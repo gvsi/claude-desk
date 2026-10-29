@@ -13,14 +13,20 @@
 - An `article` named "Held for you: {reason_plain}".
 - The status line: the dot from `receiptTone` and "Waiting for your answer" while held, with `waiting` at the right ("Web chat, 2 min ago").
 - `reason_plain` in serif (`.cd-type-summary`), `context` in `.cd-type-meta`, then "Held by your rule: {heldBy}".
-- A `role="group"` "Your answer" with one main secondary button per answer in `decision.answers`, in this order and only those: "Allow this time" (`allow_once`), "Deny this time" (`deny_once`), "Allow only for this person" (`allow_person`), "Deny always" (`deny_always`). Answers show only while `state` is `held`; with no answers there is no group.
-- Under them, a line naming the offered answers that also save a rule: "Allow only for this person and Deny always also save a rule. You'll see it before it applies." or "Deny always also saves a rule. You'll see it before it applies."
+- A `role="group"` "Your answer" with one main button per answer in `decision.answers`, in this order and only those: "Allow this time" (`allow_once`, `secondary`), "Deny this time" (`deny_once`, `danger`, the soft red fill), "Allow only for this person" (`allow_person`, `ghost`), "Deny always" (`deny_always`, `danger-ghost`, red words). Answers show only while `state` is `held`; with no answers there is no group.
+- The answers that save a rule (`allow_person`, `deny_always`) come after the one-time answers. With one of them, the answers share one row, the rule answer after a thin `line-hairline` divider. With both, the one-time answers take the first row, and the rule answers a second row after the label "Or save a rule:" in `caption`, a group named by that label.
+- A row never wraps. Under about 480 px of the card's own width (a container query on the answers, so it follows the card, not the window), the answers become one column of full-width buttons in the same order, with no divider and no label.
+- Under them, a line for the offered answers that also save a rule:
+  - "Deny always also saves a rule, so Claude declines requests like this on its own. You'll see the rule before it applies."
+  - "Allow only for this person and Deny always also save a rule, so Claude handles requests like this on its own. You'll see the rule before it applies."
+  - "Allow only for this person also saves a rule, so Claude allows requests like this from this person on its own. You'll see the rule before it applies." No board shows this answer without Deny always; the line is the card's own, in the same pattern.
+- The card is owner-facing and English only, like the rest of the owner app.
 - No counter-offer: on the canvas it is static vision.
 
 ## Answering
 
 - One click calls `onAnswer` once and every answer waits (`aria-disabled`, `aria-busy`) until `decision_id` or `state` changes, until the screen reports that the answer failed (`error` on and `pending` off, after either changed since the click), or until the promise `onAnswer` returned rejects. Return the request's promise: a screen that keeps the same `error` on between tries and never sets `pending` still gets the answers back after each failure.
-- `pending` shows "Sending your answer" in a status line under the answers.
+- `pending` shows "Sending your answer" in a status line under the answers. Every answer keeps its look and fades a little: the neutral ones to 60%, the red ones to 80%, so each label still reads at 4.5:1 in the card.
 - `error` shows "We couldn't confirm your answer. Try again, or reload to see where it stands." (`true`), or the screen's own line (a string), as an alert, and the answers can be tried again. A retry is safe: the kernel resolves a request once, and on `conflict` the screen re-reads the decision.
 - When the answers go while one of them has focus, focus moves to the status line.
 
@@ -62,4 +68,4 @@ After an answer or an event, the final line takes the place of "Waiting for your
 | `pending` | `boolean` | "Sending your answer". |
 | `error` | `boolean \| string` | `true` for the card's line, or the screen's line. |
 
-The answers are `size-control-main` secondary buttons in a grid of 208 px columns, two to a row on the board's card and one on a phone, so the longest answer never clips.
+The answers are `size-control-main` buttons, `space-8` apart, with `space-10` between the two rows. The canvas boards are N-Answers-Final (three answers, and the phone column) and N-Answers-Verified (four answers, its layout B).

@@ -1,8 +1,8 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 
 import type { ApprovalAnswer, Decision, DecisionState } from '../../../api/contracts.ts';
 import { Icon } from '../../icons/index.tsx';
-import { Button } from '../Button/Button.tsx';
+import { Button, type ButtonVariant } from '../Button/Button.tsx';
 import { Card } from '../Card/Card.tsx';
 import { receiptTone } from '../MarginReceipt/receiptTone.ts';
 import { errorCopy } from '../Notice/errorCopy.ts';
@@ -21,6 +21,17 @@ const ANSWER_LABELS = {
 
 const ANSWER_ORDER = Object.keys(ANSWER_LABELS) as readonly ApprovalAnswer[];
 
+/**
+ * Each answer's weight: Allow this time stays neutral, Deny this time is the soft red fill, and the
+ * answers that save a rule are quieter, Allow only for this person neutral and Deny always in red words.
+ */
+const ANSWER_VARIANTS = {
+  allow_once: 'secondary',
+  deny_once: 'danger',
+  allow_person: 'ghost',
+  deny_always: 'danger-ghost',
+} as const satisfies Record<ApprovalAnswer, ButtonVariant>;
+
 /** The answers that also draft a rule, which the owner sees before it applies. */
 const SAVES_A_RULE = {
   allow_once: false,
@@ -28,6 +39,20 @@ const SAVES_A_RULE = {
   allow_person: true,
   deny_always: true,
 } as const satisfies Record<ApprovalAnswer, boolean>;
+
+/** An answer that also saves a rule. */
+type RuleAnswer = { [A in ApprovalAnswer]: (typeof SAVES_A_RULE)[A] extends true ? A : never }[ApprovalAnswer];
+
+/** The line under the answers, for the rule answers offered: one of them, or both. */
+const RULE_LINES = {
+  allow_person:
+    "Allow only for this person also saves a rule, so Claude allows requests like this from this person on its own. You'll see the rule before it applies.",
+  deny_always: "Deny always also saves a rule, so Claude declines requests like this on its own. You'll see the rule before it applies.",
+  both: "Allow only for this person and Deny always also save a rule, so Claude handles requests like this on its own. You'll see the rule before it applies.",
+} as const satisfies Record<RuleAnswer | 'both', string>;
+
+/** The label before the rule answers when they have a row of their own. */
+const RULE_ROW_LABEL = 'Or save a rule:';
 
 /** The card's status line in each state: waiting while held, then the final line. */
 const STATUS_LINES = {
@@ -82,12 +107,16 @@ function offeredAnswers(decision: Decision): ApprovalAnswer[] {
   return ANSWER_ORDER.filter((answer) => decision.answers?.includes(answer) === true);
 }
 
-/** The line under the answers that names the offered answers that also save a rule, or null. */
-function ruleLine(offered: readonly ApprovalAnswer[]): string | null {
-  const saving = offered.filter((answer) => SAVES_A_RULE[answer]).map((answer) => ANSWER_LABELS[answer]);
-  if (saving.length === 0) return null;
-  const verb = saving.length === 1 ? 'saves' : 'save';
-  return `${saving.join(' and ')} also ${verb} a rule. You'll see it before it applies.`;
+/** True for an answer that also saves a rule. */
+function savesARule(answer: ApprovalAnswer): answer is RuleAnswer {
+  return SAVES_A_RULE[answer];
+}
+
+/** The line under the answers for the rule answers offered, or null when none is. */
+function ruleLine(saving: readonly RuleAnswer[]): string | null {
+  const [first, ...more] = saving;
+  if (first === undefined) return null;
+  return more.length > 0 ? RULE_LINES.both : RULE_LINES[first];
 }
 
 /** The status line for `state`; a state this build doesn't know asks for a reload, and offers nothing. */
@@ -150,7 +179,19 @@ export function ApprovalCard({ decision, heldBy, context, waiting, onAnswer, pen
     }
   };
 
-  const note = ruleLine(offered);
+  const once = offered.filter((value) => !savesARule(value));
+  const saving = offered.filter(savesARule);
+  const note = ruleLine(saving);
+  // Two rule answers take a labelled row of their own under the one-time answers; a single one
+  // follows them on the same row, after a thin divider.
+  const ruleRow = saving.length > 1;
+  const ruleRowLabel = useId();
+  const answerButton = (value: ApprovalAnswer) => (
+    <Button key={value} variant={ANSWER_VARIANTS[value]} size="main" busy={waitingForResult} onClick={() => answer(value)}>
+      {ANSWER_LABELS[value]}
+    </Button>
+  );
+
   return (
     <Card as="article" label={`Held for you: ${decision.reason_plain}`}>
       <div className="cd-approval-card__top cd-type-caption">
@@ -178,11 +219,25 @@ export function ApprovalCard({ decision, heldBy, context, waiting, onAnswer, pen
       {showAnswers ? (
         <>
           <div role="group" aria-label="Your answer" aria-busy={waitingForResult || undefined} className="cd-approval-card__answers">
-            {offered.map((value) => (
-              <Button key={value} variant="secondary" size="main" busy={waitingForResult} onClick={() => answer(value)}>
-                {ANSWER_LABELS[value]}
-              </Button>
-            ))}
+            <div className="cd-approval-card__rows">
+              {ruleRow ? (
+                <>
+                  {once.length > 0 ? <div className="cd-approval-card__row">{once.map(answerButton)}</div> : null}
+                  <div role="group" aria-labelledby={ruleRowLabel} className="cd-approval-card__row">
+                    <span id={ruleRowLabel} className="cd-approval-card__row-label cd-type-caption">
+                      {RULE_ROW_LABEL}
+                    </span>
+                    {saving.map(answerButton)}
+                  </div>
+                </>
+              ) : (
+                <div className="cd-approval-card__row">
+                  {once.map(answerButton)}
+                  {once.length > 0 && saving.length > 0 ? <span aria-hidden="true" className="cd-approval-card__divider" /> : null}
+                  {saving.map(answerButton)}
+                </div>
+              )}
+            </div>
           </div>
           {note ? <p className="cd-approval-card__note cd-type-caption">{note}</p> : null}
           <p role="status" className="cd-approval-card__progress cd-type-caption">

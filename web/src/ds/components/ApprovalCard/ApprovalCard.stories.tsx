@@ -1,16 +1,25 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { useState } from 'react';
-import { expect, fn, waitFor } from 'storybook/test';
+import { expect, fn, waitFor, within } from 'storybook/test';
 
 import type { ApprovalAnswer, Decision } from '../../../api/contracts.ts';
 import { rivera } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { ApprovalCard, type ApprovalCardProps } from './ApprovalCard.tsx';
 
-// (No `new Error` in this file: the Error story's export shadows the global.)
-
 const ANSWER_NAMES = ['Allow this time', 'Deny this time', 'Allow only for this person', 'Deny always'];
 const ERROR_LINE = "We couldn't confirm your answer. Try again, or reload to see where it stands.";
+const RULE_LINE_DENY = "Deny always also saves a rule, so Claude declines requests like this on its own. You'll see the rule before it applies.";
+const RULE_LINE_BOTH =
+  "Allow only for this person and Deny always also save a rule, so Claude handles requests like this on its own. You'll see the rule before it applies.";
+
+/** Each answer's look on the signed-off boards: neutral, soft red, quiet neutral, red words. */
+const SECONDARY = { backgroundColor: 'rgba(250, 249, 245, 0.1)', color: 'rgba(250, 249, 245, 0.92)', height: '40px' };
+const DANGER = { backgroundColor: 'rgba(220, 130, 144, 0.16)', color: 'rgb(235, 163, 174)', height: '40px' };
+const GHOST = { backgroundColor: 'rgba(0, 0, 0, 0)', color: 'rgba(250, 249, 245, 0.92)', height: '40px' };
+const DANGER_GHOST = { backgroundColor: 'rgba(0, 0, 0, 0)', color: 'rgb(235, 163, 174)', height: '40px' };
+const ANSWERS_BOARDS =
+  'The answers follow the signed-off answer boards (N-Answers-Final, N-Answers-Verified), which replace the four secondary answers on this board.';
 
 const held = rivera.decisions.held;
 const heldVerified = rivera.heldVerified;
@@ -27,10 +36,23 @@ function answerButtons(root: HTMLElement): HTMLElement[] {
   return [...root.querySelectorAll<HTMLElement>('[role="group"][aria-label="Your answer"] button')];
 }
 
+/** The top edge of each element, to the pixel: equal tops share a row. */
+function tops(elements: readonly HTMLElement[]): number[] {
+  return elements.map((el) => Math.round(el.getBoundingClientRect().top));
+}
+
+/** A 390 px phone's line: the screen less two 16 px gutters. */
+const PHONE_LINE = 358;
+
+/** The card's thin divider between the one-time answers and the rule answers, if it shows. */
+function dividerIn(root: HTMLElement): HTMLElement | null {
+  return root.querySelector<HTMLElement>('.cd-approval-card__divider');
+}
+
 /** The card's one status dot. */
 function dotIn(root: HTMLElement): HTMLElement {
   const dots = root.querySelectorAll<HTMLElement>('.cd-status-dot');
-  if (dots.length !== 1) throw new globalThis.Error(`expected one status dot, found ${dots.length}`);
+  if (dots.length !== 1) throw new Error(`expected one status dot, found ${dots.length}`);
   return dots[0] as HTMLElement;
 }
 
@@ -38,7 +60,7 @@ function dotIn(root: HTMLElement): HTMLElement {
 async function expectFinal(root: HTMLElement, decision: Decision, line: string, tone: string): Promise<void> {
   await expect(decision.answers?.length ?? 0).toBeGreaterThan(0);
   const card = root.querySelector('article');
-  if (!card) throw new globalThis.Error('no card');
+  if (!card) throw new Error('no card');
   await expect(card).toHaveAccessibleName(`Held for you: ${decision.reason_plain}`);
   await expect(root).toHaveTextContent(line);
   await expect(root).not.toHaveTextContent('Waiting for your answer');
@@ -46,7 +68,23 @@ async function expectFinal(root: HTMLElement, decision: Decision, line: string, 
   await expect(root.querySelector('[role="group"]')).toBeNull();
   await expect(root.querySelectorAll('button')).toHaveLength(0);
   for (const name of ANSWER_NAMES) await expect(root).not.toHaveTextContent(name);
-  await expect(root).not.toHaveTextContent('saves a rule');
+  for (const words of ['saves a rule', 'save a rule', "You'll see the rule"]) await expect(root).not.toHaveTextContent(words);
+  await expect(root.querySelector('.cd-approval-card__divider')).toBeNull();
+}
+
+/** The card as Today holds it once an answer is sent and no result has come back yet. */
+function SendingScreen(props: ApprovalCardProps) {
+  const [pending, setPending] = useState(false);
+  return (
+    <ApprovalCard
+      {...props}
+      pending={pending}
+      onAnswer={(answer: ApprovalAnswer) => {
+        props.onAnswer(answer);
+        setPending(true);
+      }}
+    />
+  );
 }
 
 /**
@@ -92,7 +130,7 @@ function AlwaysFailingScreen(props: ApprovalCardProps) {
       onAnswer={(answer: ApprovalAnswer) => {
         props.onAnswer(answer);
         const sent = new Promise<never>((_, reject) => {
-          setTimeout(() => reject(new globalThis.Error('the answer was lost')), 100);
+          setTimeout(() => reject(new Error('the answer was lost')), 100);
         });
         sent.catch(() => setError(true));
         return sent;
@@ -131,12 +169,11 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-export const Waiting: Story = {
+export const ThreeAnswersOnOneRow: Story = {
   parameters: {
-    canvasNote:
-      "The board's four answers become three for an unverified visitor: Allow only for this person needs a verified person. The counter-offer row is static vision.",
+    canvasNote: `${ANSWERS_BOARDS} The unverified visitor gets three: Allow only for this person needs a verified person. The counter-offer row is static vision.`,
   },
-  play: async ({ args, canvas, canvasElement, userEvent }) => {
+  play: async ({ canvas, canvasElement }) => {
     const card = canvas.getByRole('article', { name: `Held for you: ${held.reason_plain}` });
     await expect(card).toHaveTextContent('Waiting for your answer');
     await expect(dotIn(canvasElement)).toHaveClass('cd-status-dot--held');
@@ -146,80 +183,218 @@ export const Waiting: Story = {
     await expect(card).toHaveTextContent(`Held by your rule: ${rivera.ruleCards['rv-quote'].reason}`);
     await expect(card).toHaveTextContent('From the visitor: “How much to clear a clogged drain? Can I get 15% off if I pay cash?”');
 
-    // only_offered_answers: the kernel offered three, so three show, in order, as main secondary buttons.
+    // only_offered_answers: the kernel offered three, so three show, in order.
     const group = canvas.getByRole('group', { name: 'Your answer' });
-    await expect(answerButtons(canvasElement).map((button) => button.textContent)).toEqual([
-      'Allow this time',
-      'Deny this time',
-      'Deny always',
-    ]);
+    const buttons = answerButtons(canvasElement);
+    await expect(buttons.map((button) => button.textContent)).toEqual(['Allow this time', 'Deny this time', 'Deny always']);
     await expect(canvas.queryByRole('button', { name: 'Allow only for this person' })).toBeNull();
-    expectComputed(answerButtons(canvasElement)[0] as HTMLElement, { height: '40px', backgroundColor: 'rgba(250, 249, 245, 0.1)' });
-    await expect(card).toHaveTextContent("Deny always also saves a rule. You'll see it before it applies.");
-    await expect(card).not.toHaveTextContent('Allow only for this person');
 
-    // answers_once: a second click sends nothing, and every answer waits for the result.
-    const allow = canvas.getByRole('button', { name: 'Allow this time' });
-    await userEvent.click(allow);
-    await userEvent.click(allow);
-    await expect(args.onAnswer).toHaveBeenCalledTimes(1);
-    await expect(args.onAnswer).toHaveBeenCalledWith('allow_once');
-    for (const button of answerButtons(canvasElement)) await expect(button).toHaveAttribute('aria-disabled', 'true');
-    await expect(group).toHaveAttribute('aria-busy', 'true');
-    await userEvent.click(canvas.getByRole('button', { name: 'Deny always' }));
-    await expect(args.onAnswer).toHaveBeenCalledTimes(1);
+    // Allow stays neutral, Deny this time takes the soft red fill, and Deny always is red words
+    // after a thin divider, all on one row.
+    const [allow, deny, denyAlways] = buttons as [HTMLElement, HTMLElement, HTMLElement];
+    expectComputed(allow, SECONDARY);
+    expectComputed(deny, DANGER);
+    expectComputed(denyAlways, DANGER_GHOST);
+    await expect(new Set(tops(buttons)).size).toBe(1);
+    const divider = dividerIn(canvasElement);
+    if (!divider) throw new Error('no divider between the answers');
+    await expect(divider).toHaveAttribute('aria-hidden', 'true');
+    expectComputed(divider, { width: '1px', height: '20px', backgroundColor: 'rgba(250, 249, 245, 0.12)' });
+    await expect(deny.getBoundingClientRect().right).toBeLessThan(divider.getBoundingClientRect().left);
+    await expect(divider.getBoundingClientRect().right).toBeLessThan(denyAlways.getBoundingClientRect().left);
+    await expect(group).not.toHaveTextContent('Or save a rule');
+    await expect(card).toHaveTextContent(RULE_LINE_DENY);
+    await expect(card).not.toHaveTextContent('Allow only for this person');
+    await expect(group).not.toHaveAttribute('aria-busy');
   },
 };
 
-export const WaitingVerified: Story = {
+export const FourAnswersOnTwoRows: Story = {
   args: { decision: heldVerified, heldBy: rivera.ruleCards['rv-book-sat'].reason, context: undefined, waiting: 'Web chat, just now' },
   parameters: {
-    canvasNote:
-      "The board's discount request is Dana's Sunday booking here, from a verified customer, so all four answers show. The counter-offer row is static vision.",
+    canvasNote: `${ANSWERS_BOARDS} Layout B of N-Answers-Verified: Dana's Sunday booking, from a verified customer, so all four answers show. The counter-offer row is static vision.`,
+  },
+  play: async ({ canvas, canvasElement }) => {
+    // only_offered_answers: all four, in their fixed order.
+    const buttons = answerButtons(canvasElement);
+    await expect(buttons.map((button) => button.textContent)).toEqual(ANSWER_NAMES);
+    const [allow, deny, allowPerson, denyAlways] = buttons as [HTMLElement, HTMLElement, HTMLElement, HTMLElement];
+    expectComputed(allow, SECONDARY);
+    expectComputed(deny, DANGER);
+    expectComputed(allowPerson, GHOST);
+    expectComputed(denyAlways, DANGER_GHOST);
+
+    // The one-time answers on the first row; the answers that save a rule on a second row, after
+    // its label, which names them as a group. No divider.
+    const [firstRow, secondRow] = [tops([allow, deny]), tops([allowPerson, denyAlways])];
+    await expect(firstRow[0]).toBe(firstRow[1]);
+    await expect(secondRow[0]).toBe(secondRow[1]);
+    await expect(secondRow[0]).toBeGreaterThan(firstRow[0] ?? 0);
+    const ruleRow = canvas.getByRole('group', { name: 'Or save a rule:' });
+    await expect(ruleRow).toContainElement(allowPerson);
+    await expect(ruleRow).toContainElement(denyAlways);
+    const label = canvas.getByText('Or save a rule:');
+    await expect(label).toBeVisible();
+    expectComputed(label, { fontSize: '12px', color: 'rgba(250, 249, 245, 0.64)' });
+    await expect(label.getBoundingClientRect().right).toBeLessThan(allowPerson.getBoundingClientRect().left);
+    await expect(dividerIn(canvasElement)).toBeNull();
+    const group = canvas.getByRole('group', { name: 'Your answer' });
+    await expect(group.scrollWidth).toBeLessThanOrEqual(group.clientWidth);
+
+    // The line under them names both answers that save a rule.
+    await expect(canvas.getByRole('article')).toHaveTextContent(RULE_LINE_BOTH);
+  },
+};
+
+export const PersonRuleOnOneRow: Story = {
+  args: {
+    decision: { ...heldVerified, answers: ['allow_once', 'deny_once', 'allow_person'] },
+    heldBy: rivera.ruleCards['rv-book-sat'].reason,
+    context: undefined,
+    waiting: 'Web chat, just now',
+  },
+  parameters: {
+    canvasNote: `${ANSWERS_BOARDS} No board offers Allow only for this person without Deny always; alone, it follows the one-time answers after the divider, as Deny always does on N-Answers-Final.`,
+  },
+  play: async ({ canvas, canvasElement }) => {
+    const buttons = answerButtons(canvasElement);
+    await expect(buttons.map((button) => button.textContent)).toEqual(['Allow this time', 'Deny this time', 'Allow only for this person']);
+    const [deny, allowPerson] = buttons.slice(1) as [HTMLElement, HTMLElement];
+    expectComputed(allowPerson, GHOST);
+    await expect(new Set(tops(buttons)).size).toBe(1);
+    const divider = dividerIn(canvasElement);
+    if (!divider) throw new Error('no divider between the answers');
+    await expect(deny.getBoundingClientRect().right).toBeLessThan(divider.getBoundingClientRect().left);
+    await expect(canvas.queryByText('Or save a rule:')).toBeNull();
+    await expect(canvas.getByRole('article')).toHaveTextContent(
+      "Allow only for this person also saves a rule, so Claude allows requests like this from this person on its own. You'll see the rule before it applies.",
+    );
+  },
+};
+
+export const OneColumnOnAPhone: Story = {
+  render: (args) => (
+    <div data-testid="phone-line" style={{ width: PHONE_LINE, maxWidth: '100%', display: 'grid', rowGap: 'var(--space-16)' }}>
+      <ApprovalCard {...args} />
+      <ApprovalCard {...args} decision={heldVerified} heldBy={rivera.ruleCards['rv-book-sat'].reason} context={undefined} waiting="Web chat, just now" />
+    </div>
+  ),
+  parameters: {
+    canvasNote: `${ANSWERS_BOARDS} The phone columns of both boards: under about 480 px of card, the answers become one column of full-width buttons in the same order, with no divider and no label.`,
+  },
+  play: async ({ canvas }) => {
+    const line = canvas.getByTestId('phone-line');
+    await expect(line.getBoundingClientRect().width).toBe(PHONE_LINE);
+    await expect(line.scrollWidth).toBeLessThanOrEqual(PHONE_LINE);
+
+    const cards = canvas.getAllByRole('article');
+    await expect(cards).toHaveLength(2);
+    const expected = [
+      { names: ['Allow this time', 'Deny this time', 'Deny always'], looks: [SECONDARY, DANGER, DANGER_GHOST], line: RULE_LINE_DENY },
+      { names: ANSWER_NAMES, looks: [SECONDARY, DANGER, GHOST, DANGER_GHOST], line: RULE_LINE_BOTH },
+    ];
+    for (const [i, card] of cards.entries()) {
+      const want = expected[i];
+      if (!want) throw new Error(`no expectation for card ${i}`);
+      const group = within(card).getByRole('group', { name: 'Your answer' });
+      const buttons = answerButtons(card);
+      await expect(buttons.map((button) => button.textContent)).toEqual(want.names);
+      for (const [j, button] of buttons.entries()) expectComputed(button, want.looks[j] ?? {});
+
+      // One column, in order, each answer as wide as the answers.
+      const box = group.getBoundingClientRect();
+      for (const button of buttons) {
+        const edge = button.getBoundingClientRect();
+        await expect(edge.left).toBe(box.left);
+        await expect(edge.width).toBe(box.width);
+      }
+      const rowTops = tops(buttons);
+      for (let j = 1; j < rowTops.length; j += 1) await expect(rowTops[j]).toBe((rowTops[j - 1] ?? 0) + 48);
+
+      // No divider and no label on a phone; the line under the answers stays.
+      const divider = dividerIn(card);
+      if (divider) await expect(divider).not.toBeVisible();
+      const label = within(card).queryByText('Or save a rule:');
+      if (label) await expect(label).not.toBeVisible();
+      await expect(card).toHaveTextContent(want.line);
+    }
+    // The three-answer card had a divider to hide, and the four-answer card a label.
+    await expect(dividerIn(cards[0] as HTMLElement)).not.toBeNull();
+    await expect(within(cards[1] as HTMLElement).queryByText('Or save a rule:')).not.toBeNull();
+  },
+};
+
+export const SendingYourAnswer: Story = {
+  args: { decision: heldVerified, heldBy: rivera.ruleCards['rv-book-sat'].reason, context: undefined, waiting: 'Web chat, just now' },
+  render: (args) => <SendingScreen {...args} />,
+  parameters: {
+    canvasNote: `${ANSWERS_BOARDS} No board shows an answer being sent; every answer waits, faded a little, and a line under them says so.`,
   },
   play: async ({ args, canvas, canvasElement, userEvent }) => {
-    // only_offered_answers: all four, in their fixed order, and the line names both that save a rule.
-    await expect(answerButtons(canvasElement).map((button) => button.textContent)).toEqual(ANSWER_NAMES);
-    await expect(canvas.getByRole('article')).toHaveTextContent(
-      "Allow only for this person and Deny always also save a rule. You'll see it before it applies.",
-    );
+    const [allow, deny, allowPerson, denyAlways] = answerButtons(canvasElement) as [HTMLElement, HTMLElement, HTMLElement, HTMLElement];
 
-    // keyboard_answers: Tab into the group, on to Deny always, and Enter answers.
+    // keyboard_answers: Tab into the group, on to Deny always (the label is not a stop), and
+    // Enter answers.
     await userEvent.tab();
-    await expect(canvas.getByRole('button', { name: 'Allow this time' })).toHaveFocus();
+    await expect(allow).toHaveFocus();
     await userEvent.tab();
+    await expect(deny).toHaveFocus();
     await userEvent.tab();
+    await expect(allowPerson).toHaveFocus();
     await userEvent.tab();
-    const denyAlways = canvas.getByRole('button', { name: 'Deny always' });
     await expect(denyAlways).toHaveFocus();
     await userEvent.keyboard('{Enter}');
     await expect(args.onAnswer).toHaveBeenCalledTimes(1);
     await expect(args.onAnswer).toHaveBeenCalledWith('deny_always');
     // Focus stays on the answer while it is sent.
     await expect(denyAlways).toHaveFocus();
-  },
-};
 
-export const Sending: Story = {
-  args: { pending: true },
-  parameters: { canvasNote: 'No board shows an answer being sent; the answers wait, and a line says so under them.' },
-  play: async ({ args, canvas, canvasElement, userEvent }) => {
+    // answers_once: while it is sent, a second Enter or a click on any answer sends nothing.
+    await userEvent.keyboard('{Enter}');
+    await userEvent.click(allow);
+    await userEvent.click(deny);
+    await expect(args.onAnswer).toHaveBeenCalledTimes(1);
+
+    // Every answer waits, and a line under them says so.
     const group = canvas.getByRole('group', { name: 'Your answer' });
     await expect(group).toHaveAttribute('aria-busy', 'true');
-    const progress = canvas.getByText('Sending your answer');
-    await expect(progress.closest('[role="status"]')).not.toBeNull();
+    await expect(canvas.getByText('Sending your answer').closest('[role="status"]')).not.toBeNull();
     for (const button of answerButtons(canvasElement)) await expect(button).toHaveAttribute('aria-disabled', 'true');
-    await userEvent.click(canvas.getByRole('button', { name: 'Deny this time' }));
-    await expect(args.onAnswer).not.toHaveBeenCalled();
+
+    // Each answer keeps its look, faded: the neutral ones to 60%, the red ones only to 80%, so
+    // their words still read at 4.5:1 in the card.
+    expectComputed(allow, { ...SECONDARY, opacity: '0.6' });
+    expectComputed(deny, { ...DANGER, opacity: '0.8' });
+    expectComputed(allowPerson, { ...GHOST, opacity: '0.6' });
+    expectComputed(denyAlways, { ...DANGER_GHOST, opacity: '0.8' });
   },
 };
 
-export const Error: Story = {
+export const CouldNotConfirmYourAnswer: Story = {
+  args: { error: true },
+  parameters: {
+    canvasNote: `${ANSWERS_BOARDS} No board shows a lost answer; the line sits under the answers, which stay as they were and can be tried again, because the kernel resolves a request once.`,
+  },
+  play: async ({ canvas, canvasElement }) => {
+    await expect(canvas.getByRole('alert')).toHaveTextContent(ERROR_LINE);
+    const buttons = answerButtons(canvasElement);
+    for (const button of buttons) {
+      await expect(button).toBeEnabled();
+      await expect(button).not.toHaveAttribute('aria-disabled');
+    }
+    const [allow, deny, denyAlways] = buttons as [HTMLElement, HTMLElement, HTMLElement];
+    expectComputed(allow, { ...SECONDARY, opacity: '1' });
+    expectComputed(deny, { ...DANGER, opacity: '1' });
+    expectComputed(denyAlways, { ...DANGER_GHOST, opacity: '1' });
+    await expect(canvas.getByRole('article')).toHaveTextContent(RULE_LINE_DENY);
+  },
+};
+
+export const DeniedOnTheSecondTry: Story = {
   args: { error: true },
   render: (args) => <RetryingScreen {...args} />,
   parameters: {
-    canvasNote:
-      'No board shows a lost answer; the static line sits under the answers, which stay enabled, because the kernel resolves a request once.',
+    canvasNote: `${ANSWERS_BOARDS} No board shows a lost answer; after it, the owner answers again and the card ends on its final line.`,
   },
   play: async ({ args, canvas, canvasElement, userEvent }) => {
     // error_allows_retry: the line is an alert, and every answer can be tried again.

@@ -1,5 +1,6 @@
 /* ApprovalCard: the status line, Claude's summary in serif, the context and the rule that held it,
-   then the answers as main secondary buttons, two to a row on the board's card. */
+   then the answers: one row, or the one-time answers over a labelled row of the answers that save
+   a rule, and one column of full-width answers in a narrow card. */
 
 .cd-approval-card__top {
   display: flex;
@@ -62,13 +63,62 @@
   color: var(--text-primary);
 }
 
-/* As many 208 px columns as fit, so the longest answer never clips: two on the board's card, one
-   on a phone, all of them in a row across the content column. */
+/* The answers measure their own width, so a narrow card stacks them whatever the window's width. */
 .cd-approval-card__answers {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 208px), 1fr));
-  gap: var(--space-8);
+  container: cd-approval-answers / inline-size;
   margin-top: var(--space-16);
+}
+
+.cd-approval-card__rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+}
+
+/* A row never wraps: the card stacks the answers before they would. */
+.cd-approval-card__row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.cd-approval-card__row > .cd-button {
+  flex: none;
+}
+
+/* Between the one-time answers and a single rule answer: a hairline as tall as a label's line. */
+.cd-approval-card__divider {
+  flex: none;
+  width: 1px;
+  height: var(--space-20);
+  margin: 0 var(--space-4);
+  background: var(--line-hairline);
+}
+
+.cd-approval-card__row-label {
+  flex: none;
+  margin-right: var(--space-4);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* A card under about 480 px wide (its answers under 438 px, inside the card's 20 px padding and
+   1 px border): one column of full-width answers in the same order, with no divider or label. */
+@container cd-approval-answers (max-width: 437.98px) {
+  .cd-approval-card__rows {
+    gap: var(--space-8);
+  }
+
+  .cd-approval-card__row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .cd-approval-card__divider,
+  .cd-approval-card__row-label {
+    display: none;
+  }
 }
 
 .cd-approval-card__note,
