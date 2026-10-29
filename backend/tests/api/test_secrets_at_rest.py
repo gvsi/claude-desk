@@ -1,6 +1,8 @@
 """Credentials at rest (Plan 02a, "Credentials at rest"; master plan, "Resuming the conversation"): tokens live only in
 cookies and in the memory of the request or turn holding them, never in `app.*`, the job queue's arguments, a model
-request or a log, through a whole conversation with an owner's answer in the middle of it."""
+request or a log, through a whole conversation with an owner's answer in the middle of it. The logs carry no visitor
+text either: the job queue logs a job's arguments below WARNING, and the resume job's signed decision quotes the
+visitor (its `reason_plain`)."""
 
 import asyncio
 import hashlib
@@ -68,9 +70,12 @@ async def test_no_credential_at_rest_after_a_full_flow(app, browser, fake, model
     token, session_id = cookie_value(opened, "desk_visitor"), opened.json()["state"]["session_id"]
     runner = app.state.runtime.runner
 
-    # A held request, the owner's answer, the resume job and Claude's follow-up with the visitor's credential.
-    model.add(response(tool_use("native__quote", DISCOUNTED_QUOTE), reply("I've asked Maria to look at this.")))
-    asked = await visitor.post(f"/api/public/desks/{slug}/messages", json={"text": "A discount, please?"})
+    # A held request, the owner's answer, the resume job and Claude's follow-up with the visitor's credential. Claude
+    # passes the visitor's words on to Maria, so the decision the job carries quotes them.
+    said = ["A discount, please? The sink flooded twice", "Are you there?", "Thanks!"]
+    model.add(response(tool_use("native__quote", {**DISCOUNTED_QUOTE, "note": said[0]}),
+                       reply("I've asked Maria to look at this.")))
+    asked = await visitor.post(f"/api/public/desks/{slug}/messages", json={"text": said[0]})
     assert asked.status_code == 202
     await runner.drain()
     (decision_id,) = [record.decision.decision_id for record in fake.decisions.values()
@@ -85,16 +90,17 @@ async def test_no_credential_at_rest_after_a_full_flow(app, browser, fake, model
 
     # A take-over: the visitor's message waits for the owner, and Claude answers again once it is handed back.
     fake.set_mode(session_id, "owner")
-    waiting = await visitor.post(f"/api/public/desks/{slug}/messages", json={"text": "Are you there?"})
+    waiting = await visitor.post(f"/api/public/desks/{slug}/messages", json={"text": said[1]})
     assert waiting.status_code == 202
     await runner.drain()
     fake.set_mode(session_id, "ai")
     model.add(response(reply("Yes, I'm here.")))
-    assert (await visitor.post(f"/api/public/desks/{slug}/messages", json={"text": "Thanks!"})).status_code == 202
+    assert (await visitor.post(f"/api/public/desks/{slug}/messages", json={"text": said[2]})).status_code == 202
     await runner.drain()
     await jobs_done(jobs_connector)
     assert len(model.requests) == 3 and [job["task_name"] for job in jobs_connector.jobs.values()] == [
         "desk.resume_after_answer"]
+    assert said[0] in json.dumps([job["args"] for job in jobs_connector.jobs.values()])   # quoted for the owner
 
     secrets = {f"{who} token{form}": value for who, held in (("owner", owner_token), ("visitor", token))
                for form, value in (("", held), (" hash", hashlib.sha256(held.encode()).hexdigest()))}
@@ -107,3 +113,8 @@ async def test_no_credential_at_rest_after_a_full_flow(app, browser, fake, model
     for where, text in (("app and procrastinate tables", stored), ("job arguments", queued),
                         ("model requests", sent_to_model), ("logs", logged)):
         assert [name for name, value in secrets.items() if value in text] == [], where
+    # The job queue logs nothing below WARNING, and no record, its extra fields included, holds what the visitor said.
+    assert [(record.name, record.levelname) for record in caplog.records
+            if record.name.split(".")[0] == "procrastinate" and record.levelno <= logging.INFO] == []
+    every_field = "\n".join(repr(vars(record)) for record in caplog.records)
+    assert [text for text in said if text in logged or text in every_field] == []

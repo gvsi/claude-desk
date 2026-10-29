@@ -7,7 +7,9 @@ before the app, so a provider without its credential, or `ANTHROPIC_CUSTOM_HEADE
 lifespan opens the kernel client, checks it is the production one when it must be, then opens the database engine,
 the turn locks' pool, the run events listener, the turn runner and the job queue with its worker (`jobs.py`), and
 closes them in the reverse order, the worker's jobs and the runner's turns first, with the model client it built
-(never an injected one) last. In production the app refuses to start without its secrets (the API key, the
+(never an injected one) last. Building the app sets the job queue's loggers (`procrastinate` and its children) to
+WARNING: below it, Procrastinate logs each job's call string, arguments included, and the resume job's signed decision
+quotes the visitor. In production the app refuses to start without its secrets (the API key, the
 passcode hash and the public origin, which `Settings` requires), with a Bedrock setting or credential (refused by
 `Settings`) and with any test hook: `ANTHROPIC_BASE_URL` (refused by `Settings`), an injected clock, model, kernel
 transport or job queue connector. A passcode hash that isn't one refuses to start anywhere.
@@ -51,10 +53,18 @@ logger = logging.getLogger(__name__)
 # The API's pool ("Connections and state"): 20 connections, 10 more under load, 5 s to get one.
 POOL_SIZE, MAX_OVERFLOW, POOL_TIMEOUT_S = 20, 10, 5
 KERNEL_CODES = frozenset({"seed_unproved", "internal"})
+JOB_QUEUE_LOGGER = "procrastinate"
 
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+def _quiet_job_queue_logs() -> None:
+    """The job queue logs only warnings and errors: its INFO and DEBUG records name each job with its arguments."""
+    names = [name for name in logging.root.manager.loggerDict if name.startswith(JOB_QUEUE_LOGGER + ".")]
+    for name in (JOB_QUEUE_LOGGER, *names):
+        logging.getLogger(name).setLevel(logging.WARNING)
 
 
 def _refuse_test_hooks(settings: Settings, hooks: dict[str, Any]) -> None:
@@ -129,6 +139,7 @@ def create_app(settings: Settings, *, kernel_transport: Any = None, model: Any =
     them."""
     _refuse_test_hooks(settings, {"kernel transport": kernel_transport, "model": model, "clock": clock,
                                   "job queue connector": jobs_connector})
+    _quiet_job_queue_logs()
     if settings.passcode_hash is not None:
         try:
             check_passcode_hash(settings.passcode_hash)
