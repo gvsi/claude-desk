@@ -1,0 +1,23 @@
+# Local Postgres for development and tests. Migrations run as desk_admin, which owns the
+# schemas; the kernel, API and mock payments roles are created by migration 0001_core and get
+# their passwords from `make db-roles`. The default password is the .env.example placeholder,
+# and the port listens on localhost only.
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: desk_admin
+      POSTGRES_PASSWORD: ${DESK_ADMIN_PASSWORD:-change-me-admin}
+      POSTGRES_DB: desk
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - desk-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U desk_admin -d desk"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  desk-db:

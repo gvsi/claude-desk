@@ -6,6 +6,10 @@ requires-python = ">=3.13,<3.14"
 dependencies = [
     "pydantic>=2.9",
     "desk-kernel",
+    "sqlalchemy[asyncio]==2.1.4",
+    "alembic==1.20.0",
+    "psycopg[binary]==3.3.6",
+    "procrastinate==3.10.0",
 ]
 
 # The kernel's Rust module, built from source by maturin; `make kernel` rebuilds it.
@@ -15,6 +19,7 @@ desk-kernel = { path = "../kernel/py" }
 [dependency-groups]
 dev = [
     "pytest>=8",
+    "pytest-asyncio==1.4.0",
 ]
 
 [build-system]
@@ -27,3 +32,5 @@ packages = ["desk"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

@@ -1,0 +1,152 @@
+"""Database URLs, engines and sessions, one role per process.
+
+Each process gets only its own URL: the kernel `KERNEL_DATABASE_URL` (role desk_kernel), the
+API `API_DATABASE_URL` (desk_api), the mock payments server `MOCKPAY_DATABASE_URL`
+(desk_mockpay); migrations use `ADMIN_DATABASE_URL` (desk_admin). Each is a SQLAlchemy URL,
+`postgresql+psycopg://<user>:<password>@<host>:<port>/<db>`. Outside production, a URL missing
+from the environment is read from the repository's `.env`, so local tools and tests need no
+exported variables. Values are never logged.
+"""
+
+import functools
+import os
+from collections.abc import AsyncIterator, Iterator
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from sqlalchemy import Alias, FromClause, Join, Select, Table
+from sqlalchemy.engine import make_url
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+
+if TYPE_CHECKING:
+    import procrastinate
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _dotenv() -> dict[str, str]:
+    """KEY=value lines of the repository's .env; an absent file is empty."""
+    path = REPO_ROOT / ".env"
+    if not path.is_file():
+        return {}
+    values: dict[str, str] = {}
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        values[key.strip()] = value.strip().strip("'\"")
+    return values
+
+
+def database_url(prefix: str) -> str:
+    """The URL in `<prefix>_DATABASE_URL` (prefix ADMIN, KERNEL, API or MOCKPAY)."""
+    name = f"{prefix}_DATABASE_URL"
+    value = os.environ.get(name)
+    if not value and os.environ.get("DESK_ENV") != "production":
+        value = _dotenv().get(name)
+    if not value:
+        raise RuntimeError(f"{name} is not set")
+    return value
+
+
+def libpq_url(url: str) -> str:
+    """The same URL for clients that bypass SQLAlchemy (psycopg, Procrastinate)."""
+    return make_url(url).set(drivername="postgresql").render_as_string(hide_password=False)
+
+
+# One engine per process and role, created on first use. Call dispose_engines() at shutdown
+# (and between event loops in tests): pooled connections belong to the loop that opened them.
+
+@functools.cache
+def kernel_engine() -> AsyncEngine:
+    """The kernel process's engine, as desk_kernel."""
+    return create_async_engine(database_url("KERNEL"), pool_pre_ping=True)
+
+
+@functools.cache
+def _kernel_sessions() -> async_sessionmaker[AsyncSession]:
+    return async_sessionmaker(kernel_engine(), expire_on_commit=False)
+
+
+async def get_kernel_session() -> AsyncIterator[AsyncSession]:
+    """A kernel session (a FastAPI dependency); the caller owns its transactions."""
+    async with _kernel_sessions()() as session:
+        yield session
+
+
+# Procrastinate's functions name their tables unqualified, so every desk_api connection, the
+# job queue's included, puts schema procrastinate first; app comes next for the API's tables.
+API_SEARCH_PATH = "procrastinate, app"
+API_CONNECT_OPTIONS = "-c search_path=" + API_SEARCH_PATH.replace(" ", "\\ ")   # libpq options escape spaces
+
+
+@functools.cache
+def api_engine() -> AsyncEngine:
+    """The API process's engine, as desk_api."""
+    return create_async_engine(
+        database_url("API"), pool_pre_ping=True, connect_args={"options": API_CONNECT_OPTIONS}
+    )
+
+
+@functools.cache
+def _api_sessions() -> async_sessionmaker[AsyncSession]:
+    return async_sessionmaker(api_engine(), expire_on_commit=False)
+
+
+async def get_api_session() -> AsyncIterator[AsyncSession]:
+    """An API session (a FastAPI dependency); the caller owns its transactions."""
+    async with _api_sessions()() as session:
+        yield session
+
+
+def procrastinate_connector() -> "procrastinate.PsycopgConnector":
+    """The API's job queue connection, as desk_api, with api_engine()'s search_path."""
+    import procrastinate   # only the API process needs the job queue
+
+    return procrastinate.PsycopgConnector(
+        conninfo=libpq_url(database_url("API")), kwargs={"options": API_CONNECT_OPTIONS}
+    )
+
+
+async def dispose_engines() -> None:
+    """Close every pooled connection and forget the engines; the next use opens new ones."""
+    for engine in (kernel_engine, api_engine):
+        if engine.cache_info().currsize:
+            await engine().dispose()
+        engine.cache_clear()
+    _kernel_sessions.cache_clear()
+    _api_sessions.cache_clear()
+
+
+class KernelRepo:
+    """One copy's view of the kernel tables: every kernel query goes through `scoped()`.
+
+    `scoped(stmt)` adds `copy_id = <copy>` for each kernel table the statement reads from,
+    joined tables and aliases included. It fails closed: a statement that reads no kernel table,
+    or reads from anything else (a subquery, a function, another schema), raises instead of
+    running unscoped. Statements nested in a WHERE clause are the caller's to scope.
+    """
+
+    def __init__(self, copy_id: str):
+        if not copy_id:
+            raise ValueError("KernelRepo needs a copy_id")
+        self.copy_id = copy_id
+
+    def scoped(self, stmt: Select) -> Select:
+        tables = [table for clause in stmt.get_final_froms() for table in _kernel_tables(clause)]
+        if not tables:
+            raise ValueError("the statement reads no kernel table")
+        return stmt.where(*(table.c.copy_id == self.copy_id for table in tables))
+
+
+def _kernel_tables(clause: FromClause) -> Iterator[FromClause]:
+    """The kernel tables (or their aliases) a FROM item reads; anything else can't be scoped."""
+    if isinstance(clause, Join):
+        yield from _kernel_tables(clause.left)
+        yield from _kernel_tables(clause.right)
+        return
+    table = clause.element if isinstance(clause, Alias) else clause
+    if not isinstance(table, Table) or table.schema != "kernel" or "copy_id" not in table.c:
+        raise ValueError(f"KernelRepo can't scope a query that reads from {clause!r}")
+    yield clause
