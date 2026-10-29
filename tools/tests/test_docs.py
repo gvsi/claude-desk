@@ -55,6 +55,91 @@ def test_relative_links_resolve(tmp_path):
     assert code == 0, out
 
 
+def test_links_across_line_breaks_are_checked(tmp_path):
+    root = passing_tree(tmp_path)
+    write(root, "AGENTS.md", "# Agents\n\nSee [the\nguide](\n  docs/guide.md\n) and [the plan](docs/plan.md\n  \"The plan\").\n")
+
+    code, out = run(root)
+
+    assert code == 1
+    assert "AGENTS.md:5: broken link docs/guide.md" in out
+    assert "AGENTS.md:6: broken link docs/plan.md" in out
+
+    write(root, "docs/guide.md", "# Guide\n")
+    write(root, "docs/plan.md", "# Plan\n")
+    assert run(root) == (0, "docs-check: ok")
+
+
+def test_link_targets_may_hold_balanced_parentheses(tmp_path):
+    root = passing_tree(tmp_path)
+    write(root, "AGENTS.md", "See [the guide](docs/guide(v2).md) and [the notes](docs/notes(old).md \"Old notes\").\n")
+    write(root, "docs/notes(old).md", "# Old notes\n")
+
+    code, out = run(root)
+
+    assert code == 1
+    assert out.splitlines()[0] == "docs-check: AGENTS.md:1: broken link docs/guide(v2).md"
+    assert "notes" not in out
+
+    write(root, "docs/guide(v2).md", "# Guide\n")
+    assert run(root) == (0, "docs-check: ok")
+
+
+def test_reference_style_links_are_checked(tmp_path):
+    root = passing_tree(tmp_path)
+    write(root, "AGENTS.md", "See [the guide][guide] and [the plan].\n\n[guide]: docs/guide.md\n[the plan]:\n  docs/plan.md\n")
+
+    code, out = run(root)
+
+    assert code == 1
+    assert "AGENTS.md:3: broken link docs/guide.md" in out
+    assert "AGENTS.md:5: broken link docs/plan.md" in out
+
+    write(root, "docs/guide.md", "# Guide\n")
+    write(root, "docs/plan.md", "# Plan\n")
+    assert run(root) == (0, "docs-check: ok")
+
+
+def test_angle_bracket_links_are_checked(tmp_path):
+    root = passing_tree(tmp_path)
+    write(root, "AGENTS.md", "See [the guide](<docs/the guide.md>) and [two](docs/guide%20two.md).\n")
+
+    code, out = run(root)
+
+    assert code == 1
+    assert "AGENTS.md:1: broken link docs/the guide.md" in out
+    assert "AGENTS.md:1: broken link docs/guide%20two.md" in out
+
+    write(root, "docs/the guide.md", "# Guide\n")
+    write(root, "docs/guide two.md", "# Guide two\n")
+    assert run(root) == (0, "docs-check: ok")
+
+
+def test_links_in_code_examples_are_not_checked(tmp_path):
+    root = passing_tree(tmp_path)
+    write(root, "docs/plans/plan.md", "\n".join([
+        "Write a link as `[text](nope.md)` or ``[text][ref]``, even across lines: `[text](",
+        "nope.md)`.",
+        "",
+        "```md",
+        "[text](nope.md)",
+        "[ref]: nope.md",
+        "```",
+        "",
+        "1. In a list item:",
+        "",
+        "    ~~~md",
+        "    [text](nope.md)",
+        "    ~~~",
+        "",
+    ]))
+
+    assert run(root) == (0, "docs-check: ok")
+
+    write(root, "docs/plans/plan.md", "Outside code, [text](nope.md) is a link.\n")
+    assert "docs/plans/plan.md:1: broken link nope.md" in run(root)[1]
+
+
 def test_relative_links_that_leave_the_repository_are_broken(tmp_path):
     root = passing_tree(tmp_path / "repo")
     write(tmp_path, "outside/notes.md", "# Only on this machine\n")

@@ -17,6 +17,7 @@ Exit 0 when every check passes, 1 when any fails (each failure printed as `file:
 
 import argparse
 import re
+from bisect import bisect_right
 import sys
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
@@ -77,20 +78,25 @@ def linked_docs(root: Path) -> list[Path]:
     return docs
 
 
-_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
-_CODE_SPAN = re.compile(r"(`+)(?!`)(.+?)(?<!`)\1(?!`)")
+_FENCE = re.compile(r"^[ \t]*(`{3,}(?!.*`)|~{3,})")   # at any indent, so a fence nested in a list item counts
+_CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)((?:(?!\n[ \t]*\n).)+?)(?<!`)\1(?!`)", re.DOTALL)   # across lines, not paragraphs
+# Markdown lets a link break across lines (at most one line break in each gap, never a blank line),
+# so links are matched over the whole text, and each target's line comes from its offset.
+_GAP = r"[ \t]*(?:\n[ \t]*)?"
+_TEXT_CHAR = r"(?:(?!\n[ \t]*\n)[^\[\]\\]|\\.)"
+_BARE_TARGET = r"(?:[^\s()\\]|\\.|\((?:[^\s()\\]|\\.)*\))+"   # parentheses in it must balance, one level deep
 _INLINE_LINK = re.compile(   # [text](target "title") or ![alt](<target>); the target is group 1
-    r"!?\[(?:[^\[\]]|\[[^\[\]]*\])*\]"
-    r"\(\s*(<[^>]*>|[^\s)]+)(?:\s+(?:\"[^\"]*\"|'[^']*'|\([^)]*\)))?\s*\)"
+    rf"!?\[(?:{_TEXT_CHAR}|\[{_TEXT_CHAR}*\])*\]"
+    rf"\({_GAP}(<[^<>\n]*>|{_BARE_TARGET})(?:(?=\s){_GAP}(?:\"[^\"]*\"|'[^']*'|\([^)]*\)))?{_GAP}\)"
 )
-_REFERENCE_DEF = re.compile(r"^ {0,3}\[[^\]]+\]:\s*(<[^>]*>|\S+)")
+_REFERENCE_DEF = re.compile(rf"^ {{0,3}}\[[^\[\]]+\]:{_GAP}(<[^<>\n]*>|\S+)", re.MULTILINE)
 _SCHEME = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")
 
 
 def _lines(text: str) -> Iterator[tuple[int, str, bool]]:
     """(line number, line, whether it is inside a fenced code block); fence lines themselves are skipped."""
     fence = None
-    for number, line in enumerate(text.splitlines(), start=1):
+    for number, line in enumerate(text.split("\n"), start=1):
         if fence is None:
             match = _FENCE.match(line)
             if match:
@@ -103,29 +109,44 @@ def _lines(text: str) -> Iterator[tuple[int, str, bool]]:
             yield number, line, True
 
 
-def prose_lines(text: str) -> Iterator[tuple[int, str]]:
-    """Each line outside fenced code blocks, with its code spans blanked out."""
-    for number, line, fenced in _lines(text):
-        if not fenced:
-            yield number, _CODE_SPAN.sub(lambda span: " " * len(span.group(0)), line)
+def _split_fences(text: str) -> tuple[str, list[tuple[int, str]]]:
+    """The text with fenced code blanked (every line break stays, so offsets keep their line), and each fenced line."""
+    kept: dict[int, str] = {}
+    fenced: list[tuple[int, str]] = []
+    for number, line, in_fence in _lines(text):
+        if in_fence:
+            fenced.append((number, line))
+        else:
+            kept[number] = line
+    return "\n".join(kept.get(number, "") for number in range(1, text.count("\n") + 2)), fenced
+
+
+def _prose(text: str) -> str:
+    """The text with fenced code and code spans blanked, line breaks kept."""
+    return _CODE_SPAN.sub(lambda span: re.sub(r"[^\n]", " ", span.group(0)), _split_fences(text)[0])
+
+
+def _line_of(text: str) -> Callable[[int], int]:
+    starts = [0] + [match.end() for match in re.finditer("\n", text)]
+    return lambda offset: bisect_right(starts, offset)
 
 
 def code_segments(text: str) -> Iterator[tuple[int, str]]:
-    """Each code span, and each line of a fenced code block, with its line number."""
-    for number, line, fenced in _lines(text):
-        if fenced:
-            yield number, line
-        else:
-            yield from ((number, span.group(2)) for span in _CODE_SPAN.finditer(line))
+    """Each line of a code span or fenced code block, with its line number."""
+    unfenced, fenced = _split_fences(text)
+    line_of = _line_of(unfenced)
+    spans = [(line_of(span.start(2)) + at, part)
+             for span in _CODE_SPAN.finditer(unfenced) for at, part in enumerate(span.group(2).split("\n"))]
+    yield from sorted(fenced + spans)
 
 
 def link_targets(text: str) -> Iterator[tuple[int, str]]:
-    for number, line in prose_lines(text):
-        for match in _INLINE_LINK.finditer(line):
-            yield number, match.group(1)
-        definition = _REFERENCE_DEF.match(line)
-        if definition:
-            yield number, definition.group(1)
+    """Each link target outside code, inline or in a reference definition, with the line it starts on."""
+    prose = _prose(text)
+    line_of = _line_of(prose)
+    found = [(m.start(1), m.group(1)) for pattern in (_INLINE_LINK, _REFERENCE_DEF) for m in pattern.finditer(prose)]
+    for offset, target in sorted(found):
+        yield line_of(offset), target
 
 
 def check_links(root: Path) -> list[Problem]:
