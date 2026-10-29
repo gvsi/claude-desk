@@ -45,6 +45,8 @@ from desk.kernel_api import (
     DecideRequest,
     KernelError,
     LedgerAppendRequest,
+    OpenStatus,
+    PublicDesk,
     ToolsConfirmRequest,
     WhoAmI,
 )
@@ -408,6 +410,62 @@ def test_enabling_an_mcp_tool_names_the_reviewed_definition():
     assert ToolsConfirmRequest(desk_id="d", tool="native.book", enable=True).definition_sha256 is None
     with pytest.raises(ValidationError):
         ToolsConfirmRequest(desk_id="d", tool="native.book", enable=True, definition_sha256=reviewed)
+
+
+PUBLIC_DESK = {"business_name": "Rivera Plumbing", "desk_name": "Main line", "owner_display_name": "Maria Rivera",
+               "brand": {}, "charter": [], "agent_card": []}
+
+
+def test_public_desk_open_status_is_optional():
+    # a Desk without charter:hours has no open status, and a kernel that doesn't fill it yet still validates
+    assert PublicDesk.model_validate_json(json.dumps(PUBLIC_DESK)).open_status is None
+    assert PublicDesk.model_validate_json(json.dumps(PUBLIC_DESK | {"open_status": None})).open_status is None
+    assert "open_status" not in export_schema()["$defs"]["PublicDesk"]["required"]   # optional in the web's types too
+
+
+AS_OF = "2026-11-02T12:04:00-08:00"   # a Monday in the business's time zone, on the kernel's clock
+OPEN_STATUSES = (   # open until a time, open all week, closed until a time, closed with no window within 7 days
+    {"open": True, "until": "2026-11-02T18:00:00-08:00", "opens_at": None, "text": "Open now, until 6:00 pm"},
+    {"open": True, "until": None, "opens_at": None, "text": "Abierto ahora"},
+    {"open": False, "until": None, "opens_at": "2026-11-02T13:00:00-08:00", "text": "Closed now. Opens today at 1:00 pm"},
+    {"open": False, "until": None, "opens_at": None, "text": "Cerrado ahora"},
+)
+
+
+def test_open_status_shapes_validate():
+    for status in OPEN_STATUSES:
+        desk = PublicDesk.model_validate_json(json.dumps(PUBLIC_DESK | {"open_status": status | {"as_of": AS_OF}}))
+        assert desk.open_status == OpenStatus.model_validate_json(json.dumps(status | {"as_of": AS_OF}))
+        assert desk.open_status.as_of.utcoffset().total_seconds() == -8 * 3600
+    with pytest.raises(ValidationError):   # until and opens_at are always sent, null when they don't apply
+        OpenStatus.model_validate_json(json.dumps({"open": True, "text": "Open now", "as_of": AS_OF}))
+
+
+def test_open_status_times_carry_their_offset():
+    # the kernel works in the business's time zone; a time without its offset would leave the web to guess one
+    for status in OPEN_STATUSES:
+        valid = status | {"as_of": AS_OF}
+        for field in ("until", "opens_at", "as_of"):
+            if valid[field] is not None:
+                with pytest.raises(ValidationError):
+                    OpenStatus.model_validate_json(json.dumps(valid | {field: valid[field].removesuffix("-08:00")}))
+
+
+def test_open_status_names_only_its_own_boundary():
+    # the web schedules one refetch at the boundary that applies, so each state carries only its own, and it is
+    # after as_of: windows end exclusive, so a business open until now is closed, and a past boundary would loop
+    open_until = OPEN_STATUSES[0] | {"as_of": AS_OF}
+    closed_until = OPEN_STATUSES[2] | {"as_of": AS_OF}
+    assert OpenStatus.model_validate_json(json.dumps(open_until | {"until": "2026-11-03T02:00:00Z"})).until.hour == 2
+    for wrong in (
+        open_until | {"opens_at": "2026-11-03T08:00:00-08:00"},   # open, with a next opening
+        closed_until | {"until": "2026-11-02T18:00:00-08:00"},    # closed, with an end of window
+        open_until | {"until": AS_OF},
+        open_until | {"until": "2026-11-02T20:04:00Z"},           # the same instant as as_of, in UTC
+        closed_until | {"opens_at": "2026-11-02T11:00:00-08:00"},
+    ):
+        with pytest.raises(ValidationError):
+            OpenStatus.model_validate_json(json.dumps(wrong))
 
 
 def test_schema_export_is_current():

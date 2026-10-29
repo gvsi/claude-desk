@@ -276,6 +276,23 @@ class PaymentLinkStateResult(BaseModel):  # POST /payment_links/{token}/complete
     session_id: str
     verdict: ReplyVerdict | None          # the payment_confirmed verdict on paid; None on cancel
 
+class OpenStatus(BaseModel):              # PublicDesk's header line: computed from charter:hours on the kernel's clock
+    open: bool
+    until: AwareDatetime | None           # open: the end of the current window, contiguous windows merged; None if open
+                                          # through the next 7 days
+    opens_at: AwareDatetime | None        # closed: the start of the next window within 7 days, else None
+    text: str                             # kernel en/es template in the business's time zone (?lang=), shown verbatim
+    as_of: AwareDatetime                  # the kernel's clock; the web refetches after (until or opens_at) - as_of
+
+    @model_validator(mode="after")
+    def _own_boundary_after_now(self) -> Self:
+        boundary, other = (self.until, self.opens_at) if self.open else (self.opens_at, self.until)
+        if other is not None:
+            raise ValueError("an open status names only until, a closed one only opens_at")
+        if boundary is not None and boundary <= self.as_of:
+            raise ValueError("the boundary is after as_of: windows end exclusive, and a past one would refetch at once")
+        return self
+
 class PublicDesk(BaseModel):              # GET /public/{desk_slug}: public-labelled fields only, kernel-rendered (?lang=)
     business_name: str
     desk_name: str
@@ -283,6 +300,7 @@ class PublicDesk(BaseModel):              # GET /public/{desk_slug}: public-labe
     brand: dict[str, str]
     charter: list[RenderedBlock]
     agent_card: list[RenderedBlock]
+    open_status: OpenStatus | None = None   # None when the Desk has no charter:hours
 
 class Health(BaseModel):                  # GET /health (selftest result cached at startup)
     version: str
