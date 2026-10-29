@@ -124,9 +124,14 @@ export const Multiline: Story = {
     maxLength: 1500,
   },
   play: async ({ args, canvas, userEvent }) => {
+    const hint = 'Include your first name as customers should see it.';
     const field = canvas.getByRole('textbox', { name: 'Your business' });
+    const counter = () => canvas.queryByText(/^\d+ \/ 1500$/);
     await expect(field.tagName).toBe('TEXTAREA');
-    await expect(field).toHaveAccessibleDescription('Include your first name as customers should see it.');
+    await expect(field).toHaveAccessibleDescription(hint);
+
+    // Well under the limit there is no counter.
+    await expect(counter()).toBeNull();
 
     // Enter adds a line; nothing submits from a multiline field.
     await userEvent.click(field);
@@ -139,10 +144,21 @@ export const Multiline: Story = {
     await expect(field.getBoundingClientRect().width).toBe(box.width);
     await expect(field.scrollWidth).toBeLessThanOrEqual(field.clientWidth);
 
-    // maxLength caps the text: a paste past it stops at the limit.
+    // The counter shows from 90% of the limit (1350 of 1500), and the field names it in its description.
+    await userEvent.clear(field);
+    await userEvent.paste('x'.repeat(1349));
+    await expect(counter()).toBeNull();
+    await userEvent.keyboard('x');
+    await expect(counter()).toHaveTextContent('1350 / 1500');
+    await expect(field).toHaveAccessibleDescription(`${hint} 1350 / 1500`);
+    expectComputed(counter() as HTMLElement, { fontSize: '12px', color: 'rgba(250, 249, 245, 0.64)' });
+
+    // maxLength caps the text: a paste past it stops at the limit, and the counter shows the field is full.
     await expect(field).toHaveAttribute('maxlength', '1500');
     await userEvent.clear(field);
     await userEvent.paste('x'.repeat(1600));
     await expect(args.onChange).toHaveBeenLastCalledWith('x'.repeat(1500));
+    await expect(counter()).toHaveTextContent('1500 / 1500');
+    await expect(field).toHaveAccessibleDescription(`${hint} 1500 / 1500`);
   },
 };

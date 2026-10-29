@@ -373,7 +373,7 @@ Chrome (`{owner}` is `ownerName`): quote "Quote" / "Presupuesto"; booking_option
 **Interfaces:**
 - Consumes: Tasks 4 and 5.
 - Produces:
-  - `TextField({ label; value; onChange; type?: 'text' | 'password'; multiline?; hint?; error?; autoComplete?; maxLength? })`: label above, `hint` and `error` tied by `aria-describedby`, `aria-invalid` with `error`, `--radius-control`, `--line-control`, `.cd-type-body`.
+  - `TextField({ label; value; onChange; type?: 'text' | 'password'; multiline?; hint?; error?; autoComplete?; maxLength? })`: label above, `hint` and `error` tied by `aria-describedby`, `aria-invalid` with `error`, `--radius-control`, `--line-control`, `.cd-type-body`; `maxLength` caps the text and shows a counter from 90% of it, which joins the description.
   - `Dialog({ title; body; confirmLabel; cancelLabel; tone?: 'default' | 'danger'; pending?; onConfirm; onCancel })`: `role="dialog"`, `aria-modal`, labelled by its title; focus moves in and is trapped; Escape cancels; focus returns to the opener; `danger` adds a refused dot beside the title, buttons stay neutral; `pending` disables both with `aria-busy`.
   - `SwitcherMenu({ businesses: { id; name; desks }[]; currentBusinessId; currentDeskId; onPick; onNewBusiness; onClose })`: `role="menu"` on `--bg-surface`, arrow keys, Escape closes and returns focus; Desks under the current business; "New business" last.
   - `ConversationListItem({ name; time; status: { tone; text }; href; current? })`.

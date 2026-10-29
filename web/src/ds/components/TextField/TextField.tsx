@@ -20,22 +20,30 @@ export interface TextFieldProps {
   error?: string;
   /** The browser's autofill hint: "current-password", "organization". */
   autoComplete?: string;
-  /** The most characters the field takes; the browser stops typing and pasting there (1500 for a business description). */
+  /** Caps the text at this many characters (1500 for a business description), with a counter from 90% of it. */
   maxLength?: number;
 }
 
+/** The share of `maxLength` from which the counter shows. */
+const COUNTER_FROM = 0.9;
+
 /**
  * A labelled text input, or a text area with `multiline`: the label above, then the field, the hint
- * and any error under it. The hint and the error describe the field (`aria-describedby`), and an
- * error also marks it `aria-invalid`. The error line is announced when it appears.
+ * (and, from 90% of `maxLength`, a counter) and any error under it. The error, the hint and the
+ * counter describe the field (`aria-describedby`), and an error also marks it `aria-invalid`. The
+ * error line is announced when it appears.
  */
 export function TextField({ label, value, onChange, type = 'text', multiline = false, hint, error, autoComplete, maxLength }: TextFieldProps) {
   const id = useId();
   const fieldId = `${id}-field`;
   const hintId = `${id}-hint`;
   const errorId = `${id}-error`;
+  const counterId = `${id}-counter`;
   const invalid = error !== undefined && error !== '';
-  const describedBy = [invalid ? errorId : null, hint ? hintId : null].filter((part) => part !== null).join(' ') || undefined;
+  const showCounter = maxLength !== undefined && value.length >= maxLength * COUNTER_FROM;
+  const describedBy =
+    [invalid ? errorId : null, hint ? hintId : null, showCounter ? counterId : null].filter((part) => part !== null).join(' ') ||
+    undefined;
 
   const shared = {
     id: fieldId,
@@ -54,10 +62,19 @@ export function TextField({ label, value, onChange, type = 'text', multiline = f
         {label}
       </label>
       {multiline ? <textarea {...shared} rows={4} /> : <input {...shared} type={type} />}
-      {hint ? (
-        <p id={hintId} className="cd-text-field__hint cd-type-meta">
-          {hint}
-        </p>
+      {hint || showCounter ? (
+        <div className="cd-text-field__meta">
+          {hint ? (
+            <p id={hintId} className="cd-text-field__hint cd-type-meta">
+              {hint}
+            </p>
+          ) : null}
+          {showCounter ? (
+            <p id={counterId} className="cd-text-field__counter cd-type-caption">
+              {value.length} / {maxLength}
+            </p>
+          ) : null}
+        </div>
       ) : null}
       {/* Always present, so an error that appears after a submit is announced. */}
       <div className="cd-text-field__error-region" aria-live="polite">

@@ -14,12 +14,13 @@
 - The field on the page's own ground: a 1 px `line-control` outline (`line-control-hover` on hover) at `radius-control`, `size-control-main` tall, with the text in `body` type. Focus shows the 2 px `accent-blue` ring at a 2 px offset.
 - With `multiline`, a text area four lines tall. Enter adds a line, it can be dragged taller but never wider, and long words wrap.
 - The hint under the field in `meta` type, `text-secondary`.
+- With `maxLength`, a counter at the right of the hint line from 90% of the limit ("1350 / 1500"), in `caption` type, `text-secondary`. It is numbers only, so it reads the same in English and Spanish, and it shows "1500 / 1500" when the field is full.
 - The error under that: a refused dot beside the words, in `text-primary`. The outline stays neutral, so the error is never shown by color alone.
 
 ## Accessibility
 
 - The label is a `<label>` tied to the field.
-- The error and the hint describe the field (`aria-describedby`, the error first). An error also sets `aria-invalid="true"`.
+- The error, the hint and the counter describe the field (`aria-describedby`, in that order). An error also sets `aria-invalid="true"`.
 - The error sits in a polite live region that is always there, so an error that appears after a submit is announced even though focus is on the submit button.
 
 ## What the consumer provides
@@ -27,7 +28,7 @@
 - `value` and `onChange`. The field shows whatever `value` the form passes back.
 - `error` in plain words that say what to do, never a code: "That passcode didn't work. Check it and try again." Clear it when the owner fixes the field or submits again.
 - `autoComplete` where the browser can help: `current-password` for the passcode.
-- `maxLength` where the text has a limit: 1500 for the business description that starts setup. Typing and pasting stop there.
+- `maxLength` where the text has a limit: 1500 for the business description that starts setup. Typing and pasting stop there, and the counter shows from 90% of it.
 - The form around it, and its submit button. The field doesn't submit anything itself.
 
 ## Props
@@ -42,6 +43,6 @@
 | `hint` | `string` | One line under the field. |
 | `error` | `string` | Shown under the hint; sets `aria-invalid`. |
 | `autoComplete` | `string` | Passed to the field. |
-| `maxLength` | `number` | The most characters the field takes; the browser stops there. |
+| `maxLength` | `number` | Caps the text; a counter from 90% of it. |
 
 The outline's color changes at `motion-instant`. Nothing moves under reduced motion.
