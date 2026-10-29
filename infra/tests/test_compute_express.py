@@ -230,16 +230,6 @@ def test_outputs_name_the_service_endpoint_and_the_deployed_commit(desk_stacks):
     assert outputs["DeployedSha"] == "0123456789abcdef0123456789abcdef01234567"
 
 
-def test_unbuilt_compute_fails_closed():
-    from conftest import build_stacks
-
-    from stacks.config import ConfigError
-
-    # The fallback (an internal ALB behind a VPC origin) isn't built yet; never deploy Express instead.
-    with pytest.raises(ConfigError, match="compute alb"):
-        build_stacks(compute="alb")
-
-
 def test_app_synthesizes_deskapp_after_deskdata_without_credentials(tmp_path):
     from conftest import APP_CONTEXT, INFRA, feature_flags
 

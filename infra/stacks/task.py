@@ -17,6 +17,8 @@ from stacks.config import DeskConfig
 from stacks.data_stack import API_ROLE, DATABASE_NAME, KERNEL_ROLE, MOCKPAY_ROLE, DeskData, DeskSecrets
 from stacks.image import desk_image
 
+# Express Mode routes to the one named port of the container called Main; the fallback targets it too.
+API_CONTAINER = "Main"
 API_PORT = 8700
 API_PORT_NAME = "api"
 # The seam's commands; the image's entrypoint composes each container's database URLs first.
@@ -115,8 +117,8 @@ def desk_task_definition(scope: Construct, data: DeskData, config: DeskConfig) -
         logging=_logs(log_group, "kernel"),
     )
     api = task.add_container(
-        "Main",
-        container_name="Main",
+        API_CONTAINER,
+        container_name=API_CONTAINER,
         image=image,
         essential=True,
         command=API_COMMAND,
