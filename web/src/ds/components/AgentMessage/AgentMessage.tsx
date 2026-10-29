@@ -35,7 +35,7 @@ export function AgentMessage({ agentName, signed, title, meta, time, text }: Age
     <div className="cd-agent-message">
       <p className="cd-agent-message__who cd-type-caption">
         <Icon name="agent" size={14} />
-        <bdi className="cd-agent-message__name" data-copy="user">
+        <bdi className="cd-agent-message__name cd-user-name" data-copy="user">
           {agentName}
         </bdi>
         <Pill>

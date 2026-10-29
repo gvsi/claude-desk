@@ -54,6 +54,16 @@ a {
   border: 0;
 }
 
+/* A name someone chose (a visitor's, an agent's) inside the interface's own words: its own
+   isolated run of text, so its direction marks can't reorder what is around it, in text-primary
+   at weight 520, so it reads apart from the interface's words. Mark it data-copy="user" and put
+   it first in its line. */
+.cd-user-name {
+  unicode-bidi: isolate;
+  color: var(--text-primary);
+  font-weight: 520;
+}
+
 /* Reduced motion: nothing animates or transitions, anywhere. */
 @media (prefers-reduced-motion: reduce) {
   *,

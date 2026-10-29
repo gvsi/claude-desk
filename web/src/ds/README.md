@@ -8,6 +8,7 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 - Let Claude speak in the first person, in serif (`reply`, `summary`, `greeting`): "These times are open on Maria's calendar. Which of them works for you?" People speak in sans (`message`).
 - Never let Claude's prose say that something is booked, paid, refunded, discounted or what it costs, or that Claude did something no receipt records. The typed card and its receipt say it; the prose only leads into them: "Here are the details."
 - Separate facts with commas or separate lines, never with "A · B · C" strings.
+- Set off a name someone chose (a visitor's, an agent's) as user text: its own `.cd-user-name` element marked `data-copy="user"`, first in its line, and never joined to a status or a trust word in one run of text. A status sits beside it in its own `Pill`, as "Signed" or "Not signed" does on an agent's request.
 - Write English and Spanish wherever a visitor reads.
 - Call the product Claude Desk: one is "your Desk", several are "Desks". Every surface carries the footer "Concept prototype by Giovanni Alcantara, not an Anthropic product" in `caption`.
 - Say on every visitor surface that Claude is an AI answering for the business: "You're chatting with Claude, an AI answering for Rivera Plumbing. Ask for Maria Rivera anytime." It can't be turned off.

@@ -5,6 +5,7 @@ import { expect, fn } from 'storybook/test';
 import type { SessionMode } from '../../../api/contracts.ts';
 import { rivera } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { expectSetOffName } from '../../test/expectSetOffName.ts';
 import { errorCopy } from '../Notice/errorCopy.ts';
 import { TakeOverBar, type TakeOverBarProps } from './TakeOverBar.tsx';
 
@@ -18,6 +19,18 @@ function lineReading(root: HTMLElement, text: string): HTMLElement {
   const lines = [...root.querySelectorAll<HTMLElement>('p')].filter((line) => line.textContent === text);
   if (lines.length !== 1) throw new Error(`expected one line reading "${text}", found ${lines.length}`);
   return lines[0] as HTMLElement;
+}
+
+/** The whisper line while Claude answers: the visitor's name set off at its start. */
+async function expectWhisperLine(root: HTMLElement, visitor: string): Promise<HTMLElement> {
+  const line = lineReading(root, `${visitor} never sees whispers. They steer Claude, and your rules still apply.`);
+  await expectSetOffName(line, visitor);
+  return line;
+}
+
+/** The line saying what the visitor sees, the visitor's name set off at its start. */
+async function expectSeesLine(root: HTMLElement, visitor: string, sees: string): Promise<void> {
+  await expectSetOffName(lineReading(root, `${visitor} sees “${sees}”`), visitor);
 }
 
 /**
@@ -84,8 +97,8 @@ type Story = StoryObj<typeof meta>;
 export const Answering: Story = {
   render: (args) => <Screen {...args} failFirst />,
   play: async ({ args, canvas, canvasElement, userEvent }) => {
-    await expect(lineReading(canvasElement, 'Whispers steer Claude. Dana Whitfield never sees them, and your rules still apply.')).toBeVisible();
-    await expect(lineReading(canvasElement, 'Dana Whitfield sees “Maria Rivera joined the chat.”')).toBeVisible();
+    await expect(await expectWhisperLine(canvasElement, 'Dana Whitfield')).toBeVisible();
+    await expectSeesLine(canvasElement, 'Dana Whitfield', 'Maria Rivera joined the chat.');
     const takeOver = canvas.getByRole('button', { name: 'Take over' });
     await expect(canvas.getAllByRole('button')).toEqual([takeOver]);
     expectComputed(takeOver, { height: '40px', backgroundColor: 'rgba(250, 249, 245, 0.1)' });
@@ -121,7 +134,7 @@ export const InChat: Story = {
   play: async ({ args, canvas, canvasElement, userEvent }) => {
     await expect(canvas.getByText("You're in this chat")).toBeVisible();
     await expect(canvas.getByText("Claude won't send anything here until you hand it back.")).toBeVisible();
-    await expect(lineReading(canvasElement, 'Lucía Herrera sees “Claude is helping again.”')).toBeVisible();
+    await expectSeesLine(canvasElement, 'Lucía Herrera', 'Claude is helping again.');
     const handBack = canvas.getByRole('button', { name: 'Hand back to Claude' });
     await expect(canvas.getAllByRole('button')).toEqual([handBack]);
 
@@ -133,7 +146,7 @@ export const InChat: Story = {
     await expect(args.onTakeOver).not.toHaveBeenCalled();
 
     // Claude answers again, and focus moves to the bar's first line.
-    await expect(lineReading(canvasElement, 'Whispers steer Claude. Lucía Herrera never sees them, and your rules still apply.')).toHaveFocus();
+    await expect(await expectWhisperLine(canvasElement, 'Lucía Herrera')).toHaveFocus();
   },
 };
 
@@ -193,7 +206,7 @@ export const Agent: Story = {
       "The board shows a finished agent visit; while one is live the bar offers Take over, without the line about what the visitor sees, which agents never receive.",
   },
   play: async ({ canvas, canvasElement, userEvent }) => {
-    await expect(lineReading(canvasElement, "Whispers steer Claude. Alex Kim's assistant never sees them, and your rules still apply.")).toBeVisible();
+    await expect(await expectWhisperLine(canvasElement, "Alex Kim's assistant")).toBeVisible();
     await expect(canvasElement).not.toHaveTextContent('sees “');
 
     // Taken over, the bar still says nothing about what the agent sees.

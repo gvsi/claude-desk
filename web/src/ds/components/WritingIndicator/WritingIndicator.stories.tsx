@@ -3,6 +3,7 @@ import { expect } from 'storybook/test';
 
 import { rivera } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { expectSetOffName } from '../../test/expectSetOffName.ts';
 import { WritingIndicator } from './WritingIndicator.tsx';
 
 const meta = {
@@ -53,7 +54,19 @@ export const VisitorTyping: Story = {
   play: async ({ canvas, canvasElement }) => {
     const status = canvas.getByRole('status');
     await expectOnlyLabel(canvasElement, status, 'Dana is typing');
-    // The name came from a person, so it is marked as their words; the rest is interface copy.
-    await expect(canvas.getByText('Dana')).toHaveAttribute('data-copy', 'user');
+    // The name came from a person, so it is set off as their words; the rest is interface copy.
+    await expectSetOffName(status, 'Dana');
+  },
+};
+
+export const VisitorNamedClaude: Story = {
+  args: { who: 'Claude' },
+  parameters: {
+    canvasNote: 'No board shows a visitor who calls themselves Claude; their name is set off as their own words, so the line never reads as Claude writing.',
+  },
+  play: async ({ canvas, canvasElement }) => {
+    const status = canvas.getByRole('status');
+    await expectOnlyLabel(canvasElement, status, 'Claude is typing');
+    await expectSetOffName(status, 'Claude');
   },
 };

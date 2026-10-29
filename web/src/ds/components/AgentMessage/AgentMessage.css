@@ -24,13 +24,9 @@
   flex: none;
 }
 
-/* The name the agent gave, set off from the interface's words: its own isolated run of text in
-   text-primary, so it can't run into the status or reorder what is around it. */
+/* The name the agent gave, set off as user text (.cd-user-name), apart from the status pill. */
 .cd-agent-message__name {
   min-width: 0;
-  unicode-bidi: isolate;
-  color: var(--text-primary);
-  font-weight: 520;
 }
 
 .cd-agent-message__bubble {

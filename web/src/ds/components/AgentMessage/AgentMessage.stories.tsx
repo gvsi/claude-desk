@@ -3,6 +3,7 @@ import { expect } from 'storybook/test';
 
 import { rivera } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { expectSetOffName } from '../../test/expectSetOffName.ts';
 import { AgentMessage } from './AgentMessage.tsx';
 
 /** What Alex Kim's assistant sent, in order (the agent's own words, untrusted text). */
@@ -34,13 +35,10 @@ type Story = StoryObj<typeof meta>;
 async function expectWho(root: HTMLElement, name: string, status: 'Signed' | 'Not signed', tone: 'handled' | 'refused') {
   const who = root.querySelector<HTMLElement>('.cd-agent-message__who');
   if (!who) throw new Error('no line above the bubble');
-  const nameEl = who.querySelector<HTMLElement>('.cd-agent-message__name');
+  const nameEl = who.querySelector<HTMLElement>('.cd-user-name');
   const pill = who.querySelector<HTMLElement>('.cd-pill');
   if (!nameEl || !pill) throw new Error('the name and the status are not separate elements');
-  await expect(nameEl.textContent).toBe(name);
-  await expect(nameEl).toHaveAttribute('data-copy', 'user');
-  // Isolated, so a name's direction marks can't reorder the words around it.
-  expectComputed(nameEl, { unicodeBidi: 'isolate' });
+  await expectSetOffName(who, name);
   await expect(pill.textContent).toBe(status);
   await expect(pill.hasAttribute('data-copy')).toBe(false);
   await expect(nameEl.contains(pill) || pill.contains(nameEl)).toBe(false);

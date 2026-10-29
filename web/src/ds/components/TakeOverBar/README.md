@@ -11,7 +11,7 @@
 
 | `mode` | Lines | Controls | What the visitor sees |
 | --- | --- | --- | --- |
-| `ai` | "Whispers steer Claude. {visitorName} never sees them, and your rules still apply." | secondary "Take over" | "{visitorName} sees “{ownerName} joined the chat.”" |
+| `ai` | "{visitorName} never sees whispers. They steer Claude, and your rules still apply." | secondary "Take over" | "{visitorName} sees “{ownerName} joined the chat.”" |
 | `owner` | "You're in this chat", "Claude won't send anything here until you hand it back." | secondary "Hand back to Claude" | "{visitorName} sees “Claude is helping again.”" |
 | `paused` | The held dot and "Claude paused this chat after repeated blocked attempts." | primary "Resume Claude", secondary "Take over" | None |
 
@@ -19,7 +19,7 @@ A mode this build doesn't know shows the `ai` bar, which offers only Take over. 
 
 ## What the consumer provides
 
-- `mode` from the session, `visitorName` as the screen names the visitor (`whoLabel`), and `ownerName`, the business's `owner_display_name`, which the visitor sees. Both names are shown as people's own words.
+- `mode` from the session, `visitorName` as the screen names the visitor (`whoLabel`), and `ownerName`, the business's `owner_display_name`, which the visitor sees. Both names are shown as people's own words (`data-copy="user"`). The visitor may have chosen their name, so it is set off as user text (`.cd-user-name`) and starts each line it is in: no sentence of the bar's own runs into it.
 - `onTakeOver`, `onHandBack` and `onResume`, which call the API's take-over, hand-back and resume routes (the kernel's `POST /sessions/{id}/mode` behind them).
 - `pending` while the change is sent: every control waits, with `aria-busy` on the bar.
 - `error`, the screen's line for a change that failed (`errorCopy`), shown as an alert. It gives way to the next attempt while that is pending.

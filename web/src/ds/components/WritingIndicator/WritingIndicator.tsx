@@ -31,7 +31,11 @@ export function WritingIndicator({ language, who }: WritingIndicatorProps) {
         inLanguage(CLAUDE_WRITING_COPY, language)
       ) : (
         <>
-          <span data-copy="user">{person}</span> {inLanguage(PERSON_TYPING_COPY, language)}
+          {/* Set off as their own words and first in the line: a name such as "Claude" never reads as Claude. */}
+          <bdi className="cd-user-name" data-copy="user">
+            {person}
+          </bdi>{' '}
+          {inLanguage(PERSON_TYPING_COPY, language)}
         </>
       )}
     </p>

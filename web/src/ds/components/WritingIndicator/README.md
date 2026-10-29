@@ -22,7 +22,7 @@ It takes no message text. Claude's draft is checked by the kernel before anyone 
 | Claude | Claude is writing | Claude está escribiendo |
 | A person | {who} is typing | {who} está escribiendo |
 
-The name is marked `data-copy="user"`; the rest is interface copy.
+The name is someone's own words: it is set off as user text (`.cd-user-name`, `data-copy="user"`) at the start of the line, so a visitor who calls themselves "Claude" reads as a name, never as Claude writing. The rest is interface copy.
 
 ## Look and motion
 

@@ -25,9 +25,21 @@ export interface TakeOverBarProps {
   error?: string;
 }
 
-/** A name someone chose, exempt from the copy check's voice rules. */
+/** The owner's own display name, quoted as the visitor will see it; exempt from the copy check's voice rules. */
 function Name({ children }: { children: string }) {
   return <span data-copy="user">{children}</span>;
+}
+
+/**
+ * The visitor's or agent's name, which they may have chosen: set off as user text and first in
+ * its line, so no sentence of the bar's own runs into it.
+ */
+function VisitorName({ children }: { children: string }) {
+  return (
+    <bdi className="cd-user-name" data-copy="user">
+      {children}
+    </bdi>
+  );
 }
 
 /**
@@ -103,7 +115,7 @@ export function TakeOverBar({
       // `ai`, and a mode this build doesn't know: only Take over is offered.
       lead = (
         <FirstLine lineRef={firstLine}>
-          Whispers steer Claude. <Name>{visitorName}</Name> never sees them, and your rules still apply.
+          <VisitorName>{visitorName}</VisitorName> never sees whispers. They steer Claude, and your rules still apply.
         </FirstLine>
       );
       buttons = button('secondary', 'Take over', onTakeOver);
@@ -121,7 +133,7 @@ export function TakeOverBar({
         <div className={`cd-take-over__buttons${mode === 'paused' ? ' cd-take-over__buttons--stacked' : ''}`}>{buttons}</div>
         {visitorSees && !agent ? (
           <p className="cd-take-over__line cd-type-caption">
-            <Name>{visitorName}</Name> sees {visitorSees}
+            <VisitorName>{visitorName}</VisitorName> sees {visitorSees}
           </p>
         ) : null}
       </div>
