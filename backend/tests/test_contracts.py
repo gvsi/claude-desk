@@ -426,11 +426,14 @@ def test_public_desk_open_status_is_optional():
 
 
 AS_OF = "2026-11-02T12:04:00-08:00"   # a Monday in the business's time zone, on the kernel's clock
+MIDNIGHT = "2026-11-03T00:00:00-08:00"   # the next local midnight
 OPEN_STATUSES = (   # open until a time, open all week, closed until a time, closed with no window within 7 days
-    {"open": True, "until": "2026-11-02T18:00:00-08:00", "opens_at": None, "text": "Open now, until 6:00 pm"},
-    {"open": True, "until": None, "opens_at": None, "text": "Abierto ahora"},
-    {"open": False, "until": None, "opens_at": "2026-11-02T13:00:00-08:00", "text": "Closed now. Opens today at 1:00 pm"},
-    {"open": False, "until": None, "opens_at": None, "text": "Cerrado ahora"},
+    {"open": True, "until": "2026-11-02T18:00:00-08:00", "opens_at": None, "text": "Open now, until 6:00 pm",
+     "refresh_at": "2026-11-02T18:00:00-08:00"},
+    {"open": True, "until": None, "opens_at": None, "text": "Abierto ahora", "refresh_at": MIDNIGHT},
+    {"open": False, "until": None, "opens_at": "2026-11-02T13:00:00-08:00", "text": "Closed now. Opens today at 1:00 pm",
+     "refresh_at": "2026-11-02T13:00:00-08:00"},
+    {"open": False, "until": None, "opens_at": None, "text": "Cerrado ahora", "refresh_at": MIDNIGHT},
 )
 
 
@@ -470,18 +473,47 @@ def test_open_status_names_only_its_own_boundary():
             OpenStatus.model_validate_json(json.dumps(wrong))
 
 
-def test_open_status_compares_instants_across_the_fold():
-    # 01:00-02:00 happens twice in Los Angeles on 2026-11-01, and Python compares two times that share a ZoneInfo by
-    # wall clock, ignoring fold, so the kernel's own local times are compared as instants
-    pdt = datetime(2026, 11, 1, 1, 30, tzinfo=ZoneInfo("America/Los_Angeles"))           # 08:30Z
-    pst = datetime(2026, 11, 1, 1, 15, fold=1, tzinfo=ZoneInfo("America/Los_Angeles"))   # 09:15Z, 45 minutes later
-    assert pdt.tzinfo is pst.tzinfo and pst - pdt == timedelta(minutes=-15)   # wall-clock arithmetic
-    assert (pdt.utcoffset(), pst.utcoffset()) == (timedelta(hours=-7), timedelta(hours=-8))
-    for open_, boundary in ((True, "until"), (False, "opens_at")):
-        empty = {"until": None, "opens_at": None}
-        OpenStatus(open=open_, **empty | {boundary: pst}, text="x", as_of=pdt)   # a future boundary
+def test_open_status_names_when_to_refresh():
+    # the next moment the text may change: the boundary or the next local midnight, whichever comes first, so "today"
+    # and "tomorrow" stay true; the web's one refetch is then, so it is after as_of and at most a 25-hour day away
+    open_until = OPEN_STATUSES[0] | {"as_of": AS_OF}
+    status = OpenStatus.model_validate_json(json.dumps(open_until))
+    assert status.refresh_at == status.until
+    fall_back = {"open": True, "until": None, "opens_at": None, "text": "Open now",   # 2026-11-01 lasts 25 hours
+                 "as_of": "2026-11-01T00:00:00-07:00", "refresh_at": "2026-11-02T00:00:00-08:00"}
+    OpenStatus.model_validate_json(json.dumps(fall_back))
+    for wrong in (
+        open_until | {"refresh_at": AS_OF},
+        open_until | {"refresh_at": "2026-11-02T18:00:01-08:00"},   # after the boundary
+        fall_back | {"refresh_at": "2026-11-02T00:00:01-08:00"},    # more than 25 hours away
+        {key: value for key, value in open_until.items() if key != "refresh_at"},
+    ):
         with pytest.raises(ValidationError):
-            OpenStatus(open=open_, **empty | {boundary: pdt}, text="x", as_of=pst)   # a past one
+            OpenStatus.model_validate_json(json.dumps(wrong))
+
+
+def test_open_status_compares_instants_across_the_fold():
+    # 01:00-02:00 happens twice in Los Angeles on 2026-11-01, and Python compares and subtracts two times that share a
+    # ZoneInfo by wall clock, ignoring fold, so the kernel's own local times are compared as instants
+    la = ZoneInfo("America/Los_Angeles")
+    pdt = datetime(2026, 11, 1, 1, 30, tzinfo=la)           # 08:30Z
+    pst = datetime(2026, 11, 1, 1, 15, fold=1, tzinfo=la)   # 09:15Z, 45 minutes later
+    assert pst - pdt == timedelta(minutes=-15)              # wall-clock arithmetic
+    assert (pdt.utcoffset(), pst.utcoffset()) == (timedelta(hours=-7), timedelta(hours=-8))
+    early, empty = datetime(2026, 11, 1, 0, 30, tzinfo=la), {"until": None, "opens_at": None}
+    for open_, boundary in ((True, "until"), (False, "opens_at")):
+        OpenStatus(open=open_, **empty | {boundary: pst}, text="x", as_of=pdt, refresh_at=pst)   # a future boundary
+        with pytest.raises(ValidationError):                                                    # a past one
+            OpenStatus(open=open_, **empty | {boundary: pdt}, text="x", as_of=pst, refresh_at=pst + timedelta(hours=1))
+        with pytest.raises(ValidationError):                                                    # a refresh after it
+            OpenStatus(open=open_, **empty | {boundary: pdt}, text="x", as_of=early, refresh_at=pst)
+    OpenStatus(open=True, **empty, text="x", as_of=pdt, refresh_at=pst)
+    with pytest.raises(ValidationError):
+        OpenStatus(open=True, **empty, text="x", as_of=pst, refresh_at=pdt)
+    midnight = datetime(2026, 11, 1, tzinfo=la)             # 07:00Z; the next local midnight is 25 hours later
+    OpenStatus(open=True, **empty, text="x", as_of=midnight, refresh_at=datetime(2026, 11, 2, tzinfo=la))
+    with pytest.raises(ValidationError):                    # 25 hours 30 minutes, though only 24:30 by wall clock
+        OpenStatus(open=True, **empty, text="x", as_of=midnight, refresh_at=datetime(2026, 11, 2, 0, 30, tzinfo=la))
 
 
 def test_schema_export_is_current():

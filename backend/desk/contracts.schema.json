@@ -2317,6 +2317,11 @@
           "format": "date-time",
           "title": "As Of",
           "type": "string"
+        },
+        "refresh_at": {
+          "format": "date-time",
+          "title": "Refresh At",
+          "type": "string"
         }
       },
       "required": [
@@ -2324,7 +2329,8 @@
         "until",
         "opens_at",
         "text",
-        "as_of"
+        "as_of",
+        "refresh_at"
       ],
       "title": "OpenStatus",
       "type": "object"

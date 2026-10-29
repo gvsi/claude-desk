@@ -5,7 +5,7 @@ carries a principal, person, level or assurance: the kernel builds identity from
 own tables and the tokens or signatures it checks.
 """
 
-from datetime import UTC
+from datetime import UTC, timedelta
 from typing import Annotated, Literal, Self
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, StringConstraints, model_validator
@@ -283,16 +283,24 @@ class OpenStatus(BaseModel):              # PublicDesk's header line: computed f
                                           # through the next 7 days
     opens_at: AwareDatetime | None        # closed: the start of the next window within 7 days, else None
     text: str                             # kernel en/es template in the business's time zone (?lang=), shown verbatim
-    as_of: AwareDatetime                  # the kernel's clock; the web refetches after (until or opens_at) - as_of
+    as_of: AwareDatetime                  # the kernel's clock
+    refresh_at: AwareDatetime             # the next moment text may change: the earlier of the boundary and the next local
+                                          # midnight; the web's one scheduled refetch is at refresh_at - as_of
 
     @model_validator(mode="after")
-    def _own_boundary_after_now(self) -> Self:
+    def _times_in_order(self) -> Self:
         boundary, other = (self.until, self.opens_at) if self.open else (self.opens_at, self.until)
         if other is not None:
             raise ValueError("an open status names only until, a closed one only opens_at")
-        # in UTC: two times sharing a ZoneInfo compare by wall clock, ignoring the fold of a repeated hour
-        if boundary is not None and boundary.astimezone(UTC) <= self.as_of.astimezone(UTC):
-            raise ValueError("the boundary is after as_of: windows end exclusive, and a past one would refetch at once")
+        # as instants in UTC: two times sharing a ZoneInfo compare and subtract by wall clock, ignoring a repeated hour's fold
+        as_of, refresh_at = self.as_of.astimezone(UTC), self.refresh_at.astimezone(UTC)
+        boundary = boundary.astimezone(UTC) if boundary is not None else None
+        if boundary is not None and boundary <= as_of:
+            raise ValueError("the boundary is after as_of: windows end exclusive")
+        if not as_of < refresh_at <= as_of + timedelta(hours=25):   # a local day lasts 25 hours when clocks fall back
+            raise ValueError("refresh_at is after as_of and at most 25 hours later")
+        if boundary is not None and refresh_at > boundary:
+            raise ValueError("refresh_at is at or before the boundary")
         return self
 
 class PublicDesk(BaseModel):              # GET /public/{desk_slug}: public-labelled fields only, kernel-rendered (?lang=)
