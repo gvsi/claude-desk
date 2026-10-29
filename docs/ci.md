@@ -1,0 +1,121 @@
+# Continuous integration
+
+Every push to `main`, every pull request to `main` and every manual run starts one GitHub Actions workflow, `ci` ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)). Each push to a pull request runs it once, and a newer push cancels the older run of the same pull request. A run on `main` is never cancelled once it starts; if several pushes to `main` are waiting, only the newest one runs.
+
+CI holds no secrets and no model key, and it can only read the repository:
+
+- The workflow's token has `contents: read`, and no job widens it.
+- No checkout keeps the token in the git config.
+- Every action is pinned by commit.
+- Every downloaded tool (cvc5, gitleaks and actionlint) is checked against a pinned sha256 before it runs.
+
+## The checks
+
+The workflow has nine jobs. Their names are the check names, in this order:
+
+1. `backend tests`: the backend's tests pass against a real Postgres 16. First the migrations apply to an empty database and the service roles get their passwords. The job fails before migrating if the migration chain has more than one head.
+2. `kernel tests`: the Rust kernel's tests pass (`cargo test --locked`), with cvc5 available to the proof binary's tests.
+3. `proofs`: two things pass. The proof binary's self-test runs against cvc5 (`desk-prove --selftest`). Then every shipped rule set is proved again and has to match its committed proof report (`make check-presets`). A report that is missing, out of date or failing fails the check.
+4. `tier 1 evals`: two suites pass against the real kernel and database, with no network and no model key:
+   - the model-free attack suite (`make evals-tier1`);
+   - the API's kernel contract tests, against the real kernel and not only the fake one, for each part of the kernel that `evals/tier1/landed.toml` lists as landed (`make kernel-contract`).
+5. `tier 2 results`: on pull requests only. A change to the gated inputs has to carry a passing tier 2 results file for exactly those inputs (`make evals-results-check BASE=origin/main`). The gated inputs are the kernel, prompts, rule presets, shared contracts, mock payments and the eval judging code.
+6. `web tests`: two steps pass in turn. First the web app type-checks and its unit tests pass (`make web-test`). Then it builds, the build check passes and the mocked end-to-end test passes (`make web-e2e`).
+7. `infra synth`: the infrastructure tests pass and the CDK app synthesizes (`make infra-check`). Nothing is deployed, and no cloud credentials are used.
+8. `secret scan`: gitleaks finds no secret anywhere in the git history. It uses its default rules with no exceptions (`.gitleaks.toml`), and findings are redacted in the log.
+9. `repo checks`: three things pass:
+   - actionlint on the workflow, with shellcheck on the workflow's scripts;
+   - the repository tooling's tests (`cd tools && uv run pytest -q`);
+   - the docs check (`make docs-check`).
+
+## When a check skips or fails
+
+Some checks run code that other parts of the project add over time. Each of those commands runs through a gate, `tools/desk_tools/gate.py`:
+
+```sh
+uv run --project tools python -m desk_tools.gate --name <name> --run-if <path> [--run-if <path>]... [--required-if <path>]... -- <command>
+```
+
+The gate decides by paths alone, relative to the repository root. It never asks make whether a target exists. So once a suite's code is in the repository, a missing make target or a Makefile error fails the check.
+
+| State | Result |
+|---|---|
+| Every `--run-if` path exists | Runs the command and exits with its code |
+| A `--run-if` path is missing and a `--required-if` path exists | Fails (exit 1) without running the command, naming both paths |
+| A `--run-if` path is missing and no `--required-if` path exists | Skips (exit 0) and says so in the job log and summary: "`<name>`: skipped, `<path>` is not in the repo yet" |
+| A usage error | Fails (exit 2) without running anything |
+
+The gates in the workflow:
+
+| Gate | Runs once this exists | Fails if missing while this exists | Command |
+|---|---|---|---|
+| `proofs` | `backend/desk/kernel_service/compiler.py` | | `make check-presets` |
+| `tier1` | `evals/run.py` | `backend/desk/kernel_service/app.py` | `make evals-tier1` |
+| `kernel-contract` | `backend/tests/kernel_contract/conftest.py` | | `make kernel-contract` |
+| `tier2-results` | `evals/results.py` | `evals/results` | `make evals-results-check BASE=origin/main` |
+| `web` | `web/package.json` | | `make web-test` |
+| `web-e2e` | `web/playwright.config.ts` | | `make web-e2e` |
+| `infra` | `infra/cdk.json` | | `make infra-check` |
+| `docs` | `tools/desk_tools/check_docs.py` | | `make docs-check` |
+
+- A `--run-if` path is always the suite's own code, never its data. Data can only require a suite, so deleting the tier 2 results can't switch their check off.
+- The rule compiler lands a few commits before `make check-presets`. In between, `proofs` fails rather than skips.
+- Everything else in the workflow runs on every push, with no gate.
+
+## Tier 2 runs locally
+
+Tier 2 is the model-driven attack suite and legitimate-task suite. It needs a model key, and CI holds none.
+
+- It runs locally with the development key.
+- Its results file is committed to `evals/results/`, named by a hash of the gated inputs.
+- On a pull request, `tier 2 results` recomputes that hash for the head. It fails when gated inputs changed and no passing results file covers them.
+- Pushes to `main` skip the job, since the pull request already ran it.
+
+## Runner minutes
+
+One run takes [measured: Step 6] runner minutes, summed over the nine jobs.
+
+While the repository is private, runs draw on the account's included Actions minutes: 2,000 a month on GitHub Free.
+
+## Branch protection
+
+Branch protection isn't configured from this repository; it is the repository owner's call.
+
+- **Plan.** On a private repository, branch protection needs GitHub Pro or a paid organization plan.
+- **Skips.** A skipped check counts as passing. That covers the gate's visible skips, and `tier 2 results` on pushes to `main`, where it doesn't run.
+- **Requiring the checks.** To require the nine checks on `main`, with each branch up to date before it merges, run:
+
+```sh
+gh api -X PUT repos/{owner}/{repo}/branches/main/protection --input protection.json
+```
+
+`protection.json`:
+
+```json
+{
+  "required_status_checks": {
+    "strict": true,
+    "contexts": [
+      "backend tests",
+      "kernel tests",
+      "proofs",
+      "tier 1 evals",
+      "tier 2 results",
+      "web tests",
+      "infra synth",
+      "secret scan",
+      "repo checks"
+    ]
+  },
+  "enforce_admins": null,
+  "required_pull_request_reviews": null,
+  "restrictions": null
+}
+```
+
+## Running the checks locally
+
+- **Tooling tests.** The gate's and the workflow's tests run with `cd tools && uv run pytest -q`.
+- **Other checks.** Each check's make target runs the same way it does in CI.
+  - The backend tests and tier 1 evals need the local database (`docker compose up -d db`).
+  - The kernel tests, proofs and tier 1 evals need cvc5, found through `CVC5` or `PATH`.

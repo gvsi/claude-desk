@@ -1,0 +1,13 @@
+# Settings for CI's `secret scan` check: gitleaks' default rules, with no exceptions.
+#
+# The allowlist is empty. gitleaks rejects an allowlist table that has no entries, so this file has
+# no table. An exception names one file and says why it holds no secret:
+#
+#   [[allowlists]]
+#   description = "<file>: <why it holds no secret>"
+#   paths = ['''^<file>$''']
+
+minVersion = "v8.30.1"
+
+[extend]
+useDefault = true
