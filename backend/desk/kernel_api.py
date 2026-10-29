@@ -279,13 +279,13 @@ class PaymentLinkStateResult(BaseModel):  # POST /payment_links/{token}/complete
 
 class OpenStatus(BaseModel):              # PublicDesk's header line: computed from charter:hours on the kernel's clock
     open: bool
-    until: AwareDatetime | None           # open: the end of the current window, contiguous windows merged; None if open
-                                          # through the next 7 days
-    opens_at: AwareDatetime | None        # closed: the start of the next window, which weekly hours always have within 7 days
+    until: AwareDatetime | None           # open: the end of the union of overlapping or touching windows; None if open
+                                          # through the next 7 local days (up to 169 hours)
+    opens_at: AwareDatetime | None        # closed: the start of the next window, always within 7 local days
     text: str                             # kernel en/es template in the business's time zone (?lang=), shown verbatim
     as_of: AwareDatetime                  # the kernel's clock
-    refresh_at: AwareDatetime             # the next moment text may change: the earlier of the boundary and the next local
-                                          # midnight; the web's one scheduled refetch is at refresh_at - as_of
+    refresh_at: AwareDatetime             # when text may next change: the earliest of the boundary, the next local
+                                          # midnight and as_of + 25 h; the web refetches once at refresh_at - as_of
 
     @model_validator(mode="after")
     def _times_in_order(self) -> Self:
@@ -299,8 +299,10 @@ class OpenStatus(BaseModel):              # PublicDesk's header line: computed f
         boundary = boundary.astimezone(UTC) if boundary is not None else None
         if boundary is not None and boundary <= as_of:
             raise ValueError("the boundary is after as_of: windows end exclusive")
-        if not as_of < refresh_at <= as_of + timedelta(hours=25):   # a local day lasts 25 hours when clocks fall back
-            raise ValueError("refresh_at is after as_of and at most 25 hours later")
+        if refresh_at <= as_of:
+            raise ValueError("refresh_at is after as_of")
+        if refresh_at > as_of + timedelta(hours=25):   # a fall-back day lasts 25 hours, so most next midnights fit
+            raise ValueError("refresh_at is at most 25 hours after as_of")
         if boundary is not None and refresh_at > boundary:
             raise ValueError("refresh_at is at or before the boundary")
         return self

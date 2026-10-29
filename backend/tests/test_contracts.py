@@ -1,6 +1,6 @@
 import json
 import re
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import get_args
 from zoneinfo import ZoneInfo
@@ -443,55 +443,72 @@ def test_open_status_shapes_validate():
         desk = PublicDesk.model_validate_json(json.dumps(PUBLIC_DESK | {"open_status": status | {"as_of": AS_OF}}))
         assert desk.open_status == OpenStatus.model_validate_json(json.dumps(status | {"as_of": AS_OF}))
         assert desk.open_status.as_of.utcoffset().total_seconds() == -8 * 3600
-    with pytest.raises(ValidationError):   # until and opens_at are always sent, null when they don't apply
-        OpenStatus.model_validate_json(json.dumps({"open": True, "text": "Open now", "as_of": AS_OF}))
+    with pytest.raises(ValidationError) as missing:   # until and opens_at are always sent, null when they don't apply
+        OpenStatus.model_validate_json(json.dumps({"open": True, "text": "Open now", "as_of": AS_OF, "refresh_at": MIDNIGHT}))
+    assert {error["loc"] for error in missing.value.errors()} == {("until",), ("opens_at",)}
 
 
 def test_open_status_times_carry_their_offset():
     # the kernel works in the business's time zone; a time without its offset would leave the web to guess one
     for status in OPEN_STATUSES:
         valid = status | {"as_of": AS_OF}
-        for field in ("until", "opens_at", "as_of"):
+        for field in ("until", "opens_at", "as_of", "refresh_at"):
             if valid[field] is not None:
-                with pytest.raises(ValidationError):
+                with pytest.raises(ValidationError) as naive:
                     OpenStatus.model_validate_json(json.dumps(valid | {field: valid[field].removesuffix("-08:00")}))
+                assert [(error["loc"], error["type"]) for error in naive.value.errors()] == [((field,), "timezone_aware")]
 
 
 def test_open_status_names_only_its_own_boundary():
-    # the web schedules one refetch at the boundary that applies, so each state carries only its own, and it is
-    # after as_of: windows end exclusive, so a business open until now is closed, and a past boundary would loop
+    # each state carries only its own boundary, a closed one always (no hours means no status), and it is after as_of:
+    # windows end exclusive, so a business open until now is closed
     open_until = OPEN_STATUSES[0] | {"as_of": AS_OF}
     closed_until = OPEN_STATUSES[2] | {"as_of": AS_OF}
     assert OpenStatus.model_validate_json(json.dumps(open_until | {"until": "2026-11-03T02:00:00Z"})).until.hour == 2
-    for wrong in (
-        open_until | {"opens_at": "2026-11-03T08:00:00-08:00"},   # open, with a next opening
-        closed_until | {"until": "2026-11-02T18:00:00-08:00"},    # closed, with an end of window
-        closed_until | {"opens_at": None},   # no hours means no status, and weekly hours always open within a week
-        open_until | {"until": AS_OF},
-        open_until | {"until": "2026-11-02T20:04:00Z"},           # the same instant as as_of, in UTC
-        closed_until | {"opens_at": "2026-11-02T11:00:00-08:00"},
+    for wrong, reason in (
+        (open_until | {"opens_at": "2026-11-03T08:00:00-08:00"}, "names only until"),   # open, with a next opening
+        (closed_until | {"until": "2026-11-02T18:00:00-08:00"}, "names only until"),    # closed, with an end of window
+        (closed_until | {"opens_at": None}, "a closed status names when it opens"),
+        (open_until | {"until": AS_OF}, "the boundary is after as_of"),
+        (open_until | {"until": "2026-11-02T20:04:00Z"}, "the boundary is after as_of"),   # as_of's instant, in UTC
+        (closed_until | {"opens_at": "2026-11-02T11:00:00-08:00"}, "the boundary is after as_of"),
     ):
-        with pytest.raises(ValidationError):
+        with pytest.raises(ValidationError, match=reason):
             OpenStatus.model_validate_json(json.dumps(wrong))
 
 
 def test_open_status_names_when_to_refresh():
     # the next moment the text may change: the boundary or the next local midnight, whichever comes first, so "today"
-    # and "tomorrow" stay true; the web's one refetch is then, so it is after as_of and at most a 25-hour day away
+    # and "tomorrow" stay true; the web's one refetch is then, so it is after as_of and at most 25 hours away
     open_until = OPEN_STATUSES[0] | {"as_of": AS_OF}
     status = OpenStatus.model_validate_json(json.dumps(open_until))
     assert status.refresh_at == status.until
     fall_back = {"open": True, "until": None, "opens_at": None, "text": "Open now",   # 2026-11-01 lasts 25 hours
                  "as_of": "2026-11-01T00:00:00-07:00", "refresh_at": "2026-11-02T00:00:00-08:00"}
     OpenStatus.model_validate_json(json.dumps(fall_back))
-    for wrong in (
-        open_until | {"refresh_at": AS_OF},
-        open_until | {"refresh_at": "2026-11-02T18:00:01-08:00"},   # after the boundary
-        fall_back | {"refresh_at": "2026-11-02T00:00:01-08:00"},    # more than 25 hours away
-        {key: value for key, value in open_until.items() if key != "refresh_at"},
+    for wrong, reason in (
+        (open_until | {"refresh_at": AS_OF}, "refresh_at is after as_of"),
+        (open_until | {"refresh_at": "2026-11-02T18:00:01-08:00"}, "refresh_at is at or before the boundary"),
+        (fall_back | {"refresh_at": "2026-11-02T00:00:01-08:00"}, "refresh_at is at most 25 hours after as_of"),
     ):
-        with pytest.raises(ValidationError):
+        with pytest.raises(ValidationError, match=reason):
             OpenStatus.model_validate_json(json.dumps(wrong))
+    with pytest.raises(ValidationError) as missing:
+        OpenStatus.model_validate_json(json.dumps({key: value for key, value in open_until.items() if key != "refresh_at"}))
+    assert [error["loc"] for error in missing.value.errors()] == [("refresh_at",)]
+
+
+def test_open_status_refreshes_within_25_hours_on_a_longer_day():
+    # Troll's clocks go back two hours on 2026-10-25, so that local day lasts 26 hours: refresh_at is the earliest of
+    # the boundary, the next local midnight and as_of + 25 hours, which is still the same local date
+    troll = ZoneInfo("Antarctica/Troll")
+    as_of, next_midnight = datetime(2026, 10, 25, tzinfo=troll), datetime(2026, 10, 26, tzinfo=troll)
+    assert next_midnight.astimezone(UTC) - as_of.astimezone(UTC) == timedelta(hours=26)
+    open_all_week = {"open": True, "until": None, "opens_at": None, "text": "Open now", "as_of": as_of}
+    status = OpenStatus(**open_all_week, refresh_at=as_of.astimezone(UTC) + timedelta(hours=25))
+    assert status.refresh_at.astimezone(troll).date() == as_of.date()
+    with pytest.raises(ValidationError, match="refresh_at is at most 25 hours after as_of"):
+        OpenStatus(**open_all_week, refresh_at=next_midnight)
 
 
 def test_open_status_compares_instants_across_the_fold():
@@ -505,16 +522,16 @@ def test_open_status_compares_instants_across_the_fold():
     early, empty = datetime(2026, 11, 1, 0, 30, tzinfo=la), {"until": None, "opens_at": None}
     for open_, boundary in ((True, "until"), (False, "opens_at")):
         OpenStatus(open=open_, **empty | {boundary: pst}, text="x", as_of=pdt, refresh_at=pst)   # a future boundary
-        with pytest.raises(ValidationError):                                                    # a past one
+        with pytest.raises(ValidationError, match="the boundary is after as_of"):                 # a past one
             OpenStatus(open=open_, **empty | {boundary: pdt}, text="x", as_of=pst, refresh_at=pst + timedelta(hours=1))
-        with pytest.raises(ValidationError):                                                    # a refresh after it
+        with pytest.raises(ValidationError, match="refresh_at is at or before the boundary"):
             OpenStatus(open=open_, **empty | {boundary: pdt}, text="x", as_of=early, refresh_at=pst)
     OpenStatus(open=True, **empty, text="x", as_of=pdt, refresh_at=pst)
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="refresh_at is after as_of"):
         OpenStatus(open=True, **empty, text="x", as_of=pst, refresh_at=pdt)
     midnight = datetime(2026, 11, 1, tzinfo=la)             # 07:00Z; the next local midnight is 25 hours later
     OpenStatus(open=True, **empty, text="x", as_of=midnight, refresh_at=datetime(2026, 11, 2, tzinfo=la))
-    with pytest.raises(ValidationError):                    # 25 hours 30 minutes, though only 24:30 by wall clock
+    with pytest.raises(ValidationError, match="refresh_at is at most 25 hours after as_of"):   # 25:30, 24:30 by wall clock
         OpenStatus(open=True, **empty, text="x", as_of=midnight, refresh_at=datetime(2026, 11, 2, 0, 30, tzinfo=la))
 
 
