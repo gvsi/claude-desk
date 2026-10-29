@@ -1,0 +1,40 @@
+/* VisitorMessage: the visitor's words in a faint bubble, aligned right. People write in sans;
+   only Claude writes in serif. */
+
+.cd-visitor-message {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  min-width: 0;
+}
+
+.cd-visitor-message__bubble {
+  max-width: 85%;
+  margin: 0;
+  padding: var(--space-8) var(--space-14);
+  border-radius: var(--radius-card);
+  background: var(--fill-bubble);
+  color: var(--text-primary);
+  /* Their line breaks stay; a long unbroken word wraps inside the bubble. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* "Translated by Claude: …" under the bubble, with the translate icon. */
+.cd-visitor-message__translation {
+  display: flex;
+  gap: var(--space-6);
+  max-width: 85%;
+  margin: var(--space-4) 0 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.cd-visitor-message__translation > svg {
+  flex: none;
+  margin-top: var(--space-2);
+}
+
+.cd-visitor-message__translation > span {
+  min-width: 0;
+}

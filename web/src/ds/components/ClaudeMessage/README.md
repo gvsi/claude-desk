@@ -1,0 +1,30 @@
+# ClaudeMessage
+
+`ClaudeMessage` shows one delivered message from Claude, or from the Desk itself, as serif paragraphs and typed reply cards.
+
+## When to use
+
+- Every `EvMessage` whose `author` is `claude` or `desk`. A `desk` message is the kernel's own, such as the `payment_confirmed` card after a test checkout, and it looks the same.
+- An `owner` message is a `PersonMessage`, never this.
+- Only after delivery. There is no draft or streaming state: until the kernel has checked and delivered the reply, the screen shows the `WritingIndicator`.
+
+## What the consumer provides
+
+- `blocks`: the event's `blocks`, exactly as they arrived, in order.
+- `language`: the event's `language`. It picks the card chrome and sets `lang` on the message.
+- `ownerName`: `owner_display_name`, for the "Maria Rivera said" card label.
+
+## What it shows
+
+- Each `prose` block as one serif paragraph in the reply type (15/23, weight 360), with Claude's line breaks kept. A blank prose block takes no space.
+- Each other block as a `ReplyCard`. A card whose template this build doesn't know shows its text in a plain card, as `ReplyCard` does.
+- Nothing else: no bubble, no avatar, no name, no time. The blocks are the whole message, and nothing is computed or added.
+- Paragraphs sit 10 px apart, and a card sits 12 px from what is above it.
+
+## Props
+
+| Prop | Type | Notes |
+| --- | --- | --- |
+| `blocks` | `readonly RenderedBlock[]` | Required. |
+| `language` | `'en' \| 'es'` | Required. |
+| `ownerName` | `string` | Required. |

@@ -53,5 +53,15 @@ export { ReplyCard, type ReplyCardProps } from './components/ReplyCard/ReplyCard
 export { cardView, type CardView } from './components/ReplyCard/cardView.ts';
 export { CARD_CHROME, type CardChrome } from './components/ReplyCard/chrome.ts';
 
+// Conversation
+export { Transcript, type TranscriptProps } from './components/Transcript/Transcript.tsx';
+export { VisitorMessage, type VisitorMessageProps } from './components/VisitorMessage/VisitorMessage.tsx';
+export { ClaudeMessage, type ClaudeMessageProps } from './components/ClaudeMessage/ClaudeMessage.tsx';
+export { PersonMessage, type PersonMessageProps } from './components/PersonMessage/PersonMessage.tsx';
+export { AgentMessage, type AgentMessageProps } from './components/AgentMessage/AgentMessage.tsx';
+export { Whisper, type WhisperProps } from './components/Whisper/Whisper.tsx';
+export { SystemLine, type SystemLineProps } from './components/SystemLine/SystemLine.tsx';
+export { WritingIndicator, type WritingIndicatorProps } from './components/WritingIndicator/WritingIndicator.tsx';
+
 // Icons
 export { Icon, ICON_NAMES, type IconName, type IconProps, type IconSize } from './icons/index.tsx';

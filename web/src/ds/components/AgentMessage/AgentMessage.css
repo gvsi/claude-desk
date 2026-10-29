@@ -1,0 +1,68 @@
+/* AgentMessage: a visiting agent's request, on the right like a visitor's, in a bordered bubble
+   at the control radius so it reads as a structured request rather than someone typing. */
+
+.cd-agent-message {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  min-width: 0;
+}
+
+/* "Alex Kim's assistant, signed request", with the agent glyph. */
+.cd-agent-message__who {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-6);
+  max-width: 100%;
+  margin: 0 0 var(--space-4);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.cd-agent-message__who > svg {
+  flex: none;
+}
+
+.cd-agent-message__who > span {
+  min-width: 0;
+}
+
+.cd-agent-message__bubble {
+  box-sizing: border-box;
+  max-width: 85%;
+  min-width: min(300px, 100%);
+  padding: var(--space-8) var(--space-14);
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-control);
+  overflow-wrap: anywhere;
+}
+
+.cd-agent-message__title {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+/* The agent's own words, line breaks kept. */
+.cd-agent-message__text {
+  margin: var(--space-4) 0 0;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+}
+
+.cd-agent-message__meta {
+  display: flex;
+  gap: var(--space-16);
+  margin: var(--space-2) 0 0;
+  color: var(--text-secondary);
+}
+
+.cd-agent-message__meta-words {
+  flex: 1;
+  min-width: 0;
+}
+
+.cd-agent-message__time {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}

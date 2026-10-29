@@ -1,0 +1,10 @@
+/* Transcript: the conversation's rows, one under the next, in a container the rows can query
+   (`@container cd-transcript (…)`), so a narrow column stacks its margin under the message. */
+
+.cd-transcript {
+  container: cd-transcript / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-14);
+  min-width: 0;
+}

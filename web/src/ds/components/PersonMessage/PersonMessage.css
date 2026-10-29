@@ -1,0 +1,59 @@
+/* PersonMessage: a person in the chat, with initials, name and role, and their words in sans.
+   No bubble: the initials and the name say who is speaking. */
+
+.cd-person-message {
+  display: flex;
+  gap: var(--space-10);
+  min-width: 0;
+}
+
+/* The initials, hidden from screen readers: the name beside them is the text. */
+.cd-person-message__avatar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--size-avatar);
+  height: var(--size-avatar);
+  border-radius: var(--radius-full);
+  background: var(--bg-selected);
+  color: var(--text-primary);
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 520;
+}
+
+.cd-person-message__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.cd-person-message__who {
+  margin: 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.cd-person-message__name {
+  font-weight: 520;
+}
+
+.cd-person-message__role {
+  color: var(--text-secondary);
+}
+
+.cd-person-message__words {
+  margin-top: var(--space-4);
+}
+
+.cd-person-message__text {
+  margin: 0;
+  color: var(--text-primary);
+  /* Their line breaks stay; a long unbroken word wraps inside the column. */
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.cd-person-message__text + .cd-person-message__text {
+  margin-top: var(--space-8);
+}
