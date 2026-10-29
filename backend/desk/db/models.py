@@ -522,11 +522,11 @@ class A2ATurn(Base):
 
 
 class ModelCall(Base):
-    """One API model call's usage; never its content."""
+    """One API model call's usage; never its content. `created_at` is the call's finish, set by the writer."""
 
     __tablename__ = "model_calls"
     __table_args__ = {"schema": "app"}
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    model_call_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     copy_id: Mapped[str] = mapped_column(Text)
     session_id: Mapped[str | None] = mapped_column(Text)
     route: Mapped[str] = mapped_column(Text)
@@ -535,7 +535,7 @@ class ModelCall(Base):
     cached_tokens: Mapped[int] = mapped_column(Integer)
     output_tokens: Mapped[int] = mapped_column(Integer)
     latency_ms: Mapped[int] = mapped_column(Integer)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))   # the call's finish; no default stands in
 
 
 # mockpay.*: the mock payments server (role desk_mockpay); keys are unique per copy
