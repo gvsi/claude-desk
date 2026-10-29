@@ -115,11 +115,16 @@ def test_actions_pinned_by_commit_sha():
 
     # A script that fetches a tool checks it against a pinned sha256 after the fetch; under
     # `bash -e` with no `||` (test_gated_jobs_go_through_the_gate), a mismatch stops the script.
+    # A fetch is curl or wget run as a command: first on a line, or after a pipe, `;`, `&` or `$(`.
+    fetching = []
     for step in all_steps():
         run = step.get("run", "")
-        if fetch := re.search(r"\b(curl|wget)\b", run):
+        if fetch := re.search(r"(?:^|[|;&]|\$\()\s*(curl|wget)\b", run, flags=re.MULTILINE):
+            fetching.append(step["name"])
             assert "sha256sum -c" in run[fetch.end() :], run
-            assert not re.search(r"\|\s*(ba)?sh\b", run), run
+        assert not re.search(r"\|\s*(ba)?sh\b", run), run
+    # The scan finds every pinned download, and nothing else fetches.
+    assert sorted(fetching) == sorted(PINNED_DOWNLOADS)
 
 
 def test_ci_has_no_secrets_and_reads_only():
@@ -673,3 +678,36 @@ def test_ci_doc_says_where_jobs_run_and_how_to_switch_back():
     assert "unset the variable" in section.lower()
     # Pull requests from forks never reach a self-hosted runner, and the doc says so.
     assert "pull requests from forks" in section.lower()
+
+
+CHECK_RUNNER = "Check the runner has curl, unzip, make and cc"
+# What a runner must have before any job starts, as docs/ci.md's Runners section lists it.
+RUNNER_PREREQUISITES = ["docker", "sudo", "curl", "git", "make", "unzip", "cc", "tar"]
+
+
+def test_setup_desk_first_checks_the_runner_has_what_it_needs(tmp_path):
+    """curl and unzip fetch and unpack the tools, make builds the kernel, and cc links Rust code."""
+    steps = load(ROOT / ".github/actions/setup-desk/action.yml")["runs"]["steps"]
+    assert steps[0]["name"] == CHECK_RUNNER
+    runner = Runner(tmp_path)
+
+    # The stubs give curl and unzip but no make or cc.
+    result, events = runner.run(steps[0], "ARM64", PATH=str(runner.bin))
+
+    assert result.returncode == 1
+    assert "the runner has no make cc;" in result.stderr
+    assert events == []
+
+    for tool in ["make", "cc"]:
+        (runner.bin / tool).symlink_to(runner.bin / "tar")
+    result, events = runner.run(steps[0], "ARM64", PATH=str(runner.bin))
+
+    assert result.returncode == 0, result.stderr
+    assert events == []
+
+
+def test_ci_doc_lists_what_a_runner_needs():
+    section = CI_DOC.read_text().split("\n## Runners\n", 1)[1].split("\n## ", 1)[0]
+    [line] = [line for line in section.splitlines() if line.startswith("- **Prerequisites.**")]
+
+    assert re.findall(r"`([^`]+)`", line) == RUNNER_PREREQUISITES

@@ -12,6 +12,22 @@ inputs:
 runs:
   using: composite
   steps:
+    # Fail early and by name, not halfway through a download or a build: curl and unzip fetch and
+    # unpack the tools, make builds the kernel, and cc links Rust code.
+    - name: Check the runner has curl, unzip, make and cc
+      shell: bash
+      run: |
+        missing=""
+        for tool in curl unzip make cc; do
+          if ! command -v "$tool" >/dev/null 2>&1; then
+            missing="$missing $tool"
+          fi
+        done
+        if [ -n "$missing" ]; then
+          echo "setup-desk: the runner has no$missing; docs/ci.md, \"Runners\", lists what a runner needs" >&2
+          exit 1
+        fi
+
     # GitHub-hosted runners have rustup, so this does nothing there. Elsewhere it installs rustup
     # with no toolchain, from the rustup-init for the runner's architecture, checked first.
     - name: Install rustup 1.29.1 if the runner has none
