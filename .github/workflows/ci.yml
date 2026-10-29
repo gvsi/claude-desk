@@ -1,6 +1,9 @@
 # The nine checks on main and on pull requests to main; docs/ci.md says what each one proves.
 # Suites that other parts of the project add run through tools/desk_tools/gate.py, which runs,
 # skips visibly or fails each one by whether its code is in the repo. No secrets, read-only.
+# Jobs run on GitHub-hosted ubuntu-24.04 unless the repository variable CI_RUNNER_MODE is "ec2" and
+# the run isn't a pull request from a fork (docs/ci.md, "Runners"); each job's runs-on ends in its
+# own label suffix.
 name: ci
 
 on:
@@ -28,11 +31,13 @@ defaults:
 jobs:
   backend:
     name: backend tests
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-backend"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 25
     services:
       postgres:
-        image: postgres:16
+        # Docker Hub on GitHub-hosted runners, whose shared addresses run into ECR Public's anonymous
+        # pull limit; the same official image from its ECR Public mirror on self-hosted runners.
+        image: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'public.ecr.aws/docker/library/postgres:16' || 'postgres:16' }}
         ports: ["5433:5432"]
         env:
           POSTGRES_USER: desk_admin
@@ -47,6 +52,13 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-desk
+      # make db-roles uses psql. GitHub-hosted runners have it; elsewhere it comes from apt.
+      - name: Install the Postgres client if the runner has none
+        run: |
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get -o DPkg::Lock::Timeout=300 update -q
+            sudo DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y -q --no-install-recommends postgresql-client
+          fi
       - name: Use the local settings
         run: |
           cp .env.example .env
@@ -62,7 +74,7 @@ jobs:
 
   kernel:
     name: kernel tests
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-kernel"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -76,7 +88,7 @@ jobs:
 
   proofs:
     name: proofs
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-proofs"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -90,11 +102,13 @@ jobs:
 
   tier1:
     name: tier 1 evals
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-tier1"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 25
     services:
       postgres:
-        image: postgres:16
+        # Docker Hub on GitHub-hosted runners, whose shared addresses run into ECR Public's anonymous
+        # pull limit; the same official image from its ECR Public mirror on self-hosted runners.
+        image: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'public.ecr.aws/docker/library/postgres:16' || 'postgres:16' }}
         ports: ["5433:5432"]
         env:
           POSTGRES_USER: desk_admin
@@ -109,6 +123,13 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-desk
+      # make db-roles uses psql. GitHub-hosted runners have it; elsewhere it comes from apt.
+      - name: Install the Postgres client if the runner has none
+        run: |
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get -o DPkg::Lock::Timeout=300 update -q
+            sudo DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y -q --no-install-recommends postgresql-client
+          fi
       - name: Use the local settings
         run: |
           cp .env.example .env
@@ -127,7 +148,7 @@ jobs:
   tier2:
     name: tier 2 results
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-tier2"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -142,7 +163,7 @@ jobs:
 
   web:
     name: web tests
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-web"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -167,7 +188,7 @@ jobs:
 
   infra:
     name: infra synth
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-infra"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -189,7 +210,7 @@ jobs:
 
   secret-scan:
     name: secret scan
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-secret-scan"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -198,21 +219,34 @@ jobs:
           persist-credentials: false
       - name: Install gitleaks 8.30.1
         run: |
+          case "$RUNNER_ARCH" in
+            X64)
+              archive=gitleaks_8.30.1_linux_x64.tar.gz
+              sha256=551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+              ;;
+            ARM64)
+              archive=gitleaks_8.30.1_linux_arm64.tar.gz
+              sha256=e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080
+              ;;
+            *)
+              echo "gitleaks: no archive is pinned for runner architecture $RUNNER_ARCH" >&2
+              exit 1
+              ;;
+          esac
           dir="$RUNNER_TEMP/gitleaks"
           mkdir -p "$dir"
           cd "$dir"
-          curl -sSfL -o gitleaks_8.30.1_linux_x64.tar.gz \
-            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
-          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  gitleaks_8.30.1_linux_x64.tar.gz" \
-            | sha256sum -c --strict
-          tar -xzf gitleaks_8.30.1_linux_x64.tar.gz gitleaks
+          curl -sSfL -o "$archive" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/$archive"
+          echo "$sha256  $archive" | sha256sum -c --strict
+          tar -xzf "$archive" gitleaks
           echo "$dir" >> "$GITHUB_PATH"
       - name: Scan the history for secrets
         run: gitleaks git --redact --verbose --no-banner --exit-code 1 --ignore-gitleaks-allow --log-opts="--full-history HEAD" .
 
   repo:
     name: repo checks
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-repo"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -227,15 +261,36 @@ jobs:
           ignore-nothing-to-cache: true
       - name: Install actionlint 1.7.12
         run: |
+          case "$RUNNER_ARCH" in
+            X64)
+              archive=actionlint_1.7.12_linux_amd64.tar.gz
+              sha256=8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+              ;;
+            ARM64)
+              archive=actionlint_1.7.12_linux_arm64.tar.gz
+              sha256=325e971b6ba9bfa504672e29be93c24981eeb1c07576d730e9f7c8805afff0c6
+              ;;
+            *)
+              echo "actionlint: no archive is pinned for runner architecture $RUNNER_ARCH" >&2
+              exit 1
+              ;;
+          esac
           dir="$RUNNER_TEMP/actionlint"
           mkdir -p "$dir"
           cd "$dir"
-          curl -sSfL -o actionlint_1.7.12_linux_amd64.tar.gz \
-            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
-          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  actionlint_1.7.12_linux_amd64.tar.gz" \
-            | sha256sum -c --strict
-          tar -xzf actionlint_1.7.12_linux_amd64.tar.gz actionlint
+          curl -sSfL -o "$archive" \
+            "https://github.com/rhysd/actionlint/releases/download/v1.7.12/$archive"
+          echo "$sha256  $archive" | sha256sum -c --strict
+          tar -xzf "$archive" actionlint
           echo "$dir" >> "$GITHUB_PATH"
+      # actionlint checks the workflow's scripts with shellcheck only when it is on PATH.
+      # GitHub-hosted runners have it; elsewhere it comes from apt.
+      - name: Install ShellCheck if the runner has none
+        run: |
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            sudo apt-get -o DPkg::Lock::Timeout=300 update -q
+            sudo DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y -q --no-install-recommends shellcheck
+          fi
       - name: Lint the workflow
         run: actionlint
       - name: Run the repository tooling tests

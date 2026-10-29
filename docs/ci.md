@@ -8,7 +8,8 @@ CI holds no secrets and no model key, and it can only read the repository:
 - No checkout keeps the token in the git config.
 - Every action is pinned by commit.
 - Python dependencies come only from the committed uv lockfiles (`UV_LOCKED=1`), and a missing or out-of-date lockfile fails the job.
-- Every downloaded tool (cvc5, gitleaks and actionlint) is checked against a pinned sha256 before it runs.
+- Every downloaded tool (cvc5, gitleaks, actionlint, and rustup-init on a runner without rustup) is the build for the runner's architecture, x86-64 or arm64, and is checked against a pinned sha256 before it runs. Any other architecture fails the job before anything is downloaded.
+- The Postgres client and ShellCheck, installed only on a runner without them, come from Ubuntu's signed archive at the current noble version and aren't sha256-pinned (see "Runners").
 
 ## The checks
 
@@ -75,6 +76,19 @@ Tier 2 is the model-driven attack suite and legitimate-task suite. It needs a mo
 - On a pull request, `tier 2 results` recomputes that hash for the merge of the pull request into `main`, which is what CI checks out. It fails when gated inputs changed and no passing results file covers them.
 - When `main` gains gated changes after the results file was made, rebase the pull request and run tier 2 again to regenerate the file.
 - Pushes to `main` skip the job, since the pull request already ran it.
+
+## Runners
+
+- **Default.** Every job runs on a GitHub-hosted `ubuntu-24.04` runner (x86-64).
+- **Self-hosted.** The repository variable `CI_RUNNER_MODE=ec2` moves every job to self-hosted, single-use Ubuntu 24.04 arm64 runners on AWS. They have no cloud role and run on an isolated network. Pull request runs use spot capacity; pushes and manual runs use on-demand.
+- **Why.** The switch lets CI run on arm64, the production target's architecture, without drawing on the limited Actions minutes a private repository includes. The runner properties in this section, and the label form, are set by a runner launcher that this repository doesn't contain.
+- **Pull requests from forks.** They always run on GitHub-hosted runners: the switch is on only for pushes, manual runs and pull requests whose head repository is this one. The runner launcher also starts runners only for runs whose head repository is this one, and it caps how many instances run and how long each lives. "Run workflows from fork pull requests" stays off while the repository is private, and if it ever goes public, runs from outside contributors need approval. Setting the variable spends AWS money, so it is the repository owner's call.
+- **Labels.** Each job asks for a label of its own, `desk-ci-<spot or ondemand>-<run id>-<attempt>-<job>`, so no two jobs share a runner. By the runner launcher's contract, a desk runner carries exactly `self-hosted` and its own desk label, with no default OS or architecture labels such as `linux` or `ARM64`. GitHub gives a job to any runner that has all of the job's labels, so every job in every workflow asks either for a GitHub-hosted image label (`ubuntu-…`, `windows-…` or `macos-…`) or, for `ci.yml`'s nine jobs only, for its own desk expression; a workflow test enforces this.
+- **Database image.** The Postgres service is Docker's official `postgres:16`, the image `docker-compose.yml` uses. GitHub-hosted runners pull it from Docker Hub, since their shared addresses run into ECR Public's anonymous pull limit. Self-hosted runners pull the same image and tag from its ECR Public mirror, `public.ecr.aws/docker/library/postgres:16`.
+- **Prerequisites.** A runner must be Ubuntu 24.04 and have `docker`, `sudo`, `curl`, `git`, `make`, `unzip`, `cc` and `tar`. GitHub-hosted runners do. setup-desk's first step fails, naming what is wrong, when a runner that isn't GitHub-hosted isn't Ubuntu 24.04 (noble), or when any runner lacks curl, unzip, make or cc.
+- **Setup.** Where a runner has no rustup, psql or ShellCheck, the jobs install them first: rustup from a checked rustup-init, the Postgres client and ShellCheck with apt from Ubuntu's signed archive, at the current noble version and not sha256-pinned. GitHub-hosted runners have all three, so nothing is installed there.
+- **apt locks.** The workflow's own `apt-get install` steps wait up to five minutes for the dpkg lock (`-o DPkg::Lock::Timeout=300`). Everything else that uses apt, such as the `apt-get update` before each install (whose package lists lock that option doesn't cover) and Playwright's own installs, relies on the runner image, which masks apt-daily, apt-daily-upgrade and unattended-upgrades so the locks are free at boot.
+- **Kill switch.** Unset the variable, and the next run is back on GitHub-hosted runners. Any value other than `ec2` (in any letter case) does the same. Jobs that already asked for a self-hosted runner keep waiting for one until they are cancelled.
 
 ## Runner minutes
 

@@ -1,7 +1,8 @@
 name: setup-desk
 description: >-
-  Rust 1.99.1, uv 0.13.0 with Python 3.13 and cvc5 1.4.2 (CVC5 and PATH); then, unless build is
-  false, the kernel's Python module and desk-prove (make kernel), with kernel/target/release on PATH.
+  Rust 1.99.1 (and rustup first, on a runner without it), uv 0.13.0 with Python 3.13 and cvc5 1.4.2
+  (CVC5 and PATH); then, unless build is false, the kernel's Python module and desk-prove
+  (make kernel), with kernel/target/release on PATH.
 
 inputs:
   build:
@@ -11,6 +12,65 @@ inputs:
 runs:
   using: composite
   steps:
+    # Fail early and by name, not halfway through a download or a build. The pinned downloads, apt
+    # packages and setup assume Ubuntu 24.04 (noble), which GitHub-hosted runners are; curl and unzip
+    # fetch and unpack the tools, make builds the kernel, and cc links Rust code.
+    - name: Check the runner is Ubuntu 24.04 with curl, unzip, make and cc
+      shell: bash
+      run: |
+        if [ "${RUNNER_ENVIRONMENT:-}" != github-hosted ]; then
+          codename=""
+          if [ -r /etc/os-release ]; then
+            # shellcheck source=/dev/null
+            codename=$(. /etc/os-release && echo "${VERSION_CODENAME:-}")
+          fi
+          if [ "$codename" != noble ]; then
+            echo "setup-desk: a self-hosted runner must be Ubuntu 24.04 (noble), not ${codename:-an unknown system}; docs/ci.md, \"Runners\", lists what a runner needs" >&2
+            exit 1
+          fi
+        fi
+        missing=""
+        for tool in curl unzip make cc; do
+          if ! command -v "$tool" >/dev/null 2>&1; then
+            missing="$missing $tool"
+          fi
+        done
+        if [ -n "$missing" ]; then
+          echo "setup-desk: the runner has no$missing; docs/ci.md, \"Runners\", lists what a runner needs" >&2
+          exit 1
+        fi
+
+    # GitHub-hosted runners have rustup, so this does nothing there. Elsewhere it installs rustup
+    # with no toolchain, from the rustup-init for the runner's architecture, checked first.
+    - name: Install rustup 1.29.1 if the runner has none
+      shell: bash
+      run: |
+        if ! command -v rustup >/dev/null 2>&1; then
+          case "$RUNNER_ARCH" in
+            X64)
+              target=x86_64-unknown-linux-gnu
+              sha256=dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71
+              ;;
+            ARM64)
+              target=aarch64-unknown-linux-gnu
+              sha256=15f6e4ce9f583b929c996c91562bad6d4454f3281de858b02cdfdef615fac433
+              ;;
+            *)
+              echo "rustup: no rustup-init is pinned for runner architecture $RUNNER_ARCH" >&2
+              exit 1
+              ;;
+          esac
+          dir="$RUNNER_TEMP/rustup-init"
+          mkdir -p "$dir"
+          cd "$dir"
+          curl -sSfL -o rustup-init \
+            "https://static.rust-lang.org/rustup/archive/1.29.1/$target/rustup-init"
+          echo "$sha256  rustup-init" | sha256sum -c --strict
+          chmod +x rustup-init
+          ./rustup-init -y --profile minimal --default-toolchain none --no-modify-path
+          echo "${CARGO_HOME:-$HOME/.cargo}/bin" >> "$GITHUB_PATH"
+        fi
+
     - name: Install Rust 1.99.1
       shell: bash
       run: |
@@ -30,19 +90,28 @@ runs:
         # The kernel tests job never runs uv, so it has no uv cache to save.
         ignore-nothing-to-cache: true
 
+    # The build for the runner's architecture, checked against its line in tools/cvc5.sha256.
     - name: Install cvc5 1.4.2
       shell: bash
       run: |
+        case "$RUNNER_ARCH" in
+          X64) build=cvc5-Linux-x86_64-static ;;
+          ARM64) build=cvc5-Linux-arm64-static ;;
+          *)
+            echo "cvc5: no build is pinned for runner architecture $RUNNER_ARCH" >&2
+            exit 1
+            ;;
+        esac
         dir="$RUNNER_TEMP/cvc5"
         mkdir -p "$dir"
-        grep ' cvc5-Linux-x86_64-static.zip$' "$GITHUB_WORKSPACE/tools/cvc5.sha256" > "$dir/cvc5.sha256"
+        grep " $build.zip\$" "$GITHUB_WORKSPACE/tools/cvc5.sha256" > "$dir/cvc5.sha256"
         cd "$dir"
-        curl -sSfL -o cvc5-Linux-x86_64-static.zip \
-          https://github.com/cvc5/cvc5/releases/download/cvc5-1.4.2/cvc5-Linux-x86_64-static.zip
+        curl -sSfL -o "$build.zip" \
+          "https://github.com/cvc5/cvc5/releases/download/cvc5-1.4.2/$build.zip"
         sha256sum -c --strict cvc5.sha256
-        unzip -q cvc5-Linux-x86_64-static.zip
-        echo "CVC5=$dir/cvc5-Linux-x86_64-static/bin/cvc5" >> "$GITHUB_ENV"
-        echo "$dir/cvc5-Linux-x86_64-static/bin" >> "$GITHUB_PATH"
+        unzip -q "$build.zip"
+        echo "CVC5=$dir/$build/bin/cvc5" >> "$GITHUB_ENV"
+        echo "$dir/$build/bin" >> "$GITHUB_PATH"
 
     - name: Build the kernel module and desk-prove
       if: inputs.build == 'true'
