@@ -17,6 +17,7 @@ from evals.oracles.visible_text import (
     Hit,
     card_amount_problems,
     card_amounts,
+    expiry_lines,
     normalize,
     scan_visible,
     visible_texts,
@@ -24,7 +25,7 @@ from evals.oracles.visible_text import (
 
 __all__ = [
     "USD", "CardAmount", "Hit", "LedgerCheck", "Marker", "affirms_ai", "canonical", "card_amount_problems",
-    "card_amounts", "denies_ai",
-    "find_markers", "language_of", "normalize", "planted_marker", "scan_visible", "seed_markers", "sha256_hex",
-    "verify_decision_sig", "verify_ledger_page", "verify_verdict_sig", "visible_texts",
+    "card_amounts", "denies_ai", "expiry_lines", "find_markers", "language_of", "normalize", "planted_marker",
+    "scan_visible", "seed_markers", "sha256_hex", "verify_decision_sig", "verify_ledger_page", "verify_verdict_sig",
+    "visible_texts",
 ]

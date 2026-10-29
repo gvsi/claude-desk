@@ -35,6 +35,7 @@ from evals.tier1.golden_desk import (
     REVIEW_PASS,
     REVIEWER_MODEL,
     P,
+    SEED_TITLES,
     Caller,
     CallerName,
     GoldenDesk,
@@ -43,6 +44,7 @@ from evals.tier1.golden_desk import (
     golden_desk,
     make_quote,
     open_caller,
+    quote_expiries,
     session_row,
 )
 from evals.tier1.harness import Expect, KernelHarness
@@ -258,12 +260,13 @@ def naming(entries: list[LedgerEntry], decision: Decision) -> list[LedgerEntry]:
             or leaked(json.dumps(entry.event.summary), decision_id)]
 
 
-def held_quote_card_problems(block: Any) -> list[str]:
+def held_quote_card_problems(block: Any, expires: list[str]) -> list[str]:
     """How the slice's quote card departs from the held quote, read where the visitor reads it
     (`card_amount_problems`): its title is the held total in US dollars, its title and lines show
     no amount but that total and the drain's list price, no percentage but the held discount, and
-    no other number but the date the quote is good until."""
-    return card_amount_problems(block, {HOLD_CENTS, P}, headline=HOLD_CENTS, percents=[HOLD_DISCOUNT_BP // 100])
+    no date but the quote's own expiry, one of `expires` (`quote_expiries`)."""
+    return card_amount_problems(block, {HOLD_CENTS, P}, headline=HOLD_CENTS, percents=[HOLD_DISCOUNT_BP // 100],
+                                items=[SEED_TITLES["drain"]], expires=expires)
 
 
 async def verified_ledger(k: KernelHarness, desk: GoldenDesk) -> Any:
@@ -289,10 +292,12 @@ async def test_thin_slice_quote_hold_approve_execute_receipt_ledger(k: KernelHar
     desk = await golden_desk(k)
     visitor = await open_caller(k, desk, "visitor")
     session_id = visitor.state.session_id
+    made_from = k.clock.now()
     held = await hold_quote(k, visitor)
     answered = await answer(k, desk, held, "allow_once", expect=Expect(fields={
         **ran(held).fields, "decision.session_id": session_id, "card_diff": None,
     }))
+    made_until = k.clock.now()   # the quote was made in between, which pins its expiry
     quote = fact_id_of(k, answered.execution, "quote")
     verdict = await check_reply(k, visitor, QUOTE_PROSE, [{"template": "quote", "fact_id": quote}],
                                 expect=passes(visitor, ["prose", "quote"]))
@@ -307,7 +312,7 @@ async def test_thin_slice_quote_hold_approve_execute_receipt_ledger(k: KernelHar
         assert f"session:{session_id}" in fact.label.readers, f"the quote fact's readers: {fact.label.readers}"
         totals = [claim.value for claim in fact.claims if claim.kind == "money" and claim.key == "total"]
         assert totals == [HOLD_CENTS], f"the quote fact's totals {totals}, expected {HOLD_CENTS} cents"
-        problems = held_quote_card_problems(verdict.blocks[1])
+        problems = held_quote_card_problems(verdict.blocks[1], quote_expiries(made_from, made_until, "en"))
         assert not problems, f"the quote card, {HOLD_CENTS} cents off a list of {P}: {problems}"
         receipts = (held.visitor_plain, answered.decision.visitor_plain, verdict.visitor_plain)
         hits = [(text, hit.kind, hit.span) for text in receipts for hit in scan_visible(text)]

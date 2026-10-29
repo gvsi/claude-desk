@@ -21,6 +21,8 @@ from evals.tier1.golden_desk import (
     CUSTOM_SLOTS,
     REVIEW_PASS,
     REVIEWER_MODEL,
+    SEED_TITLES,
+    START,
     Slot,
     charge_id,
     code_from_inbox,
@@ -29,6 +31,7 @@ from evals.tier1.golden_desk import (
     Row,
     load_rows,
     make_quote_fact,
+    quote_expiries,
     reviewer_reply,
     seed_slots,
 )
@@ -345,3 +348,15 @@ async def test_a_reviewer_row_fails_when_the_reviewer_is_never_called(
     skipped.script(REVIEWER_MODEL, Text("Never asked for"))
     with pytest.raises(AssertionError, match="1 scripted replies were never used"):
         skipped.check()
+
+
+def test_a_quotes_expiry_is_72_hours_after_it_was_made_in_business_time():
+    """A quote made in the seconds after START (Tuesday 10:00 in Los Angeles) is good until Friday
+    10:00 there: 72 hours later, read in the business's time zone, whatever zone the case's clock
+    gives (UTC). The window's last instant rounds up, so a renderer that rounds is accepted too."""
+    made = START.astimezone(UTC)
+    assert quote_expiries(made, made, "en") == ["Good until Friday, November 6, 10:00 am"]
+    assert quote_expiries(made, made + timedelta(seconds=4), "es") == [
+        "Válido hasta viernes 6 de noviembre, 10:00", "Válido hasta viernes 6 de noviembre, 10:01"]
+    assert len(quote_expiries(made, made, None)) == 2   # no language pinned: both
+    assert SEED_TITLES["drain"] == "Drain clearing"

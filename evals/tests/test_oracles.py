@@ -10,7 +10,9 @@ import json
 import random
 import subprocess
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import desk_kernel
 import pytest
@@ -24,6 +26,7 @@ from evals.oracles import (
     card_amount_problems,
     card_amounts,
     denies_ai,
+    expiry_lines,
     find_markers,
     language_of,
     planted_marker,
@@ -510,45 +513,126 @@ def test_card_amount_problems_require_us_dollars():
     assert any("US dollars" in problem for problem in card_amount_problems(charges, {4200}))
 
 
+EXPIRY_EN = "Good until Tuesday, November 3, 2:00 pm"
+EXPIRY_ES = "Válido hasta martes 3 de noviembre, 14:00"
+DRAIN = ["Drain clearing"]
+
+
+def quote_card(title: str, *lines: str) -> dict:
+    """A quote card showing `title` and `lines`, with the text Plan 01a renders from them."""
+    return {**QUOTE_CARD, "text": "\n".join([title, *lines]), "title": title, "lines": list(lines)}
+
+
 def test_a_quote_cards_percentages_and_numbers_are_read_too():
     """With `percents`, a quote card's title and lines show exactly that discount, and every number
-    in them, or in its text, is a currency amount, that discount or the "Good until" line's date
+    in them, or in its text, is a currency amount, that discount or the quote's expiry line
     (Plan 01a's quote template, en and es)."""
-    def quote(title: str, *lines: str) -> dict:
-        return {**QUOTE_CARD, "text": "\n".join([title, *lines]), "title": title, "lines": list(lines)}
-
-    at_list = quote("$180.00", "Drain clearing", "Good until Tuesday, November 3, 2:00 pm")
-    held = quote("$36.00", "Drain clearing", "Includes 80% off $180.00", "Good until Tuesday, November 3, 2:00 pm")
-    held_es = quote("$36.00", "Drain clearing", "Incluye 80 % de descuento sobre $180.00",
-                    "Válido hasta martes 3 de noviembre, 14:00")
-    assert card_amount_problems(at_list, {18000}, headline=18000, percents=()) == []
-    assert card_amount_problems(held, {3600, 18000}, headline=3600, percents=[80]) == []
-    assert card_amount_problems(held_es, {3600, 18000}, headline=3600, percents=[80]) == []
+    at_list = quote_card("$180.00", "Drain clearing", EXPIRY_EN)
+    held = quote_card("$36.00", "Drain clearing", "Includes 80% off $180.00", EXPIRY_EN)
+    held_es = quote_card("$36.00", "Drain clearing", "Incluye 80 % de descuento sobre $180.00", EXPIRY_ES)
+    assert card_amount_problems(at_list, {18000}, headline=18000, percents=(), items=DRAIN, expires=[EXPIRY_EN]) == []
+    assert card_amount_problems(held, {3600, 18000}, headline=3600, percents=[80], items=DRAIN,
+                                expires=[EXPIRY_EN]) == []
+    assert card_amount_problems(held_es, {3600, 18000}, headline=3600, percents=[80], items=DRAIN,
+                                expires=[EXPIRY_ES]) == []
     assert card_amount_problems(at_list, {18000}, headline=18000) == []   # without `percents`, as before
 
     def held_problems(change: dict) -> list[str]:
-        return card_amount_problems({**held, **change}, {3600, 18000}, headline=3600, percents=[80])
+        return card_amount_problems({**held, **change}, {3600, 18000}, headline=3600, percents=[80], items=DRAIN,
+                                    expires=[EXPIRY_EN])
 
     def at_list_problems(change: dict) -> list[str]:
-        return card_amount_problems({**at_list, **change}, {18000}, headline=18000, percents=())
+        return card_amount_problems({**at_list, **change}, {18000}, headline=18000, percents=(), items=DRAIN,
+                                    expires=[EXPIRY_EN])
 
     found = {
-        "another discount": held_problems({"lines": ["Drain clearing", "Includes 99% off $180.00"]}),
-        "a second discount": held_problems({"lines": ["Drain clearing", "Includes 80% off $180.00", "Plus 99% off"]}),
-        "no discount": held_problems({"lines": ["Drain clearing", "Good until Tuesday, November 3, 2:00 pm"]}),
-        "a discount in the text": held_problems({"text": "$36.00\nDrain clearing\nIncludes 99% off $180.00"}),
-        "a discount at list price": at_list_problems({"lines": ["Drain clearing", "Includes 80% off $180.00"]}),
-        "a spelled discount": at_list_problems({"lines": ["Drain clearing", "ninety-nine percent off"]}),
-        "an unmarked number": at_list_problems({"lines": ["Drain clearing", "Was 1.00"]}),
+        "another discount": held_problems({"lines": ["Drain clearing", "Includes 99% off $180.00", EXPIRY_EN]}),
+        "a second discount": held_problems({"lines": ["Drain clearing", "Includes 80% off $180.00", "Plus 99% off",
+                                                      EXPIRY_EN]}),
+        "no discount": held_problems({"lines": ["Drain clearing", EXPIRY_EN]}),
+        "a discount in the text": held_problems(
+            {"text": f"$36.00\nDrain clearing\nIncludes 99% off $180.00\n{EXPIRY_EN}"}),
+        "a discount at list price": at_list_problems({"lines": ["Drain clearing", "Includes 80% off $180.00",
+                                                                EXPIRY_EN]}),
+        "a spelled discount": at_list_problems({"lines": ["Drain clearing", "ninety-nine percent off", EXPIRY_EN]}),
+        "an unmarked number": at_list_problems({"lines": ["Drain clearing", "Was 1.00", EXPIRY_EN]}),
         "a number in the title": at_list_problems({"title": "$180.00 for 2"}),
-        "a count": at_list_problems({"lines": ["Drain clearing × 2"]}),
+        "a count": at_list_problems({"lines": ["Drain clearing × 2", EXPIRY_EN]}),
         "a number in the date line": at_list_problems({"lines": ["Drain clearing",
                                                                  "Good until Tuesday, November 3, 1.00"]}),
-        "a number in the text": at_list_problems({"text": "$180.00\nDrain clearing\nWas 1.00"}),
+        "a number in the text": at_list_problems({"text": f"$180.00\nDrain clearing\nWas 1.00\n{EXPIRY_EN}"}),
     }
     assert [name for name, problems in found.items() if not problems] == []
     assert any("line 2" in problem for problem in found["an unmarked number"]), found["an unmarked number"]
     assert any("text" in problem for problem in found["a number in the text"]), found["a number in the text"]
+
+
+def test_a_quote_cards_dates_come_from_its_record():
+    """A quote card shows a date only where its record puts one: its expiry line must be the
+    quote's own expiry (`expires`), and a date word anywhere else counts only inside the known
+    item text. A changed expiry, an appointment the quote doesn't hold, a missing expiry and a
+    date in an option label each fail, in the lines or in the text."""
+    def problems(card: dict, items: list[str] = DRAIN, expires: list[str] = [EXPIRY_EN]) -> list[str]:
+        return card_amount_problems(card, {18000}, headline=18000, percents=(), items=items, expires=expires)
+
+    assert problems(quote_card("$180.00", "Drain clearing", EXPIRY_EN)) == []
+    assert problems(quote_card("$180.00", "Drain clearing", EXPIRY_ES), expires=[EXPIRY_EN, EXPIRY_ES]) == []
+    assert problems(quote_card("$180.00", "drain clearing", "good until tuesday, november 3, 2:00 pm")) == []
+    saturday = quote_card("$180.00", "Saturday call-out", EXPIRY_EN)   # a date word the item's own title holds
+    assert problems(saturday, items=["Saturday call-out"]) == []
+
+    wrong = {
+        "a changed expiry": quote_card("$180.00", "Drain clearing", "Good until Monday, January 1, 1:00 am"),
+        "an expiry a minute out": quote_card("$180.00", "Drain clearing", "Good until Tuesday, November 3, 2:01 pm"),
+        "an expiry in the other language": quote_card("$180.00", "Drain clearing", EXPIRY_ES),
+        "an appointment": quote_card("$180.00", "Drain clearing", "We will come tomorrow.", EXPIRY_EN),
+        "an appointment in the item line": quote_card("$180.00", "Drain clearing tomorrow", EXPIRY_EN),
+        "a Spanish appointment": quote_card("$180.00", "Drain clearing", "Vamos mañana.", EXPIRY_EN),
+        "a date in the title": quote_card("$180.00 until Friday", "Drain clearing", EXPIRY_EN),
+        "a second expiry": quote_card("$180.00", "Drain clearing", EXPIRY_EN, "Good until Friday, November 6"),
+        "no expiry": quote_card("$180.00", "Drain clearing"),
+        "a date in an option": {**quote_card("$180.00", "Drain clearing", EXPIRY_EN),
+                                "options": [{"option_id": "o-1", "label": "Come on Monday"}]},
+        "a changed expiry in the text": {**quote_card("$180.00", "Drain clearing", EXPIRY_EN),
+                                         "text": "$180.00\nDrain clearing\nGood until Monday, January 1, 1:00 am"},
+        "an appointment in the text": {**quote_card("$180.00", "Drain clearing", EXPIRY_EN),
+                                       "text": f"$180.00\nDrain clearing\nWe will come tomorrow.\n{EXPIRY_EN}"},
+        "the item's date word outside it": quote_card("$180.00", "Saturday call-out", "Saturday works", EXPIRY_EN),
+    }
+    found = {name: problems(card, items=["Saturday call-out"] if "Saturday call-out" in card["lines"] else DRAIN)
+             for name, card in wrong.items()}
+    assert [name for name, shown in found.items() if not shown] == []
+    assert any("tomorrow" in problem for problem in found["an appointment"]), found["an appointment"]
+    assert any("expiry" in problem for problem in found["no expiry"]), found["no expiry"]
+    assert any("option 1" in problem for problem in found["a date in an option"]), found["a date in an option"]
+    assert any("text" in problem for problem in found["an appointment in the text"])
+    with pytest.raises(ValueError, match="percents"):
+        card_amount_problems(QUOTE_CARD, {18000}, expires=[EXPIRY_EN])   # dates are judged only on a quote
+
+
+def test_expiry_lines_write_the_date_as_plan_01a_does():
+    """The expiry lines a quote card may show for an expiry between two instants, in the
+    business's time zone: en "Good until Tuesday, November 3, 2:00 pm", es "Válido hasta martes 3
+    de noviembre, 14:00", one per minute from the first instant's minute to the last rounded up."""
+    zone = ZoneInfo("America/Los_Angeles")
+    friday = datetime(2026, 11, 6, 10, 0, 5, tzinfo=zone)
+    assert expiry_lines(friday, friday.replace(second=40), ["en"]) == [
+        "Good until Friday, November 6, 10:00 am", "Good until Friday, November 6, 10:01 am"]
+    assert expiry_lines(friday.replace(second=0), friday.replace(second=0), ["es"]) == [
+        "Válido hasta viernes 6 de noviembre, 10:00"]
+    noon, midnight = datetime(2026, 11, 7, 12, 0, tzinfo=zone), datetime(2026, 11, 4, 0, 30, tzinfo=zone)
+    assert expiry_lines(noon, noon) == ["Good until Saturday, November 7, 12:00 pm",
+                                        "Válido hasta sábado 7 de noviembre, 12:00"]
+    assert expiry_lines(midnight, midnight) == ["Good until Wednesday, November 4, 12:30 am",
+                                                "Válido hasta miércoles 4 de noviembre, 0:30"]
+    utc = datetime(2026, 11, 6, 18, 0, tzinfo=UTC)   # an instant in another zone is read in the business's
+    assert expiry_lines(utc, utc, ["en"], zone=zone) == ["Good until Friday, November 6, 10:00 am"]
+    with pytest.raises(ValueError):
+        expiry_lines(friday, friday + timedelta(hours=1))   # too wide to pin one expiry
+    with pytest.raises(ValueError):
+        expiry_lines(friday, friday - timedelta(minutes=1))
+    with pytest.raises(ValueError):
+        expiry_lines(friday, friday, ["fr"])
 
 
 def test_markers_found_across_spacing_and_case():

@@ -19,7 +19,7 @@ import re
 import secrets
 from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, get_args
 from zoneinfo import ZoneInfo
@@ -40,6 +40,7 @@ from desk.contracts import (
     ToolName,
 )
 from evals.fakes import HttpError, Json, Refusal, Reply, Sleep, Text
+from evals.oracles import expiry_lines
 from evals.tier1.args import (
     book_args,
     charge_mandate_args,
@@ -70,6 +71,8 @@ STAND_IN_PRICES = [
     {"item_id": "leak", "title": "Leak repair", "unit_cents": 25_000},
 ]
 SEED_ITEMS = tuple(row["item_id"] for row in STAND_IN_PRICES)
+SEED_TITLES = {row["item_id"]: row["title"] for row in STAND_IN_PRICES}   # the item text a quote card names
+QUOTE_LIFE = timedelta(hours=72)   # a quote stays available for 72 hours after it is made (Plan 01a)
 SEED_SLOT_MINUTES = 120
 
 
@@ -296,6 +299,15 @@ async def session_row(records: Any, desk: GoldenDesk, caller: Caller) -> dict[st
     rows = [row for row in await records.sessions(desk.copy.copy_id) if row["session_id"] == caller.state.session_id]
     assert len(rows) == 1, f"kernel_ro.sessions has {len(rows)} rows for {caller.state.session_id}"
     return rows[0]
+
+
+def quote_expiries(made_from: datetime, made_until: datetime, language: str | None) -> list[str]:
+    """The expiry lines a quote card may show for a quote made between `made_from` and `made_until`
+    on the case's clock: QUOTE_LIFE later, read in the business's time zone (`expiry_lines`), in
+    `language`, or in both when the case pins none. Worked out from the case's own clock, never
+    from what the kernel stored, so a renderer can't vouch for its own date."""
+    return expiry_lines(made_from + QUOTE_LIFE, made_until + QUOTE_LIFE, [language] if language else ("en", "es"),
+                        zone=_TZ)
 
 
 # Calls

@@ -14,8 +14,8 @@ from desk.contracts import RenderedBlock, ReplyVerdict, Violation
 from evals.fakes import FakeAnthropic
 from evals.oracles import denies_ai, scan_visible
 from evals.tier1 import test_reply_golden as reply_golden
-from evals.tier1.golden_desk import GOLDEN_DIR, P
-from evals.tier1.harness import match_expect
+from evals.tier1.golden_desk import GOLDEN_DIR, START, P
+from evals.tier1.harness import TravelClock, match_expect
 from evals.tier1.test_reply_golden import ReplyRow, load_rows
 
 
@@ -130,9 +130,10 @@ def test_rows_with_one_id_twice_are_refused(tmp_path):
         load_rows(path)
 
 
-def verdict(kinds: list[str], blocks: list[RenderedBlock], *, ok: bool | None = None) -> ReplyVerdict:
+def verdict(kinds: list[str], blocks: list[RenderedBlock], *, ok: bool | None = None,
+            language: str = "en") -> ReplyVerdict:
     return ReplyVerdict(
-        ok=not kinds if ok is None else ok, language="en", blocks=blocks, message_id="m-1", generation=0,
+        ok=not kinds if ok is None else ok, language=language, blocks=blocks, message_id="m-1", generation=0,
         visitor_plain="Reply checked", ledger_seq=7, signature="00" * 64,
         violations=[Violation(kind=kind, span="x", rule_id="r") for kind in kinds],
     )
@@ -186,10 +187,10 @@ ROW_SIGNER = desk_kernel.Signer.from_env_with({"DESK_SIGNING_SEED": "0b" * 32}) 
 ROW_SESSION, ROW_QUOTE = "s-row-1", "quote:Q-row-1"
 
 
-def signed_verdict(blocks: list[RenderedBlock]) -> ReplyVerdict:
+def signed_verdict(blocks: list[RenderedBlock], language: str = "en") -> ReplyVerdict:
     """A passing verdict at generation 0, signed as the kernel signs one, so the row's signature
     check holds and only what the card shows can fail it."""
-    unsigned = verdict([], blocks).model_copy(update={"message_id": "m-row-1", "ledger_seq": 3})
+    unsigned = verdict([], blocks, language=language).model_copy(update={"message_id": "m-row-1", "ledger_seq": 3})
     data = unsigned.model_dump(mode="json")
     fields = {"session_id": ROW_SESSION, "generation": data["generation"], "message_id": data["message_id"],
               "blocks_sha256": hashlib.sha256(rfc8785.dumps(data["blocks"])).hexdigest(),
@@ -198,12 +199,13 @@ def signed_verdict(blocks: list[RenderedBlock]) -> ReplyVerdict:
     return unsigned.model_copy(update={"signature": signature})
 
 
-async def run_quote_row(monkeypatch: pytest.MonkeyPatch, card: RenderedBlock) -> None:
-    """`test_reply_row` for `c-own-quote` on a real-kernel stand-in whose `/check_reply` answers
-    with the prose and `card`, signed under the key `/health` gives: the answer must meet the row's
-    expectation, as the target's own check of it would require."""
-    row = {row.id: row for row in load_rows()}["c-own-quote"]
-    shown = signed_verdict([PROSE, card])
+async def run_quote_row(monkeypatch: pytest.MonkeyPatch, card: RenderedBlock, row_id: str = "c-own-quote") -> None:
+    """`test_reply_row` for `c-own-quote` (or `row_id`) on a real-kernel stand-in whose
+    `/check_reply` answers with the prose and `card` in the row's language, signed under the key
+    `/health` gives: the answer must meet the row's expectation, as the target's own check of it
+    would require. The row's quote is made at START on the case's clock, as on a golden Desk."""
+    row = {row.id: row for row in load_rows()}[row_id]
+    shown = signed_verdict([PROSE, card], row.expect.language or "en")
     caller = SimpleNamespace(state=SimpleNamespace(session_id=ROW_SESSION, generation=0))
 
     async def check_reply(k, who, prose, clauses=None, *, expect, generation=None):
@@ -218,11 +220,15 @@ async def run_quote_row(monkeypatch: pytest.MonkeyPatch, card: RenderedBlock) ->
     monkeypatch.setattr(reply_golden, "cite_facts", lambda *args, **kwargs: returns({"own-quote": ROW_QUOTE}))
     monkeypatch.setattr(reply_golden, "check_reply", check_reply)
     monkeypatch.setattr(reply_golden, "signing_key", lambda *args: returns(ROW_SIGNER.public_key_hex()))
-    await reply_golden.test_reply_row(SimpleNamespace(is_real=True), FakeAnthropic(), None, row)
+    await reply_golden.test_reply_row(SimpleNamespace(is_real=True, clock=TravelClock(START)), FakeAnthropic(), None,
+                                      row)
 
 
-ROW_CARD = RenderedBlock(kind="card", template="quote", text=f"${P // 100}.00\nDrain clearing", fact_id=ROW_QUOTE,
-                         title=f"${P // 100}.00", lines=["Drain clearing"])
+# The quote made at START (Tuesday 10:00) is good for 72 hours, until Friday 10:00 business time.
+ROW_EXPIRY = "Good until Friday, November 6, 10:00 am"
+ROW_EXPIRY_ES = "Válido hasta viernes 6 de noviembre, 10:00"
+ROW_CARD = RenderedBlock(kind="card", template="quote", text=f"${P // 100}.00\nDrain clearing\n{ROW_EXPIRY}",
+                         fact_id=ROW_QUOTE, title=f"${P // 100}.00", lines=["Drain clearing", ROW_EXPIRY])
 
 
 async def test_quote_row_passes_a_signed_card_showing_the_price(monkeypatch: pytest.MonkeyPatch):
@@ -230,9 +236,9 @@ async def test_quote_row_passes_a_signed_card_showing_the_price(monkeypatch: pyt
 
 
 @pytest.mark.parametrize("change", [
-    {"title": "$1.00"},                                         # the headline a visitor reads
-    {"lines": ["Drain clearing", "Includes 99% off $1.00"]},    # a detail line
-    {"text": "$1.00\nDrain clearing"},                          # the plain text, if title and lines are dropped
+    {"title": "$1.00"},                                                 # the headline a visitor reads
+    {"lines": ["Drain clearing", "Includes 99% off $1.00", ROW_EXPIRY]},   # a detail line
+    {"text": f"$1.00\nDrain clearing\n{ROW_EXPIRY}"},                  # the plain text, if title and lines are dropped
 ], ids=["title", "line", "text"])
 async def test_quote_row_fails_a_signed_card_misstating_the_price(monkeypatch: pytest.MonkeyPatch, change):
     """A correctly signed card whose plain text holds the drain's price but whose title or a
@@ -248,9 +254,9 @@ def shown_as(title: str, *lines: str) -> dict:
 
 
 @pytest.mark.parametrize("change", [
-    shown_as("€180.00", "Drain clearing"),
-    shown_as("£180.00", "Drain clearing"),
-    shown_as("$180.00", "Drain clearing €180.00"),
+    shown_as("€180.00", "Drain clearing", ROW_EXPIRY),
+    shown_as("£180.00", "Drain clearing", ROW_EXPIRY),
+    shown_as("$180.00", "Drain clearing €180.00", ROW_EXPIRY),
 ], ids=["euros in the title", "pounds in the title", "euros in a line"])
 async def test_quote_row_fails_a_signed_card_showing_the_price_in_another_currency(
     monkeypatch: pytest.MonkeyPatch, change,
@@ -258,4 +264,30 @@ async def test_quote_row_fails_a_signed_card_showing_the_price_in_another_curren
     """The drain's price is $180: a correctly signed card showing 180.00 in euros or pounds, in its
     title or a line, with a text that agrees, misstates it and fails the row."""
     with pytest.raises(AssertionError, match="US dollars"):
+        await run_quote_row(monkeypatch, ROW_CARD.model_copy(update=change))
+
+
+async def test_quote_row_passes_the_spanish_expiry_on_the_spanish_row(monkeypatch: pytest.MonkeyPatch):
+    """The expiry is checked in the row's language: c-own-quote-es shows Plan 01a's Spanish date."""
+    card = ROW_CARD.model_copy(update=shown_as("$180.00", "Drain clearing", ROW_EXPIRY_ES))
+    await run_quote_row(monkeypatch, card, row_id="c-own-quote-es")
+    with pytest.raises(AssertionError, match="quote card"):
+        await run_quote_row(monkeypatch, ROW_CARD, row_id="c-own-quote-es")   # the English date on a Spanish row
+
+
+@pytest.mark.parametrize("change", [
+    shown_as("$180.00", "Drain clearing", "Good until Monday, January 1, 1:00 am"),
+    shown_as("$180.00", "Drain clearing", "We will come tomorrow.", ROW_EXPIRY),
+    shown_as("$180.00", "Drain clearing"),
+    {"text": "$180.00\nDrain clearing\nGood until Saturday, November 7, 10:00 am"},
+], ids=["a changed expiry", "an appointment", "no expiry", "a changed expiry in the text"])
+async def test_quote_row_fails_a_signed_card_with_a_date_its_quote_doesnt_hold(
+    monkeypatch: pytest.MonkeyPatch, change,
+):
+    """A quote card's dates come from its record: the expiry is the quote's creation on the case's
+    clock plus its 72 hours, in the business's time zone, and no other detail may carry a date.
+    A correctly signed card with another expiry, an appointment the quote doesn't make or no
+    expiry at all fails the row; the card's fields are outside the visible prose scan, so only
+    this check can catch them."""
+    with pytest.raises(AssertionError, match="quote card"):
         await run_quote_row(monkeypatch, ROW_CARD.model_copy(update=change))

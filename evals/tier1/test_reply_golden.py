@@ -16,7 +16,6 @@ of every visitor-bound kernel text.
 
 import json
 from collections import Counter
-from datetime import timedelta
 from pathlib import Path
 from typing import Any, Literal, get_args
 
@@ -31,8 +30,10 @@ from evals.tier1.args import quote_args
 from evals.tier1.golden_desk import (
     GOLDEN_DIR,
     P,
+    QUOTE_LIFE,
     REVIEW_PASS,
     REVIEWER_MODEL,
+    SEED_TITLES,
     Caller,
     GoldenDesk,
     confirm_cards,
@@ -40,6 +41,7 @@ from evals.tier1.golden_desk import (
     golden_desk,
     make_quote_fact,
     open_caller,
+    quote_expiries,
 )
 from evals.tier1.harness import KERNEL_PLANS, PLANS, Auth, Expect, KernelHarness
 from evals.tier1.targets import SOFT_PROMISE_MODEL, SOFT_PROMISE_PASS
@@ -53,7 +55,6 @@ FRENCH_PROSE = "Je peux vous aider avec ça."
 OWNER_SAY = "I'll come and look at the sink myself."
 STAND_IN_CANARY = "cdk-0000000000000000"   # the stub's document canary, shaped like the kernel's
 KEEP_ALIVE_S = 12 * 3600   # a hop well inside the 24 hours a visitor session may sit idle before it closes
-STAND_IN_QUOTE_LIFE = timedelta(hours=72)   # the stub's quote expiry (Plan 01a's quotes last 72 h)
 HANDED_OFF = ["handoff"]
 
 # Rows of golden/replies.yaml
@@ -319,7 +320,7 @@ async def travel_past_expiry(
         assert not missing, f"facts with no expires_at to travel past: {missing}"
         until = max(rows[fact_id]["expires_at"] for fact_id in fact_ids)
     else:
-        until = k.clock.now() + STAND_IN_QUOTE_LIFE
+        until = k.clock.now() + QUOTE_LIFE   # the stub's stand-in for the quotes' expires_at
     while k.clock.now() <= until:
         k.clock.advance(min(KEEP_ALIVE_S, (until - k.clock.now()).total_seconds() + 60))
         await k.call("GET /context/{session_id}?desk_id=", path={"session_id": caller.state.session_id},
@@ -373,7 +374,9 @@ async def test_reply_row(k: KernelHarness, fake: FakeAnthropic, records, row: Re
     caller = await open_caller(k, desk, "visitor")
     if row.soft_promise == "denies_ai":   # the fixture only tests the flag if its prose really denies being an AI
         assert denies_ai(row.prose), f"{row.id}'s prose must deny being an AI: {row.prose!r}"
+    made_from = k.clock.now()
     facts = await cite_facts(k, records, desk, caller, row)
+    made_until = k.clock.now()   # a quote the row cites was made in between, which pins its expiry
     if row.setup == "session_language_es":   # the session's last language becomes Spanish
         await check_reply(k, caller, CLEAN_ES, expect=passes(caller, ["prose"], language="es"))
     elif row.setup == "travel_past_expiry":
@@ -394,7 +397,9 @@ async def test_reply_row(k: KernelHarness, fake: FakeAnthropic, records, row: Re
             if block.template == "handoff":
                 assert OWNER in block.text, f"the handoff names {OWNER}: {block.text!r}"
             if block.template == "quote":   # every quote a row cites is one drain clearing at list price
-                problems = card_amount_problems(block, {P}, headline=P, percents=())
+                problems = card_amount_problems(
+                    block, {P}, headline=P, percents=(), items=[SEED_TITLES["drain"]],
+                    expires=quote_expiries(made_from, made_until, row.expect.language))
                 assert not problems, f"the quote card, for one drain clearing at {P} cents: {problems}"
         if row.soft_promise != "pass":
             assert len(fake.calls(SOFT_PROMISE_MODEL)) - checks_before == 1, "one soft-promise check, as scripted"

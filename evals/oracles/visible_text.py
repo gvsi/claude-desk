@@ -15,6 +15,7 @@ import sys
 import unicodedata
 from collections.abc import Collection
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta, tzinfo
 from decimal import Decimal
 from typing import Any, Literal, NamedTuple
 
@@ -99,7 +100,8 @@ def _currency(marks: list[str]) -> str:
 
 
 def card_amount_problems(
-    block: Any, allowed: Collection[int], *, headline: int | None = None, percents: Collection[int] | None = None
+    block: Any, allowed: Collection[int], *, headline: int | None = None, percents: Collection[int] | None = None,
+    items: Collection[str] = (), expires: Collection[str] = (),
 ) -> list[str]:
     """How a card's amounts depart from those its fact states (`allowed`, in US dollar cents),
     judged on what a visitor reads. The web app shows a card's `title`, its `lines` and its option
@@ -108,8 +110,12 @@ def card_amount_problems(
     currency misstates the price) and one of `allowed`; the title and lines show at least one; with
     `headline`, the title shows that amount and no other (a quote's total); and `text` states the
     same amounts, in the same currencies, as the title and lines together. With `percents`, the
-    card is a quote (Plan 01a's template), read for every number (`_quote_number_problems`). Empty
-    when the card agrees; `block` is a `RenderedBlock` or its JSON."""
+    card is a quote (Plan 01a's template), read for every number and date
+    (`_quote_number_problems`) against the text of its items (`items`) and the lines its expiry
+    may be written as (`expires`, from `expiry_lines`). Empty when the card agrees; `block` is a
+    `RenderedBlock` or its JSON."""
+    if percents is None and (items or expires):
+        raise ValueError("items and expires judge a quote card's dates: give its percents too")
     data = block.model_dump(mode="json") if isinstance(block, BaseModel) else block
     title = card_amounts(_string(data.get("title")))
     lines = [card_amounts(_string(line)) for line in data.get("lines") or []]
@@ -132,7 +138,7 @@ def card_amount_problems(
     if sorted(text) != sorted(in_card):
         problems.append(f"its text states {_amounts(text)}, but its title and lines show {_amounts(in_card)}")
     if percents is not None:
-        problems += _quote_number_problems(data, percents)
+        problems += _quote_number_problems(data, percents, items, expires)
     return problems
 
 
@@ -140,45 +146,106 @@ def _amounts(amounts: list[CardAmount]) -> str:
     return ", ".join(f"{amount.cents} cents in {amount.currency}" for amount in amounts) or "no amount"
 
 
-def _quote_number_problems(data: dict[str, Any], percents: Collection[int]) -> list[str]:
-    """How a quote card's other numbers depart from its fact: its title, lines and option labels
-    together show exactly `percents` (its discount in whole percent, none at list price) and no
-    number but a currency amount, one of those percentages or the date of its "Good until"
-    ("Válido hasta") line, as Plan 01a's quote template writes them; its text, line by line, the
-    same. A number is any digit, percent sign or word, currency sign or word, or spelled-out
-    amount `scan_visible` finds, so a count ("× 2"), "Was 1.00" and "ninety percent" are flagged;
-    date words are left to the items, whose titles may hold one."""
+def _quote_number_problems(
+    data: dict[str, Any], percents: Collection[int], items: Collection[str], expires: Collection[str]
+) -> list[str]:
+    """How a quote card's other numbers and its dates depart from its record. Its title, lines and
+    option labels together show exactly `percents` (its discount in whole percent, none at list
+    price), and a line that is the quote's own expiry, one of `expires`; nothing in them is a
+    number but a currency amount or one of those percentages, nor a date but that expiry line or
+    a date word inside the text of an item (`items`, whose titles may hold one: "Saturday
+    call-out"). Its text, line by line, the same. A number is any digit, percent sign or word,
+    currency sign or word, or spelled-out amount `scan_visible` finds, so a count ("× 2"), "Was
+    1.00" and "ninety percent" are flagged; a date is any date word it finds, so an invented
+    expiry ("Good until Monday, January 1, 1:00 am") or an appointment the quote doesn't make
+    ("We will come tomorrow.") is flagged wherever it sits."""
     expected = sorted(Decimal(percent) for percent in percents)
-    shown = {"the title": data.get("title")}
-    shown |= {f"line {n}": line for n, line in enumerate(data.get("lines") or [], start=1)}
-    shown |= {f"option {n}": option.get("label") for n, option in enumerate(data.get("options") or [], start=1)
-              if isinstance(option, dict)}
-    shown_read = {where: _quote_numbers(_string(value)) for where, value in shown.items()}
-    text_read = [_quote_numbers(line) for line in _string(data.get("text")).split("\n")]
-    problems = [f"{where} shows {stray}, not an amount, the discount or the quote's expiry"
+    expiry = {_comparable(line) for line in expires}
+    lines = [_string(line) for line in data.get("lines") or []]
+    shown = {"the title": _string(data.get("title"))}
+    shown |= {f"line {n}": line for n, line in enumerate(lines, start=1)}
+    shown |= {f"option {n}": _string(option.get("label"))
+              for n, option in enumerate(data.get("options") or [], start=1) if isinstance(option, dict)}
+    text = _string(data.get("text")).split("\n")
+    shown_read = {where: _quote_numbers(value, items, expiry) for where, value in shown.items()}
+    text_read = [_quote_numbers(line, items, expiry) for line in text]
+    problems = [f"{where} shows {stray}, not an amount, the discount, the items or the quote's expiry"
                 for where, (_, stray) in shown_read.items() if stray]
     if text_stray := [span for _, stray in text_read for span in stray]:
-        problems.append(f"its text shows {text_stray}, not an amount, the discount or the quote's expiry")
+        problems.append(f"its text shows {text_stray}, not an amount, the discount, the items or the quote's expiry")
     in_card = [percent for found, _ in shown_read.values() for percent in found]
     if sorted(in_card) != expected:
         problems.append(f"its title, lines and options show {_percents(in_card)}, not {_percents(expected)}")
     in_text = [percent for found, _ in text_read for percent in found]
     if sorted(in_text) != expected:
         problems.append(f"its text states {_percents(in_text)}, not {_percents(expected)}")
+    if not any(_comparable(line) in expiry for line in lines):
+        problems.append(f"no line shows the quote's expiry, {sorted(expires)}")
+    if not any(_comparable(line) in expiry for line in text):
+        problems.append(f"its text doesn't show the quote's expiry, {sorted(expires)}")
     return problems
 
 
-def _quote_numbers(line: str) -> tuple[list[Decimal], list[str]]:
-    """The percentages one line of a quote card shows ("80%", "80 %"), and every other number in
-    it that is not part of a currency amount; none in a "Good until" line that is only its date."""
+def _quote_numbers(line: str, items: Collection[str], expiry: set[str]) -> tuple[list[Decimal], list[str]]:
+    """The percentages one line of a quote card shows ("80%", "80 %"), and every other number or
+    date in it that is not part of a currency amount, nor a date word inside an item's text; none
+    in a line that is the quote's expiry line (`expiry`, compared by `_comparable`)."""
     shown = normalize(line)
-    if _EXPIRY_LINE.fullmatch(_fold(shown)):
+    if _comparable(shown) in expiry:
         return [], []
     percents = list(_CARD_PERCENT.finditer(shown))
     read = [(m.start(), m.end()) for m in [*_CARD_AMOUNT.finditer(shown), *percents]]
-    stray = [hit.span for hit in scan_visible(line) if hit.kind != "date_word"
-             and not any(start <= hit.start and hit.start + len(hit.span) <= end for start, end in read)]
+    folded = _fold(shown)
+    named = [(m.start(), m.end()) for item in items if _fold(normalize(item)).strip()
+             for m in re.finditer(re.escape(_fold(normalize(item)).strip()), folded, re.IGNORECASE)]
+
+    def within(hit: Hit, spans: list[tuple[int, int]]) -> bool:
+        return any(start <= hit.start and hit.start + len(hit.span) <= end for start, end in spans)
+
+    stray = [hit.span for hit in scan_visible(line)
+             if not within(hit, read) and not (hit.kind == "date_word" and within(hit, named))]
     return [Decimal(m.group(1).replace(",", ".")) for m in percents], stray
+
+
+def _comparable(line: str) -> str:
+    """A card line as compared with an expected one: what the visitor reads, accents folded, case
+    ignored and spacing collapsed."""
+    return " ".join(_fold(normalize(line)).lower().split())
+
+
+def expiry_lines(
+    earliest: datetime, latest: datetime, languages: Collection[str] = ("en", "es"), *, zone: tzinfo | None = None
+) -> list[str]:
+    """The lines a quote card may show for an expiry between `earliest` and `latest`, as Plan
+    01a's quote template writes them in the business's time zone (`zone`, else each instant's
+    own): en "Good until Tuesday, November 3, 2:00 pm", es "Válido hasta martes 3 de noviembre,
+    14:00". One per minute, from `earliest`'s minute to `latest` rounded up to a whole minute, so a
+    renderer that drops the seconds and one that rounds them both fit; in each of `languages`. A
+    window over fifteen minutes can't pin one expiry, and is refused."""
+    zone = zone or earliest.tzinfo
+    if earliest.tzinfo is None or latest.tzinfo is None or zone is None:
+        raise ValueError("an expiry is an aware datetime")
+    if latest < earliest:
+        raise ValueError("an expiry window ends before it starts")
+    first = earliest.astimezone(UTC).replace(second=0, microsecond=0)
+    last = latest.astimezone(UTC)
+    if last.second or last.microsecond:
+        last = last.replace(second=0, microsecond=0) + timedelta(minutes=1)
+    if not timedelta(0) <= last - first <= _EXPIRY_WINDOW:
+        raise ValueError(f"an expiry window of {last - first} can't pin one expiry")
+    minutes = [first + timedelta(minutes=n) for n in range(int((last - first) / timedelta(minutes=1)) + 1)]
+    return [_expiry_line(moment.astimezone(zone), language) for language in languages for moment in minutes]
+
+
+def _expiry_line(moment: datetime, language: str) -> str:
+    if language == "en":
+        clock = f"{moment.hour % 12 or 12}:{moment.minute:02d} {'am' if moment.hour < 12 else 'pm'}"
+        return (f"Good until {_EN_WEEKDAYS[moment.weekday()].capitalize()}, "
+                f"{_EN_MONTHS[moment.month - 1].capitalize()} {moment.day}, {clock}")
+    if language == "es":
+        return (f"Válido hasta {_ES_WEEKDAYS[moment.weekday()]} {moment.day} de {_ES_MONTHS[moment.month - 1]}, "
+                f"{moment.hour}:{moment.minute:02d}")
+    raise ValueError(f"Plan 01a writes quote cards in en and es, not {language!r}")
 
 
 def _percents(values: list[Decimal]) -> str:
@@ -390,19 +457,13 @@ _USD_MARKS = frozenset({"$", "US$", "USD"})   # the US dollar spellings; any oth
 _AMOUNT = r"\d{1,3}(?:[., ]\d{3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?"
 _CARD_AMOUNT = re.compile(rf"(?P<lead>{_MARK}) ?(?P<number>{_AMOUNT})(?!\d)(?: ?(?P<trail>{_MARK})(?! ?\d))?"
                           rf"|(?<![\d.,])(?P<suffixed>{_AMOUNT}) ?(?P<suffix>{_MARK})(?! ?\d)")
-# A quote card's discount (en "80%", es "80 %") and its expiry line, matched on the folded text:
-# en "Good until Tuesday, November 3, 2:00 pm", es "Válido hasta martes 3 de noviembre, 14:00".
+# A quote card's discount (en "80%", es "80 %"), and the names its expiry line is written with.
 _CARD_PERCENT = re.compile(r"(?<![\d.,])(\d+(?:[.,]\d+)?) ?%")
 _EN_WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
-_ES_WEEKDAYS = ("lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo")
+_ES_WEEKDAYS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
 _ES_MONTHS = ("enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre",
               "noviembre", "diciembre")
-_DAY_OF_MONTH = r"(?:[1-9]|[12]\d|3[01])"
-_EN_CLOCK, _ES_CLOCK = r"(?:[1-9]|1[0-2]):[0-5]\d [ap]m", r"(?:1?\d|2[0-3]):[0-5]\d"
-_EXPIRY_LINE = re.compile(
-    rf"good until (?:{'|'.join(_EN_WEEKDAYS)}), (?:{'|'.join(_EN_MONTHS)}) {_DAY_OF_MONTH}, {_EN_CLOCK}"
-    rf"|valido hasta (?:{'|'.join(_ES_WEEKDAYS)}) {_DAY_OF_MONTH} de (?:{'|'.join(_ES_MONTHS)}), {_ES_CLOCK}",
-    re.IGNORECASE)
+_EXPIRY_WINDOW = timedelta(minutes=15)   # the widest window `expiry_lines` reads as one quote's expiry
 
 
 def _date_words(folded: str) -> list[re.Match]:

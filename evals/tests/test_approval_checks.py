@@ -227,25 +227,33 @@ async def test_upcoming_slots_are_the_desks_next_slots():
         await upcoming_slots(k, records, DESK_OF_THE_CASE, 4)
 
 
+SLICE_EXPIRY = "Good until Friday, November 6, 10:00 am"   # a quote made at START, good for 72 hours
+
+
 def test_the_slices_quote_card_is_read_where_the_visitor_reads_it():
     """The thin slice's quote card shows the held total as its headline and no amount but that
     total and the list price in its title or any line, whatever its plain text says, and its text
-    agrees with them (Plan 01a's quote template: the total, the items, the discount off the list)."""
-    card = RenderedBlock(kind="card", template="quote", fact_id="quote:Q-own-1",
-                         text="$36.00\nDrain clearing\nIncludes 80% off $180.00", title="$36.00",
-                         lines=["Drain clearing", "Includes 80% off $180.00"])
-    assert held_quote_card_problems(card) == []
-    expiring = ["Drain clearing", "Includes 80% off $180.00", "Good until Tuesday, November 3, 2:00 pm"]
-    assert held_quote_card_problems(card.model_copy(update={"lines": expiring,
-                                                            "text": "\n".join(["$36.00", *expiring])})) == []
-    for change in ({"title": "$1.00"}, {"title": "$180.00"}, {"lines": ["Drain clearing", "Includes 99% off $1.00"]},
-                   {"text": "$36.00\nDrain clearing"},
-                   {"lines": ["Drain clearing", "Includes 99% off $180.00"],
-                    "text": "$36.00\nDrain clearing\nIncludes 99% off $180.00"},
-                   {"lines": ["Drain clearing", "Includes 80% off $180.00", "Was 1.00"]}):
-        assert held_quote_card_problems(card.model_copy(update=change)), change
-    for title, *lines in (("€36.00", "Drain clearing", "Includes 80% off €180.00"),   # the right numbers in euros
-                          ("$36.00", "Drain clearing", "Includes 80% off £180.00")):  # the list price in pounds
-        problems = held_quote_card_problems(card.model_copy(update={
-            "title": title, "lines": lines, "text": "\n".join([title, *lines])}))
+    agrees with them (Plan 01a's quote template: the total, the items, the discount off the list,
+    the expiry). Its only date is the quote's own expiry, which the case works out from its clock."""
+    def held(title: str, *lines: str) -> RenderedBlock:
+        return RenderedBlock(kind="card", template="quote", fact_id="quote:Q-own-1", title=title, lines=list(lines),
+                             text="\n".join([title, *lines]))
+
+    card = held("$36.00", "Drain clearing", "Includes 80% off $180.00", SLICE_EXPIRY)
+    assert held_quote_card_problems(card, [SLICE_EXPIRY]) == []
+    for change in ({"title": "$1.00"}, {"title": "$180.00"},
+                   {"lines": ["Drain clearing", "Includes 99% off $1.00", SLICE_EXPIRY]},
+                   {"text": f"$36.00\nDrain clearing\n{SLICE_EXPIRY}"},
+                   {"lines": ["Drain clearing", "Includes 99% off $180.00", SLICE_EXPIRY],
+                    "text": f"$36.00\nDrain clearing\nIncludes 99% off $180.00\n{SLICE_EXPIRY}"},
+                   {"lines": ["Drain clearing", "Includes 80% off $180.00", "Was 1.00", SLICE_EXPIRY]}):
+        assert held_quote_card_problems(card.model_copy(update=change), [SLICE_EXPIRY]), change
+    for title, *lines in (("€36.00", "Drain clearing", "Includes 80% off €180.00", SLICE_EXPIRY),   # in euros
+                          ("$36.00", "Drain clearing", "Includes 80% off £180.00", SLICE_EXPIRY)):  # list in pounds
+        problems = held_quote_card_problems(held(title, *lines), [SLICE_EXPIRY])
         assert any("US dollars" in problem for problem in problems), (title, lines, problems)
+    for lines in (["Drain clearing", "Includes 80% off $180.00", "Good until Monday, January 1, 1:00 am"],
+                  ["Drain clearing", "Includes 80% off $180.00", "We will come tomorrow.", SLICE_EXPIRY],
+                  ["Drain clearing", "Includes 80% off $180.00"]):
+        problems = held_quote_card_problems(held("$36.00", *lines), [SLICE_EXPIRY])
+        assert problems, lines
