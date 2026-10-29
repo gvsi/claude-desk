@@ -17,7 +17,7 @@ An execution takes up to three transactions, so that a crash leaves a record of 
   cancelled task) skips T3 and leaves the intent row.
 
 Every step takes its locks in the kernel's order (`repo.py`): the session row, the decision, the
-execution row, then the ledger head.
+execution row, the rows the adapter's hooks lock, then the ledger head.
 
 Reconciliation (`reconcile_orphans`) settles an intent no execution is running (older than
 `ORPHAN_AFTER`, and its rows not locked) and an `unknown` action by asking the adapter what
@@ -530,11 +530,14 @@ async def reconcile_orphans(ctx: KernelCtx, *, at_startup: bool, action_id: str 
 
 
 async def _reconcile(ctx: KernelCtx, action_id: str, decision_id: str, cutoff: datetime) -> bool:
-    """One orphaned execution, under both rows' locks, the decision's first: an intent becomes
-    `unknown` (ledgered), then the adapter says what happened. A result is `executed`, rebuilt as
-    the session may see it; None is `failed`, after `on_failed`; `AdapterUnknown` (or any error)
-    leaves it `unknown`. Rows another transaction holds (a running execution holds both) are
-    skipped, never waited on; a lock this transaction holds already is no wait."""
+    """One orphaned execution, under both rows' locks, the decision's first. The adapter says what
+    happened (`_ask_adapter`) before anything is ledgered, so the rows its hooks lock come before
+    the ledger head, as in every other step (`repo.py`). Then the record: an intent becomes
+    `unknown` (ledgered as orphaned), then the adapter's answer, ledgered as reconciled; an adapter
+    that can't say leaves it `unknown`. A failure while recording is raised, and the rollback
+    takes back the adapter's `on_failed` with the record. Rows another transaction holds (a
+    running execution holds both) are skipped, never waited on; a lock this transaction holds
+    already is no wait."""
     decision = (await ctx.db.scalars(ctx.repo.scoped(
         select(DecisionRow).where(DecisionRow.decision_id == decision_id)
         .with_for_update(skip_locked=True).execution_options(populate_existing=True)))).one_or_none()
@@ -546,26 +549,36 @@ async def _reconcile(ctx: KernelCtx, action_id: str, decision_id: str, cutoff: d
     if execution is None:
         return False
     target = await _target(ctx, decision)
-    if execution.state == "intent":
+    orphaned = execution.state == "intent"
+    outcome = await _ask_adapter(ctx, target, action_id)
+    if orphaned:
         await _mark_unknown(ctx, target, execution, _no_result(action_id, "unknown"), orphaned=True)
+    if outcome is not None:
+        result, state = outcome
+        await _finish(ctx, target, execution, result, state, _summary(target, state, reconciled=True))
+    return True
+
+
+async def _ask_adapter(ctx: KernelCtx, target: _Target, action_id: str) -> tuple[ExecResult, str] | None:
+    """What the adapter's `reconcile` says happened to an orphan, as its result and the decision's
+    state, ledgering nothing: a result is `executed`, rebuilt as the session may see it; None is
+    `failed`, once `on_failed` has undone what `prepare` reserved. None when it can't say (no
+    adapter, `AdapterUnknown` or any error), with whatever its hooks wrote taken back."""
     if target.adapter is None:
         log.warning("reconcile_no_adapter action_id=%s", action_id)
-        return True
+        return None
     try:
         async with ctx.db.begin_nested():
             result = await target.adapter.reconcile(target.xctx(ctx), target.action)
             if result is None:
                 await _undo(ctx, target)
-                await _finish(ctx, target, execution, _no_result(action_id, "failed"), "failed",
-                              _summary(target, "failed", reconciled=True))
-            else:
-                await _finish(ctx, target, execution, await _visible(ctx, target, result), "executed",
-                              _summary(target, "executed", reconciled=True))
+                return _no_result(action_id, "failed"), "failed"
+            return await _visible(ctx, target, result), "executed"
     except AdapterUnknown:
         log.info("reconcile_still_unknown action_id=%s", action_id)
     except Exception:
         log.exception("reconcile_error action_id=%s", action_id)       # still unknown; the next read tries again
-    return True
+    return None
 
 
 async def reconcile_at_startup(runtime: KernelRuntime) -> list[str]:

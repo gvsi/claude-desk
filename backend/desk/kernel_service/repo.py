@@ -18,16 +18,20 @@ Row locks are taken in one order, so no two kernel transactions wait on each oth
 4. the Desk's active `policy_versions` row, `FOR SHARE`, which issuing a payment link takes
    (Plan 01c);
 5. a payment link (Plan 01c);
-6. the Desk's ledger head (`ledger.append`, `FOR UPDATE`, where every entry ends; `ledger.page`
+6. an adapter's own rows, which its hooks lock or write (a booking; Plan 01c's mandates), after
+   whatever of steps 4 and 5 the same transaction takes;
+7. the Desk's ledger head (`ledger.append`, `FOR UPDATE`, where every entry ends; `ledger.page`
    reads it `FOR SHARE`).
 
 A transaction that holds a later lock never asks for an earlier one: a refusal's `persist` locks
-the decision before it appends, and nothing holds a payment link and then asks for the policy
-row. A row is taken the first time in the strongest mode the transaction will need, since going
-from `FOR SHARE` to `FOR UPDATE` waits like a new lock. Reading a row without a lock (the session
-a decision names, say) waits for nothing and can come at any point. Reconciliation takes the
-decision and the execution `SKIP LOCKED`, so it skips an execution that is running rather than
-wait for it.
+the decision before it appends, nothing holds a payment link and then asks for the policy row,
+and every step runs its adapter's hooks before it appends (T1 `prepare`, T2 `execute`, T3
+`on_failed`, reconciliation `reconcile` and then `on_failed`, activation its `ON_ACTIVATE`
+hooks), so a hook may wait for the rows it locks like any other step. A row is taken the first
+time in the strongest mode the transaction will need, since going from `FOR SHARE` to
+`FOR UPDATE` waits like a new lock. Reading a row without a lock (the session a decision names,
+say) waits for nothing and can come at any point. Reconciliation takes the decision and the
+execution `SKIP LOCKED`, so it skips an execution that is running rather than wait for it.
 
 Activation (`activation.confirm`) holds no session, decision or execution row and starts at step
 4: the Desk's `versions` advisory lock, then its `policy_versions` rows `FOR UPDATE`, then the

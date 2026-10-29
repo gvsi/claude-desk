@@ -1,32 +1,35 @@
 """The kernel's lock order (`repo.py`): the session row, then the decision row, then the execution
-row, then the ledger head, so two kernel transactions never deadlock.
+row, then the rows an adapter's hooks lock, then the ledger head, so two kernel transactions never
+deadlock.
 
-The first test races two requests that once took the session and decision rows in opposite
-orders. The others record the row locks each transaction of a path takes (`LockLog`) and check
-that they come in that order.
+Two tests race requests that once took a pair of rows in opposite orders: the session and the
+decision rows, and an adapter's row and the ledger head. The others record the row locks each
+transaction of a path takes (`LockLog`) and check that they come in that order.
 """
 
 import asyncio
 import re
-from collections.abc import Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
+from typing import Any
 
 import psycopg
 import pytest
 from fastapi import FastAPI
-from sqlalchemy import event
+from sqlalchemy import event, select
 from sqlalchemy.engine import Connection
 
-from desk.contracts import Decision
+from desk.contracts import Decision, ExecResult, NormalizedAction
+from desk.db.models import DemoInboxEntry, PolicyVersion
 from desk.db.session import database_url, libpq_url
-from desk.kernel_service import execute
-from desk.kernel_service.adapters.base import AdapterFailure
+from desk.kernel_service import demo_inbox, execute
+from desk.kernel_service.adapters.base import AdapterFailure, AdapterResult, AdapterUnknown, ExecCtx
 
 from .fakes import FakeAdapter
-from .helpers import ledger_rows
+from .helpers import kernel_ctx, ledger_rows
 from .test_approvals import ASK_QUOTES, answered, held_on, post_cancel
 from .test_compiler import card
-from .test_decide import desk_with, owner_decide, set_mode
+from .test_decide import decided, desk_with, owner_decide, set_mode
 from .test_execute import executed, fake_quote_desk, post_execute, read, store_intent
 
 # The tables whose rows the kernel locks, in the order it locks them (repo.py).
@@ -151,6 +154,88 @@ async def test_reconciliation_runs_in_the_lock_order(app, client, registry, froz
         else:
             assert await execute.reconcile_at_startup(app.state.kernel) == [allowed.action.action_id]
     assert log.transactions == [["decisions", "executions", "ledger_heads"]]
+
+
+async def hold_the_active_version(xctx: ExecCtx, action: NormalizedAction) -> None:
+    """What Plan 01c's payment-link hooks take first: the Desk's active `policy_versions` row, `FOR SHARE`."""
+    ctx = xctx.ctx
+    (await ctx.db.scalars(ctx.repo.scoped(select(PolicyVersion).where(
+        PolicyVersion.desk_id == xctx.desk_row.desk_id, PolicyVersion.status == "active")
+        .with_for_update(read=True)))).one()
+
+
+def then(answer: AdapterResult | Exception | None) -> Callable[[ExecCtx, NormalizedAction], Awaitable[Any]]:
+    """A `reconcile` that holds the active version, then answers (or raises) `answer`."""
+    async def reconcile(xctx: ExecCtx, action: NormalizedAction) -> AdapterResult | None:
+        await hold_the_active_version(xctx, action)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+    return reconcile
+
+
+@pytest.mark.parametrize(("script", "state"), [
+    ({"reconcile": then(None)}, "failed"),                                    # it never ran
+    ({"on_failed": hold_the_active_version}, "failed"),                       # it never ran, undone holding it
+    ({"reconcile": then(AdapterResult(model_view={"ok": True}))}, "executed"),
+    ({"reconcile": then(AdapterUnknown("the provider is still deciding"))}, "unknown"),
+], ids=["reconcile-failed", "on_failed", "reconcile-executed", "reconcile-unknown"])
+async def test_reconciliation_runs_the_adapter_before_it_ledgers(app, client, registry, frozen_clock, script, state):
+    quote, rows, _, allowed = await fake_quote_desk(app, client)
+    quote.script.update(script)
+    await store_intent(app, rows.copy_id, allowed)                  # a kernel died after T1
+    frozen_clock.advance(31)
+    with lock_log(app) as log:
+        assert (await read(client, rows.owner, allowed)).state == state
+    # the rows the adapter's hooks lock come before the ledger head, like any step's
+    assert log.transactions == [["decisions", "executions", "policy_versions", "ledger_heads"]]
+    base = {"decision_id": allowed.decision_id, "action_id": allowed.action.action_id}
+    outcome = [] if state == "unknown" else [{**base, "state": state, "reconciled": True}]
+    assert [e.event.summary for e in await ledger_rows(app, rows) if e.event.kind == "execute"] == [
+        {**base, "state": "unknown", "orphaned": True}, *outcome]   # the same record, in the same order
+
+
+async def test_reconciliation_and_a_running_execution_never_deadlock(app, client, registry, frozen_clock):
+    # Plan 01c's mandate: a charge's `execute` and an orphaned charge's `reconcile` lock the same
+    # row of the adapter's own (a Demo inbox entry stands in for it) before the ledger head
+    quote, rows, visitor, orphan = await fake_quote_desk(app, client)
+    running = await decided(client, visitor, "native.quote", {"qty": 2}, call_id="call-2")
+    async with kernel_ctx(app) as ctx:
+        await demo_inbox.deliver(ctx, copy_id=rows.copy_id, desk_id=rows.desk_id, to="owner", person_id=None,
+                                 kind="alert", body="mandate", preview="Mandate")
+    await store_intent(app, rows.copy_id, orphan)                   # a kernel died after T1
+    frozen_clock.advance(31)
+
+    async def hold_the_mandate(xctx: ExecCtx) -> None:
+        ctx = xctx.ctx
+        (await ctx.db.scalars(ctx.repo.scoped(select(DemoInboxEntry).where(DemoInboxEntry.preview == "Mandate")
+                                              .with_for_update()))).one()
+
+    holding, release = asyncio.Event(), asyncio.Event()
+
+    async def charge(xctx: ExecCtx, action: NormalizedAction, args) -> AdapterResult:
+        await hold_the_mandate(xctx)
+        holding.set()
+        await release.wait()
+        return AdapterResult(model_view={"ok": True})
+
+    async def look_up(xctx: ExecCtx, action: NormalizedAction) -> None:
+        await hold_the_mandate(xctx)
+        return None                                                 # no charge was made
+
+    quote.script.update(execute=charge, reconcile=look_up)
+    executing = asyncio.create_task(post_execute(client, visitor, running))
+    await asyncio.wait_for(holding.wait(), 10)
+    reading = asyncio.create_task(client.get(f"/decisions/{orphan.decision_id}", headers=rows.owner))
+    assert await a_kernel_backend_waits()                           # the reconciliation waits for the mandate
+    release.set()
+    execution, settled = await asyncio.wait_for(asyncio.gather(executing, reading), 10)
+
+    # neither is a deadlock's victim: the charge succeeded, and the orphan, which never charged, failed
+    assert execution.status_code == 200, execution.text
+    assert ExecResult.model_validate(execution.json()).state == "succeeded"
+    assert settled.status_code == 200, settled.text
+    assert Decision.model_validate(settled.json()).state == "failed"
 
 
 @pytest.mark.parametrize(("error", "state"), [(AdapterFailure("slot_taken"), "failed"),
