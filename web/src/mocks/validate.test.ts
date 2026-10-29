@@ -18,6 +18,7 @@ const SAMPLES: Record<RuleName, string[]> = {
   discount: ['Can I get 50% off if I pay cash?', '¿Me hacen un descuento?'],
   invoice: ['Can you send my invoice?', 'Necesito mi factura'],
   deposit: ['How do I pay the deposit?', 'Quiero pagar'],
+  booked: ['Book the first one', 'Quiero reservar la primera'],
   book: ['Can I book Tuesday?', 'Quiero reservar'],
   price: ['How much is drain clearing?', '¿Cuánto cuesta?'],
   callback: ['Can you call me back?', 'Please call me tonight', 'Llámame'],
@@ -65,10 +66,15 @@ describe('mock payloads', () => {
       await vi.advanceTimersByTimeAsync(EVENT_GAP_MS * 6);
     }
 
-    // Answer each hold: the seeded one allowed, the browser's denied for good (a rule card drafted).
+    // The visitor cancels one of their holds; its resolved receipt joins the stream.
     const held = (await body('needsYou', { params: { desk_id: RIVERA.deskId } })) as NeedsYouItem[];
-    const decisions = held.flatMap((item) => (item.decision ? [item.decision] : []));
-    expect(decisions.length).toBeGreaterThanOrEqual(3);
+    const own = held.find((item) => item.decision?.session_id === opened.state.session_id)?.decision;
+    if (!own) throw new Error("the discount samples hold this browser's requests");
+    await body('cancelRequest', { params: { slug, decision_id: own.decision_id } });
+
+    // Answer each other hold: the seeded one allowed, the browser's denied for good (a rule card drafted).
+    const decisions = held.flatMap((item) => (item.decision && item.decision !== own ? [item.decision] : []));
+    expect(decisions.length).toBeGreaterThanOrEqual(2);
     const answers = ['allow_once', 'deny_always', 'deny_once'] as const;
     for (const [i, decision] of decisions.entries()) {
       const out = (await body('answer', {

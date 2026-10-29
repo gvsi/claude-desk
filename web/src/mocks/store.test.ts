@@ -71,6 +71,10 @@ describe('the scripted Desk', () => {
       ['Necesito mi factura', 'invoice', 'es'],
       ['How do I pay the deposit?', 'deposit', 'en'],
       ['Quiero pagar ahora', 'deposit', 'es'],
+      // "first one" picks a time already offered, before "book" or "tuesday" would list them again.
+      ['Book the first one', 'booked', 'en'],
+      ['The first one works. Dana Whitfield, 2817 Fruitvale Ave.', 'booked', 'en'],
+      ['Quiero reservar la primera', 'booked', 'es'],
       ['Can I book Tuesday?', 'book', 'en'],
       ['Quiero reservar una visita', 'book', 'es'],
       ['How much is drain clearing?', 'price', 'en'],
@@ -149,7 +153,7 @@ describe('the scripted Desk', () => {
     const answered = await call('answer', { params: { decision_id: decisionId }, body: { answer: 'allow_once' } });
     expect(answered.status).toBe(200);
     expect(answered.body).toMatchObject({
-      decision: { decision_id: decisionId, state: 'executed', visitor_plain: 'Done' },
+      decision: { decision_id: decisionId, state: 'executed', visitor_plain: "Quoted from Maria Rivera's price list" },
       execution_state: 'succeeded',
       card_diff: null,
     });
@@ -159,7 +163,13 @@ describe('the scripted Desk', () => {
     await drain();
     expect(typesOf(events).slice(4)).toEqual(['resolved', 'writing', 'message', 'turn_end']);
     const [, resolved] = events[4] ?? [];
-    expect(resolved).toMatchObject({ type: 'resolved', decision_id: decisionId, state: 'executed', visitor_plain: 'Done' });
+    // An executed action's line says what ran and whose records it used, never a bare "Done".
+    expect(resolved).toMatchObject({
+      type: 'resolved',
+      decision_id: decisionId,
+      state: 'executed',
+      visitor_plain: "Quoted from Maria Rivera's price list",
+    });
     const [, followUp] = events[6] ?? [];
     expect(followUp?.type === 'message' && followUp.blocks.map((b) => [b.kind, b.template])).toEqual([
       ['prose', null],
@@ -171,6 +181,79 @@ describe('the scripted Desk', () => {
     const needsYou = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
     expect(needsYou.map((item) => item.decision?.decision_id)).not.toContain(decisionId);
     expect(needsYou).toHaveLength(1);
+  });
+
+  it('executed_receipts_say_what_ran', async () => {
+    const { events } = await openChat();
+    const turns: [text: string, line: string][] = [
+      ['How much is drain clearing?', "Quoted from Maria Rivera's price list"],
+      ['Can I book Tuesday?', "Times read from Maria Rivera's calendar"],
+      ['Book the first one', "Booked on Maria Rivera's calendar"],
+      ['How do I pay the deposit?', 'Payment link made for this quote'],
+      ['Can you call me back?', 'Callback request saved for Maria Rivera'],
+      ['¿Cuánto cuesta?', 'Cotizado con la lista de precios de Maria Rivera'],
+      ['Quiero reservar la primera', 'Reservado en el calendario de Maria Rivera'],
+    ];
+    for (const [text] of turns) {
+      await send(text);
+      await drain();
+    }
+    const receipts = events.flatMap(([, ev]) => (ev.type === 'receipt' ? [ev] : []));
+    expect(receipts.map((ev) => [ev.state, ev.visitor_plain])).toEqual(turns.map(([, line]) => ['executed', line]));
+    expect(events.some(([, ev]) => 'visitor_plain' in ev && /^(?:Done|Hecho)$/.test(ev.visitor_plain))).toBe(false);
+
+    // "Book the first one" books the first time offered: the kernel's booked card, in its words,
+    // after a prose line with no price or date.
+    const booked = events.flatMap(([, ev]) => (ev.type === 'message' && ev.blocks.some((b) => b.template === 'booking_confirmed') ? [ev] : []));
+    expect(booked.map((ev) => [ev.language, ev.blocks.map((b) => [b.kind, b.title, b.lines])])).toEqual([
+      [
+        'en',
+        [
+          ['prose', null, []],
+          ['card', 'Tuesday, November 3', ['Arriving 2:00 pm to 4:00 pm', 'With Maria Rivera']],
+        ],
+      ],
+      [
+        'es',
+        [
+          ['prose', null, []],
+          ['card', 'martes 3 de noviembre, 14:00', ['120 minutos', 'Reserva B-77']],
+        ],
+      ],
+    ]);
+    // The booking is this chat's, confirmed.
+    const sessionId = mockStore.visitorSession(slug)?.state.session_id;
+    const bookings = [...mockStore.world.decisions.values()].filter(
+      (d) => d.decision.session_id === sessionId && d.decision.action?.tool === 'native.book',
+    );
+    expect(bookings.map((d) => d.decision.state)).toEqual(['executed', 'executed']);
+  });
+
+  it('visitor_cancel_resolves_the_hold', async () => {
+    const { events } = await openChat();
+    await send('Can I get 15% off?');
+    await drain();
+    const [, held] = events[0] ?? [];
+    const decisionId = held?.type === 'held' ? held.decision_id : '';
+
+    // Only this browser's own session can cancel, and only a decision of that session.
+    const seeded = ((await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[]).find(
+      (item) => item.decision?.decision_id !== decisionId,
+    );
+    expect((await call('cancelRequest', { params: { slug, decision_id: seeded?.decision?.decision_id ?? '' } })).status).toBe(404);
+
+    const cancelled = await call('cancelRequest', { params: { slug, decision_id: decisionId } });
+    expect(cancelled).toEqual({ status: 202, body: { decision_id: decisionId } });
+    // The outcome reaches the chat as the resolved receipt, with the kernel's line.
+    expect(events.at(-1)?.[1]).toMatchObject({ type: 'resolved', decision_id: decisionId, state: 'cancelled', visitor_plain: 'Cancelled' });
+    const needsYou = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
+    expect(needsYou.map((item) => item.decision?.decision_id)).not.toContain(decisionId);
+
+    // Cancelling again, or answering it now, changes nothing.
+    expect((await call('cancelRequest', { params: { slug, decision_id: decisionId } })).status).toBe(409);
+    expect((await call('answer', { params: { decision_id: decisionId }, body: { answer: 'allow_once' } })).status).toBe(409);
+    const ledger = (await call('ledger', { params: { desk_id: deskId } })).body as LedgerPage;
+    expect(ledger.entries.filter((e) => e.event.ref_id === decisionId).map((e) => e.event.kind)).toEqual(['decide', 'approval']);
   });
 
   it('second_answer_conflicts_with_the_decision', async () => {

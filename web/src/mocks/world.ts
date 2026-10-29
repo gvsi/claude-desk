@@ -27,6 +27,7 @@ import {
   EVENT_GAP_MS,
   VISITOR_PLAIN,
   allows,
+  statusLine,
   turnEnd,
   turnLanguage,
   type DecisionSpec,
@@ -331,7 +332,7 @@ export class MockWorld {
       card_ids: [...spec.cardIds],
       review: null,
       reason_plain: spec.reasonPlain,
-      visitor_plain: VISITOR_PLAIN[language][state],
+      visitor_plain: statusLine(language, state, spec.tool),
       answers: hold ? [...(spec.answers ?? [])] : [],
       expires_at: isoTime(this.now() + DAY),
       inbox,
@@ -389,11 +390,36 @@ export class MockWorld {
     record.decision = {
       ...record.decision,
       state,
-      visitor_plain: VISITOR_PLAIN[session.language][state],
+      visitor_plain: statusLine(session.language, state, record.decision.action?.tool ?? null),
       inbox: [],
       ledger_seq: ledgerSeq,
       signature: sign(`${decisionId}:${state}`),
     };
+    return record.decision;
+  }
+
+  /** The visitor cancels their held request, as the kernel records it: no answer can run it now. */
+  cancel(record: DecisionRecord): Decision {
+    const desk = this.desk(record.deskId);
+    const session = this.sessions.get(record.decision.session_id);
+    if (!desk || !session) throw new Error(`decision ${record.decision.decision_id} has no Desk or session`);
+    const { decision_id: decisionId, session_id: sessionId } = record.decision;
+    const cancelled = this.appendLedger(desk, {
+      kind: 'approval',
+      origin: 'kernel',
+      session_id: sessionId,
+      ref_id: decisionId,
+      summary: { state: 'cancelled', by: 'visitor' },
+    });
+    record.decision = {
+      ...record.decision,
+      state: 'cancelled',
+      visitor_plain: statusLine(session.language, 'cancelled', record.decision.action?.tool ?? null),
+      inbox: [],
+      ledger_seq: cancelled.seq,
+      signature: sign(`${decisionId}:cancelled`),
+    };
+    this.emit(session, statusEvent('resolved', record.decision));
     return record.decision;
   }
 

@@ -6,7 +6,7 @@
  */
 import type { ApprovalAnswer, Decision, DeskUpdated } from '../api/contracts.ts';
 import { ROUTES, type RouteKey, type RouteResponse } from '../api/routes.ts';
-import type { ApprovalAnswerOut, MessageAccepted, VisitorSession } from '../api/views.ts';
+import type { ApprovalAnswerOut, CancelAccepted, MessageAccepted, VisitorSession } from '../api/views.ts';
 import {
   attempts,
   businessOut,
@@ -288,6 +288,17 @@ const SERVED: ServedRoutes = {
     sv.world.visitorText(session, text);
     if (session.state.mode === 'ai') sv.runTurn(session, matchRule(text).steps, session.language, text);
     return ok({ message_id: sv.world.id('vmsg') } satisfies MessageAccepted, 202);
+  },
+  cancelRequest(sv, req) {
+    const visitor = sv.visitor(req.params.slug);
+    if (isFailure(visitor)) return visitor;
+    const record = sv.world.decisions.get(req.params.decision_id ?? '');
+    // Only a decision of this browser's own session: anyone else's is not found.
+    if (!record || record.decision.session_id !== visitor.session.state.session_id) return NOT_FOUND;
+    if (record.decision.state !== 'held') return failWith(409, 'kernel', { code: 'conflict' });
+    // The kernel cancels it; the outcome reaches the chat as the resolved receipt.
+    sv.world.cancel(record);
+    return ok({ decision_id: record.decision.decision_id } satisfies CancelAccepted, 202);
   },
   events(sv, req) {
     // A 200 opens the stream (handlers.ts); `listen` replays and follows it.

@@ -39,7 +39,10 @@ export function turnLanguage(text: string): Language {
 // ---------------------------------------------------------------------------------------------
 // Visitor-facing text: the kernel's templates and the fixture cards, by language
 
-/** The kernel's visitor status lines for Maria Rivera's Desk, as the Rivera fixtures write them. */
+/**
+ * The kernel's visitor status lines for Maria Rivera's Desk, as the Rivera fixtures write them. An
+ * executed action has no line here: it carries its tool's own line (`EXECUTED_LINES`).
+ */
 export const VISITOR_PLAIN = {
   en: {
     allowed: "Checked against Maria Rivera's rules",
@@ -49,7 +52,6 @@ export const VISITOR_PLAIN = {
     denied: 'Maria Rivera decided not to go ahead',
     expired: 'This request timed out',
     cancelled: 'Cancelled',
-    executed: 'Done',
     failed: "That didn't go through",
     unknown: 'Still confirming this',
     refused_at_execution: "The rules changed, so this didn't go ahead",
@@ -64,14 +66,44 @@ export const VISITOR_PLAIN = {
     denied: 'Maria Rivera decidió no seguir adelante',
     expired: 'Esta solicitud venció',
     cancelled: 'Cancelado',
-    executed: 'Hecho',
     failed: 'No se pudo completar',
     unknown: 'Todavía lo estamos confirmando',
     refused_at_execution: 'Las reglas cambiaron, así que no se hizo',
     reply_checked: 'Respuesta revisada con las reglas de Maria Rivera',
     reply_handed_off: 'Pasado a Maria Rivera para responder',
   },
-} as const satisfies Record<Language, Record<DecisionState | 'reply_checked' | 'reply_handed_off', string>>;
+} as const satisfies Record<Language, Record<Exclude<DecisionState, 'executed'> | 'reply_checked' | 'reply_handed_off', string>>;
+
+/**
+ * The signed line an executed action shows a visitor, per tool: what ran and whose records it
+ * used, never a bare "Done". `{owner}` is the owner's display name. These are the kernel's lines,
+ * which the visitor's page shows verbatim.
+ */
+export const EXECUTED_LINES = {
+  'native.quote': { en: "Quoted from {owner}'s price list", es: 'Cotizado con la lista de precios de {owner}' },
+  'native.find_slots': { en: "Times read from {owner}'s calendar", es: 'Horarios tomados del calendario de {owner}' },
+  'native.book': { en: "Booked on {owner}'s calendar", es: 'Reservado en el calendario de {owner}' },
+  'native.capture_lead': { en: 'Details saved for {owner}', es: 'Datos guardados para {owner}' },
+  'native.request_callback': { en: 'Callback request saved for {owner}', es: 'Solicitud de llamada guardada para {owner}' },
+  'native.start_verification': { en: 'Verification started', es: 'Verificación iniciada' },
+  'native.release_document': { en: "Document shared from {owner}'s records", es: 'Documento compartido desde los registros de {owner}' },
+  'native.payment_link': { en: 'Payment link made for this quote', es: 'Enlace de pago creado para esta cotización' },
+  // Only a visiting agent pays from a signed limit, so "your" is the agent.
+  'native.charge_mandate': { en: 'Charged within the limit of your mandate', es: 'Cobrado dentro del límite de tu mandato' },
+  'payments.list_charges': { en: "Charges read from {owner}'s payments", es: 'Cargos tomados de los pagos de {owner}' },
+  'payments.create_refund': { en: 'Refunded to the original payment', es: 'Reembolsado al pago original' },
+} as const satisfies Partial<Record<ToolName, Record<Language, string>>>;
+
+const OWNER = rivera.business.ownerName;
+
+/** The visitor's line for a decision in `state`: an executed one names what its tool did. */
+export function statusLine(language: Language, state: DecisionState, tool: ToolName | null): string {
+  if (state !== 'executed') return VISITOR_PLAIN[language][state];
+  const lines: Partial<Record<ToolName, Record<Language, string>>> = EXECUTED_LINES;
+  const line = tool === null ? undefined : lines[tool];
+  if (line === undefined) throw new Error(`the mock has no executed line for ${tool ?? 'a decision with no tool'}`);
+  return line[language].replaceAll('{owner}', OWNER);
+}
 
 const { blocks } = rivera;
 
@@ -108,6 +140,24 @@ const callbackCards: Record<'window' | 'open', Record<Language, CardBlock>> = {
     en: cardBlock('callback_confirmed', { fact_id: 'handoff:callback', title: 'Maria Rivera will call you back' }),
     es: cardBlock('callback_confirmed', { fact_id: 'handoff:callback', title: 'Maria Rivera te llamará' }),
   },
+};
+
+/**
+ * Booking the first time offered: Claude's checked words carry no price or date, and the kernel's
+ * card says what was booked. The Spanish card is the design system fixture's.
+ */
+const bookedProse: Record<Language, RenderedBlock> = {
+  en: proseBlock("Maria will text you when she's on her way."),
+  es: proseBlock('Maria te enviará un mensaje cuando vaya de camino.'),
+};
+
+const bookedCard: Record<Language, CardBlock> = {
+  en: cardBlock('booking_confirmed', {
+    fact_id: 'booking:B-77',
+    title: 'Tuesday, November 3',
+    lines: ['Arriving 2:00 pm to 4:00 pm', 'With Maria Rivera'],
+  }),
+  es: blocks.booking_confirmed.es,
 };
 
 /** Claude's checked words when nothing more specific fits: no digits, amounts, dates or promises. */
@@ -234,7 +284,7 @@ export const writing: Step = () => ({ type: 'writing' });
 /** Ends every turn: the visitor's "Claude is writing" clears even when nothing was shown. */
 export const turnEnd: Step = () => ({ type: 'turn_end' });
 
-export type RuleName = 'discount' | 'invoice' | 'deposit' | 'book' | 'price' | 'callback' | 'talk' | 'outage' | 'other';
+export type RuleName = 'discount' | 'invoice' | 'deposit' | 'booked' | 'book' | 'price' | 'callback' | 'talk' | 'outage' | 'other';
 
 export interface ScriptRule {
   name: RuleName;
@@ -288,6 +338,16 @@ export const SCRIPT: readonly ScriptRule[] = [
       },
       writing,
       (ctx) => ctx.reply([blocks.payment_link[ctx.language]]),
+    ],
+  },
+  {
+    // Picks a time already offered, so it comes before "book", which lists them.
+    name: 'booked',
+    words: ['first one', 'la primera'],
+    steps: [
+      (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.book)),
+      writing,
+      (ctx) => ctx.reply([bookedProse[ctx.language], bookedCard[ctx.language]]),
     ],
   },
   {

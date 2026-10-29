@@ -9,7 +9,7 @@ import type { SseEvent } from '../api/contracts.ts';
 import { ROUTES, apiPath, type RouteKey, type RouteParams } from '../api/routes.ts';
 import type { MockSeed } from './seed.ts';
 import { Server, failWith, isFailure, serve, type AnyServed } from './served.ts';
-import type { MockWorld } from './world.ts';
+import type { MockWorld, SessionRecord } from './world.ts';
 
 export interface MockRequestInit {
   params?: Record<string, string>;
@@ -160,6 +160,22 @@ export class MockStore {
       return { status: injection.status, body: wire(injection.body ?? faultBody(injection.status, key)) };
     }
     return { status: served.status, body: wire(served.body) };
+  }
+
+  /** The visitor session this browser's cookie names for `slug`, or null when there is none. */
+  visitorSession(slug: string): SessionRecord | null {
+    const visitor = this.server.visitor(slug);
+    return isFailure(visitor) ? null : visitor.session;
+  }
+
+  /**
+   * Sends `ev` on the stream of the session this browser's cookie names for `slug`, as the API
+   * would outside a scripted turn: the owner joining, a session error. Returns its seq.
+   */
+  emit(slug: string, ev: SseEvent): number {
+    const session = this.visitorSession(slug);
+    if (!session) throw new Error(`this browser has no session for ${slug}`);
+    return this.world.emit(session, ev);
   }
 
   /**
