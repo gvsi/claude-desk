@@ -6,18 +6,28 @@ The views leave out every secret and admit only the rows of the copy the transac
 copy it was built for, whatever the transaction read before; each query also filters on `copy_id`
 itself. Reads run in the caller's transaction and never commit. Only the master plan's views and
 columns (`KERNEL_RO_COLUMNS`) can be named; `schema` is `kernel_ro`, or the fake's mirror in tests.
+
+Two reads start from no `WhoAmI` answer: `kernel_session`, for a session a kernel answer just named (a
+payment completion names only the session), and `due_decisions`, for the job that surfaces decisions
+gone final. Each takes the copy from the API's own rows for that session or decision, which were written
+under a `WhoAmI` answer, and reads only there; a session or decision the API has no row for is not found.
+Neither ever comes from the browser.
 """
 
 import re
+from collections.abc import Sequence
 from typing import Any
 
-from sqlalchemy import TableClause, column, func, select, table
+from sqlalchemy import TableClause, column, func, select, table, union
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from desk.db.models import Message, RunEvent
 from desk.db.session import COPY_SETTING
 from desk.db.tables import KERNEL_RO_COLUMNS
 
 KERNEL_RO = "kernel_ro"
+MESSAGES = Message.__table__
+RUN_EVENTS = RunEvent.__table__
 _IDENTIFIER = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
 _MANY = (list, tuple, set, frozenset)
 
@@ -71,3 +81,30 @@ class KernelRO:
 
     async def desks(self) -> list[dict[str, Any]]:
         return await self.rows("desks", order_by=("created_at", "desk_id"))
+
+
+async def kernel_session(conn: AsyncConnection, session_id: str, schema: str = KERNEL_RO) -> dict[str, Any] | None:
+    """The kernel_ro row of a session a kernel answer just named, read in the copy of the API's rows for it."""
+    copies = union(
+        select(MESSAGES.c.copy_id).where(MESSAGES.c.session_id == session_id),
+        select(RUN_EVENTS.c.copy_id).where(RUN_EVENTS.c.session_id == session_id)).subquery()
+    found = (await conn.execute(select(copies.c.copy_id))).scalars().all()
+    if len(found) != 1:
+        return None                       # no row of the API's names it (or, impossibly, two copies do)
+    return await KernelRO(conn, found[0], schema).session(session_id)
+
+
+async def due_decisions(conn: AsyncConnection, decision_ids: Sequence[str], schema: str = KERNEL_RO) -> list[dict[str, Any]]:
+    """The kernel_ro rows of these decisions, each read in the copy of the run events that published or await it."""
+    if not decision_ids:
+        return []
+    named = RUN_EVENTS.c.payload["decision_id"].astext
+    pairs = await conn.execute(select(RUN_EVENTS.c.copy_id, named).distinct().where(
+        named.in_(list(decision_ids)), RUN_EVENTS.c.kind.in_(("sse", "control"))))
+    by_copy: dict[str, list[str]] = {}
+    for copy_id, decision_id in pairs:
+        by_copy.setdefault(copy_id, []).append(decision_id)
+    found = []
+    for copy_id, ids in sorted(by_copy.items()):
+        found += await KernelRO(conn, copy_id, schema).rows("decisions", decision_id=ids)
+    return found

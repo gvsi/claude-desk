@@ -39,10 +39,12 @@ from typing import Any
 from sqlalchemy import and_, func, insert, select, update
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from desk.api.schemas import OwnerTranscriptItem, TranscriptItem
 from desk.contracts import RenderedBlock
-from desk.db.models import Message
+from desk.db.models import Message, RunEvent
 
 MESSAGES = Message.__table__
+RUN_EVENTS = RunEvent.__table__
 SUMMARY_TAG = "conversation_so_far"
 _TAG = re.compile(r"^[a-z_]+$")
 
@@ -384,3 +386,43 @@ async def has_pending(conn: AsyncConnection, session_id: str) -> bool:
     return bool((await conn.execute(select(func.count()).where(
         MESSAGES.c.session_id == session_id, MESSAGES.c.model_seq.is_(None), MESSAGES.c.wake,
         MESSAGES.c.model_content.is_not(None)))).scalar_one())
+
+
+
+# Read models ---------------------------------------------------------------------------------------------
+
+AUDIENCE_KINDS = {
+    "visitor": ("visitor_text", "delivered", "status"),
+    "owner": ("visitor_text", "agent_text", "delivered", "status", "whisper"),
+}
+
+
+async def transcript(conn: AsyncConnection, ids: Ids, audience: str, after: int = 0) -> list[TranscriptItem]:
+    """The session's transcript after the cursor `after`, as `audience` (visitor or owner) may see it. A visitor
+    sees their own words and what was delivered to them (each with its stored event); the owner also sees agent
+    text and whispers, with AI-written translations and triage. Model rows, notes, context and tool-change rows
+    are never items."""
+    if audience not in AUDIENCE_KINDS:
+        raise ValueError("a transcript is the visitor's or the owner's")
+    rows = (await conn.execute(
+        select(MESSAGES.c.n, MESSAGES.c.kind, MESSAGES.c.created_at, MESSAGES.c.text, MESSAGES.c.ref_id,
+               MESSAGES.c.owner_translation, RUN_EVENTS.c.payload)
+        .select_from(MESSAGES.outerjoin(RUN_EVENTS, and_(
+            RUN_EVENTS.c.session_id == MESSAGES.c.session_id, RUN_EVENTS.c.kind == "sse",
+            RUN_EVENTS.c.seq == MESSAGES.c.event_seq)))
+        .where(MESSAGES.c.copy_id == ids.copy_id, MESSAGES.c.session_id == ids.session_id,
+               MESSAGES.c.kind.in_(AUDIENCE_KINDS[audience]), MESSAGES.c.n > after)
+        .order_by(MESSAGES.c.n))).all()
+    delivered = ("delivered", "status")
+    if audience == "visitor":
+        return [TranscriptItem(n=row.n, kind=row.kind, created_at=row.created_at,
+                               text=None if row.kind in delivered else row.text,
+                               event=row.payload if row.kind in delivered else None) for row in rows]
+    triage = {row.ref_id: row.text for row in await conn.execute(
+        select(MESSAGES.c.ref_id, MESSAGES.c.text).where(
+            MESSAGES.c.session_id == ids.session_id, MESSAGES.c.kind == "triage").order_by(MESSAGES.c.n))}
+    return [OwnerTranscriptItem(n=row.n, kind=row.kind, created_at=row.created_at,
+                                text=None if row.kind in delivered else row.text,
+                                event=row.payload if row.kind in delivered else None,
+                                owner_translation=row.owner_translation,
+                                triage=triage.get(row.ref_id) if row.ref_id else None) for row in rows]

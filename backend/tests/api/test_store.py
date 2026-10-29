@@ -7,7 +7,7 @@ import psycopg
 import pytest
 from sqlalchemy import text
 
-from desk.api.ro import KernelRO
+from desk.api.ro import KernelRO, due_decisions, kernel_session
 from desk.api.store import (
     append_assistant,
     append_message,
@@ -19,10 +19,15 @@ from desk.api.store import (
     last_context_hash,
     prepare_model_input,
     start_fresh_context,
+    transcript,
     UnansweredToolUse,
     unanswered_tool_use,
     wrap,
 )
+from desk.api.deliver import Reply, Status, deliver
+from desk.api.schemas import OwnerTranscriptItem, TranscriptItem
+from desk.contracts import ReplyDraft, ToolCall
+from desk.kernel_api import CheckReplyRequest, DecideRequest
 from tests.api.conftest import new_visitor
 
 FIXTURES = Path(__file__).parent / "fixtures" / "loop_contract"
@@ -404,3 +409,75 @@ async def test_pending_needs_wake(api_conn, ids):
     assert [block["text"] for block in first[:2]] == [
         "<visitor_message>Are you there?</visitor_message>",
         "<owner_said_to_visitor>I'm here, give me a minute.</owner_said_to_visitor>"]
+
+
+async def test_transcript_projects_each_audience(api_conn, kernel_http, fake, visitor, ro_schema):
+    ids = visitor.ids
+    other = (await new_visitor(kernel_http, fake)).ids
+    draft = ReplyDraft(session_id=ids.session_id, generation=0, prose="Happy to help with your drain.")
+    verdict = await visitor.kernel.call("POST /check_reply", CheckReplyRequest(draft=draft))
+    call = ToolCall(call_id="toolu_quote", tool="native.quote",
+                    args={"items": [{"item_id": "drain", "qty": 1}], "requested_discount_bp": 500})
+    held = await visitor.kernel.call("POST /decide", DecideRequest(session_id=ids.session_id, generation=0, call=call))
+
+    await start_fresh_context(api_conn, ids, TOOLS)
+    asked = await append_message(api_conn, ids, "visitor_text", text="Hola, ¿cuánto cuesta?", language="es",
+                                 owner_translation="Hi, how much is it?")
+    await append_message(api_conn, other, "visitor_text", text="Someone else's question.")
+    await prepare_model_input(api_conn, ids.session_id)
+    await append_assistant(api_conn, ids, [{"type": "text", "text": "It's $89."}])       # never shown as written
+    await deliver(api_conn, ids, Reply(verdict, "claude", "api"), ro_schema=ro_schema)
+    await deliver(api_conn, ids, Status(held, "held"), ro_schema=ro_schema)
+    await append_message(api_conn, ids, "triage", ref_id=held.decision_id, text="Pushed for a discount.")
+    await append_message(api_conn, ids, "whisper", text="Offer a callback instead.")
+    await append_message(api_conn, ids, "note", text="The visitor verified.")
+    await append_message(api_conn, ids, "owner_say", text="I'll call you at noon.")
+    await append_tool_change(api_conn, ids, "tool_removal", "native__start_verification")
+
+    seen = await transcript(api_conn, ids, "visitor")
+    assert all(type(item) is TranscriptItem for item in seen)
+    assert [(item.kind, item.text) for item in seen] == [
+        ("visitor_text", "Hola, ¿cuánto cuesta?"), ("delivered", None), ("status", None)]
+    assert seen[0].event is None
+    assert seen[1].event.type == "message" and seen[1].event.message_id == verdict.message_id
+    assert seen[2].event.type == "held" and seen[2].event.signature == held.signature
+    assert "owner_translation" not in seen[0].model_dump() and "triage" not in seen[2].model_dump()
+    assert "$89" not in str([item.model_dump() for item in seen])
+
+    owner = await transcript(api_conn, ids, "owner")
+    assert all(type(item) is OwnerTranscriptItem for item in owner)
+    assert [(item.kind, item.text, item.owner_translation, item.triage) for item in owner] == [
+        ("visitor_text", "Hola, ¿cuánto cuesta?", "Hi, how much is it?", None), ("delivered", None, None, None),
+        ("status", None, None, "Pushed for a discount."), ("whisper", "Offer a callback instead.", None, None)]
+    # the cursor: only what came after it
+    assert [item.n for item in await transcript(api_conn, ids, "owner", after=asked)] == [item.n for item in owner[1:]]
+    with pytest.raises(ValueError):
+        await transcript(api_conn, ids, "model")
+
+
+async def test_unscoped_reads_take_the_copy_from_the_apis_rows(api_conn, kernel_http, fake, ro_schema):
+    # a kernel answer that names only a session (a payment completion) or a job holding only decision IDs reads
+    # kernel_ro in the copy the API's own rows put that session or decision in, never in another
+    first, second = await new_visitor(kernel_http, fake), await new_visitor(kernel_http, fake)
+    holds = []
+    for someone, call_id in ((first, "toolu_1"), (second, "toolu_2")):
+        call = ToolCall(call_id=call_id, tool="native.quote",
+                        args={"items": [{"item_id": "drain", "qty": 1}], "requested_discount_bp": 500})
+        decision = await someone.kernel.call("POST /decide", DecideRequest(session_id=someone.ids.session_id,
+                                                                            generation=0, call=call))
+        await deliver(api_conn, someone.ids, Status(decision, "held"), ro_schema=ro_schema)
+        holds.append(decision)
+
+    session = await kernel_session(api_conn, second.ids.session_id, ro_schema)
+    assert (session["session_id"], session["copy_id"], session["desk_id"]) == (
+        second.ids.session_id, second.ids.copy_id, second.ids.desk_id)
+    stranger = await new_visitor(kernel_http, fake)             # a session with no rows of the API's
+    assert await kernel_session(api_conn, stranger.ids.session_id, ro_schema) is None
+    assert await kernel_session(api_conn, "no-such-session", ro_schema) is None
+
+    seeded = next(record.decision for record in fake.decisions.values()
+                  if record.copy_id == first.ids.copy_id and record.decision.call_id == "seed-held-quote")
+    found = await due_decisions(api_conn, [holds[0].decision_id, holds[1].decision_id, seeded.decision_id], ro_schema)
+    assert sorted((row["decision_id"], row["copy_id"], row["state"]) for row in found) == sorted(
+        [(holds[0].decision_id, first.ids.copy_id, "held"), (holds[1].decision_id, second.ids.copy_id, "held")])
+    assert await due_decisions(api_conn, [], ro_schema) == []
