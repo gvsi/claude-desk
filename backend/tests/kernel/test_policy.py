@@ -481,3 +481,23 @@ async def test_bounded_mode_never_activates_owner_drafts(app, client, monkeypatc
     use_prover(monkeypatch, "desk_prove_slow_ok.sh")
     reproved = await drafted(client, desk, [card("dana-books", "native.book", who="person", person_id=desk.dana)])
     assert (reproved.version, reproved.status, reproved.proof.method) == (3, "proved", "symcc") and len(runs) == 1
+
+
+@pytest.mark.solver
+async def test_bounded_mode_refuses_a_previously_proved_draft(desk_prove, app, client, monkeypatch):
+    """A draft SymCC proved earlier doesn't activate once the kernel runs `bounded` (restarted
+    where desk-prove can't run): no owner draft activates while rules can't be proved."""
+    desk = await desk_with_tools(app)
+    draft = await drafted(client, desk, BOOK_AND_ASK_CHARGES)
+    assert (draft.version, draft.status, draft.proof.method) == (2, "proved", "symcc")
+    monkeypatch.setattr(activation, "_proof_mode", "bounded")                   # as a restart's selftest leaves it
+    response = await post_confirm(client, desk, draft.version)
+    assert (response.status_code, response.json()) == (409, {"code": "conflict"})
+    assert (await policy_entries(app, desk))[-1] == {"version": 2, "refused": "not_proved"}
+    await assert_still_active(app, desk, 1)
+    [row] = [row for row in await versions(app, desk) if row.version == draft.version]
+    assert (row.status, row.proof) == ("proved", draft.proof)                    # the draft is left as it was
+    # once SymCC can run again, the same draft confirms
+    monkeypatch.setattr(activation, "_proof_mode", "symcc")
+    assert (await post_confirm(client, desk, draft.version)).status_code == 200
+    await assert_still_active(app, desk, 2)

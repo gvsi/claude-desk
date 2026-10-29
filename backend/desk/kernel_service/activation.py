@@ -14,8 +14,8 @@ either mode; a miss is never proved inline (503 `seed_unproved`).
 Owner drafts. `draft` (`POST /policy/draft`) compiles the owner's cards, loads them (lint and
 validation) and proves them in `symcc` mode, or only checks them in `bounded` mode; every failing
 check reads in the owner's words (`explain.py`). `confirm` (`POST /policy/confirm`) activates a
-draft only when a SymCC proof of all seven obligations holds, its parent is still the active
-version and everything it was proved against is current.
+draft only in `symcc` mode, when a SymCC proof of all seven obligations holds, its parent is still
+the active version and everything it was proved against is current.
 
 Loaded versions. A stored version loads into the policy engine on its first use
 (`LoadedVersions`), bounded to `MAX_LOADED_VERSIONS` per engine, least recently used out first.
@@ -832,14 +832,18 @@ async def confirm(ctx: KernelCtx, desk_id: str, version: int) -> PolicyVersion:
     from: <old>}`. Confirms on the Desk are serialized by its `versions` lock, and the active row
     is locked `FOR UPDATE`. Refused, in this order, with `ConfirmConflict`:
 
+    - `not_proved`, before anything else: the process runs in `bounded` mode, where no owner
+      draft activates, even one SymCC proved before a restart;
     - `not_proved`: the version isn't `proved` by a SymCC proof of all seven obligations (a
       bounded check, a rejection, or a version already active or superseded);
     - `parent_changed`: the version it was drafted on is no longer the active one;
     - `hash_changed`: the schema, baseline, enabled profiles, invariants or review thresholds it
       was proved against aren't the current ones (`current_hashes`).
 
-    A version the Desk doesn't have is 404 `not_found`."""
+    Past the mode check, a version the Desk doesn't have is 404 `not_found`."""
     copy_id = ctx.copy_id
+    if proof_mode() != "symcc":
+        raise ConfirmConflict(copy_id, desk_id, version, "not_proved")
     await _lock(ctx, "versions", desk_id)
     active = (await ctx.db.scalars(ctx.repo.scoped(select(PolicyVersionRow).where(
         PolicyVersionRow.desk_id == desk_id, PolicyVersionRow.status == "active").with_for_update()))).one_or_none()
