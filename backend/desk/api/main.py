@@ -8,11 +8,11 @@ lifespan opens the kernel client, checks it is the production one when it must b
 the turn locks' pool, the run events listener, the turn runner and the job queue with its worker (`jobs.py`), and
 closes them in the reverse order, the worker's jobs and the runner's turns first, with the model client it built
 (never an injected one) last. Building the app sets the job queue's loggers (`procrastinate` and its children) to
-WARNING: below it, Procrastinate logs each job's call string, arguments included, and the resume job's signed decision
-quotes the visitor. In production the app refuses to start without its secrets (the API key, the
-passcode hash and the public origin, which `Settings` requires), with a Bedrock setting or credential (refused by
-`Settings`) and with any test hook: `ANTHROPIC_BASE_URL` (refused by `Settings`), an injected clock, model, kernel
-transport or job queue connector. A passcode hash that isn't one refuses to start anywhere.
+WARNING and filters them (`JobRecords`): Procrastinate names each job with its arguments below WARNING and when a job
+fails, and the resume job's signed decision quotes the visitor. In production the app refuses to start without its
+secrets (the API key, the passcode hash and the public origin, which `Settings` requires), with a Bedrock setting or
+credential (refused by `Settings`) and with any test hook: `ANTHROPIC_BASE_URL` (refused by `Settings`), an injected
+clock, model, kernel transport or job queue connector. A passcode hash that isn't one refuses to start anywhere.
 
 Every error answer is an `ApiError` ("Errors"): a kernel refusal keeps its status with `{error: "kernel",
 code}`, an unreachable kernel is 503 `{error: "kernel", code}` (`seed_unproved`, `internal`, else
@@ -34,7 +34,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from desk.api.deps import ApiProblem, Runtime, runtime
-from desk.api.jobs import JobEnv, jobs_app, run_worker
+from desk.api.jobs import WORKER, JobEnv, jobs_app, run_worker
 from desk.api.kernel_client import KernelFailed, KernelHttp, KernelUnavailable, assert_production_safe
 from desk.api.loop import TURN_LOCK_POOL_SIZE
 from desk.api.model import make_model
@@ -53,17 +53,57 @@ logger = logging.getLogger(__name__)
 POOL_SIZE, MAX_OVERFLOW, POOL_TIMEOUT_S = 20, 10, 5
 KERNEL_CODES = frozenset({"seed_unproved", "internal"})
 JOB_QUEUE_LOGGER = "procrastinate"
+# The worker's loggers, which don't exist until it starts: its module's, where a failed job is logged, and its own.
+JOB_WORKER_LOGGERS = (f"{JOB_QUEUE_LOGGER}.worker", f"{JOB_QUEUE_LOGGER}.worker.{WORKER}")
+# What a record that carries a job keeps: a record's own fields, and the action and worker Procrastinate adds.
+JOB_RECORD_FIELDS = frozenset(vars(logging.LogRecord("", logging.NOTSET, "", 0, "", (), None))) | {"action", "worker"}
 
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+def _job_name(job: object) -> str:
+    """`task[id]`, from the log context Procrastinate puts in a record."""
+    return f"{job.get('task_name')}[{job.get('id')}]" if isinstance(job, dict) else "a job"
+
+
+class JobRecords(logging.Filter):
+    """Reduces a job queue record that carries a job (its `job` extra, or `jobs` for a batch) to its action, each job's
+    task and ID, and its error's type. Its call string (the job's arguments), `args`, other extras and the error's
+    message and traceback are dropped. A record without a job passes unchanged."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        fields = vars(record)
+        if "job" in fields:
+            carried = [fields["job"]]
+        elif "jobs" in fields:
+            carried = fields["jobs"] if isinstance(fields["jobs"], list) else [fields["jobs"]]
+        else:
+            return True
+        action = fields.get("action") if isinstance(fields.get("action"), str) else "job"
+        error = record.exc_info[0] if isinstance(record.exc_info, tuple) else None
+        record.msg = f"{action}: {', '.join(_job_name(job) for job in carried)}" + (
+            f" ({error.__name__})" if error is not None else "")
+        record.args = ()
+        record.exc_info = record.exc_text = record.stack_info = None
+        for name in fields.keys() - JOB_RECORD_FIELDS:
+            delattr(record, name)
+        return True
+
+
+JOB_RECORDS = JobRecords()
+
+
 def _quiet_job_queue_logs() -> None:
-    """The job queue logs only warnings and errors: its INFO and DEBUG records name each job with its arguments."""
-    names = [name for name in logging.root.manager.loggerDict if name.startswith(JOB_QUEUE_LOGGER + ".")]
-    for name in (JOB_QUEUE_LOGGER, *names):
-        logging.getLogger(name).setLevel(logging.WARNING)
+    """The job queue logs only warnings and errors, since its INFO and DEBUG records name each job with its arguments,
+    and `JobRecords` reduces each of its records that carries a job, so a failed job's ERROR doesn't name them either.
+    A logger's filter doesn't see its children's records, so the level and the filter go on each of its loggers."""
+    names = {name for name in logging.root.manager.loggerDict if name.startswith(JOB_QUEUE_LOGGER + ".")}
+    for name in (JOB_QUEUE_LOGGER, *sorted(names.union(JOB_WORKER_LOGGERS))):
+        job_queue = logging.getLogger(name)
+        job_queue.setLevel(logging.WARNING)
+        job_queue.addFilter(JOB_RECORDS)
 
 
 def _refuse_test_hooks(settings: Settings, hooks: dict[str, Any]) -> None:

@@ -56,6 +56,7 @@ SCHEDULE = {SURFACE_DUE_DECISIONS: "* * * * *", RETRY_STALLED_JOBS: "*/10 * * * 
 SHUTDOWN_GRACE_S = 5.0             # a stopping worker waits this long for its running jobs
 RESTART_S = 5.0                    # a failed worker starts again after this long
 ENV = "desk"                       # the worker's `additional_context` key for the jobs' `JobEnv`
+WORKER = "desk-api"                # the worker's name: Procrastinate logs its jobs on `procrastinate.worker.desk-api`
 EXPIRES = frozenset({"allowed", "held"})    # the states the kernel expires lazily, on its next read
 
 
@@ -110,7 +111,7 @@ async def run_worker(app: procrastinate.App, env: JobEnv) -> None:
     only: jobs wait in the queue meanwhile."""
     while True:
         try:
-            await app.run_worker_async(queues=[QUEUE], name="desk-api", install_signal_handlers=False,
+            await app.run_worker_async(queues=[QUEUE], name=WORKER, install_signal_handlers=False,
                                        additional_context={ENV: env}, shutdown_graceful_timeout=SHUTDOWN_GRACE_S)
             logger.error("the job worker stopped; starting it again")
         except Exception as error:

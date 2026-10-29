@@ -1,8 +1,8 @@
 """Credentials at rest (Plan 02a, "Credentials at rest"; master plan, "Resuming the conversation"): tokens live only in
 cookies and in the memory of the request or turn holding them, never in `app.*`, the job queue's arguments, a model
 request or a log, through a whole conversation with an owner's answer in the middle of it. The logs carry no visitor
-text either: the job queue logs a job's arguments below WARNING, and the resume job's signed decision quotes the
-visitor (its `reason_plain`)."""
+text either: the job queue names a job with its arguments below WARNING and when the job fails, and the resume job's
+signed decision quotes the visitor (its `reason_plain`)."""
 
 import asyncio
 import hashlib
@@ -16,6 +16,8 @@ import pytest
 from fastapi import FastAPI
 from procrastinate.testing import InMemoryConnector
 
+from desk.api import jobs
+from desk.api.jobs import RESUME_AFTER_ANSWER
 from desk.api.main import create_app
 from desk.db.tables import APP_TABLES
 from tests.api.conftest import PASSCODE
@@ -118,3 +120,45 @@ async def test_no_credential_at_rest_after_a_full_flow(app, browser, fake, model
             if record.name.split(".")[0] == "procrastinate" and record.levelno <= logging.INFO] == []
     every_field = "\n".join(repr(vars(record)) for record in caplog.records)
     assert [text for text in said if text in logged or text in every_field] == []
+
+
+JOB_FAILED = "the resume job failed on purpose"
+
+
+@pytest.mark.parametrize("job_queue_level", [None, logging.DEBUG], ids=["as built", "turned up to debug"])
+async def test_a_failed_resume_job_logs_no_arguments(app, browser, fake, model, jobs_connector, caplog, monkeypatch,
+                                                     job_queue_level):
+    """The job queue logs a failed job at ERROR. That record names the action, the task and the job, and the error by
+    its type only: never the job's arguments (the signed decision quotes the visitor), the error's message or its
+    traceback. The same holds for every record that carries a job when the job queue's loggers are turned up."""
+    if job_queue_level is not None:
+        for name in [name for name in logging.root.manager.loggerDict if name.split(".")[0] == "procrastinate"]:
+            caplog.set_level(job_queue_level, logger=name)
+    caplog.set_level(logging.DEBUG)
+    owner = browser(app)
+    slug = (await owner.post("/api/owner/copies", json={"passcode": PASSCODE})).json()["desks"][0]["slug"]
+    visitor = browser(app, ip="198.51.100.20")
+    session_id = (await visitor.post(f"/api/public/desks/{slug}/sessions")).json()["state"]["session_id"]
+    said = "A discount, please? The sink flooded twice"
+    model.add(response(tool_use("native__quote", {**DISCOUNTED_QUOTE, "note": said}),
+                       reply("I've asked Maria to look at this.")))
+    assert (await visitor.post(f"/api/public/desks/{slug}/messages", json={"text": said})).status_code == 202
+    await app.state.runtime.runner.drain()
+    (decision_id,) = [record.decision.decision_id for record in fake.decisions.values()
+                      if record.decision.session_id == session_id and record.decision.state == "held"]
+
+    async def fails(conn, ids, decision):
+        raise RuntimeError(f"{JOB_FAILED}: {decision.reason_plain}")
+
+    monkeypatch.setattr(jobs, "resume_after_answer", fails)
+    answered = await owner.post(f"/api/owner/approvals/{decision_id}/answer", json={"answer": "allow_once"})
+    assert answered.status_code == 200
+    (job,) = await jobs_done(jobs_connector)
+    assert job["status"] == "failed" and said in json.dumps(job["args"])     # what the job held quoted the visitor
+
+    assert [(record.name, record.levelname, record.getMessage()) for record in caplog.records
+            if record.name.split(".")[0] == "procrastinate" and record.levelno >= logging.WARNING] == [
+        ("procrastinate.worker", "ERROR", f"job_error: {RESUME_AFTER_ANSWER}[{job['id']}] (RuntimeError)")]
+    logged = "\n".join([caplog.text, *(record.getMessage() + repr(record.args) + repr(vars(record))
+                                       for record in caplog.records)])
+    assert [text for text in (JOB_FAILED, said) if text in logged] == []
