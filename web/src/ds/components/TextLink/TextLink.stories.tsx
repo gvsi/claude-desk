@@ -7,7 +7,7 @@ const meta = {
   title: 'Actions/TextLink',
   component: TextLink,
   args: { href: '#rule-discounts', children: 'See rule' },
-  parameters: { layout: 'padded', canvas: 'N-Today-NeedsYou' },
+  parameters: { layout: 'padded', canvas: 'N-Today-Run1' },
 } satisfies Meta<typeof TextLink>;
 
 export default meta;

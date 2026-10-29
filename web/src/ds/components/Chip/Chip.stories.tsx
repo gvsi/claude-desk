@@ -7,7 +7,7 @@ const meta = {
   title: 'Actions/Chip',
   component: Chip,
   args: { children: 'What happened overnight?', onClick: fn() },
-  parameters: { layout: 'padded', canvas: 'N-Today-NeedsYou' },
+  parameters: { layout: 'padded', canvas: 'N-Today-Run1' },
 } satisfies Meta<typeof Chip>;
 
 export default meta;
@@ -28,7 +28,7 @@ const OPTIONS = ['Call', 'Text', 'Email'] as const;
 
 export const SelectedRadio: Story = {
   parameters: {
-    canvas: 'N-Public-Handoff',
+    canvas: 'N-Public-Handoff-Run1',
     canvasNote:
       'The board offers callback windows as times; here the options are plain words, because times come only from the kernel. The chip is 28 px, as on the owner boards.',
   },

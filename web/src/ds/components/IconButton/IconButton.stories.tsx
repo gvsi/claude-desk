@@ -7,7 +7,7 @@ const meta = {
   title: 'Actions/IconButton',
   component: IconButton,
   args: { label: 'Add a photo or file', icon: 'plus', onClick: fn() },
-  parameters: { layout: 'padded', canvas: 'N-Today-NeedsYou' },
+  parameters: { layout: 'padded', canvas: 'N-Today-Run1' },
 } satisfies Meta<typeof IconButton>;
 
 export default meta;

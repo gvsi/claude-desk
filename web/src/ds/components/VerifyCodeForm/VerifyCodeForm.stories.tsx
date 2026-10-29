@@ -51,8 +51,9 @@ const meta = {
   render: (args) => <UnderTheCard {...args} />,
   parameters: {
     layout: 'padded',
-    canvas: 'none',
-    canvasNote: `From the canvas board ${BOARD} (Chen & Co. CPA, while the code is on its way), which draws this form from TextField and Button under the verify card; that board joins the reference boards later in this plan.`,
+    canvas: BOARD,
+    canvasNote:
+      "The board's left column (Chen & Co. CPA, while the code is on its way) draws this form from TextField and Button under the verify card, in a dashed box from before the form was built.",
   },
 } satisfies Meta<typeof VerifyCodeForm>;
 
@@ -240,7 +241,7 @@ async function expectVerifiedLine(root: HTMLElement, words: string, language: 'e
 export const VerifiedSimulated: Story = {
   render: () => <VerifiedLine text={`Verified with a code sent to ${chen.people.raj.maskedContact}`} assurance="demo_code" language="en" />,
   parameters: {
-    canvasNote: `From the canvas board ${BOARD} (Chen & Co. CPA, after the code), where the board adds the label by hand; the board joins the reference boards later in this plan.`,
+    canvasNote: "The board's right column (Chen & Co. CPA, after the code), where the board adds the label by hand.",
   },
   play: async ({ canvasElement }) => {
     // demo_code_is_labelled_simulated: a code from the Demo inbox proves the routing, not the

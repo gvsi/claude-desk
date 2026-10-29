@@ -95,7 +95,7 @@ const meta = {
       </div>
     ),
   ],
-  parameters: { layout: 'padded', canvas: 'N-Conv-Live' },
+  parameters: { layout: 'padded', canvas: 'N-Conv-Run1' },
 } satisfies Meta<typeof TranscriptRow>;
 
 export default meta;

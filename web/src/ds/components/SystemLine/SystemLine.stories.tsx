@@ -12,7 +12,7 @@ const meta = {
   title: 'Conversation/SystemLine',
   component: SystemLine,
   args: { text: `${joined.name} joined the chat`, initials: 'MR' },
-  parameters: { layout: 'padded', canvas: 'N-Public-Handoff' },
+  parameters: { layout: 'padded', canvas: 'N-Public-Handoff-Run1' },
 } satisfies Meta<typeof SystemLine>;
 
 export default meta;
@@ -69,7 +69,7 @@ export const OwnerLeft: Story = {
 export const Verified: Story = {
   args: { text: `Verified with a code sent to ${chen.people.raj.maskedContact}`, initials: undefined },
   parameters: {
-    canvas: 'N-Public-Verify',
+    canvas: 'N-Public-Verify-Run1',
     canvasNote: "The board adds a sage check and a time; the line carries only its words, and the verification form's line adds the simulated label.",
   },
   play: async ({ canvas }) => {

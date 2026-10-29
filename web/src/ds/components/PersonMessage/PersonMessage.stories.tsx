@@ -14,7 +14,7 @@ const meta = {
   title: 'Conversation/PersonMessage',
   component: PersonMessage,
   args: { name: rivera.business.ownerName, role: 'owner', blocks: said.blocks, language: said.language },
-  parameters: { layout: 'padded', canvas: 'N-Public-Handoff' },
+  parameters: { layout: 'padded', canvas: 'N-Public-Handoff-Run1' },
 } satisfies Meta<typeof PersonMessage>;
 
 export default meta;

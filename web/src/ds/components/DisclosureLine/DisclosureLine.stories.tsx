@@ -14,7 +14,7 @@ const meta = {
   parameters: {
     layout: 'padded',
     canvas: 'none',
-    canvasNote: `From the owner-signed canvas board ${BOARD}, which draws this line on the Agent Card page and the mock checkout; that board joins the reference boards later in this plan.`,
+    canvasNote: `From the owner-signed canvas board ${BOARD}, which draws this line on the Agent Card page and the mock checkout; the line stays outside the reference boards, checked against that board by its own stories.`,
   },
 } satisfies Meta<typeof DisclosureLine>;
 

@@ -38,7 +38,7 @@ const meta = {
   ],
   parameters: {
     layout: 'padded',
-    canvas: 'N-Safety',
+    canvas: 'N-Safety-Run1',
     canvasNote:
       'The board shows the full trace closed, as a bordered row under the checkpoints; this is one entry opened, in the same bordered style.',
   },

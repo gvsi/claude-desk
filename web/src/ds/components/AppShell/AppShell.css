@@ -51,6 +51,21 @@
   margin: 0 auto;
 }
 
+/* Fill: a page with its own columns takes the whole main area, its height and its width. The
+   content is one grid cell, so the page in it stretches to the window's height. */
+.cd-app-shell__main--fill {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+}
+
+.cd-app-shell__main--fill > .cd-app-shell__content {
+  display: grid;
+  flex: 1 0 auto;
+  grid-template-columns: minmax(0, 1fr);
+  max-width: none;
+}
+
 /* Compact: the top bar. */
 .cd-app-shell__topbar {
   display: flex;
@@ -139,7 +154,7 @@
 }
 
 @media (max-width: 767.98px) {
-  .cd-app-shell__main {
+  .cd-app-shell__main:not(.cd-app-shell__main--fill) {
     padding-right: var(--space-16);
     padding-left: var(--space-16);
   }

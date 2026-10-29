@@ -25,6 +25,11 @@ export interface AppShellProps {
   banner?: ReactNode;
   /** `auto` (the default) shows the column from 768 px up; `compact` always shows the top bar. */
   layout?: 'auto' | 'compact';
+  /**
+   * The page fills the main area edge to edge, with no padding and no content width, for a page
+   * that lays out its own columns, such as Conversations' list beside the open conversation.
+   */
+  fill?: boolean;
   /** The page. */
   children: ReactNode;
 }
@@ -49,7 +54,7 @@ function isNarrow(): boolean {
  * Menu opens the sidebar as a modal sheet, and Escape, "Close menu" or going to a page closes it
  * and returns focus to Menu.
  */
-export function AppShell({ sidebar, business, banner, layout = 'auto', children }: AppShellProps) {
+export function AppShell({ sidebar, business, banner, layout = 'auto', fill = false, children }: AppShellProps) {
   const narrow = useSyncExternalStore(subscribeNarrow, isNarrow, () => false);
   const compact = layout === 'compact' || narrow;
 
@@ -66,15 +71,15 @@ export function AppShell({ sidebar, business, banner, layout = 'auto', children 
             {sidebar}
           </aside>
         )}
-        <Main>{children}</Main>
+        <Main fill={fill}>{children}</Main>
       </div>
     </div>
   );
 }
 
-function Main({ children }: { children: ReactNode }) {
+function Main({ fill, children }: { fill: boolean; children: ReactNode }) {
   return (
-    <main className="cd-app-shell__main">
+    <main className={`cd-app-shell__main${fill ? ' cd-app-shell__main--fill' : ''}`}>
       <div className="cd-app-shell__content">{children}</div>
     </main>
   );

@@ -23,7 +23,7 @@ const meta = {
   title: 'Conversation/ClaudeMessage',
   component: ClaudeMessage,
   args: { blocks: [bookingAsk], language: 'en', ownerName: rivera.business.ownerName },
-  parameters: { layout: 'padded', canvas: 'N-Conv-Live' },
+  parameters: { layout: 'padded', canvas: 'N-Conv-Run1' },
 } satisfies Meta<typeof ClaudeMessage>;
 
 export default meta;
@@ -100,7 +100,7 @@ export const Spanish: Story = {
 export const PaymentConfirmed: Story = {
   args: { blocks: paid.blocks, language: paid.language },
   parameters: {
-    canvas: 'N-Conv-Agent',
+    canvas: 'N-Conv-Agent-Run1',
     canvasNote:
       "The board shows the paid deposit as a receipt row; the kernel's own message (author desk) carries the payment_confirmed card, shown like Claude's.",
   },

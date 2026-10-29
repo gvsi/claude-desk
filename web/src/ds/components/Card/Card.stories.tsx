@@ -9,7 +9,11 @@ const meta = {
   title: 'Layout/Card',
   component: Card,
   args: { children: null },
-  parameters: { layout: 'padded', canvas: 'N-Rules-Rivera' },
+  parameters: {
+    layout: 'padded',
+    canvas: 'none',
+    canvasNote: 'The Connectors and rules boards replace the earlier Rules board this card came from; the nearest reference board with cards is N-Today-Run1.',
+  },
 } satisfies Meta<typeof Card>;
 
 export default meta;
@@ -49,7 +53,10 @@ export const Default: Story = {
       <Card {...args} />
     </div>
   ),
-  parameters: { canvasNote: 'A capability card from the board with its rule rows left out; those are Plan 03b components.' },
+  parameters: {
+    canvasNote:
+      'A capability card from the earlier Rules board, with its rule rows left out. The Connectors and rules boards replace that board; the nearest reference board with cards is N-Today-Run1.',
+  },
   play: async ({ canvas }) => {
     const card = canvas.getByRole('article', { name: 'Quotes' });
     expectComputed(card, { ...CARD_LOOK, paddingTop: '16px', paddingLeft: '16px' });
@@ -83,7 +90,7 @@ export const WithStatusHeader: Story = {
     </div>
   ),
   parameters: {
-    canvas: 'N-Today-NeedsYou',
+    canvas: 'N-Today-Run1',
     canvasNote: 'The live handoff card without its two buttons, which the Today screen adds.',
   },
   play: async ({ canvas, canvasElement }) => {

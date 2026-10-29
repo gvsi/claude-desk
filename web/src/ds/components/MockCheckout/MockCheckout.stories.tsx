@@ -37,7 +37,7 @@ const meta = {
   parameters: {
     layout: 'fullscreen',
     canvas: 'none',
-    canvasNote: `From the owner-signed canvas board ${BOARD}, which draws the checkout in every state; that board joins the reference boards later in this plan. The title is the link's own (PaymentLinkView.title), where the board writes "Service call deposit, $20". Pay and Cancel are the design system's main buttons, 40 px tall, where the board draws 44 px.`,
+    canvasNote: `From the owner-signed canvas board ${BOARD}, which draws the checkout in every state; the checkout stays outside the reference boards, checked against that board by its own stories. The title is the link's own (PaymentLinkView.title), where the board writes "Service call deposit, $20". Pay and Cancel are the design system's main buttons, 40 px tall, where the board draws 44 px.`,
   },
 } satisfies Meta<typeof MockCheckout>;
 

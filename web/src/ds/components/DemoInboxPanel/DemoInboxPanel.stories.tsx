@@ -84,8 +84,8 @@ const meta = {
   ],
   parameters: {
     layout: 'fullscreen',
-    canvas: 'none',
-    canvasNote: `From the canvas board ${BOARD}, whose middle column draws this panel by hand; that board joins the reference boards later in this plan. The entry's body is the kernel's code message (inbox_code_body), longer than the board's shortened one.`,
+    canvas: BOARD,
+    canvasNote: `The board's middle column draws this panel by hand, in a dashed box from before the panel was built. The entry's body is the kernel's code message (inbox_code_body), longer than the board's shortened one.`,
   },
 } satisfies Meta<typeof DemoInboxPanel>;
 
