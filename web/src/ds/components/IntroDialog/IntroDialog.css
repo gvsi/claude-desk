@@ -1,0 +1,348 @@
+/* IntroDialog: a native modal dialog that is its own scrim, filling the window, with the panel
+   centered 40 px in (16 px under 720 px). The panel is bg-surface at radius-card, an inset hairline
+   and shadow-dialog: the content column, then the clay illustration column at
+   size-intro-illustration. Clay is a field here and nowhere else but the mark.
+
+   Under 720 px (a media query: the dialog always fills the window, so the window's width is the
+   dialog's) the illustration isn't drawn and the field and button stack. A short window scrolls
+   the panel inside itself. Nothing moves beyond the button's own transitions. */
+
+.cd-intro {
+  position: fixed;
+  inset: 0;
+  box-sizing: border-box;
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: var(--space-40);
+  border: 0;
+  background: var(--scrim);
+  color: var(--text-primary);
+  overflow: hidden;
+}
+
+.cd-intro[open] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* The dialog draws the scrim itself, so the browser's backdrop stays clear. */
+.cd-intro::backdrop {
+  background: transparent;
+}
+
+.cd-intro__panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--size-intro-illustration);
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--size-intro);
+  max-height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-radius: var(--radius-card);
+  background: var(--bg-surface);
+  box-shadow:
+    inset 0 0 0 1px var(--line-hairline),
+    var(--shadow-dialog);
+}
+
+/* The content column: 22 px between its groups, as on the board. */
+.cd-intro__content {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  min-width: 0;
+  padding: var(--space-28);
+}
+
+.cd-intro__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.cd-intro__brand > .cd-pill {
+  margin-left: var(--space-4);
+}
+
+.cd-intro__lede {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+}
+
+.cd-intro__title {
+  margin: 0;
+  text-wrap: balance;
+}
+
+.cd-intro__text {
+  margin: 0;
+}
+
+.cd-intro__things {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+}
+
+/* Two classes, so the weight wins over .cd-type-meta whatever order the stylesheets load in. */
+.cd-intro__heading.cd-type-meta {
+  margin: 0;
+  color: var(--text-secondary);
+  font-weight: 520;
+}
+
+.cd-intro__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Each icon is centered against its title and detail. */
+.cd-intro__thing {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+}
+
+.cd-intro__thing-icon {
+  flex: none;
+  color: var(--text-secondary);
+}
+
+.cd-intro__thing-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.cd-intro__thing-title {
+  display: block;
+  font-weight: 520;
+}
+
+.cd-intro__thing-detail {
+  display: block;
+  color: var(--text-secondary);
+}
+
+/* The passcode and the footer sit at the bottom of the column. */
+.cd-intro__foot {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+  margin-top: auto;
+}
+
+.cd-intro__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  margin: 0;
+}
+
+.cd-intro__label.cd-type-meta {
+  align-self: flex-start;
+  color: var(--text-primary);
+  font-weight: 520;
+}
+
+.cd-intro__row {
+  display: flex;
+  gap: var(--space-8);
+}
+
+.cd-intro__field {
+  flex: 1 1 auto;
+  box-sizing: border-box;
+  min-width: 0;
+  height: var(--size-control-main);
+  margin: 0;
+  padding: 0 var(--space-12);
+  border: 1px solid var(--line-control);
+  border-radius: var(--radius-control);
+  background: var(--fill-card);
+  color: var(--text-primary);
+}
+
+.cd-intro__row > .cd-button {
+  flex: none;
+}
+
+/* The illustration: two light cards on a clay field, centered, with two soft arcs behind them. */
+.cd-intro__illustration {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-14);
+  min-width: 0;
+  padding: 36px var(--space-32);
+  overflow: hidden;
+  background: var(--clay);
+  color: var(--illustration-ink);
+}
+
+/* The arcs run on past the SVG's box to the column's edge, which clips them. */
+.cd-intro__arcs {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: visible;
+}
+
+.cd-intro__arcs path {
+  stroke: var(--illustration-arc);
+  stroke-width: 26;
+}
+
+.cd-intro__card {
+  position: relative;
+  display: flex;
+  gap: var(--space-12);
+  padding: var(--space-14) var(--space-16);
+  border-radius: var(--radius-card);
+  background: var(--illustration-card);
+  box-shadow: var(--shadow-illustration-card);
+}
+
+.cd-intro__card p {
+  margin: 0;
+}
+
+.cd-intro__avatar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--size-control);
+  height: var(--size-control);
+  border-radius: var(--radius-full);
+  background: var(--illustration-avatar);
+  font-size: 12px;
+  line-height: 1;
+  font-weight: 560;
+}
+
+.cd-intro__tile {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--size-control);
+  height: var(--size-control);
+  border-radius: var(--radius-control);
+  background: var(--bg-app);
+}
+
+.cd-intro__card-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.cd-intro__card-body--reply {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.cd-intro__card .cd-intro__who {
+  font-weight: 600;
+}
+
+.cd-intro__card .cd-intro__where {
+  color: var(--illustration-ink-secondary);
+}
+
+.cd-intro__card .cd-intro__said {
+  margin-top: var(--space-2);
+}
+
+/* Claude's reply, in serif. */
+.cd-intro__reply {
+  font-family: var(--font-serif);
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 380;
+  font-variation-settings: 'opsz' 20;
+}
+
+.cd-intro__booked {
+  padding: var(--space-10) var(--space-12);
+  border: 1px solid var(--illustration-line);
+  border-radius: 10px;
+}
+
+.cd-intro__card .cd-intro__booked-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  color: var(--illustration-ink-secondary);
+  font-weight: 520;
+}
+
+.cd-intro__check {
+  flex: none;
+  color: var(--illustration-handled);
+}
+
+.cd-intro__card .cd-intro__booked-when {
+  margin-top: var(--space-2);
+  font-weight: 560;
+}
+
+.cd-intro__booked-with,
+.cd-intro__receipts {
+  color: var(--illustration-ink-secondary);
+}
+
+.cd-intro__receipts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.cd-intro__receipt {
+  display: flex;
+  gap: var(--space-8);
+}
+
+.cd-intro__dot {
+  flex: none;
+  width: var(--size-dot);
+  height: var(--size-dot);
+  margin-top: var(--space-6);
+  border-radius: var(--radius-full);
+  background: var(--illustration-handled);
+}
+
+@media (max-width: 719.98px) {
+  .cd-intro {
+    padding: var(--space-16);
+  }
+
+  .cd-intro__panel {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .cd-intro__illustration {
+    display: none;
+  }
+
+  .cd-intro__row {
+    flex-direction: column;
+  }
+
+  .cd-intro__field {
+    flex: none;
+    width: 100%;
+  }
+}

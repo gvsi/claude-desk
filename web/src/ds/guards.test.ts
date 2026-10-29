@@ -94,6 +94,13 @@ function rawColors(text: string, file: string): string[] {
 // The clay of the Claude Desk mark: its token, its hex and its RGB triplet.
 const CLAY = /--clay\b|#e08968\b|224\s*,\s*137\s*,\s*104/gi;
 
+// The only folders that may use clay: the mark, and the field behind the first-visit intro's illustration.
+const CLAY_FOLDERS = ['components/Mark/', 'components/IntroDialog/'] as const;
+
+function mayUseClay(file: string): boolean {
+  return CLAY_FOLDERS.some((folder) => file.startsWith(folder));
+}
+
 // A number with a time unit ("200ms", ".2s", "0s", "-200ms"), not part of a name like "space-2s".
 const RAW_DURATION = /(?<![\w.])(?<!\w-)\d*\.?\d+(?:ms|s)\b/g;
 
@@ -179,13 +186,17 @@ describe('design system source guards', () => {
     expect(findAll(sources, rawColors)).toEqual([]);
   });
 
-  it('clay_only_in_the_mark', () => {
+  it('clay_only_in_the_mark_and_the_intro_dialog', () => {
     expect(matches(CLAY)('fill: var(--clay); color: #E08968; rgb(224, 137, 104)')).toHaveLength(3);
     // A token derived from clay ("--clay-soft") counts as clay; an unrelated name doesn't.
     expect(matches(CLAY)('color: var(--clay-soft)')).toEqual(['--clay']);
     expect(matches(CLAY)('--clayton: 1')).toEqual([]);
-    const outsideTheMark = sources.filter(({ file }) => !file.startsWith('components/Mark/'));
-    expect(findAll(outsideTheMark, matches(CLAY))).toEqual([]);
+    // The allowlist is whole folders: a sibling whose name only starts the same way is outside it.
+    expect(mayUseClay('components/IntroDialog/IntroDialog.css')).toBe(true);
+    expect(mayUseClay('components/IntroDialogBanner/IntroDialogBanner.css')).toBe(false);
+    expect(mayUseClay('components/Sidebar/Sidebar.css')).toBe(false);
+    const outsideTheAllowlist = sources.filter(({ file }) => !mayUseClay(file));
+    expect(findAll(outsideTheAllowlist, matches(CLAY))).toEqual([]);
   });
 
   it('no_raw_durations', () => {

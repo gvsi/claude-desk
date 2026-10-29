@@ -76,6 +76,15 @@ export {
   type ConversationListItemProps,
 } from './components/ConversationListItem/ConversationListItem.tsx';
 
+// First visit
+export {
+  IntroDialog,
+  type IntroDialogProps,
+  type IntroErrorCode,
+  type IntroThing,
+} from './components/IntroDialog/IntroDialog.tsx';
+export { INTRO_ERROR_COPY } from './components/IntroDialog/introCopy.ts';
+
 // Reply cards
 export { ReplyCard, type ReplyCardProps } from './components/ReplyCard/ReplyCard.tsx';
 export { cardView, type CardView } from './components/ReplyCard/cardView.ts';
