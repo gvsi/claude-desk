@@ -17,6 +17,10 @@
 #   read -rs DESK_PASSCODE; export DESK_PASSCODE
 #   infra/scripts/deploy.sh [--compute express|alb] [--allow-branch]
 #
+# The first deploy creates DeskData alone first, so the owner can set the two secrets it creates:
+# `deploy.sh --data-only` runs steps 1 to 4 (preflight without the owner secrets or the web build)
+# and stops. It needs no DESK_PASSCODE.
+#
 # A custom domain comes from DESK_DOMAIN_NAME and DESK_CERTIFICATE_ARN (an ACM certificate in
 # us-east-1) in the owner's shell, never from the repo. cdk deploy asks for approval before any
 # change that broadens IAM permissions or security group access, so it keeps the terminal for its
@@ -25,11 +29,12 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: infra/scripts/deploy.sh [--compute express|alb] [--allow-branch]"
+  echo "usage: infra/scripts/deploy.sh [--compute express|alb] [--allow-branch] [--data-only]"
 }
 
 compute=express
 allow_branch=
+data_only=
 while (($#)); do
   case $1 in
     --compute)
@@ -39,6 +44,7 @@ while (($#)); do
       ;;
     --compute=*) compute=${1#*=}; shift ;;
     --allow-branch) allow_branch=--allow-branch; shift ;;
+    --data-only) data_only=--data-only; shift ;;
     -h | --help) usage; exit 0 ;;
     *) usage >&2; exit 2 ;;
   esac
@@ -63,7 +69,7 @@ for name in DESK_IMAGE_DIR DESK_IMAGE_FILE DESK_KERNEL_IMAGE; do
     exit 2
   fi
 done
-if [[ -z ${DESK_PASSCODE:-} ]]; then
+if [[ -z $data_only && -z ${DESK_PASSCODE:-} ]]; then
   echo "deploy: export DESK_PASSCODE first (read -rs DESK_PASSCODE; export DESK_PASSCODE); the smoke checks sign in with it" >&2
   exit 2
 fi
@@ -103,11 +109,17 @@ stack_output() {  # stack_output <stack> <key>: the output's value, empty when t
   printf '%s\n' "$value"
 }
 
+# The web build preflight made; --data-only builds none and deploys no web app.
+web_dist=
+if [[ -z $data_only ]]; then
+  web_dist=$ROOT/web/dist
+fi
+
 cdk_deploy() {  # cdk_deploy <stack> [cdk options...]: the pinned CLI, its output on the terminal
   local stack=$1
   shift
   (cd "$INFRA" && npx --no-install cdk deploy "$stack" --exclusively --require-approval broadening \
-    --progress events -c "compute=$compute" -c "git_sha=$sha" -c "web_dist=$ROOT/web/dist" \
+    --progress events -c "compute=$compute" -c "git_sha=$sha" ${web_dist:+-c} ${web_dist:+"web_dist=$web_dist"} \
     -c "kernel_image=desk-kernel:$sha" -c "image_dir=$ROOT" -c "image_file=infra/app.Dockerfile" "$@") >&3
 }
 
@@ -127,21 +139,25 @@ read -r -p "Type that account ID to deploy to it: " typed
 [[ $typed == "$account" ]] || fail "the typed account ID isn't $account; nothing was deployed"
 
 step "Preflight"
-uv run --project "$INFRA" python "$INFRA/scripts/preflight.py" ${allow_branch:+"$allow_branch"} ||
-  fail "preflight failed; nothing was deployed"
+uv run --project "$INFRA" python "$INFRA/scripts/preflight.py" ${allow_branch:+"$allow_branch"} \
+  ${data_only:+"$data_only"} || fail "preflight failed; nothing was deployed"
 
 # The address the Desk serves at now, which the API's links keep using.
-previous=$(stack_output DeskApp PublicUrl)
-if [[ -n $previous && -z $domain ]]; then
-  host=${previous#https://}
-  if [[ $host != *.cloudfront.net ]]; then
-    fail "DeskApp serves $previous; export DESK_DOMAIN_NAME and DESK_CERTIFICATE_ARN for it, or this deploy would drop that address"
+previous=
+expected=
+if [[ -z $data_only ]]; then
+  previous=$(stack_output DeskApp PublicUrl)
+  if [[ -n $previous && -z $domain ]]; then
+    host=${previous#https://}
+    if [[ $host != *.cloudfront.net ]]; then
+      fail "DeskApp serves $previous; export DESK_DOMAIN_NAME and DESK_CERTIFICATE_ARN for it, or this deploy would drop that address"
+    fi
   fi
-fi
-if [[ -n $domain ]]; then
-  expected=https://$domain
-else
-  expected=$previous
+  if [[ -n $domain ]]; then
+    expected=https://$domain
+  else
+    expected=$previous
+  fi
 fi
 
 step "Image"
@@ -150,6 +166,13 @@ make -C "$ROOT" image image-check KERNEL_TAG="$sha" || fail "make image or image
 step "Deploy DeskData"
 (cd "$INFRA" && npm ci --no-audit --no-fund) || fail "npm ci failed in infra/"
 cdk_deploy DeskData || fail "cdk deploy DeskData failed"
+
+if [[ -n $data_only ]]; then
+  echo
+  echo "deploy: DeskData is deployed in account $account. Next, set the two owner secrets with"
+  echo "infra/scripts/set_secret.py (docs/deploy.md), then run infra/scripts/deploy.sh"
+  exit 0
+fi
 
 step "Admin task: migrations and role passwords"
 uv run --project "$INFRA" python "$INFRA/scripts/run_admin_task.py" || fail "the admin task failed; DeskApp wasn't deployed"

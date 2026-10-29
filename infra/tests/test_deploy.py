@@ -387,6 +387,34 @@ def test_needs_a_terminal(deploy):
     assert run.calls == []
 
 
+def test_data_only_deploys_desk_data_behind_the_account_check(deploy):
+    """The first deploy creates DeskData alone, before the owner secrets can be set, in the account
+    the owner retyped, never in whichever account the ambient credentials resolve to."""
+    run = deploy("--data-only", DESK_PASSCODE=None)
+    assert run.status == 0, run.output
+    assert run.steps() == [
+        "aws sts get-caller-identity",
+        "uv preflight.py",
+        "make image image-check",
+        "npm ci",
+        "cdk deploy DeskData",
+    ]
+    [preflight] = [call for call in run.calls if call["tool"] == "uv"]
+    assert preflight["argv"][-1] == "--data-only"
+    [desk_data] = run.cdk("DeskData")
+    assert desk_data["tty"]
+    context = _context(desk_data)
+    assert context["git_sha"] == _head() and context["kernel_image"] == f"desk-kernel:{_head()}"
+    assert "web_dist" not in context
+    assert "set_secret.py" in run.log and "infra/scripts/deploy.sh" in run.log      # what comes next
+
+
+def test_data_only_stops_at_a_wrong_account(deploy):
+    run = deploy("--data-only", typed="999999999999", DESK_PASSCODE=None)
+    assert run.status == 1
+    assert run.steps() == ["aws sts get-caller-identity"]
+
+
 @pytest.mark.parametrize("args", [["--compute", "lambda"], ["--compute"], ["--force"]])
 def test_usage_errors(deploy, args):
     run = deploy(*args)

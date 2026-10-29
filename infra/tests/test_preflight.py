@@ -266,3 +266,25 @@ def test_cdk_lookup_cache_leaves_the_tree_clean():
 
 def test_owner_secret_ids_match_set_secret():
     assert load_script("preflight").OWNER_SECRETS == load_script("set_secret").OWNER_SECRETS == OWNER_SECRETS
+
+
+def test_data_only_skips_the_owner_secrets_and_the_web_build(env, secrets, capsys):
+    """deploy.sh --data-only deploys DeskData alone, which creates the owner secrets, so they can't
+    be set yet, and serves no web app; every other check still runs."""
+    assert _run(env, secrets, "--data-only") == 0          # no describe_secret: the stub has no response
+    out = capsys.readouterr().out
+    assert "ok: HEAD is on origin/main" in out and "ok: HEAD's tier 2 results file passes" in out
+    assert "skipped: the owner secrets and the web build (--data-only: DeskData alone)" in out
+    calls = env.calls()
+    assert any(call.startswith("make evals-results-check") for call in calls)
+    assert not any(call.startswith("npm") for call in calls)
+
+
+@pytest.mark.parametrize("failure", ["dirty", "results"])
+def test_data_only_still_needs_a_clean_tree_and_passing_results(env, secrets, capsys, monkeypatch, failure):
+    if failure == "dirty":
+        (env.repo / "file2.txt").write_text("changed\n")
+    else:
+        monkeypatch.setenv("MAKE_STATUS", "1")
+
+    assert _run(env, secrets, "--data-only") == 1

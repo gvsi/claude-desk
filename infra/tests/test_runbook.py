@@ -72,3 +72,17 @@ def test_approval_is_claimed_only_for_changes_that_broaden_access():
         text = " ".join(path.read_text().replace("#", " ").split())
         assert "before any change that broadens IAM permissions or security group access" in text, path
         assert "IAM or security group change" not in text, path
+
+
+def test_the_first_deploy_creates_desk_data_behind_the_account_check():
+    """deploy.sh --data-only deploys DeskData alone after the owner retypes the account ID
+    (test_deploy.py); the runbook's first deploy uses it, never a bare `cdk deploy`, which would
+    target whichever account the ambient credentials resolve to."""
+    match = re.search(r"^## First deploy \(owner's terminal\)\n.*?```sh\n(.*?)```", RUNBOOK.read_text(), re.S | re.M)
+    assert match, "the first deploy has no sh block"
+    commands = match.group(1)
+    assert "cdk deploy" not in commands
+    lines = [line.split("#", 1)[0].strip() for line in commands.splitlines()]
+    assert "infra/scripts/deploy.sh --data-only" in lines
+    assert lines.index("infra/scripts/deploy.sh --data-only") < next(
+        i for i, line in enumerate(lines) if "set_secret.py" in line) < lines.index("infra/scripts/deploy.sh")

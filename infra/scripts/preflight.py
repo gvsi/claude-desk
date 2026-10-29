@@ -1,6 +1,6 @@
 """Check that HEAD may be deployed, before deploy.sh touches anything in AWS.
 
-    uv run --project infra python infra/scripts/preflight.py [--allow-branch]
+    uv run --project infra python infra/scripts/preflight.py [--allow-branch] [--data-only]
 
 In order, stopping at the first failure, which it names:
 
@@ -13,6 +13,9 @@ In order, stopping at the first failure, which it names:
    tag that infra/scripts/set_secret.py adds, so neither is still DeskData's generated placeholder.
 5. The web app builds and checks at HEAD: `npm ci`, `npm run build`, `npm run check:build` in
    `web/`, after deleting any earlier `web/dist`, so an old build is never deployed.
+
+`--data-only` (deploy.sh --data-only, the first deploy's DeskData alone) skips 4 and 5: DeskData
+creates the owner secrets, so they can't be set yet, and it serves no web app.
 
 Exit status: 0 when every check passes, 1 at the first failure, 2 a usage error.
 """
@@ -130,6 +133,8 @@ def check_web(repo: Path) -> None:
 def main(argv: list[str] | None = None, *, repo: Path | None = None, secrets=None) -> int:
     parser = argparse.ArgumentParser(description="Check that HEAD may be deployed.")
     parser.add_argument("--allow-branch", action="store_true", help="deploy a commit that isn't on origin/main")
+    parser.add_argument("--data-only", action="store_true",
+                        help="DeskData alone, before the owner secrets exist: skip them and the web build")
     args = parser.parse_args(argv)
     repo = REPO if repo is None else Path(repo)
     try:
@@ -139,8 +144,11 @@ def main(argv: list[str] | None = None, *, repo: Path | None = None, secrets=Non
         else:
             check_on_main(repo)
         check_results(repo)
-        check_owner_secrets(boto3.client("secretsmanager", region_name=REGION) if secrets is None else secrets)
-        check_web(repo)
+        if args.data_only:
+            print("skipped: the owner secrets and the web build (--data-only: DeskData alone)")
+        else:
+            check_owner_secrets(boto3.client("secretsmanager", region_name=REGION) if secrets is None else secrets)
+            check_web(repo)
     except PreflightError as error:
         print(f"preflight: {error}", file=sys.stderr)
         return 1
