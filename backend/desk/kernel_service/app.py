@@ -2,7 +2,9 @@
 
 The kernel binds 127.0.0.1:8701 and nothing changes that: the API process in the same task is
 its only client. The lifespan builds the signer first, so a production kernel without
-`DESK_SIGNING_SEED` refuses to start, then the database engine (role desk_kernel).
+`DESK_SIGNING_SEED` refuses to start, then the policy engine over the always-on baseline
+(`app.state.engine`; a baseline it can't take stops the start too), then the database engine
+(role desk_kernel).
 
 Every non-2xx answer is a `KernelError{code}` ("Session state responses"): a `KernelFailure`
 answers its own code, request validation 422 `invalid`, the framework's own errors (an unknown
@@ -31,7 +33,7 @@ from desk.contracts import LedgerEntry, LedgerPage
 from desk.db.session import KernelSession, database_url
 from desk.env import is_development
 from desk.kernel_api import Health, KernelError, LedgerAppendRequest
-from desk.kernel_service import auth, copies, ledger, sessions
+from desk.kernel_service import auth, compiler, copies, ledger, sessions
 from desk.kernel_service.auth import AuthError, Named
 from desk.kernel_service.clock import Clock, SystemClock
 from desk.kernel_service.repo import Ctx, KernelFailure, KernelRuntime, kernel_transaction, route_template
@@ -60,6 +62,7 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
             # the process environment and the settings each name the environment; either one
             # that isn't development refuses the public dev key
             raise RuntimeError(f"DESK_SIGNING_SEED is required: the kernel settings name DESK_ENV={settings.env!r}")
+        app.state.engine = desk_kernel.PolicyEngine(compiler.BASELINE)   # raises on a baseline it can't take
         engine = create_async_engine(settings.database_url, pool_pre_ping=True)
         factory = async_sessionmaker(engine, expire_on_commit=False, sync_session_class=KernelSession)
         app.state.kernel = KernelRuntime(settings=settings, clock=clock, signer=signer, engine=engine,

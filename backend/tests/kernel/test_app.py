@@ -1,5 +1,6 @@
 """The kernel app: health, startup refusals, loopback binding, columns and error answers."""
 
+import json
 import re
 
 import desk_kernel
@@ -12,7 +13,7 @@ from desk.contracts import LedgerEvent
 from desk.db.models import Desk, PriceItem
 from desk.db.session import database_url, dispose_engines, libpq_url
 from desk.kernel_api import LedgerAppendRequest
-from desk.kernel_service import ledger
+from desk.kernel_service import compiler, ledger
 from desk.kernel_service.app import KernelSettings, create_app, serve_config
 from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure
 
@@ -31,6 +32,30 @@ async def test_health_reports_proof_mode_and_key(app, client):
     assert health["proof_mode"] == "bounded"                     # until the startup selftest passes
     assert health["unproved_seeds"] == []
     assert health["version"] == desk_kernel.version()
+
+
+async def test_startup_loads_the_baseline_engine(app, monkeypatch):
+    engine = app.state.engine
+    assert isinstance(engine, desk_kernel.PolicyEngine)
+    permit_all = {"F": "", "H": "",
+                  "A": '@id("all") @card("test") @tier("auto") @applies_to("native.find_slots")\n'
+                       'permit (principal, action, resource);'}
+    assert engine.load("desk-test:1", json.dumps(compiler.BASE_SCHEMA), json.dumps(permit_all)) == []
+    visitor = {"uid": {"type": "Visitor", "id": "s-1"}, "attrs": {"verified": False, "assurance": "none",
+                                                                  "copy": "copy-1"}, "parents": []}
+    desk = {"uid": {"type": "Desk", "id": "d-1"}, "attrs": {"copy": "copy-2"}, "parents": []}
+    other_copy = {"principal": visitor["uid"], "action": "native.find_slots", "resource": desk["uid"],
+                  "context": {"record_owner_match": False, "local_dow": 4, "local_minute": 600},
+                  "entities": [visitor, desk]}
+    verdict = json.loads(engine.decide("desk-test:1", json.dumps(other_copy), "final"))
+    assert verdict["outcome"] == "refuse" and verdict["policy_ids"] == ["B.same_copy"]   # the real baseline
+
+    # a baseline the engine can't take stops the kernel from starting
+    monkeypatch.setattr(compiler, "BASELINE", '@id("open") permit (principal, action, resource);')
+    kernel = create_app(clock=app.state.kernel.clock)
+    with pytest.raises(ValueError, match="only forbids"):
+        async with kernel.router.lifespan_context(kernel):
+            pass
 
 
 async def test_production_without_seed_refuses_to_start(monkeypatch):
