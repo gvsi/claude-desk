@@ -96,7 +96,7 @@ function whenClosed(client: object, request: Request, onClose: () => void): void
 
 type EventMap = Record<SseEvent['type'], SseEvent>;
 
-/** One event as the API frames it: named by its type, its seq as the id. */
+/** One event as the API frames it: named by its type (an `EvError` as `error`), its seq as the id. */
 function frame(seq: number, ev: SseEvent): ServerSentEventMessage<EventMap> {
   // MSW types the name and data per event map key; every key here maps to `SseEvent`.
   return { id: String(seq), event: ev.type, data: ev } as ServerSentEventMessage<EventMap>;

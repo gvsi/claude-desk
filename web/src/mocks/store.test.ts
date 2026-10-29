@@ -1,6 +1,6 @@
 /**
  * The mock API's store, driven the way its handlers drive it: the scripted Desk, held requests and
- * answers, the event log a stream replays, the transcript and injected faults.
+ * answers, Today, the event log a stream replays, the transcript, a start over and injected faults.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -11,6 +11,7 @@ import type {
   CopyOut,
   NeedsYouItem,
   OwnerTranscript,
+  Today,
   VisitorSession,
   VisitorTranscript,
 } from '../api/views.ts';
@@ -91,12 +92,24 @@ describe('the scripted Desk', () => {
   });
 
   it('discount_holds_and_reaches_needs_you', async () => {
+    // Rivera's Today greets Maria, counts the seeded hold, and has Dana's chat live (the held
+    // visitor's last word was twelve minutes ago).
+    const today = async () => (await call('today', { params: { desk_id: deskId } })).body as Today;
+    const seeded = await today();
+    expect(seeded.greeting_name).toBe('Maria');
+    expect(seeded.needs_you_count).toBe(1);
+    expect(seeded.live.map((c) => [c.session_id, c.display_name])).toEqual([['ses-dana-web', null]]);
+
     mockStore.reset('rivera_quiet');
     expect((await call('needsYou', { params: { desk_id: deskId } })).body).toEqual([]);
+    expect(await today()).toMatchObject({ greeting_name: 'Maria', needs_you_count: 0, live: [] });
 
     const { session, events } = await openChat();
     await send('Can I get 50% off if I pay cash?');
     await drain();
+    const afterHold = await today();
+    expect(afterHold.needs_you_count).toBe(1);
+    expect(afterHold.live.map((c) => c.session_id)).toEqual([session.session_id]);
 
     expect(typesOf(events)).toEqual(['held', 'writing', 'message', 'turn_end']);
     expect(events.map(([seq]) => seq)).toEqual([1, 2, 3, 4]);
@@ -190,7 +203,7 @@ describe('the scripted Desk', () => {
     expect(await call('events', { params: { slug } })).toEqual({ status: 401, body: { error: 'no_session' } });
     expect((await call('events', { params: { slug: 'rivera-plumbing-nope00' } })).status).toBe(404);
 
-    const { stop } = await openChat();
+    const { session, stop } = await openChat();
     expect((await call('events', { params: { slug }, query: { after: '0' } })).status).toBe(200);
     await send('How much is drain clearing?');
     await drain();
@@ -207,11 +220,58 @@ describe('the scripted Desk', () => {
     await drain();
     expect(replayed.map(([seq]) => seq)).toEqual([3, 4, 5, 6, 7, 8]);
 
+    // A listener that throws (a framing bug, a failed expect) is dropped and the others still hear
+    // the event, but its error is rethrown where the test runner sees it, not swallowed.
+    const record = mockStore.world.sessions.get(session.session_id);
+    if (!record) throw new Error('the session is in the copy');
+    const broken = new Error('the listener failed');
+    let brokenCalls = 0;
+    mockStore.listen(slug, 8, () => {
+      brokenCalls += 1;
+      throw broken;
+    });
+    const surfaced: (() => void)[] = [];
+    const microtasks = vi.spyOn(globalThis, 'queueMicrotask').mockImplementation((task) => void surfaced.push(task));
+    mockStore.world.emit(record, { type: 'writing' });
+    microtasks.mockRestore();
+    mockStore.world.emit(record, { type: 'turn_end' });
+    expect(brokenCalls).toBe(1);
+    expect(replayed.map(([seq, ev]) => [seq, ev.type]).slice(-2)).toEqual([
+      [9, 'writing'],
+      [10, 'turn_end'],
+    ]);
+    expect(surfaced).toHaveLength(1);
+    expect(surfaced[0]).toThrow(broken);
+
     // The resume point: `?after=`, or the browser's Last-Event-ID when it is later.
     expect(streamAfter(new URLSearchParams('after=4'), null)).toBe(4);
     expect(streamAfter(new URLSearchParams('after=4'), '6')).toBe(6);
     expect(streamAfter(new URLSearchParams('after=7'), '6')).toBe(7);
     expect(streamAfter(new URLSearchParams('after=-1'), 'x')).toBe(0);
+
+    // A start over is a new copy: new ids, the old Desk gone, a chat that starts afresh, and the
+    // old copy's turn in flight never finishing.
+    await send('How much is drain clearing?');
+    await vi.advanceTimersByTimeAsync(EVENT_GAP_MS);
+    expect(replayed.at(-1)?.[1].type).toBe('receipt');
+    const heard = replayed.length;
+    const fresh = await call('startOver');
+    expect(fresh.status).toBe(200);
+    const copy = fresh.body as CopyOut;
+    const newDesk = copy.desks[0];
+    if (!newDesk) throw new Error('the new copy has its Desk');
+    expect(copy.copy_id).not.toBe(RIVERA.copyId);
+    expect(newDesk.desk_id).not.toBe(deskId);
+    expect(newDesk.slug).not.toBe(slug);
+    expect((await call('today', { params: { desk_id: deskId } })).status).toBe(404);
+    expect((await call('events', { params: { slug } })).status).toBe(404);
+    expect((await call('today', { params: { desk_id: newDesk.desk_id } })).status).toBe(200);
+    expect(await call('visitorSession', { params: { slug: newDesk.slug } })).toEqual({ status: 401, body: { error: 'no_session' } });
+    const reopened = (await call('openSession', { params: { slug: newDesk.slug } })).body as VisitorSession;
+    expect(reopened.resumed).toBe(false);
+    expect(reopened.state.session_id).not.toBe(session.session_id);
+    await drain();
+    expect(replayed).toHaveLength(heard);
   });
 
   it('transcript_keeps_visitor_text_in_order', async () => {
@@ -259,6 +319,15 @@ describe('the scripted Desk', () => {
     expect(dana?.outcome_counts).toEqual({ executed: 3 });
     const danaOwner = (await call('conversation', { params: { session_id: 'ses-dana-web' } })).body as OwnerTranscript;
     expect(danaOwner.items.filter((item) => item.kind === 'whisper').map((item) => item.text)).toEqual(['offer Thursday morning too']);
+
+    // The owner's preview of her Desk is a chat of its own, flagged as hers, and opening it again
+    // resumes it rather than starting another.
+    const preview = (await call('openPreview', { params: { desk_id: deskId } })).body as VisitorSession;
+    expect(preview.resumed).toBe(false);
+    expect(preview.state.session_id).not.toBe(session.session_id);
+    expect((await call('openPreview', { params: { desk_id: deskId } })).body).toEqual({ state: preview.state, resumed: true });
+    const listed = (await call('conversations', { params: { desk_id: deskId } })).body as ConversationSummary[];
+    expect(listed.filter((c) => c.owner_preview).map((c) => c.session_id)).toEqual([preview.state.session_id]);
   });
 });
 

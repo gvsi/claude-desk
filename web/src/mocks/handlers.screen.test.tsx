@@ -7,8 +7,9 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { PublicDesk, SseEvent } from '../api/contracts.ts';
 import { apiPath } from '../api/routes.ts';
-import { openStream } from '../api/stream.ts';
+import { openStream, type StreamState } from '../api/stream.ts';
 import type { CopyOut } from '../api/views.ts';
+import { renderRoute } from '../test/renderRoute.tsx';
 import { RIVERA } from './seed.ts';
 import { mockStore } from './store.ts';
 
@@ -28,6 +29,18 @@ const EVENT_TYPES: readonly SseEvent['type'][] = [
 
 describe('mock API handlers', () => {
   it('handlers_serve_the_store', async () => {
+    // A screen can start on a copy this browser hasn't opened: the owner's routes answer 401 until
+    // a passcode opens it, and a wrong one opens nothing.
+    await renderRoute('/no/such/page', { seed: { name: 'rivera', signedIn: false } });
+    const me = () => fetch('/api/owner/me');
+    expect((await me()).status).toBe(401);
+    expect(await (await me()).json()).toEqual({ error: 'no_owner_session' });
+    expect((await fetch(apiPath('today', { desk_id: RIVERA.deskId }))).status).toBe(401);
+    const wrong = await fetch('/api/owner/copies', { method: 'POST', headers: json, body: JSON.stringify({ passcode: 'wrong' }) });
+    expect(wrong.status).toBe(401);
+    expect(await wrong.json()).toEqual({ error: 'wrong_passcode' });
+    expect((await me()).status).toBe(401);
+
     const copy = await fetch('/api/owner/copies', { method: 'POST', headers: json, body: JSON.stringify({ passcode: 'demo' }) });
     // Plan 02a answers a new copy with 201.
     expect(copy.status).toBe(201);
@@ -35,12 +48,20 @@ describe('mock API handlers', () => {
     expect(copyOut.copy_id).toBe(RIVERA.copyId);
     expect(copyOut.desks.map((d) => [d.desk_id, d.slug, d.name])).toEqual([[RIVERA.deskId, RIVERA.slug, 'Main line']]);
     expect(mockStore.requests.at(-1)).toEqual({ key: 'copies', body: { passcode: 'demo' }, path: '/api/owner/copies' });
+    expect((await me()).status).toBe(200);
 
     const desk = await fetch(`/api/public/${RIVERA.slug}`);
     expect(desk.status).toBe(200);
     const publicDesk = (await desk.json()) as PublicDesk;
     expect(publicDesk.owner_display_name).toBe('Maria Rivera');
     expect(Object.keys(publicDesk.brand).sort()).toEqual(['accent', 'primary']);
+    // The kernel's open status, 90 seconds before the 6:00 pm close, which is when its text next changes.
+    const status = publicDesk.open_status;
+    expect(status).toMatchObject({ open: true, text: 'Open now, until 6:00 pm', opens_at: null });
+    expect(Date.parse(status?.refresh_at ?? '') - Date.parse(status?.as_of ?? '')).toBe(90_000);
+    expect(status?.until).toBe(status?.refresh_at);
+    const spanish = (await (await fetch(`/api/public/${RIVERA.slug}?lang=es`)).json()) as PublicDesk;
+    expect(spanish.open_status?.text).toBe('Abierto ahora, hasta las 18:00');
     expect((await fetch('/api/public/rivera-plumbing-nope00')).status).toBe(404);
 
     // The visitor's routes need the visitor cookie the session sets.
@@ -51,17 +72,24 @@ describe('mock API handlers', () => {
 
     // A message's turn streams to an EventSource, each event named by its type with its seq as the id.
     const events: [number, SseEvent][] = [];
+    const states: StreamState[] = [];
     const stop = openStream<SseEvent>(apiPath('events', { slug: RIVERA.slug }, { after: '0' }), EVENT_TYPES, {
       event: (seq, ev) => events.push([seq, ev]),
-      state: () => {},
+      state: (state) => states.push(state),
     });
-    try {
-      const sent = await fetch(apiPath('sendMessage', { slug: RIVERA.slug }), {
-        method: 'POST',
-        headers: json,
-        body: JSON.stringify({ text: 'How much is drain clearing?' }),
-      });
+    // The same stream on a bare EventSource, to see what reaches its `onerror`.
+    const raw = new EventSource(apiPath('events', { slug: RIVERA.slug }));
+    const reachedOnerror: [type: string, id: string, data: unknown][] = [];
+    raw.onerror = (e) => {
+      if (e instanceof MessageEvent) reachedOnerror.push([e.type, e.lastEventId, JSON.parse(String(e.data))]);
+    };
+    const say = async (text: string) => {
+      const body = JSON.stringify({ text });
+      const sent = await fetch(apiPath('sendMessage', { slug: RIVERA.slug }), { method: 'POST', headers: json, body });
       expect(sent.status).toBe(202);
+    };
+    try {
+      await say('How much is drain clearing?');
       await vi.waitFor(() => expect(events.map(([, ev]) => ev.type)).toContain('turn_end'), { timeout: 3000 });
       expect(events.map(([seq, ev]) => [seq, ev.type])).toEqual([
         [1, 'receipt'],
@@ -69,8 +97,21 @@ describe('mock API handlers', () => {
         [3, 'message'],
         [4, 'turn_end'],
       ]);
+
+      // An error goes out as an `error` event, as the API sends it. The browser also hands that
+      // event to `onerror`, and openStream delivers it as an event, not as a dropped connection.
+      await say('outage');
+      await vi.waitFor(() => expect(events).toHaveLength(7), { timeout: 3000 });
+      expect(events.slice(4)).toEqual([
+        [5, { type: 'writing' }],
+        [6, { type: 'error', code: 'kernel_unavailable' }],
+        [7, { type: 'turn_end' }],
+      ]);
+      expect(states).toEqual(['open']);
+      await vi.waitFor(() => expect(reachedOnerror).toEqual([['error', '6', { type: 'error', code: 'kernel_unavailable' }]]));
     } finally {
       stop();
+      raw.close();
     }
 
     // A fault planted on a route answers in its place.
@@ -79,6 +120,11 @@ describe('mock API handlers', () => {
     expect((await fetch('/api/health')).status).toBe(200);
     mockStore.inject({ route: 'health', status: 'network' });
     await expect(fetch('/api/health')).rejects.toThrow(TypeError);
+
+    // A seed starts the mock over, signed in unless the test says otherwise.
+    await renderRoute('/no/such/page', { seed: 'rivera_quiet' });
+    expect((await me()).status).toBe(200);
+    expect(await (await fetch(apiPath('needsYou', { desk_id: RIVERA.deskId }))).json()).toEqual([]);
   });
 
   it('unknown_api_path_is_recorded', async () => {

@@ -1,13 +1,14 @@
 /**
  * What a fresh mock copy holds, by seed. `rivera` is the master plan's Rivera seed as far as the
- * mocked routes read it (Rivera Plumbing, Maria Rivera, the Main line Desk, its rule cards and the
- * seeded hold) plus Dana's live chat; `rivera_quiet` has no hold and no chats; `rivera_two_desks`
- * adds an "Emergencies" Desk. Seeded chats are replayed through the script's own steps, so their
- * ledger entries, receipts and transcript items line up the way the live ones do.
+ * mocked routes read it (Rivera Plumbing, Maria Rivera, the Main line Desk with its rule cards and
+ * open status, and the seeded hold) plus Dana's live chat; `rivera_quiet` has no hold and no
+ * chats; `rivera_two_desks` adds an "Emergencies" Desk. Seeded chats are replayed through the
+ * script's own steps, so their ledger entries, receipts and transcript items line up the way the
+ * live ones do.
  */
-import type { HoursWindow, PolicyVersion } from '../api/contracts.ts';
+import type { HoursWindow, OpenStatus, PolicyVersion } from '../api/contracts.ts';
 import { placeholderHex, rivera } from '../ds/fixtures/index.ts';
-import { DECISIONS, ruleNamed, writing, type Step } from './script.ts';
+import { DECISIONS, ruleNamed, writing, type Language, type Step } from './script.ts';
 import type { MockWorld, ReplayTurn } from './world.ts';
 
 export type MockSeed = 'rivera' | 'rivera_quiet' | 'rivera_two_desks';
@@ -61,6 +62,41 @@ export const RIVERA_HOURS: HoursWindow[] = [
 const ALL_DAY_EVERY_DAY: HoursWindow[] = [
   { days: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'], start: '00:00:00', end: '23:59:59' },
 ];
+
+/** When the kernel computed the mock's open statuses: a Friday, 90 seconds before Rivera's 6:00 pm close. */
+const OPEN_STATUS_AS_OF = '2026-10-30T17:58:30-07:00';
+const RIVERA_CLOSES = '2026-10-30T18:00:00-07:00';
+
+/**
+ * The main line's open status at that moment: open until the 6:00 pm close, which is also when its
+ * text next changes. It never moves on, so every screen reads the same line; a test plants a closed
+ * or null status with `mockStore.inject`.
+ */
+const RIVERA_OPEN_STATUS: Record<Language, OpenStatus> = {
+  en: {
+    open: true,
+    until: RIVERA_CLOSES,
+    opens_at: null,
+    text: 'Open now, until 6:00 pm',
+    as_of: OPEN_STATUS_AS_OF,
+    refresh_at: RIVERA_CLOSES,
+  },
+  es: {
+    open: true,
+    until: RIVERA_CLOSES,
+    opens_at: null,
+    text: 'Abierto ahora, hasta las 18:00',
+    as_of: OPEN_STATUS_AS_OF,
+    refresh_at: RIVERA_CLOSES,
+  },
+};
+
+/** The Emergencies Desk's, open around the clock: no end to name, and the text holds until local midnight. */
+const NEXT_MIDNIGHT = '2026-10-31T00:00:00-07:00';
+const OPEN_ALL_WEEK: Record<Language, OpenStatus> = {
+  en: { open: true, until: null, opens_at: null, text: 'Open now', as_of: OPEN_STATUS_AS_OF, refresh_at: NEXT_MIDNIGHT },
+  es: { open: true, until: null, opens_at: null, text: 'Abierto ahora', as_of: OPEN_STATUS_AS_OF, refresh_at: NEXT_MIDNIGHT },
+};
 
 const PROOF_CHECKS = [
   'never_errors',
@@ -126,9 +162,21 @@ function danaTurns(): ReplayTurn[] {
 export function seedWorld(world: MockWorld): void {
   const { ids, seed } = world;
   const opened = world.now();
-  const main = world.addDesk({ desk_id: ids.deskId, slug: ids.slug, name: rivera.business.deskName, hours: RIVERA_HOURS });
+  const main = world.addDesk({
+    desk_id: ids.deskId,
+    slug: ids.slug,
+    name: rivera.business.deskName,
+    hours: RIVERA_HOURS,
+    openStatus: RIVERA_OPEN_STATUS,
+  });
   if (seed === 'rivera_two_desks') {
-    world.addDesk({ desk_id: ids.emergenciesDeskId, slug: ids.emergenciesSlug, name: 'Emergencies', hours: ALL_DAY_EVERY_DAY });
+    world.addDesk({
+      desk_id: ids.emergenciesDeskId,
+      slug: ids.emergenciesSlug,
+      name: 'Emergencies',
+      hours: ALL_DAY_EVERY_DAY,
+      openStatus: OPEN_ALL_WEEK,
+    });
   }
   if (seed === 'rivera_quiet') return;
 

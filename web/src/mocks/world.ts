@@ -12,6 +12,7 @@ import type {
   EvMessage,
   LedgerEntry,
   LedgerEvent,
+  OpenStatus,
   PaymentLinkView,
   PolicyVersion,
   RenderedBlock,
@@ -72,6 +73,8 @@ export interface DeskRecord {
   summary: DeskSummary;
   policy: PolicyVersion;
   ledger: LedgerEntry[];
+  /** The kernel's open status for the Desk's public page, by language; null when it makes no claim. */
+  openStatus: Record<Language, OpenStatus> | null;
 }
 
 export interface DecisionRecord {
@@ -172,11 +175,13 @@ export class MockWorld {
     return [...this.sessions.values()].filter((s) => s.deskId === deskId);
   }
 
-  addDesk(fields: Pick<DeskSummary, 'desk_id' | 'slug' | 'name' | 'hours'>): DeskRecord {
+  addDesk(fields: Pick<DeskSummary, 'desk_id' | 'slug' | 'name' | 'hours'> & Pick<DeskRecord, 'openStatus'>): DeskRecord {
+    const { openStatus, ...summary } = fields;
     const desk: DeskRecord = {
-      summary: { ...fields, business_name: BUSINESS.name, answering: true },
+      summary: { ...summary, business_name: BUSINESS.name, answering: true },
       policy: activePolicy(fields.desk_id),
       ledger: [],
+      openStatus,
     };
     this.desks.push(desk);
     return desk;
@@ -260,8 +265,13 @@ export class MockWorld {
     for (const listener of [...session.listeners]) {
       try {
         listener(seq, ev);
-      } catch {
+      } catch (error) {
+        // Dropped, so the others still hear the stream, and rethrown on its own, so a framing bug
+        // or a failed assertion fails where it happened instead of a stream that quietly stops.
         session.listeners.delete(listener);
+        queueMicrotask(() => {
+          throw error;
+        });
       }
     }
     return seq;

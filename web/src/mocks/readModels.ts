@@ -216,7 +216,12 @@ export function ownerTranscript(session: SessionRecord, after: number): OwnerTra
 }
 
 export function publicDesk(desk: DeskRecord, language: Language): PublicDesk {
-  return { ...rivera.publicDesk[language], desk_name: desk.summary.name, brand: { ...BUSINESS.brand } };
+  return {
+    ...rivera.publicDesk[language],
+    desk_name: desk.summary.name,
+    brand: { ...BUSINESS.brand },
+    open_status: desk.openStatus?.[language] ?? null,
+  };
 }
 
 export const HEALTH: HealthOut = {

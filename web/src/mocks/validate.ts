@@ -1,8 +1,9 @@
 /**
  * Checks a mock payload against the shared contracts (`backend/desk/contracts.schema.json`), so the
  * mock API can't drift from what the kernel and API send. Each model is read from the schema's
- * `$defs` by its key. Models are closed as the generated types are: the API's Pydantic models
- * never send a field they don't declare, so a mock that does is wrong.
+ * `$defs` by its key. Models are checked as the API's Pydantic models serialize them: every field
+ * they declare, defaulted ones included, and nothing else, so a mock that leaves a field out or
+ * adds one is wrong.
  */
 import Ajv2020 from 'ajv/dist/2020.js';
 
@@ -15,13 +16,28 @@ const DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:
 /** A time of day, as Pydantic writes `datetime.time`. */
 const TIME = /^\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?$/;
 
-/** A copy of a schema node in which every object model without its own `additionalProperties` is closed. */
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const mapValues = (record: Record<string, unknown>, fn: (value: unknown) => unknown): Record<string, unknown> =>
+  Object.fromEntries(Object.entries(record).map(([key, value]) => [key, fn(value)]));
+
+/**
+ * A copy of a schema node in which every object model sends exactly its fields: each one required,
+ * defaults included, and none it doesn't declare (unless it sets its own `additionalProperties`).
+ */
 function closed(node: unknown): unknown {
   if (Array.isArray(node)) return node.map(closed);
-  if (typeof node !== 'object' || node === null) return node;
+  if (!isRecord(node)) return node;
   const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(node)) out[key] = closed(value);
-  if ('properties' in out && !('additionalProperties' in out)) out.additionalProperties = false;
+  for (const [key, value] of Object.entries(node)) {
+    // `properties` maps field names to schemas: close each schema, never the map itself.
+    out[key] = key === 'properties' && isRecord(value) ? mapValues(value, closed) : closed(value);
+  }
+  if (isRecord(out.properties)) {
+    if (!('additionalProperties' in out)) out.additionalProperties = false;
+    out.required = Object.keys(out.properties);
+  }
   return out;
 }
 

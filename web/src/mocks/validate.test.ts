@@ -46,6 +46,11 @@ describe('mock payloads', () => {
     // The check can fail: a missing field, a field the contract doesn't have, an unknown model.
     expect(validateContract('EvWriting', { type: 'writing' })).toEqual([]);
     expect(validateContract('EvMessage', { type: 'message' })).not.toEqual([]);
+    // A field with a default is still missing: the API's models always send every field.
+    expect(validateContract('ProofCheck', { name: 'never_errors', ok: true })).toEqual([
+      "ProofCheck/ must have required property 'counterexample_plain'",
+      "ProofCheck/ must have required property 'counterexample_raw'",
+    ]);
     expect(validateContract('EvWriting', { type: 'writing', text: 'hi' })).not.toEqual([]);
     expect(validateContract('Decision', { ...mockStore.world.decisions.values().next().value?.decision, expires_at: 'soon' })).not.toEqual([]);
     expect(validateContract('NoSuchModel', {})).not.toEqual([]);
