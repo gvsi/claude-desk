@@ -390,7 +390,7 @@ Content of `docs/evals.md` (short and plain, for readers of the repo; each claim
 
 ## Coordinator operations after the merge
 
-Each that commits lands through its own small PR. Budget: about $330 of the $500 for the week, under the cumulative guard.
+Each that commits lands through its own small PR. Budget: the `--max-usd` caps below add up to $283, about $265 expected (master "Model cost and latency budget"), inside the $600 the cumulative guard leaves for evals this month: the organization's $1,000 limit less the demo's $400 reserve.
 
 1. **Friday-night shakedown** (an integration checkout, per "Before you start"): `python -m evals.run tier2 --dry-run --suite all --runs 1 --max-usd 0` → 0 errors; then `tier2 --suite all --split all --runs 1 --max-usd 35` without `--results`; read every failure; fix scenarios, personas or the harness, never an oracle.
 2. **Saturday-night calibration** (Plan 02 on `main`): `tier2 --split calibration --suite all --runs 1 --max-usd 20` → `calibrate --pass <id> --write` → `make proofs` → `make evals-tier1` → `git add backend kernel/cedar/proofs evals && git commit -m "feat(kernel): set reviewer thresholds from the calibration split"` (counts in the body) → `make evals-tier2` (zero baseline violations) → `git add evals/results && git commit -m "test(evals): record the tier 2 results for the calibrated thresholds"`. When every row reports "not enough data", only the report is committed.
