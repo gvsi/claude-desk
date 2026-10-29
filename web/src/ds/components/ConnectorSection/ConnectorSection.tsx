@@ -5,7 +5,7 @@ import { Icon } from '../../icons/index.tsx';
 import { Card } from '../Card/Card.tsx';
 import { ConnectorIcon } from '../ConnectorIcon/ConnectorIcon.tsx';
 import { ConnectorName, type ConnectorView } from '../ConnectorName/ConnectorName.tsx';
-import { OUTCOME_TONE, OUTCOME_WORDS, type RuleMode } from '../OutcomeMenu/outcomeWords.ts';
+import { OUTCOME_TONE, outcomePhrase, type RuleMode } from '../OutcomeMenu/outcomeWords.ts';
 import { StatusLabel, type StatusTone } from '../StatusDot/StatusDot.tsx';
 import type { RulesLinkProps } from '../ToolRulesCard/ToolRulesCard.tsx';
 
@@ -23,6 +23,8 @@ export interface ToolSummaryView {
   summary: string;
   /** The outcome of the rule that governs it for anyone. */
   mode: RuleMode;
+  /** That rule's formatted amount limit, for an auto card with `max_amount_cents` ("$300"). */
+  limit?: string;
   /** Its profile's status: a tool that needs review or is off says so in place of its outcome. */
   status: ToolStatus;
   /** Its page. */
@@ -46,7 +48,7 @@ function PlainLink({ children, ...props }: RulesLinkProps) {
 
 /** A tool's outcome in words and its dot: its rule's outcome while it is on, or why it isn't. */
 function toolOutcome(tool: ToolSummaryView): { tone: StatusTone; words: string } {
-  if (tool.status === 'enabled') return { tone: OUTCOME_TONE[tool.mode], words: OUTCOME_WORDS[tool.mode] };
+  if (tool.status === 'enabled') return { tone: OUTCOME_TONE[tool.mode], words: outcomePhrase(tool.mode, tool.limit) };
   if (tool.status === 'disabled') return { tone: 'info', words: 'Off' };
   // A changed definition, or a status this build doesn't know: the owner needs to look.
   return { tone: 'held', words: 'Needs your review' };
@@ -55,7 +57,7 @@ function toolOutcome(tool: ToolSummaryView): { tone: StatusTone; words: string }
 /**
  * One connector on the Rules hub: a header that links to the connector's page, then a link row per
  * tool with its rule words and its outcome. Under 640 px of its own width the descriptions and the
- * count go, and each tool's words sit under its name.
+ * count go, and each tool's words sit under its name, with its outcome on its own line under them.
  */
 export function ConnectorSection({ connector, href, tools, addedNote, linkComponent: Link = PlainLink }: ConnectorSectionProps) {
   const ids = useId();

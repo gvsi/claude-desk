@@ -1,7 +1,13 @@
 /* RuleRow: the reason, the words under it and a shared rule's line on the left, the outcome at the
-   right. When the line is too narrow for both, the outcome moves under the words. */
+   right. It lays out by its own width: under 640 px (a phone, a side panel) the outcome sits on its
+   own line under the words, as the phone board draws it, and a long phrase wraps inside it. */
 
 .cd-rule-row {
+  container: cd-rule-row / inline-size;
+  min-width: 0;
+}
+
+.cd-rule-row__layout {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -44,4 +50,16 @@
 .cd-rule-row__shared > span {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+@container cd-rule-row (max-width: 639.98px) {
+  .cd-rule-row__layout {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .cd-rule-row__text {
+    flex: none;
+    width: 100%;
+  }
 }

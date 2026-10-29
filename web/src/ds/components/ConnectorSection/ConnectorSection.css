@@ -1,7 +1,8 @@
 /* ConnectorSection: a card of link rows that reach its edges. The header (14 px 16 px) names the
    connector; each tool row (12 px 16 px) sits under a hairline: its name and line on the left, its
    rule words and outcome at the right. It lays itself out by its own width: under 640 px (the
-   phone board) the lines and the count go, the tile is 32 px and the words sit under each name. */
+   phone board) the lines and the count go, the tile is 32 px, and each tool's words and then its
+   outcome sit under its name. */
 
 .cd-connector-section {
   container: cd-connector-section / inline-size;
@@ -124,8 +125,8 @@
 
 .cd-connector-section__tool-outcome {
   grid-area: outcome;
+  min-width: 0;
   color: var(--text-primary);
-  white-space: nowrap;
 }
 
 .cd-connector-section__tool > .cd-connector-section__chevron {
@@ -154,11 +155,14 @@
     display: none;
   }
 
+  /* The outcome takes its own line under the name and words, as the phone board draws it, so a
+     long limit phrase wraps there instead of crowding the name. */
   .cd-connector-section__tool {
-    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-columns: minmax(0, 1fr) auto;
     grid-template-areas:
-      'name outcome chevron'
-      'summary outcome chevron';
+      'name chevron'
+      'summary chevron'
+      'outcome chevron';
     column-gap: var(--space-12);
     padding: var(--space-12) var(--space-14);
   }
@@ -168,6 +172,10 @@
     margin-top: var(--space-2);
     text-align: left;
     overflow-wrap: anywhere;
+  }
+
+  .cd-connector-section__tool-outcome {
+    margin-top: var(--space-4);
   }
 }
 

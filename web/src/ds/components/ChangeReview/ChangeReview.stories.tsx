@@ -436,3 +436,61 @@ export const RepeatedFailure: Story = {
     await expect(args.onConfirm).toHaveBeenCalledTimes(4);
   },
 };
+
+const ceiling: ChangeRowView[] = [
+  {
+    key: 'rv-big-links',
+    change: 'added',
+    title: 'Payment link',
+    connector: rivera.connectors.views.payments,
+    before: null,
+    after: {
+      mode: 'auto',
+      limit: '$10,000',
+      reason: 'Payment links up to $10,000 for verified customers.',
+      words: [
+        { field: 'who', text: 'Verified customers' },
+        { field: 'limits', text: 'Up to $10,000' },
+      ],
+    },
+    changed: [],
+  },
+  {
+    key: link.card_id,
+    change: 'changed',
+    title: 'Payment link',
+    connector: rivera.connectors.views.payments,
+    before: { mode: 'auto', limit: '$300', reason: link.reason, words: rivera.ruleWords['rv-link'] },
+    after: {
+      mode: 'auto',
+      limit: '$10,000',
+      reason: link.reason,
+      words: [
+        { field: 'who', text: 'Anyone' },
+        { field: 'limits', text: 'Up to $10,000' },
+        { field: 'review', text: 'Checked by the reviewer' },
+      ],
+    },
+    changed: ['limits'],
+  },
+];
+
+export const NarrowMaxLimit: Story = {
+  args: { rows: ceiling, confirmLabel: undefined, cancelLabel: undefined },
+  globals: { viewport: { value: 'narrow', isRotated: false } },
+  parameters: {
+    canvas: 'N-Conn-16-Phone-Rules',
+    canvasNote: 'The largest limit a rule can carry, at the narrowest phone width; no board draws this review on a phone.',
+    viewport: { options: { narrow: { name: 'Narrow phone', styles: { width: '320px', height: '640px' }, type: 'mobile' } } },
+  },
+  play: async ({ canvas, canvasElement }) => {
+    const width = window.innerWidth;
+    await expect(width).toBe(320);
+    // Every limit phrase wraps on its line, and nothing scrolls sideways.
+    const phrases = canvas.getAllByText('Automatic up to $10,000; over $10,000, ask me first');
+    await expect(phrases).toHaveLength(2);
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+    const tooWide = [...canvasElement.querySelectorAll('*')].filter((el) => el.getBoundingClientRect().right > width);
+    await expect(tooWide).toEqual([]);
+  },
+};

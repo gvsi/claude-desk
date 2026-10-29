@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { expect, fn } from 'storybook/test';
+import { expect, fn, within } from 'storybook/test';
 
 import type { RuleCard } from '../../../api/contracts.ts';
 import { rivera } from '../../fixtures';
@@ -120,5 +120,27 @@ export const NoFallback: Story = {
     await expect(canvas.queryByText('Anything else here: ask me.')).toBeNull();
     await expect(canvas.queryByRole('button', { name: 'Add a rule' })).toBeNull();
     await expect(canvas.getByRole('button', { name: 'Never. Change the outcome of: No payment links for now.' })).toBeVisible();
+  },
+};
+
+export const Phone: Story = {
+  globals: { viewport: { value: 'phone', isRotated: false } },
+  parameters: {
+    canvas: 'N-Conn-16-Phone-Rules',
+    canvasNote: "The Payments page's first card on a phone, following the updated phone board: each outcome on its own line.",
+  },
+  play: async ({ canvas, canvasElement }) => {
+    const width = window.innerWidth;
+    await expect(width).toBe(390);
+    // Each rule's outcome sits on its own line under its words, and its phrase wraps inside it.
+    for (const row of canvas.getAllByRole('listitem')) {
+      const words = row.querySelector('.cd-rule-row__text');
+      const button = within(row).getByRole('button');
+      if (words === null) throw new Error('No words');
+      await expect(button.getBoundingClientRect().top).toBeGreaterThanOrEqual(words.getBoundingClientRect().bottom);
+    }
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+    const tooWide = [...canvasElement.querySelectorAll('*')].filter((el) => el.getBoundingClientRect().right > width);
+    await expect(tooWide).toEqual([]);
   },
 };

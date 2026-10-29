@@ -4,7 +4,7 @@
 
 .cd-outcome {
   display: inline-flex;
-  flex: none;
+  flex: 0 1 auto;
   min-width: 0;
   color: var(--text-primary);
 }
@@ -12,8 +12,9 @@
 .cd-outcome-menu {
   position: relative;
   display: inline-flex;
-  flex: none;
+  flex: 0 1 auto;
   align-items: flex-start;
+  min-width: 0;
   max-width: 100%;
 }
 

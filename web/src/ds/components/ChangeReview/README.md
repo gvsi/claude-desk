@@ -13,7 +13,7 @@
 - A "Changes" card (`section`), a row per change under a hairline:
   - A tag in words in an outlined pill: "Added", "Removed", "Changed" or "Turned on".
   - `title` in weight 520, then a meta line: the `connector`'s name and badge (`ConnectorName`, so a mock is never named without "Mock"), then the side's `appliesTo` when given, then its `words`, joined by " · ".
-  - The side's `reason`, and at the right the outcome with its dot, `outcomePhrase(mode, limit)`.
+  - The side's `reason`, and at the right the outcome with its dot, `outcomePhrase(mode, limit)`. On a narrow screen the rows wrap and a long phrase wraps on its own lines: at 320 px, "Automatic up to $10,000; over $10,000, ask me first" fits with no sideways scroll.
   - A `changed` row shows its connector, then a "Before" and an "After" group, each with what its rule applies to (`appliesTo`, on its own line), its words, reason and outcome. On the After side each line whose field is in `changed` is tagged "Changed" in words: the target line for `applies_to`, the words line for `who`, `limits`, `hours` and `review`, the reason for `reason`, the outcome for `mode`. Status is never shown by color alone.
   - Pass `appliesTo` on both sides whenever a rule's target can change, such as a rule widened from Payment link to every tool that charges money. If `changed` has `applies_to` and a side has no `appliesTo`, the title is tagged "Changed" instead, so the change is never unmarked.
   - An added or turned-on row shows its after side; a removed row the rule it removes.

@@ -4,9 +4,11 @@ import { expect } from 'storybook/test';
 import { chen, rivera } from '../../fixtures';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { expectMockBesideExternalNames } from '../../test/expectMockBadges.ts';
+import { outcomePhrase } from '../OutcomeMenu/outcomeWords.ts';
 import { ConnectorSection, type ConnectorSectionProps, type ToolSummaryView } from './ConnectorSection.tsx';
 
-const [quotes, , , , , payments, stripe] = rivera.connectors.sections;
+const sections: readonly ConnectorSectionProps[] = rivera.connectors.sections;
+const [quotes, , , , , payments, stripe] = sections;
 if (!quotes || !payments || !stripe) throw new Error('The Rivera hub fixture lost a section');
 
 const meta = {
@@ -63,9 +65,14 @@ export const Payments: Story = {
     // section_header_and_rows_are_links: the header is one link to the connector's page, naming it.
     const header = canvas.getByRole('link', { name: /^Payments Built in .* 2 tools$/ });
     await expect(header).toHaveAttribute('href', args.href);
-    // Each tool row is a link to its page, named by its name, summary and outcome.
+    // Each tool row is a link to its page, named by its name, summary and outcome; an automatic
+    // rule with an amount limit reads its limit phrase.
+    await expect(args.tools.map((tool) => outcomePhrase(tool.mode, tool.limit))).toEqual([
+      'Automatic up to $300; over $300, ask me first',
+      'Automatic up to $20; over $20, ask me first',
+    ]);
     for (const tool of args.tools) {
-      const row = canvas.getByRole('link', { name: rowName(tool, 'Automatic') });
+      const row = canvas.getByRole('link', { name: rowName(tool, outcomePhrase(tool.mode, tool.limit)) });
       await expect(row).toHaveAttribute('href', tool.href);
       // Its line is its description.
       await expect(row).toHaveAccessibleDescription(tool.description);
@@ -167,14 +174,48 @@ export const Phone: Story = {
     await expect(canvas.getByText('2 tools')).not.toBeVisible();
     for (const tool of stripe.tools) {
       await expect(canvas.getByText(tool.description)).not.toBeVisible();
-      // The summary sits under the tool's name, lined up with it.
+      // The summary sits under the tool's name, and the outcome on its own line under that, all
+      // lined up, as the updated phone board draws them.
       const name = canvas.getByText(tool.name).getBoundingClientRect();
       const summary = canvas.getByText(tool.summary).getBoundingClientRect();
+      const outcome = canvas.getByText(outcomePhrase(tool.mode, tool.limit)).getBoundingClientRect();
       await expect(summary.top).toBeGreaterThanOrEqual(name.bottom - 1);
       await expect(Math.round(summary.left)).toBe(Math.round(name.left));
+      await expect(outcome.top).toBeGreaterThanOrEqual(summary.bottom - 1);
+      await expect(Math.round(outcome.left)).toBeLessThanOrEqual(Math.round(name.left) + 14);
     }
     await expect(expectMockBesideExternalNames(canvasElement)).toBe(1);
     // Nothing is wider than the window, and nothing scrolls sideways.
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+    const tooWide = [...canvasElement.querySelectorAll('*')].filter((el) => el.getBoundingClientRect().right > width);
+    await expect(tooWide).toEqual([]);
+  },
+};
+
+/** Payments with the largest limit a rule can carry on its payment link. */
+const paymentsAtTheCeiling: ConnectorSectionProps = {
+  ...payments,
+  tools: payments.tools.map((tool) => (tool.key === 'native.payment_link' ? { ...tool, limit: '$10,000' } : tool)),
+};
+
+export const NarrowMaxLimit: Story = {
+  args: paymentsAtTheCeiling,
+  globals: { viewport: { value: 'narrow', isRotated: false } },
+  parameters: {
+    canvas: 'N-Conn-16-Phone-Rules',
+    canvasNote: 'The largest limit at the narrowest phone width, following the updated phone board: the outcome on its own line.',
+    viewport: { options: { narrow: { name: 'Narrow phone', styles: { width: '320px', height: '640px' }, type: 'mobile' } } },
+  },
+  play: async ({ canvas, canvasElement }) => {
+    const width = window.innerWidth;
+    await expect(width).toBe(320);
+    const phrase = 'Automatic up to $10,000; over $10,000, ask me first';
+    const outcome = canvas.getByText(phrase);
+    const summary = canvas.getAllByText('2 rules · 1 shared')[0];
+    if (summary === undefined) throw new Error('No summary');
+    await expect(outcome.getBoundingClientRect().top).toBeGreaterThanOrEqual(summary.getBoundingClientRect().bottom - 1);
+    // The phrase wraps on its line, and nothing scrolls sideways.
+    await expect(outcome.getBoundingClientRect().height).toBeGreaterThan(18);
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
     const tooWide = [...canvasElement.querySelectorAll('*')].filter((el) => el.getBoundingClientRect().right > width);
     await expect(tooWide).toEqual([]);

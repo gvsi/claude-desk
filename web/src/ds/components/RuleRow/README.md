@@ -13,7 +13,7 @@
 - Under it, the `words` joined by " · " in `.cd-type-meta`, `text-secondary`: "Anyone · Up to $300 · Checked by the reviewer". They are the screen's code-rendered words for the card (`ruleWords`); the design system formats none.
 - `shared` marks a rule on an effect group, such as `effect:charge`: the `shared` icon (`aria-hidden`) and "Shared rule. {appliesTo}" in `.cd-type-caption`, where `appliesTo` is the screen's words for what it covers ("Applies to every tool that charges money: Payment link and Charge within a signed limit."). The screen shows a shared rule under every tool it governs; changing it from any of them changes the one rule.
 - At the right, `OutcomeMenu` with the reason as its `label` and `limit`, the screen's amount for an auto card with `max_amount_cents`: "Automatic up to $300; over $300, ask me first".
-- On a line too narrow for both, the outcome moves under the words.
+- It lays out by its own width (a container query): under 640 px, on a phone or in a side panel, the outcome sits on its own line under the words, lined up with them, as the phone board (N-Conn-16-Phone-Rules) draws it, and a long phrase wraps inside the button. At 320 px even "Automatic up to $10,000; over $10,000, ask me first" fits with no sideways scroll.
 
 ## Types
 

@@ -76,9 +76,9 @@
 }
 
 .cd-change-review__outcome {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   color: var(--text-primary);
-  white-space: nowrap;
 }
 
 .cd-change-review__sides {
@@ -121,9 +121,11 @@
 
 .cd-change-review__side-outcome {
   display: inline-flex;
-  flex: none;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-8);
+  min-width: 0;
 }
 
 /* "Changed" beside a line whose value changed: words in a quiet outline, never a color. */

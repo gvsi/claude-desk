@@ -32,7 +32,7 @@ export interface RuleRowProps {
 
 /**
  * One rule: its reason, the words for what it enforces, a line for a shared rule, and its outcome
- * at the right.
+ * at the right, or on its own line under them when the row is under 640 px wide.
  */
 export function RuleRow({ rule, words, limit, shared, onChangeOutcome }: RuleRowProps) {
   const line = words
@@ -41,17 +41,19 @@ export function RuleRow({ rule, words, limit, shared, onChangeOutcome }: RuleRow
     .join(' · ');
   return (
     <div className="cd-rule-row">
-      <div className="cd-rule-row__text">
-        <p className="cd-rule-row__reason cd-type-body">{rule.reason}</p>
-        {line !== '' ? <p className="cd-rule-row__words cd-type-meta">{line}</p> : null}
-        {shared ? (
-          <p className="cd-rule-row__shared cd-type-caption">
-            <Icon name="shared" size={14} />
-            <span>Shared rule. {shared.appliesTo}</span>
-          </p>
-        ) : null}
+      <div className="cd-rule-row__layout">
+        <div className="cd-rule-row__text">
+          <p className="cd-rule-row__reason cd-type-body">{rule.reason}</p>
+          {line !== '' ? <p className="cd-rule-row__words cd-type-meta">{line}</p> : null}
+          {shared ? (
+            <p className="cd-rule-row__shared cd-type-caption">
+              <Icon name="shared" size={14} />
+              <span>Shared rule. {shared.appliesTo}</span>
+            </p>
+          ) : null}
+        </div>
+        <OutcomeMenu label={rule.reason} value={rule.mode} limit={limit} onChange={onChangeOutcome} />
       </div>
-      <OutcomeMenu label={rule.reason} value={rule.mode} limit={limit} onChange={onChangeOutcome} />
     </div>
   );
 }

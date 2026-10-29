@@ -82,3 +82,56 @@ export const ReadOnly: Story = {
     await expect(canvas.getByText('Ask me first')).toBeVisible();
   },
 };
+
+export const NarrowMaxLimit: Story = {
+  args: {
+    rule: { card_id: 'rv-big-links', mode: 'auto', reason: 'Payment links up to $10,000 for verified customers.' },
+    words: [
+      { field: 'who', text: 'Verified customers' },
+      { field: 'limits', text: 'Up to $10,000' },
+    ],
+    limit: '$10,000',
+    shared: { appliesTo: rivera.sharedChargeAppliesTo },
+  },
+  globals: { viewport: { value: 'narrow', isRotated: false } },
+  parameters: {
+    canvas: 'N-Conn-16-Phone-Rules',
+    canvasNote: 'The largest limit a rule can carry, at the narrowest phone width, following the updated phone board: the outcome on its own line.',
+    viewport: { options: { narrow: { name: 'Narrow phone', styles: { width: '320px', height: '640px' }, type: 'mobile' } } },
+  },
+  play: async ({ canvas, canvasElement }) => {
+    const width = window.innerWidth;
+    await expect(width).toBe(320);
+    // Under 640 px the outcome sits on its own line, under the words, lined up with them.
+    const words = canvas.getByText('Verified customers · Up to $10,000');
+    const button = canvas.getByRole('button', { name: /^Automatic up to \$10,000; over \$10,000, ask me first\./ });
+    await expect(button.getBoundingClientRect().top).toBeGreaterThanOrEqual(words.getBoundingClientRect().bottom);
+    await expect(Math.round(button.getBoundingClientRect().left)).toBe(Math.round(words.getBoundingClientRect().left));
+    // The phrase wraps inside the button, and nothing scrolls sideways.
+    await expect(button.getBoundingClientRect().height).toBeGreaterThan(32);
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+    const tooWide = [...canvasElement.querySelectorAll('*')].filter((el) => el.getBoundingClientRect().right > width);
+    await expect(tooWide).toEqual([]);
+  },
+};
+
+export const NarrowColumn: Story = {
+  args: { rule: refund, words: rivera.ruleWords['rv-refund'], limit: undefined },
+  render: (args) => (
+    <div style={{ width: 560 }}>
+      <RuleRow {...args} />
+    </div>
+  ),
+  parameters: {
+    canvas: 'N-Conn-16-Phone-Rules',
+    canvasNote: 'A row under 640 px wide, as on a phone or in a side panel, following the updated phone board: the outcome on its own line.',
+  },
+  play: async ({ canvas }) => {
+    // Under 640 px of its own width, even a short outcome sits on its own line under the words.
+    const words = canvas.getByText('The customer who paid, verified');
+    const button = canvas.getByRole('button', { name: /^Ask me first\. Change the outcome of:/ });
+    await expect(button.getBoundingClientRect().top).toBeGreaterThanOrEqual(words.getBoundingClientRect().bottom);
+    await expect(Math.round(button.getBoundingClientRect().left)).toBe(Math.round(words.getBoundingClientRect().left));
+    await expect(button.getBoundingClientRect().height).toBe(32);
+  },
+};

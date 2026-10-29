@@ -13,7 +13,7 @@
 - The outcome's dot (`OUTCOME_TONE`: Automatic handled, Ask me first held, Never refused, `aria-hidden`) beside `outcomePhrase(value, limit)`. Status is never shown by the dot alone.
 - `limit` is the screen's formatted amount ("$300") for an auto card with `max_amount_cents`, which holds anything above it for the owner through its hold twin: "Automatic up to $300; over $300, ask me first". Other modes show no limit, whatever is passed.
 - Read-only: the words in `.cd-type-meta`.
-- With `onChange`: a 32 px (`size-control`) button outlined in `line-control` (`line-control-hover` on hover and while open), radius 8 px, no fill, in `.cd-type-control`: the dot, the phrase and `chevron-down`. A long phrase wraps inside the button on a narrow line.
+- With `onChange`: a 32 px (`size-control`) button outlined in `line-control` (`line-control-hover` on hover and while open), radius 8 px, no fill, in `.cd-type-control`: the dot, the phrase and `chevron-down`. Neither form keeps its width: on a narrow line a long phrase wraps, inside the button or on its own lines, so nothing scrolls sideways.
 - The button is named "{phrase}. Change the outcome of: {label}" (`label` is the rule's reason), with `aria-haspopup="menu"` and `aria-expanded`.
 - Its menu is a popover 6 px under it, aligned to its right edge, on `bg-surface` with a `line-card` border, `radius-card` and `shadow-dialog`: three `menuitemradio`s, "Automatic", "Ask me first" and "Never", the current one checked (`aria-checked`, with a check mark).
 
