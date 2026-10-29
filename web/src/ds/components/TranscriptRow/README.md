@@ -6,7 +6,7 @@
 
 - For every message in a conversation that has receipts or notes, on the owner's conversation view and on the public page. A message with nothing attached can still be a row, so it keeps the reading column's width.
 - Inside a `Transcript`, whose log gives the row its width.
-- `TranscriptHeader` puts the conversation's captions over the rows, one under the other ("Today at 12:04, web chat from …", then "Notes from the checkpoint. Select one for the full trace."). Put it first inside the `Transcript`.
+- `TranscriptHeader` puts the conversation's captions over the rows, one under the other ("Today at 12:04, web chat from …", then "Notes from the checks. Select one for the full trace."). Put it first inside the `Transcript`.
 
 ## What the consumer provides
 

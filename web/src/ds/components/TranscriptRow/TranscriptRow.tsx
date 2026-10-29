@@ -27,7 +27,7 @@ export function TranscriptRow({ children, margin }: TranscriptRowProps) {
 export interface TranscriptHeaderProps {
   /** The first caption: "Today at 12:04, web chat from …", a display string from the screen. */
   left: ReactNode;
-  /** The caption about the receipts, under the first: "Notes from the checkpoint. Select one for the full trace." */
+  /** The caption about the receipts, under the first: "Notes from the checks. Select one for the full trace." */
   right: ReactNode;
 }
 
