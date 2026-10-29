@@ -467,7 +467,8 @@ async def test_session_state_responses(kernel, ro_read, arrange):
             assert await refused(call()) == (409, "stale_generation"), route
     assert (await read_decision(view, allow.decision_id)).state == "expired"
 
-    # Mode owner: 409 mode_owner, but /context answers.
+    # Mode owner: 409 mode_owner, but /context answers. An allow made before the take-over is always at an older
+    # generation, so its /execute answers stale_generation (the generation check comes first) and it expires.
     created, view, allow = await visitor_with_an_allow()
     await arrange.take_over(http.owner(copy.owner_token), created.state.session_id, 0)
     generation = (await view.whoami()).session.generation
@@ -475,8 +476,11 @@ async def test_session_state_responses(kernel, ro_read, arrange):
     for route, call in routes(view, created.state.session_id, generation, allow).items():
         if route == "context":
             assert isinstance(await call(), SessionContext)
+        elif route == "execute":
+            assert await refused(call()) == (409, "stale_generation"), route
         else:
             assert await refused(call()) == (409, "mode_owner"), route
+    assert (await read_decision(view, allow.decision_id)).state == "expired"
     # A stale generation answers before the mode: the generation from before the take-over is refused as stale.
     for route, call in routes(view, created.state.session_id, generation - 1, allow).items():
         if route != "context":

@@ -1134,7 +1134,9 @@ class FakeKernelState:
     def execute(self, request: Request, body: ExecuteRequest) -> ExecResult:
         session, record = self._own_decision(request, body.session_id, body.decision_id)
         if body.generation is not None:
-            if body.generation != session.generation:
+            # the body's generation, or the allow's own: one made before a take-over (and maybe a hand-back) is
+            # stale whatever the body says, so the generation check answers before the mode
+            if body.generation != session.generation or record.generation != session.generation:
                 if record.decision.state == "allowed" and record.result is None:
                     self._transition(record, "expired", fenced=True)
                 raise Refusal(409, "stale_generation")
@@ -1149,9 +1151,6 @@ class FakeKernelState:
             return record.result
         if body.approval_id is not None or decision.state != "allowed":
             raise Refusal(409, "conflict")
-        if record.generation != session.generation:      # taken over (and maybe handed back) since the allow
-            self._transition(record, "expired", fenced=True)
-            raise Refusal(409, "stale_generation")
         return self._run(record, session)
 
     def _run(self, record: DecisionRecord, session: Session) -> ExecResult:
