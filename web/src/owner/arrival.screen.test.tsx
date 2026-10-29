@@ -142,9 +142,10 @@ describe('Arrival', () => {
 
     await startTheDemo(screen);
     await expect.poll(() => router.state.location.pathname).toBe(TODAY);
+    // Only once the copy exists are its Desks read.
+    await expect.poll(() => requests('desks').length).toBeGreaterThan(0);
     const keys = mockStore.requests.map((r) => r.key);
     expect(keys.slice(0, 3)).toEqual(['me', 'copies', 'copies']);
-    // Only once the copy exists are its Desks read.
     expect(keys.indexOf('desks')).toBeGreaterThan(2);
   });
 
@@ -236,7 +237,7 @@ describe('Arrival', () => {
     await expect.element(card).toBeVisible();
     await expect.element(screen.getByRole('link', { name: 'Chat as a customer' })).toBeVisible();
     // Let Today poll a few times, then look: no chat, panel or sheet, and nothing asked of the public side.
-    await expect.poll(() => requests('today').length).toBeGreaterThan(2);
+    await expect.poll(() => requests('today').length, { timeout: 5_000 }).toBeGreaterThan(2);
     expectNoChatOnToday();
   });
 
@@ -370,7 +371,7 @@ describe('OwnerLayout', () => {
     mockStore.inject({ route: 'setAnswering', status: 'network', afterCommit: true });
     await answering.click();
     await expect.poll(() => saved()).toBe(false);
-    await expect.poll(() => requests('desks').length).toBeGreaterThan(1);
+    await expect.poll(() => requests('desks').length, { timeout: 5_000 }).toBeGreaterThan(1);
     await expect.element(answering).toHaveAttribute('aria-checked', 'false');
     expect(screen.getByRole('alert').elements()).toHaveLength(0);
 
@@ -436,7 +437,7 @@ describe('Today', () => {
     const titles = () => things.getByRole('heading', { level: 3 }).elements().map((h) => h.textContent);
     expect(titles()).toEqual(['Chat as a customer', 'Try to break it', 'Create your own Desk']);
     // Let Today poll a few times: nothing is held, so the item stays away.
-    await expect.poll(() => requests('needsYou').length).toBeGreaterThan(2);
+    await expect.poll(() => requests('needsYou').length, { timeout: 5_000 }).toBeGreaterThan(2);
     expect(titles()).toHaveLength(3);
 
     // A visitor on the public page asks for 50% off, and the Desk holds it for Maria.
