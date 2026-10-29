@@ -16,15 +16,17 @@ from conftest import INFRA
 SCRIPT = INFRA / "scripts" / "image_smoke.sh"
 TEST_HOOKS = ("DESK_DECISIONS", "DESK_PROVE", "ANTHROPIC_BASE_URL")
 # Made-up local passwords, as a developer's .env would hold them.
+# Made-up local passwords and a worktree's own database, as a developer's .env would hold them.
 DOT_ENV = {
     "DESK_ADMIN_PASSWORD": "local-admin-6d1f",
+    "ADMIN_DATABASE_URL": "postgresql+psycopg://desk_admin:local-admin-6d1f@localhost:5433/desk_lane?sslmode=disable",
     "KERNEL_ROLE_PASSWORD": "local-kernel-93ab",
     "API_ROLE_PASSWORD": "local-api-27ce",
     "MOCKPAY_ROLE_PASSWORD": "local-mockpay-4b80",
 }
 PASSCODE_HASH = "scrypt$16384$8$1$c2FsdHNhbHRzYWx0$aGFzaGhhc2hoYXNoaGFzaA=="
 KERNEL_IP = "172.17.0.5"
-LOCAL = {"DB_HOST": "host.docker.internal", "DB_PORT": "5433", "DB_SSLMODE": "disable", "DB_NAME": "desk"}
+LOCAL = {"DB_HOST": "host.docker.internal", "DB_PORT": "5433", "DB_SSLMODE": "disable", "DB_NAME": "desk_lane"}
 
 DOCKER_STUB = """#!{python}
 import json, os, stat, sys
@@ -227,6 +229,38 @@ def test_admin_failure_stops_before_the_app(smoke_run):
     assert set(_by_role(_env_runs(calls))) == {"admin"}
     assert uv_calls == []
     assert not list(smoke_run.out.glob("image-smoke*"))
+
+
+def _db_names(calls: list[dict]) -> set[str]:
+    return {run["env"]["DB_NAME"] for run in _env_runs(calls).values()}
+
+
+def test_db_name_wins_over_the_env_files_database(smoke_run):
+    result, calls, _ = smoke_run(DB_NAME="desk_other")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _db_names(calls) == {"desk_other"}
+    assert "migrations and role passwords on desk_other" in result.stdout
+
+
+def test_db_name_defaults_to_the_env_files_admin_database(smoke_run):
+    """The admin task migrates the database it is given, so it defaults to the worktree's own (the
+    one .env's ADMIN_DATABASE_URL names), never to the main checkout's shared `desk`."""
+    result, calls, _ = smoke_run(DB_NAME="")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _db_names(calls) == {"desk_lane"}
+    assert "migrations and role passwords on desk_lane" in result.stdout
+
+
+def test_make_image_smoke_passes_db_name_only_when_given():
+    """`make db-roles` still defaults to desk; `make image-smoke` leaves DB_NAME to the script."""
+    env = {name: value for name, value in os.environ.items() if name != "DB_NAME"}
+
+    def dry_run(*args: str) -> str:
+        return subprocess.run(["make", "-n", "-C", str(INFRA.parent), *args], capture_output=True, text=True,
+                              env=env, check=True).stdout
+
+    assert 'DB_NAME="" ' in dry_run("image-smoke")
+    assert 'DB_NAME="desk_other" ' in dry_run("image-smoke", "DB_NAME=desk_other")
 
 
 @pytest.mark.parametrize("missing", sorted(DOT_ENV))

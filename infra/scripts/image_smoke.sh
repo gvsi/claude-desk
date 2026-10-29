@@ -15,15 +15,16 @@
 # command line. Database passwords come from .env (DESK_ENV_FILE overrides the path), as
 # `make db-roles` reads them; the signing seed and the mock payments key are random, the Anthropic
 # key is a dummy (no model call is made), and the passcode hash is of a random passcode. Nothing
-# here prints a value. DB_NAME (default desk) picks the database; Docker Desktop's
-# host.docker.internal reaches the compose port 5433.
+# here prints a value. The admin task migrates the database it runs on: DB_NAME picks it, else the
+# one .env's ADMIN_DATABASE_URL names (this checkout's own), never a shared default. Docker
+# Desktop's host.docker.internal reaches the compose port 5433.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 IMAGE=${APP_IMAGE:-desk-app:dev}
 ENV_FILE=${DESK_ENV_FILE:-$ROOT/.env}
 OUT=${IMAGE_SMOKE_OUT:-$ROOT/infra/out}
-DB_NAME=${DB_NAME:-desk}
+DB_NAME=${DB_NAME:-}
 POLL_SECONDS=${IMAGE_SMOKE_POLL_SECONDS:-2}
 POLLS=60
 RUN=desk-image-smoke-$$
@@ -88,6 +89,10 @@ fi
 for name in DESK_ADMIN_PASSWORD KERNEL_ROLE_PASSWORD API_ROLE_PASSWORD MOCKPAY_ROLE_PASSWORD; do
   [[ -n ${!name:-} ]] || die "$name is not set (copy .env.example to .env)"
 done
+if [[ -z $DB_NAME && ${ADMIN_DATABASE_URL:-} =~ ^[^:/]+://[^/]+/([^/?]+)(\?.*)?$ ]]; then
+  DB_NAME=${BASH_REMATCH[1]}
+fi
+[[ -n $DB_NAME ]] || die "DB_NAME isn't set and ADMIN_DATABASE_URL names no database: set one (copy .env.example to .env)"
 
 docker image inspect "$IMAGE" >/dev/null 2>&1 || die "there is no $IMAGE image: build it with make image"
 

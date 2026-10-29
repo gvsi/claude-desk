@@ -16,7 +16,7 @@ test:
 # a command line. Uses the host's psql when there is one, else the one in the compose db service.
 DB_HOST ?= localhost
 DB_PORT ?= 5433
-DB_NAME ?= desk
+db-roles: DB_NAME ?= desk
 db-roles:
 	@if [ -f .env ]; then set -a; . ./.env; set +a; fi; \
 	for name in DESK_ADMIN_PASSWORD KERNEL_ROLE_PASSWORD API_ROLE_PASSWORD MOCKPAY_ROLE_PASSWORD; do \
@@ -89,6 +89,7 @@ image-check:
 # first): the admin task, then the kernel and the API in production mode in one network namespace,
 # each with only its own environment and secrets. Passes when api_health passes, mock payments
 # answers inside the kernel's container and the kernel's 8701 refuses connections from outside it.
+# The admin task migrates DB_NAME when given, else the database .env's ADMIN_DATABASE_URL names.
 image-smoke:
 	APP_IMAGE="$(APP_IMAGE)" DB_NAME="$(DB_NAME)" infra/scripts/image_smoke.sh
 
