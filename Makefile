@@ -16,8 +16,10 @@ test:
 	cd backend && uv run pytest
 
 # The API's kernel contract tests against the real kernel, not only FakeKernel, for the kernel plans
-# listed in evals/tier1/landed.toml: starts `make kernel-serve`, waits up to 30 s for its health check,
-# runs the real_kernel variants and stops it. With no kernel plan landed it says so and exits 0.
+# listed in evals/tier1/landed.toml: starts `make kernel-serve` with the kernel's development test hooks
+# (its offline reviewer, and the release desk-prove when built), waits up to 30 s for its health check,
+# prints its proof mode, runs the real_kernel variants and stops it. With no kernel plan landed it says
+# so and exits 0.
 kernel-contract:
 	cd backend && uv run python -m tests.kernel_contract.real_kernel
 
