@@ -2,8 +2,8 @@ import { useId, type KeyboardEvent } from 'react';
 
 import type { Health, LedgerEntry, LedgerPage } from '../../../api/contracts.ts';
 import { IconButton } from '../IconButton/IconButton.tsx';
-import { StatusDot, type StatusTone } from '../StatusDot/StatusDot.tsx';
-import { traceLine } from './traceLine.ts';
+import { StatusDot } from '../StatusDot/StatusDot.tsx';
+import { traceChainLine, traceLine } from './traceLine.ts';
 
 import './FullTrace.css';
 
@@ -27,24 +27,13 @@ function shorten(value: string): string {
 }
 
 /**
- * The chain line. Verified only when the kernel's check passed; a broken chain without a named
- * entry still reads as broken, and no check yet claims nothing.
- */
-function chainStatus(chain: FullTraceProps['chain'], seq: number): { tone: StatusTone; line: string } {
-  if (chain === null) return { tone: 'info', line: 'Not verified yet' };
-  if (chain.chain_ok === true) return { tone: 'handled', line: `Chain verified through entry ${seq}` };
-  if (chain.first_bad_seq === null) return { tone: 'refused', line: 'Chain broken' };
-  return { tone: 'refused', line: `Chain broken at entry ${chain.first_bad_seq}` };
-}
-
-/**
  * One ledger entry in full, for the owner: a plain line saying what it records, then the signed
  * record in mono (the only mono in Claude Desk) and the chain's state. Nothing is computed:
  * values are shown as given, long ones shortened in the middle.
  */
 export function FullTrace({ entry, chain, devKey, onClose }: FullTraceProps) {
   const titleId = useId();
-  const status = chainStatus(chain, entry.seq);
+  const status = traceChainLine(chain, entry.seq);
   const fields: readonly [label: string, value: string, full?: string][] = [
     ['Entry', String(entry.seq)],
     ['Recorded at', entry.created_at],

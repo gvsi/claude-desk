@@ -18,9 +18,9 @@
 ## What it shows
 
 1. "Full trace of entry {seq}", which also names the region, and the close button.
-2. The plain line: what this kind of entry records, then who recorded it. Entries from the kernel say "Recorded by the safety checks."; entries the chat service reported say "Reported by the chat service, and recorded as it was reported." (`traceLine.ts`, one line per `LedgerEvent.kind`, a missing kind is a compile error).
+2. The plain line: what this kind of entry records, then who recorded it. Entries from the kernel say "Recorded by the safety checks."; entries the chat service reported say "Reported by the chat service, and recorded as it was reported." (`traceLine.ts`, one line per `LedgerEvent.kind`, a missing kind is a compile error). A kind this build doesn't know reads "An entry in the record.", and an origin other than `kernel` reads as reported, never as checked.
 3. The record, labels in a secondary caption and values in mono: the entry number, `created_at` exactly as given, the previous hash, hash, signature and signing key, each shortened in the middle when longer than 17 characters with the whole value in its `title`, then `event.summary` as indented JSON.
-4. The chain: "Chain verified through entry {seq}" (handled), "Chain broken at entry {first_bad_seq}" (refused) or "Not verified yet" (info). It says verified only when the kernel's check passed.
+4. The chain (`traceChainLine` in `traceLine.ts`): "Chain verified through entry {seq}" (handled), "Chain broken at entry {first_bad_seq}" (refused; "Chain broken" when no well-formed entry number comes with it) or "Not verified yet" (info, also when there is no chain at all). It says verified only when `chain_ok` is exactly `true`.
 5. "Signed with a development key" when `devKey`.
 
 Nothing in the trace is computed or formatted: the kernel's values are shown as they arrive.

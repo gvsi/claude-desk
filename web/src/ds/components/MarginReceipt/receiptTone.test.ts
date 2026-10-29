@@ -41,6 +41,18 @@ describe('receiptTone', () => {
     expect(receiptTone({ kind: 'reply', handoff: true })).toBe('held');
   });
 
+  it('unknown_values_read_as_held', () => {
+    // Fail closed: a state this build doesn't know, or a reply whose handoff isn't exactly false,
+    // waits like a hold and never reads as handled.
+    for (const state of ['bogus', '', 'ALLOWED', 'executed ', '__proto__', 'toString', 'constructor']) {
+      expect(receiptTone({ kind: 'decision', state: state as DecisionState }), JSON.stringify(state)).toBe('held');
+    }
+    expect(receiptTone({ kind: 'decision', state: undefined as unknown as DecisionState })).toBe('held');
+    for (const handoff of [undefined, null, 'false', 0, '']) {
+      expect(receiptTone({ kind: 'reply', handoff: handoff as unknown as boolean }), JSON.stringify(handoff)).toBe('held');
+    }
+  });
+
   it('receipt_from_event_uses_visitor_plain', () => {
     const held: StatusEvent = only(rivera.events.heldTurn, 'held');
     expect(receiptFromEvent(held)).toEqual({

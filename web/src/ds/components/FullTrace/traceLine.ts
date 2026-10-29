@@ -1,4 +1,5 @@
-import type { LedgerEvent } from '../../../api/contracts.ts';
+import type { LedgerEvent, LedgerPage } from '../../../api/contracts.ts';
+import type { StatusTone } from '../StatusDot/StatusDot.tsx';
 
 /** What each kind of ledger entry records, in plain words. A kind missing here is a compile error. */
 const KIND_LINES = {
@@ -38,4 +39,16 @@ export function traceLine(event: Pick<LedgerEvent, 'kind' | 'origin'>): string {
   const what = Object.hasOwn(KIND_LINES, event.kind) ? KIND_LINES[event.kind] : 'An entry in the record.';
   const who = event.origin === 'kernel' ? ORIGIN_LINES.kernel : ORIGIN_LINES.api;
   return `${what} ${who}`;
+}
+
+/**
+ * The chain line under a trace. Verified only when the kernel's check passed (`chain_ok` exactly
+ * `true`); a broken chain without a well-formed entry number still reads as broken, and no check
+ * yet claims nothing.
+ */
+export function traceChainLine(chain: Pick<LedgerPage, 'chain_ok' | 'first_bad_seq'> | null, seq: number): { tone: StatusTone; line: string } {
+  if (chain == null) return { tone: 'info', line: 'Not verified yet' };
+  if (chain.chain_ok === true) return { tone: 'handled', line: `Chain verified through entry ${seq}` };
+  if (!Number.isInteger(chain.first_bad_seq)) return { tone: 'refused', line: 'Chain broken' };
+  return { tone: 'refused', line: `Chain broken at entry ${chain.first_bad_seq}` };
 }

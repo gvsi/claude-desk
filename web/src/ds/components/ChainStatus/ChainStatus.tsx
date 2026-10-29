@@ -1,6 +1,7 @@
 import type { Health, LedgerPage } from '../../../api/contracts.ts';
 import { CountPill } from '../CountPill/CountPill.tsx';
-import { StatusDot, type StatusTone } from '../StatusDot/StatusDot.tsx';
+import { StatusDot } from '../StatusDot/StatusDot.tsx';
+import { chainLine } from './chainLine.ts';
 
 import './ChainStatus.css';
 
@@ -13,14 +14,6 @@ export interface ChainStatusProps {
   entries: number;
   /** `Health.dev_signing_key`: the Desk signs with the development key. */
   devKey: Health['dev_signing_key'];
-}
-
-/** The line and its dot. Only a passed check reads as handled; a broken chain always says so. */
-function chainLine(chainOk: boolean | null, firstBadSeq: number | null): { tone: StatusTone; line: string } {
-  if (chainOk === null) return { tone: 'info', line: 'Not checked yet' };
-  if (chainOk === true) return { tone: 'handled', line: 'Every entry checks out' };
-  if (firstBadSeq === null) return { tone: 'refused', line: "An entry doesn't match the chain" };
-  return { tone: 'refused', line: `Entry ${firstBadSeq} doesn't match the chain` };
 }
 
 /**

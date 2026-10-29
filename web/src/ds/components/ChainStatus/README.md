@@ -18,7 +18,7 @@
 | State | Dot | Line |
 | --- | --- | --- |
 | `chainOk: true` | handled | "Every entry checks out" |
-| `chainOk: false` | refused | "Entry {firstBadSeq} doesn't match the chain" ("An entry doesn't match the chain" without a number) |
+| `chainOk: false`, or anything but `true` or `null` | refused | "Entry {firstBadSeq} doesn't match the chain" ("An entry doesn't match the chain" without a well-formed number) |
 | `chainOk: null` | info | "Not checked yet" |
 
 Beside the line, the count as a `CountPill` read as "{n} entries"; at the end, "Signed with a development key" when `devKey`.
