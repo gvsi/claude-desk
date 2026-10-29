@@ -12,6 +12,7 @@ matches words with accents folded and case ignored.
 
 import re
 import unicodedata
+from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -68,6 +69,38 @@ def card_amounts(text: str) -> list[int]:
     decimal mark (en "." or es ","); followed by three, it groups thousands."""
     shown = normalize(text)
     return [_cents(m.group(1) or m.group(2)) for m in _CARD_AMOUNT.finditer(shown)]
+
+
+def card_amount_problems(block: Any, allowed: Collection[int], *, headline: int | None = None) -> list[str]:
+    """How a card's amounts depart from those its fact states (`allowed`, in cents), judged on
+    what a visitor reads. The web app shows a card's `title`, its `lines` and its option labels,
+    and its `text` only when those are all empty, so each is read on its own: every amount any of
+    them shows is one of `allowed`; the title and lines show at least one; with `headline`, the
+    title shows that amount and no other (a quote's total); and `text` states the same amounts as
+    the title and lines together. Empty when the card agrees; `block` is a `RenderedBlock` or its
+    JSON."""
+    data = block.model_dump(mode="json") if isinstance(block, BaseModel) else block
+    title = card_amounts(_string(data.get("title")))
+    lines = [card_amounts(_string(line)) for line in data.get("lines") or []]
+    labels = [card_amounts(_string(option.get("label"))) for option in data.get("options") or []
+              if isinstance(option, dict)]
+    shown = {"the title": title} | {f"line {n}": amounts for n, amounts in enumerate(lines, start=1)}
+    shown |= {f"option {n}": amounts for n, amounts in enumerate(labels, start=1)}
+    problems = [f"{where} shows {outside} cents, none of {sorted(allowed)}" for where, amounts in shown.items()
+                if (outside := [cents for cents in amounts if cents not in allowed])]
+    in_card = title + [cents for amounts in lines for cents in amounts]
+    if not in_card:
+        problems.append("its title and lines show no amount")
+    if headline is not None and title != [headline]:
+        problems.append(f"the title shows {title} cents, not the total alone ({headline})")
+    text = card_amounts(_string(data.get("text")))
+    if sorted(text) != sorted(in_card):
+        problems.append(f"its text states {text} cents, but its title and lines show {in_card}")
+    return problems
+
+
+def _string(value: Any) -> str:
+    return value if isinstance(value, str) else ""
 
 
 def _cents(number: str) -> int:

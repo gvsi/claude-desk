@@ -1,14 +1,20 @@
 """The reply table's rows, checked without a kernel: the plan's counts, the loader's refusals, and
 agreement with the evals' own scanner."""
 
+import hashlib
 import unicodedata
 from collections import Counter
+from types import SimpleNamespace
 
+import desk_kernel
 import pytest
+import rfc8785
 
 from desk.contracts import RenderedBlock, ReplyVerdict, Violation
+from evals.fakes import FakeAnthropic
 from evals.oracles import denies_ai, scan_visible
-from evals.tier1.golden_desk import GOLDEN_DIR
+from evals.tier1 import test_reply_golden as reply_golden
+from evals.tier1.golden_desk import GOLDEN_DIR, P
 from evals.tier1.harness import match_expect
 from evals.tier1.test_reply_golden import ReplyRow, load_rows
 
@@ -172,3 +178,65 @@ def test_violation_kinds_compare_as_sets():
     assert any_of.kind_mismatches(verdict([], [HANDOFF], ok=False))
     assert rows["r-en-clean"].kind_mismatches(verdict([], [PROSE])) == []
     assert rows["r-en-clean"].kind_mismatches(verdict(["soft_promise"], [PROSE], ok=True))
+
+
+# A quote row run whole against a signed stand-in verdict
+
+ROW_SIGNER = desk_kernel.Signer.from_env_with({"DESK_SIGNING_SEED": "0b" * 32})   # a test key only
+ROW_SESSION, ROW_QUOTE = "s-row-1", "quote:Q-row-1"
+
+
+def signed_verdict(blocks: list[RenderedBlock]) -> ReplyVerdict:
+    """A passing verdict at generation 0, signed as the kernel signs one, so the row's signature
+    check holds and only what the card shows can fail it."""
+    unsigned = verdict([], blocks).model_copy(update={"message_id": "m-row-1", "ledger_seq": 3})
+    data = unsigned.model_dump(mode="json")
+    fields = {"session_id": ROW_SESSION, "generation": data["generation"], "message_id": data["message_id"],
+              "blocks_sha256": hashlib.sha256(rfc8785.dumps(data["blocks"])).hexdigest(),
+              "visitor_plain": data["visitor_plain"], "ledger_seq": data["ledger_seq"]}
+    signature = ROW_SIGNER.sign(b"desk-verdict-v1\0", hashlib.sha256(rfc8785.dumps(fields)).digest())
+    return unsigned.model_copy(update={"signature": signature})
+
+
+async def run_quote_row(monkeypatch: pytest.MonkeyPatch, card: RenderedBlock) -> None:
+    """`test_reply_row` for `c-own-quote` on a real-kernel stand-in whose `/check_reply` answers
+    with the prose and `card`, signed under the key `/health` gives: the answer must meet the row's
+    expectation, as the target's own check of it would require."""
+    row = {row.id: row for row in load_rows()}["c-own-quote"]
+    shown = signed_verdict([PROSE, card])
+    caller = SimpleNamespace(state=SimpleNamespace(session_id=ROW_SESSION, generation=0))
+
+    async def check_reply(k, who, prose, clauses=None, *, expect, generation=None):
+        assert match_expect(200, shown.model_dump(mode="json"), expect) == []
+        return shown
+
+    async def returns(value):
+        return value
+
+    monkeypatch.setattr(reply_golden, "golden_desk", lambda *args, **kwargs: returns(SimpleNamespace()))
+    monkeypatch.setattr(reply_golden, "open_caller", lambda *args, **kwargs: returns(caller))
+    monkeypatch.setattr(reply_golden, "cite_facts", lambda *args, **kwargs: returns({"own-quote": ROW_QUOTE}))
+    monkeypatch.setattr(reply_golden, "check_reply", check_reply)
+    monkeypatch.setattr(reply_golden, "signing_key", lambda *args: returns(ROW_SIGNER.public_key_hex()))
+    await reply_golden.test_reply_row(SimpleNamespace(is_real=True), FakeAnthropic(), None, row)
+
+
+ROW_CARD = RenderedBlock(kind="card", template="quote", text=f"${P // 100}.00\nDrain clearing", fact_id=ROW_QUOTE,
+                         title=f"${P // 100}.00", lines=["Drain clearing"])
+
+
+async def test_quote_row_passes_a_signed_card_showing_the_price(monkeypatch: pytest.MonkeyPatch):
+    await run_quote_row(monkeypatch, ROW_CARD)
+
+
+@pytest.mark.parametrize("change", [
+    {"title": "$1.00"},                                         # the headline a visitor reads
+    {"lines": ["Drain clearing", "Includes 99% off $1.00"]},    # a detail line
+    {"text": "$1.00\nDrain clearing"},                          # the plain text, if title and lines are dropped
+], ids=["title", "line", "text"])
+async def test_quote_row_fails_a_signed_card_misstating_the_price(monkeypatch: pytest.MonkeyPatch, change):
+    """A correctly signed card whose plain text holds the drain's price but whose title or a
+    line shows another fails the row; so does one whose text disagrees with its title and lines.
+    The signature authenticates what the kernel rendered, not that it agrees with the fact."""
+    with pytest.raises(AssertionError, match="quote card"):
+        await run_quote_row(monkeypatch, ROW_CARD.model_copy(update=change))

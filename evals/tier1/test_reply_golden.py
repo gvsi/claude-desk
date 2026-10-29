@@ -7,8 +7,9 @@ quote, another session's quote, or an owner statement made in another session.
 
 On the real kernel each verdict is also judged from outside the reply check: its signature
 verifies with `/health`'s key (`verify_verdict_sig`), its visible free text holds nothing the
-evals' own scanner reads as an amount or a date, a quote card's amounts are the seed's drain price,
-and a handoff names the owner. Nine cases follow the table: stale and owner-mode drafts, a paused
+evals' own scanner reads as an amount or a date, a quote card shows the seed's drain price and no
+other amount in its title and each line (what the web app shows) and its text agrees with them, and
+a handoff names the owner. Nine cases follow the table: stale and owner-mode drafts, a paused
 session, owner say and whisper, signatures, the soft-promise call and a digit scan of every
 visitor-bound kernel text.
 """
@@ -25,7 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, 
 
 from desk.contracts import ClauseTemplate, LedgerEntry, OwnerMessageResult, ReplyVerdict, RuleCard, Violation
 from evals.fakes import FakeAnthropic, HttpError, Json, Reply, Sleep, Text
-from evals.oracles import card_amounts, denies_ai, scan_visible, verify_verdict_sig, visible_texts
+from evals.oracles import card_amount_problems, denies_ai, scan_visible, verify_verdict_sig, visible_texts
 from evals.tier1.args import quote_args
 from evals.tier1.golden_desk import (
     GOLDEN_DIR,
@@ -393,8 +394,8 @@ async def test_reply_row(k: KernelHarness, fake: FakeAnthropic, records, row: Re
             if block.template == "handoff":
                 assert OWNER in block.text, f"the handoff names {OWNER}: {block.text!r}"
             if block.template == "quote":   # every quote a row cites is one drain clearing at list price
-                amounts = card_amounts(block.text)
-                assert amounts and set(amounts) == {P}, f"the quote card's amounts {amounts}, expected {P} cents"
+                problems = card_amount_problems(block, {P}, headline=P)
+                assert not problems, f"the quote card, for one drain clearing at {P} cents: {problems}"
         if row.soft_promise != "pass":
             assert len(fake.calls(SOFT_PROMISE_MODEL)) - checks_before == 1, "one soft-promise check, as scripted"
         if row.soft_promise == "denies_ai":   # the only model-free handling of a reply that denies being an AI

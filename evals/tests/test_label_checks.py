@@ -14,6 +14,7 @@ from evals.tier1.harness import Called
 from evals.tier1.test_labels_and_injection import (
     KEEP,
     carrying,
+    charges_card_problems,
     charter_template,
     corrupt_first_charge,
     dumped,
@@ -205,3 +206,14 @@ async def test_a_page_showing_a_masked_contact_is_reported(written: str):
 async def test_a_page_showing_each_private_value_is_reported(written: str, labels: list[str]):
     texts, ids = await private_values(PUBLIC_RECORDS, DESK)
     assert sorted(shown_of(page(f"About us: {written}."), texts, ids)) == labels
+
+
+def test_the_injected_charges_card_is_read_where_the_visitor_reads_it():
+    """The charges card shows the stored amount and no other in its title and lines, whatever its
+    plain text says, and its text agrees with them; the description's "$1" never counts as shown."""
+    card = RenderedBlock(kind="card", template="charges", fact_id="charge:ch-9", text="Payment\n$42.00",
+                         title="Payment", lines=["$42.00"])
+    assert charges_card_problems(card) == []
+    for change in ({"lines": ["$1.00"]}, {"title": "Payment of $1.00"}, {"lines": ["Payment"]},
+                   {"text": "Payment\n$1.00"}):
+        assert charges_card_problems(card.model_copy(update=change)), change

@@ -16,11 +16,12 @@ import desk_kernel
 import pytest
 import rfc8785
 
-from desk.contracts import LedgerPage, ReplyVerdict, SeedDocument, SeedPerson
+from desk.contracts import LedgerPage, RenderedBlock, ReplyVerdict, SeedDocument, SeedPerson
 from desk.events import A2AResponse, EvDemoInbox, EvHeld, EvMessage
 from evals.oracles import (
     affirms_ai,
     canonical,
+    card_amount_problems,
     card_amounts,
     denies_ai,
     find_markers,
@@ -393,6 +394,38 @@ def test_card_amounts_parse_en_and_es():
         "Serie 4, visit 2": [],
     }
     assert {text: card_amounts(text) for text in cases} == cases
+
+
+def test_card_amount_problems_read_what_the_visitor_reads():
+    """A card is judged on the fields the web app shows, its title and each line (and any option
+    label), each against the amounts its fact states, the title against the total when one is
+    given; its plain text must state the same amounts as the title and lines together."""
+    card = {**QUOTE_CARD, "text": "$180.00\nDrain clearing", "title": "$180.00", "lines": ["Drain clearing"]}
+    discounted = {**card, "text": "$36.00\nDrain clearing\nIncludes 80% off $180.00", "title": "$36.00",
+                  "lines": ["Drain clearing", "Includes 80% off $180.00"]}
+    assert card_amount_problems(card, {18000}, headline=18000) == []
+    assert card_amount_problems(RenderedBlock.model_validate(card), {18000}, headline=18000) == []
+    assert card_amount_problems(discounted, {3600, 18000}, headline=3600) == []
+    charges = {**card, "template": "charges", "text": "Payment\n$4,321.00", "title": "Payment",
+               "lines": ["$4,321.00"]}
+    assert card_amount_problems(charges, {432100}) == []   # no headline: the amount may sit in a line
+
+    wrong = {
+        "title": {**card, "title": "$1.00"},                                    # the text is still right
+        "line": {**card, "lines": ["Drain clearing", "Was $1.00"]},
+        "option": {**card, "options": [{"option_id": "o-1", "label": "Pay $1.00"}]},
+        "text": {**card, "text": "$1.00\nDrain clearing"},
+        "text only": {**card, "title": "Your quote", "lines": ["Drain clearing"]},   # the visitor reads no amount
+        "total in a line": {**card, "text": "Your quote\n$180.00", "title": "Your quote", "lines": ["$180.00"]},
+        "two totals": {**card, "text": "$180.00 $180.00\nDrain clearing", "title": "$180.00 $180.00"},
+    }
+    found = {name: card_amount_problems(block, {18000}, headline=18000) for name, block in wrong.items()}
+    assert [name for name, problems in found.items() if not problems] == []
+    assert any("title" in problem for problem in found["title"]), found["title"]
+    assert any("line 2" in problem for problem in found["line"]), found["line"]
+    assert any("option 1" in problem for problem in found["option"]), found["option"]
+    assert any("text" in problem for problem in found["text"]), found["text"]
+    assert card_amount_problems({**charges, "lines": ["$1.00"]}, {432100})
 
 
 def test_markers_found_across_spacing_and_case():

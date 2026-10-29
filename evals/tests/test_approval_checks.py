@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from desk.contracts import CopyCreated, ExecResult, Fact, Label, LedgerEntry, SessionState
+from desk.contracts import CopyCreated, ExecResult, Fact, Label, LedgerEntry, RenderedBlock, SessionState
 from desk.kernel_api import KernelError
 from evals.tier1.golden_desk import Caller, GoldenDesk
 from evals.tier1.harness import Auth, TravelClock
@@ -17,6 +17,7 @@ from evals.tier1.test_approvals import (
     approvals_of,
     assert_never_runs,
     fact_id_of,
+    held_quote_card_problems,
     leaked,
     naming,
     unreadable,
@@ -224,3 +225,16 @@ async def test_upcoming_slots_are_the_desks_next_slots():
     assert await upcoming_slots(k, records, DESK_OF_THE_CASE, 3) == ["soon", "next", "later"]
     with pytest.raises(AssertionError, match="3 upcoming slots"):
         await upcoming_slots(k, records, DESK_OF_THE_CASE, 4)
+
+
+def test_the_slices_quote_card_is_read_where_the_visitor_reads_it():
+    """The thin slice's quote card shows the held total as its headline and no amount but that
+    total and the list price in its title or any line, whatever its plain text says, and its text
+    agrees with them (Plan 01a's quote template: the total, the items, the discount off the list)."""
+    card = RenderedBlock(kind="card", template="quote", fact_id="quote:Q-own-1",
+                         text="$36.00\nDrain clearing\nIncludes 80% off $180.00", title="$36.00",
+                         lines=["Drain clearing", "Includes 80% off $180.00"])
+    assert held_quote_card_problems(card) == []
+    for change in ({"title": "$1.00"}, {"title": "$180.00"}, {"lines": ["Drain clearing", "Includes 99% off $1.00"]},
+                   {"text": "$36.00\nDrain clearing"}):
+        assert held_quote_card_problems(card.model_copy(update=change)), change
