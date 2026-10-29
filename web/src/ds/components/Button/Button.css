@@ -1,0 +1,103 @@
+/* Button: one of three weights, two heights. Hover fills change at motion-instant; a press
+   shrinks the button slightly at motion-fast. Nothing moves under reduced motion. */
+
+.cd-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-6);
+  box-sizing: border-box;
+  height: var(--size-control);
+  margin: 0;
+  padding: 0 var(--space-12);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-primary);
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-instant) var(--motion-ease),
+    color var(--motion-instant) var(--motion-ease),
+    transform var(--motion-fast) var(--motion-ease-emphasis);
+}
+
+.cd-button--main {
+  height: var(--size-control-main);
+  padding: 0 var(--space-14);
+}
+
+/* Two classes, so the weight wins over .cd-type-control whatever order the stylesheets load in. */
+.cd-button.cd-button--primary {
+  background: var(--button-primary);
+  color: var(--button-primary-text);
+  font-weight: 500;
+}
+
+.cd-button--primary.cd-button--main {
+  padding: 0 var(--space-16);
+}
+
+.cd-button--secondary {
+  background: var(--fill-secondary);
+}
+
+.cd-button--primary:hover {
+  background: var(--button-primary-hover);
+}
+
+.cd-button--secondary:hover {
+  background: var(--fill-secondary-hover);
+}
+
+.cd-button--ghost:hover {
+  background: var(--fill-hover);
+}
+
+.cd-button:active {
+  transform: scale(0.98);
+}
+
+/* Disabled and busy: no hover, no press. A disabled control is dimmed well down; a busy one only a
+   little, so its label still reads at 4.5:1 and the click visibly registered. */
+.cd-button:disabled,
+.cd-button[aria-disabled='true'] {
+  cursor: default;
+  transform: none;
+}
+
+.cd-button:disabled,
+a.cd-button[aria-disabled='true']:not([aria-busy='true']) {
+  opacity: 0.4;
+}
+
+.cd-button[aria-busy='true'] {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.cd-button--primary:disabled,
+.cd-button--primary[aria-disabled='true'] {
+  background: var(--button-primary);
+}
+
+.cd-button--secondary:disabled,
+.cd-button--secondary[aria-disabled='true'] {
+  background: var(--fill-secondary);
+}
+
+.cd-button--ghost:disabled,
+.cd-button--ghost[aria-disabled='true'] {
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cd-button {
+    transition: none;
+  }
+
+  .cd-button:active {
+    transform: none;
+  }
+}

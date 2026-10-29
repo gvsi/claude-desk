@@ -1,0 +1,34 @@
+/* StatusDot: the only way status color appears, a size-dot dot beside words. */
+
+.cd-status-dot {
+  display: inline-block;
+  flex: none;
+  box-sizing: border-box;
+  width: var(--size-dot);
+  height: var(--size-dot);
+  border-radius: var(--radius-full);
+}
+
+.cd-status-dot--handled {
+  background: var(--status-handled);
+}
+
+.cd-status-dot--held {
+  background: var(--status-held);
+}
+
+.cd-status-dot--refused {
+  background: var(--status-refused);
+}
+
+.cd-status-dot--info {
+  border: 1px solid var(--status-info);
+  background: transparent;
+}
+
+.cd-status-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-8);
+  min-width: 0;
+}
