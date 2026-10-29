@@ -25,6 +25,9 @@ from stacks.task import API_CONTAINER, API_PORT
 LISTENER_PORT = 80
 # Above the 15 s heartbeat on an open event stream, below uvicorn's 310 s keep-alive.
 IDLE_TIMEOUT = Duration.seconds(300)
+# The API starts only once the kernel is healthy, which may take the kernel's whole 60 s start
+# period; ECS ignores the balancer's failed checks until the API has had time to start too.
+HEALTH_CHECK_GRACE_PERIOD = Duration.seconds(120)
 
 
 class AlbCompute(Construct):
@@ -85,6 +88,7 @@ class AlbCompute(Construct):
             min_healthy_percent=100,
             max_healthy_percent=200,
             circuit_breaker=ecs.DeploymentCircuitBreaker(rollback=True),
+            health_check_grace_period=HEALTH_CHECK_GRACE_PERIOD,
             task_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
             assign_public_ip=True,
             security_groups=[app_security_group],

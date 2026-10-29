@@ -191,6 +191,9 @@ def test_alb_service_uses_the_app_group_with_a_public_ip(alb_stacks):
         "MaximumPercent": 200,
         "MinimumHealthyPercent": 100,
     }
+    # The API starts only once the kernel is healthy, which may take its whole 60 s start period, so
+    # ECS ignores the balancer's failed checks for the first two minutes, not the default one.
+    assert props["HealthCheckGracePeriodSeconds"] == 120
     # Public subnets with a public IP, the task's only way out without NAT, and the app group,
     # which admits 8700 from the VPC only.
     network = props["NetworkConfiguration"]["AwsvpcConfiguration"]
