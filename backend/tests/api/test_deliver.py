@@ -57,6 +57,12 @@ async def test_reply_becomes_a_message_event_and_row(api_conn, visitor, ro_schem
     assert await deliver(api_conn, ids, Reply(paid, "desk", "kernel"), ro_schema=ro_schema) == 3
     # the same verdict twice is shown once
     assert await deliver(api_conn, ids, Reply(passed, "claude", "model", call_id="toolu_1"), ro_schema=ro_schema) is None
+    # the author follows from who delivers: Claude (its send_reply, or a handoff), the owner (a say), the Desk
+    authors = {"model": "claude", "api": "claude", "owner": "owner", "kernel": "desk"}
+    for via, author in [(via, author) for via in authors for author in ("claude", "owner", "desk")
+                        if authors[via] != author]:
+        with pytest.raises(ValueError):
+            Reply(passed, author, via, call_id="toolu_3" if via == "model" else None)
 
     assert await events(api_conn, ids.session_id) == [
         (1, message_event(passed, "claude")), (2, message_event(blocked, "claude")), (3, message_event(paid, "desk"))]

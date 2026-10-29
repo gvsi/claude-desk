@@ -7,8 +7,8 @@ reach the session as one of the four signed events, which only this module build
   failed: its blocks are then the handoff clause alone) and a `delivered` row carrying the event's `seq`
   and, for Claude's `send_reply`, the call's ID. A verdict checked at a generation the session has since
   left (a take-over, a hand-back) is dropped: nothing is shown and None is returned. `via` says who
-  produced it: `model` (Claude's `send_reply`), `api` (a handoff the loop asked for), `owner` (a say) or
-  `kernel` (a payment confirmation).
+  produced it and fixes the author: `model` (Claude's `send_reply`) and `api` (a handoff the loop asked for)
+  are Claude's, `owner` (a say) the owner's and `kernel` (a payment confirmation) the Desk's.
 - `Status(decision, phase)`: a signed decision becomes `EvReceipt`, `EvHeld` or `EvResolved` with its
   signed fields unchanged, and a `status` row. Statuses aren't generation-fenced (an approved hold
   resumes across a take-over); a decision's state at a ledger entry is shown once, and again it is None.
@@ -34,6 +34,7 @@ from desk.events import EvHeld, EvMessage, EvReceipt, EvResolved
 
 Phase = Literal["receipt", "held", "resolved"]
 PHASES = ("receipt", "held", "resolved")
+AUTHOR_BY_VIA = {"model": "claude", "api": "claude", "owner": "owner", "kernel": "desk"}
 
 
 @dataclass(frozen=True)
@@ -44,9 +45,10 @@ class Reply:
     call_id: str | None = None             # the send_reply tool_use ID, for a reply Claude's call produced
 
     def __post_init__(self) -> None:
-        if self.author not in ("claude", "owner", "desk") or self.via not in ("model", "api", "owner", "kernel"):
-            raise ValueError("a reply's author is claude, owner or desk, and via is model, api, owner or kernel")
-        if (self.via == "model") != (self.call_id is not None) or (self.via == "model" and self.author != "claude"):
+        if self.via not in AUTHOR_BY_VIA or AUTHOR_BY_VIA[self.via] != self.author:
+            raise ValueError("a reply's author follows from its via: model or api is claude, owner is owner and "
+                             "kernel is desk")
+        if (self.via == "model") != (self.call_id is not None):
             raise ValueError("only Claude's send_reply calls deliver via the model, each with its call ID")
 
 
