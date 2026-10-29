@@ -21,11 +21,13 @@ hooks in this order:
 
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, runtime_checkable
+from zoneinfo import ZoneInfo
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StrictInt
+from sqlalchemy import select
 
 from desk.contracts import Fact, InboxNotice, NormalizedAction, Principal, ResourceRef, ToolProfile
-from desk.db.models import ActorSession, Desk
+from desk.db.models import ActorSession, Business, Desk
 from desk.kernel_service.repo import KernelCtx
 
 
@@ -92,3 +94,10 @@ class Adapter(Protocol):
     async def execute(self, xctx: ExecCtx, action: NormalizedAction, args: BaseModel) -> AdapterResult: ...
 
     async def reconcile(self, xctx: ExecCtx, action: NormalizedAction) -> AdapterResult | None: ...
+
+
+async def business_timezone(ctx: KernelCtx, desk_row: Desk) -> ZoneInfo:
+    """The time zone of the Desk's business: slots, hours and the dates in facts are read in it."""
+    name = (await ctx.db.execute(ctx.repo.scoped(
+        select(Business.timezone).where(Business.business_id == desk_row.business_id)))).scalar_one()
+    return ZoneInfo(name)

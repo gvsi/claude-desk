@@ -18,7 +18,6 @@ import json
 import re
 import secrets
 import unicodedata
-from datetime import datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import desk_kernel
@@ -26,9 +25,9 @@ from sqlalchemy import select
 
 from desk.contracts import BusinessSeed, Claim, DeskSeed, Fact, Label, LedgerEvent, ToolProfile
 from desk.db.models import Business, CalendarSlot, Desk, Document, NotificationPref, Person, PriceItem, Tool
-from desk.db.models import Fact as FactRow
 from desk.kernel_api import DeskCreated
 from desk.kernel_service import adapters, ledger
+from desk.kernel_service.labels import fact_row
 from desk.kernel_service.repo import KernelCtx, KernelFailure, new_id
 
 OWNER_DISPLAY_NAME = re.compile(r"[A-Za-zÀ-ÿ' -]{1,40}")
@@ -112,12 +111,6 @@ def tool_row(copy_id: str, desk_id: str, profile: ToolProfile) -> Tool:
                 reversible=enabled.reversible, status="enabled", description_confirmed=enabled.description_confirmed,
                 definition_sha256=enabled.definition_sha256, profile=enabled,
                 profile_sha256=adapters.profile_sha256(enabled))
-
-
-def fact_row(copy_id: str, desk_id: str, fact: Fact, created_at: datetime) -> FactRow:
-    return FactRow(desk_id=desk_id, fact_id=fact.fact_id, copy_id=copy_id, kind=fact.kind, status=fact.status,
-                   claims=fact.claims, readers=fact.label.readers, record_owner=fact.label.record_owner,
-                   expires_at=fact.expires_at, source=fact.source, created_at=created_at)
 
 
 def hours_claim(desk: DeskSeed) -> Claim:

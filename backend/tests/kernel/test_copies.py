@@ -72,7 +72,7 @@ async def test_copy_seeds_rivera_plumbing(app, client, frozen_clock):
     assert (business.business_id, business.name, business.owner_display_name, business.timezone, business.brand) == (
         desk.business_id, "Rivera Plumbing", "Maria Rivera", "America/Los_Angeles",
         {"primary": "#1F4E4A", "accent": "#B87333"})
-    [owner] = await rows_of(app, copy_id, select(ActorSession))
+    [owner] = await rows_of(app, copy_id, select(ActorSession).where(ActorSession.kind == "owner"))
     assert (owner.session_id, owner.kind, owner.desk_id, owner.assurance) == (
         created["owner_session"]["session_id"], "owner", None, "owner_session")
     response = await client.get("/whoami", headers={"X-Owner-Session": created["owner_token"]})   # the copy credential
@@ -103,11 +103,13 @@ async def test_copy_seeds_rivera_plumbing(app, client, frozen_clock):
     assert windows.value == desk_kernel.canonical_json(json.dumps([w.model_dump(mode="json") for w in desk.hours]))
     assert [(w.days, w.start, w.end) for w in desk.hours] == [
         (["mon", "tue", "wed", "thu", "fri"], time(8), time(18)), (["sat"], time(9), time(13))]
-    # the Desk's creation is the first entry on its ledger, its rules' activation the second
+    # the Desk's creation is the first entry on its ledger, its rules' activation the second, then
+    # the held request on Today (test_adapters.test_copy_seeds_one_held_quote)
     entries = await rows_of(app, copy_id, select(LedgerEntry).order_by(LedgerEntry.seq))
-    assert [(e.desk_id, e.seq, e.event.kind, e.event.summary) for e in entries] == [
-        (desk_id, 1, "desk_data", {"part": "desk", "created": True}),
-        (desk_id, 2, "policy", {"version": 1, "status": "active", "preset": "rivera"})]
+    assert [(e.desk_id, e.seq, e.event.kind) for e in entries] == [
+        (desk_id, 1, "desk_data"), (desk_id, 2, "policy"), (desk_id, 3, "session"), (desk_id, 4, "decide")]
+    assert [e.event.summary for e in entries[:2]] == [{"part": "desk", "created": True},
+                                                      {"version": 1, "status": "active", "preset": "rivera"}]
     # the seed's cards: the starter preset's utility cards plus Rivera's own
     ask_first = seed.PRESETS["ask_first"]
     assert all(card.card_id.startswith("preset-") and card.mode == "auto" for card in ask_first)
@@ -225,6 +227,7 @@ async def test_seed_rejects_an_hours_claim_and_a_bad_owner_name(app, frozen_cloc
 
 
 async def test_create_desk_enables_only_native_tools(app, frozen_clock, registry):
+    registry.clear()                                                        # without the native adapters
     native = adapters.register(FakeAdapter("native.find_slots", effects=["read"], status="disabled"))
     adapters.register(FakeAdapter("payments.list_charges", effects=["read"]))     # MCP: only a pinned connect adds it
     copy_id = new_id("copy")

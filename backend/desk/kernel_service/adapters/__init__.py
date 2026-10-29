@@ -1,4 +1,5 @@
-"""The registry of adapters, one per tool. Each adapter module registers itself at import.
+"""The registry of adapters, one per tool. Each adapter module registers itself at import; the
+native quote, open-times and booking adapters are imported at the end of this module.
 
 `register` refuses an adapter whose args model isn't strict and closed, or whose profile's
 `input_schema` isn't exactly that model's JSON Schema, so the schema Claude sees is the one the
@@ -57,3 +58,8 @@ def _check(adapter: Adapter) -> None:
         raise ValueError(f"{profile.tool}: free_text_fields names fields of its Args model")
     if not isinstance(adapter.model_view_keys, frozenset):
         raise ValueError(f"{profile.tool}: model_view_keys is a frozenset")
+
+
+# The native adapters register themselves when imported, so importing this package gives the kernel
+# all of them; they import `register` above, which is why they come last.
+from desk.kernel_service.adapters import book, find_slots, quote  # noqa: E402, F401

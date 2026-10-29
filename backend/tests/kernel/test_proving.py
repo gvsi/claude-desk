@@ -25,7 +25,7 @@ from sqlalchemy import select
 from desk.contracts import ProofCheck, ProofReport
 from desk.db.models import LedgerEntry, PolicyVersion
 from desk.db.session import database_url, dispose_engines, libpq_url
-from desk.kernel_service import activation, compiler
+from desk.kernel_service import activation, compiler, seed
 from desk.kernel_service.app import create_app
 from desk.kernel_service.seed import RIVERA_CARDS
 
@@ -366,8 +366,13 @@ def detached(row: PolicyVersion, **changes) -> PolicyVersion:
     return PolicyVersion(**{**columns, **changes})
 
 
-async def test_versions_load_lazily_and_report_errors(app, client):
+async def test_versions_load_lazily_and_report_errors(app, client, monkeypatch):
     engine, versions = app.state.engine, app.state.loaded_versions
+
+    async def no_held_request(ctx, copy_id, desk_id) -> None:
+        return None                       # the seeded hold would be the version's first use
+
+    monkeypatch.setattr(seed, "seed_held_request", no_held_request)
     created = await post_copy(client)
     copy_id, [desk_id] = created["copy_id"], created["desk_ids"]
     request = slots_request(copy_id, desk_id)

@@ -2,9 +2,10 @@
 
 `POST /copies` (the API checks the passcode first; the kernel is loopback only) writes a copy row,
 the Rivera seed through `desks.create_desk`, its rule cards activated from their CI-proved report
-(`activation.activate_shipped`) and the copy's owner session, all in one transaction. Without a
-report for the cards as compiled, nothing is created: 503 `seed_unproved`. The owner token in the
-answer is the copy's credential: it is shown once and stored only as its hash.
+(`activation.activate_shipped`), the held request waiting on Today (`seed.seed_held_request`) and
+the copy's owner session, all in one transaction. Without a report for the cards as compiled,
+nothing is created: 503 `seed_unproved`. The owner token in the answer is the copy's credential:
+it is shown once and stored only as its hash.
 """
 
 from fastapi import APIRouter
@@ -29,6 +30,7 @@ async def create_copy(ctx: KernelCtx) -> CopyCreated:
     business, desk = seed.rivera_seed(now)
     created = await desks.create_desk(ctx, copy_id, business, desk, answering=True)
     await activation.activate_shipped(ctx, created.desk_id, "rivera")
+    await seed.seed_held_request(ctx, copy_id, created.desk_id)
     token = auth.new_token()
     owner = SessionRow(session_id=auth.new_session_id(), copy_id=copy_id, desk_id=None, kind="owner",
                        secret_hash=auth.hash_token(token), verified=True, assurance="owner_session", mode="ai",

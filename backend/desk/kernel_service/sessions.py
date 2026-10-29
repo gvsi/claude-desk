@@ -13,7 +13,7 @@ from desk.db.models import Desk
 from desk.kernel_api import CreateSessionRequest, ModeRequest, WhoAmI
 from desk.kernel_service import auth, ledger, repo
 from desk.kernel_service.auth import AuthError, Named, SessionRow
-from desk.kernel_service.repo import Ctx, KernelFailure, route_template
+from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, route_template
 
 router = APIRouter()
 
@@ -58,17 +58,24 @@ async def create_session(body: CreateSessionRequest, ctx: Ctx, request: Request)
         raise AuthError(401, "auth", "preview_unavailable", route=route_template(request), named=named)
     if desk.deleted_at is not None:
         raise AuthError(409, "closed", "closed", route=route_template(request), named=named)
+    row, token = await open_visitor(ctx, copy_id, desk.desk_id)
+    return SessionCreated(state=session_state(row), session_token=token)
+
+
+async def open_visitor(ctx: KernelCtx, copy_id: str, desk_id: str) -> tuple[SessionRow, str]:
+    """A new, unverified visitor session on the Desk and its token (stored only as its hash), with
+    its `session` ledger entry, in the caller's transaction."""
     now = ctx.clock.now()
     token = auth.new_token()
-    row = SessionRow(session_id=auth.new_session_id(), copy_id=copy_id, desk_id=desk.desk_id, kind="visitor",
+    row = SessionRow(session_id=auth.new_session_id(), copy_id=copy_id, desk_id=desk_id, kind="visitor",
                      secret_hash=auth.hash_token(token), verified=False, assurance="none", mode="ai", generation=0,
                      strikes=0, preview=False, created_at=now, last_seen_at=now)
     ctx.db.add(row)
     await ctx.db.flush()
-    await ledger.append(ctx, copy_id=copy_id, desk_id=desk.desk_id,
+    await ledger.append(ctx, copy_id=copy_id, desk_id=desk_id,
                         event=LedgerEvent(kind="session", origin="kernel", session_id=row.session_id,
                                           summary={"session_id": row.session_id, "kind": row.kind}))
-    return SessionCreated(state=session_state(row), session_token=token)
+    return row, token
 
 
 @router.get("/whoami", response_model=WhoAmI)

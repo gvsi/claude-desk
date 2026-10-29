@@ -22,6 +22,7 @@ from .helpers import kernel_ctx, ledger_rows, make_copy_rows, rows_of
 
 
 async def test_fake_adapter_satisfies_the_protocol(registry):
+    registry.clear()                                                        # without the native adapters
     native, mcp = FakeAdapter("native.find_slots"), FakeAdapter("payments.list_charges", effects=["read"])
     for fake in (native, mcp):
         assert isinstance(fake, Adapter)

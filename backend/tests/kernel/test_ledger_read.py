@@ -49,7 +49,7 @@ async def read_page(client, desk_id: str, owner_token: str):
 
 
 async def test_owner_reads_a_verified_page(app, client, frozen_clock):
-    copy = await create_copy(client)            # the seed's desk_data and policy entries
+    copy = await create_copy(client)            # desk_data, policy, and the held request's session and decide
     [desk_id] = copy["desk_ids"]
     slug = await slug_of(app, copy["copy_id"], desk_id)
     for _ in range(2):
@@ -59,8 +59,9 @@ async def test_owner_reads_a_verified_page(app, client, frozen_clock):
     assert response.status_code == 200, response.text
     page = LedgerPage.model_validate(response.json())
     signer = app.state.kernel.signer
-    assert [entry.seq for entry in page.entries] == [1, 2, 3, 4]
-    assert [entry.event.kind for entry in page.entries] == ["desk_data", "policy", "session", "session"]
+    assert [entry.seq for entry in page.entries] == [1, 2, 3, 4, 5, 6]
+    assert [entry.event.kind for entry in page.entries] == ["desk_data", "policy", "session", "decide", "session",
+                                                            "session"]
     assert {entry.desk_id for entry in page.entries} == {desk_id}
     assert (page.chain_ok, page.first_bad_seq) == (True, None)
     assert page.entries[0].prev_hash == GENESIS
@@ -117,7 +118,7 @@ async def test_serialized_page_verifies_without_the_database(app, client, frozen
     await app.state.kernel.engine.dispose()
     await dispose_engines()
     page = LedgerPage.model_validate_json(saved.read_text())
-    assert len(page.entries) == 5 and page.chain_ok
+    assert len(page.entries) == 7 and page.chain_ok                         # the copy's four, then three sessions
     public_key = Ed25519PublicKey.from_public_bytes(bytes.fromhex(page.public_key_hex))
     assert page.key_id == hashlib.sha256(bytes.fromhex(page.public_key_hex)).hexdigest()[:16]
     prev_hash = GENESIS
@@ -162,9 +163,9 @@ async def test_tampering_names_the_first_bad_seq(app, client, frozen_clock):
     assert await page_state(client, desk_id, copy["owner_token"]) == (False, 2)
     as_admin(edit, ('"active"', desk_id))
     assert await page_state(client, desk_id, copy["owner_token"]) == (True, None)
-    # the newest entry dropped: what's left still links, but the Desk's head names entry 5
-    as_admin("DELETE FROM kernel.ledger_entries WHERE desk_id = %s AND seq = 5", (desk_id,))
-    assert await page_state(client, desk_id, copy["owner_token"]) == (False, 5)
+    # the newest entry dropped: what's left still links, but the Desk's head names entry 7
+    as_admin("DELETE FROM kernel.ledger_entries WHERE desk_id = %s AND seq = 7", (desk_id,))
+    assert await page_state(client, desk_id, copy["owner_token"]) == (False, 7)
 
 
 async def test_head_checkpoint_every_fifty_entries(app, client):

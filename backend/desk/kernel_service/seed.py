@@ -3,7 +3,8 @@
 `POST /copies` writes it through `desks.create_desk`, the same path as an owner's new Desk, so a
 copy differs from another only in its IDs, canaries and dates. `RIVERA_CARDS` have fixed IDs and
 are scoped `anyone`, `verified` or `record_owner`, never to a person, so they compile to the same
-Cedar in every copy and share one CI-proved report.
+Cedar in every copy and share one CI-proved report. Once the cards are active, `seed_held_request`
+puts one held request on the owner's Today, decided like any other.
 """
 
 from datetime import date, datetime, time, timedelta
@@ -13,6 +14,7 @@ from desk.contracts import (
     BusinessSeed,
     CalendarSlot,
     Claim,
+    Decision,
     DeskSeed,
     HoursWindow,
     NotificationDefaults,
@@ -20,10 +22,14 @@ from desk.contracts import (
     RuleCard,
     SeedDocument,
     SeedPerson,
+    ToolCall,
 )
+from desk.kernel_api import DecideRequest
+from desk.kernel_service import sessions
+from desk.kernel_service.repo import KernelCtx
 from desk.presets import PRESETS
 
-__all__ = ["PRESETS", "RIVERA_CARDS", "rivera_seed"]
+__all__ = ["PRESETS", "RIVERA_CARDS", "rivera_seed", "seed_held_request"]
 
 TIMEZONE = "America/Los_Angeles"
 WEEKDAYS = ["mon", "tue", "wed", "thu", "fri"]
@@ -48,6 +54,10 @@ RIVERA_CARDS: list[RuleCard] = [
     RuleCard(card_id="rv-docs", applies_to="native.release_document", mode="auto", who="record_owner",
              reason="Customers get their own documents after confirming it's them."),
 ]
+
+# The held request: drain clearing at 15% off, which `rv-quote` (list price only) holds for Maria.
+HELD_REQUEST = ToolCall(call_id="seed-held-quote", tool="native.quote",
+                        args={"items": [{"item_id": "drain", "qty": 1}], "requested_discount_bp": 1500})
 
 
 def rivera_seed(now: datetime) -> tuple[BusinessSeed, DeskSeed]:
@@ -107,3 +117,17 @@ def calendar_slots(now: datetime) -> list[CalendarSlot]:
             slots.append(CalendarSlot(slot_id=starts_at.strftime("S-%Y%m%d-%H%M"), starts_at=starts_at,
                                       minutes=SLOT_MINUTES))
     return slots
+
+
+async def seed_held_request(ctx: KernelCtx, copy_id: str, desk_id: str) -> Decision:
+    """The request waiting on a new copy's Today: a visitor session of its own (its token is
+    discarded, so no one can speak for it) asks for `HELD_REQUEST`, and `decide.decide_call`
+    decides it as it would any call, so it is a signed, ledgered hold that alerts the owner. Runs
+    in the caller's transaction, after the seed's cards are active."""
+    from desk.kernel_service import decide       # decide imports activation, which imports this module
+
+    ctx.bind(copy_id)
+    visitor, _ = await sessions.open_visitor(ctx, copy_id, desk_id)
+    request = DecideRequest(session_id=visitor.session_id, generation=visitor.generation,
+                            call=HELD_REQUEST.model_copy(deep=True))
+    return await decide.decide_call(ctx, sessions.principal_for(visitor), visitor, request)
