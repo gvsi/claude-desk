@@ -101,7 +101,7 @@ class SeedDocument(BaseModel):
     record_owner_ref: str | None = None   # a SeedPerson.ref; None = owner-only
 
 ITEM_ID_PATTERN = r"^[a-z0-9-]{1,40}$"
-SLOT_ID_PATTERN = r"^S-\d{8}-\d{4}$"
+SLOT_ID_PATTERN = r"^S-[0-9]{8}-[0-9]{4}$"   # ASCII digits, as in SignedTime
 
 class PriceItem(BaseModel):
     item_id: str = Field(pattern=ITEM_ID_PATTERN)

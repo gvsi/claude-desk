@@ -282,6 +282,14 @@ def test_ids_follow_their_patterns():
             CalendarSlot(slot_id=slot_id, starts_at="2026-11-02T08:00:00-08:00", minutes=120)
 
 
+def test_slot_ids_use_ascii_digits():
+    # as with SignedTime: Python and Pydantic read \d as any Unicode digit, the web app's regex as 0-9 only
+    arabic_indic = "S-٢٠٢٦١١٠٢-٠٨٠٠"   # S-20261102-0800
+    assert not re.fullmatch(SLOT_ID_PATTERN, arabic_indic)
+    with pytest.raises(ValidationError):
+        CalendarSlot(slot_id=arabic_indic, starts_at="2026-11-02T08:00:00-08:00", minutes=120)
+
+
 def test_kernel_requests_refuse_unknown_fields():
     # an identity field the API shouldn't send is refused, not silently dropped
     for model in KERNEL_REQUESTS:

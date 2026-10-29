@@ -305,7 +305,7 @@
     "CalendarSlot": {
       "properties": {
         "slot_id": {
-          "pattern": "^S-\\d{8}-\\d{4}$",
+          "pattern": "^S-[0-9]{8}-[0-9]{4}$",
           "title": "Slot Id",
           "type": "string"
         },
