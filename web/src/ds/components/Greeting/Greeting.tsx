@@ -1,0 +1,65 @@
+import { Icon } from '../../icons/index.tsx';
+import { IconButton } from '../IconButton/IconButton.tsx';
+
+import './Greeting.css';
+
+/** Someone talking to the Desk right now, drawn as a small glyph beside the presence line. */
+export interface PresenceGlyph {
+  kind: 'person' | 'agent';
+  /** A person's initials, shown in place of the person glyph. */
+  initials?: string;
+}
+
+export interface GreetingProps {
+  /** The greeting, from the screen: "Good morning, Maria". It is Today's `h1`. */
+  text: string;
+  /**
+   * Who is here right now: the line says it in words ("Two people are talking to your Desk right
+   * now."), and the first three `people` are drawn beside it as glyphs that breathe.
+   */
+  presence?: { line: string; people: PresenceGlyph[] };
+  /** The public link as the screen shows it, and a button that copies it. */
+  link?: { label: string; onCopy: () => void };
+}
+
+/** At most this many glyphs: the line carries the count, the glyphs only the feeling of company. */
+const MAX_GLYPHS = 3;
+
+/**
+ * The top of Today: a greeting in Claude's serif voice, one quiet line about who is talking to the
+ * Desk right now, and the public link with a button to copy it.
+ */
+export function Greeting({ text, presence, link }: GreetingProps) {
+  const glyphs = presence?.people.slice(0, MAX_GLYPHS) ?? [];
+  return (
+    <header className="cd-greeting">
+      <div className="cd-greeting__text">
+        <h1 className="cd-greeting__title cd-type-greeting">{text}</h1>
+        {presence ? (
+          <p className="cd-greeting__presence cd-type-body">
+            {glyphs.length > 0 ? (
+              <span className="cd-greeting__glyphs" aria-hidden="true">
+                {glyphs.map((glyph, index) => (
+                  <span key={index} className="cd-greeting__glyph">
+                    {glyph.kind === 'person' && glyph.initials ? (
+                      <span className="cd-greeting__initials cd-type-count">{glyph.initials}</span>
+                    ) : (
+                      <Icon name={glyph.kind === 'agent' ? 'agent' : 'person'} size={14} />
+                    )}
+                  </span>
+                ))}
+              </span>
+            ) : null}
+            <span>{presence.line}</span>
+          </p>
+        ) : null}
+      </div>
+      {link ? (
+        <div className="cd-greeting__link cd-type-meta">
+          <span className="cd-greeting__link-label">{link.label}</span>
+          <IconButton label="Copy your Desk link" icon="copy" shape="round" onClick={link.onCopy} />
+        </div>
+      ) : null}
+    </header>
+  );
+}

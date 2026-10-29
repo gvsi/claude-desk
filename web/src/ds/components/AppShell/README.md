@@ -1,0 +1,33 @@
+# AppShell
+
+`AppShell` is the owner app's frame: an optional banner across the top, the sidebar in its column, and the page beside it.
+
+## When to use
+
+- Once, around every owner screen. Visitor surfaces use `PublicShell`.
+
+## Layout
+
+- The shell is the height of the window. The `banner` runs full width across the top. Under it, the sidebar column and the page scroll on their own.
+- The column is `size-sidebar` wide on `bg-panel`, with a `line-hairline` seam at its right. It is an `aside` named "Claude Desk", holding the `Sidebar`.
+- The page is a `main`, padded 24 px at the top, 40 px at the sides and 20 px at the bottom (16 px at the sides on a phone). Its content is at most `size-content` wide, centered.
+- Below 768 px, or with `layout="compact"`, a top bar on the panel replaces the column. It holds the mark, the business name and a ghost "Menu" button (`aria-expanded`).
+- Menu opens the sidebar as a modal sheet from the left, over a dimmed page, with focus inside it. Escape, "Close menu", the dimmed page or going to a page closes it, and focus returns to Menu. Escape inside the sidebar's Desk list closes only the list.
+- The sheet appears in place; nothing slides.
+
+## What the consumer provides
+
+- `sidebar`, the `Sidebar`.
+- `business`, the current business's name for the top bar. The `Sidebar` carries it too, but the top bar shows when the sidebar doesn't.
+- `banner`, such as the `ReviewerBar` in the demo.
+- `children`, the page. The shell adds no footer: the owner layout puts one `ConceptFooter` under its content.
+
+## Props
+
+| Prop | Type | Notes |
+| --- | --- | --- |
+| `sidebar` | `ReactNode` | Required. |
+| `business` | `string` | Required. Shown in the compact top bar, as written. |
+| `banner` | `ReactNode` | Full width, above everything. |
+| `layout` | `'auto' \| 'compact'` | `auto` (the default) switches to the top bar below 768 px. |
+| `children` | `ReactNode` | Required. |

@@ -1,0 +1,200 @@
+/* Sidebar: the owner app's column contents, top to bottom: the mark and wordmark, the business
+   row, the Desk picker, the seven nav rows, then the Answering switch and the owner at the foot.
+   The AppShell gives it the column (size-sidebar on bg-panel, with the seam); rows are
+   size-nav-row tall, the current one on bg-selected with no accent bar. Hover fills change at
+   motion-instant; nothing moves under reduced motion. */
+
+.cd-sidebar {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--space-4);
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-16) var(--space-10) var(--space-12);
+  color: var(--text-primary);
+}
+
+.cd-sidebar__brand {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-10);
+  padding: var(--space-2) var(--space-8) var(--space-12);
+}
+
+/* The 20 px mark sits on the wordmark's 22 px first line. */
+.cd-sidebar__brand > .cd-mark {
+  margin-top: var(--space-2);
+}
+
+.cd-sidebar__ellipsis {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cd-sidebar__quiet-icon {
+  flex: none;
+  color: var(--text-secondary);
+}
+
+/* Shared by every row-like control: a full-width, left-aligned line with a hover fill. */
+.cd-sidebar__business,
+.cd-sidebar__desk-toggle,
+.cd-sidebar__desk,
+.cd-sidebar__row {
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  margin: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color var(--motion-instant) var(--motion-ease);
+}
+
+.cd-sidebar__business {
+  gap: var(--space-8);
+  width: 100%;
+  height: var(--size-nav-row);
+  padding: 0 var(--space-8);
+}
+
+/* Two classes, so the weight wins over .cd-type-control whatever order the stylesheets load in. */
+.cd-sidebar .cd-sidebar__business {
+  font-weight: 520;
+}
+
+.cd-sidebar__desks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0 var(--space-8) var(--space-4);
+}
+
+.cd-sidebar__desk-toggle {
+  gap: var(--space-8);
+  width: 100%;
+  height: var(--size-control);
+  padding: 0 var(--space-8) 0 var(--space-10);
+  border: 1px solid var(--line-card);
+}
+
+.cd-sidebar__desk-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cd-sidebar__desk {
+  gap: var(--space-8);
+  width: 100%;
+  height: var(--size-control);
+  padding: 0 var(--space-8) 0 var(--space-10);
+}
+
+.cd-sidebar__nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-8);
+}
+
+.cd-sidebar__row {
+  gap: var(--space-10);
+  height: var(--size-nav-row);
+  padding: 0 var(--space-8);
+}
+
+.cd-sidebar__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cd-sidebar__business:hover,
+.cd-sidebar__desk-toggle:hover,
+.cd-sidebar__desk:hover,
+.cd-sidebar__row:hover {
+  background: var(--fill-hover);
+}
+
+/* The current page and the current Desk: the selected fill, and nothing else. */
+.cd-sidebar__row[aria-current='page'],
+.cd-sidebar__row[aria-current='page']:hover,
+.cd-sidebar__desk[aria-current='true'],
+.cd-sidebar__desk[aria-current='true']:hover {
+  background: var(--bg-selected);
+}
+
+.cd-sidebar__footer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: auto;
+  padding-top: var(--space-8);
+  border-top: 1px solid var(--line-hairline);
+}
+
+/* The Answering row is the board's 52 px: the switch's two lines and its padding. */
+.cd-sidebar__footer > .cd-switch {
+  min-height: calc(var(--size-control) * 2 - var(--space-12));
+}
+
+.cd-sidebar__owner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  box-sizing: border-box;
+  min-height: calc(var(--size-control) + var(--space-16));
+  padding: 0 var(--space-8);
+}
+
+.cd-sidebar__avatar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--size-avatar);
+  height: var(--size-avatar);
+  border-radius: var(--radius-full);
+  background: var(--bg-selected);
+  color: var(--text-primary);
+}
+
+/* Two classes, so the weight wins over .cd-type-count whatever order the stylesheets load in. */
+.cd-sidebar .cd-sidebar__avatar {
+  font-weight: 520;
+}
+
+.cd-sidebar__owner-text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.cd-sidebar__owner-status {
+  color: var(--text-secondary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cd-sidebar__business,
+  .cd-sidebar__desk-toggle,
+  .cd-sidebar__desk,
+  .cd-sidebar__row {
+    transition: none;
+  }
+}

@@ -23,6 +23,13 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 - Show status only as a `size-dot` dot or a thin bar in `status-handled` (handled or allowed), `status-held` (held, needs you), `status-refused` (refused or blocked) or `status-info` (a hollow dot), always beside words that say the same thing. Never a colored tile, a filled badge or colored text.
 - Use `clay` only inside the Claude Desk mark.
 
+### Brand colors on the public page
+
+- The public page's header is set in the business's own colors, not in tokens: a field, two inks for the text on it and an accent. They arrive with the Desk (`PublicDesk.brand`), mapped to the header's `--brand-*` properties, and anything that isn't a plain hex color or a token falls back to the panel and the text tokens.
+- Both inks keep 4.5:1 over the field. A brand whose field can't carry them falls back to `bg-panel` with `text-primary` and `text-secondary`.
+- The accent is decorative only: a 2 px rule under the header. Never text, never a ground for text, and never the only sign that something is a control.
+- Everything below the header is the design system's: the chat, the about column and the footer use tokens like any other surface.
+
 ### Type
 
 - Use `serif` (Source Serif 4) for Claude's voice and page identity, `sans` (Hanken Grotesk) for the whole interface, and `mono` (JetBrains Mono) only inside an expanded full trace. All three load from Google Fonts.
@@ -84,6 +91,10 @@ Text and links, 4.5:1:
 | `fill-hover` over `bg-surface` | 10.0 | 5.8 | 5.3 | 5.2 |
 | `fill-secondary` over `bg-surface` | 8.9 | 5.3 | 4.8 | 4.6 |
 | `fill-secondary-hover` over `bg-surface` | 7.6 | 4.7 | not used | not used |
+| `fill-card` over `bg-panel` | 12.0 | 6.6 | 6.0 | 6.3 |
+| `fill-count` over `bg-panel` | not used | 6.3 | not used | not used |
+| `fill-count` over `bg-selected` | not used | 5.0 | not used | not used |
+| `fill-hover` over `bg-muted` | 9.7 | not used | not used | not used |
 
 `button-primary-text` reads 14.6 on `button-primary` and 12.2 on `button-primary-hover`.
 
@@ -96,6 +107,7 @@ Focus rings and status dots, 3:1 (`ring-composer` is `accent-blue`):
 | `bg-surface` | 6.2 | 5.1 | 7.9 | 5.3 | 6.6 |
 | `bg-selected` | 4.9 | 4.1 | 6.3 | 4.2 | 5.6 |
 | `fill-card` over `bg-app` | 6.8 | 5.6 | 8.7 | 5.8 | 7.0 |
+| `fill-card` over `bg-panel` | 6.3 | 5.2 | 8.0 | 5.3 | 6.6 |
 
 The mark in `clay` reads 6.5 on `bg-app` and 6.0 on `bg-panel`.
 

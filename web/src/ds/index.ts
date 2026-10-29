@@ -49,6 +49,18 @@ export { SectionHeader, type SectionHeaderProps } from './components/SectionHead
 export { Mark, Wordmark, type MarkProps, type WordmarkProps } from './components/Mark/Mark.tsx';
 export { MARK_GEOMETRY } from './components/Mark/markGeometry.ts';
 export { ConceptFooter, type ConceptFooterProps } from './components/ConceptFooter/ConceptFooter.tsx';
+export { AppShell, type AppShellProps } from './components/AppShell/AppShell.tsx';
+export {
+  Sidebar,
+  type NavCount,
+  type NavKey,
+  type SidebarLinkProps,
+  type SidebarProps,
+} from './components/Sidebar/Sidebar.tsx';
+export { PageHeader, type PageHeaderProps } from './components/PageHeader/PageHeader.tsx';
+export { Greeting, type GreetingProps, type PresenceGlyph } from './components/Greeting/Greeting.tsx';
+export { ReviewerBar, type ReviewerBarProps } from './components/ReviewerBar/ReviewerBar.tsx';
+export { PublicShell, type PublicBrand, type PublicShellProps } from './components/PublicShell/PublicShell.tsx';
 
 // Reply cards
 export { ReplyCard, type ReplyCardProps } from './components/ReplyCard/ReplyCard.tsx';

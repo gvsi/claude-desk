@@ -1,0 +1,147 @@
+/* AppShell: the owner app's frame, the height of the window. The banner runs across the top;
+   under it the sidebar column (size-sidebar on bg-panel, a hairline seam at its right) and the
+   page each scroll on their own. The page is padded 24/40/20 (16 at the sides on a phone) and its
+   content is at most size-content wide, centered.
+
+   Compact: a top bar on the panel replaces the column, and Menu opens the sidebar as a modal sheet
+   from the left over a dimmed page. Nothing slides; the sheet appears in place. */
+
+.cd-app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  background: var(--bg-app);
+  color: var(--text-primary);
+}
+
+.cd-app-shell__body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.cd-app-shell__column {
+  display: flex;
+  flex: 0 0 var(--size-sidebar);
+  box-sizing: border-box;
+  width: var(--size-sidebar);
+  overflow-y: auto;
+  border-right: 1px solid var(--line-hairline);
+  background: var(--bg-panel);
+}
+
+.cd-app-shell__main {
+  flex: 1 1 auto;
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-24) var(--space-40) var(--space-20);
+}
+
+.cd-app-shell__content {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--size-content);
+  margin: 0 auto;
+}
+
+/* Compact: the top bar. */
+.cd-app-shell__topbar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-10);
+  box-sizing: border-box;
+  min-height: calc(var(--size-control) + var(--space-20));
+  padding: 0 var(--space-8) 0 var(--space-16);
+  border-bottom: 1px solid var(--line-hairline);
+  background: var(--bg-panel);
+}
+
+.cd-app-shell__business {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Two classes, so the weight wins over .cd-type-control whatever order the stylesheets load in. */
+.cd-app-shell__topbar .cd-app-shell__business {
+  font-weight: 520;
+}
+
+/* Menu: a ghost button with its icon. */
+.cd-app-shell__menu {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-6);
+  box-sizing: border-box;
+  height: var(--size-control);
+  margin: 0;
+  padding: 0 var(--space-10);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background-color var(--motion-instant) var(--motion-ease);
+}
+
+.cd-app-shell__menu:hover {
+  background: var(--fill-hover);
+}
+
+/* The sheet: the sidebar's column, full height at the left, over the page. */
+.cd-app-shell__sheet {
+  box-sizing: border-box;
+  width: var(--size-sidebar);
+  max-width: calc(100% - var(--space-40));
+  height: 100%;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  inset: 0 auto 0 0;
+  border: 0;
+  border-right: 1px solid var(--line-hairline);
+  background: var(--bg-panel);
+  color: var(--text-primary);
+}
+
+.cd-app-shell__sheet[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.cd-app-shell__sheet::backdrop {
+  background: var(--bg-app);
+  opacity: 0.72;
+}
+
+.cd-app-shell__sheet-head {
+  display: flex;
+  flex: none;
+  justify-content: flex-end;
+  padding: var(--space-8) var(--space-8) 0;
+}
+
+/* The sidebar's own top padding sits under the close button. */
+.cd-app-shell__sheet > .cd-sidebar {
+  flex: 1 1 auto;
+  padding-top: 0;
+}
+
+@media (max-width: 767.98px) {
+  .cd-app-shell__main {
+    padding-right: var(--space-16);
+    padding-left: var(--space-16);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cd-app-shell__menu {
+    transition: none;
+  }
+}
