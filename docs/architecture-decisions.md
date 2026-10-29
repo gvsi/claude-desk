@@ -1,0 +1,87 @@
+# Architecture decisions
+
+The choices that shape Claude Desk, each with the alternatives considered and what it costs. The [spec's decisions log](specs/2026-10-28-claude-desk-design.md#decisions-log) records every decision with its date, and the [master plan](plans/2026-10-28-00-master-plan.md) holds the exact contracts.
+
+## 1. The kernel is a separate process that holds every credential
+
+**Status.** Accepted on 2026-10-28 (the spec's "Safety kernel" decision); the trust claim was narrowed during planning ("Trust claim narrowed").
+
+**Context.** A Desk talks to strangers, and some of them will try to talk it into things. Anything the model can be persuaded to do, an attacker can ask for, and adaptive attacks beat 12 published defenses more than 90% of the time ([Nasr et al., 2025](https://arxiv.org/abs/2510.09023)). The process that runs the conversation reads untrusted text all day, so it should be able to do as little as possible on its own.
+
+**Decision.** Two processes in one ECS task. The kernel (Python with a Rust core, on 127.0.0.1:8701, never exposed) owns sessions, verification, rules, facts, approvals, business data and the ledger, and holds every business credential and the ledger's signing key. The API process runs the conversation with Claude and the visitor and owner APIs; it holds only its model key, its own database role and the built-in demo agent's key, and passes the kernel session IDs and tokens, never identities. Separate Postgres roles back the split: the API's role can't write the kernel's tables and reads them only through views.
+
+**Alternatives.** One process with the checks as library calls: simpler and faster, but a bug anywhere on the chat path could reach the credentials and the tables. The strongest design, a front desk that holds no keys plus a back office that never reads the visitor's text: about 1.5 to 3 times the cost, 1 to 3 seconds more per action, and more unusual requests sent back to the owner (the estimate in the spec's [safety architecture](specs/2026-10-28-claude-desk-design.md#safety-and-enforcement-architecture-locked)); it is on the roadmap. The kernel on its own machine: stronger isolation, and more to run for a prototype.
+
+**Consequences.** The claim is narrow and checkable: a bug in the chat layer's visitor and agent paths can't move money outside the owner's rules, change rules, approve anything, verify anyone or forge the ledger, because those paths never hold the owner's token, and each of these needs it or a check that only the kernel holds. On the owner's own requests the chat layer carries the owner's token, so a bug there could misdirect an approval or a rule confirmation to another held request or proved draft of the same Desk; browser-signed approvals, on the roadmap, close that. A compromised API process still holds what it sees in flight, such as an owner session or a Demo inbox code, so that isn't claimed ([threat model](threat-model.md)). Every action costs a local HTTP call to the kernel, and the kernel's API is a contract that both processes test against.
+
+## 2. Cedar policies compiled from rule cards and proved with SymCC
+
+**Status.** Accepted on 2026-10-28 (the spec's "Enforcement" decision and "Rules: Claude drafts rule cards; code compiles them to Cedar").
+
+**Context.** Owners describe their rules in words: quotes from the price list are fine, refunds ask me first. Whatever decides must be deterministic, explainable to the owner and impossible to widen by persuasion, and a mistake in turning words into rules must be caught before it goes live.
+
+**Decision.** Claude drafts rule cards (what, for whom, do it, ask or never, and limits), and code compiles them into Cedar policies of a few allowed shapes, on top of an always-on baseline of forbids written by hand and reviewed in the repository. Before a version goes live, the proof binary `desk-prove` runs Cedar's SymCC prover with cvc5 and shows that no policy errors, the baseline holds, nothing is auto-allowed beyond the owner's cards, reviewer scores only narrow, and no money moves without an owner card. The cards side of that comparison comes from a second generator written independently of the compiler. A failed or timed-out proof rejects the version, and the owner confirms it in plain words before it applies. The Rust core (Cedar decisions, canonical JSON, Ed25519 signing) is a Python module built with PyO3 and maturin; proofs run in their own process under a deadline for the whole run.
+
+**Alternatives.** A model deciding each action: it can be talked around, and nothing can be proved about it. Owner policies written by hand or by a model: nothing guarantees they match what the owner confirmed. Open Policy Agent or a rules engine of our own: no SMT-backed analysis of the policies. Cedar's command-line analysis: it exits 0 on a failed proof, so it can't gate anything.
+
+**Consequences.** The owner confirms cards in plain words and never sees Cedar. A rule change waits for its proof, and when the prover can't run, the kernel falls back to bounded checks and no new owner rules go live. Starter presets and the Rivera seed are proved in CI and ship with their proof reports. The [kernel feasibility spike](spikes/2026-10-28-kernel-feasibility.md) confirmed the toolchain before the plans relied on it.
+
+## 3. Reviewer scores only as AND conditions on auto rules
+
+**Status.** Accepted on 2026-10-28 (the spec's "Decisions layer"); during planning the scores became integer basis points rather than calibrated probabilities.
+
+**Context.** Some auto rules need judgment that code can't express: is this booking within what the business does, does this request look like manipulation. A model can answer that, but a model can be fooled, so its answer must never be able to widen what is allowed.
+
+**Decision.** A separate Claude reviewer (Sonnet 5.5) scores a proposed action against the owner's cards and verified facts, and never sees the visitor's messages; visitor text can still reach it through the action's free-text arguments, which arrive quoted, labelled untrusted and cut to 200 characters. Its scores enter Cedar as `context.review` and appear only as AND conditions on auto-allow policies, which a lint enforces when the rules compile. The proofs treat the scores as any possible value, so a fooled reviewer can't break the baseline, and one proof shows the review conditions only narrow what the cards allow. A reviewer error, timeout or out-of-range score leaves the scores out, and the action is held for the owner. Cedar partial evaluation skips the reviewer when its scores can't change the outcome. Thresholds are set on the calibration split of the evals and reported on the held-out split.
+
+**Alternatives.** The reviewer as the decider: a fooled reviewer would mean an allowed action. The reviewer on every action: more cost and latency for no change in outcome; in the [kernel spike](spikes/2026-10-28-kernel-feasibility.md), partial evaluation skipped it on 7 of 9 test requests. Calibrated probabilities: the scores aren't calibrated, and integers keep the Cedar comparisons plain.
+
+**Consequences.** The reviewer can only turn an allow into a hold, and three "block" recommendations in a conversation pause it until the owner resumes it. When the reviewer is unsure or down, some legitimate requests wait for the owner, which costs the owner a tap rather than letting something through.
+
+## 4. Typed cards, guarded prose and check then reveal
+
+**Status.** Accepted on 2026-10-28 (the spec's "Replies: typed cards plus guarded prose" and "Reply timing" decisions).
+
+**Context.** Much of what goes wrong with a public assistant is in what it says: a price it made up, a date it can't keep, a discount nobody approved, someone else's details. Judging free text for meaning is a model's call, and a model can miss.
+
+**Decision.** Prices, dates, discounts, bookings and policies appear only in typed cards rendered by code from the business's records, in English or Spanish. Claude's own prose is scanned in both languages for digits, money, percentages, dates and promise words, and blocked if any appear; a small model check (Haiku 5.5) flags promises the cards don't back, and an error in that check counts as a violation. A blocked reply is regenerated once with feedback, then replaced with a handoff to the owner. Every visitor-visible message passes the kernel's reply check before it is shown: the visitor sees that Claude is writing, then the checked reply whole, and nothing unchecked is streamed.
+
+**Alternatives.** Streaming tokens and checking afterwards: the visitor would see what the check then retracts. A model-only output filter: probabilistic exactly where it matters most. Letting Claude write prices in prose and matching them against records: brittle, and still a model choosing the number.
+
+**Consequences.** Harmless numbers in Claude's own words are blocked too, so Claude is prompted to put them in cards. The reveal adds a delay after Claude finishes, which the evals measure and report. Soft promises with no number or promise word rely on the model check, which can miss; the [threat model](threat-model.md) lists it as a residual risk.
+
+## 5. Our own tool-use loop on the Messages API, with Postgres and Procrastinate
+
+**Status.** Accepted on 2026-10-28 (the spec's "Runtime" and "Stack" decisions; the options are compared in [stack options](research/stack-options.md)).
+
+**Context.** Every checkpoint has to be plain code the loop can't skip: each tool call decided by the kernel, each reply checked before it is shown, and a held action able to wait hours for the owner and then resume the conversation.
+
+**Decision.** A Python service (FastAPI, Pydantic, server-sent events) runs its own tool-use loop on the official Anthropic SDK and the Messages API. Claude replies through a send-reply tool, and plain text is treated as a reply too, since a tool call can't be forced. Run state lives in Postgres, and when the owner answers a held action, a Procrastinate job resumes the run. The web app is React with Vite and TypeScript, typed from the API's OpenAPI document.
+
+**Alternatives.** The Claude Agent SDK on a container worker: a subprocess per session, its deferral of a tool call works only when Claude makes a single tool call in a turn, and no hook can block final text. Claude Managed Agents: approvals are built in, but while one waits the visitor can't keep chatting, and text relayed into a session counts as the operator's intent. Next.js on Vercel: function time limits don't fit a turn that waits for the owner.
+
+**Consequences.** More code to own (the loop, retries, resuming), and every checkpoint is in it, visible and tested. The kernel and the API share one language and one set of contracts, with Rust only where it matters.
+
+## 6. ECS Express Mode, two containers in one task, behind one CloudFront address
+
+**Status.** Accepted on 2026-10-28 (the spec's "Stack" decision); the origin lock and the fallback were added in the deploy plan's reviews on 2026-10-29.
+
+**Context.** The kernel must run beside the API, reachable only from it, with secrets of its own. Visitors need long-lived streaming connections, first-party cookies and per-visitor rate limits keyed on their real address. App Runner has been closed to new customers since April 2026 (sources in the [architecture research](research/architecture-best-practices.md)).
+
+**Decision.** One Fargate arm64 task runs two containers from one image: the kernel on the task's loopback with no port mapping, and the API on port 8700, which starts only once the kernel is healthy. Each container gets only its own secrets from Secrets Manager, and the task role has no permissions. ECS Express Mode runs the task behind a load balancer whose security group admits only CloudFront's origin-facing addresses. One CloudFront distribution serves the web build from S3 and `/api/*` from the task, so cookies stay first-party and CloudFront appends the visitor's real address. A 300-second idle timeout at the load balancer and a 15-second heartbeat keep streams open. If Express can't run the task, a fallback serves the same task from an internal load balancer reached only through a CloudFront VPC origin. Each deploy is pinned to a merged commit whose tier 2 results check passes, and the owner runs every command that changes AWS ([deploying](deploy.md)).
+
+**Alternatives.** App Runner: closed to new customers. The kernel as its own service: it would need a network listener and authentication between the two. A secret header between CloudFront and the origin: one more secret to hold, where the security group already admits only CloudFront. Vercel or Fly: see decision 5.
+
+**Consequences.** The origin admits every CloudFront distribution, not only ours, and the threat model says what that allows. Express Mode manages its own load balancer, so a custom resource applies the lock on every deploy and a smoke check verifies it; switching to the fallback is a redeploy, not a redesign. The [deploy guide's cost table](deploy.md#before-you-deploy) estimates about $90–100 a month at AWS list prices, before model spend.
+
+## 7. Payments and message delivery are mocked
+
+**Status.** Accepted on 2026-10-28 (the spec's "Payments fully mocked" and "Verification and messages" decisions).
+
+**Context.** Real payments and real email or text messages need provider accounts, keys and compliance, and would put real people's contacts and cards into a public demo. What the prototype has to show is the control around them: who may be charged or refunded, how much, with whose approval, and that codes go only to the contact on record.
+
+**Decision.** A mock payments server ships in the repository: an MCP server built on the official Python SDK, offering "list charges" and "create refund", plus provider routes the kernel calls for checkouts and charges, over its own store kept separate per demo copy. The kernel connects to it as it would to a real provider: it pins each tool definition by hash, lists the tools again before every call, and disables a changed tool until the owner reviews it (the owner's "Simulate a tool change" shows this). Payment links open an in-app checkout labelled "Test payment, no money moves". Verification codes are random per challenge and follow every real rule (only to the contact on record, expiry, attempts, limits); only their delivery is simulated, into a Demo inbox on screen that also carries the owner's alerts.
+
+**Alternatives.** Stripe in test mode as the MCP server: real in shape, but its MCP tools are generic reads and writes, so a refund could only be told apart by its arguments, and it needs an account and keys. One fixed demo code: anyone could verify as any customer. Real email or text messages: provider accounts, and a public demo sending messages to strangers.
+
+**Consequences.** The payment and verification logic is real and tested; possession of a contact is not, and the [threat model](threat-model.md) lists what the Demo inbox gives away. A real payment provider and real delivery are on the path to an MVP.

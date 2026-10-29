@@ -101,3 +101,82 @@ image-smoke:
 # and the web build, and builds nothing; it needs no AWS credentials.
 infra-check:
 	cd infra && node --test 'functions/**/*.test.mjs' && uv run pytest -q && npm ci && npx cdk synth --quiet
+
+# The docs check CI runs: relative links resolve across README.md, AGENTS.md and docs/, and the
+# shipped docs carry the required disclosures and no private reference. FINAL=1 also refuses
+# placeholders ([measured: …], [owner: …]), for the docs as they ship.
+.PHONY: docs-check
+docs-check:
+	uv run --project tools python -m desk_tools.check_docs $(if $(FINAL),--final)
+
+.PHONY: cvc5 setup dev
+# cvc5 1.4.2, the static build for this machine, checked against tools/cvc5.sha256 and unpacked to
+# .tools/cvc5 (git-ignored). desk-prove finds it through CVC5 or PATH; make dev sets both.
+CVC5_VERSION := 1.4.2
+CVC5_DIR := $(CURDIR)/.tools/cvc5
+cvc5:
+	@set -eu; \
+	case "$$(uname -s)-$$(uname -m)" in \
+		Darwin-arm64) build=cvc5-macOS-arm64-static ;; \
+		Darwin-x86_64) build=cvc5-macOS-x86_64-static ;; \
+		Linux-x86_64) build=cvc5-Linux-x86_64-static ;; \
+		Linux-aarch64 | Linux-arm64) build=cvc5-Linux-arm64-static ;; \
+		*) echo "cvc5: no build is pinned for $$(uname -s) $$(uname -m)" >&2; exit 1 ;; \
+	esac; \
+	if [ -x "$(CVC5_DIR)/bin/cvc5" ] && "$(CVC5_DIR)/bin/cvc5" --version | head -n 1 | grep -q "^cvc5 $(CVC5_VERSION) "; then \
+		echo "cvc5: $(CVC5_VERSION) is already in .tools/cvc5"; exit 0; \
+	fi; \
+	tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+	grep " $$build.zip\$$" tools/cvc5.sha256 > "$$tmp/cvc5.sha256" \
+		|| { echo "cvc5: tools/cvc5.sha256 has no line for $$build.zip" >&2; exit 1; }; \
+	curl -sSfL -o "$$tmp/$$build.zip" "https://github.com/cvc5/cvc5/releases/download/cvc5-$(CVC5_VERSION)/$$build.zip"; \
+	(cd "$$tmp" && $(SHA256) -c cvc5.sha256 >/dev/null) \
+		|| { echo "cvc5: $$build.zip doesn't match its sha256 in tools/cvc5.sha256" >&2; exit 1; }; \
+	unzip -q "$$tmp/$$build.zip" -d "$$tmp"; \
+	rm -rf "$(CVC5_DIR)"; mkdir -p "$$(dirname "$(CVC5_DIR)")"; mv "$$tmp/$$build" "$(CVC5_DIR)"; \
+	echo "cvc5: $$("$(CVC5_DIR)/bin/cvc5" --version | head -n 1), in .tools/cvc5"
+
+# Everything a fresh clone needs to run Claude Desk (see the README's "Run it locally"): the Python
+# projects, the web app's packages, the kernel's module and proof binary, cvc5, a .env copied from
+# .env.example when there is none (Docker Compose reads it too), Postgres in Docker, the migrations
+# and the roles' passwords.
+setup:
+	cd backend && uv sync
+	cd tools && uv sync
+	cd infra && uv sync
+	cd web && npm ci
+	$(MAKE) kernel cvc5
+	@if [ -f .env ]; then echo "setup: keeping the .env there is"; \
+	else cp .env.example .env && echo "setup: wrote .env from .env.example"; fi
+	docker compose up -d --wait db
+	cd backend && uv run alembic upgrade head
+	$(MAKE) db-roles
+
+# Claude Desk on this machine: the kernel (make kernel-serve, 127.0.0.1:8701), the API (make
+# api-serve, 127.0.0.1:8700) and the web app (Vite, which sends /api to the API), with the release
+# desk-prove and .tools/cvc5 on PATH and CVC5 set. It stops first if either is missing: without
+# them the kernel would run in bounded mode, where no owner rule goes live. Ctrl-C, or any of the
+# three exiting, stops all three. Until the kernel service, the API and the web app have landed, it
+# names what is missing.
+dev:
+	@set -eu; \
+	missing() { echo "dev: $$1 isn't in this checkout yet; it lands with $$2" >&2; exit 1; }; \
+	$(MAKE) -n kernel-serve >/dev/null 2>&1 || missing "make kernel-serve" "the kernel service"; \
+	$(MAKE) -n api-serve >/dev/null 2>&1 || missing "make api-serve" "the API"; \
+	grep -q '"dev":' web/package.json || missing "the web app's dev script" "the web app"; \
+	[ -x "$(CVC5_DIR)/bin/cvc5" ] || { echo "dev: no cvc5 in .tools/cvc5; run make setup first" >&2; exit 1; }; \
+	[ -x "$(CURDIR)/kernel/target/release/desk-prove" ] || { echo "dev: no desk-prove in kernel/target/release; run make setup first" >&2; exit 1; }; \
+	PATH="$(CURDIR)/kernel/target/release:$(CVC5_DIR)/bin:$$PATH"; CVC5="$(CVC5_DIR)/bin/cvc5"; export PATH CVC5; \
+	killtree() { for child in $$(pgrep -P "$$1" 2>/dev/null); do killtree "$$child"; done; kill -TERM "$$1" 2>/dev/null || true; }; \
+	pids=""; \
+	stop() { trap - INT TERM EXIT; for pid in $$pids; do killtree "$$pid"; done; wait 2>/dev/null || true; }; \
+	trap stop EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; \
+	$(MAKE) --no-print-directory kernel-serve </dev/null & pids="$$pids $$!"; \
+	$(MAKE) --no-print-directory api-serve </dev/null & pids="$$pids $$!"; \
+	(cd web && exec npm run dev) </dev/null & pids="$$pids $$!"; \
+	while :; do \
+		for pid in $$pids; do \
+			kill -0 "$$pid" 2>/dev/null || { echo "dev: one of the three stopped; stopping the others" >&2; exit 1; }; \
+		done; \
+		sleep 1; \
+	done
