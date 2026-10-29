@@ -523,6 +523,39 @@ export const KeyboardThroughTheMenus: Story = {
   },
 };
 
+export const HoldingEnter: Story = {
+  args: refundArgs,
+  parameters: {
+    canvasNote: `${ANSWERS_BOARD} No board shows the keys; Enter held a moment too long on a menu button opens its menu and never answers.`,
+  },
+  play: async ({ args, canvas, userEvent }) => {
+    const allow = canvas.getByRole('button', { name: 'Allow' });
+    const deny = canvas.getByRole('button', { name: 'Deny' });
+
+    // Enter goes down on Allow and repeats before it comes up: the menu opens on its first item.
+    await userEvent.tab();
+    await expect(allow).toHaveFocus();
+    await userEvent.keyboard('{Enter>3/}');
+    await expect(allow).toHaveAttribute('aria-expanded', 'true');
+    await expect(itemsOf(canvas.getByRole('menu', { name: 'Allow' }))[0]).toHaveFocus();
+    await expect(args.onAnswer).not.toHaveBeenCalled();
+
+    // The same on Deny.
+    await userEvent.keyboard('{Escape}');
+    await userEvent.tab();
+    await expect(deny).toHaveFocus();
+    await userEvent.keyboard('{Enter>3/}');
+    await expect(deny).toHaveAttribute('aria-expanded', 'true');
+    await expect(itemsOf(canvas.getByRole('menu', { name: 'Deny' }))[0]).toHaveFocus();
+    await expect(args.onAnswer).not.toHaveBeenCalled();
+
+    // A fresh Enter in the menu still chooses.
+    await userEvent.keyboard('{Enter}');
+    await expect(args.onAnswer).toHaveBeenCalledTimes(1);
+    await expect(args.onAnswer).toHaveBeenCalledWith('deny_once');
+  },
+};
+
 export const MenuOnAPhone: Story = {
   render: (args) => (
     <div data-testid="phone-line" style={{ width: PHONE_LINE, maxWidth: '100%', display: 'grid', rowGap: 'var(--space-16)' }}>

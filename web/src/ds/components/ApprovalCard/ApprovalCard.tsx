@@ -111,6 +111,8 @@ interface OpenMenu {
   key: string;
   /** Which opening this is, so each one moves focus into the menu, even to the same item. */
   openedAt: number;
+  /** The Enter that opened it, which may still be down as focus lands on an item. */
+  heldKey: 'Enter' | null;
 }
 
 /** The answers the kernel offers for this decision, in the card's order; none unless it is held. */
@@ -210,9 +212,9 @@ export function ApprovalCard({ decision, heldBy, context, waiting, personName, o
   if (open !== null && (open.key !== menuKey || waitingForResult)) setOpen(null);
   const menuSide = open !== null && open.key === menuKey && !waitingForResult ? open.side : null;
   const openings = useRef(0);
-  const openMenu = (side: Side, focus: OpenMenu['focus']) => {
+  const openMenu = (side: Side, focus: OpenMenu['focus'], heldKey: OpenMenu['heldKey'] = null) => {
     openings.current += 1;
-    setOpen({ side, focus, key: menuKey, openedAt: openings.current });
+    setOpen({ side, focus, key: menuKey, openedAt: openings.current, heldKey });
   };
   const closeMenu = () => setOpen(null);
   const ids = useId();
@@ -224,10 +226,18 @@ export function ApprovalCard({ decision, heldBy, context, waiting, personName, o
     if (menuSide === side) closeMenu();
     else openMenu(side, 'first');
   };
+  // Enter opens or closes the menu as it goes down, so the menu knows that key may still be held;
   // Down and Up open the menu, or move focus back into it while it is open; Escape closes it and
   // leaves focus on the button.
   const onMenuButtonKey = (side: Side, event: KeyboardEvent<HTMLButtonElement>) => {
     if (waitingForResult) return;
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      if (event.repeat) return;
+      if (menuSide === side) closeMenu();
+      else openMenu(side, 'first', 'Enter');
+      return;
+    }
     if (event.key === 'Escape') {
       if (menuSide !== side) return;
       event.preventDefault();
@@ -318,6 +328,7 @@ export function ApprovalCard({ decision, heldBy, context, waiting, personName, o
                         personName={personName}
                         focus={open.focus}
                         openedAt={open.openedAt}
+                        heldKey={open.heldKey}
                         onChoose={choose}
                         onClose={closeMenu}
                       />
@@ -352,6 +363,8 @@ interface AnswerMenuProps {
   focus: 'first' | 'last';
   /** Which opening this is: each one moves focus in again. */
   openedAt: number;
+  /** A key that opened it and may still be down; until it comes up, it chooses nothing. */
+  heldKey: 'Enter' | null;
   onChoose: (answer: ApprovalAnswer) => void;
   /** Escape or Tab in it, a press outside it and its button, or another menu opening. */
   onClose: () => void;
@@ -366,18 +379,21 @@ let pageMenu: { close: () => void } | null = null;
  * End jump, Enter or Space chooses, and Escape or Tab closes it with focus back on its button.
  * Whatever closes it, focus that was in it goes back to its button.
  */
-function AnswerMenu({ id, side, labelledBy, answers, personName, focus, openedAt, onChoose, onClose }: AnswerMenuProps) {
+function AnswerMenu({ id, side, labelledBy, answers, personName, focus, openedAt, heldKey, onChoose, onClose }: AnswerMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
+  const held = useRef(heldKey);
 
   // The latest onClose, for the document listener below.
   const close = useRef(onClose);
   close.current = onClose;
 
+  // Each opening moves focus in, and notes the key that opened it.
   useLayoutEffect(() => {
+    held.current = heldKey;
     const items = ref.current?.querySelectorAll<HTMLElement>('[role="menuitem"]');
     if (!items || items.length === 0) return;
     items[focus === 'first' ? 0 : items.length - 1]?.focus();
-  }, [focus, openedAt]);
+  }, [focus, openedAt, heldKey]);
 
   // However it closes, focus that was in it goes back to its button while the menu is still on the
   // page, so it never falls to the page itself.
@@ -415,6 +431,12 @@ function AnswerMenu({ id, side, labelledBy, answers, personName, focus, openedAt
   }, [labelledBy]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    // A key held down repeats: a repeated Enter or Space, or the Enter that opened the menu before
+    // it comes up, never chooses.
+    if ((event.key === 'Enter' || event.key === ' ') && (event.repeat || event.key === held.current)) {
+      event.preventDefault();
+      return;
+    }
     if (event.key === 'Escape' || event.key === 'Tab') {
       event.preventDefault();
       event.stopPropagation();
@@ -452,6 +474,9 @@ function AnswerMenu({ id, side, labelledBy, answers, personName, focus, openedAt
       aria-labelledby={labelledBy}
       className={`cd-approval-card__menu cd-approval-card__menu--${side}`}
       onKeyDown={onKeyDown}
+      onKeyUp={(event) => {
+        if (event.key === held.current) held.current = null;
+      }}
     >
       {answers.map((value) => (
         // Named by its words alone; its line is its description, read once, after the name.

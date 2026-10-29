@@ -34,7 +34,7 @@
 ## Menus and keyboard
 
 - A menu button says `aria-haspopup="menu"` and `aria-expanded`. Its menu is a `role="menu"` named by the button ("Allow", "Deny"); each item is a `menuitem` named by its words, with its line as its description (`aria-describedby`).
-- A click, Enter, Space or Down opens a menu with focus on its first item; Up opens it on its last. In the menu, Down and Up move and wrap, Home and End jump to the first and last, and Enter, Space or a click chooses.
+- A click, Enter, Space or Down opens a menu with focus on its first item; Up opens it on its last. In the menu, Down and Up move and wrap, Home and End jump to the first and last, and Enter, Space or a click chooses. A held key never chooses: Enter held on a menu button opens its menu, and the menu ignores repeated Enter and Space, and the Enter that opened it until that key comes up.
 - Escape or Tab in the menu closes it and gives focus back to its button. With focus on the button of an open menu (after a press dragged off it, say), Escape closes the menu, and Down or Up moves focus back into it.
 - A click outside, or focus leaving the button and its menu for anything else on the page, closes the menu and leaves focus where it went. A second click on the button closes it too. However a menu closes, focus that was in it goes back to its button, never to the page.
 - One menu is open on the page at a time: opening one closes any other, Allow's when Deny's opens, or a menu on another card.
