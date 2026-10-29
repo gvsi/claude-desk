@@ -79,4 +79,4 @@ The shell is an inline-size container, so it lays out by its own width, not the 
 | `composer` | `ReactNode` | Required. |
 | `children` | `ReactNode` | Required. |
 
-`PublicBrand` and `PublicOpenStatus` are exported with the component. The generated contracts don't carry the kernel's `OpenStatus` yet, so `PublicOpenStatus` stands in for it with the two fields the shell reads; once they do, it becomes `PublicDesk['open_status']`.
+`PublicBrand` and `PublicOpenStatus` are exported with the component. `PublicOpenStatus` is `PublicDesk['open_status']`, the generated `OpenStatus` or `null`.
