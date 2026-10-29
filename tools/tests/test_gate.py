@@ -188,3 +188,67 @@ def test_tier2_results_gate_fails_when_results_are_missing(repo, capsys):
     line = "`tier2-results`: skipped, `evals/results.py` is not in the repo yet\n"
     assert capsys.readouterr().out == line
     assert summary(repo) == line
+
+
+# The `proofs` row of Plan 06a Task 2's job table; the workflow must pass exactly these arguments.
+PROOFS_GATE = [
+    "--name", "proofs",
+    "--run-if", "backend/scripts/prove_presets.py",
+    "--required-if", "kernel/cedar/proofs",
+    "--required-if", "backend/desk/kernel_service/compiler.py",
+    "--", "make", "check-presets",
+]
+
+
+def test_proofs_gate_fails_when_its_checker_is_missing(repo, capsys):
+    """Once rules ship, moving the compiler or deleting the proof checker can't turn proofs into a skip."""
+    # The compiler moved into a package, the shipped proof reports in place, and the checker gone.
+    (repo / "backend/desk/kernel_service/compiler").mkdir(parents=True)
+    (repo / "backend/desk/kernel_service/compiler/__init__.py").write_text("")
+    (repo / "kernel/cedar/proofs").mkdir(parents=True)
+    (repo / "kernel/cedar/proofs/rivera.json").write_text("{}")
+    # Stands in for Plan 01a's check, which fails when a report is missing, stale or failing.
+    (repo / "Makefile").write_text("check-presets:\n\tfalse\n")
+
+    code = main(PROOFS_GATE)
+
+    assert code == 1
+    assert capsys.readouterr().err == (
+        "`proofs` is required by `kernel/cedar/proofs` but `backend/scripts/prove_presets.py` is missing\n"
+    )
+    assert summary(repo) == ""
+
+    # With the checker in place, the check runs, and its failure fails.
+    (repo / "backend/scripts").mkdir(parents=True)
+    (repo / "backend/scripts/prove_presets.py").write_text("")
+
+    code = main(PROOFS_GATE)
+
+    assert code == 2
+    assert "skipped" not in capsys.readouterr().out
+    assert summary(repo) == ""
+
+    # The compiler alone, before any report ships, requires the check too.
+    (repo / "backend/scripts/prove_presets.py").unlink()
+    (repo / "kernel/cedar/proofs/rivera.json").unlink()
+    (repo / "kernel/cedar/proofs").rmdir()
+    (repo / "backend/desk/kernel_service/compiler/__init__.py").unlink()
+    (repo / "backend/desk/kernel_service/compiler").rmdir()
+    (repo / "backend/desk/kernel_service/compiler.py").write_text("")
+
+    code = main(PROOFS_GATE)
+
+    assert code == 1
+    assert capsys.readouterr().err == (
+        "`proofs` is required by `backend/desk/kernel_service/compiler.py` but `backend/scripts/prove_presets.py` is missing\n"
+    )
+
+    # Before any of it lands, the check skips.
+    (repo / "backend/desk/kernel_service/compiler.py").unlink()
+
+    code = main(PROOFS_GATE)
+
+    assert code == 0
+    line = "`proofs`: skipped, `backend/scripts/prove_presets.py` is not in the repo yet\n"
+    assert capsys.readouterr().out == line
+    assert summary(repo) == line

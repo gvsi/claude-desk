@@ -49,16 +49,17 @@ The gates in the workflow:
 
 | Gate | Runs once this exists | Fails if missing while this exists | Command |
 |---|---|---|---|
-| `proofs` | `backend/desk/kernel_service/compiler.py` | | `make check-presets` |
+| `proofs` | `backend/scripts/prove_presets.py` | `kernel/cedar/proofs` or `backend/desk/kernel_service/compiler.py` | `make check-presets` |
 | `tier1` | `evals/run.py` | `backend/desk/kernel_service/app.py` | `make evals-tier1` |
-| `kernel-contract` | `backend/tests/kernel_contract/conftest.py` | | `make kernel-contract` |
+| `kernel-contract` | `backend/tests/kernel_contract/conftest.py` | `backend/desk/api/kernel_client.py` | `make kernel-contract` |
 | `tier2-results` | `evals/results.py` | `evals/results` | `make evals-results-check BASE=origin/main` |
 | `web` | `web/package.json` | | `make web-test` |
-| `web-e2e` | `web/playwright.config.ts` | | `make web-e2e` |
+| `web-e2e` | `web/playwright.config.ts` | `web/e2e` | `make web-e2e` |
 | `infra` | `infra/cdk.json` | | `make infra-check` |
 | `docs` | `tools/desk_tools/check_docs.py` | | `make docs-check` |
 
 - A `--run-if` path is always the suite's own code, never its data. Data can only require a suite, so deleting the tier 2 results can't switch their check off.
+- A `--required-if` path is code or data that exists once the suite has to run: the shipped proof reports or the rule compiler for `proofs`, the API's kernel client for `kernel-contract`, the end-to-end tests for `web-e2e`. Moving or deleting a suite's checker then fails the check instead of skipping it.
 - The rule compiler lands a few commits before `make check-presets`. In between, `proofs` fails rather than skips.
 - Everything else in the workflow runs on every push, with no gate.
 

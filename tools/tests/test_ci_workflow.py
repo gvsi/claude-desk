@@ -6,7 +6,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import yaml
-from test_gate import TIER2_RESULTS_GATE
+from test_gate import PROOFS_GATE, TIER2_RESULTS_GATE
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/ci.yml"
@@ -221,10 +221,8 @@ MIGRATIONS = [SETTINGS, ONE_HEAD, MIGRATE, "make db-roles"]
 CHECKS = {
     "backend tests": [*MIGRATIONS, "cd backend && uv run pytest -q"],
     "kernel tests": ["cd kernel && cargo test --locked"],
-    "proofs": [
-        "desk-prove --selftest",
-        ["--name", "proofs", "--run-if", "backend/desk/kernel_service/compiler.py", "--", "make", "check-presets"],
-    ],
+    # Exactly the arguments test_gate's proofs regression exercises.
+    "proofs": ["desk-prove --selftest", PROOFS_GATE],
     "tier 1 evals": [
         *MIGRATIONS,
         [
@@ -236,6 +234,7 @@ CHECKS = {
         [
             "--name", "kernel-contract",
             "--run-if", "backend/tests/kernel_contract/conftest.py",
+            "--required-if", "backend/desk/api/kernel_client.py",
             "--", "make", "kernel-contract",
         ],
     ],
@@ -243,7 +242,12 @@ CHECKS = {
     "tier 2 results": [TIER2_RESULTS_GATE],
     "web tests": [
         ["--name", "web", "--run-if", "web/package.json", "--", "make", "web-test"],
-        ["--name", "web-e2e", "--run-if", "web/playwright.config.ts", "--", "make", "web-e2e"],
+        [
+            "--name", "web-e2e",
+            "--run-if", "web/playwright.config.ts",
+            "--required-if", "web/e2e",
+            "--", "make", "web-e2e",
+        ],
     ],
     "infra synth": [["--name", "infra", "--run-if", "infra/cdk.json", "--", "make", "infra-check"]],
     "secret scan": ["gitleaks git --redact --verbose --no-banner --exit-code 1 ."],
@@ -277,6 +281,7 @@ def test_gated_jobs_go_through_the_gate():
 
     assert {job["name"]: checks(job) for job in jobs(workflow)} == CHECKS
     assert TIER2_RESULTS_GATE[TIER2_RESULTS_GATE.index("--") + 1 :] == ["make", "evals-results-check", "BASE=origin/main"]
+    assert PROOFS_GATE[PROOFS_GATE.index("--") + 1 :] == ["make", "check-presets"]
     # Tier 2 runs on pull requests, against main's full history.
     tier2 = job_named("tier 2 results")
     assert tier2["if"] == "github.event_name == 'pull_request'"

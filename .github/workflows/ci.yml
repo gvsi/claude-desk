@@ -82,7 +82,7 @@ jobs:
       - name: Run the proof self-test
         run: desk-prove --selftest
       - name: Prove the shipped rule sets again
-        run: uv run --project tools python -m desk_tools.gate --name proofs --run-if backend/desk/kernel_service/compiler.py -- make check-presets
+        run: uv run --project tools python -m desk_tools.gate --name proofs --run-if backend/scripts/prove_presets.py --required-if kernel/cedar/proofs --required-if backend/desk/kernel_service/compiler.py -- make check-presets
 
   tier1:
     name: tier 1 evals
@@ -118,7 +118,7 @@ jobs:
       - name: Run the tier 1 evals
         run: uv run --project tools python -m desk_tools.gate --name tier1 --run-if evals/run.py --required-if backend/desk/kernel_service/app.py -- make evals-tier1
       - name: Run the kernel contract tests against the real kernel
-        run: uv run --project tools python -m desk_tools.gate --name kernel-contract --run-if backend/tests/kernel_contract/conftest.py -- make kernel-contract
+        run: uv run --project tools python -m desk_tools.gate --name kernel-contract --run-if backend/tests/kernel_contract/conftest.py --required-if backend/desk/api/kernel_client.py -- make kernel-contract
 
   tier2:
     name: tier 2 results
@@ -157,7 +157,7 @@ jobs:
       - name: Run the web type check and unit tests
         run: uv run --project tools python -m desk_tools.gate --name web --run-if web/package.json -- make web-test
       - name: Build the web app and run the mocked end-to-end test
-        run: uv run --project tools python -m desk_tools.gate --name web-e2e --run-if web/playwright.config.ts -- make web-e2e
+        run: uv run --project tools python -m desk_tools.gate --name web-e2e --run-if web/playwright.config.ts --required-if web/e2e -- make web-e2e
 
   infra:
     name: infra synth
