@@ -7,7 +7,8 @@ server, a stand-in prover, an offline reviewer, a frozen clock), then builds the
 `DESK_SIGNING_SEED` refuses to start, then the policy engine over the always-on baseline
 (`app.state.engine`; a baseline it can't take stops the start too) with the shipped proof reports
 in its cache, then runs `desk-prove --selftest` once to pick the proof mode for the whole process
-(`symcc` or `bounded`, which `/health` reports), then the database engine (role desk_kernel).
+(`symcc` or `bounded`, which `/health` reports), then the database engine (role desk_kernel), and
+last reconciles the executions a stopped kernel left behind (`execute.reconcile_at_startup`).
 
 Every non-2xx answer is a `KernelError{code}` ("Session state responses"): a `KernelFailure`
 answers its own code, request validation 422 `invalid`, the framework's own errors (an unknown
@@ -36,7 +37,7 @@ from desk.contracts import LedgerEntry, LedgerPage, PolicyVersion
 from desk.db.session import KernelSession, database_url
 from desk.env import is_development
 from desk.kernel_api import Health, KernelError, LedgerAppendRequest, PolicyConfirmRequest, PolicyDraftRequest
-from desk.kernel_service import activation, auth, copies, decide, ledger, sessions
+from desk.kernel_service import activation, auth, copies, decide, execute, ledger, sessions
 from desk.kernel_service.auth import AuthError, Named
 from desk.kernel_service.clock import Clock, SystemClock
 from desk.kernel_service.decisions import DecisionsBackend, make_decisions
@@ -102,6 +103,12 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
         app.state.kernel = KernelRuntime(settings=settings, clock=clock, signer=signer, engine=engine,
                                          sessions=factory, policies=policies, decisions=reviewer)
         try:
+            try:
+                # executions a stopped kernel left behind; a read settles them too, so a failure
+                # here is logged and the kernel starts
+                await execute.reconcile_at_startup(app.state.kernel)
+            except Exception:
+                log.exception("startup_reconcile_failed")
             yield
         finally:
             await engine.dispose()
@@ -116,6 +123,7 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
     app.include_router(sessions.router)
     app.include_router(copies.router)
     app.include_router(decide.router)
+    app.include_router(execute.router)
     app.include_router(ledger_router)
     app.include_router(policy_router)
 

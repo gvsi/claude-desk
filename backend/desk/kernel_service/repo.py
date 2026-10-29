@@ -19,12 +19,15 @@ import secrets
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from typing import TYPE_CHECKING, Annotated, get_args
 
 import desk_kernel
 from fastapi import Depends, Request
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from desk.db.models import Execution
 from desk.db.session import KernelRepo, resolve_copy
 from desk.kernel_api import KernelError
 from desk.kernel_service.clock import Clock
@@ -157,3 +160,25 @@ async def copy_of_session_id(ctx: KernelCtx, session_id: str) -> str | None:
 
 async def copy_of_session_token(ctx: KernelCtx, token_hash: str) -> str | None:
     return await resolve_copy("copy_of_session", token_hash, engine=ctx.engine)
+
+
+# Startup reconciliation's one lookup across copies: which copies hold an execution to settle.
+
+async def orphan_intents(runtime: KernelRuntime, older_than: datetime) -> list[tuple[str, str]]:
+    """`(copy_id, action_id)` of every execution startup reconciliation must settle: an intent
+    started before `older_than`, or one left `unknown`. Used only by startup reconciliation, which
+    then works through each copy's `KernelRepo`. It visits every copy (`kernel.copy_ids()`) and
+    reads each through its own `KernelRepo`, so row-level security still holds every read to one
+    copy."""
+    async with runtime.engine.connect() as conn:
+        copy_ids = list((await conn.scalars(select(func.kernel.copy_ids()))).all())
+    found: list[tuple[str, str]] = []
+    for copy_id in copy_ids:
+        copy = KernelRepo(copy_id)
+        async with runtime.sessions() as db:
+            copy.bind(db)
+            rows = await db.scalars(copy.scoped(select(Execution.action_id).where(or_(
+                and_(Execution.state == "intent", Execution.started_at < older_than),
+                Execution.state == "unknown")).order_by(Execution.action_id)))
+            found += [(copy_id, action_id) for action_id in rows]
+    return found

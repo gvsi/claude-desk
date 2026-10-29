@@ -752,8 +752,8 @@ async def post_decide(body: DecideRequest, ctx: Ctx, request: Request) -> Decisi
 
 @router.get("/decisions/by_call", response_model=Decision)
 async def get_by_call(session_id: str, generation: int, call_id: str, ctx: Ctx, request: Request) -> Decision:
-    """The decision `/decide` committed for a call, after the API lost its answer; 404 when none
-    was. A session reads its own calls, the owner its own session's."""
+    """The decision `/decide` committed for a call, after the API lost its answer, settled as any
+    read is; 404 when none was. A session reads its own calls, the owner its own session's."""
     if _caller(request) == "owner":
         owner = await auth.require_owner(ctx, request, session_id=session_id)
         if session_id != owner.session_id:
@@ -764,14 +764,15 @@ async def get_by_call(session_id: str, generation: int, call_id: str, ctx: Ctx, 
     row = await find_call(ctx, session_id, generation, call_id) if _storable(call_id) else None
     if row is None:
         raise KernelFailure(404, "not_found", "unknown_call")
-    return await decision_contract(ctx, await expire_if_due(ctx, row))
+    return await decision_contract(ctx, await _read(ctx, row))
 
 
 # Declared after /decisions/by_call, so that path never reads as a decision ID.
 @router.get("/decisions/{decision_id}", response_model=Decision)
 async def get_decision(decision_id: str, ctx: Ctx, request: Request) -> Decision:
-    """A decision, read by its own session or by the owner of its copy, with lazy expiry applied.
-    Any other session gets 404, ledgered on its Desk; another copy's decisions are invisible."""
+    """A decision, read by its own session or by the owner of its copy, settled as a read does (an
+    orphaned execution reconciled, lazy expiry applied). Any other session gets 404, ledgered on
+    its Desk; another copy's decisions are invisible."""
     session = None
     if _caller(request) == "owner":
         await auth.require_owner(ctx, request)
@@ -785,4 +786,12 @@ async def get_decision(decision_id: str, ctx: Ctx, request: Request) -> Decision
                         named=Named(copy_id=session.copy_id, desk_id=session.desk_id, session_id=session.session_id))
     if row is None:
         raise KernelFailure(404, "not_found", "unknown_decision")
-    return await decision_contract(ctx, await expire_if_due(ctx, row))
+    return await decision_contract(ctx, await _read(ctx, row))
+
+
+async def _read(ctx: KernelCtx, row: DecisionRow) -> DecisionRow:
+    """A decision as a read settles it: an orphaned execution reconciled, then lazy expiry
+    (`execute.refresh_decision`)."""
+    from desk.kernel_service import execute     # execute builds on this module
+
+    return await execute.refresh_decision(ctx, row)
