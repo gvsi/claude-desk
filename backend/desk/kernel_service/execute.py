@@ -7,10 +7,11 @@ An execution takes up to three transactions, so that a crash leaves a record of 
   any read does (`refresh_decision`), re-checks it against the current rows (`recheck`, step 6
   of "Evaluation"), runs the adapter's `prepare` and commits the `executions` row in state
   `intent`, with whatever `prepare` reserved. Nothing outside the kernel has happened yet.
-- T2, for an allow, holds the session row `FOR SHARE` first, so a take-over waits for a running
-  execution and one that came first stops it (the fence); then it locks the decision and the
-  intent row. It runs the adapter's `execute`, then commits `succeeded` with the result and the
-  decision `executed`, ledgered and signed again.
+- T2 first holds the session row (`_hold_session`): for an allow `FOR SHARE`, so a take-over
+  waits for a running execution and one that came first stops it (the fence); `FOR UPDATE`, on
+  either path, for an adapter that writes the session's own rows (`locks_session`). Then it locks
+  the decision and the intent row, runs the adapter's `execute`, and commits `succeeded` with the
+  result and the decision `executed`, ledgered and signed again.
 - T3 runs after an `Exception` in T2, which rolled back: `AdapterFailure` (raised only before any
   external side effect) is `failed`, after the adapter's `on_failed`; anything else, a failed T2
   commit included, is `unknown`, left to reconciliation. A `BaseException` (the process dying, a
@@ -126,11 +127,27 @@ async def _lock_decision(ctx: KernelCtx, decision_id: str) -> DecisionRow:
                       .execution_options(populate_existing=True))
 
 
-async def _share_session(ctx: KernelCtx, session_id: str) -> SessionRow:
+async def _share_session(ctx: KernelCtx, session_id: str, *, exclusive: bool = False) -> SessionRow:
     """The session row, held `FOR SHARE` until the transaction ends: a mode change (which takes it
-    `FOR UPDATE`) waits, so the mode and generation read here hold for the whole transaction."""
+    `FOR UPDATE`) waits, so the mode and generation read here hold for the whole transaction. With
+    `exclusive`, `FOR UPDATE` instead, which a mode change waits for too."""
     return await _one(ctx, select(SessionRow).where(SessionRow.session_id == session_id)
-                      .with_for_update(read=True).execution_options(populate_existing=True))
+                      .with_for_update(read=not exclusive).execution_options(populate_existing=True))
+
+
+async def _hold_session(ctx: KernelCtx, session_id: str, action_id: str, path: ExecPath) -> SessionRow | None:
+    """The session row T2 holds, taken first, before the decision and the intent row (`repo.py`).
+    An allow holds it `FOR SHARE` (the fence). An adapter that writes the session's own rows
+    (`locks_session`: a verification start) holds it `FOR UPDATE` on either path, so two such
+    executions in one session take turns: each holding it shared and then asking for it outright,
+    they would wait on each other until Postgres ended one. None for an approved hold whose adapter
+    doesn't. The action's tool is read without a lock, which waits for nothing."""
+    tool = await _one(ctx, select(ActionRow.tool).where(ActionRow.action_id == action_id))
+    if getattr(adapters.ADAPTERS.get(tool), "locks_session", False):
+        return await _share_session(ctx, session_id, exclusive=True)
+    if path == "allow":
+        return await _share_session(ctx, session_id)
+    return None
 
 
 async def _execution(ctx: KernelCtx, action_id: str, *, lock: bool = False) -> Execution | None:
@@ -348,13 +365,11 @@ async def _run(ctx: KernelCtx, decision_id: str, action_id: str, session_id: str
 
 async def _side_effect(ctx: KernelCtx, decision_id: str, action_id: str, session_id: str,
                        path: ExecPath) -> ExecResult | KernelFailure:
-    """T2: under the decision's and the intent row's locks (and, for an allow, the decision's
-    session's, `session_id`, taken first), the adapter's `execute`, then `succeeded` and
+    """T2: holding the decision's session row, `session_id`, taken first (`_hold_session`), then
+    under the decision's and the intent row's locks, the adapter's `execute`, then `succeeded` and
     `executed`, committed. A failure answer comes back as a `KernelFailure`, already committed,
     for `_run` to raise."""
-    session = None
-    if path == "allow":
-        session = await _share_session(ctx, session_id)
+    session = await _hold_session(ctx, session_id, action_id, path)
     decision = await _lock_decision(ctx, decision_id)
     execution = await _execution(ctx, action_id, lock=True)
     if execution is None or execution.state != "intent":
@@ -363,8 +378,8 @@ async def _side_effect(ctx: KernelCtx, decision_id: str, action_id: str, session
             return execution.result
         return KernelFailure(409, "conflict", "not_an_intent")
     target = await _target(ctx, decision)
-    if session is not None:
-        if session.generation != target.decision.generation:
+    if path == "allow":
+        if session is None or session.generation != target.decision.generation:
             return await _fenced(ctx, target, execution, "stale_generation")
         if session.mode != "ai":
             return await _fenced(ctx, target, execution, f"mode_{session.mode}")

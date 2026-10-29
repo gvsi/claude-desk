@@ -16,6 +16,10 @@ hooks in this order:
 - `reconcile(xctx, action)`: for an `unknown` action, by `action_id`: a result means it executed,
   None that it failed, `AdapterUnknown` that it is still unknown.
 
+An adapter whose `execute` writes the session's own rows (a verification start) sets
+`locks_session = True` (optional, looked up with `getattr`): the execution then holds the session
+row `FOR UPDATE` rather than `FOR SHARE`, so two of them in one session take turns.
+
 `model_view_keys` are the only keys of a result's `model_view` that reach Claude.
 """
 
@@ -82,7 +86,7 @@ class ExecCtx:
 @runtime_checkable
 class Adapter(Protocol):
     """Required members. `prepare(xctx, action)` and `on_failed(xctx, action)` are optional async
-    hooks, looked up with `getattr`."""
+    hooks, and `locks_session` an optional flag, looked up with `getattr`."""
 
     profile: ToolProfile
     Args: type[BaseModel]                 # extra="forbid", strict=True

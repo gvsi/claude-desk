@@ -8,6 +8,8 @@ nothing about whether the contact is on record. Tests run on Rivera Plumbing cop
 and `/execute` as the API sends them; the starter preset's cards auto-allow all three tools.
 """
 
+import asyncio
+import contextlib
 import logging
 from datetime import datetime, time
 from zoneinfo import ZoneInfo
@@ -20,7 +22,7 @@ from sqlalchemy import select
 from desk.contracts import Claim, Decision, DemoInboxEntry, ExecResult, HoursWindow
 from desk.db.models import Desk, Fact, Handoff, Lead, LedgerEntry, NotificationPref, Person, VerificationChallenge
 from desk.kernel_api import DeskUpdated
-from desk.kernel_service import adapters, compiler, desks
+from desk.kernel_service import adapters, compiler, desks, verification
 from desk.kernel_service.desks import mask_contact
 
 from .helpers import kernel_ctx, ledger_rows, rows_of, verify_session
@@ -260,6 +262,34 @@ async def test_start_verification_reveals_nothing_to_claude(app, client):
     # the visitor types the code into the verify card, and the session is Dana's
     response = await check(client, known, code)
     assert (response.status_code, response.json()["verified"]) == (200, True)
+
+
+async def test_parallel_verification_starts_take_turns(app, client, monkeypatch):
+    """Two verification starts executed together in one session take turns on the session row, so
+    both succeed and one challenge stays live; each must not hold the row shared while waiting to
+    lock it for itself, or each waits on the other until Postgres ends one."""
+    copy, visitor = await visitor_of(app, client)
+    allowed = [await decided(client, visitor, "native.start_verification", {"contact": contact}, call_id=call_id)
+               for call_id, contact in (("call-1", "dana@example.com"), ("call-2", "bob@example.com"))]
+    assert [decision.outcome for decision in allowed] == ["allow", "allow"]
+    start, arrived, together = verification.start, [], asyncio.Event()
+
+    async def start_together(ctx, session_row, contact):
+        # the two meet here unless something already made one wait for the other
+        arrived.append(contact)
+        if len(arrived) == 2:
+            together.set()
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(together.wait(), timeout=0.5)
+        return await start(ctx, session_row, contact)
+
+    monkeypatch.setattr(verification, "start", start_together)
+    results = await asyncio.gather(*(executed(client, visitor, decision) for decision in allowed))
+    assert [result.state for result in results] == ["succeeded", "succeeded"]
+    statuses = [row.status for row in await rows_of(app, copy.copy_id, select(VerificationChallenge))]
+    assert sorted(statuses) == ["cancelled", "live"]
+    assert [entry.event.summary["outcome"] for entry in await ledger_rows(app, copy)
+            if entry.event.kind == "verify"] == ["started", "started"]
 
 
 async def test_start_verification_is_for_unverified_sessions(app, client):
