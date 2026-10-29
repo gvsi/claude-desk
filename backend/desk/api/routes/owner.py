@@ -16,7 +16,7 @@ from sqlalchemy import func, select
 from desk.api.cookies import set_owner_cookie
 from desk.api.deliver import PHASES
 from desk.api.deps import ApiProblem, OwnerCtx, Runtime, client_ip, owner_context, owner_ctx, runtime
-from desk.api.jobs import defer_resume_after_answer
+from desk.api.jobs import defer_resume_after_answer, resume_after_answer
 from desk.api.kernel_client import KernelFailed, KernelUnavailable
 from desk.api.passcode import check_passcode
 from desk.api.schemas import (
@@ -153,7 +153,9 @@ async def _shown(ctx: OwnerCtx, decision: Decision) -> bool:
 
 async def _resume(state: Runtime, ctx: OwnerCtx, decision: Decision) -> None:
     """Defer the resume job for the decision's session, named by the kernel's answer within the owner's copy. If the
-    queue can't take it, the answer still stands and the due-decisions job surfaces the outcome within a minute."""
+    queue can't take it, the request does the job's work itself: like the job, it holds only IDs and the signed
+    record and makes no kernel call. If that fails too, the answer still stands, and the due-decisions job surfaces
+    the outcome once it is final."""
     session = await ctx.ro.session(decision.session_id)
     if session is None or session["desk_id"] not in ctx.desk_ids:
         logger.warning("an answered request's session isn't one of the copy's")
@@ -161,5 +163,11 @@ async def _resume(state: Runtime, ctx: OwnerCtx, decision: Decision) -> None:
     ids = Ids(copy_id=ctx.copy_id, desk_id=session["desk_id"], session_id=decision.session_id)
     try:
         await defer_resume_after_answer(state.jobs, ids, decision)
+        return
     except Exception as error:
-        logger.error("the resume job couldn't be queued (%s)", type(error).__name__)
+        logger.error("the resume job couldn't be queued (%s); resuming here", type(error).__name__)
+    try:
+        async with state.database().connect() as conn:
+            await resume_after_answer(conn, ids, decision)
+    except Exception as error:
+        logger.error("the answer couldn't be resumed here either (%s)", type(error).__name__)

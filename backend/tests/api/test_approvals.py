@@ -14,6 +14,7 @@ from datetime import timedelta
 import httpx
 import pytest
 from fastapi import FastAPI
+from procrastinate.exceptions import ConnectorException
 from procrastinate.testing import InMemoryConnector
 from sqlalchemy import text
 
@@ -291,6 +292,41 @@ async def test_a_failed_answer_to_a_held_request_keeps_the_kernels_error(app, br
     assert [type for type, _ in await sse_events(engine, held.session_id)] == ["writing", "held", "message",
                                                                               "turn_end"]
     assert (await answer(held, "allow_once")).status_code == 200          # answering again is safe
+
+
+async def test_answer_resumes_in_the_request_when_the_queue_cant_take_the_job(app, browser, fake, kernel_http, model,
+                                                                              engine, jobs_connector, monkeypatch,
+                                                                              caplog):
+    """When the job queue can't take the resume job, the request does its work itself: like the job, it holds only
+    IDs and the signed record, makes no kernel call and needs no credential. The visitor sees the outcome at once and
+    Claude follows up on the visitor's next request, as after the job."""
+    held = await held_request(app, browser, fake, kernel_http, model)
+
+    async def unreachable(jobs):
+        raise ConnectorException("the job queue's database can't be reached")
+
+    monkeypatch.setattr(jobs_connector, "defer_jobs_all", unreachable)
+    model.add(response(reply("Good news: Maria said yes.")))
+    calls = len(fake.calls)
+
+    answered = await answer(held, "allow_once")
+
+    assert answered.status_code == 200, answered.text
+    shown = [payload for type, payload in await sse_events(engine, held.session_id) if type == "resolved"]
+    assert shown == [signed(answered.json()["decision"])]                 # shown before the answer returned
+    assert jobs_connector.jobs == {}
+    made = fake.calls[calls:]                                           # the owner's, and nothing with the visitor's
+    assert [call.route for call in made] == ["GET /whoami", "POST /approvals/{decision_id}/answer"]
+    assert all(call.headers[OWNER] == held.owner_token and VISITOR not in call.headers for call in made)
+    assert ("desk.api.routes.owner", "the resume job couldn't be queued (ConnectorException); resuming here") in [
+        (record.name, record.getMessage()) for record in caplog.records]
+
+    async with Stream(app, events_path(held.slug), headers=[cookie(held.token)]) as stream:
+        events = await stream.until(lambda events: types(events).count("turn_end") == 2)
+    await app.state.runtime.runner.drain()
+    assert types(events)[4:] == ["resolved", "writing", "message", "turn_end"]
+    assert (f'<action_update decision_id=\\"{held.decision_id}\\" state=\\"executed\\">'
+            in json.dumps(model.requests[1].messages))
 
 
 async def test_answer_during_take_over_executes_and_waits_for_hand_back(app, browser, fake, kernel_http, model,
