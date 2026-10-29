@@ -1,9 +1,20 @@
-/* WritingIndicator: one quiet line that pulses while someone writes. The pulse moves the words
-   between the secondary and primary text colors, so every moment of it keeps the contrast of the
-   two tokens it moves between. */
+/* WritingIndicator: someone is writing.
+
+   The line: one quiet line that pulses while someone writes. The pulse moves the words between the
+   secondary and primary text colors, so every moment of it keeps the contrast of the two tokens it
+   moves between.
+
+   The bubble: a person typing, as three dots in a small bubble on their side of the transcript,
+   where their next message will appear. It has the visitor bubble's fill and radius and is one
+   message line tall, as a one-line bubble is, so the message that replaces it doesn't move what is
+   around it. The dots pulse one after another over the same writing loop, motion-stagger apart,
+   between the secondary and primary text colors. */
 
 .cd-writing-indicator {
   margin: 0;
+}
+
+.cd-writing-indicator--line {
   color: var(--text-secondary);
   overflow-wrap: anywhere;
   animation: cd-writing-pulse var(--motion-writing) var(--motion-ease) infinite;
@@ -15,9 +26,55 @@
   }
 }
 
-/* Reduced motion: the line stays still, in the secondary color. */
+.cd-writing-indicator--bubble {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.cd-writing-indicator--person {
+  justify-content: flex-start;
+}
+
+.cd-writing-indicator__bubble {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-4);
+  box-sizing: border-box;
+  height: calc(1lh + 2 * var(--space-8));
+  padding: 0 var(--space-14);
+  border-radius: var(--radius-card);
+  background: var(--fill-bubble);
+}
+
+.cd-writing-indicator__dot {
+  flex: none;
+  width: var(--size-dot);
+  height: var(--size-dot);
+  border-radius: var(--radius-full);
+  background: var(--text-secondary);
+  animation: cd-typing-dot var(--motion-writing) var(--motion-ease) infinite;
+}
+
+.cd-writing-indicator__dot:nth-child(2) {
+  animation-delay: var(--motion-stagger);
+}
+
+.cd-writing-indicator__dot:nth-child(3) {
+  animation-delay: calc(var(--motion-stagger) * 2);
+}
+
+@keyframes cd-typing-dot {
+  50% {
+    background: var(--text-primary);
+  }
+}
+
+/* Reduced motion: the line stays still in the secondary color, and so do the dots. */
 @media (prefers-reduced-motion: reduce) {
-  .cd-writing-indicator {
+  .cd-writing-indicator--line,
+  .cd-writing-indicator__dot {
     animation: none;
   }
 }
