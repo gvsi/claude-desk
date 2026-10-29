@@ -1,6 +1,6 @@
 // Chen & Co. CPA: Linda Chen's practice, the second business in the switcher, and the board where
 // Raj Patel confirms it's him with a code before Claude releases his tax return. Linda asks to see
-// every new client's first consultation, so a visitor's booking waits for her answer.
+// every booking before it's made, so a visitor's first consultation waits for her answer.
 
 import type {
   CardBlock,
@@ -112,7 +112,7 @@ const ruleCards = {
     hours: null,
     review: false,
     is_default: false,
-    reason: 'New client consultations wait for your answer.',
+    reason: 'Bookings wait for your answer.',
   },
 } satisfies Record<string, RuleCard>;
 

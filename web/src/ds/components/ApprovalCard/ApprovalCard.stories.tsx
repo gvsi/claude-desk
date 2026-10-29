@@ -250,10 +250,12 @@ export const TwoPlainButtons: Story = {
 export const DenyMenu: Story = {
   args: consultationArgs,
   parameters: {
-    canvasNote: `${ANSWERS_BOARD} Its three answers come from Chen & Co.: an ask card holds every first consultation, so the tool itself is held and Deny always is offered; the visitor isn't verified, so Allow has one answer.`,
+    canvasNote: `${ANSWERS_BOARD} Its three answers come from Chen & Co.: an ask card holds every booking, so the tool itself is held and Deny always is offered; the visitor isn't verified, so Allow has one answer.`,
   },
   play: async ({ canvas, canvasElement }) => {
-    await expect(canvas.getByRole('article')).toHaveTextContent(`Held by your rule: ${chen.ruleCards['cc-consult'].reason}`);
+    // Linda's card holds every booking, whoever asks, and its reason says no less.
+    await expect(chen.ruleCards['cc-consult'].who).toBe('anyone');
+    await expect(canvas.getByRole('article')).toHaveTextContent('Held by your rule: Bookings wait for your answer.');
 
     // Allow has one answer, a plain button; Deny has two, so it opens a menu: its word, then a chevron.
     const buttons = answerButtons(canvasElement);
