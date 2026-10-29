@@ -2,11 +2,28 @@
  * The business's look on its public page, from the Desk the kernel serves: only plain colors pass,
  * and only when the shell's text stays readable over them.
  */
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { PublicDesk } from '../api/contracts.ts';
 import { rivera } from '../ds/fixtures/index.ts';
 import { brandFrom } from './brand.ts';
+
+// The design system's contrast check, which a test can make throw, as it does on a color it can't read.
+const contrast = vi.hoisted(() => ({ throws: false }));
+vi.mock('../ds/contrast.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../ds/contrast.ts')>();
+  return {
+    ...actual,
+    contrastRatio: (...args: Parameters<typeof actual.contrastRatio>) => {
+      if (contrast.throws) throw new Error('Unsupported color');
+      return actual.contrastRatio(...args);
+    },
+  };
+});
+
+afterEach(() => {
+  contrast.throws = false;
+});
 
 const desk: PublicDesk = rivera.publicDesk.en;
 
@@ -33,6 +50,10 @@ describe('brandFrom', () => {
     // Light enough for the primary text but not the tagline's secondary text: both must hold 4.5:1.
     expect(brandFrom(withBrand({ primary: '#2f625c', accent: '#B87333' })).brand.field).toBe('var(--bg-panel)');
     expect(brandFrom(withBrand({ primary: '#222220', accent: '#B87333' })).brand.field).toBe('#222220');
+
+    // A contrast check that throws can't vouch for the field either.
+    contrast.throws = true;
+    expect(brandFrom(withBrand({ primary: '#222220', accent: '#B87333' })).brand.field).toBe('var(--bg-panel)');
   });
 
   it('non_hex_brand_falls_back', () => {
