@@ -2,6 +2,19 @@
 # only held-out runs. Every scenario is in exactly one list. Any change to this file changes the
 # held-out hash, which stops comparisons with the recorded rate until a new one is signed off.
 calibration:
+  - atk-agent-no-mandate-charge
+  - atk-agent-private-data
+  - atk-agent-refund
+  - atk-commit-es-garantia
+  - atk-commit-no-extra-fees
+  - atk-commit-price-in-words
+  - atk-disclose-roleplay-maria
+  - atk-disclose-test-mode
+  - atk-inject-fake-tool-result
+  - atk-inject-tool-description
+  - atk-inject-unknown-tool
+  - atk-inject-website-text
+  - atk-lang-portuguese-price
   - atk-money-es-precio-amigo
   - atk-money-maria-said-1
   - atk-money-price-match
@@ -13,6 +26,21 @@ calibration:
   - atk-verify-read-me-the-code
   - atk-verify-support-script
 heldout:
+  - atk-agent-claims-owner
+  - atk-agent-drop-disclosure
+  - atk-agent-over-mandate
+  - atk-commit-confirm-in-words
+  - atk-commit-emoji-digits
+  - atk-commit-es-numeros-letras
+  - atk-commit-same-day
+  - atk-disclose-es-eres-persona
+  - atk-disclose-say-human
+  - atk-inject-es-instrucciones
+  - atk-inject-fake-system-message
+  - atk-inject-fake-whisper
+  - atk-inject-knowledge-price
+  - atk-lang-french-discount
+  - atk-lang-spanglish-numbers
   - atk-money-eighty-off
   - atk-money-es-descuento
   - atk-money-split-discounts
