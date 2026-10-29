@@ -1,0 +1,304 @@
+"""What a visitor can read, and whether it states an amount, a percentage or a date.
+
+The reply rule (invariant 2) keeps prices, dates and discounts out of free prose: they reach a
+visitor only in typed cards rendered from facts. `scan_visible` judges prose by that rule in its own
+words, restating the minimum Plan 01a's lexicon must cover (en and es) without reading it, so a
+gap in the kernel's lexicon is a miss here instead of a shared blind spot. It scans after NFKC
+with every invisible character removed (format characters such as zero-width spaces, soft hyphens
+and bidi controls; the other default-ignorable code points, such as variation selectors and the
+combining grapheme joiner; and combining marks NFKC leaves uncomposed, such as strikethrough), and
+matches words with accents folded and case ignored.
+"""
+
+import re
+import unicodedata
+from dataclasses import dataclass
+from typing import Any, Literal
+
+from pydantic import BaseModel
+
+HitKind = Literal["digit", "currency", "percent", "spelled_amount", "date_word"]
+
+
+@dataclass(frozen=True)
+class Hit:
+    kind: HitKind
+    span: str     # the matched text, from the normalized text
+    start: int    # its offset in the normalized text (`normalize(text)`)
+
+
+def normalize(text: str) -> str:
+    """The text as a visitor reads it: NFKC, with every format character (Unicode Cf) and other
+    default-ignorable code point removed before and after, and every combining mark NFKC left
+    uncomposed (Mn and Me, such as a strikethrough or underline) removed after, except the keycap.
+    Hangul fillers read as a space, since most fonts draw them as a blank."""
+    return _clean(text).translate(_FILLER_AS_SPACE)
+
+
+def scan_visible(text: str) -> list[Hit]:
+    """Every digit, currency, percent, spelled-out amount and date word in `text`, in order.
+
+    Fonts draw a Hangul filler either as a blank or as nothing, so text with one is scanned both
+    ways: "eighty<filler>dollars" and "eigh<filler>ty" are both flagged. Every hit's span and start
+    refer to `normalize(text)`."""
+    marked = _clean(text)
+    shown = marked.translate(_FILLER_AS_SPACE)
+    hits = _scan(shown)
+    kept = [i for i, ch in enumerate(marked) if ch not in _HANGUL_FILLERS]
+    if len(kept) < len(marked):
+        for hit in _scan("".join(marked[i] for i in kept)):
+            start, end = kept[hit.start], kept[hit.start + len(hit.span) - 1] + 1
+            hits.append(Hit(hit.kind, shown[start:end], start))
+    return sorted(dict.fromkeys(hits), key=lambda hit: (hit.start, hit.kind))
+
+
+def _scan(shown: str) -> list[Hit]:
+    folded = _fold(shown)
+    hits = [*_digits(shown), *_symbols(shown)]
+    hits += [Hit("currency", shown[m.start():m.end()], m.start()) for m in _CURRENCY_WORD.finditer(folded)]
+    hits += [Hit("percent", shown[m.start():m.end()], m.start()) for m in _PERCENT.finditer(folded)]
+    hits += [Hit("date_word", shown[m.start():m.end()], m.start()) for m in _date_words(folded)]
+    hits += _spelled_amounts(shown, folded, [hit for hit in hits if hit.kind in ("currency", "percent")])
+    return hits
+
+
+def card_amounts(text: str) -> list[int]:
+    """The cents of every currency amount in a card's text, in order: "$1,234.56", "1.234,56 US$",
+    "$180", "USD 89.5". A separator followed by one or two digits at the end of a number is the
+    decimal mark (en "." or es ","); followed by three, it groups thousands."""
+    shown = normalize(text)
+    return [_cents(m.group(1) or m.group(2)) for m in _CARD_AMOUNT.finditer(shown)]
+
+
+def _cents(number: str) -> int:
+    whole, decimals = number, "00"
+    if (mark := re.search(r"[.,](\d{1,2})$", number)) is not None:
+        whole, decimals = number[:mark.start()], mark.group(1).ljust(2, "0")
+    return int(re.sub(r"[., ]", "", whole)) * 100 + int(decimals)
+
+
+def visible_texts(payload: Any) -> list[str]:
+    """The free text a visitor reads in a payload: every `visitor_plain`, the text of prose blocks,
+    Demo inbox previews (`EvDemoInbox`, and the notices it is made from) and `VerifyStarted.message`,
+    found anywhere in an SSE event, an A2A response, a kernel response or a list of them. IDs, seqs,
+    signatures, `to`, `href` and card fields (`text`, `title`, `lines`, `options`) are never read:
+    cards are rendered from facts, which is where amounts and dates belong. A plain string is
+    taken as visible text."""
+    if isinstance(payload, str):
+        return [payload]
+    found: list[str] = []
+    _collect(payload.model_dump(mode="json") if isinstance(payload, BaseModel) else payload, found)
+    return found
+
+
+def _collect(node: Any, found: list[str]) -> None:
+    if isinstance(node, BaseModel):
+        node = node.model_dump(mode="json")
+    if isinstance(node, list | tuple):
+        for item in node:
+            _collect(item, found)
+        return
+    if not isinstance(node, dict):
+        return
+    if node.get("kind") in ("prose", "card") and "text" in node:   # a RenderedBlock
+        if node["kind"] == "prose":
+            found.append(node["text"])
+        return
+    for key, value in node.items():
+        if key == "visitor_plain" and isinstance(value, str):
+            found.append(value)
+        elif key == "preview" and "to" in node and isinstance(value, str):   # EvDemoInbox, InboxNotice
+            found.append(value)
+        elif key == "message" and set(node) == {"message", "inbox"} and isinstance(value, str):   # VerifyStarted
+            found.append(value)
+        elif isinstance(value, dict | list):
+            _collect(value, found)
+
+
+# Normalization
+
+# Default_Ignorable_Code_Point (Unicode DerivedCoreProperties) beyond category Cf: the combining
+# grapheme joiner, Khmer inherent vowels, Mongolian variation selectors, variation selectors and
+# the code points reserved as ignorable. Hangul fillers, also default-ignorable, are kept apart.
+_IGNORABLE = ((0x034F, 0x034F), (0x17B4, 0x17B5), (0x180B, 0x180F), (0x2065, 0x2065), (0xFE00, 0xFE0F),
+              (0xFFF0, 0xFFF8), (0xE0000, 0xE0FFF))
+_HANGUL_FILLERS = frozenset(map(chr, (0x115F, 0x1160, 0x3164, 0xFFA0)))   # NFKC keeps only the first two
+_FILLER_AS_SPACE = str.maketrans(dict.fromkeys(_HANGUL_FILLERS, " "))
+_KEYCAP_MARK = chr(0x20E3)   # the combining enclosing keycap, part of a digit hit
+
+
+def _clean(text: str) -> str:
+    """NFKC with invisible characters and uncomposed marks removed; Hangul fillers stay for the
+    caller to read."""
+    composed = unicodedata.normalize("NFKC", "".join(ch for ch in text if not _invisible(ch)))
+    return "".join(ch for ch in composed if not _invisible(ch) and not _stray_mark(ch))
+
+
+def _invisible(ch: str) -> bool:
+    return unicodedata.category(ch) == "Cf" or any(low <= ord(ch) <= high for low, high in _IGNORABLE)
+
+
+def _stray_mark(ch: str) -> bool:
+    return unicodedata.category(ch) in ("Mn", "Me") and ch != _KEYCAP_MARK
+
+
+def _fold(text: str) -> str:
+    """The text with each character's accents dropped, one character for one, so offsets agree."""
+    return "".join(_base(ch) for ch in text)
+
+
+def _base(ch: str) -> str:
+    decomposed = unicodedata.normalize("NFD", ch)
+    return decomposed[0] if len(decomposed) > 1 and unicodedata.category(decomposed[0])[0] == "L" else ch
+
+
+# Digits and symbols
+
+# Any decimal digit (Unicode Nd: ASCII, full-width, Arabic-Indic, ...), with the separators between
+# digits of one number and a trailing keycap (U+FE0F U+20E3, as in the keycap 8) in the same hit.
+_DIGIT_RUN = re.compile(r"\d(?:\d|[.,:'](?=\d))*[\ufe0f\u20e3]*")
+_KEYCAP_TEN = "\U0001f51f"
+_PERCENT_SIGNS = "%\u066a\u2030\u2031"   # percent, Arabic percent, per mille, per ten thousand
+
+
+def _digits(shown: str) -> list[Hit]:
+    hits = [Hit("digit", m.group(), m.start()) for m in _DIGIT_RUN.finditer(shown)]
+    # Other numerals NFKC leaves alone (Unicode No and Nl, such as Tamil or Ethiopic numbers) and the
+    # keycap ten read as numbers too.
+    hits += [Hit("digit", ch, i) for i, ch in enumerate(shown)
+             if ch == _KEYCAP_TEN or unicodedata.category(ch) in ("No", "Nl")]
+    return hits
+
+
+def _symbols(shown: str) -> list[Hit]:
+    hits = []
+    for i, ch in enumerate(shown):
+        if unicodedata.category(ch) == "Sc":   # every currency sign: $ € £ ¥ ¢ ₹ ...
+            us = i >= 2 and shown[i - 2:i].upper() == "US" and (i == 2 or not shown[i - 3].isalnum())
+            hits.append(Hit("currency", shown[i - 2:i + 1] if us else ch, i - 2 if us else i))
+        elif ch in _PERCENT_SIGNS:
+            hits.append(Hit("percent", ch, i))
+    return hits
+
+
+# Words (matched on the folded text: no accents, any case)
+
+def _words(*words: str) -> str:
+    return r"\b(?:" + "|".join(sorted(words, key=len, reverse=True)) + r")\b"
+
+
+_CURRENCY_WORDS = ("usd", "eur", "mxn", "dollar", "dollars", "dolar", "dolares", "peso", "pesos", "euro", "euros",
+                   "buck", "bucks", "cent", "cents", "centavo", "centavos")
+_CURRENCY_WORD = re.compile(_words(*_CURRENCY_WORDS), re.IGNORECASE)
+_PERCENT = re.compile(_words("percent", r"per\s*cent", r"por\s*ciento", "porciento"), re.IGNORECASE)
+
+_EN_NUMBERS = (
+    "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen",
+    "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty", "thirty", "forty", "fourty",
+    "fifty", "sixty", "seventy", "eighty", "ninety", "hundred", "hundreds", "thousand", "thousands", "million",
+    "millions", "billion", "billions", "dozen", "dozens", "half", "halves",
+)
+_ES_NUMBERS = (
+    "dos", "tres", "cuatro", "cinco", "seis", "siete", "ocho", "nueve", "diez", "doce", "trece", "catorce",
+    "quince", "dieciseis", "diecisiete", "dieciocho", "diecinueve", "veinte", "veintiun", "veintiuno",
+    "veintiuna", "veintidos", "veintitres", "veinticuatro", "veinticinco", "veintiseis", "veintisiete",
+    "veintiocho", "veintinueve", "treinta", "cuarenta", "cincuenta", "sesenta", "setenta", "ochenta", "noventa",
+    "cien", "ciento", "cientos", "doscientos", "doscientas", "trescientos", "trescientas", "cuatrocientos",
+    "cuatrocientas", "quinientos", "quinientas", "seiscientos", "seiscientas", "setecientos", "setecientas",
+    "ochocientos", "ochocientas", "novecientos", "novecientas", "mil", "miles", "millon", "millones", "docena",
+    "docenas", "mitad",
+)
+# Words that are numbers only beside money: "one moment" and "una pregunta" are ordinary prose.
+_BARE_NUMBERS = ("one", "uno", "una", "once", "medio")
+_NUMBER = re.compile(_words(*_EN_NUMBERS, *_ES_NUMBERS), re.IGNORECASE)
+_BARE_NUMBER = re.compile(_words(*_BARE_NUMBERS), re.IGNORECASE)
+_NUMBER_JOINER = re.compile(r"^[\s\-\u2010-\u2015]*(?:(?:and|y)[\s\-\u2010-\u2015]+)?$", re.IGNORECASE)
+_TOKEN = re.compile(r"\w+|[^\w\s]")
+_NEAR_MONEY = 3   # words between a bare number word and a currency or percent word
+
+_DATE_WORDS = re.compile(_words(
+    # en weekdays and months; "May" only after a preposition (below), so the modal passes
+    "monday", "mondays", "tuesday", "tuesdays", "wednesday", "wednesdays", "thursday", "thursdays", "friday",
+    "fridays", "saturday", "saturdays", "sunday", "sundays", "january", "february", "march", "april", "june",
+    "july", "august", "september", "october", "november", "december",
+    # en relative days and times
+    "today", "tonight", "tomorrow", "yesterday", "weekend", "weekends", r"next\s+week", "noon", "midnight",
+    "o['\u2019]?clock", r"this\s+morning", r"this\s+afternoon", r"this\s+evening",
+    # es weekdays and months
+    "lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "sabados", "domingo", "domingos", "enero",
+    "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "setiembre", "octubre",
+    "noviembre", "diciembre",
+    # es relative days and times
+    "hoy", r"pasado\s+manana", "manana", "ayer", r"esta\s+manana", r"esta\s+tarde", r"esta\s+noche",
+    r"fin\s+de\s+semana", r"la\s+proxima\s+semana", "mediodia", "medianoche",
+), re.IGNORECASE)
+_CLOCK = re.compile(r"\b[ap]\.\s?m\.|\bpm\b", re.IGNORECASE)   # a.m., p.m., pm; a bare "am" is the verb
+_MONTH_MAY = re.compile(r"\b(?i:in|on|by|until|till|next|this|early|late|mid|last)[\s\-]+May\b")
+# An ordinal from third to thirty-first after "the" ("on the fifth") or a month name ("November
+# third") is a day of the month. "The first" and "the second" are too often not ("first, let me
+# check", "one second"), and are left to the digit forms ("the 1st").
+_HYPHEN = r"[\s\-‐-―]+"
+_UNIT_ORDINALS = ("first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth")
+_ORDINAL = (r"(?:twenty" + _HYPHEN + "(?:" + "|".join(_UNIT_ORDINALS) + r")|thirty" + _HYPHEN + "first|"
+            "third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|thirteenth|fourteenth|"
+            "fifteenth|sixteenth|seventeenth|eighteenth|nineteenth|twentieth|thirtieth)")
+_EN_MONTHS = ("january", "february", "march", "april", "may", "june", "july", "august", "september", "october",
+              "november", "december")
+_ORDINAL_DATE = re.compile(r"\b(?:the|" + "|".join(_EN_MONTHS) + r")\s+" + _ORDINAL + r"\b", re.IGNORECASE)
+# A fraction is an amount beside a discount or price word ("a quarter off", "un cuarto de
+# descuento"); "a quarter of an hour" and "the third option" are ordinary prose.
+_FRACTION = re.compile(_words("quarter", "quarters", "third", "thirds", "cuarto", "cuartos", "tercio", "tercios"),
+                       re.IGNORECASE)
+_DISCOUNT_WORD = re.compile(_words("off", "discount", "discounts", "descuento", "descuentos", "price", "prices",
+                                   "precio", "precios"), re.IGNORECASE)
+
+
+# Card amounts: a currency mark before or after a number. Thousands group with ".", "," or a space
+# (NFKC turns no-break spaces into spaces), never a line break, so a card's lines stay apart.
+_MARK = r"(?:US\$|\$|€|£|¥|USD|EUR|MXN)"
+_AMOUNT = r"(\d{1,3}(?:[., ]\d{3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?)"
+_CARD_AMOUNT = re.compile(rf"{_MARK} ?{_AMOUNT}(?!\d)|(?<![\d.,]){_AMOUNT} ?{_MARK}(?! ?\d)")
+
+
+def _date_words(folded: str) -> list[re.Match]:
+    return [*_DATE_WORDS.finditer(folded), *_CLOCK.finditer(folded), *_MONTH_MAY.finditer(folded),
+            *_ORDINAL_DATE.finditer(folded)]
+
+
+def _spelled_amounts(shown: str, folded: str, money: list[Hit]) -> list[Hit]:
+    """Number words, merged into one hit per amount ("ochenta y nueve", "fifteen hundred"). A bare
+    one, uno, una, once or medio counts within three words of a currency or percent word, or next
+    to another number word ("one hundred"); a quarter, third, cuarto or tercio counts within three
+    words of a discount or price word ("a quarter off")."""
+    money_spans = [(hit.start, hit.start + len(hit.span)) for hit in money]
+    discount_spans = [(m.start(), m.end()) for m in _DISCOUNT_WORD.finditer(folded)]
+    # "ciento" in "por ciento" is the percent word, already a hit.
+    spans = [(m.start(), m.end()) for m in _NUMBER.finditer(folded)
+             if not any(start <= m.start() < end for start, end in money_spans)]
+    tokens = [(m.start(), m.end()) for m in _TOKEN.finditer(folded)
+              if m.group()[0].isalnum() or any(start <= m.start() < end for start, end in money_spans)]
+    is_money = [any(start < t_end and t_start < end for start, end in money_spans) for t_start, t_end in tokens]
+    is_discount = [any(start == t_start for start, _ in discount_spans) for t_start, _ in tokens]
+    is_number = [any(start == t_start for start, _ in spans) for t_start, _ in tokens]
+    for m in _BARE_NUMBER.finditer(folded):
+        i = next((i for i, (t_start, _) in enumerate(tokens) if t_start == m.start()), None)
+        if i is None:
+            continue
+        near = range(max(0, i - _NEAR_MONEY), min(len(tokens), i + _NEAR_MONEY + 1))
+        beside = (i > 0 and is_number[i - 1]) or (i + 1 < len(tokens) and is_number[i + 1])
+        if beside or any(is_money[j] for j in near):
+            spans.append((m.start(), m.end()))
+    for m in _FRACTION.finditer(folded):
+        i = next((i for i, (t_start, _) in enumerate(tokens) if t_start == m.start()), None)
+        if i is None:
+            continue
+        near = range(max(0, i - _NEAR_MONEY), min(len(tokens), i + _NEAR_MONEY + 1))
+        if any(is_discount[j] for j in near):
+            spans.append((m.start(), m.end()))
+    merged: list[list[int]] = []
+    for start, end in sorted(spans):
+        if merged and _NUMBER_JOINER.match(folded[merged[-1][1]:start]):
+            merged[-1][1] = end
+        else:
+            merged.append([start, end])
+    return [Hit("spelled_amount", shown[start:end], start) for start, end in merged]

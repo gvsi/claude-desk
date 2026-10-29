@@ -1,0 +1,362 @@
+"""`KernelTarget`'s plumbing, run against a stand-in for Plan 01a's `create_app`.
+
+Until Plan 01a lands, tier 1's kernel cases are pending, so these tests are what runs the target:
+the environment it gives the kernel, the clock, the server's lifecycle and restarts, the bounded
+mode refusal, the contract checks on every call and the unscripted-call check at stop. The
+stand-in is a few routes, not a kernel; tier 1's own cases need the real one.
+"""
+
+import json
+import os
+import re
+import sys
+import types
+from contextlib import asynccontextmanager
+
+import anthropic
+import httpx
+import pytest
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import JSONResponse, Response
+from starlette.routing import Route
+
+from desk.kernel_api import KernelError, WhoAmI
+from evals.fakes import LoopbackServer
+from evals.tier1 import targets
+from evals.tier1.harness import Auth, ContractError, Expect, KernelHarness, load_landed
+from evals.tier1.targets import DUMMY_KEY, SYMCC_REQUIRED, KernelTarget, MockpayClient, TargetError
+
+WATCHED = ("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "DESK_ENV", "DESK_DECISIONS", "DESK_SIGNING_SEED")
+LEAKED_CODE = "482913"   # what the stand-in's /verify/start puts in a field the contract doesn't declare
+
+
+class StandInKernel:
+    """`create_app(settings, clock)` as Plan 01a gives it, serving a handful of routes."""
+
+    def __init__(self) -> None:
+        self.proof_mode = "symcc"
+        self.model = "claude-haiku-5-5"   # the model `GET /whoami` calls, as a reply check would
+        self.apps: list[tuple[object, dict[str, str | None]]] = []   # each app's clock and environment
+        self.lifespan: list[str] = []
+        self.requests = 0
+
+    def create_app(self, settings: object = None, clock: object = None) -> Starlette:
+        self.apps.append((clock, {name: os.environ.get(name) for name in WATCHED}))
+
+        @asynccontextmanager
+        async def lifespan(app: Starlette):
+            self.lifespan.append("startup")
+            yield
+            self.lifespan.append("shutdown")
+
+        async def health(request: Request) -> JSONResponse:
+            return JSONResponse({"version": "stand-in", "proof_mode": self.proof_mode, "dev_signing_key": True,
+                                 "public_key_hex": "ab" * 32, "key_id": "ab" * 8, "unproved_seeds": []})
+
+        async def whoami(request: Request) -> JSONResponse:
+            self.requests += 1
+            client = anthropic.AsyncAnthropic(max_retries=0)   # reads ANTHROPIC_API_KEY and ANTHROPIC_BASE_URL
+            try:
+                await client.messages.create(
+                    model=self.model, max_tokens=16, messages=[{"role": "user", "content": "Hi"}]
+                )
+            except anthropic.APIStatusError:
+                pass   # an unscripted call: the kernel fails closed, and the target's stop() fails the case
+            return JSONResponse({"kind": "visitor", "copy_id": "c-1", "desk_id": "d-1", "desk_ids": ["d-1"],
+                                 "session": None})
+
+        async def copies(request: Request) -> JSONResponse:
+            self.requests += 1
+            return JSONResponse({"copy_id": "c-1", "desk_ids": ["d-1"]})   # no owner session or token: off contract
+
+        async def decision(request: Request) -> JSONResponse:
+            self.requests += 1
+            body = {"code": "stale_generation"}
+            if request.path_params["id"] == "d-detail":
+                body["detail"] = "generation 3 is current"   # a field KernelError doesn't declare
+            return JSONResponse(body, status_code=409)
+
+        async def verify_start(request: Request) -> JSONResponse:
+            self.requests += 1
+            notice = {"entry_id": "e-1", "to": "d•••@example.com", "preview": "A code is on its way."}
+            return JSONResponse({"message": "If that contact is on record, a code is on its way.", "inbox": [notice],
+                                 "verification_code": LEAKED_CODE})   # a valid VerifyStarted, plus a leak
+
+        async def not_found(request: Request) -> JSONResponse:
+            self.requests += 1
+            return JSONResponse({"code": "not_found"}, status_code=404)   # any other route, on contract
+
+        return Starlette(lifespan=lifespan, routes=[
+            Route("/health", health), Route("/whoami", whoami), Route("/copies", copies, methods=["POST"]),
+            Route("/decisions/{id}", decision), Route("/verify/start", verify_start, methods=["POST"]),
+            Route("/{rest:path}", not_found, methods=["GET", "POST", "PUT", "DELETE"]),
+        ])
+
+
+@pytest.fixture
+def kernel(monkeypatch: pytest.MonkeyPatch) -> StandInKernel:
+    stand_in = StandInKernel()
+    package = types.ModuleType("desk.kernel_service")
+    package.__path__ = []
+    module = types.ModuleType("desk.kernel_service.app")
+    module.create_app = stand_in.create_app
+    monkeypatch.setitem(sys.modules, "desk.kernel_service", package)
+    monkeypatch.setitem(sys.modules, "desk.kernel_service.app", module)
+    # Records connects only when read, and these tests read none.
+    monkeypatch.setenv("API_DATABASE_URL", "postgresql+psycopg://desk_api:unused@127.0.0.1:1/desk")
+    monkeypatch.setenv("KERNEL_DATABASE_URL", "postgresql+psycopg://desk_kernel:unused@127.0.0.1:1/desk")
+    # What a developer's shell might hold; the target replaces it for the kernel, then puts it back.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-from-the-shell")
+    monkeypatch.setenv("DESK_SIGNING_SEED", "5" * 64)
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    return stand_in
+
+
+@pytest.mark.parametrize("plans", [None, ["master", "01a"]], ids=["landed.toml", "01a landed"])
+async def test_target_runs_the_kernel_app_on_its_clock_and_fake(
+    kernel: StandInKernel, plans: list[str] | None, tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    """Run with the committed landed.toml, and with a temporary one listing 01a as the kernel core's
+    PR will: `landed` follows whichever file the target's loader read, so the test holds either way."""
+    if plans is not None:
+        landed_file = tmp_path / "landed.toml"
+        landed_file.write_text(f"plans = {json.dumps(plans)}\n")
+        monkeypatch.setattr(targets, "load_landed", lambda: load_landed(landed_file))
+    target = await KernelTarget(models="fake").start()
+    try:
+        assert re.fullmatch(r"http://127\.0\.0\.1:\d+", target.url)
+        assert isinstance(target, KernelHarness) and target.is_real
+        assert target.landed("01a") == ("01a" in targets.load_landed())
+        assert target.health is not None and target.health.proof_mode == "symcc"
+        [(clock, env)] = kernel.apps
+        assert clock is target.clock
+        assert env == {"ANTHROPIC_BASE_URL": target.fake.url, "ANTHROPIC_API_KEY": DUMMY_KEY, "DESK_ENV": "test",
+                       "DESK_DECISIONS": "anthropic", "DESK_SIGNING_SEED": None}
+
+        # The kernel's model call reaches the fake, whose Haiku default passes the soft-promise check.
+        whoami = await target.call("GET /whoami", auth=Auth.raw({"X-Session-Token": "secret-token"}),
+                                   expect=Expect(fields={"kind": "visitor"}))
+        assert isinstance(whoami, WhoAmI)
+        assert len(target.fake.calls("claude-haiku-5-5")) == 1
+        assert [(called.route, called.status) for called in target.responses] == [("GET /whoami", 200)]
+        assert "secret-token" not in repr(target.responses)
+    finally:
+        await target.stop()
+    assert kernel.lifespan == ["startup", "shutdown"]
+    assert os.environ["ANTHROPIC_API_KEY"] == "sk-ant-from-the-shell"
+    assert os.environ["DESK_SIGNING_SEED"] == "5" * 64
+    assert "ANTHROPIC_BASE_URL" not in os.environ and "DESK_DECISIONS" not in os.environ
+
+
+async def test_restart_serves_a_fresh_app_on_the_same_port_and_clock(kernel: StandInKernel):
+    target = await KernelTarget(models="fake").start()
+    try:
+        url = target.url
+        await target.restart()
+        assert target.url == url
+        assert [clock for clock, _ in kernel.apps] == [target.clock, target.clock]
+        assert kernel.lifespan == ["startup", "shutdown", "startup"]
+        await target.call("GET /whoami", auth=Auth.none(), expect=Expect(fields={"kind": "visitor"}))
+        target.advance(3600)
+        target.travel(target.clock.now())
+    finally:
+        await target.stop()
+    assert kernel.lifespan == ["startup", "shutdown", "startup", "shutdown"]
+
+
+async def test_bounded_kernel_stops_the_target(kernel: StandInKernel):
+    kernel.proof_mode = "bounded"
+    with pytest.raises(TargetError, match=re.escape(SYMCC_REQUIRED)):
+        await KernelTarget(models="fake").start()
+    assert kernel.lifespan == ["startup", "shutdown"]   # nothing left running
+    assert os.environ["ANTHROPIC_API_KEY"] == "sk-ant-from-the-shell"
+
+    target = await KernelTarget(models="fake", allow_bounded=True).start()
+    await target.stop()
+    assert target.health is not None and target.health.proof_mode == "bounded"
+
+
+async def test_calls_are_checked_against_the_contract_both_ways(kernel: StandInKernel):
+    target = await KernelTarget(models="fake").start()
+    try:
+        with pytest.raises(ContractError, match="args"):   # a request off contract is never sent
+            await target.call("POST /decide", body={"session_id": "s-1", "generation": 0,
+                                                    "call": {"call_id": "c-1", "tool": "native.quote"}},
+                              auth=Auth.none())
+        assert kernel.requests == 0
+        with pytest.raises(ContractError, match="breaks CopyCreated"):   # an answer off contract fails
+            await target.new_copy()
+        with pytest.raises(AssertionError, match=r"answered 409 \(code 'stale_generation'\): status: expected 200"):
+            await target.call("GET /decisions/{id}", path={"id": "d 1"}, auth=Auth.none())
+        error = await target.call("GET /decisions/{id}", path={"id": "d-1"}, auth=Auth.none(),
+                                  expect=Expect(status=409, fields={"code": "stale_generation"}))
+        assert error == KernelError(code="stale_generation")
+        assert [(called.route, called.status) for called in target.responses] == [
+            ("GET /decisions/{id}", 409), ("GET /decisions/{id}", 409)
+        ]
+    finally:
+        await target.stop()
+
+
+async def test_an_undeclared_response_field_fails_the_call(kernel: StandInKernel):
+    """A valid `VerifyStarted` with an extra `verification_code` field fails the call as a contract
+    break naming the field, never its value, and records nothing: the response models drop what
+    they don't declare, so a code or a canary there would otherwise vanish before any scan saw
+    it. The same for a `KernelError` with a `detail` beside its code. What the kernel did send
+    is kept on each recorded call as `raw`, beside the contract's reading of it."""
+    target = await KernelTarget(models="fake").start()
+    try:
+        with pytest.raises(ContractError, match="verification_code") as failure:
+            await target.call("POST /verify/start", body={"session_id": "s-1", "contact": "dana@example.com"},
+                              auth=Auth.none())
+        assert LEAKED_CODE not in str(failure.value)
+        with pytest.raises(ContractError, match="detail") as failure:
+            await target.call("GET /decisions/{id}", path={"id": "d-detail"}, auth=Auth.none(),
+                              expect=Expect(status=409, fields={"code": "stale_generation"}))
+        assert "generation 3" not in str(failure.value)
+        assert target.responses == []
+        await target.call("GET /whoami", auth=Auth.none(), expect=Expect(fields={"kind": "visitor"}))
+        [called] = target.responses
+        assert called.raw == {"kind": "visitor", "copy_id": "c-1", "desk_id": "d-1", "desk_ids": ["d-1"],
+                              "session": None}
+        assert called.body == called.raw
+    finally:
+        await target.stop()
+
+
+async def test_proving_routes_get_the_longer_client_timeout(kernel: StandInKernel, monkeypatch: pytest.MonkeyPatch):
+    """`POST /policy/draft`, `POST /policy/{version}/probe` and `POST /tools/confirm` wait 60 s for
+    the kernel, the client timeout the master plan gives proving calls (the kernel proves within
+    45 s); every other route keeps the 30 s timeout."""
+    seen: list[tuple[str, float | None]] = []
+    original = httpx.AsyncClient.send
+
+    async def send(self: httpx.AsyncClient, request: httpx.Request, **kwargs: object) -> httpx.Response:
+        seen.append((str(request.url), request.extensions.get("timeout", {}).get("read")))
+        return await original(self, request, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, "send", send)
+    target = await KernelTarget(models="fake").start()
+    try:
+        not_found = Expect(status=404, fields={"code": "not_found"})
+        await target.call("POST /policy/draft", body={"desk_id": "d-1", "cards": [], "expected_parent": 1},
+                          auth=Auth.none(), expect=not_found)
+        await target.call("POST /policy/{version}/probe", path={"version": 1}, body={"desk_id": "d-1", "probes": []},
+                          auth=Auth.none(), expect=not_found)
+        await target.call("POST /tools/confirm", body={"desk_id": "d-1", "tool": "native.quote", "enable": True},
+                          auth=Auth.none(), expect=not_found)
+        await target.call("GET /whoami", auth=Auth.none(), expect=Expect(fields={"kind": "visitor"}))
+    finally:
+        await target.stop()
+    to_kernel = [(url.removeprefix(target.url), read) for url, read in seen if url.startswith(target.url)]
+    assert to_kernel == [("/health", 30.0), ("/policy/draft", 60.0), ("/policy/1/probe", 60.0),
+                         ("/tools/confirm", 60.0), ("/whoami", 30.0)]
+
+
+async def test_stop_fails_on_an_unscripted_model_call(kernel: StandInKernel):
+    kernel.model = "claude-sonnet-5-5"   # a reviewer call no case scripted
+    target = await KernelTarget(models="fake").start()
+    await target.call("GET /whoami", auth=Auth.none(), expect=Expect(fields={"kind": "visitor"}))
+    with pytest.raises(AssertionError, match="1 unscripted model calls.*claude-sonnet-5-5"):
+        await target.stop()
+    assert kernel.lifespan == ["startup", "shutdown"]
+    assert os.environ["ANTHROPIC_API_KEY"] == "sk-ant-from-the-shell"
+
+
+async def test_real_models_are_refused_where_tier1_refuses_them(kernel: StandInKernel, monkeypatch):
+    monkeypatch.setattr(targets, "_real_models_refused", True)
+    with pytest.raises(TargetError, match="tier 1 makes no model calls"):
+        await KernelTarget(models="real").start()
+    assert kernel.apps == []
+    with pytest.raises(TargetError, match="Plan 01c"):   # no mock payments server before 01c lands
+        KernelTarget().mockpay
+
+
+async def test_mockpay_client_names_the_copy_and_carries_the_key():
+    seen: list[tuple[str, str | None, str | None, dict]] = []
+
+    async def provider(request: Request) -> JSONResponse:
+        body = await request.json()
+        seen.append((request.url.path, request.headers.get("x-mockpay-key"), request.headers.get("x-desk-copy"), body))
+        return JSONResponse({"charge_ids": ["ch-1", "ch-2"]} if request.url.path.endswith("seed") else {})
+
+    server = LoopbackServer(Starlette(routes=[Route("/provider/{op:path}", provider, methods=["POST"])]))
+    server.start()
+    try:
+        client = MockpayClient(server.url, "k" * 32)
+        charge = {"owner_person_id": "p-dana", "amount_cents": 18000, "description": "Drain clearing",
+                  "created_at": "2026-11-02T17:00:00.000000Z"}
+        assert await client.seed("copy-a", [charge, {**charge, "amount_cents": 25000}]) == ["ch-1", "ch-2"]
+        await client.delay("copy-a", "complete", 3)
+    finally:
+        server.stop()
+    assert [(path, key, copy) for path, key, copy, _ in seen] == [
+        ("/provider/seed", "k" * 32, "copy-a"), ("/provider/test/delay", "k" * 32, "copy-a")
+    ]
+    assert seen[0][3]["charges"][1]["amount_cents"] == 25000
+    assert seen[1][3] == {"op": "complete", "seconds": 3}
+
+
+async def test_mockpay_client_reads_a_charge_as_the_copy():
+    """`charge` reads one charge from the copy's store (`GET /provider/charges/{id}`, Plan 01c), and
+    a charge the copy's store doesn't hold fails instead of reading as unrefunded."""
+    seen: list[tuple[str, str | None, str | None]] = []
+
+    async def provider(request: Request) -> JSONResponse:
+        charge_id = request.path_params["charge_id"]
+        seen.append((charge_id, request.headers.get("x-mockpay-key"), request.headers.get("x-desk-copy")))
+        if charge_id != "ch-1":
+            return JSONResponse({"detail": "not found"}, status_code=404)
+        return JSONResponse({"charge_id": "ch-1", "owner_person_id": "p-bob", "amount_cents": 15000,
+                             "refunded_cents": 0})
+
+    server = LoopbackServer(Starlette(routes=[Route("/provider/charges/{charge_id}", provider, methods=["GET"])]))
+    server.start()
+    try:
+        client = MockpayClient(server.url, "k" * 32)
+        assert await client.charge("copy-a", "ch-1") == {
+            "charge_id": "ch-1", "owner_person_id": "p-bob", "amount_cents": 15000, "refunded_cents": 0}
+        with pytest.raises(httpx.HTTPStatusError):
+            await client.charge("copy-b", "ch-2")
+    finally:
+        server.stop()
+    assert seen == [("ch-1", "k" * 32, "copy-a"), ("ch-2", "k" * 32, "copy-b")]
+
+
+async def test_mockpay_client_reads_what_the_server_lists():
+    """`listed_tools` asks the mock payments server's MCP endpoint for `tools/list` as the copy,
+    the way any MCP client would (Plan 01c: stateless, JSON answers), following `nextCursor` to
+    the last page; it reads an answer framed as server-sent events too. A JSON-RPC error raises."""
+    seen: list[tuple[str | None, str | None, str | None, dict]] = []
+    pages = {None: ({"name": "list_charges"}, "page-2"), "page-2": ({"name": "transfer_funds"}, None)}
+
+    async def mcp(request: Request) -> Response:
+        message = await request.json()
+        seen.append((request.headers.get("x-mockpay-key"), request.headers.get("x-desk-copy"),
+                     request.headers.get("accept"), message))
+        if request.headers.get("x-desk-copy") == "copy-error":
+            return JSONResponse({"jsonrpc": "2.0", "id": message["id"], "error": {"code": -32601, "message": "no"}})
+        tool, cursor = pages[message["params"].get("cursor")]
+        result = {"tools": [tool], **({"nextCursor": cursor} if cursor else {})}
+        answer = {"jsonrpc": "2.0", "id": message["id"], "result": result}
+        if request.headers.get("x-desk-copy") == "copy-sse":
+            return Response(f"event: message\ndata: {json.dumps(answer)}\n\n", media_type="text/event-stream")
+        return JSONResponse(answer)
+
+    server = LoopbackServer(Starlette(routes=[Route("/mcp", mcp, methods=["POST"])]))
+    server.start()
+    try:
+        client = MockpayClient(server.url, "k" * 32)
+        assert await client.listed_tools("copy-a") == {"list_charges": {"name": "list_charges"},
+                                                       "transfer_funds": {"name": "transfer_funds"}}
+        assert list(await client.listed_tools("copy-sse")) == ["list_charges", "transfer_funds"]
+        with pytest.raises(TargetError, match="tools/list"):
+            await client.listed_tools("copy-error")
+    finally:
+        server.stop()
+    assert [(key, copy) for key, copy, _, _ in seen] == [("k" * 32, "copy-a")] * 2 + [("k" * 32, "copy-sse")] * 2 + [
+        ("k" * 32, "copy-error")]
+    assert all("application/json" in accept and "text/event-stream" in accept for _, _, accept, _ in seen)
+    assert [message["method"] for *_, message in seen] == ["tools/list"] * 5
+    assert [message["params"] for *_, message in seen][:2] == [{}, {"cursor": "page-2"}]
