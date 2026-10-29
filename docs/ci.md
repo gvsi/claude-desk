@@ -73,7 +73,7 @@ Tier 2 is the model-driven attack suite and legitimate-task suite. It needs a mo
 
 ## Runner minutes
 
-One run takes [measured: Step 6] runner minutes, summed over the nine jobs.
+One run takes 27 billed runner minutes, summed over the nine jobs (21 minutes of job time; GitHub rounds each job up to the minute). Measured on the first run, on October 29, 2026, before most suites had landed, so expect more as the web, infrastructure and eval suites arrive. The longest jobs were backend tests (6m 22s), proofs (5m 46s), tier 1 evals (5m 13s) and kernel tests (2m 18s); the run took about 6.5 minutes end to end.
 
 While the repository is private, runs draw on the account's included Actions minutes: 2,000 a month on GitHub Free.
 
