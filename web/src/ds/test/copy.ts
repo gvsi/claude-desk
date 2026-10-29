@@ -20,9 +20,10 @@ const ARROW = new RegExp(`${ARROW_CHARACTERS.source}|->`, 'u');
 
 /**
  * Words written in capitals that stay in capitals. Plurals of these ("PDFs") pass too, because only
- * the run of two or more capitals is looked up.
+ * the run of two or more capitals is looked up. "IA" is AI in Spanish, as the public page's
+ * disclosure says it ("una IA que responde por …").
  */
-export const COPY_ACRONYMS: ReadonlySet<string> = new Set(['I', 'AI', 'PDF', 'QR', 'CPA', 'ZIP', 'SMS', 'USD']);
+export const COPY_ACRONYMS: ReadonlySet<string> = new Set(['I', 'AI', 'IA', 'PDF', 'QR', 'CPA', 'ZIP', 'SMS', 'USD']);
 
 /** Two or more capitals in a row: "SEND", the "DONALD" in "McDONALD", the "PDF" in "PDFs". */
 const CAPS_RUN = /\p{Lu}{2,}/gu;

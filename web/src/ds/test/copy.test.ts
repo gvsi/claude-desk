@@ -49,6 +49,8 @@ describe('assertCleanCopy', () => {
       expect(check(`<p>About the ${acronym} here</p>`)).not.toThrow();
     }
     expect(check('<p>I can send both PDFs by SMS.</p>')).not.toThrow();
+    // Spanish writes AI as IA: "una IA que responde por Rivera Plumbing".
+    expect(check('<p lang="es">Estás hablando con Claude, una IA que responde por Rivera Plumbing.</p>')).not.toThrow();
     // Someone else's words are shown as they wrote them.
     expect(check('<p data-copy="user">PLEASE CALL ME</p>')).not.toThrow();
   });
