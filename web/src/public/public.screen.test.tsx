@@ -265,6 +265,39 @@ describe('public chat page', () => {
     await second.screen.getByRole('button', { name: 'Send' }).click();
     await newChat(second.screen);
 
+    // Requests from a chat that ended never change the new one. First a send, the read after a lost
+    // send and a cancel, each answering 401 after "Start a new chat"; then a cancel whose answer is
+    // lost, and whose read settles after the next new chat.
+    const late = 2_000;
+    const stale = await renderRoute(PAGE, { seed: 'rivera' });
+    await ready(stale.screen);
+    await say(stale.screen, 'Can I get 15% off if I pay cash?');
+    const cancel = stale.screen.getByRole('button', { name: 'Cancel this request' });
+    mockStore.inject({ route: 'cancelRequest', status: 401, delayMs: late });
+    mockStore.inject({ route: 'sendMessage', status: 401, delayMs: late });
+    mockStore.inject({ route: 'sendMessage', status: 'network' });
+    mockStore.inject({ route: 'visitorSession', status: 401, delayMs: late });
+    await cancel.click();
+    await type(stale.screen, 'How much is drain clearing?');
+    await type(stale.screen, 'Can someone come Tuesday afternoon?');
+    await vi.waitFor(() => expect(requests('visitorSession')).toHaveLength(2));
+    mockStore.emit(RIVERA.slug, { type: 'error', code: 'session' });
+    await newChat(stale.screen);
+
+    mockStore.inject({ route: 'cancelRequest', status: 'network' });
+    mockStore.inject({ route: 'visitorSession', status: 503, delayMs: late });
+    const asked = requests('visitorSession').length;
+    await cancel.click();
+    const settled = performance.now() + late;
+    await vi.waitFor(() => expect(requests('visitorSession')).toHaveLength(asked + 1));
+    mockStore.emit(RIVERA.slug, { type: 'error', code: 'session' });
+    await newChat(stale.screen);
+    await sleep(settled - performance.now() + 500);
+    expect(stale.screen.getByText(CHAT_ENDED_COPY.en, { exact: true }).query()).toBeNull();
+    expect(stale.screen.getByText(UNREACHABLE_COPY.en, { exact: true }).query()).toBeNull();
+    await expect.element(cancel).toBeEnabled();
+    await ready(stale.screen);
+
     // The stream closes, and reading the conversation answers 401.
     mockStore.reset('rivera');
     mockStore.inject({ route: 'events', status: 401 });
@@ -345,7 +378,7 @@ describe('public chat page', () => {
   });
 
   it('lost_send_response_does_not_duplicate', async () => {
-    const { screen } = await renderRoute(PAGE);
+    const { screen, router } = await renderRoute(PAGE);
     await ready(screen);
     // The message is kept and answered, but its answer never reaches the page.
     mockStore.inject({ route: 'sendMessage', status: 'network', afterCommit: true });
@@ -360,6 +393,52 @@ describe('public chat page', () => {
     expect(screen.getByRole('button', { name: 'Try again' }).query()).toBeNull();
     expect(screen.getByText('How much is drain clearing?', { exact: true }).elements()).toHaveLength(1);
     expect(mockStore.visitorSession(RIVERA.slug)?.items.filter((item) => item.kind === 'visitor_text')).toHaveLength(1);
+
+    // The read after a lost answer fails too: the chat can't tell yet, so it says nothing and
+    // offers no resend, and reads again 2 s later. That read finds the message, which went through.
+    const stored = () => mockStore.visitorSession(RIVERA.slug)?.items.filter((item) => item.kind === 'visitor_text') ?? [];
+    const notSent = "That didn't send";
+    mockStore.inject({ route: 'sendMessage', status: 'network', afterCommit: true });
+    mockStore.inject({ route: 'visitorSession', status: 503 });
+    const reads = requests('visitorSession').length;
+    const lost = chatEvents().length;
+    await type(screen, 'Can someone come Tuesday afternoon?');
+    await turnEnded(lost);
+    await vi.waitFor(() => expect(requests('visitorSession')).toHaveLength(reads + 1));
+    await sleep(300);
+    expect(screen.container.textContent).not.toContain(notSent);
+    expect(screen.getByRole('button', { name: 'Try again' }).query()).toBeNull();
+    await vi.waitFor(() => expect(requests('visitorSession')).toHaveLength(reads + 2), { timeout: 4_000 });
+    await sleep(300);
+    expect(screen.container.textContent).not.toContain(notSent);
+    expect(screen.getByRole('button', { name: 'Try again' }).query()).toBeNull();
+    expect(requests('sendMessage')).toHaveLength(2);
+    expect(stored()).toHaveLength(2);
+
+    // A message that didn't get through is said to have failed only once a read shows it isn't
+    // there. Here that read comes when the stream next opens: the visitor leaves the page and comes back.
+    mockStore.inject({ route: 'sendMessage', status: 'network' });
+    mockStore.inject({ route: 'visitorSession', status: 503 });
+    await type(screen, 'Can you call me back?');
+    await vi.waitFor(() => expect(requests('visitorSession')).toHaveLength(reads + 3));
+    await sleep(300);
+    expect(screen.container.textContent).not.toContain(notSent);
+    expect(screen.getByRole('button', { name: 'Try again' }).query()).toBeNull();
+    const streams = requests('events').length;
+    await router.navigate('/d/nobody-here');
+    await expect.element(screen.getByText("This Desk isn't available", { exact: true })).toBeVisible();
+    await router.navigate(PAGE);
+    await vi.waitFor(() => expect(requests('events')).toHaveLength(streams + 1));
+    const failed = screen.getByRole('alert');
+    // Sooner than the 2 s retry, which leaving the page called off.
+    await expect.element(failed.getByText(`${notSent}. Your message is still here.`, { exact: true }), { timeout: 1_000 }).toBeVisible();
+    expect(requests('visitorSession')).toHaveLength(reads + 4);
+    const resent = chatEvents().length;
+    await failed.getByRole('button', { name: 'Try again' }).click();
+    await turnEnded(resent);
+    expect(requests('sendMessage')).toHaveLength(4);
+    expect(stored()).toHaveLength(3);
+    expect(screen.container.textContent).not.toContain(notSent);
   });
 
   it('rejected_send_keeps_the_message', async () => {

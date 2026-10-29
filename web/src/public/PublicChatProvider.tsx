@@ -112,6 +112,18 @@ class VisitorChat {
   private users = 0;
   /** Bumped when in-flight loading and streaming must stop applying: a new chat, or nobody watching. */
   private epoch = 0;
+  /**
+   * Bumped by a new chat only, so that what the chat that ended still has in flight (a send, the
+   * read after a lost one, a cancel) never changes the new one. A page going away doesn't bump it:
+   * those still belong to this chat, which shows them when a page comes back.
+   */
+  private generation = 0;
+  /** Messages whose answer was lost, by id, until a read of the conversation shows whether they went through. */
+  private readonly lost = new Map<string, string>();
+  /** A read for the lost messages is out. */
+  private checking = false;
+  private checkTimer: ReturnType<typeof setTimeout> | null = null;
+  private checkRetries = 0;
   private loading = false;
   /** The session and its stored conversation are in. */
   private loaded = false;
@@ -162,6 +174,8 @@ class VisitorChat {
     this.epoch += 1;
     this.loading = false;
     this.stop();
+    // Nobody is watching: the lost messages are read for again when the stream next opens.
+    this.clearCheckTimer();
   }
 
   private stop(): void {
@@ -233,8 +247,13 @@ class VisitorChat {
       void this.afterClose(epoch);
       return;
     }
-    if (state === 'open') this.reopens = 0;
     this.dispatch({ type: 'connection', connection: state });
+    if (state === 'open') {
+      this.reopens = 0;
+      // The server answers again: a good moment to settle any message whose answer was lost.
+      this.checkRetries = 0;
+      void this.checkLost(this.generation);
+    }
   }
 
   /**
@@ -278,11 +297,16 @@ class VisitorChat {
 
   readonly newChat = (): void => {
     this.epoch += 1;
+    this.generation += 1;
     const epoch = this.epoch;
     this.stop();
     this.loaded = false;
     this.reopens = 0;
     this.knownN = 0;
+    this.lost.clear();
+    this.checking = false;
+    this.clearCheckTimer();
+    this.checkRetries = 0;
     this.dispatch({ type: 'reset' });
     this.set({ session: null, status: 'loading', cancelling: null, cancelFailed: false });
     this.loading = true;
@@ -312,12 +336,15 @@ class VisitorChat {
   };
 
   private async post(id: string, text: string): Promise<void> {
+    const generation = this.generation;
     try {
       await request('sendMessage', { params: { slug: this.slug }, body: { text } });
     } catch (err) {
+      if (generation !== this.generation) return;
       if (isUncertain(err)) {
         this.dispatch({ type: 'send_checking', id });
-        await this.check(id, text);
+        this.lost.set(id, text);
+        await this.checkLost(generation);
       } else {
         this.fail(id, failureOf(err));
       }
@@ -330,23 +357,64 @@ class VisitorChat {
   }
 
   /**
-   * A message whose answer was lost may have gone through: it did when the conversation holds it
-   * past the last read, more times than the chat's other copies of the same words that did.
+   * A message whose answer was lost may have gone through, so only a read of the conversation
+   * settles it: it went through when the conversation holds it past the last read, more times than
+   * the chat's other copies of the same words that did, and didn't when it isn't there. A read that
+   * fails settles nothing. The messages stay being checked, with no line and no resend, and the read
+   * runs again after 2, 5 and 10 s and whenever the stream opens.
    */
-  private async check(id: string, text: string): Promise<void> {
-    let transcript: VisitorTranscript;
+  private async checkLost(generation: number): Promise<void> {
+    if (this.checking || this.lost.size === 0) return;
+    this.checking = true;
+    this.clearCheckTimer();
+    const lost = [...this.lost];
+    let transcript: VisitorTranscript | null = null;
+    let gone = false;
     try {
       transcript = await request('visitorSession', { params: { slug: this.slug } });
     } catch (err) {
-      this.fail(id, sessionGone(err) ? 'session' : 'not_sent');
+      gone = sessionGone(err);
+    }
+    if (generation !== this.generation) return;
+    this.checking = false;
+    if (gone) {
+      // The chat ended. Whether they went through stays unknown, so nothing is said of them.
+      this.lost.clear();
+      this.dispatch({ type: 'ended' });
       return;
     }
-    const stored = transcript.items.filter((item) => item.kind === 'visitor_text' && item.n > this.knownN && item.text === text).length;
-    const others = this.snapshot.state.rows.filter(
-      ({ item }) => item.kind === 'visitor' && item.id !== id && item.id.startsWith(LOCAL_ID) && item.text === text && item.status === 'sent',
-    ).length;
-    if (stored > others) this.dispatch({ type: 'resent', id });
-    else this.fail(id, 'not_sent');
+    if (transcript === null) {
+      this.checkLater(generation);
+      return;
+    }
+    this.checkRetries = 0;
+    for (const [id, text] of lost) {
+      this.lost.delete(id);
+      const stored = transcript.items.filter((item) => item.kind === 'visitor_text' && item.n > this.knownN && item.text === text).length;
+      const others = this.snapshot.state.rows.filter(
+        ({ item }) => item.kind === 'visitor' && item.id !== id && item.id.startsWith(LOCAL_ID) && item.text === text && item.status === 'sent',
+      ).length;
+      if (stored > others) this.dispatch({ type: 'resent', id });
+      else this.fail(id, 'not_sent');
+    }
+    // Lost while that read was out, which may have been too early to hold them.
+    if (this.lost.size > 0) await this.checkLost(generation);
+  }
+
+  /** The next read for the lost messages, after 2, 5 then 10 s; after that, when the stream opens. */
+  private checkLater(generation: number): void {
+    const delay = REOPEN_DELAYS_MS[this.checkRetries];
+    if (delay === undefined || this.users === 0) return;
+    this.checkRetries += 1;
+    this.checkTimer = setTimeout(() => {
+      this.checkTimer = null;
+      void this.checkLost(generation);
+    }, delay);
+  }
+
+  private clearCheckTimer(): void {
+    if (this.checkTimer !== null) clearTimeout(this.checkTimer);
+    this.checkTimer = null;
   }
 
   readonly cancel = (decisionId: string): void => {
@@ -356,11 +424,14 @@ class VisitorChat {
   };
 
   private async cancelHold(decisionId: string): Promise<void> {
+    const generation = this.generation;
     try {
       // Accepted: the outcome arrives on the stream, which clears `cancelling`.
       await request('cancelRequest', { params: { slug: this.slug, decision_id: decisionId } });
+      if (generation !== this.generation) return;
       if (!this.snapshot.state.openHolds.includes(decisionId)) this.set({ cancelling: null });
     } catch (err) {
+      if (generation !== this.generation) return;
       if (sessionGone(err)) {
         this.set({ cancelling: null });
         this.dispatch({ type: 'ended' });
@@ -372,6 +443,7 @@ class VisitorChat {
         return;
       }
       const applied = isUncertain(err) && (await this.wasResolved(decisionId));
+      if (generation !== this.generation) return;
       this.set({ cancelling: null, cancelFailed: !applied });
     }
   }
