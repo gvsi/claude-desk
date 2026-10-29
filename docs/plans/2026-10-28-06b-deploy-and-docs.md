@@ -284,7 +284,7 @@ Content (about two pages): **Architecture** now and for an MVP; **Infrastructure
 - [ ] **Step 1: Write the failing tests:** `test_path_to_mvp_sections` (the seven headings, in order); `test_every_number_has_a_source` (each row of the latency, cost and scaling tables has a source cell that links to a file under `evals/` or a pull request, or reads `estimate:` with a formula).
 - [ ] **Step 2: Run** `cd tools && uv run pytest tests/test_docs.py -q` → FAIL (`docs/path-to-mvp.md` doesn't exist).
 - [ ] **Step 3: Write** the doc and the README's "Evidence" from Plan 05b's held-out report, each measured number naming its `pass_id` and date. If Plan 05b hasn't reported, stop and report BLOCKED on it; never present an unmeasured number as measured.
-- [ ] **Step 4: Draft** the capability prediction and product proposal from the same numbers into the git-ignored `.local/` for the owner to edit; the README's two `[owner: …]` links point to the owner's versions.
+- [ ] **Step 4: Draft** the capability prediction and product proposal from the same numbers into the "Doc drafts" tab of the owner's alignment document, where the product docs are written, not into the repo; the README's two `[owner: …]` links stay the owner's to fill with the published versions.
 - [ ] **Step 5: Run** `cd tools && uv run pytest -q && uv run python -m desk_tools.check_docs --final` → PASS (33 passed); the final check passes once the owner has filled the two `[owner: …]` links and otherwise lists exactly those two. Quote the output.
 - [ ] **Step 6: Commit** `git add docs/path-to-mvp.md README.md tools && git commit -m "docs: add the path to MVP with measured latency and cost per conversation"`.
 
