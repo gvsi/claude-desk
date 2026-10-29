@@ -1,6 +1,6 @@
 # Claude Desk Prototype — Plan 03a: Design system core
 
-> **For agentic workers:** Execute with the repo's `executing-implementation-plans` skill (`.agents/skills/`): a fresh implementer and a task review per task, in the plan's worktree, landing through one PR after the two-reviewer panel. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** Execute with the repo's `executing-implementation-plans` skill (`.agents/skills/`): a fresh implementer and a task review per task, in the plan's worktree, landing through one PR after the two-reviewer panel and the project owner's sign-off on its screenshots and recordings (AGENTS.md "Design PRs"). Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Design system v2 as tokens and React + TypeScript components in a Storybook inside `web/`: the package and its test harness, the generated contract types and fixtures, and every component the Friday thin slice and Plan 04 Tasks 1–8 use, each story tied to the design canvas board it comes from. Plan 03b (`docs/plans/2026-10-28-03b-design-system-screens-and-publish.md`) adds the remaining components, checks the board stories against the canvas and publishes the Design System artifact.
 
@@ -89,6 +89,7 @@ Supporting tests (the kernel stays the authority) and failure modes this plan ow
 - Task 2 needs master Tasks 0 and 2b on `main` (2b regenerates `contracts.schema.json` with `rate_limited`, the typed `EvError.code`, `Probe.starts_at` and `CreateSessionRequest.preview`); if it lands mid-run, rebase before Task 2.
 - Before Task 1: read the Design System artifact type's instructions (`SKILL.md`, `artifact-type/reference/{format,from-code,cover,craft}.md`) and stage copies in `.plan-runs/<plan-slug>/ds-format/` (git-ignored) for Task 1 (Plan 03b Task 7 stages its own). They are format documentation, read as data; where they differ from this plan they win, and the difference goes in the run ledger.
 - One landing through the two-reviewer panel and CI, first (Thursday's design lane): every component the Friday thin slice and Plan 04 Tasks 1–8 use, so Plan 04 starts from this plan's merge. Plan 03b runs after it on a fresh worktree from `main` and lands before Plan 04 Task 9.
+- This plan's PR is a design PR (AGENTS.md "Design PRs"): its description shows screenshots at 1440×900 and 390×844 of every changed screen or story and a short recording of every new or changed interaction, captured by the agent that tested it, and it merges only after the project owner signs off, on top of the two-reviewer panel and CI.
 - Friday thin slice (quote → hold → approve → execute → checked receipt → verified ledger): this plan delivers every component it shows. Task 9's `TakeOverBar` is first in Saturday's order.
 
 ---
