@@ -206,6 +206,9 @@ jobs:
           node-version: "24.21.0"
           package-manager-cache: false
       - name: Test and synthesize the infrastructure
+        # jsii refuses a package cache under a group-writable home, as on the single-use runners.
+        env:
+          JSII_RUNTIME_PACKAGE_CACHE: disabled
         run: uv run --project tools python -m desk_tools.gate --name infra --run-if infra/cdk.json -- make infra-check
 
   secret-scan:

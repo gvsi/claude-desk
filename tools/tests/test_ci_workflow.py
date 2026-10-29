@@ -936,3 +936,11 @@ def test_runner_check_requires_ubuntu_24_04_on_any_runner_not_github_hosted(tmp_
     else:
         assert result.returncode == 1
         assert "must be Ubuntu 24.04 (noble)" in result.stderr
+
+
+def test_infra_synth_runs_without_the_shared_jsii_cache():
+    # Single-use runners' home caches are group-writable, so jsii refuses its package cache and synth
+    # fails. Each runner is fresh, so a cache saves nothing: the step turns it off.
+    infra = load(WORKFLOW)["jobs"]["infra"]
+    [synth] = [step for step in infra["steps"] if step.get("name") == "Test and synthesize the infrastructure"]
+    assert synth.get("env", {}).get("JSII_RUNTIME_PACKAGE_CACHE") == "disabled"
