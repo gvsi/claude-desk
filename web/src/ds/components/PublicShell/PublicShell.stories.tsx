@@ -405,13 +405,26 @@ const CLOSED_ES = {
   as_of: '2026-10-31T14:00:00-07:00',
   refresh_at: '2026-11-01T00:00:00-07:00',
 };
-/** In Spanish, Wednesday 10:00, open until midnight at the end of Friday: the longest line. */
-const OPEN_ES_LONGEST = {
+/** In Spanish, Wednesday 10:00, open until midnight at the end of Friday: the copy table's longest open line. */
+const OPEN_ES_FRIDAY_MIDNIGHT = {
   open: true,
   until: '2026-10-31T00:00:00-07:00',
   opens_at: null,
   text: 'Abierto ahora, hasta el viernes a medianoche',
   as_of: '2026-10-28T10:00:00-07:00',
+  refresh_at: '2026-10-29T00:00:00-07:00',
+};
+/**
+ * In Spanish, Wednesday 14:00 after Wednesday's hours, closed until 13:00 a week ahead: the longest
+ * line the kernel writes, with "el próximo", the longest weekday and a two-digit hour, wider than
+ * any open line, and the closed line under it.
+ */
+const CLOSED_ES_LONGEST = {
+  open: false,
+  until: null,
+  opens_at: '2026-11-04T13:00:00-08:00',
+  text: 'Cerrado ahora. Abre el próximo miércoles a las 13:00',
+  as_of: '2026-10-28T14:00:00-07:00',
   refresh_at: '2026-10-29T00:00:00-07:00',
 };
 /** The shell's own line under a closed status. */
@@ -578,18 +591,34 @@ export const ClosedNowEsPhone: Story = {
   },
 };
 
-export const OpenNowEsLongestPhone: Story = {
+export const OpenNowEsUntilFridayMidnightPhone: Story = {
   ...phone,
-  args: { ...spanish, openStatus: OPEN_ES_LONGEST },
+  args: { ...spanish, openStatus: OPEN_ES_FRIDAY_MIDNIGHT },
   parameters: {
     canvas: 'none',
     canvasNote:
-      'The "Open now" sign-off board\'s phone header with the longest Spanish line: N-Public-Rivera at 390 px, the status on its own line under the name, still on one line.',
+      'The "Open now" sign-off board\'s phone header with the copy table\'s longest Spanish open line: N-Public-Rivera at 390 px, the status on its own line under the name, still on one line.',
   },
   play: async ({ canvas }) => {
     const header = canvas.getByRole('banner');
-    const { status, dot } = await openStatusIn(header, OPEN_ES_LONGEST.text);
+    const { status, dot } = await openStatusIn(header, OPEN_ES_FRIDAY_MIDNIGHT.text);
     await expectOpen(status, dot);
+    await expectOwnLineOnAPhone(canvas.getByTestId('phone'), header, status);
+  },
+};
+
+export const ClosedNowEsLongestPhone: Story = {
+  ...phone,
+  args: { ...spanish, openStatus: CLOSED_ES_LONGEST },
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      'The "Open now" sign-off board\'s phone header with the longest Spanish status: N-Public-Rivera at 390 px, closed until next Wednesday at 13:00 with "Claude puede ayudarte igual." under it, on their own lines under the name. Each still fits on one line, and nothing reaches past the phone\'s edge.',
+  },
+  play: async ({ canvas }) => {
+    const header = canvas.getByRole('banner');
+    const { status, line, dot } = await openStatusIn(header, CLOSED_ES_LONGEST.text);
+    await expectClosed(header, status, line, dot, STILL_HELPS.es);
     await expectOwnLineOnAPhone(canvas.getByTestId('phone'), header, status);
   },
 };
