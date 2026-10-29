@@ -76,7 +76,7 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 
 ## Accessibility
 
-- Every color pair a component uses is listed in `CONTRAST_PAIRS` (`contrast.ts`), and the token tests fail if any falls below its minimum: 4.5:1 for text (3:1 at 24 px and up), and 3:1 for focus rings, status dots and the mark. Translucent grounds are measured over what they sit on, down to an opaque color (a button's fill over a card's fill over the app), and a faded control, such as a busy button, at its own opacity.
+- Every color pair a component uses is listed in `CONTRAST_PAIRS` (`contrast.ts`), and the token tests fail if any falls below its minimum: 4.5:1 for text (3:1 at 24 px and up), and 3:1 for focus rings, status dots and the mark. Translucent grounds are measured over what they sit on, down to an opaque color (a button's fill over a card's fill over the app). A busy button is never faded: it steps to listed colors, so its label is a listed pair too.
 
 Text and links, 4.5:1:
 
@@ -106,7 +106,7 @@ Text and links, 4.5:1:
 
 `button-danger-text` reads 6.1 on `button-danger-fill` and 5.3 on `button-danger-fill-hover` over `fill-card` (6.6 and 5.7 straight on `bg-app`), 7.9 on `fill-card` and 6.7 on `fill-hover` over `fill-card` (8.5 and 7.3 on `bg-app`).
 
-Busy buttons are measured as drawn, faded by their own opacity, in a held request's card: the danger answer (Deny) at 80% reads 4.5 and the secondary answer (Allow) at 60% reads 4.8; a danger-ghost or ghost button there would read 5.6 at the same fades. The red buttons fade less, because red text loses contrast faster.
+Busy buttons step to listed colors instead of fading. In a held request's card, the busy Allow's `text-secondary` label reads 5.7 on `fill-secondary`, and the busy Deny keeps its red words on `button-danger-fill-hover` at 5.3; a busy ghost or danger-ghost button there would read 7.0 on the card or 6.7 on `fill-hover`. A busy secondary button reads 6.0 on a page and 5.3 on a dialog's `bg-surface`, and the busy primary 12.2 on `button-primary-hover`.
 
 In Deny's menu on a held request, `button-danger-text` reads 7.2 on `bg-surface` and 6.0 on `fill-hover` over it (an item hovered or focused). Allow's items use `text-primary` and every item's line `text-secondary`, already listed on `bg-surface` and on `fill-hover` over it.
 

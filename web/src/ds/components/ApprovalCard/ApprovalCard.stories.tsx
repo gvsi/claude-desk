@@ -831,7 +831,7 @@ export const SendingYourAnswer: Story = {
   args: refundArgs,
   render: (args) => <SendingScreen {...args} />,
   parameters: {
-    canvasNote: `${ANSWERS_BOARD} No board shows an answer being sent; both controls wait, faded a little, and a line under them says so.`,
+    canvasNote: `${ANSWERS_BOARD} No board shows an answer being sent; both controls wait in their busy colors, and a line under them says so.`,
   },
   play: async ({ args, canvas, canvasElement, userEvent }) => {
     const [allow, deny] = answerButtons(canvasElement) as [HTMLElement, HTMLElement];
@@ -861,10 +861,16 @@ export const SendingYourAnswer: Story = {
     await expect(canvas.getByText('Sending your answer').closest('[role="status"]')).not.toBeNull();
     for (const button of answerButtons(canvasElement)) await expect(button).toHaveAttribute('aria-disabled', 'true');
 
-    // Each keeps its look, faded: Allow to 60%, the red Deny only to 80%, so its words still read
-    // at 4.5:1 in the card.
-    expectComputed(allow, { ...SECONDARY, opacity: '0.6' });
-    expectComputed(deny, { ...DANGER, opacity: '0.8' });
+    // Each steps to its busy colors, never dimmed, so its words still read at 4.5:1 in the card:
+    // Allow's label turns text-secondary on its fill, and the red Deny keeps its words on its hover
+    // fill. Both keep their chevrons. They step over the instant color transition, so wait for it
+    // to end.
+    const BUSY_LABEL = 'rgba(250, 249, 245, 0.64)';
+    await waitFor(() => {
+      expectComputed(allow, { ...SECONDARY, color: BUSY_LABEL, opacity: '1' });
+      expectComputed(deny, { ...DANGER, backgroundColor: 'rgba(220, 130, 144, 0.24)', opacity: '1' });
+    });
+    for (const button of [allow, deny]) await expect(button.querySelector('.cd-button__chevron')).not.toBeNull();
   },
 };
 

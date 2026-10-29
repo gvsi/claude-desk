@@ -18,7 +18,7 @@
 ## What the consumer provides
 
 - The label, in words that say what happens. Never "OK" or "Continue" when a verb can say more, and never an arrow.
-- `busy` while the click's request is in flight. The button keeps focus, dims a little (to 60%, the red variants to 80%, so every label still reads at 4.5:1 in a card), announces `aria-busy` and ignores further clicks; change the label too if the wait is long ("Sending").
+- `busy` while the click's request is in flight. The button keeps focus, steps down in token colors (a secondary or ghost label turns `text-secondary`, the primary fill turns `button-primary-hover`, a `danger` fill turns `button-danger-fill-hover` and a `danger-ghost` button takes `fill-hover` under its red words, so every label still reads at 4.5:1 or more), announces `aria-busy` and ignores further clicks; change the label too if the wait is long ("Sending").
 - `disabled` only when the action can't be taken at all. A disabled button is dimmed and leaves the tab order.
 - For a menu button, `menuOpen` (`true` while its menu shows), an `id` the menu can be labelled by, and `onKeyDown` for the keys that open it. A busy menu button ignores clicks like any busy button; the screen ignores its keys too. Only a button opens a menu: `menuOpen` and `onKeyDown` with `href` are a type error (`ButtonProps` is a union of a button and a link), and a link never takes the menu look.
 
@@ -32,7 +32,7 @@
 | `href` | `string` | Renders an `<a rel="noopener noreferrer">`. A disabled or busy link loses its `href` and says `aria-disabled`. Not with `menuOpen` or `onKeyDown`. |
 | `external` | `boolean` | Only with `href`: adds `target="_blank"` (dropped with the `href` while disabled or busy). Not with `menuOpen`. |
 | `disabled` | `boolean` | Native `disabled`. |
-| `busy` | `boolean` | `aria-busy` and `aria-disabled`; clicks are swallowed. |
+| `busy` | `boolean` | `aria-busy` and `aria-disabled`; clicks are swallowed. Never dimmed as a whole: its colors are listed contrast pairs. |
 | `menuOpen` | `boolean` | Makes it a menu button: a chevron, `aria-haspopup="menu"`, `aria-expanded`. Leave it out for a plain button. Not on a link. |
 | `id` | `string` | The element's `id`. |
 | `onClick` | `(event) => void` | Not called while disabled or busy. |
@@ -51,6 +51,6 @@
 
 A menu button keeps its variant's look, and its hover fill while its menu is open (`aria-expanded="true"`); its padding is `space-14` before the words and `space-10` after the chevron (`space-12` and `space-8` inline), because the icon carries its own margin.
 
-Disabled dims every variant to 40%. Busy dims to 60%, and `danger` and `danger-ghost` to 80%, because red words lose contrast faster as they fade. Focus shows the base stylesheet's 2 px `accent-blue` ring at a 2 px offset on every variant.
+Disabled dims every variant to 40%. Busy never dims: each variant steps to listed token colors, as `busy` above says. Focus shows the base stylesheet's 2 px `accent-blue` ring at a 2 px offset on every variant.
 
 Hover fills change at `motion-instant`; a press scales to 0.98 at `motion-fast` with `motion-ease-emphasis`. Nothing moves under reduced motion.

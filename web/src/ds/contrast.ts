@@ -15,7 +15,7 @@ export type ContrastPair = {
   readonly over?: string;
   /** The opaque token under a translucent `over`, such as the app under a card's fill. */
   readonly under?: string;
-  /** The control's own opacity when it is drawn faded, such as a busy button: its label and fill fade together over `over`. */
+  /** The control's own opacity when it is drawn faded as a whole: its label and fill fade together over `over`. */
   readonly opacity?: number;
   /** 4.5:1 for text; 3:1 for focus rings, dots, the mark and text at 24 px and up. */
   readonly min: 4.5 | 3;
@@ -135,11 +135,11 @@ const SURFACES = ['bg-app', 'bg-panel', 'bg-surface', 'bg-selected'] as const;
 
 export const CONTRAST_PAIRS: readonly ContrastPair[] = Object.freeze([
   ...pairs(TEXT, ['bg-app', 'bg-panel', 'bg-surface', 'bg-muted', 'bg-selected'], 4.5, 'Text and links on the app, panels, raised surfaces, quiet fills and the selected row.'),
-  ...pairs(TEXT, ['fill-card', 'fill-bubble', 'fill-count', 'fill-hover', 'fill-secondary'], 4.5, 'Text and links in cards, bubbles, count pills, hovered rows and secondary buttons on the app background.', 'bg-app'),
-  ...pairs(TEXT, ['fill-secondary', 'fill-hover'], 4.5, 'Text and links on secondary buttons and hovered rows inside the composer and menus.', 'bg-surface'),
+  ...pairs(TEXT, ['fill-card', 'fill-bubble', 'fill-count', 'fill-hover', 'fill-secondary'], 4.5, "Text and links in cards, bubbles, count pills, hovered rows and secondary buttons on the app background, a busy secondary button's text-secondary label included.", 'bg-app'),
+  ...pairs(TEXT, ['fill-secondary', 'fill-hover'], 4.5, "Text and links on secondary buttons and hovered rows inside the composer, menus and dialogs, a busy secondary button's text-secondary label included.", 'bg-surface'),
   ...pairs(['text-primary', 'text-secondary'], ['fill-secondary-hover'], 4.5, 'Text on a hovered secondary button on the app background.', 'bg-app'),
   ...pairs(['text-primary', 'text-secondary'], ['fill-secondary-hover'], 4.5, 'Text on a hovered secondary button inside the composer and menus.', 'bg-surface'),
-  ...pairs(['button-primary-text'], ['button-primary', 'button-primary-hover'], 4.5, 'Text on the primary button, at rest and on hover.'),
+  ...pairs(['button-primary-text'], ['button-primary', 'button-primary-hover'], 4.5, 'Text on the primary button, at rest, on hover and while busy.'),
   ...pairs(MARKS, SURFACES, 3, 'Focus rings and status dots on the app, panels, raised surfaces and the selected row.'),
   ...pairs(MARKS, ['fill-card'], 3, 'Focus rings and status dots inside cards.', 'bg-app'),
   ...pairs(MARKS, ['fill-hover'], 3, 'Focus rings and status dots on a hovered conversation or attempt row.', 'bg-app'),
@@ -164,8 +164,7 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = Object.freeze([
   ...pairs(['button-danger-text'], ['fill-hover'], 4.5, 'A danger-ghost button in a card while it is hovered.', 'fill-card', { under: 'bg-app' }),
   ...pairs(['button-danger-text'], ['bg-app'], 4.5, 'A danger-ghost button on the app background.'),
   ...pairs(['button-danger-text'], ['button-danger-fill', 'button-danger-fill-hover', 'fill-hover'], 4.5, 'Danger and danger-ghost buttons on the app background, at rest and on hover.', 'bg-app'),
-  ...pairs(['button-danger-text'], ['button-danger-fill', 'transparent'], 4.5, 'Danger and danger-ghost answers in a card while an answer is sent, faded to 80%.', 'fill-card', { under: 'bg-app', opacity: 0.8 }),
-  ...pairs(['text-primary'], ['fill-secondary', 'transparent'], 4.5, 'Secondary and ghost answers in a card while an answer is sent, faded to 60%.', 'fill-card', { under: 'bg-app', opacity: 0.6 }),
+  ...pairs(['text-secondary'], ['fill-secondary'], 4.5, "A busy secondary answer in a card: its text-secondary label on the button's fill.", 'fill-card', { under: 'bg-app' }),
   ...pairs(['button-danger-text'], ['bg-surface'], 4.5, "Deny's answers in its menu on a held request, This time and Always, in red words on the raised surface."),
   ...pairs(['button-danger-text'], ['fill-hover'], 4.5, "Deny's answers in its menu while one is hovered or has focus.", 'bg-surface'),
 ]);

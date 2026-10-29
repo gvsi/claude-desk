@@ -65,6 +65,40 @@ export const Busy: Story = {
     await expect(button).toHaveAttribute('aria-disabled', 'true');
     await userEvent.click(button);
     await expect(args.onClick).not.toHaveBeenCalled();
+    // busy_label_keeps_contrast: a busy button is drawn in token colors, never dimmed as a whole, so
+    // its label is a listed contrast pair: button-primary-text on button-primary-hover, 12.2:1.
+    expectComputed(button, { opacity: '1', backgroundColor: 'rgb(221, 217, 207)', color: 'rgb(28, 27, 25)' });
+  },
+};
+
+export const BusySecondary: Story = {
+  args: { busy: true, children: 'Keep it' },
+  parameters: {
+    canvasNote:
+      "The board shows no button mid-request; this is a dialog's cancel button while the confirmation sends, on the dialog's raised surface.",
+  },
+  decorators: [
+    (Story) => (
+      <div style={{ background: 'var(--bg-surface)', padding: 'var(--space-20)' }}>
+        <Story />
+      </div>
+    ),
+  ],
+  play: async ({ canvas }) => {
+    const button = canvas.getByRole('button', { name: 'Keep it' });
+    await expect(button).toHaveAttribute('aria-busy', 'true');
+    // The label steps down to text-secondary on the button's own fill: 5.3:1 on bg-surface, where
+    // dimming the whole button left it at 4.48:1.
+    expectComputed(button, { opacity: '1', backgroundColor: 'rgba(250, 249, 245, 0.1)', color: 'rgba(250, 249, 245, 0.64)' });
+  },
+};
+
+export const BusyGhost: Story = {
+  args: { variant: 'ghost', busy: true, children: 'Start over' },
+  parameters: { canvasNote: 'The board shows no button mid-request; this is a ghost button while its request is in flight.' },
+  play: async ({ canvas }) => {
+    const button = canvas.getByRole('button', { name: 'Start over' });
+    expectComputed(button, { opacity: '1', backgroundColor: 'rgba(0, 0, 0, 0)', color: 'rgba(250, 249, 245, 0.64)' });
   },
 };
 
@@ -126,13 +160,13 @@ export const DangerGhost: Story = {
 export const DangerBusy: Story = {
   args: { variant: 'danger', size: 'main', busy: true, children: 'Deny this time' },
   parameters: {
-    canvasNote: `${ANSWERS_NOTE} No board shows it mid-request; it fades to 80%, less than the neutral buttons, so its red words still read at 4.5:1.`,
+    canvasNote: `${ANSWERS_NOTE} No board shows it mid-request; it takes its hover fill and keeps its red words, never dimmed, so they still read at 4.5:1.`,
   },
   play: async ({ args, canvas, userEvent }) => {
     const button = canvas.getByRole('button', { name: 'Deny this time' });
     await expect(button).toHaveAttribute('aria-busy', 'true');
     await expect(button).toHaveAttribute('aria-disabled', 'true');
-    expectComputed(button, { backgroundColor: DANGER_FILL, color: DANGER_TEXT, opacity: '0.8' });
+    expectComputed(button, { backgroundColor: 'rgba(220, 130, 144, 0.24)', color: DANGER_TEXT, opacity: '1' });
     await userEvent.click(button);
     await expect(args.onClick).not.toHaveBeenCalled();
   },

@@ -108,8 +108,7 @@
   transform: scale(0.98);
 }
 
-/* Disabled and busy: no hover, no press. A disabled control is dimmed well down; a busy one only a
-   little, so its label still reads at 4.5:1 and the click visibly registered. */
+/* Disabled and busy: no hover, no press. A disabled control is dimmed well down. */
 .cd-button:disabled,
 .cd-button[aria-disabled='true'] {
   cursor: default;
@@ -119,18 +118,6 @@
 .cd-button:disabled,
 a.cd-button[aria-disabled='true']:not([aria-busy='true']) {
   opacity: 0.4;
-}
-
-.cd-button[aria-busy='true'] {
-  cursor: progress;
-  opacity: 0.6;
-}
-
-/* Red words lose contrast faster as they fade, so the red variants fade less: at 80% their words
-   still read at 4.5:1 inside a card (contrast.ts). */
-.cd-button--danger[aria-busy='true'],
-.cd-button--danger-ghost[aria-busy='true'] {
-  opacity: 0.8;
 }
 
 .cd-button--primary:disabled,
@@ -153,6 +140,34 @@ a.cd-button[aria-disabled='true']:not([aria-busy='true']) {
 .cd-button--danger-ghost:disabled,
 .cd-button--danger-ghost[aria-disabled='true'] {
   background: transparent;
+}
+
+/* Busy: the click registered and the result is on its way. The button steps down in token colors,
+   never dimmed as a whole, so its label stays a listed contrast pair: on a secondary or ghost
+   button the label turns text-secondary on the button's own fill (5.3:1 or more), and the primary
+   button's fill turns button-primary-hover (12.2:1). After the disabled rules, which busy also
+   matches through aria-disabled. */
+.cd-button[aria-busy='true'] {
+  cursor: progress;
+}
+
+.cd-button--secondary[aria-busy='true'],
+.cd-button--ghost[aria-busy='true'] {
+  color: var(--text-secondary);
+}
+
+.cd-button--primary[aria-busy='true'] {
+  background: var(--button-primary-hover);
+}
+
+/* The red answers keep their red words while busy: the filled one takes its hover fill and the
+   ghost one the hover ground, both listed pairs (contrast.ts). */
+.cd-button--danger[aria-busy='true'] {
+  background: var(--button-danger-fill-hover);
+}
+
+.cd-button--danger-ghost[aria-busy='true'] {
+  background: var(--fill-hover);
 }
 
 @media (prefers-reduced-motion: reduce) {

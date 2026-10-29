@@ -45,7 +45,7 @@
 ## Answering
 
 - One click on a plain button, or one choice in a menu, calls `onAnswer` once, and both controls wait (`aria-disabled`, `aria-busy`, and no menu opens) until `decision_id` or `state` changes, until the screen reports that the answer failed (`error` on and `pending` off, after either changed since the click), or until the promise `onAnswer` returned rejects. Return the request's promise: a screen that keeps the same `error` on between tries and never sets `pending` still gets the answers back after each failure.
-- `pending` shows "Sending your answer" in a status line under the answers. Both controls keep their look and fade a little: Allow to 60%, the red Deny to 80%, so each label still reads at 4.5:1 in the card.
+- `pending` shows "Sending your answer" in a status line under the answers. Both controls keep their look and step to their busy colors, never dimmed: Allow's label turns `text-secondary` on its fill, and the red Deny takes its hover fill under its words, so each label still reads at 4.5:1 in the card. A menu button keeps its chevron.
 - `error` shows "We couldn't confirm your answer. Try again, or reload to see where it stands." (`true`), or the screen's own line (a string), as an alert, and the answers can be tried again. A retry is safe: the kernel resolves a request once, and on `conflict` the screen re-reads the decision.
 - When the answers go while one of them has focus, focus moves to the status line. If an answer starts to be sent while a menu is open, from this card or from elsewhere, the menu closes and focus waits on its button.
 
