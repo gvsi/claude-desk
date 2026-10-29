@@ -18,6 +18,7 @@ from procrastinate.exceptions import ConnectorException
 from procrastinate.testing import InMemoryConnector
 from sqlalchemy import text
 
+from desk.api.jobs import surface_due_decisions
 from desk.api.main import create_app
 from desk.kernel_api import CreateCopyRequest
 from tests.api.fakes import ScriptedModel, response, tool_use
@@ -331,6 +332,42 @@ async def test_answer_resumes_in_the_request_when_the_queue_cant_take_the_job(ap
     assert types(events)[4:] == ["resolved", "writing", "message", "turn_end"]
     assert (f'<action_update decision_id=\\"{held.decision_id}\\" state=\\"executed\\">'
             in json.dumps(model.requests[1].messages))
+
+
+async def test_answer_stands_when_neither_the_queue_nor_the_request_can_resume(app, browser, fake, kernel_http, model,
+                                                                              engine, jobs_connector, ro_schema,
+                                                                              monkeypatch, caplog):
+    """When the job queue can't take the resume job and the request can't do its work either, the owner's answer
+    still stands: both errors are logged by type only and nothing is shown yet. The minute scan then finds the
+    decision final in kernel_ro and leaves a `decision_due` row, for the visitor's next request to show it."""
+    held = await held_request(app, browser, fake, kernel_http, model)
+
+    async def unreachable(jobs):
+        raise ConnectorException("the job queue's database can't be reached")
+
+    async def unresumable(conn, ids, decision):
+        raise RuntimeError(f"no resume for {decision.reason_plain}")
+
+    monkeypatch.setattr(jobs_connector, "defer_jobs_all", unreachable)
+    monkeypatch.setattr("desk.api.routes.owner.resume_after_answer", unresumable)
+
+    answered = await answer(held, "allow_once")
+
+    assert answered.status_code == 200, answered.text
+    assert answered.json()["decision"]["state"] == fake.decisions[held.decision_id].decision.state == "executed"
+    assert [record.getMessage() for record in caplog.records if record.name == "desk.api.routes.owner"] == [
+        "the resume job couldn't be queued (ConnectorException); resuming here",
+        "the answer couldn't be resumed here either (RuntimeError)"]
+    assert [type for type, _ in await sse_events(engine, held.session_id)] == ["writing", "held", "message",
+                                                                              "turn_end"]
+    assert jobs_connector.jobs == {}
+
+    assert await surface_due_decisions(engine, now=fake.now, ro_schema=ro_schema) == 1
+    async with engine.connect() as conn:
+        due = (await conn.execute(text("SELECT payload FROM app.run_events WHERE session_id = :s"
+                                       " AND kind = 'control' AND type = 'decision_due'"),
+                                  {"s": held.session_id})).scalars().all()
+    assert due == [{"decision_id": held.decision_id}]
 
 
 async def test_answer_during_take_over_executes_and_waits_for_hand_back(app, browser, fake, kernel_http, model,
