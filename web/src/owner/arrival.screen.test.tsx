@@ -8,7 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 
 import { userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
-import { ROUTES } from '../api/routes.ts';
+import { observeRequests } from '../api/http.ts';
+import { ROUTES, type RouteKey } from '../api/routes.ts';
 import { readLocal } from '../lib/storage.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
@@ -381,11 +382,35 @@ describe('OwnerLayout', () => {
     await expect.element(screen.getByRole('alert')).toHaveTextContent("That didn't save, so Answering is still off.");
     await expect.element(answering).toHaveAttribute('aria-checked', 'false');
 
-    // And a change that saves.
+    // And a change that saves, after which the Desks are read again.
+    const reads = requests('desks').length;
     await answering.click();
     await expect.poll(() => saved()).toBe(true);
     await expect.element(answering).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByRole('alert').elements()).toHaveLength(0);
+    await expect.poll(() => requests('desks').length).toBeGreaterThan(reads);
+
+    // A lost answer whose Desk can't be read back either: the switch stays where it was put and the
+    // line says it's unconfirmed, until the next read settles it. Here the change went through...
+    let before = requests('desks').length;
+    mockStore.inject({ route: 'setAnswering', status: 'network', afterCommit: true });
+    mockStore.inject({ route: 'desks', status: 'network', times: 2 });
+    await answering.click();
+    await expect.element(screen.getByRole('alert')).toHaveTextContent("We couldn't confirm that Answering is now off. Reload to see where it stands.");
+    await expect.element(answering).toHaveAttribute('aria-checked', 'false');
+    expect(saved()).toBe(false);
+    await expect.poll(() => requests('desks').length, { timeout: 5_000 }).toBe(before + 3);
+    await expect.element(answering).toHaveAttribute('aria-checked', 'false');
+
+    // ...and here it didn't, so the next read puts the switch back.
+    before = requests('desks').length;
+    mockStore.inject({ route: 'setAnswering', status: 'network' });
+    mockStore.inject({ route: 'desks', status: 'network', times: 2 });
+    await answering.click();
+    await expect.element(screen.getByRole('alert')).toHaveTextContent("We couldn't confirm that Answering is now on. Reload to see where it stands.");
+    await expect.poll(() => requests('desks').length, { timeout: 5_000 }).toBe(before + 3);
+    await expect.element(answering).toHaveAttribute('aria-checked', 'false');
+    expect(saved()).toBe(false);
   });
 
   it('start_over_confirms_first', async () => {
@@ -426,6 +451,45 @@ describe('OwnerLayout', () => {
       `/d/${mockStore.world.ids.slug}?preview=${fresh}`,
     );
     expect(sawNotFound()).toBe(false);
+  });
+
+  it('late_answering_failure_keeps_the_fresh_copy', async () => {
+    const { screen, router } = await renderRoute(TODAY);
+    const sawNotFound = watchFor("This page doesn't exist");
+    const heading = screen.getByRole('heading', { level: 1, name: /, Maria$/ });
+    const answering = screen.getByRole('switch', { name: 'Answering' });
+
+    // An Answering change is still out when Start over opens a fresh copy, and fails after it:
+    // refused (the old copy's Desk is gone), then with its answer lost.
+    for (const status of [404, 'network'] as const) {
+      await expect.element(heading).toBeVisible();
+      await expect.element(answering).toHaveAttribute('aria-checked', 'true');
+      const before = router.state.location.pathname;
+      mockStore.inject({ route: 'setAnswering', status, delayMs: 2_000 });
+      const late = nextAnswerTo('setAnswering');
+      await answering.click();
+      await expect.element(answering).toHaveAttribute('aria-checked', 'false');
+
+      await screen.getByRole('button', { name: 'Start over' }).click();
+      await screen.getByRole('dialog', { name: 'Start over with a fresh copy?' }).getByRole('button', { name: 'Start over' }).click();
+      await expect.poll(() => router.state.location.pathname).not.toBe(before);
+      const fresh = `/app/${mockStore.world.ids.deskId}/today`;
+      expect(router.state.location.pathname).toBe(fresh);
+      await expect.element(heading).toBeVisible();
+      await expect.element(answering).toHaveAttribute('aria-checked', 'true');
+      expect(late.came()).toBe(false);
+
+      // The late failure leaves the fresh copy's Today as it is: its Answering untouched, no line.
+      await late.settled;
+      const polled = requests('today').length;
+      await expect.poll(() => sawNotFound() || requests('today').length > polled + 1, { timeout: 5_000 }).toBe(true);
+      expect(sawNotFound()).toBe(false);
+      expect(router.state.location.pathname).toBe(fresh);
+      await expect.element(heading).toBeVisible();
+      await expect.element(answering).toHaveAttribute('aria-checked', 'true');
+      expect(screen.getByRole('alert').elements()).toHaveLength(0);
+    }
+    expect(requests('startOver')).toHaveLength(2);
   });
 });
 
@@ -555,6 +619,22 @@ function watchFor(text: string): () => boolean {
   observer.observe(document.body, { childList: true, subtree: true, characterData: true });
   onTestFinished(() => observer.disconnect());
   return () => seen;
+}
+
+/** The next answer to `key`, or its failure: whether it has come yet, and a promise that settles when it does. */
+function nextAnswerTo(key: RouteKey): { came: () => boolean; settled: Promise<void> } {
+  let came = false;
+  let stop = () => {};
+  const settled = new Promise<void>((resolve) => {
+    stop = observeRequests((outcome) => {
+      if (outcome.key !== key) return;
+      came = true;
+      stop();
+      resolve();
+    });
+  });
+  onTestFinished(() => stop());
+  return { came: () => came, settled };
 }
 
 /** Links to the owner's preview of Rivera's public page. */

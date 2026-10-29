@@ -58,9 +58,10 @@ function RouterLink({ href, children, ...rest }: SidebarLinkProps) {
   );
 }
 
-/** The same Desks with this Desk's Answering set to `on`. */
+/** The same Desks with this Desk's Answering set to `on`; the same list when it doesn't hold the Desk. */
 function withAnswering(businesses: BusinessOut[] | undefined, deskId: string, on: boolean): BusinessOut[] | undefined {
-  return businesses?.map((b) => ({ ...b, desks: b.desks.map((d) => (d.desk_id === deskId ? { ...d, answering: on } : d)) }));
+  if (businesses === undefined || findDesk(businesses, deskId) === null) return businesses;
+  return businesses.map((b) => ({ ...b, desks: b.desks.map((d) => (d.desk_id === deskId ? { ...d, answering: on } : d)) }));
 }
 
 const onOff = (on: boolean) => (on ? 'on' : 'off');
@@ -117,30 +118,34 @@ function DeskFrame({ businesses, business, desk }: DeskFrameProps) {
     onMutate: async (on) => {
       setNotice(null);
       await queryClient.cancelQueries({ queryKey: DESKS_KEY });
-      const before = queryClient.getQueryData<BusinessOut[]>(DESKS_KEY);
       queryClient.setQueryData<BusinessOut[]>(DESKS_KEY, (current) => withAnswering(current, deskId, on));
-      return { before, was: !on };
     },
-    onError: async (err, on, context) => {
-      const restore = () => queryClient.setQueryData(DESKS_KEY, context?.before);
+    // This can run after the frame has gone (Start over opened a new copy while the change was out),
+    // so it only ever puts back this Desk's switch, in the Desks as they are now, and leaves a list
+    // without this Desk alone.
+    onError: async (err, on) => {
+      const was = !on;
+      const putBack = () => queryClient.setQueryData<BusinessOut[]>(DESKS_KEY, (current) => withAnswering(current, deskId, was));
       if (err instanceof ApiError && err.kind === 'unauthorized') {
-        restore();
+        putBack();
         return;
       }
       if (!isUncertain(err)) {
-        restore();
-        setNotice(`That didn't save, so Answering is still ${onOff(context?.was ?? !on)}.`);
+        putBack();
+        setNotice(`That didn't save, so Answering is still ${onOff(was)}.`);
         return;
       }
       // The change may have been applied with its answer lost: the switch shows what the Desk reads now.
       const read = await queryClient.fetchQuery({ queryKey: DESKS_KEY, queryFn: () => request('desks') }).catch(() => null);
-      const now = read ? findDesk(read, deskId)?.desk.answering : undefined;
-      if (now === undefined) {
-        restore();
-        setNotice(ownerErrorCopy(err));
-      } else if (now !== on) {
-        setNotice(`That didn't save, so Answering is still ${onOff(now)}.`);
+      if (read === null) {
+        // Nor could the Desk be read: the switch stays where it was put, and the next read settles it.
+        setNotice(`We couldn't confirm that Answering is now ${onOff(on)}. Reload to see where it stands.`);
+        void queryClient.invalidateQueries({ queryKey: DESKS_KEY });
+        return;
       }
+      // A copy without this Desk (a new one, from Start over) has nothing of this change to show.
+      const now = findDesk(read, deskId)?.desk.answering;
+      if (now !== undefined && now !== on) setNotice(`That didn't save, so Answering is still ${onOff(now)}.`);
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: DESKS_KEY }),
   });
