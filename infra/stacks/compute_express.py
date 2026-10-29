@@ -73,6 +73,7 @@ class ExpressCompute(Construct):
             ),
         )
 
+        self.load_balancer_arn: str = self.service.attr_ecs_managed_resource_arns_ingress_path_load_balancer_arn
         self.edge_lock = self._edge_lock(data, task)
 
         self.service_endpoint: str = self.service.attr_endpoint
@@ -86,7 +87,7 @@ class ExpressCompute(Construct):
         """ExpressEdge (functions/express_edge): the load balancer's idle timeout to 300 s, and its
         security groups admitting 443 only from CloudFront's prefix list. A failure fails the
         resource, and the stack rolls back."""
-        load_balancer = self.service.attr_ecs_managed_resource_arns_ingress_path_load_balancer_arn
+        load_balancer = self.load_balancer_arn
         handler = lambda_.Function(
             self,
             "ExpressEdgeFunction",

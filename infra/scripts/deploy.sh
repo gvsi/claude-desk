@@ -12,7 +12,8 @@
 #   5. run_admin_task.py: migrations and role passwords, before any new app task starts;
 #   6. cdk deploy DeskApp with the commit and the Desk's public URL; on a first deploy without a
 #      custom domain that URL is known only afterwards, so DeskApp is deployed once more with it;
-#   7. smoke.py against the public URL, the task's public IP and, in Express mode, the origin.
+#   7. smoke.py against the public URL, the task's public IP and, in Express mode, the origin and
+#      its load balancer's security groups.
 #
 #   read -rs DESK_PASSCODE; export DESK_PASSCODE
 #   infra/scripts/deploy.sh [--compute express|alb] [--allow-branch]
@@ -205,7 +206,9 @@ if [[ $compute == express ]]; then
   origin_host=${endpoint#*://}
   origin_host=${origin_host%%/*}
   [[ -n $origin_host ]] || fail "DeskApp has no ServiceEndpoint output to probe"
-  smoke+=(--origin-host "$origin_host")
+  load_balancer=$(stack_output DeskApp LoadBalancerArn)
+  [[ -n $load_balancer ]] || fail "DeskApp has no LoadBalancerArn output whose security groups to check"
+  smoke+=(--origin-host "$origin_host" --load-balancer-arn "$load_balancer")
 fi
 uv run --project "$INFRA" python "$INFRA/scripts/smoke.py" "${smoke[@]}" ||
   fail "the smoke checks failed: the deploy isn't done, and the thin slice isn't announced"

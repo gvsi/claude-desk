@@ -46,4 +46,6 @@ class DeskApp(Stack):
         CfnOutput(self, "WebBucketName", value=self.edge.bucket.bucket_name)
         if isinstance(self.compute, ExpressCompute):
             CfnOutput(self, "ServiceEndpoint", value=self.compute.service_endpoint)
+            # The balancer Express made: the smoke checks describe its security groups.
+            CfnOutput(self, "LoadBalancerArn", value=self.compute.load_balancer_arn)
         CfnOutput(self, "DeployedSha", value=config.git_sha)

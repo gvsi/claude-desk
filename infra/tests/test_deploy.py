@@ -19,6 +19,7 @@ REPO = INFRA.parent
 ACCOUNT = "123456789012"
 DISTRIBUTION_URL = "https://d111111abcdef8.cloudfront.net"
 ENDPOINT = "https://desk-0a1b2c3d.ecs.us-west-2.on.aws/"
+LOAD_BALANCER = "arn:aws:elasticloadbalancing:us-west-2:123456789012:loadbalancer/app/ecs-express-desk/0a1b2c3d4e5f6071"
 DOMAIN = "desk.example.com"
 CERTIFICATE = f"arn:aws:acm:us-east-1:{ACCOUNT}:certificate/0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9"
 
@@ -63,8 +64,10 @@ elif tool == "npx" and args[:2] == ["--no-install", "cdk"] and args[2] == "deplo
         if os.environ.get("STUB_URL_MOVES") and deploys > 1:        # a distribution replaced on redeploy
             url = "https://d222222abcdef8.cloudfront.net"
         sha = os.environ.get("STUB_DEPLOYED_SHA") or context.get("git_sha", "unset")
-        stacks["DeskApp"] = {{"PublicUrl": url, "ServiceEndpoint": "{endpoint}", "DeployedSha": sha,
-                             "Deploys": deploys}}
+        stacks["DeskApp"] = {{"PublicUrl": url, "ServiceEndpoint": "{endpoint}", "LoadBalancerArn": "{load_balancer}",
+                             "DeployedSha": sha, "Deploys": deploys}}
+        if os.environ.get("STUB_NO_LOAD_BALANCER"):
+            del stacks["DeskApp"]["LoadBalancerArn"]
     json.dump(stacks, open(stacks_path, "w"))
 """
 
@@ -73,7 +76,8 @@ elif tool == "npx" and args[:2] == ["--no-install", "cdk"] and args[2] == "deplo
 def deploy(tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    body = STUB.format(python=sys.executable, account=ACCOUNT, distribution=DISTRIBUTION_URL, endpoint=ENDPOINT)
+    body = STUB.format(python=sys.executable, account=ACCOUNT, distribution=DISTRIBUTION_URL, endpoint=ENDPOINT,
+                       load_balancer=LOAD_BALANCER)
     for tool in ("aws", "npx", "npm", "make", "uv"):
         (bin_dir / tool).write_text(body)
         (bin_dir / tool).chmod(stat.S_IRWXU)
@@ -184,13 +188,14 @@ def test_first_deploy_runs_every_step_in_order(deploy):
         "aws cloudformation describe-stacks",  # DeployedSha
         "aws cloudformation describe-stacks",  # ClusterName
         "aws cloudformation describe-stacks",  # ServiceEndpoint
+        "aws cloudformation describe-stacks",  # LoadBalancerArn
         "uv smoke.py",
     ]
     first, second = run.cdk("DeskApp")
     assert "public_origin" not in _context(first)
     assert _context(second)["public_origin"] == DISTRIBUTION_URL
     assert run.smoke() == ["--base-url", DISTRIBUTION_URL, "--cluster", "desk",
-                           "--origin-host", "desk-0a1b2c3d.ecs.us-west-2.on.aws"]
+                           "--origin-host", "desk-0a1b2c3d.ecs.us-west-2.on.aws", "--load-balancer-arn", LOAD_BALANCER]
 
 
 def test_cdk_deploys_ask_for_approval_on_the_terminal(deploy):
@@ -315,7 +320,17 @@ def test_alb_mode(deploy):
     run = deploy("--compute", "alb")
     assert run.status == 0, run.output
     assert {_context(call)["compute"] for call in run.calls if call["tool"] == "npx"} == {"alb"}
-    assert "--origin-host" not in run.smoke()
+    assert "--origin-host" not in run.smoke() and "--load-balancer-arn" not in run.smoke()
+
+
+def test_express_mode_without_a_load_balancer_output_stops_before_smoke(deploy):
+    """Without the balancer's ARN the smoke can't describe its groups, so the deploy isn't done."""
+    deployed = {"DeskData": {"ClusterName": "desk"},
+                "DeskApp": {"PublicUrl": DISTRIBUTION_URL, "ServiceEndpoint": ENDPOINT, "DeployedSha": "0" * 40}}
+    run = deploy(deployed=deployed, STUB_NO_LOAD_BALANCER="1")
+    assert run.status == 1
+    assert "LoadBalancerArn" in run.log
+    assert not _smoke_ran(run)
 
 
 def test_allow_branch_reaches_preflight(deploy):

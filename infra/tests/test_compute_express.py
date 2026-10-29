@@ -227,6 +227,10 @@ def test_outputs_name_the_service_endpoint_and_the_deployed_commit(desk_stacks):
 
     # deploy.sh passes the endpoint's host to the smoke checks, which expect it to refuse connections.
     assert outputs["ServiceEndpoint"] == {"Fn::GetAtt": [service_id, "Endpoint"]}
+    # And the balancer Express made, whose security groups the smoke checks describe.
+    assert outputs["LoadBalancerArn"] == {
+        "Fn::GetAtt": [service_id, "ECSManagedResourceArns.IngressPath.LoadBalancerArn"]
+    }
     assert outputs["DeployedSha"] == "0123456789abcdef0123456789abcdef01234567"
 
 

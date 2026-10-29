@@ -28,6 +28,9 @@ HSTS = "max-age=31536000; includeSubDomains"
 CLUSTER = "desk"
 TASK_ARN = "arn:aws:ecs:us-west-2:123456789012:task/desk/0f1e2d3c4b5a69788a7b6c5d4e3f2a1b"
 ENI = "eni-0a1b2c3d4e5f60718"
+LOAD_BALANCER = "arn:aws:elasticloadbalancing:us-west-2:123456789012:loadbalancer/app/ecs-express-desk/0a1b2c3d4e5f6071"
+LB_GROUP = "sg-0a1b2c3d4e5f60718"
+CLOUDFRONT_LIST, OTHER_LIST = "pl-82a045eb", "pl-0f1e2d3c4b5a69788"
 OWNER_COOKIE = f"desk_owner={OWNER_TOKEN}; Path=/api/owner; Max-Age=604800; HttpOnly; Secure; SameSite=Strict"
 VISITOR_COOKIE = (
     f"desk_visitor={VISITOR_TOKEN}; Path=/api/public/desks/{SLUG}; Max-Age=86400; HttpOnly; Secure; SameSite=Strict"
@@ -215,7 +218,7 @@ def smoke(monkeypatch):
 
 @pytest.fixture
 def aws():
-    clients = {name: unsigned_client(name) for name in ("ecs", "ec2")}
+    clients = {name: unsigned_client(name) for name in ("ecs", "ec2", "elbv2")}
     stubs = {name: Stubber(client) for name, client in clients.items()}
     for stub in stubs.values():
         stub.activate()
@@ -245,6 +248,37 @@ def expect_task(stubs, public_ip: str | None = "127.0.0.1", family: str = "desk"
                               {"NetworkInterfaceIds": [ENI]})
 
 
+def cloudfront_443(prefix_list: str = CLOUDFRONT_LIST) -> dict:
+    return {"IpProtocol": "tcp", "FromPort": 443, "ToPort": 443, "PrefixListIds": [{"PrefixListId": prefix_list}]}
+
+
+def expect_balancer(stubs, permissions: list[dict] | None = None, groups: list[str] | None = None,
+                    prefix_lists: list[str] | None = None) -> None:
+    """The describe calls origin_groups_locked makes, in order; by default a locked balancer."""
+    groups = [LB_GROUP] if groups is None else groups
+    stubs["elbv2"].add_response(
+        "describe_load_balancers",
+        {"LoadBalancers": [{"LoadBalancerArn": LOAD_BALANCER, "SecurityGroups": groups}]},
+        {"LoadBalancerArns": [LOAD_BALANCER]},
+    )
+    if not groups:
+        return
+    stubs["ec2"].add_response(
+        "describe_managed_prefix_lists",
+        {"PrefixLists": [{"PrefixListId": pl, "PrefixListName": "com.amazonaws.global.cloudfront.origin-facing"}
+                         for pl in ([CLOUDFRONT_LIST] if prefix_lists is None else prefix_lists)]},
+        {"Filters": [{"Name": "prefix-list-name", "Values": ["com.amazonaws.global.cloudfront.origin-facing"]}]},
+    )
+    if prefix_lists is not None and len(prefix_lists) != 1:
+        return
+    stubs["ec2"].add_response(
+        "describe_security_groups",
+        {"SecurityGroups": [{"GroupId": LB_GROUP,
+                             "IpPermissions": [cloudfront_443()] if permissions is None else permissions}]},
+        {"GroupIds": groups},
+    )
+
+
 def run(smoke, stub: Stub, *extra: str, passcode: str | None = PASSCODE, clients=None) -> int:
     environ = {} if passcode is None else {"DESK_PASSCODE": passcode}
     return smoke.main(["--base-url", stub.base_url, *extra], clients=clients, environ=environ)
@@ -262,9 +296,11 @@ def results(out: str) -> dict[str, str]:
 
 def test_all_checks_pass_against_a_good_stub(smoke, aws, capsys):
     clients, stubs = aws
+    expect_balancer(stubs)
     expect_task(stubs)
     with Stub(Behavior()) as stub:
-        status = run(smoke, stub, "--origin-host", "127.0.0.1", "--cluster", CLUSTER, clients=clients)
+        status = run(smoke, stub, "--origin-host", "127.0.0.1", "--cluster", CLUSTER,
+                     "--load-balancer-arn", LOAD_BALANCER, clients=clients)
     out = capsys.readouterr().out
     assert results(out) == {name: "pass" for name in smoke.CHECKS}, out
     assert status == 0
@@ -386,7 +422,7 @@ def test_wrong_passcode_fails_the_signed_in_checks(smoke, capsys):
         {"visitor_cookie": VISITOR_COOKIE.replace("; Secure", "")},
         {"visitor_cookie": VISITOR_COOKIE.replace(f"Path=/api/public/desks/{SLUG}", "Path=/")},
         {"visitor_cookie": VISITOR_COOKIE.replace(f"Path=/api/public/desks/{SLUG}", "Path=/api/public/desks")},
-        {"visitor_cookie": VISITOR_COOKIE.replace(f"Path=/api/public/desks/{SLUG}", "Path=/api/public/desks/other-desk")},
+        {"visitor_cookie": VISITOR_COOKIE.replace(f"desks/{SLUG}", "desks/other-desk")},
         {"visitor_cookie": VISITOR_COOKIE.replace(f"; Path=/api/public/desks/{SLUG}", "")},
         {"visitor_cookie": VISITOR_COOKIE.replace("; SameSite=Strict", "")},
         {"visitor_cookie": VISITOR_COOKIE.replace("SameSite=Strict", "SameSite=None")},
@@ -464,10 +500,9 @@ def test_without_a_passcode_the_signed_in_checks_are_not_run(smoke, capsys):
     found = results(capsys.readouterr().out)
     assert {name for name, status in found.items() if status == "not run"} == {
         "cookies_first_party", "public_links_use_public_url", "sse_survives_idle"}
-    assert {name for name, status in found.items() if status == "skipped"} == {
-        "origin_direct_refused", "task_ports_refused"}
-    assert all(status == "pass" for name, status in found.items()
-               if name not in smoke.SIGNED_IN_CHECKS + ("origin_direct_refused", "task_ports_refused"))
+    probes = ("origin_groups_locked", "origin_direct_refused", "task_ports_refused")
+    assert {name for name, status in found.items() if status == "skipped"} == set(probes)
+    assert all(status == "pass" for name, status in found.items() if name not in smoke.SIGNED_IN_CHECKS + probes)
 
 
 def test_only_runs_the_named_checks(smoke, capsys):
@@ -481,10 +516,71 @@ def test_a_failure_wins_over_not_run(smoke, capsys):
         assert run(smoke, stub, passcode=None) == 1
 
 
-def test_probe_checks_named_without_their_option_are_a_usage_error(smoke, capsys):
+@pytest.mark.parametrize("check", ["task_ports_refused", "origin_groups_locked"])
+def test_probe_checks_named_without_their_option_are_a_usage_error(smoke, capsys, check):
     with Stub(Behavior()) as stub, pytest.raises(SystemExit) as exit_:
-        run(smoke, stub, "--only", "task_ports_refused")
+        run(smoke, stub, "--only", check)
     assert exit_.value.code == 2
+
+
+def _origin_groups(smoke, clients, stub) -> int:
+    return run(smoke, stub, "--load-balancer-arn", LOAD_BALANCER, "--only", "origin_groups_locked", clients=clients)
+
+
+def test_origin_groups_locked_passes_when_only_cloudfront_reaches_443(smoke, aws, capsys):
+    """What the Express balancer's groups say, read with describe calls, so the result doesn't hang
+    on this machine's network as the TCP probes do (those stay as a second signal)."""
+    clients, stubs = aws
+    expect_balancer(stubs)
+    with Stub(Behavior()) as stub:
+        assert _origin_groups(smoke, clients, stub) == 0
+    out = capsys.readouterr().out
+    assert results(out) == {"origin_groups_locked": "pass"}
+    assert LB_GROUP in out and CLOUDFRONT_LIST in out
+
+
+WORLD_443 = {"IpProtocol": "tcp", "FromPort": 443, "ToPort": 443, "IpRanges": [{"CidrIp": "0.0.0.0/0"}]}
+
+
+@pytest.mark.parametrize(
+    "permissions",
+    [
+        [cloudfront_443(), WORLD_443],
+        [cloudfront_443(), {"IpProtocol": "tcp", "FromPort": 80, "ToPort": 80, "Ipv6Ranges": [{"CidrIpv6": "::/0"}]}],
+        [cloudfront_443(), {"IpProtocol": "-1", "IpRanges": [{"CidrIp": "0.0.0.0/0"}]}],
+        [cloudfront_443(), {**WORLD_443, "IpRanges": [{"CidrIp": "10.0.0.0/16"}]}],
+        [cloudfront_443(), {**WORLD_443, "FromPort": 400, "ToPort": 500, "IpRanges": [{"CidrIp": "192.0.2.0/24"}]}],
+        [cloudfront_443(), cloudfront_443(OTHER_LIST)],
+        [cloudfront_443(), {"IpProtocol": "tcp", "FromPort": 443, "ToPort": 443,
+                            "UserIdGroupPairs": [{"GroupId": "sg-0f0e0d0c0b0a09080"}]}],
+        [],
+        [cloudfront_443(OTHER_LIST)],
+    ],
+    ids=["world_443", "world_v6_80", "world_all_traffic", "cidr_443", "cidr_range_over_443", "other_prefix_list",
+         "group_443", "no_ingress", "only_another_prefix_list"],
+)
+def test_origin_groups_locked_fails_on_any_other_ingress(smoke, aws, capsys, permissions):
+    clients, stubs = aws
+    expect_balancer(stubs, permissions=permissions)
+    with Stub(Behavior()) as stub:
+        assert _origin_groups(smoke, clients, stub) == 1
+    assert results(capsys.readouterr().out) == {"origin_groups_locked": "FAIL"}
+
+
+@pytest.mark.parametrize("case", ["no_groups", "no_prefix_list", "two_prefix_lists", "describe_error"])
+def test_origin_groups_locked_fails_closed(smoke, aws, capsys, case):
+    clients, stubs = aws
+    if case == "no_groups":
+        expect_balancer(stubs, groups=[])
+    elif case == "no_prefix_list":
+        expect_balancer(stubs, prefix_lists=[])
+    elif case == "two_prefix_lists":
+        expect_balancer(stubs, prefix_lists=[CLOUDFRONT_LIST, OTHER_LIST])
+    else:
+        stubs["elbv2"].add_client_error("describe_load_balancers", "AccessDenied", "not allowed")
+    with Stub(Behavior()) as stub:
+        assert _origin_groups(smoke, clients, stub) == 1
+    assert results(capsys.readouterr().out) == {"origin_groups_locked": "FAIL"}
 
 
 def test_app_family_matches_the_task_definition(smoke, desk_stacks):

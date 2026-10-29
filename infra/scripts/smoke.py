@@ -2,7 +2,8 @@
 
     read -rs DESK_PASSCODE; export DESK_PASSCODE
     uv run --project infra python infra/scripts/smoke.py --base-url https://<PublicUrl host> \\
-      [--origin-host <ServiceEndpoint host>] [--cluster desk] [--only <check>]...
+      [--origin-host <ServiceEndpoint host>] [--load-balancer-arn <LoadBalancerArn>] [--cluster desk] \\
+      [--only <check>]...
 
 deploy.sh runs every check after each deploy; `make image-smoke` runs `api_health` against a
 local container. One line per check: `pass`, `FAIL`, `not run` (the signed-in checks without
@@ -17,8 +18,12 @@ Checks, in order:
 - api_health: `/api/health` is ok, the kernel proves with SymCC, signs with the production key,
   and every seed is proved.
 - security_headers: HSTS on `/` and `/api/health`.
+- origin_groups_locked (`--load-balancer-arn`): the Express load balancer's security groups, read
+  with describe calls, admit nothing from 0.0.0.0/0 or ::/0, and 443 only from CloudFront's
+  origin-facing prefix list, which at least one rule admits.
 - origin_direct_refused (`--origin-host`): the Express origin takes no TCP connection on 443 or
-  80 from here; only CloudFront reaches it.
+  80 from here; only CloudFront reaches it. A second signal beside origin_groups_locked: a network
+  that filters these ports would refuse them too.
 - task_ports_refused (`--cluster`): each running app task's public IP takes no connection on
   8700 or 8701.
 - cookies_first_party (`DESK_PASSCODE`): a new copy's cookies are Secure, HttpOnly, SameSite=Strict
@@ -69,6 +74,9 @@ FORGED_HOST = "evil.example"
 FORGED_HEADERS = {"X-Desk-Public-Host": FORGED_HOST, "X-Forwarded-Host": FORGED_HOST}
 # The app task definition's family (infra/stacks/task.py); the admin task's is desk-admin.
 APP_FAMILY = "desk"
+# AWS's managed list of the addresses CloudFront reaches origins from (as DeskData looks it up).
+CLOUDFRONT_ORIGIN_FACING = "com.amazonaws.global.cloudfront.origin-facing"
+HTTPS, WORLD = 443, ("0.0.0.0/0", "::/0")
 # The labelled stand-in page synth serves without a web build (infra/site-placeholder).
 PLACEHOLDER = re.compile(r"""<meta\s+name=["']desk-site["']\s+content=["']placeholder["']""", re.IGNORECASE)
 ASSET_SCRIPT = re.compile(r"""["'](/assets/[^"'?#\s]+\.js)["']""")
@@ -144,13 +152,14 @@ class Copy:
 
 class Smoke:
     def __init__(self, base_url: str, *, passcode: str | None, origin_host: str | None, cluster: str | None,
-                 clients: Mapping | None) -> None:
+                 clients: Mapping | None, load_balancer_arn: str | None = None) -> None:
         parts = urlsplit(base_url)
         self.base_url = f"{parts.scheme}://{parts.netloc}"
         self.https = parts.scheme == "https"
         self.host, self.port = parts.hostname or "", parts.port
         self.passcode = passcode
         self.origin_host = origin_host
+        self.load_balancer_arn = load_balancer_arn
         self.cluster = cluster
         self._clients = clients
         self._secrets = {passcode} if passcode else set()
@@ -262,7 +271,7 @@ class Smoke:
         if self._clients is None:
             import boto3
 
-            self._clients = {name: boto3.client(name, region_name=REGION) for name in ("ecs", "ec2")}
+            self._clients = {name: boto3.client(name, region_name=REGION) for name in ("ecs", "ec2", "elbv2")}
         return self._clients
 
 
@@ -353,6 +362,63 @@ def _resolves(host: str) -> None:
         socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
     except OSError:
         raise CheckFailed(f"{host} doesn't resolve, so nothing was probed") from None
+
+
+def _covers(permission: dict, port: int) -> bool:
+    """Whether an ingress permission admits TCP on `port` (all traffic does)."""
+    if permission.get("IpProtocol") == "-1":
+        return True
+    return permission.get("IpProtocol") in ("tcp", "6") and permission.get("FromPort", 0) <= port <= permission.get(
+        "ToPort", -1)
+
+
+def _sources(permission: dict) -> list[str]:
+    return ([item.get("CidrIp") for item in permission.get("IpRanges", [])]
+            + [item.get("CidrIpv6") for item in permission.get("Ipv6Ranges", [])]
+            + [item.get("GroupId") for item in permission.get("UserIdGroupPairs", [])]
+            + [item.get("PrefixListId") for item in permission.get("PrefixListIds", [])])
+
+
+def origin_groups_locked(smoke: Smoke) -> str:
+    arn = smoke.load_balancer_arn
+    if not arn:
+        raise Skipped("no --load-balancer-arn (the fallback's load balancer is internal)")
+    clients = smoke.clients()
+    elbv2, ec2 = clients["elbv2"], clients["ec2"]
+    try:
+        balancers = elbv2.describe_load_balancers(LoadBalancerArns=[arn]).get("LoadBalancers", [])
+        group_ids = [group for balancer in balancers for group in balancer.get("SecurityGroups") or []]
+        if not group_ids:
+            raise CheckFailed(f"{arn} has no security groups to check")
+        lists = ec2.describe_managed_prefix_lists(
+            Filters=[{"Name": "prefix-list-name", "Values": [CLOUDFRONT_ORIGIN_FACING]}]).get("PrefixLists", [])
+        if len(lists) != 1:
+            raise CheckFailed(f"{len(lists)} prefix lists are named {CLOUDFRONT_ORIGIN_FACING}, not one")
+        cloudfront = lists[0].get("PrefixListId")
+        groups = ec2.describe_security_groups(GroupIds=group_ids).get("SecurityGroups", [])
+    except CheckFailed:
+        raise
+    except Exception as error:  # botocore's errors, without importing botocore at module load
+        raise CheckFailed(f"can't describe the origin's load balancer: {type(error).__name__}: {error}") from None
+    if sorted(group.get("GroupId") for group in groups) != sorted(group_ids):
+        raise CheckFailed("a security group of the load balancer wasn't found")
+    problems, admitted = [], False
+    for group in groups:
+        for permission in group.get("IpPermissions", []):
+            sources = _sources(permission)
+            ports = permission.get("FromPort", "all")
+            if any(source in WORLD for source in sources):
+                problems.append(f"{group['GroupId']} admits port {ports} from anywhere")
+            elif _covers(permission, HTTPS):
+                others = [source for source in sources if source != cloudfront]
+                if others:
+                    problems.append(f"{group['GroupId']} admits {HTTPS} from {', '.join(map(str, others))}")
+                admitted = admitted or cloudfront in sources
+    if not admitted:
+        problems.append(f"no rule admits {HTTPS} from CloudFront's prefix list {cloudfront}")
+    if problems:
+        raise CheckFailed("; ".join(problems))
+    return f"{', '.join(group_ids)}: nothing from anywhere, {HTTPS} only from CloudFront's prefix list {cloudfront}"
 
 
 def origin_direct_refused(smoke: Smoke) -> str:
@@ -496,8 +562,8 @@ CHECKS: dict[str, Callable[[Smoke], str]] = {
     check.__name__: check
     for check in (
         index_served, spa_route_served, assets_served, api_404_passes_through, api_health, security_headers,
-        origin_direct_refused, task_ports_refused, cookies_first_party, public_links_use_public_url,
-        sse_survives_idle,
+        origin_groups_locked, origin_direct_refused, task_ports_refused, cookies_first_party,
+        public_links_use_public_url, sse_survives_idle,
     )
 }
 
@@ -514,6 +580,8 @@ def main(argv: list[str] | None = None, *, clients: Mapping | None = None,
     parser = argparse.ArgumentParser(description="Smoke-check a deployed Desk.")
     parser.add_argument("--base-url", required=True, type=_base_url, help="the Desk's PublicUrl")
     parser.add_argument("--origin-host", help="Express mode: the service endpoint's host, which must refuse us")
+    parser.add_argument("--load-balancer-arn",
+                        help="Express mode: the service's load balancer, whose groups must admit CloudFront only")
     parser.add_argument("--cluster", help="the ECS cluster whose app task's public IP must refuse us")
     parser.add_argument("--only", action="append", choices=list(CHECKS), metavar="CHECK",
                         help=f"run only this check (repeatable): {', '.join(CHECKS)}")
@@ -522,10 +590,12 @@ def main(argv: list[str] | None = None, *, clients: Mapping | None = None,
         parser.error("origin_direct_refused needs --origin-host")
     if args.only and "task_ports_refused" in args.only and not args.cluster:
         parser.error("task_ports_refused needs --cluster")
+    if args.only and "origin_groups_locked" in args.only and not args.load_balancer_arn:
+        parser.error("origin_groups_locked needs --load-balancer-arn")
 
     environ = os.environ if environ is None else environ
     smoke = Smoke(args.base_url, passcode=environ.get("DESK_PASSCODE") or None, origin_host=args.origin_host,
-                  cluster=args.cluster, clients=clients)
+                  cluster=args.cluster, clients=clients, load_balancer_arn=args.load_balancer_arn)
     counts = {"pass": 0, "FAIL": 0, "not run": 0, "skipped": 0}
     for name, check in CHECKS.items():
         if args.only and name not in args.only:
