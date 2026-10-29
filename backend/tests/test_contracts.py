@@ -183,11 +183,17 @@ def test_cards_name_a_known_target_and_limits_in_range():
 
 def test_hours_windows_are_one_local_span():
     HoursWindow(days=["sat"], start="09:00", end="13:00")
+    # an end of 00:00 is midnight, the end of the day: the first half of an overnight split, or a whole day
+    HoursWindow(days=["fri"], start="22:00", end="00:00")
+    HoursWindow(days=["sat"], start="00:00", end="02:00")
+    HoursWindow(days=["sun"], start="00:00", end="00:00")
     for wrong in (
         {"days": []},
         {"start": "22:00", "end": "02:00"},   # past midnight is two windows
         {"start": "09:00", "end": "09:00"},
+        {"start": "22:00", "end": "00:00:30"},
         {"start": "09:00+02:00"},              # local to the business, never an offset
+        {"start": "22:00", "end": "00:00+02:00"},
     ):
         with pytest.raises(ValidationError):
             HoursWindow(**{"days": ["mon"], "start": "09:00", "end": "17:00"} | wrong)

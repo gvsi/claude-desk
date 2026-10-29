@@ -124,14 +124,15 @@ class BusinessSeed(BaseModel):
 class HoursWindow(BaseModel):
     days: list[Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]] = Field(min_length=1)
     start: time
-    end: time                             # exclusive, after start, in the business's time zone; past midnight = two windows
+    end: time                             # exclusive, after start, in the business's time zone; 00:00 is midnight, the end of
+                                          # the day (minute 1440); past midnight = two windows (fri 22:00–00:00, sat 00:00–02:00)
 
     @model_validator(mode="after")
     def _one_local_span(self) -> Self:
         if self.start.tzinfo is not None or self.end.tzinfo is not None:
             raise ValueError("hours are local to the business's time zone, without an offset")
-        if self.end <= self.start:
-            raise ValueError("end is after start; a window past midnight is two windows")
+        if self.end <= self.start and self.end != time(0):
+            raise ValueError("end is after start, or 00:00 for midnight; a window past midnight is two windows")
         return self
 
 class DeskSeed(BaseModel):
