@@ -3,10 +3,11 @@
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 
+import httpx
 from fastapi import FastAPI
 from sqlalchemy import select
 
-from desk.contracts import NotificationDefaults
+from desk.contracts import NotificationDefaults, PolicyVersion, RuleCard
 from desk.db.models import ActorSession, Business, Copy, Desk, LedgerEntry, NotificationPref
 from desk.kernel_service import auth
 from desk.kernel_service.repo import KernelCtx, kernel_transaction, new_id
@@ -67,3 +68,34 @@ async def rows_of(app: FastAPI, copy_id: str, stmt) -> list:
 async def ledger_rows(app: FastAPI, rows: CopyRows) -> list[LedgerEntry]:
     return await rows_of(app, rows.copy_id,
                          select(LedgerEntry).where(LedgerEntry.desk_id == rows.desk_id).order_by(LedgerEntry.seq))
+
+
+async def active_version_number(client: httpx.AsyncClient, owner_token: str, desk_id: str) -> int | None:
+    """The Desk's active version, as its safety ledger records it: the last `policy` entry that
+    activated one (a new Desk's first version, then each confirm)."""
+    response = await client.get(f"/ledger/{desk_id}", headers={auth.OWNER_HEADER: owner_token})
+    assert response.status_code == 200, response.text
+    active = None
+    for entry in response.json()["entries"]:
+        event = entry["event"]
+        summary = event["summary"]
+        if event["kind"] == "policy" and (summary.get("status") == "active" or summary.get("activated")):
+            active = summary["version"]
+    return active
+
+
+async def draft_and_confirm(client: httpx.AsyncClient, owner_token: str, desk_id: str,
+                            cards: list[RuleCard]) -> PolicyVersion:
+    """Drafts `cards` on the Desk's active version and confirms them, as the owner app does; the
+    draft has to prove, so the kernel needs `symcc` mode (the `desk_prove` fixture, or a stub)."""
+    headers = {auth.OWNER_HEADER: owner_token}
+    parent = await active_version_number(client, owner_token, desk_id)
+    response = await client.post("/policy/draft", headers=headers, json={
+        "desk_id": desk_id, "cards": [card.model_dump(mode="json") for card in cards], "expected_parent": parent})
+    assert response.status_code == 200, response.text
+    drafted = PolicyVersion.model_validate(response.json())
+    assert drafted.status == "proved", drafted.proof
+    response = await client.post("/policy/confirm", headers=headers, json={"desk_id": desk_id,
+                                                                          "version": drafted.version})
+    assert response.status_code == 200, response.text
+    return PolicyVersion.model_validate(response.json())

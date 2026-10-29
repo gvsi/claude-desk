@@ -1,0 +1,5 @@
+#!/bin/sh
+# A desk-prove that takes its time, then proves whatever it was given: it sleeps 2 s (or
+# DESK_PROVE_STUB_SLEEP seconds) and prints a report in which all seven obligations hold.
+sleep "${DESK_PROVE_STUB_SLEEP:-2}"
+echo '{"ok": true, "method": "symcc", "cases": null, "timed_out": false, "checks": [{"name": "never_errors", "ok": true, "counterexample_plain": null, "counterexample_raw": null}, {"name": "baseline_auto", "ok": true, "counterexample_plain": null, "counterexample_raw": null}, {"name": "baseline_approvable", "ok": true, "counterexample_plain": null, "counterexample_raw": null}, {"name": "auto_within_cards", "ok": true, "counterexample_plain": null, "counterexample_raw": null}, {"name": "review_only_narrows", "ok": true, "counterexample_plain": null, "counterexample_raw": null}, {"name": "hold_within_cards", "ok": true, "counterexample_plain": null, "counterexample_raw": null}, {"name": "money_needs_card", "ok": true, "counterexample_plain": null, "counterexample_raw": null}]}'

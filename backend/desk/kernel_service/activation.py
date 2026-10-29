@@ -11,6 +11,12 @@ ship in `kernel/cedar/proofs/`. They seed the in-memory `ProofCache`, keyed by w
 (`VersionHashes`), and `activate_shipped` activates a set only on a hit with a passing report, in
 either mode; a miss is never proved inline (503 `seed_unproved`).
 
+Owner drafts. `draft` (`POST /policy/draft`) compiles the owner's cards, loads them (lint and
+validation) and proves them in `symcc` mode, or only checks them in `bounded` mode; every failing
+check reads in the owner's words (`explain.py`). `confirm` (`POST /policy/confirm`) activates a
+draft only when a SymCC proof of all seven obligations holds, its parent is still the active
+version and everything it was proved against is current.
+
 Loaded versions. A stored version loads into the policy engine on its first use
 (`LoadedVersions`), bounded to `MAX_LOADED_VERSIONS` per engine, least recently used out first.
 
@@ -37,13 +43,14 @@ import threading
 from collections import OrderedDict
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
+from functools import partial
 from datetime import datetime, time
 from pathlib import Path
 from typing import Any, Literal, NamedTuple
 
 import desk_kernel
 from pydantic import BaseModel, ConfigDict, StrictInt, ValidationError
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from desk.contracts import (
     AUTO_MONEY_HARD_CAP_CENTS,
@@ -55,8 +62,10 @@ from desk.contracts import (
     RuleCard,
     ToolProfile,
 )
+from desk.db.models import AgentKey, Person
 from desk.db.models import PolicyVersion as PolicyVersionRow
-from desk.kernel_service import adapters, compiler, desks, ledger, reference, review_thresholds, seed
+from desk.kernel_service import adapters, compiler, desks, explain, ledger, reference, review_thresholds, seed
+from desk.kernel_service.auth import OwnerCtx
 from desk.kernel_service.reference import RefSets
 from desk.kernel_service.repo import KernelCtx, KernelFailure
 from desk.presets import PRESETS
@@ -554,14 +563,15 @@ class SeedUnproved(KernelFailure):
 def version_row(*, copy_id: str, desk_id: str, version: int, parent_version: int | None,
                 compiled: compiler.CompiledSets, a0: str, schema: Mapping[str, Any], hashes: VersionHashes,
                 status: str, proof: ProofReport | None, created_at: datetime,
-                preset: str | None = None) -> PolicyVersionRow:
+                preset: str | None = None, draft_key_sha256: str | None = None) -> PolicyVersionRow:
     """A `policy_versions` row for a compiled version: its cards with defaults, its Cedar (`F`,
     `A`, `H` and `A0`), its schema as loaded and the hashes its proof covers (`cards_sha256`
-    among them, from `version_hashes`)."""
+    among them, from `version_hashes`); an owner's draft also carries its `draft_key_sha256`."""
     return PolicyVersionRow(
         desk_id=desk_id, version=version, copy_id=copy_id, parent_version=parent_version, cards=compiled.cards,
         status=status, proof=proof, **hashes._asdict(), created_at=created_at,
-        cedar={**compiled.sets(), "A0": a0}, schema_json=json.dumps(schema), preset=preset)
+        cedar={**compiled.sets(), "A0": a0}, schema_json=json.dumps(schema), preset=preset,
+        draft_key_sha256=draft_key_sha256)
 
 
 def version_contract(row: PolicyVersionRow) -> PolicyVersion:
@@ -605,6 +615,254 @@ async def active_version(ctx: KernelCtx, desk_id: str) -> PolicyVersionRow | Non
     """The Desk's active version, if it has one (the caller's copy must be bound)."""
     return (await ctx.db.scalars(ctx.repo.scoped(select(PolicyVersionRow).where(
         PolicyVersionRow.desk_id == desk_id, PolicyVersionRow.status == "active")))).one_or_none()
+
+
+# ---- Owner drafts --------------------------------------------------------------------------------
+#
+# `POST /policy/draft` turns the owner's cards into a stored version that can't decide anything
+# yet: compiled, loaded (lint and validation), then proved in `symcc` mode (a cached report for
+# the same cards and hashes stands in for a run) or checked in `bounded` mode, which never
+# activates. It is idempotent on a key over the parent and everything the proof covers, so a
+# re-post (the API's poll after its 25 s answer) waits for the running proof and gets its version.
+
+class Hashes(NamedTuple):
+    """What a version is proved against besides its own cards and Cedar: the Desk's schema, the
+    baseline, the enabled profiles, the invariants (with the check list and the prover's version)
+    and the review thresholds' version. Confirm needs a version's to be the current ones."""
+
+    schema_sha256: str
+    baseline_sha256: str
+    profiles_sha256: str
+    invariants_sha256: str
+    review_thresholds_version: int
+
+
+def _hashes(profiles: Sequence[ToolProfile], schema: Mapping[str, Any]) -> Hashes:
+    return Hashes(schema_sha256=compiler.schema_sha256(dict(schema)), baseline_sha256=compiler.baseline_sha256(),
+                  profiles_sha256=profiles_sha256(profiles), invariants_sha256=compiler.invariants_sha256(PROOF_CHECKS),
+                  review_thresholds_version=review_thresholds.REVIEW_THRESHOLDS_VERSION)
+
+
+async def current_hashes(ctx: KernelCtx, desk_id: str) -> Hashes:
+    """The hashes a version of the Desk would be proved against now, from its enabled profiles."""
+    profiles = await desks.enabled_profiles(ctx, desk_id)
+    return _hashes(profiles, compiler.desk_schema(profiles))
+
+
+def draft_key_sha256(parent_version: int | None, cards: Iterable[RuleCard], hashes: Hashes) -> str:
+    """sha256 of `canonical_json({parent_version, cards_sha256, schema_sha256, baseline_sha256,
+    profiles_sha256, invariants_sha256, review_thresholds_version})`: the same cards on the same
+    parent, proved against the same things, are the same draft."""
+    key = {"parent_version": parent_version, "cards_sha256": cards_sha256(cards), **hashes._asdict()}
+    return hashlib.sha256(desk_kernel.canonical_json(json.dumps(key)).encode()).hexdigest()
+
+
+def _lock_id(*parts: str) -> int:
+    """A Postgres advisory lock ID (a signed 64-bit integer) for `parts`, apart from other locks."""
+    digest = hashlib.sha256("\0".join(("desk-policy", *parts)).encode()).digest()
+    return int.from_bytes(digest[:8], "big", signed=True)
+
+
+async def _lock(ctx: KernelCtx, *parts: str) -> None:
+    """Takes the transaction's advisory lock on `parts`, waiting for whoever holds it to commit."""
+    await ctx.db.execute(select(func.pg_advisory_xact_lock(_lock_id(*parts))))
+
+
+async def desk_people(ctx: KernelCtx, desk_id: str) -> dict[str, str]:
+    """The Desk's people, display name by person ID."""
+    rows = await ctx.db.execute(ctx.repo.scoped(
+        select(Person.person_id, Person.display_name).where(Person.desk_id == desk_id)))
+    return {person_id: name for person_id, name in rows}
+
+
+async def _agent_keys(ctx: KernelCtx) -> set[str]:
+    return set((await ctx.db.scalars(ctx.repo.scoped(select(AgentKey.agent_key_id)))).all())
+
+
+def load_draft(engine: desk_kernel.PolicyEngine, *, key: str, schema_json: str,
+               compiled: compiler.CompiledSets) -> list[str]:
+    """Loads a draft the way its version will load (`F`, `A`, `H` to decide, and `F`, `H` for
+    approvals) under `key` and `key:approvable`, then drops both, and returns the lint and
+    validation errors: empty means the draft loads."""
+    keys = [key, key + ":approvable"]
+    try:
+        errors = engine.load(keys[0], schema_json, json.dumps(compiled.sets()))
+        if not errors:
+            errors = engine.load(keys[1], schema_json, json.dumps({"F": compiled.F, "A": "", "H": compiled.H}))
+    finally:
+        drop_keys(engine, keys)
+    return list(errors)
+
+
+async def _check_draft(ctx: KernelCtx, *, key: str, schema: Mapping[str, Any], cards: Sequence[RuleCard],
+                       profiles: Sequence[ToolProfile], compiled: compiler.CompiledSets,
+                       hashes: VersionHashes) -> ProofReport:
+    """What the process's proof mode says about a draft that loads; a draft that doesn't is
+    rejected by its `lint` check before anything is proved. In `symcc` mode a cached report for
+    exactly these hashes stands in for a run, and every conclusive run is cached."""
+    mode = proof_mode()
+    errors = load_draft(ctx.policies.engine, key=f"draft:{key}", schema_json=json.dumps(schema), compiled=compiled)
+    if errors:
+        log.warning("draft_unloadable errors=%d", len(errors))
+        return ProofReport(ok=False, method=mode, cases=0 if mode == "bounded" else None,
+                           checks=[ProofCheck(name="lint", ok=False)])
+    if mode == "symcc" and (cached := ctx.policies.cache.get(hashes)) is not None:
+        return cached
+    report = await prove_or_check(ctx.policies.engine, cards, profiles, key_prefix=key)
+    if report.method == "symcc":
+        ctx.policies.cache.put(hashes, report)
+    return report
+
+
+def _draft_status(report: ProofReport) -> str:
+    """`proved` only for a SymCC proof of all seven obligations; a bounded check that holds leaves
+    a `draft`, which never activates; anything else is `rejected`."""
+    if report.method == "symcc":
+        return "proved" if proved(report) else "rejected"
+    return "draft" if report.ok else "rejected"
+
+
+# What proving a draft again rewrites: its compiled sets, what they were proved against and the verdict.
+_PROVED_COLUMNS = ("cards", "cedar", "schema_json", *VersionHashes._fields, "status", "proof")
+
+
+def _proves_again(row: PolicyVersionRow) -> bool:
+    """An unconfirmed draft whose report answered nothing proves again when it is posted again: a
+    timeout or a prover that couldn't run, or a bounded check now that SymCC can run."""
+    proof = row.proof
+    return row.status in ("draft", "rejected") and (
+        proof is None or proof.timed_out or (proof.method == "bounded" and proof_mode() == "symcc"))
+
+
+async def draft(ctx: KernelCtx, owner: OwnerCtx, desk_id: str, cards: Sequence[RuleCard],
+                expected_parent: int | None) -> PolicyVersion:
+    """The owner's `cards` as a new version of the Desk, proved or checked, in the caller's
+    transaction (`POST /policy/draft`), ledgered `policy` `{version, status, method}`.
+
+    Cards `validate_cards` refuses are 422 `invalid`, and a parent that isn't the active version
+    409 `conflict`. Default asks are dropped and derived again. A draft with the same key (the
+    parent, the cards and the hashes they are proved against) is returned as it is, unless its
+    report answered nothing (`_proves_again`): then it is proved again in place. The key's advisory
+    lock is held until commit, so a re-post waits for the running proof; the version number is
+    allocated under the Desk's lock just before the insert. Every failing check of the report
+    reads in the owner's words."""
+    owned = [card for card in cards if not card.is_default]
+    people = await desk_people(ctx, desk_id)
+    if compiler.validate_cards(owned, people=people.keys(), agent_keys=await _agent_keys(ctx)):
+        raise KernelFailure(422, "invalid", "invalid_cards")
+    active = await active_version(ctx, desk_id)
+    if (active.version if active is not None else None) != expected_parent:
+        raise KernelFailure(409, "conflict", "parent_not_active")
+    profiles = await desks.enabled_profiles(ctx, desk_id)
+    schema = compiler.desk_schema(profiles)
+    key = draft_key_sha256(expected_parent, owned, _hashes(profiles, schema))
+    await _lock(ctx, "draft", desk_id, key)
+    existing = (await ctx.db.scalars(ctx.repo.scoped(select(PolicyVersionRow).where(
+        PolicyVersionRow.desk_id == desk_id, PolicyVersionRow.draft_key_sha256 == key)))).one_or_none()
+    if existing is not None and not _proves_again(existing):
+        return version_contract(existing)
+    try:
+        compiled = compiler.compile_cards(owned, profiles)
+        a0 = compiler.compile_cards(owned, profiles, review=False).A
+    except ValueError:
+        raise KernelFailure(422, "invalid", "uncompilable_cards") from None
+    hashes = version_hashes(compiled, schema, profiles, cards=owned)
+    report = await _check_draft(ctx, key=f"{desk_id}:{key}", schema=schema, cards=owned, profiles=profiles,
+                                compiled=compiled, hashes=hashes)
+    report = explain.explain_report(report, people)
+    status = _draft_status(report)
+    if existing is None:
+        await _lock(ctx, "versions", desk_id)
+        version = await _next_version(ctx, desk_id)
+    else:
+        version = existing.version
+    row = version_row(copy_id=owner.copy_id, desk_id=desk_id, version=version, parent_version=expected_parent,
+                      compiled=compiled, a0=a0, schema=schema, hashes=hashes, status=status, proof=report,
+                      created_at=ctx.clock.now(), draft_key_sha256=key)
+    if existing is None:
+        ctx.db.add(row)
+    else:
+        # proved again in place: the row takes the Cedar this run proved, which a newer compiler
+        # may have emitted differently from the first run, so a report never covers other Cedar
+        for column in _PROVED_COLUMNS:
+            setattr(existing, column, getattr(row, column))
+        row = existing
+    await ctx.db.flush()
+    await ledger.append(ctx, copy_id=owner.copy_id, desk_id=desk_id, event=LedgerEvent(
+        kind="policy", origin="kernel", summary={"version": row.version, "status": status, "method": report.method}))
+    return version_contract(row)
+
+
+async def _next_version(ctx: KernelCtx, desk_id: str) -> int:
+    """The Desk's next version number; call it holding the Desk's `versions` lock."""
+    latest = (await ctx.db.scalars(ctx.repo.scoped(
+        select(func.max(PolicyVersionRow.version)).where(PolicyVersionRow.desk_id == desk_id)))).one()
+    return (latest or 0) + 1
+
+
+# ---- Confirm -------------------------------------------------------------------------------------
+
+ConfirmRefusal = Literal["not_proved", "parent_changed", "hash_changed"]
+
+
+class ConfirmConflict(KernelFailure):
+    """A version that can't be activated now: 409 `conflict`, ledgered `policy` `{version,
+    refused: <reason>}` after the request's transaction has rolled back."""
+
+    def __init__(self, copy_id: str, desk_id: str, version: int, refused: ConfirmRefusal):
+        super().__init__(409, "conflict", f"confirm_{refused}",
+                         persist=partial(_ledger_refusal, copy_id=copy_id, desk_id=desk_id, version=version,
+                                         refused=refused))
+        self.refused = refused
+
+
+async def _ledger_refusal(ctx: KernelCtx, *, copy_id: str, desk_id: str, version: int, refused: str) -> None:
+    ctx.bind(copy_id)
+    await ledger.append(ctx, copy_id=copy_id, desk_id=desk_id, event=LedgerEvent(
+        kind="policy", origin="kernel", summary={"version": version, "refused": refused}))
+
+
+def _proved_against(row: PolicyVersionRow) -> Hashes:
+    return Hashes(*(getattr(row, field) for field in Hashes._fields))
+
+
+async def confirm(ctx: KernelCtx, desk_id: str, version: int) -> PolicyVersion:
+    """Activates a proved version (`POST /policy/confirm`) in the caller's transaction: it becomes
+    `active`, the version it replaces `superseded`, ledgered `policy` `{version, activated: true,
+    from: <old>}`. Confirms on the Desk are serialized by its `versions` lock, and the active row
+    is locked `FOR UPDATE`. Refused, in this order, with `ConfirmConflict`:
+
+    - `not_proved`: the version isn't `proved` by a SymCC proof of all seven obligations (a
+      bounded check, a rejection, or a version already active or superseded);
+    - `parent_changed`: the version it was drafted on is no longer the active one;
+    - `hash_changed`: the schema, baseline, enabled profiles, invariants or review thresholds it
+      was proved against aren't the current ones (`current_hashes`).
+
+    A version the Desk doesn't have is 404 `not_found`."""
+    copy_id = ctx.copy_id
+    await _lock(ctx, "versions", desk_id)
+    active = (await ctx.db.scalars(ctx.repo.scoped(select(PolicyVersionRow).where(
+        PolicyVersionRow.desk_id == desk_id, PolicyVersionRow.status == "active").with_for_update()))).one_or_none()
+    row = (await ctx.db.scalars(ctx.repo.scoped(select(PolicyVersionRow).where(
+        PolicyVersionRow.desk_id == desk_id, PolicyVersionRow.version == version).with_for_update()))).one_or_none()
+    if row is None:
+        raise KernelFailure(404, "not_found", "unknown_version")
+    if row.status != "proved" or row.proof is None or not proved(row.proof):
+        raise ConfirmConflict(copy_id, desk_id, version, "not_proved")
+    if row.parent_version != (active.version if active is not None else None):
+        raise ConfirmConflict(copy_id, desk_id, version, "parent_changed")
+    if _proved_against(row) != await current_hashes(ctx, desk_id):
+        raise ConfirmConflict(copy_id, desk_id, version, "hash_changed")
+    if active is not None:
+        active.status = "superseded"
+        await ctx.db.flush()              # one active version per Desk, even between the two updates
+    row.status = "active"
+    await ctx.db.flush()
+    await ledger.append(ctx, copy_id=copy_id, desk_id=desk_id, event=LedgerEvent(
+        kind="policy", origin="kernel",
+        summary={"version": version, "activated": True, "from": active.version if active is not None else None}))
+    return version_contract(row)
+
 
 # The bounded checks, in the order a report lists them. Each holds when, on every case:
 # - auto_within_cards: `:policy` auto-allows => `:R` auto-allows;

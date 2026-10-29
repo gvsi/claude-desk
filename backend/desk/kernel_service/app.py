@@ -30,10 +30,10 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from desk.contracts import LedgerEntry, LedgerPage
+from desk.contracts import LedgerEntry, LedgerPage, PolicyVersion
 from desk.db.session import KernelSession, database_url
 from desk.env import is_development
-from desk.kernel_api import Health, KernelError, LedgerAppendRequest
+from desk.kernel_api import Health, KernelError, LedgerAppendRequest, PolicyConfirmRequest, PolicyDraftRequest
 from desk.kernel_service import activation, auth, copies, ledger, sessions
 from desk.kernel_service.auth import AuthError, Named
 from desk.kernel_service.clock import Clock, SystemClock
@@ -85,6 +85,7 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
     app.include_router(sessions.router)
     app.include_router(copies.router)
     app.include_router(ledger_router)
+    app.include_router(policy_router)
 
     @app.get("/health", response_model=Health)
     async def health(request: Request) -> Health:
@@ -142,6 +143,25 @@ async def read_ledger(desk_id: str, ctx: Ctx, request: Request) -> LedgerPage:
     `verify` flag of the documented route (`?verify=true`) says."""
     await auth.require_owner(ctx, request, desk_id=desk_id)
     return await ledger.page(ctx, desk_id)
+
+
+policy_router = APIRouter()
+
+
+@policy_router.post("/policy/draft", response_model=PolicyVersion)
+async def post_policy_draft(body: PolicyDraftRequest, ctx: Ctx, request: Request) -> PolicyVersion:
+    """The owner's cards as a draft version, proved (or, in `bounded` mode, checked) before it
+    answers; idempotent, so a re-post waits for the running proof and gets the same version."""
+    owner = await auth.require_owner(ctx, request, desk_id=body.desk_id)
+    return await activation.draft(ctx, owner, body.desk_id, body.cards, body.expected_parent)
+
+
+@policy_router.post("/policy/confirm", response_model=PolicyVersion)
+async def post_policy_confirm(body: PolicyConfirmRequest, ctx: Ctx, request: Request) -> PolicyVersion:
+    """Activates a proved draft while its parent is still active and what it was proved against
+    is current; 409 `conflict` otherwise, ledgered with the reason."""
+    await auth.require_owner(ctx, request, desk_id=body.desk_id)
+    return await activation.confirm(ctx, body.desk_id, body.version)
 
 
 def error_response(status: int, code: str, headers: dict[str, str] | None = None) -> JSONResponse:
