@@ -15,6 +15,9 @@ reach the session as one of the four signed events, which only this module build
 
 Each call runs in the caller's transaction under the session's run lock (`run_lock`, a transaction-level
 advisory lock held until the caller commits), the lock take-over and hand-back hold around a mode change.
+The run lock comes before the session's events lock (taken by `sse.append_event`): a transaction that calls
+`emit()` and then `deliver()` takes `run_lock` before its first `emit`, or it can deadlock against another
+delivery.
 The session's generation is read from `kernel_ro.sessions` after the lock is taken, in a READ COMMITTED
 transaction, so a mode change committed while delivery waited is seen. The session is named only by a
 kernel answer (`Ids` from `/whoami` or a kernel result naming it) within that answer's copy.

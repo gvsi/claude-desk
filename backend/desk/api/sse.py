@@ -2,7 +2,9 @@
 
 Each session's SSE events carry a `seq`, gapless per session, which is the SSE `id`: `append_event` takes
 the session's events lock, writes `max + 1` and notifies `desk_run_events` with the session ID, all in the
-caller's transaction, so a reader never sees a later event before an earlier one. Only `deliver()` writes
+caller's transaction, so a reader never sees a later event before an earlier one. The locks are taken in one
+order, the run lock (`deliver.run_lock`) before the events lock: `deliver()` takes both, so a transaction that
+emits and also delivers takes the run lock before its first `emit`. Only `deliver()` writes
 the four signed events (message, receipt, held, resolved); `emit` writes the other six. Control rows
 (`run_resumable`, `decision_due`, `decision_pending`) are work for the next request that holds the
 session's credential, claimed once each; metric rows record reveal and turn timings.
@@ -268,8 +270,9 @@ def event_stream(engine: AsyncEngine, listener: Listener, ids: Ids, last_event_i
     waiting); `on_control` gets each control row that appears unhandled while the stream is open, whatever order
     the rows' writers commit in.
 
-    A row can reach `on_open` and `on_control`, or several streams; `claim_control` decides which caller
-    handles it."""
+    Both callbacks run inside the stream and hold back its frames until they return, so they return promptly
+    and start longer work (a resumed turn) as a task. A row can reach `on_open` and `on_control`, or several
+    streams; `claim_control` decides which caller handles it."""
     frames = _frames(engine, listener, ids, last_event_id or 0, on_control, on_open, poll_s)
     return EventSourceResponse(frames, ping=ping_s, ping_message_factory=lambda: ServerSentEvent(comment="keep-alive"))
 
