@@ -12,8 +12,8 @@ Functions that write run in the caller's transaction and never commit.
 The stream: one `Listener` per process holds the only `LISTEN desk_run_events` connection and wakes the
 streams of the session each notification names. `event_stream` replays the session's events after the
 client's `Last-Event-ID`, calls `on_open`, then sends each new event as it is committed (a wake-up, or a
-poll every 2 s when a notification is missed) and hands each new control row to `on_control`; an idle
-stream gets a `keep-alive` comment every `ping_s`.
+poll every 2 s when a notification is missed) and hands each control row that appears unhandled while it is
+open to `on_control`, once per stream; an idle stream gets a `keep-alive` comment every `ping_s`.
 """
 
 import asyncio
@@ -223,38 +223,36 @@ async def _events_after(engine: AsyncEngine, ids: Ids, after: int) -> list[tuple
         return [(row.seq, row.payload) for row in rows]
 
 
-async def _controls_after(engine: AsyncEngine, ids: Ids, after: int) -> list[ControlRow]:
+async def _unhandled_controls(engine: AsyncEngine, ids: Ids) -> list[ControlRow]:
     async with engine.connect() as conn:
         rows = await conn.execute(select(RUN_EVENTS).where(
             RUN_EVENTS.c.copy_id == ids.copy_id, RUN_EVENTS.c.session_id == ids.session_id,
-            RUN_EVENTS.c.kind == "control", RUN_EVENTS.c.handled_at.is_(None), RUN_EVENTS.c.id > after)
-            .order_by(RUN_EVENTS.c.id))
+            RUN_EVENTS.c.kind == "control", RUN_EVENTS.c.handled_at.is_(None)).order_by(RUN_EVENTS.c.id))
         return [ControlRow(id=row.id, type=row.type, payload=row.payload, copy_id=row.copy_id, desk_id=row.desk_id,
                            session_id=row.session_id) for row in rows]
-
-
-async def _last_control_id(engine: AsyncEngine, ids: Ids) -> int:
-    async with engine.connect() as conn:
-        last = (await conn.execute(select(func.max(RUN_EVENTS.c.id)).where(
-            RUN_EVENTS.c.session_id == ids.session_id, RUN_EVENTS.c.kind == "control"))).scalar_one()
-    return last or 0
 
 
 async def _frames(engine: AsyncEngine, listener: Listener, ids: Ids, after: int,
                   on_control: Callable[[ControlRow], Awaitable[None]] | None,
                   on_open: Callable[[], Awaitable[None]] | None, poll_s: float) -> AsyncIterator[ServerSentEvent]:
     async with listener.subscribe(ids.session_id) as wakeup:
-        controls_after = await _last_control_id(engine, ids)      # rows already waiting are on_open's
+        # Control rows are tracked by the IDs this stream has seen, not by a high-water mark: a row's ID is
+        # taken at insert and rows commit in any order, so a lower ID can become visible after a higher one.
+        # Rows already waiting are on_open's.
+        handed = set() if on_control is None else {row.id for row in await _unhandled_controls(engine, ids)}
         for seq, payload in await _events_after(engine, ids, after):
             yield _frame(seq, payload)
             after = seq
         if on_open is not None:
             await on_open()
         while True:
-            for row in await _controls_after(engine, ids, controls_after):
-                controls_after = row.id                           # each new row is handed over once per stream
-                if on_control is not None:
-                    await on_control(row)
+            if on_control is not None:
+                unhandled = await _unhandled_controls(engine, ids)
+                handed &= {row.id for row in unhandled}           # a handled row is never unhandled again
+                for row in unhandled:
+                    if row.id not in handed:                      # each row is handed over once per stream
+                        handed.add(row.id)
+                        await on_control(row)
             for seq, payload in await _events_after(engine, ids, after):
                 yield _frame(seq, payload)
                 after = seq
@@ -267,7 +265,11 @@ def event_stream(engine: AsyncEngine, listener: Listener, ids: Ids, last_event_i
                  poll_s: float = POLL_S) -> EventSourceResponse:
     """The session's events after `last_event_id` (all of them when None), then live ones: SSE `event` is the
     event's `type` and `id` its `seq`. `on_open` runs after the replay (the control rows and pending work already
-    waiting); `on_control` gets each control row written while the stream is open."""
+    waiting); `on_control` gets each control row that appears unhandled while the stream is open, whatever order
+    the rows' writers commit in.
+
+    A row can reach `on_open` and `on_control`, or several streams; `claim_control` decides which caller
+    handles it."""
     frames = _frames(engine, listener, ids, last_event_id or 0, on_control, on_open, poll_s)
     return EventSourceResponse(frames, ping=ping_s, ping_message_factory=lambda: ServerSentEvent(comment="keep-alive"))
 

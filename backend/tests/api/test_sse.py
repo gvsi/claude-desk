@@ -146,6 +146,43 @@ async def test_heartbeat_is_a_comment(engine, listener):
     assert frames == [": keep-alive\r\n\r\n"] * 2           # a comment: no event, id or data for the client
 
 
+async def until(condition, timeout: float = 3.0) -> None:
+    """Waits until `condition()` holds; fails after `timeout` seconds."""
+    async def poll() -> None:
+        while not condition():
+            await asyncio.sleep(0.01)
+    await asyncio.wait_for(poll(), timeout)
+
+
+async def test_control_rows_committed_out_of_id_order_are_each_handed_over(engine, listener):
+    async with engine.begin() as conn:             # already waiting when the stream opens: on_open's, not handed
+        waiting = await append_control(conn, SESSION_A, "decision_due", {"decision_id": "d-1"})
+    opened = asyncio.Event()
+    handed: list[int] = []
+
+    async def on_open() -> None:
+        opened.set()
+
+    async def on_control(row) -> None:
+        handed.append(row.id)
+
+    stream = asyncio.create_task(read_frames(event_stream(
+        engine, listener, SESSION_A, None, on_open=on_open, on_control=on_control, poll_s=0.1), 1, timeout=10))
+    await asyncio.wait_for(opened.wait(), 5)       # subscribed and replayed
+    async with engine.connect() as slow:
+        # the slow writer takes the lower id and commits last
+        first = await append_control(slow, SESSION_A, "run_resumable", {})
+        async with engine.begin() as quick:
+            second = await append_control(quick, SESSION_A, "decision_pending", {"decision_id": "d-2"})
+        assert waiting < first < second
+        await until(lambda: second in handed)
+        await slow.commit()
+    await until(lambda: first in handed)           # polled many times over: a skipped row would never arrive
+    await publish(engine, SESSION_A, EvWriting(type="writing"))
+    await stream
+    assert handed == [second, first]                # each once, in the order they became visible
+
+
 async def listening_backends(conn) -> set[int]:
     rows = await conn.execute(text("SELECT pid FROM pg_stat_activity WHERE datname = current_database()"
                                    " AND query = 'LISTEN desk_run_events'"))
