@@ -394,7 +394,7 @@ async def test_reply_row(k: KernelHarness, fake: FakeAnthropic, records, row: Re
             if block.template == "handoff":
                 assert OWNER in block.text, f"the handoff names {OWNER}: {block.text!r}"
             if block.template == "quote":   # every quote a row cites is one drain clearing at list price
-                problems = card_amount_problems(block, {P}, headline=P)
+                problems = card_amount_problems(block, {P}, headline=P, percents=())
                 assert not problems, f"the quote card, for one drain clearing at {P} cents: {problems}"
         if row.soft_promise != "pass":
             assert len(fake.calls(SOFT_PROMISE_MODEL)) - checks_before == 1, "one soft-promise check, as scripted"

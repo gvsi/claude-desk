@@ -14,6 +14,7 @@ import re
 import unicodedata
 from collections.abc import Collection
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any, Literal
 
 from pydantic import BaseModel
@@ -71,14 +72,17 @@ def card_amounts(text: str) -> list[int]:
     return [_cents(m.group(1) or m.group(2)) for m in _CARD_AMOUNT.finditer(shown)]
 
 
-def card_amount_problems(block: Any, allowed: Collection[int], *, headline: int | None = None) -> list[str]:
+def card_amount_problems(
+    block: Any, allowed: Collection[int], *, headline: int | None = None, percents: Collection[int] | None = None
+) -> list[str]:
     """How a card's amounts depart from those its fact states (`allowed`, in cents), judged on
     what a visitor reads. The web app shows a card's `title`, its `lines` and its option labels,
     and its `text` only when those are all empty, so each is read on its own: every amount any of
     them shows is one of `allowed`; the title and lines show at least one; with `headline`, the
     title shows that amount and no other (a quote's total); and `text` states the same amounts as
-    the title and lines together. Empty when the card agrees; `block` is a `RenderedBlock` or its
-    JSON."""
+    the title and lines together. With `percents`, the card is a quote (Plan 01a's template), read
+    for every number (`_quote_number_problems`). Empty when the card agrees; `block` is a
+    `RenderedBlock` or its JSON."""
     data = block.model_dump(mode="json") if isinstance(block, BaseModel) else block
     title = card_amounts(_string(data.get("title")))
     lines = [card_amounts(_string(line)) for line in data.get("lines") or []]
@@ -96,7 +100,54 @@ def card_amount_problems(block: Any, allowed: Collection[int], *, headline: int 
     text = card_amounts(_string(data.get("text")))
     if sorted(text) != sorted(in_card):
         problems.append(f"its text states {text} cents, but its title and lines show {in_card}")
+    if percents is not None:
+        problems += _quote_number_problems(data, percents)
     return problems
+
+
+def _quote_number_problems(data: dict[str, Any], percents: Collection[int]) -> list[str]:
+    """How a quote card's other numbers depart from its fact: its title, lines and option labels
+    together show exactly `percents` (its discount in whole percent, none at list price) and no
+    number but a currency amount, one of those percentages or the date of its "Good until"
+    ("Válido hasta") line, as Plan 01a's quote template writes them; its text, line by line, the
+    same. A number is any digit, percent sign or word, currency sign or word, or spelled-out
+    amount `scan_visible` finds, so a count ("× 2"), "Was 1.00" and "ninety percent" are flagged;
+    date words are left to the items, whose titles may hold one."""
+    expected = sorted(Decimal(percent) for percent in percents)
+    shown = {"the title": data.get("title")}
+    shown |= {f"line {n}": line for n, line in enumerate(data.get("lines") or [], start=1)}
+    shown |= {f"option {n}": option.get("label") for n, option in enumerate(data.get("options") or [], start=1)
+              if isinstance(option, dict)}
+    shown_read = {where: _quote_numbers(_string(value)) for where, value in shown.items()}
+    text_read = [_quote_numbers(line) for line in _string(data.get("text")).split("\n")]
+    problems = [f"{where} shows {stray}, not an amount, the discount or the quote's expiry"
+                for where, (_, stray) in shown_read.items() if stray]
+    if text_stray := [span for _, stray in text_read for span in stray]:
+        problems.append(f"its text shows {text_stray}, not an amount, the discount or the quote's expiry")
+    in_card = [percent for found, _ in shown_read.values() for percent in found]
+    if sorted(in_card) != expected:
+        problems.append(f"its title, lines and options show {_percents(in_card)}, not {_percents(expected)}")
+    in_text = [percent for found, _ in text_read for percent in found]
+    if sorted(in_text) != expected:
+        problems.append(f"its text states {_percents(in_text)}, not {_percents(expected)}")
+    return problems
+
+
+def _quote_numbers(line: str) -> tuple[list[Decimal], list[str]]:
+    """The percentages one line of a quote card shows ("80%", "80 %"), and every other number in
+    it that is not part of a currency amount; none in a "Good until" line that is only its date."""
+    shown = normalize(line)
+    if _EXPIRY_LINE.fullmatch(_fold(shown)):
+        return [], []
+    percents = list(_CARD_PERCENT.finditer(shown))
+    read = [(m.start(), m.end()) for m in [*_CARD_AMOUNT.finditer(shown), *percents]]
+    stray = [hit.span for hit in scan_visible(line) if hit.kind != "date_word"
+             and not any(start <= hit.start and hit.start + len(hit.span) <= end for start, end in read)]
+    return [Decimal(m.group(1).replace(",", ".")) for m in percents], stray
+
+
+def _percents(values: list[Decimal]) -> str:
+    return f"percentages {[f'{value}%' for value in values]}" if values else "no percentage"
 
 
 def _string(value: Any) -> str:
@@ -299,6 +350,19 @@ _DISCOUNT_WORD = re.compile(_words("off", "discount", "discounts", "descuento", 
 _MARK = r"(?:US\$|\$|€|£|¥|USD|EUR|MXN)"
 _AMOUNT = r"(\d{1,3}(?:[., ]\d{3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?)"
 _CARD_AMOUNT = re.compile(rf"{_MARK} ?{_AMOUNT}(?!\d)|(?<![\d.,]){_AMOUNT} ?{_MARK}(?! ?\d)")
+# A quote card's discount (en "80%", es "80 %") and its expiry line, matched on the folded text:
+# en "Good until Tuesday, November 3, 2:00 pm", es "Válido hasta martes 3 de noviembre, 14:00".
+_CARD_PERCENT = re.compile(r"(?<![\d.,])(\d+(?:[.,]\d+)?) ?%")
+_EN_WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+_ES_WEEKDAYS = ("lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo")
+_ES_MONTHS = ("enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre",
+              "noviembre", "diciembre")
+_DAY_OF_MONTH = r"(?:[1-9]|[12]\d|3[01])"
+_EN_CLOCK, _ES_CLOCK = r"(?:[1-9]|1[0-2]):[0-5]\d [ap]m", r"(?:1?\d|2[0-3]):[0-5]\d"
+_EXPIRY_LINE = re.compile(
+    rf"good until (?:{'|'.join(_EN_WEEKDAYS)}), (?:{'|'.join(_EN_MONTHS)}) {_DAY_OF_MONTH}, {_EN_CLOCK}"
+    rf"|valido hasta (?:{'|'.join(_ES_WEEKDAYS)}) {_DAY_OF_MONTH} de (?:{'|'.join(_ES_MONTHS)}), {_ES_CLOCK}",
+    re.IGNORECASE)
 
 
 def _date_words(folded: str) -> list[re.Match]:

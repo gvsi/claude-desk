@@ -260,9 +260,10 @@ def naming(entries: list[LedgerEntry], decision: Decision) -> list[LedgerEntry]:
 
 def held_quote_card_problems(block: Any) -> list[str]:
     """How the slice's quote card departs from the held quote, read where the visitor reads it
-    (`card_amount_problems`): its title is the held total, and its title and lines show no amount
-    but that total and the drain's list price."""
-    return card_amount_problems(block, {HOLD_CENTS, P}, headline=HOLD_CENTS)
+    (`card_amount_problems`): its title is the held total, its title and lines show no amount but
+    that total and the drain's list price, no percentage but the held discount, and no other
+    number but the date the quote is good until."""
+    return card_amount_problems(block, {HOLD_CENTS, P}, headline=HOLD_CENTS, percents=[HOLD_DISCOUNT_BP // 100])
 
 
 async def verified_ledger(k: KernelHarness, desk: GoldenDesk) -> Any:

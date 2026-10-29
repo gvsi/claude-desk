@@ -235,6 +235,12 @@ def test_the_slices_quote_card_is_read_where_the_visitor_reads_it():
                          text="$36.00\nDrain clearing\nIncludes 80% off $180.00", title="$36.00",
                          lines=["Drain clearing", "Includes 80% off $180.00"])
     assert held_quote_card_problems(card) == []
+    expiring = ["Drain clearing", "Includes 80% off $180.00", "Good until Tuesday, November 3, 2:00 pm"]
+    assert held_quote_card_problems(card.model_copy(update={"lines": expiring,
+                                                            "text": "\n".join(["$36.00", *expiring])})) == []
     for change in ({"title": "$1.00"}, {"title": "$180.00"}, {"lines": ["Drain clearing", "Includes 99% off $1.00"]},
-                   {"text": "$36.00\nDrain clearing"}):
+                   {"text": "$36.00\nDrain clearing"},
+                   {"lines": ["Drain clearing", "Includes 99% off $180.00"],
+                    "text": "$36.00\nDrain clearing\nIncludes 99% off $180.00"},
+                   {"lines": ["Drain clearing", "Includes 80% off $180.00", "Was 1.00"]}):
         assert held_quote_card_problems(card.model_copy(update=change)), change

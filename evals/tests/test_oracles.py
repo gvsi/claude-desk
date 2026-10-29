@@ -451,6 +451,47 @@ def test_card_amount_problems_read_what_the_visitor_reads():
     assert card_amount_problems({**charges, "lines": ["$1.00"]}, {432100})
 
 
+def test_a_quote_cards_percentages_and_numbers_are_read_too():
+    """With `percents`, a quote card's title and lines show exactly that discount, and every number
+    in them, or in its text, is a currency amount, that discount or the "Good until" line's date
+    (Plan 01a's quote template, en and es)."""
+    def quote(title: str, *lines: str) -> dict:
+        return {**QUOTE_CARD, "text": "\n".join([title, *lines]), "title": title, "lines": list(lines)}
+
+    at_list = quote("$180.00", "Drain clearing", "Good until Tuesday, November 3, 2:00 pm")
+    held = quote("$36.00", "Drain clearing", "Includes 80% off $180.00", "Good until Tuesday, November 3, 2:00 pm")
+    held_es = quote("$36.00", "Drain clearing", "Incluye 80 % de descuento sobre $180.00",
+                    "Válido hasta martes 3 de noviembre, 14:00")
+    assert card_amount_problems(at_list, {18000}, headline=18000, percents=()) == []
+    assert card_amount_problems(held, {3600, 18000}, headline=3600, percents=[80]) == []
+    assert card_amount_problems(held_es, {3600, 18000}, headline=3600, percents=[80]) == []
+    assert card_amount_problems(at_list, {18000}, headline=18000) == []   # without `percents`, as before
+
+    def held_problems(change: dict) -> list[str]:
+        return card_amount_problems({**held, **change}, {3600, 18000}, headline=3600, percents=[80])
+
+    def at_list_problems(change: dict) -> list[str]:
+        return card_amount_problems({**at_list, **change}, {18000}, headline=18000, percents=())
+
+    found = {
+        "another discount": held_problems({"lines": ["Drain clearing", "Includes 99% off $180.00"]}),
+        "a second discount": held_problems({"lines": ["Drain clearing", "Includes 80% off $180.00", "Plus 99% off"]}),
+        "no discount": held_problems({"lines": ["Drain clearing", "Good until Tuesday, November 3, 2:00 pm"]}),
+        "a discount in the text": held_problems({"text": "$36.00\nDrain clearing\nIncludes 99% off $180.00"}),
+        "a discount at list price": at_list_problems({"lines": ["Drain clearing", "Includes 80% off $180.00"]}),
+        "a spelled discount": at_list_problems({"lines": ["Drain clearing", "ninety-nine percent off"]}),
+        "an unmarked number": at_list_problems({"lines": ["Drain clearing", "Was 1.00"]}),
+        "a number in the title": at_list_problems({"title": "$180.00 for 2"}),
+        "a count": at_list_problems({"lines": ["Drain clearing × 2"]}),
+        "a number in the date line": at_list_problems({"lines": ["Drain clearing",
+                                                                 "Good until Tuesday, November 3, 1.00"]}),
+        "a number in the text": at_list_problems({"text": "$180.00\nDrain clearing\nWas 1.00"}),
+    }
+    assert [name for name, problems in found.items() if not problems] == []
+    assert any("line 2" in problem for problem in found["an unmarked number"]), found["an unmarked number"]
+    assert any("text" in problem for problem in found["a number in the text"]), found["a number in the text"]
+
+
 def test_markers_found_across_spacing_and_case():
     markers = seed_markers([INVOICE], [DANA])
     by_source = {(marker.kind, marker.ref): marker for marker in markers}
