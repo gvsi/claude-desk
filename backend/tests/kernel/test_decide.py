@@ -15,6 +15,7 @@ from datetime import timedelta
 
 import desk_kernel
 import httpx
+import psycopg
 import pytest
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -24,6 +25,7 @@ from sqlalchemy import select
 from desk.contracts import Claim, Decision, Fact, Label, NotificationDefaults, ResourceRef, Review, RuleCard
 from desk.db import session as db_session
 from desk.db.models import Action, ActorSession, DemoInboxEntry, Desk
+from desk.db.session import database_url, libpq_url
 from desk.db.models import Decision as DecisionRow
 from desk.kernel_service import activation, adapters, auth, compiler, desks, ledger, render
 from desk.kernel_service.adapters.base import Normalized, NormalizeCtx
@@ -381,6 +383,93 @@ async def test_stale_generation_is_409_and_ledgered(app, client, registry):
     refusals = [(e.event.session_id, e.event.summary) for e in await ledger_rows(app, rows) if e.event.kind == "auth"]
     assert refusals == [(visitor.session_id, {"route": "POST /decide", "reason": "stale_generation"})] * 2
     assert (await decided(client, visitor, "native.quote")).outcome == "allow"   # at its generation it goes through
+
+
+async def test_decide_after_a_committed_take_over_is_409(app, client, registry, monkeypatch, frozen_clock):
+    website = FakeAdapter("native.fetch_website", effects=["read"])
+    rows = await desk_with(app, [FakeAdapter("native.quote"), website],
+                           [card("quote", "native.quote"), card("site", "native.fetch_website")])
+    visitor = await open_visitor(client, rows)
+    lock_session = auth.lock_session
+    # each change commits on its own connection after the token check read the row, before the lock
+    changes = {visitor.session_id: lambda: set_mode(client, rows, visitor.session_id, "owner", 0),
+               rows.owner_session_id: lambda: set_session(app, rows, rows.owner_session_id,
+                                                          closed_at=frozen_clock.now())}
+
+    async def changed_first(ctx, session_id):
+        await changes.pop(session_id)()
+        return await lock_session(ctx, session_id)
+
+    monkeypatch.setattr(auth, "lock_session", changed_first)
+    response = await post_decide(client, visitor, "native.quote")
+    assert (response.status_code, response.json()) == (409, {"code": "stale_generation"})
+    # the owner's own session is read under the lock too
+    response = await owner_decide(client, rows, "native.fetch_website", desk_id=rows.desk_id)
+    assert (response.status_code, response.json()) == (409, {"code": "closed"})
+    assert changes == {}
+    assert await decisions_of(app, rows) == []
+    entries = [(e.event.kind, e.event.session_id, e.event.summary) for e in await ledger_rows(app, rows)
+               if e.event.kind in ("takeover", "auth", "decide")]
+    assert entries == [("takeover", visitor.session_id, {"from": "ai", "to": "owner", "generation": 1}),
+                       ("auth", visitor.session_id, {"route": "POST /decide", "reason": "stale_generation"})]
+
+
+async def a_statement_waits_for_a_lock(within: float = 5.0) -> bool:
+    """Whether a statement in this test database comes to wait for a lock another transaction holds."""
+    async with await psycopg.AsyncConnection.connect(libpq_url(database_url("ADMIN")), autocommit=True) as admin:
+        for _ in range(int(within / 0.02)):
+            waiting = await (await admin.execute(
+                "SELECT count(*) FROM pg_locks JOIN pg_stat_activity USING (pid)"
+                " WHERE NOT granted AND datname = current_database()")).fetchone()
+            if waiting[0]:
+                return True
+            await asyncio.sleep(0.02)
+    return False
+
+
+async def test_take_over_waits_for_a_decision_in_flight(app, client, registry):
+    quote = FakeAdapter("native.quote")
+    rows = await desk_with(app, [quote], [card("quote", "native.quote")])
+    visitor = await open_visitor(client, rows)
+    evaluating, release = asyncio.Event(), asyncio.Event()
+
+    async def held(nctx: NormalizeCtx, args) -> Normalized:
+        evaluating.set()
+        await release.wait()
+        return Normalized(resource=ResourceRef(kind="desk", id=nctx.desk_row.desk_id, owner_person_id=None))
+
+    quote.script["normalize"] = held
+    deciding = asyncio.create_task(decided(client, visitor, "native.quote"))
+    await asyncio.wait_for(evaluating.wait(), 5)                          # the decision is mid-evaluation
+    taking_over = asyncio.create_task(set_mode(client, rows, visitor.session_id, "owner", 0))
+    assert await a_statement_waits_for_a_lock()                           # the session row the decision holds
+    assert not taking_over.done()
+    release.set()
+    decision, state = await asyncio.wait_for(asyncio.gather(deciding, taking_over), 10)
+    assert (decision.outcome, decision.action.generation) == ("allow", 0)
+    assert (state["mode"], state["generation"]) == ("owner", decision.action.generation + 1)
+    seqs = {e.event.kind: e.seq for e in await ledger_rows(app, rows) if e.event.kind in ("decide", "takeover")}
+    assert seqs["decide"] == decision.ledger_seq < seqs["takeover"]       # the take-over came after the commit
+
+
+async def test_strike_still_pauses_under_the_lock(app, client, registry, reviewer):
+    reviewer.answer = BLOCKS["failing_scores"]
+    rows = await desk_with(app, [booking()], REVIEWED_BOOKINGS)
+    visitor = await open_visitor(client, rows)
+    # three blocks at once: each decision counts its strike on the session row it holds
+    responses = await asyncio.wait_for(asyncio.gather(
+        *(post_decide(client, visitor, "native.book", call_id=f"call-{n}") for n in (1, 2, 3))), 15)
+    assert [response.status_code for response in responses] == [200] * 3, [r.text for r in responses]
+    decisions = [Decision.model_validate(response.json()) for response in responses]
+    assert [d.outcome for d in decisions] == ["hold"] * 3
+    assert sorted(len(d.inbox) for d in decisions) == [1, 1, 2]           # the third strike also paused it
+    breaker = [e.event.summary for e in await ledger_rows(app, rows) if e.event.kind == "breaker"]
+    assert breaker == [{"strike": 1}, {"strike": 2}, {"strike": 3}, {"paused": True}]
+    row = await session_row(app, rows, visitor.session_id)
+    assert (row.mode, row.strikes, row.generation) == ("paused", 3, 0)
+    paused = await decided(client, visitor, "native.book", call_id="call-4")
+    assert (paused.outcome, paused.action, paused.reason_plain) == (
+        "refuse", None, "A stranger asked to book a visit. The conversation is paused, so it was refused.")
 
 
 async def add_desk(app: FastAPI, rows: CopyRows, fakes: list[FakeAdapter], cards: list[RuleCard]) -> str:

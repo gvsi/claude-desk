@@ -117,9 +117,10 @@ async def caller(ctx: KernelCtx, request: Request, session_id: str | None) -> Li
 
 
 async def require_session(ctx: KernelCtx, request: Request, session_id: str, *, generation: int | None = None,
-                          desk_id: str | None = None) -> SessionRow:
+                          desk_id: str | None = None, lock: bool = False) -> SessionRow:
     """The visitor or agent session `session_id`, once `X-Session-Token` proves it ("Session state
-    responses", first four rows in order). Binds the request's transaction to the session's copy."""
+    responses", first four rows in order). Binds the request's transaction to the session's copy.
+    With `lock`, the closed and generation checks run on the row as `lock_session` reads it."""
     route = route_template(request)
     copy_id = await repo.copy_of_session_id(ctx, session_id)
     if copy_id is None:
@@ -133,9 +134,21 @@ async def require_session(ctx: KernelCtx, request: Request, session_id: str, *, 
         raise AuthError(401, "auth", "bad_token", route=route, named=named)
     if desk_id is not None and desk_id != row.desk_id:
         raise AuthError(404, "not_found", "wrong_copy", route=route, named=named)
+    if lock:
+        row = await lock_session(ctx, row.session_id)
     require_open(ctx, request, row, generation=generation)
     row.last_seen_at = ctx.clock.now()
     return row
+
+
+async def lock_session(ctx: KernelCtx, session_id: str) -> SessionRow:
+    """The session's row read again under `FOR UPDATE` and held until the transaction ends. A
+    take-over or hand-back locks the same row, so one that committed first shows its generation and
+    mode here, and one that comes later waits for this transaction. Take it only once the caller's
+    token is proved, so a request without the token can't hold up a take-over."""
+    return (await ctx.db.scalars(ctx.repo.scoped(
+        select(SessionRow).where(SessionRow.session_id == session_id).with_for_update()
+        .execution_options(populate_existing=True)))).one()
 
 
 async def require_session_token(ctx: KernelCtx, request: Request) -> SessionRow:
@@ -202,12 +215,13 @@ async def require_owner(ctx: KernelCtx, request: Request, *, desk_id: str | None
 
 
 async def require_caller(ctx: KernelCtx, request: Request, session_id: str, desk_id: str | None, *,
-                         generation: int | None = None) -> tuple[SessionRow, Desk]:
+                         generation: int | None = None, lock: bool = False) -> tuple[SessionRow, Desk]:
     """The session a call that takes either credential acts for, and the Desk it acts on, once the
     session-state rows pass ("Session state responses"): a session's own token, on its own Desk; or
     the owner's token, for the owner's own session and a Desk of its copy. Then open, at
     `generation` when the call carries one, on a Desk not deleted (409 `closed`). Binds the
-    request's transaction to the caller's copy.
+    request's transaction to the caller's copy. With `lock`, the closed and generation checks run
+    on the session's row as `lock_session` reads it, held until the transaction ends.
 
     The owner must name its Desk, and a request that doesn't is 422 only once the caller is
     known, so a bad token is always 401 and acting as another session is always ledgered."""
@@ -219,11 +233,11 @@ async def require_caller(ctx: KernelCtx, request: Request, session_id: str, desk
                             named=Named(copy_id=owner.copy_id, session_id=session_id))
         if desk_id is None:
             raise KernelFailure(422, "invalid", "owner_names_no_desk")
-        row = (await ctx.db.scalars(ctx.repo.scoped(
+        row = await lock_session(ctx, owner.session_id) if lock else (await ctx.db.scalars(ctx.repo.scoped(
             select(SessionRow).where(SessionRow.session_id == owner.session_id)))).one()
         require_open(ctx, request, row, generation=generation)
     else:
-        row = await require_session(ctx, request, session_id, generation=generation, desk_id=desk_id)
+        row = await require_session(ctx, request, session_id, generation=generation, desk_id=desk_id, lock=lock)
     return row, await require_desk(ctx, request, row, desk_id or row.desk_id)
 
 

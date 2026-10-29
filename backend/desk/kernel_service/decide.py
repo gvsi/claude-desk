@@ -6,7 +6,8 @@ Optional attributes appear only when set, since the schema reads them behind `ha
 `owner_approved` is never sent: the engine sets it for each evaluation, over any value sent.
 
 `decide_call` runs "Evaluation" for one call, after the route has answered the session-state
-rows ("Session state responses": token, copy, closed, generation, mode `owner`):
+rows ("Session state responses": token, copy, closed, generation, mode `owner`) on the session
+row, which the route holds locked until the decision commits:
 
 0. A call ID the decisions table can't keep (`keepable_call_id`) is 422 `invalid`.
 1. Idempotency on `(session_id, generation, call_id)`: the same call returns its stored decision,
@@ -760,9 +761,13 @@ router = APIRouter()
 async def _decide_caller(ctx: KernelCtx, request: Request, body: DecideRequest) -> tuple[Principal, SessionRow]:
     """The session `/decide` acts for, once the session-state rows pass: its token (or the owner's,
     for the owner's own session and a Desk of its copy), copy and Desk, open, at its generation, and
-    not taken over by the owner. A paused session passes: its decisions are stored refusals."""
+    not taken over by the owner. A paused session passes: its decisions are stored refusals.
+
+    Once the token is proved, the session row is locked (`auth.lock_session`) for the rest of the
+    request, so the closed, generation and mode checks see its current state, and a take-over or
+    hand-back comes either before the whole decision (409) or after it commits."""
     row, desk_row = await auth.require_caller(ctx, request, body.session_id, body.desk_id,
-                                              generation=body.generation)
+                                              generation=body.generation, lock=True)
     if row.mode == "owner":
         raise AuthError(409, "mode_owner", "mode_owner", route=route_template(request),
                         named=Named(copy_id=row.copy_id, desk_id=desk_row.desk_id, session_id=row.session_id))
