@@ -1,6 +1,13 @@
 /* Button: one of three weights, two heights, plus the danger variants for answers that refuse.
    Hover fills change at motion-instant; a press shrinks the button slightly at motion-fast.
    Nothing moves under reduced motion. */
+/* Button: one of three weights, two heights. Hover fills change at motion-instant; a press
+   shrinks the button slightly at motion-fast. Nothing moves under reduced motion.
+
+   A label longer than its line (a phone's, or a narrow column's) wraps inside the button, in
+   balanced lines, and the button grows taller with the same padding: it is never wider than its
+   container, and the vertical padding makes one line exactly size-control (or size-control-main)
+   tall, so a short label looks as it always has. */
 
 .cd-button {
   display: inline-flex;
@@ -8,14 +15,17 @@
   justify-content: center;
   gap: var(--space-6);
   box-sizing: border-box;
-  height: var(--size-control);
+  max-width: 100%;
+  min-height: var(--size-control);
   margin: 0;
-  padding: 0 var(--space-12);
+  padding: calc((var(--size-control) - 1lh) / 2) var(--space-12);
   border: 0;
   border-radius: var(--radius-control);
   background: transparent;
   color: var(--text-primary);
-  white-space: nowrap;
+  text-align: center;
+  text-wrap: balance;
+  overflow-wrap: break-word;
   text-decoration: none;
   cursor: pointer;
   transition:
@@ -25,8 +35,8 @@
 }
 
 .cd-button--main {
-  height: var(--size-control-main);
-  padding: 0 var(--space-14);
+  min-height: var(--size-control-main);
+  padding: calc((var(--size-control-main) - 1lh) / 2) var(--space-14);
 }
 
 /* Two classes, so the weight wins over .cd-type-control whatever order the stylesheets load in. */
@@ -37,7 +47,7 @@
 }
 
 .cd-button--primary.cd-button--main {
-  padding: 0 var(--space-16);
+  padding-inline: var(--space-16);
 }
 
 /* A menu button: its words, then a 16 px chevron. The chevron's own margin sits inside the icon,

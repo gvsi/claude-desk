@@ -102,6 +102,70 @@ export const BusyGhost: Story = {
   },
 };
 
+/** A phone's line: 390 px less the 16 px gutter on each side. */
+const PHONE_LINE = 358;
+
+/** The text's line boxes inside a button, from the browser's layout. */
+function lineBoxes(button: HTMLElement): DOMRect[] {
+  const range = document.createRange();
+  range.selectNodeContents(button);
+  return [...range.getClientRects()].filter((box) => box.width > 0);
+}
+
+export const LongLabel: Story = {
+  args: { children: 'Pedir hablar con María Guadalupe Fernández de la Torre' },
+  render: (args) => (
+    <div style={{ display: 'grid', rowGap: 'var(--space-24)' }}>
+      {/* The public page's ask button on a phone, with a long owner's name. */}
+      <div data-testid="narrow" style={{ width: PHONE_LINE, maxWidth: '100%' }}>
+        <Button {...args} />
+      </div>
+      {/* The take-over bar's controls column: full-width main buttons, one above the other. */}
+      <div data-testid="narrow" style={{ display: 'flex', flexDirection: 'column', width: 'var(--size-margin)' }}>
+        <Button {...args} size="main" />
+      </div>
+      {/* A short label keeps the control heights. */}
+      <div data-testid="short" style={{ display: 'flex', gap: 'var(--space-8)', alignItems: 'flex-start' }}>
+        <Button variant="secondary">Keep it</Button>
+        <Button variant="primary" size="main">
+          Join the chat
+        </Button>
+      </div>
+    </div>
+  ),
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      "No board shows a label wider than its line; on a phone, or in the take-over bar's controls column, a long label wraps inside the button instead of running past it.",
+  },
+  play: async ({ canvas }) => {
+    for (const container of canvas.getAllByTestId('narrow')) {
+      const button = container.querySelector<HTMLElement>('.cd-button');
+      if (!button) throw new Error('no button in the narrow container');
+      const box = button.getBoundingClientRect();
+      const edge = container.getBoundingClientRect();
+      // long_label_wraps_inside_the_button: nothing runs past the button or its line.
+      await expect(button.scrollWidth).toBeLessThanOrEqual(button.clientWidth);
+      await expect(box.left).toBeGreaterThanOrEqual(edge.left - 0.5);
+      await expect(box.right).toBeLessThanOrEqual(edge.right + 0.5);
+      // The label takes more than one line, and every line keeps the button's side padding.
+      const lines = lineBoxes(button);
+      await expect(new Set(lines.map((line) => Math.round(line.top))).size).toBeGreaterThan(1);
+      const padding = Number.parseFloat(getComputedStyle(button).paddingLeft);
+      await expect(padding).toBeGreaterThanOrEqual(12);
+      for (const line of lines) {
+        await expect(line.left).toBeGreaterThanOrEqual(box.left + padding - 0.5);
+        await expect(line.right).toBeLessThanOrEqual(box.right - padding + 0.5);
+        await expect(line.top).toBeGreaterThanOrEqual(box.top);
+        await expect(line.bottom).toBeLessThanOrEqual(box.bottom);
+      }
+    }
+    // One line of label is still exactly a control's height: 32 px inline, 40 px main.
+    expectComputed(canvas.getByRole('button', { name: 'Keep it' }), { height: '32px' });
+    expectComputed(canvas.getByRole('button', { name: 'Join the chat' }), { height: '40px' });
+  },
+};
+
 export const AsLink: Story = {
   args: { href: '/pay/k7Hq2vX9', children: 'Open payment page' },
   parameters: { canvasNote: 'The board has no link styled as a button; payment and document cards end with one.' },

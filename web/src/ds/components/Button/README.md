@@ -52,5 +52,6 @@
 A menu button keeps its variant's look, and its hover fill while its menu is open (`aria-expanded="true"`); its padding is `space-14` before the words and `space-10` after the chevron (`space-12` and `space-8` inline), because the icon carries its own margin.
 
 Disabled dims every variant to 40%. Busy never dims: each variant steps to listed token colors, as `busy` above says. Focus shows the base stylesheet's 2 px `accent-blue` ring at a 2 px offset on every variant.
+A label longer than its line, such as a long name on a phone or in the take-over bar's controls column, wraps inside the button in balanced lines, and the button grows taller with the same padding. It is never wider than its container, and one line of label keeps it exactly `size-control` (or `size-control-main`) tall.
 
 Hover fills change at `motion-instant`; a press scales to 0.98 at `motion-fast` with `motion-ease-emphasis`. Nothing moves under reduced motion.
