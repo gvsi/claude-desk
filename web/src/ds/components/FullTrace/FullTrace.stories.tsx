@@ -55,7 +55,7 @@ export const Verified: Story = {
     // The plain line says what the entry records and who wrote it, before any of the record.
     const plain = trace.querySelector<HTMLElement>('.cd-full-trace__plain');
     if (!plain) throw new Error('no plain line');
-    await expect(plain).toHaveTextContent('A decision on an action Claude asked to take. Recorded by the safety checks.');
+    await expect(plain).toHaveTextContent('A decision on an action Claude asked to take. Recorded by the checkpoint.');
 
     // The record, field by field, as the kernel signed it.
     const values = new Map(

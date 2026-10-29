@@ -57,7 +57,7 @@ function DanaOpening({ onOpenTrace }: { onOpenTrace: (ledgerSeq: number) => void
     <Transcript label={`Conversation with ${dana.name}`}>
       <TranscriptHeader
         left="Today at 12:04, web chat from the Rivera Plumbing page"
-        right="Notes from the checks. Select one for the full trace."
+        right="Notes from the checkpoint. Select one for the full trace."
       />
       <TranscriptRow>
         <VisitorMessage text={question} />
@@ -131,7 +131,7 @@ export const ReplyWithReceipts: Story = {
   render: () => <DanaOpening onOpenTrace={fn()} />,
   parameters: {
     canvasNote:
-      "The board's quote is in Claude's prose and its notes sit in a margin column; here the quote is a card, and the kernel's lines for the quote and its reply check are attached under the reply, at every width.",
+      "The board's quote is in Claude's prose and its notes sit in a margin column; here the quote is a card, and the kernel's lines for the quote and its reply check are attached under the reply, at every width. The header's notes come from the checkpoint, as the full trace says, where the board says the checks.",
   },
   play: async ({ canvas, canvasElement }) => {
     const log = canvas.getByRole('log', { name: `Conversation with ${dana.name}` });
@@ -160,7 +160,7 @@ export const ReplyWithReceipts: Story = {
     await expect(left?.getBoundingClientRect().left).toBe(reply.left);
     await expect(right?.getBoundingClientRect().left).toBe(reply.left);
     await expect(right?.getBoundingClientRect().top).toBeGreaterThanOrEqual(left?.getBoundingClientRect().bottom ?? Number.POSITIVE_INFINITY);
-    await expect(right).toHaveTextContent('Notes from the checks. Select one for the full trace.');
+    await expect(right).toHaveTextContent('Notes from the checkpoint. Select one for the full trace.');
   },
 };
 

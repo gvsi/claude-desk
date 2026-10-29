@@ -3,11 +3,11 @@ import { describe, expect, it } from 'vitest';
 import type { LedgerEvent, LedgerPage } from '../../../api/contracts.ts';
 import { traceChainLine, traceLine } from './traceLine.ts';
 
-const RECORDED = 'Recorded by the safety checks.';
-const REPORTED = 'Reported by the chat service, and recorded as it was reported.';
+const RECORDED = 'Recorded by the checkpoint.';
+const REPORTED = 'Reported by the chat service, not checked by the checkpoint.';
 
 describe('traceLine', () => {
-  it('kernel_entries_are_recorded_by_the_checks', () => {
+  it('kernel_entries_are_recorded_by_the_checkpoint', () => {
     expect(traceLine({ kind: 'decide', origin: 'kernel' })).toBe(`A decision on an action Claude asked to take. ${RECORDED}`);
   });
 
@@ -17,7 +17,7 @@ describe('traceLine', () => {
   });
 
   it('unknown_origin_reads_as_reported_never_as_checked', () => {
-    // Only an entry the kernel wrote says the safety checks recorded it.
+    // Only an entry the kernel wrote says the checkpoint recorded it.
     for (const origin of ['bogus', 'Kernel', 'kernel ', '', undefined, null]) {
       const line = traceLine({ kind: 'decide', origin: origin as unknown as LedgerEvent['origin'] });
       expect(line, JSON.stringify(origin)).toBe(`A decision on an action Claude asked to take. ${REPORTED}`);

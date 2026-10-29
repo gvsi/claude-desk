@@ -24,10 +24,10 @@ const KIND_LINES = {
   desk_data: "A change to your Desk's details.",
 } as const satisfies Record<LedgerEvent['kind'], string>;
 
-/** Who wrote the entry. Entries from the chat service are recorded as it reported them. */
+/** Who wrote the entry: the checkpoint, or the chat service, whose report is recorded as it arrived, unchecked. */
 const ORIGIN_LINES = {
-  kernel: 'Recorded by the safety checks.',
-  api: 'Reported by the chat service, and recorded as it was reported.',
+  kernel: 'Recorded by the checkpoint.',
+  api: 'Reported by the chat service, not checked by the checkpoint.',
 } as const satisfies Record<LedgerEvent['origin'], string>;
 
 /**
