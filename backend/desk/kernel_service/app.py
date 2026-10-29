@@ -27,27 +27,28 @@ from typing import Annotated, Any
 
 import desk_kernel
 import uvicorn
-from fastapi import APIRouter, FastAPI, Request
+from fastapi import APIRouter, FastAPI, Path, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
-from pydantic import BeforeValidator
+from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel, BeforeValidator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from desk.contracts import DemoInboxEntry, LedgerEntry, LedgerEvent, LedgerPage, PolicyVersion
-from desk.db.models import Handoff
+from desk.db.models import Desk, Handoff
 from desk.db.session import KernelSession, database_url
 from desk.env import is_development
-from desk.kernel_api import (DeskUpdated, Health, KernelError, LedgerAppendRequest, PolicyConfirmRequest,
-                             PolicyDraftRequest)
-from desk.kernel_service import (activation, approvals, auth, context, copies, decide, demo_inbox, execute, ledger,
-                                 public, reply_check, sessions, verification)
+from desk.kernel_api import (CreateDeskRequest, DeskCreated, DeskUpdated, DocumentCreated, DocumentUploadRequest,
+                             Health, KernelError, LedgerAppendRequest, PolicyConfirmRequest, PolicyDraftRequest)
+from desk.kernel_service import (activation, approvals, auth, context, copies, decide, demo_inbox, desks, execute,
+                                 ledger, public, reply_check, sessions, verification)
 from desk.kernel_service.auth import AuthError, Named
 from desk.kernel_service.clock import Clock, SystemClock
 from desk.kernel_service.decisions import DecisionsBackend, make_decisions
-from desk.kernel_service.repo import Ctx, KernelFailure, KernelRuntime, kernel_transaction, log_error, route_template
+from desk.kernel_service.repo import (Ctx, KernelCtx, KernelFailure, KernelRuntime, kernel_transaction, log_error,
+                                      route_template)
 
 log = logging.getLogger("desk.kernel_service")
 
@@ -135,6 +136,7 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
     app.include_router(reply_check.router)
     app.include_router(public.router)
     app.include_router(verification.router)
+    app.include_router(desk_router)
     app.include_router(inbox_router)
     app.include_router(handoff_router)
     app.include_router(ledger_router)
@@ -148,6 +150,49 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
                       key_id=signer.key_id(), unproved_seeds=sorted(request.app.state.unproved_seeds))
 
     return app
+
+
+desk_router = APIRouter()
+
+
+@desk_router.post("/desks", response_model=DeskCreated)
+async def post_desk(body: CreateDeskRequest, ctx: Ctx, request: Request) -> DeskCreated:
+    """A new Desk in the owner's copy, with the starter preset (`ask_first`) active from its shipped
+    report, in one transaction: a preset with no report for the Desk's tools is 503
+    `seed_unproved` and creates nothing. A new Desk connects no MCP server (`/tools/connect` does)."""
+    owner = await desks.owner_alone(ctx, request)
+    if body.desk.connections:
+        raise KernelFailure(422, "invalid", "desk_connections")
+    created = await desks.create_desk(ctx, owner.copy_id, body.business, body.desk)
+    await activation.activate_shipped(ctx, created.desk_id, "ask_first")
+    return created
+
+
+@desk_router.delete("/desks/{id}", status_code=204)
+async def delete_desk(desk_id: Annotated[str, Path(alias="id")], ctx: Ctx, request: Request) -> Response:
+    """Deletes a Desk of the owner's copy (`desks.delete_desk`); its ledger stays readable."""
+    await desks.delete_desk(ctx, await desks.owner_desk(ctx, request, desk_id))
+    return Response(status_code=204)
+
+
+@desk_router.post("/documents", response_model=DocumentCreated)
+async def post_document(body: DocumentUploadRequest, ctx: Ctx, request: Request) -> DocumentCreated:
+    """A document on a Desk of the owner's copy, with a fresh canary (`desks.upload_document`)."""
+    return await desks.upload_document(ctx, await desks.owner_desk(ctx, request, body.desk_id), body.document)
+
+
+def _put_route(part: str, model: type[BaseModel]) -> None:
+    """`PUT /desks/{id}/<part>` with that part's body model (`desks.PARTS`)."""
+
+    async def put(desk_id: Annotated[str, Path(alias="id")], body: model, ctx: Ctx,   # type: ignore[valid-type]
+                  request: Request) -> DeskUpdated:
+        return await desks.put_part(ctx, request, desk_id, part, body)
+
+    desk_router.put(f"/desks/{{id}}/{part}", response_model=DeskUpdated, name=f"put_desk_{part}")(put)
+
+
+for _part, (_model, _) in desks.PARTS.items():
+    _put_route(_part, _model)
 
 
 inbox_router = APIRouter()
@@ -249,6 +294,7 @@ async def post_policy_draft(body: PolicyDraftRequest, ctx: Ctx, request: Request
     """The owner's cards as a draft version, proved (or, in `bounded` mode, checked) before it
     answers; idempotent, so a re-post waits for the running proof and gets the same version."""
     owner = await auth.require_owner(ctx, request, desk_id=body.desk_id)
+    await _open_desk(ctx, request, body.desk_id)
     return await activation.draft(ctx, owner, body.desk_id, body.cards, body.expected_parent)
 
 
@@ -257,7 +303,17 @@ async def post_policy_confirm(body: PolicyConfirmRequest, ctx: Ctx, request: Req
     """Activates a proved draft while its parent is still active and what it was proved against
     is current; 409 `conflict` otherwise, ledgered with the reason."""
     await auth.require_owner(ctx, request, desk_id=body.desk_id)
+    await _open_desk(ctx, request, body.desk_id)
     return await activation.confirm(ctx, body.desk_id, body.version)
+
+
+async def _open_desk(ctx: KernelCtx, request: Request, desk_id: str) -> None:
+    """A deleted Desk's rules don't change (409 `closed`, ledgered on it)."""
+    deleted_at = (await ctx.db.execute(ctx.repo.scoped(select(Desk.deleted_at).where(
+        Desk.desk_id == desk_id)))).scalar_one()
+    if deleted_at is not None:
+        raise AuthError(409, "closed", "closed", route=route_template(request),
+                        named=Named(copy_id=ctx.copy_id, desk_id=desk_id))
 
 
 def error_response(status: int, code: str, headers: dict[str, str] | None = None) -> JSONResponse:

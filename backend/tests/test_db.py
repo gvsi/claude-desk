@@ -832,6 +832,8 @@ def test_visitor_payloads_validate_against_contracts(api_tx):
 
 
 COPY_POLICY = "(copy_id = NULLIF(current_setting('desk.copy_id'::text, true), ''::text))"
+# What each kernel_ro view's owner reads beyond its copy: kernel_ro.people skips removed people (01b_3_people)
+COPY_READ_POLICY = {"people": f"({COPY_POLICY} AND (removed_at IS NULL))"}
 # What the copy resolvers' role may read: the copy and the lookup key of each table, in every copy.
 RESOLVER_READS = {"copies": {"copy_id"}, "sessions": {"copy_id", "secret_hash", "session_id"},
                   "desks": {"copy_id", "slug"}, "decisions": {"copy_id", "decision_id"}}
@@ -859,7 +861,8 @@ def test_every_kernel_table_forces_copy_row_security(admin):
         if name == "copy_scope":
             assert policy == [["desk_kernel"], "ALL", "PERMISSIVE", COPY_POLICY, COPY_POLICY], table
         elif name == "copy_read":
-            assert policy == [["desk_ro_owner"], "SELECT", "PERMISSIVE", COPY_POLICY, None], table
+            qual = COPY_READ_POLICY.get(table, COPY_POLICY)
+            assert policy == [["desk_ro_owner"], "SELECT", "PERMISSIVE", qual, None], table
         else:   # every copy, but only the columns in RESOLVER_READS (test_copy_resolvers_are_narrow)
             assert policy == [["desk_resolver"], "SELECT", "PERMISSIVE", "true", None], table
 

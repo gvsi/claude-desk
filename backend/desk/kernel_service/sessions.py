@@ -3,6 +3,7 @@
 A session's state and principal are built from the kernel's own rows, never from a request.
 """
 
+import hmac
 from typing import Annotated
 
 from fastapi import APIRouter, Path, Request
@@ -46,6 +47,9 @@ def principal_for(row: SessionRow, *, desk_id: str | None = None) -> Principal:
 
 @router.post("/sessions", response_model=SessionCreated)
 async def create_session(body: CreateSessionRequest, ctx: Ctx, request: Request) -> SessionCreated:
+    """A visitor session on the Desk the slug names. A preview (`preview: true`) is the owner trying
+    the Desk as a customer, so it needs `X-Owner-Session` of the slug's copy (else 401 `auth`,
+    ledgered on the Desk); it gets a visitor's tools even while Answering is off."""
     copy_id = await repo.copy_of_desk_slug(ctx, body.desk_slug)
     if copy_id is None:
         raise KernelFailure(404, "not_found", "unknown_desk")
@@ -54,27 +58,43 @@ async def create_session(body: CreateSessionRequest, ctx: Ctx, request: Request)
     named = Named(copy_id=copy_id, desk_id=desk.desk_id)
     if body.kind == "agent":
         raise AuthError(401, "auth", "agent_auth_unavailable", route=route_template(request), named=named)
-    if body.preview:
+    if body.preview and not await _owner_of(ctx, request, copy_id):
         raise AuthError(401, "auth", "preview_unavailable", route=route_template(request), named=named)
     if desk.deleted_at is not None:
         raise AuthError(409, "closed", "closed", route=route_template(request), named=named)
-    row, token = await open_visitor(ctx, copy_id, desk.desk_id)
+    row, token = await open_visitor(ctx, copy_id, desk.desk_id, preview=body.preview)
     return SessionCreated(state=session_state(row), session_token=token)
 
 
-async def open_visitor(ctx: KernelCtx, copy_id: str, desk_id: str) -> tuple[SessionRow, str]:
+async def _owner_of(ctx: KernelCtx, request: Request, copy_id: str) -> bool:
+    """Whether `X-Owner-Session` proves an open owner session of the copy `copy_id`, which the
+    request's transaction is bound to."""
+    token = request.headers.get(auth.OWNER_HEADER)
+    token_hash = auth.hash_token(token) if token else None
+    if token_hash is None or await repo.copy_of_session_token(ctx, token_hash) != copy_id:
+        return False
+    row = (await ctx.db.scalars(ctx.repo.scoped(
+        select(SessionRow).where(SessionRow.secret_hash == token_hash)))).one_or_none()
+    return (row is not None and row.kind == "owner" and row.closed_at is None
+            and hmac.compare_digest(row.secret_hash, token_hash))
+
+
+async def open_visitor(ctx: KernelCtx, copy_id: str, desk_id: str, *, preview: bool = False
+                       ) -> tuple[SessionRow, str]:
     """A new, unverified visitor session on the Desk and its token (stored only as its hash), with
-    its `session` ledger entry, in the caller's transaction."""
+    its `session` ledger entry, in the caller's transaction; the owner's preview is marked
+    `preview` in its row and its entry."""
     now = ctx.clock.now()
     token = auth.new_token()
     row = SessionRow(session_id=auth.new_session_id(), copy_id=copy_id, desk_id=desk_id, kind="visitor",
                      secret_hash=auth.hash_token(token), verified=False, assurance="none", mode="ai", generation=0,
-                     strikes=0, preview=False, created_at=now, last_seen_at=now)
+                     strikes=0, preview=preview, created_at=now, last_seen_at=now)
     ctx.db.add(row)
     await ctx.db.flush()
+    summary = {"session_id": row.session_id, "kind": row.kind} | ({"preview": True} if preview else {})
     await ledger.append(ctx, copy_id=copy_id, desk_id=desk_id,
                         event=LedgerEvent(kind="session", origin="kernel", session_id=row.session_id,
-                                          summary={"session_id": row.session_id, "kind": row.kind}))
+                                          summary=summary))
     return row, token
 
 

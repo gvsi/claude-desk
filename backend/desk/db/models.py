@@ -130,6 +130,7 @@ class Person(Base):
     ref: Mapped[str] = mapped_column(Text)                   # the seed's handle, unique per Desk
     contact: Mapped[str] = mapped_column(Text)               # on record; verification codes go only here; never in a view
     contact_norm: Mapped[str] = mapped_column(Text)          # normalized for lookup; never in a view
+    removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))   # on record for no one once set
 
 
 class Lead(Base):
