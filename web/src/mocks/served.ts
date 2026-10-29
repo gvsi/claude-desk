@@ -1,11 +1,13 @@
 /**
- * The routes the mock API answers, the way Plan 02's API does, from and into the copy: `Server`
- * holds the copy, this browser's cookies and the turns in progress, and `SERVED` answers each
- * route from it. Cookies are modelled, not set: the owner is signed in or not, and each Desk slug
- * may name one visitor session, as the API's HttpOnly cookies would. Nothing here is a credential.
+ * The routes the mock API answers, the way Plan 02's API does, from and into a copy: `Server`
+ * holds one copy and its turns in progress, and `SERVED` answers each route from it and from the
+ * request's cookies (`Cookies`), the owner cookie for the copy and a visitor cookie per Desk slug
+ * naming a session. The store (store.ts) finds the copy a request reaches, by `reachOf`, and its
+ * cookies: kept in the store for the screen tests' one page, real ones on the dev server. Nothing
+ * here is a credential.
  */
 import type { ApprovalAnswer, Decision, DeskUpdated } from '../api/contracts.ts';
-import { ROUTES, type RouteKey, type RouteResponse } from '../api/routes.ts';
+import { ROUTES, type RouteKey, type RouteResponse, type RouteSpec } from '../api/routes.ts';
 import type { ApprovalAnswerOut, CancelAccepted, MessageAccepted, VisitorSession } from '../api/views.ts';
 import {
   attempts,
@@ -31,13 +33,30 @@ const MESSAGE_MAX = 2000;
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-/** A request as a route sees it: path params, query, the parsed JSON body. */
+/**
+ * The cookies a request carries, as the API reads who is asking from them, and the ones its answer
+ * sets: `desk_owner` for the copy the request reached, and `desk_visitor` for a Desk's slug,
+ * naming one of its sessions.
+ */
+export interface Cookies {
+  /** The request carries the owner cookie of the copy it reached. */
+  readonly owner: boolean;
+  /** The session the request's visitor cookie names for `slug`, if it names one. */
+  visitor(slug: string): string | undefined;
+  /** Answers with the owner cookie for the copy the request reached. */
+  setOwner(): void;
+  /** Answers with the visitor cookie for `slug`, naming `sessionId`. */
+  setVisitor(slug: string, sessionId: string): void;
+}
+
+/** A request as a route sees it: path params, query, the parsed JSON body and its cookies. */
 export interface Req {
   params: Record<string, string>;
   query: URLSearchParams;
   body: unknown;
   /** A body was sent but wasn't JSON. */
   malformed: boolean;
+  cookies: Cookies;
 }
 
 /** The statuses a route answers its model with. */
@@ -67,8 +86,11 @@ export type Served<T> = ([T] extends [never] ? { status: 200; body?: undefined }
 /** Any route's answer, as the store hands it to the transport. */
 export type AnyServed = { status: number; body?: unknown };
 
-/** The routes the mock answers, each one's answer checked against its route's model. */
+/** The routes the mock answers from a copy, each one's answer checked against its route's model. */
 type ServedRoutes = { [K in RouteKey]?: (sv: Server, req: Req) => Served<RouteResponse<K>> };
+
+/** The routes that answer without a copy. */
+type UnscopedRoutes = { [K in RouteKey]?: (req: Req) => Served<RouteResponse<K>> };
 
 const ok = <T>(body: T, status: OkStatus = 200): { status: OkStatus; body: T } => ({ status, body });
 export const failWith = (status: FailStatus, error: string, extra: Omit<ErrorBody, 'error'> = {}): Failure => ({
@@ -84,35 +106,39 @@ const ANSWERS: ReadonlySet<string> = new Set<ApprovalAnswer>(['allow_once', 'den
 
 type Scheduled = { step: Step; language: Language; text: string };
 
-/** The API's side: the copy, this browser's cookies, and the turns in progress. */
+/**
+ * How a store numbers its copies and names their payment links: the screen tests' one copy from
+ * 1, so its ids are the seed's, and the dev server's at random, so each copy's are its own.
+ */
+export interface CopyNaming {
+  /** A new copy's number, which its ids and slugs come from (seed.ts `copyIds`). */
+  copyNo(): number;
+  /** A new payment link's token, unique across the store's copies. */
+  linkToken(): string;
+}
+
+/** The API's side of one copy: the copy itself and the turns in progress. */
 export class Server {
   world: MockWorld;
-  copyNo = 1;
-  signedIn: boolean;
-  /** Desk slug → the session its visitor cookie names. */
-  readonly cookies = new Map<string, string>();
   private readonly turns = new Map<string, { queue: Scheduled[]; timer: ReturnType<typeof setTimeout> | null }>();
 
   constructor(
     readonly seed: MockSeed,
-    signedIn: boolean,
+    private readonly naming: CopyNaming,
   ) {
-    this.signedIn = signedIn;
     this.world = this.freshWorld();
   }
 
   private freshWorld(): MockWorld {
-    const world = new MockWorld(this.seed, this.copyNo);
+    const world = new MockWorld(this.seed, this.naming.copyNo(), () => this.naming.linkToken());
     seedWorld(world);
     return world;
   }
 
-  /** A new copy of the same seed, with new ids; the old copy's chats and turns are left behind. */
+  /** A new copy of the same seed, with new ids and slugs; the old copy's chats and turns are left behind. */
   startOver(): void {
     this.stopTurns();
-    this.copyNo += 1;
     this.world = this.freshWorld();
-    this.cookies.clear();
   }
 
   stopTurns(): void {
@@ -120,19 +146,19 @@ export class Server {
     this.turns.clear();
   }
 
-  /** The session this browser's cookie names for `slug`, or why there is none. */
-  visitor(slug: string | undefined): { desk: DeskRecord; session: SessionRecord } | Failure {
+  /** The session the request's visitor cookie names for `slug`, or why there is none. */
+  visitor(slug: string | undefined, cookies: Cookies): { desk: DeskRecord; session: SessionRecord } | Failure {
     const desk = this.world.deskBySlug(slug);
-    if (!desk) return NOT_FOUND;
-    const sessionId = slug === undefined ? undefined : this.cookies.get(slug);
+    if (!desk || slug === undefined) return NOT_FOUND;
+    const sessionId = cookies.visitor(slug);
     const session = sessionId === undefined ? undefined : this.world.sessions.get(sessionId);
     if (!session || session.deskId !== desk.summary.desk_id) return NO_SESSION;
     return { desk, session };
   }
 
-  /** The owner's Desk named in the path, or why the owner can't have it. */
-  ownerDesk(deskId: string | undefined): DeskRecord | Failure {
-    if (!this.signedIn) return NO_OWNER;
+  /** The owner's Desk named in the path, or why the request can't have it. */
+  ownerDesk(deskId: string | undefined, cookies: Cookies): DeskRecord | Failure {
+    if (!cookies.owner) return NO_OWNER;
     return this.world.desk(deskId) ?? NOT_FOUND;
   }
 
@@ -165,28 +191,28 @@ export class Server {
 
 export const isFailure = (value: Failure | object): value is Failure => 'status' in value;
 
-/** Every route the mock answers. The rest fall through to the catch-all, which records them. */
+/** Every route the mock answers from a copy. Unserved ones fall through to the catch-all, which records them. */
 const SERVED: ServedRoutes = {
   copies(sv, req) {
     const passcode = isRecord(req.body) ? req.body.passcode : undefined;
     if (req.malformed || typeof passcode !== 'string' || passcode === '') return INVALID;
     if (passcode === 'wrong') return failWith(401, 'wrong_passcode');
-    sv.signedIn = true;
+    req.cookies.setOwner();
     return ok(copyOut(sv.world), 201);
   },
-  startOver(sv) {
-    if (!sv.signedIn) return NO_OWNER;
+  startOver(sv, req) {
+    if (!req.cookies.owner) return NO_OWNER;
     sv.startOver();
     return ok(copyOut(sv.world));
   },
-  me(sv) {
-    return sv.signedIn ? ok(copyOut(sv.world)) : NO_OWNER;
+  me(sv, req) {
+    return req.cookies.owner ? ok(copyOut(sv.world)) : NO_OWNER;
   },
-  desks(sv) {
-    return sv.signedIn ? ok([businessOut(sv.world)]) : NO_OWNER;
+  desks(sv, req) {
+    return req.cookies.owner ? ok([businessOut(sv.world)]) : NO_OWNER;
   },
   setAnswering(sv, req) {
-    const desk = sv.ownerDesk(req.params.desk_id);
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
     if (isFailure(desk)) return desk;
     const on = isRecord(req.body) ? req.body.on : undefined;
     if (typeof on !== 'boolean') return INVALID;
@@ -194,31 +220,31 @@ const SERVED: ServedRoutes = {
     return ok({ desk_id: desk.summary.desk_id, updated_at: isoTime(sv.world.now()) } satisfies DeskUpdated);
   },
   openPreview(sv, req) {
-    const desk = sv.ownerDesk(req.params.desk_id);
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
     if (isFailure(desk)) return desk;
     const slug = desk.summary.slug;
-    const current = sv.visitor(slug);
+    const current = sv.visitor(slug, req.cookies);
     if (!isFailure(current) && current.session.ownerPreview) {
       return ok({ state: current.session.state, resumed: true } satisfies VisitorSession);
     }
     const session = sv.world.addSession(desk, { ownerPreview: true });
-    sv.cookies.set(slug, session.state.session_id);
+    req.cookies.setVisitor(slug, session.state.session_id);
     return ok({ state: session.state, resumed: false } satisfies VisitorSession);
   },
   today(sv, req) {
-    const desk = sv.ownerDesk(req.params.desk_id);
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
     return isFailure(desk) ? desk : ok(today(sv.world, desk));
   },
   needsYou(sv, req) {
-    const desk = sv.ownerDesk(req.params.desk_id);
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
     return isFailure(desk) ? desk : ok(needsYou(sv.world, desk));
   },
   reports(sv, req) {
-    const desk = sv.ownerDesk(req.params.desk_id);
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
     return isFailure(desk) ? desk : ok(reports(sv.world, desk));
   },
   answer(sv, req) {
-    if (!sv.signedIn) return NO_OWNER;
+    if (!req.cookies.owner) return NO_OWNER;
     const record = sv.world.decisions.get(req.params.decision_id ?? '');
     if (!record) return NOT_FOUND;
     const answer = isRecord(req.body) ? req.body.answer : undefined;
@@ -237,28 +263,25 @@ const SERVED: ServedRoutes = {
     return ok(out);
   },
   conversations(sv, req) {
-    const desk = sv.ownerDesk(req.params.desk_id);
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
     if (isFailure(desk)) return desk;
     const sessions = sv.world.sessionsOf(desk.summary.desk_id).sort((a, b) => b.lastActivity - a.lastActivity);
     return ok(sessions.map((s) => conversationSummary(sv.world, s)));
   },
   conversation(sv, req) {
-    if (!sv.signedIn) return NO_OWNER;
+    if (!req.cookies.owner) return NO_OWNER;
     const session = sv.world.sessions.get(req.params.session_id ?? '');
     if (!session) return NOT_FOUND;
     const after = Number(req.query.get('after') ?? '0');
     return ok(ownerTranscript(session, Number.isSafeInteger(after) ? after : 0));
   },
   safety(sv, req) {
-    const desk = sv.ownerDesk(req.params.desk_id);
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
     return isFailure(desk) ? desk : ok(attempts(sv.world, desk));
   },
   ledger(sv, req) {
-    const desk = sv.ownerDesk(req.params.desk_id);
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
     return isFailure(desk) ? desk : ok(ledgerPage(desk));
-  },
-  health() {
-    return ok(HEALTH);
   },
   publicDesk(sv, req) {
     const desk = sv.world.deskBySlug(req.params.slug);
@@ -269,18 +292,18 @@ const SERVED: ServedRoutes = {
     const slug = req.params.slug ?? '';
     const desk = sv.world.deskBySlug(slug);
     if (!desk) return NOT_FOUND;
-    const current = sv.visitor(slug);
+    const current = sv.visitor(slug, req.cookies);
     if (!isFailure(current)) return ok({ state: current.session.state, resumed: true } satisfies VisitorSession);
     const session = sv.world.addSession(desk);
-    sv.cookies.set(slug, session.state.session_id);
+    req.cookies.setVisitor(slug, session.state.session_id);
     return ok({ state: session.state, resumed: false } satisfies VisitorSession);
   },
   visitorSession(sv, req) {
-    const visitor = sv.visitor(req.params.slug);
+    const visitor = sv.visitor(req.params.slug, req.cookies);
     return isFailure(visitor) ? visitor : ok(visitorTranscript(visitor.session));
   },
   sendMessage(sv, req) {
-    const visitor = sv.visitor(req.params.slug);
+    const visitor = sv.visitor(req.params.slug, req.cookies);
     if (isFailure(visitor)) return visitor;
     const text = isRecord(req.body) ? req.body.text : undefined;
     if (req.malformed || typeof text !== 'string' || text.length < 1 || text.length > MESSAGE_MAX) return INVALID;
@@ -290,7 +313,7 @@ const SERVED: ServedRoutes = {
     return ok({ message_id: sv.world.id('vmsg') } satisfies MessageAccepted, 202);
   },
   cancelRequest(sv, req) {
-    const visitor = sv.visitor(req.params.slug);
+    const visitor = sv.visitor(req.params.slug, req.cookies);
     if (isFailure(visitor)) return visitor;
     const record = sv.world.decisions.get(req.params.decision_id ?? '');
     // Only a decision of this browser's own session: anyone else's is not found.
@@ -302,16 +325,47 @@ const SERVED: ServedRoutes = {
   },
   events(sv, req) {
     // A 200 opens the stream (handlers.ts); `listen` replays and follows it.
-    const visitor = sv.visitor(req.params.slug);
+    const visitor = sv.visitor(req.params.slug, req.cookies);
     return isFailure(visitor) ? visitor : { status: 200 };
   },
 };
 
-/** The routes the mock answers, in the route table's order. */
-export const SERVED_KEYS = (Object.keys(ROUTES) as RouteKey[]).filter((key) => key in SERVED);
+/** The routes that need no copy, which a request with no cookie reaches. */
+const UNSCOPED: UnscopedRoutes = {
+  health() {
+    return ok(HEALTH);
+  },
+};
 
-/** `key`'s answer from the copy, or null when the mock doesn't serve it. */
-export function serve(server: Server, key: RouteKey, req: Req): AnyServed | null {
+/** The routes the mock answers, in the route table's order. */
+export const SERVED_KEYS = (Object.keys(ROUTES) as RouteKey[]).filter((key) => key in SERVED || key in UNSCOPED);
+
+/**
+ * How a request to `key` finds the copy it is about, as the API does: a passcode starts one, owner
+ * routes go by the owner cookie, public routes by the Desk slug in the path (their session by the
+ * visitor cookie), payment routes by the link's token in the path, and the rest need none.
+ */
+export type Reach = 'passcode' | 'owner_cookie' | 'slug' | 'token' | 'none';
+
+export function reachOf(key: RouteKey): Reach {
+  const route: RouteSpec = ROUTES[key];
+  if (key === 'copies') return 'passcode';
+  if (key in UNSCOPED) return 'none';
+  if (route.owner) return 'owner_cookie';
+  if (route.path.includes('{slug}')) return 'slug';
+  if (route.path.includes('{token}')) return 'token';
+  throw new Error(`the mock has no way to find the copy for ${key}`);
+}
+
+/**
+ * `key`'s answer from `server`, the copy the request reached (null for a route that needs none),
+ * or null when the mock doesn't serve it.
+ */
+export function serve(server: Server | null, key: RouteKey, req: Req): AnyServed | null {
+  const unscoped = UNSCOPED[key];
+  if (unscoped) return unscoped(req);
   const route = SERVED[key];
-  return route ? route(server, req) : null;
+  if (!route) return null;
+  if (server === null) throw new Error(`${key} needs a copy`);
+  return route(server, req);
 }

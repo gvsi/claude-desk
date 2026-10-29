@@ -313,8 +313,10 @@ export interface TurnContext {
   inbox(fields: { to: string; body: string; preview: string }): EvDemoInbox;
   /** An open callback request in Needs you; the visitor becomes a lead under `lead`. */
   openHandoff(fields: { reason: string; callbackWindow: string | null; lead: string }): void;
-  /** A payment link for this session, `issued`. */
-  issueLink(token: string, fields: { title: string; amountCents: number }): void;
+  /** A payment link for this session, `issued`, with a token of its own. */
+  issueLink(fields: { title: string; amountCents: number }): void;
+  /** The token of the newest payment link issued in this session. */
+  latestLink(): string;
 }
 
 /** One event of a turn, made when its time comes. */
@@ -338,7 +340,10 @@ export interface ScriptRule {
 /** The verification code the invoice rule sends to the Demo inbox. */
 export const DEMO_CODE = '482913';
 
-/** The payment link the deposit rule issues, the one the fixtures' card points at. */
+/**
+ * The first payment link's token in the screen tests' copy, the one the fixtures' card points at.
+ * Every later link, and every link on the dev server, gets a random token of its own (store.ts).
+ */
 export const PAYMENT_TOKEN = 'k7Hq2vX9';
 
 /** The callback request the script records, as the visitor typed it. */
@@ -375,11 +380,12 @@ export const SCRIPT: readonly ScriptRule[] = [
     steps: [
       (ctx) => {
         const decision = ctx.decide(DECISIONS.paymentLink);
-        ctx.issueLink(PAYMENT_TOKEN, { title: 'Service call deposit', amountCents: 2000 });
+        ctx.issueLink({ title: 'Service call deposit', amountCents: 2000 });
         return ctx.status('receipt', decision);
       },
       writing,
-      (ctx) => ctx.reply([blocks.payment_link[ctx.language]]),
+      // The card points at the link this turn issued, by its own token.
+      (ctx) => ctx.reply([{ ...blocks.payment_link[ctx.language], href: `/pay/${ctx.latestLink()}` }]),
     ],
   },
   {

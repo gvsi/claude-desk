@@ -9,24 +9,13 @@ import './ds/tokens.css';
 import './ds/base.css';
 
 /**
- * In mode `mock` (`npm run dev:mock`) the mock API's service worker answers `/api/*` before the
- * app renders. The mode is fixed at build time, so a build carries no mock code.
+ * The app. It starts no mock: under `npm run dev:mock` the dev server answers `/api/` itself, once
+ * for every tab (src/mocks/devServer.ts), so a build carries no mock code.
  */
-async function startMockApi(): Promise<void> {
-  if (import.meta.env.MODE !== 'mock') return;
-  const { startMockApi: start } = await import('./mocks/browser.ts');
-  await start();
-}
-
-async function main(): Promise<void> {
-  await startMockApi();
-  const root = document.getElementById('root');
-  if (!root) throw new Error('index.html has no #root element');
-  createRoot(root).render(
-    <StrictMode>
-      <App router={createBrowserRouter(routes)} />
-    </StrictMode>,
-  );
-}
-
-void main();
+const root = document.getElementById('root');
+if (!root) throw new Error('index.html has no #root element');
+createRoot(root).render(
+  <StrictMode>
+    <App router={createBrowserRouter(routes)} />
+  </StrictMode>,
+);

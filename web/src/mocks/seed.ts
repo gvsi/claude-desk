@@ -32,7 +32,11 @@ export const RIVERA = {
   emergenciesSlug: 'rivera-plumbing-em24hr',
 } as const satisfies CopyIds;
 
-/** Each copy gets its own ids, as the API's do: copy 1 is `RIVERA`, later copies are numbered. */
+/**
+ * Each copy gets its own ids and slugs, as the API's do: copy 1 is `RIVERA`, later copies are
+ * numbered (the screen tests' start over makes copy 2). The dev server numbers its copies at random,
+ * with six base-36 digits, so a public link names one copy and a link from before a restart names none.
+ */
 export function copyIds(copyNo: number): CopyIds {
   if (copyNo === 1) return { ...RIVERA };
   const tag = copyNo.toString(36);

@@ -134,6 +134,8 @@ export class MockWorld {
   constructor(
     readonly seed: MockSeed,
     readonly copyNo: number,
+    /** A new payment link's token, from the store that holds the copy. */
+    private readonly linkToken: () => string,
   ) {
     this.ids = copyIds(copyNo);
   }
@@ -512,12 +514,18 @@ export class MockWorld {
       reply: (blocks, opts) => this.reply(session, blocks, language, opts),
       inbox: (fields) => this.addVisitorInbox(session, fields),
       openHandoff: (fields) => this.openHandoff(session, fields),
-      issueLink: (token, fields) => {
-        this.links.set(token, {
+      issueLink: (fields) => {
+        this.links.set(this.linkToken(), {
           view: { title: fields.title, amount_cents: fields.amountCents, state: 'issued', language },
           deskId: session.deskId,
           sessionId: session.state.session_id,
         });
+      },
+      latestLink: () => {
+        const mine = [...this.links].filter(([, link]) => link.sessionId === session.state.session_id);
+        const newest = mine.at(-1);
+        if (!newest) throw new Error(`session ${session.state.session_id} has no payment link`);
+        return newest[0];
       },
     };
   }

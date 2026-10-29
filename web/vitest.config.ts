@@ -9,9 +9,9 @@ import viteConfig from './vite.config.ts';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export default defineConfig((env) =>
+export default defineConfig(async (env) =>
   mergeConfig(
-    viteConfig(env),
+    await viteConfig(env),
     defineConfig({
       test: {
         projects: [

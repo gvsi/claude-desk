@@ -1,8 +1,10 @@
 /**
- * MSW handlers: the mock API's transport. Each served route parses the request and hands it to
- * `mockStore.dispatch`; the visitor's event stream goes through MSW's `sse()`, named by type with
- * the seq as its id, as Plan 02's API sends it. Any other `/api/` request is answered 501 and
- * recorded, so a screen test fails on a route nobody mocked.
+ * MSW handlers: the mock API's transport, over one store. Each served route parses the request and
+ * hands it, with its cookies, to the store's `dispatch`, and sends the answer back with the
+ * `Set-Cookie` lines the store gives it; the visitor's event stream goes through MSW's `sse()`,
+ * named by type with the seq as its id, as Plan 02's API sends it. Any other `/api/` request is
+ * answered 501 and recorded, so a screen test fails on a route nobody mocked. The screen tests'
+ * service worker runs them over `mockStore` (browser.ts), the dev server over its own (devServer.ts).
  */
 import {
   http,
@@ -17,7 +19,7 @@ import {
 import type { SseEvent } from '../api/contracts.ts';
 import { ROUTES, type RouteKey } from '../api/routes.ts';
 import { SERVED_KEYS } from './served.ts';
-import { mockStore, streamAfter, type MockAnswer } from './store.ts';
+import { streamAfter, type MockAnswer, type MockStore } from './store.ts';
 
 /** `/api/owner/desks/{desk_id}/today` as MSW writes it: `/api/owner/desks/:desk_id/today`. */
 function mswPath(key: RouteKey): string {
@@ -43,24 +45,10 @@ async function readBody(request: Request): Promise<{ body: unknown; malformed: b
 
 function toResponse(answer: MockAnswer): Response {
   if ('network' in answer) return HttpResponse.error();
-  if (answer.body === undefined) return new HttpResponse(null, { status: answer.status });
-  return HttpResponse.json(answer.body as JsonBodyType, { status: answer.status });
-}
-
-function served(key: RouteKey): HttpHandler {
-  const method = ROUTES[key].method.toLowerCase() as 'get' | 'post' | 'put' | 'delete';
-  return http[method](mswPath(key), async ({ request, params }) => {
-    const url = new URL(request.url);
-    const { body, malformed } = await readBody(request);
-    const answer = await mockStore.dispatch(key, {
-      params: stringParams(params),
-      query: url.searchParams,
-      body,
-      malformed,
-      path: `${url.pathname}${url.search}`,
-    });
-    return toResponse(answer);
-  });
+  const headers = new Headers();
+  for (const line of answer.setCookie ?? []) headers.append('set-cookie', line);
+  if (answer.body === undefined) return new HttpResponse(null, { status: answer.status, headers });
+  return HttpResponse.json(answer.body as JsonBodyType, { status: answer.status, headers });
 }
 
 /** MSW 3 announces a closed stream on the connection's emitter, keyed by this registered symbol. */
@@ -102,42 +90,64 @@ function frame(seq: number, ev: SseEvent): ServerSentEventMessage<EventMap> {
   return { id: String(seq), event: ev.type, data: ev } as ServerSentEventMessage<EventMap>;
 }
 
-/**
- * The visitor's event stream. The first handler answers it like any route (no session, unknown
- * Desk, a planted fault) and lets an open stream through to the second, which replays what came
- * after `?after=` or `Last-Event-ID` and then follows the session.
- */
-const eventStream: HttpHandler[] = [
-  http.get(mswPath('events'), async ({ request, params }) => {
-    const url = new URL(request.url);
-    const answer = await mockStore.dispatch('events', {
-      params: stringParams(params),
-      query: url.searchParams,
-      path: `${url.pathname}${url.search}`,
+/** The mock API's handlers over `store`: every served route, the event stream, then the catch-all. */
+export function createHandlers(store: MockStore): HttpHandler[] {
+  function served(key: RouteKey): HttpHandler {
+    const method = ROUTES[key].method.toLowerCase() as 'get' | 'post' | 'put' | 'delete';
+    return http[method](mswPath(key), async ({ request, params, cookies }) => {
+      const url = new URL(request.url);
+      const { body, malformed } = await readBody(request);
+      const answer = await store.dispatch(key, {
+        params: stringParams(params),
+        query: url.searchParams,
+        body,
+        malformed,
+        path: `${url.pathname}${url.search}`,
+        cookies,
+      });
+      return toResponse(answer);
     });
-    if (!('network' in answer) && answer.status === 200) return undefined;
-    return toResponse(answer);
-  }),
-  sse<EventMap>(mswPath('events'), ({ request, params, client }) => {
-    const url = new URL(request.url);
-    const slug = stringParams(params).slug ?? '';
-    const after = streamAfter(url.searchParams, request.headers.get('last-event-id'));
-    let open = true;
-    const stop = mockStore.listen(slug, after, (seq, ev) => {
-      if (open) client.send(frame(seq, ev));
-    });
-    whenClosed(client, request, () => {
-      open = false;
-      stop();
-    });
-  }),
-];
+  }
 
-export const handlers: HttpHandler[] = [
-  ...eventStream,
-  ...SERVED_KEYS.filter((key) => key !== 'events').map(served),
-  http.all('/api/*', ({ request }) => {
-    mockStore.recordUnhandled(new URL(request.url).pathname);
-    return HttpResponse.json({ error: 'not_mocked' }, { status: 501 });
-  }),
-];
+  /**
+   * The visitor's event stream. The first handler answers it like any route (no session, unknown
+   * Desk, a planted fault) and lets an open stream through to the second, which replays what came
+   * after `?after=` or `Last-Event-ID` and then follows the session.
+   */
+  const eventStream: HttpHandler[] = [
+    http.get(mswPath('events'), async ({ request, params, cookies }) => {
+      const url = new URL(request.url);
+      const answer = await store.dispatch('events', {
+        params: stringParams(params),
+        query: url.searchParams,
+        path: `${url.pathname}${url.search}`,
+        cookies,
+      });
+      if (!('network' in answer) && answer.status === 200) return undefined;
+      return toResponse(answer);
+    }),
+    sse<EventMap>(mswPath('events'), ({ request, params, client, cookies }) => {
+      const url = new URL(request.url);
+      const slug = stringParams(params).slug ?? '';
+      const after = streamAfter(url.searchParams, request.headers.get('last-event-id'));
+      let open = true;
+      const send = (seq: number, ev: SseEvent) => {
+        if (open) client.send(frame(seq, ev));
+      };
+      const stop = store.listen(slug, after, send, cookies);
+      whenClosed(client, request, () => {
+        open = false;
+        stop();
+      });
+    }),
+  ];
+
+  return [
+    ...eventStream,
+    ...SERVED_KEYS.filter((key) => key !== 'events').map(served),
+    http.all('/api/*', ({ request }) => {
+      store.recordUnhandled(new URL(request.url).pathname);
+      return HttpResponse.json({ error: 'not_mocked' }, { status: 501 });
+    }),
+  ];
+}
