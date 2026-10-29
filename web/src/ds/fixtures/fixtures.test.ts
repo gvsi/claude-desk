@@ -143,6 +143,17 @@ function wordsRule(words: readonly string[]): RegExp {
   return new RegExp(`${NOT_LETTER_BEFORE}(?:${words.join('|')})${NOT_LETTER_AFTER}`, 'iu');
 }
 
+// Verbs of an action Claude could claim to have taken, past tense.
+const ACTION_VERBS_EN = [
+  'asked', 'told', 'sent', 'booked', 'scheduled', 'arranged', 'notified', 'contacted', 'messaged', 'emailed', 'texted',
+  'called', 'charged', 'refunded', 'let', 'passed', 'forwarded', 'flagged',
+];
+const ACTION_VERBS_ES = [
+  'pedí', 'avisé', 'escribí', 'envié', 'mandé', 'pasé', 'notifiqué', 'llamé', 'contacté', 'agendé', 'reservé', 'cobré', 'reembolsé',
+  'pedimos', 'avisamos', 'escribimos', 'enviamos', 'mandamos', 'pasamos', 'notificamos', 'llamamos', 'contactamos', 'agendamos',
+  'reservamos', 'cobramos', 'reembolsamos',
+];
+
 // Claims only a card may make, even without a number: that something is booked, paid, charged or
 // refunded, what it costs, that a price is lowered, or that Claude did something (only an executed
 // receipt and its card may say that). Past forms and participles in both
@@ -150,7 +161,7 @@ function wordsRule(words: readonly string[]): RegExp {
 // allowed, so Claude can still say what a card will do.
 const CLAIM_RULES: [string, RegExp][] = [
   ['booking claim', wordsRule([
-    'booked', 'rebooked', 'reserved', 'scheduled', 'confirmed', 'all set',
+    'booked', 'rebooked', 'reserved', 'scheduled', 'confirmed', 'all set', 'locked in',
     'reservad[oa]s?', 'reservé', 'reservamos', 'agendad[oa]s?', 'agendé', 'confirmad[oa]s?', 'confirmé',
     'programad[oa]s?', 'apartad[oa]s?',
   ])],
@@ -163,12 +174,16 @@ const CLAIM_RULES: [string, RegExp][] = [
     'costs?', 'costing', 'priced', 'cheap(?:er|est)?', 'affordable', 'inexpensive',
     'cuesta', 'cuestan', 'costar[áa]n?', 'costó', 'costo', 'barat[oa]s?', 'económic[oa]s?',
   ])],
-  // An action in the past tense with Claude as its subject: no receipt or card would back it.
-  ['action claim', new RegExp(
-    `${NOT_LETTER_BEFORE}(?:(?:i(?:['’]ve| have)?|we(?:['’]ve| have)?) (?:already )?(?:asked|told|sent|booked|scheduled|arranged|notified|contacted|messaged|emailed|texted|called|charged|refunded|let)` +
-      `|(?:ya )?(?:le |les |te )?(?:pedí|avisé|escribí|envié|mandé|notifiqué|llamé|contacté|agendé|reservé|cobré|reembolsé))${NOT_LETTER_AFTER}`,
-    'iu',
-  )],
+  // An action in the past tense with Claude as its subject, or a passive saying it was done: no
+  // receipt or card would back it. English after I or we; Spanish in the first person, singular and
+  // plural, in the simple past and the perfect (he or hemos with a participle).
+  ['action claim', wordsRule([
+    `(?:i(?:['’]ve| have)?|we(?:['’]ve| have)?) (?:already )?(?:${ACTION_VERBS_EN.join('|')})`,
+    '(?:has|have) been (?:notified|told|informed|contacted)',
+    `(?:ya )?(?:le |les |te )?(?:${ACTION_VERBS_ES.join('|')})`,
+    '(?:he|hemos) \\p{L}+(?:ado|ido)',
+    '(?:avisad|notificad|informad)[oa]s?',
+  ])],
   ['discount claim', wordsRule([
     'markdown', 'marked down', 'price cut', 'special price', 'waived?', 'knock(?:ed)? off', 'half off',
     'rebaj\\p{L}*', 'precio especial', 'sin cargo', 'sin costo', 'mitad de precio',
@@ -303,6 +318,21 @@ describe('fixtures', () => {
     expect(claimProblems("Of course. I've asked Maria to join.")).toEqual(['action claim']);
     expect(claimProblems('Claro. Le pedí a Maria que se sume al chat.')).toEqual(['action claim']);
     expect(claimProblems('We already told her.')).toEqual(['action claim']);
+    // Plural and perfect past forms, passives, and passing a message on.
+    expect(claimProblems('Ya le avisamos a Maria.')).toEqual(['action claim']);
+    expect(claimProblems('Hemos avisado a Maria.')).toEqual(['action claim']);
+    expect(claimProblems('Le pasé tu mensaje a Maria.')).toEqual(['action claim']);
+    expect(claimProblems('Maria ya está avisada.')).toEqual(['action claim']);
+    expect(claimProblems("I've passed your message to Maria.")).toEqual(['action claim']);
+    expect(claimProblems('Maria has been notified.')).toEqual(['action claim']);
+    expect(claimProblems("I've forwarded this to Maria.")).toEqual(['action claim']);
+    expect(claimProblems('Le pedimos a Maria que se sume.')).toEqual(['action claim']);
+    expect(claimProblems('Te he enviado el enlace.')).toEqual(['action claim']);
+    expect(claimProblems('Your visit is locked in.')).toEqual(['booking claim']);
+    // Asking for something, or saying what someone is called, claims nothing.
+    expect(claimProblems('Listo.')).toEqual([]);
+    expect(claimProblems('Claro. ¿Cómo te llamas, y cuál es el mejor número para llamarte?')).toEqual([]);
+    expect(claimProblems("Of course. What's your name, and the best number to reach you?")).toEqual([]);
     // What a card will do is not a claim that it was done.
     expect(claimProblems("To hold the visit, here's a link. It's a test payment, so no money moves.")).toEqual([]);
     expect(claimProblems('Para reservar la visita, aquí tienes un enlace. Es un pago de prueba.')).toEqual([]);
