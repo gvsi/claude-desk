@@ -22,7 +22,6 @@ from desk.api.cookies import VISITOR_COOKIE, set_visitor_cookie
 from desk.api.deliver import Status, deliver
 from desk.api.deps import ApiProblem, VisitorCtx, client_ip, public_origin, runtime, visitor_context, visitor_ctx
 from desk.api.ratelimit import StreamSlot
-from desk.api.runner import hand_off_paused
 from desk.api.schemas import (
     AgentCardOut,
     AgentCardSigning,
@@ -142,19 +141,18 @@ async def send_message(body: MessageIn, request: Request,
 
     Within the message limits (per session and per copy), what control rows left for this session is done first,
     so an outcome that came in meanwhile precedes the message and the same turn answers both. The message wakes a
-    turn only while the session is Claude's (mode `ai`): during a take-over the owner answers it, and a paused
-    session answers at once with the kernel's handoff, with no model call."""
+    turn unless the owner has taken the chat over (mode `owner`: the owner answers it). In a paused session that
+    turn is the kernel's handoff, with no model call: it runs under the session's turn lock and stops the waiting
+    work from starting more turns, so one handoff answers the message and whatever else was waiting."""
     state = runtime(request).started()
     await state.limiter.enforce("visitor_message", ctx.ids.session_id, ledger=ctx.ledger())
     await state.limiter.enforce("visitor_message_copy", ctx.ids.copy_id, ledger=ctx.ledger())
     conn, caller = ctx.conn, ctx.caller
     await conn.commit()
     await state.runner.handle_controls(conn, caller)
-    n = await append_message(conn, ctx.ids, "visitor_text", text=body.text, wake=ctx.state.mode == "ai")
+    n = await append_message(conn, ctx.ids, "visitor_text", text=body.text, wake=ctx.state.mode != "owner")
     message_id = (await conn.execute(select(MESSAGES.c.message_id).where(MESSAGES.c.n == n))).scalar_one()
     await conn.commit()
-    if ctx.state.mode == "paused":
-        await hand_off_paused(conn, caller, ctx.state.generation)
     state.runner.start(caller)
     return MessageAccepted(message_id=message_id)
 

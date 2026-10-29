@@ -691,6 +691,55 @@ async def test_due_decision_is_surfaced_with_the_visitor_credential(app, browser
     assert await control_rows(engine, session_id) == {due: True, not_yet: True, pending: True, not_known: False}
 
 
+async def stored_events(engine, session_id: str) -> list:
+    """The session's events as stored, in order."""
+    async with engine.connect() as conn:
+        found = await conn.execute(text("SELECT payload FROM app.run_events WHERE session_id = :s AND kind = 'sse'"
+                                        " ORDER BY seq"), {"s": session_id})
+        return [EVENT.validate_python(payload) for (payload,) in found]
+
+
+async def test_paused_session_answers_each_message_with_one_handoff(app, browser, fake, kernel_http, model, engine):
+    slug = await new_slug(kernel_http, fake)
+    client, token, opened = await open_session(app, browser, slug)
+    session_id = opened["state"]["session_id"]
+    ids = ids_of(fake, session_id)
+    expiring = await hold(fake, kernel_http, token, "quote-1")
+    fake.now += timedelta(hours=23)
+    assert (await client.get(f"/api/public/desks/{slug}/session")).status_code == 200    # the visitor is back
+    fake.now += timedelta(hours=2)                                      # the hold's day is over, not the session's
+    async with engine.begin() as conn:                                  # an outcome and a whisper wait for a turn
+        due = await append_control(conn, ids, "decision_due", {"decision_id": expiring})
+        await append_message(conn, ids, "whisper", text="Whisper: offer the deposit credit.")
+    fake.set_mode(session_id, "paused")                                 # the breaker's third strike
+    fake.calls.clear()
+
+    sent = await client.post(f"/api/public/desks/{slug}/messages", json={"text": "Hello? Is anyone there?"})
+    assert sent.status_code == 202
+    await app.state.runtime.runner.drain()
+
+    # The expiry shows as the kernel signed it, then the kernel's handoff answers it all once, with no model call.
+    events = await stored_events(engine, session_id)
+    assert [event.type for event in events] == ["resolved", "message", "turn_end"]
+    assert events[0].model_dump() == shown_as("resolved", fake.decisions[expiring].decision)
+    assert events[1].handoff is True and [block.template for block in events[1].blocks] == ["handoff"]
+    assert model.requests == [] and len(fake.called("/check_reply")) == 1
+    assert await control_rows(engine, session_id) == {due: True}
+    # What waited stays for Claude to read once the owner resumes the session, and starts no more turns.
+    for kind in ("action_update", "whisper", "visitor_text"):
+        assert await rows(engine, session_id, kind, "model_seq", "wake") == [(None, False)], kind
+
+    # Each later message gets one handoff of its own.
+    again = await client.post(f"/api/public/desks/{slug}/messages", json={"text": "Hello again?"})
+    assert again.status_code == 202
+    await app.state.runtime.runner.drain()
+    events = await stored_events(engine, session_id)
+    assert [event.type for event in events] == ["resolved", "message", "turn_end", "message", "turn_end"]
+    assert events[3].handoff is True
+    assert model.requests == [] and len(fake.called("/check_reply")) == 2
+    assert credentials(fake) == {("x-session-token", token)}
+
+
 async def test_message_limit(app, browser, fake, kernel_http, engine, clock, monkeypatch):
     slug = await new_slug(kernel_http, fake)
     client, token, opened = await open_session(app, browser, slug)

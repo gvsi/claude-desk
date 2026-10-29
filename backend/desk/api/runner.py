@@ -19,8 +19,8 @@ for the session's credential, with that credential, then starts the session's tu
   an `action_update` row that wakes a turn. A decision not yet final (`unknown` included: it is reconciled
   later), or one the kernel can't read now, leaves the row for a later request.
 
-`hand_off_paused(conn, caller, generation)` is a paused session's answer to a new message: the kernel's handoff,
-checked and shown at once, with no model call.
+A paused session's work runs here too: its turn (`run_pending`, under the turn lock) stops the waiting work from
+starting more turns and hands off once, with no model call.
 """
 
 import asyncio
@@ -34,11 +34,10 @@ from desk.api.deliver import Status, deliver
 from desk.api.kernel_client import KernelFailed, KernelUnavailable
 from desk.api.loop import run_pending
 from desk.api.model import ModelClient
-from desk.api.sse import ControlRow, being_cancelled, claim_control, emit, unhandled_controls
+from desk.api.sse import ControlRow, being_cancelled, claim_control, unhandled_controls
 from desk.api.store import append_message
-from desk.api.tools import Caller, hand_off
+from desk.api.tools import Caller
 from desk.contracts import Decision
-from desk.events import EvError, EvTurnEnd
 
 logger = logging.getLogger(__name__)
 # A decision in one of these states may still change: its control row waits for a later request.
@@ -158,14 +157,3 @@ async def _read_decision(caller: Caller, decision_id: str) -> Decision | None:
         logger.warning("a waiting decision couldn't be read (%s)", type(failure).__name__)
         return None
     return decision if decision.session_id == caller.session_id else None
-
-
-async def hand_off_paused(conn: AsyncConnection, caller: Caller, generation: int) -> None:
-    """A paused session's answer to a message: the handoff, checked by the kernel and shown, with no model call; the
-    turn ends as a turn does, with the static error when the handoff couldn't be shown."""
-    outcome = await hand_off(conn, caller, generation)
-    code = "session" if outcome.session_ended else "kernel_unavailable" if outcome.unavailable else None
-    if code is not None:
-        await emit(conn, caller.ids, EvError(type="error", code=code))
-    await emit(conn, caller.ids, EvTurnEnd(type="turn_end"))
-    await conn.commit()
