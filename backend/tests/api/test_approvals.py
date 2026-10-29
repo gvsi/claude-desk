@@ -161,6 +161,10 @@ async def test_answer_twice_resolves_once(app, browser, fake, kernel_http, model
 
     jobs = await jobs_done(jobs_connector)
     assert [(job["task_name"], job["status"]) for job in jobs] == [("desk.resume_after_answer", "succeeded")]
+    # The job holds IDs and the decision as the kernel signed it, and nothing else: no token, key or code.
+    session = fake.sessions[held.session_id]
+    assert jobs[0]["args"] == {"copy_id": session.copy_id, "desk_id": session.desk_id, "session_id": held.session_id,
+                               "decision": first.json()["decision"]}
     assert [payload for type, payload in await sse_events(engine, held.session_id) if type == "resolved"] == [shown]
     executions = [entry for entry in fake.desks[fake.sessions[held.session_id].desk_id].ledger
                   if entry.event.kind == "execute" and entry.event.summary.get("decision_id") == held.decision_id]
