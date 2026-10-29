@@ -254,26 +254,27 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
   - `RuleRow({ rule: Pick<RuleCard, 'card_id' | 'mode' | 'reason'>; words: RuleWord[]; limit?: string; shared?: { appliesTo: string }; onChangeOutcome?: (mode: RuleMode) => void })`:
     - `rule.reason`, with the `words` beneath, joined by " · " in secondary meta, and `OutcomeMenu` at the right (`label` the reason; `limit` the screen's amount for an auto card with `max_amount_cents`).
     - `shared` marks a rule on an effect group, such as `effect:charge`: the `shared` icon (`aria-hidden`) and "Shared rule. {appliesTo}", the screen's words for what it covers ("Applies to every tool that charges money: Payment link and Charge within a signed limit."). The screen shows a shared rule under every tool it covers; changing it from any of them changes the one rule.
+    - Under 640 px of its own width (a phone, a side panel), the outcome sits on its own line under the words, as the phone board draws it, and a long phrase wraps inside the button.
   - `ToolRulesCard({ label; tool?: { name; description; href }; rules: RuleRowProps[]; fallback?: boolean; onAddRule?: () => void; linkComponent? })`:
     - A `Card` (`section`, named `label`).
     - With `tool` (on a connector's page) it starts with the tool's name and `description` as one link to the tool's page, with `chevron-right`.
     - Then a `RuleRow` per rule.
     - With `fallback` (true unless the screen passes false, as it does when a `never` card for anyone covers the tool), the last row is "Anything else here: ask me.", with a ghost "Add a rule" → `onAddRule` when given.
   - `rulesForTool(tool: { tool: ToolName; effects: Effect[] }, cards: RuleCard[]): RuleCard[]` (`toolRules.ts`), the rules that govern a tool under the master's "Coverage and overlap", most specific first, for the screen to build a tool's `RuleRow`s from. It lists cards and decides nothing:
-    - The tool's own cards always; an effect card (`effect:charge`) only where it covers the tool and none of the tool's own cards outranks it for everyone it is for. A tool card outranks an effect card; a card for one person or agent outranks a tool card; a tool card for fewer people (record owners) leaves the group rule deciding for the rest. An `auto` effect card covers a multi-effect tool only jointly, with an `auto` card per effect at its specificity. A `never` effect card always shows. Default cards are left out (the fallback row says what they do).
+    - The tool's own cards always; an effect card (`effect:charge`) only where it covers the tool and none of the tool's own cards outranks it for everyone it is for. A tool card outranks an effect card; a card for one person or agent outranks a tool card; a tool card for fewer people (record owners) leaves the group rule deciding for the rest. An `auto` effect card covers a multi-effect tool only jointly, with an `auto` card per effect at its specificity that one principal can satisfy with it: cards for groups of people combine, and a card for one person or agent combines only with that same person's or agent's cards. A `never` effect card always shows. Default cards are left out (the fallback row says what they do).
     - So a group rule for anyone shows under a tool with no card of its own and is hidden under a tool with its own card for anyone.
   - `describeEffects(effects, reversible): string`, in the boards' words, first match wins:
     - `pay_out` "Moves money out."; `charge` "Charges money."; `private_data` "Touches private data."; `send_message` "Sends a message out."; `change` "Changes something."; `read` "Changes nothing.".
     - Then " Can be undone." or " Can't be undone.", only when an effect changes something (`change`, `charge`, `pay_out`, `send_message`). A tool that only reads, or reads private data, has no suffix.
     - The screen calls it for a connected tool's line; components take lines as strings (except `ToolReviewCard`, Task 3).
-  - `ToolSummaryView = { key: string; name: string; description: string; summary: string; mode: RuleMode; status: ToolStatus; href: string }`, one tool on the hub:
+  - `ToolSummaryView = { key: string; name: string; description: string; summary: string; mode: RuleMode; limit?: string; status: ToolStatus; href: string }`, one tool on the hub (`mode` and `limit` are the outcome and formatted amount limit of the rule that governs it for anyone):
     - `description`: the screen's line for what the tool does and its effects ("Prices a job from your price list. Changes something. Can be undone.").
     - `summary`: its rule words ("Anyone · No discounts", "2 rules · 1 shared", "Always on").
   - `ConnectorSection({ connector; href; tools: ToolSummaryView[]; addedNote?: string; linkComponent? })`, a `Card` section named by the connector:
     - The header is one link to the connector's page (padding 14px 16px): `ConnectorIcon` at `section` size, `ConnectorName`, `connector.description`, `addedNote` ("Added just now") when given, "1 tool" or "{n} tools", and `chevron-right`.
-    - Then a link row per tool (padding 12px 16px, a hairline above): the name (weight 520) and `description`; at the right `summary` and the outcome with its dot: `OUTCOME_WORDS[mode]`, or held "Needs your review" when `status` is `needs_review`, or info "Off" when `disabled`.
+    - Then a link row per tool (padding 12px 16px, a hairline above): the name (weight 520) and `description`; at the right `summary` and the outcome with its dot: `outcomePhrase(mode, limit)`, or held "Needs your review" when `status` is `needs_review`, or info "Off" when `disabled`.
     - Each row is named "{name}: {summary}, {outcome}. Open".
-    - Under 640 px (N-Conn-16-Phone-Rules) the connector's description and count and each tool's `description` are hidden, and `summary` sits under the tool's name.
+    - Under 640 px (N-Conn-16-Phone-Rules) the connector's description and count and each tool's `description` are hidden, `summary` sits under the tool's name, and the outcome on its own line under that, where a long phrase wraps.
   - `ConnectorList({ summary: string; onAddConnector: () => void; children })`, the hub's list:
     - `summary` in meta ("6 built-in connectors and 1 you connected · Version 7, checked against the always-on rules").
     - A list named "Connectors", one item per `ConnectorSection`.
@@ -284,7 +285,7 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
     - Rows by `card_id`; `is_default` cards skipped; unchanged cards omitted.
     - `RuleDiffRow = { cardId; change: 'added' | 'removed' | 'changed'; before: RuleCard | null; after: RuleCard | null; fields: RuleField[] }`.
     - `RuleField = 'applies_to' | 'mode' | 'who' | 'limits' | 'hours' | 'review' | 'reason'`; `person_id` and `agent_key_id` count as `who`, `max_amount_cents` and `max_discount_bp` as `limits`.
-  - `ChangeSide = { mode: RuleMode; limit?: string; reason: string; words: RuleWord[] }` and `ChangeRowView = { key: string; change: 'added' | 'removed' | 'changed' | 'turned_on'; title: string; connector?: ConnectorView; before: ChangeSide | null; after: ChangeSide | null; changed: RuleField[] }`.
+  - `ChangeSide = { appliesTo?: string; mode: RuleMode; limit?: string; reason: string; words: RuleWord[] }` (`appliesTo` is the screen's words for what the rule covers, "Payment link" or "Every tool that charges money"; the screen passes it on both sides whenever a rule's target can change) and `ChangeRowView = { key: string; change: 'added' | 'removed' | 'changed' | 'turned_on'; title: string; connector?: ConnectorView; before: ChangeSide | null; after: ChangeSide | null; changed: RuleField[] }`.
   - `ChangeReview({ rows: ChangeRowView[]; checks: { status: 'checked' | 'failed' | 'unavailable'; lines: string[] }; confirmLabel?; cancelLabel?; onConfirm; onCancel; hasOtherChanges?; pending?; error?: string })`, renamed from `RuleChangeDiff` (N-Conn-10-GCal-Confirm). It shows a proved change before it applies: a rule draft, a connector turned on, a changed tool turned back on. Turning a connector off needs no proof, so it has a plain confirm instead (`ConnectionPanel`, Task 3).
     - A "Changes" card with a row per change:
       - A tag in words in an outlined pill: "Added", "Removed", "Changed" or "Turned on".
@@ -318,12 +319,12 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
     - `Connectors/ConnectorIcon`: `BuiltIn` (the six tiles), `Brands` (Stripe and Google Calendar).
     - `Connectors/ConnectorName`: `BuiltIn`, `Mock`.
     - `Rules/OutcomeMenu`: `ReadOnly`, `Automatic`, `AutomaticWithLimit`, `AskMeFirst`, `Never`.
-    - `Rules/RuleRow`: `PaymentLink` (`rv-link`), `Shared` (`sharedChargeCard`), `ReadOnly`.
-    - `Rules/ToolRulesCard`: `PaymentLinkOnPayments` (the tool's header, `rv-link` and the shared card), `RefundOnItsPage` (no header; `rv-refund`), `NoFallback`.
-    - `Connectors/ConnectorSection`: `Quotes`, `Payments`, `Stripe`, `NeedsReview` (Refund `needs_review`), `AddedJustNow`, `Phone`.
+    - `Rules/RuleRow`: `PaymentLink` (`rv-link`), `Shared` (`sharedChargeCard`), `ReadOnly`, `NarrowMaxLimit` (320 px), `NarrowColumn` (a row 560 px wide).
+    - `Rules/ToolRulesCard`: `PaymentLinkOnPayments` (the tool's header, `rv-link` and the shared card), `RefundOnItsPage` (no header; `rv-refund`), `NoFallback`, `Phone`.
+    - `Connectors/ConnectorSection`: `Quotes`, `Payments`, `Stripe`, `NeedsReview` (Refund `needs_review`), `AddedJustNow`, `Phone`, `NarrowMaxLimit` (320 px).
     - `Connectors/ConnectorList`: `RiveraHub` (seven sections), `Phone`.
     - `Rules/AlwaysOnList`: `Default`.
-    - `Rules/ChangeReview`: `TurnOnPayments` (Chen: two "Turned on" rows at "Ask me first"), `RaiseDiscount`, `AddAndRemove`, `TurnBackOnRefund` (one "Turned on" row for Stripe's Refund at "Ask me first"), `ChecksFailed`, `ChecksUnavailable`, `Confirming`, `LimitOnly` (no rows, with `hasOtherChanges`), `NothingChanges` (no rows: "No rules change." and no confirm), `ConfirmFailed` (the screen's error, and confirm works again).
+    - `Rules/ChangeReview`: `TurnOnPayments` (Chen: two "Turned on" rows at "Ask me first"), `RaiseDiscount`, `AddAndRemove`, `TurnBackOnRefund` (one "Turned on" row for Stripe's Refund at "Ask me first"), `ChecksFailed`, `ChecksUnavailable`, `Confirming`, `LimitOnly` (no rows, with `hasOtherChanges`), `NothingChanges` (no rows: "No rules change." and no confirm), `ConfirmFailed` (the screen's error, and confirm works again), `WidenScope` (a rule widened from Payment link to every tool that charges money), `ScopeChangedWithoutTargets`, `RepeatedFailure` (the same failure three times), `NarrowMaxLimit` (320 px).
     - `Rules/AskClaudePanel`: `AddPayments` (Chen's owner: "Add Payments, so clients can pay their invoices"; Claude, in serif: "I can add Payments, so clients can pay with a test payment link. Have a look before anything turns on."), `Writing`, `Phone`.
   - Plays:
     - `mock_badge_always_beside_external_names`: `Mock`, `Brands`, `Stripe` and `RiveraHub` show "Mock" beside every "Stripe" and "Google Calendar".
@@ -340,6 +341,9 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
     - `diff_shows_enforced_values`: `RaiseDiscount` has the same reason on both sides, "Discounts up to 10%" before and "Discounts up to 50%" after, and the after line tagged "Changed".
     - `rows_are_tagged_in_words`: `AddAndRemove`, `TurnOnPayments` and `TurnBackOnRefund` show each tag's word as text.
     - `confirm_once`: two clicks → `onConfirm` once.
+    - `same_failure_can_retry`: in `RepeatedFailure`, a screen that clears its error when a confirm starts and shows the same words when it fails lets the owner confirm three times; confirm is released on each error delivered, not only on new words.
+    - `scope_change_is_shown`: `WidenScope` shows "Payment link" before and "Every tool that charges money" after, the after one tagged "Changed"; `ScopeChangedWithoutTargets` tags the title.
+    - `limit_phrases_reflow`: at 320 px, "Automatic up to $10,000; over $10,000, ask me first" wraps with no sideways scroll in `RuleRow`'s, `ConnectorSection`'s and `ChangeReview`'s `NarrowMaxLimit`; under 640 px the outcome sits on its own line (`NarrowColumn`, both `Phone` stories).
     - `confirm_only_when_checked`: in `ChecksFailed` and `ChecksUnavailable`, confirm is disabled under their headings and lines.
     - `limit_only_change_keeps_confirm`: `LimitOnly` shows "Your rules stay the same.", "Confirm change" and "Keep my rules", and no "No rules change.".
     - `ask_claude_panel_is_a_log`: in `AddPayments`, an `aside` named "Ask Claude" holds the replies inside a `role="log"` with `aria-live="polite"`. "Close" → `onClose`; Escape → `onClose`; sending "Turn off Payments" → `onSend('Turn off Payments')`.
@@ -348,7 +352,7 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
   - `RuleRow`'s `Shared` and `ToolRulesCard`'s `PaymentLinkOnPayments`: the shared rule is the demo agent's charges up to $20, automatic, shown as "Automatic up to $20; over $20, ask me first"; the board's example is illustrative. A rule for one agent outranks the tool's own rule, so `rulesForTool` lists it first.
   - `ChangeReview`'s `RaiseDiscount`: the board shows only the after side of a changed row; a changed rule shows both, because the owner confirms what is enforced.
   - `ConnectorList`'s `RiveraHub`: Rivera keeps Documents, so the hub has six built-in connectors.
-- [ ] **Step 4: Run** the same commands plus `npm run check:ds` → PASS (16 unit tests; 37 story tests, with the Card and SegmentedControl stories still passing).
+- [ ] **Step 4: Run** the same commands plus `npm run check:ds` → PASS (16 unit tests; 45 story tests, with the Card and SegmentedControl stories still passing).
 - [ ] **Step 5: Commit** `git add web && git commit -m "feat(ds): add the rules hub pieces: connector sections, rule rows with outcome menus, the change review and the Ask Claude panel"`.
 
 ### Task 3: Connector and tool pages, adding a connector, and a changed tool
@@ -653,7 +657,7 @@ None is open. Three questions raised when Tasks 2–3 were re-specified were ans
    - Adding drafts one rules version for the group and proves it, then the usual confirm.
    - Turning off applies atomically and at once, unproved, with each tool's change ledgered. The web app shows a plain confirm first.
    - `enable: false` for `native.start_verification` is refused, since Verification is always on.
-3. **The shared-rule example.** It is an `auto` card for `effect:charge` with `max_amount_cents` 2000 for the visiting agent's key, whose hold twin holds anything above $20 from that agent for the owner. It reads "Automatic up to $20; over $20, ask me first". No mode asks with a limit. (It was a card for anyone up to $100 until 2026-10-29; that card's hold would have caught the $100 to $300 links the seed's own `rv-link` allows.)
+3. **The shared-rule example.** It is an `auto` card for `effect:charge` with `max_amount_cents` 2000 for the visiting agent's key, whose hold twin holds anything above $20 from that agent for the owner. It reads "Automatic up to $20; over $20, ask me first". No mode asks with a limit. (Until 2026-10-29 it was a card for anyone up to $100. On Rivera both charging tools have their own cards for anyone, `rv-link` and `rv-mandate`, and a tool card outranks a group card for the same people, so that example governed nothing there.)
 
 ## Review Ledger
 
@@ -712,6 +716,13 @@ Answers and owner decisions on the re-specified Tasks 2–3 (2026-10-29):
 - The three master-plan questions are closed. Task 2 now has 11 unit tests and 35 story tests; Task 3 has 36 story tests.
 
 Rulings during Task 2 (2026-10-29):
-- **The shared-rule example agrees with the seed.** A group rule for anyone up to $100 would hold the $100 to $300 links `rv-link` allows, so the example is now the seed's $20 agent limit as a shared rule for the visiting agent's key (`rv-agent-charges`, "Automatic up to $20; over $20, ask me first"). `who: 'agent'` needs an `agent_key_id`, so it names the one demo agent rather than every visiting agent. Every auto rule with an amount limit shows its limit phrase through `outcomePhrase`.
+- **The shared-rule example agrees with the seed.** A group rule for anyone up to $100 was shadowed on both charging tools by their own cards for anyone (`rv-link`, `rv-mandate`), since a tool card outranks a group card for the same people, so it governed nothing on Rivera. The example is now the seed's $20 agent limit as a shared rule for the visiting agent's key (`rv-agent-charges`, "Automatic up to $20; over $20, ask me first"). `who: 'agent'` needs an `agent_key_id`, so it names the one demo agent rather than every visiting agent. Every auto rule with an amount limit shows its limit phrase through `outcomePhrase`.
 - **A tool lists only the rules that govern it.** `rulesForTool` applies the master's "Coverage and overlap": a group rule shows under a tool only where none of the tool's own cards outranks it, so a group rule for anyone never shows under a tool with its own rule for anyone. Plan 04's `capabilities` should take its `rules` from it, rather than every card that covers the tool. The shared example governs Payment link and Charge within a signed limit for the demo agent, since a card for one agent outranks each tool's card for anyone.
 - `ChangeReview` gains two stories, `NothingChanges` and `ConfirmFailed`, for its empty and error states; `Card` takes `padding={0}` for a card of rows that pad themselves (`ConnectorSection`). Task 2 has 16 unit tests and 37 story tests.
+
+Task 2 fix round 1 (2026-10-29), from the task review:
+- A change of what a rule applies to shows: `ChangeSide.appliesTo` on each side, tagged "Changed" when it moved, and the title tagged when the screen passes no targets.
+- Confirm is released on each error delivered, so the same failure twice can be retried.
+- Joint coverage needs one principal to satisfy every card: a person's or agent's cards combine only with the same person's or agent's.
+- Limit phrases reflow: nothing keeps its width, and under 640 px a rule row's and a hub tool row's outcome sits on its own line, following the updated phone board (N-Conn-16-Phone-Rules), which awaits the owner's sign-off. Hub tool rows show the governing rule's limit phrase (`ToolSummaryView.limit`).
+- Task 2 has 16 unit tests and 45 story tests.
