@@ -316,7 +316,10 @@ async def test_production_requires_secrets(monkeypatch, passcode_hash, clock):
     production = {"DESK_ENV": "production", "API_DATABASE_URL": "postgresql+psycopg://desk_api@127.0.0.1:5433/desk",
                   "ANTHROPIC_API_KEY": "key-for-tests", "PASSCODE_HASH": passcode_hash,
                   "PUBLIC_ORIGIN": "https://desk.example.com", "TRUSTED_PROXY_HOPS": "2"}
-    for name in (*production, "KERNEL_URL", "ANTHROPIC_BASE_URL"):
+    for name in (*production, "KERNEL_URL", "ANTHROPIC_BASE_URL",
+                 # the provider's variables, which a developer's shell may export
+                 "MODEL_PROVIDER", "BEDROCK_BEARER_TOKEN", "AWS_BEARER_TOKEN_BEDROCK", "ANTHROPIC_AWS_API_KEY",
+                 "ANTHROPIC_CUSTOM_HEADERS"):
         monkeypatch.delenv(name, raising=False)
     for name, value in production.items():
         monkeypatch.setenv(name, value)

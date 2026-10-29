@@ -6,9 +6,17 @@ test hook that points the model client at a fake server. `a2a_loopback` and `ker
 are not read from the environment; tests and `make_api_target` override them with
 `dataclasses.replace`, which checks the result again.
 
+The model provider (`MODEL_PROVIDER`) is the Claude API (`anthropic`, the default) or, for local
+evals, Amazon Bedrock (`bedrock`) in `AWS_REGION` with the one Bedrock credential the API ever
+holds: a short-term Bedrock API key in `BEDROCK_BEARER_TOKEN`, a name only this process reads.
+The SDK's own key variables (`AWS_BEARER_TOKEN_BEDROCK`, `ANTHROPIC_AWS_API_KEY`) are never used
+as a credential, and `AWS_REGION` is read only for Bedrock, so ECS setting it changes nothing.
+
 Outside a development `DESK_ENV` (`desk.env`) the process is in production: the key, the passcode
-hash and an `https://` public origin are required, and the test hook is refused. Errors name the
-variable, never its value, and `repr` leaves the secrets out.
+hash and an `https://` public origin are required, and the test hook is refused. Production also
+refuses `bedrock` and any Bedrock key in the environment, so the hosted API never holds a Bedrock
+credential or builds a Bedrock client. Errors name the variable, never its value, and `repr`
+leaves the secrets out.
 """
 
 import os
@@ -18,6 +26,10 @@ from urllib.parse import urlsplit
 
 from desk.db.session import database_url
 from desk.env import is_development
+
+PROVIDERS = ("anthropic", "bedrock")
+# The SDK's own Bedrock key variables: never a credential here, and refused in production.
+SDK_BEDROCK_KEYS = ("AWS_BEARER_TOKEN_BEDROCK", "ANTHROPIC_AWS_API_KEY")
 
 
 def _env(name: str) -> str | None:
@@ -48,6 +60,9 @@ class Settings:
     public_origin: str = "http://localhost:5173"
     trusted_proxy_hops: int = 0
     anthropic_base_url: str | None = None   # tests only
+    model_provider: str = "anthropic"
+    aws_region: str = "us-west-2"           # read only for bedrock
+    bedrock_bearer_token: str | None = field(default=None, repr=False)   # local Bedrock evals only
     a2a_loopback: str = "http://127.0.0.1:8700"
     kernel_ro_schema: str = "kernel_ro"
 
@@ -63,12 +78,18 @@ class Settings:
             raise RuntimeError("KERNEL_URL must be an http:// URL")
         if why := _origin_error(self.public_origin, https_only=self.production):
             raise RuntimeError(f"PUBLIC_ORIGIN must be {why}")
+        if self.model_provider not in PROVIDERS:
+            raise ValueError(f"MODEL_PROVIDER must be one of {', '.join(PROVIDERS)}")
         if self.production:
             for name, value in (("ANTHROPIC_API_KEY", self.anthropic_api_key), ("PASSCODE_HASH", self.passcode_hash)):
                 if not value:
                     raise RuntimeError(f"{name} is not set")
             if self.anthropic_base_url is not None:
                 raise RuntimeError("ANTHROPIC_BASE_URL is a test hook; production refuses it")
+            if self.model_provider != "anthropic":
+                raise RuntimeError("MODEL_PROVIDER names a provider for local evals; production runs on the Claude API")
+            if self.bedrock_bearer_token:
+                raise RuntimeError("BEDROCK_BEARER_TOKEN is set; production holds no Bedrock credential")
 
     @classmethod
     def from_env(cls) -> Self:
@@ -82,6 +103,11 @@ class Settings:
             raise RuntimeError("PUBLIC_ORIGIN is not set")
         if public_origin is not None and public_origin.endswith("/") and not public_origin.endswith("//"):
             public_origin = public_origin[:-1]   # "https://host/" names the same origin as "https://host"
+        if not is_development(desk_env):
+            for name in SDK_BEDROCK_KEYS:
+                if _env(name) is not None:
+                    raise RuntimeError(f"{name} is set; production holds no Bedrock credential")
+        model_provider = _env("MODEL_PROVIDER") or cls.model_provider
         return cls(
             desk_env=desk_env,
             api_database_url=database_url("API"),
@@ -91,4 +117,7 @@ class Settings:
             public_origin=public_origin or cls.public_origin,
             trusted_proxy_hops=int(hops),
             anthropic_base_url=_env("ANTHROPIC_BASE_URL"),
+            model_provider=model_provider,
+            aws_region=(_env("AWS_REGION") or cls.aws_region) if model_provider == "bedrock" else cls.aws_region,
+            bedrock_bearer_token=_env("BEDROCK_BEARER_TOKEN"),
         )

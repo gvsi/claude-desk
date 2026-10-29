@@ -2,11 +2,14 @@
 
     uvicorn --factory desk.api.main:app_factory --host 0.0.0.0 --port 8700 --timeout-keep-alive 310
 
-The lifespan opens the kernel client, checks it is the production one when it must be, then opens the
-database engine and the run events listener. In production the app refuses to start without its secrets (the
-API key, the passcode hash and the public origin, which `Settings` requires) and with any test hook:
-`ANTHROPIC_BASE_URL` (refused by `Settings`), an injected clock, model or kernel transport. A passcode hash
-that isn't one refuses to start anywhere.
+`create_app` builds the model client through `make_model` (the Claude API, or Amazon Bedrock for local evals)
+before the app, so a provider without its credential, or `ANTHROPIC_CUSTOM_HEADERS` set, refuses to start; the
+lifespan closes that client, never an injected one. The lifespan opens the kernel client, checks it is the
+production one when it must be, then opens the database engine and the run events listener. In production the app
+refuses to start without its secrets (the API key, the passcode hash and the public origin, which `Settings`
+requires), with a Bedrock setting or credential (refused by `Settings`) and with any test hook:
+`ANTHROPIC_BASE_URL` (refused by `Settings`), an injected clock, model or kernel transport. A passcode hash that
+isn't one refuses to start anywhere.
 
 Every error answer is an `ApiError` ("Errors"): a kernel refusal keeps its status with `{error: "kernel",
 code}`, an unreachable kernel is 503 `{error: "kernel", code}` (`seed_unproved`, `internal`, else
@@ -28,6 +31,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from desk.api.deps import ApiProblem, Runtime, runtime
 from desk.api.kernel_client import KernelFailed, KernelHttp, KernelUnavailable, assert_production_safe
+from desk.api.model import make_model
 from desk.api.passcode import check_passcode_hash
 from desk.api.ratelimit import RateLimited, RateLimiter, StreamSlots
 from desk.api.routes import owner
@@ -107,20 +111,25 @@ async def health(request: Request) -> HealthOut | JSONResponse:
 
 def create_app(settings: Settings, *, kernel_transport: Any = None, model: Any = None,
                clock: Callable[[], datetime] | None = None) -> FastAPI:
-    """The API app. `kernel_transport`, `model` and `clock` are test hooks, refused in production."""
+    """The API app. `kernel_transport`, `model` and `clock` are test hooks, refused in production. With no model
+    injected, the client `settings` names is built here, so a provider without its credential never starts."""
     _refuse_test_hooks(settings, {"kernel transport": kernel_transport, "model": model, "clock": clock})
     if settings.passcode_hash is not None:
         try:
             check_passcode_hash(settings.passcode_hash)
         except ValueError as malformed:
             raise RuntimeError(str(malformed)) from None    # the message names the variable, never its value
-    state = Runtime(settings=settings, clock=clock or _utc_now, limiter=RateLimiter(clock or _utc_now),
-                    stream_slots=StreamSlots(), model=model, kernel_transport=kernel_transport)
+    now = clock or _utc_now
+    built = make_model(settings, clock=now) if model is None else None   # closed by the lifespan; an injected one isn't
+    state = Runtime(settings=settings, clock=now, limiter=RateLimiter(now), stream_slots=StreamSlots(),
+                    model=model if model is not None else built, kernel_transport=kernel_transport)
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         kernel = KernelHttp(settings.kernel_url, transport=state.kernel_transport)
         async with contextlib.AsyncExitStack() as stack:
+            if built is not None:
+                stack.push_async_callback(built.aclose)
             stack.push_async_callback(kernel.aclose)
             assert_production_safe(settings, kernel)
             engine = create_async_engine(settings.api_database_url, connect_args={"options": API_CONNECT_OPTIONS},

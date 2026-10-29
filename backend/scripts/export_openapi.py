@@ -2,7 +2,8 @@
 
 Run from backend/ after adding or changing a route: uv run python scripts/export_openapi.py
 Operation IDs read `<router>_<name>`, and every error answer is an `ApiError`. The app is built from placeholder
-settings and never started, so this reads no environment and opens no connection.
+settings and never started: it builds a model client it never calls (the SDK reads its own variables when the
+client is built, so the placeholder names a closed loopback port) and opens no connection.
 """
 
 import json
@@ -12,7 +13,8 @@ from desk.api.main import create_app
 from desk.api.settings import Settings
 
 OPENAPI_PATH = Path(__file__).resolve().parent.parent / "desk" / "api" / "openapi.json"
-PLACEHOLDER_SETTINGS = Settings(api_database_url="postgresql+psycopg://openapi@127.0.0.1/openapi", desk_env="test")
+PLACEHOLDER_SETTINGS = Settings(api_database_url="postgresql+psycopg://openapi@127.0.0.1/openapi", desk_env="test",
+                                anthropic_base_url="http://127.0.0.1:9")
 
 
 def export_openapi() -> dict:

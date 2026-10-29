@@ -172,10 +172,18 @@ def passcode_hash() -> str:
     return hash_passcode(PASSCODE)
 
 
+@pytest.fixture(autouse=True)
+def _no_custom_headers(monkeypatch) -> None:
+    """`ANTHROPIC_CUSTOM_HEADERS`, which a developer's shell may export, refuses every model client."""
+    monkeypatch.delenv("ANTHROPIC_CUSTOM_HEADERS", raising=False)
+
+
 @pytest.fixture
 def api_settings(passcode_hash: str) -> Settings:
+    # The model host is a closed loopback port: an app that runs a turn with no injected model gets
+    # ModelUnavailable, never a network call.
     return Settings(api_database_url=database_url("API"), desk_env="test", passcode_hash=passcode_hash,
-                    kernel_ro_schema=FAKE_RO_SCHEMA)
+                    kernel_ro_schema=FAKE_RO_SCHEMA, anthropic_base_url="http://127.0.0.1:9")
 
 
 @pytest.fixture

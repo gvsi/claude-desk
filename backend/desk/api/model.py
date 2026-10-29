@@ -2,9 +2,9 @@
 budget"; Plan 02a, Task 4).
 
 `ModelClient` is what the loop and the routes call: `await model.call(ModelRequest(...))` returns a
-`ModelResponse` or raises `ModelUnavailable`. `AnthropicModel` is the real one, on the Anthropic SDK with
-`max_retries=2`; tests use `tests/api/fakes.py`'s `ScriptedModel`, or point `AnthropicModel` at a fake server
-(`ANTHROPIC_BASE_URL`, refused in production by `Settings`).
+`ModelResponse` or raises `ModelUnavailable`. `AnthropicModel` and `BedrockModel` ("The provider" below) are the
+real ones, on the Anthropic SDK with `max_retries=2`; tests use `tests/api/fakes.py`'s `ScriptedModel`, or point
+`AnthropicModel` at a fake server (`ANTHROPIC_BASE_URL`, refused in production by `Settings`).
 
 - **The conversation call** (route `conversation`) streams `claude-opus-5-5` with adaptive thinking and an
   explicit effort, under the mid-conversation tool changes beta. The tools are frozen per model context, so
@@ -19,8 +19,29 @@ budget"; Plan 02a, Task 4).
 Every SDK error (after the SDK's retries), a stream cut halfway, and an answer that doesn't parse raise
 `ModelUnavailable`, which carries the call's `ModelResponse` so its usage row can still be written
 (`metrics.record_model_call`). A response's `finished_at` is the call's finish and `latency_ms` its duration.
+
+**The provider.** `make_model(settings)` builds the client `Settings.model_provider` names: `AnthropicModel` on
+the Claude API, or `BedrockModel` on Amazon Bedrock for local evals, which sends the same body with the model
+mapped through `BEDROCK_MODEL_IDS` (the one table, the three production names to their inference profiles) and
+records a served model by its production name. Both close what the pinned SDK leaves open ("The credentials",
+safety invariant 5):
+
+- The Claude API client always gets an explicit key (`ANTHROPIC_API_KEY`, or in development the placeholder
+  `NO_API_KEY`, never an empty one, which httpx2 wouldn't send) and an explicit host, so it never reads
+  `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_PROFILE`, workload-identity variables, the on-disk profile or
+  `ANTHROPIC_BASE_URL` itself. `ANTHROPIC_CUSTOM_HEADERS`, whose lines that client sends after its own auth
+  headers, is refused before any client exists, whichever the provider.
+- The Bedrock client is built only from `bedrock_client_kwargs`: the one credential is a Bedrock API key from
+  `BEDROCK_BEARER_TOKEN`, passed as `api_key`, which the SDK takes before any other source, so it reads no key
+  variable, never signs with the AWS credential chain and never imports boto3 or botocore; `base_url` and
+  `aws_region` are always passed, the region fully matching a region name, so `ANTHROPIC_BEDROCK_MANTLE_BASE_URL`,
+  `AWS_REGION` and `AWS_DEFAULT_REGION` are never read by the SDK. It carries no middleware: a refusal still hands
+  off.
+- Keys must be one run of printable ASCII, so a malformed one never reaches an error message or a log.
 """
 
+import os
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
@@ -31,9 +52,29 @@ import anthropic
 import httpx2
 from pydantic import BaseModel, ValidationError
 
-from desk.api.metrics import ROUTES
+from desk.api.metrics import PRICES_PER_MTOK, ROUTES
+from desk.api.settings import Settings
 
 CONVERSATION_MODEL = "claude-opus-5-5"
+ANTHROPIC_API_URL = "https://api.anthropic.com"
+# The development placeholder key: the Claude API answers it 401, a fake at ANTHROPIC_BASE_URL ignores it, and
+# the SDK, given a key, reads no ambient credential. Production requires the real key.
+NO_API_KEY = "no-key"
+# The production models on Amazon Bedrock: each name to the account's cross-region inference profile. Tests and
+# the tier 2 evals read this table, so a refused profile id changes only this table.
+BEDROCK_MODEL_IDS: dict[str, str] = {
+    "claude-opus-5-5": "us.anthropic.claude-opus-5-5",
+    "claude-sonnet-5-5": "us.anthropic.claude-sonnet-5-5",
+    "claude-haiku-5-5": "us.anthropic.claude-haiku-5-5",
+}
+assert BEDROCK_MODEL_IDS.keys() == PRICES_PER_MTOK.keys(), "every production model is priced and mapped"
+# What a Bedrock answer may call a model, back to its production name.
+_BEDROCK_SERVED_NAMES = {served: name for name, profile in BEDROCK_MODEL_IDS.items()
+                         for served in (name, profile, profile.removeprefix("us."))}
+# A key is one run of printable ASCII (h11 refuses whitespace in a header and quotes the value in its error), and a
+# region is a whole region name (a prefix match would let `us-west-2.example.com#` move the host).
+_KEY = re.compile(r"[!-~]+")
+_REGION = re.compile(r"[a-z]{2}(-[a-z]+)+-[0-9]+")
 TOOL_CHANGES_BETA = "mid-conversation-tool-changes-2026-07-01"
 EPHEMERAL = {"type": "ephemeral"}
 # Tool fields no model call sends (see the module docstring).
@@ -188,21 +229,29 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-class AnthropicModel:
-    """`ModelClient` on the Anthropic SDK. `base_url` is the `ANTHROPIC_BASE_URL` test hook; `http_client` and
-    `clock` are test hooks too."""
+class _SdkModel:
+    """`ModelClient` on one of the SDK's clients: every provider sends `build_kwargs(request)`, streams the
+    conversation and `create`s the structured routes. A provider maps the model name it sends (`_sent_model`) and
+    the one it records (`_served_model`); `clock` is a test hook."""
 
-    def __init__(self, api_key: str, base_url: str | None = None, *, http_client: httpx2.AsyncClient | None = None,
-                 clock: Callable[[], datetime] = _utc_now):
-        self._client = anthropic.AsyncAnthropic(api_key=api_key, base_url=base_url, max_retries=MAX_RETRIES,
-                                                http_client=http_client)
+    _client: anthropic.AsyncAnthropic | anthropic.AsyncAnthropicBedrockMantle
+
+    def __init__(self, client: anthropic.AsyncAnthropic | anthropic.AsyncAnthropicBedrockMantle,
+                 clock: Callable[[], datetime]):
+        self._client = client
         self._clock = clock
 
     async def aclose(self) -> None:
         await self._client.close()
 
+    def _sent_model(self, name: str) -> str:
+        return name
+
+    def _served_model(self, name: str) -> str:
+        return name
+
     async def call(self, request: ModelRequest) -> ModelResponse:
-        kwargs = build_kwargs(request)
+        kwargs = {**build_kwargs(request), "model": self._sent_model(request.model)}
         started = time.monotonic()
         try:
             if request.output_schema is None:
@@ -220,7 +269,7 @@ class AnthropicModel:
                              cache_read_input_tokens=usage.cache_read_input_tokens or 0,
                              cache_creation_input_tokens=usage.cache_creation_input_tokens or 0,
                              output_tokens=usage.output_tokens),
-            latency_ms=self._latency_ms(started), finished_at=self._clock(), model=message.model)
+            latency_ms=self._latency_ms(started), finished_at=self._clock(), model=self._served_model(message.model))
         if request.output_schema is None:
             return response
         return replace(response, parsed=self._parsed(request.output_schema, response))
@@ -243,3 +292,65 @@ class AnthropicModel:
     @staticmethod
     def _latency_ms(started: float) -> int:
         return round((time.monotonic() - started) * 1000)
+
+
+class AnthropicModel(_SdkModel):
+    """`ModelClient` on the Claude API. `base_url` is the `ANTHROPIC_BASE_URL` test hook (`make_model` always
+    passes one); `http_client` and `clock` are test hooks too."""
+
+    def __init__(self, api_key: str, base_url: str | None = None, *, http_client: httpx2.AsyncClient | None = None,
+                 clock: Callable[[], datetime] = _utc_now):
+        super().__init__(anthropic.AsyncAnthropic(api_key=api_key, base_url=base_url, max_retries=MAX_RETRIES,
+                                                  http_client=http_client), clock)
+
+
+def bedrock_client_kwargs(aws_region: str, *, bearer_token: str | None) -> dict[str, str]:
+    """The Bedrock client's arguments, from the one credential rule: a Bedrock API key from `BEDROCK_BEARER_TOKEN`
+    as `api_key` (so the SDK reads no key variable and never signs), the region's host as `base_url` and the region
+    itself. Raises `RuntimeError` naming the variable, never its value, before any client exists; the tier 2
+    simulator builds its client from this too."""
+    if not bearer_token or not _KEY.fullmatch(bearer_token):
+        raise RuntimeError("BEDROCK_BEARER_TOKEN must be set to one Bedrock API key: printable ASCII with no spaces")
+    if not _REGION.fullmatch(aws_region):
+        raise RuntimeError("AWS_REGION must be a region name, such as us-west-2")
+    return {"aws_region": aws_region, "base_url": f"https://bedrock-mantle.{aws_region}.api.aws/anthropic",
+            "api_key": bearer_token}
+
+
+class BedrockModel(_SdkModel):
+    """`ModelClient` on Amazon Bedrock, for local evals: the same calls as `AnthropicModel` with the model mapped
+    through `BEDROCK_MODEL_IDS` (a name outside it raises `ValueError` before any request) and a served model
+    recorded by its production name when it maps back to one, so `app.model_calls.model` names the model that
+    served the call on both providers. No middleware: a refusal still hands off."""
+
+    def __init__(self, aws_region: str, *, bearer_token: str | None, http_client: httpx2.AsyncClient | None = None,
+                 clock: Callable[[], datetime] = _utc_now):
+        kwargs = bedrock_client_kwargs(aws_region, bearer_token=bearer_token)
+        super().__init__(anthropic.AsyncAnthropicBedrockMantle(**kwargs, max_retries=MAX_RETRIES,
+                                                               http_client=http_client), clock)
+
+    def _sent_model(self, name: str) -> str:
+        if name not in BEDROCK_MODEL_IDS:
+            raise ValueError(f"{name!r} is not a production model, so it has no Bedrock model id")
+        return BEDROCK_MODEL_IDS[name]
+
+    def _served_model(self, name: str) -> str:
+        return _BEDROCK_SERVED_NAMES.get(name, name)
+
+
+def make_model(settings: Settings, *, http_client: httpx2.AsyncClient | None = None,
+               clock: Callable[[], datetime] = _utc_now) -> ModelClient:
+    """The model client `settings` names, with every credential and host passed explicitly (the module docstring).
+    Raises `RuntimeError` naming a variable, never its value, before any client exists: `ANTHROPIC_CUSTOM_HEADERS`
+    set to anything but empty refuses either provider."""
+    if os.environ.get("ANTHROPIC_CUSTOM_HEADERS"):
+        raise RuntimeError("ANTHROPIC_CUSTOM_HEADERS is set; the API sends no custom headers, which could replace "
+                           "its key")
+    if settings.model_provider == "bedrock":
+        return BedrockModel(settings.aws_region, bearer_token=settings.bedrock_bearer_token, http_client=http_client,
+                            clock=clock)
+    api_key = settings.anthropic_api_key or NO_API_KEY
+    if not _KEY.fullmatch(api_key):
+        raise RuntimeError("ANTHROPIC_API_KEY must be one API key: printable ASCII with no spaces")
+    return AnthropicModel(api_key, settings.anthropic_base_url or ANTHROPIC_API_URL, http_client=http_client,
+                          clock=clock)
