@@ -4,6 +4,7 @@
 use desk_kernel_core as kernel;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pyo3::types::PyTuple;
 use std::collections::HashMap;
 
 fn value_error(e: impl std::fmt::Display) -> PyErr {
@@ -51,8 +52,8 @@ struct Signer {
 #[pymethods]
 impl Signer {
     /// Reads `DESK_SIGNING_SEED` (64 hex). Raises ValueError when it is malformed,
-    /// or missing outside a development `DESK_ENV` (unset, empty, `development`,
-    /// `test` or `local`); the kernel then refuses to start.
+    /// or missing outside a development `DESK_ENV` (unset or in
+    /// `DEVELOPMENT_ENVS`); the kernel then refuses to start.
     #[staticmethod]
     fn from_env() -> PyResult<Self> {
         kernel::Signer::from_env()
@@ -136,5 +137,11 @@ fn desk_kernel(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(ledger_hash, m)?)?;
     m.add_function(wrap_pyfunction!(verify_chain, m)?)?;
     m.add_function(wrap_pyfunction!(version, m)?)?;
+    // The DESK_ENV values that name a development environment, which the
+    // backend's `desk.env` must match.
+    m.add(
+        "DEVELOPMENT_ENVS",
+        PyTuple::new(m.py(), kernel::DEVELOPMENT_ENVS)?,
+    )?;
     Ok(())
 }

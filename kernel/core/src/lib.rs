@@ -13,4 +13,4 @@ pub mod sign;
 pub use jcs::{canonical_json, canonical_json_any};
 pub use lint::lint_policies;
 pub use policy::{Outcome, PolicyEngine, Verdict};
-pub use sign::{Signer, ledger_hash, verify_chain};
+pub use sign::{DEVELOPMENT_ENVS, Signer, is_development_env, ledger_hash, verify_chain};

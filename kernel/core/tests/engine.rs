@@ -1,8 +1,8 @@
 //! Kernel decisions, lint, canonical JSON and ledger signing, against the fixtures
 //! in kernel/cedar/fixtures (the master plan's sets B, F, A and H).
 use desk_kernel_core::{
-    PolicyEngine, Signer, canonical_json, canonical_json_any, ledger_hash, lint_policies,
-    verify_chain,
+    DEVELOPMENT_ENVS, PolicyEngine, Signer, canonical_json, canonical_json_any, ledger_hash,
+    lint_policies, verify_chain,
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -669,15 +669,33 @@ fn signer_fails_closed_in_production() {
     assert_eq!(signer.key_id(), hex::encode(Sha256::digest(&public))[..16]);
 
     // Only a development environment, named or unset, falls back to the dev
-    // key, labelled as one; a misspelt production name doesn't.
+    // key, labelled as one; a misspelt production name doesn't. The names are
+    // the ones the plans run with (`dev` for real-model runs, `test`, `ci`).
     let dev = Signer::from_env_with(&vars(&[])).unwrap();
     assert!(dev.dev_key());
     assert_ne!(dev.public_key_hex(), signer.public_key_hex());
-    for env in ["", "development", "test", "local", " Development "] {
+    assert_eq!(
+        DEVELOPMENT_ENVS,
+        ["", "dev", "development", "test", "ci", "local"]
+    );
+    for env in DEVELOPMENT_ENVS
+        .into_iter()
+        .chain([" Development ", "DEV", "CI\n", "\tdev"])
+    {
         let signer = Signer::from_env_with(&vars(&[("DESK_ENV", env)]));
         assert!(signer.is_ok_and(|s| s.dev_key()), "{env:?}");
     }
-    for env in ["prod", "staging", "Production", "producton"] {
+    // Only ASCII whitespace and case are forgiven, as desk.env reads the same list.
+    for env in [
+        "prod",
+        "staging",
+        "Production",
+        "producton",
+        "deployed",
+        "\u{a0}dev",
+        "dev\u{b}",
+        "C\u{130}",
+    ] {
         assert!(
             Signer::from_env_with(&vars(&[("DESK_ENV", env)])).is_err(),
             "{env:?}"

@@ -28,6 +28,21 @@ const ENVELOPE: [&str; 6] = [
 const SEED_VAR: &str = "DESK_SIGNING_SEED";
 const ENV_VAR: &str = "DESK_ENV";
 
+/// The `DESK_ENV` values that name a development environment, where a missing
+/// seed falls back to the dev key; unset counts as `""`. A value matches after
+/// trimming ASCII whitespace, ignoring ASCII case. The backend's `desk.env`
+/// holds the same list (a Python test compares them). Since unset counts as
+/// development, a deploy must set `DESK_ENV=production`.
+pub const DEVELOPMENT_ENVS: [&str; 6] = ["", "dev", "development", "test", "ci", "local"];
+
+/// True when `DESK_ENV` (as `value`) names a development environment.
+pub fn is_development_env(value: &str) -> bool {
+    let value = value.trim_ascii();
+    DEVELOPMENT_ENVS
+        .iter()
+        .any(|dev| value.eq_ignore_ascii_case(dev))
+}
+
 /// The dev key's seed. It is public on purpose: anything it signs is labelled
 /// as dev-signed (`/health`, the Safety ledger) and is never trusted.
 const DEV_SEED: [u8; 32] = [7; 32];
@@ -55,18 +70,15 @@ impl Signer {
 
     /// `from_env` over an explicit map, so tests never touch the process
     /// environment. A missing seed gives the dev key only in a development
-    /// environment (`DESK_ENV` unset, empty, `development`, `test` or `local`);
-    /// anywhere else, `production` and any misspelling of it included, it is an
-    /// error and the kernel refuses to start. A malformed seed is always an error.
+    /// environment (`DESK_ENV` unset or in [`DEVELOPMENT_ENVS`]); anywhere
+    /// else, `production` and any misspelling of it included, it is an error and
+    /// the kernel refuses to start. A malformed seed is always an error.
     pub fn from_env_with(vars: &HashMap<String, String>) -> Result<Self> {
         let seed = vars
             .get(SEED_VAR)
             .map(|s| s.trim())
             .filter(|s| !s.is_empty());
-        let env = vars.get(ENV_VAR).map_or("", |env| env.trim());
-        let development = ["", "development", "test", "local"]
-            .iter()
-            .any(|dev| env.eq_ignore_ascii_case(dev));
+        let development = is_development_env(vars.get(ENV_VAR).map_or("", String::as_str));
         match seed {
             Some(seed) => {
                 let bytes: [u8; 32] = hex::decode(seed)
@@ -79,7 +91,9 @@ impl Signer {
                 })
             }
             None if !development => {
-                bail!("{SEED_VAR} is required unless {ENV_VAR} is development, test or local")
+                bail!(
+                    "{SEED_VAR} is required unless {ENV_VAR} is unset or one of dev, development, test, ci, local"
+                )
             }
             None => Ok(Self {
                 key: SigningKey::from_bytes(&DEV_SEED),

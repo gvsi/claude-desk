@@ -3,9 +3,10 @@
 Each process gets only its own URL: the kernel `KERNEL_DATABASE_URL` (role desk_kernel), the
 API `API_DATABASE_URL` (desk_api), the mock payments server `MOCKPAY_DATABASE_URL`
 (desk_mockpay); migrations use `ADMIN_DATABASE_URL` (desk_admin). Each is a SQLAlchemy URL,
-`postgresql+psycopg://<user>:<password>@<host>:<port>/<db>`. Outside production, a URL missing
-from the environment is read from the repository's `.env`, so local tools and tests need no
-exported variables. Values are never logged.
+`postgresql+psycopg://<user>:<password>@<host>:<port>/<db>`. In a development environment
+(`desk.env.is_development()`), a URL missing from the environment is read from the repository's
+`.env`, so local tools and tests need no exported variables; anywhere else it must be set. Values
+are never logged.
 """
 
 import contextlib
@@ -23,6 +24,8 @@ from sqlalchemy.sql import visitors
 from sqlalchemy.sql.selectable import SelectBase
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+
+from desk.env import is_development
 
 if TYPE_CHECKING:
     import procrastinate
@@ -49,7 +52,7 @@ def database_url(prefix: str) -> str:
     """The URL in `<prefix>_DATABASE_URL` (prefix ADMIN, KERNEL, API or MOCKPAY)."""
     name = f"{prefix}_DATABASE_URL"
     value = os.environ.get(name)
-    if not value and os.environ.get("DESK_ENV") != "production":
+    if not value and is_development():
         value = _dotenv().get(name)
     if not value:
         raise RuntimeError(f"{name} is not set")
