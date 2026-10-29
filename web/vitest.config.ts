@@ -38,6 +38,23 @@ export default mergeConfig(
             },
           },
         },
+        {
+          extends: true,
+          // Browser tests of the design system itself: the story hooks fail a story, and nothing
+          // moves under reduced motion (emulated for the whole browser context).
+          test: {
+            name: 'ds-browser',
+            include: ['src/ds/**/*.browser.test.tsx'],
+            setupFiles: ['src/ds/test/browser-setup.ts'],
+            browser: {
+              enabled: true,
+              headless: true,
+              provider: playwright({ contextOptions: { reducedMotion: 'reduce' } }),
+              viewport: { width: 1280, height: 820 },
+              instances: [{ browser: 'chromium' }],
+            },
+          },
+        },
       ],
     },
   }),

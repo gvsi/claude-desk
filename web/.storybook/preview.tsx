@@ -1,9 +1,17 @@
 import type { Preview } from '@storybook/react-vite';
 
+import { assertCanvasParameter } from '../src/ds/reference/boards.ts';
+import { assertCleanCopy } from '../src/ds/test/copy.ts';
+
 import '../src/ds/tokens.css';
 import '../src/ds/base.css';
 
 const preview: Preview = {
+  // After every story renders (and its play runs): it names its canvas board, and its copy is clean.
+  afterEach: ({ canvasElement, parameters }) => {
+    assertCanvasParameter(parameters);
+    assertCleanCopy(canvasElement);
+  },
   parameters: {
     layout: 'fullscreen',
     // Any axe violation fails the story's test, in the Vitest run and in CI.
