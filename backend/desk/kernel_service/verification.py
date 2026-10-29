@@ -14,7 +14,8 @@ ten wrong codes in any hour; past either limit, starts and checks for them are r
 the owner gets one alert an hour. The visitor types the code back, and only the session that
 asked may use it: a right code binds the session to that person (one person per session,
 assurance `demo_code`), and the facts the session already holds become theirs too
-(`labels.relabel_on_verify`).
+(`labels.relabel_on_verify`). A session that already names a person without being verified as
+them is refused (`already_bound`), and the challenge stays live.
 
 Every start and check writes a `verify` ledger entry `{outcome, challenge_id?}` in the same
 transaction as what it changed. A check that fails commits its attempt and entry first, then
@@ -297,7 +298,9 @@ async def check(ctx: KernelCtx, session_row: SessionRow, code: str) -> SessionSt
             challenge.status = "failed"
         raise await _refused(ctx, session, "wrong_code", challenge.challenge_id)
     if session.person_id is not None:
-        raise RuntimeError("a session verifies one person, once")
+        # a session names one person: one bound to someone else is refused like any failed check,
+        # and the challenge stays live
+        raise await _refused(ctx, session, "already_bound", challenge.challenge_id)
     challenge.status = "consumed"
     session.person_id, session.assurance, session.verified = person.person_id, "demo_code", True
     await ctx.db.flush()

@@ -32,7 +32,7 @@ from desk.kernel_service.desks import mask_contact, normalize_contact
 
 from .helpers import kernel_ctx, rows_of
 from .test_adapters import Rivera, quote_args, rivera
-from .test_decide import Visitor, decided
+from .test_decide import Visitor, decided, set_session
 from .test_execute import executed
 
 DANA_PHONE = "+15105550177"               # Dana's contact on record in these tests
@@ -443,6 +443,24 @@ async def test_a_session_verifies_one_person(app, client):
         "started", "verified", "already_verified", "already_verified"]
     await set_language(app, copy, visitor, "es")
     assert (await started(client, visitor, "bob@example.com")).message == "Ya confirmaste quién eres en este chat."
+
+
+async def test_a_session_bound_to_someone_else_is_refused_and_ledgered(app, client, monkeypatch):
+    """A session that names a person without being verified as them (an agent session, once those
+    verify) gets the one 422 for a right code, ledgered `already_bound`, and the challenge stays live."""
+    codes(monkeypatch, 111111)
+    copy = await rivera_copy(app, client)
+    visitor = await open_session(client, copy)
+    await started(client, visitor, DANA_PHONE)
+    await set_session(app, copy, visitor.session_id, person_id=copy.people["bob"])
+    response = await check(client, visitor, "111111")
+    assert (response.status_code, response.json()) == INVALID
+    [challenge] = await challenges(app, copy)
+    assert (challenge.status, challenge.failed_at) == ("live", [])
+    session = await session_row(app, copy, visitor)
+    assert (session.person_id, session.assurance, session.verified) == (copy.people["bob"], "none", False)
+    assert await verify_entries(app, copy) == [{"outcome": "started", "challenge_id": challenge.challenge_id},
+                                               {"outcome": "already_bound", "challenge_id": challenge.challenge_id}]
 
 
 async def update_rows(app: FastAPI, copy: Copy, model, key_column, key: str, **values) -> None:
