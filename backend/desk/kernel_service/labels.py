@@ -50,6 +50,11 @@ def new_fact_label(session_row: ActorSession) -> Label:
     return Label(readers=readers, record_owner=person)
 
 
+def label_of(readers: Sequence[str] | None, record_owner: str | None = None) -> Label:
+    """The label a stored row's readers give it: a missing or empty list is the owner's alone."""
+    return Label(readers=list(readers or OWNER_ONLY), record_owner=record_owner)
+
+
 def can_read(label: Label | Sequence[str] | None, readers: Iterable[str]) -> bool:
     """Whether a session reading as `readers` (`session_readers`) may read a fact with `label` (a
     `Label` or its readers): any reader in common. A missing or empty label reads as `["owner"]`."""
@@ -72,5 +77,5 @@ def fact_of(row: FactRow) -> Fact:
     """The `Fact` a `facts` row holds. A row without a source fails validation: a fact is never
     taken for the kernel's without saying so."""
     return Fact(fact_id=row.fact_id, kind=row.kind, status=row.status, source=row.source,
-                claims=row.claims, label=Label(readers=row.readers or list(OWNER_ONLY), record_owner=row.record_owner),
+                claims=row.claims, label=label_of(row.readers, row.record_owner),
                 expires_at=row.expires_at)

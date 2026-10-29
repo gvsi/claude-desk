@@ -113,11 +113,13 @@ async def test_tools_follow_the_session_kind(app, client, registry):
     seen = await context_of(client, stranger.session_id, stranger.headers)
     assert (tools(seen.tools), tools(seen.tools_declared)) == (["native.capture_lead"], visitor_declared)
 
-    # whatever its standing, a session is given only tools its kind declares
+    # a kind declares exactly the tools it is given in some standing, so a session is given only
+    # tools its kind declares, and an agent never declares a refund
     for tool in TOOL_NAMES:
         adapters.register(FakeAdapter(tool), replace=True)
     desk_row = Desk(desk_id="desk-1", answering=True)
     for kind in ("visitor", "agent", "owner"):
+        ever_given: set[str] = set()
         for person_id, assurance, mandate_id in ((None, "none", None), ("person-dana", "demo_code", None),
                                                  (None, "none", "mandate-1"), (None, "owner_session", None)):
             if (kind == "owner") != (assurance == "owner_session") or (mandate_id and kind != "agent"):
@@ -128,6 +130,9 @@ async def test_tools_follow_the_session_kind(app, client, registry):
             session_row = auth.SessionRow(session_id="s-1", kind=kind, preview=False)
             given = decide.tools_given(principal, session_row, desk_row, TOOL_NAMES)
             assert given <= decide.declared_tools(kind), (kind, person_id, mandate_id)
+            ever_given |= given
+        assert decide.declared_tools(kind) == ever_given, kind
+    assert "payments.create_refund" not in decide.declared_tools("agent")
 
 
 async def test_tools_carry_strict_input_schemas_and_confirmed_descriptions(app, client, registry):

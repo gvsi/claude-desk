@@ -27,7 +27,7 @@ reads its context.
 from fastapi import APIRouter, Request
 from sqlalchemy import or_, select
 
-from desk.contracts import KnowledgeItem, Label, Principal, ToolProfile
+from desk.contracts import KnowledgeItem, Principal, ToolProfile
 from desk.db.models import Desk, Tool
 from desk.db.models import Fact as FactRow
 from desk.db.models import KnowledgeItem as KnowledgeRow
@@ -65,7 +65,7 @@ async def session_context(ctx: KernelCtx, principal: Principal, session_row: Ses
         tools_declared=[profile for tool, profile in profiles.items() if tool in declared],
         facts=[labels.fact_of(row) for row in facts if labels.can_read(row.readers, readers)],
         knowledge=[KnowledgeItem(item_id=row.item_id, source=row.source, title=row.title, text=row.text,
-                                 label=Label(readers=row.readers or list(labels.OWNER_ONLY)))
+                                 label=labels.label_of(row.readers))
                    for row in knowledge if labels.can_read(row.readers, readers)],
     )
 
