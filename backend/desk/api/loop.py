@@ -228,8 +228,10 @@ class _Turn:
 
     async def _store(self, content: list[dict], tool_uses: list[dict]) -> None:
         """Keep a response that runs no tools, as it came, with any call in it answered `not_run`. A response with
-        nothing but thinking is left out, as a retry would leave it: there is nothing to replay."""
-        if all(block.get("type") in THINKING for block in content):
+        nothing but thinking and blank text is left out, as a retry would leave it: there is nothing to replay, and
+        the Messages API refuses blank text blocks."""
+        if all(block.get("type") in THINKING or (block.get("type") == "text" and not block["text"].strip())
+               for block in content):
             return
         assistant_n = await append_assistant(self.conn, self.caller.ids, content)
         if tool_uses:
@@ -260,6 +262,9 @@ class _Turn:
             self.empty_answers += 1
             return None if self.empty_answers == 1 else await self._hand_off()
         outcome = await self._reply({"prose": prose, "clauses": []}, None)
+        stop = _stop([outcome])                            # no verdict, or a session that changed: stop as a call would
+        if stop is not None:
+            return stop
         if outcome.result["outcome"] == "blocked":         # once, with kinds a rewrite can fix: say why, call again
             violations = json.dumps({"violations": outcome.result["violations"]}, ensure_ascii=False)
             await append_message(self.conn, self.caller.ids, "note", text=NOTES["prose_blocked"] + "\n" + violations)

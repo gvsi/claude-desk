@@ -148,6 +148,42 @@ async def test_end_turn_text_becomes_prose(api_conn, caller, fake):
     assert len(model.requests) == 1
 
 
+async def test_a_failed_check_of_prose_ends_the_turn_with_the_error(api_conn, kernel_http, fake, ro_schema, visitor):
+    # Claude's plain-text answer fails closed like a send_reply would: nothing shows, the visitor gets the static
+    # error, the turn ends with no further model call, and its metric says why
+    async def prose_turn(caller: Caller) -> tuple[str, ScriptedModel]:
+        await said(api_conn, caller, "Do you fix leaks?")
+        model = ScriptedModel([response({"type": "text", "text": "Yes, we fix leaks."})])
+        return await run_turn(api_conn, caller, model), model
+
+    async def ended_as(caller: Caller, outcome: str, code: str) -> None:
+        assert [(event.type, getattr(event, "code", None)) for event in await events(api_conn, caller.session_id)] \
+            == [("writing", None), ("error", code), ("turn_end", None)]
+        assert await rows(api_conn, caller.session_id, "delivered", "author") == []
+        ((turn_type, turn),) = await metric_rows(api_conn, caller.session_id)
+        assert (turn_type, turn["model_calls"], turn["outcome"]) == ("turn", 1, outcome)
+
+    # the kernel can't be reached for the check
+    caller = await new_caller(kernel_http, fake, ro_schema)
+    fake.fail("/check_reply", "connect")
+    outcome, model = await prose_turn(caller)
+    assert outcome == "kernel_unavailable" and len(model.requests) == 1
+    await ended_as(caller, "kernel_unavailable", "kernel_unavailable")
+
+    # the session closed while the prose was being checked
+    async def close(path: str) -> None:
+        fake.sessions[visitor.ids.session_id].closed_at = fake.now
+
+    fake.fail("/check_reply", None)
+    async with KernelHttp("http://fake-kernel", transport=Watching(fake, {"/check_reply"}, close)) as http:
+        caller = Caller(copy_id=visitor.ids.copy_id, desk_id=visitor.ids.desk_id,
+                        session_id=visitor.ids.session_id, kind="visitor", kernel=http.session(visitor.token),
+                        ro_schema=ro_schema)
+        outcome, model = await prose_turn(caller)
+    assert outcome == "session_ended" and len(model.requests) == 1
+    await ended_as(caller, "session_ended", "session")
+
+
 async def test_blocked_prose_gets_one_rewrite_then_the_handoff(api_conn, kernel_http, fake, ro_schema):
     async def turn(*texts: str):
         caller = await new_caller(kernel_http, fake, ro_schema)
@@ -376,6 +412,8 @@ async def test_other_stop_reasons_and_empty_end_turn_hand_off(api_conn, kernel_h
         ("a stop reason the loop doesn't know", [response(said_so, stop_reason="something_new")]),
         # nothing to show, twice (thinking alone is nothing): one more call, then the handoff
         ("two empty end_turns", [response(), response(thinking())]),
+        # text that is only whitespace is nothing too, and isn't kept: replayed, it would end the next request
+        ("whitespace, then nothing", [response(thinking(), {"type": "text", "text": " \n "}), response()]),
     ]
     for name, script in cases:
         caller = await new_caller(kernel_http, fake, ro_schema)
@@ -391,6 +429,7 @@ async def test_other_stop_reasons_and_empty_end_turn_hand_off(api_conn, kernel_h
     # an empty answer is asked again as it was: nothing was shown or blocked, so there is nothing to tell Claude
     first, again = model.requests
     assert again.messages == first.messages
+    assert await rows(api_conn, caller.session_id, "model_assistant", "n") == []
 
 
 async def test_truncated_tool_call_never_runs(api_conn, caller, fake):
