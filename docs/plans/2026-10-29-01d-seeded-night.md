@@ -87,7 +87,7 @@ The master plan's "Global Constraints" and the kernel core's plan-specific const
 ## Landing
 
 - **PR 1, Friday evening, after kernel payments (plan 01c) lands:** Tasks 1, 2, 3 and 5, with the hand-made fixture `backend/tests/kernel/fixtures/seed_night.json` that Task 2's tests and Task 5's cases replay. No `recording.json` ships, so every copy is live and the kernel logs `seed_night_unavailable` (missing). The agent persona's dry run waits for the API owner plan's A2A endpoint (plan 02b) (it skips, naming `02`, until that is in `landed.toml`). It changes gated paths, so it commits a tier 2 results file at its rebased head (Task 5).
-- **PR 2, recorded Saturday night after the tier 2 evals' calibration commit (plan 05b), landing Sunday before the final deploy:** Task 4's `recording.json`, outside every gated path. If `check_seed_night --fresh` fails at the final deploy's commit, the night is recorded again first.
+- **PR 2, recorded Saturday night after the tier 2 evals' calibration commit (plan 05b), landing Sunday before the final deploy, and only once the "Recorded history" labels show on Today, Conversations, People and Safety on `main`** (owner decision 6: the API owner plan's `replayed` fields and Today flags, plan 02b, and the web app's tags and captions, plan 04): Task 4's `recording.json`, outside every gated path. Until those labels are on `main`, PR 2 waits; if they aren't there by the final deploy, Sunday ships live data only (Task 4). If `check_seed_night --fresh` fails at the final deploy's commit, the night is recorded again first.
 - The master's "Shared contracts v2" block and "Data model" views table change in Task 2's commit, because `test_ro_views_match_the_data_model` ties the table to the code; the docs PR for this plan changes only the master's plan index, contracts note and schedule.
 
 ---
@@ -171,8 +171,8 @@ The master plan's "Global Constraints" and the kernel core's plan-specific const
 ### Task 4: Record and ship (operation, Saturday night)
 
 - [ ] After the tier 2 evals' calibration commit on `main` (plan 05b), with kernel payments (plan 01c) and the API owner plan (plan 02b) landed: on a clean checkout of `main`, `make seed-night` (real models, about 15 minutes and $3); read every printed transcript; `cd backend && uv run python -m scripts.check_seed_night --fresh` → exit 0; `make image image-check` → passes, with the recorded-night step's sha match and the recording loaded inside the image.
-- [ ] PR 2: commit `backend/desk/seed_night/recording.json` (`feat(kernel): ship the recorded night`), with each session's counts and `attempts` in the PR body; it lands before Sunday's final deploy, whose `make image-check` runs `--fresh` and `--image` again and calls for a new recording if anything under the keys changed.
-- [ ] If the recorder still refuses after its retries, PR 2 doesn't land and Sunday ships live data only: no recording file, nothing replayed so no labels show, and the README (deploy and docs, plan 06b) leaves the recorded-night line out.
+- [ ] PR 2: commit `backend/desk/seed_night/recording.json` (`feat(kernel): ship the recorded night`), with each session's counts and `attempts` in the PR body; it lands before Sunday's final deploy, and only once the "Recorded history" labels show on Today, Conversations, People and Safety on `main` ("Landing"). The final deploy's `make image-check` runs `--fresh` and `--image` again and calls for a new recording if anything under the keys changed.
+- [ ] If the recorder still refuses after its retries, or the labels aren't on `main` by the final deploy, PR 2 doesn't land and Sunday ships live data only: no recording file, nothing replayed so no labels show, and the README (deploy and docs, plan 06b) leaves the recorded-night line out.
 
 ### Task 5: Evals gate for this plan
 
