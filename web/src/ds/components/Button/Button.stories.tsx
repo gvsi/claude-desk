@@ -102,6 +102,42 @@ export const BusyGhost: Story = {
   },
 };
 
+/** Each variant's busy colors: what it steps to while its request is in flight. */
+const BUSY_LOOKS = [
+  { variant: 'primary', children: 'Send counter-offer', backgroundColor: 'rgb(221, 217, 207)', color: 'rgb(28, 27, 25)' },
+  { variant: 'secondary', children: 'Keep it', backgroundColor: 'rgba(250, 249, 245, 0.1)', color: 'rgba(250, 249, 245, 0.64)' },
+  { variant: 'ghost', children: 'Start over', backgroundColor: 'rgba(0, 0, 0, 0)', color: 'rgba(250, 249, 245, 0.64)' },
+  { variant: 'danger', children: 'Deny this time', backgroundColor: 'rgba(220, 130, 144, 0.24)', color: DANGER_TEXT },
+  { variant: 'danger-ghost', children: 'Deny always', backgroundColor: 'rgba(250, 249, 245, 0.06)', color: DANGER_TEXT },
+] as const;
+
+export const BusyAndDisabled: Story = {
+  render: (args) => (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-8)' }}>
+      {BUSY_LOOKS.map(({ variant, children }) => (
+        <Button key={variant} variant={variant} busy disabled onClick={args.onClick}>
+          {children}
+        </Button>
+      ))}
+    </div>
+  ),
+  parameters: {
+    canvasNote:
+      'The board shows no button that is busy and disabled at once; busy wins, so each variant keeps its busy colors at full opacity instead of dimming to 40%.',
+  },
+  play: async ({ args, canvas, userEvent }) => {
+    for (const { children, backgroundColor, color } of BUSY_LOOKS) {
+      const button = canvas.getByRole('button', { name: children });
+      await expect(button).toBeDisabled();
+      await expect(button).toHaveAttribute('aria-busy', 'true');
+      // busy_label_keeps_contrast: disabled as well doesn't dim it below its busy pair.
+      expectComputed(button, { opacity: '1', backgroundColor, color });
+      await userEvent.click(button);
+    }
+    await expect(args.onClick).not.toHaveBeenCalled();
+  },
+};
+
 /** A phone's line: 390 px less the 16 px gutter on each side. */
 const PHONE_LINE = 358;
 

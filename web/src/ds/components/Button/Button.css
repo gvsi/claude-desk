@@ -116,14 +116,15 @@
   transform: scale(0.98);
 }
 
-/* Disabled and busy: no hover, no press. A disabled control is dimmed well down. */
+/* Disabled and busy: no hover, no press. A disabled control is dimmed well down, unless it is busy
+   too: busy always wins, so its label keeps its busy colors. */
 .cd-button:disabled,
 .cd-button[aria-disabled='true'] {
   cursor: default;
   transform: none;
 }
 
-.cd-button:disabled,
+.cd-button:disabled:not([aria-busy='true']),
 a.cd-button[aria-disabled='true']:not([aria-busy='true']) {
   opacity: 0.4;
 }
