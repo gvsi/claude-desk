@@ -1,0 +1,70 @@
+/* ConversationListItem: a row link at the control radius, at least 48 px tall: the name and the
+   time on the first line, the status dot and its words on the second, each line on one line with
+   an ellipsis. The open conversation is on the selected fill; others fill on hover at
+   motion-instant. Nothing moves under reduced motion. */
+
+.cd-conversation-item {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: calc(var(--size-control) + var(--space-16));
+  padding: var(--space-6) var(--space-10);
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-primary);
+  text-decoration: none;
+  transition: background-color var(--motion-instant) var(--motion-ease);
+}
+
+.cd-conversation-item:hover {
+  background: var(--fill-hover);
+}
+
+.cd-conversation-item[aria-current='true'],
+.cd-conversation-item[aria-current='true']:hover {
+  background: var(--bg-selected);
+}
+
+.cd-conversation-item__top {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+.cd-conversation-item__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cd-conversation-item__time {
+  flex: none;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.cd-conversation-item__status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  min-width: 0;
+  color: var(--text-secondary);
+}
+
+.cd-conversation-item__status-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cd-conversation-item {
+    transition: none;
+  }
+}

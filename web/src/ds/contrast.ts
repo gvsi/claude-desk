@@ -109,6 +109,7 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = Object.freeze([
   ...pairs(['button-primary-text'], ['button-primary', 'button-primary-hover'], 4.5, 'Text on the primary button, at rest and on hover.'),
   ...pairs(MARKS, SURFACES, 3, 'Focus rings and status dots on the app, panels, raised surfaces and the selected row.'),
   ...pairs(MARKS, ['fill-card'], 3, 'Focus rings and status dots inside cards.', 'bg-app'),
+  ...pairs(MARKS, ['fill-hover'], 3, 'Focus rings and status dots on a hovered conversation or attempt row.', 'bg-app'),
   ...pairs(['clay'], ['bg-app', 'bg-panel'], 3, 'The Claude Desk mark in the sidebar and on the public page.'),
   ...pairs(['button-primary'], ['bg-app', 'bg-panel'], 3, 'The switch track when on, on a page and in the sidebar.'),
   ...pairs(['bg-app'], ['button-primary'], 3, 'The switch knob when on, against its track.'),

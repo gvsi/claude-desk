@@ -42,4 +42,4 @@
 | `owner` | `{ name: string; status: string }` | Required. |
 | `linkComponent` | `ComponentType<SidebarLinkProps>` | A plain `<a>` by default. |
 
-`NavKey`, `NavCount` and `SidebarLinkProps` are exported with the component.
+`NavKey`, `NavCount` and `SidebarLinkProps` are exported with the component, and `initialsOf(name)`, the owner avatar's initials, which `SwitcherMenu`'s monograms share.

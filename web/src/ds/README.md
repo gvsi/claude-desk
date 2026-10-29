@@ -107,6 +107,7 @@ Focus rings and status dots, 3:1 (`ring-composer` is `accent-blue`):
 | `bg-surface` | 6.2 | 5.1 | 7.9 | 5.3 | 6.6 |
 | `bg-selected` | 4.9 | 4.1 | 6.3 | 4.2 | 5.6 |
 | `fill-card` over `bg-app` | 6.8 | 5.6 | 8.7 | 5.8 | 7.0 |
+| `fill-hover` over `bg-app` | 6.3 | 5.2 | 8.0 | 5.3 | 6.6 |
 | `fill-card` over `bg-panel` | 6.3 | 5.2 | 8.0 | 5.3 | 6.6 |
 
 The mark in `clay` reads 6.5 on `bg-app` and 6.0 on `bg-panel`.

@@ -1,0 +1,48 @@
+/* Dialog: a raised surface with the card border and radius, centered over a dimmed page. The title
+   in section type (with a refused dot when it is a danger), the body in secondary text, then the
+   cancel and confirm buttons at the right. No shadow: the dimmed page separates it. It appears in
+   place; nothing slides or fades. */
+
+.cd-dialog {
+  box-sizing: border-box;
+  /* As wide as a short question needs, and never wider than a phone's line. */
+  width: min(440px, calc(100% - var(--space-32)));
+  max-width: none;
+  max-height: calc(100% - var(--space-32));
+  margin: auto;
+  padding: var(--space-20);
+  overflow-y: auto;
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-card);
+  background: var(--bg-surface);
+  box-shadow: none;
+  color: var(--text-primary);
+}
+
+.cd-dialog::backdrop {
+  background: var(--bg-app);
+  opacity: 0.72;
+}
+
+.cd-dialog__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin: 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.cd-dialog__body {
+  margin-top: var(--space-8);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.cd-dialog__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-8);
+  margin-top: var(--space-20);
+}

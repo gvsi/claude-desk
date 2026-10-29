@@ -66,7 +66,7 @@ function PlainLink({ children, ...props }: SidebarLinkProps) {
 }
 
 /** The first letter of the first and last words, as written: "Maria Rivera" is "MR". */
-function initialsOf(name: string): string {
+export function initialsOf(name: string): string {
   const words = name.trim().split(/\s+/).filter((word) => word !== '');
   const first = words[0];
   const last = words.length > 1 ? words[words.length - 1] : undefined;

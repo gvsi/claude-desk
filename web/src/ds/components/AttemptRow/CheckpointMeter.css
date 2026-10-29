@@ -1,0 +1,42 @@
+/* CheckpointMeter: four status dots in a row, then the stopping checkpoint's name in caption type,
+   secondary. Passed checks are filled and checks never reached are hollow, both in the outline's
+   quiet color; the stopping one is the refused dot. The dots are decorative beside the words. */
+
+.cd-checkpoint-meter {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.cd-checkpoint-meter__segments {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.cd-checkpoint-meter__segment {
+  flex: none;
+  box-sizing: border-box;
+  width: var(--size-dot);
+  height: var(--size-dot);
+  border-radius: var(--radius-full);
+}
+
+.cd-checkpoint-meter__segment--passed {
+  background: var(--line-control-hover);
+}
+
+.cd-checkpoint-meter__segment--stopped {
+  background: var(--status-refused);
+}
+
+.cd-checkpoint-meter__segment--unreached {
+  border: 1px solid var(--line-control-hover);
+  background: transparent;
+}
+
+.cd-checkpoint-meter__name {
+  color: var(--text-secondary);
+  white-space: nowrap;
+}

@@ -42,6 +42,7 @@ export {
 } from './components/SegmentedControl/SegmentedControl.tsx';
 export { Composer, type ComposerProps, type ComposerVariant } from './components/Composer/Composer.tsx';
 export { SuggestionChips, type SuggestionChipsProps } from './components/SuggestionChips/SuggestionChips.tsx';
+export { TextField, type TextFieldProps } from './components/TextField/TextField.tsx';
 
 // Layout
 export { Card, type CardProps } from './components/Card/Card.tsx';
@@ -61,6 +62,19 @@ export { PageHeader, type PageHeaderProps } from './components/PageHeader/PageHe
 export { Greeting, type GreetingProps, type PresenceGlyph } from './components/Greeting/Greeting.tsx';
 export { ReviewerBar, type ReviewerBarProps } from './components/ReviewerBar/ReviewerBar.tsx';
 export { PublicShell, type PublicBrand, type PublicShellProps } from './components/PublicShell/PublicShell.tsx';
+export { Dialog, type DialogProps } from './components/Dialog/Dialog.tsx';
+
+// Navigation
+export {
+  SwitcherMenu,
+  type SwitcherBusiness,
+  type SwitcherMenuProps,
+  type SwitcherPick,
+} from './components/SwitcherMenu/SwitcherMenu.tsx';
+export {
+  ConversationListItem,
+  type ConversationListItemProps,
+} from './components/ConversationListItem/ConversationListItem.tsx';
 
 // Reply cards
 export { ReplyCard, type ReplyCardProps } from './components/ReplyCard/ReplyCard.tsx';
@@ -100,6 +114,12 @@ export { TakeOverBar, type TakeOverBarProps } from './components/TakeOverBar/Tak
 // Safety
 export { FullTrace, type FullTraceProps } from './components/FullTrace/FullTrace.tsx';
 export { ChainStatus, type ChainStatusProps } from './components/ChainStatus/ChainStatus.tsx';
+export { AttemptRow, type AttemptRowProps } from './components/AttemptRow/AttemptRow.tsx';
+export {
+  CheckpointMeter,
+  type Checkpoint,
+  type CheckpointMeterProps,
+} from './components/AttemptRow/CheckpointMeter.tsx';
 
 // Icons
 export { Icon, ICON_NAMES, type IconName, type IconProps, type IconSize } from './icons/index.tsx';
