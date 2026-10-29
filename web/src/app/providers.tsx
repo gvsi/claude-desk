@@ -58,7 +58,8 @@ export function Providers({ router, children }: ProvidersProps) {
         if (outcome.error.kind !== 'unauthorized' || SESSION_PROBES.has(outcome.key)) return;
         if (router.state.location.pathname === '/') return;
         const state: SessionEndedState = { ended: ownerSucceeded.current };
-        void router.navigate('/', { state });
+        // Replace, so Back doesn't return to a page that would only answer 401 again.
+        void router.navigate('/', { state, replace: true });
       }),
     [router],
   );
