@@ -1,8 +1,6 @@
 /* Button: one of three weights, two heights, plus the danger variants for answers that refuse.
    Hover fills change at motion-instant; a press shrinks the button slightly at motion-fast.
-   Nothing moves under reduced motion. */
-/* Button: one of three weights, two heights. Hover fills change at motion-instant; a press
-   shrinks the button slightly at motion-fast. Nothing moves under reduced motion.
+   Nothing moves under reduced motion.
 
    A label longer than its line (a phone's, or a narrow column's) wraps inside the button, in
    balanced lines, and the button grows taller with the same padding: it is never wider than its
