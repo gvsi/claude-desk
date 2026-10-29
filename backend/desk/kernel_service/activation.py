@@ -270,20 +270,33 @@ def _read_report(code: int, stdout: bytes) -> ProofReport:
 # ---- What a proof covers -------------------------------------------------------------------------
 
 class VersionHashes(NamedTuple):
-    """Everything a proof of a compiled version depends on. A report proved for other hashes is
-    never reused: the first five key the proof cache, and the thresholds version must match too."""
+    """What a proof of a compiled version was proved against, all of it the proof cache's key.
+
+    `desk-prove` reads the compiled Cedar (`cedar_sha256`), the schema, the baseline and the
+    invariant files (`invariants_sha256`, with the prover's version), and three things that come
+    from the owner's cards rather than from the Cedar: the reference generator's `R` and `R_hold`,
+    the compiler's `A0` and the money tools no card covers. `cards_sha256` stands for those: it
+    hashes the cards the reference generator reads, never the compiler's output, so cards that
+    compile to the same Cedar (as a compiler that drops a never card would make them) never share
+    a report. The enabled profiles, with their pinned definitions, and the review thresholds'
+    version complete it. Within one build these fix every input `desk-prove` reads; across builds,
+    `make check-presets` proves the shipped sets again."""
 
     cedar_sha256: str
+    cards_sha256: str
     schema_sha256: str
     baseline_sha256: str
     profiles_sha256: str
     invariants_sha256: str
     review_thresholds_version: int
 
-    @property
-    def key(self) -> tuple[str, str, str, str, str]:
-        return (self.cedar_sha256, self.schema_sha256, self.baseline_sha256, self.profiles_sha256,
-                self.invariants_sha256)
+
+def cards_sha256(cards: Iterable[RuleCard]) -> str:
+    """sha256 of `canonical_json` of the owner's cards (defaults left out: both generators derive
+    them again from the profiles), sorted by `card_id`."""
+    owned = sorted((card for card in cards if not card.is_default), key=lambda card: card.card_id)
+    dumped = [card.model_dump(mode="json") for card in owned]
+    return hashlib.sha256(desk_kernel.canonical_json(json.dumps(dumped)).encode()).hexdigest()
 
 
 def profiles_sha256(profiles: Iterable[ToolProfile]) -> str:
@@ -298,10 +311,13 @@ def profiles_sha256(profiles: Iterable[ToolProfile]) -> str:
     return hashlib.sha256(desk_kernel.canonical_json(json.dumps(by_tool)).encode()).hexdigest()
 
 
-def version_hashes(compiled: compiler.CompiledSets, schema: Mapping[str, Any],
-                   profiles: Iterable[ToolProfile]) -> VersionHashes:
+def version_hashes(compiled: compiler.CompiledSets, schema: Mapping[str, Any], profiles: Iterable[ToolProfile],
+                   *, cards: Iterable[RuleCard]) -> VersionHashes:
+    """The hashes of `compiled`, the set compiled from `cards` over the enabled `profiles`. Pass
+    the owner's cards as given to the compiler and the reference generator, not `compiled.cards`."""
     return VersionHashes(
         cedar_sha256=compiler.cedar_sha256(compiled),
+        cards_sha256=cards_sha256(cards),
         schema_sha256=compiler.schema_sha256(dict(schema)),
         baseline_sha256=compiler.baseline_sha256(),
         profiles_sha256=profiles_sha256(profiles),
@@ -336,6 +352,7 @@ class ShippedReport(BaseModel):
 
     preset: str
     cedar_sha256: str
+    cards_sha256: str
     schema_sha256: str
     baseline_sha256: str
     profiles_sha256: str
@@ -371,19 +388,14 @@ def conclusive(report: ProofReport) -> bool:
             and [c.name for c in report.checks] == list(PROOF_CHECKS))
 
 
-@dataclass(frozen=True)
-class CachedProof:
-    report: ProofReport
-    review_thresholds_version: int
-
-
 class ProofCache:
-    """Proof reports in memory, by what they proved (`VersionHashes.key`), so every copy of a rule
-    set reuses one report: the shipped reports, loaded at startup, and every conclusive live SymCC
-    proof the kernel adds. A lookup also needs the thresholds version the report was proved with."""
+    """Proof reports in memory, by everything they were proved against (`VersionHashes`, cards and
+    thresholds version included), so every copy of a rule set reuses one report while other cards
+    never do: the shipped reports, loaded at startup, and every conclusive live SymCC proof the
+    kernel adds."""
 
     def __init__(self) -> None:
-        self._entries: dict[tuple[str, str, str, str, str], CachedProof] = {}
+        self._entries: dict[VersionHashes, ProofReport] = {}
         self._lock = threading.Lock()
 
     @classmethod
@@ -408,19 +420,18 @@ class ProofCache:
         if not conclusive(report):
             return False
         with self._lock:
-            current = self._entries.get(hashes.key)
-            if current is not None and not current.report.ok and report.ok:
-                log.warning("proof_cache_conflict cedar_sha256=%s", hashes.cedar_sha256)
+            current = self._entries.get(hashes)
+            if current is not None and not current.ok and report.ok:
+                log.warning("proof_cache_conflict cedar_sha256=%s cards_sha256=%s", hashes.cedar_sha256,
+                            hashes.cards_sha256)
                 return False
-            self._entries[hashes.key] = CachedProof(report, hashes.review_thresholds_version)
+            self._entries[hashes] = report
         return True
 
     def get(self, hashes: VersionHashes) -> ProofReport | None:
+        """The report proved against exactly `hashes`, if there is one."""
         with self._lock:
-            entry = self._entries.get(hashes.key)
-        if entry is None or entry.review_thresholds_version != hashes.review_thresholds_version:
-            return None
-        return entry.report
+            return self._entries.get(hashes)
 
     def __len__(self) -> int:
         with self._lock:
@@ -537,22 +548,16 @@ class SeedUnproved(KernelFailure):
         self.preset = preset
 
 
-def cards_sha256(cards: Iterable[RuleCard]) -> str:
-    """sha256 of `canonical_json` of the owner's cards (defaults left out), sorted by `card_id`."""
-    owned = sorted((card for card in cards if not card.is_default), key=lambda card: card.card_id)
-    dumped = [card.model_dump(mode="json") for card in owned]
-    return hashlib.sha256(desk_kernel.canonical_json(json.dumps(dumped)).encode()).hexdigest()
-
-
-def version_row(*, copy_id: str, desk_id: str, version: int, parent_version: int | None, cards: Sequence[RuleCard],
+def version_row(*, copy_id: str, desk_id: str, version: int, parent_version: int | None,
                 compiled: compiler.CompiledSets, a0: str, schema: Mapping[str, Any], hashes: VersionHashes,
                 status: str, proof: ProofReport | None, created_at: datetime,
                 preset: str | None = None) -> PolicyVersionRow:
     """A `policy_versions` row for a compiled version: its cards with defaults, its Cedar (`F`,
-    `A`, `H` and `A0`), its schema as loaded and the hashes its proof covers."""
+    `A`, `H` and `A0`), its schema as loaded and the hashes its proof covers (`cards_sha256`
+    among them, from `version_hashes`)."""
     return PolicyVersionRow(
         desk_id=desk_id, version=version, copy_id=copy_id, parent_version=parent_version, cards=compiled.cards,
-        status=status, proof=proof, **hashes._asdict(), created_at=created_at, cards_sha256=cards_sha256(cards),
+        status=status, proof=proof, **hashes._asdict(), created_at=created_at,
         cedar={**compiled.sets(), "A0": a0}, schema_json=json.dumps(schema), preset=preset)
 
 
@@ -576,16 +581,16 @@ async def activate_shipped(ctx: KernelCtx, desk_id: str, preset: str) -> PolicyV
     profiles = await desks.enabled_profiles(ctx, desk_id)
     schema = compiler.desk_schema(profiles)
     compiled = compiler.compile_cards(cards, profiles)
-    hashes = version_hashes(compiled, schema, profiles)
+    hashes = version_hashes(compiled, schema, profiles, cards=cards)
     report = ctx.policies.cache.get(hashes)
     if report is None or not proved(report):
         ctx.policies.unproved_seeds.add(preset)
         log.error("seed_unproved preset=%s %s", preset,
                   " ".join(f"{field}={value}" for field, value in hashes._asdict().items()))
         raise SeedUnproved(preset)
-    row = version_row(copy_id=ctx.copy_id, desk_id=desk_id, version=1, parent_version=None, cards=cards,
-                      compiled=compiled, a0=compiler.compile_cards(cards, profiles, review=False).A, schema=schema,
-                      hashes=hashes, status="active", proof=report, created_at=ctx.clock.now(), preset=preset)
+    row = version_row(copy_id=ctx.copy_id, desk_id=desk_id, version=1, parent_version=None, compiled=compiled,
+                      a0=compiler.compile_cards(cards, profiles, review=False).A, schema=schema, hashes=hashes,
+                      status="active", proof=report, created_at=ctx.clock.now(), preset=preset)
     ctx.db.add(row)
     await ctx.db.flush()
     await ledger.append(ctx, copy_id=ctx.copy_id, desk_id=desk_id, event=LedgerEvent(

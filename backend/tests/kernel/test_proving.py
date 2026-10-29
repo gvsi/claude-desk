@@ -22,7 +22,7 @@ import pytest
 from fastapi import FastAPI
 from sqlalchemy import select
 
-from desk.contracts import ProofReport
+from desk.contracts import ProofCheck, ProofReport
 from desk.db.models import LedgerEntry, PolicyVersion
 from desk.db.session import database_url, dispose_engines, libpq_url
 from desk.kernel_service import activation, compiler
@@ -137,7 +137,7 @@ def test_shipped_reports_match_the_current_build():
     assert set(activation.SHIPPED_PRESETS) == {"rivera", "ask_first", "auto"}
     for preset, cards in activation.SHIPPED_PRESETS.items():
         schema = compiler.desk_schema(profiles)
-        hashes = activation.version_hashes(compiler.compile_cards(cards, profiles), schema, profiles)
+        hashes = activation.version_hashes(compiler.compile_cards(cards, profiles), schema, profiles, cards=cards)
         shipped = json.loads((activation.PROOFS_DIR / f"{preset}.json").read_text())
         assert shipped["preset"] == preset
         assert {field: shipped[field] for field in hashes._fields} == hashes._asdict(), preset
@@ -222,9 +222,49 @@ async def test_two_copies_share_one_cached_report(app, client, monkeypatch):
     assert first.desk_id != second.desk_id
     assert hashes_of(first) == hashes_of(second) == shipped("rivera").hashes   # the same Cedar in every copy
     assert first.cards == second.cards and first.cedar == second.cedar
-    assert len(cache) == entries == len({shipped(p).hashes.key for p in activation.SHIPPED_PRESETS})
+    assert len(cache) == entries == len({shipped(p).hashes for p in activation.SHIPPED_PRESETS})
     assert cache.get(hashes_of(first)) is cache.get(hashes_of(second)) == first.proof == second.proof
     assert calls == []
+
+
+def proof_of(*, failing: tuple[str, ...] = ()) -> ProofReport:
+    """A conclusive SymCC report: every obligation holds except those in `failing`."""
+    return ProofReport(ok=not failing, method="symcc",
+                       checks=[ProofCheck(name=name, ok=name not in failing) for name in activation.PROOF_CHECKS])
+
+
+def test_a_cached_proof_answers_only_the_cards_it_was_proved_for(monkeypatch):
+    """desk-prove checks the compiled Cedar against the reference generator's reading of the
+    cards, so a report proves that these cards compile to this Cedar. Other cards that compile to
+    the same Cedar, which is what a compiler that drops a never card produces, miss the cache and
+    have to be proved themselves; a report proved under other review thresholds misses too."""
+    profiles = [native_profile("native.book"), native_profile("native.find_slots")]
+    schema = compiler.desk_schema(profiles)
+    auto_book = [card("book", "native.book")]
+    never_changes = [card("no-changes", "effect:change", mode="never"), card("book", "native.book")]
+
+    def hashes(cards):
+        return activation.version_hashes(compiler.compile_cards(cards, profiles), schema, profiles, cards=cards)
+
+    sound = hashes(auto_book)
+    cache = activation.ProofCache()
+    assert cache.put(sound, proof_of())
+
+    # a compiler that emits no forbid for the never card: both sets compile to the same Cedar
+    compile_cards = compiler.compile_cards
+    monkeypatch.setattr(compiler, "compile_cards", lambda *a, **k: dataclasses.replace(compile_cards(*a, **k), F=""))
+    dropped = hashes(never_changes)
+    assert dropped.cedar_sha256 == sound.cedar_sha256 and dropped.cards_sha256 != sound.cards_sha256
+    assert cache.get(dropped) is None                     # the pass for auto_book isn't reused: it gets proved
+
+    # and the other way: that set's failure never answers the sound set
+    failed = proof_of(failing=("auto_within_cards", "hold_within_cards"))
+    assert cache.put(dropped, failed)
+    assert cache.get(dropped) == failed and cache.get(sound) == proof_of()
+    assert len(cache) == 2
+
+    # the thresholds version is part of what a report proved
+    assert cache.get(sound._replace(review_thresholds_version=sound.review_thresholds_version + 1)) is None
 
 
 def force_mode(monkeypatch: pytest.MonkeyPatch, mode: str) -> None:
@@ -242,11 +282,12 @@ def kernel_row_counts(*tables: str) -> dict[str, int]:
         return {table: admin.execute(f"SELECT count(*) FROM kernel.{table}").fetchone()[0] for table in tables}
 
 
-async def test_an_uncached_seed_is_503_in_either_mode(monkeypatch, frozen_clock, tmp_path, caplog):
+@pytest.mark.parametrize("patched", ["cedar_sha256", "cards_sha256"])   # other Cedar, or the same Cedar from other cards
+async def test_an_uncached_seed_is_503_in_either_mode(patched, monkeypatch, frozen_clock, tmp_path, caplog):
     compiled = shipped("rivera").cedar_sha256                     # what the kernel compiles Rivera's cards to
     # the shipped reports, each with one hash patched, so nothing the kernel compiles has a report
     for preset in activation.SHIPPED_PRESETS:
-        report = shipped(preset).model_copy(update={"cedar_sha256": "0" * 64})
+        report = shipped(preset).model_copy(update={patched: "0" * 64})
         (tmp_path / f"{preset}.json").write_text(activation.report_text(report))
     monkeypatch.setattr(activation, "PROOFS_DIR", tmp_path)
     calls = spy_on_proving(monkeypatch)
@@ -342,9 +383,9 @@ async def store_active_version(app: FastAPI, rows, cards, profiles) -> None:
     async with kernel_ctx(app) as ctx:
         ctx.bind(rows.copy_id)
         ctx.db.add(activation.version_row(
-            copy_id=rows.copy_id, desk_id=rows.desk_id, version=1, parent_version=None, cards=cards, compiled=compiled,
+            copy_id=rows.copy_id, desk_id=rows.desk_id, version=1, parent_version=None, compiled=compiled,
             a0=compiler.compile_cards(cards, profiles, review=False).A, schema=schema,
-            hashes=activation.version_hashes(compiled, schema, profiles), status="active", proof=None,
+            hashes=activation.version_hashes(compiled, schema, profiles, cards=cards), status="active", proof=None,
             created_at=ctx.clock.now()))
 
 

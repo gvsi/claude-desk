@@ -1,5 +1,6 @@
 {
   "baseline_sha256": "581210756d4345c31324f64c84e7008b1609ae2bbb5bc85bd727bd644dffe991",
+  "cards_sha256": "bfc6b6a2056e87d174f5d0006bcaef1d2e732f0db60ece6eabd68d352687aa03",
   "cedar_sha256": "57d37c08b8fb966c88e459e2898a0092d08f846beb8cbd6e10d627dfd4dea5e6",
   "invariants_sha256": "05f672b80818db0b2e3a520c60370c2ab05c0527e368cec20de83acf0f6be4a2",
   "preset": "auto",

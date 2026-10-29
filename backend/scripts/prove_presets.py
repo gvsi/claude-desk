@@ -23,9 +23,9 @@ from desk.kernel_service import activation, compiler
 async def prove_set(preset: str, cards: list[RuleCard], profiles: list[ToolProfile]) -> activation.ShippedReport:
     """The report for one shipped set. Raises RuntimeError when compiling isn't deterministic."""
     schema = compiler.desk_schema(profiles)
-    hashes = activation.version_hashes(compiler.compile_cards(cards, profiles), schema, profiles)
+    hashes = activation.version_hashes(compiler.compile_cards(cards, profiles), schema, profiles, cards=cards)
     again = activation.version_hashes(compiler.compile_cards(list(cards), list(profiles)),
-                                      compiler.desk_schema(profiles), profiles)
+                                      compiler.desk_schema(profiles), profiles, cards=list(cards))
     if hashes != again:
         raise RuntimeError(f"{preset}: compiling twice gave different hashes")
     proof = await activation.prove(activation.build_proof_inputs(cards, profiles, schema))
