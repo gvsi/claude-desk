@@ -34,19 +34,27 @@ const SIDES = {
 const ONCE_LINE = 'Only this request. Nothing is saved.';
 const RULE_LINE = "Saves a rule. You'll see it first.";
 
+/** An answer's words, or, for one that names the person, its words around them. */
+type Words = string | ((person: ReactNode) => ReactNode);
+
 /**
  * Each answer's side and words, in the order a side offers them: the one-time answer, then the
  * one that also saves a rule. `button` is its plain button when it is its side's only answer;
- * `item` and `line` are its menu item. Allow only for this person's words are the generic ones;
- * with the person's name, `buttonWords` and `itemWords` put it in place of "this person". A missing
- * answer is a compile error.
+ * `item` and `line` are its menu item. Allow only for this person's words take the person: their
+ * name on record, or "this person". This table is the only source of the answers' words, and a
+ * missing answer is a compile error.
  */
 const ANSWERS = {
   allow_once: { side: 'allow', button: 'Allow this time', item: 'This time', line: ONCE_LINE },
-  allow_person: { side: 'allow', button: 'Allow only for this person, always', item: 'Only for this person, always', line: RULE_LINE },
+  allow_person: {
+    side: 'allow',
+    button: (person) => <>Allow only for {person}, always</>,
+    item: (person) => <>Only for {person}, always</>,
+    line: RULE_LINE,
+  },
   deny_once: { side: 'deny', button: 'Deny this time', item: 'This time', line: ONCE_LINE },
   deny_always: { side: 'deny', button: 'Deny always', item: 'Always', line: RULE_LINE },
-} as const satisfies Record<ApprovalAnswer, { side: Side; button: string; item: string; line: string }>;
+} as const satisfies Record<ApprovalAnswer, { side: Side; button: Words; item: Words; line: string }>;
 
 const ANSWER_ORDER = Object.keys(ANSWERS) as readonly ApprovalAnswer[];
 
@@ -131,16 +139,19 @@ function personWords(personName: string | undefined): ReactNode {
   );
 }
 
+/** Words as shown for this person. */
+function say(words: Words, personName: string | undefined): ReactNode {
+  return typeof words === 'string' ? words : words(personWords(personName));
+}
+
 /** An answer's words on a plain button. */
 function buttonWords(answer: ApprovalAnswer, personName: string | undefined): ReactNode {
-  if (answer !== 'allow_person') return ANSWERS[answer].button;
-  return <>Allow only for {personWords(personName)}, always</>;
+  return say(ANSWERS[answer].button, personName);
 }
 
 /** An answer's words as a menu item. */
 function itemWords(answer: ApprovalAnswer, personName: string | undefined): ReactNode {
-  if (answer !== 'allow_person') return ANSWERS[answer].item;
-  return <>Only for {personWords(personName)}, always</>;
+  return say(ANSWERS[answer].item, personName);
 }
 
 /** The status line for `state`; a state this build doesn't know asks for a reload, and offers nothing. */
