@@ -8,7 +8,7 @@ import { Button } from './Button.tsx';
 const DANGER_FILL = 'rgba(220, 130, 144, 0.16)';
 const DANGER_TEXT = 'rgb(235, 163, 174)';
 const ANSWERS_NOTE =
-  "The signed-off answer boards (N-Answers-Final, N-Answers-Verified) replace this board's four secondary answers: Deny this time is the soft red danger button, Deny always the red-text danger-ghost.";
+  "The signed-off answer board (N-Answers-TwoButtons, option 2) replaces this board's four secondary answers: Deny is the soft red danger button. Danger-ghost is the same refusal's quieter look, red words with no fill.";
 
 const meta = {
   title: 'Actions/Button',

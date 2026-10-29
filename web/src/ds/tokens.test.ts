@@ -200,6 +200,10 @@ describe('design tokens', () => {
     // still reads at 4.5:1.
     add(['button-danger-text'], ['button-danger-fill', 'transparent'], 4.5, 'fill-card', 'bg-app', 0.8);
     add(['text-primary'], ['fill-secondary', 'transparent'], 4.5, 'fill-card', 'bg-app', 0.6);
+    // Deny's menu on a held request: its answers in red words on the raised surface, at rest and
+    // while one is hovered or has focus.
+    add(['button-danger-text'], ['bg-surface'], 4.5);
+    add(['button-danger-text'], ['fill-hover'], 4.5, 'bg-surface');
 
     // Every required pair is listed, at no lower a minimum, so dropping one can't pass.
     for (const want of required) {

@@ -21,7 +21,7 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 - Set body text and everything Claude says in `text-primary`; captions, meta lines, helper text and receipts in `text-secondary`. Use `text-tertiary` only for placeholders and labels at 13 px and up.
 - Separate regions by fill and a hairline, not by shadow. A card is `fill-card` with a 1 px `line-card` border. Chips, outlined pills and the whisper composer are outlined in `line-control`, `line-control-hover` on hover. The intro's passcode field is outlined in `line-field` (3:1).
 - Make the primary button `button-primary` with `button-primary-text`, `button-primary-hover` on hover: an inverted neutral, at most one per view. Secondary buttons are `fill-secondary` (`fill-secondary-hover` on hover) with `text-primary`; ghost buttons are transparent with `fill-hover` on hover. Visitor bubbles are `fill-bubble`; count pills and the segmented track are `fill-count`.
-- Give an answer that refuses the red look, and nothing else: `danger` buttons are `button-danger-fill` (`button-danger-fill-hover` on hover) with `button-danger-text`, and `danger-ghost` buttons are transparent with `button-danger-text`. They are the only red controls and the only red words in the system; their words say what is refused ("Deny this time", "Deny always"), and the red is never a status.
+- Give an answer that refuses the red look, and nothing else: `danger` buttons are `button-danger-fill` (`button-danger-fill-hover` on hover) with `button-danger-text`, and `danger-ghost` buttons are transparent with `button-danger-text`. They are the only red controls and the only red words in the system, with the items of Deny's menu on a held request, which use `button-danger-text` on `bg-surface`. Their words say what is refused ("Deny this time", "Always" in Deny's menu), and the red is never a status.
 - Use `accent-blue` only for links, the focus ring and selection. Never put text on it and never use it as decoration.
 - Show status only as a `size-dot` dot or a thin bar in `status-handled` (handled or allowed), `status-held` (held, needs you), `status-refused` (refused or blocked) or `status-info` (a hollow dot), always beside words that say the same thing. Never a colored tile, a filled badge or colored text.
 - Use `clay` only inside the Claude Desk mark, and as the field behind the first-visit intro's illustration.
@@ -106,7 +106,9 @@ Text and links, 4.5:1:
 
 `button-danger-text` reads 6.1 on `button-danger-fill` and 5.3 on `button-danger-fill-hover` over `fill-card` (6.6 and 5.7 straight on `bg-app`), 7.9 on `fill-card` and 6.7 on `fill-hover` over `fill-card` (8.5 and 7.3 on `bg-app`).
 
-Busy buttons are measured as drawn, faded by their own opacity, in the card where all four answers wait together: the danger and danger-ghost answers at 80% read 4.5 and 5.6, the secondary and ghost answers at 60% read 4.8 and 5.6. The red buttons fade less, because red text loses contrast faster.
+Busy buttons are measured as drawn, faded by their own opacity, in a held request's card: the danger answer (Deny) at 80% reads 4.5 and the secondary answer (Allow) at 60% reads 4.8; a danger-ghost or ghost button there would read 5.6 at the same fades. The red buttons fade less, because red text loses contrast faster.
+
+In Deny's menu on a held request, `button-danger-text` reads 7.2 on `bg-surface` and 6.0 on `fill-hover` over it (an item hovered or focused). Allow's items use `text-primary` and every item's line `text-secondary`, already listed on `bg-surface` and on `fill-hover` over it.
 
 Focus rings and status dots, 3:1 (`ring-composer` is `accent-blue`):
 

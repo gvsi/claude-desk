@@ -6,9 +6,9 @@
 
 - `primary` for the one action a view is about ("Send counter-offer", "Join the chat"): an inverted neutral, at most one per view.
 - `secondary` for the other actions beside it, such as "Allow this time" on an approval card.
-- `ghost` for quiet actions that shouldn't compete ("Start over", "Mark done", "Allow only for this person").
+- `ghost` for quiet actions that shouldn't compete ("Start over", "Mark done").
 - `danger` for an answer that refuses, once: "Deny this time", a soft `button-danger-fill` behind `button-danger-text`.
-- `danger-ghost` for a quieter refusal beside it: "Deny always", `button-danger-text` with no fill.
+- `danger-ghost` for a quieter refusal beside it: `button-danger-text` with no fill.
 - The red variants are only for refusing. They are never a status, a warning or decoration, and their words still say exactly what happens.
 - `size="main"` for a screen's main actions (`size-control-main`, 40 px); `inline` (`size-control`, 32 px) everywhere else.
 - With `href`, the same look as a link: the button a payment or document card ends with ("Open payment page").

@@ -3,26 +3,33 @@ import { useState } from 'react';
 import { expect, fn, waitFor, within } from 'storybook/test';
 
 import type { ApprovalAnswer, Decision } from '../../../api/contracts.ts';
-import { rivera } from '../../fixtures/index.ts';
+import { chen, rivera } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { ApprovalCard, type ApprovalCardProps } from './ApprovalCard.tsx';
 
-const ANSWER_NAMES = ['Allow this time', 'Deny this time', 'Allow only for this person', 'Deny always'];
+/** Words that only an offered answer shows: its button, its menu items and their lines. */
+const ANSWER_WORDS = ['Allow this time', 'Deny this time', 'This time', 'Only for', 'Always', 'Nothing is saved', 'Saves a rule'];
 const ERROR_LINE = "We couldn't confirm your answer. Try again, or reload to see where it stands.";
-const RULE_LINE_DENY = "Deny always also saves a rule, so Claude declines requests like this on its own. You'll see the rule before it applies.";
-const RULE_LINE_BOTH =
-  "Allow only for this person and Deny always also save a rule, so Claude handles requests like this on its own. You'll see the rule before it applies.";
+const ONCE_LINE = 'Only this request. Nothing is saved.';
+const RULE_LINE = "Saves a rule. You'll see it first.";
 
-/** Each answer's look on the signed-off boards: neutral, soft red, quiet neutral, red words. */
+/** Each side's look on the signed board: Allow the secondary button, Deny the soft red fill. */
 const SECONDARY = { backgroundColor: 'rgba(250, 249, 245, 0.1)', color: 'rgba(250, 249, 245, 0.92)', height: '40px' };
 const DANGER = { backgroundColor: 'rgba(220, 130, 144, 0.16)', color: 'rgb(235, 163, 174)', height: '40px' };
-const GHOST = { backgroundColor: 'rgba(0, 0, 0, 0)', color: 'rgba(250, 249, 245, 0.92)', height: '40px' };
-const DANGER_GHOST = { backgroundColor: 'rgba(0, 0, 0, 0)', color: 'rgb(235, 163, 174)', height: '40px' };
-const ANSWERS_BOARDS =
-  'The answers follow the signed-off answer boards (N-Answers-Final, N-Answers-Verified), which replace the four secondary answers on this board.';
+/** A menu on the raised surface, with the card's border and radius, lifted by the dialog shadow. */
+const MENU = { backgroundColor: 'rgb(42, 41, 39)', borderTopWidth: '1px', borderTopColor: 'rgba(250, 249, 245, 0.14)', borderRadius: '12px' };
+/** Deny's items say what they refuse in red words; Allow's are plain; each item's line is quieter. */
+const RED_WORDS = { color: 'rgb(235, 163, 174)' };
+const PLAIN_WORDS = { color: 'rgba(250, 249, 245, 0.92)' };
+const QUIET_LINE = { color: 'rgba(250, 249, 245, 0.64)', fontSize: '12px' };
+const ANSWERS_BOARD =
+  'The answers follow the signed-off answer board N-Answers-TwoButtons, option 2 (menu buttons), which replaces the four secondary answers on this board.';
 
 const held = rivera.decisions.held;
 const heldVerified = rivera.heldVerified;
+const heldRefund = rivera.heldRefund;
+const heldConsultation = chen.heldConsultation;
+const DANA = rivera.people.dana.name;
 
 /** The visitor's own words, quoted as Plan 04's Today does, and marked as someone else's text. */
 const fromTheVisitor = (
@@ -31,9 +38,44 @@ const fromTheVisitor = (
   </>
 );
 
-/** The card's answer buttons, in the order shown. */
+/** Each held request with its rule, as Today passes them. */
+const consultationArgs = {
+  decision: heldConsultation,
+  heldBy: chen.ruleCards['cc-consult'].reason,
+  context: undefined,
+  waiting: 'Web chat, 5 min ago',
+} satisfies Partial<ApprovalCardProps>;
+const saturdayArgs = {
+  decision: heldVerified,
+  heldBy: rivera.ruleCards['rv-book-sat'].reason,
+  context: undefined,
+  waiting: 'Web chat, just now',
+} satisfies Partial<ApprovalCardProps>;
+const refundArgs = {
+  decision: heldRefund,
+  heldBy: rivera.ruleCards['rv-refund'].reason,
+  context: undefined,
+  waiting: 'Web chat, 1 min ago',
+} satisfies Partial<ApprovalCardProps>;
+
+/** The card's answer buttons, in the order shown, without the items of an open menu. */
 function answerButtons(root: HTMLElement): HTMLElement[] {
-  return [...root.querySelectorAll<HTMLElement>('[role="group"][aria-label="Your answer"] button')];
+  return [...root.querySelectorAll<HTMLElement>('[role="group"][aria-label="Your answer"] button:not([role="menuitem"])')];
+}
+
+/** An open menu's items, in order. */
+function itemsOf(menu: HTMLElement): HTMLElement[] {
+  return within(menu).getAllByRole('menuitem');
+}
+
+/** What an open menu offers: each item's name and its quieter line. */
+async function expectItems(menu: HTMLElement, items: readonly [string, string][]): Promise<void> {
+  const found = itemsOf(menu);
+  await expect(found).toHaveLength(items.length);
+  for (const [i, [name, line]] of items.entries()) {
+    await expect(found[i]).toHaveAccessibleName(name);
+    await expect(found[i]).toHaveAccessibleDescription(line);
+  }
 }
 
 /** The top edge of each element, to the pixel: equal tops share a row. */
@@ -43,11 +85,6 @@ function tops(elements: readonly HTMLElement[]): number[] {
 
 /** A 390 px phone's line: the screen less two 16 px gutters. */
 const PHONE_LINE = 358;
-
-/** The card's thin divider between the one-time answers and the rule answers, if it shows. */
-function dividerIn(root: HTMLElement): HTMLElement | null {
-  return root.querySelector<HTMLElement>('.cd-approval-card__divider');
-}
 
 /** The card's one status dot. */
 function dotIn(root: HTMLElement): HTMLElement {
@@ -66,10 +103,9 @@ async function expectFinal(root: HTMLElement, decision: Decision, line: string, 
   await expect(root).not.toHaveTextContent('Waiting for your answer');
   await expect(dotIn(root)).toHaveClass(`cd-status-dot--${tone}`);
   await expect(root.querySelector('[role="group"]')).toBeNull();
+  await expect(root.querySelector('[role="menu"]')).toBeNull();
   await expect(root.querySelectorAll('button')).toHaveLength(0);
-  for (const name of ANSWER_NAMES) await expect(root).not.toHaveTextContent(name);
-  for (const words of ['saves a rule', 'save a rule', "You'll see the rule"]) await expect(root).not.toHaveTextContent(words);
-  await expect(root.querySelector('.cd-approval-card__divider')).toBeNull();
+  for (const words of ANSWER_WORDS) await expect(root).not.toHaveTextContent(words);
 }
 
 /** The card as Today holds it once an answer is sent and no result has come back yet. */
@@ -169,9 +205,9 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-export const ThreeAnswersOnOneRow: Story = {
+export const TwoPlainButtons: Story = {
   parameters: {
-    canvasNote: `${ANSWERS_BOARDS} The unverified visitor gets three: Allow only for this person needs a verified person. The counter-offer row is static vision.`,
+    canvasNote: `${ANSWERS_BOARD} The quote card's discount limit holds this request, not the tool, and the visitor isn't verified, so each side has one answer and shows it as a plain button. The counter-offer row is static vision.`,
   },
   play: async ({ canvas, canvasElement }) => {
     const card = canvas.getByRole('article', { name: `Held for you: ${held.reason_plain}` });
@@ -183,210 +219,398 @@ export const ThreeAnswersOnOneRow: Story = {
     await expect(card).toHaveTextContent(`Held by your rule: ${rivera.ruleCards['rv-quote'].reason}`);
     await expect(card).toHaveTextContent('From the visitor: “How much to clear a clogged drain? Can I get 15% off if I pay cash?”');
 
-    // only_offered_answers: the kernel offered three, so three show, in order.
+    // only_offered_answers: one answer on each side, so two plain buttons with their full words.
     const group = canvas.getByRole('group', { name: 'Your answer' });
     const buttons = answerButtons(canvasElement);
-    await expect(buttons.map((button) => button.textContent)).toEqual(['Allow this time', 'Deny this time', 'Deny always']);
-    await expect(canvas.queryByRole('button', { name: 'Allow only for this person' })).toBeNull();
+    await expect(buttons.map((button) => button.textContent)).toEqual(['Allow this time', 'Deny this time']);
+    const [allow, deny] = buttons as [HTMLElement, HTMLElement];
+    await expect(allow).toHaveAccessibleName('Allow this time');
+    await expect(deny).toHaveAccessibleName('Deny this time');
+    for (const button of buttons) {
+      await expect(button).not.toHaveAttribute('aria-haspopup');
+      await expect(button).not.toHaveAttribute('aria-expanded');
+      await expect(button.querySelector('svg')).toBeNull();
+    }
 
-    // Allow stays neutral, Deny this time takes the soft red fill, and Deny always is red words
-    // after a thin divider, all on one row.
-    const [allow, deny, denyAlways] = buttons as [HTMLElement, HTMLElement, HTMLElement];
+    // Allow is the secondary button, Deny the soft red fill, side by side.
     expectComputed(allow, SECONDARY);
     expectComputed(deny, DANGER);
-    expectComputed(denyAlways, DANGER_GHOST);
     await expect(new Set(tops(buttons)).size).toBe(1);
-    const divider = dividerIn(canvasElement);
-    if (!divider) throw new Error('no divider between the answers');
-    await expect(divider).toHaveAttribute('aria-hidden', 'true');
-    expectComputed(divider, { width: '1px', height: '20px', backgroundColor: 'rgba(250, 249, 245, 0.12)' });
-    await expect(deny.getBoundingClientRect().right).toBeLessThan(divider.getBoundingClientRect().left);
-    await expect(divider.getBoundingClientRect().right).toBeLessThan(denyAlways.getBoundingClientRect().left);
-    await expect(group).not.toHaveTextContent('Or save a rule');
-    await expect(card).toHaveTextContent(RULE_LINE_DENY);
-    await expect(card).not.toHaveTextContent('Allow only for this person');
+    await expect(allow.getBoundingClientRect().right + 8).toBe(deny.getBoundingClientRect().left);
+
+    // Nothing else: no menu, and no line about rules under the answers.
+    await expect(canvas.queryByRole('menu')).toBeNull();
+    for (const words of ['saves a rule', 'save a rule', "You'll see", 'Or save a rule']) await expect(card).not.toHaveTextContent(words);
     await expect(group).not.toHaveAttribute('aria-busy');
   },
 };
 
-export const FourAnswersOnTwoRows: Story = {
-  args: { decision: heldVerified, heldBy: rivera.ruleCards['rv-book-sat'].reason, context: undefined, waiting: 'Web chat, just now' },
+export const DenyMenu: Story = {
+  args: consultationArgs,
   parameters: {
-    canvasNote: `${ANSWERS_BOARDS} Layout B of N-Answers-Verified: Dana's Saturday afternoon booking, from a verified customer, so all four answers show. The counter-offer row is static vision.`,
+    canvasNote: `${ANSWERS_BOARD} Its three answers come from Chen & Co.: an ask card holds every first consultation, so the tool itself is held and Deny always is offered; the visitor isn't verified, so Allow has one answer.`,
   },
   play: async ({ canvas, canvasElement }) => {
-    // only_offered_answers: all four, in their fixed order.
+    await expect(canvas.getByRole('article')).toHaveTextContent(`Held by your rule: ${chen.ruleCards['cc-consult'].reason}`);
+
+    // Allow has one answer, a plain button; Deny has two, so it opens a menu: its word, then a chevron.
     const buttons = answerButtons(canvasElement);
-    await expect(buttons.map((button) => button.textContent)).toEqual(ANSWER_NAMES);
-    const [allow, deny, allowPerson, denyAlways] = buttons as [HTMLElement, HTMLElement, HTMLElement, HTMLElement];
+    await expect(buttons.map((button) => button.textContent)).toEqual(['Allow this time', 'Deny']);
+    const [allow, deny] = buttons as [HTMLElement, HTMLElement];
+    await expect(allow).not.toHaveAttribute('aria-haspopup');
+    await expect(deny).toHaveAccessibleName('Deny');
+    await expect(deny).toHaveAttribute('aria-haspopup', 'menu');
+    await expect(deny).toHaveAttribute('aria-expanded', 'false');
+    await expect(deny.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
     expectComputed(allow, SECONDARY);
-    expectComputed(deny, DANGER);
-    expectComputed(allowPerson, GHOST);
-    expectComputed(denyAlways, DANGER_GHOST);
-
-    // The one-time answers on the first row; the answers that save a rule on a second row, after
-    // its label, which names them as a group. No divider.
-    const [firstRow, secondRow] = [tops([allow, deny]), tops([allowPerson, denyAlways])];
-    await expect(firstRow[0]).toBe(firstRow[1]);
-    await expect(secondRow[0]).toBe(secondRow[1]);
-    await expect(secondRow[0]).toBeGreaterThan(firstRow[0] ?? 0);
-    const ruleRow = canvas.getByRole('group', { name: 'Or save a rule:' });
-    await expect(ruleRow).toContainElement(allowPerson);
-    await expect(ruleRow).toContainElement(denyAlways);
-    const label = canvas.getByText('Or save a rule:');
-    await expect(label).toBeVisible();
-    expectComputed(label, { fontSize: '12px', color: 'rgba(250, 249, 245, 0.64)' });
-    await expect(label.getBoundingClientRect().right).toBeLessThan(allowPerson.getBoundingClientRect().left);
-    await expect(dividerIn(canvasElement)).toBeNull();
-    const group = canvas.getByRole('group', { name: 'Your answer' });
-    await expect(group.scrollWidth).toBeLessThanOrEqual(group.clientWidth);
-
-    // The line under them names both answers that save a rule.
-    await expect(canvas.getByRole('article')).toHaveTextContent(RULE_LINE_BOTH);
-  },
-};
-
-export const PersonRuleOnOneRow: Story = {
-  args: {
-    decision: { ...heldVerified, answers: ['allow_once', 'deny_once', 'allow_person'] },
-    heldBy: rivera.ruleCards['rv-book-sat'].reason,
-    context: undefined,
-    waiting: 'Web chat, just now',
-  },
-  parameters: {
-    canvasNote: `${ANSWERS_BOARDS} No board offers Allow only for this person without Deny always; alone, it follows the one-time answers after the divider, as Deny always does on N-Answers-Final.`,
-  },
-  play: async ({ canvas, canvasElement }) => {
-    const buttons = answerButtons(canvasElement);
-    await expect(buttons.map((button) => button.textContent)).toEqual(['Allow this time', 'Deny this time', 'Allow only for this person']);
-    const [deny, allowPerson] = buttons.slice(1) as [HTMLElement, HTMLElement];
-    expectComputed(allowPerson, GHOST);
+    expectComputed(deny, { ...DANGER, paddingRight: '10px' });
     await expect(new Set(tops(buttons)).size).toBe(1);
-    const divider = dividerIn(canvasElement);
-    if (!divider) throw new Error('no divider between the answers');
-    await expect(deny.getBoundingClientRect().right).toBeLessThan(divider.getBoundingClientRect().left);
-    await expect(canvas.queryByText('Or save a rule:')).toBeNull();
-    await expect(canvas.getByRole('article')).toHaveTextContent(
-      "Allow only for this person also saves a rule, so Claude allows requests like this from this person on its own. You'll see the rule before it applies.",
-    );
+
+    // Closed, the menu isn't drawn at all.
+    await expect(canvas.queryByRole('menu')).toBeNull();
+    for (const words of ['Always', RULE_LINE, ONCE_LINE]) await expect(canvasElement).not.toHaveTextContent(words);
   },
 };
 
-export const OneColumnOnAPhone: Story = {
+export const DenyMenuOpen: Story = {
+  args: consultationArgs,
+  // Over the next held request, as on Today's list, so the menu shows it floats above it.
   render: (args) => (
-    <div data-testid="phone-line" style={{ width: PHONE_LINE, maxWidth: '100%', display: 'grid', rowGap: 'var(--space-16)' }}>
+    <div style={{ display: 'grid', rowGap: 'var(--space-12)' }}>
       <ApprovalCard {...args} />
-      <ApprovalCard {...args} decision={heldVerified} heldBy={rivera.ruleCards['rv-book-sat'].reason} context={undefined} waiting="Web chat, just now" />
+      <ApprovalCard {...args} decision={held} heldBy={rivera.ruleCards['rv-quote'].reason} waiting="Web chat, 2 min ago" />
     </div>
   ),
   parameters: {
-    canvasNote: `${ANSWERS_BOARDS} The phone columns of both boards: under about 480 px of card, the answers become one column of full-width buttons in the same order, with no divider and no label.`,
+    canvasNote: `${ANSWERS_BOARD} Deny's menu, open over the next held request: This time and Always, each with its quieter line. The board's Always line names its rule; the card keeps the line generic, because the design system never composes rule text, and the rule is shown before it applies.`,
   },
-  play: async ({ canvas }) => {
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
+    const [card, next] = canvas.getAllByRole('article') as [HTMLElement, HTMLElement];
+    const cardHeight = card.getBoundingClientRect().height;
+    const deny = canvas.getByRole('button', { name: 'Deny' });
+    await userEvent.click(deny);
+
+    // The menu is named by its button, which keeps its hover fill while it is open, and focus
+    // moves to its first item.
+    await expect(deny).toHaveAttribute('aria-expanded', 'true');
+    await userEvent.unhover(deny);
+    await waitFor(() => expectComputed(deny, { backgroundColor: 'rgba(220, 130, 144, 0.24)' }));
+    const menu = canvas.getByRole('menu', { name: 'Deny' });
+    await expectItems(menu, [
+      ['This time', ONCE_LINE],
+      ['Always', RULE_LINE],
+    ]);
+    const items = itemsOf(menu);
+    await expect(items[0]).toHaveFocus();
+
+    // A popover under the button, on the raised surface, above the card: the card keeps its height.
+    expectComputed(menu, { ...MENU, position: 'absolute', boxShadow: /rgba/ });
+    const [box, under] = [menu.getBoundingClientRect(), deny.getBoundingClientRect()];
+    await expect(Math.round(box.left)).toBe(Math.round(under.left));
+    await expect(Math.round(box.top)).toBe(Math.round(under.bottom) + 6);
+    await expect(box.bottom).toBeGreaterThan(card.getBoundingClientRect().bottom);
+    await expect(card.getBoundingClientRect().height).toBe(cardHeight);
+    // It covers the next card's top, and nothing of that card shows through it.
+    await expect(box.bottom).toBeGreaterThan(next.getBoundingClientRect().top);
+    for (const y of [box.top + 8, next.getBoundingClientRect().top + 8, box.bottom - 8]) {
+      const top = canvasElement.ownerDocument.elementFromPoint(box.left + 12, y);
+      await expect(menu.contains(top)).toBe(true);
+    }
+
+    // Deny's items say what they refuse in red words, each over its quieter line.
+    for (const item of items) {
+      expectComputed(item.firstElementChild as HTMLElement, RED_WORDS);
+      expectComputed(item.lastElementChild as HTMLElement, QUIET_LINE);
+    }
+    await expect(args.onAnswer).not.toHaveBeenCalled();
+  },
+};
+
+export const AllowMenu: Story = {
+  args: { ...saturdayArgs, personName: DANA },
+  parameters: {
+    canvasNote: `${ANSWERS_BOARD} Dana's Saturday afternoon request, held by the Saturday card's hours: a limit, not the tool, so Deny always isn't offered; she is verified, so Allow has two answers and opens a menu.`,
+  },
+  play: async ({ canvas, canvasElement }) => {
+    const buttons = answerButtons(canvasElement);
+    await expect(buttons.map((button) => button.textContent)).toEqual(['Allow', 'Deny this time']);
+    const [allow, deny] = buttons as [HTMLElement, HTMLElement];
+    await expect(allow).toHaveAccessibleName('Allow');
+    await expect(allow).toHaveAttribute('aria-haspopup', 'menu');
+    await expect(allow).toHaveAttribute('aria-expanded', 'false');
+    await expect(deny).not.toHaveAttribute('aria-haspopup');
+    expectComputed(allow, { ...SECONDARY, paddingRight: '10px' });
+    expectComputed(deny, DANGER);
+    await expect(new Set(tops(buttons)).size).toBe(1);
+    await expect(canvas.queryByRole('menu')).toBeNull();
+  },
+};
+
+export const AllowMenuOpen: Story = {
+  args: { ...saturdayArgs, personName: DANA },
+  parameters: {
+    canvasNote: `${ANSWERS_BOARD} Allow's menu, open, naming the verified person as the board does; its rule line stays generic.`,
+  },
+  play: async ({ canvas, userEvent }) => {
+    const allow = canvas.getByRole('button', { name: 'Allow' });
+    await userEvent.click(allow);
+    await expect(allow).toHaveAttribute('aria-expanded', 'true');
+    const menu = canvas.getByRole('menu', { name: 'Allow' });
+    await expectItems(menu, [
+      ['This time', ONCE_LINE],
+      [`Only for ${DANA}, always`, RULE_LINE],
+    ]);
+    const items = itemsOf(menu);
+    await expect(items[0]).toHaveFocus();
+
+    // The name is the person's own, set apart as user text; Allow's items are plain words.
+    const name = within(menu).getByText(DANA);
+    await expect(name).toHaveAttribute('data-copy', 'user');
+    for (const item of items) {
+      expectComputed(item.firstElementChild as HTMLElement, PLAIN_WORDS);
+      expectComputed(item.lastElementChild as HTMLElement, QUIET_LINE);
+    }
+    expectComputed(menu, { ...MENU, position: 'absolute' });
+    await expect(Math.round(menu.getBoundingClientRect().left)).toBe(Math.round(allow.getBoundingClientRect().left));
+  },
+};
+
+export const AllowAndDenyMenus: Story = {
+  args: refundArgs,
+  parameters: {
+    canvasNote: `${ANSWERS_BOARD} Dana's refund: the refund card asks about every refund, so the tool itself is held, and she is verified with an amount under the hard cap, so all four answers show, two on each side. One menu opens at a time.`,
+  },
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
+    const buttons = answerButtons(canvasElement);
+    await expect(buttons.map((button) => button.textContent)).toEqual(['Allow', 'Deny']);
+    const [allow, deny] = buttons as [HTMLElement, HTMLElement];
+    expectComputed(allow, SECONDARY);
+    expectComputed(deny, DANGER);
+    for (const button of buttons) await expect(button).toHaveAttribute('aria-haspopup', 'menu');
+
+    // Without a name for the person, Allow's rule answer says "this person".
+    await userEvent.click(allow);
+    await expectItems(canvas.getByRole('menu', { name: 'Allow' }), [
+      ['This time', ONCE_LINE],
+      ['Only for this person, always', RULE_LINE],
+    ]);
+
+    // One menu at a time: opening Deny closes Allow.
+    await userEvent.click(deny);
+    await expect(allow).toHaveAttribute('aria-expanded', 'false');
+    await expect(deny).toHaveAttribute('aria-expanded', 'true');
+    await expect(canvas.getAllByRole('menu')).toHaveLength(1);
+    await expectItems(canvas.getByRole('menu', { name: 'Deny' }), [
+      ['This time', ONCE_LINE],
+      ['Always', RULE_LINE],
+    ]);
+
+    // A click outside closes it, and leaves focus alone.
+    await userEvent.click(canvas.getByText(heldRefund.reason_plain));
+    await expect(canvas.queryByRole('menu')).toBeNull();
+    await expect(deny).toHaveAttribute('aria-expanded', 'false');
+
+    // A second click on its button closes it too.
+    await userEvent.click(deny);
+    await expect(canvas.getByRole('menu', { name: 'Deny' })).toBeVisible();
+    await userEvent.click(deny);
+    await expect(canvas.queryByRole('menu')).toBeNull();
+    await expect(args.onAnswer).not.toHaveBeenCalled();
+  },
+};
+
+export const KeyboardThroughTheMenus: Story = {
+  args: { ...refundArgs, personName: DANA },
+  parameters: {
+    canvasNote: `${ANSWERS_BOARD} No board shows the keys; this is the menu button pattern, through both menus, ending on Allow only for Dana.`,
+  },
+  play: async ({ args, canvas, userEvent }) => {
+    const allow = canvas.getByRole('button', { name: 'Allow' });
+    const deny = canvas.getByRole('button', { name: 'Deny' });
+    const open = () => itemsOf(canvas.getByRole('menu'));
+
+    // Down opens Allow's menu on its first item; Down and Up move and wrap, End and Home jump.
+    await userEvent.tab();
+    await expect(allow).toHaveFocus();
+    await userEvent.keyboard('{ArrowDown}');
+    await expect(allow).toHaveAttribute('aria-expanded', 'true');
+    let items = open();
+    await expect(items[0]).toHaveFocus();
+    await userEvent.keyboard('{ArrowDown}');
+    await expect(items[1]).toHaveFocus();
+    await userEvent.keyboard('{ArrowDown}');
+    await expect(items[0]).toHaveFocus();
+    await userEvent.keyboard('{ArrowUp}');
+    await expect(items[1]).toHaveFocus();
+    await userEvent.keyboard('{Home}');
+    await expect(items[0]).toHaveFocus();
+    await userEvent.keyboard('{End}');
+    await expect(items[1]).toHaveFocus();
+
+    // Escape closes it and gives focus back to its button.
+    await userEvent.keyboard('{Escape}');
+    await expect(canvas.queryByRole('menu')).toBeNull();
+    await expect(allow).toHaveFocus();
+    await expect(allow).toHaveAttribute('aria-expanded', 'false');
+
+    // Enter opens it again; Tab closes it and gives focus back to its button too.
+    await userEvent.keyboard('{Enter}');
+    await expect(open()[0]).toHaveFocus();
+    await userEvent.tab();
+    await expect(canvas.queryByRole('menu')).toBeNull();
+    await expect(allow).toHaveFocus();
+
+    // On to Deny: Space opens its menu, and Escape closes it; Up opens it on its last item.
+    await userEvent.tab();
+    await expect(deny).toHaveFocus();
+    await userEvent.keyboard(' ');
+    await expect(deny).toHaveAttribute('aria-expanded', 'true');
+    await expect(open()[0]).toHaveAccessibleName('This time');
+    await expect(open()[0]).toHaveFocus();
+    await userEvent.keyboard('{Escape}');
+    await expect(deny).toHaveFocus();
+    await userEvent.keyboard('{ArrowUp}');
+    await expect(open()[1]).toHaveAccessibleName('Always');
+    await expect(open()[1]).toHaveFocus();
+    await userEvent.keyboard('{Escape}');
+    await expect(deny).toHaveFocus();
+    await expect(args.onAnswer).not.toHaveBeenCalled();
+
+    // Back to Allow, down to Only for Dana, always, and Enter chooses it: one answer, allow_person.
+    await userEvent.tab({ shift: true });
+    await expect(allow).toHaveFocus();
+    await userEvent.keyboard('{ArrowDown}');
+    items = open();
+    await userEvent.keyboard('{ArrowDown}');
+    await expect(items[1]).toHaveAccessibleName(`Only for ${DANA}, always`);
+    await expect(items[1]).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+    await expect(args.onAnswer).toHaveBeenCalledTimes(1);
+    await expect(args.onAnswer).toHaveBeenCalledWith('allow_person');
+
+    // The menu goes, and focus waits on Allow while the answer is sent.
+    await expect(canvas.queryByRole('menu')).toBeNull();
+    await expect(allow).toHaveFocus();
+    await expect(allow).toHaveAttribute('aria-disabled', 'true');
+  },
+};
+
+export const MenuOnAPhone: Story = {
+  render: (args) => (
+    <div data-testid="phone-line" style={{ width: PHONE_LINE, maxWidth: '100%', display: 'grid', rowGap: 'var(--space-16)' }}>
+      <ApprovalCard {...args} />
+      <ApprovalCard {...args} {...refundArgs} />
+    </div>
+  ),
+  parameters: {
+    canvasNote: `${ANSWERS_BOARD} The board's phone note: under about 480 px of card, Allow and Deny stay side by side, each half the line and 44 px tall, and a menu opens inline as a full-width list under them, its items 48 px, pushing the card down.`,
+  },
+  play: async ({ canvas, userEvent }) => {
     const line = canvas.getByTestId('phone-line');
     await expect(line.getBoundingClientRect().width).toBe(PHONE_LINE);
-    await expect(line.scrollWidth).toBeLessThanOrEqual(PHONE_LINE);
-
     const cards = canvas.getAllByRole('article');
     await expect(cards).toHaveLength(2);
-    const expected = [
-      { names: ['Allow this time', 'Deny this time', 'Deny always'], looks: [SECONDARY, DANGER, DANGER_GHOST], line: RULE_LINE_DENY },
-      { names: ANSWER_NAMES, looks: [SECONDARY, DANGER, GHOST, DANGER_GHOST], line: RULE_LINE_BOTH },
-    ];
-    for (const [i, card] of cards.entries()) {
-      const want = expected[i];
-      if (!want) throw new Error(`no expectation for card ${i}`);
+
+    // Both cards: two controls side by side, sharing the line, each 44 px tall.
+    for (const card of cards) {
       const group = within(card).getByRole('group', { name: 'Your answer' });
       const buttons = answerButtons(card);
-      await expect(buttons.map((button) => button.textContent)).toEqual(want.names);
-      for (const [j, button] of buttons.entries()) expectComputed(button, want.looks[j] ?? {});
-
-      // One column, in order, each answer as wide as the answers.
+      await expect(buttons).toHaveLength(2);
+      const [left, right] = buttons.map((button) => button.getBoundingClientRect()) as [DOMRect, DOMRect];
       const box = group.getBoundingClientRect();
-      for (const button of buttons) {
-        const edge = button.getBoundingClientRect();
-        await expect(edge.left).toBe(box.left);
-        await expect(edge.width).toBe(box.width);
-      }
-      const rowTops = tops(buttons);
-      for (let j = 1; j < rowTops.length; j += 1) await expect(rowTops[j]).toBe((rowTops[j - 1] ?? 0) + 48);
-
-      // No divider and no label on a phone; the line under the answers stays.
-      const divider = dividerIn(card);
-      if (divider) await expect(divider).not.toBeVisible();
-      const label = within(card).queryByText('Or save a rule:');
-      if (label) await expect(label).not.toBeVisible();
-      await expect(card).toHaveTextContent(want.line);
+      await expect(left.height).toBe(44);
+      await expect(right.height).toBe(44);
+      await expect(left.top).toBe(right.top);
+      await expect(left.left).toBe(box.left);
+      await expect(right.right).toBe(box.right);
+      await expect(Math.abs(left.width - right.width)).toBeLessThan(1);
     }
-    // The three-answer card had a divider to hide, and the four-answer card a label.
-    await expect(dividerIn(cards[0] as HTMLElement)).not.toBeNull();
-    await expect(within(cards[1] as HTMLElement).queryByText('Or save a rule:')).not.toBeNull();
+    await expect(answerButtons(cards[0] as HTMLElement).map((button) => button.textContent)).toEqual(['Allow this time', 'Deny this time']);
+
+    // Deny's menu opens inline: a full-width list under both controls, inside the card, which grows.
+    const card = cards[1] as HTMLElement;
+    const before = card.getBoundingClientRect().height;
+    const [allow, deny] = answerButtons(card) as [HTMLElement, HTMLElement];
+    await userEvent.click(deny);
+    const menu = within(card).getByRole('menu', { name: 'Deny' });
+    expectComputed(menu, { ...MENU, position: 'static', boxShadow: 'none' });
+    const group = within(card).getByRole('group', { name: 'Your answer' }).getBoundingClientRect();
+    const box = menu.getBoundingClientRect();
+    await expect(box.left).toBe(group.left);
+    await expect(box.width).toBe(group.width);
+    await expect(box.top).toBeGreaterThanOrEqual(deny.getBoundingClientRect().bottom);
+    await expect(box.top).toBeGreaterThanOrEqual(allow.getBoundingClientRect().bottom);
+    await expect(card.getBoundingClientRect().bottom).toBeGreaterThan(box.bottom);
+    await expect(card.getBoundingClientRect().height).toBeGreaterThan(before);
+    for (const item of itemsOf(menu)) await expect(item.getBoundingClientRect().height).toBeGreaterThanOrEqual(48);
+    await expect(itemsOf(menu)[0]).toHaveFocus();
+    await expect(line.scrollWidth).toBeLessThanOrEqual(PHONE_LINE);
   },
 };
 
 export const SendingYourAnswer: Story = {
-  args: { decision: heldVerified, heldBy: rivera.ruleCards['rv-book-sat'].reason, context: undefined, waiting: 'Web chat, just now' },
+  args: refundArgs,
   render: (args) => <SendingScreen {...args} />,
   parameters: {
-    canvasNote: `${ANSWERS_BOARDS} No board shows an answer being sent; every answer waits, faded a little, and a line under them says so.`,
+    canvasNote: `${ANSWERS_BOARD} No board shows an answer being sent; both controls wait, faded a little, and a line under them says so.`,
   },
   play: async ({ args, canvas, canvasElement, userEvent }) => {
-    const [allow, deny, allowPerson, denyAlways] = answerButtons(canvasElement) as [HTMLElement, HTMLElement, HTMLElement, HTMLElement];
+    const [allow, deny] = answerButtons(canvasElement) as [HTMLElement, HTMLElement];
 
-    // keyboard_answers: Tab into the group, on to Deny always (the label is not a stop), and
-    // Enter answers.
-    await userEvent.tab();
-    await expect(allow).toHaveFocus();
-    await userEvent.tab();
-    await expect(deny).toHaveFocus();
-    await userEvent.tab();
-    await expect(allowPerson).toHaveFocus();
-    await userEvent.tab();
-    await expect(denyAlways).toHaveFocus();
-    await userEvent.keyboard('{Enter}');
+    // A click on Deny opens its menu, and a click on Always answers.
+    await userEvent.click(deny);
+    await userEvent.click(within(canvas.getByRole('menu', { name: 'Deny' })).getByRole('menuitem', { name: 'Always' }));
     await expect(args.onAnswer).toHaveBeenCalledTimes(1);
     await expect(args.onAnswer).toHaveBeenCalledWith('deny_always');
-    // Focus stays on the answer while it is sent.
-    await expect(denyAlways).toHaveFocus();
+    // The menu goes, and focus waits on Deny while the answer is sent.
+    await expect(canvas.queryByRole('menu')).toBeNull();
+    await expect(deny).toHaveFocus();
 
-    // answers_once: while it is sent, a second Enter or a click on any answer sends nothing.
+    // answers_once: while it is sent, nothing opens a menu and nothing answers.
     await userEvent.keyboard('{Enter}');
+    await userEvent.keyboard('{ArrowDown}');
+    await userEvent.keyboard(' ');
     await userEvent.click(allow);
     await userEvent.click(deny);
+    await expect(canvas.queryByRole('menu')).toBeNull();
+    await expect(deny).toHaveAttribute('aria-expanded', 'false');
     await expect(args.onAnswer).toHaveBeenCalledTimes(1);
 
-    // Every answer waits, and a line under them says so.
+    // Both controls wait, and a line under them says so.
     const group = canvas.getByRole('group', { name: 'Your answer' });
     await expect(group).toHaveAttribute('aria-busy', 'true');
     await expect(canvas.getByText('Sending your answer').closest('[role="status"]')).not.toBeNull();
     for (const button of answerButtons(canvasElement)) await expect(button).toHaveAttribute('aria-disabled', 'true');
 
-    // Each answer keeps its look, faded: the neutral ones to 60%, the red ones only to 80%, so
-    // their words still read at 4.5:1 in the card.
+    // Each keeps its look, faded: Allow to 60%, the red Deny only to 80%, so its words still read
+    // at 4.5:1 in the card.
     expectComputed(allow, { ...SECONDARY, opacity: '0.6' });
     expectComputed(deny, { ...DANGER, opacity: '0.8' });
-    expectComputed(allowPerson, { ...GHOST, opacity: '0.6' });
-    expectComputed(denyAlways, { ...DANGER_GHOST, opacity: '0.8' });
   },
 };
 
 export const CouldNotConfirmYourAnswer: Story = {
-  args: { error: true },
+  args: { ...refundArgs, error: true },
   parameters: {
-    canvasNote: `${ANSWERS_BOARDS} No board shows a lost answer; the line sits under the answers, which stay as they were and can be tried again, because the kernel resolves a request once.`,
+    canvasNote: `${ANSWERS_BOARD} No board shows a lost answer; the line sits under the answers, which stay as they were and can be tried again, because the kernel resolves a request once.`,
   },
-  play: async ({ canvas, canvasElement }) => {
+  play: async ({ canvas, canvasElement, userEvent }) => {
     await expect(canvas.getByRole('alert')).toHaveTextContent(ERROR_LINE);
     const buttons = answerButtons(canvasElement);
     for (const button of buttons) {
       await expect(button).toBeEnabled();
       await expect(button).not.toHaveAttribute('aria-disabled');
     }
-    const [allow, deny, denyAlways] = buttons as [HTMLElement, HTMLElement, HTMLElement];
+    const [allow, deny] = buttons as [HTMLElement, HTMLElement];
     expectComputed(allow, { ...SECONDARY, opacity: '1' });
     expectComputed(deny, { ...DANGER, opacity: '1' });
-    expectComputed(denyAlways, { ...DANGER_GHOST, opacity: '1' });
-    await expect(canvas.getByRole('article')).toHaveTextContent(RULE_LINE_DENY);
+
+    // The menus still open, so the owner can answer again.
+    await userEvent.click(deny);
+    await expect(canvas.getByRole('menu', { name: 'Deny' })).toBeVisible();
+    await userEvent.keyboard('{Escape}');
+    await expect(canvas.queryByRole('menu')).toBeNull();
+    await expect(deny).toHaveFocus();
   },
 };
 
@@ -394,7 +618,7 @@ export const DeniedOnTheSecondTry: Story = {
   args: { error: true },
   render: (args) => <RetryingScreen {...args} />,
   parameters: {
-    canvasNote: `${ANSWERS_BOARDS} No board shows a lost answer; after it, the owner answers again and the card ends on its final line.`,
+    canvasNote: `${ANSWERS_BOARD} No board shows a lost answer; after it, the owner answers again and the card ends on its final line.`,
   },
   play: async ({ args, canvas, canvasElement, userEvent }) => {
     // error_allows_retry: the line is an alert, and every answer can be tried again.

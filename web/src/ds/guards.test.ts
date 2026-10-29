@@ -107,14 +107,22 @@ function mayUseClay(file: string): boolean {
 // 'button-danger-text'. The red look is only for answers that refuse.
 const DANGER_TOKEN = /(?<![\w-])(?:--)?button-danger(?:-[a-z0-9]+)*(?!\w)/g;
 
-// The only files that may name them: Button's styles, the token sources, the contrast table and the token tests.
-const DANGER_TOKEN_FILES: readonly string[] = ['components/Button/Button.css', 'tokens.json', 'tokens.css', 'contrast.ts', 'tokens.test.ts'];
+// The only files that may name them: Button's styles, ApprovalCard's styles (the red words of Deny's
+// menu items), the token sources, the contrast table and the token tests.
+const DANGER_TOKEN_FILES: readonly string[] = [
+  'components/Button/Button.css',
+  'components/ApprovalCard/ApprovalCard.css',
+  'tokens.json',
+  'tokens.css',
+  'contrast.ts',
+  'tokens.test.ts',
+];
 
 // A danger button asked for as a `variant` prop or key, by the name only a Button variant has, or by its class.
 const DANGER_VARIANT = /\bvariant\s*[:=]\s*\{?\s*(['"`])danger(?:-ghost)?\1|(['"`])danger-ghost\2|\bcd-button--danger(?:-ghost)?\b/g;
 const DANGER_LITERAL = /(['"`])danger\1/g;
 
-// The only folders that may ask for one: Button itself, and ApprovalCard's "Deny this time" and "Deny always".
+// The only folders that may ask for one: Button itself, and ApprovalCard's Deny.
 const DANGER_VARIANT_FOLDERS = ['components/Button/', 'components/ApprovalCard/'] as const;
 
 function mayUseDangerTokens(file: string): boolean {
@@ -259,13 +267,16 @@ describe('design system source guards', () => {
     expect(dangerVariants("const look: ButtonVariant = 'secondary'; <Button variant='danger' />")).toEqual(["variant='danger'"]);
     // Dialog's danger tone adds a refused dot and keeps its buttons neutral: not a danger button.
     expect(dangerVariants("tone?: 'default' | 'danger'; {tone === 'danger' ? <StatusDot tone=\"refused\" /> : null}")).toEqual([]);
-    // The allowlists: two whole folders for the buttons, five files for the tokens.
+    // The allowlists: two whole folders for the buttons, six files for the tokens.
     expect(mayUseDangerVariants('components/ApprovalCard/ApprovalCard.stories.tsx')).toBe(true);
     expect(mayUseDangerVariants('components/ButtonGroup/ButtonGroup.tsx')).toBe(false);
     expect(mayUseDangerVariants('components/Dialog/Dialog.tsx')).toBe(false);
     expect(mayUseDangerTokens('components/Button/Button.css')).toBe(true);
     expect(mayUseDangerTokens('components/Button/Button.tsx')).toBe(false);
-    expect(mayUseDangerTokens('components/ApprovalCard/ApprovalCard.css')).toBe(false);
+    // ApprovalCard's styles name the red words for Deny's menu items, and nothing else of its may.
+    expect(mayUseDangerTokens('components/ApprovalCard/ApprovalCard.css')).toBe(true);
+    expect(mayUseDangerTokens('components/ApprovalCard/ApprovalCard.tsx')).toBe(false);
+    expect(mayUseDangerTokens('components/Dialog/Dialog.css')).toBe(false);
 
     // Every file but the docs, which name the tokens and variants to explain them, and this file's samples.
     const code = everyTextFile().filter(({ file }) => !file.endsWith('.md') && file !== THIS_FILE);

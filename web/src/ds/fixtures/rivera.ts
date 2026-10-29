@@ -670,7 +670,11 @@ const heldQuoteAction = {
   starts_at: null,
 } satisfies NormalizedAction;
 
-/** The seeded hold: a visitor not on record wants the drain clearing at 15% off. */
+/**
+ * The seeded hold: a visitor not on record wants the drain clearing at 15% off. The quote card's
+ * discount limit holds it, not the tool, so Deny always isn't offered, and an unverified visitor
+ * has no person to scope a rule to: the two one-time answers.
+ */
 const heldQuote = {
   decision_id: 'dec-held-quote',
   session_id: sessions.public.session_id,
@@ -684,7 +688,7 @@ const heldQuote = {
   review: null,
   reason_plain: 'A visitor not on record asked for a drain clearing quote at 15% off, $153.00 instead of $180.00.',
   visitor_plain: plain.en.held,
-  answers: ['allow_once', 'deny_once', 'deny_always'],
+  answers: ['allow_once', 'deny_once'],
   expires_at: '2026-10-31T17:04:05.123456Z',
   inbox: [{ entry_id: 'inbox-hold-quote', to: 'owner', preview: 'A request needs your answer' }],
   ledger_seq: 2,
@@ -786,9 +790,10 @@ const decisions = {
 } satisfies Record<DecisionState, Decision>;
 
 /**
- * Verified Dana asks for a Saturday afternoon visit, after the Saturday card's morning hours: all
- * four answers. Both booking cards' hold twins match, since a hold twin drops its card's hours; the
- * Saturday card, the one the reason names, comes first.
+ * Verified Dana asks for a Saturday afternoon visit, after the Saturday card's morning hours. Both
+ * booking cards' hold twins match, since a hold twin drops its card's hours; the Saturday card, the
+ * one the reason names, comes first. Hours hold it, not the tool, so Deny always isn't offered;
+ * she is verified, so Allow only for this person is.
  */
 const heldVerified = {
   decision_id: 'dec-dana-saturday',
@@ -820,11 +825,52 @@ const heldVerified = {
   reason_plain:
     'Dana Whitfield, verified with a code, asked to book Saturday, November 7 at 2:00 pm. Your Saturday bookings run 9:00 am to 1:00 pm.',
   visitor_plain: plain.en.held,
-  answers: ['allow_once', 'deny_once', 'allow_person', 'deny_always'],
+  answers: ['allow_once', 'deny_once', 'allow_person'],
   expires_at: '2026-10-31T16:40:00.552013Z',
   inbox: [{ entry_id: 'inbox-hold-saturday', to: 'owner', preview: 'A request needs your answer' }],
   ledger_seq: 28,
   signature: signature('dec-dana-saturday:held'),
+} satisfies Decision;
+
+/**
+ * Verified Dana asks for her drain clearing payment back. The refund card asks Maria about every
+ * refund, so the tool itself is held and Deny always is offered; she is verified and the amount is
+ * under the hard cap, so Allow only for this person is too: all four answers.
+ */
+const heldRefund = {
+  decision_id: 'dec-dana-refund',
+  session_id: sessions.demoCode.session_id,
+  call_id: 'call-dana-refund',
+  action: {
+    action_id: 'act-dana-refund',
+    copy_id: COPY_ID,
+    desk_id: DESK_ID,
+    session_id: sessions.demoCode.session_id,
+    generation: 1,
+    tool: 'payments.create_refund',
+    effects: ['pay_out', 'private_data'],
+    args_sha256: sha256('args:dana-refund'),
+    profile_sha256: sha256('profile:payments.create_refund'),
+    resource: { kind: 'charge', id: 'ch-dana-1', owner_person_id: people.dana.personId },
+    list_cents: null,
+    discount_bp: null,
+    amount_cents: 18000,
+    recipient: null,
+    starts_at: null,
+  },
+  outcome: 'hold',
+  state: 'held',
+  policy_version: 1,
+  policy_ids: ['H.rv-refund'],
+  card_ids: ['rv-refund'],
+  review: null,
+  reason_plain: 'Dana Whitfield, verified with a code, asked for a refund of her $180.00 payment from Monday, October 12.',
+  visitor_plain: plain.en.held,
+  answers: ['allow_once', 'deny_once', 'allow_person', 'deny_always'],
+  expires_at: '2026-10-31T17:20:14.302518Z',
+  inbox: [{ entry_id: 'inbox-hold-refund', to: 'owner', preview: 'A request needs your answer' }],
+  ledger_seq: 46,
+  signature: signature('dec-dana-refund:held'),
 } satisfies Decision;
 
 // ---------------------------------------------------------------------------------------------
@@ -1152,6 +1198,7 @@ export const rivera = {
   events,
   decisions,
   heldVerified,
+  heldRefund,
   ruleCards,
   toolProfiles,
   ledger,

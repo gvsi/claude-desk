@@ -1,6 +1,6 @@
 /* ApprovalCard: the status line, Claude's summary in serif, the context and the rule that held it,
-   then the answers: one row, or the one-time answers over a labelled row of the answers that save
-   a rule, and one column of full-width answers in a narrow card. */
+   then the answers: Allow and Deny side by side, each a plain button or a menu button. A menu is a
+   popover under its button; in a narrow card it opens inline, a full-width list under the two. */
 
 .cd-approval-card__top {
   display: flex;
@@ -63,23 +63,17 @@
   color: var(--text-primary);
 }
 
-/* The answers measure their own width, so a narrow card stacks them whatever the window's width. */
+/* The answers measure their own width, so a narrow card lays them out for a phone whatever the
+   window's width. */
 .cd-approval-card__answers {
   container: cd-approval-answers / inline-size;
   margin-top: var(--space-16);
 }
 
-.cd-approval-card__rows {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-10);
-}
-
-/* A row never wraps: the card stacks the answers before they would. */
 .cd-approval-card__row {
   display: flex;
   flex-wrap: nowrap;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--space-8);
 }
 
@@ -87,41 +81,114 @@
   flex: none;
 }
 
-/* Between the one-time answers and a single rule answer: a hairline as tall as a label's line. */
-.cd-approval-card__divider {
+/* A side that opens a menu: its button, and the menu under it while open. */
+.cd-approval-card__side {
+  position: relative;
+  display: flex;
   flex: none;
-  width: 1px;
-  height: var(--space-20);
-  margin: 0 var(--space-4);
-  background: var(--line-hairline);
 }
 
-.cd-approval-card__row-label {
-  flex: none;
-  margin-right: var(--space-4);
+/* The menu: a popover 6 px under its button, on the raised surface with the card's border and
+   radius, lifted by the dialog shadow above the card and whatever follows it. It appears in place. */
+.cd-approval-card__menu {
+  position: absolute;
+  top: calc(100% + var(--space-6));
+  left: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  box-sizing: border-box;
+  width: calc(var(--size-sidebar) + var(--space-16));
+  padding: var(--space-4);
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-card);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-dialog);
+}
+
+/* An item: what it does, over a quieter line. It fills on hover and focus at motion-instant. */
+.cd-approval-card__item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--size-nav-row);
+  margin: 0;
+  padding: var(--space-8) var(--space-10);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--motion-instant) var(--motion-ease);
+}
+
+.cd-approval-card__item:hover,
+.cd-approval-card__item:focus-visible {
+  background: var(--fill-hover);
+}
+
+/* The focus ring sits just inside the item, so it clears the menu's edge and the next item. */
+.cd-approval-card__item:focus-visible {
+  outline-offset: -2px;
+}
+
+.cd-approval-card__item-words {
+  color: var(--text-primary);
+}
+
+/* Deny's answers say what they refuse in the red words, like the button that opened them. */
+.cd-approval-card__menu--deny .cd-approval-card__item-words {
+  color: var(--button-danger-text);
+}
+
+.cd-approval-card__item-line {
   color: var(--text-secondary);
-  white-space: nowrap;
 }
 
 /* A card under about 480 px wide (its answers under 438 px, inside the card's 20 px padding and
-   1 px border): one column of full-width answers in the same order, with no divider or label. */
+   1 px border): Allow and Deny share the line, each 44 px tall, and wrap only if their words can't
+   fit side by side. A menu opens inline as a full-width list under them, its items 48 px tall,
+   and pushes the card down. */
 @container cd-approval-answers (max-width: 437.98px) {
-  .cd-approval-card__rows {
-    gap: var(--space-8);
-  }
-
   .cd-approval-card__row {
-    flex-direction: column;
-    align-items: stretch;
+    flex-wrap: wrap;
   }
 
-  .cd-approval-card__divider,
-  .cd-approval-card__row-label {
-    display: none;
+  .cd-approval-card__side {
+    display: contents;
+  }
+
+  .cd-approval-card__row .cd-button {
+    flex: 1 1 0;
+    height: calc(var(--size-control-main) + var(--space-4));
+  }
+
+  .cd-approval-card__menu {
+    position: static;
+    order: 1;
+    flex: 1 0 100%;
+    width: auto;
+    box-shadow: none;
+  }
+
+  .cd-approval-card__item {
+    min-height: calc(var(--size-control-main) + var(--space-8));
+    padding: var(--space-12);
   }
 }
 
-.cd-approval-card__note,
+@media (prefers-reduced-motion: reduce) {
+  .cd-approval-card__item {
+    transition: none;
+  }
+}
+
 .cd-approval-card__progress {
   margin: var(--space-8) 0 0;
   color: var(--text-secondary);

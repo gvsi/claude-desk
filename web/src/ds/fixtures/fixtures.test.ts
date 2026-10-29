@@ -5,7 +5,18 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
 
 import { CLAUSE_TEMPLATES, DECISION_STATES, EV_ERROR_CODES } from '../../api/contracts';
-import type { CardOption, ClauseTemplate, Decision, DecisionState, EvMessage, NormalizedAction, RenderedBlock, SessionState, SseEvent } from '../../api/contracts';
+import type {
+  CardOption,
+  ClauseTemplate,
+  Decision,
+  DecisionState,
+  EvMessage,
+  NormalizedAction,
+  RenderedBlock,
+  RuleCard,
+  SessionState,
+  SseEvent,
+} from '../../api/contracts';
 import { chen, rivera } from './index';
 import type { ConversationFixture, TranscriptTurn } from './index';
 
@@ -601,11 +612,13 @@ describe('fixtures', () => {
       expect(rivera.decisions[state].state, state).toBe(state);
     }
 
-    // The seeded hold (unverified) offers three answers; verified Dana's offers all four.
+    // The seeded hold, an unverified visitor's discount over the quote card's limit, offers the two
+    // one-time answers; verified Dana's Saturday request, over the Saturday card's hours, adds
+    // Allow only for this person ("answers_follow_what_held_the_request" says why).
     const held = rivera.decisions.held;
-    expect(held.answers).toEqual(['allow_once', 'deny_once', 'deny_always']);
+    expect(held.answers).toEqual(['allow_once', 'deny_once']);
     expect(rivera.heldVerified.state).toBe('held');
-    expect(rivera.heldVerified.answers).toEqual(['allow_once', 'deny_once', 'allow_person', 'deny_always']);
+    expect(rivera.heldVerified.answers).toEqual(['allow_once', 'deny_once', 'allow_person']);
 
     // Every state the hold can move to keeps its answers, so only `state` can hide the buttons.
     const afterHold: DecisionState[] = ['approved', 'denied', 'expired', 'cancelled', 'executed', 'failed', 'unknown', 'refused_at_execution'];
@@ -620,7 +633,7 @@ describe('fixtures', () => {
         (session) => [session.session_id, session],
       ),
     );
-    const decisions: Decision[] = [...Object.values(rivera.decisions), rivera.heldVerified];
+    const decisions: Decision[] = [...Object.values(rivera.decisions), rivera.heldVerified, rivera.heldRefund];
     for (const decision of decisions) {
       const session = sessions.get(decision.session_id);
       expect(session, `${decision.decision_id} has a session fixture`).toBeDefined();
@@ -641,6 +654,68 @@ describe('fixtures', () => {
         expect(action.amount_cents ?? Number.POSITIVE_INFINITY, `${decision.decision_id} amount`).toBeLessThanOrEqual(hardCapCents);
       }
     }
+  });
+
+  test('answers_follow_what_held_the_request', () => {
+    const { moneyTools, hardCapCents } = backendMoneyRules();
+    const sessions = new Map(
+      collect<SessionState>((node) => typeof node.session_id === 'string' && typeof node.verified === 'boolean' && 'assurance' in node).map(
+        (session) => [session.session_id, session],
+      ),
+    );
+    // Every held request in each business's fixtures, beside that business's rule cards.
+    const businesses: { name: string; fixture: unknown; cards: Record<string, RuleCard> }[] = [
+      { name: 'rivera', fixture: rivera, cards: rivera.ruleCards },
+      { name: 'chen', fixture: chen, cards: chen.ruleCards },
+    ];
+    const shapes = new Set<string>();
+    for (const { name, fixture, cards } of businesses) {
+      // A decision, not a status event about one: it carries its reason and its answers.
+      const held = collect<Decision>(
+        (node) => typeof node.decision_id === 'string' && typeof node.reason_plain === 'string' && Array.isArray(node.answers) && node.state === 'held',
+        fixture,
+      );
+      expect(held.length, `${name} has a held request`).toBeGreaterThan(0);
+      for (const decision of held) {
+        const where = `${name}: ${decision.decision_id}`;
+        const answers = decision.answers ?? [];
+        // The one-time answers are always offered.
+        expect(answers.slice(0, 2), where).toEqual(['allow_once', 'deny_once']);
+
+        // Each card that held it holds through its own permit: an ask card directly, an auto card
+        // through its hold twin, which drops the card's limits (amount, discount, hours, review).
+        const holding = decision.card_ids.map((id) => cards[id]);
+        expect(holding.every((card) => card !== undefined), `${where} names its business's cards`).toBe(true);
+        expect([...decision.policy_ids].sort(), where).toEqual(
+          holding.map((card) => (card?.mode === 'ask' ? `H.${card.card_id}` : `H.${card?.card_id}.hold`)).sort(),
+        );
+
+        // Deny always only when the tool itself is held, by an ask card or a default ask; a
+        // request over a limit leaves it out.
+        const askHeld = holding.some((card) => card?.mode === 'ask' || card?.is_default === true);
+        expect(answers.includes('deny_always'), `${where} deny_always`).toBe(askHeld);
+
+        // Allow only for this person exactly when there is a person or an agent key to scope it to,
+        // and a money action stays under the hard cap.
+        const session = sessions.get(decision.session_id);
+        const action = decision.action;
+        const underCap = !action || !moneyTools.includes(action.tool) || (action.amount_cents ?? Number.POSITIVE_INFINITY) <= hardCapCents;
+        const scoped = session?.verified === true || session?.kind === 'agent';
+        expect(answers.includes('allow_person'), `${where} allow_person`).toBe(scoped && underCap);
+
+        shapes.add(answers.join(' '));
+      }
+    }
+    // The fixtures show every shape the card lays out: two plain buttons, a Deny menu, an Allow
+    // menu, and both menus.
+    expect([...shapes].sort()).toEqual(
+      [
+        'allow_once deny_once',
+        'allow_once deny_once deny_always',
+        'allow_once deny_once allow_person',
+        'allow_once deny_once allow_person deny_always',
+      ].sort(),
+    );
   });
 
   test('slot_ids_name_their_start_in_business_time', () => {
