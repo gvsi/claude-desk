@@ -25,6 +25,9 @@
   --button-primary: #efece4;
   --button-primary-hover: #ddd9cf;
   --button-primary-text: var(--bg-app);
+  --button-danger-fill: rgba(220,130,144,0.16);
+  --button-danger-fill-hover: rgba(220,130,144,0.24);
+  --button-danger-text: #eba3ae;
   --accent-blue: #7eaeda;
   --ring-composer: var(--accent-blue);
   --status-handled: #6fa859;

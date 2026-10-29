@@ -11,8 +11,12 @@ export type ContrastPair = {
   readonly fg: string;
   /** The color token it sits on. */
   readonly ground: string;
-  /** The opaque token under a translucent ground. */
+  /** What the ground sits on: an opaque token, or a translucent one with `under` beneath it. */
   readonly over?: string;
+  /** The opaque token under a translucent `over`, such as the app under a card's fill. */
+  readonly under?: string;
+  /** The control's own opacity when it is drawn faded, such as a busy button: its label and fill fade together over `over`. */
+  readonly opacity?: number;
   /** 4.5:1 for text; 3:1 for focus rings, dots, the mark and text at 24 px and up. */
   readonly min: 4.5 | 3;
   readonly use: string;
@@ -29,6 +33,8 @@ const VAR = /^var\(\s*--([A-Za-z0-9][A-Za-z0-9_.-]{0,63})\s*\)$/;
 function parseColor(input: string, depth = 0): Rgba {
   if (depth > 16) throw new Error(`Color alias chain is too deep at ${input}`);
   const color = input.trim();
+  // A ghost control's own ground: nothing, so only its label is drawn.
+  if (color === 'transparent') return { r: 0, g: 0, b: 0, a: 0 };
   const named = ALIAS.exec(color)?.[1] ?? VAR.exec(color)?.[1] ?? (COLORS.has(color) ? color : undefined);
   if (named !== undefined) {
     const value = COLORS.get(named);
@@ -51,10 +57,12 @@ function parseColor(input: string, depth = 0): Rgba {
   throw new Error(`Unsupported color: ${input}`);
 }
 
-/** `top` alpha-composited over an opaque `bottom`. */
+/** `top` alpha-composited over `bottom` (source-over); over an opaque `bottom` the result is opaque. */
 function composite(top: Rgba, bottom: Rgba): Rgba {
-  const mix = (t: number, b: number) => t * top.a + b * (1 - top.a);
-  return { r: mix(top.r, bottom.r), g: mix(top.g, bottom.g), b: mix(top.b, bottom.b), a: 1 };
+  const a = bottom.a === 1 ? 1 : top.a + bottom.a * (1 - top.a);
+  if (a === 0) return { r: 0, g: 0, b: 0, a: 0 };
+  const mix = (t: number, b: number) => (t * top.a + b * bottom.a * (1 - top.a)) / a;
+  return { r: mix(top.r, bottom.r), g: mix(top.g, bottom.g), b: mix(top.b, bottom.b), a };
 }
 
 function luminance({ r, g, b }: Rgba): number {
@@ -66,22 +74,44 @@ function luminance({ r, g, b }: Rgba): number {
 }
 
 /**
- * WCAG contrast ratio of `fg` on `ground`. Each argument is a color token name, a
- * `{token}` alias, a `var(--token)`, a hex color or an `rgb()`/`rgba()` color.
- * A translucent `ground` is composited over `over` first, and `fg` over the result.
- * Throws on anything it can't read, or a translucent ground with nothing opaque under it.
+ * WCAG contrast of a pair as it is drawn. Each color is a color token name, a `{token}` alias, a
+ * `var(--token)`, a hex color, an `rgb()`/`rgba()` color or `transparent`. The ground sits on
+ * `over`, and a translucent `over` on an opaque `under`; at an `opacity` under 1 the label and the
+ * ground fade together over what is beneath them. Throws on anything it can't read, and on layers
+ * that don't end on something opaque.
  */
-export function contrastRatio(fg: string, ground: string, over?: string): number {
-  let base = parseColor(ground);
+export function pairContrast({ fg, ground, over, under, opacity = 1 }: Omit<ContrastPair, 'min' | 'use'>): number {
+  if (under !== undefined && over === undefined) throw new Error(`${under} is under nothing; name the layer it sits under as over`);
+  if (!(opacity > 0 && opacity <= 1)) throw new Error(`opacity ${opacity} is not in (0, 1]`);
+  let beneath: Rgba | undefined;
   if (over !== undefined) {
-    const under = parseColor(over);
-    if (under.a !== 1) throw new Error(`${over} is translucent; contrast needs an opaque color underneath`);
-    base = composite(base, under);
+    beneath = parseColor(over);
+    if (under !== undefined) {
+      const base = parseColor(under);
+      if (base.a !== 1) throw new Error(`${under} is translucent; contrast needs an opaque color underneath`);
+      beneath = composite(beneath, base);
+    }
+    if (beneath.a !== 1) throw new Error(`${over} is translucent; contrast needs an opaque color underneath`);
   }
-  if (base.a !== 1) throw new Error(`${ground} is translucent; pass the opaque color it sits over`);
-  const top = composite(parseColor(fg), base);
-  const [light, dark] = [luminance(top), luminance(base)].sort((x, y) => y - x) as [number, number];
+  if (opacity !== 1 && beneath === undefined) throw new Error(`a control at opacity ${opacity} needs what it sits on as over`);
+
+  const groundColor = parseColor(ground);
+  const fade = (c: Rgba): Rgba => ({ ...c, a: c.a * opacity });
+  const label = fade(composite(parseColor(fg), groundColor));
+  const fill = fade(groundColor);
+  const back = beneath === undefined ? fill : composite(fill, beneath);
+  if (back.a !== 1) throw new Error(`${ground} is translucent; pass the opaque color it sits over`);
+  const front = composite(label, back);
+  const [light, dark] = [luminance(front), luminance(back)].sort((x, y) => y - x) as [number, number];
   return (light + 0.05) / (dark + 0.05);
+}
+
+/**
+ * WCAG contrast ratio of `fg` on `ground`, as `pairContrast` measures it: a translucent `ground`
+ * over `over`, and a translucent `over` over `under`.
+ */
+export function contrastRatio(fg: string, ground: string, over?: string, under?: string): number {
+  return pairContrast({ fg, ground, over, under });
 }
 
 function pairs(
@@ -90,9 +120,10 @@ function pairs(
   min: 4.5 | 3,
   use: string,
   over?: string,
+  beneath: Pick<ContrastPair, 'under' | 'opacity'> = {},
 ): ContrastPair[] {
   return fgs.flatMap((fg) =>
-    grounds.map((ground) => (over === undefined ? { fg, ground, min, use } : { fg, ground, over, min, use })),
+    grounds.map((ground) => ({ fg, ground, ...(over === undefined ? {} : { over }), ...beneath, min, use })),
   );
 }
 
@@ -126,6 +157,11 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = Object.freeze([
   ...pairs(['illustration-ink'], ['illustration-avatar'], 4.5, 'The initials on an intro illustration card.'),
   ...pairs(['illustration-handled'], ['illustration-card'], 3, "The check and the receipt dots on the intro illustration's light cards."),
   ...pairs(['line-field'], ['bg-surface', 'bg-app'], 3, "A text field's outline, its boundary, on a dialog or a page."),
+  ...pairs(['button-danger-text'], ['button-danger-fill', 'button-danger-fill-hover'], 4.5, 'A danger button in a card, such as Deny this time on a held request, at rest and on hover.', 'fill-card', { under: 'bg-app' }),
+  ...pairs(['button-danger-text'], ['fill-card'], 4.5, 'A danger-ghost button in a card, such as Deny always on a held request.', 'bg-app'),
+  ...pairs(['button-danger-text'], ['fill-hover'], 4.5, 'A danger-ghost button in a card while it is hovered.', 'fill-card', { under: 'bg-app' }),
+  ...pairs(['button-danger-text'], ['bg-app'], 4.5, 'A danger-ghost button on the app background.'),
+  ...pairs(['button-danger-text'], ['button-danger-fill', 'button-danger-fill-hover', 'fill-hover'], 4.5, 'Danger and danger-ghost buttons on the app background, at rest and on hover.', 'bg-app'),
 ]);
 
 export const DECORATIVE_COLORS: Readonly<Record<string, string>> = Object.freeze({

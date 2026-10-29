@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
 
 import { buildTokensCss } from '../../scripts/build-tokens.mjs';
-import { CONTRAST_PAIRS, DECORATIVE_COLORS, contrastRatio } from './contrast';
+import { CONTRAST_PAIRS, DECORATIVE_COLORS, contrastRatio, pairContrast } from './contrast';
 import tokens from './tokens.json' with { type: 'json' };
 
 const NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
@@ -17,6 +17,14 @@ const ALIAS = /^\{([A-Za-z0-9][A-Za-z0-9_.-]{0,63})\}$/;
 const LIST_FAMILIES = ['color', 'spacing', 'radius', 'size', 'shadow', 'motion'] as const;
 
 const colorNames = tokens.color.tokens.map((t) => t.name);
+
+/** "fg on ground over a under b at 60%", for a pair or a required pair. */
+function label(pair: { fg: string; ground: string; over?: string; under?: string; opacity?: number }): string {
+  const over = pair.over ? ` over ${pair.over}` : '';
+  const under = pair.under ? ` over ${pair.under}` : '';
+  const faded = pair.opacity === undefined ? '' : ` at ${Math.round(pair.opacity * 100)}%`;
+  return `${pair.fg} on ${pair.ground}${over}${under}${faded}`;
+}
 
 function tokenValue(name: string): string | undefined {
   const color = tokens.color.tokens.find((t) => t.name === name);
@@ -89,6 +97,18 @@ describe('design tokens', () => {
     expect(reply).not.toHaveProperty('letterSpacing');
   });
 
+  test('danger_buttons_are_the_refused_rose', () => {
+    // The deny answers: a soft fill of the refused status color, and a lighter rose for their words.
+    expect(tokenValue('button-danger-text')).toBe('#eba3ae');
+    expect(tokenValue('button-danger-fill')).toBe('rgba(220,130,144,0.16)');
+    expect(tokenValue('button-danger-fill-hover')).toBe('rgba(220,130,144,0.24)');
+    const refused = tokenValue('status-refused') ?? '';
+    const rgb = [1, 3, 5].map((i) => parseInt(refused.slice(i, i + 2), 16)).join(',');
+    for (const name of ['button-danger-fill', 'button-danger-fill-hover']) {
+      expect(tokenValue(name), `${name} is status-refused (${refused}) at an alpha`).toMatch(new RegExp(`^rgba\\(${rgb},0\\.\\d+\\)$`));
+    }
+  });
+
   test('one_dark_theme_only', () => {
     expect(tokens.color.themes).toEqual([{ id: 'dark', name: 'Dark' }]);
     for (const token of tokens.color.tokens) {
@@ -137,10 +157,10 @@ describe('design tokens', () => {
     expect(() => contrastRatio('text-primary', 'fill-card')).toThrow();
     expect(() => contrastRatio('not-a-color', 'bg-app')).toThrow();
 
-    type Required = { fg: string; ground: string; over?: string; min: 4.5 | 3 };
+    type Required = { fg: string; ground: string; over?: string; under?: string; opacity?: number; min: 4.5 | 3 };
     const required: Required[] = [];
-    const add = (fgs: string[], grounds: string[], min: 4.5 | 3, over?: string) => {
-      for (const fg of fgs) for (const ground of grounds) required.push({ fg, ground, over, min });
+    const add = (fgs: string[], grounds: string[], min: 4.5 | 3, over?: string, under?: string, opacity?: number) => {
+      for (const fg of fgs) for (const ground of grounds) required.push({ fg, ground, over, under, opacity, min });
     };
     const text = ['text-primary', 'text-secondary', 'text-tertiary', 'accent-blue'];
     add(text, ['bg-app', 'bg-panel', 'bg-surface', 'bg-muted', 'bg-selected'], 4.5);
@@ -168,21 +188,58 @@ describe('design tokens', () => {
     add(['illustration-handled'], ['illustration-card'], 3);
     // A text field's outline is its boundary, so it needs 3:1 on every ground a field sits on.
     add(['line-field'], ['bg-surface', 'bg-app'], 3);
+    // The deny answers in a held request's card: danger at rest and on hover, then danger-ghost,
+    // whose ground is the card itself, at rest and on hover.
+    add(['button-danger-text'], ['button-danger-fill', 'button-danger-fill-hover'], 4.5, 'fill-card', 'bg-app');
+    add(['button-danger-text'], ['fill-card'], 4.5, 'bg-app');
+    add(['button-danger-text'], ['fill-hover'], 4.5, 'fill-card', 'bg-app');
+    // The same buttons straight on the app background.
+    add(['button-danger-text'], ['bg-app'], 4.5);
+    add(['button-danger-text'], ['button-danger-fill', 'button-danger-fill-hover', 'fill-hover'], 4.5, 'bg-app');
 
     // Every required pair is listed, at no lower a minimum, so dropping one can't pass.
     for (const want of required) {
       const listed = CONTRAST_PAIRS.find(
-        (p) => p.fg === want.fg && p.ground === want.ground && p.over === want.over,
+        (p) =>
+          p.fg === want.fg && p.ground === want.ground && p.over === want.over && p.under === want.under && p.opacity === want.opacity,
       );
-      expect(listed, `${want.fg} on ${want.ground}${want.over ? ` over ${want.over}` : ''}`).toBeDefined();
+      expect(listed, label(want)).toBeDefined();
       expect(listed?.min).toBeGreaterThanOrEqual(want.min);
     }
 
     for (const pair of CONTRAST_PAIRS) {
-      const label = `${pair.fg} on ${pair.ground}${pair.over ? ` over ${pair.over}` : ''}`;
-      expect(pair.use.trim().length, `${label} says where it is used`).toBeGreaterThan(0);
-      expect(contrastRatio(pair.fg, pair.ground, pair.over), label).toBeGreaterThanOrEqual(pair.min);
+      expect(pair.use.trim().length, `${label(pair)} says where it is used`).toBeGreaterThan(0);
+      expect(pairContrast(pair), label(pair)).toBeGreaterThanOrEqual(pair.min);
     }
+  });
+
+  test('contrast_composites_layers_and_opacity', () => {
+    // A translucent ground over a translucent card over the app equals the same ground over the
+    // card's opaque composite, worked out by hand.
+    const cardOverApp = 'rgb(34.66,33.66,31.6)'; // fill-card (rgba(250,249,245,0.03)) over #1c1b19
+    expect(pairContrast({ fg: 'text-primary', ground: 'fill-secondary', over: 'fill-card', under: 'bg-app' })).toBeCloseTo(
+      contrastRatio('text-primary', 'fill-secondary', cardOverApp),
+      6,
+    );
+    expect(contrastRatio('text-primary', 'fill-secondary', 'fill-card', 'bg-app')).toBeCloseTo(
+      contrastRatio('text-primary', 'fill-secondary', cardOverApp),
+      6,
+    );
+    // A control drawn at half opacity: black on white over white reads as mid gray on white.
+    expect(pairContrast({ fg: '#000000', ground: '#ffffff', over: '#ffffff', opacity: 0.5 })).toBeCloseTo(
+      contrastRatio('rgba(0,0,0,0.5)', '#ffffff'),
+      6,
+    );
+    // A ghost control has no fill of its own: only its label fades.
+    expect(pairContrast({ fg: '#000000', ground: 'transparent', over: '#ffffff', opacity: 0.5 })).toBeCloseTo(
+      contrastRatio('rgba(0,0,0,0.5)', '#ffffff'),
+      6,
+    );
+    // Faded or not, the layers under a control must end on something opaque.
+    expect(() => pairContrast({ fg: 'text-primary', ground: 'fill-secondary', over: 'fill-card' })).toThrow(/translucent/);
+    expect(() => pairContrast({ fg: 'text-primary', ground: 'fill-secondary', under: 'bg-app' })).toThrow(/under/);
+    expect(() => pairContrast({ fg: 'text-primary', ground: 'bg-app', opacity: 0.6 })).toThrow(/opacity/);
+    expect(() => pairContrast({ fg: 'text-primary', ground: 'bg-app', over: 'bg-app', opacity: 0 })).toThrow(/opacity/);
   });
 
   test('every_color_token_is_classified', () => {

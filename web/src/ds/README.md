@@ -75,7 +75,7 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 
 ## Accessibility
 
-- Every color pair a component uses is listed in `CONTRAST_PAIRS` (`contrast.ts`), and the token tests fail if any falls below its minimum: 4.5:1 for text (3:1 at 24 px and up), and 3:1 for focus rings, status dots and the mark. Translucent grounds are measured over the opaque color they sit on.
+- Every color pair a component uses is listed in `CONTRAST_PAIRS` (`contrast.ts`), and the token tests fail if any falls below its minimum: 4.5:1 for text (3:1 at 24 px and up), and 3:1 for focus rings, status dots and the mark. Translucent grounds are measured over what they sit on, down to an opaque color (a button's fill over a card's fill over the app).
 
 Text and links, 4.5:1:
 
@@ -102,6 +102,8 @@ Text and links, 4.5:1:
 | `fill-hover` over `bg-muted` | 9.7 | not used | not used | not used |
 
 `button-primary-text` reads 14.6 on `button-primary` and 12.2 on `button-primary-hover`.
+
+`button-danger-text` reads 6.1 on `button-danger-fill` and 5.3 on `button-danger-fill-hover` over `fill-card` (6.6 and 5.7 straight on `bg-app`), 7.9 on `fill-card` and 6.7 on `fill-hover` over `fill-card` (8.5 and 7.3 on `bg-app`).
 
 Focus rings and status dots, 3:1 (`ring-composer` is `accent-blue`):
 
