@@ -121,9 +121,18 @@ const PROSE_RULES: [string, RegExp][] = [
   ['promise word', new RegExp(`${NOT_LETTER_BEFORE}(?:${PROMISE_STEMS.join('|')})\\p{L}*`, 'iu')],
 ];
 
-/** The rules `text` breaks, after NFKC with zero-width characters and soft hyphens removed. */
+// Zero-width spaces and joiners, the word joiner, the byte order mark and the soft hyphen: removed
+// before any rule runs, so they can't split a word the rules would catch.
+const HIDDEN_IN_WORDS = /[\u200B-\u200D\u2060\uFEFF\u00AD]/gu;
+
+/** `text` as the prose rules read it: NFKC, with the characters that can hide inside a word removed. */
+function normalizeProse(text: string): string {
+  return text.normalize('NFKC').replace(HIDDEN_IN_WORDS, '');
+}
+
+/** The rules `text` breaks, after `normalizeProse`. */
 function proseProblems(text: string): string[] {
-  const normalized = text.normalize('NFKC').replace(/[\u200B-\u200D\u2060\uFEFF\u00AD]/g, '');
+  const normalized = normalizeProse(text);
   return PROSE_RULES.filter(([, rule]) => rule.test(normalized)).map(([name]) => name);
 }
 
@@ -166,9 +175,9 @@ const CLAIM_RULES: [string, RegExp][] = [
   ])],
 ];
 
-/** The claims `text` makes that only a card may make, after the same normalization as `proseProblems`. */
+/** The claims `text` makes that only a card may make, after `normalizeProse`. */
 function claimProblems(text: string): string[] {
-  const normalized = text.normalize('NFKC').replace(/[​-‍⁠﻿­]/g, '');
+  const normalized = normalizeProse(text);
   return CLAIM_RULES.filter(([, rule]) => rule.test(normalized)).map(([name]) => name);
 }
 
@@ -269,6 +278,11 @@ describe('fixtures', () => {
     expect(proseProblems('It\'s $180, or １８０')).toEqual(['digit', 'money or percent sign']);
     expect(proseProblems('Someone will be done in May')).toEqual(['month']);
     expect(proseProblems('You may want to turn off the water, and feel at home.')).toEqual([]);
+    // Characters hidden inside a word don't get it past the rules.
+    const [zwsp, zwj, wordJoiner, bom, softHyphen] = [0x200b, 0x200d, 0x2060, 0xfeff, 0x00ad].map((code) => String.fromCharCode(code));
+    expect(normalizeProse(`Tu${zwsp}es${zwj}day ${wordJoiner}to${bom}day dis${softHyphen}count`)).toBe('Tuesday today discount');
+    expect(proseProblems(`See you Tu${zwsp}esday`)).toEqual(['weekday']);
+    expect(claimProblems(`You're boo${softHyphen}ked.`)).toEqual(['booking claim']);
 
     expect(proseBlocks.length).toBeGreaterThan(15);
     for (const block of proseBlocks) {

@@ -126,6 +126,20 @@ function arrowsInSource(text: string): string[] {
 // Formatting or computing money, dates and discounts: the kernel renders those, never the client.
 const FORMATS = /\bIntl\b|toLocale|\bnew\s+Date\b|(?<![\w.])Date\s*\(|\bDate\s*\.\s*(?:now|parse|UTC)\b|\bTemporal\s*\.|\bto(?:Fixed|Precision)\s*\(/g;
 
+// Characters that change or hide text without showing: soft hyphens, zero-width and joiner
+// characters, direction marks, embeddings, overrides and isolates, and the byte order mark. Written
+// as escapes, so this file holds none of them itself.
+const INVISIBLE = /[\u00AD\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/gu;
+
+/** Every text file under `src/ds/`, tests, stories and fixtures included. */
+function everyTextFile(): Source[] {
+  return readdirSync(DS, { recursive: true, encoding: 'utf8' })
+    .map((file) => file.split(path.sep).join('/'))
+    .filter((file) => /\.(ts|tsx|mjs|css|md|json|html)$/.test(file))
+    .sort()
+    .map((file) => ({ file, text: readFileSync(path.join(DS, file), 'utf8') }));
+}
+
 /** Component folders under `components/`, each named for its main export. */
 function componentNames(): string[] {
   const dir = path.join(DS, 'components');
@@ -215,6 +229,18 @@ describe('design system source guards', () => {
     expect(arrowsInSource(`&amp; &#8212; ${bs}u00a0 /${bs}bword${bs}d/ &#x2014;`)).toEqual([]);
     expect(findAll(sources, matches(UPPERCASE))).toEqual([]);
     expect(findAll(sources, arrowsInSource)).toEqual([]);
+  });
+
+  it('no_invisible_characters_in_any_file', () => {
+    // Text a reviewer can't see is text a reviewer can't check: a regex range typed as raw
+    // zero-width characters reads as an empty class. Escapes written out in the source are fine.
+    const hidden = [0x00ad, 0x200b, 0x200d, 0x200e, 0x202e, 0x2060, 0x2066, 0xfeff].map((code) => String.fromCharCode(code));
+    for (const char of hidden) expect(matches(INVISIBLE)(`a${char}b`), char.codePointAt(0)?.toString(16)).toHaveLength(1);
+    const bs = String.fromCharCode(92);
+    expect(matches(INVISIBLE)(`replace(/[${bs}u200B-${bs}u200D${bs}u00AD]/g, '') d•••@example.com Lucía`)).toEqual([]);
+    const files = everyTextFile();
+    expect(files.length).toBeGreaterThan(100);
+    expect(findAll(files, (text) => matches(INVISIBLE)(text).map((char) => `U+${(char.codePointAt(0) ?? 0).toString(16).toUpperCase()}`))).toEqual([]);
   });
 
   it('components_never_format_money_or_dates', () => {
