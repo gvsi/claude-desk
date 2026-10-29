@@ -37,6 +37,10 @@ from desk.events import EvHeld, EvMessage, EvReceipt, EvResolved
 
 Phase = Literal["receipt", "held", "resolved"]
 PHASES = ("receipt", "held", "resolved")
+# A decision in one of these states may still change ("Decision lifecycle"): an allow may yet run or expire, a hold be
+# answered, cancelled or expire, an approval finish, and an `unknown` execution be reconciled. Its final state is
+# published once it has one, through a control row the session's next request handles.
+NOT_FINAL = frozenset({"allowed", "held", "approved", "unknown"})
 AUTHOR_BY_VIA = {"model": "claude", "api": "claude", "owner": "owner", "kernel": "desk"}
 
 

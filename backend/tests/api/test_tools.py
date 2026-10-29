@@ -301,6 +301,25 @@ async def test_execute_timeout_polls_and_never_redecides(api_conn, caller, fake,
     assert len(await events(api_conn, caller.session_id)) == 1
 
 
+async def test_an_unknown_outcome_is_left_until_it_is_final(api_conn, caller, fake, monkeypatch):
+    """An execution the kernel can't yet say succeeded or failed (`unknown`, reconciled later) is shown as signed and
+    left for the visitor's next request, which publishes its final state; a final one leaves nothing behind."""
+    monkeypatch.setattr(tools, "EXECUTE_POLL_S", 0)
+    fake.script("native.quote", exec_state="unknown")
+    ran = await route_call(api_conn, caller, 0, tool_use("native__quote", DRAIN))
+    fake.drop_response("/execute")                                 # found unknown by the poll after a lost answer
+    polled = await route_call(api_conn, caller, 0, tool_use("native__quote", DRAIN))
+    fake.script("native.quote", exec_state="failed")
+    failed = await route_call(api_conn, caller, 0, tool_use("native__quote", DRAIN))
+
+    assert [(outcome.result["outcome"], outcome.status.decision.state) for outcome in (ran, polled, failed)] == [
+        ("unknown", "unknown"), ("unknown", "unknown"), ("failed", "failed")]
+    assert await events(api_conn, caller.session_id) == [receipt(outcome.status.decision)
+                                                         for outcome in (ran, polled, failed)]
+    assert await control_rows(api_conn, caller.session_id) == [
+        ("decision_pending", {"decision_id": outcome.status.decision.decision_id}) for outcome in (ran, polled)]
+
+
 def check_drafts(fake) -> list[dict]:
     return [call.body["draft"] for call in fake.called("/check_reply")]
 

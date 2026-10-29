@@ -30,7 +30,7 @@ from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
-from desk.api.deliver import Status, deliver
+from desk.api.deliver import NOT_FINAL, Status, deliver
 from desk.api.kernel_client import KernelFailed, KernelUnavailable
 from desk.api.loop import run_pending
 from desk.api.model import ModelClient
@@ -40,8 +40,6 @@ from desk.api.tools import Caller
 from desk.contracts import Decision
 
 logger = logging.getLogger(__name__)
-# A decision in one of these states may still change: its control row waits for a later request.
-NOT_FINAL = frozenset({"allowed", "held", "approved", "unknown"})
 DECISION_ROWS = frozenset({"decision_due", "decision_pending"})
 
 

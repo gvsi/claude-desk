@@ -26,7 +26,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, ValidationError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from desk.api.deliver import Reply, Status, deliver
+from desk.api.deliver import NOT_FINAL, Reply, Status, deliver
 from desk.api.kernel_client import CredentialView, KernelFailed, KernelUnavailable
 from desk.api.prompts import KERNEL_ONLY_TEMPLATES, REPLY_TEMPLATES, REWRITE_INSTRUCTION, SEND_REPLY_TOOL
 from desk.api.ro import KERNEL_RO
@@ -226,7 +226,11 @@ def _unavailable() -> ToolOutcome:
 
 
 async def _publish(conn: AsyncConnection, caller: Caller, status: Status) -> Status:
-    await deliver(conn, caller.ids, status, ro_schema=caller.ro_schema)
+    """Show the decision as the kernel signed it. A receipt for an execution whose outcome isn't final (`unknown`,
+    reconciled later) is also left for the visitor's next request, which publishes its final state."""
+    shown = await deliver(conn, caller.ids, status, ro_schema=caller.ro_schema)
+    if shown is not None and status.phase == "receipt" and status.decision.state in NOT_FINAL:
+        await append_control(conn, caller.ids, "decision_pending", {"decision_id": status.decision.decision_id})
     await conn.commit()
     return status
 
