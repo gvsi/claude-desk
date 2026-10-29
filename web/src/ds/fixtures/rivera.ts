@@ -259,7 +259,8 @@ const cards = {
     }),
     es: cardBlock('owner_said', {
       fact_id: 'owner:M-9002',
-      title: 'Hola Lucía, soy Maria. Si gotea por la unión, normalmente basta con cambiar la junta. Unos $250 con la visita.',
+      title:
+        'Hola Lucía, soy Maria. Vi tu mensaje y prefiero escribirte ahora en vez de esperar a la llamada del martes. Si gotea por la unión, normalmente basta con cambiar la junta. Unos $250 con la visita.',
     }),
   },
   charges: {
@@ -322,10 +323,15 @@ const proseBlocks = {
     en: proseBlock("I can help with that after you confirm it's you."),
     es: proseBlock('Puedo ayudarte con eso cuando confirmes que eres tú.'),
   },
+  // Asks for what a callback needs; the visitor gives it in their own words, digits and all.
+  callbackAsk: {
+    en: proseBlock("Of course. What's your name, and the best number to reach you?"),
+    es: proseBlock('Claro. ¿Cómo te llamas, y cuál es el mejor número para llamarte?'),
+  },
   // Leads into the callback_confirmed card after native.request_callback ran; the card says what happens.
-  askOwner: {
-    en: proseBlock('Of course.'),
-    es: proseBlock('Claro.'),
+  thanks: {
+    en: proseBlock('Thanks.'),
+    es: proseBlock('Gracias.'),
   },
 } satisfies Record<string, Bilingual<ProseBlock>>;
 
@@ -568,17 +574,29 @@ const conversations = {
       { kind: 'event', event: luciaQuoteReceipt },
       { kind: 'event', event: luciaQuote },
       { kind: 'visitor', text: '¿Puedo hablar con Maria? También gotea la llave de paso.' },
-      // native.request_callback ran: the kernel wrote the handoff and its callback_confirmed fact.
-      { kind: 'event', event: status('receipt', 'dec-lucia-callback', 'executed', 'es', 33) },
+      // A callback needs her name and number, so Claude asks; she gives them in her own message.
       {
         kind: 'event',
-        event: message('msg-lucia-ask', {
+        event: message('msg-lucia-callback-ask', {
           language: 'es',
-          blocks: [proseBlocks.askOwner.es, cards.callback_confirmed.es],
+          blocks: [proseBlocks.callbackAsk.es],
           visitor_plain: plain.es.reply_checked,
-          ledger_seq: 34,
+          ledger_seq: 33,
         }),
       },
+      { kind: 'visitor', text: 'Lucía Herrera, (510) 555-0187.' },
+      // native.request_callback ran: the kernel wrote the handoff and its callback_confirmed fact.
+      { kind: 'event', event: status('receipt', 'dec-lucia-callback', 'executed', 'es', 34) },
+      {
+        kind: 'event',
+        event: message('msg-lucia-callback', {
+          language: 'es',
+          blocks: [proseBlocks.thanks.es, cards.callback_confirmed.es],
+          visitor_plain: plain.es.reply_checked,
+          ledger_seq: 35,
+        }),
+      },
+      // Maria takes the chat over (ledger entry 36) without waiting for the callback time.
       { kind: 'event', event: ownerJoined },
       {
         kind: 'event',
@@ -588,7 +606,7 @@ const conversations = {
           language: 'es',
           blocks: [cards.owner_said.es],
           visitor_plain: plain.es.owner_said,
-          ledger_seq: 36,
+          ledger_seq: 37,
         }),
       },
       { kind: 'visitor', text: 'Perfecto. ¿Cuándo pueden venir?' },

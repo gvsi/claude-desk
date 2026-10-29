@@ -369,6 +369,34 @@ describe('fixtures', () => {
     expect(checked).toBeGreaterThanOrEqual(4);
   });
 
+  test('callbacks_use_details_the_visitor_gave', () => {
+    // A callback needs a name and a number to call. Claude asks for them, and the visitor gives
+    // them in their own message, before the request_callback receipt and its card.
+    const PHONE = /\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/u;
+    expect(PHONE.test('Lucía Herrera, (510) 555-0187')).toBe(true);
+    expect(PHONE.test('¿Puedo hablar con Maria?')).toBe(false);
+    const conversations = Object.values(FIXTURES).flatMap((fixture) => Object.entries(fixture.conversations));
+    let callbacks = 0;
+    for (const [name, conversation] of conversations) {
+      let gaveDetails = false;
+      for (const turn of conversation.turns) {
+        if (turn.kind === 'visitor') {
+          gaveDetails ||= PHONE.test(turn.text);
+          continue;
+        }
+        if (turn.kind !== 'event') continue;
+        const { event } = turn;
+        if (event.type !== 'message') continue;
+        if (event.blocks.some((block: RenderedBlock) => block.template === 'callback_confirmed')) {
+          callbacks += 1;
+          expect(gaveDetails, `${name}: ${event.message_id} confirms a callback`).toBe(true);
+        }
+        gaveDetails = false;
+      }
+    }
+    expect(callbacks).toBeGreaterThan(0);
+  });
+
   test('fixture_prose_restates_no_card_statement', () => {
     // The oracle catches a charter policy repeated in prose, so a clean result means something.
     expect(restatedStatements('Thanks. Maria texts before she arrives.')).toEqual(['maria texts before she arrives']);
