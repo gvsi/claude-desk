@@ -3,7 +3,9 @@
 # containers of the Fargate task (the kernel and the API) and the one-off admin task; each
 # container's command picks the process.
 #
-#   make image   (builds desk-kernel:dev, then this with --build-arg KERNEL_IMAGE=desk-kernel:dev)
+#   make image KERNEL_TAG=<tag>   (builds desk-kernel:<tag>, then this with
+#                                  --build-arg KERNEL_IMAGE=desk-kernel:<tag>; the tag is dev unless
+#                                  given, and deploy.sh gives the commit)
 #
 # The kernel image (kernel/Dockerfile) holds the desk_kernel wheel in the system interpreter,
 # desk-prove, cvc5 and the user desk (uid 10001). The backend's locked dependencies go into that

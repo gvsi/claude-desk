@@ -74,8 +74,9 @@ ROUTES = {
     "visitor_sessions": "/api/public/desks/{slug}/sessions",
     "visitor_events": "/api/public/desks/{slug}/events",
 }
-# The cookies as Plan 02a's "Cookies carry only tokens" sets them: both HttpOnly, Secure and
-# SameSite=Strict, the owner's on the owner routes and the visitor's on its own Desk's public routes.
+# The cookies as the API core plan (plan 02a) sets them in "Cookies carry only tokens": both
+# HttpOnly, Secure and SameSite=Strict, the owner's on the owner routes and the visitor's on its own
+# Desk's public routes.
 OWNER_COOKIE, OWNER_COOKIE_PATH = "desk_owner", "/api/owner"
 VISITOR_COOKIE, VISITOR_COOKIE_PATH = "desk_visitor", "/api/public/desks/{slug}"
 FORGED_HOST = "evil.example"
