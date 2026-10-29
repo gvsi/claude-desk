@@ -30,6 +30,24 @@ function FailingPage(args: IntroDialogProps) {
   );
 }
 
+/**
+ * The page's side of a try that starts the demo: `busy` goes on as the passcode is sent and stays
+ * on while the demo opens. The promise settles at once, so only `busy` holds a second submit back.
+ */
+function StartingPage(args: IntroDialogProps) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <IntroDialog
+      {...args}
+      busy={busy}
+      onSubmit={async (passcode) => {
+        setBusy(true);
+        await args.onSubmit(passcode);
+      }}
+    />
+  );
+}
+
 /** The error line, the field's state and its focus, for a dialog showing `code`. */
 async function expectErrorOnTheField(canvas: ReturnType<typeof within>, code: IntroErrorCode): Promise<void> {
   const field = canvas.getByLabelText('Passcode');
@@ -91,6 +109,9 @@ export const Default: Story = {
     await expect(field).toHaveAttribute('type', 'password');
     await expect(field).toHaveAttribute('autocomplete', 'off');
     await expect(dialog).toHaveAccessibleDescription(args.intro);
+    // A main-action-tall field whose outline, its boundary, reaches 3:1 (line-field).
+    expectComputed(field, { height: '40px', borderTopLeftRadius: '8px', borderTopWidth: '1px' });
+    expectComputed(field, { borderTopColor: 'rgba(250, 249, 245, 0.36)', borderBottomColor: 'rgba(250, 249, 245, 0.36)' });
     await expect(field).not.toHaveAttribute('aria-invalid');
     await expect(field).not.toHaveAttribute('aria-describedby');
     await expect(canvas.queryByRole('alert')).toBeNull();
@@ -177,22 +198,35 @@ export const Default: Story = {
 };
 
 export const Busy: Story = {
-  args: { busy: true },
+  render: (args) => <StartingPage {...args} />,
   play: async ({ args, canvas, userEvent }) => {
-    // busy_submits_once: while the demo starts, the button says so and nothing more is sent.
-    const button = canvas.getByRole('button', { name: 'Starting' });
+    // busy_submits_once: a click starts the demo. The button then reads "Starting" and keeps focus,
+    // still reachable but inert (aria-disabled, not disabled), and nothing more is sent.
+    const field = canvas.getByLabelText('Passcode');
+    await userEvent.type(field, 'rivera-demo');
+    const button = canvas.getByRole('button', { name: 'Start the demo' });
+    await userEvent.click(button);
+    await expect(args.onSubmit).toHaveBeenCalledTimes(1);
+    await expect(args.onSubmit).toHaveBeenCalledWith('rivera-demo');
+
+    await expect(canvas.getByRole('button', { name: 'Starting' })).toBe(button);
     await expect(canvas.queryByRole('button', { name: 'Start the demo' })).toBeNull();
-    await expect(button).toBeDisabled();
+    await expect(button).toHaveAttribute('aria-disabled', 'true');
+    await expect(button).not.toHaveAttribute('disabled');
     await expect(button).toHaveAttribute('aria-busy', 'true');
     await expect(button.closest('form')).toHaveAttribute('aria-busy', 'true');
+    await expect(button).toHaveFocus();
 
-    const field = canvas.getByLabelText('Passcode');
-    await expect(field).toHaveFocus();
-    await userEvent.type(field, 'rivera-demo');
-    await userEvent.keyboard('{Enter}');
+    // A second click, Enter on the button and Enter in the field all send nothing.
     await userEvent.click(button);
-    await expect(args.onSubmit).not.toHaveBeenCalled();
-    await expect(button).toBeDisabled();
+    await userEvent.keyboard('{Enter}');
+    await expect(button).toHaveFocus();
+    await userEvent.tab();
+    await expect(field).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+    await userEvent.tab();
+    await expect(button).toHaveFocus();
+    await expect(args.onSubmit).toHaveBeenCalledTimes(1);
   },
 };
 

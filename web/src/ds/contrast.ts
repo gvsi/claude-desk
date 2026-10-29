@@ -125,6 +125,7 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = Object.freeze([
   ...pairs(['illustration-ink', 'illustration-ink-secondary'], ['illustration-card'], 4.5, "Names, messages and meta lines on the intro illustration's light cards."),
   ...pairs(['illustration-ink'], ['illustration-avatar'], 4.5, 'The initials on an intro illustration card.'),
   ...pairs(['illustration-handled'], ['illustration-card'], 3, "The check and the receipt dots on the intro illustration's light cards."),
+  ...pairs(['line-field'], ['bg-surface', 'bg-app'], 3, "A text field's outline, its boundary, on a dialog or a page."),
 ]);
 
 export const DECORATIVE_COLORS: Readonly<Record<string, string>> = Object.freeze({

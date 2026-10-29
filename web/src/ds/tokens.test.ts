@@ -162,6 +162,8 @@ describe('design tokens', () => {
     add(['illustration-ink', 'illustration-ink-secondary'], ['illustration-card'], 4.5);
     add(['illustration-ink'], ['illustration-avatar'], 4.5);
     add(['illustration-handled'], ['illustration-card'], 3);
+    // A text field's outline is its boundary, so it needs 3:1 on every ground a field sits on.
+    add(['line-field'], ['bg-surface', 'bg-app'], 3);
 
     // Every required pair is listed, at no lower a minimum, so dropping one can't pass.
     for (const want of required) {

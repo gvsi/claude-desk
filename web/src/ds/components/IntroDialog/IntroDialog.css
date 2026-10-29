@@ -167,7 +167,7 @@
   height: var(--size-control-main);
   margin: 0;
   padding: 0 var(--space-12);
-  border: 1px solid var(--line-control);
+  border: 1px solid var(--line-field);
   border-radius: var(--radius-control);
   background: var(--fill-card);
   color: var(--text-primary);

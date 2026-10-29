@@ -19,7 +19,7 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 
 - Set pages on `bg-app`. Put the sidebar and side panels on `bg-panel` with a `line-hairline` seam; the composer, menus and popovers on `bg-surface`; quiet fills on `bg-muted`; the active nav row, the segmented control thumb and the initials avatar on `bg-selected`.
 - Set body text and everything Claude says in `text-primary`; captions, meta lines, helper text and receipts in `text-secondary`. Use `text-tertiary` only for placeholders and labels at 13 px and up.
-- Separate regions by fill and a hairline, not by shadow. A card is `fill-card` with a 1 px `line-card` border. Chips, outlined pills and the whisper composer are outlined in `line-control`, `line-control-hover` on hover.
+- Separate regions by fill and a hairline, not by shadow. A card is `fill-card` with a 1 px `line-card` border. Chips, outlined pills and the whisper composer are outlined in `line-control`, `line-control-hover` on hover. Outline a text field in `line-field`: its outline is its boundary, so it reaches 3:1 against the ground.
 - Make the primary button `button-primary` with `button-primary-text`, `button-primary-hover` on hover: an inverted neutral, at most one per view. Secondary buttons are `fill-secondary` (`fill-secondary-hover` on hover) with `text-primary`; ghost buttons are transparent with `fill-hover` on hover. Visitor bubbles are `fill-bubble`; count pills and the segmented track are `fill-count`.
 - Use `accent-blue` only for links, the focus ring and selection. Never put text on it and never use it as decoration.
 - Show status only as a `size-dot` dot or a thin bar in `status-handled` (handled or allowed), `status-held` (held, needs you), `status-refused` (refused or blocked) or `status-info` (a hollow dot), always beside words that say the same thing. Never a colored tile, a filled badge or colored text.
@@ -115,6 +115,8 @@ Focus rings and status dots, 3:1 (`ring-composer` is `accent-blue`):
 | `fill-card` over `bg-panel` | 6.3 | 5.2 | 8.0 | 5.3 | 6.6 |
 
 The mark in `clay` reads 6.5 on `bg-app`, 6.0 on `bg-panel` and 5.5 on `bg-surface` (the intro dialog).
+
+A text field's outline in `line-field` reads 3.1 on `bg-surface` and 3.2 on `bg-app` (3:1).
 
 On the intro illustration's light cards, `illustration-ink` reads 16.3 and `illustration-ink-secondary` 5.4 on `illustration-card`, and `illustration-ink` reads 13.1 on `illustration-avatar`. The check and the receipt dots in `illustration-handled` read 4.9 (3:1).
 

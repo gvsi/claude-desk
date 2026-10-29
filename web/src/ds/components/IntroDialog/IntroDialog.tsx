@@ -85,6 +85,9 @@ export function IntroDialog({ title, intro, thingsToTry, submitLabel, onSubmit, 
 
   const code = passcode.trim();
   const canSubmit = code !== '' && !busy;
+  // Empty: truly disabled. Busy: the Button stays focusable and inert (aria-disabled), so a person
+  // who pressed it keeps their place while the demo starts.
+  const empty = code === '' && !busy;
 
   const titleId = `${id}-title`;
   const introId = `${id}-intro`;
@@ -202,7 +205,7 @@ export function IntroDialog({ title, intro, thingsToTry, submitLabel, onSubmit, 
                   aria-describedby={error !== undefined ? errorId : undefined}
                   onChange={(event) => setPasscode(event.target.value)}
                 />
-                <Button variant="primary" size="main" type="submit" disabled={!canSubmit} busy={busy}>
+                <Button variant="primary" size="main" type="submit" disabled={empty} busy={busy}>
                   {busy ? BUSY_LABEL : submitLabel}
                 </Button>
               </div>
