@@ -9,7 +9,8 @@ reach `app.*`.
   row records the session `generation` its tool calls were made at, which the kernel finds them by.
 - `run_events` holds each session's SSE events (`seq`, gapless per session), control rows the API
   handles once (`handled_at`) and metric rows. A signed status is published once per decision and
-  ledger entry, and a due decision waits in at most one unhandled control row.
+  ledger entry, and a due decision waits in at most one unhandled control row. The minute job that
+  looks for due decisions reads the `held` events through an index of their own.
 - `a2a_turns` stores each agent turn's answer; the kernel binds a nonce to one session per key, so
   `(agent_key_id, nonce)` is unique too.
 - `model_calls` gains the master plan's remaining usage columns.
@@ -91,6 +92,8 @@ def upgrade() -> None:
             WHERE kind = 'control' AND type = 'decision_due' AND handled_at IS NULL;
         CREATE INDEX run_events_unhandled ON app.run_events (session_id, id)
             WHERE kind = 'control' AND handled_at IS NULL;
+        CREATE INDEX run_events_held ON app.run_events (session_id, (payload ->> 'decision_id'))
+            WHERE kind = 'sse' AND type = 'held';
     """)
     op.execute(f"""
         ALTER TABLE app.setup_interviews
@@ -144,6 +147,7 @@ def downgrade() -> None:
             DROP COLUMN consent,
             DROP COLUMN step,
             DROP COLUMN business_type;
+        DROP INDEX app.run_events_held;
         DROP INDEX app.run_events_unhandled;
         DROP INDEX app.run_events_due_once;
         DROP INDEX app.run_events_status_once;

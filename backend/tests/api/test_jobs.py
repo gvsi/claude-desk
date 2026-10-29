@@ -11,6 +11,7 @@ from datetime import timedelta
 import pytest
 from procrastinate.testing import InMemoryConnector
 from sqlalchemy import text
+from sqlalchemy.dialects import postgresql
 
 from desk.api.deliver import Status, deliver
 from desk.api import jobs
@@ -240,6 +241,18 @@ async def test_due_decisions_get_one_control_row(copy, engine, fake, ro_schema, 
         assert all(handled for _, _, handled in (await session_rows(engine, caller.session_id))["control"])
     assert await surface_due_decisions(engine, now=fake.now + timedelta(days=1), ro_schema=ro_schema) == 1  # waiting
     assert await due(waiting) == [("decision_due", still.decision_id)]
+
+
+async def test_the_minute_scan_reads_held_events_through_their_own_index(engine):
+    """`surface_due_decisions` looks, every minute, at each held event ever shown, so it reads them through a partial
+    index of their own, never the whole run_events table, and checks each for a final state through the index that
+    keeps statuses unique. Sequential scans are off, so the plan names an index wherever one serves the query."""
+    sql = jobs._waiting_decisions().compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True})
+    async with engine.connect() as conn:
+        await conn.execute(text("SET LOCAL enable_seqscan = off"))
+        plan = "\n".join((await conn.execute(text(f"EXPLAIN {sql}"))).scalars())
+    assert "run_events_held" in plan and "run_events_status_once" in plan, plan
+    assert "Seq Scan" not in plan, plan
 
 
 async def test_stalled_job_is_retried(db):
