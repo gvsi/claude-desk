@@ -191,6 +191,97 @@
         }
       }
     },
+    "/api/owner/approvals/{decision_id}/answer": {
+      "post": {
+        "summary": "Answer Approval",
+        "description": "The owner's answer to a held request. The kernel decides it with the owner's credential, and an allow runs\nthere and then, as the visitor's session (also during a take-over); the visitor sees the outcome, and Claude\nfollows up, once the resume job ran and the visitor's own credential is present (the open stream or the next\nrequest). Drafted rule cards come back in `card_diff`; proving them is a rules route's work, so an answer never\nwaits on a proof.\n\nWhen the kernel refuses the answer (409: answered before, expired or cancelled) or its response is lost, the\ndecision is read as it stands: once it left `held`, an outcome the visitor wasn't shown yet gets the (idempotent)\nresume job, so a lost response still resumes the chat, and the answer is 409 `already_resolved` with the\ndecision. A lost answer that never reached the kernel (still `held`), or a decision that can't be read, is 503:\nanswering again is safe. An answer the request doesn't offer is the kernel's 422 `invalid`.",
+        "operationId": "owner_answer_approval",
+        "parameters": [
+          {
+            "name": "decision_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "title": "Decision Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalAnswerIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalAnswerOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlreadyResolved"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        }
+      }
+    },
     "/api/public/{slug}": {
       "get": {
         "summary": "Public Desk",
@@ -802,6 +893,25 @@
         "title": "AgentCardSigning",
         "description": "How an agent signs each request: the headers it sends and the payload its Ed25519 signature covers."
       },
+      "AlreadyResolved": {
+        "properties": {
+          "error": {
+            "type": "string",
+            "const": "already_resolved",
+            "title": "Error",
+            "default": "already_resolved"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/Decision"
+          }
+        },
+        "type": "object",
+        "required": [
+          "decision"
+        ],
+        "title": "AlreadyResolved",
+        "description": "409: the request was no longer waiting for an answer (answered before, expired or cancelled); `decision` is\nhow it stands now, as the kernel signed it."
+      },
       "ApiError": {
         "properties": {
           "error": {
@@ -837,6 +947,72 @@
         ],
         "title": "ApiError",
         "description": "Every error answer: `error` names what went wrong; `code` is the kernel's, when `error` is \"kernel\";\n`retry_after` is the seconds to wait, on a 429. Fields that don't apply are left out."
+      },
+      "ApprovalAnswerIn": {
+        "properties": {
+          "answer": {
+            "type": "string",
+            "enum": [
+              "allow_once",
+              "deny_once",
+              "allow_person",
+              "deny_always"
+            ],
+            "title": "Answer"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "answer"
+        ],
+        "title": "ApprovalAnswerIn",
+        "description": "`POST /api/owner/approvals/{decision_id}/answer`: one of the four answers to a held request."
+      },
+      "ApprovalAnswerOut": {
+        "properties": {
+          "decision": {
+            "$ref": "#/components/schemas/Decision"
+          },
+          "execution_state": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "succeeded",
+                  "failed",
+                  "unknown"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution State"
+          },
+          "card_diff": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RuleCard"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Card Diff"
+          }
+        },
+        "type": "object",
+        "required": [
+          "decision",
+          "execution_state",
+          "card_diff"
+        ],
+        "title": "ApprovalAnswerOut",
+        "description": "The answered request as the kernel signed it, how its execution went (an allow runs inside the answer; None\nfor a denial or a request the rules no longer allow), and the rule cards an `allow_person` or `deny_always`\nanswer drafts, which the owner proves and confirms through the rules routes (Plan 02b)."
       },
       "CancelAccepted": {
         "properties": {
@@ -907,6 +1083,147 @@
           "passcode"
         ],
         "title": "CopyRequest"
+      },
+      "Decision": {
+        "properties": {
+          "decision_id": {
+            "type": "string",
+            "title": "Decision Id"
+          },
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "call_id": {
+            "type": "string",
+            "title": "Call Id"
+          },
+          "action": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NormalizedAction"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "allow",
+              "hold",
+              "refuse"
+            ],
+            "title": "Outcome"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "allowed",
+              "held",
+              "refused",
+              "approved",
+              "denied",
+              "expired",
+              "cancelled",
+              "executed",
+              "failed",
+              "unknown",
+              "refused_at_execution"
+            ],
+            "title": "State"
+          },
+          "policy_version": {
+            "type": "integer",
+            "title": "Policy Version"
+          },
+          "policy_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Policy Ids"
+          },
+          "card_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Card Ids"
+          },
+          "review": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Review"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason_plain": {
+            "type": "string",
+            "title": "Reason Plain"
+          },
+          "visitor_plain": {
+            "type": "string",
+            "title": "Visitor Plain"
+          },
+          "answers": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "allow_once",
+                "deny_once",
+                "allow_person",
+                "deny_always"
+              ]
+            },
+            "type": "array",
+            "title": "Answers",
+            "default": []
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "inbox": {
+            "items": {
+              "$ref": "#/components/schemas/InboxNotice"
+            },
+            "type": "array",
+            "title": "Inbox",
+            "default": []
+          },
+          "ledger_seq": {
+            "type": "integer",
+            "title": "Ledger Seq"
+          },
+          "signature": {
+            "type": "string",
+            "title": "Signature"
+          }
+        },
+        "type": "object",
+        "required": [
+          "decision_id",
+          "session_id",
+          "call_id",
+          "action",
+          "outcome",
+          "state",
+          "policy_version",
+          "policy_ids",
+          "card_ids",
+          "reason_plain",
+          "visitor_plain",
+          "expires_at",
+          "ledger_seq",
+          "signature"
+        ],
+        "title": "Decision"
       },
       "DeskSummary": {
         "properties": {
@@ -1284,6 +1601,29 @@
         ],
         "title": "HoursWindow"
       },
+      "InboxNotice": {
+        "properties": {
+          "entry_id": {
+            "type": "string",
+            "title": "Entry Id"
+          },
+          "to": {
+            "type": "string",
+            "title": "To"
+          },
+          "preview": {
+            "type": "string",
+            "title": "Preview"
+          }
+        },
+        "type": "object",
+        "required": [
+          "entry_id",
+          "to",
+          "preview"
+        ],
+        "title": "InboxNotice"
+      },
       "MessageAccepted": {
         "properties": {
           "message_id": {
@@ -1313,6 +1653,154 @@
           "text"
         ],
         "title": "MessageIn"
+      },
+      "NormalizedAction": {
+        "properties": {
+          "action_id": {
+            "type": "string",
+            "title": "Action Id"
+          },
+          "copy_id": {
+            "type": "string",
+            "title": "Copy Id"
+          },
+          "desk_id": {
+            "type": "string",
+            "title": "Desk Id"
+          },
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "generation": {
+            "type": "integer",
+            "title": "Generation"
+          },
+          "tool": {
+            "type": "string",
+            "enum": [
+              "native.quote",
+              "native.find_slots",
+              "native.book",
+              "native.release_document",
+              "native.payment_link",
+              "native.charge_mandate",
+              "native.capture_lead",
+              "native.request_callback",
+              "native.start_verification",
+              "native.fetch_website",
+              "native.read_memory",
+              "payments.list_charges",
+              "payments.create_refund"
+            ],
+            "title": "Tool"
+          },
+          "effects": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "read",
+                "private_data",
+                "change",
+                "charge",
+                "pay_out",
+                "send_message"
+              ]
+            },
+            "type": "array",
+            "title": "Effects"
+          },
+          "args_sha256": {
+            "type": "string",
+            "title": "Args Sha256"
+          },
+          "profile_sha256": {
+            "type": "string",
+            "title": "Profile Sha256"
+          },
+          "resource": {
+            "$ref": "#/components/schemas/ResourceRef"
+          },
+          "list_cents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "List Cents"
+          },
+          "discount_bp": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discount Bp"
+          },
+          "amount_cents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount Cents"
+          },
+          "recipient": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "owner",
+                  "verified_contact"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipient"
+          },
+          "starts_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Starts At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "action_id",
+          "copy_id",
+          "desk_id",
+          "session_id",
+          "generation",
+          "tool",
+          "effects",
+          "args_sha256",
+          "profile_sha256",
+          "resource",
+          "list_cents",
+          "discount_bp",
+          "amount_cents",
+          "recipient",
+          "starts_at"
+        ],
+        "title": "NormalizedAction"
       },
       "PublicDesk": {
         "properties": {
@@ -1460,6 +1948,182 @@
           "text"
         ],
         "title": "RenderedBlock"
+      },
+      "ResourceRef": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "quote",
+              "slot",
+              "booking",
+              "document",
+              "charge",
+              "desk"
+            ],
+            "title": "Kind"
+          },
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "owner_person_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Person Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "id",
+          "owner_person_id"
+        ],
+        "title": "ResourceRef"
+      },
+      "Review": {
+        "properties": {
+          "within_charter_bp": {
+            "type": "integer",
+            "maximum": 10000.0,
+            "minimum": 0.0,
+            "title": "Within Charter Bp"
+          },
+          "manipulation_bp": {
+            "type": "integer",
+            "maximum": 10000.0,
+            "minimum": 0.0,
+            "title": "Manipulation Bp"
+          },
+          "recommendation": {
+            "type": "string",
+            "enum": [
+              "allow",
+              "hold",
+              "block"
+            ],
+            "title": "Recommendation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "within_charter_bp",
+          "manipulation_bp",
+          "recommendation"
+        ],
+        "title": "Review"
+      },
+      "RuleCard": {
+        "properties": {
+          "card_id": {
+            "type": "string",
+            "title": "Card Id"
+          },
+          "applies_to": {
+            "type": "string",
+            "title": "Applies To"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "ask",
+              "never"
+            ],
+            "title": "Mode"
+          },
+          "who": {
+            "type": "string",
+            "enum": [
+              "anyone",
+              "verified",
+              "record_owner",
+              "person",
+              "agent"
+            ],
+            "title": "Who"
+          },
+          "person_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Person Id"
+          },
+          "agent_key_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Key Id"
+          },
+          "max_amount_cents": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Amount Cents"
+          },
+          "max_discount_bp": {
+            "type": "integer",
+            "maximum": 10000.0,
+            "minimum": 0.0,
+            "title": "Max Discount Bp",
+            "default": 0
+          },
+          "hours": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HoursWindow"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "review": {
+            "type": "boolean",
+            "title": "Review",
+            "default": false
+          },
+          "is_default": {
+            "type": "boolean",
+            "title": "Is Default",
+            "default": false
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "card_id",
+          "applies_to",
+          "mode",
+          "who",
+          "reason"
+        ],
+        "title": "RuleCard"
       },
       "SessionState": {
         "properties": {

@@ -19,6 +19,7 @@ from urllib.parse import quote
 import httpx
 import pytest
 from fastapi import FastAPI
+from procrastinate.testing import InMemoryConnector
 from pydantic import TypeAdapter
 from sqlalchemy import text
 from sse_starlette import EventSourceResponse
@@ -50,7 +51,7 @@ def model() -> ScriptedModel:
 async def app(db, fake, api_settings, clock, model) -> AsyncIterator[FastAPI]:
     """The API on FakeKernel and the scripted model, its lifespan running."""
     app = create_app(api_settings, kernel_transport=httpx.ASGITransport(app=fake_kernel_app(fake)), model=model,
-                     clock=clock)
+                     clock=clock, jobs_connector=InMemoryConnector())
     async with app.router.lifespan_context(app):
         yield app
 
@@ -207,7 +208,8 @@ async def test_public_desk_passes_the_kernels_fields_through(app, browser, fake,
 
 async def test_agent_card_uses_the_public_origin(fake, browser, api_settings, clock, visitor):
     settings = dataclasses.replace(api_settings, public_origin="https://desk.example.com")
-    app = create_app(settings, kernel_transport=httpx.ASGITransport(app=fake_kernel_app(fake)), clock=clock)
+    app = create_app(settings, kernel_transport=httpx.ASGITransport(app=fake_kernel_app(fake)), clock=clock,
+                     jobs_connector=InMemoryConnector())
     slug = visitor.slug
     fake.calls.clear()
     async with app.router.lifespan_context(app):

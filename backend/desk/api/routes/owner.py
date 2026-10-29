@@ -5,18 +5,36 @@ kernel's `GET /whoami` answer for the owner cookie (`deps.owner_ctx`), never fro
 """
 
 import asyncio
+import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Path, Request, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, StringConstraints
+from sqlalchemy import func, select
 
 from desk.api.cookies import set_owner_cookie
+from desk.api.deliver import PHASES
 from desk.api.deps import ApiProblem, OwnerCtx, Runtime, client_ip, owner_context, owner_ctx, runtime
+from desk.api.jobs import defer_resume_after_answer
+from desk.api.kernel_client import KernelFailed, KernelUnavailable
 from desk.api.passcode import check_passcode
-from desk.api.schemas import CopyOut, DeskSummary, error_responses, operation_ids
-from desk.kernel_api import CreateCopyRequest
+from desk.api.schemas import (
+    AlreadyResolved,
+    ApprovalAnswerIn,
+    ApprovalAnswerOut,
+    CopyOut,
+    DeskSummary,
+    error_responses,
+    operation_ids,
+)
+from desk.api.sse import RUN_EVENTS
+from desk.api.store import Ids
+from desk.contracts import Decision
+from desk.kernel_api import AnswerRequest, CreateCopyRequest
 
 router = APIRouter(prefix="/api/owner", generate_unique_id_function=operation_ids("owner"))
+logger = logging.getLogger(__name__)
 
 
 class CopyRequest(BaseModel):
@@ -70,3 +88,74 @@ async def start_over(request: Request, response: Response, ctx: Annotated[OwnerC
 async def me(ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> CopyOut:
     """The copy the owner cookie names."""
     return await copy_out(ctx)
+
+
+# Held requests -----------------------------------------------------------------------------------------------
+
+
+@router.post("/approvals/{decision_id}/answer", response_model=ApprovalAnswerOut,
+             responses={**error_responses(401, 404, 422, 503), 409: {"model": AlreadyResolved}})
+async def answer_approval(decision_id: Annotated[str, Path(max_length=128)], body: ApprovalAnswerIn,
+                          request: Request,
+                          ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> ApprovalAnswerOut | JSONResponse:
+    """The owner's answer to a held request. The kernel decides it with the owner's credential, and an allow runs
+    there and then, as the visitor's session (also during a take-over); the visitor sees the outcome, and Claude
+    follows up, once the resume job ran and the visitor's own credential is present (the open stream or the next
+    request). Drafted rule cards come back in `card_diff`; proving them is a rules route's work, so an answer never
+    waits on a proof.
+
+    When the kernel refuses the answer (409: answered before, expired or cancelled) or its response is lost, the
+    decision is read as it stands: once it left `held`, an outcome the visitor wasn't shown yet gets the (idempotent)
+    resume job, so a lost response still resumes the chat, and the answer is 409 `already_resolved` with the
+    decision. A lost answer that never reached the kernel (still `held`), or a decision that can't be read, is 503:
+    answering again is safe. An answer the request doesn't offer is the kernel's 422 `invalid`."""
+    state = runtime(request).started()
+    try:
+        result = await ctx.kernel.call("POST /approvals/{decision_id}/answer", AnswerRequest(answer=body.answer),
+                                       path={"decision_id": decision_id})
+    except KernelFailed as failure:
+        if failure.status != 409:
+            raise
+        return await _no_longer_held(state, ctx, decision_id, lost=False)
+    except KernelUnavailable:
+        return await _no_longer_held(state, ctx, decision_id, lost=True)
+    await _resume(state, ctx, result.decision)
+    return ApprovalAnswerOut(decision=result.decision, card_diff=result.card_diff,
+                             execution_state=result.execution.state if result.execution is not None else None)
+
+
+async def _no_longer_held(state: Runtime, ctx: OwnerCtx, decision_id: str, *, lost: bool) -> JSONResponse:
+    """The answer of a request the kernel refused to answer, or whose answer's response was lost (route docstring)."""
+    try:
+        decision = await ctx.kernel.call("GET /decisions/{id}", path={"id": decision_id})
+    except (KernelFailed, KernelUnavailable):
+        raise ApiProblem(503, "kernel", code="kernel_unavailable") from None
+    if lost and decision.state == "held":
+        raise ApiProblem(503, "kernel", code="kernel_unavailable")
+    if decision.state != "held" and not await _shown(ctx, decision):
+        await _resume(state, ctx, decision)
+    return JSONResponse(AlreadyResolved(decision=decision).model_dump(mode="json"), status_code=409)
+
+
+async def _shown(ctx: OwnerCtx, decision: Decision) -> bool:
+    """Whether the visitor was shown the decision in this state (its ledger entry)."""
+    shown = await ctx.ro.conn.execute(select(func.count()).where(
+        RUN_EVENTS.c.copy_id == ctx.copy_id, RUN_EVENTS.c.session_id == decision.session_id,
+        RUN_EVENTS.c.kind == "sse", RUN_EVENTS.c.type.in_(PHASES),
+        RUN_EVENTS.c.payload["decision_id"].astext == decision.decision_id,
+        RUN_EVENTS.c.payload["ledger_seq"].astext == str(decision.ledger_seq)))
+    return shown.scalar_one() > 0
+
+
+async def _resume(state: Runtime, ctx: OwnerCtx, decision: Decision) -> None:
+    """Defer the resume job for the decision's session, named by the kernel's answer within the owner's copy. If the
+    queue can't take it, the answer still stands and the due-decisions job surfaces the outcome within a minute."""
+    session = await ctx.ro.session(decision.session_id)
+    if session is None or session["desk_id"] not in ctx.desk_ids:
+        logger.warning("an answered request's session isn't one of the copy's")
+        return
+    ids = Ids(copy_id=ctx.copy_id, desk_id=session["desk_id"], session_id=decision.session_id)
+    try:
+        await defer_resume_after_answer(state.jobs, ids, decision)
+    except Exception as error:
+        logger.error("the resume job couldn't be queued (%s)", type(error).__name__)

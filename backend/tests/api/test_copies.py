@@ -12,6 +12,7 @@ from typing import Annotated
 import httpx
 import pytest
 from fastapi import APIRouter, Depends, FastAPI, Request, Response
+from procrastinate.testing import InMemoryConnector
 
 from desk.api.cookies import clear_visitor_cookie, set_owner_cookie, set_visitor_cookie
 from desk.api.deps import SHARED_BUCKET, ApiProblem, OwnerCtx, client_ip, owner_ctx, public_origin, require_model_budget
@@ -61,7 +62,8 @@ async def test_wrong_passcode_is_401_and_creates_nothing(api, browser, fake):
 
 async def test_no_passcode_hash_admits_no_one(fake, browser, api_settings, db):
     app = create_app(dataclasses.replace(api_settings, passcode_hash=None),
-                     kernel_transport=httpx.ASGITransport(app=fake_kernel_app(fake)))
+                     kernel_transport=httpx.ASGITransport(app=fake_kernel_app(fake)),
+                     jobs_connector=InMemoryConnector())
     async with app.router.lifespan_context(app):
         response = await browser(app).post("/api/owner/copies", json={"passcode": PASSCODE})
     assert (response.status_code, response.json()) == (401, {"error": "wrong_passcode"})
@@ -159,7 +161,7 @@ class EndedOwnerSessions(httpx.AsyncBaseTransport):
 
 async def test_closed_or_unknown_token_is_401(fake, browser, api_settings, clock, db):
     transport = EndedOwnerSessions(fake, {})
-    app = create_app(api_settings, kernel_transport=transport, clock=clock)
+    app = create_app(api_settings, kernel_transport=transport, clock=clock, jobs_connector=InMemoryConnector())
     async with app.router.lifespan_context(app):
         client = browser(app)
         no_session = (401, {"error": "no_owner_session"})
@@ -349,6 +351,8 @@ async def test_production_requires_secrets(monkeypatch, passcode_hash, clock):
         create_app(settings, model=object())
     with pytest.raises(RuntimeError, match="kernel transport"):
         create_app(settings, kernel_transport=httpx.MockTransport(lambda request: httpx.Response(200)))
+    with pytest.raises(RuntimeError, match="job queue connector"):         # production's jobs live in Postgres
+        create_app(settings, jobs_connector=InMemoryConnector())
 
     # The lifespan reaches the kernel only over HTTP on 127.0.0.1, before it opens anything else.
     app = create_app(production_settings(passcode_hash, kernel_url="http://localhost:8701"))

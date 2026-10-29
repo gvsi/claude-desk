@@ -27,6 +27,7 @@ import pytest
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from fastapi import FastAPI
+from procrastinate.testing import InMemoryConnector
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 from sse_starlette import sse as sse_starlette
 
@@ -189,7 +190,8 @@ def api_settings(passcode_hash: str) -> Settings:
 @pytest.fixture
 async def api(db: psycopg.Connection, fake: FakeKernelState, api_settings: Settings, clock: Clock) -> AsyncIterator[FastAPI]:
     """The API app on FakeKernel, its lifespan running."""
-    app = create_app(api_settings, kernel_transport=httpx.ASGITransport(app=fake_kernel_app(fake)), clock=clock)
+    app = create_app(api_settings, kernel_transport=httpx.ASGITransport(app=fake_kernel_app(fake)), clock=clock,
+                     jobs_connector=InMemoryConnector())
     async with app.router.lifespan_context(app):
         yield app
 

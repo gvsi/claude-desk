@@ -1,7 +1,7 @@
 """What the API's routes depend on: the process's runtime, the caller and the errors routes raise.
 
-`runtime(request)` is the app's `Runtime`: settings, clock, rate limits and, once the lifespan has started,
-the kernel client, the database engine, the run events listener and the turn runner. `owner_ctx` is the owner's
+`runtime(request)` is the app's `Runtime`: settings, clock, rate limits, the job queue and, once the lifespan has
+started, the kernel client, the database engine, the run events listener and the turn runner. `owner_ctx` is the owner's
 copy and `visitor_ctx` the visitor's session, each taken from the kernel's `GET /whoami` answer for its cookie;
 `client_ip` and `public_origin` follow Plan 06b's seam ("Client IP and public origin"); `require_model_budget`
 guards the model routes.
@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+import procrastinate
 from fastapi import Request, Response
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
@@ -41,12 +42,13 @@ class ApiProblem(Exception):
 @dataclass
 class Runtime:
     """The process's state. `kernel`, `engine`, `listener` and `runner` are opened by the lifespan, which also builds
-    the model client unless a test injected one."""
+    the model client unless a test injected one, and opens the job queue (`jobs`) and runs its worker."""
 
     settings: Settings
     clock: Callable[[], datetime]
     limiter: RateLimiter
     stream_slots: StreamSlots
+    jobs: procrastinate.App | None = None   # the job queue (Task 8): resume jobs and the periodic ones
     model: Any = None                     # the model client (Task 4); a test may inject one
     kernel_transport: Any = field(default=None, repr=False)   # tests only: FakeKernel in process
     kernel: KernelHttp | None = None
@@ -60,7 +62,8 @@ class Runtime:
         return self.engine
 
     def started(self) -> "Runtime":
-        if self.kernel is None or self.engine is None or self.listener is None or self.runner is None:
+        if (self.kernel is None or self.engine is None or self.listener is None or self.runner is None
+                or self.jobs is None):
             raise RuntimeError("the API's lifespan hasn't started")
         return self
 

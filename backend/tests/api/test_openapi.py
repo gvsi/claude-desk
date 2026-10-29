@@ -6,6 +6,8 @@ from scripts.export_openapi import OPENAPI_PATH, export_openapi
 
 ROUTERS = {"system", "owner", "public", "agents", "proxy"}
 ERROR = {"$ref": "#/components/schemas/ApiError"}
+# The error answers whose body is a model of its own, by (operation, status).
+OWN_ERROR_BODIES = {("system_health", "503"): "HealthOut", ("owner_answer_approval", "409"): "AlreadyResolved"}
 
 
 def typed(schema: dict) -> bool:
@@ -27,6 +29,7 @@ def test_every_route_has_typed_responses():
     assert schemas["ApiError"]["required"] == ["error"]
     assert set(schemas["ApiError"]["properties"]) == {"error", "code", "retry_after"}
     assert "HTTPValidationError" not in schemas            # a bad body is an ApiError too
+    assert set(schemas["AlreadyResolved"]["properties"]) == {"error", "decision"}
 
     operations = {op["operationId"]: (path, method, op)
                   for path, item in document["paths"].items() for method, op in item.items()}
@@ -47,8 +50,8 @@ def test_every_route_has_typed_responses():
             schema = response["content"]["application/json"]["schema"]
             if status.startswith("2"):
                 assert typed(schema) and schema != ERROR, (operation_id, status)
-            elif (operation_id, status) == ("system_health", "503"):
-                assert schema == {"$ref": "#/components/schemas/HealthOut"}
+            elif (operation_id, status) in OWN_ERROR_BODIES:
+                assert schema == {"$ref": f"#/components/schemas/{OWN_ERROR_BODIES[operation_id, status]}"}
             else:
                 assert schema == ERROR, (operation_id, status)
         if op.get("requestBody"):

@@ -5,12 +5,12 @@
 `create_app` builds the model client through `make_model` (the Claude API, or Amazon Bedrock for local evals)
 before the app, so a provider without its credential, or `ANTHROPIC_CUSTOM_HEADERS` set, refuses to start. The
 lifespan opens the kernel client, checks it is the production one when it must be, then opens the database engine,
-the turn locks' pool, the run events listener and the turn runner, and closes them in the reverse order, the
-runner's turns first, with the model client it built (never an injected one) last. In production the app refuses
-to start without its secrets (the API key, the passcode hash and the public origin, which `Settings` requires),
-with a Bedrock setting or credential (refused by `Settings`) and with any test hook: `ANTHROPIC_BASE_URL` (refused
-by `Settings`), an injected clock, model or kernel transport. A passcode hash that isn't one refuses to start
-anywhere.
+the turn locks' pool, the run events listener, the turn runner and the job queue with its worker (`jobs.py`), and
+closes them in the reverse order, the worker's jobs and the runner's turns first, with the model client it built
+(never an injected one) last. In production the app refuses to start without its secrets (the API key, the
+passcode hash and the public origin, which `Settings` requires), with a Bedrock setting or credential (refused by
+`Settings`) and with any test hook: `ANTHROPIC_BASE_URL` (refused by `Settings`), an injected clock, model, kernel
+transport or job queue connector. A passcode hash that isn't one refuses to start anywhere.
 
 Every error answer is an `ApiError` ("Errors"): a kernel refusal keeps its status with `{error: "kernel",
 code}`, an unreachable kernel is 503 `{error: "kernel", code}` (`seed_unproved`, `internal`, else
@@ -18,6 +18,7 @@ code}`, an unreachable kernel is 503 `{error: "kernel", code}` (`seed_unproved`,
 422 `{error: "invalid"}`, never echoing what was sent.
 """
 
+import asyncio
 import contextlib
 import logging
 from collections.abc import AsyncIterator, Callable
@@ -31,6 +32,8 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from desk.api.deps import ApiProblem, Runtime, runtime
+from desk.api.jobs import JobEnv, jobs_app, run_worker
+from desk.api.jobs import jobs_connector as postgres_jobs_connector
 from desk.api.kernel_client import KernelFailed, KernelHttp, KernelUnavailable, assert_production_safe
 from desk.api.loop import TURN_LOCK_POOL_SIZE
 from desk.api.model import make_model
@@ -112,11 +115,20 @@ async def health(request: Request) -> HealthOut | JSONResponse:
     return HealthOut(ok=True, kernel=kernel)
 
 
+async def _stop(task: asyncio.Task) -> None:
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+
 def create_app(settings: Settings, *, kernel_transport: Any = None, model: Any = None,
-               clock: Callable[[], datetime] | None = None) -> FastAPI:
-    """The API app. `kernel_transport`, `model` and `clock` are test hooks, refused in production. With no model
-    injected, the client `settings` names is built here, so a provider without its credential never starts."""
-    _refuse_test_hooks(settings, {"kernel transport": kernel_transport, "model": model, "clock": clock})
+               clock: Callable[[], datetime] | None = None, jobs_connector: Any = None) -> FastAPI:
+    """The API app. `kernel_transport`, `model`, `clock` and `jobs_connector` are test hooks, refused in production.
+    With no model injected, the client `settings` names is built here, so a provider without its credential never
+    starts. An injected job queue connector (Procrastinate's `InMemoryConnector`) runs no periodic jobs: tests run
+    them."""
+    _refuse_test_hooks(settings, {"kernel transport": kernel_transport, "model": model, "clock": clock,
+                                  "job queue connector": jobs_connector})
     if settings.passcode_hash is not None:
         try:
             check_passcode_hash(settings.passcode_hash)
@@ -124,8 +136,10 @@ def create_app(settings: Settings, *, kernel_transport: Any = None, model: Any =
             raise RuntimeError(str(malformed)) from None    # the message names the variable, never its value
     now = clock or _utc_now
     built = make_model(settings, clock=now) if model is None else None   # closed by the lifespan; an injected one isn't
+    jobs = (jobs_app(postgres_jobs_connector(settings.api_database_url)) if jobs_connector is None
+            else jobs_app(jobs_connector, schedule=False))
     state = Runtime(settings=settings, clock=now, limiter=RateLimiter(now), stream_slots=StreamSlots(),
-                    model=model if model is not None else built, kernel_transport=kernel_transport)
+                    model=model if model is not None else built, kernel_transport=kernel_transport, jobs=jobs)
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -148,7 +162,11 @@ def create_app(settings: Settings, *, kernel_transport: Any = None, model: Any =
             listener = await stack.enter_async_context(Listener(settings.api_database_url))
             runner = TurnRunner(state.model, engine=engine, lock_engine=lock_engine, production=settings.production,
                                 clock=state.clock)
-            stack.push_async_callback(runner.close)        # first out: no turn outlives the pools it runs on
+            stack.push_async_callback(runner.close)        # no turn outlives the pools it runs on
+            await stack.enter_async_context(jobs.open_async())
+            worker = asyncio.create_task(run_worker(jobs, JobEnv(engine=engine, ro_schema=settings.kernel_ro_schema,
+                                                                 clock=state.clock)), name="desk-jobs-worker")
+            stack.push_async_callback(_stop, worker)        # first out: no job outlives the pools it runs on
             state.kernel, state.engine, state.listener, state.runner = kernel, engine, listener, runner
             if settings.passcode_hash is None:
                 logger.warning("PASSCODE_HASH is not set, so no passcode creates a copy "

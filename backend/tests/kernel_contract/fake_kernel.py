@@ -12,8 +12,8 @@ contract test, before the task that first uses them.
 - Signatures are `"fake:" + sha256 hex` of the fields the kernel signs. Times come from `state.now`.
 - Every non-2xx body is a `KernelError`; a body that isn't the route's request model is 422 `invalid`;
   every answer is checked against the route's response model before it leaves.
-- Knobs for tests: `fail`, `drop_response`, `set_mode`, `script`, `violation`, `verify`, and `calls`
-  (with `called(route)`); `now` drives expiry and the 24-hour idle close. A `"timeout"` or `"connect"`
+- Knobs for tests: `fail`, `drop_response`, `set_mode`, `script`, `violation`, `verify`, `never`, `reconcile`
+  and `calls` (with `called(route)`); `now` drives expiry and the 24-hour idle close. A `"timeout"` or `"connect"`
   failure is raised as httpx's own exception, which reaches the client through `httpx.ASGITransport`.
 - Not modelled: Cedar, the reviewer, the breaker's strikes (`set_mode` pauses), `auth` ledger entries
   for refused calls, agents, verification routes and payments (Plans 01b, 01c and 02b add them).
@@ -578,6 +578,18 @@ class FakeKernelState:
         self._put_policy(desk, parent_version=parent)
         self.append(desk, "policy", {"version": desk.policy_version, "activated": True})
         self.flush()
+
+    def reconcile(self, decision_id: str, exec_state: str = "succeeded") -> Decision:
+        """The kernel reconciles an `unknown` execution by its idempotency key (at startup, or on a read 30 s on):
+        it ran (`succeeded` → `executed`) or it didn't (`failed`); ledgered, re-signed and mirrored."""
+        record = self.decisions[decision_id]
+        if record.decision.state != "unknown" or exec_state not in ("succeeded", "failed"):
+            raise ValueError("only an unknown execution is reconciled, as succeeded or failed")
+        record.result = record.result.model_copy(update={"state": exec_state})
+        decision = self._transition(record, "executed" if exec_state == "succeeded" else "failed", kind="execute",
+                                    reconciled=True)
+        self.flush()
+        return decision
 
     def _never(self, desk: Desk, tool: str) -> bool:
         return any(card.mode == "never" and card.applies_to == tool for card in desk.cards)

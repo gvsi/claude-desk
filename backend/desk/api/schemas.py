@@ -7,9 +7,9 @@ from collections.abc import Callable
 from typing import Annotated, Any, Literal
 
 from fastapi.routing import APIRoute
-from pydantic import AwareDatetime, BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
-from desk.contracts import HoursWindow, SessionState
+from desk.contracts import ApprovalAnswer, Decision, HoursWindow, RuleCard, SessionState
 from desk.events import EvHeld, EvMessage, EvReceipt, EvResolved
 from desk.kernel_api import Health
 
@@ -123,3 +123,32 @@ class AgentCardOut(BaseModel):
     endpoint: str
     signing: AgentCardSigning
     example_request: str
+
+
+# The owner's answers (Task 8) ------------------------------------------------------------------------------------
+
+
+class ApprovalAnswerIn(BaseModel):
+    """`POST /api/owner/approvals/{decision_id}/answer`: one of the four answers to a held request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    answer: ApprovalAnswer
+
+
+class ApprovalAnswerOut(BaseModel):
+    """The answered request as the kernel signed it, how its execution went (an allow runs inside the answer; None
+    for a denial or a request the rules no longer allow), and the rule cards an `allow_person` or `deny_always`
+    answer drafts, which the owner proves and confirms through the rules routes (Plan 02b)."""
+
+    decision: Decision
+    execution_state: Literal["succeeded", "failed", "unknown"] | None      # the kernel's `ExecResult.state`
+    card_diff: list[RuleCard] | None
+
+
+class AlreadyResolved(BaseModel):
+    """409: the request was no longer waiting for an answer (answered before, expired or cancelled); `decision` is
+    how it stands now, as the kernel signed it."""
+
+    error: Literal["already_resolved"] = "already_resolved"
+    decision: Decision
