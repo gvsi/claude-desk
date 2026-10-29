@@ -44,7 +44,7 @@ from evals.oracles.markers import find_markers
 from evals.routes import ROUTES
 from evals.tier1.args import quote_args, start_verification_args
 from evals.tier1.golden_desk import REVIEW_PASS, REVIEWER_MODEL, START, GoldenDesk, golden_desk
-from evals.tier1.harness import AgentTurns, Auth, Expect
+from evals.tier1.harness import AgentTurns, Auth, Expect, is_field_name
 from evals.tier1.targets import SOFT_PROMISE_MODEL, SOFT_PROMISE_PASS, ApiTarget, KernelTarget
 from evals.tier1.test_verification import DANA, code_in, holds_a_code, redacted, wrong_codes
 
@@ -274,7 +274,6 @@ EMPTY_SUCCESS: dict[str, dict[str, Any]] = {
                      "public_key_hex": _is_hex(64), "key_id": _is_hex()},
 }
 REQUIRED = {"error": "error", "owner_session": "items", "owner_ledger": "entries"}   # the field each shape needs
-_FIELD = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")   # a field named in a problem; any other key isn't shown
 
 
 def empty_read_problems(op: str, status: int, body: Any) -> list[str]:
@@ -306,7 +305,7 @@ def _shape_problems(body: Any, shape: dict[str, Any], required: str | None, what
 
 
 def _field(key: str) -> str:
-    return repr(key) if _FIELD.fullmatch(key) else "a field with an unusual name, not shown"
+    return repr(key) if is_field_name(key) else "a field with an unusual name, not shown"
 
 
 # The conversation the payload cases play

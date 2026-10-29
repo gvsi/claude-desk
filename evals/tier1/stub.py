@@ -47,6 +47,7 @@ from evals.tier1.harness import (
     match_expect,
     matches,
     response_type,
+    validation_summary,
 )
 
 __all__ = ["STUB_CARD", "ContractError", "ContractStub", "build"]
@@ -329,8 +330,11 @@ class ContractStub:
         tp = response_type(route, answer.status)
         try:
             model = None if tp is None else build(tp, answer)
-        except (TypeError, ValidationError) as error:
-            raise ContractError(f"{route}: the expected values don't fit the response model: {error}") from None
+        except TypeError:
+            raise ContractError(f"{route}: the expected values aren't JSON") from None
+        except ValidationError as error:   # told by place and kind: pydantic's own text quotes the values
+            raise ContractError(f"{route}: the expected values don't fit the response model: "
+                                f"{validation_summary(error, tp)}") from None
         response = None if tp is None else TypeAdapter(tp).dump_python(model, mode="json")
         self.responses.append(Called(route=route, request=request, status=answer.status, body=response, raw=response))
         if mismatches := match_expect(answer.status, response, expect):

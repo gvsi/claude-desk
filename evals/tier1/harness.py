@@ -412,8 +412,11 @@ def check_request(
         raise ContractError(f"{route} needs a {request_model.__name__} body")
     try:
         request_model.model_validate_json(json.dumps(body))
-    except (TypeError, ValidationError) as error:
-        raise ContractError(f"{route}: the request breaks {request_model.__name__}: {error}") from None
+    except TypeError:
+        raise ContractError(f"{route}: the request body isn't JSON") from None
+    except ValidationError as error:   # told by place and kind: pydantic's own text quotes the request
+        raise ContractError(f"{route}: the request breaks {request_model.__name__}: "
+                            f"{validation_summary(error, request_model)}") from None
     return body
 
 
@@ -423,15 +426,15 @@ def response_type(route: str, status: int) -> Any:
 
 
 def validation_summary(error: ValidationError, tp: Any) -> str:
-    """A validation failure of an answer read as `tp`, told by where each error is and its kind
-    ("message: missing; inbox.0.entry_id: string_type"), never by what the answer held: pydantic's
-    own text quotes the input, which may be a code or a token. A place is shown by its field names
-    and list indexes; any other part of it (a key the answer chose, a union member's label) is
-    `*`."""
+    """A validation failure of a body read as `tp` (a kernel answer, a request, the stub's expected
+    values), told by where each error is and its kind ("message: missing; inbox.0.entry_id:
+    string_type"), never by what the body held: pydantic's own text quotes the input, which may be
+    a code or a token. A place is shown by its field names and list indexes; any other part of it
+    (a key the body chose, a union member's label) is `*`."""
     names = declared_names(tp)
 
     def where(loc: tuple[int | str, ...]) -> str:
-        return ".".join(str(part) if isinstance(part, int) or part in names else "*" for part in loc) or "the answer"
+        return ".".join(str(part) if isinstance(part, int) or part in names else "*" for part in loc) or "the body"
 
     errors = error.errors(include_url=False, include_context=False, include_input=False)
     return "; ".join(dict.fromkeys(f"{where(item['loc'])}: {item['type']}" for item in errors))
@@ -460,29 +463,42 @@ def declared_names(tp: Any) -> frozenset[str]:
     return frozenset(names)
 
 
+FIELD_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")   # a key a problem may name; any other isn't shown
+
+
+def is_field_name(key: Any) -> bool:
+    """Whether a problem may name `key`, a key an answer chose: only when it is shaped like a field
+    name, since any other (a code or a token used as a key) could be what the answer leaked."""
+    return isinstance(key, str) and FIELD_NAME.fullmatch(key) is not None
+
+
 def undeclared_fields(raw: Any, value: Any, path: str = "") -> list[str]:
     """The dotted paths of every field in `raw` (a kernel answer, parsed) that its response model
     doesn't declare, nested ones included; `value` is the answer validated as that model, which
     says what each part was read as. The models drop what they don't declare, so a code or a
     canary in such a field would vanish before any scan saw it: a field the contract doesn't
-    declare is itself a contract break. Whatever a `dict` or `Any` field holds is declared by it."""
+    declare is itself a contract break. Whatever a `dict` or `Any` field holds is declared by it.
+    A path shows the keys the answer chose only when `is_field_name`, and `*` for any other."""
+    def at(key: Any) -> str:
+        shown = str(key) if isinstance(key, int) or is_field_name(key) else "*"
+        return f"{path}.{shown}" if path else shown
+
     if isinstance(value, BaseModel) and isinstance(raw, dict):
         fields = type(value).model_fields
         by_key = {name: name for name in fields} | {field.alias: name for name, field in fields.items() if field.alias}
         found = []
         for key, item in raw.items():
-            here = f"{path}.{key}" if path else key
             if key in by_key:
-                found += undeclared_fields(item, getattr(value, by_key[key]), here)
+                found += undeclared_fields(item, getattr(value, by_key[key]), at(key))
             else:
-                found.append(here)
+                found.append(at(key))
         return found
     if isinstance(value, list | tuple) and isinstance(raw, list):
         return [found for n, (item, element) in enumerate(zip(raw, value, strict=False))
-                for found in undeclared_fields(item, element, f"{path}.{n}" if path else str(n))]
+                for found in undeclared_fields(item, element, at(n))]
     if isinstance(value, dict) and isinstance(raw, dict):
         return [found for key, item in raw.items() if key in value
-                for found in undeclared_fields(item, value[key], f"{path}.{key}" if path else key)]
+                for found in undeclared_fields(item, value[key], at(key))]
     return []
 
 

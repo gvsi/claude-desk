@@ -89,6 +89,32 @@ def test_undeclared_response_fields_are_named_by_path():
         f"facts.{n}.extra" for n in range(len(viewed["facts"]))] + ["receipt"]
 
 
+def test_an_undeclared_key_is_named_only_when_shaped_like_a_field():
+    """A key the contract doesn't declare is the answer's own choice, so it may be a code or a
+    token: `undeclared_fields` names it only when it is shaped like a field name, and any other
+    as `*`."""
+    notice = {"entry_id": "e-1", "to": "d•••@example.com", "preview": "A code is on its way."}
+    keyed = {"message": "If that contact is on record, a code is on its way.",
+             "inbox": [{**notice, "c-482913": 1}], "482913": True, "named_like_a_field": 1}
+    assert undeclared_fields(keyed, VerifyStarted.model_validate(keyed)) == ["inbox.0.*", "*", "named_like_a_field"]
+
+
+async def test_a_request_off_contract_is_told_without_its_values():
+    """A request that breaks its model fails by field and kind of error, never by what it held:
+    pydantic's own text quotes the input, which may be a code or a token. So do the stub's
+    expected values when they don't fit the response model."""
+    k = ContractStub()
+    body = {"session_id": "s-482913", "generation": "g-314159", "call": {"call_id": "c-271828", "tool": "native.quote"}}
+    with pytest.raises(ContractError, match=r"breaks DecideRequest: .*generation: int_parsing") as failure:
+        await k.call("POST /decide", body=body, auth=Auth.none())
+    shown = str(failure.value)
+    assert "call.args: missing" in shown, shown
+    assert [value for value in ("482913", "314159", "271828", "native.quote") if value in shown] == [], shown
+    with pytest.raises(ContractError, match=r"don't fit the response model: outcome: literal_error") as failure:
+        await k.call("POST /decide", body=decide_body(), auth=Auth.none(), expect=Expect(fields={"outcome": "482913"}))
+    assert "482913" not in str(failure.value), str(failure.value)
+
+
 async def test_stub_rejects_an_expect_path_not_on_the_model():
     k = ContractStub()
     with pytest.raises(ContractError, match="outcom"):
