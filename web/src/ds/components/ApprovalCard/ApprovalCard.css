@@ -70,18 +70,21 @@
   margin-top: var(--space-16);
 }
 
+/* Allow and Deny side by side; when their words can't share the line, Deny moves to the next. */
 .cd-approval-card__row {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: flex-start;
   gap: var(--space-8);
 }
 
-/* A side: its button, and the menu under it while open. */
+/* A side: its button, and the menu under it while open. It keeps its words' width, and only a
+   button whose words are wider than the whole line narrows to it and wraps them. */
 .cd-approval-card__side {
   position: relative;
   display: flex;
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 /* The menu: a popover 6 px under its button, on the raised surface with the card's border and
@@ -148,21 +151,19 @@
 }
 
 /* A card under about 480 px wide (its answers under 438 px, inside the card's 20 px padding and
-   1 px border): Allow and Deny share the line, each 44 px tall, and wrap only if their words can't
-   fit side by side. A menu opens inline as a full-width list under them, its items 48 px tall,
-   and pushes the card down. */
+   1 px border): Allow and Deny share the line in equal halves, each 44 px tall, and wrap only if
+   their words can't fit side by side. Each is then a full-width line, and words longer than the
+   line wrap inside their button, which grows taller. A menu opens inline as a full-width list
+   under them, its items 48 px tall, and pushes the card down. */
 @container cd-approval-answers (max-width: 437.98px) {
-  .cd-approval-card__row {
-    flex-wrap: wrap;
-  }
-
   .cd-approval-card__side {
     display: contents;
   }
 
   .cd-approval-card__row .cd-button {
     flex: 1 1 0;
-    height: calc(var(--size-control-main) + var(--space-4));
+    min-width: fit-content;
+    min-height: calc(var(--size-control-main) + var(--space-4));
   }
 
   .cd-approval-card__menu {

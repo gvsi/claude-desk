@@ -88,6 +88,39 @@ function tops(elements: readonly HTMLElement[]): number[] {
 /** A 390 px phone's line: the screen less two 16 px gutters. */
 const PHONE_LINE = 358;
 
+/** A verified person's long name, on Allow's only answer: a plain button with long words. */
+const LONG_NAME = 'María Guadalupe Fernández de la Torre';
+const longNameArgs = {
+  ...saturdayArgs,
+  decision: { ...heldVerified, answers: ['allow_person', 'deny_once'] },
+  personName: LONG_NAME,
+} satisfies Partial<ApprovalCardProps>;
+
+/** Every answer's words stay inside its button, and every button inside the card's answers. */
+async function expectAnswersInside(card: HTMLElement): Promise<void> {
+  const group = within(card).getByRole('group', { name: 'Your answer' });
+  const row = group.querySelector<HTMLElement>('.cd-approval-card__row');
+  if (!row) throw new Error('no answer row');
+  const edge = group.getBoundingClientRect();
+  await expect(row.scrollWidth).toBeLessThanOrEqual(row.clientWidth);
+  await expect(edge.right).toBeLessThanOrEqual(card.getBoundingClientRect().right);
+  for (const button of answerButtons(card)) {
+    const box = button.getBoundingClientRect();
+    await expect(button.scrollWidth).toBeLessThanOrEqual(button.clientWidth);
+    await expect(button.scrollHeight).toBeLessThanOrEqual(button.clientHeight);
+    await expect(box.left).toBeGreaterThanOrEqual(edge.left - 0.5);
+    await expect(box.right).toBeLessThanOrEqual(edge.right + 0.5);
+    const range = document.createRange();
+    range.selectNodeContents(button);
+    for (const line of [...range.getClientRects()].filter((rect) => rect.width > 0)) {
+      await expect(line.left).toBeGreaterThanOrEqual(box.left - 0.5);
+      await expect(line.right).toBeLessThanOrEqual(box.right + 0.5);
+      await expect(line.top).toBeGreaterThanOrEqual(box.top - 0.5);
+      await expect(line.bottom).toBeLessThanOrEqual(box.bottom + 0.5);
+    }
+  }
+}
+
 /** The card's one status dot. */
 function dotIn(root: HTMLElement): HTMLElement {
   const dots = root.querySelectorAll<HTMLElement>('.cd-status-dot');
@@ -667,6 +700,61 @@ export const MenuOnAPhone: Story = {
     for (const item of itemsOf(menu)) await expect(item.getBoundingClientRect().height).toBeGreaterThanOrEqual(48);
     await expect(itemsOf(menu)[0]).toHaveFocus();
     await expect(line.scrollWidth).toBeLessThanOrEqual(PHONE_LINE);
+  },
+};
+
+export const LongNameOnAPhone: Story = {
+  args: longNameArgs,
+  render: (args) => (
+    <div data-testid="phone-line" style={{ width: PHONE_LINE, maxWidth: '100%' }}>
+      <ApprovalCard {...args} />
+    </div>
+  ),
+  parameters: {
+    canvasNote: `${ANSWERS_BOARD} No board shows a long name on a plain answer; on a phone it can't share the line, so Allow takes a line of its own, as many lines of words tall as it needs, and Deny the next, and nothing leaves its button or the card.`,
+  },
+  play: async ({ canvas }) => {
+    const card = canvas.getByRole('article');
+    const group = within(card).getByRole('group', { name: 'Your answer' }).getBoundingClientRect();
+    const [allow, deny] = answerButtons(card) as [HTMLElement, HTMLElement];
+    await expect(allow).toHaveAccessibleName(`Allow only for ${LONG_NAME}, always`);
+    await expect(deny).toHaveAccessibleName('Deny this time');
+
+    // long_answer_stays_in_its_button: each answer is a full-width line; the long one wraps its
+    // words and grows, and Deny keeps 44 px.
+    const [left, right] = [allow.getBoundingClientRect(), deny.getBoundingClientRect()];
+    await expect(right.top).toBeGreaterThanOrEqual(left.bottom);
+    await expect(left.width).toBe(group.width);
+    await expect(right.width).toBe(group.width);
+    await expect(left.height).toBeGreaterThan(44);
+    await expect(right.height).toBe(44);
+    await expectAnswersInside(card);
+    await expect(canvas.getByTestId('phone-line').scrollWidth).toBeLessThanOrEqual(PHONE_LINE);
+  },
+};
+
+export const LongNameInAWideCard: Story = {
+  args: longNameArgs,
+  render: (args) => (
+    <div data-testid="wide-card" style={{ width: 500, maxWidth: '100%' }}>
+      <ApprovalCard {...args} />
+    </div>
+  ),
+  parameters: {
+    canvasNote: `${ANSWERS_BOARD} No board shows a long name on a plain answer; in a 500 px card it can't sit beside Deny this time, so Deny moves to the next line instead of past the card.`,
+  },
+  play: async ({ canvas }) => {
+    const card = canvas.getByRole('article');
+    const [allow, deny] = answerButtons(card) as [HTMLElement, HTMLElement];
+    await expect(allow).toHaveAccessibleName(`Allow only for ${LONG_NAME}, always`);
+    // long_answer_stays_in_its_button: Deny goes under Allow, at the start of the line, and keeps
+    // its one-line height.
+    const [left, right] = [allow.getBoundingClientRect(), deny.getBoundingClientRect()];
+    await expect(right.top).toBeGreaterThanOrEqual(left.bottom);
+    await expect(right.left).toBe(left.left);
+    expectComputed(deny, { height: '40px' });
+    await expectAnswersInside(card);
+    await expect(canvas.getByTestId('wide-card').scrollWidth).toBeLessThanOrEqual(500);
   },
 };
 
