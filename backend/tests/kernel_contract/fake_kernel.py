@@ -49,6 +49,7 @@ from desk.contracts import (
     Clause,
     CopyCreated,
     Decision,
+    DemoInboxEntry,
     ExecResult,
     Fact,
     HoursWindow,
@@ -77,6 +78,8 @@ from desk.kernel_api import (
     CheckReplyRequest,
     CreateSessionRequest,
     DecideRequest,
+    DeskAnsweringRequest,
+    DeskUpdated,
     ExecuteRequest,
     Health,
     KernelError,
@@ -492,6 +495,8 @@ class FakeKernelState:
         self.desks: dict[str, Desk] = {}
         self.sessions: dict[str, Session] = {}
         self.decisions: dict[str, DecisionRecord] = {}
+        self.handoffs: dict[str, dict] = {}             # handoff_id -> its kernel_ro row
+        self.inbox: list[tuple[str, DemoInboxEntry]] = []   # (copy_id, entry): the Demo inbox, oldest first
         self._by_call: dict[tuple[str, int, str], str] = {}   # (session_id, generation, call_id) -> decision_id
         self._token_hashes: dict[str, str] = {}        # sha256(token) -> session_id
         self._failures: dict[str, list] = {}           # route -> [kind, times left or None]
@@ -928,9 +933,10 @@ class FakeKernelState:
             return self._new_decision(session, desk, call, digest, None, "refuse", [], why="adapter_refused")
         outcome, card_ids = self._rule(session, desk, action)
         script = self._scripts.get(call.tool)
-        if script is not None and script.outcome is not None:
+        scripted = script is not None and script.outcome is not None
+        if scripted:
             outcome = script.outcome
-        return self._new_decision(session, desk, call, digest, action, outcome, card_ids)
+        return self._new_decision(session, desk, call, digest, action, outcome, card_ids, scripted=scripted)
 
     def _normalize(self, session: Session, desk: Desk, call: ToolCall) -> NormalizedAction | None:
         """The adapter's step: resolve the resource and compute amounts from the Desk's records, never from
@@ -995,7 +1001,7 @@ class FakeKernelState:
 
     def _new_decision(self, session: Session, desk: Desk, call: ToolCall, digest: str,
                       action: NormalizedAction | None, outcome: str, card_ids: list[str], *,
-                      why: str | None = None) -> Decision:
+                      why: str | None = None, scripted: bool = False) -> Decision:
         state = {"allow": "allowed", "hold": "held", "refuse": "refused"}[outcome]
         decision_id = new_id("dec")
         tool = call.tool[:64]
@@ -1008,9 +1014,13 @@ class FakeKernelState:
         answers, inbox = [], []
         if outcome == "hold":
             money = action.tool in MONEY_TOOLS and (action.amount_cents or 0) > AUTO_MONEY_HARD_CAP_CENTS
+            # a limit hold, through an auto card's hold twin, offers no "Deny always"; a scripted hold stands for an
+            # ask card's and keeps it (master "Decision lifecycle")
+            limit_hold = not scripted and self._decided_by_auto_card(desk, card_ids)
             answers = [answer for answer in HELD_ANSWERS
-                       if answer != "allow_person" or (session.person_id is not None and not money)]
-            inbox = [InboxNotice(entry_id=new_id("inbox"), to="owner", preview="A request is waiting for you.")]
+                       if (answer != "allow_person" or (session.person_id is not None and not money))
+                       and (answer != "deny_always" or not limit_hold)]
+            inbox = [self._alert_owner(desk, "A request is waiting for you.")]
         tier = {"allow": "A", "hold": "H", "refuse": "B"}[outcome]
         decision = self._signed(Decision(
             decision_id=decision_id, session_id=session.session_id, call_id=call.call_id, action=action,
@@ -1032,6 +1042,18 @@ class FakeKernelState:
                                              "starts_at"}),
                 "resource_kind": action.resource.kind, "created_at": self.now})
         return decision
+
+    def _alert_owner(self, desk: Desk, preview: str) -> InboxNotice:
+        """An owner alert in the copy's Demo inbox ("approval" alerts at once by the seed's defaults), and its
+        code-free notice."""
+        entry = DemoInboxEntry(entry_id=new_id("inbox"), to="owner", kind="alert", body=preview, created_at=self.now)
+        self.inbox.append((desk.copy_id, entry))
+        return InboxNotice(entry_id=entry.entry_id, to=entry.to, preview=preview)
+
+    @staticmethod
+    def _decided_by_auto_card(desk: Desk, card_ids: list[str]) -> bool:
+        """Whether the deciding card (the first of `card_ids`) is an `auto` card: its hold is a limit hold."""
+        return bool(card_ids) and any(card.card_id == card_ids[0] and card.mode == "auto" for card in desk.cards)
 
     @staticmethod
     def _reason(session: Session, desk: Desk, call: ToolCall, action: NormalizedAction | None,
@@ -1218,10 +1240,11 @@ class FakeKernelState:
             view = {"lead_id": lead_id, "saved": True}
         elif tool == "native.request_callback":
             handoff_id = new_id("handoff")
-            self._put("handoffs", (handoff_id,), {
+            self.handoffs[handoff_id] = {
                 "handoff_id": handoff_id, **ids, "session_id": session.session_id,
                 "reason": f"{args['name']} · {args['contact']} · {args['reason']}", "callback_window": None,
-                "status": "open"})
+                "status": "open"}
+            self._put("handoffs", (handoff_id,), dict(self.handoffs[handoff_id]))
             facts.append(Fact(fact_id=f"handoff:{handoff_id}", kind="handoff", status="committed", source="kernel",
                               label=label, claims=[Claim(key="handoff", kind="ref", value=handoff_id)]))
             view = {"fact_id": facts[0].fact_id, "handoff_id": handoff_id}
@@ -1415,6 +1438,42 @@ class FakeKernelState:
                                       "message_id": message_id, "blocks_sha256": blocks_sha256,
                                       "visitor_plain": visitor_plain, "ledger_seq": entry.seq}))
 
+    # The owner's Desk ----------------------------------------------------------------------------
+
+    def _owners_desk(self, request: Request, desk_id: str) -> Desk:
+        """A Desk of the copy `X-Owner-Session` names (401 without it), else 404."""
+        copy, _ = self.owner_of(request)
+        if desk_id not in copy.desk_ids:
+            raise Refusal(404, "not_found")
+        return self.desks[desk_id]
+
+    def answering(self, request: Request, body: DeskAnsweringRequest) -> DeskUpdated:
+        """The owner's Answering switch: off leaves visitors only lead capture and a callback."""
+        desk = self._owners_desk(request, request.path_params["id"])
+        desk.answering = body.on
+        self._put_desk(desk)
+        self.append(desk, "desk_data", {"part": "answering", "refs": []})
+        return DeskUpdated(desk_id=desk.desk_id, updated_at=self.now)
+
+    def handoff_done(self, request: Request, body: Any) -> DeskUpdated:
+        """The owner closes a callback request: `open` → `done` once, ledgered `desk_data` naming it."""
+        copy, _ = self.owner_of(request)
+        handoff = self.handoffs.get(request.path_params["id"])
+        if handoff is None or handoff["copy_id"] != copy.copy_id:
+            raise Refusal(404, "not_found")
+        if handoff["status"] != "open":
+            raise Refusal(409, "conflict")
+        handoff["status"] = "done"
+        self._put("handoffs", (handoff["handoff_id"],), dict(handoff))
+        desk = self.desks[handoff["desk_id"]]
+        self.append(desk, "desk_data", {"part": "handoffs", "refs": [handoff["handoff_id"]]})
+        return DeskUpdated(desk_id=desk.desk_id, updated_at=self.now)
+
+    def owner_inbox(self, request: Request, body: Any) -> list[DemoInboxEntry]:
+        """The owner's Demo inbox: every entry of the copy, oldest first."""
+        copy, _ = self.owner_of(request)
+        return [entry for copy_id, entry in self.inbox if copy_id == copy.copy_id]
+
     # Ledger --------------------------------------------------------------------------------------
 
     def ledger_append(self, request: Request, body: LedgerAppendRequest) -> LedgerEntry:
@@ -1502,6 +1561,9 @@ FAKE_ROUTES: dict[str, str] = {
     "POST /check_reply": "check_reply",
     "POST /ledger/append": "ledger_append",
     "GET /ledger/{desk_id}?verify=true": "ledger_page",
+    "PUT /desks/{id}/answering": "answering",
+    "POST /handoffs/{id}/done": "handoff_done",
+    "GET /demo_inbox": "owner_inbox",
 }
 
 

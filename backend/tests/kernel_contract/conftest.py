@@ -141,6 +141,27 @@ class Arrange:
             pytest.skip(f"the kernel didn't prove the draft ({draft.status})")
         await owner.call("POST /policy/confirm", PolicyConfirmRequest(desk_id=desk_id, version=draft.version))
 
+    async def ask(self, owner: CredentialView, ro_read: Callable[..., list[dict]], ro_schema: str, copy: CopyCreated,
+                  tool: str) -> None:
+        """The owner's rules change: `tool` asks the owner (an `ask` card for anyone, in place of the cards that
+        covered it) on the copy's first Desk, so its calls hold through an ask card. The fake stands for it with a
+        scripted hold (`state.script`); the real kernel gets the card drafted, proved and confirmed as `never` does,
+        and skips when the kernel can't prove drafts."""
+        desk_id = copy.desk_ids[0]
+        if self._state is not None:
+            self._state.script(tool, "hold")
+            return
+        (active,) = ro_read(ro_schema, copy.copy_id, "SELECT version, cards FROM {ro}.policy_versions"
+                                                     " WHERE desk_id = %s AND status = 'active'", (desk_id,))
+        cards = [RuleCard.model_validate(card) for card in active["cards"]]
+        cards = [card for card in cards if not card.is_default and card.applies_to != tool] + [RuleCard(
+            card_id=f"ask-{tool}", applies_to=tool, mode="ask", who="anyone", reason="Ask me first.")]
+        draft = await owner.call("POST /policy/draft", PolicyDraftRequest(desk_id=desk_id, cards=cards,
+                                                                          expected_parent=active["version"]))
+        if draft.status != "proved":
+            pytest.skip(f"the kernel didn't prove the draft ({draft.status})")
+        await owner.call("POST /policy/confirm", PolicyConfirmRequest(desk_id=desk_id, version=draft.version))
+
     def close_idle_sessions(self, session_id: str) -> None:
         """Closes the session: the fake's clock moves past the 24-hour idle limit (closing every idle visitor
         session of the fake), the real kernel's row gets `closed_at`."""

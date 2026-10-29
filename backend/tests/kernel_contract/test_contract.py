@@ -14,6 +14,7 @@ from desk.contracts import (
     ApprovalResult,
     CopyCreated,
     Decision,
+    DemoInboxEntry,
     ExecResult,
     LedgerEvent,
     LedgerPage,
@@ -30,6 +31,8 @@ from desk.kernel_api import (
     CreateCopyRequest,
     CreateSessionRequest,
     DecideRequest,
+    DeskAnsweringRequest,
+    DeskUpdated,
     ExecuteRequest,
     Health,
     KernelError,
@@ -279,6 +282,32 @@ async def test_discounted_quote_holds_and_answers_once(kernel, ro_read):
     assert await refused(answer(owner, held.decision_id, "allow_once")) == (409, "conflict")
     assert await refused(answer(owner, held.decision_id, "deny_once")) == (409, "conflict")
     assert (await read_decision(view, held.decision_id)).state == "executed"
+
+
+@pytest.mark.kernel_plan("01a")
+async def test_limit_hold_offers_no_deny_always(kernel, ro_read, arrange):
+    """"Deny always" is offered only on a hold an `ask` card decided (master "Decision lifecycle"). The seeded 15% quote
+    is a limit hold, through `rv-quote`'s hold twin: its answers leave it out, and posting it is 422 `invalid` with
+    nothing changed. A hold an ask card decided keeps it, and answering it drafts a `never` card."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    (seeded,) = ro_read(ro_schema, copy.copy_id, "SELECT decision_id FROM {ro}.decisions"
+                                                 " WHERE desk_id = %s AND state = 'held'", (copy.desk_ids[0],))
+    held = await read_decision(owner, seeded["decision_id"])
+    assert held.state == "held" and {"allow_once", "deny_once"} <= set(held.answers)
+    assert "deny_always" not in held.answers
+    assert await refused(answer(owner, held.decision_id, "deny_always")) == (422, "invalid")
+    assert await read_decision(owner, held.decision_id) == held                 # nothing changed
+
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    view, session_id = http.session(visitor.session_token), visitor.state.session_id
+    await arrange.ask(owner, ro_read, ro_schema, copy, "native.find_slots")
+    asked = await decide(view, session_id, 0, "call-1", "native.find_slots", {})
+    assert asked.state == "held" and "deny_always" in asked.answers
+    denied = await answer(owner, asked.decision_id, "deny_always")
+    assert denied.decision.state == "denied" and denied.execution is None
+    assert [(card.mode, card.applies_to) for card in denied.card_diff] == [("never", "native.find_slots")]
 
 
 @pytest.mark.kernel_plan("01a")
@@ -597,3 +626,102 @@ async def test_responses_validate(kernel, ro_read):
             response = await pending
             assert response.status_code == status, (status, code)
             assert KernelError.model_validate_json(response.content).code == code
+
+
+# The owner's Desk (Plan 01b) -------------------------------------------------------------------------------
+
+
+async def ledger_page(owner: CredentialView, desk_id: str) -> LedgerPage:
+    return await owner.call("GET /ledger/{desk_id}?verify=true", path={"desk_id": desk_id})
+
+
+def tools(seen: SessionContext) -> tuple[set[str], set[str]]:
+    """The tools a session has now, and every tool its kind could be given."""
+    return {tool.tool for tool in seen.tools}, {tool.tool for tool in seen.tools_declared}
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_answering_switch_round_trips(kernel, ro_read):
+    """Answering off leaves visitors only lead capture and a callback (their declared tools unchanged), on gives the
+    rest back; each switch is the owner's, on its own copy's Desk, and ledgered `desk_data`."""
+    http, ro_schema, _ = kernel
+    copy, other = await new_copy(http), await new_copy(http)
+    desk_id, owner = copy.desk_ids[0], http.owner(copy.owner_token)
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    view, session_id = http.session(visitor.session_token), visitor.state.session_id
+    before = tools(await context(view, session_id))
+
+    def answering() -> list[dict]:
+        return ro_read(ro_schema, copy.copy_id, "SELECT answering FROM {ro}.desks WHERE desk_id = %s", (desk_id,))
+
+    off = await owner.call("PUT /desks/{id}/answering", DeskAnsweringRequest(on=False), path={"id": desk_id})
+    assert isinstance(off, DeskUpdated) and off.desk_id == desk_id
+    assert answering() == [{"answering": False}]
+    now, declared = tools(await context(view, session_id))
+    assert now == {"native.capture_lead", "native.request_callback"} and declared == before[1]
+
+    on = await owner.call("PUT /desks/{id}/answering", DeskAnsweringRequest(on=True), path={"id": desk_id})
+    assert on.desk_id == desk_id and on.updated_at >= off.updated_at
+    assert answering() == [{"answering": True}] and tools(await context(view, session_id)) == before
+    switches = [entry.event.summary for entry in (await ledger_page(owner, desk_id)).entries
+                if entry.event.kind == "desk_data" and entry.event.summary.get("part") == "answering"]
+    assert len(switches) == 2
+    elsewhere = http.owner(other.owner_token).call("PUT /desks/{id}/answering", DeskAnsweringRequest(on=False),
+                                                   path={"id": desk_id})
+    assert await refused(elsewhere) == (404, "not_found") and answering() == [{"answering": True}]
+
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_handoff_done_closes_it_once(kernel, ro_read):
+    """A visitor's callback request opens a handoff; the owner closes it once (`open` → `done`, ledgered `desk_data`
+    naming it), a second time is 409 `conflict`, and another copy's owner or an unknown handoff gets 404."""
+    http, ro_schema, _ = kernel
+    copy, other = await new_copy(http), await new_copy(http)
+    desk_id, owner = copy.desk_ids[0], http.owner(copy.owner_token)
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    view, session_id = http.session(visitor.session_token), visitor.state.session_id
+    callback = await decide(view, session_id, 0, "call-1", "native.request_callback",
+                            {"name": "Dana Wells", "contact": "(503) 555-0142", "reason": "Leaking water heater"})
+    assert callback.state == "allowed" and (await execute(view, callback, 0)).state == "succeeded"
+
+    def handoffs() -> list[dict]:
+        return ro_read(ro_schema, copy.copy_id, "SELECT handoff_id, session_id, status FROM {ro}.handoffs"
+                                                " WHERE desk_id = %s", (desk_id,))
+
+    ((handoff_id, opened_by, status),) = [tuple(row.values()) for row in handoffs()]
+    assert (opened_by, status) == (session_id, "open")
+    path = {"id": handoff_id}
+    assert await refused(http.owner(other.owner_token).call("POST /handoffs/{id}/done", path=path)) == (
+        404, "not_found")
+    done = await owner.call("POST /handoffs/{id}/done", path=path)
+    assert isinstance(done, DeskUpdated) and done.desk_id == desk_id
+    assert handoffs() == [{"handoff_id": handoff_id, "session_id": session_id, "status": "done"}]
+    assert await refused(owner.call("POST /handoffs/{id}/done", path=path)) == (409, "conflict")
+    assert await refused(owner.call("POST /handoffs/{id}/done", path={"id": "handoff-never-made"})) == (
+        404, "not_found")
+    closed = [entry.event.summary for entry in (await ledger_page(owner, desk_id)).entries
+              if entry.event.kind == "desk_data" and entry.event.summary.get("part") == "handoffs"]
+    assert closed == [{"part": "handoffs", "refs": [handoff_id]}]
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_owner_demo_inbox_is_the_copys(kernel, ro_read):
+    """The owner's Demo inbox holds the copy's entries: a hold alerts the owner there, under the entry its notice
+    names. Another copy's owner never reads them, and a visitor's token isn't the owner's."""
+    http, ro_schema, _ = kernel
+    copy, other = await new_copy(http), await new_copy(http)
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    view, session_id = http.session(visitor.session_token), visitor.state.session_id
+    held = await decide(view, session_id, 0, "call-1", "native.quote",
+                        quote_args(item_id(ro_read, ro_schema, copy, "Drain clearing"), 1500))
+    assert held.state == "held" and held.inbox and {notice.to for notice in held.inbox} == {"owner"}
+
+    mine = await http.owner(copy.owner_token).call("GET /demo_inbox")
+    theirs = await http.owner(other.owner_token).call("GET /demo_inbox")
+    assert all(isinstance(entry, DemoInboxEntry) for entry in mine)
+    entries = {entry.entry_id: entry for entry in mine}
+    for notice in held.inbox:
+        assert (entries[notice.entry_id].to, entries[notice.entry_id].kind) == ("owner", "alert")
+    assert not {entry.entry_id for entry in theirs} & set(entries)
+    assert await refused(view.call("GET /demo_inbox")) == (401, "auth")
