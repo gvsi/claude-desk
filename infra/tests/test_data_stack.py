@@ -6,7 +6,9 @@ import string
 from pathlib import Path
 
 import aws_cdk as cdk
+import pytest
 from conftest import actions as _actions
+from conftest import build_stacks
 from conftest import resource_list as _resource_list
 from conftest import role_statements as _statements
 
@@ -347,3 +349,17 @@ def test_cluster_has_fargate_capacity_and_outputs(data_stack, data_template):
         "AppSecurityGroupId": {"Fn::GetAtt": [_logical_id(data_stack, data_stack.app_security_group), "GroupId"]},
         "CloudFrontPrefixListId": data_stack.resolve(data_stack.cloudfront_prefix_list_id),
     }
+
+
+@pytest.mark.parametrize("compute", ["express", "alb"])
+def test_every_function_in_both_stacks_runs_on_arm64(compute):
+    """"arm64 for all AWS compute": every Lambda function either stack synthesizes, the ones CDK
+    adds for its own custom resources (the prefix list lookup, the default group's restriction)
+    included, in both compute modes."""
+    stacks = build_stacks(compute=compute)
+    for template in (stacks.data_template, stacks.template):
+        functions = template.find_resources("AWS::Lambda::Function")
+        assert functions, template
+        for function_id, function in functions.items():
+            assert function["Properties"].get("Architectures") == ["arm64"], function_id
+    assert len(stacks.data_template.find_resources("AWS::Lambda::Function")) == 2

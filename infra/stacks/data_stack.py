@@ -69,6 +69,10 @@ class DeskData(Stack):
                 ec2.SubnetConfiguration(name="isolated", subnet_type=ec2.SubnetType.PRIVATE_ISOLATED, cidr_mask=24),
             ],
         )
+        # The function CDK adds to strip the VPC's default security group is plain Node.js; run it on
+        # arm64 like all of the Desk's compute.
+        restrict_default = self.node.find_child("Custom::VpcRestrictDefaultSGCustomResourceProvider")
+        restrict_default.node.find_child("Handler").add_property_override("Architectures", ["arm64"])
 
         # The app task: the API on 8700 for the load balancer, which lives in this VPC.
         self.app_security_group = ec2.SecurityGroup(
@@ -173,6 +177,10 @@ class DeskData(Stack):
             ),
             install_latest_aws_sdk=False,
         )
+        # The lookup runs in the one function CDK shares among a stack's AwsCustomResources, plain
+        # Node.js; run it on arm64 like all of the Desk's compute.
+        function = self.node.find_child(f"AWS{cr.AwsCustomResource.PROVIDER_FUNCTION_UUID.replace('-', '')}")
+        function.node.default_child.add_property_override("Architectures", ["arm64"])
         return lookup.get_response_field("PrefixLists.0.PrefixListId")
 
     def _admin_task(self, config: DeskConfig) -> ecs.FargateTaskDefinition:
