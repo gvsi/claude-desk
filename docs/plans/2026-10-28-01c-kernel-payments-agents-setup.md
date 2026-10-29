@@ -1,6 +1,6 @@
 # Claude Desk Prototype — Plan 01c: Kernel payments, agents and setup
 
-> **For agentic workers:** Execute with the repo's `executing-implementation-plans` skill (`.agents/skills/`): a fresh implementer and a task review per task, in this plan's worktree, landing through the PRs in "Landing" after the two-reviewer panel. Steps use checkbox (`- [ ]`) syntax for tracking. This plan builds on Plans 01a and 01b as merged; only Task 1, which reads no money cap, may start from the kernel verification and owner data plan's Task 6 commit (plan 01b; master "Schedule, lanes and gates").
+> **For agentic workers:** Execute with the repo's `executing-implementation-plans` skill (`.agents/skills/`): a fresh implementer and a task review per task, in this plan's worktree, landing through the PRs in "Landing" after the review panel. Steps use checkbox (`- [ ]`) syntax for tracking. This plan builds on Plans 01a and 01b as merged; only Task 1, which reads no money cap, may start from the kernel verification and owner data plan's Task 6 commit (plan 01b; master "Schedule, lanes and gates").
 
 **Goal:** The kernel's money, agent and setup surfaces: mock payments over MCP with pinned, drift-checked tools; single-use payment links with a signed `payment_confirmed`; charges and refunds through trusted adapters; signed visiting agents (`AgentAuth`, the kernel side of A2A, Agent Card blocks), demo agents and mandates with reserve, commit and release; the setup tools and safety probes; the Rivera seed rows marked 01c. Lands by the Friday 18:00 gate.
 

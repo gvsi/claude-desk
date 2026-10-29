@@ -1,6 +1,6 @@
 # Claude Desk Prototype — Plan 02b: API owner tools, setup and agents
 
-> **For agentic workers:** Execute with the repo's `executing-implementation-plans` skill (`.agents/skills/`): a fresh implementer and a task review per task, in the plan's worktree, landing through one PR after the two-reviewer panel ("Before you start"). Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** Execute with the repo's `executing-implementation-plans` skill (`.agents/skills/`): a fresh implementer and a task review per task, in the plan's worktree, landing through one PR after the review panel ("Before you start"). Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** The rest of the API process (`backend/desk/api/`), built on Plan 02a: take-over, say, whisper and hand-back; demo-code verification and the Demo inbox; the document link and mock checkout proxies; the A2A endpoint and the built-in visiting agent; the setup interview with its proving routes; owner Desk management, people, reports, rules by chat and presets; triage and owner translations; the web app's generated TypeScript client; and the API's eval cases. It keeps Plan 02a's boundary: only the Anthropic API key and the `desk_api` role, kernel session IDs and handed-over tokens, never identities.
 

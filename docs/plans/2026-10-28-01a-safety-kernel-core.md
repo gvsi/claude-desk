@@ -1,6 +1,6 @@
 # Claude Desk Prototype — Plan 01a: Safety kernel core
 
-> **For agentic workers:** Execute with the repo's `executing-implementation-plans` skill (`.agents/skills/`): a fresh implementer and a task review per task, in the plan's worktree, landing through one PR after the two-reviewer panel. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** Execute with the repo's `executing-implementation-plans` skill (`.agents/skills/`): a fresh implementer and a task review per task, in the plan's worktree, landing through one PR after the review panel. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** The kernel process (`backend/desk/kernel_service/`, 127.0.0.1:8701) with everything the Friday thin slice needs from it, in the task order below: the internals seam, sessions, copies and the Rivera seed, the signed ledger, rule cards compiled to Cedar and proved at activation, decide with the reviewer, native quote, slots and booking, execution, approvals, `/context` and the reply check. Lands Thursday midday.
 

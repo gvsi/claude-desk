@@ -1,6 +1,6 @@
 # Claude Desk Prototype — Plan 05b: Evals tier 2, the gate and the report
 
-> **For agentic workers:** Execute with the repo's `executing-implementation-plans` skill (`.agents/skills/`): a fresh implementer and a task review per task, in the plan's worktree, landing through two PRs ("Before you start"), each after the two-reviewer panel. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** Execute with the repo's `executing-implementation-plans` skill (`.agents/skills/`): a fresh implementer and a task review per task, in the plan's worktree, landing through two PRs ("Before you start"), each after the review panel. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Evidence that a Desk can't be talked around and still does its job: a model-driven tier 2 suite (about 50 hostile-visitor scenarios and 30 legitimate tasks, judged by independent oracles over the kernel's records) that gates deploys and gated pull requests through a committed results file CI checks, sets the reviewer thresholds on a calibration split, and measures cost and latency per conversation for the report.
 

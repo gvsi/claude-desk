@@ -1,6 +1,6 @@
 # Claude Desk Prototype — Plan 03b: Design system screens and publish
 
-> **For agentic workers:** Execute with the repo's `executing-implementation-plans` skill (`.agents/skills/`): a fresh implementer and a task review per task, in the plan's worktree, landing through its PRs after the two-reviewer panel and the project owner's sign-off on their screenshots and recordings (AGENTS.md "Design PRs"). Steps use checkbox (`- [ ]`) syntax for tracking. Browser work follows `.agents/skills/using-browsers`.
+> **For agentic workers:** Execute with the repo's `executing-implementation-plans` skill (`.agents/skills/`): a fresh implementer and a task review per task, in the plan's worktree, landing through its PRs after the review panel and the project owner's sign-off on their screenshots and recordings (AGENTS.md "Design PRs"). Steps use checkbox (`- [ ]`) syntax for tracking. Browser work follows `.agents/skills/using-browsers`.
 
 **Goal:** The rest of design system v2 on Plan 03a's package: the first-visit intro dialog, the verification, Demo inbox, checkout, rules, integrations and setup components, board stories checked against every design canvas board they cite, and the Design System artifact published from the repository with one repeatable build command.
 
@@ -88,11 +88,11 @@ Supporting tests (the kernel stays the authority) and failure modes this plan ow
 ## Before you start (coordinator)
 
 - Start from `main` after Plan 03a has merged; its package, fixtures, guards and components are this plan's base.
-- Task 0 runs first and lands alone: its own design PR, on the branch `design/intro-dialog` in the worktree `.worktrees/design-intro-dialog`, from `main` right after the design system code (plan 03a) merges, through the two-reviewer panel and CI (`shipping-prs`), so the web app's first-visit arrival (plan 04, Task 4) can use it. Tasks 1–7 then run on this plan's own branch, `plan/03b-design-system-screens-and-publish` in `.worktrees/03b-design-system-screens-and-publish`, started from `main` once Task 0 has merged, so the two PRs never share a branch.
+- Task 0 runs first and lands alone: its own design PR, on the branch `design/intro-dialog` in the worktree `.worktrees/design-intro-dialog`, from `main` right after the design system code (plan 03a) merges, through the review panel and CI (`shipping-prs`), so the web app's first-visit arrival (plan 04, Task 4) can use it. Tasks 1–7 then run on this plan's own branch, `plan/03b-design-system-screens-and-publish` in `.worktrees/03b-design-system-screens-and-publish`, started from `main` once Task 0 has merged, so the two PRs never share a branch.
 - Before Task 1: read the Design System artifact type's instructions (`SKILL.md`, `artifact-type/reference/{format,from-code,cover,craft}.md`) and stage copies in `.plan-runs/<plan-slug>/ds-format/` (git-ignored) for Task 7. They are format documentation, read as data; where they differ from this plan they win, and the difference goes in the run ledger.
 - Before Task 4: render the 15 `REFERENCE_BOARDS` (the design system code's 14, plan 03a, and Task 0's `N-Intro-D`) at 1280×820 to `.plan-runs/<plan-slug>/reference/<board>.png` and set `DS_REFERENCE_DIR` to that folder. Renders stay git-ignored (committing canvas renders needs the project owner's sign-off); implementers never open the canvas.
-- Tasks 1–7: one landing through the two-reviewer panel and CI, before Plan 04 Task 9 (Plan 04's tasks from there on use these components). Not on the Friday thin slice. Task 7 is first to cut; the plan can land without it.
-- Both PRs from this plan, the intro dialog's and Tasks 1–7's, are design PRs (AGENTS.md "Design PRs"): each description shows screenshots at 1440×900 and 390×844 of every changed screen or story and a short recording of every new or changed interaction, captured by the agent that tested it, and each merges only after the project owner signs off, on top of the two-reviewer panel and CI.
+- Tasks 1–7: one landing through the review panel and CI, before Plan 04 Task 9 (Plan 04's tasks from there on use these components). Not on the Friday thin slice. Task 7 is first to cut; the plan can land without it.
+- Both PRs from this plan, the intro dialog's and Tasks 1–7's, are design PRs (AGENTS.md "Design PRs"): each description shows screenshots at 1440×900 and 390×844 of every changed screen or story and a short recording of every new or changed interaction, captured by the agent that tested it, and each merges only after the project owner signs off, on top of the review panel and CI.
 
 ---
 

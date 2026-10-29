@@ -1,6 +1,6 @@
 # Claude Desk Prototype — Plan 01b: Kernel verification and owner data
 
-> **For agentic workers:** Execute with the repo's `executing-implementation-plans` skill (`.agents/skills/`): a fresh implementer and a task review per task, in this plan's worktree, landing through one PR after the two-reviewer panel. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** Execute with the repo's `executing-implementation-plans` skill (`.agents/skills/`): a fresh implementer and a task review per task, in this plan's worktree, landing through one PR after the review panel. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** On top of Plan 01a's kernel: demo-code verification with per-contact limits and the Demo inbox reads; the lead, callback and verification tools; owner writes to Desks, people, documents and knowledge; owner say and whisper; labels hardening with canaries; single-use document links. Lands Thursday evening.
 
