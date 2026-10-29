@@ -207,7 +207,8 @@ def test_postgres_services_match_compose():
     settings = env_example()
     user, database = db["environment"]["POSTGRES_USER"], db["environment"]["POSTGRES_DB"]
     password = settings["DESK_ADMIN_PASSWORD"]
-    assert db["image"] == "postgres:16"
+    # Docker's official image, from its mirror on Amazon ECR Public, which has no anonymous pull limit.
+    assert db["image"] == "public.ecr.aws/docker/library/postgres:16"
     assert db["environment"]["POSTGRES_PASSWORD"] == f"${{DESK_ADMIN_PASSWORD:-{password}}}"
     [mapping] = db["ports"]
     host_port, container_port = mapping.split(":")[-2:]
