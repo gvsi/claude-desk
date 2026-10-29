@@ -256,20 +256,22 @@ _DATE_WORDS = re.compile(_words(
     "july", "august", "september", "october", "november", "december",
     # en relative days and times
     "today", "tonight", "tomorrow", "yesterday", "weekend", "weekends", r"next\s+week", "noon", "midnight",
-    "o['\u2019]?clock", r"this\s+morning", r"this\s+afternoon", r"this\s+evening",
+    "o['\u2019]?clock", r"this\s+morning", r"this\s+afternoon", r"this\s+evening", r"in\s+an\s+hour",
     # es weekdays and months
     "lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "sabados", "domingo", "domingos", "enero",
     "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "setiembre", "octubre",
     "noviembre", "diciembre",
     # es relative days and times
     "hoy", r"pasado\s+manana", "manana", "ayer", r"esta\s+manana", r"esta\s+tarde", r"esta\s+noche",
-    r"fin\s+de\s+semana", r"la\s+proxima\s+semana", "mediodia", "medianoche",
+    r"fin\s+de\s+semana", r"la\s+proxima\s+semana", r"la\s+semana\s+que\s+viene", r"el\s+mes\s+que\s+viene",
+    r"en\s+una\s+hora", "mediodia", "medianoche",
 ), re.IGNORECASE)
 _CLOCK = re.compile(r"\b[ap]\.\s?m\.|\bpm\b", re.IGNORECASE)   # a.m., p.m., pm; a bare "am" is the verb
 _MONTH_MAY = re.compile(r"\b(?i:in|on|by|until|till|next|this|early|late|mid|last)[\s\-]+May\b")
-# An ordinal from third to thirty-first after "the" ("on the fifth") or a month name ("November
-# third") is a day of the month. "The first" and "the second" are too often not ("first, let me
-# check", "one second"), and are left to the digit forms ("the 1st").
+# An ordinal from third to thirty-first after "the" ("on the fifth"), a month name ("November
+# third") or its abbreviation, with or without its dot ("Nov. third"), is a day of the month. "The
+# first" and "the second" are too often not ("first, let me check", "one second"), and are left to
+# the digit forms ("the 1st").
 _HYPHEN = r"[\s\-‐-―]+"
 _UNIT_ORDINALS = ("first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth")
 _ORDINAL = (r"(?:twenty" + _HYPHEN + "(?:" + "|".join(_UNIT_ORDINALS) + r")|thirty" + _HYPHEN + "first|"
@@ -277,11 +279,17 @@ _ORDINAL = (r"(?:twenty" + _HYPHEN + "(?:" + "|".join(_UNIT_ORDINALS) + r")|thir
             "fifteenth|sixteenth|seventeenth|eighteenth|nineteenth|twentieth|thirtieth)")
 _EN_MONTHS = ("january", "february", "march", "april", "may", "june", "july", "august", "september", "october",
               "november", "december")
-_ORDINAL_DATE = re.compile(r"\b(?:the|" + "|".join(_EN_MONTHS) + r")\s+" + _ORDINAL + r"\b", re.IGNORECASE)
-# A fraction is an amount beside a discount or price word ("a quarter off", "un cuarto de
-# descuento"); "a quarter of an hour" and "the third option" are ordinary prose.
-_FRACTION = re.compile(_words("quarter", "quarters", "third", "thirds", "cuarto", "cuartos", "tercio", "tercios"),
-                       re.IGNORECASE)
+_EN_MONTH_ABBREVIATIONS = ("jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec")
+_ORDINAL_DATE = re.compile(r"\b(?:the|" + "|".join(_EN_MONTHS) + "|(?:" + "|".join(_EN_MONTH_ABBREVIATIONS)
+                           + r")\.?)\s+" + _ORDINAL + r"\b", re.IGNORECASE)
+# A unit fraction is an amount beside a discount or price word ("a quarter off", "a fifth off the
+# price", "un cuarto de descuento"); "a quarter of an hour" and "the third option" are ordinary prose.
+_FRACTION = re.compile(_words(
+    "quarter", "quarters", "third", "thirds", "fifth", "fifths", "sixth", "sixths", "seventh", "sevenths",
+    "eighth", "eighths", "ninth", "ninths", "tenth", "tenths",
+    "cuarto", "cuartos", "tercio", "tercios", "quinto", "quintos", "sexto", "sextos", "septimo", "septimos",
+    "setimo", "setimos", "octavo", "octavos", "noveno", "novenos", "decimo", "decimos",
+), re.IGNORECASE)
 _DISCOUNT_WORD = re.compile(_words("off", "discount", "discounts", "descuento", "descuentos", "price", "prices",
                                    "precio", "precios"), re.IGNORECASE)
 
@@ -301,8 +309,9 @@ def _date_words(folded: str) -> list[re.Match]:
 def _spelled_amounts(shown: str, folded: str, money: list[Hit]) -> list[Hit]:
     """Number words, merged into one hit per amount ("ochenta y nueve", "fifteen hundred"). A bare
     one, uno, una, once or medio counts within three words of a currency or percent word, or next
-    to another number word ("one hundred"); a quarter, third, cuarto or tercio counts within three
-    words of a discount or price word ("a quarter off")."""
+    to another number word ("one hundred"); a unit fraction (a quarter, a third to a tenth, cuarto,
+    tercio, quinto to décimo) counts within three words of a discount or price word ("a quarter
+    off")."""
     money_spans = [(hit.start, hit.start + len(hit.span)) for hit in money]
     discount_spans = [(m.start(), m.end()) for m in _DISCOUNT_WORD.finditer(folded)]
     # "ciento" in "por ciento" is the percent word, already a hit.

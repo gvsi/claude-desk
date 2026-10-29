@@ -316,6 +316,20 @@ def test_scanner_flags_money_in_en_and_es():
         "this morning or this evening": {"date_word"},
         "esta mañana": {"date_word"},
         "tonight": {"date_word"},
+        # Other unit fractions; abbreviated months before an ordinal; more relative times
+        "a fifth off the price": {"spelled_amount"},
+        "Two fifths of the price.": {"spelled_amount"},
+        "a tenth off": {"spelled_amount"},
+        "an eighth of the price": {"spelled_amount"},
+        "Le hago un quinto de descuento.": {"spelled_amount"},
+        "un décimo del precio": {"spelled_amount"},
+        "Come by Nov. third": {"date_word"},
+        "Sept. twenty-first works": {"date_word"},
+        "Dec fifth": {"date_word"},
+        "Nos vemos la semana que viene.": {"date_word"},
+        "El mes que viene tengo hueco.": {"date_word"},
+        "I'll call you back in an hour.": {"date_word"},
+        "Le llamo en una hora.": {"date_word"},
         # Invisible characters that aren't Unicode Cf, and marks NFKC can't compose
         "eigh\u034fty": {"spelled_amount"},                           # a combining grapheme joiner
         "dol\u034flars": {"currency"},
@@ -334,17 +348,26 @@ def test_scanner_flags_money_in_en_and_es():
     misses = {text: (kinds, {hit.kind for hit in scan_visible(text)}) for text, kinds in expected.items()
               if not kinds <= {hit.kind for hit in scan_visible(text)}}
     assert misses == {}
+    # ... and the same words where they state no amount or date
+    passing = ["A fifth of our visitors ask that.", "Un quinto de los clientes pregunta eso.",
+               "A tenth of the calls are about drains.", "Ask Jan first.", "Jan, a third of our visitors ask that.",
+               "¿Qué semana le viene bien?", "¿Qué mes le viene mejor?", "The visit takes about an hour.",
+               "La visita dura una hora."]
+    assert {text: scan_visible(text) for text in passing if scan_visible(text)} == {}
     assert [hit.span for hit in scan_visible("8\u200b9")] == ["89"]
     spelled = {text: [hit.span for hit in scan_visible(text) if hit.kind == "spelled_amount"]
                for text in ("ochenta y nueve dólares", "cincuenta por ciento", "It's one hundred eighty",
-                            "I can do a quarter off.", "dos tercios del precio")}
+                            "I can do a quarter off.", "dos tercios del precio", "a fifth off the price")}
     assert spelled == {"ochenta y nueve dólares": ["ochenta y nueve"], "cincuenta por ciento": ["cincuenta"],
                        "It's one hundred eighty": ["one hundred eighty"], "I can do a quarter off.": ["quarter"],
-                       "dos tercios del precio": ["dos tercios"]}
+                       "dos tercios del precio": ["dos tercios"], "a fifth off the price": ["fifth"]}
     dates = {text: [hit.span for hit in scan_visible(text) if hit.kind == "date_word"]
-             for text in ("on the fifth", "November third", "See you this afternoon", "Nos vemos esta tarde")}
+             for text in ("on the fifth", "November third", "See you this afternoon", "Nos vemos esta tarde",
+                          "Come by Nov. third", "Nos vemos la semana que viene.", "I'll call you back in an hour.")}
     assert dates == {"on the fifth": ["the fifth"], "November third": ["November", "November third"],
-                     "See you this afternoon": ["this afternoon"], "Nos vemos esta tarde": ["esta tarde"]}
+                     "See you this afternoon": ["this afternoon"], "Nos vemos esta tarde": ["esta tarde"],
+                     "Come by Nov. third": ["Nov. third"], "Nos vemos la semana que viene.": ["la semana que viene"],
+                     "I'll call you back in an hour.": ["in an hour"]}
 
 
 def test_scanner_passes_plain_replies():
