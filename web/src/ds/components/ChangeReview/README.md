@@ -19,7 +19,7 @@
   - An added or turned-on row shows its after side; a removed row the rule it removes.
 - No rows: "No rules change." and no confirm button. With `hasOtherChanges` (the draft changes something the screen shows above it, such as the money limit) it reads "Your rules stay the same." instead, and the controls stay.
 - A card for the checks, headed by `checks.status`: "Checked before you confirm", "This change can't be applied" or "Rules can't be checked right now", with `checks.lines` as a list in secondary meta: the screen's words from the proof report.
-- The primary `confirmLabel` ("Confirm change" by default; "Confirm and turn on") is enabled only when the status is `checked`. One click calls `onConfirm` once and waits, busy, until `pending` has come and gone, `error` shows a new message, or the promise `onConfirm` returned rejects. `pending` reads "Confirming", with `aria-busy`.
+- The primary `confirmLabel` ("Confirm change" by default; "Confirm and turn on") is enabled only when the status is `checked`. One click calls `onConfirm` once and waits, busy, until `pending` has come and gone, an error is delivered, or the promise `onConfirm` returned rejects. An error is delivered each time one appears or another replaces it, so a confirm that fails with the same words as last time (the screen clears its error when a confirm starts) can be tried again; clearing an error releases nothing. `pending` reads "Confirming", with `aria-busy`.
 - The secondary `cancelLabel` ("Keep my rules" by default; "Back") calls `onCancel`; it waits while a confirm is in flight.
 - `error` shows the screen's message in an error `Notice` (an alert), and confirm works again.
 

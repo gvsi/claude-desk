@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { Button } from '../Button/Button.tsx';
 import { Card } from '../Card/Card.tsx';
@@ -44,8 +44,8 @@ export interface ChangeReviewProps {
   /** The secondary button's words: "Keep my rules" by default; "Back". */
   cancelLabel?: string;
   /**
-   * Called once per click; the button then waits until `pending` clears, `error` shows a new
-   * message, or the promise it returns rejects.
+   * Called once per click; the button then waits until `pending` clears, an error is delivered
+   * (one appears, or another replaces it), or the promise it returns rejects.
    */
   onConfirm: () => void | Promise<unknown>;
   onCancel: () => void;
@@ -72,13 +72,6 @@ const CHECK_HEADINGS = {
 
 /** The fields shown on a side's line of words. */
 const WORD_FIELDS: readonly RuleField[] = ['who', 'limits', 'hours', 'review'];
-
-/** The confirm click that waits for its result, and the screen's `pending` and `error` it last saw. */
-interface ConfirmLock {
-  click: number;
-  sawPending: boolean;
-  error: string | undefined;
-}
 
 function joinWords(words: readonly RuleWord[]): string {
   return words
@@ -237,31 +230,47 @@ export function ChangeReview({
   const failed = error !== undefined && error.trim() !== '';
   const canConfirm = rows.length > 0 || hasOtherChanges;
 
-  // One click waits for its result: until `pending` has come and gone, `error` shows a new
-  // message, or the promise onConfirm returned rejects.
-  const [lock, setLock] = useState<ConfirmLock | null>(null);
+  // One click waits for its result: until `pending` has come and gone, an error is delivered, or
+  // the promise onConfirm returned rejects. An error is delivered each time one appears or another
+  // replaces it, so the same words after a cleared error release the button again; clearing an
+  // error, as a screen does when a confirm starts, releases nothing. The ref is set in the click
+  // itself, so a second click before the screen re-renders sends nothing.
+  const [clicked, setClicked] = useState<number | null>(null);
+  const sent = useRef(false);
   const clicks = useRef(0);
-  let locked = false;
-  if (lock !== null) {
-    if (pending) {
-      locked = true;
-      if (!lock.sawPending) setLock({ ...lock, sawPending: true });
-    } else if (lock.sawPending || (failed && error !== lock.error)) {
-      setLock(null);
-    } else {
-      locked = true;
-    }
-  }
-  const waiting = pending || locked;
+  const release = () => {
+    sent.current = false;
+    setClicked(null);
+  };
+  const sawPending = useRef(pending);
+  useEffect(() => {
+    const ended = sawPending.current && !pending;
+    sawPending.current = pending;
+    if (ended) release();
+  }, [pending]);
+  const delivered = useRef(failed ? error : undefined);
+  useEffect(() => {
+    const now = failed ? error : undefined;
+    const before = delivered.current;
+    delivered.current = now;
+    if (now !== undefined && now !== before) release();
+  }, [failed, error]);
+  const waiting = pending || clicked !== null;
 
   const confirm = () => {
-    if (waiting || !checked) return;
+    if (sent.current || waiting || !checked) return;
+    sent.current = true;
     clicks.current += 1;
     const click = clicks.current;
-    setLock({ click, sawPending: false, error });
-    const sent = onConfirm();
-    if (sent !== undefined && typeof sent.then === 'function') {
-      sent.then(undefined, () => setLock((current) => (current !== null && current.click === click ? null : current)));
+    setClicked(click);
+    const result = onConfirm();
+    if (result !== undefined && typeof result.then === 'function') {
+      // A rejection releases only its own click.
+      result.then(undefined, () => {
+        if (clicks.current !== click) return;
+        sent.current = false;
+        setClicked((current) => (current === click ? null : current));
+      });
     }
   };
 

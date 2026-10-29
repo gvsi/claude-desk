@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { expect, fn, within } from 'storybook/test';
+import { useState } from 'react';
+import { expect, fn, waitFor, within } from 'storybook/test';
 
 import { chen, rivera } from '../../fixtures';
 import { expectComputed } from '../../test/expectComputed.ts';
@@ -387,5 +388,51 @@ export const ScopeChangedWithoutTargets: Story = {
     if (title === null) throw new Error('No title');
     await expect(title).toHaveTextContent('Payment link Changed');
     await expect(within(title).getByText('Changed')).toBeVisible();
+  },
+};
+
+const FAILED = "We couldn't confirm your change. Nothing changed, so you can try again.";
+
+/**
+ * A screen whose confirm fails every time with the same words: it clears its error when a confirm
+ * starts and shows the same message when it fails, and never sets `pending`.
+ */
+function FailsEveryTime(props: ChangeReviewProps) {
+  const [error, setError] = useState<string | undefined>(undefined);
+  return (
+    <ChangeReview
+      {...props}
+      error={error}
+      onConfirm={() => {
+        void props.onConfirm();
+        setError(undefined);
+        setTimeout(() => setError(FAILED), 0);
+      }}
+    />
+  );
+}
+
+export const RepeatedFailure: Story = {
+  args: { rows: raiseDiscount, confirmLabel: undefined, cancelLabel: undefined },
+  render: (args) => (
+    <div style={{ maxWidth: 960 }}>
+      <FailsEveryTime {...args} />
+    </div>
+  ),
+  parameters: { canvasNote: 'A confirm that fails the same way each time it is tried; no board draws it.' },
+  play: async ({ args, canvas }) => {
+    // Each failure lets the owner try again, even when its words are the same as the last one's.
+    const confirm = canvas.getByRole('button', { name: 'Confirm change' });
+    for (const attempt of [1, 2, 3]) {
+      await waitFor(() => expect(confirm).not.toHaveAttribute('aria-busy'));
+      confirm.click();
+      await expect(args.onConfirm).toHaveBeenCalledTimes(attempt);
+      await waitFor(() => expect(canvas.getByRole('alert')).toHaveTextContent(FAILED));
+    }
+    // A second click while one is in flight still sends nothing.
+    await waitFor(() => expect(confirm).not.toHaveAttribute('aria-busy'));
+    confirm.click();
+    confirm.click();
+    await expect(args.onConfirm).toHaveBeenCalledTimes(4);
   },
 };
