@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { useState } from 'react';
-import { expect, fn } from 'storybook/test';
+import { expect, fn, waitFor } from 'storybook/test';
 
 import type { SessionMode } from '../../../api/contracts.ts';
 import { rivera } from '../../fixtures/index.ts';
@@ -59,6 +59,27 @@ function Screen({ failFirst = false, ...props }: TakeOverBarProps & { failFirst?
       onTakeOver={change('owner', props.onTakeOver)}
       onHandBack={change('ai', props.onHandBack)}
       onResume={change('ai', props.onResume)}
+    />
+  );
+}
+
+/**
+ * The bar as the conversation screen holds it while a change is sent: a press reports to the story
+ * and the change stays pending, so the bar keeps waiting.
+ */
+function SendingScreen(props: TakeOverBarProps) {
+  const [pending, setPending] = useState(false);
+  const send = (report: () => void) => () => {
+    report();
+    setPending(true);
+  };
+  return (
+    <TakeOverBar
+      {...props}
+      pending={pending}
+      onTakeOver={send(props.onTakeOver)}
+      onHandBack={send(props.onHandBack)}
+      onResume={send(props.onResume)}
     />
   );
 }
@@ -191,9 +212,42 @@ export const Sending: Story = {
     await expect(bar).toHaveAttribute('aria-busy', 'true');
     const takeOver = canvas.getByRole('button', { name: 'Take over' });
     await expect(takeOver).toHaveAttribute('aria-disabled', 'true');
+    // Sent from elsewhere, not pressed here: it waits in its busy colors with no spinner.
+    await expect(takeOver).not.toHaveAttribute('aria-busy');
+    await expect(takeOver.querySelector('.cd-button__spinner')).toBeNull();
     await expect(canvas.queryByRole('alert')).toBeNull();
     await userEvent.click(takeOver);
     await expect(args.onTakeOver).not.toHaveBeenCalled();
+  },
+};
+
+export const ResumeSending: Story = {
+  args: { mode: 'paused', visitorName: 'Visitor' },
+  render: (args) => <SendingScreen {...args} />,
+  parameters: {
+    canvas: 'N-Conv-TakeOver',
+    canvasNote:
+      'No board shows a paused chat resuming; only the pressed button spins, as on a held request, and the other waits in its busy colors.',
+  },
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
+    const resume = canvas.getByRole('button', { name: 'Resume Claude' });
+    const takeOver = canvas.getByRole('button', { name: 'Take over' });
+    await userEvent.click(resume);
+    await expect(args.onResume).toHaveBeenCalledTimes(1);
+    await expect(canvasElement.querySelector('.cd-take-over')).toHaveAttribute('aria-busy', 'true');
+    for (const button of [resume, takeOver]) await expect(button).toHaveAttribute('aria-disabled', 'true');
+    // spinner_on_the_pressed_button: Resume Claude spins and keeps focus; Take over can't be pressed,
+    // in its busy colors with no spinner.
+    await expect(resume).toHaveAttribute('aria-busy', 'true');
+    await expect(resume.querySelectorAll('.cd-button__spinner')).toHaveLength(1);
+    await expect(resume).toHaveFocus();
+    await expect(takeOver).not.toHaveAttribute('aria-busy');
+    await expect(takeOver.querySelector('.cd-button__spinner')).toBeNull();
+    await waitFor(() => expectComputed(takeOver, { color: 'rgba(250, 249, 245, 0.64)', backgroundColor: 'rgba(250, 249, 245, 0.1)', opacity: '1' }));
+    await userEvent.click(takeOver);
+    await userEvent.click(resume);
+    await expect(args.onTakeOver).not.toHaveBeenCalled();
+    await expect(args.onResume).toHaveBeenCalledTimes(1);
   },
 };
 

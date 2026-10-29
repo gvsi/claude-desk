@@ -6,6 +6,7 @@ import type { TranscriptTurn } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { ClaudeMessage } from '../ClaudeMessage/ClaudeMessage.tsx';
 import { VisitorMessage } from '../VisitorMessage/VisitorMessage.tsx';
+import { TranscriptRow } from '../TranscriptRow/TranscriptRow.tsx';
 import { Whisper } from '../Whisper/Whisper.tsx';
 import { WritingIndicator } from '../WritingIndicator/WritingIndicator.tsx';
 import { Transcript } from './Transcript.tsx';
@@ -40,10 +41,10 @@ const meta = {
         {dana.turns.map((turn, index) => (
           <Turn key={index} turn={turn} />
         ))}
-        {/* The visitor's side is the right, as on the board; the consumer places the line. */}
-        <div style={{ textAlign: 'right' }}>
-          <WritingIndicator language="en" who={firstName} />
-        </div>
+        {/* Dana types her next message: the typing bubble on her side, where it will appear. */}
+        <TranscriptRow>
+          <WritingIndicator language="en" variant="bubble" who={firstName} />
+        </TranscriptRow>
       </>
     ),
   },

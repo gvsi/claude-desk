@@ -40,14 +40,14 @@ export interface IntroDialogProps {
   submitLabel: string;
   /** Called once with the trimmed passcode. A rejection is ignored; report failures through `error`. */
   onSubmit: (passcode: string) => Promise<void>;
-  /** The demo is starting: the button reads "Starting" and nothing more is submitted. */
+  /** The demo is starting: the button shows the busy spinner, a status line says so, and nothing more is submitted. */
   busy?: boolean;
   /** Why the last try failed, shown as a line under the field. */
   error?: IntroErrorCode;
 }
 
-/** The button's words while the demo starts. */
-const BUSY_LABEL = 'Starting';
+/** What the status line says while the demo starts; the button itself only shows the busy spinner. */
+const STARTING_LINE = 'Starting the demo';
 
 /** What a keyboard can reach, before leaving out what is disabled, hidden or decorative. */
 const TABBABLE =
@@ -213,9 +213,13 @@ export function IntroDialog({ title, intro, thingsToTry, submitLabel, onSubmit, 
                   onChange={(event) => setPasscode(event.target.value)}
                 />
                 <Button variant="primary" size="main" type="submit" disabled={empty} busy={busy}>
-                  {busy ? BUSY_LABEL : submitLabel}
+                  {submitLabel}
                 </Button>
               </div>
+              {/* Always on the page and empty until the demo starts, so the change is announced. */}
+              <p className="cd-sr-only" role="status">
+                {busy ? STARTING_LINE : null}
+              </p>
               {shownError !== undefined ? (
                 <div id={errorId}>
                   <Notice tone="error">{errorLine(shownError)}</Notice>

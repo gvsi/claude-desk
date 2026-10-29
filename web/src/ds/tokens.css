@@ -75,6 +75,7 @@
   --size-nav-row: 36px;
   --size-icon: 20px;
   --size-dot: 6px;
+  --size-spinner: 16px;
   --size-avatar: 28px;
   --size-brand-header: 76px;
   --size-intro: 880px;
@@ -87,6 +88,7 @@
   --motion-ease-emphasis: cubic-bezier(.165,.84,.44,1);
   --motion-breathe: 5s;
   --motion-writing: 1600ms;
+  --motion-spin: 800ms;
   --font-serif: "Source Serif 4", Georgia, serif;
   --font-sans: "Hanken Grotesk", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;

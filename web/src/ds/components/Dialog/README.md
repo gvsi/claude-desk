@@ -26,7 +26,7 @@
 
 ## States
 
-- `pending` while the confirmation is being sent: both buttons wait with `aria-busy` (they keep focus and ignore clicks), the dialog is `aria-busy`, and Escape does nothing. If the request fails, clear `pending` and say so with a `Notice` on the screen.
+- `pending` while the confirmation is being sent: the confirm button shows the busy spinner (`aria-busy`), the cancel button steps to its busy colors without one (`Button`'s `waiting`), both keep focus and ignore clicks, the dialog is `aria-busy`, and Escape does nothing. If the request fails, clear `pending` and say so with a `Notice` on the screen.
 
 ## What the consumer provides
 
@@ -42,6 +42,6 @@
 | `confirmLabel` | `string` | Required. The primary button. |
 | `cancelLabel` | `string` | Required. The secondary button, focused first. |
 | `tone` | `'default' \| 'danger'` | `danger` adds a refused dot beside the title. |
-| `pending` | `boolean` | Both buttons wait with `aria-busy`; Escape does nothing. |
+| `pending` | `boolean` | Confirm spins, cancel waits without a spinner; neither can be pressed, and Escape does nothing. |
 | `onConfirm` | `() => void` | Required. |
 | `onCancel` | `() => void` | Required. The cancel button, Escape, and a close by the browser. |

@@ -1,21 +1,32 @@
 /* Button: one of three weights, two heights, plus the danger variants for answers that refuse.
    Hover fills change at motion-instant; a press shrinks the button slightly at motion-fast.
-   Nothing moves under reduced motion. */
+   Nothing moves under reduced motion.
+
+   A label longer than its line (a phone's, or a narrow column's) wraps inside the button, in
+   balanced lines, and the button grows taller with the same padding: it is never wider than its
+   container, and the vertical padding makes one line exactly size-control (or size-control-main)
+   tall, so a short label looks as it always has. A word wider than the line, such as a long name
+   with no spaces, breaks inside the button too: overflow-wrap anywhere also lets the button's
+   narrowest size break it, so even a button in a row of buttons can't be pushed past its line. */
 
 .cd-button {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: var(--space-6);
   box-sizing: border-box;
-  height: var(--size-control);
+  max-width: 100%;
+  min-height: var(--size-control);
   margin: 0;
-  padding: 0 var(--space-12);
+  padding: calc((var(--size-control) - 1lh) / 2) var(--space-12);
   border: 0;
   border-radius: var(--radius-control);
   background: transparent;
   color: var(--text-primary);
-  white-space: nowrap;
+  text-align: center;
+  text-wrap: balance;
+  overflow-wrap: anywhere;
   text-decoration: none;
   cursor: pointer;
   transition:
@@ -25,8 +36,14 @@
 }
 
 .cd-button--main {
-  height: var(--size-control-main);
-  padding: 0 var(--space-14);
+  min-height: var(--size-control-main);
+  padding: calc((var(--size-control-main) - 1lh) / 2) var(--space-14);
+}
+
+/* The words are one run of text, one flex item: words around a name never come apart from it,
+   and the gap only separates them from a menu button's chevron. */
+.cd-button__label {
+  min-width: 0;
 }
 
 /* Two classes, so the weight wins over .cd-type-control whatever order the stylesheets load in. */
@@ -37,7 +54,7 @@
 }
 
 .cd-button--primary.cd-button--main {
-  padding: 0 var(--space-16);
+  padding-inline: var(--space-16);
 }
 
 /* A menu button: its words, then a 16 px chevron. The chevron's own margin sits inside the icon,
@@ -108,29 +125,17 @@
   transform: scale(0.98);
 }
 
-/* Disabled and busy: no hover, no press. A disabled control is dimmed well down; a busy one only a
-   little, so its label still reads at 4.5:1 and the click visibly registered. */
+/* Disabled and busy: no hover, no press. A disabled control is dimmed well down, unless it is busy
+   too: busy always wins, so its label keeps its busy colors. */
 .cd-button:disabled,
 .cd-button[aria-disabled='true'] {
   cursor: default;
   transform: none;
 }
 
-.cd-button:disabled,
-a.cd-button[aria-disabled='true']:not([aria-busy='true']) {
+.cd-button:disabled:not([aria-busy='true'], .cd-button--waiting),
+a.cd-button[aria-disabled='true']:not([aria-busy='true'], .cd-button--waiting) {
   opacity: 0.4;
-}
-
-.cd-button[aria-busy='true'] {
-  cursor: progress;
-  opacity: 0.6;
-}
-
-/* Red words lose contrast faster as they fade, so the red variants fade less: at 80% their words
-   still read at 4.5:1 inside a card (contrast.ts). */
-.cd-button--danger[aria-busy='true'],
-.cd-button--danger-ghost[aria-busy='true'] {
-  opacity: 0.8;
 }
 
 .cd-button--primary:disabled,
@@ -155,9 +160,80 @@ a.cd-button[aria-disabled='true']:not([aria-busy='true']) {
   background: transparent;
 }
 
+/* Busy: the click registered and the result is on its way. The button steps down in token colors,
+   never dimmed as a whole, so its label color, which its spinner takes, stays a pair listed for a
+   page (bg-app), a card on it (fill-card) and a dialog (bg-surface), and for a ghost button the
+   sidebar (bg-panel) and the reviewer bar (bg-muted); every Button sits on one of them. On them a
+   secondary or ghost label turns text-secondary on the button's own fill (5.3:1 or more), and the
+   primary button's fill turns button-primary-hover (12.2:1, on any ground). No Button sits on
+   bg-selected, where a busy secondary label would read 4.45:1 (guards.test.ts). After the disabled
+   rules, which busy also matches through aria-disabled. */
+.cd-button[aria-busy='true'],
+.cd-button.cd-button--waiting {
+  cursor: progress;
+}
+
+.cd-button--secondary[aria-busy='true'],
+.cd-button--ghost[aria-busy='true'],
+.cd-button--secondary.cd-button--waiting,
+.cd-button--ghost.cd-button--waiting {
+  color: var(--text-secondary);
+}
+
+.cd-button--primary[aria-busy='true'],
+.cd-button--primary.cd-button--waiting {
+  background: var(--button-primary-hover);
+}
+
+/* The red answers keep their red words while busy: the filled one takes its hover fill and the
+   ghost one the hover ground, both listed pairs (contrast.ts). */
+.cd-button--danger[aria-busy='true'],
+.cd-button--danger.cd-button--waiting {
+  background: var(--button-danger-fill-hover);
+}
+
+.cd-button--danger-ghost[aria-busy='true'],
+.cd-button--danger-ghost.cd-button--waiting {
+  background: var(--fill-hover);
+}
+
+/* While busy, a small spinner takes the label's place, in the label's busy color: a faint ring and
+   a quarter arc on it, turning once every motion-spin at an even speed, and still under reduced
+   motion. The label and a menu button's chevron keep their places, unseen, so the button keeps
+   its width and the label still names it. The arc is the busy label color at full strength, so it
+   reads at the busy pair's ratio, 5.3:1 or more, where a graphic needs 3:1; the ring behind it is
+   decoration. Dots are only for someone typing (WritingIndicator). */
+.cd-button[aria-busy='true'] > .cd-button__label {
+  opacity: 0;
+}
+
+.cd-button[aria-busy='true'] > .cd-button__chevron {
+  visibility: hidden;
+}
+
+.cd-button__spinner {
+  position: absolute;
+  inset: 0;
+  width: var(--size-spinner);
+  height: var(--size-spinner);
+  margin: auto;
+  pointer-events: none;
+  animation: cd-button-spin var(--motion-spin) linear infinite;
+}
+
+@keyframes cd-button-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .cd-button {
     transition: none;
+  }
+
+  .cd-button__spinner {
+    animation: none;
   }
 
   .cd-button:active {

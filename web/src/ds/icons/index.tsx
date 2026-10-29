@@ -174,10 +174,12 @@ const SHAPES = {
       <path d="M9 12h6" />
     </>
   ),
+  // A head over shoulders, centered on the grid: the shoulders span 6 to 18 under the head at 12,
+  // and the figure runs from 3.5 to 20.5, so it sits in the middle of a round tile.
   person: (
     <>
-      <circle cx="12" cy="8" r="4" />
-      <path d="M5 21v-1a6 6 0 0 1 12 0v1" />
+      <circle cx="12" cy="7.5" r="4" />
+      <path d="M6 20.5v-1a6 6 0 0 1 12 0v1" />
     </>
   ),
   document: (

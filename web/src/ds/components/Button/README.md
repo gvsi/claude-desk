@@ -18,7 +18,10 @@
 ## What the consumer provides
 
 - The label, in words that say what happens. Never "OK" or "Continue" when a verb can say more, and never an arrow.
-- `busy` while the click's request is in flight. The button keeps focus, dims a little (to 60%, the red variants to 80%, so every label still reads at 4.5:1 in a card), announces `aria-busy` and ignores further clicks; change the label too if the wait is long ("Sending").
+- `busy` while the click's request is in flight. A small spinner takes the label's place, at the same width: the label, and a menu button's chevron, keep their places unseen, so nothing around the button moves. The button steps down to its busy colors (the table below), and the spinner takes its label's busy color: a `size-spinner` (16 px) ring at 30% with a quarter arc on it, both 2 px wide, turning once every `motion-spin` (0.8 s) at an even speed, and a still arc under reduced motion. The button keeps focus, is still named by its label, announces `aria-busy` and `aria-disabled`, and ignores further clicks. If the wait needs words, a status line beside it says them, as a held request's "Sending your answer" does. Dots mean someone is typing (`WritingIndicator`), never a busy button.
+- Every busy color is a listed contrast pair (`contrast.ts`) on the grounds its pairs are listed for: a page (`bg-app`), a card on it (`fill-card` over `bg-app`) and a dialog (`bg-surface`), the sidebar (`bg-panel`) and the reviewer bar (`bg-muted`) too for a ghost button, and a page or a card for the red answers. There the busy label color reads 4.5:1 or more on the busy fill, so the spinner's arc, a graphic that needs 3:1, reads 5.3:1 or more; the faint ring behind it is decoration.
+- A ground for it among those. No Button sits on `bg-selected`, the selected row's ground: a busy secondary label would read 4.45 there and a busy danger one 3.98, so the guard `no_button_on_the_selected_ground` keeps Buttons off it until its pairs are listed, with colors that clear 4.5.
+- `waiting` on the buttons beside a busy one whose request they wait for, such as the other answer on a held request: they step to the same busy colors without the spinner and ignore clicks.
 - `disabled` only when the action can't be taken at all. A disabled button is dimmed and leaves the tab order.
 - For a menu button, `menuOpen` (`true` while its menu shows), an `id` the menu can be labelled by, and `onKeyDown` for the keys that open it. A busy menu button ignores clicks like any busy button; the screen ignores its keys too. Only a button opens a menu: `menuOpen` and `onKeyDown` with `href` are a type error (`ButtonProps` is a union of a button and a link), and a link never takes the menu look.
 
@@ -32,25 +35,28 @@
 | `href` | `string` | Renders an `<a rel="noopener noreferrer">`. A disabled or busy link loses its `href` and says `aria-disabled`. Not with `menuOpen` or `onKeyDown`. |
 | `external` | `boolean` | Only with `href`: adds `target="_blank"` (dropped with the `href` while disabled or busy). Not with `menuOpen`. |
 | `disabled` | `boolean` | Native `disabled`. |
-| `busy` | `boolean` | `aria-busy` and `aria-disabled`; clicks are swallowed. |
+| `busy` | `boolean` | A spinner in place of the label, at the same width; `aria-busy` and `aria-disabled`; clicks are swallowed. Never dimmed as a whole: its colors are listed contrast pairs. |
+| `waiting` | `boolean` | Another button's request is in flight, such as the answer a held request's owner didn't choose: the busy colors without the spinner, its words still shown, `aria-disabled`, and clicks are swallowed. |
 | `menuOpen` | `boolean` | Makes it a menu button: a chevron, `aria-haspopup="menu"`, `aria-expanded`. Leave it out for a plain button. Not on a link. |
 | `id` | `string` | The element's `id`. |
 | `onClick` | `(event) => void` | Not called while disabled or busy. |
 | `onKeyDown` | `(event) => void` | Keys pressed on the button. Not on a link. |
-| `children` | `ReactNode` | The label, in `.cd-type-control` (primary at weight 500). |
+| `children` | `ReactNode` | The label, in `.cd-type-control` (primary at weight 500), held as one run of text, so words around a name stay together and the gap only separates them from a menu button's chevron. |
 
 ## States
 
-| Variant | Rest | Hover | Disabled and busy |
-| --- | --- | --- | --- |
-| `primary` | `button-primary`, `button-primary-text` | `button-primary-hover` | Rest fill |
-| `secondary` | `fill-secondary`, `text-primary` | `fill-secondary-hover` | Rest fill |
-| `ghost` | No fill, `text-primary` | `fill-hover` | No fill |
-| `danger` | `button-danger-fill`, `button-danger-text` | `button-danger-fill-hover` | Rest fill |
-| `danger-ghost` | No fill, `button-danger-text` | `fill-hover` | No fill |
+| Variant | Rest | Hover | Disabled | Busy |
+| --- | --- | --- | --- | --- |
+| `primary` | `button-primary`, `button-primary-text` | `button-primary-hover` | Rest fill | `button-primary-hover`, spinner in `button-primary-text` |
+| `secondary` | `fill-secondary`, `text-primary` | `fill-secondary-hover` | Rest fill | Rest fill, spinner in `text-secondary` |
+| `ghost` | No fill, `text-primary` | `fill-hover` | No fill | No fill, spinner in `text-secondary` |
+| `danger` | `button-danger-fill`, `button-danger-text` | `button-danger-fill-hover` | Rest fill | `button-danger-fill-hover`, spinner in `button-danger-text` |
+| `danger-ghost` | No fill, `button-danger-text` | `fill-hover` | No fill | `fill-hover`, spinner in `button-danger-text` |
 
 A menu button keeps its variant's look, and its hover fill while its menu is open (`aria-expanded="true"`); its padding is `space-14` before the words and `space-10` after the chevron (`space-12` and `space-8` inline), because the icon carries its own margin.
 
-Disabled dims every variant to 40%. Busy dims to 60%, and `danger` and `danger-ghost` to 80%, because red words lose contrast faster as they fade. Focus shows the base stylesheet's 2 px `accent-blue` ring at a 2 px offset on every variant.
+Disabled dims every variant to 40%. Busy never dims, even on a button that is disabled too: busy wins, and each variant steps to its busy colors and shows its spinner, as `busy` above says. Focus shows the base stylesheet's 2 px `accent-blue` ring at a 2 px offset on every variant.
 
-Hover fills change at `motion-instant`; a press scales to 0.98 at `motion-fast` with `motion-ease-emphasis`. Nothing moves under reduced motion.
+A label longer than its line, such as a long name on a phone or in the take-over bar's controls column, wraps inside the button in balanced lines, and the button grows taller with the same padding. A word wider than the line, such as a name with no spaces, breaks inside the button too (`overflow-wrap: anywhere`), even in a row of buttons. It is never wider than its container, and one line of label keeps it exactly `size-control` (or `size-control-main`) tall.
+
+Hover fills change at `motion-instant`; a press scales to 0.98 at `motion-fast` with `motion-ease-emphasis`; a busy spinner turns once every `motion-spin`. Nothing moves under reduced motion.

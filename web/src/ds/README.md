@@ -19,7 +19,7 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 
 - Set pages on `bg-app`. Put the sidebar and side panels on `bg-panel` with a `line-hairline` seam; the composer, menus and popovers on `bg-surface`; quiet fills on `bg-muted`; the active nav row, the segmented control thumb and the initials avatar on `bg-selected`.
 - Set body text and everything Claude says in `text-primary`; captions, meta lines, helper text and receipts in `text-secondary`. Use `text-tertiary` only for placeholders and labels at 13 px and up.
-- Separate regions by fill and a hairline, not by shadow. A card is `fill-card` with a 1 px `line-card` border. Chips, outlined pills and the whisper composer are outlined in `line-control`, `line-control-hover` on hover. The intro's passcode field is outlined in `line-field` (3:1).
+- Separate regions by fill and a hairline, not by shadow. A card is `fill-card` with a 1 px `line-card` border. Chips, outlined pills and the whisper composer are outlined in `line-control`, `line-control-hover` on hover. Outline a text field in `line-field`: its outline is its boundary, so it reaches 3:1 against the ground.
 - Make the primary button `button-primary` with `button-primary-text`, `button-primary-hover` on hover: an inverted neutral, at most one per view. Secondary buttons are `fill-secondary` (`fill-secondary-hover` on hover) with `text-primary`; ghost buttons are transparent with `fill-hover` on hover. Visitor bubbles are `fill-bubble`; count pills and the segmented track are `fill-count`.
 - Give an answer that refuses the red look, and nothing else: `danger` buttons are `button-danger-fill` (`button-danger-fill-hover` on hover) with `button-danger-text`, and `danger-ghost` buttons are transparent with `button-danger-text`. They are the only red controls and the only red words in the system, with the items of Deny's menu on a held request, which use `button-danger-text` on `bg-surface`. Their words say what is refused ("Deny this time", "Always" in Deny's menu), and the red is never a status.
 - Use `accent-blue` only for links, the focus ring and selection. Never put text on it and never use it as decoration.
@@ -51,7 +51,7 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 ### Motion
 
 - Keep transitions between 60 and 200 ms: `motion-instant` for color, `motion-fast` for press feedback, `motion-base` for a check that draws once or a reveal. Ease with `motion-ease`, or `motion-ease-emphasis` for a screen's one small moment. Results that arrive one by one are `motion-stagger` apart.
-- The only loops are `motion-breathe` for presence glyphs and `motion-writing` for the writing indicator.
+- The only loops are `motion-breathe` for presence glyphs, `motion-writing` for the writing indicator's line and typing dots, and `motion-spin` for a busy button's spinner.
 - Allow at most one small moment per screen. Motion explains a change; it never decorates.
 - Under `prefers-reduced-motion: reduce` nothing animates or transitions; the base stylesheet enforces it on every element.
 
@@ -76,7 +76,7 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 
 ## Accessibility
 
-- Every color pair a component uses is listed in `CONTRAST_PAIRS` (`contrast.ts`), and the token tests fail if any falls below its minimum: 4.5:1 for text (3:1 at 24 px and up), and 3:1 for focus rings, status dots and the mark. Translucent grounds are measured over what they sit on, down to an opaque color (a button's fill over a card's fill over the app), and a faded control, such as a busy button, at its own opacity.
+- Every color pair a component uses is listed in `CONTRAST_PAIRS` (`contrast.ts`), and the token tests fail if any falls below its minimum: 4.5:1 for text (3:1 at 24 px and up), and 3:1 for focus rings, status dots and the mark. Translucent grounds are measured over what they sit on, down to an opaque color (a button's fill over a card's fill over the app). A busy button is never faded: it steps to listed colors, so its label is a listed pair too.
 
 Text and links, 4.5:1:
 
@@ -106,7 +106,9 @@ Text and links, 4.5:1:
 
 `button-danger-text` reads 6.1 on `button-danger-fill` and 5.3 on `button-danger-fill-hover` over `fill-card` (6.6 and 5.7 straight on `bg-app`), 7.9 on `fill-card` and 6.7 on `fill-hover` over `fill-card` (8.5 and 7.3 on `bg-app`).
 
-Busy buttons are measured as drawn, faded by their own opacity, in a held request's card: the danger answer (Deny) at 80% reads 4.5 and the secondary answer (Allow) at 60% reads 4.8; a danger-ghost or ghost button there would read 5.6 at the same fades. The red buttons fade less, because red text loses contrast faster.
+Busy buttons step to listed colors instead of fading, and a spinner in the label's busy color takes the label's place. In a held request's card, the busy Allow's `text-secondary` label reads 5.7 on `fill-secondary`, and the busy Deny keeps its red words on `button-danger-fill-hover` at 5.3; a busy ghost or danger-ghost button there would read 7.0 on the card or 6.7 on `fill-hover`. A busy secondary button reads 6.0 on a page and 5.3 on a dialog's `bg-surface`, a busy ghost button 7.3 on a page, 7.0 in the sidebar and 6.4 on the reviewer bar's `bg-muted`, a busy danger or danger-ghost answer 5.7 or 7.3 straight on a page, and the busy primary 12.2 on `button-primary-hover`. Those are the only grounds whose busy pairs are listed, and every Button in the design system sits on one of them. No Button sits on `bg-selected`: a busy secondary label would read 4.45 there and a busy danger one 3.98, so the guard `no_button_on_the_selected_ground` keeps Buttons off it.
+
+The spinner's arc is a graphic, 3:1, drawn in the busy label color at full strength, so it reads at the pairs above: 12.2 on a busy primary; on a busy secondary 6.0 on a page, 5.7 in a card and 5.3 in a dialog; on a busy ghost 7.3 on a page, 7.0 in the sidebar or a card, 6.6 in a dialog and 6.4 on the reviewer bar; on a busy danger answer 5.7 on a page and 5.3 in a card; and on a busy danger-ghost 7.3 on a page, 6.7 in a card and 6.0 in a dialog. The ring behind the arc, the same color at 30%, is decoration: the arc carries it.
 
 In Deny's menu on a held request, `button-danger-text` reads 7.2 on `bg-surface` and 6.0 on `fill-hover` over it (an item hovered or focused). Allow's items use `text-primary` and every item's line `text-secondary`, already listed on `bg-surface` and on `fill-hover` over it.
 
@@ -124,13 +126,13 @@ Focus rings and status dots, 3:1 (`ring-composer` is `accent-blue`):
 
 The mark in `clay` reads 6.5 on `bg-app`, 6.0 on `bg-panel` and 5.5 on `bg-surface` (the intro dialog).
 
-`line-field`, the intro's passcode field outline, reads 3.1 on `bg-surface` and 3.2 on `bg-app` (3:1).
+`line-field`, a text field's outline, reads 3.1 on `bg-surface` and 3.2 on `bg-app` (3:1).
 
 On the intro illustration's light cards, `illustration-ink` reads 16.3 and `illustration-ink-secondary` 5.4 on `illustration-card`, and `illustration-ink` reads 13.1 on `illustration-avatar`. The check and the receipt dots in `illustration-handled` read 4.9 (3:1).
 
 - Don't put `text-tertiary` or a link on `fill-secondary-hover`: those pairs aren't listed.
 - `line-hairline`, `line-card`, `line-control`, `line-control-hover`, `scrim`, `illustration-line` and `illustration-arc` are decorative (`DECORATIVE_COLORS`): they separate, dim or outline things that are identified otherwise, or carry nothing. `line-control` is flagged: it is 2.0:1 on `bg-app`, under the 3:1 for control borders, which is acceptable only because a chip or pill is identified by its own text. Never make an outline the only cue that something is a control.
-- Show focus with a solid 2 px `accent-blue` outline at a 2 px offset on every focusable element; the base stylesheet sets it. The composer shows `ring-composer` when focus is inside it, solid too, because a translucent ring falls under 3:1.
+- Show focus with a solid 2 px `accent-blue` outline at a 2 px offset on every focusable element; the base stylesheet sets it. The composer shows `ring-composer` while its text box has focus, solid too, because a translucent ring falls under 3:1; a button inside the composer shows its own ring instead, so only one ring ever shows.
 - Never show status by color alone: a dot always sits beside words that say the same thing, and the dot is `aria-hidden`.
 - Put replies and receipts inside the transcript's `role="log"` so screen readers announce them. Chat, approvals and take-over all work from the keyboard.
 

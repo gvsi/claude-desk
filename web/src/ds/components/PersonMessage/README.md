@@ -20,6 +20,7 @@
 - Initials on `bg-selected` in a 28 px circle. They are `aria-hidden`, because the name beside them is the text. They are the first letters of the name's first and last words, as written.
 - The name in the meta type at weight 520, then the role, then the words in the message type (15/21). No bubble.
 - The name and the words are marked `data-copy="user"`; the role is interface copy.
+- The frame, the initials and the line that names them over the words, is `PersonFrame`, which `WritingIndicator`'s person form draws too while they type, with three dots where the words will start. Their message then takes its place without moving.
 
 ## Props
 

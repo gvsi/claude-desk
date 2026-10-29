@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, type ReactNode, type Ref } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode, type Ref } from 'react';
 
 import type { SessionMode } from '../../../api/contracts.ts';
 import { Button } from '../Button/Button.tsx';
@@ -70,13 +70,32 @@ export function TakeOverBar({
     if (line && (active == null || active === line.ownerDocument.body)) line.focus();
   }, [mode]);
 
-  const press = (handler: () => void) => () => {
+  // The button pressed here, in this mode, and whether its change has been pending since: while it
+  // is, that button spins and the others wait. It goes when the mode changes or that change ends,
+  // so a change sent from elsewhere makes every button wait, none spinning.
+  const [pressed, setPressed] = useState<{ label: string; mode: SessionMode; pending: boolean } | null>(null);
+  if (pressed !== null) {
+    if (pressed.mode !== mode || (pressed.pending && !pending)) setPressed(null);
+    else if (!pressed.pending && pending) setPressed({ ...pressed, pending: true });
+  }
+  const spinning = pending && pressed !== null && pressed.mode === mode ? pressed.label : null;
+
+  // Button ignores a press while busy or waiting, so this runs only while nothing is pending.
+  const press = (label: string, handler: () => void) => () => {
     pressedHere.current = true;
+    setPressed({ label, mode, pending: false });
     handler();
   };
   // Keyed by its words, so a button never turns into the opposite one under the owner's focus.
   const button = (variant: 'primary' | 'secondary', label: string, handler: () => void) => (
-    <Button key={label} variant={variant} size="main" busy={pending} onClick={press(handler)}>
+    <Button
+      key={label}
+      variant={variant}
+      size="main"
+      busy={spinning === label}
+      waiting={pending && spinning !== label}
+      onClick={press(label, handler)}
+    >
       {label}
     </Button>
   );

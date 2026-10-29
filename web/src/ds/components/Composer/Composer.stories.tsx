@@ -77,6 +77,18 @@ export const Owner: Story = {
     await userEvent.click(input);
     await expect(input).toHaveFocus();
     expectComputed(box, { outlineStyle: 'solid', outlineWidth: '2px', outlineColor: 'rgb(126, 174, 218)', outlineOffset: '2px' });
+    expectComputed(input, { outlineStyle: 'none' });
+
+    // one_focus_ring: a control inside the composer shows its own ring, and the box shows none, so
+    // there is never a ring inside a ring.
+    await userEvent.tab();
+    const attach = canvas.getByRole('button', { name: 'Add a photo or file' });
+    await expect(attach).toHaveFocus();
+    expectComputed(attach, { outlineStyle: 'solid', outlineWidth: '2px', outlineColor: 'rgb(126, 174, 218)', outlineOffset: '2px' });
+    expectComputed(box, { outlineStyle: 'none' });
+    await userEvent.tab({ shift: true });
+    await expect(input).toHaveFocus();
+    expectComputed(box, { outlineStyle: 'solid', outlineColor: 'rgb(126, 174, 218)' });
 
     // enter_sends_shift_enter_newlines: Shift+Enter starts a new line; Enter sends the trimmed text and clears.
     await userEvent.keyboard('  Raise my cash discount limit');

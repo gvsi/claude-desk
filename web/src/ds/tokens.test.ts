@@ -196,14 +196,31 @@ describe('design tokens', () => {
     // The same buttons straight on the app background.
     add(['button-danger-text'], ['bg-app'], 4.5);
     add(['button-danger-text'], ['button-danger-fill', 'button-danger-fill-hover', 'fill-hover'], 4.5, 'bg-app');
-    // Every answer while it is sent: each busy button, faded by its own opacity over the card,
-    // still reads at 4.5:1.
-    add(['button-danger-text'], ['button-danger-fill', 'transparent'], 4.5, 'fill-card', 'bg-app', 0.8);
-    add(['text-primary'], ['fill-secondary', 'transparent'], 4.5, 'fill-card', 'bg-app', 0.6);
+    // Every answer while it is sent, in its card: a busy danger answer on its hover fill or the
+    // hover ground (listed above), a busy secondary answer's text-secondary label on its fill.
+    add(['text-secondary'], ['fill-secondary'], 4.5, 'fill-card', 'bg-app');
+    // A busy button: a secondary one's label in text-secondary on its fill, on a page and in a
+    // dialog; a ghost one's on the ground under it; the primary's label on its hover fill.
+    add(['text-secondary'], ['fill-secondary'], 4.5, 'bg-app');
+    add(['text-secondary'], ['fill-secondary'], 4.5, 'bg-surface');
+    add(['text-secondary'], ['bg-app', 'bg-panel', 'bg-surface', 'bg-muted'], 4.5);
+    add(['button-primary-text'], ['button-primary-hover'], 4.5);
     // Deny's menu on a held request: its answers in red words on the raised surface, at rest and
     // while one is hovered or has focus.
     add(['button-danger-text'], ['bg-surface'], 4.5);
     add(['button-danger-text'], ['fill-hover'], 4.5, 'bg-surface');
+    // A busy button's spinner, a graphic (3:1) in its busy label color, on every ground its busy pair
+    // is listed for: the primary's on its own fill, a secondary's on its fill on a page, a dialog and
+    // a card, a ghost's on the page, the sidebar, a dialog, the reviewer bar and a card, and the red
+    // answers' on their busy grounds on a page and in a card (danger-ghost in a dialog too).
+    add(['button-primary-text'], ['button-primary-hover'], 3);
+    for (const over of ['bg-app', 'bg-surface']) add(['text-secondary'], ['fill-secondary'], 3, over);
+    add(['text-secondary'], ['fill-secondary'], 3, 'fill-card', 'bg-app');
+    add(['text-secondary'], ['bg-app', 'bg-panel', 'bg-surface', 'bg-muted'], 3);
+    add(['text-secondary'], ['fill-card'], 3, 'bg-app');
+    add(['button-danger-text'], ['button-danger-fill-hover', 'fill-hover'], 3, 'bg-app');
+    add(['button-danger-text'], ['button-danger-fill-hover', 'fill-hover'], 3, 'fill-card', 'bg-app');
+    add(['button-danger-text'], ['fill-hover'], 3, 'bg-surface');
 
     // Every required pair is listed, at no lower a minimum, so dropping one can't pass.
     for (const want of required) {
@@ -278,7 +295,7 @@ describe('design tokens', () => {
   });
 
   test('motion_stays_in_range', () => {
-    const loops = ['motion-breathe', 'motion-writing'];
+    const loops = ['motion-breathe', 'motion-writing', 'motion-spin'];
     const easings = ['motion-ease', 'motion-ease-emphasis'];
     const names = tokens.motion.tokens.map((t) => t.name);
     for (const name of [...loops, ...easings]) expect(names).toContain(name);

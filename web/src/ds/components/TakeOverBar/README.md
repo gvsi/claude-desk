@@ -21,7 +21,7 @@ A mode this build doesn't know shows the `ai` bar, which offers only Take over. 
 
 - `mode` from the session, `visitorName` as the screen names the visitor (`whoLabel`), and `ownerName`, the business's `owner_display_name`, which the visitor sees. Both names are shown as people's own words (`data-copy="user"`). The visitor may have chosen their name, so it is set off as user text (`.cd-user-name`) and starts each line it is in: no sentence of the bar's own runs into it.
 - `onTakeOver`, `onHandBack` and `onResume`, which call the API's take-over, hand-back and resume routes (the kernel's `POST /sessions/{id}/mode` behind them).
-- `pending` while the change is sent: every control waits, with `aria-busy` on the bar.
+- `pending` while the change is sent: every control waits, unpressable, with `aria-busy` on the bar. The button pressed here shows the busy spinner and the others step to their busy colors without one (`Button`'s `waiting`); a change the screen reports as sent from elsewhere spins none.
 - `error`, the screen's line for a change that failed (`errorCopy`), shown as an alert. It gives way to the next attempt while that is pending.
 - Held `ApprovalCard`s stay answerable in every mode.
 
@@ -36,7 +36,7 @@ A mode this build doesn't know shows the `ai` bar, which offers only Take over. 
 | `onTakeOver` | `() => void` | Required. |
 | `onHandBack` | `() => void` | Required. |
 | `onResume` | `() => void` | Required. |
-| `pending` | `boolean` | Every control waits. |
+| `pending` | `boolean` | Every control waits; only the one pressed here spins. |
 | `error` | `string` | The screen's line. |
 
 The lines take a `size-reading` column, in line with the transcript's rows above them, and the controls a `size-margin` column beside them; below the two columns' width the controls wrap under the lines. The buttons are `size-control-main`. When the mode changes under a button that had focus, focus moves to the bar's first line, and a button never turns into the opposite one under focus.

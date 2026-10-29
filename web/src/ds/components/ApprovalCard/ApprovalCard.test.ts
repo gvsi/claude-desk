@@ -6,7 +6,7 @@ import type { ApprovalAnswer } from '../../../api/contracts.ts';
 import { rivera } from '../../fixtures/index.ts';
 import { ApprovalCard } from './ApprovalCard.tsx';
 
-/** The card's answer buttons, as markup, for a held request that offers `answers`. */
+/** The words on the card's answer buttons, as markup, for a held request that offers `answers`. */
 function answerMarkup(answers: ApprovalAnswer[], personName?: string): string[] {
   const html = renderToStaticMarkup(
     createElement(ApprovalCard, {
@@ -17,7 +17,7 @@ function answerMarkup(answers: ApprovalAnswer[], personName?: string): string[] 
     }),
   );
   const doc = new DOMParser().parseFromString(html, 'text/html');
-  return [...doc.querySelectorAll('[role="group"] button')].map((button) => button.innerHTML.replace(/<svg.*<\/svg>/, ''));
+  return [...doc.querySelectorAll('[role="group"] button .cd-button__label')].map((label) => label.innerHTML);
 }
 
 describe('ApprovalCard words', () => {

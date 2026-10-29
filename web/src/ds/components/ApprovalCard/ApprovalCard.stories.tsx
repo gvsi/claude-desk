@@ -88,6 +88,39 @@ function tops(elements: readonly HTMLElement[]): number[] {
 /** A 390 px phone's line: the screen less two 16 px gutters. */
 const PHONE_LINE = 358;
 
+/** A verified person's long name, on Allow's only answer: a plain button with long words. */
+const LONG_NAME = 'María Guadalupe Fernández de la Torre';
+const longNameArgs = {
+  ...saturdayArgs,
+  decision: { ...heldVerified, answers: ['allow_person', 'deny_once'] },
+  personName: LONG_NAME,
+} satisfies Partial<ApprovalCardProps>;
+
+/** Every answer's words stay inside its button, and every button inside the card's answers. */
+async function expectAnswersInside(card: HTMLElement): Promise<void> {
+  const group = within(card).getByRole('group', { name: 'Your answer' });
+  const row = group.querySelector<HTMLElement>('.cd-approval-card__row');
+  if (!row) throw new Error('no answer row');
+  const edge = group.getBoundingClientRect();
+  await expect(row.scrollWidth).toBeLessThanOrEqual(row.clientWidth);
+  await expect(edge.right).toBeLessThanOrEqual(card.getBoundingClientRect().right);
+  for (const button of answerButtons(card)) {
+    const box = button.getBoundingClientRect();
+    await expect(button.scrollWidth).toBeLessThanOrEqual(button.clientWidth);
+    await expect(button.scrollHeight).toBeLessThanOrEqual(button.clientHeight);
+    await expect(box.left).toBeGreaterThanOrEqual(edge.left - 0.5);
+    await expect(box.right).toBeLessThanOrEqual(edge.right + 0.5);
+    const range = document.createRange();
+    range.selectNodeContents(button);
+    for (const line of [...range.getClientRects()].filter((rect) => rect.width > 0)) {
+      await expect(line.left).toBeGreaterThanOrEqual(box.left - 0.5);
+      await expect(line.right).toBeLessThanOrEqual(box.right + 0.5);
+      await expect(line.top).toBeGreaterThanOrEqual(box.top - 0.5);
+      await expect(line.bottom).toBeLessThanOrEqual(box.bottom + 0.5);
+    }
+  }
+}
+
 /** The card's one status dot. */
 function dotIn(root: HTMLElement): HTMLElement {
   const dots = root.querySelectorAll<HTMLElement>('.cd-status-dot');
@@ -670,6 +703,61 @@ export const MenuOnAPhone: Story = {
   },
 };
 
+export const LongNameOnAPhone: Story = {
+  args: longNameArgs,
+  render: (args) => (
+    <div data-testid="phone-line" style={{ width: PHONE_LINE, maxWidth: '100%' }}>
+      <ApprovalCard {...args} />
+    </div>
+  ),
+  parameters: {
+    canvasNote: `${ANSWERS_BOARD} No board shows a long name on a plain answer; on a phone it can't share the line, so Allow takes a line of its own, as many lines of words tall as it needs, and Deny the next, and nothing leaves its button or the card.`,
+  },
+  play: async ({ canvas }) => {
+    const card = canvas.getByRole('article');
+    const group = within(card).getByRole('group', { name: 'Your answer' }).getBoundingClientRect();
+    const [allow, deny] = answerButtons(card) as [HTMLElement, HTMLElement];
+    await expect(allow).toHaveAccessibleName(`Allow only for ${LONG_NAME}, always`);
+    await expect(deny).toHaveAccessibleName('Deny this time');
+
+    // long_answer_stays_in_its_button: each answer is a full-width line; the long one wraps its
+    // words and grows, and Deny keeps 44 px.
+    const [left, right] = [allow.getBoundingClientRect(), deny.getBoundingClientRect()];
+    await expect(right.top).toBeGreaterThanOrEqual(left.bottom);
+    await expect(left.width).toBe(group.width);
+    await expect(right.width).toBe(group.width);
+    await expect(left.height).toBeGreaterThan(44);
+    await expect(right.height).toBe(44);
+    await expectAnswersInside(card);
+    await expect(canvas.getByTestId('phone-line').scrollWidth).toBeLessThanOrEqual(PHONE_LINE);
+  },
+};
+
+export const LongNameInAWideCard: Story = {
+  args: longNameArgs,
+  render: (args) => (
+    <div data-testid="wide-card" style={{ width: 500, maxWidth: '100%' }}>
+      <ApprovalCard {...args} />
+    </div>
+  ),
+  parameters: {
+    canvasNote: `${ANSWERS_BOARD} No board shows a long name on a plain answer; in a 500 px card it can't sit beside Deny this time, so Deny moves to the next line instead of past the card.`,
+  },
+  play: async ({ canvas }) => {
+    const card = canvas.getByRole('article');
+    const [allow, deny] = answerButtons(card) as [HTMLElement, HTMLElement];
+    await expect(allow).toHaveAccessibleName(`Allow only for ${LONG_NAME}, always`);
+    // long_answer_stays_in_its_button: Deny goes under Allow, at the start of the line, and keeps
+    // its one-line height.
+    const [left, right] = [allow.getBoundingClientRect(), deny.getBoundingClientRect()];
+    await expect(right.top).toBeGreaterThanOrEqual(left.bottom);
+    await expect(right.left).toBe(left.left);
+    expectComputed(deny, { height: '40px' });
+    await expectAnswersInside(card);
+    await expect(canvas.getByTestId('wide-card').scrollWidth).toBeLessThanOrEqual(500);
+  },
+};
+
 export const DragOffTheButton: Story = {
   args: consultationArgs,
   parameters: {
@@ -783,6 +871,13 @@ export const SendingStartsWhileOpen: Story = {
     await expect(deny).toHaveFocus();
     await expect(deny).toHaveAttribute('aria-expanded', 'false');
     await expect(deny).toHaveAttribute('aria-disabled', 'true');
+    // No answer was chosen here, so neither button shows the busy spinner: both wait in their busy
+    // colors, and the line under them says what is happening.
+    for (const button of answerButtons(canvasElement)) {
+      await expect(button).toHaveAttribute('aria-disabled', 'true');
+      await expect(button).not.toHaveAttribute('aria-busy');
+      await expect(button.querySelector('.cd-button__spinner')).toBeNull();
+    }
 
     // That answer fails and the answers come back: the menu stays closed until the owner opens it.
     updateScreen(canvasElement, { pending: false, error: true });
@@ -831,7 +926,7 @@ export const SendingYourAnswer: Story = {
   args: refundArgs,
   render: (args) => <SendingScreen {...args} />,
   parameters: {
-    canvasNote: `${ANSWERS_BOARD} No board shows an answer being sent; both controls wait, faded a little, and a line under them says so.`,
+    canvasNote: `${ANSWERS_BOARD} The N-Typing-Owner-Busy board and the owner's spinner decision show an answer being sent: the chosen answer shows the busy spinner, the other waits in its busy colors without one, and a line under them says so.`,
   },
   play: async ({ args, canvas, canvasElement, userEvent }) => {
     const [allow, deny] = answerButtons(canvasElement) as [HTMLElement, HTMLElement];
@@ -855,16 +950,32 @@ export const SendingYourAnswer: Story = {
     await expect(deny).toHaveAttribute('aria-expanded', 'false');
     await expect(args.onAnswer).toHaveBeenCalledTimes(1);
 
-    // Both controls wait, and a line under them says so.
+    // Neither control can be pressed, and a line under them says the answer is being sent.
     const group = canvas.getByRole('group', { name: 'Your answer' });
     await expect(group).toHaveAttribute('aria-busy', 'true');
     await expect(canvas.getByText('Sending your answer').closest('[role="status"]')).not.toBeNull();
     for (const button of answerButtons(canvasElement)) await expect(button).toHaveAttribute('aria-disabled', 'true');
 
-    // Each keeps its look, faded: Allow to 60%, the red Deny only to 80%, so its words still read
-    // at 4.5:1 in the card.
-    expectComputed(allow, { ...SECONDARY, opacity: '0.6' });
-    expectComputed(deny, { ...DANGER, opacity: '0.8' });
+    // spinner_on_the_chosen_answer: Deny, the side chosen, shows the busy spinner in place of its word
+    // and chevron, and stays named "Deny"; Allow waits without one, its word and chevron still shown.
+    await expect(deny).toHaveAttribute('aria-busy', 'true');
+    await expect(deny).toHaveAccessibleName('Deny');
+    await expect(deny.querySelectorAll('.cd-button__spinner')).toHaveLength(1);
+    expectComputed(deny.querySelector('.cd-button__label') as HTMLElement, { opacity: '0' });
+    expectComputed(deny.querySelector('.cd-button__chevron') as SVGElement, { visibility: 'hidden' });
+    await expect(allow).not.toHaveAttribute('aria-busy');
+    await expect(allow.querySelector('.cd-button__spinner')).toBeNull();
+    expectComputed(allow.querySelector('.cd-button__label') as HTMLElement, { opacity: '1' });
+    expectComputed(allow.querySelector('.cd-button__chevron') as SVGElement, { visibility: 'visible' });
+
+    // Each steps to its busy colors, never dimmed, so its words or spinner still read in the card:
+    // Allow's label turns text-secondary on its fill, and the red Deny keeps its color on its hover
+    // fill. They step over the instant color transition, so wait for it to end.
+    const BUSY_LABEL = 'rgba(250, 249, 245, 0.64)';
+    await waitFor(() => {
+      expectComputed(allow, { ...SECONDARY, color: BUSY_LABEL, opacity: '1' });
+      expectComputed(deny, { ...DANGER, backgroundColor: 'rgba(220, 130, 144, 0.24)', opacity: '1' });
+    });
   },
 };
 

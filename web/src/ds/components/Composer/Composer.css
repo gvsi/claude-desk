@@ -1,5 +1,6 @@
 /* Composer: a raised surface at the composer radius, an inset hairline and the composer's shadow.
-   The whole box takes the focus ring while its text box has focus. */
+   The whole box takes the focus ring while its text box has focus, and only then: a button inside
+   it shows its own ring, so there is never a ring inside a ring. */
 
 .cd-composer {
   display: flex;
@@ -19,7 +20,7 @@
 }
 
 /* The canvas's 55% ring is 2.9:1, so the composer takes the full focus ring instead. */
-.cd-composer__box:focus-within {
+.cd-composer__box:has(> .cd-composer__input:focus) {
   outline: 2px solid var(--ring-composer);
   outline-offset: 2px;
 }
