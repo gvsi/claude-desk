@@ -1,0 +1,62 @@
+/* TranscriptRow and TranscriptHeader: the reading column and the margin column beside it, as on
+   the conversation boards. The margin sits at the right edge of the content, at least space-24
+   from the message. */
+
+.cd-transcript-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-24);
+  min-width: 0;
+}
+
+.cd-transcript-row__main {
+  flex: 0 1 var(--size-reading);
+  min-width: 0;
+}
+
+.cd-transcript-row__margin {
+  display: flex;
+  flex: 0 1 var(--size-margin);
+  flex-direction: column;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+/* Each margin starts where its message's first line does, so a 17 px caption line sits level
+   with it: 3 px into a 23 px serif reply line, 10 px into a bubble (8 px of padding, then a
+   21 px line), at the top for a message with a caption above it. */
+.cd-transcript-row--reply > .cd-transcript-row__margin {
+  padding-top: 3px;
+}
+
+.cd-transcript-row--bubble > .cd-transcript-row__margin {
+  padding-top: var(--space-10);
+}
+
+.cd-transcript-row--top > .cd-transcript-row__margin {
+  padding-top: 0;
+}
+
+.cd-transcript-header__caption {
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* A transcript narrower than the two columns and their gap (640 + 24 + 220 px): the margin goes
+   under the message, full width. */
+@container cd-transcript (width < 884px) {
+  .cd-transcript-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-8);
+  }
+
+  .cd-transcript-row > .cd-transcript-row__main,
+  .cd-transcript-row > .cd-transcript-row__margin {
+    flex: none;
+    width: 100%;
+    padding-top: 0;
+  }
+}

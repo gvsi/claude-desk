@@ -63,5 +63,25 @@ export { Whisper, type WhisperProps } from './components/Whisper/Whisper.tsx';
 export { SystemLine, type SystemLineProps } from './components/SystemLine/SystemLine.tsx';
 export { WritingIndicator, type WritingIndicatorProps } from './components/WritingIndicator/WritingIndicator.tsx';
 
+// Margin receipts
+export {
+  TranscriptHeader,
+  TranscriptRow,
+  type TranscriptHeaderProps,
+  type TranscriptRowProps,
+} from './components/TranscriptRow/TranscriptRow.tsx';
+export { MarginReceipt, type MarginReceiptProps } from './components/MarginReceipt/MarginReceipt.tsx';
+export {
+  receiptFromEvent,
+  receiptTone,
+  type ReceiptSource,
+  type ReceiptView,
+} from './components/MarginReceipt/receiptTone.ts';
+export { MarginNote, type MarginNoteProps } from './components/MarginNote/MarginNote.tsx';
+
+// Safety
+export { FullTrace, type FullTraceProps } from './components/FullTrace/FullTrace.tsx';
+export { ChainStatus, type ChainStatusProps } from './components/ChainStatus/ChainStatus.tsx';
+
 // Icons
 export { Icon, ICON_NAMES, type IconName, type IconProps, type IconSize } from './icons/index.tsx';

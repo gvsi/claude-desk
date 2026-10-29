@@ -1,0 +1,86 @@
+/* FullTrace: one ledger entry opened, in the bordered style of the Safety board's closed "Full
+   trace" row. No fill of its own, so it reads the same on a page, a panel or a dialog. */
+
+.cd-full-trace {
+  min-width: 0;
+  padding: var(--space-8) var(--space-8) var(--space-14) var(--space-14);
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-control);
+  color: var(--text-primary);
+}
+
+/* Zero specificity, so each part's own margin below wins. */
+:where(.cd-full-trace) :where(p, dl, dd, pre) {
+  margin: 0;
+}
+
+.cd-full-trace__top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.cd-full-trace__title {
+  flex: 1;
+  min-width: 0;
+}
+
+.cd-full-trace__plain {
+  margin-top: var(--space-2);
+  padding-right: var(--space-6);
+}
+
+/* The record: labels in a secondary caption, values in mono, two columns on any width. */
+.cd-full-trace__fields {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: baseline;
+  gap: var(--space-4) var(--space-16);
+  margin-top: var(--space-12);
+  padding-right: var(--space-6);
+}
+
+.cd-full-trace__field {
+  display: contents;
+}
+
+.cd-full-trace__label {
+  color: var(--text-secondary);
+}
+
+.cd-full-trace__value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The recorded summary takes the full width under its label. */
+.cd-full-trace__field--block > .cd-full-trace__label,
+.cd-full-trace__field--block > .cd-full-trace__value {
+  grid-column: 1 / -1;
+}
+
+.cd-full-trace__field--block > .cd-full-trace__label {
+  margin-top: var(--space-8);
+}
+
+.cd-full-trace__summary {
+  padding-left: var(--space-12);
+  border-left: 1px solid var(--line-hairline);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.cd-full-trace__chain {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin-top: var(--space-14);
+  padding-top: var(--space-12);
+  border-top: 1px solid var(--line-hairline);
+  color: var(--text-secondary);
+}
+
+.cd-full-trace__key {
+  margin-top: var(--space-4);
+  color: var(--text-secondary);
+}
