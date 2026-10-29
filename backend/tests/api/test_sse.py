@@ -58,7 +58,7 @@ async def test_seq_is_per_session_and_gapless(engine):
     seqs = await asyncio.gather(*(append(ids) for ids in sessions))
 
     for ids in (SESSION_A, SESSION_B):
-        assert sorted(seq for seq, owner in zip(seqs, sessions) if owner == ids) == list(range(1, 11))
+        assert sorted(seq for seq, owner in zip(seqs, sessions, strict=True) if owner == ids) == list(range(1, 11))
         async with engine.connect() as conn:
             stored = (await conn.execute(text("SELECT seq FROM app.run_events WHERE session_id = :s ORDER BY seq"),
                                          {"s": ids.session_id})).scalars().all()

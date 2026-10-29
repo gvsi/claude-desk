@@ -481,3 +481,31 @@ async def test_unscoped_reads_take_the_copy_from_the_apis_rows(api_conn, kernel_
     assert sorted((row["decision_id"], row["copy_id"], row["state"]) for row in found) == sorted(
         [(holds[0].decision_id, first.ids.copy_id, "held"), (holds[1].decision_id, second.ids.copy_id, "held")])
     assert await due_decisions(api_conn, [], ro_schema) == []
+
+
+async def test_fresh_context_restates_the_desk_context_once(api_conn, visitor, ro_schema):
+    ids = visitor.ids
+    context = await visitor.kernel.call("GET /context/{session_id}?desk_id=", path={"session_id": ids.session_id})
+    facts = context_text(context.facts, context.knowledge)
+    await start_fresh_context(api_conn, ids, TOOLS)
+    await append_message(api_conn, ids, "desk_context", text=facts)
+    await append_message(api_conn, ids, "visitor_text", text="When are you open?")
+    await prepare_model_input(api_conn, ids.session_id)
+    await append_assistant(api_conn, ids, [{"type": "text", "text": "Let me show you."}])
+    # the owner says something, delivered and waiting for the model, as the context starts afresh
+    draft = ReplyDraft(session_id=ids.session_id, generation=0, prose="I can come by at noon.")
+    said = await visitor.kernel.call("POST /check_reply", CheckReplyRequest(draft=draft))
+    await deliver(api_conn, ids, Reply(said, "owner", "owner"), ro_schema=ro_schema)
+    await append_message(api_conn, ids, "owner_say", text="I can come by at noon.")
+
+    await start_fresh_context(api_conn, ids, TOOLS)
+    await append_message(api_conn, ids, "visitor_text", text="Great, thanks.")
+    first = (await prepare_model_input(api_conn, ids.session_id)).messages[0]["content"]
+
+    texts = [block["text"] for block in first]
+    assert texts[0].startswith("<conversation_so_far>")
+    assert "owner (shown to the visitor): I can come by at noon." in texts[0]
+    assert sum("I can come by at noon." in text for text in texts) == 1          # the say, once
+    assert [text.split(">", 1)[0] for text in texts[1:]] == ["<desk_context", "<visitor_message"]
+    assert texts[1] == wrap("desk_context", facts)                               # the facts, again in this context
+    assert await last_context_hash(api_conn, ids.session_id) == context_hash(facts)

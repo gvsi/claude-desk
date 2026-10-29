@@ -270,15 +270,23 @@ async def _summary(conn: AsyncConnection, session_id: str) -> str:
 
 async def start_fresh_context(conn: AsyncConnection, ids: Ids, tools: list[dict]) -> int:
     """Open a new model context with these frozen tools and, after the first context, the code-built summary.
-    Tool changes still waiting belong to the context they were written for and close it unsent."""
+
+    What the old context was still waiting for closes it unsent: tool changes (the new tools supersede them)
+    and says (the summary carries them, from their delivered rows). The last desk context is stated again,
+    since the facts Claude cites must be in the context it answers from."""
     await _lock_transcript(conn, ids.session_id)
     await _refuse_open_tool_use(conn, ids.session_id)
     current = await _current_context(conn, ids.session_id)
     summary = None
     if current is not None:
-        stale = [row.n for row in await _pending(conn, ids.session_id) if row.kind == "tool_change"]
-        await _place(conn, stale, current, await _next_seq(conn, ids.session_id))
+        closing = [row.n for row in await _pending(conn, ids.session_id) if row.kind in ("tool_change", "owner_say")]
+        await _place(conn, closing, current, await _next_seq(conn, ids.session_id))
         summary = await _summary(conn, ids.session_id)
+        facts = (await conn.execute(select(MESSAGES.c.text, MESSAGES.c.model_seq).where(
+            MESSAGES.c.session_id == ids.session_id, MESSAGES.c.kind == "desk_context")
+            .order_by(MESSAGES.c.n.desc()).limit(1))).first()
+        if facts is not None and facts.model_seq is not None:
+            await append_message(conn, ids, "desk_context", text=facts.text)
     return await _insert(conn, ids, kind="context_start", author="api", visibility="model",
                          model_context=0 if current is None else current + 1,
                          model_seq=await _next_seq(conn, ids.session_id),

@@ -78,7 +78,7 @@ async def spent_today_cents(conn: AsyncConnection, clock: Callable[[], datetime]
     dollars = Fraction(0)
     for model, *tokens in rows:
         prices = PRICES_PER_MTOK.get(model, HIGHEST_PRICES)
-        dollars += sum((Fraction(int(count)) * price for count, price in zip(tokens, prices)), Fraction(0)) / 1_000_000
+        dollars += sum((Fraction(int(count)) * price for count, price in zip(tokens, prices, strict=True)), Fraction(0)) / 1_000_000
     return ceil(dollars * 100)
 
 
