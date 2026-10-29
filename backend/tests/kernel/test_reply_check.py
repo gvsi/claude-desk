@@ -27,6 +27,7 @@ from desk.db.models import Fact as FactRow
 from desk.kernel_api import PublicDesk
 from desk.kernel_service import lang, ledger
 
+from .fakes import FakeDecisions
 from .helpers import kernel_ctx, ledger_rows, rows_of
 from .test_adapters import Rivera, book, quote_args, visitor_of
 from .test_approvals import answered
@@ -86,7 +87,8 @@ async def test_clean_prose_with_a_quote_card_passes(app, client):
     assert (entry.seq, entry.event.session_id, entry.event.ref_id) == (verdict.ledger_seq, visitor.session_id,
                                                                       verdict.message_id)
     assert entry.event.summary == {"message_id": verdict.message_id, "author": "claude", "ok": True, "language": "en",
-                                   "violations": [], "rule_ids": [], "fact_ids": [quote.fact_id], "soft_promise": None}
+                                   "violations": [], "rule_ids": [], "fact_ids": [quote.fact_id],
+                                   "soft_promise": FakeDecisions.SOFT_USAGE | {"status": "ok"}}   # the check passed it
     assert (await session_of(app, copy, visitor)).last_language == "en"
 
 

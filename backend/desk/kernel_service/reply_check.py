@@ -13,7 +13,11 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    Desk's document canaries.
 4. Each clause renders from a fact this session may read, current, of the template's kind and ID,
    with no canary in what it renders.
-5. (The soft-promise check, Task 17.)
+5. The soft-promise check, only when steps 2 to 4 found nothing and there is prose: Haiku 5.5
+   reads the prose and the cards' texts (never the visitor's words) and flags a promise the cards
+   don't hold (`soft.promise`) or prose that says or suggests the writer is a human
+   (`soft.denies_ai`). No verdict (a timeout, an error, a refusal, an unparsable answer) blocks
+   too (`soft.unavailable`).
 6. `ok` when nothing was found: the prose (when not empty) and the cards; otherwise only the
    handoff clause, in the reply's language.
 7. `finalize`: the session keeps a detected language for its next reply and status lines, and
@@ -46,7 +50,7 @@ from desk.db.models import Fact as FactRow
 from desk.kernel_api import CheckReplyRequest
 from desk.kernel_service import auth, labels, lang, ledger, render
 from desk.kernel_service.auth import AuthError, Named, SessionRow
-from desk.kernel_service.decisions import CallUsage
+from desk.kernel_service.decisions import CallUsage, SoftPromiseInput
 from desk.kernel_service.render.cards import DeskInfo, slot_claims
 from desk.kernel_service.repo import Ctx, KernelCtx, new_id, route_template
 
@@ -387,6 +391,10 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
     violations += scan_prose(draft.prose, canaries)
     cards, refused = await check_clauses(ctx, session_row, desk_id, desk, draft.clauses, language, canaries)
     violations += refused
+    usage = None
+    if not violations and prose.strip():
+        found, usage = await soft_promises(ctx, language, prose, cards)
+        violations += found
     if violations:
         blocks = [handoff(language, desk)]
     else:
@@ -394,7 +402,23 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
     if detected in ("en", "es"):
         session_row.last_language = detected
     return await finalize(ctx, session_row, blocks=blocks, violations=violations, language=language,
-                          author="claude", fact_ids=fact_ids)
+                          author="claude", fact_ids=fact_ids, soft_promise=usage)
+
+
+async def soft_promises(ctx: KernelCtx, language: render.Language, prose: str,
+                        cards: Sequence[RenderedBlock]) -> tuple[list[Violation], CallUsage | None]:
+    """Step 5: the soft-promise check on prose the scan passed and the cards rendered for it. A
+    `soft_promise` violation per flag set (`soft.promise`, `soft.denies_ai`), or `soft.unavailable`
+    when there is no verdict, each spanning the prose's start; and the call's usage, for the
+    ledger."""
+    verdict, usage = await ctx.decisions.soft_promise(
+        SoftPromiseInput(language=language, prose=prose, cards=[card.text for card in cards]))
+    if verdict is None:
+        rule_ids = ["soft.unavailable"]
+    else:
+        rule_ids = (["soft.promise"] if verdict.promises_beyond_cards else []) + (
+            ["soft.denies_ai"] if verdict.denies_being_ai else [])
+    return [Violation(kind="soft_promise", span=_span(prose), rule_id=rule_id) for rule_id in rule_ids], usage
 
 
 def sign_verdict(signer: desk_kernel.Signer, *, session_id: str, generation: int, message_id: str,

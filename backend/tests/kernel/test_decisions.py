@@ -23,7 +23,7 @@ from desk.kernel_service import decisions
 from desk.kernel_service.app import KernelSettings, create_app
 from desk.kernel_service.decisions import (REVIEW_SCHEMA, REVIEW_SYSTEM, AnthropicDecisions, OfflineDecisions,
                                            ReviewAction, ReviewCard, Reviewed, ReviewFact, ReviewInput,
-                                           make_decisions)
+                                           SoftPromiseInput, SoftPromiseVerdict, make_decisions)
 from desk.kernel_service.repo import kernel_transaction
 
 from .conftest import NO_PROVER, START
@@ -201,6 +201,10 @@ async def test_test_hooks_are_refused_in_production(hook, monkeypatch):
 
 async def test_offline_backend_reviews_nothing(monkeypatch):
     assert await OfflineDecisions().review(review_input()) == Reviewed(review=None, usage=None)   # no call, no usage
+    # and passes every reply's soft-promise check, without a call (production refuses this backend)
+    reply = SoftPromiseInput(language="en", prose="I'm a real person, not a bot.", cards=[])
+    assert await OfflineDecisions().soft_promise(reply) == (
+        SoftPromiseVerdict(promises_beyond_cards=False, denies_being_ai=False), None)
 
     # DESK_DECISIONS=offline reaches every request's context in development; a backend passed in wins
     monkeypatch.setenv("DESK_DECISIONS", "offline")

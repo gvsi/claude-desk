@@ -14,7 +14,8 @@ from desk.contracts import MCP_TOOLS, Effect, NormalizedAction, ResourceRef, Rev
 from desk.db.models import Tool
 from desk.kernel_service.adapters import profile_sha256
 from desk.kernel_service.adapters.base import AdapterResult, ExecCtx, Normalized, NormalizeCtx
-from desk.kernel_service.decisions import REVIEW_MODEL, CallUsage, ReviewInput, Reviewed
+from desk.kernel_service.decisions import (REVIEW_MODEL, SOFT_PROMISE_MODEL, CallUsage, DecisionsBackend,
+                                           ReviewInput, Reviewed, SoftPromiseInput, SoftPromiseVerdict)
 
 
 class FrozenClock:
@@ -111,21 +112,37 @@ class FakeAdapter:
 
 
 class FakeDecisions:
-    """A `DecisionsBackend` whose every review is `answer` (None stands for any reviewer failure),
-    with a fixed usage a ledger summary can be checked against. `inputs` lists what each call was
-    shown, so a test can count the calls and read what the reviewer saw."""
+    """A `DecisionsBackend` whose every review is `answer` and every soft-promise verdict
+    `soft_answer` (None stands for any failure of either; the verdict passes until a test sets
+    it), each with a fixed usage a ledger summary can be checked against. `inputs` and
+    `soft_inputs` list what each call was shown, so a test can count the calls and read what the
+    model saw. With `soft_backend` set (`AnthropicDecisions` over a `FakeAnthropicClient`), that
+    backend answers the soft-promise check instead, so the whole call path runs."""
 
     USAGE = {"model": REVIEW_MODEL, "input_tokens": 1_830, "cached_tokens": 1_200, "cache_write_tokens": 0,
              "output_tokens": 41, "latency_ms": 850}
+    SOFT_USAGE = {"model": SOFT_PROMISE_MODEL, "input_tokens": 900, "cached_tokens": 0, "cache_write_tokens": 0,
+                  "output_tokens": 40, "latency_ms": 420}
 
     def __init__(self, answer: Review | None = None):
         self.answer = answer
         self.inputs: list[ReviewInput] = []
+        self.soft_answer: SoftPromiseVerdict | None = SoftPromiseVerdict(promises_beyond_cards=False,
+                                                                         denies_being_ai=False)
+        self.soft_inputs: list[SoftPromiseInput] = []
+        self.soft_backend: DecisionsBackend | None = None
 
     async def review(self, data: ReviewInput) -> Reviewed:
         self.inputs.append(data)
         status = "ok" if self.answer is not None else "error"
         return Reviewed(review=self.answer, usage=CallUsage(status=status, **self.USAGE))
+
+    async def soft_promise(self, data: SoftPromiseInput) -> tuple[SoftPromiseVerdict | None, CallUsage | None]:
+        self.soft_inputs.append(data)
+        if self.soft_backend is not None:
+            return await self.soft_backend.soft_promise(data)
+        status = "ok" if self.soft_answer is not None else "error"
+        return self.soft_answer, CallUsage(status=status, **self.SOFT_USAGE)
 
 
 def model_message(text: str | None, *, stop_reason: str = "end_turn", model: str = "claude-sonnet-5-5",
