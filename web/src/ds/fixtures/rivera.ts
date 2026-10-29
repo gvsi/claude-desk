@@ -322,9 +322,10 @@ const proseBlocks = {
     en: proseBlock("I can help with that after you confirm it's you."),
     es: proseBlock('Puedo ayudarte con eso cuando confirmes que eres tú.'),
   },
+  // Leads into the callback_confirmed card after native.request_callback ran; the card says what happens.
   askOwner: {
-    en: proseBlock("Of course. I've asked Maria to join, and she can see what we've talked about so far."),
-    es: proseBlock('Claro. Le pedí a Maria que se sume al chat, y puede ver lo que hablamos hasta ahora.'),
+    en: proseBlock('Of course.'),
+    es: proseBlock('Claro.'),
   },
 } satisfies Record<string, Bilingual<ProseBlock>>;
 
@@ -567,11 +568,13 @@ const conversations = {
       { kind: 'event', event: luciaQuoteReceipt },
       { kind: 'event', event: luciaQuote },
       { kind: 'visitor', text: '¿Puedo hablar con Maria? También gotea la llave de paso.' },
+      // native.request_callback ran: the kernel wrote the handoff and its callback_confirmed fact.
+      { kind: 'event', event: status('receipt', 'dec-lucia-callback', 'executed', 'es', 33) },
       {
         kind: 'event',
         event: message('msg-lucia-ask', {
           language: 'es',
-          blocks: [proseBlocks.askOwner.es],
+          blocks: [proseBlocks.askOwner.es, cards.callback_confirmed.es],
           visitor_plain: plain.es.reply_checked,
           ledger_seq: 34,
         }),

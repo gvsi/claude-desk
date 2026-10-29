@@ -16,12 +16,13 @@ function messageIn(events: readonly SseEvent[]): EvMessage {
 const quote = messageIn(rivera.events.quoteTurn);
 const quoteEs = messageIn(rivera.events.quoteTurnEs);
 const paid = messageIn(rivera.events.paymentConfirmed);
-const askOwner = rivera.blocks.prose.askOwner.en;
+/** Claude asking which open time works: prose that claims nothing done, in the reply style. */
+const bookingAsk = rivera.blocks.prose.bookingAsk.en;
 
 const meta = {
   title: 'Conversation/ClaudeMessage',
   component: ClaudeMessage,
-  args: { blocks: [askOwner], language: 'en', ownerName: rivera.business.ownerName },
+  args: { blocks: [bookingAsk], language: 'en', ownerName: rivera.business.ownerName },
   parameters: { layout: 'padded', canvas: 'N-Conv-Live' },
 } satisfies Meta<typeof ClaudeMessage>;
 
@@ -31,12 +32,12 @@ type Story = StoryObj<typeof meta>;
 
 export const ProseOnly: Story = {
   parameters: {
-    canvas: 'N-Public-Handoff',
-    canvasNote: "The board sets Claude's public replies at 16/25; the design system's reply style is 15/23 on every surface.",
+    canvasNote:
+      "The board's replies carry their facts in prose; this is the fixture's prose on its own, Claude asking which open time works, without the booking options card that follows it.",
   },
   play: async ({ canvas, canvasElement }) => {
     // prose_is_serif_people_are_sans: Claude speaks in serif, with no bubble and no avatar.
-    const prose = canvas.getByText(askOwner.text);
+    const prose = canvas.getByText(bookingAsk.text);
     expectComputed(prose, {
       fontFamily: /Source Serif 4/,
       fontSize: '15px',

@@ -135,7 +135,8 @@ function wordsRule(words: readonly string[]): RegExp {
 }
 
 // Claims only a card may make, even without a number: that something is booked, paid, charged or
-// refunded, what it costs, or that a price is lowered. Past forms and participles in both
+// refunded, what it costs, that a price is lowered, or that Claude did something (only an executed
+// receipt and its card may say that). Past forms and participles in both
 // languages; infinitives and nouns ("to book", "reservar", "a test payment", "un pago") stay
 // allowed, so Claude can still say what a card will do.
 const CLAIM_RULES: [string, RegExp][] = [
@@ -153,6 +154,12 @@ const CLAIM_RULES: [string, RegExp][] = [
     'costs?', 'costing', 'priced', 'cheap(?:er|est)?', 'affordable', 'inexpensive',
     'cuesta', 'cuestan', 'costar[áa]n?', 'costó', 'costo', 'barat[oa]s?', 'económic[oa]s?',
   ])],
+  // An action in the past tense with Claude as its subject: no receipt or card would back it.
+  ['action claim', new RegExp(
+    `${NOT_LETTER_BEFORE}(?:(?:i(?:['’]ve| have)?|we(?:['’]ve| have)?) (?:already )?(?:asked|told|sent|booked|scheduled|arranged|notified|contacted|messaged|emailed|texted|called|charged|refunded|let)` +
+      `|(?:ya )?(?:le |les |te )?(?:pedí|avisé|escribí|envié|mandé|notifiqué|llamé|contacté|agendé|reservé|cobré|reembolsé))${NOT_LETTER_AFTER}`,
+    'iu',
+  )],
   ['discount claim', wordsRule([
     'markdown', 'marked down', 'price cut', 'special price', 'waived?', 'knock(?:ed)? off', 'half off',
     'rebaj\\p{L}*', 'precio especial', 'sin cargo', 'sin costo', 'mitad de precio',
@@ -171,6 +178,11 @@ function claimProblems(text: string): string[] {
 // and the soft-promise check block even when the words hold no number.
 const STATEMENT_TEMPLATES: readonly ClauseTemplate[] = [
   'hours', 'contact', 'policy', 'handoff', 'verify_prompt', 'callback_confirmed', 'owner_said',
+];
+
+// Cards that report an action the kernel carried out.
+const ACTION_TEMPLATES: readonly ClauseTemplate[] = [
+  'booking_confirmed', 'charge_confirmed', 'refund_issued', 'callback_confirmed', 'document_link',
 ];
 
 /** `text` as lower-case words joined by single spaces, so punctuation and case don't matter. */
@@ -264,16 +276,19 @@ describe('fixtures', () => {
     }
   });
 
-  test('fixture_prose_claims_no_booking_payment_price_or_discount', () => {
+  test('fixture_prose_claims_no_booking_payment_price_discount_or_action', () => {
     // The claims lexicon catches each kind in both languages, so a clean result means something.
     expect(claimProblems("You're booked.")).toEqual(['booking claim']);
     expect(claimProblems('Listo, quedó reservado.')).toEqual(['booking claim']);
     expect(claimProblems('The deposit is paid within your signed limit.')).toEqual(['payment claim']);
-    expect(claimProblems('Ya te cobré la visita y te reembolsé el resto.')).toEqual(['payment claim']);
+    expect(claimProblems('La visita ya está pagada y el resto, reembolsado.')).toEqual(['payment claim']);
     expect(claimProblems("It's cheaper than a new tap.")).toEqual(['price claim']);
     expect(claimProblems('Cuesta menos que una llave nueva.')).toEqual(['price claim']);
     expect(claimProblems('Maria waived the call-out fee.')).toEqual(['discount claim']);
     expect(claimProblems('Te hago una rebaja si pagas hoy.')).toEqual(['discount claim']);
+    expect(claimProblems("Of course. I've asked Maria to join.")).toEqual(['action claim']);
+    expect(claimProblems('Claro. Le pedí a Maria que se sume al chat.')).toEqual(['action claim']);
+    expect(claimProblems('We already told her.')).toEqual(['action claim']);
     // What a card will do is not a claim that it was done.
     expect(claimProblems("To hold the visit, here's a link. It's a test payment, so no money moves.")).toEqual([]);
     expect(claimProblems('Para reservar la visita, aquí tienes un enlace. Es un pago de prueba.')).toEqual([]);
@@ -282,6 +297,32 @@ describe('fixtures', () => {
     for (const block of proseBlocks) {
       expect(claimProblems(block.text), block.text).toEqual([]);
     }
+  });
+
+  test('action_cards_follow_an_executed_receipt', () => {
+    // A card that reports an action as done (a booking, a charge, a refund, a callback, a released
+    // document) shows only after the kernel's executed receipt for it, since the previous message.
+    const conversations = Object.values(FIXTURES).flatMap((fixture) => Object.entries(fixture.conversations));
+    let checked = 0;
+    for (const [name, conversation] of conversations) {
+      let executedSinceLastMessage = false;
+      for (const turn of conversation.turns) {
+        if (turn.kind !== 'event') continue;
+        const { event } = turn;
+        if (event.type === 'receipt' || event.type === 'resolved') {
+          if (event.state === 'executed') executedSinceLastMessage = true;
+          continue;
+        }
+        if (event.type !== 'message') continue;
+        for (const block of event.blocks) {
+          if (block.kind !== 'card' || !ACTION_TEMPLATES.includes(block.template as ClauseTemplate)) continue;
+          checked += 1;
+          expect(executedSinceLastMessage, `${name}: ${event.message_id} shows ${block.template}`).toBe(true);
+        }
+        executedSinceLastMessage = false;
+      }
+    }
+    expect(checked).toBeGreaterThanOrEqual(4);
   });
 
   test('fixture_prose_restates_no_card_statement', () => {
