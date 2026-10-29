@@ -16,7 +16,12 @@ Work reaches `main` through a pull request: a branch in a worktree, the two-seat
   - Summary: what changed and why, in a few lines.
   - Tests: each command run and its result, quoted (pass counts, not "tests pass"), plus eval results when the kernel, prompts or policies changed.
   - Review: for a plan's PR, the plan's Review Ledger, any parked P3s, and any task set aside with its branch.
-  - Design evidence, for a design PR (`AGENTS.md` "Design PRs"): the screenshots and recordings, pushed to the orphan `pr-media` branch under `pr-<n>/` and linked as `https://github.com/gvsi/claude-desk/blob/pr-media/pr-<n>/<file>?raw=true`, never committed to the PR's branch or uploaded through a browser form (layout and contact sheets: "Design PRs" in `docs/plans/2026-10-28-00-master-plan.md`). A PR that touches `web/` or copy with no visible change says so here instead.
+  - Design evidence, for a design PR (`AGENTS.md` "Design PRs"): the screenshots and recordings, never committed to the PR's branch or uploaded through a browser form (layout and contact sheets: "Design PRs" in `docs/plans/2026-10-28-00-master-plan.md`). In this order:
+    1. Open the PR; its number `<n>` names the captures' folder.
+    2. Push the captures to the orphan `pr-media` branch under `pr-<n>/` only, from a worktree on that branch (`git fetch origin pr-media && git worktree add .worktrees/pr-media pr-media`). If the push is rejected because another worktree pushed first, run `git fetch origin pr-media && git rebase origin/pr-media` and push again; never force-push `pr-media`.
+    3. Edit the description (`gh pr edit <n> --body-file <file>`) to link each capture as `https://github.com/gvsi/claude-desk/blob/pr-media/pr-<n>/<file>?raw=true`.
+
+    A PR that touches `web/` or copy with no visible change says so here instead.
   - The last line: `🤖 Generated with [Claude Code](https://claude.com/claude-code)`.
 - **PR text is written for outside readers** of the public history: neutral and self-contained, with no internal shorthand, no references to private docs or conversations, no local paths, and no secrets or logs that might hold them.
 
@@ -37,7 +42,7 @@ Work reaches `main` through a pull request: a branch in a worktree, the two-seat
 
 ## Close out
 
-1. Remove the worktree once it has no uncommitted work, and delete the branch locally and on the remote: `git worktree remove .worktrees/<name> && git branch -D <branch> && git push origin --delete <branch>`.
+1. Remove the worktree once it has no uncommitted work, and delete the branch locally and on the remote: `git worktree remove .worktrees/<name> && git branch -D <branch> && git push origin --delete <branch>`. Never delete `pr-media`: it holds every design PR's captures.
 2. Fast-forward the main checkout only when it is on `main` and clean: `git pull --ff-only`. Otherwise say you skipped it.
 3. Close issues the PR settles with a comment naming the PR and what was verified. Record anything still owed as a GitHub issue, not only in chat.
 4. Report: the PR link, what merged, the test and check results, the panel's verdict, and any follow-ups.
