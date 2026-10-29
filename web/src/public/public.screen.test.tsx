@@ -19,6 +19,9 @@ import { expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts'
 
 const PAGE = `/d/${RIVERA.slug}`;
 
+/** The app's own name in the tab, as index.html sets it (the test browser's page has its own). */
+const APP_TITLE = 'Claude Desk';
+
 /** The requests a route got, by key. */
 const requests = (key: string) => mockStore.requests.filter((r) => r.key === key);
 
@@ -81,6 +84,7 @@ function receiptsOf(row: Element): string[] {
 
 describe('public chat page', () => {
   it('public_page_discloses_ai_en_es', async () => {
+    document.title = APP_TITLE;
     const { screen } = await renderRoute(PAGE);
     const main = screen.getByRole('main');
     await expect.element(main.getByText("You're chatting with Claude, an AI answering for Rivera Plumbing. Ask for Maria Rivera anytime.")).toBeVisible();
@@ -90,6 +94,10 @@ describe('public chat page', () => {
     for (const block of rivera.publicDesk.en.charter) await expect.element(about.getByText(block.title ?? '', { exact: true }).first()).toBeVisible();
     expect(requests('publicDesk').map((r) => r.path)).toEqual([`/api/public/${RIVERA.slug}?lang=en`]);
     await expectScreenBasics(screen.container, { owner: false });
+    // The tab names the business; elsewhere it stays the app's own name.
+    await vi.waitFor(() => expect(document.title).toBe('Rivera Plumbing'));
+    await renderRoute('/no/such/page');
+    expect(document.title).toBe(APP_TITLE);
 
     const es = await renderRoute(PAGE, { language: 'es-MX' });
     await expect
@@ -808,9 +816,11 @@ describe('public chat page', () => {
   });
 
   it('unknown_desk_is_kind', async () => {
+    document.title = APP_TITLE;
     const { screen } = await renderRoute('/d/rivera-plumbing-nope00');
     const main = screen.getByRole('main');
     await expect.element(main.getByText("This Desk isn't available", { exact: true })).toBeVisible();
+    expect(document.title).toBe(APP_TITLE);
     await expect.element(main.getByText('Check the link, or contact the business another way.', { exact: true })).toBeVisible();
     expect(requests('openSession')).toEqual([]);
     await expectScreenBasics(screen.container, { owner: false });

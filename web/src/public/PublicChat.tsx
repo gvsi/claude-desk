@@ -243,6 +243,18 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
     if (chat.session !== null) onSession?.(chat.session);
   }, [chat.session, onSession]);
 
+  // On its own page the tab names the business, as the kernel serves it; the app's name comes back
+  // when the page closes. Inside an owner screen the tab is the owner's.
+  const tabTitle = embedded ? null : (desk?.business_name ?? null);
+  useEffect(() => {
+    if (tabTitle === null) return undefined;
+    const before = document.title;
+    document.title = tabTitle;
+    return () => {
+      document.title = before;
+    };
+  }, [tabTitle]);
+
   // A cancel that went through takes its button away: the visitor's place moves to the composer,
   // unless they have already moved on to something else.
   const lastCancel = useRef<string | null>(null);
