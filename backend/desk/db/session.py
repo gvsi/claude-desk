@@ -229,10 +229,13 @@ SETS_THE_COPY = ("KernelRepo refused a statement that calls set_config or runs q
 # raw SQL, before anything is read: Unicode escapes (U&"\0073et_config" is set_config, and U&'...' a
 # string spelled by code point), dollar quoting ($$...$$ or $tag$...$tag$; no kernel identifier holds a
 # $), escape strings (E'...', where \' doesn't end the string), comments and statement separators.
+# The escape-string test refuses any e or E followed by a quote at a token start (after anything but
+# a letter, digit, _ or $), so a one-letter literal 'e' is refused too: kernel statements bind their
+# values and never inline a literal, so that only refuses more.
 _UNICODE_ESCAPES = re.compile(r"u&[\"']", flags=re.IGNORECASE)
 _UNREADABLE_SQL = re.compile(r"\$|(?<![\w$])[eE]'|--|/\*|;")
-UNREADABLE_SQL = ("KernelRepo refused a statement whose SQL is spelled in a way it doesn't read: Unicode escapes,"
-                  " dollar quoting, an escape string, a comment or a statement separator")
+SPELLING_REFUSED = ("KernelRepo refused a statement whose SQL is spelled in a way it doesn't read: Unicode escapes,"
+                    " dollar quoting, an escape string, a comment or a statement separator")
 # A string literal ('...', a quote inside doubled) or a quoted identifier ("...", likewise), read left to
 # right, so a quote inside one kind of token is part of that token and never starts the other kind.
 _LITERAL_OR_IDENTIFIER = re.compile(r"'(?:[^']|'')*'|(\"(?:[^\"]|\"\")*\")")
@@ -337,7 +340,7 @@ def _check_compiled(stmt: Select, scoped_tables: set[str]) -> None:
     raw = str(stmt.compile(dialect=_POSTGRES))
     # Spellings are refused on the raw text, before string literals are told apart: each could hide what follows.
     if _UNICODE_ESCAPES.search(raw) or _UNREADABLE_SQL.search(raw):
-        raise ValueError(UNREADABLE_SQL)
+        raise ValueError(SPELLING_REFUSED)
     sql = _LITERAL_OR_IDENTIFIER.sub(lambda m: m.group(1) or "''", raw)   # drop string literals, keep identifiers
     keywords = re.sub(r'"(?:[^"]|"")*"', '""', sql)                        # and drop quoted identifiers
     if len(re.findall(r"\bselect\b", keywords, flags=re.IGNORECASE)) != 1:

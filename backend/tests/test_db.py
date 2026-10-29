@@ -469,12 +469,14 @@ def test_guard_refuses_unicode_escape_identifiers():
 # SQL text SQLAlchemy never compiles a kernel statement to. Each can hide a call, a nested SELECT or a
 # table from a check that reads the SQL as text: dollar quoting and escape strings swallow the text
 # after a quote they hold, a quoted identifier or a comment can hold a quote, and a separator starts
-# a second statement.
-UNREADABLE_SQL = (
+# a second statement. A shape that hides a nested SELECT inside a dollar quote, an escape string or a
+# comment is refused only by the check for that spelling, so a narrower check admits it; a
+# Unicode-escaped call is refused by the escape check wherever it stands.
+UNREADABLE_SHAPES = (
     "$$'$$ || U&\"\\0073et_config\"('desk.copy_id', 'copy-b', true) || $$'$$",
-    "$q$'$q$ || U&\"\\0073et_config\"('desk.copy_id', 'copy-b', true) || $q$'$q$",
+    "$q$'$q$ || (select coalesce(max(seq), 0) from kernel.ledger_entries)::text || $q$'$q$",
     "E'\\'' || U&\"\\0073et_config\"('desk.copy_id', 'copy-b', true) || E'\\''",
-    "e'\\'' || U&\"\\0073et_config\"('desk.copy_id', 'copy-b', true) || e'\\''",
+    "e'\\'' || (select coalesce(max(seq), 0) from kernel.ledger_entries)::text || e'\\''",
     "$$'$$ || (select coalesce(max(seq), 0) from kernel.ledger_entries)::text || $$'$$",
     "E'\\'' || (select coalesce(max(seq), 0) from kernel.ledger_entries)::text || E'\\''",
     "\"a'b\", U&\"\\0073et_config\"('desk.copy_id', 'copy-b', true)",
@@ -486,11 +488,11 @@ UNREADABLE_SQL = (
 
 
 def test_guard_refuses_quoting_it_cannot_read():
-    """The guard refuses the spellings in `UNREADABLE_SQL` themselves, before it reads anything
+    """The guard refuses the spellings in `UNREADABLE_SHAPES` themselves, before it reads anything
     else, instead of trying to lex them: each would otherwise hide text from the checks that run on
     the SQL with its string literals dropped."""
     repo = KernelRepo(f"copy-{uuid4().hex}")
-    statements = [select(calling(n, literal_column(sql))) for n, sql in enumerate(UNREADABLE_SQL, start=3000)]
+    statements = [select(calling(n, literal_column(sql))) for n, sql in enumerate(UNREADABLE_SHAPES, start=3000)]
     admitted = []
     for statement in statements:
         try:
