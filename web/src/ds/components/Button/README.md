@@ -47,7 +47,7 @@
 | `danger` | `button-danger-fill`, `button-danger-text` | `button-danger-fill-hover` | Rest fill |
 | `danger-ghost` | No fill, `button-danger-text` | `fill-hover` | No fill |
 
-A menu button keeps its variant's look; its padding is `space-14` before the words and `space-10` after the chevron (`space-12` and `space-8` inline), because the icon carries its own margin.
+A menu button keeps its variant's look, and its hover fill while its menu is open (`aria-expanded="true"`); its padding is `space-14` before the words and `space-10` after the chevron (`space-12` and `space-8` inline), because the icon carries its own margin.
 
 Disabled dims every variant to 40%. Busy dims to 60%, and `danger` and `danger-ghost` to 80%, because red words lose contrast faster as they fade. Focus shows the base stylesheet's 2 px `accent-blue` ring at a 2 px offset on every variant.
 

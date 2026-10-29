@@ -169,5 +169,7 @@ export const MenuOpen: Story = {
     const button = canvas.getByRole('button', { name: 'Allow' });
     await expect(button).toHaveAttribute('aria-haspopup', 'menu');
     await expect(button).toHaveAttribute('aria-expanded', 'true');
+    // While its menu is open it keeps its hover fill, so the menu reads as its own.
+    expectComputed(button, { backgroundColor: 'rgba(250, 249, 245, 0.15)' });
   },
 };
