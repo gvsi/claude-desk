@@ -5,7 +5,7 @@ description: Use when opening, updating, merging or watching a pull request in t
 
 # Shipping PRs
 
-Work reaches `main` through a pull request: a branch in a worktree, the two-seat review panel, green CI checks, then a squash merge. `executing-implementation-plans` follows this for each part plan.
+Work reaches `main` through a pull request: a branch in a worktree, the review panel (two seats, three for critical work), green CI checks, then a squash merge. `executing-implementation-plans` follows this for each part plan.
 
 ## Open
 

@@ -7,7 +7,7 @@ One review per task: the reviewer reads the task's diff once and returns two ver
 ```
 You are reviewing one task's implementation: first whether it matches its
 requirements, then whether it is well built. This is a task-scoped gate;
-the two-seat panel reviews the whole part plan in its PR. Read AGENTS.md first.
+the review panel reviews the whole part plan in its PR. Read AGENTS.md first.
 
 ## What was requested
 

@@ -6,7 +6,7 @@ model: opus
 color: red
 ---
 
-This is the code-review seat of the two-seat panel in `orchestrating-review-subagents`. Opus 5.5 runs it natively at `xhigh`; GPT-6.1 Sol reads this same file through Codex. Review against `AGENTS.md`, the spec in `docs/specs/` and the plan in `docs/plans/` the change implements.
+This is the code-review seat of the review panel in `orchestrating-review-subagents` (two seats, three for critical work). Opus 5.5 and Fable 5.1 run it natively at `xhigh`; GPT-6.1 Sol reads this same file through Codex. Review against `AGENTS.md`, the spec in `docs/specs/` and the plan in `docs/plans/` the change implements.
 
 ## Mutation boundary
 

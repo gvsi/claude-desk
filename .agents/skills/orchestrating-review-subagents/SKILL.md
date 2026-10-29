@@ -45,7 +45,7 @@ Give each seat short locating context, never pasted payloads:
 ## Shared loop
 
 1. **Fan out** the panel's seats in parallel ("The panel"), each following its spec.
-2. **Wait** for both under the rules above.
+2. **Wait** for every seat under the rules above.
 3. **Require valid outputs.** Valid statuses are `complete`, `complete_with_concerns`, `needs_context` and `blocked`. A round is complete when every active seat is `complete` or `complete_with_concerns` and has either listed findings or said it has no P1/P2. For `needs_context`, supply the context and rerun that seat only; for `blocked`, clear the blocker or ask the project owner. Malformed output caused by tooling: rerun that seat, same round.
 4. **Consolidate** by root cause, not by wording or `file:line`, and record which seats reported each finding.
 5. **Validate** each finding yourself: re-read the cited refs, run its verification hint, and give a verdict (`VALID — fix now`, `VALID — decision needed`, `VALID — defer` or `INVALID — skip`) with a one-line rationale. Check codebase reality, compatibility constraints and whether the current behaviour is intended. A fix that adds an unreachable path or speculative scope is not `fix now`. Use `decision needed` only when the right fix replaces the core approach or most of the plan; stop and ask the project owner.
@@ -64,7 +64,7 @@ Before collecting issues, seats review the frame of the target:
 - **Invariants:** the six safety invariants in `AGENTS.md`, plus any the spec or plan adds.
 - **Risk boundaries:** the kernel/API trust boundary, sessions and verification, money and mandates, approvals, the ledger, reply checks, MCP pins, data labels, per-visitor copies, retries and restarts.
 - **Shape:** one coherent model, or a pile of special cases.
-- **Constitution:** when `.local/constitution.md` exists, the target is also scored against its rubric (finding type `constitution`). Name the file in every dispatch so both seats read it.
+- **Constitution:** when `.local/constitution.md` exists, the target is also scored against its rubric (finding type `constitution`). Name the file in every dispatch so every seat reads it.
 
 A wrong or incomplete frame is one high-level P1/P2 `abstraction gap`, not a list of its symptoms. When validating, treat repeated findings in one area as a possible abstraction gap.
 
