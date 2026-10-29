@@ -30,14 +30,15 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
+from desk.api.metrics import metric_row
 from desk.api.store import Ids, lock_key
 from desk.db.models import RunEvent
 from desk.db.session import libpq_url
-from desk.events import EvHeld, EvMessage, EvReceipt, EvResolved, SseEvent
+from desk.events import SseEvent
 
 RUN_EVENTS = RunEvent.__table__
 CHANNEL = "desk_run_events"
-SIGNED_EVENTS = (EvMessage, EvReceipt, EvHeld, EvResolved)
+SIGNED_TYPES = frozenset({"message", "receipt", "held", "resolved"})   # built only by deliver()
 CONTROL_TYPES = frozenset({"run_resumable", "decision_due", "decision_pending"})
 _EVENT = TypeAdapter(SseEvent)
 POLL_S = 2.0
@@ -67,7 +68,7 @@ async def append_event(conn: AsyncConnection, ids: Ids, event: BaseModel) -> int
 
 async def emit(conn: AsyncConnection, ids: Ids, event: Any) -> int:
     """Publish one of the six unsigned events (writing, turn_end, owner_joined, owner_left, demo_inbox, error)."""
-    if isinstance(event, SIGNED_EVENTS) or not isinstance(event, BaseModel):
+    if not isinstance(event, BaseModel) or getattr(event, "type", None) in SIGNED_TYPES:
         raise TypeError("emit() publishes unsigned events only; signed ones go through deliver()")
     return await append_event(conn, ids, event)
 
@@ -269,3 +270,11 @@ def event_stream(engine: AsyncEngine, listener: Listener, ids: Ids, last_event_i
     waiting); `on_control` gets each control row written while the stream is open."""
     frames = _frames(engine, listener, ids, last_event_id or 0, on_control, on_open, poll_s)
     return EventSourceResponse(frames, ping=ping_s, ping_message_factory=lambda: ServerSentEvent(comment="keep-alive"))
+
+
+async def append_metric(conn: AsyncConnection, ids: Ids, metric: BaseModel) -> int:
+    """Record a `RevealMetric` or `TurnMetric` for the session (no wake-up); returns the row's id."""
+    type, payload = metric_row(metric)
+    return (await conn.execute(insert(RUN_EVENTS).values(
+        copy_id=ids.copy_id, desk_id=ids.desk_id, session_id=ids.session_id, kind="metric", type=type,
+        payload=payload).returning(RUN_EVENTS.c.id))).scalar_one()

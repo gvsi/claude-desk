@@ -1,0 +1,130 @@
+"""deliver(): the only writer of what a visitor sees from a conversation (master plan, "Delivery").
+
+A visitor sees a reply only after the kernel checked it, and a status only as the kernel signed it. Both
+reach the session as one of the four signed events, which only this module builds:
+
+- `Reply(verdict, author, via, call_id)`: a `ReplyVerdict` becomes `EvMessage` (`handoff` when the check
+  failed: its blocks are then the handoff clause alone) and a `delivered` row carrying the event's `seq`
+  and, for Claude's `send_reply`, the call's ID. A verdict checked at a generation the session has since
+  left (a take-over, a hand-back) is dropped: nothing is shown and None is returned. `via` says who
+  produced it: `model` (Claude's `send_reply`), `api` (a handoff the loop asked for), `owner` (a say) or
+  `kernel` (a payment confirmation).
+- `Status(decision, phase)`: a signed decision becomes `EvReceipt`, `EvHeld` or `EvResolved` with its
+  signed fields unchanged, and a `status` row. Statuses aren't generation-fenced (an approved hold
+  resumes across a take-over); a decision's state at a ledger entry is shown once, and again it is None.
+
+Each call runs in the caller's transaction under the session's run lock (`run_lock`, a transaction-level
+advisory lock held until the caller commits), the lock take-over and hand-back hold around a mode change.
+The session's generation is read from `kernel_ro.sessions` after the lock is taken, in a READ COMMITTED
+transaction, so a mode change committed while delivery waited is seen. The session is named only by a
+kernel answer (`Ids` from `/whoami` or a kernel result naming it) within that answer's copy.
+"""
+
+from dataclasses import dataclass
+from typing import Literal
+
+from sqlalchemy import func, select, text
+from sqlalchemy.ext.asyncio import AsyncConnection
+
+from desk.api.ro import KERNEL_RO, KernelRO
+from desk.api.sse import RUN_EVENTS, append_event
+from desk.api.store import MESSAGES, Ids, append_message, lock_key
+from desk.contracts import Decision, ReplyVerdict
+from desk.events import EvHeld, EvMessage, EvReceipt, EvResolved
+
+Phase = Literal["receipt", "held", "resolved"]
+PHASES = ("receipt", "held", "resolved")
+
+
+@dataclass(frozen=True)
+class Reply:
+    verdict: ReplyVerdict
+    author: Literal["claude", "owner", "desk"]
+    via: Literal["model", "api", "owner", "kernel"]
+    call_id: str | None = None             # the send_reply tool_use ID, for a reply Claude's call produced
+
+    def __post_init__(self) -> None:
+        if self.author not in ("claude", "owner", "desk") or self.via not in ("model", "api", "owner", "kernel"):
+            raise ValueError("a reply's author is claude, owner or desk, and via is model, api, owner or kernel")
+        if (self.via == "model") != (self.call_id is not None) or (self.via == "model" and self.author != "claude"):
+            raise ValueError("only Claude's send_reply calls deliver via the model, each with its call ID")
+
+
+@dataclass(frozen=True)
+class Status:
+    decision: Decision
+    phase: Phase
+
+    def __post_init__(self) -> None:
+        if self.phase not in PHASES:
+            raise ValueError("a status is a receipt, held or resolved")
+        if (self.phase == "held") != (self.decision.state == "held"):
+            raise ValueError("a held status shows a held decision, and only a held status does")
+
+
+class SessionNotFound(LookupError):
+    """The session isn't in the copy that named it; nothing is delivered."""
+
+
+async def run_lock(conn: AsyncConnection, session_id: str) -> None:
+    """The master's run lock: held until the caller's transaction ends, across API workers and tasks."""
+    await conn.execute(select(func.pg_advisory_xact_lock(lock_key("run:" + session_id))))
+
+
+async def deliver(conn: AsyncConnection, ids: Ids, item: Reply | Status, *, ro_schema: str = KERNEL_RO) -> int | None:
+    """Publish a checked reply or a signed status to the session; returns the event's `seq`, or None when it is
+    stale or already shown. `ro_schema` is `kernel_ro` (the fake's mirror in tests)."""
+    if not isinstance(item, (Reply, Status)):
+        raise TypeError("deliver() takes a Reply or a Status")
+    isolation = (await conn.execute(text("SHOW transaction_isolation"))).scalar_one()
+    if isolation != "read committed":
+        raise RuntimeError("deliver() reads the current generation, which needs a READ COMMITTED transaction")
+    await run_lock(conn, ids.session_id)
+    if isinstance(item, Reply):
+        return await _deliver_reply(conn, ids, item, ro_schema)
+    return await _deliver_status(conn, ids, item)
+
+
+async def _deliver_reply(conn: AsyncConnection, ids: Ids, reply: Reply, ro_schema: str) -> int | None:
+    session = await KernelRO(conn, ids.copy_id, ro_schema).session(ids.session_id)
+    if session is None or session["desk_id"] != ids.desk_id:
+        raise SessionNotFound(ids.session_id)
+    verdict = reply.verdict
+    if verdict.generation != session["generation"]:
+        return None
+    shown = (await conn.execute(select(func.count()).where(
+        MESSAGES.c.session_id == ids.session_id, MESSAGES.c.kind == "delivered",
+        MESSAGES.c.ref_id == verdict.message_id))).scalar_one()
+    if shown:
+        return None
+    event = EvMessage(type="message", message_id=verdict.message_id, generation=verdict.generation,
+                      author=reply.author, language=verdict.language, handoff=not verdict.ok, blocks=verdict.blocks,
+                      visitor_plain=verdict.visitor_plain, ledger_seq=verdict.ledger_seq, signature=verdict.signature)
+    seq = await append_event(conn, ids, event)
+    await append_message(conn, ids, "delivered", author=reply.author, blocks=verdict.blocks,
+                         language=verdict.language, ref_id=verdict.message_id, call_id=reply.call_id, event_seq=seq)
+    return seq
+
+
+async def _deliver_status(conn: AsyncConnection, ids: Ids, status: Status) -> int | None:
+    decision = status.decision
+    if decision.session_id != ids.session_id:
+        raise ValueError("a decision is shown only in its own session")
+    shown = (await conn.execute(select(func.count()).where(
+        RUN_EVENTS.c.session_id == ids.session_id, RUN_EVENTS.c.kind == "sse",
+        RUN_EVENTS.c.type.in_(PHASES),
+        RUN_EVENTS.c.payload["decision_id"].astext == decision.decision_id,
+        RUN_EVENTS.c.payload["ledger_seq"].astext == str(decision.ledger_seq)))).scalar_one()
+    if shown:
+        return None
+    signed = {"decision_id": decision.decision_id, "state": decision.state, "visitor_plain": decision.visitor_plain,
+              "ledger_seq": decision.ledger_seq, "signature": decision.signature}
+    if status.phase == "receipt":
+        event = EvReceipt(type="receipt", **signed)
+    elif status.phase == "held":
+        event = EvHeld(type="held", **signed)
+    else:
+        event = EvResolved(type="resolved", **signed)
+    seq = await append_event(conn, ids, event)
+    await append_message(conn, ids, "status", ref_id=decision.decision_id, event_seq=seq)
+    return seq
