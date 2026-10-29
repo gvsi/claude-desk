@@ -68,11 +68,13 @@ export interface ConversationSummary {
   mode: SessionMode;
   last_activity: string;
   outcome_counts: Partial<Record<DecisionState, number>>;
-  owner_preview: string | null;
+  /** The owner's own preview chat (`kernel_ro.sessions.preview`, a boolean). */
+  owner_preview: boolean;
 }
 
 export interface Briefing {
-  since: string;
+  /** The owner's previous read of Today; null on the first ("So far"). */
+  since: string | null;
   conversations: number;
   bookings: number;
   leads: number;
