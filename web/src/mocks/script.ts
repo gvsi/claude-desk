@@ -21,7 +21,7 @@ import type {
   StatusEvent,
   ToolName,
 } from '../api/contracts.ts';
-import { cardBlock, proseBlock, rivera } from '../ds/fixtures/index.ts';
+import { RIVERA_MONEY_CAP_CENTS, cardBlock, proseBlock, rivera } from '../ds/fixtures/index.ts';
 
 export type Language = 'en' | 'es';
 
@@ -174,6 +174,12 @@ const inboxPreview: Record<Language, string> = {
 // ---------------------------------------------------------------------------------------------
 // Decisions the script asks the kernel for
 
+/**
+ * What held a request: `limit` when an auto card's limit failed (an amount, a discount, its hours
+ * or its review), `ask` when an ask card asks about the tool itself.
+ */
+export type HoldKind = 'limit' | 'ask';
+
 /** What a step asks the store to record: the store fills in ids, times, ledger entries and signatures. */
 export interface DecisionSpec {
   tool: ToolName;
@@ -183,7 +189,8 @@ export interface DecisionSpec {
   executed: boolean;
   cardIds: string[];
   reasonPlain: string;
-  answers?: ApprovalAnswer[];
+  /** For a `hold`: what held it, which decides the answers it offers (`answersFor`). */
+  hold?: HoldKind;
   listCents?: number | null;
   discountBp?: number | null;
   amountCents?: number | null;
@@ -191,9 +198,10 @@ export interface DecisionSpec {
 }
 
 const heldFixture = rivera.decisions.held;
+const refundFixture = rivera.heldRefund;
 
 export const DECISIONS = {
-  /** The seeded hold: a visitor not on record wants the drain clearing at 15% off. */
+  /** The seeded hold: a visitor not on record wants the drain clearing at 15% off, past the quote card's limit. */
   heldQuote: {
     tool: 'native.quote',
     effects: heldFixture.action?.effects ?? ['change'],
@@ -201,10 +209,22 @@ export const DECISIONS = {
     executed: false,
     cardIds: heldFixture.card_ids,
     reasonPlain: heldFixture.reason_plain,
-    answers: heldFixture.answers ?? ['allow_once', 'deny_once', 'deny_always'],
+    hold: 'limit',
     listCents: 18000,
     discountBp: 1500,
     amountCents: 15300,
+  },
+  /** Verified Dana wants her $180.00 drain clearing payment back; the refund card asks about every refund. */
+  heldRefund: {
+    tool: refundFixture.action.tool,
+    effects: refundFixture.action.effects,
+    outcome: 'hold',
+    executed: false,
+    cardIds: refundFixture.card_ids,
+    reasonPlain: refundFixture.reason_plain,
+    hold: 'ask',
+    amountCents: refundFixture.action.amount_cents,
+    resource: refundFixture.action.resource,
   },
   quote: {
     tool: 'native.quote',
@@ -252,6 +272,28 @@ export const DECISIONS = {
     reasonPlain: 'A visitor asked you to call them back.',
   },
 } as const satisfies Record<string, DecisionSpec>;
+
+/** The effects that move money: a request with one is a money request. */
+const MONEY_EFFECTS: ReadonlySet<Effect> = new Set<Effect>(['charge', 'pay_out']);
+
+/**
+ * The answers a hold offers, as the kernel works them out (master plan, "Decision lifecycle"):
+ * always the two one-time answers; "Allow only for this person" when the visitor is a verified
+ * person and, for a money request, its amount is within the rules' money cap; and "Deny always"
+ * only when an ask card held it, never for a limit hold.
+ */
+export function answersFor(spec: DecisionSpec, verifiedPerson: boolean): ApprovalAnswer[] {
+  if (spec.outcome !== 'hold') return [];
+  const money = spec.effects.some((effect) => MONEY_EFFECTS.has(effect));
+  const amount = spec.amountCents ?? null;
+  const withinCap = !money || (amount !== null && amount <= RIVERA_MONEY_CAP_CENTS);
+  return [
+    'allow_once',
+    'deny_once',
+    ...(verifiedPerson && withinCap ? (['allow_person'] as const) : []),
+    ...(spec.hold === 'ask' ? (['deny_always'] as const) : []),
+  ];
+}
 
 // ---------------------------------------------------------------------------------------------
 // Steps
@@ -424,16 +466,17 @@ export function allows(answer: ApprovalAnswer): boolean {
   return answer === 'allow_once' || answer === 'allow_person';
 }
 
-/** What the visitor's chat gets once the owner has answered: the resolved receipt, then Claude's follow-up. */
+/**
+ * What the visitor's chat gets once the owner has answered: the resolved receipt, then Claude's
+ * follow-up, which reports what ran (the discounted quote, or the refund) or hands off to Maria.
+ */
 export function afterAnswer(answer: ApprovalAnswer, decision: Decision): Step[] {
-  if (allows(answer)) {
-    return [
-      (ctx) => ctx.status('resolved', decision),
-      writing,
-      (ctx) => ctx.reply([blocks.prose.quoteIntro[ctx.language], discountedQuote[ctx.language]]),
-    ];
+  const resolved: Step = (ctx) => ctx.status('resolved', decision);
+  if (!allows(answer)) return [resolved, writing, (ctx) => ctx.reply([blocks.handoff[ctx.language]])];
+  if (decision.action?.tool === 'payments.create_refund') {
+    return [resolved, writing, (ctx) => ctx.reply([blocks.prose.details[ctx.language], blocks.refund_issued[ctx.language]])];
   }
-  return [(ctx) => ctx.status('resolved', decision), writing, (ctx) => ctx.reply([blocks.handoff[ctx.language]])];
+  return [resolved, writing, (ctx) => ctx.reply([blocks.prose.quoteIntro[ctx.language], discountedQuote[ctx.language]])];
 }
 
 /**

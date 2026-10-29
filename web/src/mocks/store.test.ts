@@ -15,7 +15,7 @@ import type {
   VisitorSession,
   VisitorTranscript,
 } from '../api/views.ts';
-import { EVENT_GAP_MS, matchRule, turnLanguage, type RuleName } from './script.ts';
+import { DECISIONS, EVENT_GAP_MS, matchRule, turnLanguage, type RuleName } from './script.ts';
 import { RIVERA } from './seed.ts';
 import { mockStore, streamAfter, type MockAnswer, type MockRequestInit } from './store.ts';
 
@@ -126,11 +126,13 @@ describe('the scripted Desk', () => {
     const needsYou = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
     expect(needsYou).toHaveLength(1);
     const [item] = needsYou;
+    // The quote card's discount limit held it, not an ask card, so there is no "Deny always"; the
+    // visitor isn't verified, so there is no "Allow only for this person" either.
     expect(item?.decision).toMatchObject({
       session_id: session.session_id,
       outcome: 'hold',
       state: 'held',
-      answers: ['allow_once', 'deny_once', 'deny_always'],
+      answers: ['allow_once', 'deny_once'],
     });
     expect(item?.decision?.decision_id).toBe(held?.type === 'held' ? held.decision_id : 'none');
     expect(item?.held_by).toBe('Quotes from your price list, at list price.');
@@ -141,6 +143,18 @@ describe('the scripted Desk', () => {
     const decide = ledger.entries.find((e) => e.event.kind === 'decide' && e.event.ref_id === item?.decision?.decision_id);
     expect(decide?.seq).toBe(item?.decision?.ledger_seq);
     expect(decide?.event.summary).toMatchObject({ tool: 'native.quote', outcome: 'hold' });
+
+    // A verified visitor's limit hold adds "Allow only for this person", for money only within the
+    // rules' money cap; an ask card's hold adds "Deny always".
+    const refund = mockStore.world.addHeldRefund();
+    const dana = mockStore.world.sessions.get(refund.session_id);
+    if (!dana) throw new Error("Dana's verified session is in the copy");
+    expect(dana.state).toMatchObject({ verified: true, assurance: 'demo_code' });
+    const answersFor = (spec: (typeof DECISIONS)[keyof typeof DECISIONS]) => mockStore.world.decide(dana, spec, 'en').answers;
+    expect(answersFor(DECISIONS.heldQuote)).toEqual(['allow_once', 'deny_once', 'allow_person']);
+    expect(refund.answers).toEqual(['allow_once', 'deny_once', 'allow_person', 'deny_always']);
+    expect(answersFor({ ...DECISIONS.heldRefund, amountCents: 50_001 })).toEqual(['allow_once', 'deny_once', 'deny_always']);
+    expect(answersFor({ ...DECISIONS.heldRefund, amountCents: 50_000 })).toContain('allow_person');
   });
 
   it('answer_resolves_and_follows_up', async () => {
@@ -258,24 +272,55 @@ describe('the scripted Desk', () => {
 
   it('second_answer_conflicts_with_the_decision', async () => {
     const [seeded] = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
-    const decisionId = seeded?.decision?.decision_id ?? '';
-    expect(seeded?.decision?.answers).toEqual(['allow_once', 'deny_once', 'deny_always']);
+    const seededId = seeded?.decision?.decision_id ?? '';
+    // The seeded 15% quote is a limit hold from a visitor not on record: the two one-time answers.
+    expect(seeded?.decision?.answers).toEqual(['allow_once', 'deny_once']);
 
-    // An answer the hold doesn't offer changes nothing.
-    const notOffered = await call('answer', { params: { decision_id: decisionId }, body: { answer: 'allow_person' } });
-    expect(notOffered).toEqual({ status: 422, body: { error: 'kernel', code: 'invalid' } });
+    // An answer the hold doesn't offer changes nothing, "Deny always" on a limit hold included.
+    const invalid = { status: 422, body: { error: 'kernel', code: 'invalid' } };
+    for (const answer of ['allow_person', 'deny_always']) {
+      expect(await call('answer', { params: { decision_id: seededId }, body: { answer } }), answer).toEqual(invalid);
+    }
+    expect(mockStore.world.decisions.get(seededId)?.decision.state).toBe('held');
 
-    const first = await call('answer', { params: { decision_id: decisionId }, body: { answer: 'deny_always' } });
+    // Verified Dana's refund: the refund card asks about every refund, so all four answers.
+    const refund = mockStore.world.addHeldRefund();
+    const held = ((await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[]).find(
+      (item) => item.decision?.decision_id === refund.decision_id,
+    );
+    expect(held?.decision).toMatchObject({
+      outcome: 'hold',
+      state: 'held',
+      card_ids: ['rv-refund'],
+      action: { tool: 'payments.create_refund', amount_cents: 18_000 },
+      answers: ['allow_once', 'deny_once', 'allow_person', 'deny_always'],
+    });
+    expect(held?.held_by).toBe('Refunds to a customer wait for your answer.');
+    expect(held?.session).toMatchObject({ verified: true, display_name: 'Dana Whitfield' });
+
+    // "Deny always" denies it and drafts a never card for Dana and this tool.
+    const first = await call('answer', { params: { decision_id: refund.decision_id }, body: { answer: 'deny_always' } });
     expect(first.status).toBe(200);
     expect(first.body).toMatchObject({
-      decision: { state: 'denied' },
+      decision: { decision_id: refund.decision_id, state: 'denied' },
       execution_state: null,
-      card_diff: [{ card_id: 'never-anyone-native.quote', applies_to: 'native.quote', mode: 'never', who: 'anyone' }],
+      card_diff: [
+        {
+          card_id: 'never-per-dana-payments.create_refund',
+          applies_to: 'payments.create_refund',
+          mode: 'never',
+          who: 'person',
+          person_id: 'per-dana',
+        },
+      ],
     });
 
-    const second = await call('answer', { params: { decision_id: decisionId }, body: { answer: 'allow_once' } });
-    expect(second.status).toBe(409);
-    expect(second.body).toMatchObject({ error: 'already_resolved', decision: { decision_id: decisionId, state: 'denied' } });
+    // A second answer, even one the hold offered, gets the decision as it now stands.
+    for (const answer of ['allow_once', 'deny_always']) {
+      const second = await call('answer', { params: { decision_id: refund.decision_id }, body: { answer } });
+      expect(second.status, answer).toBe(409);
+      expect(second.body).toMatchObject({ error: 'already_resolved', decision: { decision_id: refund.decision_id, state: 'denied' } });
+    }
 
     const unknown = await call('answer', { params: { decision_id: 'dec-elsewhere' }, body: { answer: 'allow_once' } });
     expect(unknown.status).toBe(404);

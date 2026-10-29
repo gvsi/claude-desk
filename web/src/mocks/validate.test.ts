@@ -72,15 +72,20 @@ describe('mock payloads', () => {
     if (!own) throw new Error("the discount samples hold this browser's requests");
     await body('cancelRequest', { params: { slug, decision_id: own.decision_id } });
 
-    // Answer each other hold: the seeded one allowed, the browser's denied for good (a rule card drafted).
-    const decisions = held.flatMap((item) => (item.decision && item.decision !== own ? [item.decision] : []));
-    expect(decisions.length).toBeGreaterThanOrEqual(2);
-    const answers = ['allow_once', 'deny_always', 'deny_once'] as const;
+    // Answer each other hold with the answers it offers: the limit holds once each way, and
+    // verified Dana's refund (an ask card's hold) allowed for her and denied for good, which draft
+    // rule cards.
+    const refund = mockStore.world.addHeldRefund();
+    const twin = mockStore.world.addHeldRefund();
+    const decisions = [...held.flatMap((item) => (item.decision && item.decision !== own ? [item.decision] : [])), refund, twin];
+    expect(decisions.length).toBeGreaterThanOrEqual(4);
+    const oneTime = ['allow_once', 'deny_once'] as const;
+    const forDana = ['allow_person', 'deny_always'] as const;
     for (const [i, decision] of decisions.entries()) {
-      const out = (await body('answer', {
-        params: { decision_id: decision.decision_id },
-        body: { answer: answers[i % answers.length] },
-      })) as ApprovalAnswerOut;
+      const offered = decision.answers ?? [];
+      const answer = offered.includes('deny_always') ? forDana[i % forDana.length] : oneTime[i % oneTime.length];
+      expect(offered, decision.decision_id).toContain(answer);
+      const out = (await body('answer', { params: { decision_id: decision.decision_id }, body: { answer } })) as ApprovalAnswerOut;
       checks.push(['Decision', out.decision], ...(out.card_diff ?? []).map((card): [string, unknown] => ['RuleCard', card]));
     }
     await vi.advanceTimersByTimeAsync(EVENT_GAP_MS * 20);

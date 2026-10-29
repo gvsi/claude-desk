@@ -24,12 +24,15 @@ import type { DeskSummary, Handoff, TranscriptItem, TranscriptKind } from '../ap
 import { placeholderHex, rivera } from '../ds/fixtures/index.ts';
 import { BUSINESS, activePolicy, copyIds, type CopyIds, type MockSeed } from './seed.ts';
 import {
+  DECISIONS,
   EVENT_GAP_MS,
   VISITOR_PLAIN,
   allows,
+  answersFor,
   statusLine,
   turnEnd,
   turnLanguage,
+  writing,
   type DecisionSpec,
   type Language,
   type Step,
@@ -104,6 +107,9 @@ export interface LinkRecord {
   deskId: string;
   sessionId: string;
 }
+
+/** What verified Dana writes when she asks for her drain clearing payment back. Untrusted, as any visitor's words. */
+export const REFUND_REQUEST = "I'd like a refund for the drain clearing I paid for on October 12.";
 
 /** One seeded turn: what the visitor wrote, an optional owner whisper, and Claude's steps. */
 export interface ReplayTurn {
@@ -333,7 +339,7 @@ export class MockWorld {
       review: null,
       reason_plain: spec.reasonPlain,
       visitor_plain: statusLine(language, state, spec.tool),
-      answers: hold ? [...(spec.answers ?? [])] : [],
+      answers: hold ? answersFor(spec, session.person !== null) : [],
       expires_at: isoTime(this.now() + DAY),
       inbox,
       ledger_seq: ledgerSeq,
@@ -346,6 +352,55 @@ export class MockWorld {
       fromTheVisitor: session.lastVisitorText,
     });
     return decision;
+  }
+
+  /** The visitor confirmed it's them with the demo code: the chat is now `person`'s, verified. */
+  verify(session: SessionRecord, person: { personId: string; name: string }): void {
+    session.state = { ...session.state, verified: true, assurance: 'demo_code' };
+    session.person = { personId: person.personId, name: person.name };
+    session.displayName = person.name;
+    this.appendLedger(this.deskOf(session), {
+      kind: 'verify',
+      origin: 'kernel',
+      session_id: session.state.session_id,
+      ref_id: null,
+      summary: { ok: true, assurance: 'demo_code' },
+    });
+  }
+
+  /**
+   * Verified Dana asks for her $180.00 drain clearing payment back, a minute ago, and the refund
+   * card holds it for Maria: the design system's `rivera.heldRefund`, in this copy. Tests add it;
+   * no seed has it. Her verified chat with the Desk is made the first time and kept after.
+   */
+  addHeldRefund(deskId: string = this.ids.deskId): Decision {
+    const desk = this.desk(deskId);
+    if (!desk) throw new Error(`the copy has no Desk ${deskId}`);
+    const from = this.now() - MINUTE;
+    const { dana } = rivera.people;
+    let session = this.sessionsOf(deskId).find((s) => s.person?.personId === dana.personId);
+    if (!session) {
+      const sessionId = deskId === this.ids.deskId ? this.scoped('ses-dana-verified') : undefined;
+      const opened = this.at(from, () => this.addSession(desk, { sessionId }));
+      this.at(from, () => this.verify(opened, dana));
+      session = opened;
+    }
+    let held: Decision | null = null;
+    this.replay(session, from, [
+      {
+        text: REFUND_REQUEST,
+        steps: [
+          (ctx) => {
+            held = ctx.decide(DECISIONS.heldRefund);
+            return ctx.status('held', held);
+          },
+          writing,
+          (ctx) => ctx.reply([rivera.blocks.handoff[ctx.language]]),
+        ],
+      },
+    ]);
+    if (held === null) throw new Error("Dana's refund wasn't decided");
+    return held;
   }
 
   /** The owner's Demo inbox alert for a hold; the decision carries its notice. */
