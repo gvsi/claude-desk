@@ -18,6 +18,7 @@ from desk.api.model import ModelUsage
 from desk.api.prompts import NOTES, REWRITE_INSTRUCTION, DeskIdentity, conversation_system
 from desk.api.store import append_message, has_pending
 from desk.api.tools import Caller
+from desk.contracts import AgentAuth
 from desk.events import SseEvent
 from tests.api.conftest import new_visitor
 from tests.api.fakes import FINISHED_AT, ScriptedModel, response, thinking, tool_use, unavailable
@@ -304,6 +305,47 @@ async def test_reply_waits_for_parallel_tool_calls(api_conn, caller, visitor, fa
     receipt, message = await events(api_conn, caller.session_id)
     assert (receipt.type, receipt.state, message.type, message.handoff) == ("receipt", "executed", "message", False)
     assert model.requests[0].system == conversation_system(RIVERA.model_copy(update={"kind": "agent"}))
+
+
+class SignedAgent(httpx.AsyncBaseTransport):
+    """The kernel as an agent's signed requests reach it ("Kernel HTTP API v2"): a signature authenticates the agent but
+    names no session, so `/whoami` answers 401 `auth` unless its query names one. Each signed call then reaches
+    FakeKernel (which has no agent signatures yet) as the session the test opened for the agent."""
+
+    def __init__(self, fake, token: str, session_id: str):
+        self._inner = httpx.ASGITransport(app=fake_kernel_app(fake))
+        self._token, self._session_id = token, session_id
+        self.whoami: list[dict] = []
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        headers = {name: value for name, value in request.headers.items() if not name.startswith("x-agent-")}
+        if "x-agent-sig" not in request.headers or "x-session-token" in request.headers:
+            return httpx.Response(401, json={"code": "auth"})
+        if request.url.path == "/whoami":
+            self.whoami.append(dict(request.url.params))
+            if request.url.params.get("session_id") != self._session_id:
+                return httpx.Response(401, json={"code": "auth"})
+        signed = httpx.Request(request.method, request.url, headers={**headers, "x-session-token": self._token},
+                               content=await request.aread())
+        return await self._inner.handle_async_request(signed)
+
+
+async def test_an_agent_turn_names_its_session_to_the_kernel(api_conn, caller, visitor, fake):
+    """An agent's turn reaches its model call: each `/whoami` names the session, since a signature can't."""
+    agent = replace(caller, kind="agent")
+    await append_message(api_conn, agent.ids, "agent_text", text="What are your hours?")
+    await api_conn.commit()
+    model = ScriptedModel([response(reply("We're open on weekdays.", HOURS))])
+    auth = AgentAuth(agent_key_id="agent-key-1", ts="2026-10-30T17:04:05.123000Z", nonce="nonce-1", sig="ab" * 64)
+    transport = SignedAgent(fake, visitor.token, caller.session_id)
+    async with KernelHttp("http://fake-kernel", transport=transport) as http:
+        outcome = await run_turn(api_conn, replace(agent, kernel=http.agent(auth, "cd" * 32)), model,
+                                 end_on_reply=True)
+
+    assert outcome == "done" and len(model.requests) == 1
+    assert transport.whoami == [{"session_id": caller.session_id}]
+    (message,) = await events(api_conn, caller.session_id)
+    assert (message.type, message.handoff) == ("message", False)
 
 
 async def test_held_result_returns_without_waiting(api_conn, caller, fake):

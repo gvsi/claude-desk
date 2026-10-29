@@ -120,9 +120,10 @@ def _stop(outcomes: Iterable[ToolOutcome]) -> TurnOutcome | None:
 
 async def _session(caller: Caller) -> SessionState | TurnOutcome:
     """The caller's session as the kernel has it now (`GET /whoami`: its mode and generation), or how the turn ends
-    when there is none to act in."""
+    when there is none to act in. An agent names its session in the query, since its signature can't (master,
+    "Kernel HTTP API v2"); a token names its own."""
     try:
-        who = await caller.kernel.whoami()
+        who = await caller.kernel.whoami(session_id=caller.session_id if caller.kind == "agent" else None)
     except KernelFailed as failure:
         return _failed(failure)
     except KernelUnavailable:
