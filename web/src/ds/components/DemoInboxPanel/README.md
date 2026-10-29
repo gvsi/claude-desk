@@ -18,8 +18,11 @@
 | `entry` with the notice's `entry_id` | The kind ("Verification code", "Alert" or "Ledger checkpoint") and `entry.body` word for word, which may hold a code. A ledger checkpoint's body reads in the trace's monospace. |
 | `entry: null`, not failed | The notice's `preview` and a waiting `Notice` "Opening" (`role="status"`). Never a code. |
 | `failed`, or an `entry` with another `entry_id` | The `preview`, an error `Notice` "Couldn’t open this entry." and "Try again", which calls `onRetry(entry_id)`. An entry fetched for another notice never shows under this one. |
-| `viewer="visitor"` and an `entry` of any kind but `verification_code` | Nothing. A visitor never sees the owner's alerts or checkpoints, whatever the screen passes in. |
+| `viewer="visitor"` and a notice to `owner` | Nothing, whether its entry is opening, failed to open or open. |
+| `viewer="visitor"` and its own `entry` of any kind but `verification_code`, or one the kernel addressed to `owner` | Nothing. |
+| `viewer="visitor"`, its own entry not yet fetched, and a recipient that isn't clearly a contact (blank, or the owner's word written another way) | Nothing, until the fetched entry proves it is a verification code. |
 
+- A visitor never sees the owner's alerts or checkpoints, whatever the screen passes in: before its own entry arrives, a row shows (opening or failed to open) only for a notice to a masked contact on record, the legitimate state of a code on its way.
 - With nothing to show: "Nothing here yet. Codes and alerts you’d get by text or email show up here."
 - No time ever shows on a visitor's panel, even when an item carries one.
 

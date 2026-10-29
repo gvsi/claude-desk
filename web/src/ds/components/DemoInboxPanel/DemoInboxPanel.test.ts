@@ -29,4 +29,34 @@ describe('DemoInboxPanel', () => {
     // Under its own notice it shows.
     expect(render({ items: [{ notice, entry: codeEntry }] })).toContain('482913');
   });
+
+  it('a_visitor_sees_a_row_before_its_entry_only_for_a_contact', () => {
+    if (!codeEntry || !notice) throw new Error('the Chen fixture has no code entry');
+    const rows = (html: string) => html.match(/<li /g)?.length ?? 0;
+    // The legitimate case: a code on its way to the contact on record shows its preview and Opening.
+    const opening = render({ items: [{ notice, entry: null }] });
+    expect(rows(opening)).toBe(1);
+    expect(opening).toContain('New verification code');
+    expect(opening).toContain('Opening');
+    // A recipient that can't be read as a contact (blank, or the owner written another way) shows
+    // nothing while opening or after failing to open, for a visitor.
+    for (const to of ['', '   ', 'Owner', ' owner ', 'OWNER']) {
+      const unclear = { ...notice, to, preview: 'A request needs your answer' };
+      for (const failed of [false, true]) {
+        const html = render({ items: [{ notice: unclear, entry: null, failed }] });
+        expect(rows(html), JSON.stringify({ to, failed })).toBe(0);
+        expect(html).not.toContain('A request needs your answer');
+      }
+      // Once its fetched entry proves it is a code for this session, it shows. An entry fetched for
+      // another notice proves nothing.
+      expect(rows(render({ items: [{ notice: unclear, entry: codeEntry }] })), JSON.stringify(to)).toBe(1);
+      const elsewhere = { ...unclear, entry_id: 'inbox-something-else' };
+      expect(rows(render({ items: [{ notice: elsewhere, entry: codeEntry }] })), JSON.stringify(to)).toBe(0);
+    }
+    // An entry the kernel addressed to the owner never shows to a visitor, whatever its kind says.
+    expect(rows(render({ items: [{ notice, entry: { ...codeEntry, to: 'owner' } }] }))).toBe(0);
+    // The owner's own panel shows every row.
+    const owner = { ...notice, to: 'owner', preview: 'A request needs your answer' };
+    expect(render({ viewer: 'owner', items: [{ notice: owner, entry: null }] })).toContain('A request needs your answer');
+  });
 });

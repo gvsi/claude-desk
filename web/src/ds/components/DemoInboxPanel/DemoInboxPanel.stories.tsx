@@ -213,14 +213,29 @@ export const OwnerAlerts: Story = {
 /** No clock time, in any form: visitor surfaces show none. */
 const CLOCK = /\d{1,2}:\d{2}|\b(?:am|pm)\b/i;
 
+/**
+ * Two more owner notices whose entries haven't opened: a lockout alert still being fetched, and a
+ * second hold alert whose fetch failed. A visitor's panel must show neither, before or after.
+ */
+const ownerStillOpening: DemoInboxItem = {
+  notice: { entry_id: 'inbox-lockout-chen', to: 'owner', preview: 'Verification paused for a contact' },
+  entry: null,
+};
+const ownerFailedToOpen: DemoInboxItem = {
+  notice: { entry_id: 'inbox-hold-chen-2', to: 'owner', preview: 'Another request needs your answer' },
+  entry: null,
+  failed: true,
+};
+
 export const VisitorGivenAlert: Story = {
-  args: { viewer: 'visitor', items: everythingArrived },
+  args: { viewer: 'visitor', items: [...everythingArrived, ownerStillOpening, ownerFailedToOpen] },
   parameters: {
-    canvasNote: `${BOARD}'s visitor panel, handed the owner's alert and ledger checkpoint by mistake (the kernel never sends a visitor either); it shows only the code.`,
+    canvasNote: `${BOARD}'s visitor panel, handed the owner's alerts and ledger checkpoint by mistake, opened, still opening and failed to open (the kernel never sends a visitor any of them); it shows only the code.`,
   },
   play: async ({ canvas, canvasElement }) => {
     // visitor_sees_only_codes: a visitor's panel shows verification codes and nothing else, even
-    // when a screen passes it more, and no time.
+    // when a screen passes it more, and no time. An owner's notice shows no row at all: not
+    // while its entry is opening, not when it failed to open, and not once it has.
     const items = itemsOf(canvasElement);
     await expect(items).toHaveLength(1);
     await expect(within(items[0] as HTMLElement).getByText(entryOf(CODE_ID).body)).toBeVisible();
@@ -229,6 +244,10 @@ export const VisitorGivenAlert: Story = {
       await expect(text).not.toContain(hidden.body);
       await expect(text).not.toContain(noticeOf(hidden.entry_id).preview);
     }
+    for (const { notice } of [ownerStillOpening, ownerFailedToOpen]) await expect(text).not.toContain(notice.preview);
+    await expect(canvas.queryByRole('status')).toBeNull();
+    await expect(canvas.queryByRole('alert')).toBeNull();
+    await expect(canvas.queryByRole('button', { name: 'Try again' })).toBeNull();
     await expect(canvas.queryByText('Alert')).toBeNull();
     await expect(canvas.queryByText('Ledger checkpoint')).toBeNull();
     await expect(canvas.queryByText('To owner')).toBeNull();

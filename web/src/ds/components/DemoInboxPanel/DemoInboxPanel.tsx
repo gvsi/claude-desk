@@ -43,12 +43,32 @@ function viewOf({ notice, entry, failed }: DemoInboxItem): ItemView {
   return entry || failed ? { kind: 'failed' } : { kind: 'opening' };
 }
 
+/** The recipient the kernel writes for the owner; anything else is a masked contact on record. */
+const OWNER_RECIPIENT = 'owner';
+
+/**
+ * Who a notice or entry went to, as far as a visitor's panel can tell: the owner, a contact on
+ * record, or unclear (blank, or the owner's word written another way), which counts as not a contact.
+ */
+function recipientOf(to: string): 'owner' | 'contact' | 'unclear' {
+  if (to === OWNER_RECIPIENT) return 'owner';
+  const plain = to.trim();
+  return plain === '' || plain.toLowerCase() === OWNER_RECIPIENT ? 'unclear' : 'contact';
+}
+
 /**
  * A visitor sees only their own codes, never the owner's alerts or ledger checkpoints, whatever the
- * screen passes in. An item whose kind isn't known yet shows its code-free notice.
+ * screen passes in. A notice addressed to the owner shows no row at all, whether its entry is
+ * opening, failed to open or open. Before its own entry arrives, a row shows only for a notice to
+ * a contact on record; one whose recipient is unclear waits, unshown, until its fetched entry (the
+ * same `entry_id`) proves it is a verification code that didn't go to the owner.
  */
-function shownTo(viewer: DemoInboxPanelProps['viewer'], { entry }: DemoInboxItem): boolean {
-  return viewer === 'owner' || entry === null || entry.kind === 'verification_code';
+function shownTo(viewer: DemoInboxPanelProps['viewer'], { notice, entry }: DemoInboxItem): boolean {
+  if (viewer === 'owner') return true;
+  const to = recipientOf(notice.to);
+  if (to === 'owner') return false;
+  if (entry === null || entry.entry_id !== notice.entry_id) return to === 'contact';
+  return entry.kind === 'verification_code' && recipientOf(entry.to) !== 'owner';
 }
 
 /**
