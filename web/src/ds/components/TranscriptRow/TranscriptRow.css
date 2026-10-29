@@ -1,6 +1,6 @@
 /* TranscriptRow and TranscriptHeader: a message in the reading column (at most size-reading wide,
-   the full width of a narrower log), with its receipts attached under it, space-8 below, at every
-   width. Receipts are space-8 apart. */
+   the full width of a narrower log), with its receipts attached under it, space-8 below, on the
+   message's side, at every width. Receipts are space-8 apart. */
 
 .cd-transcript-row {
   display: flex;
@@ -21,6 +21,15 @@
   flex-direction: column;
   gap: var(--space-8);
   min-width: 0;
+}
+
+/* Under a message on the right (a visitor's or an agent's bubble), what is attached sits on the
+   right too: it ends where the bubble ends and is no wider than a bubble can be. Its lines still
+   start together, so their dots stay in one column. Under Claude's and the owner's words, on the
+   left, it starts where they start. */
+.cd-transcript-row:has(> .cd-transcript-row__main > :is(.cd-visitor-message, .cd-agent-message)) > .cd-transcript-row__margin {
+  align-self: flex-end;
+  max-width: 85%;
 }
 
 .cd-transcript-header__caption {

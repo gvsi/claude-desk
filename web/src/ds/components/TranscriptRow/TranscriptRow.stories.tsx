@@ -3,6 +3,7 @@ import { expect, fn } from 'storybook/test';
 
 import type { EvMessage, SseEvent, StatusEvent } from '../../../api/contracts.ts';
 import { rivera } from '../../fixtures/index.ts';
+import { AgentMessage } from '../AgentMessage/AgentMessage.tsx';
 import { ClaudeMessage } from '../ClaudeMessage/ClaudeMessage.tsx';
 import { MarginNote } from '../MarginNote/MarginNote.tsx';
 import { MarginReceipt } from '../MarginReceipt/MarginReceipt.tsx';
@@ -16,7 +17,7 @@ const ownerName = rivera.business.ownerName;
 
 /** A fixture part the stories need, or a thrown error naming what the fixture lost. */
 function required<T>(value: T | undefined, what: string): T {
-  if (value === undefined) throw new Error(`the Dana fixture has no ${what}`);
+  if (value === undefined) throw new Error(`the Rivera fixture has no ${what}`);
   return value;
 }
 
@@ -35,6 +36,19 @@ const quoteReply = required(
 );
 
 const receipts = [receiptFromEvent(quoteReceipt), receiptFromEvent(quoteReply)];
+
+/** Alex Kim's assistant's first request, and the receipt for the quote it asked for. */
+const alex = rivera.conversations.alexAgent;
+const agentRequest = required(
+  alex.turns.flatMap((turn) => (turn.kind === 'agent' ? [turn.text] : []))[0],
+  'agent request',
+);
+const agentReceipt = receiptFromEvent(
+  required(
+    alex.turns.flatMap((turn) => (turn.kind === 'event' && turn.event.type === 'receipt' ? [turn.event] : []))[0],
+    'agent quote receipt',
+  ),
+);
 const LEAD_SAVED = 'Name and phone saved to Customers as a new lead.';
 
 /** The opening of Dana's conversation as the owner reads it: her question, then the reply and its receipts. */
@@ -89,19 +103,27 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 /**
- * receipts_attach_under_message: the row is the reading column, and its receipts sit under the
- * message, left-aligned with it, `space-8` below it, as wide as the column. Nothing overflows.
+ * receipts_attach_under_message: the row is the reading column, and what is attached sits
+ * `space-8` under the message, on the message's side: from its left edge under Claude's and the
+ * owner's words, and ending at its right edge, no wider than a bubble (85%), under a visitor's or
+ * an agent's bubble on the right. `selector` is the message element it lines up with. Nothing
+ * overflows.
  */
-async function expectAttachedUnder(root: HTMLElement, selector: string, readingWidth: number) {
-  const { row, main, margin } = rowParts(root, selector);
+async function expectAttachedUnder(root: HTMLElement, selector: string, side: 'start' | 'end', readingWidth: number) {
+  const { inner, row, main, margin } = rowParts(root, selector);
   const rowBox = row.getBoundingClientRect();
   const mainBox = main.getBoundingClientRect();
   const marginBox = margin.getBoundingClientRect();
+  const message = inner.getBoundingClientRect();
   await expect(rowBox.width).toBe(readingWidth);
   await expect(mainBox.width).toBe(rowBox.width);
-  await expect(marginBox.width).toBe(rowBox.width);
-  await expect(marginBox.left).toBe(rowBox.left);
   await expect(marginBox.top - mainBox.bottom).toBe(8);
+  if (side === 'start') {
+    await expect(marginBox.left).toBe(message.left);
+  } else {
+    await expect(marginBox.right).toBe(message.right);
+    await expect(marginBox.width).toBeLessThanOrEqual(rowBox.width * 0.85 + 0.5);
+  }
   for (const el of [row, main, margin]) await expect(el.scrollWidth).toBeLessThanOrEqual(el.clientWidth);
 }
 
@@ -125,7 +147,7 @@ export const ReplyWithReceipts: Story = {
     // In the owner's 960 px content column, the row is still the 640 px reading column, and the
     // receipts are under the reply, one above the other.
     await expect(log.getBoundingClientRect().width).toBe(960);
-    await expectAttachedUnder(canvasElement, '.cd-claude-message__prose', 640);
+    await expectAttachedUnder(canvasElement, '.cd-claude-message__prose', 'start', 640);
     const [first, second] = shown as [HTMLElement, HTMLElement];
     await expect(second.getBoundingClientRect().top).toBeGreaterThan(first.getBoundingClientRect().bottom);
     await expect(second.getBoundingClientRect().left).toBe(first.getBoundingClientRect().left);
@@ -148,18 +170,23 @@ export const BubbleWithNote: Story = {
       <TranscriptRow margin={<MarginNote text={LEAD_SAVED} onOpen={fn()} />}>
         <VisitorMessage text={followUp} />
       </TranscriptRow>
+      <TranscriptRow margin={<MarginReceipt {...agentReceipt} onOpenTrace={fn()} />}>
+        <AgentMessage agentName={alex.name} signed title="Quote the service call deposit" meta="Request 1" text={agentRequest} />
+      </TranscriptRow>
     </Transcript>
   ),
   parameters: {
-    canvasNote: "Dana's second message is the fixture's; the board's message under this note also gave her name and phone, and its note sits in a margin column.",
+    canvasNote:
+      "Dana's second message and Alex Kim's assistant's request are the fixture's; the board's message under the note also gave her name and phone, and its notes sit in a margin column.",
   },
   play: async ({ canvasElement }) => {
-    // The note is attached under the bubble, like a receipt.
-    await expectAttachedUnder(canvasElement, '.cd-visitor-message__bubble', 640);
-    const bubble = canvasElement.querySelector<HTMLElement>('.cd-visitor-message__bubble');
-    const note = canvasElement.querySelector<HTMLElement>('.cd-margin-note');
-    if (!bubble || !note) throw new Error('no bubble or note');
-    await expect(note.getBoundingClientRect().top).toBeGreaterThanOrEqual(bubble.getBoundingClientRect().bottom);
+    // Under a bubble on the right, what is attached sits on the right too, ending where it ends.
+    await expectAttachedUnder(canvasElement, '.cd-visitor-message__bubble', 'end', 640);
+    await expectAttachedUnder(canvasElement, '.cd-agent-message__bubble', 'end', 640);
+    for (const line of canvasElement.querySelectorAll<HTMLElement>('.cd-margin-line')) {
+      const bubble = line.closest('.cd-transcript-row')?.querySelector<HTMLElement>('.cd-visitor-message__bubble, .cd-agent-message__bubble');
+      await expect(line.getBoundingClientRect().top).toBeGreaterThanOrEqual(bubble?.getBoundingClientRect().bottom ?? Number.POSITIVE_INFINITY);
+    }
   },
 };
 
@@ -177,7 +204,7 @@ export const Stacked: Story = {
   },
   play: async ({ canvas, canvasElement }) => {
     // stacks_when_narrow: the same layout in a narrower column, where the row takes its full width.
-    await expectAttachedUnder(canvasElement, '.cd-claude-message__prose', 600);
+    await expectAttachedUnder(canvasElement, '.cd-claude-message__prose', 'start', 600);
     const log = canvas.getByRole('log');
     await expect(log.scrollWidth).toBeLessThanOrEqual(log.clientWidth);
   },

@@ -17,7 +17,7 @@
 ## Layout
 
 - The row is the reading column: `size-reading` wide at most, and the full width of a narrower log.
-- Its receipts attach under the message at every width, `space-8` below it, left-aligned with the row and as wide as it, `space-8` apart. On the owner's wide screens, on a phone and on the public page alike, each checkpoint result sits right under the message it explains.
+- Its receipts attach under the message at every width, `space-8` below it and `space-8` apart, on the message's side: under Claude's and the owner's words they start at the left, as wide as the row; under a visitor's or an agent's bubble on the right they end where the bubble ends and are at most 85% of the row wide, like the bubble. Their lines start together either way, so the dots stay in one column. On the owner's wide screens, on a phone and on the public page alike, each checkpoint result sits right under the message it explains.
 - The header's captions stack the same way, the receipts' caption second.
 
 ## Props
