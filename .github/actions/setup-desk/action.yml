@@ -27,6 +27,8 @@ runs:
         python-version: "3.13"
         enable-cache: true
         cache-suffix: ${{ github.job }}
+        # The kernel tests job never runs uv, so it has no uv cache to save.
+        ignore-nothing-to-cache: true
 
     - name: Install cvc5 1.4.2
       shell: bash

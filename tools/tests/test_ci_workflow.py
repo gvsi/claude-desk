@@ -321,7 +321,8 @@ def test_gated_jobs_go_through_the_gate():
     assert node_setups
     for step in node_setups:
         assert step["with"] == {"node-version": "24.21.0", "package-manager-cache": False}, step
-    # Each job keeps its own uv cache, so the first job to save one can't stand in for the others.
+    # Each job keeps its own uv cache, so the first job to save one can't stand in for the others; a
+    # job that never runs uv (kernel tests) has nothing to save, which mustn't fail its post step.
     uv_setups = [step for step in all_steps() if step.get("uses", "").startswith("astral-sh/setup-uv@")]
     assert uv_setups
     for step in uv_setups:
@@ -330,6 +331,7 @@ def test_gated_jobs_go_through_the_gate():
             "python-version": "3.13",
             "enable-cache": True,
             "cache-suffix": "${{ github.job }}",
+            "ignore-nothing-to-cache": True,
         }, step
 
 
