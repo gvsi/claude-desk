@@ -35,6 +35,7 @@ const SAMPLES: Record<string, string> = {
   count: '3',
   beta: 'Beta',
   'brand-name': 'Rivera Plumbing',
+  amount: '$20.00',
   trace: 'prev_hash 9f2c41d07a',
 };
 
