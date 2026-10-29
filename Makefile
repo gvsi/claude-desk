@@ -83,8 +83,9 @@ image-check:
 	else echo "image-check: skipped the proof reports, no kernel/cedar/proofs yet"; fi; \
 	echo "image-check: ok"
 
-# The CDK stacks: their tests, then a synth of every stack (synth takes them all when none is
-# named; it has no --all). Synth only stages the image's build context and builds nothing; it
-# needs no AWS credentials.
+# The CDK stacks: the CloudFront function's tests (Node 24 expands the quoted glob itself and no
+# longer searches a directory argument), the stacks' tests, then a synth of every stack (synth
+# takes them all when none is named; it has no --all). Synth only stages the image's build context
+# and the web build, and builds nothing; it needs no AWS credentials.
 infra-check:
-	cd infra && uv run pytest -q && npm ci && npx cdk synth --quiet
+	cd infra && node --test 'functions/**/*.test.mjs' && uv run pytest -q && npm ci && npx cdk synth --quiet

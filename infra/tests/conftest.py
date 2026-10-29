@@ -3,7 +3,7 @@ environment, and the small Dockerfile fixture the stacks build their image from.
 
 import json
 import os
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -116,9 +116,8 @@ class DeskStacks:
         return self.data.get_logical_id(construct.node.default_child)
 
 
-def build_stacks(before_synth: Callable[[Any], None] | None = None, **context: str) -> DeskStacks:
-    """DeskData and DeskApp as app.py builds them without credentials: us-west-2, no account.
-    `before_synth(desk_app)` may add probe constructs to DeskApp before the templates are made."""
+def build_stacks(**context: str) -> DeskStacks:
+    """DeskData and DeskApp as app.py builds them without credentials: us-west-2, no account."""
     from aws_cdk.assertions import Template
 
     from stacks.app_stack import DeskApp
@@ -131,8 +130,6 @@ def build_stacks(before_synth: Callable[[Any], None] | None = None, **context: s
         env = cdk.Environment(region="us-west-2")
         data = DeskData(app, "DeskData", config=config, env=env)
         desk = DeskApp(app, "DeskApp", data=data, config=config, env=env)
-        if before_synth is not None:
-            before_synth(desk)
         template = Template.from_stack(desk)
         return DeskStacks(config, data, desk, template, Template.from_stack(data))
 

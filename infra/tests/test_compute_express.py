@@ -9,7 +9,6 @@ from pathlib import Path
 
 import aws_cdk as cdk
 import pytest
-from aws_cdk import aws_cloudfront as cloudfront
 from aws_cdk import aws_lambda as lambda_
 from conftest import actions, resource_list, role_statements
 
@@ -102,19 +101,14 @@ def test_origin_host_strips_scheme_and_path(endpoint):
     assert _evaluate(stack.resolve(origin_host(endpoint))) == "a.ecs.us-west-2.on.aws"
 
 
-def test_api_origin_is_the_service_endpoint_over_https():
-    from conftest import build_stacks
-
-    def add_probe(desk_app):
-        # Task 5's distribution uses the origin; a probe distribution shows how it binds.
-        cloudfront.Distribution(
-            desk_app, "Probe", default_behavior=cloudfront.BehaviorOptions(origin=desk_app.compute.api_origin)
-        )
-
-    stacks = build_stacks(before_synth=add_probe)
+def test_api_origin_is_the_service_endpoint_over_https(desk_stacks):
+    stacks = desk_stacks
     service_id, _ = _only(stacks.template, "AWS::ECS::ExpressGatewayService")
-    _, probe = _only(stacks.template, "AWS::CloudFront::Distribution")
-    [origin] = probe["Properties"]["DistributionConfig"]["Origins"]
+    # The edge's /api/* behavior (stacks/edge.py) uses the compute's origin as bound here.
+    _, distribution = _only(stacks.template, "AWS::CloudFront::Distribution")
+    config = distribution["Properties"]["DistributionConfig"]
+    [api] = [behavior for behavior in config["CacheBehaviors"] if behavior["PathPattern"] == "/api/*"]
+    [origin] = [origin for origin in config["Origins"] if origin["Id"] == api["TargetOriginId"]]
 
     assert stacks.desk_app.resolve(stacks.desk_app.compute.service_endpoint) == {"Fn::GetAtt": [service_id, "Endpoint"]}
     assert origin["DomainName"] == stacks.desk_app.resolve(origin_host(stacks.desk_app.compute.service_endpoint))
@@ -139,6 +133,17 @@ def _edge_function_ids(stacks) -> set[str]:
     }
 
 
+def _express_edge_handler(stacks) -> tuple[str, dict]:
+    """The ExpressEdge handler, among the Express construct's own functions (the web deploy's
+    function is an `index.handler` too)."""
+    functions = _functions(stacks.template)
+    [handler_id] = [
+        function_id for function_id in _edge_function_ids(stacks)
+        if functions[function_id]["Properties"]["Handler"] == "index.handler"
+    ]
+    return handler_id, functions[handler_id]
+
+
 def test_express_edge_is_scoped(desk_stacks):
     template = desk_stacks.template
     service_id, _ = _only(template, "AWS::ECS::ExpressGatewayService")
@@ -157,9 +162,7 @@ def test_express_edge_is_scoped(desk_stacks):
     assert props["TaskDefinitionArn"] == {"Ref": task_id}
     assert set(props) == {"ServiceToken", "LoadBalancerArn", "PrefixListId", "TaskDefinitionArn"}
 
-    [handler] = [
-        function for function in _functions(template).values() if function["Properties"]["Handler"] == "index.handler"
-    ]
+    _, handler = _express_edge_handler(desk_stacks)
     assert handler["Properties"]["Runtime"] == "python3.13"
     assert handler["Properties"]["Architectures"] == ["arm64"]
 
@@ -264,9 +267,11 @@ def test_app_synthesizes_deskapp_after_deskdata_without_credentials(tmp_path):
 
 def test_express_edge_code_is_only_the_handler(desk_stacks):
     assembly = Path(desk_stacks.desk_app.node.root.synth().directory)
-    assets = json.loads((assembly / "DeskApp.assets.json").read_text())["files"].values()
-    staged = [assembly / asset["source"]["path"] for asset in assets if asset["source"]["packaging"] == "zip"]
-    [handler] = [path for path in staged if (path / "index.py").is_file()]
+    assets = json.loads((assembly / "DeskApp.assets.json").read_text())["files"]
+    _, function = _express_edge_handler(desk_stacks)
+    asset = assets[function["Properties"]["Code"]["S3Key"].removesuffix(".zip")]
+    assert asset["source"]["packaging"] == "zip"
+    handler = assembly / asset["source"]["path"]
 
     # The tests import the handler, which writes bytecode beside it; never ship that.
     assert sorted(item.relative_to(handler).as_posix() for item in handler.rglob("*")) == ["index.py"]
