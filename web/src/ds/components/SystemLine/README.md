@@ -11,7 +11,7 @@
 
 ## What the consumer provides
 
-- `text`: the line, in the reader's language. It shows no time, because no contract carries one and visitor surfaces show no clock times.
+- `text`: the line, in the reader's language. It shows no time, because no contract carries one and visitor surfaces show no clock times outside the public header's open status.
 - `initials` (optional): a person's initials, shown in a small circle beside the words and hidden from screen readers.
 
 ## Look and behavior
