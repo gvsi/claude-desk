@@ -364,13 +364,56 @@ export const WithAgentLinks: Story = {
 
 // The open status in the header: the kernel's words (`PublicDesk.open_status`), shown as written.
 
-/** Each status as the kernel serves it: open until later today, closed until tomorrow, open all week. */
-const OPEN_EN = { text: 'Open now, until 6:00 pm', open: true };
-const CLOSED_EN = { text: 'Closed now. Opens tomorrow at 8:00 am', open: false };
-const OPEN_ALL_WEEK = { text: 'Open now', open: true };
-/** In Spanish: closed until a later day, and the longest line, open until midnight on a later day. */
-const CLOSED_ES = { text: 'Cerrado ahora. Abre el lunes a las 8:00', open: false };
-const OPEN_ES_LONGEST = { text: 'Abierto ahora, hasta el viernes a medianoche', open: true };
+/*
+ * Each status whole, as the kernel serves it in `PublicDesk.open_status` for a business in
+ * America/Los_Angeles. The shell reads only `text` and `open`; the times are the kernel's and are
+ * never shown or used on the page.
+ */
+/** Thursday 10:00, open until 18:00 today. */
+const OPEN_EN = {
+  open: true,
+  until: '2026-10-29T18:00:00-07:00',
+  opens_at: null,
+  text: 'Open now, until 6:00 pm',
+  as_of: '2026-10-29T10:00:00-07:00',
+  refresh_at: '2026-10-29T18:00:00-07:00',
+};
+/** Thursday 19:00, closed until 8:00 tomorrow. */
+const CLOSED_EN = {
+  open: false,
+  until: null,
+  opens_at: '2026-10-30T08:00:00-07:00',
+  text: 'Closed now. Opens tomorrow at 8:00 am',
+  as_of: '2026-10-29T19:00:00-07:00',
+  refresh_at: '2026-10-30T00:00:00-07:00',
+};
+/** Open all week: the shortest line. */
+const OPEN_ALL_WEEK = {
+  open: true,
+  until: null,
+  opens_at: null,
+  text: 'Open now',
+  as_of: '2026-10-29T10:00:00-07:00',
+  refresh_at: '2026-10-30T00:00:00-07:00',
+};
+/** In Spanish, Saturday 14:00, closed until Monday at 8:00 (after the clocks fall back). */
+const CLOSED_ES = {
+  open: false,
+  until: null,
+  opens_at: '2026-11-02T08:00:00-08:00',
+  text: 'Cerrado ahora. Abre el lunes a las 8:00',
+  as_of: '2026-10-31T14:00:00-07:00',
+  refresh_at: '2026-11-01T00:00:00-07:00',
+};
+/** In Spanish, Wednesday 10:00, open until midnight at the end of Friday: the longest line. */
+const OPEN_ES_LONGEST = {
+  open: true,
+  until: '2026-10-31T00:00:00-07:00',
+  opens_at: null,
+  text: 'Abierto ahora, hasta el viernes a medianoche',
+  as_of: '2026-10-28T10:00:00-07:00',
+  refresh_at: '2026-10-29T00:00:00-07:00',
+};
 /** The shell's own line under a closed status. */
 const STILL_HELPS = { en: 'Claude can still help.', es: 'Claude puede ayudarte igual.' };
 
@@ -388,6 +431,8 @@ function partOf(header: HTMLElement, selector: string): HTMLElement {
 async function openStatusIn(header: HTMLElement, text: string): Promise<{ status: HTMLElement; line: HTMLElement; dot: HTMLElement }> {
   const line = lineReading(header, text);
   await expect(line).toHaveAttribute('data-copy', 'user');
+  // Only the kernel's words: none of the times that come with them.
+  await expect(header).not.toHaveTextContent(/\d{4}-\d{2}-\d{2}/);
   const status = line.closest<HTMLElement>('.cd-public-shell__open-status');
   const dot = status?.querySelector<HTMLElement>('.cd-status-dot');
   if (!status || !dot) throw new Error(`no open status with a dot around "${text}"`);

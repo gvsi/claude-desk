@@ -30,16 +30,17 @@ export interface PublicBrand {
 }
 
 /**
- * Whether the business is open now, from the Desk the kernel serves (`PublicDesk.open_status`). The
- * kernel works it out from the business's hours on its own clock and writes `text` in the page's
- * language and the business's time zone; the page shows `text` as written and works out no time.
+ * Whether the business is open now: `PublicDesk['open_status']`, the kernel's own object, or null
+ * for a Desk without hours. The kernel works it out from the business's hours on its own clock and
+ * writes `text` in the page's language and the business's time zone ("Open now, until 6:00 pm",
+ * "Cerrado ahora. Abre el lunes a las 8:00"). The shell reads only `text` and `open`, shows `text`
+ * as written and works out no time.
+ *
+ * The generated contracts don't carry the kernel's `OpenStatus` yet. Until they do, this alias
+ * stands in for it with only the two fields the shell reads; then it becomes
+ * `PublicDesk['open_status']`, the one line to change.
  */
-export interface PublicOpenStatus {
-  /** "Open now, until 6:00 pm", "Cerrado ahora. Abre el lunes a las 8:00". */
-  text: string;
-  /** A filled dot when open, a hollow one when closed. */
-  open: boolean;
-}
+export type PublicOpenStatus = { text: string; open: boolean } | null;
 
 export interface PublicShellProps {
   brand: PublicBrand;
@@ -48,9 +49,9 @@ export interface PublicShellProps {
   /** The visitor's language: every line of the shell's own copy, and `lang` on the page. */
   language: CopyLanguage;
   /**
-   * `PublicDesk.open_status`: the kernel's words in the header, with a filled dot when open, and a
-   * hollow one and "Claude can still help." under them when closed. Without it, or when it isn't
-   * whole, the header has no status line.
+   * `PublicDesk.open_status` as served: the kernel's words in the header, with a filled dot when
+   * open, and a hollow one and "Claude can still help." under them when closed. Without it (null
+   * for a Desk without hours), or when it isn't whole, the header has no status line.
    */
   openStatus?: PublicOpenStatus;
   /** Asks for the owner in the chat. */

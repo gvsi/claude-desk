@@ -54,10 +54,9 @@ describe('PublicShell guards', () => {
     // Everything a visitor reads comes from the kernel or is the shell's own static copy. A free-text
     // header line would be a slot outside both, which a screen could fill with a time or an amount
     // worked out on the page, so the shell has none. Its one status line is the kernel's open
-    // status: the kernel's words and a boolean for the dot, shown as written.
+    // status, `PublicDesk.open_status` as served, of which it reads the words and the boolean.
     expectTypeOf<PublicShellProps>().not.toHaveProperty('statusLine');
     expectTypeOf<PublicShellProps['openStatus']>().toEqualTypeOf<PublicOpenStatus | undefined>();
-    expectTypeOf<PublicOpenStatus>().toEqualTypeOf<{ text: string; open: boolean }>();
     const base: PublicShellProps = {
       brand: { name: 'Rivera Plumbing', tagline: 'Main line', monogram: 'R', field: '#1F4E4A', ink: '#ffffff', inkSecondary: '#e6e6e6', accent: '#B87333' },
       ownerName: 'Maria Rivera',
@@ -75,6 +74,11 @@ describe('PublicShell guards', () => {
     // The kernel's words, exactly once and exactly as written.
     const kernelLine = render({ ...base, openStatus: { text: 'Open now, until 6:00 pm', open: true } });
     expect(kernelLine.split('Open now, until 6:00 pm')).toHaveLength(2);
+
+    // A Desk without hours: the kernel sends null, passed straight through, and there is no line.
+    const noHours = render({ ...base, openStatus: null });
+    expect(noHours).not.toContain('cd-public-shell__open-status');
+    expect(noHours).not.toContain('cd-status-dot');
 
     // A status that isn't whole draws neither words nor a dot.
     const broken = render({ ...base, openStatus: { text: 'Open now', open: 'yes' } as unknown as PublicOpenStatus });
