@@ -8,8 +8,8 @@ Cards read datetimes in the business's time zone ("martes 3 de noviembre, 14:00"
 from datetime import datetime, time
 
 from desk.contracts import Fact, HoursWindow
-from desk.kernel_service.render.cards import (Card, DeskInfo, booking_window, claims, day_groups, hours_windows, local,
-                                              money, percent_text, slot_claims, text_claim)
+from desk.kernel_service.render.cards import (Card, DeskInfo, booking_window, callback_window, claims, day_groups,
+                                              hours_windows, local, money, percent_text, slot_claims, text_claim)
 
 STATUS: dict[str, str] = {
     "allowed": "Revisado con las reglas de {owner}",
@@ -122,3 +122,14 @@ def charter_text(fact: Fact | None, desk: DeskInfo) -> Card:
 
 def verify_prompt(fact: Fact | None, desk: DeskInfo) -> Card:
     return Card(title="Enviaré un código al contacto registrado.")
+
+
+def callback_confirmed(fact: Fact | None, desk: DeskInfo) -> Card:
+    """`{owner} te llamará el {day}, entre las {start} y las {end}`; sin horario `{owner} te llamará`.
+    El hecho guarda solo el horario, nunca el texto del visitante."""
+    owner = desk.owner_display_name
+    window = callback_window(fact, desk)
+    if window is None:
+        return Card(title=f"{owner} te llamará")
+    start, end = window
+    return Card(title=f"{owner} te llamará el {date(start)}, entre las {clock(start)} y las {clock(end)}")

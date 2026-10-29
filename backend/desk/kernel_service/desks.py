@@ -12,18 +12,22 @@ documents' record owners and the contacts on record must be usable.
 Contacts on record are kept three ways: `contact` as given (verification codes go only there),
 `contact_norm` for lookups, and `masked_contact`, the only form any view, notice or owner alert
 shows.
+
+A callback's window comes from the Desk's hours (`next_open_window`), never from a tool call.
 """
 
 import json
 import re
 import secrets
 import unicodedata
+from collections.abc import Sequence
+from datetime import UTC, datetime, time, timedelta, tzinfo
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import desk_kernel
 from sqlalchemy import select
 
-from desk.contracts import BusinessSeed, Claim, DeskSeed, Fact, Label, LedgerEvent, ToolProfile
+from desk.contracts import BusinessSeed, Claim, DeskSeed, Fact, HoursWindow, Label, LedgerEvent, ToolProfile
 from desk.db.models import Business, CalendarSlot, Desk, Document, NotificationPref, Person, PriceItem, Tool
 from desk.kernel_api import DeskCreated
 from desk.kernel_service import adapters, ledger
@@ -35,6 +39,9 @@ SLUG_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 SLUG_SUFFIX_LENGTH = 6
 SLUG_NAME_LENGTH = 40
 MASK = "•••"
+WEEK = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+WINDOW_SEARCH = timedelta(days=14)        # how far ahead a callback window is looked for
+DAY_END = 24 * 60                         # an hours window ending at 00:00 ends at midnight
 
 
 class InvalidSeed(KernelFailure):
@@ -185,6 +192,34 @@ async def create_desk(ctx: KernelCtx, copy_id: str, business: BusinessSeed, desk
     await ledger.append(ctx, copy_id=copy_id, desk_id=desk_id,
                         event=LedgerEvent(kind="desk_data", origin="kernel", summary={"part": "desk", "created": True}))
     return DeskCreated(desk_id=desk_id, slug=slug)
+
+
+def next_open_window(hours: Sequence[HoursWindow], tz: tzinfo, after: datetime) -> tuple[datetime, datetime] | None:
+    """The first clock-aligned hour `[h, h + 1 h)` of the business's hours: `h` on the hour in its
+    time zone `tz`, no earlier than `after`, and the whole hour inside one window (its end
+    exclusive, 00:00 the end of the day), within 14 days. None when there is none: no hours, or
+    only windows shorter than an hour. Hours are read on the wall clock, so a day the clocks
+    change keeps its hours; an hour the change skips is never offered, and of an hour it repeats
+    only the first."""
+    if after.tzinfo is None:
+        raise ValueError("after must be an aware datetime")
+    spans = [(set(window.days), window.start.hour * 60 + window.start.minute,
+              DAY_END if window.end == time(0) else window.end.hour * 60 + window.end.minute) for window in hours]
+    local = after.astimezone(tz).replace(tzinfo=None, fold=0)
+    first = local.replace(minute=0, second=0, microsecond=0)
+    if first < local:
+        first += timedelta(hours=1)
+    for step in range(WINDOW_SEARCH // timedelta(hours=1)):
+        wall = first + timedelta(hours=step)
+        minute = wall.hour * 60
+        if not any(WEEK[wall.weekday()] in days and start <= minute and minute + 60 <= end
+                   for days, start, end in spans):
+            continue
+        start = wall.replace(tzinfo=tz)
+        if start.astimezone(UTC).astimezone(tz).replace(tzinfo=None) != wall or start < after:
+            continue                      # a wall time the clocks skip, or the repeated hour before `after`
+        return start, (wall + timedelta(hours=1)).replace(tzinfo=tz)
+    return None
 
 
 async def enabled_profiles(ctx: KernelCtx, desk_id: str) -> list[ToolProfile]:

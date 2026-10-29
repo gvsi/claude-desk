@@ -8,8 +8,8 @@ time zone ("Tuesday, November 3, 2:00 pm"), money as `$1,234.56` and percentages
 from datetime import datetime, time
 
 from desk.contracts import Fact, HoursWindow
-from desk.kernel_service.render.cards import (Card, DeskInfo, booking_window, claims, day_groups, hours_windows, local,
-                                              money, percent_text, slot_claims, text_claim)
+from desk.kernel_service.render.cards import (Card, DeskInfo, booking_window, callback_window, claims, day_groups,
+                                              hours_windows, local, money, percent_text, slot_claims, text_claim)
 
 STATUS: dict[str, str] = {
     "allowed": "Checked against {owner}'s rules",
@@ -44,6 +44,8 @@ OWNER_PREVIEWS: dict[str, str] = {
     "breaker": "A conversation was paused",
     "booking": "New booking",
     "lockout": "Verification paused for a contact",
+    "lead": "New lead",
+    "callback": "Callback requested",
 }
 
 
@@ -132,3 +134,14 @@ def charter_text(fact: Fact | None, desk: DeskInfo) -> Card:
 
 def verify_prompt(fact: Fact | None, desk: DeskInfo) -> Card:
     return Card(title="I'll send a code to the contact on record.")
+
+
+def callback_confirmed(fact: Fact | None, desk: DeskInfo) -> Card:
+    """`{owner} will call you back on {day}, between {start} and {end}`; without a window
+    `{owner} will call you back`. The fact holds only the window, never the visitor's text."""
+    owner = desk.owner_display_name
+    window = callback_window(fact, desk)
+    if window is None:
+        return Card(title=f"{owner} will call you back")
+    start, end = window
+    return Card(title=f"{owner} will call you back on {date(start)}, between {clock(start)} and {clock(end)}")

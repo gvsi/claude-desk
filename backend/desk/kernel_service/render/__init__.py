@@ -118,5 +118,7 @@ register_template("booking_confirmed", {"booking"}, en.booking_confirmed, es.boo
 register_template("hours", {"charter"}, en.hours, es.hours, key="charter:hours")
 register_template("policy", {"charter"}, en.charter_text, es.charter_text, key="charter:policy:")
 register_template("contact", {"charter"}, en.charter_text, es.charter_text, key="charter:contact")
+register_template("callback_confirmed", {"handoff"}, en.callback_confirmed, es.callback_confirmed, key="handoff:",
+                  statuses=("committed",))
 register_template("handoff", (), en.handoff, es.handoff)
 register_template("verify_prompt", (), en.verify_prompt, es.verify_prompt)

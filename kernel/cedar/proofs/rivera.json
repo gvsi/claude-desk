@@ -1,10 +1,10 @@
 {
   "baseline_sha256": "581210756d4345c31324f64c84e7008b1609ae2bbb5bc85bd727bd644dffe991",
   "cards_sha256": "603a91b69d73100193dc6397ada398038bbde39d02d7d8e2a3c3568a125e5dcd",
-  "cedar_sha256": "824872006e9b14c057addda59351e1f172fe8be562f54d4ba61589f60027388e",
+  "cedar_sha256": "ef330595e9851bd119b1e64433fdb863ec77919b79fb36ad1d0d6e12231933fd",
   "invariants_sha256": "05f672b80818db0b2e3a520c60370c2ab05c0527e368cec20de83acf0f6be4a2",
   "preset": "rivera",
-  "profiles_sha256": "281127ae3aa9dc9d7f4efd4a07bb270a22fe0e8f349467525adaf4a698970caf",
+  "profiles_sha256": "1dce5135dbe08ee4393e9ac23d353aeeadbd05fc94f676b9a3af5427ed870bf2",
   "proof": {
     "cases": null,
     "checks": [

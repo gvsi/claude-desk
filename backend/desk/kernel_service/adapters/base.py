@@ -96,6 +96,13 @@ class Adapter(Protocol):
     async def reconcile(self, xctx: ExecCtx, action: NormalizedAction) -> AdapterResult | None: ...
 
 
+def quoted(*parts: str | None) -> str:
+    """Visitor text as the owner reads it in an alert: the given parts on one line, joined by " · ",
+    inside quotes it can't close. It stays untrusted text, never an instruction."""
+    line = " · ".join(" ".join(part.split()) for part in parts if part)
+    return "“" + line.replace("“", '"').replace("”", '"') + "”"
+
+
 async def business_timezone(ctx: KernelCtx, desk_row: Desk) -> ZoneInfo:
     """The time zone of the Desk's business: slots, hours and the dates in facts are read in it."""
     name = (await ctx.db.execute(ctx.repo.scoped(

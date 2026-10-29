@@ -92,6 +92,15 @@ def booking_window(fact: Fact, desk: DeskInfo) -> tuple[datetime, datetime]:
     return start, (start.astimezone(UTC) + timedelta(minutes=minutes)).astimezone(desk.tz)
 
 
+def callback_window(fact: Fact | None, desk: DeskInfo) -> tuple[datetime, datetime] | None:
+    """A handoff's window in the business's time zone, from its `window_start` and `window_end`
+    claims; None when it has neither (no hour was open). One without the other is an error."""
+    found = claims(fact)
+    if "window_start" not in found and "window_end" not in found:
+        return None
+    return local(found["window_start"], desk), local(found["window_end"], desk)
+
+
 def slot_claims(fact: Fact) -> list[tuple[str, str]]:
     """A slots fact's `(slot_id, starts_at)` pairs, in order: one `slot` claim, then its `starts_at`."""
     pairs = []

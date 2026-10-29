@@ -31,14 +31,17 @@ from fastapi import APIRouter, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BeforeValidator
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from desk.contracts import DemoInboxEntry, LedgerEntry, LedgerPage, PolicyVersion
+from desk.contracts import DemoInboxEntry, LedgerEntry, LedgerEvent, LedgerPage, PolicyVersion
+from desk.db.models import Handoff
 from desk.db.session import KernelSession, database_url
 from desk.env import is_development
-from desk.kernel_api import Health, KernelError, LedgerAppendRequest, PolicyConfirmRequest, PolicyDraftRequest
+from desk.kernel_api import (DeskUpdated, Health, KernelError, LedgerAppendRequest, PolicyConfirmRequest,
+                             PolicyDraftRequest)
 from desk.kernel_service import (activation, approvals, auth, context, copies, decide, demo_inbox, execute, ledger,
                                  public, reply_check, sessions, verification)
 from desk.kernel_service.auth import AuthError, Named
@@ -133,6 +136,7 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
     app.include_router(public.router)
     app.include_router(verification.router)
     app.include_router(inbox_router)
+    app.include_router(handoff_router)
     app.include_router(ledger_router)
     app.include_router(policy_router)
 
@@ -159,6 +163,34 @@ async def read_demo_inbox(ctx: Ctx, request: Request, session_id: str | None = N
     row = await auth.require_session(ctx, request, session_id)
     await auth.require_desk(ctx, request, row, row.desk_id)
     return await demo_inbox.session_entries(ctx, row)
+
+
+handoff_router = APIRouter()
+
+
+@handoff_router.post("/handoffs/{handoff_id}/done", response_model=DeskUpdated)
+async def close_handoff(handoff_id: str, ctx: Ctx, request: Request) -> DeskUpdated:
+    """The owner has called the visitor back: the handoff goes from `open` to `done` under its
+    row's lock, ledgered `desk_data` `{part: "handoffs", refs: [handoff_id]}`, with the owner's
+    credential alone. One already done is 409 `conflict`, changing nothing. One the owner's copy
+    doesn't have, unknown or another copy's (row-level security hides those), is 404
+    `not_found`, logged, since there is no Desk of the copy to ledger it on."""
+    route = route_template(request)
+    if auth.SESSION_HEADER in request.headers:
+        raise AuthError(401, "auth", "bad_token", route=route)
+    await auth.require_owner(ctx, request)
+    handoff = None
+    if decide._storable(handoff_id):                     # text Postgres can't hold names no handoff
+        handoff = (await ctx.db.scalars(ctx.repo.scoped(select(Handoff).where(Handoff.handoff_id == handoff_id)
+                                                        .with_for_update()))).one_or_none()
+    if handoff is None:
+        raise AuthError(404, "not_found", "unknown_handoff", route=route)
+    if handoff.status != "open":
+        raise KernelFailure(409, "conflict", "handoff_done")
+    handoff.status = "done"
+    await ledger.append(ctx, copy_id=handoff.copy_id, desk_id=handoff.desk_id, event=LedgerEvent(
+        kind="desk_data", origin="kernel", summary={"part": "handoffs", "refs": [handoff.handoff_id]}))
+    return DeskUpdated(desk_id=handoff.desk_id, updated_at=ctx.clock.now())
 
 
 ledger_router = APIRouter()

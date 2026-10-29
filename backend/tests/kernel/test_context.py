@@ -81,10 +81,11 @@ STANDING_FAKES = {
 
 
 async def test_tools_follow_the_session_kind(app, client, registry):
-    # a stranger on Rivera Plumbing gets this plan's three native tools, all declared
+    # a stranger on Rivera Plumbing gets every native tool a stranger is given, all declared
     copy, stranger = await visitor_of(app, client)
     seen = await context_of(client, stranger.session_id, stranger.headers)
-    assert tools(seen.tools) == ["native.book", "native.find_slots", "native.quote"]
+    assert tools(seen.tools) == ["native.book", "native.capture_lead", "native.find_slots", "native.quote",
+                                 "native.request_callback", "native.start_verification"]
     assert {profile.status for profile in seen.tools} == {"enabled"}
     declared = {profile.tool: profile for profile in seen.tools_declared}
     assert all(declared[profile.tool] == profile for profile in seen.tools)

@@ -472,6 +472,9 @@ class PaymentLink(Base):
 
 
 class Handoff(Base):
+    """A callback a visitor asked for: one per `native.request_callback` action, `open` until the
+    owner marks it `done` (01b_2_handoffs)."""
+
     __tablename__ = "handoffs"
     __table_args__ = {"schema": "kernel"}
     handoff_id: Mapped[str] = mapped_column(Text, primary_key=True)
@@ -481,6 +484,9 @@ class Handoff(Base):
     reason: Mapped[str | None] = mapped_column(Text)
     callback_window: Mapped[str | None] = mapped_column(Text)    # ISO 8601 "<start>/<end>", or None
     status: Mapped[str] = mapped_column(Text, server_default=text("'open'"))
+    action_id: Mapped[str] = mapped_column(Text)
+    window_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))   # null without a window
+    window_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class NotificationPref(Base):
