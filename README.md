@@ -46,7 +46,7 @@ This README was written during the build. The status column describes each part 
 
 Claude proposes every action and every reply; a separate kernel process decides whether each action runs and whether each reply can be shown, under rules compiled by code from the owner's rule cards and proved before they go live.
 
-The chat layer holds no business credential, so a bug in it can't move money outside the owner's rules, change rules, approve anything, verify anyone or forge the ledger. This covers a buggy chat layer, not a compromised one.
+A bug in the chat layer can't move money outside the owner's rules, change rules, approve anything, verify anyone or forge the ledger: each needs a credential or a check that only the kernel holds. This covers a buggy chat layer, not a compromised one.
 
 Talking Claude around can't make it act past the owner's rules. Within them, it can still be talked into actions the rules allow, and into text that is wrong or unflattering but carries no price, date or promise.
 
