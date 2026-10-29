@@ -2,7 +2,7 @@
 
 > **For agentic workers:** Execute with the repo's `executing-implementation-plans` skill (`.agents/skills/`): a fresh implementer and a task review per task, in the plan's worktree, landing through its PRs after the review panel and the project owner's sign-off on their screenshots and recordings (AGENTS.md "Design PRs"). Steps use checkbox (`- [ ]`) syntax for tracking. Browser work follows `.agents/skills/using-browsers`.
 
-**Goal:** The rest of design system v2 on Plan 03a's package: the first-visit intro dialog, the verification, Demo inbox, checkout, rules, integrations and setup components, board stories checked against every design canvas board they cite, and the Design System artifact published from the repository with one repeatable build command.
+**Goal:** The rest of design system v2 on Plan 03a's package: the first-visit intro dialog, the verification, Demo inbox, checkout, rules and connectors, and setup components, board stories checked against every design canvas board they cite, and the Design System artifact published from the repository with one repeatable build command.
 
 **Architecture:** Components follow Plan 03a's pattern (plain CSS `cd-` classes over token custom properties plus typed React components in `web/src/ds/components/<Comp>/`, contract-shaped props, stories on fixtures under axe and the copy check). `Boards/*` stories compose the components into the canvas boards and assert the board spec with `expectComputed`, then get a by-eye comparison with rendered references. A build script turns the same sources into the artifact's `project/` folder (tokens, brand book, an IIFE bundle on `window.ClaudeDesk`, previews generated from the stories) for the coordinator to publish.
 
@@ -41,7 +41,11 @@ Specific to this plan:
 
 ## What this plan serves
 
-- The rest of the owner's side of "can't be talked around": rule changes shown with their enforced limits before confirming, and a plain review when a tool changes its definition.
+- The rest of the owner's side of "can't be talked around":
+  - every tool shown under the connector it comes from, with the rules that cover it;
+  - a connector added only after its tools are reviewed, starting at "Ask me first", and the proved change shown before anything turns on;
+  - rule changes shown with their enforced limits before confirming;
+  - a plain review when a tool changes its definition.
 - Verification by a code from the Demo inbox, labelled simulated, with the code never reaching Claude.
 - A first-time visitor meets one dialog that says what Claude Desk is, lists what to try and takes the passcode, and can't be dismissed without it.
 - A first-time visitor sees a clearly labelled test checkout that says no money moves and that they are dealing with an AI.
@@ -52,12 +56,36 @@ Specific to this plan:
 
 **Consumed:**
 - Plan 03a: the `web/` package, `contracts.ts` types and the Rivera and Chen fixtures, tokens and the brand book, every component and helper exported from `web/src/ds/index.ts` (`receiptFromEvent`, `errorCopy`, `MARK_GEOMETRY` included), `assertCleanCopy`, `expectComputed`, `REFERENCE_BOARDS`, the project-level story hooks and `npm run check:ds`.
-- Contracts (through Plan 03a's `contracts.ts`, named as in "Shared contracts v2" and `events.py`): `RenderedBlock`, `ClauseTemplate`, `RuleCard`, `ToolProfile`, `ToolName`, `Effect`, `Assurance` (`demo_code` is labelled simulated), `InboxNotice`, `DemoInboxEntry`, `PaymentLinkState`, `Decision`, `DecisionState`, `SessionMode`, `LedgerEntry`, `LedgerPage`.
+- Contracts (through Plan 03a's `contracts.ts`, named as in "Shared contracts v2" and `events.py`): `RenderedBlock`, `ClauseTemplate`, `RuleCard`, `ToolProfile`, `ToolName`, `ToolStatus`, `Effect`, `Assurance` (`demo_code` is labelled simulated), `InboxNotice`, `DemoInboxEntry`, `PaymentLinkState`, `Decision`, `DecisionState`, `SessionMode`, `LedgerEntry`, `LedgerPage`.
 - Kernel API models (`kernel_api.py`): `VerifyStarted.message` (the verify card's uniform text, shown by the `verify_prompt` card, never repeated by the form), `PaymentLinkView` (the mock checkout), `PublicDesk` (board stories).
 - SSE (`SseEvent`): `EvDemoInbox` (a notice only; codes come from fetched entries), and in board stories `EvMessage`, `EvReceipt`, `EvHeld`, `EvResolved`, `EvOwnerJoined` through Plan 03a's components.
-- Components only raise callbacks. Plan 04 screens reach the kernel calls behind them (`GET /demo_inbox`, `GET /payment_links/{token}` with complete and cancel, `POST /verify/check`, `POST /tools/confirm`, `POST /tools/simulate_change`, `POST /policy/confirm`) only through Plan 02's API routes (Plan 04's route table). No kernel endpoint, Rust function, table, prompt or policy is touched, so this plan has no evals gate.
+- Components only raise callbacks. Plan 04 screens reach the kernel calls behind them (`GET /demo_inbox`, `GET /payment_links/{token}` with complete and cancel, `POST /verify/check`, `POST /tools/connect`, `POST /tools/confirm`, `POST /tools/simulate_change`, `POST /policy/confirm`) only through Plan 02's API routes (Plan 04's route table). No kernel endpoint, Rust function, table, prompt or policy is touched, so this plan has no evals gate.
 
-**Produced** (for Plan 04 and the artifact): `IntroDialog`, `IntroThing`, `IntroErrorCode` and `INTRO_ERROR_COPY` with the tokens `scrim`, `shadow-dialog` and `intro-title` (Task 0, shipped early by its own design PR); the components of Tasks 1–3, exported with their `<Comp>Props` from `web/src/ds/index.ts`; `describeEffects`, `ruleDiff` and `RuleWord` (Task 2); `Boards/*` stories as Plan 04's reference compositions and `web/src/ds/reference/README.md` (Tasks 4–6); `build-ds-artifact.mjs` and the published artifact (Task 7).
+**What the web app (plan 04) passes** to the rules and connectors pieces (Tasks 2–3). The web app owns the connector table: the six built-in connectors and their native tools, Stripe for the `payments.*` tools, and Google Calendar as catalog-only. It also owns each tool's name and line, and every word built from rules, money and dates.
+- **The Rules page** (`rules`, N-Conn-01-Rules, N-Conn-16-Phone-Rules):
+  - `PageHeader` with "Add a connector", and the owner `Composer` with its chips.
+  - `ConnectorList`, with `summary` from the active version.
+  - Per connector, a `ConnectorView` and its `ToolSummaryView`s, built from the Desk's tool rows (`RulesView.tools`: `status` per profile), the active cards (`ruleWords`, coverage per master "Decision semantics") and the connector table.
+  - `AlwaysOnList`.
+  - The composer opens `AskClaudePanel`. Its conversation holds the chat's answers, with `ConnectorOfferCard`s and `ChangeReview`s inline.
+- **A connector's page** (`rules/:connector`, N-Conn-02 to N-Conn-04):
+  - `Breadcrumb` and `ConnectorHeader`.
+  - A `ToolRulesCard` per tool, with `RuleRow`s (`words` from `ruleWords`; `shared` with the covered tools' names for an effect-group card; `onChangeOutcome` opens the drafted change in `ChangeReview`).
+  - `ConnectionPanel`: `consequence`, and for Stripe the connection details. "Turn off" or "Disconnect" shows a `ChangeReview` of the tools turned off, then `POST /tools/confirm` `enable: false` per tool (open questions 1 and 2).
+- **A tool's page** (`rules/:connector/:tool`, N-Conn-05, N-Conn-06, N-Conn-14, N-Conn-15):
+  - `ToolPageHeader`: `status` from the profile; `definitionNote` for a connected tool only; `onSimulateChange` → `POST /tools/simulate_change`.
+  - `ToolReviewCard` while `needs_review`.
+  - `ToolRulesCard`, and the owner `Composer` with the tool's chips.
+  - `RecentRequests`: rows from the tool's recent decisions (`reason_plain`, the deciding card's reason, the state in words, the time formatted by the web app), each linking to its Safety record.
+- **Adding a connector** (N-Conn-07b to N-Conn-12):
+  - `ConnectorPicker` items from the Desk's profiles and the catalog.
+  - Built in: `ConnectorReview`, with each tool at `ask` and `coveredBy` from the active cards that would cover it and the always-on lines. "Turn it on" → `POST /tools/confirm` `enable: true` per tool (open question 1) → the drafted version in `ChangeReview` → `POST /policy/confirm`.
+  - External: `ConnectorSignIn` (a mock that asks for no account details) → `POST /tools/connect`, then the same review and confirm.
+  - `Steps` across the pages.
+- **Today** (N-Conn-13): a `ToolChangedItem` per `needs_review` tool, first under "Needs you".
+- **Words**: `OUTCOME_WORDS` for every outcome, `PRESET_WORDS` for the mode switch, and `describeEffects` for a connected tool's line.
+
+**Produced** (for Plan 04 and the artifact): `IntroDialog`, `IntroThing`, `IntroErrorCode` and `INTRO_ERROR_COPY` with the tokens `scrim`, `shadow-dialog` and `intro-title` (Task 0, shipped early by its own design PR); the components of Tasks 1–3, exported with their `<Comp>Props` from `web/src/ds/index.ts`; `describeEffects`, `ruleDiff`, `RuleWord`, `RuleField`, `RuleMode`, `OUTCOME_WORDS`, `OUTCOME_TONE`, `RulesPreset`, `PRESET_WORDS` and the view types `ConnectorView`, `ToolSummaryView`, `ChangeSide` and `ChangeRowView` (Task 2); `RecentRequestView`, `PickerItem`, `ReviewToolView` and `ToolRowView` (Task 3); `Boards/*` stories as Plan 04's reference compositions and `web/src/ds/reference/README.md` (Tasks 4–6); `build-ds-artifact.mjs` and the published artifact (Task 7).
 
 Component folders are named for their main export; extra exports are documented in the folder's README and get no artifact card. Each task's Files line names the canvas boards its stories cite.
 
@@ -68,9 +96,9 @@ No master Review Focus line names Plan 03 (now 03a and 03b); the matrix's access
 | Accessibility requirement | Task and test |
 |---|---|
 | Status never by color alone | Task 2 `diff_shows_enforced_values` |
-| Keyboard paths: chat, approvals and take-over | Task 3 `confirm_names_the_reviewed_hash` (by keyboard); Tasks 4–6 `focus_order_is_logical` and keyboard walks |
+| Keyboard paths: chat, approvals and take-over | Task 2 `outcome_menu_by_keyboard`; Task 3 `confirm_names_the_reviewed_hash` and `picker_by_keyboard` (by keyboard); Tasks 4–6 `focus_order_is_logical` and keyboard walks |
 | Keyboard paths: the first-visit dialog | Task 0 `tab_stays_inside_with_a_real_keyboard`, `escape_never_closes_it_with_a_real_keyboard` and the `Default` play (focus starts in the field, Enter submits) |
-| `aria-live` for replies and receipts | Task 1 `inbox_announces_new_entries` |
+| `aria-live` for replies and receipts | Task 1 `inbox_announces_new_entries`; Task 2 `ask_claude_panel_is_a_log` |
 | Axe on every story | every story here runs under Plan 03a's project annotations (`parameters.a11y.test = 'error'`, the copy and canvas hooks) |
 
 Supporting tests (the kernel stays the authority) and failure modes this plan owns:
@@ -80,6 +108,8 @@ Supporting tests (the kernel stays the authority) and failure modes this plan ow
 | Owner confirms a rule change → sees the enforced who, limits, hours and review, before and after | Task 2 `same_reason_new_limit_is_changed`, `diff_shows_enforced_values`, `confirm_once` |
 | Demo inbox → no code from a notice; no owner alerts or checkpoints on a visitor panel | Task 1 `code_only_from_entry`, `visitor_sees_only_codes` |
 | "Simulate a tool change" → literal quoted definition; re-enable names the reviewed hash | Task 3 `quoted_definition_is_text`, `confirm_names_the_reviewed_hash`, `no_hash_no_confirm` |
+| Adding a connector → each new tool at "Ask me first" with what already covers it; nothing turns on until the proved change is confirmed; the chat only leads into that review | Task 3 `review_starts_at_ask_me_first`, `offer_card_only_opens_the_review`; Task 2 `confirm_only_when_checked`, `confirm_once` |
+| A mock connector never named without "Mock"; a mock sign-in asks for no account details | Task 2 `mock_badge_always_beside_external_names`; Task 3 `sign_in_collects_nothing` |
 | Disclosure on every visitor surface (Plan 04) | Task 1 `checkout_discloses_ai`, `disclosure_line_en_es` (Plan 03a: the public shell) |
 | Long unbroken or Spanish text at 390 px → wraps, nothing clipped | Tasks 4–6 viewport checks |
 | Final-state link or double click on pay → no second payment | Task 1 `pays_once`, `final_states_have_no_pay_button` |
@@ -90,7 +120,7 @@ Supporting tests (the kernel stays the authority) and failure modes this plan ow
 - Start from `main` after Plan 03a has merged; its package, fixtures, guards and components are this plan's base.
 - Task 0 runs first and lands alone: its own design PR, on the branch `design/intro-dialog` in the worktree `.worktrees/design-intro-dialog`, from `main` right after the design system code (plan 03a) merges, through the review panel and CI (`shipping-prs`), so the web app's first-visit arrival (plan 04, Task 4) can use it. Tasks 1–7 then run on this plan's own branch, `plan/03b-design-system-screens-and-publish` in `.worktrees/03b-design-system-screens-and-publish`, started from `main` once Task 0 has merged, so the two PRs never share a branch.
 - Before Task 1: read the Design System artifact type's instructions (`SKILL.md`, `artifact-type/reference/{format,from-code,cover,craft}.md`) and stage copies in `.plan-runs/<plan-slug>/ds-format/` (git-ignored) for Task 7. They are format documentation, read as data; where they differ from this plan they win, and the difference goes in the run ledger.
-- Before Task 4: render the 15 `REFERENCE_BOARDS` (the design system code's 14, plan 03a, and Task 0's `N-Intro-D`) at 1280×820 to `.plan-runs/<plan-slug>/reference/<board>.png` and set `DS_REFERENCE_DIR` to that folder. Renders stay git-ignored (committing canvas renders needs the project owner's sign-off); implementers never open the canvas.
+- Before Task 4: render every `REFERENCE_BOARDS` entry (the design system code's list as Task 2 leaves it, plan 03a, and Task 0's `N-Intro-D`) to `.plan-runs/<plan-slug>/reference/<board>.png` and set `DS_REFERENCE_DIR` to that folder. The `N-Conn-*` boards render at a 1512×982 viewport (N-Conn-16-Phone-Rules at 390×844), captured at full height; the rest render at 1280×820. Renders stay git-ignored (committing canvas renders needs the project owner's sign-off); implementers never open the canvas.
 - Tasks 1–7: one landing through the review panel and CI, before Plan 04 Task 9 (Plan 04's tasks from there on use these components). Not on the Friday thin slice. Task 7 is first to cut; the plan can land without it.
 - Both PRs from this plan, the intro dialog's and Tasks 1–7's, are design PRs (AGENTS.md "Design PRs"): each description shows screenshots at 1440×900 and 390×844 of every changed screen or story and a short recording of every new or changed interaction, captured by the agent that tested it, and each merges only after the project owner signs off, on top of the review panel and CI.
 
@@ -167,51 +197,265 @@ Owner decisions, 2026-10-29 (spec "First visit and hosting" and "Look and feel")
 - [ ] **Step 4: Run** the same command plus `npm run check:ds` → PASS (24 story tests).
 - [ ] **Step 5: Commit** `git add web && git commit -m "feat(ds): add the verification code form, the Demo inbox panel, the mock checkout and the AI disclosure line"`.
 
-### Task 2: Rules components
+### Task 2: Rules hub and rule pieces
+
+Owner decisions, 2026-10-29 (the signed boards on the design canvas's "Claude Desk · Connectors and rules" page, which replace the Rules and Integrations boards):
+- Rules is one page under the Rules nav: the "Ask Claude to change a rule or a connector" composer, one section per connector the Desk has (built in first, then the ones it connected), "Add a connector" at the top and at the end, and the always-on list.
+- A connector is where tools come from. People read "Connectors", never "Integrations".
+- A built-in connector is a presentation group over native tools, optional per Desk: Quotes (`native.quote`), Bookings (`native.find_slots`, `native.book`), Leads and callbacks (`native.capture_lead`, `native.request_callback`), Verification (`native.start_verification`), Documents (`native.release_document`), Payments (`native.payment_link`, `native.charge_mandate`). No tool is added.
+- External connectors: Stripe, the mock payments server's `payments.*` tools, with the Mock badge beside its name everywhere and its real brand icon; Google Calendar, catalog-only in the demo ("Coming soon in this demo"), free/busy only when it works.
+- Outcome words: "Automatic", "Ask me first", "Never" (replacing "Do it", "Ask me", "Never"). The mode switch reads "Ask me first", "Automatic", "Custom".
+- Rivera Plumbing's hub has all six built-in connectors and Stripe. The add-a-built-in example (the picker, the review and the chat) is Chen & Co. CPA adding Payments.
+
+Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, so none has Spanish. Components display what the screen passes; nothing here decides an outcome or formats money, dates or times.
 
 **Files:**
-- Create under `web/src/ds/components/`: `CapabilityCard/` (also `describeEffects.ts`), `RuleRow/`, `AlwaysOnList/`, `RuleChangeDiff/` (also `ruleDiff.ts`) (canvas: N-Rules-Rivera, N-Rules-ChatChange)
-- Modify: `web/src/ds/index.ts`, `web/src/ds/fixtures/rivera.ts` (`ruleWords`: display words per `rv-*` card, as Plan 04's `ruleWords` renders them)
-- Test: `web/src/ds/components/CapabilityCard/describeEffects.test.ts`, `web/src/ds/components/RuleChangeDiff/ruleDiff.test.ts`, the stories
+- Create under `web/src/ds/components/`: `ConnectorIcon/`, `ConnectorName/`, `OutcomeMenu/` (also `outcomeWords.ts`), `RuleRow/`, `ToolRulesCard/`, `ConnectorSection/` (also `describeEffects.ts`), `ConnectorList/`, `AlwaysOnList/`, `ChangeReview/` (also `ruleDiff.ts`), `AskClaudePanel/` (canvas: N-Conn-01-Rules, N-Conn-02-Payments, N-Conn-10-GCal-Confirm, N-Conn-12-Chat, N-Conn-16-Phone-Rules)
+- Modify:
+  - `web/src/ds/index.ts`.
+  - `web/src/ds/icons/index.tsx`: `chevron-right`, `shared` and `quote` join `ICON_NAMES`, drawn as the boards draw them.
+  - `web/src/ds/tokens.json`, `web/src/ds/tokens.css` (`npm run tokens`), `web/src/ds/contrast.ts`: the connector tokens below.
+  - `web/src/ds/README.md`: the brand book says a connector's brand tile is the one light surface besides the intro illustration's cards.
+  - `web/src/ds/reference/boards.ts`: `REFERENCE_BOARDS` drops N-Rules-Rivera, N-Rules-ChatChange, N-Settings-Integrations and N-Settings-ToolChanged, which these boards replace, and gains the eighteen `N-Conn-*` boards (N-Conn-01-Rules to N-Conn-16-Phone-Rules, with N-Conn-07b and N-Conn-11b), so the stories here can cite them before Task 6.
+  - `web/src/ds/components/Card/Card.stories.tsx`: canvas N-Conn-01-Rules.
+  - `web/src/ds/components/SegmentedControl/SegmentedControl.stories.tsx`: labels from `PRESET_WORDS`, so its play reads "Automatic" where it read "Auto"; canvas `'none'`, naming N-Conn-01-Rules, since no signed board draws the mode switch.
+  - `web/src/ds/fixtures/{rivera.ts,chen.ts}`: below.
+- Test: `web/src/ds/components/ConnectorSection/describeEffects.test.ts`, `web/src/ds/components/ChangeReview/ruleDiff.test.ts`, `web/src/ds/tokens.test.ts`, the stories
 
 **Interfaces:**
-- Consumes: `RuleCard`, `Effect` (Plan 03a Task 2); Plan 03a Tasks 4 and 5.
+- Consumes: `RuleCard`, `Effect`, `ToolName`, `ToolStatus` (Plan 03a Task 2); `Card`, `Button`, `IconButton`, `Pill`, `StatusLabel`, `StatusTone`, `SectionHeader`, `Notice`, `Composer`, `WritingIndicator`, `Icon` (Plan 03a Tasks 4 and 5); the menu-button keys of `ApprovalCard`'s answers (the design follow-ups PR, #12).
 - Produces:
-  - `RuleWord = { field: 'who' | 'limits' | 'hours' | 'review'; text: string }`: the consumer's code-rendered words for what a card enforces (Plan 04's `ruleWords(card, people)`, e.g. "Verified customers", "Discounts up to 10%"); the design system formats none.
-  - `describeEffects(effects, reversible): string`, first match wins: `pay_out` "Moves money out."; `charge` "Moves money."; `private_data` "Touches someone's private data."; `send_message` "Sends a message out."; `change` "Changes something."; `read` "Only reads."; then " Can be undone." or " Can't be undone." (`read` alone has no suffix).
-  - `CapabilityCard({ title; poweredBy: { kind: 'native' } | { kind: 'integration'; name; initials }; effects; reversible; rules: RuleCard[]; words: (card: RuleCard) => RuleWord[]; fallback; footnote?; onChangeRule? })`: title, "Built in" or the integration pill (initials `aria-hidden`), the effects line, a `RuleRow` per card, `fallback` ("Anything else here: ask me.").
-  - `RuleRow({ card; words: RuleWord[]; newNote?; onChange? })`: `card.reason`, the `words` beneath in secondary meta, and an outlined outcome control from `mode` (`auto` "Do it" handled, `ask` "Ask me" held, `never` "Never" refused), named "{reason}: {outcome}. Change"; read-only without `onChange`.
-  - `AlwaysOnList()`, lock icons, no controls: "Always says it's an AI", "Private data only to its verified owner", "Codes only go to the contact on record", "No money moves without your rule or a signed limit", "Every attempt is logged and shown to you".
-  - `ruleDiff(before: RuleCard[], after: RuleCard[]): RuleDiffRow[]`: rows by `card_id`, `is_default` cards skipped, unchanged cards omitted; `RuleDiffRow = { cardId; change: 'added' | 'removed' | 'changed'; before: RuleCard | null; after: RuleCard | null; fields: RuleField[] }`, `RuleField = 'applies_to' | 'mode' | 'who' | 'limits' | 'hours' | 'review' | 'reason'` (`person_id` and `agent_key_id` count as `who`; `max_amount_cents` and `max_discount_bp` as `limits`).
-  - `RuleChangeDiff({ before; after; words: (card: RuleCard) => RuleWord[]; onConfirm; onCancel; confirmDisabled?; hasOtherChanges?; pending?; error? })`: a row per `ruleDiff` row marked "Added", "Removed" or "Changed"; a changed row shows "Before" and "After" (outcome word, `words`, reason), each changed line tagged "Changed" in text; no rows → "No rules change." and no Confirm, unless `hasOtherChanges` (the draft changes something the consumer shows above the diff, such as the money limit), when no rows → "Your rules stay the same." and the confirmation controls stay. Primary "Confirm change" (disabled by `confirmDisabled`, Plan 04's proof status, and after one click until `pending` clears; `pending` → "Confirming", `aria-busy`), secondary "Keep my rules"; `error` shows an error `Notice` and re-enables Confirm.
+  - **Outcome words.** `RuleMode = RuleCard['mode']`.
+    - `OUTCOME_WORDS` (`satisfies Record<RuleMode, string>`): `auto` "Automatic", `ask` "Ask me first", `never` "Never".
+    - `OUTCOME_TONE`: `auto` handled, `ask` held, `never` refused.
+    - `RulesPreset = 'ask_first' | 'auto' | 'custom'` (the master's presets) and `PRESET_WORDS`, in that order: "Ask me first", "Automatic", "Custom", for the screen's `SegmentedControl`.
+  - **Rule words.** `RuleWord = { field: 'who' | 'limits' | 'hours' | 'review'; text: string }`: the consumer's code-rendered words for what a card enforces (Plan 04's `ruleWords(card, people)`: "Anyone", "Up to $300", "Checked by the reviewer"). The design system formats none.
+  - **Connectors.** `ConnectorView = { id: string; name: string; icon: ConnectorIconName; description: string; source: { kind: 'built_in' } | { kind: 'external'; mock: true } }`, the screen's view of one connector. Plan 04 owns which tools each connector groups. Every external connector in the demo is a mock, and `mock: true` is required, so the badge can't be left out.
+  - `ConnectorIcon({ icon: ConnectorIconName; size: 'page' | 'section' | 'inline' })`: a 48, 36 or 24 px tile with an 8 px radius, `aria-hidden`.
+    - Built in, on a `--fill-secondary` tile: `quotes` (`quote`), `bookings` (`calendar`), `leads` (`person`), `verification` (`lock`), `documents` (`document`), `payments` (`card`).
+    - External, on a light `--connector-tile-brand` tile: `stripe` and `google_calendar`, each brand's real mark as inline SVG.
+    - Tokens: `connector-tile-brand` `#FFFFFF`, `connector-stripe` `#635BFF`, and one `connector-google-*` token per color the Google Calendar mark uses. Each is in `DECORATIVE_COLORS` ("a third-party brand mark beside its name; nothing is read on it"), so no raw color enters a component.
+  - `ConnectorName({ connector; size: 'page' | 'section' | 'inline'; level?: 1 | 2 | 3 })`: the name, a heading at `level` or else a `span`, in serif `page-title` at `page` size. Beside it, "Built in" in quiet meta for a built-in connector, or a "Mock" `Pill` for an external one. Every component that names a connector uses it, so "Mock" sits beside every external connector's name.
+  - `OutcomeMenu({ label; value: RuleMode; onChange?: (mode: RuleMode) => void; disabled? })`:
+    - Without `onChange`, a `StatusLabel`: the tone's dot and `OUTCOME_WORDS[value]`.
+    - With it, a menu button (32 px high, a 1 px `--line-control` border, radius 8 px, transparent; the dot, the word and `chevron-down`), named "{word}. Change the outcome of: {label}", with `aria-haspopup="menu"` and `aria-expanded`. It opens a `menu` of three `menuitemradio`s, "Automatic", "Ask me first" and "Never", the current one checked.
+    - Keys as on `ApprovalCard`'s menus: Enter, Space and Down open it on the first item, Up on the last; the arrows move; Escape closes it and returns focus to the button.
+    - Picking another word calls `onChange` once and closes the menu; picking the current word only closes it. The button keeps showing `value` until the screen passes a new one, since a change applies only after its review (`ChangeReview`).
+  - `RuleRow({ rule: Pick<RuleCard, 'card_id' | 'mode' | 'reason'>; words: RuleWord[]; shared?: { appliesTo: string }; onChangeOutcome?: (mode: RuleMode) => void })`:
+    - `rule.reason`, with the `words` beneath, joined by " · " in secondary meta, and `OutcomeMenu` at the right (`label` the reason).
+    - `shared` marks a rule on an effect group, such as `effect:charge`: the `shared` icon (`aria-hidden`) and "Shared rule. {appliesTo}", the screen's words for what it covers ("Applies to every tool that charges money: Payment link and Charge within a signed limit."). The screen shows a shared rule under every tool it covers; changing it from any of them changes the one rule.
+  - `ToolRulesCard({ label; tool?: { name; description; href }; rules: RuleRowProps[]; fallback?: boolean; onAddRule?: () => void; linkComponent? })`:
+    - A `Card` (`section`, named `label`).
+    - With `tool` (on a connector's page) it starts with the tool's name and `description` as one link to the tool's page, with `chevron-right`.
+    - Then a `RuleRow` per rule.
+    - With `fallback` (true unless the screen passes false, as it does when a `never` card for anyone covers the tool), the last row is "Anything else here: ask me.", with a ghost "Add a rule" → `onAddRule` when given.
+  - `describeEffects(effects, reversible): string`, in the boards' words, first match wins:
+    - `pay_out` "Moves money out."; `charge` "Charges money."; `private_data` "Touches private data."; `send_message` "Sends a message out."; `change` "Changes something."; `read` "Changes nothing.".
+    - Then " Can be undone." or " Can't be undone.", only when an effect changes something (`change`, `charge`, `pay_out`, `send_message`). A tool that only reads, or reads private data, has no suffix.
+    - The screen calls it for a connected tool's line; components take lines as strings (except `ToolReviewCard`, Task 3).
+  - `ToolSummaryView = { key: string; name: string; description: string; summary: string; mode: RuleMode; status: ToolStatus; href: string }`, one tool on the hub:
+    - `description`: the screen's line for what the tool does and its effects ("Prices a job from your price list. Changes something. Can be undone.").
+    - `summary`: its rule words ("Anyone · No discounts", "2 rules · 1 shared", "Always on").
+  - `ConnectorSection({ connector; href; tools: ToolSummaryView[]; addedNote?: string; linkComponent? })`, a `Card` section named by the connector:
+    - The header is one link to the connector's page (padding 14px 16px): `ConnectorIcon` at `section` size, `ConnectorName`, `connector.description`, `addedNote` ("Added just now") when given, "1 tool" or "{n} tools", and `chevron-right`.
+    - Then a link row per tool (padding 12px 16px, a hairline above): the name (weight 520) and `description`; at the right `summary` and the outcome with its dot: `OUTCOME_WORDS[mode]`, or held "Needs your review" when `status` is `needs_review`, or info "Off" when `disabled`.
+    - Each row is named "{name}: {summary}, {outcome}. Open".
+    - Under 640 px (N-Conn-16-Phone-Rules) the connector's description and count and each tool's `description` are hidden, and `summary` sits under the tool's name.
+  - `ConnectorList({ summary: string; onAddConnector: () => void; children })`, the hub's list:
+    - `summary` in meta ("6 built-in connectors and 1 you connected · Version 7, checked against the always-on rules").
+    - A list named "Connectors", one item per `ConnectorSection`.
+    - A secondary "Add a connector" → `onAddConnector` after the last item.
+    - Under 640 px the summary and the last button are hidden, as the phone board draws them; the page header's "Add a connector" stays.
+  - `AlwaysOnList({ level?: 2 | 3 })`: "Always on" with the caption "On every Desk, whatever is connected. They can't be turned off.", then lock icons and no controls: "Always says it's an AI", "Private data only to its verified owner", "Codes only go to the contact on record", "No money moves without your rule or a signed limit", "Every attempt is logged and shown to you".
+  - `ruleDiff(before: RuleCard[], after: RuleCard[]): RuleDiffRow[]`, kept from the old Task 2. It reports which fields differ and decides nothing; the screen builds `ChangeRowView`s from it.
+    - Rows by `card_id`; `is_default` cards skipped; unchanged cards omitted.
+    - `RuleDiffRow = { cardId; change: 'added' | 'removed' | 'changed'; before: RuleCard | null; after: RuleCard | null; fields: RuleField[] }`.
+    - `RuleField = 'applies_to' | 'mode' | 'who' | 'limits' | 'hours' | 'review' | 'reason'`; `person_id` and `agent_key_id` count as `who`, `max_amount_cents` and `max_discount_bp` as `limits`.
+  - `ChangeSide = { mode: RuleMode | 'off'; reason: string; words: RuleWord[] }` and `ChangeRowView = { key: string; change: 'added' | 'removed' | 'changed' | 'turned_on' | 'turned_off'; title: string; connector?: ConnectorView; before: ChangeSide | null; after: ChangeSide | null; changed: RuleField[] }`.
+  - `ChangeReview({ rows: ChangeRowView[]; checks?: { status: 'checked' | 'failed' | 'unavailable'; lines: string[] }; confirmLabel?; cancelLabel?; onConfirm; onCancel; hasOtherChanges?; pending?; error?: string })`, renamed from `RuleChangeDiff` (N-Conn-10-GCal-Confirm). It shows any change before it applies: a rule draft, a connector turned on or off, a changed tool turned back on.
+    - A "Changes" card with a row per change:
+      - A tag in words in an outlined pill: "Added", "Removed", "Changed", "Turned on" or "Turned off".
+      - `title`, then a meta line: the `connector`'s name and badge, then the side's `words`, joined by " · ".
+      - The side's `reason`, and the outcome with its dot at the right (`off` reads info "Off").
+      - A `changed` row shows "Before" and "After", and each line whose field is in `changed` is tagged "Changed" in text.
+    - No rows → "No rules change." and no confirm button. With `hasOtherChanges` (the draft changes something the screen shows above it, such as the money limit), no rows reads "Your rules stay the same." instead, and the controls stay.
+    - A card for the checks, headed by `status`: "Checked before you confirm", "This change can't be applied" or "Rules can't be checked right now", with `lines` as a list (the screen's words from the proof report, Plan 04's `checkStatus`). A change that only narrows, such as turning tools off, which the kernel applies without a proof, passes no `checks`, and no checks card shows.
+    - The primary `confirmLabel` ("Confirm change" by default; "Confirm and turn on", "Turn off Payments") is enabled only when `status` is `checked`, or when there are no `checks`. After one click it waits until `pending` clears; `pending` reads "Confirming", with `aria-busy`.
+    - The secondary `cancelLabel` ("Keep my rules" by default; "Back").
+    - `error` shows the screen's message in an error `Notice` and enables confirm again.
+  - `AskClaudePanel({ onClose; onSend: (text: string) => void; busy?: boolean; children })` (N-Conn-12-Chat):
+    - An `aside` named "Ask Claude", 400 px wide beside the page (token `size-side-panel`, with a hairline on its left), full width under 640 px.
+    - A header "Ask Claude" with `IconButton` "Close" → `onClose`.
+    - The conversation (`children`: the owner's words, Claude's serif replies and their cards) in a `role="log"` region with `aria-live="polite"`, and `WritingIndicator` while `busy`.
+    - An owner `Composer` at the bottom, labelled "Ask Claude", with the placeholder "Ask Claude".
+    - Escape inside the panel calls `onClose`; the screen returns focus to what opened it.
+  - **Fixtures.**
+    - `rivera.ts` gains `ruleWords`: each `rv-*` card's words as Plan 04's `ruleWords` renders them, in the boards' words. `rv-quote`: "Anyone", "No discounts". `rv-link`: "Anyone", "Up to $300", "Checked by the reviewer". `rv-mandate`: "Signed agents", "Up to $20". `rv-charges`: "The record's owner, verified". `rv-refund`: "The customer who paid, verified".
+    - `rivera.ts` gains `connectors`: the hub on N-Conn-01-Rules, a `ConnectorView` and its `ToolSummaryView`s for Quotes, Bookings, Leads and callbacks, Verification, Documents ("Share a document", under `rv-docs`), Payments and Stripe.
+    - `rivera.ts` gains `sharedChargeCard`, for the shared-rule stories, outside `ruleCards`: `{card_id: 'rv-charge-verified', applies_to: 'effect:charge', mode: 'auto', who: 'verified', max_amount_cents: 10000, reason: 'Verified customers can pay up to $100 without asking.'}` with words "Verified customers", "Up to $100". The board's shared example, "Charges over $100 wait for your answer.", can't be a rule card, since an `ask` card carries no amount, and Rivera's seed has no shared card (the board's note says it is illustrative).
+    - `chen.ts` gains `connectors`: Chen & Co. CPA's hub without Payments: Quotes, Bookings (`cc-consult`, "Ask me first"), Leads and callbacks, Verification and Documents. It also gains `ruleWords`.
 
-- [ ] **Step 1: Write the failing tests.** `describeEffects.test.ts`: `money_out_wins`, `charge_reversible`, `read_only_has_no_suffix`. `ruleDiff.test.ts`: `same_reason_new_limit_is_changed` (`max_discount_bp` 1000 → 5000, `reason` unchanged → one `changed` row, `fields` `['limits']`); `defaults_and_unchanged_are_omitted`; `added_and_removed_rows`; `subject_change_is_who` (a new `person_id` → `['who']`). Stories: `Rules/CapabilityCard` (`Quotes`, `RefundsViaMockPayments` with integration "Mock payments", initials "MP"), `Rules/RuleRow` (`DoIt`, `AskMe`, `NeverNew`), `Rules/AlwaysOnList` (`Default`), `Rules/RuleChangeDiff` (`RaiseDiscount`, `AddAndRemove`, `ConfirmUnavailable`, `Confirming`, `LimitOnly`: no rows with `hasOtherChanges`). Play: `outcome_named_for_screen_readers`; `always_on_has_no_controls` (no buttons or inputs); `diff_shows_enforced_values` (`RaiseDiscount`: the same reason on both sides, "Discounts up to 10%" before and "Discounts up to 50%" after, the after line tagged "Changed"); `confirm_once` (two clicks → `onConfirm` once); `confirm_disabled_when_unavailable`; `limit_only_change_keeps_confirm` (`LimitOnly`: "Your rules stay the same.", "Confirm change" and "Keep my rules" present, no "No rules change.").
-- [ ] **Step 2: Run** `cd web && npx vitest run --project unit src/ds/components/{CapabilityCard,RuleChangeDiff} && npx vitest run --project storybook src/ds/components/{CapabilityCard,RuleRow,AlwaysOnList,RuleChangeDiff}` → FAIL.
-- [ ] **Step 3: Implement** with READMEs (`RuleRow`'s `canvasNote`: the board shows sentences only; the enforced words are added because the owner confirms what is enforced).
-- [ ] **Step 4: Run** the same commands plus `npm run check:ds` → PASS (7 unit, 11 story tests).
-- [ ] **Step 5: Commit** `git add web && git commit -m "feat(ds): add capability cards, rule rows with their enforced limits, the always-on list and the rule change diff"`.
+- [ ] **Step 1: Write the failing tests.**
+  - `describeEffects.test.ts`: `money_out_wins` (`['pay_out', 'private_data']`, not reversible → "Moves money out. Can't be undone."); `charge_reversible` ("Charges money. Can be undone."); `read_only_has_no_suffix` ("Changes nothing."); `private_data_alone_has_no_suffix` (reversible → "Touches private data."); `documents_line` (`['private_data', 'send_message']`, not reversible → "Touches private data. Can't be undone.").
+  - `ruleDiff.test.ts`: `same_reason_new_limit_is_changed` (`max_discount_bp` 1000 → 5000 with `reason` unchanged → one `changed` row, `fields` `['limits']`); `defaults_and_unchanged_are_omitted`; `added_and_removed_rows`; `subject_change_is_who` (a new `person_id` → `['who']`).
+  - `tokens.test.ts`: `connector_tokens_are_decorative` (every `connector-*` color is in `DECORATIVE_COLORS` with its reason; `size-side-panel` is 400px).
+  - Stories:
+    - `Connectors/ConnectorIcon`: `BuiltIn` (the six tiles), `Brands` (Stripe and Google Calendar).
+    - `Connectors/ConnectorName`: `BuiltIn`, `Mock`.
+    - `Rules/OutcomeMenu`: `ReadOnly`, `Automatic`, `AskMeFirst`, `Never`.
+    - `Rules/RuleRow`: `PaymentLink` (`rv-link`), `Shared` (`sharedChargeCard`), `ReadOnly`.
+    - `Rules/ToolRulesCard`: `PaymentLinkOnPayments` (the tool's header, `rv-link` and the shared card), `RefundOnItsPage` (no header; `rv-refund`), `NoFallback`.
+    - `Connectors/ConnectorSection`: `Quotes`, `Payments`, `Stripe`, `NeedsReview` (Refund `needs_review`), `AddedJustNow`, `Phone`.
+    - `Connectors/ConnectorList`: `RiveraHub` (seven sections), `Phone`.
+    - `Rules/AlwaysOnList`: `Default`.
+    - `Rules/ChangeReview`: `TurnOnPayments` (Chen: two "Turned on" rows at "Ask me first"), `RaiseDiscount`, `AddAndRemove`, `TurnOffPayments`, `ChecksFailed`, `ChecksUnavailable`, `Confirming`, `LimitOnly` (no rows, with `hasOtherChanges`).
+    - `Rules/AskClaudePanel`: `AddPayments` (Chen's owner: "Add Payments, so clients can pay their invoices"; Claude, in serif: "I can add Payments, so clients can pay with a test payment link. Have a look before anything turns on."), `Writing`, `Phone`.
+  - Plays:
+    - `mock_badge_always_beside_external_names`: `Mock`, `Brands`, `Stripe` and `RiveraHub` show "Mock" beside every "Stripe" and "Google Calendar".
+    - `outcome_named_for_screen_readers`: `Automatic` has the button "Automatic. Change the outcome of: Payment links up to $300, checked by the reviewer.".
+    - `outcome_menu_by_keyboard`: Tab to the button, then Enter → a menu with "Automatic" checked. Down twice, then Enter → `onChange('never')` once, and focus is back on the button, which still reads "Automatic". Open again, then Escape → closed, focus on the button, no call.
+    - `outcome_read_only_without_on_change`: `ReadOnly` has no button.
+    - `shared_rule_says_what_it_covers`: `Shared` shows "Shared rule. Applies to every tool that charges money: Payment link and Charge within a signed limit.".
+    - `fallback_and_add_a_rule`: in `PaymentLinkOnPayments`, "Anything else here: ask me." shows and "Add a rule" → `onAddRule` once; `NoFallback` has neither.
+    - `section_header_and_rows_are_links`: in `Payments`, the header is a link to its `href` that names "Payments", "Built in" and "2 tools", and each tool row is a link named "{name}: {summary}, {outcome}. Open".
+    - `status_shows_in_words`: `NeedsReview` shows "Needs your review" where the outcome was.
+    - `phone_hides_descriptions`: both `Phone` stories, at 390 px, hide the descriptions and counts, put `summary` under the name, and have no horizontal scroll.
+    - `always_on_has_no_controls`: no buttons or inputs.
+    - `diff_shows_enforced_values`: `RaiseDiscount` has the same reason on both sides, "Discounts up to 10%" before and "Discounts up to 50%" after, and the after line tagged "Changed".
+    - `rows_are_tagged_in_words`: `AddAndRemove`, `TurnOnPayments` and `TurnOffPayments` show each tag's word as text.
+    - `confirm_once`: two clicks → `onConfirm` once.
+    - `confirm_only_when_checked`: in `ChecksFailed` and `ChecksUnavailable`, confirm is disabled under their headings and lines. `TurnOffPayments` passes no checks, so it shows no checks card and its "Turn off Payments" is enabled.
+    - `limit_only_change_keeps_confirm`: `LimitOnly` shows "Your rules stay the same.", "Confirm change" and "Keep my rules", and no "No rules change.".
+    - `ask_claude_panel_is_a_log`: in `AddPayments`, an `aside` named "Ask Claude" holds the replies inside a `role="log"` with `aria-live="polite"`. "Close" → `onClose`; Escape → `onClose`; sending "Turn off Payments" → `onSend('Turn off Payments')`.
+- [ ] **Step 2: Run** `cd web && npx vitest run --project unit src/ds/tokens.test.ts src/ds/components/{ConnectorSection,ChangeReview} && npx vitest run --project storybook src/ds/components/{ConnectorIcon,ConnectorName,OutcomeMenu,RuleRow,ToolRulesCard,ConnectorSection,ConnectorList,AlwaysOnList,ChangeReview,AskClaudePanel,Card,SegmentedControl}` → FAIL.
+- [ ] **Step 3: Implement** with READMEs, the tokens (`npm run tokens`), the icons, the fixtures and the two story updates. `canvasNote`s:
+  - `RuleRow`'s `Shared` and `ToolRulesCard`'s `PaymentLinkOnPayments`: the board's shared rule can't be a rule card, so the fixture's shared card is a representable one.
+  - `ChangeReview`'s `RaiseDiscount`: the board shows only the after side of a changed row; a changed rule shows both, because the owner confirms what is enforced.
+  - `ConnectorList`'s `RiveraHub`: Rivera keeps Documents, so the hub has six built-in connectors.
+- [ ] **Step 4: Run** the same commands plus `npm run check:ds` → PASS (10 unit tests; 34 story tests, with the Card and SegmentedControl stories still passing).
+- [ ] **Step 5: Commit** `git add web && git commit -m "feat(ds): add the rules hub pieces: connector sections, rule rows with outcome menus, the change review and the Ask Claude panel"`.
 
-### Task 3: Integrations and setup pieces
+### Task 3: Connector and tool pages, adding a connector, and a changed tool
 
 **Files:**
-- Create under `web/src/ds/components/`: `ToolStatusRow/`, `ToolReviewCard/`, `SubNav/`, `Steps/`, `ToolLabel/` (canvas: N-Settings-Integrations, N-Settings-ToolChanged; `Steps` and `ToolLabel` use `'none'`, following the setup boards)
-- Modify: `web/src/ds/index.ts`
+- Create under `web/src/ds/components/`: `Breadcrumb/`, `ConnectorHeader/` (also `ConnectorPromise`), `ConnectionPanel/`, `ToolPageHeader/`, `RecentRequests/`, `ConnectorPicker/`, `ConnectorSignIn/`, `ConnectorReview/`, `ConnectorOfferCard/`, `ToolChangedItem/`, `ToolReviewCard/`, `Steps/` (canvas: N-Conn-02-Payments to N-Conn-15-Changed-After), and two pieces Plan 04 needs for setup and Settings: `SubNav/`, `ToolLabel/` (`'none'`, naming the nearest board)
+- Modify: `web/src/ds/index.ts`, `web/src/ds/fixtures/{rivera.ts,chen.ts}` (below)
 
 **Interfaces:**
-- Consumes: `ToolProfile` (Plan 03a Task 2), for the `ToolRowView` `Pick`; `describeEffects` (Task 2); Plan 03a Tasks 4 and 5.
+- Consumes: Task 2 (`ConnectorView`, `ConnectorIcon`, `ConnectorName`, `OutcomeMenu`, `OUTCOME_WORDS`, `RuleMode`, `ToolRulesCard`, `ChangeReview`, `describeEffects`); `ToolProfile` (Plan 03a Task 2), for the `ToolRowView` `Pick`; Task 0's `scrim` and `shadow-dialog` tokens; Plan 03a's `Card`, `Button`, `IconButton`, `StatusLabel`, `Notice`, `Icon`.
 - Produces:
-  - `type ToolRowView = Pick<ToolProfile, 'tool' | 'source' | 'effects' | 'reversible' | 'status' | 'description_confirmed' | 'definition_sha256' | 'pending_definition_text' | 'pending_sha256'>`, exported from the components' types and re-exported from `web/src/ds/index.ts`, so both a `ToolProfile` and the API's `ToolRow` fit.
-  - `ToolStatusRow({ title; profile: ToolRowView; onReview?; onSimulateChange? })`: `title`, `describeEffects(…)`, and the status in words with a dot: `enabled` handled "On"; `needs_review` held "Needs your review" with "Review"; `disabled` info "Off". While `enabled`, `onSimulateChange` adds a ghost "Simulate a tool change" captioned "Demo only. Changes this tool on the mock payments server so you can see what happens."
-  - `ToolReviewCard({ title; integration; profile: ToolRowView; noticed; onTurnBackOn: (definitionSha256: string) => void; onKeepOff: (definitionSha256: string) => void; pending?; error? })` for a `needs_review` tool: held dot, "Needs your review", `noticed` ("Noticed today at 9:14, when the tools were listed again"); in serif `.cd-type-summary`: "{integration} changed “{title}”, so it's turned off until you review it." and "Until you decide, it can't run at all."; "What you confirmed before" with `description_confirmed` and the effects line; "What the integration says now", a `blockquote` labelled "Quoted from the integration. Claude never sees this text; it sees only the description you confirmed." holding `pending_definition_text` as literal text (`.cd-type-trace`, `pre-wrap`, `overflow-wrap: anywhere`, `data-copy="user"`), never parsed as markup; primary "Turn back on" and secondary "Keep off", each called with `profile.pending_sha256`, under "Turning it back on trusts the new definition and checks your rules again before it runs." (kernel `POST /tools/confirm` drafts a version to prove; the tool stays `needs_review` until it is confirmed). Without `pending_sha256` both are disabled under "This change can't be reviewed right now. Reload the page." `pending` disables both with `aria-busy`; `error` shows the screen's message (`conflict`: "The tool changed again while you were reviewing. Review the newest version."). No before/now table or "Turn back on with Ask me" (open question 1).
-  - `SubNav({ label; items: { key; label; href }[]; current; linkComponent? })`: vertical links, `aria-current="page"`, `--size-nav-row`; a horizontal scroller at phone width.
-  - `Steps({ label; steps; current; done })`: ordered list, current `aria-current="step"`, done "{name}, done".
-  - `ToolLabel({ text })`: an inline tool label (icon, `.cd-type-meta`) for setup's `tool_label` messages ("Searched your Claude memory").
+  - `Breadcrumb({ items: { label: string; href?: string }[]; linkComponent? })`: a `nav` named "Breadcrumb" holding an ordered list. Every item but the last is a link; the last is plain text with `aria-current="page"`. Between items, "/", the separator the boards draw, `aria-hidden`: "Rules / Stripe / Refund".
+  - `ConnectorHeader({ connector; status: 'on' | 'connected' | 'off'; promise?: { title: string; detail?: string } })`, the top of a connector's page:
+    - `ConnectorIcon` at `page` size and `ConnectorName` as the page's `h1` at `page` size, then `connector.description`.
+    - At the right, the status in words with its dot: handled "On" or "Connected", info "Off".
+    - `promise` shows under the header as `ConnectorPromise`: a card with the `lock` icon, `title` in weight 520 and `detail` in meta (Google Calendar: "Claude sees only when you're busy, never what the event is: no titles, guests or notes."). `ConnectorPromise({ title; detail? })` is also exported from the folder, for `ConnectorSignIn`.
+  - `ConnectionPanel({ connector; details?: { label: string; value: string }[]; consequence: string; onTurnOff: () => void; pending?: boolean })`, the end of a connector's page. `consequence` is the screen's sentence ("Claude stops offering payment links and charges.", "Disconnecting removes its tools from your Desk.").
+    - Built in: "Turn off {name}", then "{consequence} You'll see the change before it applies. Your rules are kept, so you can add it back." and a secondary "Turn off {name}".
+    - External: "Connection", then `details` as a description list (Account, Connected, Customers it can see, Tool definitions; the screen's words, any date already formatted). Then "{consequence} You'll see the change before it applies. Your rules for them are kept in case you connect again." and a secondary "Disconnect".
+    - The button calls `onTurnOff` once and waits (`aria-busy`) until `pending` clears. The screen shows the change in a `ChangeReview` before anything turns off.
+  - `ToolPageHeader({ name; description; connector; status: ToolStatus; definitionNote?: string; onSimulateChange?: () => void; simulatePending?: boolean })`, the top of a tool's page:
+    - `name` as the page's serif `h1`, then `description` (what the tool does and its effects).
+    - The source line: `ConnectorIcon` at `inline` size, "From {name}" with its badge (`ConnectorName` at `inline` size), and the status in words with its dot. `enabled`: handled "On", followed by " · {definitionNote}" when given ("Definition unchanged", "Definition reviewed today"). `needs_review`: info "Off until you review a change". `disabled`: info "Off".
+    - For an external connector's tool while `enabled`, `onSimulateChange` adds a ghost "Simulate a tool change", captioned "Demo only. Changes this tool's definition on the mock {connector name} server, so you can see what happens." This is the master's owner-side demo action ("Connected integration"). No board draws it, so it sits on the tool's page, where its result shows.
+  - `RecentRequestView = { key: string; when: string; what: string; why: string; tone: StatusTone; outcome: string; href?: string }` and `RecentRequests({ rows: RecentRequestView[]; linkComponent? })`:
+    - "Recent requests under these rules", then a row per request: `when` in meta; `what` (the decision's `reason_plain`); `why` in meta (the rule that decided it, or what happened); and at the right the outcome in words with its dot ("Automatic", "Waiting for your answer", "Stopped", "You allowed it").
+    - Each row is a link to its record when `href` is given.
+    - Empty: "No requests under these rules yet."
+    - The screen passes every string; nothing here formats a time or an amount.
+  - `PickerItem = { connector: ConnectorView; state: 'available' | 'added' | 'connected' | 'coming_soon' }` and `ConnectorPicker({ business: string; builtIn: PickerItem[]; external: PickerItem[]; note?: string; onChoose: (id: string) => void; onClose: () => void })` (N-Conn-07b, N-Conn-07):
+    - A modal `<dialog>` (`showModal()`, over `scrim`, with `shadow-dialog`), named by its serif title "Add a connector".
+    - "Add what fits {business}. Each tool you add starts at Ask me first unless one of your rules already covers it, and you review them before anything turns on."
+    - Two lists, "Claude Desk" (built in) and "Other apps" (external). Each item shows `ConnectorIcon`, `ConnectorName` and the description, and at the right, by `state`:
+      - `available`: a button "Add" (built in) or "Connect" (external) → `onChoose(id)`.
+      - `added`: "Added". `connected`: "Connected". `coming_soon`: "Coming soon in this demo".
+    - Under the lists: `note` when given ("Google Calendar is coming soon in this demo. Until then, Claude offers the open times you set on Bookings."), and, whenever an external connector is listed, "Mock connectors stand in for the real apps. No account is used and nothing is sent to them."
+    - Escape and an `IconButton` "Close" call `onClose`. Focus starts on the first button, and Tab stays inside.
+  - `ConnectorSignIn({ connector; provider: string; promise: { title: string; detail?: string }; question: string; choices: { id: string; label: string; detail: string }[]; value: string; onChange: (id: string) => void; onContinue: (id: string) => void; onCancel: () => void; steps: StepsProps })` (N-Conn-08), for an external connector:
+    - A modal `<dialog>` with `Steps` at the top, `ConnectorIcon`, and "Connect {name}" with its Mock badge (`ConnectorName`) as its title.
+    - "A mock sign-in. No {provider} account is used, and nothing is read from or sent to {provider}.", then `ConnectorPromise`.
+    - A radio group named by `question` ("Which calendar shows when you're busy?"), one choice per `choices` (label and detail).
+    - "Cancel" → `onCancel`; primary "Continue" → `onContinue(value)`.
+    - It asks for no account details: no text field and no password.
+  - `ReviewToolView = { key: string; name: string; description: string; mode: RuleMode; coveredBy: { text: string; mode: RuleMode | 'always_on' }[] }` and `ConnectorReview({ connector; intro?: string; tools: ReviewToolView[]; onChangeOutcome?: (key: string, mode: RuleMode) => void; onTurnOn: () => void; onCancel: () => void; pending?: boolean; error?: string })` (N-Conn-09, N-Conn-11b), the review before anything turns on:
+    - `ConnectorIcon` and the page's `h1` "Review what Claude could do with {name}", with its badge.
+    - Built in: "A built-in connector, so there's nothing to sign in to. Nothing runs until you turn it on." External: "Nothing runs until you turn it on." followed by `intro` (the connector's promise).
+    - A card with a row per tool: name and `description`; a line per `coveredBy`, "Covered by your rule: {text} · {Automatic | Ask me first | Never}", or for an always-on line "Covered by your always-on rule: {text}"; and `OutcomeMenu` at `mode`. The screen starts every new tool at "Ask me first"; `onChangeOutcome` makes each outcome a menu.
+    - Primary "Turn it on" → `onTurnOn()` once (`pending` → "Turning on", `aria-busy`), secondary "Cancel", and "You'll see the change to your rules before anything runs."
+    - `error` shows the screen's message in an error `Notice`.
+  - `ConnectorOfferCard({ connector; toolsLine: string; coverage?: string; action: 'add' | 'connect' | 'turn_off' | 'disconnect' | 'coming_soon'; onReview: () => void })` (N-Conn-12-Chat), Claude's card in the Ask Claude panel. It leads into the same review as the picker, and nothing turns on or off from it.
+    - `ConnectorIcon`, `ConnectorName`, `toolsLine` ("2 tools · Payment link, Charge within a signed limit") and `coverage` ("Covered by your always-on rule: no money moves without your rule or a signed limit.").
+    - The button by `action`: "Review and add", "Review and connect", "Review and turn off" or "Review and disconnect" → `onReview()`. `coming_soon` shows "Coming soon in this demo." and no button.
+  - `ToolChangedItem({ connector; tool: string; noticed: string; consequence: string; onReview: () => void })` (N-Conn-13), Today's "Needs you" item for a tool that a changed definition switched off:
+    - A `Card` (`article`) with a held dot and "{connector name} changed “{tool}”, so it's off until you review it."
+    - In meta: "{connector name} · Mock · {noticed}. {consequence}" ("Noticed today at 9:14", "Refunds can't run until you decide.").
+    - "Review" → `onReview()`, which opens the tool's page.
+  - `type ToolRowView = Pick<ToolProfile, 'tool' | 'source' | 'effects' | 'reversible' | 'status' | 'description_confirmed' | 'definition_sha256' | 'pending_definition_text' | 'pending_sha256'>`, kept, so both a `ToolProfile` and the API's `ToolRow` fit.
+  - `ToolReviewCard({ title; connector: ConnectorView; profile: ToolRowView; noticed; onTurnBackOn: (definitionSha256: string) => void; onKeepOff: (definitionSha256: string) => void; pending?; error? })` (N-Conn-14), for a `needs_review` tool, kept from the old Task 3 with the connector's words:
+    - A held dot and "Needs your review", with `noticed` at the right ("Noticed today at 9:14, when the tools were listed again").
+    - In serif `.cd-type-summary`: "{connector name} changed “{title}”, so it's turned off until you review it. Until you decide, it can't run at all."
+    - "What you confirmed before", with `description_confirmed` and `describeEffects(profile.effects, profile.reversible)`.
+    - "What the connector says now": a `blockquote` (padding 10px 12px, a hairline border, `--bg-app`), labelled "Quoted from the connector. Claude never sees this text; it sees only the description you confirmed.". It holds `pending_definition_text` as literal text (mono 12/18 `.cd-type-trace`, `pre-wrap`, `overflow-wrap: anywhere`, `data-copy="user"`), never parsed as markup.
+    - "Turning it back on trusts the new definition and checks your rules again before it runs.", then primary "Turn back on" and secondary "Keep off", each called with `profile.pending_sha256`. Kernel `POST /tools/confirm` drafts a version to prove, which the screen shows in a `ChangeReview`; the tool stays `needs_review` until that version is confirmed.
+    - Without `pending_sha256`, both buttons are disabled under "This change can't be reviewed right now. Reload the page."
+    - `pending` disables both, with `aria-busy`. `error` shows the screen's message (for `conflict`: "The tool changed again while you were reviewing. Review the newest version.").
+    - The after-state (N-Conn-15) is the screen's: `ToolPageHeader` with "Definition reviewed today", and an info `Notice` ("Refund is back on. Your rules were checked against its new definition, and refunds still wait for your answer.").
+  - `Steps({ label: string; steps: readonly string[]; current: number })` (N-Conn-08 to N-Conn-11b; setup): an ordered list in a row, joined by hairlines.
+    - Steps before `current` show `check` and read "{name}, done".
+    - The current step is a filled 22 px circle with its number, with `aria-current="step"`; later steps are quiet numbered circles.
+    - The add flow passes "Choose", "Sign in", "Review tools", "Confirm" for an external connector, or "Choose", "Review tools", "Confirm" for a built-in one; setup passes its five steps.
+  - `SubNav({ label; items: { key; label; href }[]; current; linkComponent? })`, kept for Settings (Plan 04): vertical links with `aria-current="page"` and `--size-nav-row` rows; a horizontal scroller at phone width.
+  - `ToolLabel({ text })`, kept for setup: an inline tool label (icon, `.cd-type-meta`) for setup's `tool_label` messages ("Searched your Claude memory").
+  - **Fixtures.**
+    - `rivera.ts` gains `recentRequests`, the Refund and Quote rows on N-Conn-05-Refund and N-Conn-06-Quote, and `toolPages`, the `ToolPageHeader` strings for both.
+    - `rivera.ts` gains `stripeConnection`, the details on N-Conn-03-Stripe.
+    - `rivera.ts` gains `googleCalendar`: the catalog-only connector's `ConnectorView` and its flow on N-Conn-04 and N-Conn-07 to N-Conn-11, with its sign-in choices ("Rivera Plumbing jobs", "Personal"), its review row and its change rows.
+    - `chen.ts` gains `picker`: Payments to add; Quotes, Bookings and Documents added; Google Calendar coming soon; Stripe to connect.
+    - `chen.ts` gains `paymentsReview`: Payment link and Charge within a signed limit, each at "Ask me first", each covered by the always-on "No money moves without your rule or a signed limit".
+    - `chen.ts` gains `paymentsOffer`, the card in Chen's Ask Claude panel.
 
-- [ ] **Step 1: Write the stories:** `Integrations/ToolStatusRow` (`On`, `NeedsReview`, `Off`), `Integrations/ToolReviewCard` (`CreateRefundChanged`, `Sending`, `ChangedAgain`, `NoHash`), `Navigation/SubNav` (`Settings`), `Navigation/Steps` (`ThirdOfFive`), `Conversation/ToolLabel` (`Memory`, `Website`, `CouldNotRead`). Play: `simulate_only_when_on` (in `On`, absent from `NeedsReview` and `Off`); `quoted_definition_is_text` (`CreateRefundChanged` has no `img` element, the quote's text equals the fixture exactly, and the summary and quote label read as above); `confirm_names_the_reviewed_hash` (Tab to "Turn back on", Enter → `onTurnBackOn` once with the fixture's `pending_sha256`); `no_hash_no_confirm` (`NoHash`: both disabled, notice visible); `current_is_marked`; `current_step_marked`; `tool_label_is_text`.
-- [ ] **Step 2: Run** `cd web && npx vitest run --project storybook src/ds/components/{ToolStatusRow,ToolReviewCard,SubNav,Steps,ToolLabel}` → FAIL.
-- [ ] **Step 3: Implement** with READMEs.
-- [ ] **Step 4: Run** the same command plus `npm run check:ds` → PASS (12 story tests).
-- [ ] **Step 5: Commit** `git add web && git commit -m "feat(ds): add tool status rows, the tool review card, the settings sub-nav and the setup steps and tool labels"`.
+- [ ] **Step 1: Write the stories:**
+  - `Navigation/Breadcrumb`: `ToolPage` (Rules / Stripe / Refund).
+  - `Connectors/ConnectorHeader`: `Payments`, `Stripe`, `GoogleCalendar` (with its promise).
+  - `Connectors/ConnectionPanel`: `TurnOffPayments`, `DisconnectStripe`, `Pending`.
+  - `Connectors/ToolPageHeader`: `Refund`, `Quote`, `RefundNeedsReview`, `RefundReviewed`, `WithSimulate`.
+  - `Connectors/RecentRequests`: `Refund`, `Empty`.
+  - `Connectors/ConnectorPicker`: `ChenComingSoon`, `RiveraConnectable`.
+  - `Connectors/ConnectorSignIn`: `GoogleCalendar`.
+  - `Connectors/ConnectorReview`: `ChenPayments`, `GoogleCalendar`, `TurningOn`, `Error`.
+  - `Connectors/ConnectorOfferCard`: `AddPayments`, `ComingSoon`.
+  - `Connectors/ToolChangedItem`: `StripeRefund`.
+  - `Connectors/ToolReviewCard`: `CreateRefundChanged`, `Sending`, `ChangedAgain`, `NoHash`.
+  - `Navigation/Steps`: `ReviewToolsOfFour`, `SetupThirdOfFive`.
+  - `Navigation/SubNav`: `Settings`.
+  - `Conversation/ToolLabel`: `Memory`, `Website`, `CouldNotRead`.
+  - Plays:
+    - `breadcrumb_marks_the_page`: two links, then "Refund" with `aria-current="page"`; the separators are hidden from screen readers.
+    - `connector_status_in_words`: `Payments` shows "On" and `Stripe` "Connected", each beside a dot.
+    - `turn_off_once`: in `TurnOffPayments`, two clicks on "Turn off Payments" → `onTurnOff` once, and the text says the change shows before it applies. `DisconnectStripe` has the details list and "Disconnect".
+    - `simulate_only_when_on`: `WithSimulate` has "Simulate a tool change"; `RefundNeedsReview` and `Quote` (built in) don't.
+    - `recent_requests_show_outcomes_in_words`: each row's outcome word beside its dot; `Empty` shows its line.
+    - `picker_by_keyboard`: the dialog named "Add a connector" opens with focus on "Add" (Payments). Tab stays inside it. Enter → `onChoose('payments')` once. Escape → `onClose`.
+    - `picker_states_in_words`: in `ChenComingSoon`, the added built-ins read "Added", Google Calendar reads "Coming soon in this demo" with no button, Stripe has "Connect", and the mock line shows.
+    - `sign_in_collects_nothing`: in `GoogleCalendar`, the only inputs are radios, none of type text, email or password. The mock line names Google. "Continue" → `onContinue('rivera-jobs')`.
+    - `review_starts_at_ask_me_first`: in `ChenPayments`, each row's outcome is "Ask me first" with its covered-by line. Two clicks on "Turn it on" → `onTurnOn` once. "Cancel" → `onCancel`. "You'll see the change to your rules before anything runs." shows.
+    - `offer_card_only_opens_the_review`: in `AddPayments`, "Review and add" → `onReview` once and no other callback; `ComingSoon` has no button.
+    - `tool_changed_item_says_what_and_why`: `StripeRefund` shows the title with “Refund” and "Stripe · Mock", and "Review" → `onReview`.
+    - `quoted_definition_is_text`: `CreateRefundChanged` has no `img` element, the quote's text equals the fixture exactly, and the summary and the quote's label read as above.
+    - `confirm_names_the_reviewed_hash`: Tab to "Turn back on", then Enter → `onTurnBackOn` once, with the fixture's `pending_sha256`.
+    - `no_hash_no_confirm`: in `NoHash`, both buttons are disabled and the notice shows.
+    - `current_step_marked`: the current step has `aria-current="step"`, and done steps read "{name}, done".
+    - `current_is_marked`: `SubNav`'s current link has `aria-current="page"`.
+    - `tool_label_is_text`.
+- [ ] **Step 2: Run** `cd web && npx vitest run --project storybook src/ds/components/{Breadcrumb,ConnectorHeader,ConnectionPanel,ToolPageHeader,RecentRequests,ConnectorPicker,ConnectorSignIn,ConnectorReview,ConnectorOfferCard,ToolChangedItem,ToolReviewCard,Steps,SubNav,ToolLabel}` → FAIL.
+- [ ] **Step 3: Implement** with READMEs and the fixtures. `canvasNote`s:
+  - `ToolReviewCard`: the quote is the fixture's drifted definition, whose markup must show as text, not the board's sentence. "What you confirmed before" shows `description_confirmed`, the text Claude sees, where the board shows the tool's short line.
+  - `ToolPageHeader`'s `Quote`: a built-in tool has no pinned definition, so it gets no definition note, where the board shows "Definition unchanged".
+  - `ConnectorReview`'s `GoogleCalendar`: the board starts the tool at "Automatic", "from your Bookings rule"; every new tool starts at "Ask me first", with the rules that cover it shown.
+  - `ConnectorPicker`: a "Close" button, which the board doesn't draw, so the dialog closes by pointer as well as by Escape. The mock line also shows under the coming-soon note.
+  - `ConnectionPanel`'s `DisconnectStripe`: the line says the change shows first, as the owner's decision does.
+  - The Google Calendar stories: Google Calendar is catalog-only in the demo, so they show what the components support once it works.
+- [ ] **Step 4: Run** the same command plus `npm run check:ds` → PASS (34 story tests).
+- [ ] **Step 5: Commit** `git add web && git commit -m "feat(ds): add connector and tool pages, the add-a-connector flow and the changed-tool review"`.
 
 ### Task 4: Visual check of the owner boards
 
@@ -263,18 +507,71 @@ Owner decisions, 2026-10-29 (spec "First visit and hosting" and "Look and feel")
 - [ ] **Step 5: Run** `cd web && npm test && npm run typecheck` → PASS.
 - [ ] **Step 6: Commit** `git add web && git commit -m "test(ds): check the public page and take-over boards against the design canvas"`.
 
-### Task 6: Visual check of the verification, rules, safety, switcher and settings boards
+### Task 6: Visual check of the verification, safety, switcher, rules and connectors boards
+
+The connectors boards are drawn as AGENTS.md asks, at a 14-inch laptop's width or a phone's. They are rendered at a 1512×982 viewport (N-Conn-16-Phone-Rules at 390×844), and a board taller than one screen is captured at full height. The Chen verify, Safety and Switcher boards stay at 1280×820.
 
 **Files:**
-- Create: `web/src/ds/boards/ChenVerify.stories.tsx`, `RulesRivera.stories.tsx`, `RulesChatChange.stories.tsx`, `Safety.stories.tsx`, `Switcher.stories.tsx`, `SettingsIntegrations.stories.tsx`, `SettingsToolChanged.stories.tsx`
-- Modify: `web/src/ds/reference/README.md`, `web/src/ds/reference/boards.test.ts`
+- Create: `web/src/ds/boards/ChenVerify.stories.tsx`, `Safety.stories.tsx`, `Switcher.stories.tsx`, `ConnectorsHub.stories.tsx`, `ConnectorPages.stories.tsx`, `AddConnector.stories.tsx`, `ToolChanged.stories.tsx`
+- Modify: `web/src/ds/reference/README.md`, `web/src/ds/reference/boards.test.ts`, `web/.storybook/preview.tsx` (a `board` viewport, 1512×982)
 
-- [ ] **Step 1: Write the failing test and the board stories.** `boards.test.ts` adds `every_reference_board_has_a_board_story` (each `REFERENCE_BOARDS` entry is named by a `Boards/*` story). Stories, with the applicable Task 4 spec rows plus: Chen verify shows `VerifiedLine` with "Simulated verification" and a `document_link` card; Rules shows four capability cards with their rule words and the always-on list; the chat change shows `RuleChangeDiff` with a changed limit; Safety shows the attempts list and one `FullTrace`; Switcher shows the menu open over Today, listing only businesses and "New business" (`canvasNote`: the board's two columns become one menu of businesses; its Desks, New Desk and their status dots are in the sidebar's Desk picker or left out); Settings, integrations shows `SubNav` and both `payments.*` `ToolStatusRow`s; Settings, tool changed shows the `ToolReviewCard` for `payments.create_refund` with a `ToolStatusRow` for `payments.list_charges` still on (`canvasNote`: the board's payment provider is the mock payments server with two tools; no before/now table, open question 1); each has `focus_order_is_logical`.
+**Connectors board spec** (from the board sources; each connectors board story's play asserts the rows that apply with `expectComputed`, with Task 4's spec rows):
+
+| Element | Expected |
+|---|---|
+| Connector section | Task 4's card background, border and radius 12px; no padding of its own (`overflow: hidden`) |
+| Section header link | padding 14px 16px; icon tile 36px, radius 8px, background `rgba(250, 249, 245, 0.1)`, or `rgb(255, 255, 255)` behind a brand mark |
+| Tool row | padding 12px 16px; top border 1px `rgba(250, 249, 245, 0.12)`; name weight 520 |
+| Outcome menu button | height 32px; border 1px `rgba(250, 249, 245, 0.22)`; radius 8px; background `rgba(0, 0, 0, 0)` |
+| Change tag | width 64px; border 1px `rgba(250, 249, 245, 0.22)`; fully rounded |
+| Steps | circle 22px; the current one `rgb(239, 236, 228)` |
+| Quoted definition | padding 10px 12px; border 1px `rgba(250, 249, 245, 0.12)`; radius 8px; background `rgb(28, 27, 25)`; 12px/18px mono; `white-space: pre-wrap` |
+| Ask Claude panel | width 400px; left border 1px `rgba(250, 249, 245, 0.12)` |
+
+- [ ] **Step 1: Write the failing tests and the board stories.**
+  - `boards.test.ts`:
+    - Adds `every_reference_board_has_a_board_story`: each `REFERENCE_BOARDS` entry is named by a `Boards/*` story.
+    - Changes `every_reference_board_has_a_render`: an `N-Conn-*` render is 1512 px wide and at least 982 tall; N-Conn-16-Phone-Rules is 390 wide and at least 844 tall; every other board stays 1280×820.
+  - Stories, with the applicable Task 4 spec rows:
+    - Chen verify shows `VerifiedLine` with "Simulated verification" and a `document_link` card.
+    - Safety shows the attempts list and one `FullTrace`.
+    - Switcher shows the menu open over Today, listing only businesses and "New business" (`canvasNote`: the board's two columns become one menu of businesses; its Desks, New Desk and their status dots are in the sidebar's Desk picker or left out).
+  - The connectors stories, each at the `board` viewport (the phone board's at `phone`), with `parameters.canvas` its board. Every Rules page has `PageHeader` "Rules", subtitle "What Claude can do on this Desk, where each tool comes from, and your rules for it.", and "Add a connector". Its owner `Composer` reads "Ask Claude to change a rule or a connector", with the helper "Claude shows you the change and example situations before anything applies.", above the board's chips.
+
+| Story | Board | Shows |
+|---|---|---|
+| `Boards/Rules and connectors` (`ConnectorsHub`) | N-Conn-01-Rules | Rivera's Rules page: `ConnectorList` with six built-in sections and Stripe, then `AlwaysOnList` |
+| `Boards/Rules on a phone` (`ConnectorsHub`) | N-Conn-16-Phone-Rules | the same at 390 px: sections stacked, each tool's outcome kept, the composer on top (`canvasNote`: the board's placeholder is shorter; the composer keeps one placeholder at every width) |
+| `Boards/Google Calendar added` (`ConnectorsHub`) | N-Conn-11-GCal-Done | Rivera's Rules page with an info `Notice` ("Google Calendar is on. Claude now checks when you're busy before offering times, and never sees what an event is.") and Google Calendar's section with "Added just now" |
+| `Boards/Ask Claude to add a connector` (`ConnectorsHub`) | N-Conn-12-Chat | Chen's Rules page with `AskClaudePanel`: the owner's words, Claude's serif reply and `ConnectorOfferCard` "Review and add" for Payments |
+| `Boards/Payments` (`ConnectorPages`) | N-Conn-02-Payments | `Breadcrumb` Rules / Payments; `ConnectorHeader` "On"; "Tools" with the caption "Each tool with every rule that covers it. Open a tool for its own page."; a `ToolRulesCard` per tool, the shared card under both; `ConnectionPanel` "Turn off Payments" |
+| `Boards/Stripe` (`ConnectorPages`) | N-Conn-03-Stripe | `ConnectorHeader` "Connected"; a `ToolRulesCard` per tool; `ConnectionPanel` with the connection details and "Disconnect" |
+| `Boards/Google Calendar` (`ConnectorPages`) | N-Conn-04-GoogleCalendar | `ConnectorHeader` with its promise; one tool; the connection and "Disconnect" (`canvasNote`: catalog-only in the demo) |
+| `Boards/Refund` (`ConnectorPages`) | N-Conn-05-Refund | `Breadcrumb` Rules / Stripe / Refund; `ToolPageHeader` "On · Definition unchanged"; "Your rules for refund" (`ToolRulesCard`, no header); the composer "Ask Claude to change a rule for refund" with its chips; `RecentRequests` |
+| `Boards/Quote` (`ConnectorPages`) | N-Conn-06-Quote | the same for Quote, with no definition note (`canvasNote`: a built-in tool has no pinned definition; the board's chips repeat the Refund page's, so the story's are the Quote page's own) |
+| `Boards/Add a connector, coming soon` (`AddConnector`) | N-Conn-07b-Add-Picker-ComingSoon | Chen's Rules page under `ConnectorPicker`: Payments to add, Google Calendar coming soon, Stripe to connect |
+| `Boards/Add a connector` (`AddConnector`) | N-Conn-07-Add-Picker | Rivera's Rules page under the picker, every built-in added and Google Calendar to connect (`canvasNote`: catalog-only in the demo) |
+| `Boards/Connect Google Calendar` (`AddConnector`) | N-Conn-08-GCal-SignIn | `ConnectorSignIn` over Rivera's Rules page, step 2 of 4 |
+| `Boards/Review Google Calendar` (`AddConnector`) | N-Conn-09-GCal-Review | `Breadcrumb`, `Steps` at 3 of 4, `ConnectorReview` with "See when you're free" at "Ask me first", covered by the Bookings rule |
+| `Boards/Turn on Google Calendar` (`AddConnector`) | N-Conn-10-GCal-Confirm | `Steps` at 4 of 4, `PageHeader` "Turn on Google Calendar" ("Here's exactly what changes on your Desk. Nothing changes until you confirm."), `ChangeReview` with "Confirm and turn on" and "Back" |
+| `Boards/Review Payments` (`AddConnector`) | N-Conn-11b-Documents-Review | Chen adding Payments: `Breadcrumb` Rules / Payments, `Steps` "Choose", "Review tools", "Confirm" at 2 of 3, `ConnectorReview` with both tools at "Ask me first" (the board keeps its name from when it showed Documents) |
+| `Boards/A tool changed, Today` (`ToolChanged`) | N-Conn-13-Changed-Today | Today with `ToolChangedItem` first under "Needs you", then the seeded held quote as its `ApprovalCard` (`canvasNote`: the board draws the hold as a short row; held requests keep the signed Today's `ApprovalCard`) |
+| `Boards/A tool changed, review` (`ToolChanged`) | N-Conn-14-Changed-Review | the Refund page with `ToolPageHeader` "Off until you review a change" and `ToolReviewCard` above its rules |
+| `Boards/A tool changed, after` (`ToolChanged`) | N-Conn-15-Changed-After | "On · Definition reviewed today" and the info `Notice` |
+
+  - Each board story has `focus_order_is_logical`:
+    - Rules pages: "Add a connector", the composer, its chips, then each section's header and rows in order, then the last "Add a connector".
+    - A board with a dialog: only the dialog's controls.
+    - The review boards: the outcome menus, then "Turn it on".
+    - The changed tool's review: "Turn back on", "Keep off", then the rules.
 - [ ] **Step 2: Run** `cd web && npx vitest run --project unit src/ds/reference && npx vitest run --project storybook src/ds/boards` → FAIL until the stories and fixes land.
-- [ ] **Step 3: Compare by eye** as in Task 4 Step 4 for all seven boards at 1280×820, 1440×900 and 390×844, with a keyboard walk.
-- [ ] **Step 4: Record** seven README lines.
+- [ ] **Step 3: Compare by eye** as in Task 4 Step 4.
+  - The Chen verify, Safety and Switcher boards at 1280×820.
+  - The connectors boards at `set viewport 1512 982` (N-Conn-16-Phone-Rules at `390 844`), with a full-page screenshot for a board taller than one screen, against `$DS_REFERENCE_DIR/<board>.png`.
+  - Then every board at 1440×900 and 390×844, with a keyboard walk.
+- [ ] **Step 4: Record** a README line per board (21 lines).
 - [ ] **Step 5: Run** `cd web && npm test && npm run typecheck` → PASS.
-- [ ] **Step 6: Commit** `git add web && git commit -m "test(ds): check verification, rules, safety, switcher and settings boards against the design canvas"`.
+- [ ] **Step 6: Commit** `git add web && git commit -m "test(ds): check the verification, safety, switcher, rules and connectors boards against the design canvas"`.
 
 ### Task 7: Publish to the Design System artifact (first to cut)
 
@@ -324,7 +621,16 @@ Index rules: `--new-index` writes the staged `format.md`'s index shape with its 
 
 ## Open questions for the master plan
 
-1. **Tool review needs the changed tool's new profile.** N-Settings-ToolChanged shows the new effects, reversibility and payee and offers "Turn back on with Ask me"; `ToolProfile` has only `pending_definition_text` and `pending_sha256`, and `POST /tools/confirm` takes no mode. Proposal: adapter-drafted `pending_effects` and `pending_reversible`, and whether a re-enabled `pay_out` tool forces an ask card.
+The old question 1, whether a tool's review needs the changed tool's new profile, is closed. The signed review (N-Conn-14-Changed-Review) shows no new effects and no "Turn back on with Ask me", so `ToolProfile` needs no new field.
+
+1. **Adding or turning off a built-in connector.** The owner's decision runs both through `POST /tools/confirm`. Three things stand in the way:
+   - Native profiles carry no `definition_sha256`, and the call requires one.
+   - `POST /desks` writes every native profile enabled (Plan 01c), so a Desk can't start without a built-in connector, such as Chen & Co. CPA without Payments.
+   - The starter presets are proved in CI over every native tool, so a Desk that starts with fewer tools has another profiles hash and no shipped report.
+
+   Proposal: `definition_sha256` is null for `source: "native"` and `/tools/confirm` accepts that; the Desk's seed names the built-in connectors it starts with; and the presets are proved for each starting set that setup can produce, or proved live.
+2. **Turning a connector off.** The owner's decision proves the change before it applies. The master turns a tool off at once with no draft, since turning off only narrows. A connector also has several tools, so turning it off is one call per tool and not one transaction. Proposal: keep turning off at once, since it needs no proof, and have the web app show the change first. `/tools/confirm` would then accept a list of tools, so a connector turns off in one transaction.
+3. **A shared rule with an ask limit.** The Payments board's shared example, "Charges over $100 wait for your answer.", is an `ask` card with an amount. `RuleCard` can't express it: limits are auto-only, and above an auto card's limit its hold twin asks. Proposal: no contract change. The boards' example changes, and the web app words an auto card's limit as what asks above it.
 
 ## Review Ledger
 
@@ -364,3 +670,12 @@ PR round 3, 2026-10-29: the landing lines name the review panel. Nothing in this
 Changes after PR #7 (2026-10-29): where this plan restates Plan 03a, it now says what Plan 03a's components do (Plan 03a's ledger lists the component changes). No task, kernel contract or evals gate changed.
 - Matches the code PR #7 shipped: receipts attach under their message on its side, with no margin column, in the board spec and the by-eye checks, and the public page's rows fill its chat column.
 - Signed off by the project owner on 2026-10-29: every card about money moving (`MONEY_TEMPLATES`) carries the test-payment note; the kernel's open-status `text` is the one clock time a visitor surface shows, verbatim; the composer shows one focus ring; the Switcher board's menu lists only businesses, with Desks in the sidebar's Desk picker; Today's approval card follows the signed-off answer boards; the things-to-try list on First visit is drawn by `IntroDialog`, added in its own pull request (#11), with Plan 04 passing its items.
+
+Tasks 2–3 re-specified from the owner-signed Connectors and rules boards (2026-10-29). The owner signed eighteen boards on the design canvas's "Claude Desk · Connectors and rules" page (N-Conn-01-Rules to N-Conn-16-Phone-Rules). They replace the Rules and Integrations boards that the old Tasks 2 and 3 followed, so both tasks are rewritten to build them. Task 6 checks the new boards in place of N-Rules-Rivera, N-Rules-ChatChange, N-Settings-Integrations and N-Settings-ToolChanged.
+- **The Rules hub.** Rules is one page, with a section per connector the Desk has, built in first, and "Connectors" is the name people read. `CapabilityCard` becomes `ConnectorSection` (and `ConnectorList`), and `ToolStatusRow` becomes the hub's tool rows and `ToolPageHeader`. Connector and tool pages, the add-a-connector flow (`ConnectorPicker`, `ConnectorSignIn`, `ConnectorReview`, `ConnectorOfferCard`) and Today's `ToolChangedItem` are new.
+- **Outcomes.** The words are now "Automatic", "Ask me first" and "Never", in `OutcomeMenu`. The mode switch reads "Ask me first", "Automatic" and "Custom" (`PRESET_WORDS`). `RuleRow` marks a shared effect-group rule under every tool it covers.
+- **Kept, renamed or dropped.** `RuleChangeDiff` becomes `ChangeReview`: the same before-and-after rows and confirm-once behavior, now also for a connector turned on or off and with the proof's lines. `ToolReviewCard` keeps its contract, speaking of a connector. `AlwaysOnList`, `ruleDiff`, `RuleWord`, `Steps`, `SubNav` and `ToolLabel` stay. The initials pill and "Do it" and "Ask me" are dropped.
+- **Copy and data.** `describeEffects` uses the boards' words. Connector brand marks use their own decorative tokens. Components display the screen's strings and decide nothing.
+- **Fixtures and reference boards.** Rivera keeps Documents, since the verified-invoice scenario needs it, so its hub has all six built-in connectors and Stripe. Chen & Co. CPA, adding Payments, is the add-a-built-in example. `REFERENCE_BOARDS` swaps the four replaced boards for the eighteen new ones, re-pointing the two stories that cited N-Rules-Rivera. The new boards render at 1512×982, as AGENTS.md draws boards.
+- **Interfaces.** "Interfaces consumed / produced" now says what the web app (plan 04) passes for each screen.
+- **Open questions.** The old open question 1 is closed. Three new ones cover the master's contracts: native tools through `/tools/confirm`, turning a connector off, and a shared rule with an ask limit.
