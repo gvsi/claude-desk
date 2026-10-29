@@ -45,5 +45,6 @@ If a task seems to require breaking one of these, stop and raise it with the pro
 ## Reporting
 
 - Every status update stands on its own: what the task is, what happened, what you found, what you need. Lead with the result.
+- Name plans, PRs and tasks by what they build, with the number in brackets, e.g. "the web app (plan 04)" or "the kernel core PR (plan 01a)", never by number alone.
 - Ask for decisions with the questions tool, one question per decision, recommended option first with a one-line reason.
 - Standing rules belong in this file, not in agent memory.
