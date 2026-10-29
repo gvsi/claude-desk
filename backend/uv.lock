@@ -25,6 +25,7 @@ name = "desk"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "desk-kernel" },
     { name = "pydantic" },
 ]
 
@@ -34,10 +35,17 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pydantic", specifier = ">=2.9" }]
+requires-dist = [
+    { name = "desk-kernel", directory = "../kernel/py" },
+    { name = "pydantic", specifier = ">=2.9" },
+]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8" }]
+
+[[package]]
+name = "desk-kernel"
+source = { directory = "../kernel/py" }
 
 [[package]]
 name = "iniconfig"

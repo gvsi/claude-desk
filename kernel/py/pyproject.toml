@@ -1,0 +1,13 @@
+[build-system]
+requires = ["maturin==1.15.0"]
+build-backend = "maturin"
+
+[project]
+name = "desk-kernel"
+description = "The Claude Desk kernel's Rust module: Cedar decisions, policy lint, canonical JSON and ledger signing"
+requires-python = ">=3.13"
+dynamic = ["version"]
+
+[tool.maturin]
+module-name = "desk_kernel"
+features = ["pyo3/extension-module"]

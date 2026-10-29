@@ -5,7 +5,12 @@ description = "Claude Desk backend: the kernel service, the API service and thei
 requires-python = ">=3.13,<3.14"
 dependencies = [
     "pydantic>=2.9",
+    "desk-kernel",
 ]
+
+# The kernel's Rust module, built from source by maturin; `make kernel` rebuilds it.
+[tool.uv.sources]
+desk-kernel = { path = "../kernel/py" }
 
 [dependency-groups]
 dev = [
