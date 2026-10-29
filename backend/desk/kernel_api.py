@@ -5,6 +5,7 @@ carries a principal, person, level or assurance: the kernel builds identity from
 own tables and the tokens or signatures it checks.
 """
 
+from datetime import UTC, timedelta
 from typing import Annotated, Literal, Self
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, StringConstraints, model_validator
@@ -276,6 +277,36 @@ class PaymentLinkStateResult(BaseModel):  # POST /payment_links/{token}/complete
     session_id: str
     verdict: ReplyVerdict | None          # the payment_confirmed verdict on paid; None on cancel
 
+class OpenStatus(BaseModel):              # PublicDesk's header line: computed from charter:hours on the kernel's clock
+    open: bool
+    until: AwareDatetime | None           # open: the end of the union of overlapping or touching windows; None if open
+                                          # through the next 7 local days (up to 169 hours)
+    opens_at: AwareDatetime | None        # closed: the start of the next window, always within 7 local days
+    text: str                             # kernel en/es template in the business's time zone (?lang=), shown verbatim
+    as_of: AwareDatetime                  # the kernel's clock
+    refresh_at: AwareDatetime             # when text may next change: the earliest of the boundary, the next local
+                                          # midnight and as_of + 25 h; the web refetches once at refresh_at - as_of
+
+    @model_validator(mode="after")
+    def _times_in_order(self) -> Self:
+        boundary, other = (self.until, self.opens_at) if self.open else (self.opens_at, self.until)
+        if other is not None:
+            raise ValueError("an open status names only until, a closed one only opens_at")
+        if not self.open and boundary is None:
+            raise ValueError("a closed status names when it opens: without hours there is no status at all")
+        # as instants in UTC: two times sharing a ZoneInfo compare and subtract by wall clock, ignoring a repeated hour's fold
+        as_of, refresh_at = self.as_of.astimezone(UTC), self.refresh_at.astimezone(UTC)
+        boundary = boundary.astimezone(UTC) if boundary is not None else None
+        if boundary is not None and boundary <= as_of:
+            raise ValueError("the boundary is after as_of: windows end exclusive")
+        if refresh_at <= as_of:
+            raise ValueError("refresh_at is after as_of")
+        if refresh_at > as_of + timedelta(hours=25):   # a fall-back day lasts 25 hours, so most next midnights fit
+            raise ValueError("refresh_at is at most 25 hours after as_of")
+        if boundary is not None and refresh_at > boundary:
+            raise ValueError("refresh_at is at or before the boundary")
+        return self
+
 class PublicDesk(BaseModel):              # GET /public/{desk_slug}: public-labelled fields only, kernel-rendered (?lang=)
     business_name: str
     desk_name: str
@@ -283,6 +314,7 @@ class PublicDesk(BaseModel):              # GET /public/{desk_slug}: public-labe
     brand: dict[str, str]
     charter: list[RenderedBlock]
     agent_card: list[RenderedBlock]
+    open_status: OpenStatus | None = None   # None without charter:hours or with no windows in it, or when computing it fails
 
 class Health(BaseModel):                  # GET /health (selftest result cached at startup)
     version: str

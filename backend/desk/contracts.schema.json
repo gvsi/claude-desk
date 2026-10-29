@@ -2279,6 +2279,62 @@
       "title": "NotificationDefaults",
       "type": "object"
     },
+    "OpenStatus": {
+      "properties": {
+        "open": {
+          "title": "Open",
+          "type": "boolean"
+        },
+        "until": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Until"
+        },
+        "opens_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Opens At"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "as_of": {
+          "format": "date-time",
+          "title": "As Of",
+          "type": "string"
+        },
+        "refresh_at": {
+          "format": "date-time",
+          "title": "Refresh At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "open",
+        "until",
+        "opens_at",
+        "text",
+        "as_of",
+        "refresh_at"
+      ],
+      "title": "OpenStatus",
+      "type": "object"
+    },
     "OwnerMessageRequest": {
       "additionalProperties": false,
       "properties": {
@@ -2915,6 +2971,17 @@
           },
           "title": "Agent Card",
           "type": "array"
+        },
+        "open_status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OpenStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
