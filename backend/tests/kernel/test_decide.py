@@ -128,7 +128,7 @@ async def test_known_outcomes_skip_the_reviewer(app, client, registry, reviewer)
     assert (held.action.list_cents, held.action.discount_bp, held.action.amount_cents) == (18_000, 1500, 15_300)
     assert [d.visitor_plain for d in (allowed, held, refused)] == [
         "Checked against Maria Rivera's rules", "Waiting for Maria Rivera to approve", "Not something I can do here"]
-    assert held.answers == ["allow_once", "deny_once", "deny_always"]   # no allow_person for a stranger
+    assert held.answers == ["allow_once", "deny_once"]   # a limit hold, and no allow_person for a stranger
     assert allowed.answers == refused.answers == []
     start = allowed.expires_at - timedelta(seconds=60)                    # allow: 60 s, hold: 24 h, refuse: now
     assert (held.expires_at - start, refused.expires_at) == (timedelta(hours=24), start)
@@ -372,6 +372,9 @@ async def test_money_allow_needs_an_owner_card(app, client, registry):
     await activate_sets(app, rows, A=STRAY_PERMIT)
     stray = await decided(client, visitor, "native.payment_link", call_id="call-3")
     assert (stray.outcome, stray.policy_ids, stray.policy_version) == ("hold", ["A.auto.stray"], 3)
+    # the default ask held the tool itself; an auto permit, no ask card, decided step 5's hold
+    assert (uncovered.answers, stray.answers) == (["allow_once", "deny_once", "deny_always"],
+                                                  ["allow_once", "deny_once"])
 
 
 async def test_stale_generation_is_409_and_ledgered(app, client, registry):

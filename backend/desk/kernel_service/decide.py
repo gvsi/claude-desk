@@ -73,7 +73,7 @@ from desk.db.models import Decision as DecisionRow
 from desk.db.models import Fact as FactRow
 from desk.db.models import PolicyVersion as PolicyVersionRow
 from desk.kernel_api import DecideRequest
-from desk.kernel_service import activation, adapters, auth, demo_inbox, explain, ledger, render, repo
+from desk.kernel_service import activation, adapters, auth, compiler, demo_inbox, explain, ledger, render, repo
 from desk.kernel_service.adapters.base import Adapter, AdapterRefusal, NormalizeCtx
 from desk.kernel_service.auth import AuthError, Named, SessionRow
 from desk.kernel_service.decisions import CallUsage, ReviewAction, ReviewCard, ReviewFact, ReviewInput, Reviewed
@@ -222,17 +222,30 @@ class Evaluation:
     errored: bool = False                 # an evaluation error refused it
 
 
-# The compiler writes `@id("...") @card("a,b") ...` at the head of every policy.
-_POLICY_HEAD = re.compile(r'^@id\("([^"]+)"\) @card\("([^"]*)"\)', re.MULTILINE)
+# The compiler writes `@id("...") @card("a,b") @tier("...") ...` at the head of every policy.
+_POLICY_HEAD = re.compile(r'^@id\("([^"]+)"\) @card\("([^"]*)"\)(?: @tier\("([^"]*)"\))?', re.MULTILINE)
+
+
+@dataclass(frozen=True)
+class PolicyHead:
+    """What the compiler's annotations say about one policy: the cards behind it and its tier."""
+
+    cards: tuple[str, ...]
+    tier: str | None
+
+
+def policy_heads(version_row: PolicyVersionRow) -> dict[str, PolicyHead]:
+    """Each policy of a stored version, by the engine's name for it (`<set>.<@id>`), read from the
+    `@card` and `@tier` annotations of its `F`, `A` and `H` texts. Baseline policies belong to no
+    card."""
+    cedar = version_row.cedar or {}
+    return {f"{name}.{policy_id}": PolicyHead(tuple(card for card in cards.split(",") if card), tier or None)
+            for name in ("F", "A", "H") for policy_id, cards, tier in _POLICY_HEAD.findall(cedar.get(name) or "")}
 
 
 def policy_cards(version_row: PolicyVersionRow) -> dict[str, list[str]]:
-    """The cards behind each policy of a stored version, by the engine's name for the policy
-    (`<set>.<@id>`), read from the `@card` annotations of its `F`, `A` and `H` texts. Baseline
-    policies belong to no card."""
-    cedar = version_row.cedar or {}
-    return {f"{name}.{policy_id}": [card for card in cards.split(",") if card]
-            for name in ("F", "A", "H") for policy_id, cards in _POLICY_HEAD.findall(cedar.get(name) or "")}
+    """The cards behind each policy of a stored version, by the engine's name for the policy."""
+    return {policy_id: list(head.cards) for policy_id, head in policy_heads(version_row).items()}
 
 
 def _card_ids(policy_ids: Iterable[str], by_policy: Mapping[str, list[str]]) -> list[str]:
@@ -468,15 +481,45 @@ def is_money(tool: str, effects: Iterable[str]) -> bool:
     return tool in MONEY_TOOLS or bool(MONEY_EFFECTS & set(effects))
 
 
-def held_answers(principal: Principal, action: NormalizedAction | None) -> list[ApprovalAnswer]:
+def held_by_ask(version_row: PolicyVersionRow | None, policy_ids: Iterable[str]) -> bool:
+    """Was a hold decided by an `ask` card, the owner's or the compiler's default ask, rather than
+    by an `auto` card's hold twin, whose amount, discount, hours or review gate failed (a limit
+    hold)? ("Decision lifecycle".) Read from the deciding policies' `@tier` and the cards their
+    `@card` names in the version that decided it.
+
+    A hold's deciding policies are the `@tier("hold")` permits of `H` that matched: ask cards' own
+    and the twins of auto cards. Several can match, so "Coverage and overlap" settles which card
+    decided: the most specific, an ask card winning a tie. A person's own auto card thus decides
+    over the default ask that matches them too. Any deciding policy that is no hold permit of a
+    known card (step 5's money hold, decided by an auto permit) makes it no ask hold."""
+    if version_row is None:
+        return False
+    heads = policy_heads(version_row)
+    cards = {card.card_id: card for card in version_row.cards}
+    ranked: list[tuple[tuple[int, int], bool]] = []
+    for policy_id in policy_ids:
+        head = heads.get(policy_id)
+        if head is None or head.tier != "hold" or not head.cards or not set(head.cards) <= cards.keys():
+            return False
+        behind = [cards[card_id] for card_id in head.cards]
+        ranked.append((max(compiler.specificity(card) for card in behind), all(card.mode == "ask" for card in behind)))
+    if not ranked:
+        return False
+    top = max(rank for rank, _ in ranked)
+    return any(ask for rank, ask in ranked if rank == top)
+
+
+def held_answers(principal: Principal, action: NormalizedAction | None, *, ask_held: bool) -> list[ApprovalAnswer]:
     """The owner's answers to a hold ("Decision lifecycle"): `allow_person` only for a verified
-    person or an agent key and, on a money tool, an amount within the hard cap. A session that
-    names a person without having confirmed it's them is no person to allow."""
+    person or an agent key and, on a money tool, an amount within the hard cap; `deny_always` only
+    when an `ask` card decided the hold (`held_by_ask`). A session that names a person without
+    having confirmed it's them is no person to allow."""
     person = principal.person_id is not None and verified(principal.kind, principal.assurance, principal.person_id)
     scoped = person or principal.agent_key_id is not None
     if action is not None and is_money(action.tool, action.effects):
         scoped = scoped and action.amount_cents is not None and action.amount_cents <= AUTO_MONEY_HARD_CAP_CENTS
-    return [answer for answer in get_args(ApprovalAnswer) if answer != "allow_person" or scoped]
+    offered = {"allow_person": scoped, "deny_always": ask_held}
+    return [answer for answer in get_args(ApprovalAnswer) if offered.get(answer, True)]
 
 
 def free_text(adapter: Adapter, args: BaseModel) -> dict[str, str]:
@@ -696,12 +739,16 @@ async def _store(ctx: KernelCtx, call: _Call, outcome: Outcome, *, reason: str |
     principal, session_row, action = call.principal, call.session_row, call.action
     now = ctx.clock.now()
     state = STATE_OF[outcome]
+    answers: list[ApprovalAnswer] = []
+    if outcome == "hold":
+        answers = held_answers(principal, action, ask_held=evaluation is not None and held_by_ask(
+            call.version_row, evaluation.policy_ids))
     row = DecisionRow(
         decision_id=new_id("dec"), copy_id=principal.copy_id, desk_id=principal.desk_id,
         session_id=session_row.session_id, generation=session_row.generation, call_id=call.req.call.call_id,
         call_sha256=call.call_sha256, tool=action.tool if action else stored_name(call.req.call.tool),
         effects=action.effects if action else [], outcome=outcome, state=state,
-        answers=held_answers(principal, action) if outcome == "hold" else [], policy_version=call.policy_version,
+        answers=answers, policy_version=call.policy_version,
         card_ids=evaluation.card_ids if evaluation and reason is None else [],
         policy_ids=evaluation.policy_ids if evaluation and reason is None else [],
         review=evaluation.review if evaluation else None,

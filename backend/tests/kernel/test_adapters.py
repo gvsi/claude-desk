@@ -174,8 +174,8 @@ async def test_quote_discounts_follow_the_cards(app, client, reviewer):
     assert reviewer.inputs == []
     held = await decided(client, visitor, "native.quote", quote_args(("drain", 1), discount_bp=8000),
                          call_id="call-8000")
-    assert (held.state, held.policy_ids, held.answers) == ("held", ["H.twin.rv-quote"],
-                                                           ["allow_once", "deny_once", "deny_always"])
+    # a limit hold: Maria isn't offered "deny always", which would refuse every quote
+    assert (held.state, held.policy_ids, held.answers) == ("held", ["H.twin.rv-quote"], ["allow_once", "deny_once"])
     assert held.reason_plain == ("A stranger asked to get a quote for $36 with 80% off. "
                                  "Quotes from your price list, at list price.")
     assert held.visitor_plain == "Waiting for Maria Rivera to approve"
@@ -529,7 +529,7 @@ async def test_copy_seeds_one_held_quote(app, client, reviewer, frozen_clock):
     assert decision.reason_plain == ("A stranger asked to get a quote for $153 with 15% off. "
                                      "Quotes from your price list, at list price.")
     assert (decision.visitor_plain, decision.answers, decision.expires_at) == (
-        "Waiting for Maria Rivera to approve", ["allow_once", "deny_once", "deny_always"], now + timedelta(hours=24))
+        "Waiting for Maria Rivera to approve", ["allow_once", "deny_once"], now + timedelta(hours=24))
 
     # ledgered after the Desk and its rules, and the owner was alerted
     entries = await rows_of(app, copy.copy_id, select(LedgerEntry).order_by(LedgerEntry.seq))
