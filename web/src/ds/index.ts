@@ -32,6 +32,7 @@ export {
   type CopyPair,
 } from './components/Notice/errorCopy.ts';
 export { EmptyState, type EmptyStateProps } from './components/EmptyState/EmptyState.tsx';
+export { DisclosureLine, type DisclosureLineProps } from './components/DisclosureLine/DisclosureLine.tsx';
 
 // Controls
 export { Switch, type SwitchProps } from './components/Switch/Switch.tsx';
