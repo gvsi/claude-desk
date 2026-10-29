@@ -9,6 +9,7 @@ CI holds no secrets and no model key, and it can only read the repository:
 - Every action is pinned by commit.
 - Python dependencies come only from the committed uv lockfiles (`UV_LOCKED=1`), and a missing or out-of-date lockfile fails the job.
 - Every downloaded tool (cvc5, gitleaks, actionlint, and rustup-init on a runner without rustup) is the build for the runner's architecture, x86-64 or arm64, and is checked against a pinned sha256 before it runs. Any other architecture fails the job before anything is downloaded.
+- The Postgres client and ShellCheck, installed only on a runner without them, come from Ubuntu's signed archive at the current noble version and aren't sha256-pinned (see "Runners").
 
 ## The checks
 
@@ -80,12 +81,13 @@ Tier 2 is the model-driven attack suite and legitimate-task suite. It needs a mo
 
 - **Default.** Every job runs on a GitHub-hosted `ubuntu-24.04` runner (x86-64).
 - **Self-hosted.** The repository variable `CI_RUNNER_MODE=ec2` moves every job to self-hosted, single-use arm64 runners on AWS. They have no cloud role and run on an isolated network. Pull request runs use spot capacity; pushes and manual runs use on-demand.
+- **Why.** The switch lets CI run on arm64, the production target's architecture, without drawing on the limited Actions minutes a private repository includes. The runner properties in this section, and the label form, are set by a runner launcher that this repository doesn't contain.
 - **Pull requests from forks.** They always run on GitHub-hosted runners: the switch is on only for pushes, manual runs and pull requests whose head repository is this one. The runner launcher also starts runners only for runs whose head repository is this one, and it caps how many instances run and how long each lives. "Run workflows from fork pull requests" stays off while the repository is private, and if it ever goes public, runs from outside contributors need approval. Setting the variable spends AWS money, so it is the repository owner's call.
 - **Labels.** Each job asks for a label of its own, `desk-ci-<spot or ondemand>-<run id>-<attempt>-<job>`, so no two jobs share a runner.
 - **Database image.** The Postgres service is Docker's official `postgres:16`, the image `docker-compose.yml` uses. GitHub-hosted runners pull it from Docker Hub, since their shared addresses run into ECR Public's anonymous pull limit. Self-hosted runners pull the same image and tag from its ECR Public mirror, `public.ecr.aws/docker/library/postgres:16`.
 - **Prerequisites.** A runner must have `docker`, `sudo`, `curl`, `git`, `make`, `unzip`, `cc` and `tar`. GitHub-hosted runners do. setup-desk's first step fails, naming what is missing, when a runner lacks curl, unzip, make or cc.
-- **Setup.** Where a runner has no rustup, psql or ShellCheck, the jobs install them first: rustup from a checked rustup-init, the Postgres client and ShellCheck from Ubuntu's archive. GitHub-hosted runners have all three, so nothing is installed there.
-- **Kill switch.** Unset the variable, and the next run is back on GitHub-hosted runners. Any value other than `ec2` does the same. Jobs that already asked for a self-hosted runner keep waiting for one until they are cancelled.
+- **Setup.** Where a runner has no rustup, psql or ShellCheck, the jobs install them first: rustup from a checked rustup-init, the Postgres client and ShellCheck with apt from Ubuntu's signed archive, at the current noble version and not sha256-pinned. GitHub-hosted runners have all three, so nothing is installed there.
+- **Kill switch.** Unset the variable, and the next run is back on GitHub-hosted runners. Any value other than `ec2` (in any letter case) does the same. Jobs that already asked for a self-hosted runner keep waiting for one until they are cancelled.
 
 ## Runner minutes
 
