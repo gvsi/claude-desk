@@ -1,9 +1,10 @@
 """What the API's routes depend on: the process's runtime, the caller and the errors routes raise.
 
 `runtime(request)` is the app's `Runtime`: settings, clock, rate limits and, once the lifespan has started,
-the kernel client, the database engine and the run events listener. `owner_ctx` is the owner's copy, taken
-from the kernel's `GET /whoami` answer for the owner cookie; `client_ip` and `public_origin` follow Plan 06b's
-seam ("Client IP and public origin"); `require_model_budget` guards the model routes.
+the kernel client, the database engine, the run events listener and the turn runner. `owner_ctx` is the owner's
+copy and `visitor_ctx` the visitor's session, each taken from the kernel's `GET /whoami` answer for its cookie;
+`client_ip` and `public_origin` follow Plan 06b's seam ("Client IP and public origin"); `require_model_budget`
+guards the model routes.
 """
 
 import contextlib
@@ -13,16 +14,20 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from fastapi import Request
-from sqlalchemy.ext.asyncio import AsyncEngine
+from fastapi import Request, Response
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
-from desk.api.cookies import OWNER_COOKIE
+from desk.api.cookies import OWNER_COOKIE, VISITOR_COOKIE, set_visitor_cookie
 from desk.api.kernel_client import CredentialView, KernelFailed, KernelHttp
 from desk.api.metrics import over_daily_budget
 from desk.api.ratelimit import RateLimiter, RateLimitLedger, StreamSlots
 from desk.api.ro import KernelRO
+from desk.api.runner import TurnRunner
 from desk.api.settings import Settings
 from desk.api.sse import Listener
+from desk.api.store import Ids
+from desk.api.tools import Caller
+from desk.contracts import SessionState
 
 
 class ApiProblem(Exception):
@@ -35,7 +40,8 @@ class ApiProblem(Exception):
 
 @dataclass
 class Runtime:
-    """The process's state. `kernel`, `engine` and `listener` are opened by the lifespan."""
+    """The process's state. `kernel`, `engine`, `listener` and `runner` are opened by the lifespan, which also builds
+    the model client unless a test injected one."""
 
     settings: Settings
     clock: Callable[[], datetime]
@@ -46,6 +52,7 @@ class Runtime:
     kernel: KernelHttp | None = None
     engine: AsyncEngine | None = None
     listener: Listener | None = None
+    runner: TurnRunner | None = None      # the session turns this process runs (Task 7)
 
     def database(self) -> AsyncEngine:
         if self.engine is None:
@@ -53,7 +60,7 @@ class Runtime:
         return self.engine
 
     def started(self) -> "Runtime":
-        if self.kernel is None or self.engine is None or self.listener is None:
+        if self.kernel is None or self.engine is None or self.listener is None or self.runner is None:
             raise RuntimeError("the API's lifespan hasn't started")
         return self
 
@@ -155,6 +162,67 @@ async def owner_ctx(request: Request) -> AsyncIterator[OwnerCtx]:
     if not token:
         raise ApiProblem(401, "no_owner_session")
     async with owner_context(runtime(request).started(), token) as ctx:
+        yield ctx
+
+
+# The visitor -------------------------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class VisitorCtx:
+    """A visitor request's session, from the kernel's `GET /whoami` answer for the `desk_visitor` cookie: its IDs,
+    the caller a turn acts for (holding the token in memory only), the copy's kernel_ro reads on the request's
+    database connection, and the session's state. The browser never names any of them."""
+
+    ids: Ids
+    caller: Caller = field(repr=False)
+    ro: KernelRO = field(repr=False)
+    state: SessionState
+
+    @property
+    def conn(self) -> AsyncConnection:
+        """The request's database connection (the one `ro` reads on)."""
+        return self.ro.conn
+
+    def ledger(self) -> RateLimitLedger:
+        """The visitor's own credential, for ledgering a refusal on the session's Desk."""
+        return RateLimitLedger(self.caller.kernel, desk_id=self.ids.desk_id, session_id=self.ids.session_id)
+
+
+@contextlib.asynccontextmanager
+async def visitor_context(state: Runtime, token: str | None, slug: str) -> AsyncIterator[VisitorCtx]:
+    """The visitor context for `token`, read with `GET /whoami` once; 401 `no_session` unless the kernel says it
+    names an open visitor session on the slug's Desk. Holds one database connection for the request."""
+    if not token:
+        raise ApiProblem(401, "no_session")
+    try:
+        kernel = state.kernel.session(token)
+        who = await kernel.whoami()
+    except ValueError:                                   # not a header value a kernel token could be
+        raise ApiProblem(401, "no_session") from None
+    except KernelFailed as failure:
+        if failure.ends_session:
+            raise ApiProblem(401, "no_session") from None
+        raise
+    if who.kind != "visitor" or who.session is None or who.desk_id is None:
+        raise ApiProblem(401, "no_session")
+    async with state.engine.connect() as conn:
+        ro = KernelRO(conn, who.copy_id, state.settings.kernel_ro_schema)
+        desk = await ro.one("desks", desk_id=who.desk_id)
+        if desk is None or desk["slug"] != slug:         # a session of another Desk: not this route's
+            raise ApiProblem(401, "no_session")
+        ids = Ids(copy_id=who.copy_id, desk_id=who.desk_id, session_id=who.session.session_id)
+        caller = Caller(copy_id=ids.copy_id, desk_id=ids.desk_id, session_id=ids.session_id, kind="visitor",
+                        kernel=kernel, ro_schema=state.settings.kernel_ro_schema)
+        yield VisitorCtx(ids=ids, caller=caller, ro=ro, state=who.session)
+
+
+async def visitor_ctx(request: Request, response: Response, slug: str) -> AsyncIterator[VisitorCtx]:
+    """The visitor context for the request's `desk_visitor` cookie (a dependency, so once per request); the cookie
+    is renewed on the answer, since the kernel closes a session after 24 hours idle."""
+    token = request.cookies.get(VISITOR_COOKIE)
+    async with visitor_context(runtime(request).started(), token, slug) as ctx:
+        set_visitor_cookie(response, slug, token)
         yield ctx
 
 

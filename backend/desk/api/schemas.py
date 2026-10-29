@@ -9,7 +9,7 @@ from typing import Annotated, Any, Literal
 from fastapi.routing import APIRoute
 from pydantic import AwareDatetime, BaseModel, Field
 
-from desk.contracts import HoursWindow
+from desk.contracts import HoursWindow, SessionState
 from desk.events import EvHeld, EvMessage, EvReceipt, EvResolved
 from desk.kernel_api import Health
 
@@ -71,3 +71,55 @@ class OwnerTranscriptItem(TranscriptItem):
 
     owner_translation: str | None
     triage: str | None
+
+
+# The visitor's chat (Task 7) ---------------------------------------------------------------------------------
+
+
+class VisitorSession(BaseModel):
+    """`POST /api/public/desks/{slug}/sessions`: the session the visitor cookie now holds, and whether it is the one
+    the cookie already held (a returning visitor) or a new one."""
+
+    state: SessionState
+    resumed: bool
+
+
+class VisitorTranscript(BaseModel):
+    """`GET /api/public/desks/{slug}/session`: the session's state, its transcript as the visitor sees it, and the
+    highest event `seq` read in the same snapshot, which the event stream continues after."""
+
+    state: SessionState
+    items: list[TranscriptItem]
+    last_seq: int
+
+
+class MessageAccepted(BaseModel):
+    """202: the visitor's message is stored; Claude's answer arrives on the event stream."""
+
+    message_id: str
+
+
+class CancelAccepted(BaseModel):
+    """202: the held request is withdrawn; its outcome arrives on the event stream as `resolved`."""
+
+    decision_id: str
+
+
+class AgentCardSigning(BaseModel):
+    """How an agent signs each request: the headers it sends and the payload its Ed25519 signature covers."""
+
+    headers: list[str]
+    payload_fields: list[str]
+    canonical: Literal["RFC 8785"]
+    algorithm: Literal["Ed25519"]
+    encoding: Literal["lowercase hex"]
+    ts_window_s: int
+
+
+class AgentCardOut(BaseModel):
+    """`GET /api/public/desks/{slug}/agent_card`: built by code from `PUBLIC_ORIGIN` and the slug, with no model
+    text; what agents may do here, and the AI disclosure, are the kernel's `PublicDesk.agent_card`."""
+
+    endpoint: str
+    signing: AgentCardSigning
+    example_request: str

@@ -3,13 +3,14 @@
     uvicorn --factory desk.api.main:app_factory --host 0.0.0.0 --port 8700 --timeout-keep-alive 310
 
 `create_app` builds the model client through `make_model` (the Claude API, or Amazon Bedrock for local evals)
-before the app, so a provider without its credential, or `ANTHROPIC_CUSTOM_HEADERS` set, refuses to start; the
-lifespan closes that client, never an injected one. The lifespan opens the kernel client, checks it is the
-production one when it must be, then opens the database engine and the run events listener. In production the app
-refuses to start without its secrets (the API key, the passcode hash and the public origin, which `Settings`
-requires), with a Bedrock setting or credential (refused by `Settings`) and with any test hook:
-`ANTHROPIC_BASE_URL` (refused by `Settings`), an injected clock, model or kernel transport. A passcode hash that
-isn't one refuses to start anywhere.
+before the app, so a provider without its credential, or `ANTHROPIC_CUSTOM_HEADERS` set, refuses to start. The
+lifespan opens the kernel client, checks it is the production one when it must be, then opens the database engine,
+the turn locks' pool, the run events listener and the turn runner, and closes them in the reverse order, the
+runner's turns first, with the model client it built (never an injected one) last. In production the app refuses
+to start without its secrets (the API key, the passcode hash and the public origin, which `Settings` requires),
+with a Bedrock setting or credential (refused by `Settings`) and with any test hook: `ANTHROPIC_BASE_URL` (refused
+by `Settings`), an injected clock, model or kernel transport. A passcode hash that isn't one refuses to start
+anywhere.
 
 Every error answer is an `ApiError` ("Errors"): a kernel refusal keeps its status with `{error: "kernel",
 code}`, an unreachable kernel is 503 `{error: "kernel", code}` (`seed_unproved`, `internal`, else
@@ -31,10 +32,12 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from desk.api.deps import ApiProblem, Runtime, runtime
 from desk.api.kernel_client import KernelFailed, KernelHttp, KernelUnavailable, assert_production_safe
+from desk.api.loop import TURN_LOCK_POOL_SIZE
 from desk.api.model import make_model
 from desk.api.passcode import check_passcode_hash
 from desk.api.ratelimit import RateLimited, RateLimiter, StreamSlots
-from desk.api.routes import owner
+from desk.api.routes import owner, public
+from desk.api.runner import TurnRunner
 from desk.api.schemas import ApiError, HealthOut, operation_ids
 from desk.api.settings import Settings
 from desk.api.sse import Listener
@@ -136,15 +139,24 @@ def create_app(settings: Settings, *, kernel_transport: Any = None, model: Any =
                                          pool_size=POOL_SIZE, max_overflow=MAX_OVERFLOW, pool_timeout=POOL_TIMEOUT_S,
                                          pool_pre_ping=True)
             stack.push_async_callback(engine.dispose)
+            # The turn locks' own pool: each running turn holds its session's lock on one of these connections.
+            lock_engine = create_async_engine(settings.api_database_url,
+                                              connect_args={"options": API_CONNECT_OPTIONS},
+                                              pool_size=TURN_LOCK_POOL_SIZE, max_overflow=0,
+                                              pool_timeout=POOL_TIMEOUT_S, pool_pre_ping=True)
+            stack.push_async_callback(lock_engine.dispose)
             listener = await stack.enter_async_context(Listener(settings.api_database_url))
-            state.kernel, state.engine, state.listener = kernel, engine, listener
+            runner = TurnRunner(state.model, engine=engine, lock_engine=lock_engine, production=settings.production,
+                                clock=state.clock)
+            stack.push_async_callback(runner.close)        # first out: no turn outlives the pools it runs on
+            state.kernel, state.engine, state.listener, state.runner = kernel, engine, listener, runner
             if settings.passcode_hash is None:
                 logger.warning("PASSCODE_HASH is not set, so no passcode creates a copy "
                                "(make one with: cd backend && uv run python scripts/hash_passcode.py)")
             try:
                 yield
             finally:
-                state.kernel = state.engine = state.listener = None
+                state.kernel = state.engine = state.listener = state.runner = None
 
     app = FastAPI(title="Claude Desk API", version="0.1.0", lifespan=lifespan, openapi_url=None, docs_url=None,
                   redoc_url=None)
@@ -152,6 +164,7 @@ def create_app(settings: Settings, *, kernel_transport: Any = None, model: Any =
     _install_error_handlers(app)
     app.include_router(system)
     app.include_router(owner.router)
+    app.include_router(public.router)
     return app
 
 

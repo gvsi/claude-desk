@@ -190,10 +190,618 @@
           }
         }
       }
+    },
+    "/api/public/{slug}": {
+      "get": {
+        "summary": "Public Desk",
+        "description": "The Desk's public page: the kernel's `PublicDesk`, unchanged. Never cached: the page's open status refetches\non a delay that assumes a fresh answer (CloudFront doesn't cache `/api/*` either).",
+        "operationId": "public_public_desk",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 35,
+                  "pattern": "^[A-Za-z0-9-]+$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Lang"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicDesk"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/public/desks/{slug}/agent_card": {
+      "get": {
+        "summary": "Agent Card",
+        "description": "Where agents send their requests and how they sign them, built by code from `PUBLIC_ORIGIN`, never from the\nrequest's own host headers. The kernel's public Desk is read only to answer 404 for an unknown slug.",
+        "operationId": "public_agent_card",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentCardOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/public/desks/{slug}/sessions": {
+      "post": {
+        "summary": "Open Session",
+        "description": "The visitor's session on the slug's Desk: the one the cookie holds while the kernel says it is open there (a\nreturning visitor, ledgered as a `session` event), else a new one, whose token only the cookie holds.",
+        "operationId": "public_open_session",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VisitorSession"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/public/desks/{slug}/session": {
+      "get": {
+        "summary": "Visitor Session",
+        "description": "The session's state and its transcript as the visitor sees it: their own words and what was delivered to\nthem, never model, note, owner-only or other sessions' rows. `last_seq` is read in the same snapshot, so the\nevent stream opened after it neither misses nor repeats an item.",
+        "operationId": "public_visitor_session",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VisitorTranscript"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/public/desks/{slug}/messages": {
+      "post": {
+        "summary": "Send Message",
+        "description": "Store the visitor's message and start Claude's turn; the answer arrives on the event stream.\n\nWithin the message limits (per session and per copy), what control rows left for this session is done first,\nso an outcome that came in meanwhile precedes the message and the same turn answers both. The message wakes a\nturn only while the session is Claude's (mode `ai`): during a take-over the owner answers it, and a paused\nsession answers at once with the kernel's handoff, with no model call.",
+        "operationId": "public_send_message",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessageIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageAccepted"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/public/desks/{slug}/events": {
+      "get": {
+        "summary": "Events",
+        "description": "The session's events after the cursor, then live ones (SSE `id` is the event's `seq`). On opening, and as each\ncontrol row appears while it is open, the session's runner does what control rows left and runs waiting work,\nwith the visitor's credential, in a task of its own: a hang-up never cuts it short. Three streams per session\nand thirty per address may be open at once.",
+        "operationId": "public_events",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After"
+            }
+          },
+          {
+            "name": "last-event-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Last-Event-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The session's events",
+            "content": {
+              "text/event-stream": {}
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/public/desks/{slug}/decisions/{decision_id}/cancel": {
+      "post": {
+        "summary": "Cancel Request",
+        "description": "Withdraw one of the visitor's own held requests. The kernel cancels it (409 once it is no longer held, 404\nfor another session's); its signed outcome is then shown as `resolved`, and Claude reads it at the next turn\n(an `action_update` that starts none: the visitor already sees what happened).",
+        "operationId": "public_cancel_request",
+        "parameters": [
+          {
+            "name": "decision_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "title": "Decision Id"
+            }
+          },
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelAccepted"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "AgentCardOut": {
+        "properties": {
+          "endpoint": {
+            "type": "string",
+            "title": "Endpoint"
+          },
+          "signing": {
+            "$ref": "#/components/schemas/AgentCardSigning"
+          },
+          "example_request": {
+            "type": "string",
+            "title": "Example Request"
+          }
+        },
+        "type": "object",
+        "required": [
+          "endpoint",
+          "signing",
+          "example_request"
+        ],
+        "title": "AgentCardOut",
+        "description": "`GET /api/public/desks/{slug}/agent_card`: built by code from `PUBLIC_ORIGIN` and the slug, with no model\ntext; what agents may do here, and the AI disclosure, are the kernel's `PublicDesk.agent_card`."
+      },
+      "AgentCardSigning": {
+        "properties": {
+          "headers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Headers"
+          },
+          "payload_fields": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Payload Fields"
+          },
+          "canonical": {
+            "type": "string",
+            "const": "RFC 8785",
+            "title": "Canonical"
+          },
+          "algorithm": {
+            "type": "string",
+            "const": "Ed25519",
+            "title": "Algorithm"
+          },
+          "encoding": {
+            "type": "string",
+            "const": "lowercase hex",
+            "title": "Encoding"
+          },
+          "ts_window_s": {
+            "type": "integer",
+            "title": "Ts Window S"
+          }
+        },
+        "type": "object",
+        "required": [
+          "headers",
+          "payload_fields",
+          "canonical",
+          "algorithm",
+          "encoding",
+          "ts_window_s"
+        ],
+        "title": "AgentCardSigning",
+        "description": "How an agent signs each request: the headers it sends and the payload its Ed25519 signature covers."
+      },
       "ApiError": {
         "properties": {
           "error": {
@@ -229,6 +837,38 @@
         ],
         "title": "ApiError",
         "description": "Every error answer: `error` names what went wrong; `code` is the kernel's, when `error` is \"kernel\";\n`retry_after` is the seconds to wait, on a 429. Fields that don't apply are left out."
+      },
+      "CancelAccepted": {
+        "properties": {
+          "decision_id": {
+            "type": "string",
+            "title": "Decision Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "decision_id"
+        ],
+        "title": "CancelAccepted",
+        "description": "202: the held request is withdrawn; its outcome arrives on the event stream as `resolved`."
+      },
+      "CardOption": {
+        "properties": {
+          "option_id": {
+            "type": "string",
+            "title": "Option Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          }
+        },
+        "type": "object",
+        "required": [
+          "option_id",
+          "label"
+        ],
+        "title": "CardOption"
       },
       "CopyOut": {
         "properties": {
@@ -308,6 +948,233 @@
           "answering"
         ],
         "title": "DeskSummary"
+      },
+      "EvHeld": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "held",
+            "title": "Type"
+          },
+          "decision_id": {
+            "type": "string",
+            "title": "Decision Id"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "allowed",
+              "held",
+              "refused",
+              "approved",
+              "denied",
+              "expired",
+              "cancelled",
+              "executed",
+              "failed",
+              "unknown",
+              "refused_at_execution"
+            ],
+            "title": "State"
+          },
+          "visitor_plain": {
+            "type": "string",
+            "title": "Visitor Plain"
+          },
+          "ledger_seq": {
+            "type": "integer",
+            "title": "Ledger Seq"
+          },
+          "signature": {
+            "type": "string",
+            "title": "Signature"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "decision_id",
+          "state",
+          "visitor_plain",
+          "ledger_seq",
+          "signature"
+        ],
+        "title": "EvHeld"
+      },
+      "EvMessage": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "message",
+            "title": "Type"
+          },
+          "message_id": {
+            "type": "string",
+            "title": "Message Id"
+          },
+          "generation": {
+            "type": "integer",
+            "title": "Generation"
+          },
+          "author": {
+            "type": "string",
+            "enum": [
+              "claude",
+              "owner",
+              "desk"
+            ],
+            "title": "Author"
+          },
+          "language": {
+            "type": "string",
+            "enum": [
+              "en",
+              "es"
+            ],
+            "title": "Language"
+          },
+          "handoff": {
+            "type": "boolean",
+            "title": "Handoff"
+          },
+          "blocks": {
+            "items": {
+              "$ref": "#/components/schemas/RenderedBlock"
+            },
+            "type": "array",
+            "title": "Blocks"
+          },
+          "visitor_plain": {
+            "type": "string",
+            "title": "Visitor Plain"
+          },
+          "ledger_seq": {
+            "type": "integer",
+            "title": "Ledger Seq"
+          },
+          "signature": {
+            "type": "string",
+            "title": "Signature"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "message_id",
+          "generation",
+          "author",
+          "language",
+          "handoff",
+          "blocks",
+          "visitor_plain",
+          "ledger_seq",
+          "signature"
+        ],
+        "title": "EvMessage"
+      },
+      "EvReceipt": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "receipt",
+            "title": "Type"
+          },
+          "decision_id": {
+            "type": "string",
+            "title": "Decision Id"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "allowed",
+              "held",
+              "refused",
+              "approved",
+              "denied",
+              "expired",
+              "cancelled",
+              "executed",
+              "failed",
+              "unknown",
+              "refused_at_execution"
+            ],
+            "title": "State"
+          },
+          "visitor_plain": {
+            "type": "string",
+            "title": "Visitor Plain"
+          },
+          "ledger_seq": {
+            "type": "integer",
+            "title": "Ledger Seq"
+          },
+          "signature": {
+            "type": "string",
+            "title": "Signature"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "decision_id",
+          "state",
+          "visitor_plain",
+          "ledger_seq",
+          "signature"
+        ],
+        "title": "EvReceipt"
+      },
+      "EvResolved": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "resolved",
+            "title": "Type"
+          },
+          "decision_id": {
+            "type": "string",
+            "title": "Decision Id"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "allowed",
+              "held",
+              "refused",
+              "approved",
+              "denied",
+              "expired",
+              "cancelled",
+              "executed",
+              "failed",
+              "unknown",
+              "refused_at_execution"
+            ],
+            "title": "State"
+          },
+          "visitor_plain": {
+            "type": "string",
+            "title": "Visitor Plain"
+          },
+          "ledger_seq": {
+            "type": "integer",
+            "title": "Ledger Seq"
+          },
+          "signature": {
+            "type": "string",
+            "title": "Signature"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "decision_id",
+          "state",
+          "visitor_plain",
+          "ledger_seq",
+          "signature"
+        ],
+        "title": "EvResolved"
       },
       "Health": {
         "properties": {
@@ -416,6 +1283,358 @@
           "end"
         ],
         "title": "HoursWindow"
+      },
+      "MessageAccepted": {
+        "properties": {
+          "message_id": {
+            "type": "string",
+            "title": "Message Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message_id"
+        ],
+        "title": "MessageAccepted",
+        "description": "202: the visitor's message is stored; Claude's answer arrives on the event stream."
+      },
+      "MessageIn": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Text"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "title": "MessageIn"
+      },
+      "PublicDesk": {
+        "properties": {
+          "business_name": {
+            "type": "string",
+            "title": "Business Name"
+          },
+          "desk_name": {
+            "type": "string",
+            "title": "Desk Name"
+          },
+          "owner_display_name": {
+            "type": "string",
+            "title": "Owner Display Name"
+          },
+          "brand": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Brand"
+          },
+          "charter": {
+            "items": {
+              "$ref": "#/components/schemas/RenderedBlock"
+            },
+            "type": "array",
+            "title": "Charter"
+          },
+          "agent_card": {
+            "items": {
+              "$ref": "#/components/schemas/RenderedBlock"
+            },
+            "type": "array",
+            "title": "Agent Card"
+          }
+        },
+        "type": "object",
+        "required": [
+          "business_name",
+          "desk_name",
+          "owner_display_name",
+          "brand",
+          "charter",
+          "agent_card"
+        ],
+        "title": "PublicDesk"
+      },
+      "RenderedBlock": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "prose",
+              "card"
+            ],
+            "title": "Kind"
+          },
+          "template": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "quote",
+                  "booking_options",
+                  "booking_confirmed",
+                  "payment_link",
+                  "document_link",
+                  "hours",
+                  "policy",
+                  "contact",
+                  "handoff",
+                  "verify_prompt",
+                  "owner_said",
+                  "charges",
+                  "refund_issued",
+                  "charge_confirmed",
+                  "callback_confirmed",
+                  "payment_confirmed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "fact_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fact Id"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "lines": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Lines",
+            "default": []
+          },
+          "href": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Href"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/CardOption"
+            },
+            "type": "array",
+            "title": "Options",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "text"
+        ],
+        "title": "RenderedBlock"
+      },
+      "SessionState": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "visitor",
+              "agent",
+              "owner"
+            ],
+            "title": "Kind"
+          },
+          "verified": {
+            "type": "boolean",
+            "title": "Verified"
+          },
+          "assurance": {
+            "type": "string",
+            "enum": [
+              "none",
+              "demo_code",
+              "owner_session"
+            ],
+            "title": "Assurance"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "ai",
+              "owner",
+              "paused"
+            ],
+            "title": "Mode"
+          },
+          "generation": {
+            "type": "integer",
+            "title": "Generation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "kind",
+          "verified",
+          "assurance",
+          "mode",
+          "generation"
+        ],
+        "title": "SessionState"
+      },
+      "TranscriptItem": {
+        "properties": {
+          "n": {
+            "type": "integer",
+            "title": "N"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "visitor_text",
+              "agent_text",
+              "delivered",
+              "status",
+              "whisper"
+            ],
+            "title": "Kind"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "event": {
+            "anyOf": [
+              {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/EvMessage"
+                  },
+                  {
+                    "$ref": "#/components/schemas/EvReceipt"
+                  },
+                  {
+                    "$ref": "#/components/schemas/EvHeld"
+                  },
+                  {
+                    "$ref": "#/components/schemas/EvResolved"
+                  }
+                ],
+                "discriminator": {
+                  "propertyName": "type",
+                  "mapping": {
+                    "held": "#/components/schemas/EvHeld",
+                    "message": "#/components/schemas/EvMessage",
+                    "receipt": "#/components/schemas/EvReceipt",
+                    "resolved": "#/components/schemas/EvResolved"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event"
+          }
+        },
+        "type": "object",
+        "required": [
+          "n",
+          "kind",
+          "created_at",
+          "text",
+          "event"
+        ],
+        "title": "TranscriptItem",
+        "description": "One transcript entry as the visitor sees it: their own words, or an event the API delivered."
+      },
+      "VisitorSession": {
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/SessionState"
+          },
+          "resumed": {
+            "type": "boolean",
+            "title": "Resumed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "state",
+          "resumed"
+        ],
+        "title": "VisitorSession",
+        "description": "`POST /api/public/desks/{slug}/sessions`: the session the visitor cookie now holds, and whether it is the one\nthe cookie already held (a returning visitor) or a new one."
+      },
+      "VisitorTranscript": {
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/SessionState"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TranscriptItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "last_seq": {
+            "type": "integer",
+            "title": "Last Seq"
+          }
+        },
+        "type": "object",
+        "required": [
+          "state",
+          "items",
+          "last_seq"
+        ],
+        "title": "VisitorTranscript",
+        "description": "`GET /api/public/desks/{slug}/session`: the session's state, its transcript as the visitor sees it, and the\nhighest event `seq` read in the same snapshot, which the event stream continues after."
       }
     }
   }
