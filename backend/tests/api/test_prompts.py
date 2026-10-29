@@ -4,17 +4,22 @@ import ast
 import json
 import re
 from pathlib import Path
+from typing import get_args
 
 import desk.api
+from desk.api import prompts
 from desk.api.prompts import (
     DEMO_TASKS,
+    KERNEL_ONLY_TEMPLATES,
     NOTES,
+    REPLY_TEMPLATES,
     REWRITE_INSTRUCTION,
     SEND_REPLY_TOOL,
     DeskIdentity,
     conversation_system,
 )
 from desk.api.store import ROW_KINDS, SUMMARY_TAG
+from desk.contracts import ClauseTemplate
 
 RIVERA = DeskIdentity(business_name="Rivera Plumbing", desk_name="Main line", owner_name="Maria Rivera", kind="visitor")
 
@@ -101,3 +106,17 @@ def test_model_visible_strings_live_in_prompts():
     # the reply tool and the rewrite instruction reach Claude through tools.py, imported
     tools = next(tree for path, tree in modules.items() if path.name == "tools.py")
     assert {"SEND_REPLY_TOOL", "REWRITE_INSTRUCTION"} <= _from_prompts(tools)
+
+
+def test_reply_templates_are_an_allow_list():
+    """Claude may draft only the clause templates prompts.py lists by name, so a template the contracts gain later
+    (one only the kernel issues, say) reaches Claude's reply tool only once it is listed here, an evals-gated change.
+    Every template is in exactly one of the lists: Claude's, or the kernel's own."""
+    tree = ast.parse(Path(prompts.__file__).read_text())
+    (listed,) = [node.value for node in ast.walk(tree) if isinstance(node, ast.Assign)
+                 and [target.id for target in node.targets if isinstance(target, ast.Name)] == ["REPLY_TEMPLATES"]]
+    assert isinstance(listed, ast.Tuple)
+    assert all(isinstance(item, ast.Constant) and isinstance(item.value, str) for item in listed.elts)
+    assert sorted(REPLY_TEMPLATES + KERNEL_ONLY_TEMPLATES) == sorted(get_args(ClauseTemplate))
+    template = SEND_REPLY_TOOL["input_schema"]["properties"]["clauses"]["items"]["properties"]["template"]
+    assert template["enum"] == list(REPLY_TEMPLATES)

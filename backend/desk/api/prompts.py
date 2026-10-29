@@ -13,15 +13,18 @@ The prompt states the rules Claude should follow; none of them is enforced here.
 call and checks every reply, so a prompt that is ignored or talked around still shows nothing unchecked.
 """
 
-from typing import Literal, get_args
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
-from desk.contracts import ClauseTemplate
-
 PROMPT_VERSION = "2026-10-29.1"
+# The clause templates Claude may draft, by name: a template the contracts gain reaches Claude only once it is listed
+# here. `KERNEL_ONLY_TEMPLATES` are the kernel's own, which Claude's replies can't name; every `ClauseTemplate` is in
+# one list or the other.
+REPLY_TEMPLATES = ("quote", "booking_options", "booking_confirmed", "payment_link", "document_link", "hours", "policy",
+                   "contact", "handoff", "verify_prompt", "charges", "refund_issued", "charge_confirmed",
+                   "callback_confirmed")
 KERNEL_ONLY_TEMPLATES = ("owner_said", "payment_confirmed")
-REPLY_TEMPLATES = tuple(template for template in get_args(ClauseTemplate) if template not in KERNEL_ONLY_TEMPLATES)
 
 
 class DeskIdentity(BaseModel):
