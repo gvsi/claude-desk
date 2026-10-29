@@ -343,6 +343,10 @@ CHAIN_ROLES = ("desk_kernel", "desk_api", "desk_mockpay", "desk_resolver", "desk
 # Each migration's schemas: every object in them, its owner and its grants are compared below.
 SCHEMAS = ("kernel", "kernel_ro", "app", "mockpay", "procrastinate")
 
+# The owner roles a migration lends the admin to change an owner, each with the schema the role is
+# lent CREATE on (`_change_owner` in 0004_copy_resolvers, 0005_kernel_ro_owner and 0006_preview_and_pins).
+LENT = (("desk_resolver", "kernel"), ("desk_ro_owner", "kernel_ro"))
+
 
 @pytest.fixture(scope="module")
 def rds_like_admin(scratch) -> tuple[str, URL]:
@@ -426,6 +430,17 @@ def test_migrations_reach_head_as_an_admin_without_superuser(rds_like_admin, rol
     with psycopg.connect(libpq_url(url_text(url))) as conn:
         assert conn.execute("SELECT current_user, rolsuper, rolbypassrls FROM pg_roles"
                             " WHERE rolname = current_user").fetchone() == (admin_role, False, False)
+        # Nothing lent outlives the run, checked directly: a superuser's run lends the same way, so
+        # the comparison below can't see a lend both runs keep.
+        kept = conn.execute("SELECT r.rolname, a.inherit_option, a.set_option FROM pg_auth_members a"
+                            " JOIN pg_roles r ON r.oid = a.roleid"
+                            " WHERE a.member = (SELECT oid FROM pg_roles WHERE rolname = current_user)"
+                            " AND r.rolname = ANY(%s) AND (a.inherit_option OR a.set_option)",
+                            (list(CHAIN_ROLES),)).fetchall()
+        assert kept == [], f"the admin still holds SET or INHERIT on {kept}"
+        for role, schema in LENT:
+            assert not conn.execute("SELECT has_schema_privilege(%s, %s, 'CREATE')",
+                                    (role, schema)).fetchone()[0], f"{role} still has CREATE on {schema}"
     superuser_url, _ = request.getfixturevalue("first_run")
     assert privileges(url) == privileges(superuser_url)
 
