@@ -159,11 +159,17 @@ def test_job_names_are_the_required_checks():
         assert job["timeout-minutes"] == 25, job["name"]
 
 
-# Where each job runs: GitHub-hosted ubuntu-24.04 unless the repository variable CI_RUNNER_MODE is
-# "ec2"; then a single-use self-hosted runner, spot for pull requests and on-demand otherwise, whose
-# label names the run, the attempt and the job. <suffix> is the job's own part of the label.
+# The runner switch: on when the repository variable CI_RUNNER_MODE is "ec2", except for a pull
+# request from a fork, whose code never runs on a self-hosted runner.
+SWITCH = (
+    "vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' "
+    "|| github.event.pull_request.head.repo.full_name == github.repository)"
+)
+# Where each job runs: GitHub-hosted ubuntu-24.04 unless the switch is on; then a single-use
+# self-hosted runner, spot for pull requests and on-demand otherwise, whose label names the run,
+# the attempt and the job. <suffix> is the job's own part of the label.
 RUNS_ON = (
-    "${{ vars.CI_RUNNER_MODE == 'ec2' && fromJSON(format("
+    "${{ " + SWITCH + " && fromJSON(format("
     """'["self-hosted","desk-ci-{0}-{1}-{2}-<suffix>"]', """
     "github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) "
     "|| 'ubuntu-24.04' }}"
@@ -188,11 +194,12 @@ def test_jobs_run_on_hosted_runners_unless_switched_to_ec2():
     assert set(suffixes) == RUNNER_SUFFIXES
     for suffix in suffixes:
         assert re.fullmatch(r"[a-z][a-z0-9-]{0,31}", suffix), suffix
-    # Hosted stays the default: the variable unset, or anything but "ec2", makes the condition false
-    # and the expression falls back to ubuntu-24.04. Nothing else in a job picks its machine.
-    assert RUNS_ON.startswith("${{ vars.CI_RUNNER_MODE == 'ec2' && ")
-    assert RUNS_ON.endswith(" || 'ubuntu-24.04' }}")
+    # Hosted stays the default: with the variable unset or not "ec2", or for a fork's pull request,
+    # the switch is false and the expression falls back to ubuntu-24.04. Nothing else in a job picks
+    # its machine.
     for job in workflow_jobs.values():
+        assert job["runs-on"].startswith("${{ " + SWITCH + " && "), job["name"]
+        assert job["runs-on"].endswith(" || 'ubuntu-24.04' }}"), job["name"]
         assert not {"strategy", "container"} & set(job), job["name"]
 
 
@@ -220,8 +227,7 @@ def test_postgres_services_match_compose():
     # The image follows the runner switch. GitHub-hosted runners pull the compose file's image from
     # Docker Hub, since their shared addresses run into ECR Public's anonymous limit; self-hosted
     # runners pull the same official image and tag from its ECR Public mirror.
-    [switch] = set(re.findall(r"vars\.\w+ == '\w+'", RUNS_ON))
-    image = f"${{{{ {switch} && 'public.ecr.aws/docker/library/{db['image']}' || '{db['image']}' }}}}"
+    image = f"${{{{ {SWITCH} && 'public.ecr.aws/docker/library/{db['image']}' || '{db['image']}' }}}}"
 
     with_services = {job["name"]: job["services"] for job in jobs(load(WORKFLOW)) if "services" in job}
     assert set(with_services) == {"backend tests", "tier 1 evals"}
@@ -663,3 +669,5 @@ def test_ci_doc_says_where_jobs_run_and_how_to_switch_back():
     [(variable, value)] = set(re.findall(r"vars\.(\w+) == '(\w+)'", RUNS_ON))
     assert f"`{variable}={value}`" in section
     assert "unset the variable" in section.lower()
+    # Pull requests from forks never reach a self-hosted runner, and the doc says so.
+    assert "pull requests from forks" in section.lower()
