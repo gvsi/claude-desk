@@ -26,6 +26,7 @@ runs:
         version: "0.13.0"
         python-version: "3.13"
         enable-cache: true
+        cache-suffix: ${{ github.job }}
 
     - name: Install cvc5 1.4.2
       shell: bash

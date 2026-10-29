@@ -17,6 +17,10 @@ concurrency:
 permissions:
   contents: read
 
+# Every uv command uses the committed lockfile, and fails if it is missing or out of date.
+env:
+  UV_LOCKED: "1"
+
 defaults:
   run:
     shell: bash
@@ -154,6 +158,7 @@ jobs:
           version: "0.13.0"
           python-version: "3.13"
           enable-cache: true
+          cache-suffix: ${{ github.job }}
       - name: Run the web type check and unit tests
         run: uv run --project tools python -m desk_tools.gate --name web --run-if web/package.json -- make web-test
       - name: Build the web app and run the mocked end-to-end test
@@ -172,6 +177,7 @@ jobs:
           version: "0.13.0"
           python-version: "3.13"
           enable-cache: true
+          cache-suffix: ${{ github.job }}
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24.21.0"
@@ -215,6 +221,7 @@ jobs:
           version: "0.13.0"
           python-version: "3.13"
           enable-cache: true
+          cache-suffix: ${{ github.job }}
       - name: Install actionlint 1.7.12
         run: |
           dir="$RUNNER_TEMP/actionlint"

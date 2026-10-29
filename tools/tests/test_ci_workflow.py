@@ -100,6 +100,14 @@ def test_actions_pinned_by_commit_sha():
         used.add(match[1])
     assert used == set(PINNED_ACTIONS)
 
+    # Python dependencies come only from the committed lockfiles: every uv command runs as --locked,
+    # and fails if a lockfile is missing or out of date. No job or step changes uv's settings.
+    workflow = load(WORKFLOW)
+    assert workflow["env"] == {"UV_LOCKED": "1"}
+    for job in jobs(workflow):
+        for scope in [job, *job["steps"]]:
+            assert not any(name.startswith("UV_") for name in scope.get("env", {})), scope
+
     # A script that fetches a tool checks it against a pinned sha256 after the fetch; under
     # `bash -e` with no `||` (test_gated_jobs_go_through_the_gate), a mismatch stops the script.
     for step in all_steps():
@@ -313,6 +321,16 @@ def test_gated_jobs_go_through_the_gate():
     assert node_setups
     for step in node_setups:
         assert step["with"] == {"node-version": "24.21.0", "package-manager-cache": False}, step
+    # Each job keeps its own uv cache, so the first job to save one can't stand in for the others.
+    uv_setups = [step for step in all_steps() if step.get("uses", "").startswith("astral-sh/setup-uv@")]
+    assert uv_setups
+    for step in uv_setups:
+        assert step["with"] == {
+            "version": "0.13.0",
+            "python-version": "3.13",
+            "enable-cache": True,
+            "cache-suffix": "${{ github.job }}",
+        }, step
 
 
 def test_secret_scan_has_no_exceptions():
