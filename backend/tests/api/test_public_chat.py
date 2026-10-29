@@ -21,10 +21,12 @@ import pytest
 from fastapi import FastAPI
 from pydantic import TypeAdapter
 from sqlalchemy import text
+from sse_starlette import EventSourceResponse
 
 from desk.api import runner as runner_module
 from desk.api.main import create_app
-from desk.api.ratelimit import LIMITS, Limit
+from desk.api.ratelimit import LIMITS, Limit, StreamSlots
+from desk.api.routes.public import _released
 from desk.api.sse import append_control, emit
 from desk.api.store import Ids, append_message
 from desk.contracts import ToolCall
@@ -584,6 +586,26 @@ async def test_open_streams_are_capped(app, browser, fake, kernel_http):
         assert again.status == 200
     for stream in streams[1:]:
         await stream.close()
+    assert slots.open_counts() == ({}, {})
+
+
+async def test_a_stream_closed_mid_send_closes_its_frames_and_frees_its_place():
+    closed = []
+
+    async def frames() -> AsyncIterator[str]:
+        try:
+            yield "first"
+            yield "second"
+        finally:
+            closed.append(True)                          # the listener subscription is let go here
+
+    slots = StreamSlots()
+    inner = frames()
+    body = _released(EventSourceResponse(inner), slots.acquire("session-1", CLIENT_IP)).body_iterator
+    assert await anext(body) == "first"
+    await body.aclose()                                   # as sse-starlette closes the body after an interrupted send
+
+    assert closed == [True]                               # at once, not when the inner generator is collected
     assert slots.open_counts() == ({}, {})
 
 

@@ -109,7 +109,9 @@ class TurnRunner:
         """Handle each of the session's waiting control rows (`handle_control`), each in a transaction of its own, but
         start nothing: a request starts the session's work once what it brought is stored too, so one turn answers
         both."""
-        for row in await unhandled_controls(conn, caller.ids):
+        rows = await unhandled_controls(conn, caller.ids)
+        await conn.commit()
+        for row in rows:
             await self.handle_control(conn, caller, row, start=False)
 
     async def handle_control(self, conn: AsyncConnection, caller: Caller, row: ControlRow, *,

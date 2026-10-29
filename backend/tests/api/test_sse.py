@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 import pytest
 from sqlalchemy import text
 
-from desk.api.sse import Listener, Wakeup, append_control, claim_control, emit, event_stream
+from desk.api.sse import Listener, Wakeup, append_control, claim_control, emit, event_stream, unhandled_controls
 from desk.db.session import database_url
 from desk.api.store import Ids
 from desk.contracts import RenderedBlock
@@ -113,6 +113,15 @@ async def test_control_rows_are_claimed_once(engine):
         sse_id = (await conn.execute(text("SELECT id FROM app.run_events WHERE kind = 'sse' AND seq = :q"),
                                      {"q": seq})).scalar_one()
         assert await claim_control(conn, sse_id) is False
+
+
+async def test_unhandled_controls_read_in_the_callers_transaction(engine):
+    async with engine.connect() as conn:
+        row = await append_control(conn, SESSION_A, "run_resumable", {})
+        assert [found.id for found in await unhandled_controls(conn, SESSION_A)] == [row]
+        await conn.rollback()                            # the caller's write is still the caller's to undo
+    async with engine.connect() as conn:
+        assert await unhandled_controls(conn, SESSION_A) == []
 
 
 async def test_replay_after_last_event_id(engine, listener):

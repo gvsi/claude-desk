@@ -7,6 +7,7 @@ sends is never read. Claude's turns run in the process's `TurnRunner`, which hol
 memory only; what they show reaches the visitor on the event stream.
 """
 
+import contextlib
 import json
 from collections.abc import AsyncIterator
 from typing import Annotated
@@ -168,13 +169,15 @@ def _cursor(last_event_id: str | None, after: int | None) -> int | None:
 
 def _released(response: EventSourceResponse, slot: StreamSlot) -> EventSourceResponse:
     """Free the stream's place when it ends, however it ends: the background task runs after a normal end or a hang
-    up, the body's `finally` when the stream failed."""
+    up, the body's `finally` when the stream failed. Closing the body closes the stream's frames at once, which lets
+    go of their listener subscription."""
     frames = response.body_iterator
 
     async def releasing() -> AsyncIterator:
         try:
-            async for frame in frames:
-                yield frame
+            async with contextlib.aclosing(frames):
+                async for frame in frames:
+                    yield frame
         finally:
             slot.release()
 

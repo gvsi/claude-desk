@@ -227,20 +227,19 @@ async def _events_after(engine: AsyncEngine, ids: Ids, after: int) -> list[tuple
 
 
 async def unhandled_controls(conn: AsyncConnection, ids: Ids) -> list[ControlRow]:
-    """The session's control rows no request has handled yet, oldest first; commits once they are read, so each can
-    then be handled in a transaction of its own."""
+    """The session's control rows no request has handled yet, oldest first, read in the caller's transaction."""
     rows = await conn.execute(select(RUN_EVENTS).where(
         RUN_EVENTS.c.copy_id == ids.copy_id, RUN_EVENTS.c.session_id == ids.session_id,
         RUN_EVENTS.c.kind == "control", RUN_EVENTS.c.handled_at.is_(None)).order_by(RUN_EVENTS.c.id))
-    found = [ControlRow(id=row.id, type=row.type, payload=row.payload, copy_id=row.copy_id, desk_id=row.desk_id,
-                        session_id=row.session_id) for row in rows]
-    await conn.commit()
-    return found
+    return [ControlRow(id=row.id, type=row.type, payload=row.payload, copy_id=row.copy_id, desk_id=row.desk_id,
+                       session_id=row.session_id) for row in rows]
 
 
 async def _unhandled_controls(engine: AsyncEngine, ids: Ids) -> list[ControlRow]:
     async with engine.connect() as conn:
-        return await unhandled_controls(conn, ids)
+        found = await unhandled_controls(conn, ids)
+        await conn.commit()
+        return found
 
 
 def being_cancelled() -> bool:
