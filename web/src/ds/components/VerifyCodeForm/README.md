@@ -1,0 +1,61 @@
+# VerifyCodeForm
+
+`VerifyCodeForm` is where a visitor types the six-digit code that confirms it's them, under the verify card in the chat.
+
+## When to use
+
+- Under the latest message that carries a `verify_prompt` card, while the visitor hasn't confirmed yet. Once the code works, the screen takes the form away and shows `VerifiedLine` in its place.
+- Not for the demo passcode or any other text. `TextField` and the first-visit dialog have their own fields.
+
+## What it does
+
+- The verify card above it carries the kernel's uniform message. The form repeats none of it: it shows only its label, its two buttons and, after a failed try, one line.
+- The field is labelled "6-digit code" and is `inputmode="numeric"`, `autocomplete="one-time-code"` and `maxlength="6"`, so phones offer the number pad and a code from a text message.
+- Only digits enter the field. Letters, spaces and dashes typed are dropped, and full-width digits count as the digits they are. A paste keeps its digits even when it comes with words or spaces around it, so "Code: 482 913" pastes as 482913.
+- Confirm is disabled until all six digits are in. Enter in the field or Confirm calls `onSubmit` with exactly those six digits. A second Enter or click before the screen moves the form to `checking` sends nothing more, so a double press can't spend a second try on the same code; changing the code or a new state allows another.
+- While `checking`, Confirm keeps its words and is busy (`aria-busy="true"`, focusable but inert), the form has `aria-busy="true"`, and nothing more is sent. "I can’t get the code" still works.
+- With `failed`, an error `Notice` (`role="alert"`) under the field reads "That code didn’t work. Check the newest code, or ask me for a new one." It is the same line for a wrong, expired or used-up code, as the verify route answers all three alike, and it never names the reason. The field gets `aria-invalid="true"`, is described by the line, and takes focus with its code selected, ready to type over. The line isn't shown while `checking`, so every failure is a new alert and is read out.
+- "I can’t get the code" calls `onAskForOwner`.
+- Nothing here fetches. The component holds the typed code and gives it only to `onSubmit`.
+
+## What the consumer provides
+
+- `state`: `checking` while the code is with the verify route, `failed` when it answers that the code didn't work, `idle` otherwise.
+- `onSubmit`: post the code through the API's verify route. The code goes to the kernel, never to Claude.
+- `onAskForOwner`: the same as the page's "Ask for" the owner.
+- `language`: the visitor's language. The form sets `lang` to it.
+
+## Copy (`verifyCopy.ts`)
+
+| | English | Spanish |
+| --- | --- | --- |
+| Label | 6-digit code | Código de 6 dígitos |
+| Button | Confirm | Confirmar |
+| Failed try | That code didn’t work. Check the newest code, or ask me for a new one. | Ese código no funcionó. Revisa el más reciente o pídeme uno nuevo. |
+| Way out | I can’t get the code | No me llega el código |
+| Simulated label | Simulated verification | Verificación simulada |
+
+## Layout
+
+- At most 520 px wide, like the reply card above it.
+- The label above the field in `control` type, 6 px over it. The field is `size-control-main` tall at `radius-control`, on the page's own ground in a 1 px `line-control` outline (`line-control-hover` on hover), with the digits in `body` type and tabular figures. Confirm is a primary main button beside it, 8 px away, on the same line and as tall. The failed line and the ghost button "I can’t get the code" follow 10 px apart.
+- The outline's color changes at `motion-instant`. Nothing moves under reduced motion.
+
+## Props
+
+| Prop | Type | Notes |
+| --- | --- | --- |
+| `state` | `'idle' \| 'checking' \| 'failed'` | Required. `VerifyCodeState`. |
+| `onSubmit` | `(code: string) => void` | Required. Called with six ASCII digits. |
+| `onAskForOwner` | `() => void` | Required. |
+| `language` | `'en' \| 'es'` | Required. |
+
+## VerifiedLine
+
+`VerifiedLine` is the chat line once the code works: a `SystemLine` in the visitor's language, with "Simulated verification" / "Verificación simulada" after the screen's words when the session's assurance is `demo_code`. A code from the Demo inbox shows that the code went to the contact on record, not that the visitor holds that contact, so the line says the verification was simulated. Any other assurance shows the words alone.
+
+| Prop | Type | Notes |
+| --- | --- | --- |
+| `text` | `string` | Required. The screen's words: "Verified with a code sent to •••• 0142". |
+| `assurance` | `Assurance` | Required. `demo_code` adds the label, after a full stop. |
+| `language` | `'en' \| 'es'` | Required. The label's language and the line's `lang`. |

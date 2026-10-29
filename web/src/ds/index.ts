@@ -85,6 +85,14 @@ export {
 } from './components/IntroDialog/IntroDialog.tsx';
 export { INTRO_ERROR_COPY } from './components/IntroDialog/introCopy.ts';
 
+// Verification
+export {
+  VerifyCodeForm,
+  type VerifyCodeFormProps,
+  type VerifyCodeState,
+} from './components/VerifyCodeForm/VerifyCodeForm.tsx';
+export { VerifiedLine, type VerifiedLineProps } from './components/VerifyCodeForm/VerifiedLine.tsx';
+
 // Reply cards
 export { ReplyCard, type ReplyCardProps } from './components/ReplyCard/ReplyCard.tsx';
 export { cardView, type CardView } from './components/ReplyCard/cardView.ts';
