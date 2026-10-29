@@ -17,6 +17,7 @@ from desk.contracts import (
     HoursWindow,
     Label,
     LedgerEntry,
+    MCP_TOOLS,
     Mandate,
     NormalizedAction,
     PriceItem,
@@ -27,9 +28,18 @@ from desk.contracts import (
     SeedPerson,
     SessionCreated,
     SessionState,
+    ToolName,
 )
 from desk.events import EvDemoInbox, EvHeld, SseEvent
-from desk.kernel_api import KERNEL_REQUESTS, KERNEL_RESPONSES, KERNEL_ROUTES, ExecuteRequest, KernelError, WhoAmI
+from desk.kernel_api import (
+    KERNEL_REQUESTS,
+    KERNEL_RESPONSES,
+    KERNEL_ROUTES,
+    ExecuteRequest,
+    KernelError,
+    ToolsConfirmRequest,
+    WhoAmI,
+)
 from scripts.export_schema import export_schema
 
 IDENTITY = {"principal", "person_id", "level", "assurance"}
@@ -208,6 +218,23 @@ def test_execute_names_generation_or_approval():
     for extra in ({}, {"generation": 3, "approval_id": "a1"}):
         with pytest.raises(ValidationError):
             ExecuteRequest(decision_id="d1", session_id="s1", **extra)
+
+
+def test_enabling_an_mcp_tool_names_the_reviewed_definition():
+    # the pin review: the owner's confirm names the exact definition hash they saw, so the kernel
+    # compares it with the current listing and never enables a definition nobody reviewed
+    assert MCP_TOOLS == {tool for tool in get_args(ToolName) if not tool.startswith("native.")}
+    reviewed = "a" * 64
+    for tool in sorted(MCP_TOOLS):
+        assert ToolsConfirmRequest(desk_id="d", tool=tool, enable=True, definition_sha256=reviewed)
+        assert ToolsConfirmRequest(desk_id="d", tool=tool, enable=False).definition_sha256 is None
+        for missing in ({}, {"definition_sha256": None}, {"definition_sha256": ""}, {"definition_sha256": "A" * 64}):
+            with pytest.raises(ValidationError):
+                ToolsConfirmRequest(desk_id="d", tool=tool, enable=True, **missing)
+    # native tools have no definition to pin, so naming one is a caller bug
+    assert ToolsConfirmRequest(desk_id="d", tool="native.book", enable=True).definition_sha256 is None
+    with pytest.raises(ValidationError):
+        ToolsConfirmRequest(desk_id="d", tool="native.book", enable=True, definition_sha256=reviewed)
 
 
 def test_schema_export_is_current():

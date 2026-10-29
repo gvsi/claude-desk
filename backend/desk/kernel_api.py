@@ -5,9 +5,9 @@ carries a principal, person, level or assurance: the kernel builds identity from
 own tables and the tokens or signatures it checks.
 """
 
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
-from pydantic import AwareDatetime, BaseModel, model_validator
+from pydantic import AwareDatetime, BaseModel, StringConstraints, model_validator
 
 from desk.contracts import (
     ActorKind,
@@ -29,6 +29,7 @@ from desk.contracts import (
     LedgerEntry,
     LedgerEvent,
     LedgerPage,
+    MCP_TOOLS,
     Mandate,
     NotificationDefaults,
     OwnerMessageResult,
@@ -49,6 +50,8 @@ from desk.contracts import (
     ToolName,
     ToolProfile,
 )
+
+Sha256Hex = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]   # lowercase hex
 
 # Requests. A PUT /desks/{id}/{part} body is the DeskSeed subset holding only that part,
 # keyed by its DeskSeed field name, except business (the BusinessSeed fields but
@@ -169,7 +172,17 @@ class ToolsConfirmRequest(BaseModel):     # POST /tools/confirm (enabling drafts
     desk_id: str
     tool: ToolName
     enable: bool
-    definition_sha256: str | None = None  # MCP tools: must equal the current listing, else 409
+    definition_sha256: Sha256Hex | None = None   # required to enable an MCP tool: the hash the owner reviewed, which must
+                                                 # equal the current listing, else 409; never set for a native tool
+
+    @model_validator(mode="after")
+    def _names_the_reviewed_definition(self) -> Self:
+        if self.tool not in MCP_TOOLS:
+            if self.definition_sha256 is not None:
+                raise ValueError("a native tool has no definition hash")
+        elif self.enable and self.definition_sha256 is None:
+            raise ValueError("enabling an MCP tool names the definition_sha256 the owner reviewed")
+        return self
 
 class ToolsSimulateChangeRequest(BaseModel):   # POST /tools/simulate_change (demo)
     desk_id: str

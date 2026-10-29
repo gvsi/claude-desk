@@ -126,6 +126,7 @@ ToolName = Literal["native.quote", "native.find_slots", "native.book", "native.r
                    "native.fetch_website", "native.read_memory",
                    "payments.list_charges", "payments.create_refund"]
 MONEY_TOOLS: frozenset[str] = frozenset({"native.payment_link", "native.charge_mandate", "payments.create_refund"})
+MCP_TOOLS: frozenset[str] = frozenset({"payments.list_charges", "payments.create_refund"})   # pinned by definition hash
 AUTO_MONEY_HARD_CAP_CENTS = 50_000        # $500: the most any auto card may allow per action
 
 class ToolProfile(BaseModel):
