@@ -53,11 +53,15 @@ const BUSY_LABEL = 'Starting';
 const TABBABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-/** The dialog's own controls in Tab order: enabled, shown, and not inside the hidden illustration. */
+/**
+ * The dialog's own controls in Tab order: enabled, shown, and not inside the hidden illustration.
+ * Only hiding inside the dialog counts: a modal dialog escapes an inert page around it.
+ */
 function tabbables(root: HTMLElement): HTMLElement[] {
-  return [...root.querySelectorAll<HTMLElement>(TABBABLE)].filter(
-    (el) => el.closest('[aria-hidden="true"], [inert]') === null && el.getClientRects().length > 0,
-  );
+  return [...root.querySelectorAll<HTMLElement>(TABBABLE)].filter((el) => {
+    const hidden = el.closest('[aria-hidden="true"], [inert]');
+    return (hidden === null || !root.contains(hidden)) && el.getClientRects().length > 0;
+  });
 }
 
 /** The line for `code`; a code this build doesn't know reads as unreachable, never as nothing. */
@@ -88,6 +92,9 @@ export function IntroDialog({ title, intro, thingsToTry, submitLabel, onSubmit, 
   // Empty: truly disabled. Busy: the Button stays focusable and inert (aria-disabled), so a person
   // who pressed it keeps their place while the demo starts.
   const empty = code === '' && !busy;
+  // No error while a try is out, so the next failure is a new alert and is announced, even when the
+  // page leaves `error` set to the same code throughout.
+  const shownError = busy ? undefined : error;
 
   const titleId = `${id}-title`;
   const introId = `${id}-intro`;
@@ -106,10 +113,10 @@ export function IntroDialog({ title, intro, thingsToTry, submitLabel, onSubmit, 
 
   // When a try fails, the field takes focus with its text selected, ready to type over.
   useEffect(() => {
-    if (error === undefined || busy) return;
+    if (shownError === undefined) return;
     fieldRef.current?.focus();
     fieldRef.current?.select();
-  }, [error, busy]);
+  }, [shownError]);
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -201,17 +208,17 @@ export function IntroDialog({ title, intro, thingsToTry, submitLabel, onSubmit, 
                   type="password"
                   autoComplete="off"
                   value={passcode}
-                  aria-invalid={error !== undefined || undefined}
-                  aria-describedby={error !== undefined ? errorId : undefined}
+                  aria-invalid={shownError !== undefined || undefined}
+                  aria-describedby={shownError !== undefined ? errorId : undefined}
                   onChange={(event) => setPasscode(event.target.value)}
                 />
                 <Button variant="primary" size="main" type="submit" disabled={empty} busy={busy}>
                   {busy ? BUSY_LABEL : submitLabel}
                 </Button>
               </div>
-              {error !== undefined ? (
+              {shownError !== undefined ? (
                 <div id={errorId}>
-                  <Notice tone="error">{errorLine(error)}</Notice>
+                  <Notice tone="error">{errorLine(shownError)}</Notice>
                 </div>
               ) : null}
             </form>

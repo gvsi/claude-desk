@@ -15,13 +15,14 @@
 - Enter in the field or the button calls `onSubmit` once, with the trimmed passcode. The button is disabled while the trimmed field is empty.
 - While `busy`, the button reads "Starting" and the form has `aria-busy="true"`. The button stays focusable but inert (`aria-disabled="true"`, a press is ignored), so a person who pressed it keeps their place. Only the empty state is truly `disabled`. A second submit does nothing, and neither does one sent before the last `onSubmit` promise settles, so a quick double Enter can't start two copies.
 - A rejected `onSubmit` promise is ignored: the page reports failures through `error`.
-- With `error`, an error `Notice` (`role="alert"`) under the field gives the line from `INTRO_ERROR_COPY`. The field gets `aria-invalid="true"` and its `aria-describedby` names the line. When `error` changes to a code, or a busy try ends with one, the field takes focus with its text selected, ready to type over. The code itself never appears in the page, and a code this build doesn't know reads as `unreachable`.
+- With `error`, an error `Notice` (`role="alert"`) under the field gives the line from `INTRO_ERROR_COPY`. The field gets `aria-invalid="true"` and its `aria-describedby` names the line. The line isn't shown while `busy`, so every failure is a new alert and is announced, even when the page leaves `error` set to the same code through a retry. When a line appears, the field takes focus with its text selected, ready to type over. The code itself never appears in the page, and a code this build doesn't know reads as `unreachable`.
 - Nothing moves beyond the button's own transitions, which stop under reduced motion.
 
 ## What the consumer provides
 
 - `title`, `intro`, `thingsToTry` and `submitLabel`, as in the stories. An item without an `icon` shows none.
 - `onSubmit`: send the passcode to the API's passcode route, with `busy` on while it runs. On failure set `error`: a wrong passcode is `wrong_passcode`, too many tries is `rate_limited`, and a network failure or server error is `unreachable`. On success, take the dialog away.
+- Render it outside the inert preview of Today, not inside it. A modal dialog escapes an inert page and its Tab order still works there, but an `aria-hidden` wrapper would hide it from assistive tech.
 - Nothing fetches here.
 
 ## Error copy (`introCopy.ts`)
@@ -31,7 +32,7 @@
 | `error` | Line |
 | --- | --- |
 | `wrong_passcode` | "That passcode didn’t work. Check the message that shared this link, then try again." |
-| `rate_limited` | "That’s a lot of tries. Wait a few minutes, then try again." |
+| `rate_limited` | "That’s a lot of tries. Wait a while, then try again." |
 | `unreachable` | "We couldn’t reach the demo. Try again in a moment." |
 
 ## Layout

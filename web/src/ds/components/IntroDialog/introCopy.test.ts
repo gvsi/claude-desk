@@ -22,7 +22,7 @@ describe('intro dialog copy', () => {
     // The lines themselves, word for word.
     expect(INTRO_ERROR_COPY).toEqual({
       wrong_passcode: 'That passcode didn’t work. Check the message that shared this link, then try again.',
-      rate_limited: 'That’s a lot of tries. Wait a few minutes, then try again.',
+      rate_limited: 'That’s a lot of tries. Wait a while, then try again.',
       unreachable: 'We couldn’t reach the demo. Try again in a moment.',
     });
   });

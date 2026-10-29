@@ -48,6 +48,26 @@ function StartingPage(args: IntroDialogProps) {
   );
 }
 
+/**
+ * A page that leaves `error` set while it retries, then fails again with the same code: the line
+ * has to be announced again all the same.
+ */
+function SameErrorPage(args: IntroDialogProps) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <IntroDialog
+      {...args}
+      busy={busy}
+      onSubmit={async (passcode) => {
+        setBusy(true);
+        await args.onSubmit(passcode);
+        setBusy(false);
+        throw new Error('The passcode route said no again.');
+      }}
+    />
+  );
+}
+
 /** The error line, the field's state and its focus, for a dialog showing `code`. */
 async function expectErrorOnTheField(canvas: ReturnType<typeof within>, code: IntroErrorCode): Promise<void> {
   const field = canvas.getByLabelText('Passcode');
@@ -90,15 +110,6 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {
-  // A link on the page behind, as the web app's preview of Today has, so Tab has somewhere to escape to.
-  decorators: [
-    (Story) => (
-      <>
-        <a href="#today">Today</a>
-        <Story />
-      </>
-    ),
-  ],
   play: async ({ args, canvas, userEvent }) => {
     const dialog = canvas.getByRole('dialog', { name: args.title });
     const field = canvas.getByLabelText('Passcode');
@@ -203,10 +214,28 @@ export const Default: Story = {
 };
 
 export const Busy: Story = {
+  args: { busy: true },
+  play: async ({ args, canvas, userEvent }) => {
+    // busy_submits_once: while the demo starts the button reads "Starting", stays focusable but inert,
+    // and nothing is sent.
+    const button = canvas.getByRole('button', { name: 'Starting' });
+    await expect(canvas.queryByRole('button', { name: 'Start the demo' })).toBeNull();
+    await expect(button).toHaveAttribute('aria-disabled', 'true');
+    await expect(button).not.toHaveAttribute('disabled');
+    await expect(button).toHaveAttribute('aria-busy', 'true');
+    await expect(button.closest('form')).toHaveAttribute('aria-busy', 'true');
+    await userEvent.type(canvas.getByLabelText('Passcode'), 'rivera-demo');
+    await userEvent.keyboard('{Enter}');
+    await userEvent.click(button);
+    await expect(args.onSubmit).not.toHaveBeenCalled();
+  },
+};
+
+export const StartingFlow: Story = {
   render: (args) => <StartingPage {...args} />,
   play: async ({ args, canvas, userEvent }) => {
-    // busy_submits_once: a click starts the demo. The button then reads "Starting" and keeps focus,
-    // still reachable but inert (aria-disabled, not disabled), and nothing more is sent.
+    // busy_submits_once, from a click: the button then reads "Starting" and keeps focus, still
+    // reachable but inert (aria-disabled, not disabled), and nothing more is sent.
     const field = canvas.getByLabelText('Passcode');
     await userEvent.type(field, 'rivera-demo');
     const button = canvas.getByRole('button', { name: 'Start the demo' });
@@ -253,6 +282,26 @@ export const WrongPasscode: Story = {
     await expectErrorOnTheField(canvas, 'wrong_passcode');
     await expect([field.selectionStart, field.selectionEnd]).toEqual([0, 'rivera'.length]);
     await expect(canvas.getByRole('button', { name: 'Start the demo' })).toBeEnabled();
+  },
+};
+
+export const WrongPasscodeAgain: Story = {
+  args: { error: 'wrong_passcode' },
+  render: (args) => <SameErrorPage {...args} />,
+  play: async ({ args, canvas, userEvent }) => {
+    // A second failure with the same code is a new alert, so it is announced again: the line isn't
+    // shown while the try is out, even though the page kept `error` set.
+    const first = canvas.getByRole('alert');
+    await expectErrorOnTheField(canvas, 'wrong_passcode');
+    const field = canvas.getByLabelText<HTMLInputElement>('Passcode');
+    await userEvent.type(field, 'rivera');
+    await userEvent.keyboard('{Enter}');
+    await expect(args.onSubmit).toHaveBeenCalledTimes(1);
+    await expect(args.onSubmit).toHaveBeenCalledWith('rivera');
+    await waitFor(() => expect(canvas.getByRole('alert')).not.toBe(first));
+    await expect(first.isConnected).toBe(false);
+    await expectErrorOnTheField(canvas, 'wrong_passcode');
+    await expect([field.selectionStart, field.selectionEnd]).toEqual([0, 'rivera'.length]);
   },
 };
 
