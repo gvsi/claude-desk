@@ -44,7 +44,7 @@ async def public_desk(ctx: KernelCtx, slug: str, lang: render.Language) -> Publi
         FactRow.desk_id == desk.desk_id, FactRow.kind == "charter").order_by(FactRow.fact_id)))
     facts = [labels.fact_of(row) for row in rows if labels.can_read(row.readers, PUBLIC)]
     info = DeskInfo(owner_display_name=business.owner_display_name, timezone=business.timezone)
-    canaries = await reply_check.desk_canaries(ctx, desk.desk_id)
+    canaries = await labels.copy_canaries(ctx)
     now = ctx.clock.now()
     charter: list[RenderedBlock] = []
     for name in CHARTER_TEMPLATES:

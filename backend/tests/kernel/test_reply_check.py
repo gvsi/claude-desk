@@ -659,8 +659,9 @@ async def test_a_canary_in_prose_is_blocked(app, client):
     for prose in (f"Your invoice reference is {canaries[0]}.",
                   f"Your reference is {canaries[1][:6]}​{canaries[1][6:]}."):   # hidden behind a zero-width space
         verdict = await checked(client, visitor, prose)
-        # only the canary: its digits aren't read as an amount, and nothing echoes it
-        assert [(v.kind, v.span, v.rule_id) for v in verdict.violations] == [("canary", "", "canary")]
+        # only the canary: its digits aren't read as an amount, and nothing echoes it (Plan 01b's form)
+        assert [(v.kind, v.span, v.rule_id) for v in verdict.violations] == [("canary", "document text",
+                                                                              "labels.canary")]
         assert_handed_off(verdict)
         assert not any(canary in verdict.model_dump_json() for canary in canaries)
     entries = await reply_entries(app, copy)

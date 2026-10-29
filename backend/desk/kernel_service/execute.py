@@ -26,7 +26,9 @@ happened (`reconcile`, by `action_id`), on every read of the decision and at sta
 retried blindly.
 
 Claude sees an execution only through its `model_view`: kept to the adapter's `model_view_keys`,
-and emptied when a fact the session can't read was dropped or a value carries a document canary.
+and emptied when a fact the session can't read was dropped or a value carries a document canary,
+which the `execute` entry records (`violation: "canary"`). This one check runs wherever a result
+is stored: an allow, an approved hold and a reconciled orphan.
 """
 
 import hashlib
@@ -43,7 +45,7 @@ from sqlalchemy import and_, or_, select
 
 from desk.contracts import ExecResult, LedgerEvent, NormalizedAction, Principal
 from desk.db.models import Action as ActionRow
-from desk.db.models import Approval, Business, Desk, Document, Execution, Tool
+from desk.db.models import Approval, Business, Desk, Execution, Tool
 from desk.db.models import Decision as DecisionRow
 from desk.kernel_api import ExecuteRequest
 from desk.kernel_service import activation, adapters, auth, decide, labels, ledger, repo
@@ -388,8 +390,8 @@ async def _side_effect(ctx: KernelCtx, decision_id: str, action_id: str, session
         raise AdapterFailure("no_adapter")
     args = adapter.Args.model_validate(target.action_row.args_json)
     result = await adapter.execute(target.xctx(ctx), target.action, args)
-    visible = await _visible(ctx, target, result)
-    await _finish(ctx, target, execution, visible, "executed", _summary(target, "executed"))
+    visible, flagged = await _visible(ctx, target, result)
+    await _finish(ctx, target, execution, visible, "executed", _summary(target, "executed", **flagged))
     await ctx.db.commit()
     return visible
 
@@ -479,25 +481,21 @@ async def _settled_elsewhere(execution: Execution | None, action_id: str) -> Exe
 
 # ---- What Claude may see ---------------------------------------------------------------------------
 
-async def _visible(ctx: KernelCtx, target: _Target, result: AdapterResult) -> ExecResult:
-    """The adapter's result as the session may see it: the facts its readers can read, and a
-    `model_view` kept to the adapter's `model_view_keys`, or `{}` when a fact was dropped or a value
-    carries one of the copy's document canaries."""
+async def _visible(ctx: KernelCtx, target: _Target, result: AdapterResult) -> tuple[ExecResult, dict[str, Any]]:
+    """The adapter's result as the session may see it, and what its `execute` entry adds: the facts
+    its readers can read, and a `model_view` kept to the adapter's `model_view_keys`, or `{}` when a
+    fact was dropped or the kept view holds one of the copy's document canaries, even split by
+    spaces or in another case or width (`labels.find_canaries_in`); a canary adds
+    `{violation: "canary"}` to the entry. The execution's state is the same either way."""
     readers = labels.session_readers(target.session_row)
     facts = [fact for fact in result.facts if labels.can_read(fact.label, readers)]
     keys = target.adapter.model_view_keys if target.adapter is not None else frozenset()
     view = {key: value for key, value in result.model_view.items() if key in keys}
-    if len(facts) < len(result.facts) or await _holds_canary(ctx, view):
+    flagged = {"violation": "canary"} if labels.find_canaries_in(view, await labels.copy_canaries(ctx)) else {}
+    if len(facts) < len(result.facts) or flagged:
         view = {}
     return ExecResult(action_id=target.action.action_id, state="succeeded", facts=facts, model_view=view,
-                      inbox=list(result.inbox))
-
-
-async def _holds_canary(ctx: KernelCtx, view: dict[str, Any]) -> bool:
-    canaries = [canary.lower() for canary in await ctx.db.scalars(ctx.repo.scoped(select(Document.canary)))
-                if canary]
-    text = json.dumps(view, default=str).lower()
-    return any(canary in text for canary in canaries)
+                      inbox=list(result.inbox)), flagged
 
 
 # ---- Reconciliation ---------------------------------------------------------------------------------
@@ -569,16 +567,18 @@ async def _reconcile(ctx: KernelCtx, action_id: str, decision_id: str, cutoff: d
     if orphaned:
         await _mark_unknown(ctx, target, execution, _no_result(action_id, "unknown"), orphaned=True)
     if outcome is not None:
-        result, state = outcome
-        await _finish(ctx, target, execution, result, state, _summary(target, state, reconciled=True))
+        result, state, flagged = outcome
+        await _finish(ctx, target, execution, result, state, _summary(target, state, reconciled=True, **flagged))
     return True
 
 
-async def _ask_adapter(ctx: KernelCtx, target: _Target, action_id: str) -> tuple[ExecResult, str] | None:
-    """What the adapter's `reconcile` says happened to an orphan, as its result and the decision's
-    state, ledgering nothing: a result is `executed`, rebuilt as the session may see it; None is
-    `failed`, once `on_failed` has undone what `prepare` reserved. None when it can't say (no
-    adapter, `AdapterUnknown` or any error), with whatever its hooks wrote taken back."""
+async def _ask_adapter(ctx: KernelCtx, target: _Target,
+                       action_id: str) -> tuple[ExecResult, str, dict[str, Any]] | None:
+    """What the adapter's `reconcile` says happened to an orphan, as its result, the decision's
+    state and what its `execute` entry adds, ledgering nothing: a result is `executed`, rebuilt as
+    the session may see it (`_visible`, which flags a canary); None is `failed`, once `on_failed`
+    has undone what `prepare` reserved. None when it can't say (no adapter, `AdapterUnknown` or any
+    error), with whatever its hooks wrote taken back."""
     if target.adapter is None:
         log.warning("reconcile_no_adapter action_id=%s", action_id)
         return None
@@ -587,8 +587,9 @@ async def _ask_adapter(ctx: KernelCtx, target: _Target, action_id: str) -> tuple
             result = await target.adapter.reconcile(target.xctx(ctx), target.action)
             if result is None:
                 await _undo(ctx, target)
-                return _no_result(action_id, "failed"), "failed"
-            return await _visible(ctx, target, result), "executed"
+                return _no_result(action_id, "failed"), "failed", {}
+            visible, flagged = await _visible(ctx, target, result)
+            return visible, "executed", flagged
     except AdapterUnknown:
         log.info("reconcile_still_unknown action_id=%s", action_id)
     except Exception as exc:                        # still unknown; the next read tries again

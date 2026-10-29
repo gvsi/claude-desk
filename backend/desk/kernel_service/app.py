@@ -36,15 +36,16 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from desk.contracts import DemoInboxEntry, LedgerEntry, LedgerEvent, LedgerPage, OwnerMessageResult, PolicyVersion
+from desk.contracts import (DemoInboxEntry, KnowledgeItem, LedgerEntry, LedgerEvent, LedgerPage, OwnerMessageResult,
+                            PolicyVersion)
 from desk.db.models import Desk, Fact, Handoff
 from desk.db.session import KernelSession, database_url
 from desk.env import is_development
 from desk.kernel_api import (CreateDeskRequest, DeskCreated, DeskUpdated, DocumentCreated, DocumentUploadRequest,
-                             Health, KernelError, LedgerAppendRequest, OwnerMessageRequest, PolicyConfirmRequest,
-                             PolicyDraftRequest)
+                             Health, KernelError, KnowledgeRequest, LedgerAppendRequest, OwnerMessageRequest,
+                             PolicyConfirmRequest, PolicyDraftRequest)
 from desk.kernel_service import (activation, approvals, auth, context, copies, decide, demo_inbox, desks, execute,
-                                 ledger, public, reply_check, sessions, verification)
+                                 labels, ledger, public, reply_check, sessions, verification)
 from desk.kernel_service.auth import AuthError, Named, SessionRow
 from desk.kernel_service.clock import Clock, SystemClock
 from desk.kernel_service.decisions import DecisionsBackend, make_decisions
@@ -182,6 +183,13 @@ async def delete_desk(desk_id: Annotated[str, Path(alias="id")], ctx: Ctx, reque
 async def post_document(body: DocumentUploadRequest, ctx: Ctx, request: Request) -> DocumentCreated:
     """A document on a Desk of the owner's copy, with a fresh canary (`desks.upload_document`)."""
     return await desks.upload_document(ctx, await desks.owner_desk(ctx, request, body.desk_id), body.document)
+
+
+@desk_router.post("/knowledge", response_model=KnowledgeItem)
+async def post_knowledge(body: KnowledgeRequest, ctx: Ctx, request: Request) -> KnowledgeItem:
+    """A knowledge item on a Desk of the owner's copy (`labels.store_knowledge`)."""
+    desk_row = await desks.owner_desk(ctx, request, body.desk_id)
+    return await labels.store_knowledge(ctx, desk_row.desk_id, body.item)
 
 
 def _put_route(part: str, model: type[BaseModel]) -> None:

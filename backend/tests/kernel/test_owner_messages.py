@@ -20,7 +20,7 @@ from sqlalchemy import select
 from desk.contracts import Claim, OwnerMessageResult
 from desk.db.models import Desk, Document
 from desk.db.models import Fact as FactRow
-from desk.kernel_service import auth, render, reply_check
+from desk.kernel_service import auth, labels, render
 
 from .helpers import kernel_ctx, ledger_rows, rows_of
 from .test_adapters import Rivera, rivera, visitor_of
@@ -105,14 +105,14 @@ async def test_say_works_during_a_take_over(app, client, monkeypatch):
     # conversation had when it was ledgered, never one a take-over ended before it was sent
     assert (await set_mode(client, copy, visitor.session_id, "ai", 1))["generation"] == 2      # Maria resumes it
     reading, release = asyncio.Event(), asyncio.Event()
-    canaries = reply_check.desk_canaries
+    canaries = labels.copy_canaries
 
-    async def held_open(ctx, desk_id):
+    async def held_open(ctx):
         reading.set()
         await release.wait()
-        return await canaries(ctx, desk_id)
+        return await canaries(ctx)
 
-    monkeypatch.setattr(reply_check, "desk_canaries", held_open)
+    monkeypatch.setattr(labels, "copy_canaries", held_open)
     say = asyncio.create_task(post_message(client, copy, visitor.session_id, "Maria here, taking this one."))
     await asyncio.wait_for(reading.wait(), 10)
     take_over = asyncio.create_task(set_mode(client, copy, visitor.session_id, "owner", 2))
@@ -131,18 +131,21 @@ async def test_say_works_during_a_take_over(app, client, monkeypatch):
 
 async def test_say_with_a_document_canary_is_blocked(app, client, reviewer):
     copy, visitor = await visitor_of(app, client)
-    canaries = [row.canary for row in await rows_of(app, copy.copy_id, select(Document))]
+    documents = await rows_of(app, copy.copy_id, select(Document))
+    canaries = [row.canary for row in documents]
     assert len(canaries) == 2                                             # Dana's invoice and Bob's warranty
     key = await public_key(client)
     blocked = []
     hidden = f"{canaries[1][:6]}\u200b{canaries[1][6:]}"                  # behind a zero-width space
-    for language, text in (("en", f"Your invoice reference is {canaries[0]}."), ("es", f"Tu referencia es {hidden}.")):
+    for document, language, text in ((documents[0], "en", f"Your invoice reference is {canaries[0]}."),
+                                     (documents[1], "es", f"Tu referencia es {hidden}.")):
         await set_session(app, copy, visitor.session_id, last_language=language)
         result = await sent(client, copy, visitor.session_id, text)
         verdict = result.verdict
         # nothing for the visitor: no card, and a receipt the API shows the owner alone
         assert verdict is not None and (verdict.ok, verdict.blocks, verdict.language) == (False, [], language)
-        assert [(v.kind, v.span, v.fact_ids, v.rule_id) for v in verdict.violations] == [("canary", "", [], "canary")]
+        assert [(v.kind, v.span, v.fact_ids, v.rule_id) for v in verdict.violations] == [
+            ("canary", "document text", [f"document:{document.document_id}"], "labels.canary")]
         verify_verdict(key, visitor.session_id, verdict)
         assert not any(canary in result.model_dump_json() for canary in canaries)
         blocked.append(verdict)

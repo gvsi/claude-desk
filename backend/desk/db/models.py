@@ -384,6 +384,7 @@ class KnowledgeItem(Base):
     title: Mapped[str] = mapped_column(Text)
     text: Mapped[str] = mapped_column(Text)
     readers: Mapped[list[str]] = mapped_column(ContractJSON(list[str]), server_default=OWNER_ONLY)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))   # first added (01b_5_knowledge)
 
 
 class PriceItem(Base):

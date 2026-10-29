@@ -8,22 +8,39 @@ verified person when there is one (`new_fact_label`); when the session verifies,
 already holds gain that person too (`relabel_on_verify`). A fact with no label is the owner's
 alone.
 
+Data put together from several labelled parts is readable only by the readers every part has
+(`combine`).
+
 `fact_row` and `fact_of` map between the `Fact` contract and its `facts` row, which also keeps
 the session and action that wrote it.
+
+Every document's body ends with its canary, a random marker (`cdk-` and 16 hex digits) that no
+other text holds. Text that carries one is carrying the document out, so canaries are looked for
+(`find_canaries`) wherever text could leave for someone the document isn't for: Claude's replies,
+the owner's say, what a tool shows Claude and knowledge the owner adds (`store_knowledge`). They
+are matched on `canary_key`, which keeps only ASCII letters and digits after NFKC and case
+folding, so spaces, punctuation, capitals and full-width forms don't hide one.
 """
 
-from collections.abc import Iterable, Sequence
+import re
+import unicodedata
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from datetime import datetime
+from types import MappingProxyType
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from desk.contracts import Fact, Label
-from desk.db.models import ActorSession
+from desk.contracts import Fact, KnowledgeItem, Label, LedgerEvent
+from desk.db.models import ActorSession, Document
 from desk.db.models import Fact as FactRow
-from desk.kernel_service.repo import KernelCtx
+from desk.db.models import KnowledgeItem as KnowledgeRow
+from desk.kernel_service import ledger
+from desk.kernel_service.repo import KernelCtx, KernelFailure
 from desk.kernel_service.sessions import verified
 
 OWNER_ONLY = ("owner",)
+NO_CANARIES: Mapping[str, str] = MappingProxyType({})
 
 
 def _person(session_row: ActorSession) -> str | None:
@@ -80,6 +97,29 @@ def label_of(readers: Sequence[str] | None, record_owner: str | None = None) -> 
     return Label(readers=list(readers or OWNER_ONLY), record_owner=record_owner)
 
 
+def combine(parts: Iterable[Label | Sequence[str]]) -> Label:
+    """The label of data put together from `parts` (each a `Label` or its readers): readable only
+    by the readers every part has. A `public` part restricts nothing; a part with no readers is the
+    owner's alone, like any unlabelled row. The owner is always a reader, so two people's data
+    together is the owner's alone, and nothing to combine is too. All parts public stays public. A
+    record owner survives only when every part names the same one."""
+    given = [parts] if isinstance(parts, str) else list(parts)
+    if any(isinstance(part, str) for part in given):
+        raise TypeError("each part is a Label or a list of readers, not one string")
+    combined = [part if isinstance(part, Label) else Label(readers=list(part)) for part in given]
+    restricting = [list(part.readers or OWNER_ONLY) for part in combined if "public" not in part.readers]
+    if combined and not restricting:
+        readers = ["public"]
+    elif not restricting:
+        readers = list(OWNER_ONLY)
+    else:
+        shared = set.intersection(*(set(each) for each in restricting))
+        readers = ["owner", *(reader for reader in dict.fromkeys(restricting[0])
+                              if reader in shared and reader != "owner")]
+    owners = {part.record_owner for part in combined}
+    return Label(readers=readers, record_owner=owners.pop() if len(owners) == 1 else None)
+
+
 def can_read(label: Label | Sequence[str] | None, readers: Iterable[str]) -> bool:
     """Whether a session reading as `readers` (`session_readers`) may read a fact with `label` (a
     `Label` or its readers): any reader in common. A missing or empty label reads as `["owner"]`."""
@@ -87,6 +127,82 @@ def can_read(label: Label | Sequence[str] | None, readers: Iterable[str]) -> boo
         raise TypeError("a label is a Label or a list of readers, not one string")
     listed = label.readers if isinstance(label, Label) else label
     return not set(listed or OWNER_ONLY).isdisjoint(readers)
+
+
+# ---- Canaries -------------------------------------------------------------------------------------
+
+async def copy_canaries(ctx: KernelCtx) -> dict[str, str]:
+    """The canary of each of the copy's documents, by document ID, in ID order."""
+    rows = await ctx.db.execute(ctx.repo.scoped(
+        select(Document.document_id, Document.canary).order_by(Document.document_id)))
+    return {document_id: canary for document_id, canary in rows if canary}
+
+
+def _keyed(text: str) -> tuple[str, list[int]]:
+    """`canary_key(text)`, and the index in `text` each of its characters came from."""
+    chars: list[str] = []
+    origin: list[int] = []
+    for i, ch in enumerate(text):
+        for part in unicodedata.normalize("NFKC", ch).casefold():
+            if part.isascii() and part.isalnum():
+                chars.append(part)
+                origin.append(i)
+    return "".join(chars), origin
+
+
+def canary_key(text: str) -> str:
+    """`text` as canaries are matched in it: each character in NFKC and case-folded, keeping only
+    ASCII letters and digits, so spaces, punctuation, capitals and full-width forms can't hide one
+    ("Ｃdk-0123 4567" reads as "cdk01234567")."""
+    return _keyed(text)[0]
+
+
+def canary_spans(text: str, canaries: Mapping[str, str]) -> list[tuple[str, int, int]]:
+    """Each place a canary of `canaries` (document ID → canary) occurs in `text`, matched by
+    `canary_key`: the document's ID, and the start and end of the characters it takes up in
+    `text`, from its first letter or digit to its last, whatever lies between."""
+    key, origin = _keyed(text)
+    spans = []
+    for document_id, canary in canaries.items():
+        wanted = canary_key(canary)
+        start = key.find(wanted) if wanted else -1
+        while start >= 0:
+            spans.append((document_id, origin[start], origin[start + len(wanted) - 1] + 1))
+            start = key.find(wanted, start + 1)
+    return spans
+
+
+def find_canaries(text: str, canaries: Mapping[str, str]) -> list[str]:
+    """The IDs of the documents whose canary's `canary_key` occurs in `canary_key(text)`, in the
+    order `canaries` lists them."""
+    found = {document_id for document_id, _, _ in canary_spans(text, canaries)}
+    return [document_id for document_id in canaries if document_id in found]
+
+
+def _texts(value: object, keys: list[str]) -> Iterator[str]:
+    """The values in `value` as text, at any depth of mappings and lists, in order; the mappings'
+    keys go to `keys`."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, Mapping):
+        for key, item in value.items():
+            keys.extend(_texts(key, keys))
+            yield from _texts(item, keys)
+    elif isinstance(value, (list, tuple, set, frozenset)):
+        for item in value:
+            yield from _texts(item, keys)
+    elif value is not None:
+        yield str(value)
+
+
+def find_canaries_in(value: object, canaries: Mapping[str, str]) -> list[str]:
+    """`find_canaries` over a text, or over every value at any depth of a mapping or a list (anything
+    else as its text) read one after another, so a canary split between neighbouring values is
+    found too, and over the mappings' keys likewise."""
+    keys: list[str] = []
+    values = " ".join(_texts(value, keys))
+    found = {*find_canaries(values, canaries), *find_canaries(" ".join(keys), canaries)}
+    return [document_id for document_id in canaries if document_id in found]
 
 
 def fact_row(copy_id: str, desk_id: str, fact: Fact, created_at: datetime, *, session_id: str | None = None,
@@ -104,3 +220,59 @@ def fact_of(row: FactRow) -> Fact:
     return Fact(fact_id=row.fact_id, kind=row.kind, status=row.status, source=row.source,
                 claims=row.claims, label=label_of(row.readers, row.record_owner),
                 expires_at=row.expires_at)
+
+
+# ---- Knowledge ------------------------------------------------------------------------------------
+
+KNOWLEDGE_READERS = (["owner"], ["public"])
+MAX_KNOWLEDGE_BYTES = 100 * 1024
+MAX_KNOWLEDGE_TITLE = 200
+KNOWLEDGE_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")      # as `desk_data` entries carry refs
+
+
+def _holdable(text: str) -> bool:
+    """Text Postgres can store: valid UTF-8, without NUL."""
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return "\0" not in text
+
+
+def _check_knowledge(item: KnowledgeItem) -> None:
+    if item.label.readers not in KNOWLEDGE_READERS or item.label.record_owner is not None:
+        raise KernelFailure(422, "invalid", "knowledge_label")
+    if not (_holdable(item.text) and _holdable(item.title)) or len(item.text.encode()) > MAX_KNOWLEDGE_BYTES \
+            or len(item.title) > MAX_KNOWLEDGE_TITLE:
+        raise KernelFailure(422, "invalid", "knowledge_text")
+    if not KNOWLEDGE_ID.fullmatch(item.item_id):
+        raise KernelFailure(422, "invalid", "ref")
+
+
+async def store_knowledge(ctx: KernelCtx, desk_id: str, item: KnowledgeItem) -> KnowledgeItem:
+    """The owner's knowledge item on the Desk, in the caller's transaction: added, or replacing the
+    item with its ID (it keeps when it was first added), and ledgered `desk_data` `{part:
+    "knowledge", item_id, owner_only_forced}`. Returns the item as stored.
+
+    Knowledge is untrusted text, and one holding a document's canary in its title or text, even
+    split or disguised (`find_canaries_in`), is stored the owner's alone, whatever label it came
+    with (`owner_only_forced`), so private document text never reaches a visitor as knowledge.
+
+    Checked before anything is written, else 422 `invalid`: the label is the owner's alone or
+    everyone's (`["owner"]` or `["public"]`, with no record owner), the text at most 100 KiB and
+    the title at most 200 characters, both text Postgres can hold, and the ID one the ledger can
+    name (`^[A-Za-z0-9_-]{1,64}$`)."""
+    _check_knowledge(item)
+    forced = bool(find_canaries_in([item.title, item.text], await copy_canaries(ctx)))
+    readers = list(OWNER_ONLY) if forced else list(item.label.readers)
+    insert = pg_insert(KnowledgeRow).values(desk_id=desk_id, item_id=item.item_id, copy_id=ctx.copy_id,
+                                            source=item.source, title=item.title, text=item.text, readers=readers,
+                                            created_at=ctx.clock.now())
+    await ctx.db.execute(insert.on_conflict_do_update(
+        index_elements=[KnowledgeRow.desk_id, KnowledgeRow.item_id],
+        set_={"source": insert.excluded.source, "title": insert.excluded.title, "text": insert.excluded.text,
+              "readers": insert.excluded.readers}))
+    await ledger.append(ctx, copy_id=ctx.copy_id, desk_id=desk_id, event=LedgerEvent(
+        kind="desk_data", origin="kernel",
+        summary={"part": "knowledge", "item_id": item.item_id, "owner_only_forced": forced}))
+    return item.model_copy(update={"label": Label(readers=readers)})
