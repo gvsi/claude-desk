@@ -221,7 +221,7 @@ Owner decisions, 2026-10-29 (spec "First visit and hosting" and "Look and feel")
 **Interfaces:**
 - Produces: board stories `Boards/Today, needs you`, `Boards/Conversation, live`, `Boards/Conversation, agent`, `Boards/First visit`, `Boards/First visit, intro` (`layout: 'fullscreen'`, `parameters.canvas` set to the board).
 
-**Board spec** (from the canvas; each board story's play asserts the rows that apply with `expectComputed`):
+**Board spec** (from the canvas; each board story's play asserts the rows that apply with `expectComputed`, except the receipt row's placement, which it checks by bounding box as the design system code's `receipts_sit_under_their_message` does, plan 03a):
 
 | Element | Expected |
 |---|---|
