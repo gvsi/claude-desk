@@ -198,8 +198,9 @@ class VisitorCtx:
 @contextlib.asynccontextmanager
 async def visitor_context(state: Runtime, token: str | None, slug: str) -> AsyncIterator[VisitorCtx]:
     """The visitor context for `token`, read with `GET /whoami` once; 401 `no_session` unless the kernel says it
-    names an open visitor session on the slug's Desk, which clears the cookie the token came in (Plan 02a,
-    "API fail-closed rules"). Holds one database connection for the request."""
+    names an open visitor session on the slug's Desk. A token that names none is a session gone, and that answer
+    also clears the cookie it came in (Plan 02a, "API fail-closed rules"). Holds one database connection for the
+    request."""
     if not token:
         raise ApiProblem(401, "no_session")
     gone = ApiProblem(401, "no_session", clear_visitor=slug)
