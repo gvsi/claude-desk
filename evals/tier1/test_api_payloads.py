@@ -240,13 +240,73 @@ def code_in_log(text: str, code: str) -> bool:
     return re.search(rf"(?<![0-9A-Za-z]){re.escape(code)}(?![0-9A-Za-z])", text) is not None
 
 
-def is_empty(body: Any) -> bool:
-    """A body holding no records: every list in it empty."""
-    if isinstance(body, list):
-        return not body
-    if isinstance(body, dict):
-        return all(is_empty(value) for value in body.values() if isinstance(value, list | dict))
-    return True
+# What a read naming another copy's records may answer. Each field is checked by its own rule, so a
+# record, a note or an id can't sit in a field a nothing-answer has, or in one it doesn't have.
+_NAME = re.compile(r"[a-z][a-z0-9_]{0,63}")      # an ApiError's error or code: "kernel", "not_found"
+_HEX = re.compile(r"[0-9a-f]{1,64}")
+
+
+def _optional(rule: Any) -> Any:
+    return lambda value: value is None or rule(value)
+
+
+def _is_name(value: Any) -> bool:
+    return isinstance(value, str) and _NAME.fullmatch(value) is not None
+
+
+def _is_int(value: Any) -> bool:
+    return type(value) is int
+
+
+def _is_hex(length: int | None = None) -> Any:
+    return lambda value: (isinstance(value, str) and _HEX.fullmatch(value) is not None
+                          and (length is None or len(value) == length))
+
+
+# The API's error body (`ApiError{error, code, retry_after}`, Plan 02a), with a 404.
+ERROR_BODY = {"error": _is_name, "code": _optional(_is_name), "retry_after": _optional(_is_int)}
+# A success holding nothing, beyond no body, `[]` and `{}`: its fields and each one's rule, per read.
+EMPTY_SUCCESS: dict[str, dict[str, Any]] = {
+    "owner_session": {"items": lambda value: value == [], "state": lambda value: value is None},   # OwnerTranscript
+    "owner_decision": {},                                                                          # Decision
+    "owner_ledger": {"entries": lambda value: value == [], "head": _is_hex(64),                   # LedgerPage
+                     "chain_ok": lambda value: type(value) is bool, "first_bad_seq": _optional(_is_int),
+                     "public_key_hex": _is_hex(64), "key_id": _is_hex()},
+}
+REQUIRED = {"error": "error", "owner_session": "items", "owner_ledger": "entries"}   # the field each shape needs
+_FIELD = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")   # a field named in a problem; any other key isn't shown
+
+
+def empty_read_problems(op: str, status: int, body: Any) -> list[str]:
+    """How an answer to `op` (a `ROUTES` owner read) naming another copy's records holds
+    something: empty when it is a 404 with no body or the API's error body, or a success with no
+    body, an empty list or object, or `op`'s empty shape (`EMPTY_SUCCESS`: a transcript with no
+    items and no state, a ledger page with no entries and only its documented metadata). Any other
+    status, field or value is a problem, a scalar field or body above all; a problem names fields
+    and types, never what they hold."""
+    if status == 404:
+        return [] if body is None else _shape_problems(body, ERROR_BODY, REQUIRED["error"], "the API's error body")
+    if not 200 <= status < 300:
+        return [f"it answered {status}, neither 404 nor a success holding nothing"]
+    if body is None or body == [] or body == {}:
+        return []
+    return _shape_problems(body, EMPTY_SUCCESS[op], REQUIRED.get(op), f"an empty {op} answer")
+
+
+def _shape_problems(body: Any, shape: dict[str, Any], required: str | None, what: str) -> list[str]:
+    if not isinstance(body, dict):
+        held = f"a list of {len(body)}" if isinstance(body, list) else f"a {type(body).__name__}"
+        return [f"its body is {held}, not {what}"]
+    problems = [f"its body has {_field(key)}, which {what} doesn't" for key in body if key not in shape]
+    problems += [f"its {key!r} holds a {type(body[key]).__name__}, which {what} can't"
+                 for key in body if key in shape and not shape[key](body[key])]
+    if required is not None and required not in body:
+        problems.append(f"its body has no {required!r}, which {what} has")
+    return problems
+
+
+def _field(key: str) -> str:
+    return repr(key) if _FIELD.fullmatch(key) else "a field with an unusual name, not shown"
 
 
 # The conversation the payload cases play
@@ -528,8 +588,10 @@ async def plant(client: DeskClient, words: str, reply: str) -> dict[str, str]:
 async def test_owner_cookie_with_another_copys_ids_reads_nothing(
     k: KernelTarget, api: ApiTarget, fake: FakeAnthropic, records,
 ):
-    """Copy A's owner names copy B's session, decision and Desk: each read is 404 or empty, and no
-    answer holds B's ids or the text planted in B's chat. A's own reads answer, so the cookie works."""
+    """Copy A's owner names copy B's session, decision and Desk: each read is a 404 with the API's
+    error body, or a success holding nothing in its operation's shape (`empty_read_problems`), and
+    no answer holds B's ids or the text planted in B's chat. A's own reads answer, so the cookie
+    works."""
     rng = random.Random(1205)
     reply = planted_replies(fake, rng)
     k.travel(START)
@@ -551,15 +613,18 @@ async def test_owner_cookie_with_another_copys_ids_reads_nothing(
         assert (await owner_a.owner_decision(decisions_a[0]))["decision_id"] == decisions_a[0]
         assert (await owner_a.owner_ledger(desk_a["desk_id"]))["entries"]
         answers = {
-            "session": await owner_a.request("owner_session", params={"session_id": b_owns["session id"]}),
-            "decision": await owner_a.request("owner_decision", params={"decision_id": decisions_b[0]}),
-            "ledger": await owner_a.request("owner_ledger", params={"desk_id": desk_b["desk_id"]}),
+            "owner_session": await owner_a.request("owner_session", params={"session_id": b_owns["session id"]}),
+            "owner_decision": await owner_a.request("owner_decision", params={"decision_id": decisions_b[0]}),
+            "owner_ledger": await owner_a.request("owner_ledger", params={"desk_id": desk_b["desk_id"]}),
         }
-    for read, response in answers.items():
-        body = response.json() if response.content else None
-        empty = 200 <= response.status_code < 300 and is_empty(body)
-        assert response.status_code == 404 or empty, (
-            f"A's owner reading B's {read} got {response.status_code}: {response.text[:300]}")
+    for op, response in answers.items():
+        read = op.removeprefix("owner_")
+        try:
+            body = response.json() if response.content else None
+        except ValueError:
+            body = response.text   # not JSON: a scalar body, which no read naming B's records answers
+        problems = empty_read_problems(op, response.status_code, body)
+        assert not problems, f"A's owner reading B's {read} got {response.status_code}: {problems}"
         assert not found_in(response.text, b_owns), f"B's {read} answered with B's {found_in(response.text, b_owns)}"
 
 
