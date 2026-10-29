@@ -9,13 +9,14 @@ This skill is the single source of truth for running plan and code reviews throu
 
 ## The panel
 
-Every plan and code review uses two seats at `xhigh`, dispatched in parallel, without asking the project owner to choose a panel (`AGENTS.md`, **Agents**):
+Every plan and code review uses two seats at `xhigh`, dispatched in parallel, without asking the project owner to choose a panel (`AGENTS.md`, **Agents**), and a third for critical work:
 
 - **Opus 5.5**, native: the Agent tool with `model: opus`, from a Claude Code session running at `xhigh` (native subagents inherit the session's effort). Claude Code never shells out to `claude -p` for this seat.
 - **GPT-6.1 Sol**: `codex exec -C <repo root> -s danger-full-access -c model=gpt-6.1-sol -c model_reasoning_effort=xhigh --json "<prompt>" < /dev/null`.
-- From a Codex session the transports swap: Sol runs natively, and Opus runs as `claude -p --model opus --effort xhigh --output-format json "<prompt>" < /dev/null` from the repo root.
+- **Fable 5.1**, the third seat, for very complex or critical reviews: the kernel, the kernel/API trust boundary, money, verification, the evals gate and the master plan. Native: the Agent tool with `model: fable`, from a Claude Code session running at `xhigh`. When a review touches any of these, run all three seats in parallel.
+- From a Codex session the transports swap: Sol runs natively, and Opus and Fable run as `claude -p --model opus --effort xhigh --output-format json "<prompt>" < /dev/null` (`--model fable` for Fable) from the repo root.
 
-The project owner's explicit choices (models, panel, round cap) override these defaults. If one seat is unavailable (CLI, authentication or usage limit), run the round with the other and report the reduced panel and the reason. The two-seat gate stays incomplete until both seats finish or the project owner waives it.
+The project owner's explicit choices (models, panel, round cap) override these defaults. If one seat is unavailable (CLI, authentication or usage limit), run the round with the others and report the reduced panel and the reason. The gate stays incomplete until every seat it needs finishes or the project owner waives it.
 
 ## Reviewer mutation boundary
 
@@ -43,8 +44,8 @@ Give each seat short locating context, never pasted payloads:
 
 ## Shared loop
 
-1. **Fan out** both seats in parallel, each following its spec.
-2. **Wait** for both under the rules above.
+1. **Fan out** the panel's seats in parallel ("The panel"), each following its spec.
+2. **Wait** for every seat under the rules above.
 3. **Require valid outputs.** Valid statuses are `complete`, `complete_with_concerns`, `needs_context` and `blocked`. A round is complete when every active seat is `complete` or `complete_with_concerns` and has either listed findings or said it has no P1/P2. For `needs_context`, supply the context and rerun that seat only; for `blocked`, clear the blocker or ask the project owner. Malformed output caused by tooling: rerun that seat, same round.
 4. **Consolidate** by root cause, not by wording or `file:line`, and record which seats reported each finding.
 5. **Validate** each finding yourself: re-read the cited refs, run its verification hint, and give a verdict (`VALID — fix now`, `VALID — decision needed`, `VALID — defer` or `INVALID — skip`) with a one-line rationale. Check codebase reality, compatibility constraints and whether the current behaviour is intended. A fix that adds an unreachable path or speculative scope is not `fix now`. Use `decision needed` only when the right fix replaces the core approach or most of the plan; stop and ask the project owner.
@@ -63,7 +64,7 @@ Before collecting issues, seats review the frame of the target:
 - **Invariants:** the six safety invariants in `AGENTS.md`, plus any the spec or plan adds.
 - **Risk boundaries:** the kernel/API trust boundary, sessions and verification, money and mandates, approvals, the ledger, reply checks, MCP pins, data labels, per-visitor copies, retries and restarts.
 - **Shape:** one coherent model, or a pile of special cases.
-- **Constitution:** when `.local/constitution.md` exists, the target is also scored against its rubric (finding type `constitution`). Name the file in every dispatch so both seats read it.
+- **Constitution:** when `.local/constitution.md` exists, the target is also scored against its rubric (finding type `constitution`). Name the file in every dispatch so every seat reads it.
 
 A wrong or incomplete frame is one high-level P1/P2 `abstraction gap`, not a list of its symptoms. When validating, treat repeated findings in one area as a possible abstraction gap.
 

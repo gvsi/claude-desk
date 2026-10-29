@@ -5,7 +5,7 @@ description: Use when opening, updating, merging or watching a pull request in t
 
 # Shipping PRs
 
-Work reaches `main` through a pull request: a branch in a worktree, the two-seat review panel, green CI checks, then a squash merge. `executing-implementation-plans` follows this for each part plan.
+Work reaches `main` through a pull request: a branch in a worktree, the review panel (two seats, three for critical work), green CI checks, then a squash merge. `executing-implementation-plans` follows this for each part plan.
 
 ## Open
 
@@ -16,6 +16,12 @@ Work reaches `main` through a pull request: a branch in a worktree, the two-seat
   - Summary: what changed and why, in a few lines.
   - Tests: each command run and its result, quoted (pass counts, not "tests pass"), plus eval results when the kernel, prompts or policies changed.
   - Review: for a plan's PR, the plan's Review Ledger, any parked P3s, and any task set aside with its branch.
+  - Design evidence, for a design PR (`AGENTS.md` "Design PRs"): the screenshots and recordings, never committed to the PR's branch or uploaded through a browser form (layout and contact sheets: "Design PRs" in `docs/plans/2026-10-28-00-master-plan.md`). In this order:
+    1. Open the PR; its number `<n>` names the captures' folder.
+    2. Push the captures to the orphan `pr-media` branch under `pr-<n>/` only, from a detached worktree of your own, since Git checks a branch out in one worktree at a time and other design PRs push captures too: `git fetch origin pr-media && git worktree add --detach .worktrees/pr-media-<n> origin/pr-media`; copy the captures into its `pr-<n>/`, `git add pr-<n> && git commit`, then `git push origin HEAD:pr-media`. If the push is rejected because another PR pushed first, run `git fetch origin pr-media && git rebase origin/pr-media` in that worktree and push again, until it goes through; never force-push `pr-media`. Then `git worktree remove .worktrees/pr-media-<n>`.
+    3. Edit the description (`gh pr edit <n> --body-file <file>`) to link each capture as `https://github.com/gvsi/claude-desk/blob/pr-media/pr-<n>/<file>?raw=true`.
+
+    A PR that touches `web/` or copy with no visible change says so here instead.
   - The last line: `🤖 Generated with [Claude Code](https://claude.com/claude-code)`.
 - **PR text is written for outside readers** of the public history: neutral and self-contained, with no internal shorthand, no references to private docs or conversations, no local paths, and no secrets or logs that might hold them.
 
@@ -32,10 +38,11 @@ Work reaches `main` through a pull request: a branch in a worktree, the two-seat
 - Merge only when the panel loop has ended with no `VALID — fix now` P1 or P2, no round is running, and every check is green: `gh pr merge <n> --squash`. Never merge with a failing or pending check.
 - The squash commit keeps the PR title as its subject and ends with the `Co-Authored-By` line from `AGENTS.md`; pass `--subject` and `--body` when the default message would drop it.
 - A clean panel is not owner sign-off. Anything on the sign-off list in `AGENTS.md` still needs the project owner's go before merge.
+- A design PR (`AGENTS.md` "Design PRs") also needs the project owner's sign-off in the PR before merge.
 
 ## Close out
 
-1. Remove the worktree once it has no uncommitted work, and delete the branch locally and on the remote: `git worktree remove .worktrees/<name> && git branch -D <branch> && git push origin --delete <branch>`.
+1. Remove the worktree once it has no uncommitted work, and delete the branch locally and on the remote: `git worktree remove .worktrees/<name> && git branch -D <branch> && git push origin --delete <branch>`. Never delete `pr-media`: it holds every design PR's captures.
 2. Fast-forward the main checkout only when it is on `main` and clean: `git pull --ff-only`. Otherwise say you skipped it.
 3. Close issues the PR settles with a comment naming the PR and what was verified. Record anything still owed as a GitHub issue, not only in chat.
 4. Report: the PR link, what merged, the test and check results, the panel's verdict, and any follow-ups.
