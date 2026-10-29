@@ -37,6 +37,7 @@
 - A click, Enter, Space or Down opens a menu with focus on its first item; Up opens it on its last. In the menu, Down and Up move and wrap, Home and End jump to the first and last, and Enter, Space or a click chooses.
 - Escape or Tab closes the menu and gives focus back to its button. A click outside, or focus leaving for anything but the menu and its button, closes it and leaves focus where it went. A second click on the button closes it too.
 - One menu is open at a time: opening Deny's closes Allow's.
+- An item draws the focus ring just inside its edge (a 2 px `accent-blue` outline at -2 px), not 2 px outside as elsewhere, so the ring clears the menu's 4 px padding and the next item; `accent-blue` reads 5.2 on `fill-hover` over `bg-surface`. An open menu's button keeps its hover fill, so the menu reads as its own.
 - Choosing an item calls `onAnswer` with that answer, closes the menu and leaves focus on its button while the answer is sent.
 
 ## Answering
