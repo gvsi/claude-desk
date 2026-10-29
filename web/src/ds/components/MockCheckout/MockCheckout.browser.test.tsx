@@ -6,6 +6,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
+import { userEvent } from 'vitest/browser';
 
 import { rivera } from '../../fixtures/index.ts';
 import { MockCheckout, type MockCheckoutProps } from './MockCheckout.tsx';
@@ -99,18 +100,51 @@ it('an_error_or_a_new_state_ends_the_request', () => {
   expect(pay().hasAttribute('aria-busy')).toBe(false);
 });
 
-it('the_line_takes_focus_when_the_link_closes_here', () => {
-  // Paid after a click on Pay: the button that had focus is gone, so the line that says what
-  // happened takes it, and a screen reader reads it.
+/** The checkout's result region: polite, atomic, and there in every state. */
+function resultRegion(container: HTMLElement): HTMLElement {
+  const region = container.querySelector<HTMLElement>('.cd-checkout__card [role="status"]');
+  if (!region) throw new Error('no result region');
+  expect(region.getAttribute('aria-live')).toBe('polite');
+  expect(region.getAttribute('aria-atomic')).toBe('true');
+  return region;
+}
+
+it('the_title_takes_focus_when_the_link_closes_here', () => {
+  // Paid after a click on Pay: the button that had focus is gone, so the card's title takes it,
+  // and the result region, there and empty while the link was open, announces the line once.
   const paying = render();
+  const before = resultRegion(paying.container);
+  expect(before.textContent).toBe('');
   const pay = button(paying.container, `Pay ${AMOUNT}`);
   pay.focus();
   act(() => pay.click());
   paying.update({ state: 'paid' });
-  const line = paying.container.querySelector<HTMLElement>('.cd-checkout__state');
-  expect(document.activeElement).toBe(line);
-  expect(line?.getAttribute('tabindex')).toBe('-1');
-  expect(line?.textContent).toBe('Paid. Go back to the chat to see it there.');
+  const title = paying.container.querySelector<HTMLElement>('h1');
+  expect(document.activeElement).toBe(title);
+  expect(title?.getAttribute('tabindex')).toBe('-1');
+  const region = resultRegion(paying.container);
+  expect(region).toBe(before);
+  expect(region.textContent).toBe('Paid. Go back to the chat to see it there.');
+});
+
+it('a_later_result_is_announced_and_focus_stays_put', () => {
+  // Still being confirmed, then paid, while the visitor is elsewhere on the page: the same
+  // region announces the new line, and focus stays where it was.
+  const elsewhere = document.createElement('button');
+  elsewhere.textContent = 'Elsewhere';
+  document.body.append(elsewhere);
+  try {
+    const { container, update } = render({ state: 'unknown' });
+    const region = resultRegion(container);
+    expect(region.textContent).toBe('This payment is still being confirmed. The chat will show the result.');
+    elsewhere.focus();
+    update({ state: 'paid' });
+    expect(resultRegion(container)).toBe(region);
+    expect(region.textContent).toBe('Paid. Go back to the chat to see it there.');
+    expect(document.activeElement).toBe(elsewhere);
+  } finally {
+    elsewhere.remove();
+  }
 });
 
 it('a_page_that_opens_closed_leaves_focus_alone', () => {
@@ -134,20 +168,84 @@ it('focus_elsewhere_on_the_page_stays_there', () => {
   }
 });
 
-it('the_test_card_needs_no_name', () => {
-  // Without a name from the screen, or with a blank one, the test card carries a test name, in
-  // the page's language; a name the screen gives is shown as written, marked as someone's words.
+it('the_name_comes_only_from_the_link', () => {
+  // A link from a verified session carries the customer's name: it shows read-only, like the
+  // other test card values, marked as someone's words. Without one, or with a blank one, the name
+  // is an empty field to type in, in the page's language.
   const nameOn = (container: HTMLElement) => container.querySelector('.cd-checkout__field--name .cd-checkout__value');
-  const page = render();
-  expect(nameOn(page.container)?.textContent).toBe('Test customer');
-  expect(nameOn(page.container)?.hasAttribute('data-copy')).toBe(false);
-  page.update({ language: 'es' });
-  expect(nameOn(page.container)?.textContent).toBe('Cliente de prueba');
-  page.update({ cardName: '  ' });
-  expect(nameOn(page.container)?.textContent).toBe('Test customer');
-  page.update({ cardName: rivera.people.dana.name });
-  expect(nameOn(page.container)?.textContent).toBe(rivera.people.dana.name);
+  const page = render({ customerName: 'Dana W.' });
+  expect(nameOn(page.container)?.textContent).toBe('Dana W.');
   expect(nameOn(page.container)?.getAttribute('data-copy')).toBe('user');
+  expect(page.container.querySelector('input')).toBeNull();
+  for (const customerName of [undefined, '', '  ']) {
+    page.update({ customerName });
+    const field = page.container.querySelector('input');
+    expect(field?.value).toBe('');
+    expect(field?.readOnly).toBe(false);
+    expect(field?.labels?.[0]?.textContent).toBe('Name on card');
+    expect(nameOn(page.container)).toBeNull();
+  }
+  page.update({ language: 'es', customerName: undefined });
+  expect(page.container.querySelector('input')?.labels?.[0]?.textContent).toBe('Nombre en la tarjeta');
+});
+
+it('a_typed_name_reaches_no_callback', async () => {
+  // The name typed stays in the field: Enter submits nothing, and Cancel says only that it was
+  // pressed. The page has no form to send it with.
+  const { container, onPay, onCancel } = render();
+  const field = container.querySelector('input');
+  if (!field) throw new Error('no name field');
+  expect(field.form).toBeNull();
+  await act(async () => {
+    await userEvent.type(field, 'Ana López{Enter}');
+  });
+  expect(field.value).toBe('Ana López');
+  expect(onPay).not.toHaveBeenCalled();
+  expect(onCancel).not.toHaveBeenCalled();
+  act(() => button(container, 'Cancel payment').click());
+  expect(onCancel).toHaveBeenCalledTimes(1);
+  expect(onCancel.mock.calls[0]).toEqual([]);
+});
+
+it('clearing_an_old_error_keeps_a_retry_locked', () => {
+  const { container, onPay, onCancel, update } = render();
+  const pay = () => button(container, `Pay ${AMOUNT}`);
+  const cancel = () => button(container, 'Cancel payment');
+  act(() => pay().click());
+  update({ error: true });
+  // A retry, then the screen clears the old error as the retry starts: the retry is still in
+  // flight, so the buttons stay locked and nothing more is sent.
+  act(() => pay().click());
+  update({ error: false });
+  expect(pay().getAttribute('aria-busy')).toBe('true');
+  act(() => {
+    pay().click();
+    cancel().click();
+  });
+  expect(onPay).toHaveBeenCalledTimes(2);
+  expect(onCancel).not.toHaveBeenCalled();
+  // The retry fails too: the buttons are back.
+  update({ error: true });
+  expect(pay().hasAttribute('aria-busy')).toBe(false);
+  expect(cancel().hasAttribute('aria-disabled')).toBe(false);
+});
+
+it('a_retried_cancel_keeps_its_spinner', () => {
+  const { container, onPay, onCancel, update } = render();
+  const pay = () => button(container, `Pay ${AMOUNT}`);
+  const cancel = () => button(container, 'Cancel payment');
+  act(() => pay().click());
+  update({ error: true });
+  // The visitor cancels instead, and the screen clears the old error and says it is busy: Cancel
+  // is the one in flight, so it spins and Pay waits.
+  act(() => cancel().click());
+  update({ error: false, busy: true });
+  expect(cancel().getAttribute('aria-busy')).toBe('true');
+  expect(cancel().querySelector('.cd-button__spinner')).not.toBeNull();
+  expect(pay().classList.contains('cd-button--waiting')).toBe(true);
+  expect(pay().querySelector('.cd-button__spinner')).toBeNull();
+  expect(onPay).toHaveBeenCalledTimes(1);
+  expect(onCancel).toHaveBeenCalledTimes(1);
 });
 
 it('a_state_this_build_does_not_know_can_not_be_paid', () => {

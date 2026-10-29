@@ -16,6 +16,12 @@ const link = rivera.paymentLinks.issued;
 /** The page's amount string, as the screen makes it from the link's `amount_cents` (2000). */
 const AMOUNT = '$20.00';
 
+/**
+ * The kernel's `customer_name` for Dana's verified session: first name and last initial. A link
+ * carries it only while it is open, so only the open link's stories pass it.
+ */
+const CUSTOMER_NAME = 'Dana W.';
+
 const meta = {
   title: 'Payments/MockCheckout',
   component: MockCheckout,
@@ -25,7 +31,6 @@ const meta = {
     amount: AMOUNT,
     state: link.state,
     language: link.language,
-    cardName: rivera.people.dana.name,
     onPay: fn(),
     onCancel: fn(),
   },
@@ -122,6 +127,7 @@ const CARD_WORDS = {
 } as const;
 
 export const Issued: Story = {
+  args: { customerName: CUSTOMER_NAME },
   play: async ({ args, canvas, canvasElement, userEvent }) => {
     const { page, disclosure, card, footer, merchant, title, footnote } = await expectChrome(canvasElement, 'en');
     const words = CARD_WORDS.en;
@@ -153,8 +159,8 @@ export const Issued: Story = {
     expectComputed(once, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
     await expect(box(once).top - box(amount).bottom).toBe(2);
 
-    // The test card, filled in and locked: it is shown, never asked for. Nothing on the page takes
-    // input, so it collects nothing.
+    // The test card, filled in and locked: it is shown, never asked for. With the customer's name
+    // from the link, nothing on the page takes input at all.
     await expect(canvasElement.querySelector('form, input, textarea, select, [contenteditable]')).toBeNull();
     const information = canvas.getByRole('group', { name: words.information });
     const label = within(information).getByText(words.information);
@@ -191,7 +197,7 @@ export const Issued: Story = {
     const nameField = name.querySelector<HTMLElement>('.cd-checkout__field');
     if (!nameField) throw new globalThis.Error('no name field');
     await expect(box(name).top - box(fields).bottom).toBe(14);
-    await expect(nameField.textContent).toBe(rivera.people.dana.name);
+    await expect(nameField.textContent).toBe(CUSTOMER_NAME);
     expectComputed(nameField, { height: '40px', borderTopWidth: '1px', borderTopColor: 'rgba(250, 249, 245, 0.22)', borderTopLeftRadius: '8px' });
     const hint = within(name).getByText(words.hint);
     expectComputed(hint, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' });
@@ -241,7 +247,7 @@ const ENGLISH_CHROME = [
 ];
 
 export const IssuedEs: Story = {
-  args: { language: 'es' },
+  args: { language: 'es', customerName: CUSTOMER_NAME },
   parameters: {
     canvasNote: `${BOARD}'s "Issued, Spanish". The title is the link's own words, which stay as the owner wrote them; the board's Spanish title is a stand-in.`,
   },
@@ -270,8 +276,47 @@ export const IssuedEs: Story = {
   },
 };
 
+export const IssuedUnverified: Story = {
+  parameters: {
+    canvasNote: `${BOARD}'s "Issued" for a link from a session that hasn't verified, which the board doesn't draw: the link carries no customer's name, so "Name on card" is an empty field to type in, in the field outline every editable field has.`,
+  },
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
+    await expectChrome(canvasElement, 'en');
+    // The name is the one thing to type, in a labelled field with no form around it.
+    await expect(canvasElement.querySelector('form, textarea, select, [contenteditable]')).toBeNull();
+    const field = canvas.getByRole('textbox', { name: 'Name on card' });
+    await expect(canvasElement.querySelectorAll('input')).toHaveLength(1);
+    await expect(field).toHaveValue('');
+    await expect(field).not.toHaveAttribute('readonly');
+    await expect(field).toHaveAttribute('autocomplete', 'off');
+    const label = canvasElement.querySelector(`label[for="${field.id}"]`) as HTMLElement;
+    expectComputed(label, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
+    await expect(box(field).top - box(label).bottom).toBe(6);
+    expectComputed(field, {
+      height: '40px',
+      borderTopWidth: '1px',
+      borderTopColor: 'rgba(250, 249, 245, 0.36)',
+      borderTopLeftRadius: '8px',
+      fontSize: '14px',
+      color: 'rgba(250, 249, 245, 0.92)',
+      backgroundColor: 'rgba(0, 0, 0, 0)',
+    });
+    const hint = canvas.getByText(CARD_WORDS.en.hint);
+    await expect(box(hint).top - box(field).bottom).toBe(6);
+
+    // typed_name_stays_on_the_page: Enter sends nothing, and Pay says only that it was pressed.
+    await userEvent.type(field, 'Ana López{Enter}');
+    await expect(field).toHaveValue('Ana López');
+    await expect(args.onPay).not.toHaveBeenCalled();
+    await userEvent.click(canvas.getByRole('button', { name: CARD_WORDS.en.pay }));
+    await expect(args.onPay).toHaveBeenCalledTimes(1);
+    await expect(args.onPay).toHaveBeenCalledWith();
+    await expect(args.onCancel).not.toHaveBeenCalled();
+  },
+};
+
 export const Paying: Story = {
-  args: { busy: true },
+  args: { busy: true, customerName: CUSTOMER_NAME },
   parameters: {
     canvasNote: `${BOARD}'s "Paying": while the request is in flight only the pressed button spins, Pay when the screen says it is busy and nothing was pressed here, and Cancel waits in its busy colors.`,
   },
@@ -334,15 +379,16 @@ async function expectFinal(root: HTMLElement, line: string, dot: 'handled' | 'he
 export const Paid: Story = {
   args: { state: 'paid' },
   parameters: {
-    canvasNote: `${BOARD}'s "Paid": the handled dot and the sage check that draws once beside the line.`,
+    canvasNote: `${BOARD}'s "Paid": the handled dot and the check that draws once beside the line, in the line's ink where the board draws it sage, since status color appears only as a dot.`,
   },
   play: async ({ canvasElement }) => {
     const { state } = await expectFinal(canvasElement, 'Paid. Go back to the chat to see it there.', 'handled');
-    // The check is decorative, sage and drawn once: the words already say it was paid.
+    // The check is decorative and drawn once, in the line's own ink: status color stays on the
+    // dot, and the words already say it was paid.
     const check = state.querySelector('svg');
     if (!check) throw new globalThis.Error('no check on the paid line');
     await expect(check).toHaveAttribute('aria-hidden', 'true');
-    expectComputed(check, { color: 'rgb(111, 168, 89)', width: '14px' });
+    expectComputed(check, { color: 'rgba(250, 249, 245, 0.92)', width: '14px' });
     const stroke = check.querySelector('path') as SVGPathElement;
     expectComputed(stroke, { animationName: /draw/, animationIterationCount: '1' });
   },
@@ -393,7 +439,7 @@ export const Unknown: Story = {
 };
 
 export const Error: Story = {
-  args: { error: true },
+  args: { error: true, customerName: CUSTOMER_NAME },
   parameters: {
     canvasNote: `${BOARD}'s "Error after paying": the error line under the buttons, which are back at rest, since the request is over.`,
   },

@@ -1,8 +1,9 @@
 /* MockCheckout: one centered column, at most size-checkout wide: the AI disclosure, the card and
    the concept footer, 14 px apart. In the card, 14 px apart: the merchant with the "Test mode"
    badge, the title, then the amount, the locked test card and the two buttons while the link is
-   open, or the state's line once it isn't, and the test-payment footnote last. Nothing here takes
-   input. The paid check draws once at motion-base; nothing moves under reduced motion. */
+   open, or the result region's line once it isn't, and the test-payment footnote last. The only
+   input is the name, when the link carries none, and it goes nowhere. The paid check draws once at
+   motion-base; nothing moves under reduced motion. */
 
 .cd-checkout {
   display: flex;
@@ -113,6 +114,22 @@
   border-radius: var(--radius-control);
 }
 
+/* The name to type when the link carries none: the field look every editable field has, the
+   page's own ground in the field outline (3:1 against it), as tall as the shown values. */
+.cd-checkout__name-field {
+  display: block;
+  box-sizing: content-box;
+  width: calc(100% - 2 * var(--space-12) - 2px);
+  height: var(--size-control-main);
+  min-width: 0;
+  margin: 0;
+  padding: 0 var(--space-12);
+  border: 1px solid var(--line-field);
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-primary);
+}
+
 .cd-checkout__value {
   min-width: 0;
   margin: 0;
@@ -144,8 +161,13 @@
   gap: var(--space-8);
 }
 
-/* A final state's line: its dot, then the words, wrapping beside the dot. Paid adds the sage check
-   before the words. The dot and the check sit on the middle of the first line. */
+/* A final state's line, inside the result region: its dot, then the words, wrapping beside the
+   dot. Paid adds the check before the words. The dot and the check sit on the middle of the first
+   line. While the link is open the region is visually hidden, empty and out of the flow. */
+.cd-checkout__result {
+  min-width: 0;
+}
+
 .cd-checkout__state {
   display: flex;
   align-items: flex-start;
@@ -170,10 +192,7 @@
   height: 1lh;
 }
 
-/* The paid check, drawn once. */
-.cd-checkout__check {
-  color: var(--status-handled);
-}
+/* The paid check, drawn once in the line's own ink: status color stays on the dot. */
 
 .cd-checkout__check path {
   stroke-dasharray: 24;

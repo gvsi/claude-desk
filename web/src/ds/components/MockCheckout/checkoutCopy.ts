@@ -2,7 +2,8 @@
  * The mock checkout's own words, in the two languages a visitor reads. They are fixed at build
  * time and carry no amount, date or promise: the amount is the page's string, put into "Pay" as
  * given, and the title is the link's own. The test card is fixed too, so its values are copy here,
- * never props: the page shows a card, it never asks for one.
+ * never props: the page shows a card, it never asks for one. Only the name can be typed, when the
+ * link carries none, and it stays on the page.
  */
 import type { PaymentLinkState } from '../../../api/contracts.ts';
 import type { CopyLanguage } from '../Notice/errorCopy.ts';
@@ -24,10 +25,8 @@ export interface CheckoutCopy {
   cardNumber: string;
   expiry: string;
   securityCode: string;
-  /** The name group's label. */
+  /** The name's label, over the customer's name or the field to type one in. */
   nameOnCard: string;
-  /** The name on the card when the screen gives none. */
-  testName: string;
   /** Under the name: why the card needs nothing typed. */
   filledIn: string;
   /** The primary button, with the page's amount string. */
@@ -59,7 +58,6 @@ export const CHECKOUT_COPY = {
     expiry: 'Expiry date',
     securityCode: 'Security code',
     nameOnCard: 'Name on card',
-    testName: 'Test customer',
     filledIn: 'Test card, filled in for you',
     pay: (amount) => `Pay ${amount}`,
     cancel: 'Cancel payment',
@@ -82,7 +80,6 @@ export const CHECKOUT_COPY = {
     expiry: 'Fecha de vencimiento',
     securityCode: 'Código de seguridad',
     nameOnCard: 'Nombre en la tarjeta',
-    testName: 'Cliente de prueba',
     filledIn: 'Tarjeta de prueba, ya rellenada',
     pay: (amount) => `Pagar ${amount}`,
     cancel: 'Cancelar pago',

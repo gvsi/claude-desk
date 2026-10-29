@@ -26,6 +26,16 @@ function isFinal(state: string): state is FinalPaymentState {
   return Object.hasOwn(FINAL_DOT, state);
 }
 
+/** The line under the name: the test card needs nothing typed but the name, if that. */
+function Hint({ text }: { text: string }) {
+  return (
+    <p className="cd-checkout__hint cd-type-caption">
+      <Icon name="lock" size={14} />
+      {text}
+    </p>
+  );
+}
+
 /** The button whose request is in flight. */
 type Pressed = 'pay' | 'cancel';
 
@@ -43,24 +53,25 @@ export interface MockCheckoutProps {
   /** The link's language (`PaymentLinkView.language`). */
   language: CopyLanguage;
   /**
-   * The name on the test card. The page opens for anyone who holds the link, so pass a name only
-   * when the link's own view carries one; without it the card reads "Test customer".
+   * The customer's name, the kernel's `PaymentLinkView.customer_name` for a link from a verified
+   * session, shown read-only as the name on the test card. Without it the name is an empty field;
+   * what is typed there stays in it and never leaves the page.
    */
-  cardName?: string;
+  customerName?: string;
   /** A request to pay or cancel is in flight. The pressed button spins; Pay does when none was pressed here. */
   busy?: boolean;
   /** The last request to pay or cancel failed: shows a line that says to reload. */
   error?: boolean;
-  /** "Pay {amount}": complete the test payment. Called once until the state changes or an error shows. */
+  /** "Pay {amount}": complete the test payment. Called once until the state changes or a new error shows. */
   onPay: () => void;
-  /** "Cancel payment". Called once until the state changes or an error shows. */
+  /** "Cancel payment". Called once until the state changes or a new error shows. */
   onCancel: () => void;
 }
 
 /**
  * The page a visitor opens from a payment link card: a test checkout in the design system's own
- * look. It shows a test card filled in and locked, so it collects nothing, and says in every state
- * that this is a test payment and that the page is part of a chat with an AI.
+ * look. It shows a test card filled in and locked, sends nothing typed on it anywhere, and says in
+ * every state that this is a test payment and that the page is part of a chat with an AI.
  */
 export function MockCheckout({
   merchant,
@@ -69,7 +80,7 @@ export function MockCheckout({
   state,
   cancelReason,
   language,
-  cardName,
+  customerName,
   busy = false,
   error = false,
   onPay,
@@ -80,15 +91,28 @@ export function MockCheckout({
   const titleId = `${id}-title`;
   const cardLabelId = `${id}-card`;
   const nameLabelId = `${id}-name`;
+  const nameFieldId = `${id}-name-field`;
 
-  // The button pressed here, until the link's state changes or an error shows. The ref is set in
-  // the click itself, so a second click that lands before the screen re-renders sends nothing.
+  // The button pressed here, until the request ends: the link's state changes, or a new error
+  // shows. Clearing an old error, as a screen does when a retry starts, ends nothing. The ref is
+  // set in the click itself, so a second click that lands before the screen re-renders sends
+  // nothing.
   const [pressed, setPressed] = useState<Pressed | null>(null);
   const sent = useRef(false);
-  useEffect(() => {
+  const release = () => {
     sent.current = false;
     setPressed(null);
-  }, [state, error]);
+  };
+  useEffect(release, [state]);
+  const hadError = useRef(error);
+  useEffect(() => {
+    const failed = error && !hadError.current;
+    hadError.current = error;
+    if (failed) release();
+  }, [error]);
+
+  // A name typed on the page stays in this field: it is never passed to a callback.
+  const [typedName, setTypedName] = useState('');
 
   const press = (which: Pressed) => {
     if (sent.current || busy) return;
@@ -104,15 +128,16 @@ export function MockCheckout({
   const inFlight: Pressed | null = pressed ?? (busy ? 'pay' : null);
   // A state this build doesn't know reads as still being confirmed: the chat has the result.
   const final: FinalPaymentState = isFinal(state) ? state : 'unknown';
-  // A blank name is no name: the test card then carries its own.
-  const nameOnCard = cardName?.trim();
+  // A blank name is no name: the card then asks for one.
+  const nameOnCard = customerName?.trim();
   const finalLine = final === 'cancelled' && cancelReason === 'rules_changed' ? copy.cancelledRulesChanged : copy.final[final];
 
-  // When the link closes while the page is open, the buttons go with it. If focus was on one of
-  // them, it would fall to the page, so the line that says what happened takes it instead and is
-  // read out. Focus anywhere else on the page stays where it is.
+  // When the link closes while the page is open, the buttons go with it. If focus was in the
+  // card, it would fall to the page, so the card's title takes it instead; the result region
+  // reads the new line out, so focus doesn't read it a second time. Focus anywhere else on the
+  // page stays where it is.
   const rootRef = useRef<HTMLDivElement>(null);
-  const lineRef = useRef<HTMLParagraphElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
   const wasOpen = useRef(open);
   useEffect(() => {
     const closedHere = wasOpen.current && !open;
@@ -120,7 +145,7 @@ export function MockCheckout({
     const page = rootRef.current;
     if (!closedHere || !page) return;
     const active = page.ownerDocument.activeElement;
-    if (active === null || active === page.ownerDocument.body || page.contains(active)) lineRef.current?.focus();
+    if (active === null || active === page.ownerDocument.body || page.contains(active)) titleRef.current?.focus();
   }, [open]);
 
   return (
@@ -136,7 +161,7 @@ export function MockCheckout({
             {copy.testMode}
           </Pill>
         </div>
-        <h1 id={titleId} className="cd-checkout__title cd-type-section" data-copy="user">
+        <h1 ref={titleRef} id={titleId} className="cd-checkout__title cd-type-section" data-copy="user" tabIndex={-1}>
           {title}
         </h1>
         {open ? (
@@ -165,21 +190,37 @@ export function MockCheckout({
                 </div>
               </dl>
             </div>
-            <div className="cd-checkout__group" role="group" aria-labelledby={nameLabelId}>
-              <p id={nameLabelId} className="cd-checkout__label cd-type-meta">
-                {copy.nameOnCard}
-              </p>
-              {/* The group's label names this one value, so it needs no name of its own. */}
-              <p className="cd-checkout__field cd-checkout__field--name cd-type-body">
-                <span className="cd-checkout__value" data-copy={nameOnCard ? 'user' : undefined}>
-                  {nameOnCard || copy.testName}
-                </span>
-              </p>
-              <p className="cd-checkout__hint cd-type-caption">
-                <Icon name="lock" size={14} />
-                {copy.filledIn}
-              </p>
-            </div>
+            {nameOnCard ? (
+              <div className="cd-checkout__group" role="group" aria-labelledby={nameLabelId}>
+                <p id={nameLabelId} className="cd-checkout__label cd-type-meta">
+                  {copy.nameOnCard}
+                </p>
+                {/* The group's label names this one value, so it needs no name of its own. */}
+                <p className="cd-checkout__field cd-checkout__field--name cd-type-body">
+                  <span className="cd-checkout__value" data-copy="user">
+                    {nameOnCard}
+                  </span>
+                </p>
+                <Hint text={copy.filledIn} />
+              </div>
+            ) : (
+              <div className="cd-checkout__group">
+                <label htmlFor={nameFieldId} className="cd-checkout__label cd-type-meta">
+                  {copy.nameOnCard}
+                </label>
+                {/* No form around it and no callback takes it: what is typed stays here. */}
+                <input
+                  id={nameFieldId}
+                  className="cd-checkout__name-field cd-type-body"
+                  type="text"
+                  autoComplete="off"
+                  spellCheck={false}
+                  value={typedName}
+                  onChange={(event) => setTypedName(event.target.value)}
+                />
+                <Hint text={copy.filledIn} />
+              </div>
+            )}
             <div className="cd-checkout__actions">
               <Button
                 variant="primary"
@@ -201,21 +242,32 @@ export function MockCheckout({
               </Button>
             </div>
           </>
-        ) : (
-          <p ref={lineRef} className="cd-checkout__state cd-type-body" tabIndex={-1}>
-            <span className="cd-checkout__state-mark">
-              <StatusDot tone={FINAL_DOT[final]} />
-            </span>
-            <span className="cd-checkout__state-words">
-              {final === 'paid' ? (
-                <span className="cd-checkout__state-mark">
-                  <Icon name="check" size={14} className="cd-checkout__check" />
-                </span>
-              ) : null}
-              {finalLine}
-            </span>
-          </p>
-        )}
+        ) : null}
+        {/* The result region is there in every state, so a new line is read out whenever it
+            arrives: issued to paid, or still being confirmed to paid. While the link is open it
+            is empty and takes no room. */}
+        <div
+          className={open ? 'cd-sr-only' : 'cd-checkout__result'}
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          {open ? null : (
+            <p className="cd-checkout__state cd-type-body">
+              <span className="cd-checkout__state-mark">
+                <StatusDot tone={FINAL_DOT[final]} />
+              </span>
+              <span className="cd-checkout__state-words">
+                {final === 'paid' ? (
+                  <span className="cd-checkout__state-mark">
+                    <Icon name="check" size={14} className="cd-checkout__check" />
+                  </span>
+                ) : null}
+                {finalLine}
+              </span>
+            </p>
+          )}
+        </div>
         {error ? <Notice tone="error">{copy.error}</Notice> : null}
         <p className="cd-checkout__footnote cd-type-caption">{copy.testPayment}</p>
       </section>
