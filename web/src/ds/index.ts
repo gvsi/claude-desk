@@ -40,6 +40,8 @@ export {
   type SegmentedControlProps,
   type SegmentedOption,
 } from './components/SegmentedControl/SegmentedControl.tsx';
+export { Composer, type ComposerProps, type ComposerVariant } from './components/Composer/Composer.tsx';
+export { SuggestionChips, type SuggestionChipsProps } from './components/SuggestionChips/SuggestionChips.tsx';
 
 // Layout
 export { Card, type CardProps } from './components/Card/Card.tsx';
@@ -78,6 +80,10 @@ export {
   type ReceiptView,
 } from './components/MarginReceipt/receiptTone.ts';
 export { MarginNote, type MarginNoteProps } from './components/MarginNote/MarginNote.tsx';
+
+// Owner decisions
+export { ApprovalCard, type ApprovalCardProps } from './components/ApprovalCard/ApprovalCard.tsx';
+export { TakeOverBar, type TakeOverBarProps } from './components/TakeOverBar/TakeOverBar.tsx';
 
 // Safety
 export { FullTrace, type FullTraceProps } from './components/FullTrace/FullTrace.tsx';

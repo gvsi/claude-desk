@@ -1,0 +1,113 @@
+/* Composer: a raised surface at the composer radius, an inset hairline and the composer's shadow.
+   The whole box takes the focus ring while its text box has focus. */
+
+.cd-composer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+.cd-composer__box {
+  box-sizing: border-box;
+  min-width: 0;
+  border-radius: var(--radius-composer);
+  background: var(--bg-surface);
+  box-shadow:
+    inset 0 0 0 1px var(--line-hairline),
+    var(--shadow-composer);
+}
+
+/* The canvas's 55% ring is 2.9:1, so the composer takes the full focus ring instead. */
+.cd-composer__box:focus-within {
+  outline: 2px solid var(--ring-composer);
+  outline-offset: 2px;
+}
+
+/* Owner: the text on top, the controls in a row under it. */
+.cd-composer__box--stacked {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  padding: var(--space-14) var(--space-10) var(--space-10) var(--space-16);
+}
+
+/* Visitor and whisper: one row, the send button kept at the bottom as the text grows. */
+.cd-composer__box--inline {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-8);
+  padding: var(--space-10) var(--space-10) var(--space-10) var(--space-16);
+}
+
+.cd-composer__input {
+  display: block;
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  max-height: 6lh;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  resize: none;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+
+/* The box draws the ring for the text box. */
+.cd-composer__input:focus-visible {
+  outline: none;
+}
+
+.cd-composer__input:disabled {
+  color: var(--text-tertiary);
+  cursor: default;
+}
+
+/* One line of text sits centered against the 32 px buttons in the row. */
+.cd-composer__box--inline .cd-composer__input {
+  margin-block: calc((var(--size-control) - 1lh) / 2);
+}
+
+.cd-composer__tools {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+/* The first ghost control lines its glyph up with the text above it. */
+.cd-composer__tools > .cd-icon-button:first-child {
+  margin-left: calc(-1 * var(--space-6));
+}
+
+.cd-composer__helper {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-secondary);
+}
+
+.cd-composer__tools > .cd-icon-button:first-child + .cd-composer__helper {
+  padding-left: var(--space-4);
+}
+
+.cd-composer__counter {
+  flex: none;
+  padding: 0 var(--space-4);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Under a single-row composer: the helper in line with the text, the counter at the right. */
+.cd-composer__meta {
+  display: flex;
+  gap: var(--space-16);
+  min-width: 0;
+  padding-left: var(--space-16);
+}
+
+.cd-composer__meta > .cd-composer__counter {
+  margin-left: auto;
+}
