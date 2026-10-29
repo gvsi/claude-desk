@@ -4,8 +4,8 @@ The models below are the master plan's "Shared contracts v2" block, verbatim and
 order (each class is defined before it is used). Field comments are part of the contract.
 """
 
-from datetime import time
-from typing import Annotated, Literal, Self
+from datetime import datetime, time
+from typing import Annotated, Literal, Self, get_args
 
 from pydantic import AwareDatetime, BaseModel, Field, StrictInt, StringConstraints, model_validator
 
@@ -43,7 +43,7 @@ class CopyCreated(BaseModel):             # POST /copies; the owner token is the
     owner_token: str                      # 256-bit CSPRNG, stored hashed, sent as X-Owner-Session
 
 # A signed timestamp: RFC 3339 UTC with microseconds and "Z"; signatures cover the literal string
-SignedTime = Annotated[str, StringConstraints(pattern=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$")]
+SignedTime = Annotated[str, StringConstraints(pattern=r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z$")]
 
 class AgentAuth(BaseModel):               # headers X-Agent-Key-Id, X-Agent-Ts, X-Agent-Nonce, X-Agent-Sig; verified by the kernel
     agent_key_id: str
@@ -61,6 +61,26 @@ class Claim(BaseModel):
     key: str                              # "total", "starts_at", "title", "contact"; never "hours" (DeskSeed.hours)
     kind: Literal["money", "percent_bp", "datetime", "text", "ref"]
     value: StrictInt | str                # money in USD cents; percent in bp; datetime ISO 8601 with offset
+
+    @model_validator(mode="after")
+    def _value_matches_kind(self) -> Self:
+        if self.key == "hours":
+            raise ValueError('a claim is never "hours"; hours live in DeskSeed.hours')
+        if self.kind in ("money", "percent_bp"):
+            if not isinstance(self.value, int):
+                raise ValueError(f"a {self.kind} claim is an integer")
+            if self.kind == "percent_bp" and not 0 <= self.value <= 10_000:
+                raise ValueError("a percent_bp claim is 0-10000 basis points")
+        elif not isinstance(self.value, str):
+            raise ValueError(f"a {self.kind} claim is a string")
+        elif self.kind == "datetime":
+            try:
+                parsed = datetime.fromisoformat(self.value)
+            except ValueError:
+                raise ValueError("a datetime claim is ISO 8601") from None
+            if parsed.tzinfo is None:
+                raise ValueError("a datetime claim carries its offset")
+        return self
 
 class InboxNotice(BaseModel):             # code-free; safe for SSE and app.*, never for Claude's context
     entry_id: str
@@ -102,9 +122,17 @@ class BusinessSeed(BaseModel):
     existing_business_id: str | None = None   # add a Desk to a business in this copy
 
 class HoursWindow(BaseModel):
-    days: list[Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]]
+    days: list[Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]] = Field(min_length=1)
     start: time
     end: time                             # exclusive, after start, in the business's time zone; past midnight = two windows
+
+    @model_validator(mode="after")
+    def _one_local_span(self) -> Self:
+        if self.start.tzinfo is not None or self.end.tzinfo is not None:
+            raise ValueError("hours are local to the business's time zone, without an offset")
+        if self.end <= self.start:
+            raise ValueError("end is after start; a window past midnight is two windows")
+        return self
 
 class DeskSeed(BaseModel):
     name: str                             # "Main line"
@@ -207,6 +235,8 @@ class Decision(BaseModel):
     signature: str                        # Ed25519 over b"desk-decision-v1\0" + sha256(canonical_json {decision_id, session_id, state, visitor_plain, ledger_seq})
 
 # Rules
+_RULE_TARGETS = frozenset(get_args(ToolName)) | {f"effect:{effect}" for effect in get_args(Effect)}
+
 class RuleCard(BaseModel):                # Claude drafts, code compiles, the owner reads
     card_id: str
     applies_to: str                       # a tool ("native.book") or an effect ("effect:charge")
@@ -214,8 +244,8 @@ class RuleCard(BaseModel):                # Claude drafts, code compiles, the ow
     who: Literal["anyone", "verified", "record_owner", "person", "agent"]
     person_id: str | None = None          # required iff who == "person"
     agent_key_id: str | None = None       # required iff who == "agent"
-    max_amount_cents: StrictInt | None = None   # auto only; required and <= AUTO_MONEY_HARD_CAP_CENTS when applies_to is in MONEY_TOOLS or effect:charge|pay_out
-    max_discount_bp: StrictInt = 0        # auto only; a larger requested discount asks
+    max_amount_cents: StrictInt | None = Field(None, ge=0)   # auto only; required and <= AUTO_MONEY_HARD_CAP_CENTS when applies_to is in MONEY_TOOLS or effect:charge|pay_out
+    max_discount_bp: StrictInt = Field(0, ge=0, le=10_000)   # auto only; a larger requested discount asks
     hours: HoursWindow | None = None      # auto only
     review: bool = False                  # auto only: gate on the reviewer, thresholds from review_thresholds.py
     is_default: bool = False              # compiler-emitted "ask" (who="anyone") unless cards for anyone cover the tool; ranks below every card
@@ -223,6 +253,8 @@ class RuleCard(BaseModel):                # Claude drafts, code compiles, the ow
 
     @model_validator(mode="after")
     def _limits_only_on_auto(self) -> Self:
+        if self.applies_to not in _RULE_TARGETS:
+            raise ValueError('applies_to names a tool or an effect ("effect:charge")')
         limited = self.max_amount_cents is not None or self.max_discount_bp != 0 or self.hours is not None
         if self.mode != "auto" and (self.review or limited):
             raise ValueError("review and limits apply only to auto cards")
@@ -276,6 +308,12 @@ class Probe(BaseModel):                   # a setup safety probe: a hypothetical
     resource_kind: Literal["quote", "slot", "booking", "document", "charge", "desk"]
     resource_owner: Literal["caller", "other", "none"] = "none"
     amount_cents: StrictInt | None = None   # stand-in price for money tools
+
+    @model_validator(mode="after")
+    def _subject_when_scoped(self) -> Self:
+        if (self.who in ("person", "agent")) != (self.subject_id is not None):
+            raise ValueError('subject_id is required iff who is "person" or "agent"')
+        return self
 
 class ProbeResult(BaseModel):
     probe: Probe

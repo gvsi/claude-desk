@@ -36,7 +36,9 @@ from desk.kernel_api import (
     KERNEL_RESPONSES,
     KERNEL_ROUTES,
     ExecuteRequest,
+    DecideRequest,
     KernelError,
+    LedgerAppendRequest,
     ToolsConfirmRequest,
     WhoAmI,
 )
@@ -162,6 +164,80 @@ def test_valid_cards_are_accepted():
                  max_discount_bp=1_000),
     ]
     assert [card.mode for card in cards].count("auto") == 6
+
+
+def test_cards_name_a_known_target_and_limits_in_range():
+    valid = {"card_id": "x", "applies_to": "native.quote", "mode": "auto", "who": "anyone", "reason": "r"}
+    RuleCard(**valid)
+    for wrong in (
+        {"applies_to": "native.payment_links"},   # a misspelt money tool would dodge the money-card rule
+        {"applies_to": "effect:Charge"},
+        {"applies_to": "anything"},
+        {"max_amount_cents": -5},
+        {"max_discount_bp": -1},
+        {"max_discount_bp": 10_001},
+    ):
+        with pytest.raises(ValidationError):
+            RuleCard(**valid | wrong)
+
+
+def test_hours_windows_are_one_local_span():
+    HoursWindow(days=["sat"], start="09:00", end="13:00")
+    for wrong in (
+        {"days": []},
+        {"start": "22:00", "end": "02:00"},   # past midnight is two windows
+        {"start": "09:00", "end": "09:00"},
+        {"start": "09:00+02:00"},              # local to the business, never an offset
+    ):
+        with pytest.raises(ValidationError):
+            HoursWindow(**{"days": ["mon"], "start": "09:00", "end": "17:00"} | wrong)
+
+
+def test_claim_values_match_their_kind():
+    for kind, value in (("money", 18_000), ("percent_bp", 1_500), ("datetime", "2026-11-03T16:00:00-08:00"),
+                        ("datetime", "2026-11-03T16:00:00Z"), ("text", "Fresno and Clovis"), ("ref", "doc-1")):
+        Claim(key="k", kind=kind, value=value)
+    for kind, value in (("money", "80% off"), ("percent_bp", "15"), ("percent_bp", 10_001), ("percent_bp", -1),
+                        ("datetime", 5), ("datetime", "next tuesday"), ("datetime", "2026-11-03T16:00:00"),
+                        ("text", 5), ("ref", 5)):
+        with pytest.raises(ValidationError):
+            Claim(key="k", kind=kind, value=value)
+    with pytest.raises(ValidationError):
+        Claim(key="hours", kind="text", value="8 to 6")   # hours live in DeskSeed.hours
+
+
+def test_signed_timestamps_use_ascii_digits():
+    with pytest.raises(ValidationError):
+        AgentAuth(agent_key_id="k1", ts="\u0662\u0660\u0662\u0666-10-30T17:04:05.123000Z", nonce="n", sig="s")
+
+
+def test_probes_name_their_subject_exactly_when_scoped():
+    base = {"actor": "visitor", "call": {"call_id": "c1", "tool": "native.book", "args": {}}, "resource_kind": "slot"}
+    Probe(**base, who="person", subject_id="p1")
+    Probe(**base, who="anyone")
+    for wrong in ({"who": "person"}, {"who": "agent"}, {"who": "anyone", "subject_id": "p1"}):
+        with pytest.raises(ValidationError):
+            Probe(**base | wrong)
+
+
+def test_kernel_requests_refuse_unknown_fields():
+    # an identity field the API shouldn't send is refused, not silently dropped
+    for model in KERNEL_REQUESTS:
+        assert model.model_config.get("extra") == "forbid", model
+    decide = {"session_id": "s1", "generation": 1, "call": {"call_id": "c1", "tool": "native.quote", "args": {}}}
+    DecideRequest.model_validate(decide)
+    for identity in ({"person_id": "p-dana"}, {"assurance": "owner_session"}):
+        with pytest.raises(ValidationError):
+            DecideRequest.model_validate(decide | identity)
+
+
+def test_the_api_appends_only_its_own_ledger_events():
+    for kind in ("session", "rate_limit", "agent_auth"):
+        LedgerAppendRequest(desk_id="d", event={"kind": kind, "origin": "api", "summary": {}})
+    for event in ({"kind": "decide", "origin": "api", "summary": {}},
+                  {"kind": "session", "origin": "kernel", "summary": {}}):
+        with pytest.raises(ValidationError):
+            LedgerAppendRequest(desk_id="d", event=event)
 
 
 def test_actions_carry_kernel_prices():

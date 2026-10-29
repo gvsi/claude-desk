@@ -7,7 +7,7 @@ own tables and the tokens or signatures it checks.
 
 from typing import Annotated, Literal, Self
 
-from pydantic import AwareDatetime, BaseModel, StringConstraints, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, StringConstraints, model_validator
 
 from desk.contracts import (
     ActorKind,
@@ -57,75 +57,80 @@ Sha256Hex = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]   # low
 # keyed by its DeskSeed field name, except business (the BusinessSeed fields but
 # existing_business_id), people (upserts and removals) and answering ({on}).
 
-class CreateCopyRequest(BaseModel):       # POST /copies: {}; the API checks the passcode first
+class KernelRequest(BaseModel):
+    """A request body: an unknown field, such as an identity the API must not send, is refused, not dropped."""
+
+    model_config = ConfigDict(extra="forbid")
+
+class CreateCopyRequest(KernelRequest):       # POST /copies: {}; the API checks the passcode first
     pass
 
-class CreateDeskRequest(BaseModel):       # POST /desks (activates the ask_first preset)
+class CreateDeskRequest(KernelRequest):       # POST /desks (activates the ask_first preset)
     business: BusinessSeed
     desk: DeskSeed
 
-class DeskBusinessRequest(BaseModel):     # PUT /desks/{id}/business
+class DeskBusinessRequest(KernelRequest):     # PUT /desks/{id}/business
     name: str
     owner_display_name: str
     timezone: str
     brand: dict[str, str] = {}
 
-class DeskCharterRequest(BaseModel):      # PUT /desks/{id}/charter
+class DeskCharterRequest(KernelRequest):      # PUT /desks/{id}/charter
     charter: list[Claim]
 
-class DeskHoursRequest(BaseModel):        # PUT /desks/{id}/hours (the kernel rewrites fact "charter:hours")
+class DeskHoursRequest(KernelRequest):        # PUT /desks/{id}/hours (the kernel rewrites fact "charter:hours")
     hours: list[HoursWindow]
 
-class DeskPricesRequest(BaseModel):       # PUT /desks/{id}/prices
+class DeskPricesRequest(KernelRequest):       # PUT /desks/{id}/prices
     price_items: list[PriceItem]
 
-class DeskCalendarRequest(BaseModel):     # PUT /desks/{id}/calendar
+class DeskCalendarRequest(KernelRequest):     # PUT /desks/{id}/calendar
     calendar_slots: list[CalendarSlot]
 
-class PersonUpsert(BaseModel):            # upserted by ref
+class PersonUpsert(KernelRequest):            # upserted by ref
     ref: str
     display_name: str
     contact: str | None                   # None keeps the contact on record; a masked contact is rejected by the kernel
     notes: str = ""
 
-class DeskPeopleRequest(BaseModel):       # PUT /desks/{id}/people
+class DeskPeopleRequest(KernelRequest):       # PUT /desks/{id}/people
     upsert: list[PersonUpsert] = []
     remove: list[str] = []                # SeedPerson refs
 
-class DeskNotificationsRequest(BaseModel):   # PUT /desks/{id}/notifications
+class DeskNotificationsRequest(KernelRequest):   # PUT /desks/{id}/notifications
     notifications: NotificationDefaults
 
-class DeskAnsweringRequest(BaseModel):    # PUT /desks/{id}/answering; off leaves only lead capture and callback
+class DeskAnsweringRequest(KernelRequest):    # PUT /desks/{id}/answering; off leaves only lead capture and callback
     on: bool
 
-class DocumentUploadRequest(BaseModel):   # POST /documents (the kernel adds a canary)
+class DocumentUploadRequest(KernelRequest):   # POST /documents (the kernel adds a canary)
     desk_id: str
     document: SeedDocument
 
-class CreateSessionRequest(BaseModel):    # POST /sessions; agents authenticate by signature alone
+class CreateSessionRequest(KernelRequest):    # POST /sessions; agents authenticate by signature alone
     desk_slug: str
     kind: Literal["visitor", "agent"]
     mandate: Mandate | None = None
 
-class ModeRequest(BaseModel):             # POST /sessions/{id}/mode (bumps generation; resumes a paused session)
+class ModeRequest(KernelRequest):             # POST /sessions/{id}/mode (bumps generation; resumes a paused session)
     mode: SessionMode
     generation: int
 
-class VerifyStartRequest(BaseModel):      # POST /verify/start
+class VerifyStartRequest(KernelRequest):      # POST /verify/start
     session_id: str
     contact: str                          # as typed; codes go only to the contact on record
 
-class VerifyCheckRequest(BaseModel):      # POST /verify/check
+class VerifyCheckRequest(KernelRequest):      # POST /verify/check
     session_id: str
     code: str
 
-class DecideRequest(BaseModel):           # POST /decide; idempotent on (session_id, generation, call_id)
+class DecideRequest(KernelRequest):           # POST /decide; idempotent on (session_id, generation, call_id)
     session_id: str
     generation: int
     call: ToolCall
     desk_id: str | None = None            # required iff the caller is an owner session
 
-class ExecuteRequest(BaseModel):          # POST /execute: exactly one of generation and approval_id
+class ExecuteRequest(KernelRequest):          # POST /execute: exactly one of generation and approval_id
     decision_id: str
     session_id: str
     generation: int | None = None         # executes an allow at this generation
@@ -137,38 +142,38 @@ class ExecuteRequest(BaseModel):          # POST /execute: exactly one of genera
             raise ValueError("name exactly one of generation and approval_id")
         return self
 
-class CancelRequest(BaseModel):           # POST /decisions/{decision_id}/cancel
+class CancelRequest(KernelRequest):           # POST /decisions/{decision_id}/cancel
     session_id: str
 
-class AnswerRequest(BaseModel):           # POST /approvals/{decision_id}/answer
+class AnswerRequest(KernelRequest):           # POST /approvals/{decision_id}/answer
     answer: ApprovalAnswer
 
-class CheckReplyRequest(BaseModel):       # POST /check_reply
+class CheckReplyRequest(KernelRequest):       # POST /check_reply
     draft: ReplyDraft
 
-class OwnerMessageRequest(BaseModel):     # POST /owner/messages (the kernel ledgers both kinds)
+class OwnerMessageRequest(KernelRequest):     # POST /owner/messages (the kernel ledgers both kinds)
     session_id: str
     text: str                             # untrusted text
     kind: Literal["say", "whisper"]
 
-class PolicyDraftRequest(BaseModel):      # POST /policy/draft (compiled, linted, proved; idempotent)
+class PolicyDraftRequest(KernelRequest):      # POST /policy/draft (compiled, linted, proved; idempotent)
     desk_id: str
     cards: list[RuleCard]
     expected_parent: int | None
 
-class PolicyProbeRequest(BaseModel):      # POST /policy/{version}/probe (nothing activates)
+class PolicyProbeRequest(KernelRequest):      # POST /policy/{version}/probe (nothing activates)
     desk_id: str
     probes: list[Probe]
 
-class PolicyConfirmRequest(BaseModel):    # POST /policy/confirm
+class PolicyConfirmRequest(KernelRequest):    # POST /policy/confirm
     desk_id: str
     version: int
 
-class ToolsConnectRequest(BaseModel):     # POST /tools/connect
+class ToolsConnectRequest(KernelRequest):     # POST /tools/connect
     desk_id: str
     server: Literal["mock_payments"]
 
-class ToolsConfirmRequest(BaseModel):     # POST /tools/confirm (enabling drafts a version to prove)
+class ToolsConfirmRequest(KernelRequest):     # POST /tools/confirm (enabling drafts a version to prove)
     desk_id: str
     tool: ToolName
     enable: bool
@@ -184,23 +189,29 @@ class ToolsConfirmRequest(BaseModel):     # POST /tools/confirm (enabling drafts
             raise ValueError("enabling an MCP tool names the definition_sha256 the owner reviewed")
         return self
 
-class ToolsSimulateChangeRequest(BaseModel):   # POST /tools/simulate_change (demo)
+class ToolsSimulateChangeRequest(KernelRequest):   # POST /tools/simulate_change (demo)
     desk_id: str
     tool: ToolName
 
-class KnowledgeRequest(BaseModel):        # POST /knowledge
+class KnowledgeRequest(KernelRequest):        # POST /knowledge
     desk_id: str
     item: KnowledgeItem
 
-class PaymentLinkActionRequest(BaseModel):   # POST /payment_links/{token}/complete and /cancel: {}
+class PaymentLinkActionRequest(KernelRequest):   # POST /payment_links/{token}/complete and /cancel: {}
     pass
 
-class DemoAgentRequest(BaseModel):        # POST /agents/demo (rate limited)
+class DemoAgentRequest(KernelRequest):        # POST /agents/demo (rate limited)
     desk_id: str
 
-class LedgerAppendRequest(BaseModel):     # POST /ledger/append: origin forced to "api"; kinds session, rate_limit, agent_auth only
+class LedgerAppendRequest(KernelRequest):     # POST /ledger/append: origin "api"; kinds session, rate_limit, agent_auth only
     desk_id: str
     event: LedgerEvent
+
+    @model_validator(mode="after")
+    def _api_events_only(self) -> Self:
+        if self.event.origin != "api" or self.event.kind not in ("session", "rate_limit", "agent_auth"):
+            raise ValueError("the API appends only its own session, rate_limit and agent_auth events")
+        return self
 
 KERNEL_REQUESTS: tuple[type[BaseModel], ...] = (
     CreateCopyRequest, CreateDeskRequest, DeskBusinessRequest, DeskCharterRequest, DeskHoursRequest,
