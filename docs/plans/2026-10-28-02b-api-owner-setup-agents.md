@@ -381,4 +381,6 @@ Fix round, 2026-10-29: the copied Global Constraints follow the master's Models 
 
 Owner decisions, 2026-10-29, after the fix round: the platform ceiling is $10,000, the per-payment limit (master "Charter money cap"). The copied Global Constraints follow; the strict-integer and `money_cap` tests reject 1_000_001, and the live injection check plants a $10,000 limit. The copied design line now allows clay in the first-visit intro dialog's illustration (spec "Look and feel").
 
+Owner decisions, 2026-10-29, on receipts: the copied design line now says checkpoint results show as receipts attached under each message, at every width (spec "Look and feel"). Nothing in this plan's tasks changes.
+
 Round 2 (seam review, 2026-10-29): seam-06 slot and price item ids; seam-12 confirm before go-live, preview sessions; seam-14 `rate_limited` passthrough; seam-15 after-hours `starts_at`; seam-16 resent opening requests get their session; seam-19 drafts carry cards, `CardDiff` API-owned; seam-20 `SetupTools`, `ToolRow`; seam-22 model call routes; seam-24 `{desk_id}` paths, per-part routes; seam-28 schema titles; seam-30 built-in agent case; seam-35 stale names; seam-51 preset cache; seam-52 owner name fallback; seam-53 checkout 409; seam-56 contract type source.
