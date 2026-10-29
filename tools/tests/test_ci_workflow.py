@@ -784,16 +784,14 @@ def test_ci_doc_lists_what_a_runner_needs():
     assert re.findall(r"`([^`]+)`", line) == RUNNER_PREREQUISITES
 
 
-# GitHub gives a job to any runner whose labels include all of the job's labels. A desk runner has
-# `self-hosted` and its own desk-ci label, so a job that asks for `self-hosted` without its own desk
-# label, or for another job's desk label, could take a runner meant for a different job, and the
-# launcher would then stop the wrong machine. Only ci.yml's nine jobs may ask for desk labels.
+# GitHub gives a job to any runner whose labels include all of the job's labels. A desk runner
+# carries exactly `self-hosted` and its own desk label, with no default OS or architecture labels,
+# so a job asking for `self-hosted`, `linux`, `ARM64` or another job's desk label could take a
+# runner meant for a different job, and the launcher would then stop the wrong machine. So every
+# runs-on, in every workflow, is either a GitHub-hosted image label or, for ci.yml's nine jobs, that
+# job's own desk expression.
 WORKFLOWS = sorted([*(ROOT / ".github/workflows").glob("*.yml"), *(ROOT / ".github/workflows").glob("*.yaml")])
-
-
-# A job's own desk label: the market, run id and attempt (literal, or the format() placeholders
-# ci.yml fills), then the job's key.
-DESK_LABEL = re.compile(r"desk-ci-(?:spot|ondemand|\{0\})-(?:\d+|\{1\})-(?:\d+|\{2\})-([a-z][a-z0-9-]{0,31})")
+HOSTED_IMAGE = re.compile(r"(ubuntu|windows|macos)-[\w.-]+")
 
 
 def runs_on_text(value) -> str:
@@ -806,17 +804,24 @@ def runs_on_text(value) -> str:
 
 
 def runner_label_problems(file: str, workflow: dict) -> list[str]:
-    """Each job that could take a desk runner meant for another job. Labels match in any letter case."""
+    """Each job whose runs-on isn't a GitHub-hosted image label or, in ci.yml, its own desk expression."""
     problems = []
     for key, job in (workflow.get("jobs") or {}).items():
-        text = runs_on_text(job.get("runs-on", ""))
-        labels = re.findall(r"desk-ci-[^\s\"',\[\]]*", text, flags=re.IGNORECASE)
-        own = [label for label in labels if (match := DESK_LABEL.fullmatch(label)) and match[1] == key]
-        problems += [f"{key}: {label} isn't this job's own desk label" for label in labels if label not in own]
-        if labels and (file != "ci.yml" or key not in RUNNER_SUFFIXES):
+        if "runs-on" not in job:
+            # A job that calls a reusable workflow has no runner of its own.
+            if "uses" not in job:
+                problems.append(f"{key}: has no runs-on")
+            continue
+        runs_on = job["runs-on"]
+        nine = file == "ci.yml" and key in RUNNER_SUFFIXES
+        if isinstance(runs_on, str) and HOSTED_IMAGE.fullmatch(runs_on):
+            continue
+        if nine and runs_on == RUNS_ON.replace("<suffix>", key):
+            continue
+        if not nine and re.search(r"desk-ci-", runs_on_text(runs_on), flags=re.IGNORECASE):
             problems.append(f"{key}: only ci.yml's nine jobs may ask for desk labels")
-        if re.search(r"\bself-hosted\b", text, flags=re.IGNORECASE) and not own:
-            problems.append(f"{key}: self-hosted without its own desk label")
+        else:
+            problems.append(f"{key}: runs-on is neither a GitHub-hosted image nor this job's own desk expression")
     return problems
 
 
@@ -826,34 +831,51 @@ def test_no_job_can_take_another_jobs_desk_runner():
         assert runner_label_problems(path.name, load(path)) == [], path.name
 
 
+NOT_ALLOWED = "runs-on is neither a GitHub-hosted image nor this job's own desk expression"
+ONLY_THE_NINE = "only ci.yml's nine jobs may ask for desk labels"
+
+
+def own_desk(key: str) -> str:
+    return RUNS_ON.replace("<suffix>", key)
+
+
 @pytest.mark.parametrize(
-    "file, text, problem",
+    "file, key, runs_on, problem",
     [
-        # self-hosted without the job's own desk label, in each form runs-on takes.
-        ("other.yml", "jobs: {lint: {runs-on: self-hosted}}", "lint: self-hosted without its own desk label"),
-        ("other.yml", "jobs: {lint: {runs-on: [Self-Hosted, linux, ARM64]}}", "lint: self-hosted without its own desk label"),
-        ("other.yml", "jobs: {lint: {runs-on: {group: desk, labels: [self-hosted]}}}", "lint: self-hosted without its own desk label"),
-        ("ci.yml", "jobs: {web: {runs-on: \"${{ vars.X == 'y' && 'self-hosted' || 'ubuntu-24.04' }}\"}}", "web: self-hosted without its own desk label"),
-        # A desk label whose suffix isn't the job's key.
-        ("ci.yml", "jobs: {backend: {runs-on: [self-hosted, desk-ci-spot-1-1-web]}}", "backend: desk-ci-spot-1-1-web isn't this job's own desk label"),
-        ("ci.yml", "jobs: {backend: {runs-on: [desk-ci-spot-1-1-backend, desk-ci-spot-1-1-web]}}", "backend: desk-ci-spot-1-1-web isn't this job's own desk label"),
-        ("ci.yml", "jobs: {backend: {runs-on: [self-hosted, desk-ci-backend]}}", "backend: desk-ci-backend isn't this job's own desk label"),
+        # Labels a desk runner could carry, in each form runs-on takes.
+        ("other.yml", "lint", "self-hosted", NOT_ALLOWED),
+        ("other.yml", "lint", "linux", NOT_ALLOWED),
+        ("other.yml", "lint", "ARM64", NOT_ALLOWED),
+        ("other.yml", "lint", ["Linux", "ARM64"], NOT_ALLOWED),
+        ("other.yml", "lint", ["Self-Hosted", "linux", "ARM64"], NOT_ALLOWED),
+        ("other.yml", "lint", {"group": "desk", "labels": ["self-hosted"]}, NOT_ALLOWED),
+        ("other.yml", "lint", ["ubuntu-24.04"], NOT_ALLOWED),
+        # Any expression but the job's own desk one.
+        ("ci.yml", "web", "${{ vars.X == 'y' && 'self-hosted' || 'ubuntu-24.04' }}", NOT_ALLOWED),
+        ("ci.yml", "web", "${{ matrix.os }}", NOT_ALLOWED),
+        ("ci.yml", "backend", own_desk("web"), NOT_ALLOWED),
+        ("ci.yml", "backend", ["self-hosted", "desk-ci-spot-1-1-backend"], NOT_ALLOWED),
         # Desk labels anywhere but ci.yml's nine jobs.
-        ("other.yml", "jobs: {backend: {runs-on: [self-hosted, desk-ci-spot-1-1-backend]}}", "backend: only ci.yml's nine jobs may ask for desk labels"),
-        ("ci.yml", "jobs: {extra: {runs-on: [self-hosted, desk-ci-spot-1-1-extra]}}", "extra: only ci.yml's nine jobs may ask for desk labels"),
+        ("other.yml", "backend", own_desk("backend"), ONLY_THE_NINE),
+        ("other.yml", "lint", ["self-hosted", "desk-ci-spot-1-1-lint"], ONLY_THE_NINE),
+        ("ci.yml", "extra", own_desk("extra"), ONLY_THE_NINE),
     ],
 )
-def test_runner_label_rules_catch_a_job_that_could_take_the_wrong_runner(file, text, problem):
-    assert problem in runner_label_problems(file, yaml.safe_load(text))
+def test_runner_label_rules_catch_a_job_that_could_take_the_wrong_runner(file, key, runs_on, problem):
+    assert runner_label_problems(file, {"jobs": {key: {"runs-on": runs_on}}}) == [f"{key}: {problem}"]
 
 
 @pytest.mark.parametrize(
-    "text",
+    "file, key, job",
     [
-        "jobs: {backend: {runs-on: ubuntu-24.04}}",
-        "jobs: {backend: {runs-on: [self-hosted, desk-ci-ondemand-123-2-backend]}}",
-        "jobs: {build: {uses: ./.github/workflows/other.yml}}",
+        ("other.yml", "lint", {"runs-on": "ubuntu-24.04"}),
+        ("other.yml", "lint", {"runs-on": "ubuntu-24.04-arm"}),
+        ("other.yml", "lint", {"runs-on": "windows-2025"}),
+        ("other.yml", "lint", {"runs-on": "macos-15"}),
+        ("ci.yml", "backend", {"runs-on": own_desk("backend")}),
+        ("ci.yml", "secret-scan", {"runs-on": own_desk("secret-scan")}),
+        ("other.yml", "release", {"uses": "./.github/workflows/ci.yml"}),
     ],
 )
-def test_runner_label_rules_allow_hosted_runners_and_a_jobs_own_desk_label(text):
-    assert runner_label_problems("ci.yml", yaml.safe_load(text)) == []
+def test_runner_label_rules_allow_hosted_images_and_a_jobs_own_desk_expression(file, key, job):
+    assert runner_label_problems(file, {"jobs": {key: job}}) == []
