@@ -51,13 +51,20 @@ elif tool == "aws" and args[:2] == ["cloudformation", "describe-stacks"]:
     print(stacks[stack].get(key, "None"))
 elif tool == "npx" and args[:2] == ["--no-install", "cdk"] and args[2] == "deploy":
     stack = args[3]
+    print(f"stub: cdk events for {{stack}}", file=sys.stderr)  # cdk's diff, prompt and events: stderr
+    print(f"stub: cdk stack outputs for {{stack}}")            # its results: stdout
     context = dict(args[i + 1].split("=", 1) for i, arg in enumerate(args) if arg == "-c")
     if stack == "DeskData":
         stacks["DeskData"] = {{"ClusterName": "desk"}}
     else:
         domain = os.environ.get("DESK_DOMAIN_NAME")
-        stacks["DeskApp"] = {{"PublicUrl": f"https://{{domain}}" if domain else "{distribution}",
-                             "ServiceEndpoint": "{endpoint}", "DeployedSha": context.get("git_sha", "unset")}}
+        deploys = stacks.get("DeskApp", {{}}).get("Deploys", 0) + 1
+        url = f"https://{{domain}}" if domain else "{distribution}"
+        if os.environ.get("STUB_URL_MOVES") and deploys > 1:        # a distribution replaced on redeploy
+            url = "https://d222222abcdef8.cloudfront.net"
+        sha = os.environ.get("STUB_DEPLOYED_SHA") or context.get("git_sha", "unset")
+        stacks["DeskApp"] = {{"PublicUrl": url, "ServiceEndpoint": "{endpoint}", "DeployedSha": sha,
+                             "Deploys": deploys}}
     json.dump(stacks, open(stacks_path, "w"))
 """
 
@@ -208,6 +215,17 @@ def test_everything_is_logged(deploy):
     assert "deploy-test-passcode" not in run.log + run.output
 
 
+def test_cdk_events_are_logged_and_its_stack_outputs_stay_on_the_terminal(deploy):
+    """cdk deploy writes all but its results to stderr, which the log keeps; its results (the stack
+    outputs) go to stdout, which stays the terminal its approval prompt needs. docs/deploy.md says so."""
+    run = deploy()
+    assert run.status == 0, run.output
+    for stack in ("DeskData", "DeskApp"):
+        assert f"stub: cdk events for {stack}" in run.log
+        assert f"stub: cdk stack outputs for {stack}" in run.output
+        assert f"stub: cdk stack outputs for {stack}" not in run.log
+
+
 def test_a_later_deploy_keeps_its_public_url(deploy):
     deployed = {"DeskData": {"ClusterName": "desk"},
                 "DeskApp": {"PublicUrl": DISTRIBUTION_URL, "ServiceEndpoint": ENDPOINT, "DeployedSha": "0" * 40}}
@@ -265,6 +283,27 @@ def test_admin_failure_stops_before_desk_app(deploy):
     assert run.status == 1
     assert run.cdk("DeskData") and not run.cdk("DeskApp")
     assert not any(call["tool"] == "uv" and any("smoke.py" in a for a in call["argv"]) for call in run.calls)
+
+
+def _smoke_ran(run) -> bool:
+    return any(call["tool"] == "uv" and any("smoke.py" in a for a in call["argv"]) for call in run.calls)
+
+
+def test_a_public_url_that_moves_again_stops_before_smoke(deploy):
+    """The second DeskApp deploy pins the URL the first one reported; if it moves again, the API's
+    links point at an address the Desk no longer serves, so the deploy stops."""
+    run = deploy(STUB_URL_MOVES="1")
+    assert run.status == 1
+    assert len(run.cdk("DeskApp")) == 2
+    assert "PublicUrl moved again" in run.log
+    assert not _smoke_ran(run)
+
+
+def test_a_deployed_commit_other_than_head_stops_before_smoke(deploy):
+    run = deploy(STUB_DEPLOYED_SHA="0" * 40)
+    assert run.status == 1
+    assert f"DeskApp reports commit {'0' * 40}, not {_head()}" in run.log
+    assert not _smoke_ran(run)
 
 
 @pytest.mark.parametrize("status", ["1", "2"])
