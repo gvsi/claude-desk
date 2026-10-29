@@ -1,0 +1,254 @@
+"""The CI gate runs a suite, skips it visibly or fails, by whether the paths that mark its code exist."""
+
+import sys
+from pathlib import Path
+
+import pytest
+
+from desk_tools.gate import main
+
+
+@pytest.fixture
+def repo(tmp_path, monkeypatch):
+    """An empty checkout as the working directory, with its own job summary file."""
+    checkout = tmp_path / "repo"
+    checkout.mkdir()
+    monkeypatch.chdir(checkout)
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(tmp_path / "summary.md"))
+    return checkout
+
+
+def summary(repo: Path) -> str:
+    path = repo.parent / "summary.md"
+    return path.read_text() if path.exists() else ""
+
+
+def touch(name: str) -> list[str]:
+    """A command that records it ran by creating `name`."""
+    return [sys.executable, "-c", f"open({name!r}, 'w').close()"]
+
+
+def test_runs_command_when_every_run_if_path_exists(repo):
+    (repo / "web").mkdir()
+    (repo / "web" / "package.json").write_text("{}")
+    (repo / "evals").mkdir()
+
+    code = main(["--name", "web", "--run-if", "web/package.json", "--run-if", "evals", "--", *touch("ran")])
+
+    assert code == 0
+    assert (repo / "ran").exists()
+    assert summary(repo) == ""
+
+
+def test_propagates_command_exit_code(repo):
+    (repo / "evals").mkdir()
+
+    code = main(["--name", "tier1", "--run-if", "evals", "--", sys.executable, "-c", "raise SystemExit(3)"])
+
+    assert code == 3
+
+
+def test_makefile_error_fails(repo, capsys):
+    (repo / "backend/desk/kernel_service").mkdir(parents=True)
+    (repo / "backend/desk/kernel_service/compiler.py").write_text("")
+    argv = ["--name", "proofs", "--run-if", "backend/desk/kernel_service/compiler.py", "--", "make", "check-presets"]
+
+    for makefile in [
+        "check-presets:\n\ttouch recipe-ran\nnot make syntax\n",  # a syntax error
+        "kernel:\n\ttouch recipe-ran\n",  # no such target
+        None,  # no Makefile
+    ]:
+        if makefile is None:
+            (repo / "Makefile").unlink()
+        else:
+            (repo / "Makefile").write_text(makefile)
+
+        code = main(argv)
+
+        assert code == 2, makefile
+        assert not (repo / "recipe-ran").exists(), makefile
+        assert "skipped" not in capsys.readouterr().out, makefile
+    assert summary(repo) == ""
+
+
+def test_fails_when_required_but_absent(repo, capsys):
+    (repo / "backend/desk/kernel_service").mkdir(parents=True)
+    (repo / "backend/desk/kernel_service/app.py").write_text("")
+
+    code = main(
+        [
+            "--name", "tier1",
+            "--run-if", "evals/run.py",
+            "--required-if", "evals/results",
+            "--required-if", "backend/desk/kernel_service/app.py",
+            "--", *touch("ran"),
+        ]
+    )
+
+    assert code == 1
+    assert not (repo / "ran").exists()
+    assert capsys.readouterr().err == (
+        "`tier1` is required by `backend/desk/kernel_service/app.py` but `evals/run.py` is missing\n"
+    )
+    assert summary(repo) == ""
+
+
+def test_skips_visibly_when_nothing_requires_it(repo, capsys, monkeypatch):
+    (repo / "web").mkdir()
+    (repo / "web" / "package.json").write_text("{}")
+    argv = [
+        "--name", "web-e2e",
+        "--run-if", "web/package.json",
+        "--run-if", "web/playwright.config.ts",
+        "--required-if", "evals/run.py",
+        "--", *touch("ran"),
+    ]
+    line = "`web-e2e`: skipped, `web/playwright.config.ts` is not in the repo yet\n"
+
+    code = main(argv)
+
+    assert code == 0
+    assert not (repo / "ran").exists()
+    assert capsys.readouterr().out == line
+    assert summary(repo) == line
+
+    # Outside GitHub Actions the line still reaches the log.
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY")
+    code = main(argv)
+
+    assert code == 0
+    assert capsys.readouterr().out == line
+    assert summary(repo) == line
+
+
+def test_usage_errors_exit_2(repo, capsys):
+    (repo / "web").mkdir()
+    run = touch("ran")
+    for argv in [
+        ["--name", "web", "--run-if", "web", *run],  # no `--`
+        ["--name", "web", "--run-if", "web", "--"],  # no command
+        ["--run-if", "web", "--", *run],  # no --name
+        ["--name", "web", "--", *run],  # no --run-if
+        ["--name", "web", "--run-if", "", "--", *run],  # empty path, which would mean the working directory
+        ["--name", "web", "--run-if", "web", "--required-if", "", "--", *run],
+        ["--name", "proofs", "--run-if", "make:check-presets", "--", *run],  # make targets aren't probed
+        ["--name", "web", "--run-if", "web", "--unknown", "--", *run],
+    ]:
+        code = main(argv)
+
+        assert code == 2, argv
+        assert not (repo / "ran").exists(), argv
+        assert "usage:" in capsys.readouterr().err, argv
+    assert summary(repo) == ""
+
+
+# The `tier 2 results` row of Plan 06a Task 2's job table; the workflow must pass exactly these arguments.
+TIER2_RESULTS_GATE = [
+    "--name", "tier2-results",
+    "--run-if", "evals/results.py",
+    "--required-if", "evals/results",
+    "--", "make", "evals-results-check", "BASE=origin/main",
+]
+
+
+def test_tier2_results_gate_fails_when_results_are_missing(repo, capsys):
+    """The checker's code decides whether tier 2 results are checked; the results data never does."""
+    (repo / "evals").mkdir()
+    (repo / "evals/results.py").write_text("")
+    # Stands in for Plan 05b's check, which fails when the head has no results file.
+    (repo / "Makefile").write_text("evals-results-check:\n\ttest -d evals/results\n")
+
+    # A change that deletes the results directory but keeps the checker still runs it, and fails.
+    code = main(TIER2_RESULTS_GATE)
+
+    assert code == 2
+    assert "skipped" not in capsys.readouterr().out
+    assert summary(repo) == ""
+
+    # Results without the checker (deleted or renamed) fail too, rather than skip.
+    (repo / "evals/results.py").unlink()
+    (repo / "evals/results").mkdir()
+    (repo / "evals/results/.gitkeep").write_text("")
+
+    code = main(TIER2_RESULTS_GATE)
+
+    assert code == 1
+    assert capsys.readouterr().err == (
+        "`tier2-results` is required by `evals/results` but `evals/results.py` is missing\n"
+    )
+    assert summary(repo) == ""
+
+    # Before Plan 05b lands there is neither, and the check skips.
+    (repo / "evals/results/.gitkeep").unlink()
+    (repo / "evals/results").rmdir()
+
+    code = main(TIER2_RESULTS_GATE)
+
+    assert code == 0
+    line = "`tier2-results`: skipped, `evals/results.py` is not in the repo yet\n"
+    assert capsys.readouterr().out == line
+    assert summary(repo) == line
+
+
+# The `proofs` row of Plan 06a Task 2's job table; the workflow must pass exactly these arguments.
+PROOFS_GATE = [
+    "--name", "proofs",
+    "--run-if", "backend/scripts/prove_presets.py",
+    "--required-if", "kernel/cedar/proofs",
+    "--required-if", "backend/desk/kernel_service/compiler.py",
+    "--", "make", "check-presets",
+]
+
+
+def test_proofs_gate_fails_when_its_checker_is_missing(repo, capsys):
+    """Once rules ship, moving the compiler or deleting the proof checker can't turn proofs into a skip."""
+    # The compiler moved into a package, the shipped proof reports in place, and the checker gone.
+    (repo / "backend/desk/kernel_service/compiler").mkdir(parents=True)
+    (repo / "backend/desk/kernel_service/compiler/__init__.py").write_text("")
+    (repo / "kernel/cedar/proofs").mkdir(parents=True)
+    (repo / "kernel/cedar/proofs/rivera.json").write_text("{}")
+    # Stands in for Plan 01a's check, which fails when a report is missing, stale or failing.
+    (repo / "Makefile").write_text("check-presets:\n\tfalse\n")
+
+    code = main(PROOFS_GATE)
+
+    assert code == 1
+    assert capsys.readouterr().err == (
+        "`proofs` is required by `kernel/cedar/proofs` but `backend/scripts/prove_presets.py` is missing\n"
+    )
+    assert summary(repo) == ""
+
+    # With the checker in place, the check runs, and its failure fails.
+    (repo / "backend/scripts").mkdir(parents=True)
+    (repo / "backend/scripts/prove_presets.py").write_text("")
+
+    code = main(PROOFS_GATE)
+
+    assert code == 2
+    assert "skipped" not in capsys.readouterr().out
+    assert summary(repo) == ""
+
+    # The compiler alone, before any report ships, requires the check too.
+    (repo / "backend/scripts/prove_presets.py").unlink()
+    (repo / "kernel/cedar/proofs/rivera.json").unlink()
+    (repo / "kernel/cedar/proofs").rmdir()
+    (repo / "backend/desk/kernel_service/compiler/__init__.py").unlink()
+    (repo / "backend/desk/kernel_service/compiler").rmdir()
+    (repo / "backend/desk/kernel_service/compiler.py").write_text("")
+
+    code = main(PROOFS_GATE)
+
+    assert code == 1
+    assert capsys.readouterr().err == (
+        "`proofs` is required by `backend/desk/kernel_service/compiler.py` but `backend/scripts/prove_presets.py` is missing\n"
+    )
+
+    # Before any of it lands, the check skips.
+    (repo / "backend/desk/kernel_service/compiler.py").unlink()
+
+    code = main(PROOFS_GATE)
+
+    assert code == 0
+    line = "`proofs`: skipped, `backend/scripts/prove_presets.py` is not in the repo yet\n"
+    assert capsys.readouterr().out == line
+    assert summary(repo) == line

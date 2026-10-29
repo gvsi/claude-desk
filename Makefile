@@ -1,4 +1,4 @@
-.PHONY: kernel test db-roles
+.PHONY: kernel test db-roles web-test web-e2e
 
 # Rebuild the kernel's Python module into the backend environment, and the
 # proof binary the kernel runs. desk-prove and its tests find cvc5 through
@@ -30,3 +30,11 @@ db-roles:
 		docker compose exec -T -e KERNEL_ROLE_PASSWORD -e API_ROLE_PASSWORD -e MOCKPAY_ROLE_PASSWORD \
 			db psql -X -q -U desk_admin -d "$(DB_NAME)" < backend/desk/db/role_passwords.psql; \
 	fi
+
+# The web app's checks, as CI's `web tests` runs them: install, type-check and unit tests, then the
+# production build, its check and the mocked end-to-end test (which uses web-test's install).
+web-test:
+	cd web && npm ci && npx playwright install --with-deps chromium && npm run typecheck && npm test
+
+web-e2e:
+	cd web && npm run build && npm run check:build && npm run e2e:mock

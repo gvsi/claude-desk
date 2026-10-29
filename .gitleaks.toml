@@ -1,0 +1,14 @@
+# Settings for CI's `secret scan` check: gitleaks' default rules, with no exceptions.
+#
+# tools/tests/test_ci_workflow.py requires this file to hold only these settings and no
+# .gitleaksignore to exist, and the scan ignores inline gitleaks:allow comments. An exception is a
+# reviewed change to that test and this file: one entry naming one file and why it holds no secret.
+#
+#   [[allowlists]]
+#   description = "<file>: <why it holds no secret>"
+#   paths = ['''^<file>$''']
+
+minVersion = "v8.30.1"
+
+[extend]
+useDefault = true

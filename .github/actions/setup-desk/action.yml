@@ -1,0 +1,52 @@
+name: setup-desk
+description: >-
+  Rust 1.99.1, uv 0.13.0 with Python 3.13 and cvc5 1.4.2 (CVC5 and PATH); then, unless build is
+  false, the kernel's Python module and desk-prove (make kernel), with kernel/target/release on PATH.
+
+inputs:
+  build:
+    description: Run make kernel and put kernel/target/release on PATH ("true" or "false").
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Install Rust 1.99.1
+      shell: bash
+      run: |
+        rustup toolchain install 1.99.1 --profile minimal --no-self-update
+        rustup default 1.99.1
+
+    - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      with:
+        workspaces: kernel -> target
+
+    - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      with:
+        version: "0.13.0"
+        python-version: "3.13"
+        enable-cache: true
+        cache-suffix: ${{ github.job }}
+        # The kernel tests job never runs uv, so it has no uv cache to save.
+        ignore-nothing-to-cache: true
+
+    - name: Install cvc5 1.4.2
+      shell: bash
+      run: |
+        dir="$RUNNER_TEMP/cvc5"
+        mkdir -p "$dir"
+        grep ' cvc5-Linux-x86_64-static.zip$' "$GITHUB_WORKSPACE/tools/cvc5.sha256" > "$dir/cvc5.sha256"
+        cd "$dir"
+        curl -sSfL -o cvc5-Linux-x86_64-static.zip \
+          https://github.com/cvc5/cvc5/releases/download/cvc5-1.4.2/cvc5-Linux-x86_64-static.zip
+        sha256sum -c --strict cvc5.sha256
+        unzip -q cvc5-Linux-x86_64-static.zip
+        echo "CVC5=$dir/cvc5-Linux-x86_64-static/bin/cvc5" >> "$GITHUB_ENV"
+        echo "$dir/cvc5-Linux-x86_64-static/bin" >> "$GITHUB_PATH"
+
+    - name: Build the kernel module and desk-prove
+      if: inputs.build == 'true'
+      shell: bash
+      run: |
+        make kernel
+        echo "$GITHUB_WORKSPACE/kernel/target/release" >> "$GITHUB_PATH"

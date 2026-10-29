@@ -1,0 +1,244 @@
+# The nine checks on main and on pull requests to main; docs/ci.md says what each one proves.
+# Suites that other parts of the project add run through tools/desk_tools/gate.py, which runs,
+# skips visibly or fails each one by whether its code is in the repo. No secrets, read-only.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+# Every uv command uses the committed lockfile, and fails if it is missing or out of date.
+env:
+  UV_LOCKED: "1"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  backend:
+    name: backend tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        ports: ["5433:5432"]
+        env:
+          POSTGRES_USER: desk_admin
+          POSTGRES_PASSWORD: change-me-admin
+          POSTGRES_DB: desk
+        options: >-
+          --health-cmd "pg_isready -U desk_admin"
+          --health-interval 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-desk
+      - name: Use the local settings
+        run: |
+          cp .env.example .env
+          grep -E '^[A-Z][A-Z0-9_]*=' .env >> "$GITHUB_ENV"
+      - name: Check the migrations have one head
+        run: test "$(cd backend && uv run alembic heads | wc -l)" -eq 1
+      - name: Migrate
+        run: cd backend && uv run alembic upgrade head
+      - name: Set the role passwords
+        run: make db-roles
+      - name: Run the backend tests
+        run: cd backend && uv run pytest -q
+
+  kernel:
+    name: kernel tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-desk
+        with:
+          build: false
+      - name: Run the kernel tests
+        run: cd kernel && cargo test --locked
+
+  proofs:
+    name: proofs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-desk
+      - name: Run the proof self-test
+        run: desk-prove --selftest
+      - name: Prove the shipped rule sets again
+        run: uv run --project tools python -m desk_tools.gate --name proofs --run-if backend/scripts/prove_presets.py --required-if kernel/cedar/proofs --required-if backend/desk/kernel_service/compiler.py -- make check-presets
+
+  tier1:
+    name: tier 1 evals
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        ports: ["5433:5432"]
+        env:
+          POSTGRES_USER: desk_admin
+          POSTGRES_PASSWORD: change-me-admin
+          POSTGRES_DB: desk
+        options: >-
+          --health-cmd "pg_isready -U desk_admin"
+          --health-interval 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-desk
+      - name: Use the local settings
+        run: |
+          cp .env.example .env
+          grep -E '^[A-Z][A-Z0-9_]*=' .env >> "$GITHUB_ENV"
+      - name: Check the migrations have one head
+        run: test "$(cd backend && uv run alembic heads | wc -l)" -eq 1
+      - name: Migrate
+        run: cd backend && uv run alembic upgrade head
+      - name: Set the role passwords
+        run: make db-roles
+      - name: Run the tier 1 evals
+        run: uv run --project tools python -m desk_tools.gate --name tier1 --run-if evals/run.py --required-if backend/desk/kernel_service/app.py -- make evals-tier1
+      - name: Run the kernel contract tests against the real kernel
+        run: uv run --project tools python -m desk_tools.gate --name kernel-contract --run-if backend/tests/kernel_contract/conftest.py --required-if backend/desk/api/kernel_client.py -- make kernel-contract
+
+  tier2:
+    name: tier 2 results
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-desk
+        with:
+          build: false
+      - name: Check the tier 2 results
+        run: uv run --project tools python -m desk_tools.gate --name tier2-results --run-if evals/results.py --required-if evals/results -- make evals-results-check BASE=origin/main
+
+  web:
+    name: web tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # No npm cache: this job runs before web/package-lock.json exists.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.21.0"
+          package-manager-cache: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.0"
+          python-version: "3.13"
+          enable-cache: true
+          cache-suffix: ${{ github.job }}
+          ignore-nothing-to-cache: true
+      - name: Run the web type check and unit tests
+        run: uv run --project tools python -m desk_tools.gate --name web --run-if web/package.json -- make web-test
+      - name: Build the web app and run the mocked end-to-end test
+        run: uv run --project tools python -m desk_tools.gate --name web-e2e --run-if web/playwright.config.ts --required-if web/e2e -- make web-e2e
+
+  infra:
+    name: infra synth
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.0"
+          python-version: "3.13"
+          enable-cache: true
+          cache-suffix: ${{ github.job }}
+          ignore-nothing-to-cache: true
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.21.0"
+          package-manager-cache: false
+      - name: Test and synthesize the infrastructure
+        run: uv run --project tools python -m desk_tools.gate --name infra --run-if infra/cdk.json -- make infra-check
+
+  secret-scan:
+    name: secret scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install gitleaks 8.30.1
+        run: |
+          dir="$RUNNER_TEMP/gitleaks"
+          mkdir -p "$dir"
+          cd "$dir"
+          curl -sSfL -o gitleaks_8.30.1_linux_x64.tar.gz \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  gitleaks_8.30.1_linux_x64.tar.gz" \
+            | sha256sum -c --strict
+          tar -xzf gitleaks_8.30.1_linux_x64.tar.gz gitleaks
+          echo "$dir" >> "$GITHUB_PATH"
+      - name: Scan the history for secrets
+        run: gitleaks git --redact --verbose --no-banner --exit-code 1 --ignore-gitleaks-allow --log-opts="--full-history HEAD" .
+
+  repo:
+    name: repo checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.0"
+          python-version: "3.13"
+          enable-cache: true
+          cache-suffix: ${{ github.job }}
+          ignore-nothing-to-cache: true
+      - name: Install actionlint 1.7.12
+        run: |
+          dir="$RUNNER_TEMP/actionlint"
+          mkdir -p "$dir"
+          cd "$dir"
+          curl -sSfL -o actionlint_1.7.12_linux_amd64.tar.gz \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  actionlint_1.7.12_linux_amd64.tar.gz" \
+            | sha256sum -c --strict
+          tar -xzf actionlint_1.7.12_linux_amd64.tar.gz actionlint
+          echo "$dir" >> "$GITHUB_PATH"
+      - name: Lint the workflow
+        run: actionlint
+      - name: Run the repository tooling tests
+        run: cd tools && uv run pytest -q
+      - name: Check the docs
+        run: uv run --project tools python -m desk_tools.gate --name docs --run-if tools/desk_tools/check_docs.py -- make docs-check
