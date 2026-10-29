@@ -40,7 +40,7 @@ If a task seems to require breaking one of these, stop and raise it with the pro
 - **Owner sign-off required for:** creating cloud resources or deploying; spending beyond model usage for development and evals; secrets handling; sharing anything outside the repo; changing a locked decision in the spec; anything irreversible.
 - **Secrets:** never commit or print secrets; local secrets live in `.env` (git-ignored).
 - **Names and copy:** the product is Claude Desk ("a Desk", "Desks"). Sentence case, plain literal copy, no all-caps labels, no "→" on buttons. Footer: "Concept prototype by Giovanni Alcantara, not an Anthropic product". No Claude or Anthropic logos.
-- **Design:** design system v2 only (warm dark; Source Serif 4 for Claude's voice and page titles; Hanken Grotesk for the interface; clay only in the Claude Desk mark; checkpoint results as margin receipts). Use tokens, not hard-coded values.
+- **Design:** design system v2 only (warm dark; Source Serif 4 for Claude's voice and page titles; Hanken Grotesk for the interface; clay only in the Claude Desk mark and the first-visit intro dialog's illustration; checkpoint results as receipts attached under each message). Use tokens, not hard-coded values.
 
 ## Reporting
 
