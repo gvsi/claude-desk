@@ -122,6 +122,8 @@ def assert_handed_off(verdict: ReplyVerdict, language: str = "en") -> None:
     ("See you Tu\u0435sday", {"lex.en.date", "mixed_script"}, "Tu\u0435sday"),   # a Cyrillic e
     ("That is tw\u0435nty", {"lex.en.number", "mixed_script"}, "tw\u0435nty"),   # a Cyrillic e
     ("That will be \u039d\u0399\u039d\u0395", {"lex.en.number"}, "\u039d\u0399\u039d\u0395"),   # Greek NINE, iota as I
+    ("Puedo ir a las once.", {"lex.es.date"}, "las once"),             # eleven o'clock
+    ("Llego a la una.", {"lex.es.date"}, "la una"),                    # one o'clock
 ])
 async def test_numbers_and_dates_in_prose_are_blocked(app, client, prose, rule_ids, span):
     copy, visitor = await visitor_of(app, client)
@@ -130,7 +132,8 @@ async def test_numbers_and_dates_in_prose_are_blocked(app, client, prose, rule_i
     numbers = [violation for violation in verdict.violations if violation.kind == "number_in_prose"]
     assert span in [violation.span for violation in numbers]
     assert all(len(violation.span) <= 40 for violation in verdict.violations)
-    assert_handed_off(verdict, "es" if prose == "nos vemos el martes" else "en")
+    spanish = prose in ("nos vemos el martes", "Puedo ir a las once.", "Llego a la una.")
+    assert_handed_off(verdict, "es" if spanish else "en")
 
 
 @pytest.mark.parametrize(("prose", "rule_id", "span", "language"), [

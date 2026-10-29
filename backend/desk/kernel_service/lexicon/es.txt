@@ -6,7 +6,7 @@
 # every draft, whatever its language.
 
 # Spelled-out numbers. A bare "uno", "una", "once" or "medio" counts only next to a unit or another
-# number word, so "una pregunta" passes.
+# number word, so "una pregunta" passes; "las once" and "la una" are clock times (below).
 number	dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|doce|trece|catorce|quince
 number	dieci(?:seis|siete|ocho|nueve)|veinte|veinti[a-z]+
 number	treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa
@@ -26,6 +26,7 @@ date	enero|febrero|marzo|abril|mayo|junio|julio|agosto|sept?iembre|octubre|novie
 date	hoy|manana|ayer|anoche|mediodia|medianoche
 date	fin(?:es)?[\s-]+de[\s-]+semana|(?:la[\s-]+)?(?:proxima|siguiente)[\s-]+semana|semana[\s-]+(?:que[\s-]+viene|proxima|entrante)
 date	esta[\s-]+(?:noche|tarde|semana)|(?:este|el[\s-]+proximo)[\s-]+mes
+date	las[\s-]+once|la[\s-]+una
 
 # Promises only the owner's rules or a card can make ("garantía" without the accent)
 promise	garantias?|garantiz[a-z]*|promet[a-z]*|promesas?
