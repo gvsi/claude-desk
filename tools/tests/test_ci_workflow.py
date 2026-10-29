@@ -151,8 +151,44 @@ def test_job_names_are_the_required_checks():
     assert [job["name"] for job in workflow_jobs] == REQUIRED_CHECKS
     assert documented_checks() == REQUIRED_CHECKS
     for job in workflow_jobs:
-        assert job["runs-on"] == "ubuntu-24.04", job["name"]
         assert job["timeout-minutes"] == 25, job["name"]
+
+
+# Where each job runs: GitHub-hosted ubuntu-24.04 unless the repository variable CI_RUNNER_MODE is
+# "ec2"; then a single-use self-hosted runner, spot for pull requests and on-demand otherwise, whose
+# label names the run, the attempt and the job. <suffix> is the job's own part of the label.
+RUNS_ON = (
+    "${{ vars.CI_RUNNER_MODE == 'ec2' && fromJSON(format("
+    """'["self-hosted","desk-ci-{0}-{1}-{2}-<suffix>"]', """
+    "github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) "
+    "|| 'ubuntu-24.04' }}"
+)
+# The runner launcher's suffixes, one per job.
+RUNNER_SUFFIXES = {"backend", "kernel", "proofs", "tier1", "tier2", "web", "infra", "secret-scan", "repo"}
+
+
+def test_jobs_run_on_hosted_runners_unless_switched_to_ec2():
+    workflow_jobs = load(WORKFLOW)["jobs"]
+
+    pattern = re.escape(RUNS_ON).replace(re.escape("<suffix>"), "(.*)")
+    suffixes = []
+    for job_id, job in workflow_jobs.items():
+        match = re.fullmatch(pattern, job["runs-on"])
+        assert match, (job_id, job["runs-on"])
+        suffixes.append(match[1])
+        # The label names the job, so a reader of the runner's logs can tell which job it ran.
+        assert match[1] == job_id, job_id
+    # Each label is unique within the run and in the launcher's form.
+    assert len(suffixes) == len(set(suffixes)) == len(workflow_jobs)
+    assert set(suffixes) == RUNNER_SUFFIXES
+    for suffix in suffixes:
+        assert re.fullmatch(r"[a-z][a-z0-9-]{0,31}", suffix), suffix
+    # Hosted stays the default: the variable unset, or anything but "ec2", makes the condition false
+    # and the expression falls back to ubuntu-24.04. Nothing else in a job picks its machine.
+    assert RUNS_ON.startswith("${{ vars.CI_RUNNER_MODE == 'ec2' && ")
+    assert RUNS_ON.endswith(" || 'ubuntu-24.04' }}")
+    for job in workflow_jobs.values():
+        assert not {"strategy", "container"} & set(job), job["name"]
 
 
 def env_example() -> dict[str, str]:

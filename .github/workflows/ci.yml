@@ -1,6 +1,8 @@
 # The nine checks on main and on pull requests to main; docs/ci.md says what each one proves.
 # Suites that other parts of the project add run through tools/desk_tools/gate.py, which runs,
 # skips visibly or fails each one by whether its code is in the repo. No secrets, read-only.
+# Jobs run on GitHub-hosted ubuntu-24.04 unless the repository variable CI_RUNNER_MODE is "ec2"
+# (docs/ci.md, "Runners"); each job's runs-on ends in its own label suffix.
 name: ci
 
 on:
@@ -28,7 +30,7 @@ defaults:
 jobs:
   backend:
     name: backend tests
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-backend"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 25
     services:
       postgres:
@@ -62,7 +64,7 @@ jobs:
 
   kernel:
     name: kernel tests
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-kernel"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -76,7 +78,7 @@ jobs:
 
   proofs:
     name: proofs
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-proofs"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -90,7 +92,7 @@ jobs:
 
   tier1:
     name: tier 1 evals
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-tier1"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 25
     services:
       postgres:
@@ -127,7 +129,7 @@ jobs:
   tier2:
     name: tier 2 results
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-tier2"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -142,7 +144,7 @@ jobs:
 
   web:
     name: web tests
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-web"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -167,7 +169,7 @@ jobs:
 
   infra:
     name: infra synth
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-infra"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -189,7 +191,7 @@ jobs:
 
   secret-scan:
     name: secret scan
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-secret-scan"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -212,7 +214,7 @@ jobs:
 
   repo:
     name: repo checks
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-repo"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
