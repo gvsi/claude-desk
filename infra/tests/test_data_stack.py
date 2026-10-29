@@ -179,6 +179,37 @@ def test_secrets_are_generated_never_literal(data_template):
             assert generator["PasswordLength"] == 32
 
 
+def _login(role: str) -> dict:
+    return {"ExcludePunctuation": True, "GenerateStringKey": "password", "IncludeSpace": False, "PasswordLength": 32,
+            "SecretStringTemplate": json.dumps({"username": role}, separators=(",", ":"))}
+
+
+_HEX_64 = {"ExcludeCharacters": "ghijklmnopqrstuvwxyz", "ExcludePunctuation": True, "ExcludeUppercase": True,
+           "IncludeSpace": False, "PasswordLength": 64}
+_PLACEHOLDER = {"ExcludePunctuation": True, "IncludeSpace": False, "PasswordLength": 32}
+
+# Each secret's generator exactly as first deployed. CloudFormation generates a new value when a
+# generator changes, which would replace the database logins, rotate the ledger's signing seed (so
+# earlier entries no longer verify) and overwrite the owner's key and passcode hash with a
+# placeholder. A CDK upgrade that adds or changes a property fails here before it can do that.
+GENERATORS = {
+    "desk/db/admin": _login("desk_admin"),
+    "desk/db/kernel": _login("desk_kernel"),
+    "desk/db/api": _login("desk_api"),
+    "desk/db/mockpay": _login("desk_mockpay"),
+    "desk/signing-seed": _HEX_64,
+    "desk/mockpay-key": _HEX_64,
+    "desk/anthropic-api-key": _PLACEHOLDER,
+    "desk/passcode-hash": _PLACEHOLDER,
+}
+
+
+def test_each_secrets_generator_is_frozen(data_template):
+    secrets = _resources(data_template, "AWS::SecretsManager::Secret").values()
+    generators = {secret["Properties"]["Name"]: secret["Properties"]["GenerateSecretString"] for secret in secrets}
+    assert generators == GENERATORS
+
+
 def _alphabet(generator: dict) -> set[str]:
     """The characters Secrets Manager draws from under a GenerateSecretString."""
     alphabet = set(string.digits) if not generator.get("ExcludeNumbers") else set()

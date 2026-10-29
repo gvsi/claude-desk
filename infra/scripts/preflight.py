@@ -9,8 +9,10 @@ In order, stopping at the first failure, which it names:
 3. `make evals-results-check BASE=<the repository's first commit>`. The first commit touches no
    gated path, so the check always requires HEAD's own tier 2 results file to exist and pass. A
    missing make target fails too: no deploy without the tier 2 check.
-4. Both owner secrets (`desk/anthropic-api-key`, `desk/passcode-hash`) carry the `owner-set=true`
-   tag that infra/scripts/set_secret.py adds, so neither is still DeskData's generated placeholder.
+4. Both owner secrets (`desk/anthropic-api-key`, `desk/passcode-hash`) are the owner's: the
+   `owner-set` tag infra/scripts/set_secret.py adds names the version it wrote, and that version is
+   the secret's current one (AWSCURRENT). A secret never set, or set and then overwritten (by
+   CloudFormation generating its placeholder again, say), fails.
 5. The web app builds and checks at HEAD: `npm ci`, `npm run build`, `npm run check:build` in
    `web/`, after deleting any earlier `web/dist`, so an old build is never deployed.
 
@@ -32,7 +34,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 REGION = "us-west-2"
 REPO = Path(__file__).resolve().parents[2]
 OWNER_SECRETS = ("desk/anthropic-api-key", "desk/passcode-hash")
-OWNER_SET_TAG = ("owner-set", "true")
+OWNER_SET_TAG = "owner-set"      # set_secret.py's tag; its value is the version it wrote
 MAIN = "refs/remotes/origin/main"
 WEB_STEPS = (["npm", "ci"], ["npm", "run", "build"], ["npm", "run", "check:build"])
 
@@ -100,7 +102,7 @@ def check_results(repo: Path) -> None:
 def check_owner_secrets(client) -> None:
     for secret_id in OWNER_SECRETS:
         try:
-            tags = client.describe_secret(SecretId=secret_id).get("Tags", [])
+            described = client.describe_secret(SecretId=secret_id)
         except ClientError as error:
             code = error.response.get("Error", {}).get("Code", "error")
             if code == "ResourceNotFoundException":
@@ -108,11 +110,18 @@ def check_owner_secrets(client) -> None:
             raise PreflightError(f"can't read {secret_id}: {code}") from None
         except BotoCoreError as error:
             raise PreflightError(f"can't read {secret_id}: {type(error).__name__}") from None
-        if not any((tag.get("Key"), tag.get("Value")) == OWNER_SET_TAG for tag in tags):
+        owner_set = [tag.get("Value") for tag in described.get("Tags", []) if tag.get("Key") == OWNER_SET_TAG]
+        current = [version for version, stages in (described.get("VersionIdsToStages") or {}).items()
+                   if "AWSCURRENT" in stages]
+        set_it = f"set it with infra/scripts/set_secret.py {secret_id}"
+        if not owner_set:
+            raise PreflightError(f"{secret_id} is still the generated placeholder: {set_it}")
+        if owner_set != current:
             raise PreflightError(
-                f"{secret_id} is still the generated placeholder: set it with infra/scripts/set_secret.py {secret_id}"
+                f"{secret_id}'s current version is {', '.join(current) or 'none'}, not {owner_set[0]}, the one "
+                f"set_secret.py wrote, so the value may not be yours: {set_it} again"
             )
-    print(f"ok: {' and '.join(OWNER_SECRETS)} are owner-set")
+    print(f"ok: {' and '.join(OWNER_SECRETS)} are owner-set, each at its current version")
 
 
 def check_web(repo: Path) -> None:

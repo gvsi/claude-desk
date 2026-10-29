@@ -1,5 +1,6 @@
 """set_secret.py: the owner sets the Anthropic key or the passcode hash, never echoed or printed,
-and tags the secret so the deploy preflight knows it is no longer the generated placeholder."""
+and tags the secret with the version it wrote, so the deploy preflight knows the current value is
+the owner's and not a generated placeholder."""
 
 import io
 
@@ -42,7 +43,7 @@ def _expect_write(stub: Stubber, secret_id: str, value: str) -> None:
         {"SecretId": secret_id, "SecretString": value},
     )
     stub.add_response(
-        "tag_resource", {}, {"SecretId": secret_id, "Tags": [{"Key": "owner-set", "Value": "true"}]}
+        "tag_resource", {}, {"SecretId": secret_id, "Tags": [{"Key": "owner-set", "Value": VERSION}]}
     )
 
 
@@ -111,14 +112,16 @@ def test_rejects_empty_value(secrets, monkeypatch, capsys, value):
     assert "empty" in capsys.readouterr().err
 
 
-def test_tags_the_secret_owner_set(secrets, monkeypatch, capsys):
-    """put_secret_value, then the owner-set tag the preflight looks for; Stubber checks both, in order."""
+def test_tags_the_secret_with_the_version_it_wrote(secrets, monkeypatch, capsys):
+    """put_secret_value, then `owner-set=<the version it wrote>`, which the preflight compares with
+    the current version; Stubber checks both calls, in order."""
     client, stub = secrets
     module = load_script("set_secret")
     monkeypatch.setattr(module.getpass, "getpass", lambda prompt="": f"  {TYPED}  ")
     _expect_write(stub, KEY_ID, TYPED)
 
     assert module.main([KEY_ID], client=client, stdin=_Terminal()) == 0
+    assert f"tagged owner-set={VERSION}" in capsys.readouterr().out
 
 
 def test_aws_failure_fails_without_the_value(secrets, monkeypatch, capsys):

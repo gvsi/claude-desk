@@ -83,18 +83,27 @@ def secrets():
         stub.assert_no_pending_responses()
 
 
-def _secret(stub: Stubber, secret_id: str, tags: list[dict] | None) -> None:
+# Secrets Manager's version IDs: the owner's (set_secret.py tagged the secret with it), the
+# placeholder's DeskData generated, and one written by neither, as a regenerated value would be.
+OWNER_VERSION = "0b1c2d3e-4f50-6172-8394-a5b6c7d8e9f0"
+PLACEHOLDER_VERSION = "9f8e7d6c-5b4a-3928-1706-f5e4d3c2b1a0"
+OTHER_VERSION = "5a5a5a5a-1b1b-2c2c-3d3d-4e4e4e4e4e4e"
+
+
+def _secret(stub: Stubber, secret_id: str, tags: list[dict] | None, current: str = OWNER_VERSION) -> None:
     if tags is None:
         stub.add_client_error("describe_secret", "ResourceNotFoundException", "Secrets Manager can't find it.",
                               expected_params={"SecretId": secret_id})
         return
-    stub.add_response("describe_secret", {"Name": secret_id, "Tags": tags}, {"SecretId": secret_id})
+    stages = {current: ["AWSCURRENT"], **({} if current == PLACEHOLDER_VERSION else {PLACEHOLDER_VERSION: ["AWSPREVIOUS"]})}
+    stub.add_response("describe_secret", {"Name": secret_id, "Tags": tags, "VersionIdsToStages": stages},
+                      {"SecretId": secret_id})
 
 
 def _owner_set(stub: Stubber) -> None:
     for secret_id in OWNER_SECRETS:
         _secret(stub, secret_id, [{"Key": "aws:cloudformation:stack-name", "Value": "DeskData"},
-                                  {"Key": "owner-set", "Value": "true"}])
+                                  {"Key": "owner-set", "Value": OWNER_VERSION}])
 
 
 def _run(env, secrets, *argv: str) -> int:
@@ -193,15 +202,35 @@ def test_results_check_runs_even_with_allow_branch(env, secrets, monkeypatch):
 @pytest.mark.parametrize("missing", OWNER_SECRETS)
 def test_refuses_owner_secrets_not_set(env, secrets, capsys, missing):
     for secret_id in OWNER_SECRETS:
-        tags = [{"Key": "owner-set", "Value": "true"}] if secret_id != missing else [{"Key": "owner-set", "Value": "false"}]
-        _secret(secrets[1], secret_id, tags)
         if secret_id == missing:
+            _secret(secrets[1], secret_id, [{"Key": "aws:cloudformation:stack-name", "Value": "DeskData"}],
+                    current=PLACEHOLDER_VERSION)
             break
+        _secret(secrets[1], secret_id, [{"Key": "owner-set", "Value": OWNER_VERSION}])
 
     assert _run(env, secrets) == 1
     err = capsys.readouterr().err
-    assert missing in err and "set_secret.py" in err
+    assert missing in err and "placeholder" in err and "set_secret.py" in err
     assert not any(call.startswith("npm") for call in env.calls())
+
+
+@pytest.mark.parametrize("current", [PLACEHOLDER_VERSION, OTHER_VERSION])
+def test_refuses_an_owner_secret_whose_current_value_the_owner_didnt_set(env, secrets, capsys, current):
+    """The tag names the version set_secret.py wrote. If another version became current (one
+    CloudFormation generated again, or a rotation), the tag no longer vouches for the value."""
+    _secret(secrets[1], OWNER_SECRETS[0], [{"Key": "owner-set", "Value": OWNER_VERSION}], current=current)
+
+    assert _run(env, secrets) == 1
+    err = capsys.readouterr().err
+    assert OWNER_SECRETS[0] in err and current in err and OWNER_VERSION in err and "set_secret.py" in err
+
+
+def test_refuses_the_old_owner_set_true_tag(env, secrets, capsys):
+    """`owner-set=true` names no version, so it vouches for none."""
+    _secret(secrets[1], OWNER_SECRETS[0], [{"Key": "owner-set", "Value": "true"}])
+
+    assert _run(env, secrets) == 1
+    assert "set_secret.py" in capsys.readouterr().err
 
 
 def test_refuses_owner_secrets_that_dont_exist(env, secrets, capsys):
