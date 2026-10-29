@@ -701,6 +701,25 @@ async def test_preview_session_needs_the_owner_of_the_copy(app, client):
     assert (whoami.status_code, whoami.json()["kind"], whoami.json()["desk_id"]) == (200, "visitor", copy.desk_id)
 
 
+async def test_preview_checks_the_owner_as_owner_routes_do(app, client, monkeypatch):
+    """One owner check serves both the owner's routes and the preview, so whatever later refuses an
+    owner token there (an expiry, a revocation) refuses its preview too."""
+    copy = await rivera(app, client)
+    sessions = len(await rows_of(app, copy.copy_id, select(ActorSession)))
+    owner_session = auth.owner_session
+
+    async def revoked(ctx, request, copy_id=None):
+        row = await owner_session(ctx, request, copy_id)
+        return None if row is not None and row.copy_id == copy.copy_id else row
+
+    monkeypatch.setattr(auth, "owner_session", revoked)
+    response = await client.get("/whoami", headers=copy.owner)
+    assert (response.status_code, response.json()) == (401, {"code": "auth"})
+    response = await preview(client, copy, copy.owner)
+    assert (response.status_code, response.json()) == (401, {"code": "auth"})
+    assert len(await rows_of(app, copy.copy_id, select(ActorSession))) == sessions
+
+
 async def test_preview_session_gets_visitor_tools_with_answering_off(app, client):
     copy = await rivera(app, client)
     live = await open_visitor(client, copy)

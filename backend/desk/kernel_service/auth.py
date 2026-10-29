@@ -224,6 +224,23 @@ def require_open(ctx: KernelCtx, request: Request, row: SessionRow, *, generatio
         raise AuthError(409, "stale_generation", "stale_generation", route=route_template(request), named=named)
 
 
+async def owner_session(ctx: KernelCtx, request: Request, copy_id: str | None = None) -> SessionRow | None:
+    """The open owner session `X-Owner-Session` proves, or None: the one owner check, for the
+    owner's routes (`require_owner`) and the owner's preview. With `copy_id`, only an owner session
+    of that copy counts. Binds the request's transaction to the owner's copy once the token names
+    one (and, with `copy_id`, only when it is that copy)."""
+    token = request.headers.get(OWNER_HEADER)
+    token_hash = hash_token(token) if token else None
+    owner_copy = await repo.copy_of_session_token(ctx, token_hash) if token_hash else None
+    if owner_copy is None or copy_id not in (None, owner_copy):
+        return None
+    row = (await ctx.db.scalars(ctx.bind(owner_copy).scoped(
+        select(SessionRow).where(SessionRow.secret_hash == token_hash)))).one_or_none()
+    if row is None or row.kind != "owner" or row.closed_at is not None:
+        return None
+    return row if hmac.compare_digest(row.secret_hash, token_hash) else None
+
+
 async def require_owner(ctx: KernelCtx, request: Request, *, desk_id: str | None = None,
                         session_id: str | None = None, named: Named | None = None) -> OwnerCtx:
     """The owner session `X-Owner-Session` proves and the copy it owns ("Session state responses",
@@ -239,15 +256,10 @@ async def require_owner(ctx: KernelCtx, request: Request, *, desk_id: str | None
     target_copy = await repo.copy_of_session_id(ctx, session_id) if session_id is not None else None
     if session_id is not None:
         named = Named(copy_id=target_copy, session_id=session_id) if target_copy is not None else None
-    token = request.headers.get(OWNER_HEADER)
-    token_hash = hash_token(token) if token else None
-    copy_id = await repo.copy_of_session_token(ctx, token_hash) if token_hash else None
-    if copy_id is None:
+    row = await owner_session(ctx, request)
+    if row is None:
         raise AuthError(401, "auth", "bad_owner_token", route=route, named=named)
-    copy = ctx.bind(copy_id)
-    row = (await ctx.db.scalars(copy.scoped(select(SessionRow).where(SessionRow.secret_hash == token_hash)))).one()
-    if row.kind != "owner" or row.closed_at is not None or not hmac.compare_digest(row.secret_hash, token_hash):
-        raise AuthError(401, "auth", "bad_owner_token", route=route, named=named)
+    copy_id, copy = row.copy_id, ctx.repo
     if session_id is not None and target_copy != copy_id:
         raise AuthError(404, "not_found", "wrong_copy" if named else "unknown_session", route=route, named=named)
     if desk_id is not None:

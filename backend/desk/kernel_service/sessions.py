@@ -3,7 +3,6 @@
 A session's state and principal are built from the kernel's own rows, never from a request.
 """
 
-import hmac
 from typing import Annotated
 
 from fastapi import APIRouter, Path, Request
@@ -58,25 +57,12 @@ async def create_session(body: CreateSessionRequest, ctx: Ctx, request: Request)
     named = Named(copy_id=copy_id, desk_id=desk.desk_id)
     if body.kind == "agent":
         raise AuthError(401, "auth", "agent_auth_unavailable", route=route_template(request), named=named)
-    if body.preview and not await _owner_of(ctx, request, copy_id):
+    if body.preview and await auth.owner_session(ctx, request, copy_id) is None:
         raise AuthError(401, "auth", "preview_unavailable", route=route_template(request), named=named)
     if desk.deleted_at is not None:
         raise AuthError(409, "closed", "closed", route=route_template(request), named=named)
     row, token = await open_visitor(ctx, copy_id, desk.desk_id, preview=body.preview)
     return SessionCreated(state=session_state(row), session_token=token)
-
-
-async def _owner_of(ctx: KernelCtx, request: Request, copy_id: str) -> bool:
-    """Whether `X-Owner-Session` proves an open owner session of the copy `copy_id`, which the
-    request's transaction is bound to."""
-    token = request.headers.get(auth.OWNER_HEADER)
-    token_hash = auth.hash_token(token) if token else None
-    if token_hash is None or await repo.copy_of_session_token(ctx, token_hash) != copy_id:
-        return False
-    row = (await ctx.db.scalars(ctx.repo.scoped(
-        select(SessionRow).where(SessionRow.secret_hash == token_hash)))).one_or_none()
-    return (row is not None and row.kind == "owner" and row.closed_at is None
-            and hmac.compare_digest(row.secret_hash, token_hash))
 
 
 async def open_visitor(ctx: KernelCtx, copy_id: str, desk_id: str, *, preview: bool = False
