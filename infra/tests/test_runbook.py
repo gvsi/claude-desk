@@ -63,3 +63,12 @@ def test_the_log_keeps_all_of_cdk_deploy_but_its_stack_outputs():
     first = section("First deploy (owner's terminal)")
     assert "`cdk deploy`'s diff and CloudFormation events included" in first
     assert "only its stack outputs stay on the terminal alone" in first
+
+
+def test_approval_is_claimed_only_for_changes_that_broaden_access():
+    """deploy.sh passes `--require-approval broadening` (test_deploy.py), so cdk asks only before a
+    change that broadens IAM permissions or security group access, not before every such change."""
+    for path in (RUNBOOK, INFRA / "scripts" / "deploy.sh"):
+        text = " ".join(path.read_text().replace("#", " ").split())
+        assert "before any change that broadens IAM permissions or security group access" in text, path
+        assert "IAM or security group change" not in text, path

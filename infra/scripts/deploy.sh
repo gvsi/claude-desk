@@ -19,8 +19,9 @@
 #
 # A custom domain comes from DESK_DOMAIN_NAME and DESK_CERTIFICATE_ARN (an ACM certificate in
 # us-east-1) in the owner's shell, never from the repo. cdk deploy asks for approval before any
-# IAM or security group change, so it keeps the terminal for its own output; everything else, the
-# CloudFormation events included, is also written to infra/out/deploy-<UTC time>.log.
+# change that broadens IAM permissions or security group access, so it keeps the terminal for its
+# own output; everything else, the CloudFormation events included, is also written to
+# infra/out/deploy-<UTC time>.log.
 set -euo pipefail
 
 usage() {
