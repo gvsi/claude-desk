@@ -12,7 +12,7 @@ const TEST_PAYMENT = { en: 'Test payment, no money moves', es: 'Pago de prueba, 
 describe('CARD_CHROME', () => {
   it('money_cards_say_test_payment', () => {
     // A payment link, a paid link, an agent's charge and a refund all move money.
-    expect(MONEY_TEMPLATES).toEqual(expect.arrayContaining(['payment_link', 'payment_confirmed', 'charge_confirmed', 'refund_issued']));
+    expect([...MONEY_TEMPLATES].sort()).toEqual(['charge_confirmed', 'payment_confirmed', 'payment_link', 'refund_issued']);
     for (const template of MONEY_TEMPLATES) {
       for (const language of LANGUAGES) {
         expect(CARD_CHROME[template][language].note, `${template} ${language}`).toBe(TEST_PAYMENT[language]);
