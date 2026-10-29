@@ -27,10 +27,13 @@ date	today|tonight|tomorrow|yesterday|weekends?|noon|midnight|o['’]?clock
 date	(?:next|this|last)[\s-]+(?:week|month|year)|this[\s-]+(?:morning|afternoon|evening)
 date	[ap]\.\s?m\.?|pm
 
-# Promises only the owner's rules or a card can make. "free" passes in "feel free" and in "free to"
-# followed by a verb ("free to ask"), never in "free to you".
+# Promises only the owner's rules or a card can make. "free" passes only in "feel free" and in
+# "free to" after "you're", "you are", "you'll be" or "you will be" ("you're free to ask"), where
+# it can't be a price. Anywhere else "free to" may state one: "free to everyone", "free to all
+# customers", "inspections are free to members".
 promise	guarant(?:ee|ees|eed|eeing|y)|promis(?:e|es|ed|ing)
-promise	(?<!feel )free(?! to (?!you\b|your\b))
+promise	(?<!feel )free(?! to\b)
+promise	(?<!feel )(?<!you['’]re )(?<!you are )(?<!you['’]ll be )(?<!you will be )free(?= to\b)
 promise	discount(?:s|ed|ing)?|refund(?:s|ed|ing|able)?|waiv(?:e|es|ed|er|ing)|complimentary
 promise	no[\s-]+charge|on[\s-]+the[\s-]+house|warrant(?:y|ies)|money[\s-]+back
 promise	(?:at[\s-]+)?no[\s-]+(?:extra[\s-]+|additional[\s-]+)?cost

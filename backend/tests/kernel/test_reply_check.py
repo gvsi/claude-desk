@@ -136,6 +136,9 @@ async def test_numbers_and_dates_in_prose_are_blocked(app, client, prose, rule_i
 @pytest.mark.parametrize(("prose", "rule_id", "span", "language"), [
     ("I guarantee it.", "lex.en.promise", "guarantee", "en"),
     ("That part is free.", "lex.en.promise", "free", "en"),
+    ("The first visit is free to everyone.", "lex.en.promise", "free", "en"),     # "free to" stating a price
+    ("It is free to all customers.", "lex.en.promise", "free", "en"),
+    ("Inspections are free to members.", "lex.en.promise", "free", "en"),
     ("Eso es gratis.", "lex.es.promise", "gratis", "es"),
     ("Le prometo.", "lex.es.promise", "prometo", "en"),      # too few words to tell: English
 ])
@@ -162,6 +165,7 @@ async def test_a_word_mixing_scripts_is_blocked(app, client, prose, span):
     ("Con gusto le ayudo. ¿Qué día le viene bien?", "es"),
     ("You may want to turn off the water.", "en"),          # the modal, not the month
     ("Feel free to ask me anything.", "en"),                # free, not a price
+    ("You're free to ask me anything.", "en"),
 ])
 async def test_plain_prose_passes(app, client, prose, language):
     copy, visitor = await visitor_of(app, client)
