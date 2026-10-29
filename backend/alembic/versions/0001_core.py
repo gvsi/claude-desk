@@ -477,6 +477,10 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA kernel TO desk_kern
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA kernel TO desk_kernel;
 ALTER DEFAULT PRIVILEGES IN SCHEMA kernel GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO desk_kernel;
 ALTER DEFAULT PRIVILEGES IN SCHEMA kernel GRANT USAGE, SELECT ON SEQUENCES TO desk_kernel;
+-- The ledger is append-only for the kernel: a kernel bug can't rewrite or erase history. Test
+-- cleanup and anything else that must remove ledger rows runs as desk_admin. ledger_heads keeps
+-- UPDATE, since appending moves the head.
+REVOKE UPDATE, DELETE, TRUNCATE ON kernel.ledger_entries FROM desk_kernel;
 
 GRANT USAGE ON SCHEMA kernel_ro TO desk_api;
 GRANT SELECT ON ALL TABLES IN SCHEMA kernel_ro TO desk_api;

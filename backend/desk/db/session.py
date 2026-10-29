@@ -14,7 +14,9 @@ from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Alias, FromClause, Join, Select, Table
+from sqlalchemy import Alias, ColumnClause, FromClause, Join, Select, Table, TextClause
+from sqlalchemy.sql import visitors
+from sqlalchemy.sql.selectable import SelectBase
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
@@ -122,10 +124,12 @@ async def dispose_engines() -> None:
 class KernelRepo:
     """One copy's view of the kernel tables: every kernel query goes through `scoped()`.
 
-    `scoped(stmt)` adds `copy_id = <copy>` for each kernel table the statement reads from,
-    joined tables and aliases included. It fails closed: a statement that reads no kernel table,
-    or reads from anything else (a subquery, a function, another schema), raises instead of
-    running unscoped. Statements nested in a WHERE clause are the caller's to scope.
+    `scoped(stmt)` supports one shape: a SELECT over kernel tables, their aliases and inner joins
+    of them, and adds `copy_id = <copy>` for each of those tables. Anything it can't scope makes it
+    raise instead of returning a statement that would read other copies' rows: a nested SELECT
+    anywhere in the statement (scalar subqueries, IN and EXISTS subqueries, derived tables, CTEs),
+    raw SQL fragments (`text()`, `literal_column()`), outer joins (a copy filter on the missing
+    side would drop the row), and FROM items that aren't kernel tables. A later plan can widen it.
     """
 
     def __init__(self, copy_id: str):
@@ -134,6 +138,15 @@ class KernelRepo:
         self.copy_id = copy_id
 
     def scoped(self, stmt: Select) -> Select:
+        if not isinstance(stmt, Select):
+            raise ValueError(f"KernelRepo scopes only SELECT statements, not {type(stmt).__name__}")
+        for element in visitors.iterate(stmt):
+            if element is stmt:
+                continue
+            if isinstance(element, SelectBase):
+                raise ValueError("KernelRepo can't scope a nested SELECT; query each table through scoped()")
+            if isinstance(element, TextClause) or (isinstance(element, ColumnClause) and element.is_literal):
+                raise ValueError("KernelRepo can't scope raw SQL text")
         tables = [table for clause in stmt.get_final_froms() for table in _kernel_tables(clause)]
         if not tables:
             raise ValueError("the statement reads no kernel table")
@@ -143,6 +156,8 @@ class KernelRepo:
 def _kernel_tables(clause: FromClause) -> Iterator[FromClause]:
     """The kernel tables (or their aliases) a FROM item reads; anything else can't be scoped."""
     if isinstance(clause, Join):
+        if clause.isouter or clause.full:
+            raise ValueError("KernelRepo can't scope an outer join; query the optional side separately")
         yield from _kernel_tables(clause.left)
         yield from _kernel_tables(clause.right)
         return

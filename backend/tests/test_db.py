@@ -5,6 +5,7 @@ These tests run against the local Postgres (`docker compose up -d db`) after
 desk_admin; privilege checks connect as the role under test. Every write is rolled back.
 """
 
+import warnings
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -13,13 +14,13 @@ import procrastinate
 import psycopg
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import create_engine, select, text
+from sqlalchemy import create_engine, exists, literal_column, select, text
 from sqlalchemy.exc import IntegrityError, StatementError
 from sqlalchemy.orm import Session, aliased
 from sqlalchemy.pool import NullPool
 
 import desk.db
-from desk.contracts import Claim, Review
+from desk.contracts import Claim, RenderedBlock, Review
 from desk.db.models import (
     ActorSession,
     Approval,
@@ -27,11 +28,14 @@ from desk.db.models import (
     Booking,
     Business,
     CalendarSlot,
+    A2ATurn,
     Decision,
     Desk,
+    Document,
     Fact,
     KnowledgeItem,
     LedgerEntry,
+    Message,
     PriceItem,
     Quote,
     Tool,
@@ -45,6 +49,7 @@ from desk.db.session import (
     libpq_url,
     procrastinate_connector,
 )
+from desk.events import A2AResponse
 from desk.db.tables import APP_TABLES, KERNEL_RO_COLUMNS, KERNEL_RO_VIEWS, KERNEL_TABLES, MOCKPAY_TABLES
 
 
@@ -242,14 +247,6 @@ async def test_kernel_repo_scopes_by_copy(kernel_db):
     other = aliased(Desk)
     pairs = select(Desk.desk_id, other.desk_id).join(other, other.business_id == Desk.business_id)
     assert (await kernel_db.execute(repo.scoped(pairs))).all() == [(f"desk-{copy_a}", f"desk-{copy_a}")]
-    # and it fails closed on what it can't scope
-    for unscopable in (
-        select(text("1")),                                                   # no kernel table
-        select(select(Desk).subquery()),                                     # a subquery
-        select(Desk).join(select(Business).subquery(), text("true")),        # a kernel table joined to one
-    ):
-        with pytest.raises(ValueError):
-            repo.scoped(unscopable)
 
 
 async def test_api_role_can_enqueue_jobs():
@@ -272,8 +269,61 @@ async def test_api_role_can_enqueue_jobs():
     assert jobs_path["search_path"] == api_path == "procrastinate, app"
 
 
-# Requirements of the same section that the ten tests above don't reach: each role's full
-# privileges, the data model's unique keys, and JSON columns that hold contracts.
+# Requirements of the same section that the plan's ten tests above don't reach: what KernelRepo
+# refuses, the append-only ledger, each role's full privileges, the data model's unique keys,
+# and JSON columns that hold contracts.
+
+
+async def test_kernel_repo_refuses_what_it_cannot_scope(kernel_db):
+    copy_a, copy_b = f"copy-{uuid4().hex}", f"copy-{uuid4().hex}"
+    kernel_db.add_all([
+        Desk(desk_id=f"desk-{copy_a}", copy_id=copy_a, business_id="biz-missing", name="Main line",
+             slug=f"slug-{copy_a}"),
+        Document(document_id=f"doc-{copy_b}", copy_id=copy_b, desk_id=f"desk-{copy_b}", title="Bob's warranty",
+                 body="...", canary="canary"),
+    ])
+    await kernel_db.flush()
+    repo = KernelRepo(copy_a)
+    title = select(Document.title).scalar_subquery()
+    businesses = select(Business).subquery()
+    nested = (
+        select(Desk.desk_id, title),                                         # copy B's title beside copy A's Desk
+        select(Desk).where(Desk.desk_id.in_(select(Document.desk_id))),
+        select(Desk).where(exists().where(Document.desk_id == Desk.desk_id)),
+        select(Desk).join(Document, Document.title == title),
+        select(Desk).order_by(title),
+        select(Desk).where(Desk.business_id == select(Document.title).cte().c.title),
+        select(select(Desk).subquery()),
+        select(Desk).join(businesses, businesses.c.business_id == Desk.business_id),
+    )
+    raw_sql = (select(text("1")), select(Desk).where(text("true")), select(Desk, literal_column("(SELECT 1)")))
+    # an outer join's missing side is NULL, so a copy filter in WHERE would drop the row: refused
+    outer = (
+        select(Desk.desk_id, Business.name).outerjoin(Business, Desk.business_id == Business.business_id),
+        select(Desk.desk_id, Business.name).join(Business, Desk.business_id == Business.business_id, full=True),
+    )
+    for unscopable in (*nested, *raw_sql, *outer):
+        with pytest.raises(ValueError):
+            repo.scoped(unscopable)
+
+
+def test_kernel_role_cannot_rewrite_the_ledger():
+    entry = ledger_entry("desk-a", 1)
+    with connect("KERNEL") as kernel, kernel.transaction(force_rollback=True):
+        kernel.execute(
+            "INSERT INTO kernel.ledger_entries (desk_id, seq, copy_id, prev_hash, created_at, event, hash, signature,"
+            " key_id, envelope_jcs) VALUES (%s, %s, %s, %s, %s, '{}'::jsonb, %s, %s, %s, %s)",
+            (entry.desk_id, entry.seq, entry.copy_id, entry.prev_hash, entry.created_at, entry.hash,
+             entry.signature, entry.key_id, entry.envelope_jcs),
+        )
+        for statement in (
+            "UPDATE kernel.ledger_entries SET signature = 'forged' WHERE desk_id = 'desk-a'",
+            "DELETE FROM kernel.ledger_entries WHERE desk_id = 'desk-a'",
+            "TRUNCATE kernel.ledger_entries",
+        ):
+            with pytest.raises(psycopg.errors.InsufficientPrivilege), kernel.transaction():
+                kernel.execute(statement)
+
 
 DML = ("SELECT", "INSERT", "UPDATE", "DELETE")
 SCHEMA_ACCESS = {   # the table privileges each role holds on every table or view of its schemas, and no others
@@ -281,6 +331,7 @@ SCHEMA_ACCESS = {   # the table privileges each role holds on every table or vie
     "desk_api": {"app": DML, "procrastinate": DML, "kernel_ro": ("SELECT",)},
     "desk_mockpay": {"mockpay": DML},
 }
+APPEND_ONLY = {("desk_kernel", "kernel", "ledger_entries"): ("SELECT", "INSERT")}   # ledger_heads keeps UPDATE
 
 
 def has(admin: psycopg.Connection, check: str, role: str, target: str, privilege: str) -> bool:
@@ -302,7 +353,7 @@ def test_each_role_reaches_only_its_own_schemas(admin):
             for (relation,) in relations:
                 privileges = (*DML, "TRUNCATE", "REFERENCES", "TRIGGER")
                 held = {p for p in privileges if has(admin, "has_table_privilege", role, f"{schema}.{relation}", p)}
-                assert held == set(expected), (role, schema, relation)
+                assert held == set(APPEND_ONLY.get((role, schema, relation), expected)), (role, schema, relation)
 
 
 def per_desk_rows(desk_id: str) -> list[Base]:
@@ -404,3 +455,42 @@ def test_json_columns_validate_against_contracts(kernel_tx):
     kernel_tx.expunge_all()
     assert kernel_tx.get(Fact, ("desk-a", "quote:q-1")).claims == [claim]
     assert kernel_tx.get(Decision, "decision-1").review == review
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")   # the strict integer types take part in SQLAlchemy's statement cache
+        kernel_tx.execute(select(Quote).where(Quote.amount_cents == 18_000, Quote.discount_bp == 0)).all()
+
+
+@pytest.fixture
+def api_tx():
+    """An ORM session as desk_api whose writes are rolled back."""
+    engine = create_engine(database_url("API"), poolclass=NullPool)
+    with Session(engine) as session:
+        yield session
+        session.rollback()
+    engine.dispose()
+
+
+def test_visitor_payloads_validate_against_contracts(api_tx):
+    block = RenderedBlock(kind="prose", text="Hi, I'm Claude, answering for Rivera Plumbing.")
+    answer = A2AResponse(session_id="session-1", disclosure="ai", blocks=[block], receipts=[])
+
+    def message(blocks) -> Message:
+        return Message(message_id=f"m-{uuid4().hex}", copy_id="copy-a", desk_id="desk-a", session_id="session-1",
+                       blocks=blocks)
+
+    def turn(response) -> A2ATurn:
+        return A2ATurn(agent_key_id="agent-1", session_id="session-1", nonce=uuid4().hex, copy_id="copy-a",
+                       response=response)
+
+    for row in (
+        message([{"kind": "banner", "text": "Free plumbing for everyone"}]),   # not a block kind
+        turn({"session_id": "session-1", "blocks": [block.model_dump()], "receipts": []}),   # no AI disclosure
+    ):
+        assert_refused_before_the_database(api_tx, row)
+
+    sent, stored = message([block]), turn(answer)
+    api_tx.add_all([sent, stored])
+    api_tx.flush()
+    api_tx.expunge_all()
+    assert api_tx.get(Message, sent.n).blocks == [block]
+    assert api_tx.get(A2ATurn, ("agent-1", "session-1", stored.nonce)).response == answer

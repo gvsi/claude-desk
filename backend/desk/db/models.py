@@ -22,6 +22,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
 
 from desk import contracts as c
+from desk.events import A2AResponse
 
 NOW = text("now()")
 EMPTY_LIST = text("'[]'::jsonb")
@@ -51,9 +52,10 @@ class ContractJSON(TypeDecorator):
 
 
 class _StrictInteger(TypeDecorator):
-    """An integer column that refuses bools and floats instead of letting Postgres round them."""
+    """An integer column that refuses bools and floats instead of letting Postgres round them.
 
-    cache_ok = True
+    SQLAlchemy reads `cache_ok` from each concrete class, so every subclass sets it again.
+    """
 
     def process_bind_param(self, value: Any, dialect: Any) -> Any:
         if value is None or type(value) is int:
@@ -65,12 +67,14 @@ class Cents(_StrictInteger):
     """Money in USD cents."""
 
     impl = BigInteger
+    cache_ok = True
 
 
 class BasisPoints(_StrictInteger):
     """A percentage in basis points (0-10_000)."""
 
     impl = Integer
+    cache_ok = True
 
 
 class Base(DeclarativeBase):
@@ -473,7 +477,7 @@ class Message(Base):
     copy_id: Mapped[str] = mapped_column(Text)
     desk_id: Mapped[str | None] = mapped_column(Text)
     session_id: Mapped[str | None] = mapped_column(Text)
-    blocks: Mapped[Any | None] = mapped_column(JSONB)
+    blocks: Mapped[list[c.RenderedBlock] | None] = mapped_column(ContractJSON(list[c.RenderedBlock]))
     language: Mapped[str | None] = mapped_column(Text)
     owner_translation: Mapped[str | None] = mapped_column(Text)
     visibility: Mapped[str | None] = mapped_column(Text)
@@ -510,7 +514,8 @@ class A2ATurn(Base):
     copy_id: Mapped[str] = mapped_column(Text)
     desk_id: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(Text, server_default=text("'running'"))
-    response: Mapped[Any | None] = mapped_column(JSONB)
+    # the stored answer, replayed to a resent request; it always carries the AI disclosure
+    response: Mapped[A2AResponse | None] = mapped_column(ContractJSON(A2AResponse))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
 
 
