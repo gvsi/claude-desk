@@ -107,7 +107,10 @@ interface AnswerLock {
 interface OpenMenu {
   side: Side;
   focus: 'first' | 'last';
+  /** The decision, its state and the answers it offered when the menu opened (`menuKey`). */
   key: string;
+  /** Which opening this is, so each one moves focus into the menu, even to the same item. */
+  openedAt: number;
 }
 
 /** The answers the kernel offers for this decision, in the card's order; none unless it is held. */
@@ -154,6 +157,8 @@ export function ApprovalCard({ decision, heldBy, context, waiting, personName, o
   const showAnswers = offered.length > 0;
   const failed = error === true || (typeof error === 'string' && error !== '');
   const answerKey = `${decision.decision_id}\n${decision.state}`;
+  // What a menu was opened on: the decision, its state and the answers it offers.
+  const menuKey = `${answerKey}\n${offered.join(' ')}`;
 
   // One click waits until the decision or its state changes, the screen says that answer ended in
   // an error (`error` on and `pending` off, after either of them changed since the click), or the
@@ -199,44 +204,52 @@ export function ApprovalCard({ decision, heldBy, context, waiting, personName, o
     }
   };
 
-  // One menu at a time, and none while an answer is sent or once the answers have changed.
+  // One menu at a time. It opens only on the owner's click or key, and once an answer starts to be
+  // sent or the answers change it is gone, not hidden, so it can't come back on its own.
   const [open, setOpen] = useState<OpenMenu | null>(null);
-  const menuSide = open !== null && open.key === answerKey && !waitingForResult ? open.side : null;
+  if (open !== null && (open.key !== menuKey || waitingForResult)) setOpen(null);
+  const menuSide = open !== null && open.key === menuKey && !waitingForResult ? open.side : null;
+  const openings = useRef(0);
+  const openMenu = (side: Side, focus: OpenMenu['focus']) => {
+    openings.current += 1;
+    setOpen({ side, focus, key: menuKey, openedAt: openings.current });
+  };
+  const closeMenu = () => setOpen(null);
   const ids = useId();
   const buttonId = (side: Side) => `${ids}-${side}`;
-  const answersRef = useRef<HTMLDivElement>(null);
-  const focusButton = (side: Side) => {
-    answersRef.current?.ownerDocument.getElementById(buttonId(side))?.focus();
-  };
-  const closeMenu = (returnFocus: boolean) => {
-    if (returnFocus && open !== null) focusButton(open.side);
-    setOpen(null);
-  };
 
-  // If an answer starts to be sent while a menu is open, the menu goes and focus waits on its button.
-  useLayoutEffect(() => {
-    if (!waitingForResult || open === null) return;
-    const doc = answersRef.current?.ownerDocument;
-    const menu = doc?.getElementById(`${buttonId(open.side)}-menu`);
-    if (menu?.contains(doc?.activeElement ?? null)) focusButton(open.side);
-    setOpen(null);
-  });
-
-  // A click on an open menu's button closes it, with focus on the button, whichever browser it is.
+  // A click on an open menu's button closes it; the menu gives focus back to the button, whichever
+  // browser it is.
   const toggleMenu = (side: Side) => {
-    if (menuSide === side) closeMenu(true);
-    else setOpen({ side, focus: 'first', key: answerKey });
+    if (menuSide === side) closeMenu();
+    else openMenu(side, 'first');
   };
+  // Down and Up open the menu, or move focus back into it while it is open; Escape closes it and
+  // leaves focus on the button.
   const onMenuButtonKey = (side: Side, event: KeyboardEvent<HTMLButtonElement>) => {
     if (waitingForResult) return;
+    if (event.key === 'Escape') {
+      if (menuSide !== side) return;
+      event.preventDefault();
+      event.stopPropagation();
+      closeMenu();
+      return;
+    }
     if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
     event.preventDefault();
-    setOpen({ side, focus: event.key === 'ArrowDown' ? 'first' : 'last', key: answerKey });
+    openMenu(side, event.key === 'ArrowDown' ? 'first' : 'last');
   };
-  const choose = (side: Side, value: ApprovalAnswer) => {
-    // Focus goes back to the menu's button, and waits there while the answer is sent.
-    focusButton(side);
-    setOpen(null);
+  // Focus that leaves a side, its button and its menu, for anything else on the page closes its
+  // menu, and stays where it went. Focus that leaves the page, or a press on the menu's own padding,
+  // has nowhere to go and closes nothing.
+  const onSideBlur = (side: Side, event: FocusEvent<HTMLDivElement>) => {
+    const next = event.relatedTarget;
+    if (next === null || event.currentTarget.contains(next)) return;
+    setOpen((current) => (current?.side === side ? null : current));
+  };
+  // The menu goes and gives focus back to its button, where it waits while the answer is sent.
+  const choose = (value: ApprovalAnswer) => {
+    closeMenu();
     answer(value);
   };
 
@@ -271,7 +284,6 @@ export function ApprovalCard({ decision, heldBy, context, waiting, personName, o
       {showAnswers ? (
         <>
           <div
-            ref={answersRef}
             role="group"
             aria-label="Your answer"
             aria-busy={waitingForResult || undefined}
@@ -279,27 +291,23 @@ export function ApprovalCard({ decision, heldBy, context, waiting, personName, o
           >
             <div className="cd-approval-card__row">
               {sides.map(({ side, answers }) => {
+                // Each side keeps one button, a plain one or a menu button, so focus stays on it when
+                // its answers change.
                 const [only] = answers;
-                if (answers.length === 1 && only !== undefined) {
-                  return (
-                    <Button key={side} variant={SIDES[side].variant} size="main" busy={waitingForResult} onClick={() => answer(only)}>
-                      {buttonWords(only, personName)}
-                    </Button>
-                  );
-                }
-                const isOpen = menuSide === side;
+                const single = answers.length === 1 ? only : undefined;
+                const isOpen = single === undefined && menuSide === side;
                 return (
-                  <div key={side} className="cd-approval-card__side">
+                  <div key={side} className="cd-approval-card__side" onBlur={(event) => onSideBlur(side, event)}>
                     <Button
                       id={buttonId(side)}
                       variant={SIDES[side].variant}
                       size="main"
                       busy={waitingForResult}
-                      menuOpen={isOpen}
-                      onClick={() => toggleMenu(side)}
-                      onKeyDown={(event) => onMenuButtonKey(side, event)}
+                      menuOpen={single === undefined ? isOpen : undefined}
+                      onClick={() => (single === undefined ? toggleMenu(side) : answer(single))}
+                      onKeyDown={single === undefined ? (event) => onMenuButtonKey(side, event) : undefined}
                     >
-                      {SIDES[side].word}
+                      {single === undefined ? SIDES[side].word : buttonWords(single, personName)}
                     </Button>
                     {isOpen && open !== null ? (
                       <AnswerMenu
@@ -309,7 +317,8 @@ export function ApprovalCard({ decision, heldBy, context, waiting, personName, o
                         answers={answers}
                         personName={personName}
                         focus={open.focus}
-                        onChoose={(value) => choose(side, value)}
+                        openedAt={open.openedAt}
+                        onChoose={choose}
                         onClose={closeMenu}
                       />
                     ) : null}
@@ -341,17 +350,23 @@ interface AnswerMenuProps {
   personName: string | undefined;
   /** Where focus lands when it opens. */
   focus: 'first' | 'last';
+  /** Which opening this is: each one moves focus in again. */
+  openedAt: number;
   onChoose: (answer: ApprovalAnswer) => void;
-  /** Escape, Tab, a click outside, or focus leaving it; `true` gives focus back to its button. */
-  onClose: (returnFocus: boolean) => void;
+  /** Escape or Tab in it, a press outside it and its button, or another menu opening. */
+  onClose: () => void;
 }
+
+/** The one answer menu open on the page, across every card: opening another closes it. */
+let pageMenu: { close: () => void } | null = null;
 
 /**
  * One side's answers as a menu, under its button: each item says what it does, over a quieter line.
  * It opens with focus on its first item (or its last, from Up); Down and Up move and wrap, Home and
  * End jump, Enter or Space chooses, and Escape or Tab closes it with focus back on its button.
+ * Whatever closes it, focus that was in it goes back to its button.
  */
-function AnswerMenu({ id, side, labelledBy, answers, personName, focus, onChoose, onClose }: AnswerMenuProps) {
+function AnswerMenu({ id, side, labelledBy, answers, personName, focus, openedAt, onChoose, onClose }: AnswerMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
 
   // The latest onClose, for the document listener below.
@@ -362,7 +377,28 @@ function AnswerMenu({ id, side, labelledBy, answers, personName, focus, onChoose
     const items = ref.current?.querySelectorAll<HTMLElement>('[role="menuitem"]');
     if (!items || items.length === 0) return;
     items[focus === 'first' ? 0 : items.length - 1]?.focus();
-  }, [focus]);
+  }, [focus, openedAt]);
+
+  // However it closes, focus that was in it goes back to its button while the menu is still on the
+  // page, so it never falls to the page itself.
+  useLayoutEffect(() => {
+    const menu = ref.current;
+    return () => {
+      const doc = menu?.ownerDocument;
+      if (menu && doc && menu.contains(doc.activeElement)) doc.getElementById(labelledBy)?.focus();
+    };
+  }, [labelledBy]);
+
+  // One menu on the page: this one closes any other, in this card or another, after focus has
+  // moved into it, so the other gives none back.
+  useLayoutEffect(() => {
+    const self = { close: () => close.current() };
+    pageMenu?.close();
+    pageMenu = self;
+    return () => {
+      if (pageMenu === self) pageMenu = null;
+    };
+  }, []);
 
   // A press outside the menu and its button closes it, and leaves focus where the press puts it.
   useEffect(() => {
@@ -372,7 +408,7 @@ function AnswerMenu({ id, side, labelledBy, answers, personName, focus, onChoose
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target as Node | null;
       if (target && (menu.contains(target) || doc.getElementById(labelledBy)?.contains(target))) return;
-      close.current(false);
+      close.current();
     };
     doc.addEventListener('pointerdown', onPointerDown, true);
     return () => doc.removeEventListener('pointerdown', onPointerDown, true);
@@ -382,7 +418,7 @@ function AnswerMenu({ id, side, labelledBy, answers, personName, focus, onChoose
     if (event.key === 'Escape' || event.key === 'Tab') {
       event.preventDefault();
       event.stopPropagation();
-      onClose(true);
+      onClose();
       return;
     }
     const items = [...event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]')];
@@ -408,14 +444,6 @@ function AnswerMenu({ id, side, labelledBy, answers, personName, focus, onChoose
     items[next]?.focus();
   };
 
-  // Focus that leaves for anything but the menu or its button, a screen reader's move say, closes it.
-  const onBlur = (event: FocusEvent<HTMLDivElement>) => {
-    const next = event.relatedTarget;
-    if (next === null || event.currentTarget.contains(next)) return;
-    if (event.currentTarget.ownerDocument.getElementById(labelledBy)?.contains(next)) return;
-    onClose(false);
-  };
-
   return (
     <div
       ref={ref}
@@ -424,7 +452,6 @@ function AnswerMenu({ id, side, labelledBy, answers, personName, focus, onChoose
       aria-labelledby={labelledBy}
       className={`cd-approval-card__menu cd-approval-card__menu--${side}`}
       onKeyDown={onKeyDown}
-      onBlur={onBlur}
     >
       {answers.map((value) => (
         // Named by its words alone; its line is its description, read once, after the name.

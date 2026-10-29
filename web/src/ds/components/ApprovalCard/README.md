@@ -35,8 +35,10 @@
 
 - A menu button says `aria-haspopup="menu"` and `aria-expanded`. Its menu is a `role="menu"` named by the button ("Allow", "Deny"); each item is a `menuitem` named by its words, with its line as its description (`aria-describedby`).
 - A click, Enter, Space or Down opens a menu with focus on its first item; Up opens it on its last. In the menu, Down and Up move and wrap, Home and End jump to the first and last, and Enter, Space or a click chooses.
-- Escape or Tab closes the menu and gives focus back to its button. A click outside, or focus leaving for anything but the menu and its button, closes it and leaves focus where it went. A second click on the button closes it too.
-- One menu is open at a time: opening Deny's closes Allow's.
+- Escape or Tab in the menu closes it and gives focus back to its button. With focus on the button of an open menu (after a press dragged off it, say), Escape closes the menu, and Down or Up moves focus back into it.
+- A click outside, or focus leaving the button and its menu for anything else on the page, closes the menu and leaves focus where it went. A second click on the button closes it too. However a menu closes, focus that was in it goes back to its button, never to the page.
+- One menu is open on the page at a time: opening one closes any other, Allow's when Deny's opens, or a menu on another card.
+- A menu opens only on the owner's click or key. When an answer starts to be sent, or the answers it was opened on change (a side drops to one answer, or `decision.answers`, `decision_id` or `state` changes), it closes for good and never comes back by itself. Each side keeps one button, so focus stays on Allow when it turns from a menu button into "Allow this time" and back.
 - An item draws the focus ring just inside its edge (a 2 px `accent-blue` outline at -2 px), not 2 px outside as elsewhere, so the ring clears the menu's 4 px padding and the next item; `accent-blue` reads 5.2 on `fill-hover` over `bg-surface`. An open menu's button keeps its hover fill, so the menu reads as its own.
 - Choosing an item calls `onAnswer` with that answer, closes the menu and leaves focus on its button while the answer is sent.
 
@@ -45,7 +47,7 @@
 - One click on a plain button, or one choice in a menu, calls `onAnswer` once, and both controls wait (`aria-disabled`, `aria-busy`, and no menu opens) until `decision_id` or `state` changes, until the screen reports that the answer failed (`error` on and `pending` off, after either changed since the click), or until the promise `onAnswer` returned rejects. Return the request's promise: a screen that keeps the same `error` on between tries and never sets `pending` still gets the answers back after each failure.
 - `pending` shows "Sending your answer" in a status line under the answers. Both controls keep their look and fade a little: Allow to 60%, the red Deny to 80%, so each label still reads at 4.5:1 in the card.
 - `error` shows "We couldn't confirm your answer. Try again, or reload to see where it stands." (`true`), or the screen's own line (a string), as an alert, and the answers can be tried again. A retry is safe: the kernel resolves a request once, and on `conflict` the screen re-reads the decision.
-- When the answers go while one of them has focus, focus moves to the status line. If an answer starts to be sent while a menu is open, the menu closes and focus waits on its button.
+- When the answers go while one of them has focus, focus moves to the status line. If an answer starts to be sent while a menu is open, from this card or from elsewhere, the menu closes and focus waits on its button.
 
 ## Final lines
 

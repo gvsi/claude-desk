@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { expect, fn, waitFor, within } from 'storybook/test';
 
 import type { ApprovalAnswer, Decision } from '../../../api/contracts.ts';
@@ -175,6 +175,30 @@ function AlwaysFailingScreen(props: ApprovalCardProps) {
       }}
     />
   );
+}
+
+/** The event a story sends the screen below, carrying new props for its card. */
+const SCREEN_UPDATE = 'cd-story-screen-update';
+
+/**
+ * The card as a screen holds it, re-rendered with whatever props the story sends: `pending` when an
+ * answer starts to be sent from elsewhere, or the decision as the kernel re-read it.
+ */
+function UpdatingScreen(props: ApprovalCardProps) {
+  const [update, setUpdate] = useState<Partial<ApprovalCardProps>>({});
+  useEffect(() => {
+    const onUpdate = (event: Event) => {
+      if (event instanceof CustomEvent) setUpdate((current) => ({ ...current, ...(event.detail as Partial<ApprovalCardProps>) }));
+    };
+    window.addEventListener(SCREEN_UPDATE, onUpdate);
+    return () => window.removeEventListener(SCREEN_UPDATE, onUpdate);
+  }, []);
+  return <ApprovalCard {...props} {...update} />;
+}
+
+/** Sends the screen new props for its card. */
+function updateScreen(root: HTMLElement, update: Partial<ApprovalCardProps>): void {
+  root.ownerDocument.defaultView?.dispatchEvent(new CustomEvent(SCREEN_UPDATE, { detail: update }));
 }
 
 const meta = {
@@ -549,6 +573,163 @@ export const MenuOnAPhone: Story = {
     for (const item of itemsOf(menu)) await expect(item.getBoundingClientRect().height).toBeGreaterThanOrEqual(48);
     await expect(itemsOf(menu)[0]).toHaveFocus();
     await expect(line.scrollWidth).toBeLessThanOrEqual(PHONE_LINE);
+  },
+};
+
+export const DragOffTheButton: Story = {
+  args: consultationArgs,
+  parameters: {
+    canvasNote: `${ANSWERS_BOARD} No board shows a press dragged off a menu button; the menu stays open with focus on its button, Down goes back into it, and focus leaving the button closes it.`,
+  },
+  play: async ({ args, canvas, userEvent }) => {
+    const allow = canvas.getByRole('button', { name: 'Allow this time' });
+    const deny = canvas.getByRole('button', { name: 'Deny' });
+    const summary = canvas.getByText(heldConsultation.reason_plain);
+    const dragOff = () =>
+      userEvent.pointer([{ keys: '[MouseLeft>]', target: deny }, { target: summary }, { keys: '[/MouseLeft]', target: summary }]);
+    await userEvent.click(deny);
+    await expect(itemsOf(canvas.getByRole('menu', { name: 'Deny' }))[0]).toHaveFocus();
+
+    // A press on the open menu's button, dragged off and let go over the summary, is no click: the
+    // menu stays open, and focus is on its button.
+    await dragOff();
+    await expect(canvas.getByRole('menu', { name: 'Deny' })).toBeVisible();
+    await expect(deny).toHaveFocus();
+    await expect(deny).toHaveAttribute('aria-expanded', 'true');
+
+    // Down on the button moves focus back into its open menu.
+    await userEvent.keyboard('{ArrowDown}');
+    await expect(itemsOf(canvas.getByRole('menu', { name: 'Deny' }))[0]).toHaveFocus();
+
+    // Once more, then focus leaves the button for Allow: the menu closes.
+    await dragOff();
+    await expect(deny).toHaveFocus();
+    await userEvent.tab({ shift: true });
+    await expect(allow).toHaveFocus();
+    await expect(canvas.queryByRole('menu')).toBeNull();
+    await expect(deny).toHaveAttribute('aria-expanded', 'false');
+    await expect(args.onAnswer).not.toHaveBeenCalled();
+  },
+};
+
+export const EscapeOnTheButton: Story = {
+  args: consultationArgs,
+  parameters: {
+    canvasNote: `${ANSWERS_BOARD} No board shows the keys; with focus on a menu button whose menu is open, Escape closes the menu and leaves focus on the button.`,
+  },
+  play: async ({ args, canvas, userEvent }) => {
+    const deny = canvas.getByRole('button', { name: 'Deny' });
+    await userEvent.click(deny);
+    // A press dragged off the button leaves its menu open with focus on the button.
+    await userEvent.pointer([
+      { keys: '[MouseLeft>]', target: deny },
+      { target: canvas.getByText(heldConsultation.reason_plain) },
+      { keys: '[/MouseLeft]' },
+    ]);
+    await expect(deny).toHaveFocus();
+    await expect(deny).toHaveAttribute('aria-expanded', 'true');
+
+    await userEvent.keyboard('{Escape}');
+    await expect(canvas.queryByRole('menu')).toBeNull();
+    await expect(deny).toHaveAttribute('aria-expanded', 'false');
+    await expect(deny).toHaveFocus();
+    await expect(args.onAnswer).not.toHaveBeenCalled();
+  },
+};
+
+export const OneMenuAcrossCards: Story = {
+  args: refundArgs,
+  render: (args) => (
+    <div style={{ display: 'grid', rowGap: 'var(--space-12)' }}>
+      <ApprovalCard {...args} />
+      <ApprovalCard {...args} {...consultationArgs} personName={undefined} />
+    </div>
+  ),
+  parameters: {
+    canvasNote: `${ANSWERS_BOARD} Two held requests on Today's list: one menu is open on the page at a time, however the next one opens, here by assistive tech activating a button with no pointer press while focus is outside the open menu.`,
+  },
+  play: async ({ args, canvas, userEvent }) => {
+    const [first, second] = canvas.getAllByRole('article') as [HTMLElement, HTMLElement];
+    const allow = within(first).getByRole('button', { name: 'Allow' });
+    const deny = within(second).getByRole('button', { name: 'Deny' });
+    await userEvent.click(allow);
+    const menu = within(first).getByRole('menu', { name: 'Allow' });
+    // A press on the menu's own padding is inside it, so the menu stays open, though focus leaves it.
+    await userEvent.pointer({ keys: '[MouseLeft]', target: menu });
+    await expect(menu).toBeVisible();
+    await expect(menu).not.toContainElement(menu.ownerDocument.activeElement as HTMLElement | null);
+
+    // Deny's button on the next card is activated directly: a click, and nothing else.
+    deny.click();
+    await waitFor(() => expect(within(second).getByRole('menu', { name: 'Deny' })).toBeVisible());
+    await expect(canvas.getAllByRole('menu')).toHaveLength(1);
+    await expect(allow).toHaveAttribute('aria-expanded', 'false');
+    await expect(deny).toHaveAttribute('aria-expanded', 'true');
+    await expect(itemsOf(within(second).getByRole('menu'))[0]).toHaveFocus();
+    await expect(args.onAnswer).not.toHaveBeenCalled();
+  },
+};
+
+export const SendingStartsWhileOpen: Story = {
+  args: refundArgs,
+  render: (args) => <UpdatingScreen {...args} />,
+  parameters: {
+    canvasNote: `${ANSWERS_BOARD} No board shows an answer sent from elsewhere while a menu is open; the menu closes and focus waits on its button, never on the page.`,
+  },
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
+    const deny = canvas.getByRole('button', { name: 'Deny' });
+    await userEvent.click(deny);
+    await expect(itemsOf(canvas.getByRole('menu', { name: 'Deny' }))[0]).toHaveFocus();
+
+    // The screen starts sending an answer given elsewhere, say on the same request in its conversation.
+    updateScreen(canvasElement, { pending: true });
+    await waitFor(() => expect(canvas.getByText('Sending your answer')).toBeVisible());
+    // The menu goes, and focus moves to its button, where it waits.
+    await expect(canvas.queryByRole('menu')).toBeNull();
+    await expect(deny).toHaveFocus();
+    await expect(deny).toHaveAttribute('aria-expanded', 'false');
+    await expect(deny).toHaveAttribute('aria-disabled', 'true');
+
+    // That answer fails and the answers come back: the menu stays closed until the owner opens it.
+    updateScreen(canvasElement, { pending: false, error: true });
+    await waitFor(() => expect(canvas.getByRole('alert')).toHaveTextContent(ERROR_LINE));
+    await expect(deny).not.toHaveAttribute('aria-disabled');
+    await expect(canvas.queryByRole('menu')).toBeNull();
+    await expect(deny).toHaveFocus();
+    await expect(args.onAnswer).not.toHaveBeenCalled();
+  },
+};
+
+export const AnswersChangeWhileOpen: Story = {
+  args: refundArgs,
+  render: (args) => <UpdatingScreen {...args} />,
+  parameters: {
+    canvasNote: `${ANSWERS_BOARD} No board shows the answers changing under an open menu. Maria lowers her money cap below the refund in another tab, so a re-read drops Allow only for Dana, then raises it again; the menu stays closed until she opens it, and focus stays on Allow.`,
+  },
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
+    const labels = () => answerButtons(canvasElement).map((button) => button.textContent);
+    const allow = canvas.getByRole('button', { name: 'Allow' });
+    await userEvent.tab();
+    await expect(allow).toHaveFocus();
+    await userEvent.keyboard('{ArrowUp}');
+    const last = itemsOf(canvas.getByRole('menu', { name: 'Allow' }))[1];
+    await expect(last).toHaveAccessibleName(`Only for ${DANA}, always`);
+    await expect(last).toHaveFocus();
+
+    // The re-read drops allow_person: Allow has one answer, a plain button, and focus stays on it.
+    updateScreen(canvasElement, { decision: { ...heldRefund, answers: ['allow_once', 'deny_once', 'deny_always'] } });
+    await waitFor(() => expect(labels()).toEqual(['Allow this time', 'Deny']));
+    await expect(canvas.queryByRole('menu')).toBeNull();
+    await expect(canvas.getByRole('button', { name: 'Allow this time' })).toHaveFocus();
+
+    // It comes back: Allow opens a menu again, closed, and focus doesn't jump into it.
+    updateScreen(canvasElement, { decision: heldRefund });
+    await waitFor(() => expect(labels()).toEqual(['Allow', 'Deny']));
+    await expect(canvas.queryByRole('menu')).toBeNull();
+    const again = canvas.getByRole('button', { name: 'Allow' });
+    await expect(again).toHaveAttribute('aria-expanded', 'false');
+    await expect(again).toHaveFocus();
+    await expect(args.onAnswer).not.toHaveBeenCalled();
   },
 };
 

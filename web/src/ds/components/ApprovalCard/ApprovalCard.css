@@ -77,11 +77,7 @@
   gap: var(--space-8);
 }
 
-.cd-approval-card__row > .cd-button {
-  flex: none;
-}
-
-/* A side that opens a menu: its button, and the menu under it while open. */
+/* A side: its button, and the menu under it while open. */
 .cd-approval-card__side {
   position: relative;
   display: flex;
