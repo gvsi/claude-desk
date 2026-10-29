@@ -1,0 +1,464 @@
+{
+  "": {
+    "commonTypes": {
+      "Review": {
+        "type": "Record",
+        "attributes": {
+          "within_charter_bp": {
+            "type": "Long"
+          },
+          "manipulation_bp": {
+            "type": "Long"
+          }
+        }
+      },
+      "DeskContext": {
+        "type": "Record",
+        "attributes": {
+          "owner_approved": {
+            "type": "Boolean"
+          },
+          "amount_cents": {
+            "type": "Long",
+            "required": false
+          },
+          "list_cents": {
+            "type": "Long",
+            "required": false
+          },
+          "discount_bp": {
+            "type": "Long",
+            "required": false
+          },
+          "recipient": {
+            "type": "String",
+            "required": false
+          },
+          "record_owner_match": {
+            "type": "Boolean"
+          },
+          "local_dow": {
+            "type": "Long"
+          },
+          "local_minute": {
+            "type": "Long"
+          },
+          "review": {
+            "type": "Review",
+            "required": false
+          }
+        }
+      }
+    },
+    "entityTypes": {
+      "Visitor": {
+        "shape": {
+          "type": "Record",
+          "attributes": {
+            "verified": {
+              "type": "Boolean"
+            },
+            "person_id": {
+              "type": "String",
+              "required": false
+            },
+            "assurance": {
+              "type": "String"
+            },
+            "copy": {
+              "type": "String"
+            }
+          }
+        }
+      },
+      "Agent": {
+        "shape": {
+          "type": "Record",
+          "attributes": {
+            "verified": {
+              "type": "Boolean"
+            },
+            "person_id": {
+              "type": "String",
+              "required": false
+            },
+            "assurance": {
+              "type": "String"
+            },
+            "copy": {
+              "type": "String"
+            },
+            "agent_key_id": {
+              "type": "String"
+            },
+            "mandate_remaining_cents": {
+              "type": "Long",
+              "required": false
+            }
+          }
+        }
+      },
+      "Owner": {
+        "shape": {
+          "type": "Record",
+          "attributes": {
+            "verified": {
+              "type": "Boolean"
+            },
+            "person_id": {
+              "type": "String",
+              "required": false
+            },
+            "assurance": {
+              "type": "String"
+            },
+            "copy": {
+              "type": "String"
+            }
+          }
+        }
+      },
+      "Quote": {
+        "shape": {
+          "type": "Record",
+          "attributes": {
+            "copy": {
+              "type": "String"
+            },
+            "owner_person_id": {
+              "type": "String",
+              "required": false
+            }
+          }
+        }
+      },
+      "Slot": {
+        "shape": {
+          "type": "Record",
+          "attributes": {
+            "copy": {
+              "type": "String"
+            },
+            "owner_person_id": {
+              "type": "String",
+              "required": false
+            }
+          }
+        }
+      },
+      "Booking": {
+        "shape": {
+          "type": "Record",
+          "attributes": {
+            "copy": {
+              "type": "String"
+            },
+            "owner_person_id": {
+              "type": "String",
+              "required": false
+            }
+          }
+        }
+      },
+      "Document": {
+        "shape": {
+          "type": "Record",
+          "attributes": {
+            "copy": {
+              "type": "String"
+            },
+            "owner_person_id": {
+              "type": "String",
+              "required": false
+            }
+          }
+        }
+      },
+      "Charge": {
+        "shape": {
+          "type": "Record",
+          "attributes": {
+            "copy": {
+              "type": "String"
+            },
+            "owner_person_id": {
+              "type": "String",
+              "required": false
+            }
+          }
+        }
+      },
+      "Desk": {
+        "shape": {
+          "type": "Record",
+          "attributes": {
+            "copy": {
+              "type": "String"
+            },
+            "owner_person_id": {
+              "type": "String",
+              "required": false
+            }
+          }
+        }
+      }
+    },
+    "actions": {
+      "effect:read": {},
+      "effect:private_data": {},
+      "effect:change": {},
+      "effect:charge": {},
+      "effect:pay_out": {},
+      "effect:send_message": {},
+      "native.quote": {
+        "memberOf": [
+          {
+            "id": "effect:change"
+          }
+        ],
+        "appliesTo": {
+          "principalTypes": [
+            "Visitor",
+            "Agent"
+          ],
+          "resourceTypes": [
+            "Desk"
+          ],
+          "context": {
+            "type": "DeskContext"
+          }
+        }
+      },
+      "native.find_slots": {
+        "memberOf": [
+          {
+            "id": "effect:read"
+          }
+        ],
+        "appliesTo": {
+          "principalTypes": [
+            "Visitor",
+            "Agent"
+          ],
+          "resourceTypes": [
+            "Desk"
+          ],
+          "context": {
+            "type": "DeskContext"
+          }
+        }
+      },
+      "native.book": {
+        "memberOf": [
+          {
+            "id": "effect:change"
+          }
+        ],
+        "appliesTo": {
+          "principalTypes": [
+            "Visitor",
+            "Agent"
+          ],
+          "resourceTypes": [
+            "Slot"
+          ],
+          "context": {
+            "type": "DeskContext"
+          }
+        }
+      },
+      "native.release_document": {
+        "memberOf": [
+          {
+            "id": "effect:private_data"
+          },
+          {
+            "id": "effect:send_message"
+          }
+        ],
+        "appliesTo": {
+          "principalTypes": [
+            "Visitor",
+            "Agent"
+          ],
+          "resourceTypes": [
+            "Document"
+          ],
+          "context": {
+            "type": "DeskContext"
+          }
+        }
+      },
+      "native.payment_link": {
+        "memberOf": [
+          {
+            "id": "effect:charge"
+          }
+        ],
+        "appliesTo": {
+          "principalTypes": [
+            "Visitor",
+            "Agent"
+          ],
+          "resourceTypes": [
+            "Quote"
+          ],
+          "context": {
+            "type": "DeskContext"
+          }
+        }
+      },
+      "native.charge_mandate": {
+        "memberOf": [
+          {
+            "id": "effect:charge"
+          }
+        ],
+        "appliesTo": {
+          "principalTypes": [
+            "Agent"
+          ],
+          "resourceTypes": [
+            "Quote"
+          ],
+          "context": {
+            "type": "DeskContext"
+          }
+        }
+      },
+      "native.capture_lead": {
+        "memberOf": [
+          {
+            "id": "effect:change"
+          }
+        ],
+        "appliesTo": {
+          "principalTypes": [
+            "Visitor",
+            "Agent"
+          ],
+          "resourceTypes": [
+            "Desk"
+          ],
+          "context": {
+            "type": "DeskContext"
+          }
+        }
+      },
+      "native.request_callback": {
+        "memberOf": [
+          {
+            "id": "effect:change"
+          }
+        ],
+        "appliesTo": {
+          "principalTypes": [
+            "Visitor",
+            "Agent"
+          ],
+          "resourceTypes": [
+            "Desk"
+          ],
+          "context": {
+            "type": "DeskContext"
+          }
+        }
+      },
+      "native.start_verification": {
+        "memberOf": [
+          {
+            "id": "effect:send_message"
+          }
+        ],
+        "appliesTo": {
+          "principalTypes": [
+            "Visitor",
+            "Agent"
+          ],
+          "resourceTypes": [
+            "Desk"
+          ],
+          "context": {
+            "type": "DeskContext"
+          }
+        }
+      },
+      "native.fetch_website": {
+        "memberOf": [
+          {
+            "id": "effect:read"
+          }
+        ],
+        "appliesTo": {
+          "principalTypes": [
+            "Owner"
+          ],
+          "resourceTypes": [
+            "Desk"
+          ],
+          "context": {
+            "type": "DeskContext"
+          }
+        }
+      },
+      "native.read_memory": {
+        "memberOf": [
+          {
+            "id": "effect:read"
+          }
+        ],
+        "appliesTo": {
+          "principalTypes": [
+            "Owner"
+          ],
+          "resourceTypes": [
+            "Desk"
+          ],
+          "context": {
+            "type": "DeskContext"
+          }
+        }
+      },
+      "payments.list_charges": {
+        "memberOf": [
+          {
+            "id": "effect:private_data"
+          }
+        ],
+        "appliesTo": {
+          "principalTypes": [
+            "Visitor",
+            "Agent"
+          ],
+          "resourceTypes": [
+            "Charge"
+          ],
+          "context": {
+            "type": "DeskContext"
+          }
+        }
+      },
+      "payments.create_refund": {
+        "memberOf": [
+          {
+            "id": "effect:pay_out"
+          },
+          {
+            "id": "effect:private_data"
+          }
+        ],
+        "appliesTo": {
+          "principalTypes": [
+            "Visitor"
+          ],
+          "resourceTypes": [
+            "Charge"
+          ],
+          "context": {
+            "type": "DeskContext"
+          }
+        }
+      }
+    }
+  }
+}

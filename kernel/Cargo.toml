@@ -1,0 +1,35 @@
+[workspace]
+resolver = "3"
+members = ["core", "py", "prove"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99.1"
+publish = false
+
+# Exact pins from the master plan's "Pinned toolchain". cedar-policy and
+# cedar-policy-symcc move together: each symcc release needs one exact Cedar.
+[workspace.dependencies]
+cedar-policy = { version = "=4.14.0", default-features = false, features = ["decimal", "partial-eval"] }
+cedar-policy-symcc = "=0.8.0"
+tokio = { version = "=1.54.1", features = ["rt", "macros", "process", "time"] }
+pyo3 = { version = "=0.30.1", features = ["extension-module", "abi3-py313"] }
+ed25519-dalek = "=3.0.0"
+sha2 = "=0.11.1"
+hex = "=0.4.3"
+# float_roundtrip: canonical_json_any must parse every float exactly before
+# printing it in ECMAScript form, or MCP pins would differ from other JCS code.
+serde_json = { version = "=1.0.154", features = ["float_roundtrip"] }
+serde = "1"
+# Shortest, correctly rounded float digits (ties to even, as ECMAScript prints them);
+# also what serde_json itself formats floats with.
+zmij = "1"
+anyhow = "1"
+# desk-prove kills its solver by pid at the deadline.
+libc = "0.2"
+
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 1

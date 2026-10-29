@@ -1,0 +1,3975 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Claude Desk shared contracts",
+  "description": "Generated from backend/desk/contracts.py, events.py and kernel_api.py by backend/scripts/export_schema.py; do not edit by hand.",
+  "$defs": {
+    "A2ARequest": {
+      "properties": {
+        "desk_slug": {
+          "title": "Desk Slug",
+          "type": "string"
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Session Id"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "mandate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Mandate"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "verify_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verify Code"
+        }
+      },
+      "required": [
+        "desk_slug",
+        "message"
+      ],
+      "title": "A2ARequest",
+      "type": "object"
+    },
+    "A2AResponse": {
+      "properties": {
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        },
+        "disclosure": {
+          "const": "ai",
+          "title": "Disclosure",
+          "type": "string"
+        },
+        "blocks": {
+          "items": {
+            "$ref": "#/$defs/RenderedBlock"
+          },
+          "title": "Blocks",
+          "type": "array"
+        },
+        "receipts": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "held": "#/$defs/EvHeld",
+                "receipt": "#/$defs/EvReceipt",
+                "resolved": "#/$defs/EvResolved"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/EvReceipt"
+              },
+              {
+                "$ref": "#/$defs/EvHeld"
+              },
+              {
+                "$ref": "#/$defs/EvResolved"
+              }
+            ]
+          },
+          "title": "Receipts",
+          "type": "array"
+        }
+      },
+      "required": [
+        "session_id",
+        "disclosure",
+        "blocks",
+        "receipts"
+      ],
+      "title": "A2AResponse",
+      "type": "object"
+    },
+    "AgentAuth": {
+      "properties": {
+        "agent_key_id": {
+          "title": "Agent Key Id",
+          "type": "string"
+        },
+        "ts": {
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{6}Z$",
+          "title": "Ts",
+          "type": "string"
+        },
+        "nonce": {
+          "title": "Nonce",
+          "type": "string"
+        },
+        "sig": {
+          "title": "Sig",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent_key_id",
+        "ts",
+        "nonce",
+        "sig"
+      ],
+      "title": "AgentAuth",
+      "type": "object"
+    },
+    "AnswerRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "answer": {
+          "enum": [
+            "allow_once",
+            "deny_once",
+            "allow_person",
+            "deny_always"
+          ],
+          "title": "Answer",
+          "type": "string"
+        }
+      },
+      "required": [
+        "answer"
+      ],
+      "title": "AnswerRequest",
+      "type": "object"
+    },
+    "Approval": {
+      "properties": {
+        "approval_id": {
+          "title": "Approval Id",
+          "type": "string"
+        },
+        "decision_id": {
+          "title": "Decision Id",
+          "type": "string"
+        },
+        "answer": {
+          "enum": [
+            "allow_once",
+            "deny_once",
+            "allow_person",
+            "deny_always"
+          ],
+          "title": "Answer",
+          "type": "string"
+        },
+        "nonce": {
+          "title": "Nonce",
+          "type": "string"
+        },
+        "binding_sha256": {
+          "title": "Binding Sha256",
+          "type": "string"
+        },
+        "policy_version": {
+          "title": "Policy Version",
+          "type": "integer"
+        },
+        "expires_at": {
+          "format": "date-time",
+          "title": "Expires At",
+          "type": "string"
+        },
+        "consumed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Consumed At"
+        }
+      },
+      "required": [
+        "approval_id",
+        "decision_id",
+        "answer",
+        "nonce",
+        "binding_sha256",
+        "policy_version",
+        "expires_at"
+      ],
+      "title": "Approval",
+      "type": "object"
+    },
+    "ApprovalResult": {
+      "properties": {
+        "decision": {
+          "$ref": "#/$defs/Decision"
+        },
+        "execution": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExecResult"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "card_diff": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/RuleCard"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Card Diff"
+        }
+      },
+      "required": [
+        "decision",
+        "execution",
+        "card_diff"
+      ],
+      "title": "ApprovalResult",
+      "type": "object"
+    },
+    "BusinessSeed": {
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "owner_display_name": {
+          "title": "Owner Display Name",
+          "type": "string"
+        },
+        "timezone": {
+          "title": "Timezone",
+          "type": "string"
+        },
+        "brand": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "title": "Brand",
+          "type": "object"
+        },
+        "existing_business_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Existing Business Id"
+        }
+      },
+      "required": [
+        "name",
+        "owner_display_name",
+        "timezone"
+      ],
+      "title": "BusinessSeed",
+      "type": "object"
+    },
+    "CalendarSlot": {
+      "properties": {
+        "slot_id": {
+          "title": "Slot Id",
+          "type": "string"
+        },
+        "starts_at": {
+          "format": "date-time",
+          "title": "Starts At",
+          "type": "string"
+        },
+        "minutes": {
+          "title": "Minutes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "slot_id",
+        "starts_at",
+        "minutes"
+      ],
+      "title": "CalendarSlot",
+      "type": "object"
+    },
+    "CancelRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "title": "CancelRequest",
+      "type": "object"
+    },
+    "CardOption": {
+      "properties": {
+        "option_id": {
+          "title": "Option Id",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "option_id",
+        "label"
+      ],
+      "title": "CardOption",
+      "type": "object"
+    },
+    "CheckReplyRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "draft": {
+          "$ref": "#/$defs/ReplyDraft"
+        }
+      },
+      "required": [
+        "draft"
+      ],
+      "title": "CheckReplyRequest",
+      "type": "object"
+    },
+    "Claim": {
+      "properties": {
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "money",
+            "percent_bp",
+            "datetime",
+            "text",
+            "ref"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Value"
+        }
+      },
+      "required": [
+        "key",
+        "kind",
+        "value"
+      ],
+      "title": "Claim",
+      "type": "object"
+    },
+    "Clause": {
+      "properties": {
+        "template": {
+          "enum": [
+            "quote",
+            "booking_options",
+            "booking_confirmed",
+            "payment_link",
+            "document_link",
+            "hours",
+            "policy",
+            "contact",
+            "handoff",
+            "verify_prompt",
+            "owner_said",
+            "charges",
+            "refund_issued",
+            "charge_confirmed",
+            "callback_confirmed",
+            "payment_confirmed"
+          ],
+          "title": "Template",
+          "type": "string"
+        },
+        "fact_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fact Id"
+        }
+      },
+      "required": [
+        "template"
+      ],
+      "title": "Clause",
+      "type": "object"
+    },
+    "CopyCreated": {
+      "properties": {
+        "copy_id": {
+          "title": "Copy Id",
+          "type": "string"
+        },
+        "desk_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Desk Ids",
+          "type": "array"
+        },
+        "owner_session": {
+          "$ref": "#/$defs/SessionState"
+        },
+        "owner_token": {
+          "title": "Owner Token",
+          "type": "string"
+        }
+      },
+      "required": [
+        "copy_id",
+        "desk_ids",
+        "owner_session",
+        "owner_token"
+      ],
+      "title": "CopyCreated",
+      "type": "object"
+    },
+    "CreateCopyRequest": {
+      "additionalProperties": false,
+      "properties": {},
+      "title": "CreateCopyRequest",
+      "type": "object"
+    },
+    "CreateDeskRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "business": {
+          "$ref": "#/$defs/BusinessSeed"
+        },
+        "desk": {
+          "$ref": "#/$defs/DeskSeed"
+        }
+      },
+      "required": [
+        "business",
+        "desk"
+      ],
+      "title": "CreateDeskRequest",
+      "type": "object"
+    },
+    "CreateSessionRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "desk_slug": {
+          "title": "Desk Slug",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "visitor",
+            "agent"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "mandate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Mandate"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "desk_slug",
+        "kind"
+      ],
+      "title": "CreateSessionRequest",
+      "type": "object"
+    },
+    "DecideRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        },
+        "generation": {
+          "title": "Generation",
+          "type": "integer"
+        },
+        "call": {
+          "$ref": "#/$defs/ToolCall"
+        },
+        "desk_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Desk Id"
+        }
+      },
+      "required": [
+        "session_id",
+        "generation",
+        "call"
+      ],
+      "title": "DecideRequest",
+      "type": "object"
+    },
+    "Decision": {
+      "properties": {
+        "decision_id": {
+          "title": "Decision Id",
+          "type": "string"
+        },
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        },
+        "call_id": {
+          "title": "Call Id",
+          "type": "string"
+        },
+        "action": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NormalizedAction"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "outcome": {
+          "enum": [
+            "allow",
+            "hold",
+            "refuse"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "allowed",
+            "held",
+            "refused",
+            "approved",
+            "denied",
+            "expired",
+            "cancelled",
+            "executed",
+            "failed",
+            "unknown",
+            "refused_at_execution"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "policy_version": {
+          "title": "Policy Version",
+          "type": "integer"
+        },
+        "policy_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Policy Ids",
+          "type": "array"
+        },
+        "card_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Card Ids",
+          "type": "array"
+        },
+        "review": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Review"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "reason_plain": {
+          "title": "Reason Plain",
+          "type": "string"
+        },
+        "visitor_plain": {
+          "title": "Visitor Plain",
+          "type": "string"
+        },
+        "answers": {
+          "default": [],
+          "items": {
+            "enum": [
+              "allow_once",
+              "deny_once",
+              "allow_person",
+              "deny_always"
+            ],
+            "type": "string"
+          },
+          "title": "Answers",
+          "type": "array"
+        },
+        "expires_at": {
+          "format": "date-time",
+          "title": "Expires At",
+          "type": "string"
+        },
+        "inbox": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/InboxNotice"
+          },
+          "title": "Inbox",
+          "type": "array"
+        },
+        "ledger_seq": {
+          "title": "Ledger Seq",
+          "type": "integer"
+        },
+        "signature": {
+          "title": "Signature",
+          "type": "string"
+        }
+      },
+      "required": [
+        "decision_id",
+        "session_id",
+        "call_id",
+        "action",
+        "outcome",
+        "state",
+        "policy_version",
+        "policy_ids",
+        "card_ids",
+        "reason_plain",
+        "visitor_plain",
+        "expires_at",
+        "ledger_seq",
+        "signature"
+      ],
+      "title": "Decision",
+      "type": "object"
+    },
+    "DemoAgentIssued": {
+      "properties": {
+        "agent_key_id": {
+          "title": "Agent Key Id",
+          "type": "string"
+        },
+        "agent_private_key_hex": {
+          "title": "Agent Private Key Hex",
+          "type": "string"
+        },
+        "mandate": {
+          "$ref": "#/$defs/Mandate"
+        }
+      },
+      "required": [
+        "agent_key_id",
+        "agent_private_key_hex",
+        "mandate"
+      ],
+      "title": "DemoAgentIssued",
+      "type": "object"
+    },
+    "DemoAgentRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "desk_id": {
+          "title": "Desk Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "desk_id"
+      ],
+      "title": "DemoAgentRequest",
+      "type": "object"
+    },
+    "DemoInboxEntry": {
+      "properties": {
+        "entry_id": {
+          "title": "Entry Id",
+          "type": "string"
+        },
+        "to": {
+          "title": "To",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "verification_code",
+            "alert",
+            "head_checkpoint"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "body": {
+          "title": "Body",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "entry_id",
+        "to",
+        "kind",
+        "body",
+        "created_at"
+      ],
+      "title": "DemoInboxEntry",
+      "type": "object"
+    },
+    "DeskAnsweringRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "on": {
+          "title": "On",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "on"
+      ],
+      "title": "DeskAnsweringRequest",
+      "type": "object"
+    },
+    "DeskBusinessRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "owner_display_name": {
+          "title": "Owner Display Name",
+          "type": "string"
+        },
+        "timezone": {
+          "title": "Timezone",
+          "type": "string"
+        },
+        "brand": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "title": "Brand",
+          "type": "object"
+        }
+      },
+      "required": [
+        "name",
+        "owner_display_name",
+        "timezone"
+      ],
+      "title": "DeskBusinessRequest",
+      "type": "object"
+    },
+    "DeskCalendarRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "calendar_slots": {
+          "items": {
+            "$ref": "#/$defs/CalendarSlot"
+          },
+          "title": "Calendar Slots",
+          "type": "array"
+        }
+      },
+      "required": [
+        "calendar_slots"
+      ],
+      "title": "DeskCalendarRequest",
+      "type": "object"
+    },
+    "DeskCharterRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "charter": {
+          "items": {
+            "$ref": "#/$defs/Claim"
+          },
+          "title": "Charter",
+          "type": "array"
+        }
+      },
+      "required": [
+        "charter"
+      ],
+      "title": "DeskCharterRequest",
+      "type": "object"
+    },
+    "DeskCreated": {
+      "properties": {
+        "desk_id": {
+          "title": "Desk Id",
+          "type": "string"
+        },
+        "slug": {
+          "title": "Slug",
+          "type": "string"
+        }
+      },
+      "required": [
+        "desk_id",
+        "slug"
+      ],
+      "title": "DeskCreated",
+      "type": "object"
+    },
+    "DeskHoursRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "hours": {
+          "items": {
+            "$ref": "#/$defs/HoursWindow"
+          },
+          "title": "Hours",
+          "type": "array"
+        }
+      },
+      "required": [
+        "hours"
+      ],
+      "title": "DeskHoursRequest",
+      "type": "object"
+    },
+    "DeskNotificationsRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "notifications": {
+          "$ref": "#/$defs/NotificationDefaults"
+        }
+      },
+      "required": [
+        "notifications"
+      ],
+      "title": "DeskNotificationsRequest",
+      "type": "object"
+    },
+    "DeskPeopleRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "upsert": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PersonUpsert"
+          },
+          "title": "Upsert",
+          "type": "array"
+        },
+        "remove": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Remove",
+          "type": "array"
+        }
+      },
+      "title": "DeskPeopleRequest",
+      "type": "object"
+    },
+    "DeskPricesRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "price_items": {
+          "items": {
+            "$ref": "#/$defs/PriceItem"
+          },
+          "title": "Price Items",
+          "type": "array"
+        }
+      },
+      "required": [
+        "price_items"
+      ],
+      "title": "DeskPricesRequest",
+      "type": "object"
+    },
+    "DeskSeed": {
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "charter": {
+          "items": {
+            "$ref": "#/$defs/Claim"
+          },
+          "title": "Charter",
+          "type": "array"
+        },
+        "hours": {
+          "items": {
+            "$ref": "#/$defs/HoursWindow"
+          },
+          "title": "Hours",
+          "type": "array"
+        },
+        "price_items": {
+          "items": {
+            "$ref": "#/$defs/PriceItem"
+          },
+          "title": "Price Items",
+          "type": "array"
+        },
+        "calendar_slots": {
+          "items": {
+            "$ref": "#/$defs/CalendarSlot"
+          },
+          "title": "Calendar Slots",
+          "type": "array"
+        },
+        "people": {
+          "items": {
+            "$ref": "#/$defs/SeedPerson"
+          },
+          "title": "People",
+          "type": "array"
+        },
+        "documents": {
+          "items": {
+            "$ref": "#/$defs/SeedDocument"
+          },
+          "title": "Documents",
+          "type": "array"
+        },
+        "notifications": {
+          "$ref": "#/$defs/NotificationDefaults"
+        },
+        "connections": {
+          "default": [],
+          "items": {
+            "const": "mock_payments",
+            "type": "string"
+          },
+          "title": "Connections",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "charter",
+        "hours",
+        "price_items",
+        "calendar_slots",
+        "people",
+        "documents",
+        "notifications"
+      ],
+      "title": "DeskSeed",
+      "type": "object"
+    },
+    "DeskUpdated": {
+      "properties": {
+        "desk_id": {
+          "title": "Desk Id",
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "desk_id",
+        "updated_at"
+      ],
+      "title": "DeskUpdated",
+      "type": "object"
+    },
+    "DocumentCreated": {
+      "properties": {
+        "document_id": {
+          "title": "Document Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "document_id"
+      ],
+      "title": "DocumentCreated",
+      "type": "object"
+    },
+    "DocumentUploadRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "desk_id": {
+          "title": "Desk Id",
+          "type": "string"
+        },
+        "document": {
+          "$ref": "#/$defs/SeedDocument"
+        }
+      },
+      "required": [
+        "desk_id",
+        "document"
+      ],
+      "title": "DocumentUploadRequest",
+      "type": "object"
+    },
+    "EvDemoInbox": {
+      "properties": {
+        "type": {
+          "const": "demo_inbox",
+          "title": "Type",
+          "type": "string"
+        },
+        "entry_id": {
+          "title": "Entry Id",
+          "type": "string"
+        },
+        "to": {
+          "title": "To",
+          "type": "string"
+        },
+        "preview": {
+          "title": "Preview",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "entry_id",
+        "to",
+        "preview"
+      ],
+      "title": "EvDemoInbox",
+      "type": "object"
+    },
+    "EvError": {
+      "properties": {
+        "type": {
+          "const": "error",
+          "title": "Type",
+          "type": "string"
+        },
+        "code": {
+          "title": "Code",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "code"
+      ],
+      "title": "EvError",
+      "type": "object"
+    },
+    "EvHeld": {
+      "properties": {
+        "type": {
+          "const": "held",
+          "title": "Type",
+          "type": "string"
+        },
+        "decision_id": {
+          "title": "Decision Id",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "allowed",
+            "held",
+            "refused",
+            "approved",
+            "denied",
+            "expired",
+            "cancelled",
+            "executed",
+            "failed",
+            "unknown",
+            "refused_at_execution"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "visitor_plain": {
+          "title": "Visitor Plain",
+          "type": "string"
+        },
+        "ledger_seq": {
+          "title": "Ledger Seq",
+          "type": "integer"
+        },
+        "signature": {
+          "title": "Signature",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "decision_id",
+        "state",
+        "visitor_plain",
+        "ledger_seq",
+        "signature"
+      ],
+      "title": "EvHeld",
+      "type": "object"
+    },
+    "EvMessage": {
+      "properties": {
+        "type": {
+          "const": "message",
+          "title": "Type",
+          "type": "string"
+        },
+        "message_id": {
+          "title": "Message Id",
+          "type": "string"
+        },
+        "generation": {
+          "title": "Generation",
+          "type": "integer"
+        },
+        "author": {
+          "enum": [
+            "claude",
+            "owner",
+            "desk"
+          ],
+          "title": "Author",
+          "type": "string"
+        },
+        "language": {
+          "enum": [
+            "en",
+            "es"
+          ],
+          "title": "Language",
+          "type": "string"
+        },
+        "handoff": {
+          "title": "Handoff",
+          "type": "boolean"
+        },
+        "blocks": {
+          "items": {
+            "$ref": "#/$defs/RenderedBlock"
+          },
+          "title": "Blocks",
+          "type": "array"
+        },
+        "visitor_plain": {
+          "title": "Visitor Plain",
+          "type": "string"
+        },
+        "ledger_seq": {
+          "title": "Ledger Seq",
+          "type": "integer"
+        },
+        "signature": {
+          "title": "Signature",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "message_id",
+        "generation",
+        "author",
+        "language",
+        "handoff",
+        "blocks",
+        "visitor_plain",
+        "ledger_seq",
+        "signature"
+      ],
+      "title": "EvMessage",
+      "type": "object"
+    },
+    "EvOwnerJoined": {
+      "properties": {
+        "type": {
+          "const": "owner_joined",
+          "title": "Type",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "name"
+      ],
+      "title": "EvOwnerJoined",
+      "type": "object"
+    },
+    "EvOwnerLeft": {
+      "properties": {
+        "type": {
+          "const": "owner_left",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "EvOwnerLeft",
+      "type": "object"
+    },
+    "EvReceipt": {
+      "properties": {
+        "type": {
+          "const": "receipt",
+          "title": "Type",
+          "type": "string"
+        },
+        "decision_id": {
+          "title": "Decision Id",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "allowed",
+            "held",
+            "refused",
+            "approved",
+            "denied",
+            "expired",
+            "cancelled",
+            "executed",
+            "failed",
+            "unknown",
+            "refused_at_execution"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "visitor_plain": {
+          "title": "Visitor Plain",
+          "type": "string"
+        },
+        "ledger_seq": {
+          "title": "Ledger Seq",
+          "type": "integer"
+        },
+        "signature": {
+          "title": "Signature",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "decision_id",
+        "state",
+        "visitor_plain",
+        "ledger_seq",
+        "signature"
+      ],
+      "title": "EvReceipt",
+      "type": "object"
+    },
+    "EvResolved": {
+      "properties": {
+        "type": {
+          "const": "resolved",
+          "title": "Type",
+          "type": "string"
+        },
+        "decision_id": {
+          "title": "Decision Id",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "allowed",
+            "held",
+            "refused",
+            "approved",
+            "denied",
+            "expired",
+            "cancelled",
+            "executed",
+            "failed",
+            "unknown",
+            "refused_at_execution"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "visitor_plain": {
+          "title": "Visitor Plain",
+          "type": "string"
+        },
+        "ledger_seq": {
+          "title": "Ledger Seq",
+          "type": "integer"
+        },
+        "signature": {
+          "title": "Signature",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "decision_id",
+        "state",
+        "visitor_plain",
+        "ledger_seq",
+        "signature"
+      ],
+      "title": "EvResolved",
+      "type": "object"
+    },
+    "EvTurnEnd": {
+      "properties": {
+        "type": {
+          "const": "turn_end",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "EvTurnEnd",
+      "type": "object"
+    },
+    "EvWriting": {
+      "properties": {
+        "type": {
+          "const": "writing",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "EvWriting",
+      "type": "object"
+    },
+    "ExecResult": {
+      "properties": {
+        "action_id": {
+          "title": "Action Id",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "succeeded",
+            "failed",
+            "unknown"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "facts": {
+          "items": {
+            "$ref": "#/$defs/Fact"
+          },
+          "title": "Facts",
+          "type": "array"
+        },
+        "model_view": {
+          "additionalProperties": true,
+          "title": "Model View",
+          "type": "object"
+        },
+        "inbox": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/InboxNotice"
+          },
+          "title": "Inbox",
+          "type": "array"
+        }
+      },
+      "required": [
+        "action_id",
+        "state",
+        "facts",
+        "model_view"
+      ],
+      "title": "ExecResult",
+      "type": "object"
+    },
+    "ExecuteRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "decision_id": {
+          "title": "Decision Id",
+          "type": "string"
+        },
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        },
+        "generation": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Generation"
+        },
+        "approval_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Approval Id"
+        }
+      },
+      "required": [
+        "decision_id",
+        "session_id"
+      ],
+      "title": "ExecuteRequest",
+      "type": "object"
+    },
+    "Fact": {
+      "properties": {
+        "fact_id": {
+          "title": "Fact Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "quote",
+            "booking",
+            "payment_link",
+            "document",
+            "charter",
+            "knowledge",
+            "owner_statement",
+            "charge",
+            "refund",
+            "handoff",
+            "slots"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "available",
+            "proposed",
+            "committed",
+            "expired"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "kernel",
+            "owner"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "claims": {
+          "items": {
+            "$ref": "#/$defs/Claim"
+          },
+          "title": "Claims",
+          "type": "array"
+        },
+        "label": {
+          "$ref": "#/$defs/Label"
+        },
+        "expires_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expires At"
+        }
+      },
+      "required": [
+        "fact_id",
+        "kind",
+        "status",
+        "source",
+        "claims",
+        "label"
+      ],
+      "title": "Fact",
+      "type": "object"
+    },
+    "Health": {
+      "properties": {
+        "version": {
+          "title": "Version",
+          "type": "string"
+        },
+        "proof_mode": {
+          "enum": [
+            "symcc",
+            "bounded"
+          ],
+          "title": "Proof Mode",
+          "type": "string"
+        },
+        "dev_signing_key": {
+          "title": "Dev Signing Key",
+          "type": "boolean"
+        },
+        "public_key_hex": {
+          "title": "Public Key Hex",
+          "type": "string"
+        },
+        "key_id": {
+          "title": "Key Id",
+          "type": "string"
+        },
+        "unproved_seeds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Unproved Seeds",
+          "type": "array"
+        }
+      },
+      "required": [
+        "version",
+        "proof_mode",
+        "dev_signing_key",
+        "public_key_hex",
+        "key_id",
+        "unproved_seeds"
+      ],
+      "title": "Health",
+      "type": "object"
+    },
+    "HoursWindow": {
+      "properties": {
+        "days": {
+          "items": {
+            "enum": [
+              "mon",
+              "tue",
+              "wed",
+              "thu",
+              "fri",
+              "sat",
+              "sun"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Days",
+          "type": "array"
+        },
+        "start": {
+          "format": "time",
+          "title": "Start",
+          "type": "string"
+        },
+        "end": {
+          "format": "time",
+          "title": "End",
+          "type": "string"
+        }
+      },
+      "required": [
+        "days",
+        "start",
+        "end"
+      ],
+      "title": "HoursWindow",
+      "type": "object"
+    },
+    "InboxNotice": {
+      "properties": {
+        "entry_id": {
+          "title": "Entry Id",
+          "type": "string"
+        },
+        "to": {
+          "title": "To",
+          "type": "string"
+        },
+        "preview": {
+          "title": "Preview",
+          "type": "string"
+        }
+      },
+      "required": [
+        "entry_id",
+        "to",
+        "preview"
+      ],
+      "title": "InboxNotice",
+      "type": "object"
+    },
+    "KernelError": {
+      "properties": {
+        "code": {
+          "enum": [
+            "auth",
+            "not_found",
+            "closed",
+            "stale_generation",
+            "mode_owner",
+            "mode_paused",
+            "replayed",
+            "conflict",
+            "invalid",
+            "seed_unproved",
+            "internal"
+          ],
+          "title": "Code",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code"
+      ],
+      "title": "KernelError",
+      "type": "object"
+    },
+    "KnowledgeItem": {
+      "properties": {
+        "item_id": {
+          "title": "Item Id",
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "website",
+            "upload",
+            "setup",
+            "memory_import"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "label": {
+          "$ref": "#/$defs/Label"
+        }
+      },
+      "required": [
+        "item_id",
+        "source",
+        "title",
+        "text",
+        "label"
+      ],
+      "title": "KnowledgeItem",
+      "type": "object"
+    },
+    "KnowledgeRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "desk_id": {
+          "title": "Desk Id",
+          "type": "string"
+        },
+        "item": {
+          "$ref": "#/$defs/KnowledgeItem"
+        }
+      },
+      "required": [
+        "desk_id",
+        "item"
+      ],
+      "title": "KnowledgeRequest",
+      "type": "object"
+    },
+    "Label": {
+      "properties": {
+        "readers": {
+          "default": [
+            "owner"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "title": "Readers",
+          "type": "array"
+        },
+        "record_owner": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Record Owner"
+        }
+      },
+      "title": "Label",
+      "type": "object"
+    },
+    "LedgerAppendRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "desk_id": {
+          "title": "Desk Id",
+          "type": "string"
+        },
+        "event": {
+          "$ref": "#/$defs/LedgerEvent"
+        }
+      },
+      "required": [
+        "desk_id",
+        "event"
+      ],
+      "title": "LedgerAppendRequest",
+      "type": "object"
+    },
+    "LedgerEntry": {
+      "properties": {
+        "copy_id": {
+          "title": "Copy Id",
+          "type": "string"
+        },
+        "desk_id": {
+          "title": "Desk Id",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "prev_hash": {
+          "title": "Prev Hash",
+          "type": "string"
+        },
+        "created_at": {
+          "title": "Created At",
+          "type": "string"
+        },
+        "event": {
+          "$ref": "#/$defs/LedgerEvent"
+        },
+        "hash": {
+          "title": "Hash",
+          "type": "string"
+        },
+        "signature": {
+          "title": "Signature",
+          "type": "string"
+        },
+        "key_id": {
+          "title": "Key Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "copy_id",
+        "desk_id",
+        "seq",
+        "prev_hash",
+        "created_at",
+        "event",
+        "hash",
+        "signature",
+        "key_id"
+      ],
+      "title": "LedgerEntry",
+      "type": "object"
+    },
+    "LedgerEvent": {
+      "properties": {
+        "kind": {
+          "enum": [
+            "session",
+            "auth",
+            "verify",
+            "decide",
+            "review",
+            "breaker",
+            "approval",
+            "execute",
+            "payment",
+            "document_link",
+            "reply",
+            "policy",
+            "tool_pin",
+            "takeover",
+            "whisper",
+            "rate_limit",
+            "agent_auth",
+            "head_checkpoint",
+            "desk_data"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "origin": {
+          "enum": [
+            "kernel",
+            "api"
+          ],
+          "title": "Origin",
+          "type": "string"
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Session Id"
+        },
+        "ref_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ref Id"
+        },
+        "summary": {
+          "additionalProperties": true,
+          "title": "Summary",
+          "type": "object"
+        }
+      },
+      "required": [
+        "kind",
+        "origin",
+        "summary"
+      ],
+      "title": "LedgerEvent",
+      "type": "object"
+    },
+    "LedgerPage": {
+      "properties": {
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/LedgerEntry"
+          },
+          "title": "Entries",
+          "type": "array"
+        },
+        "head": {
+          "title": "Head",
+          "type": "string"
+        },
+        "chain_ok": {
+          "title": "Chain Ok",
+          "type": "boolean"
+        },
+        "first_bad_seq": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "First Bad Seq"
+        },
+        "public_key_hex": {
+          "title": "Public Key Hex",
+          "type": "string"
+        },
+        "key_id": {
+          "title": "Key Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "entries",
+        "head",
+        "chain_ok",
+        "first_bad_seq",
+        "public_key_hex",
+        "key_id"
+      ],
+      "title": "LedgerPage",
+      "type": "object"
+    },
+    "Mandate": {
+      "properties": {
+        "mandate_id": {
+          "title": "Mandate Id",
+          "type": "string"
+        },
+        "issuer": {
+          "title": "Issuer",
+          "type": "string"
+        },
+        "agent_key_id": {
+          "title": "Agent Key Id",
+          "type": "string"
+        },
+        "desk_id": {
+          "title": "Desk Id",
+          "type": "string"
+        },
+        "on_behalf_of": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "On Behalf Of"
+        },
+        "allowed_effects": {
+          "items": {
+            "const": "charge",
+            "type": "string"
+          },
+          "title": "Allowed Effects",
+          "type": "array"
+        },
+        "per_charge_cents": {
+          "title": "Per Charge Cents",
+          "type": "integer"
+        },
+        "total_cents": {
+          "title": "Total Cents",
+          "type": "integer"
+        },
+        "currency": {
+          "const": "usd",
+          "title": "Currency",
+          "type": "string"
+        },
+        "expires_at": {
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{6}Z$",
+          "title": "Expires At",
+          "type": "string"
+        },
+        "nonce": {
+          "title": "Nonce",
+          "type": "string"
+        },
+        "sig": {
+          "title": "Sig",
+          "type": "string"
+        }
+      },
+      "required": [
+        "mandate_id",
+        "issuer",
+        "agent_key_id",
+        "desk_id",
+        "allowed_effects",
+        "per_charge_cents",
+        "total_cents",
+        "currency",
+        "expires_at",
+        "nonce",
+        "sig"
+      ],
+      "title": "Mandate",
+      "type": "object"
+    },
+    "ModeRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "enum": [
+            "ai",
+            "owner",
+            "paused"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "generation": {
+          "title": "Generation",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "mode",
+        "generation"
+      ],
+      "title": "ModeRequest",
+      "type": "object"
+    },
+    "NormalizedAction": {
+      "properties": {
+        "action_id": {
+          "title": "Action Id",
+          "type": "string"
+        },
+        "copy_id": {
+          "title": "Copy Id",
+          "type": "string"
+        },
+        "desk_id": {
+          "title": "Desk Id",
+          "type": "string"
+        },
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        },
+        "generation": {
+          "title": "Generation",
+          "type": "integer"
+        },
+        "tool": {
+          "enum": [
+            "native.quote",
+            "native.find_slots",
+            "native.book",
+            "native.release_document",
+            "native.payment_link",
+            "native.charge_mandate",
+            "native.capture_lead",
+            "native.request_callback",
+            "native.start_verification",
+            "native.fetch_website",
+            "native.read_memory",
+            "payments.list_charges",
+            "payments.create_refund"
+          ],
+          "title": "Tool",
+          "type": "string"
+        },
+        "effects": {
+          "items": {
+            "enum": [
+              "read",
+              "private_data",
+              "change",
+              "charge",
+              "pay_out",
+              "send_message"
+            ],
+            "type": "string"
+          },
+          "title": "Effects",
+          "type": "array"
+        },
+        "args_sha256": {
+          "title": "Args Sha256",
+          "type": "string"
+        },
+        "profile_sha256": {
+          "title": "Profile Sha256",
+          "type": "string"
+        },
+        "resource": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "list_cents": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "List Cents"
+        },
+        "discount_bp": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Discount Bp"
+        },
+        "amount_cents": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Amount Cents"
+        },
+        "recipient": {
+          "anyOf": [
+            {
+              "enum": [
+                "owner",
+                "verified_contact"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Recipient"
+        },
+        "starts_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Starts At"
+        }
+      },
+      "required": [
+        "action_id",
+        "copy_id",
+        "desk_id",
+        "session_id",
+        "generation",
+        "tool",
+        "effects",
+        "args_sha256",
+        "profile_sha256",
+        "resource",
+        "list_cents",
+        "discount_bp",
+        "amount_cents",
+        "recipient",
+        "starts_at"
+      ],
+      "title": "NormalizedAction",
+      "type": "object"
+    },
+    "NotificationDefaults": {
+      "properties": {
+        "now": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Now",
+          "type": "array"
+        },
+        "briefing": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Briefing",
+          "type": "array"
+        }
+      },
+      "required": [
+        "now",
+        "briefing"
+      ],
+      "title": "NotificationDefaults",
+      "type": "object"
+    },
+    "OwnerMessageRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "say",
+            "whisper"
+          ],
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "text",
+        "kind"
+      ],
+      "title": "OwnerMessageRequest",
+      "type": "object"
+    },
+    "OwnerMessageResult": {
+      "properties": {
+        "message_id": {
+          "title": "Message Id",
+          "type": "string"
+        },
+        "verdict": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReplyVerdict"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ledger_seq": {
+          "title": "Ledger Seq",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "message_id",
+        "verdict",
+        "ledger_seq"
+      ],
+      "title": "OwnerMessageResult",
+      "type": "object"
+    },
+    "PaymentLinkActionRequest": {
+      "additionalProperties": false,
+      "properties": {},
+      "title": "PaymentLinkActionRequest",
+      "type": "object"
+    },
+    "PaymentLinkStateResult": {
+      "properties": {
+        "state": {
+          "enum": [
+            "issued",
+            "paid",
+            "expired",
+            "cancelled",
+            "unknown"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        },
+        "verdict": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReplyVerdict"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "state",
+        "session_id",
+        "verdict"
+      ],
+      "title": "PaymentLinkStateResult",
+      "type": "object"
+    },
+    "PaymentLinkView": {
+      "properties": {
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "amount_cents": {
+          "title": "Amount Cents",
+          "type": "integer"
+        },
+        "state": {
+          "enum": [
+            "issued",
+            "paid",
+            "expired",
+            "cancelled",
+            "unknown"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "language": {
+          "enum": [
+            "en",
+            "es"
+          ],
+          "title": "Language",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "amount_cents",
+        "state",
+        "language"
+      ],
+      "title": "PaymentLinkView",
+      "type": "object"
+    },
+    "PersonUpsert": {
+      "additionalProperties": false,
+      "properties": {
+        "ref": {
+          "title": "Ref",
+          "type": "string"
+        },
+        "display_name": {
+          "title": "Display Name",
+          "type": "string"
+        },
+        "contact": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Contact"
+        },
+        "notes": {
+          "default": "",
+          "title": "Notes",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ref",
+        "display_name",
+        "contact"
+      ],
+      "title": "PersonUpsert",
+      "type": "object"
+    },
+    "PolicyConfirmRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "desk_id": {
+          "title": "Desk Id",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "desk_id",
+        "version"
+      ],
+      "title": "PolicyConfirmRequest",
+      "type": "object"
+    },
+    "PolicyDraftRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "desk_id": {
+          "title": "Desk Id",
+          "type": "string"
+        },
+        "cards": {
+          "items": {
+            "$ref": "#/$defs/RuleCard"
+          },
+          "title": "Cards",
+          "type": "array"
+        },
+        "expected_parent": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Expected Parent"
+        }
+      },
+      "required": [
+        "desk_id",
+        "cards",
+        "expected_parent"
+      ],
+      "title": "PolicyDraftRequest",
+      "type": "object"
+    },
+    "PolicyProbeRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "desk_id": {
+          "title": "Desk Id",
+          "type": "string"
+        },
+        "probes": {
+          "items": {
+            "$ref": "#/$defs/Probe"
+          },
+          "title": "Probes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "desk_id",
+        "probes"
+      ],
+      "title": "PolicyProbeRequest",
+      "type": "object"
+    },
+    "PolicyVersion": {
+      "properties": {
+        "desk_id": {
+          "title": "Desk Id",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "integer"
+        },
+        "parent_version": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Parent Version"
+        },
+        "cards": {
+          "items": {
+            "$ref": "#/$defs/RuleCard"
+          },
+          "title": "Cards",
+          "type": "array"
+        },
+        "cedar_sha256": {
+          "title": "Cedar Sha256",
+          "type": "string"
+        },
+        "schema_sha256": {
+          "title": "Schema Sha256",
+          "type": "string"
+        },
+        "baseline_sha256": {
+          "title": "Baseline Sha256",
+          "type": "string"
+        },
+        "profiles_sha256": {
+          "title": "Profiles Sha256",
+          "type": "string"
+        },
+        "invariants_sha256": {
+          "title": "Invariants Sha256",
+          "type": "string"
+        },
+        "review_thresholds_version": {
+          "title": "Review Thresholds Version",
+          "type": "integer"
+        },
+        "status": {
+          "enum": [
+            "draft",
+            "proved",
+            "rejected",
+            "active",
+            "superseded"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "proof": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProofReport"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "desk_id",
+        "version",
+        "parent_version",
+        "cards",
+        "cedar_sha256",
+        "schema_sha256",
+        "baseline_sha256",
+        "profiles_sha256",
+        "invariants_sha256",
+        "review_thresholds_version",
+        "status"
+      ],
+      "title": "PolicyVersion",
+      "type": "object"
+    },
+    "PriceItem": {
+      "properties": {
+        "item_id": {
+          "title": "Item Id",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "unit_cents": {
+          "maximum": 1000000,
+          "minimum": 0,
+          "title": "Unit Cents",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "item_id",
+        "title",
+        "unit_cents"
+      ],
+      "title": "PriceItem",
+      "type": "object"
+    },
+    "Probe": {
+      "properties": {
+        "actor": {
+          "enum": [
+            "visitor",
+            "agent",
+            "owner"
+          ],
+          "title": "Actor",
+          "type": "string"
+        },
+        "who": {
+          "enum": [
+            "anyone",
+            "verified",
+            "record_owner",
+            "person",
+            "agent"
+          ],
+          "title": "Who",
+          "type": "string"
+        },
+        "subject_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Subject Id"
+        },
+        "agent_mandate_remaining_cents": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Mandate Remaining Cents"
+        },
+        "call": {
+          "$ref": "#/$defs/ToolCall"
+        },
+        "resource_kind": {
+          "enum": [
+            "quote",
+            "slot",
+            "booking",
+            "document",
+            "charge",
+            "desk"
+          ],
+          "title": "Resource Kind",
+          "type": "string"
+        },
+        "resource_owner": {
+          "default": "none",
+          "enum": [
+            "caller",
+            "other",
+            "none"
+          ],
+          "title": "Resource Owner",
+          "type": "string"
+        },
+        "amount_cents": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Amount Cents"
+        }
+      },
+      "required": [
+        "actor",
+        "who",
+        "call",
+        "resource_kind"
+      ],
+      "title": "Probe",
+      "type": "object"
+    },
+    "ProbeResult": {
+      "properties": {
+        "probe": {
+          "$ref": "#/$defs/Probe"
+        },
+        "outcome": {
+          "enum": [
+            "allow",
+            "hold",
+            "refuse"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "depends_on_review": {
+          "title": "Depends On Review",
+          "type": "boolean"
+        },
+        "card_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Card Ids",
+          "type": "array"
+        },
+        "reason_plain": {
+          "title": "Reason Plain",
+          "type": "string"
+        }
+      },
+      "required": [
+        "probe",
+        "outcome",
+        "depends_on_review",
+        "card_ids",
+        "reason_plain"
+      ],
+      "title": "ProbeResult",
+      "type": "object"
+    },
+    "ProofCheck": {
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "counterexample_plain": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Counterexample Plain"
+        },
+        "counterexample_raw": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Counterexample Raw"
+        }
+      },
+      "required": [
+        "name",
+        "ok"
+      ],
+      "title": "ProofCheck",
+      "type": "object"
+    },
+    "ProofReport": {
+      "properties": {
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "method": {
+          "enum": [
+            "symcc",
+            "bounded"
+          ],
+          "title": "Method",
+          "type": "string"
+        },
+        "cases": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cases"
+        },
+        "timed_out": {
+          "default": false,
+          "title": "Timed Out",
+          "type": "boolean"
+        },
+        "checks": {
+          "items": {
+            "$ref": "#/$defs/ProofCheck"
+          },
+          "title": "Checks",
+          "type": "array"
+        }
+      },
+      "required": [
+        "ok",
+        "method",
+        "checks"
+      ],
+      "title": "ProofReport",
+      "type": "object"
+    },
+    "PublicDesk": {
+      "properties": {
+        "business_name": {
+          "title": "Business Name",
+          "type": "string"
+        },
+        "desk_name": {
+          "title": "Desk Name",
+          "type": "string"
+        },
+        "owner_display_name": {
+          "title": "Owner Display Name",
+          "type": "string"
+        },
+        "brand": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Brand",
+          "type": "object"
+        },
+        "charter": {
+          "items": {
+            "$ref": "#/$defs/RenderedBlock"
+          },
+          "title": "Charter",
+          "type": "array"
+        },
+        "agent_card": {
+          "items": {
+            "$ref": "#/$defs/RenderedBlock"
+          },
+          "title": "Agent Card",
+          "type": "array"
+        }
+      },
+      "required": [
+        "business_name",
+        "desk_name",
+        "owner_display_name",
+        "brand",
+        "charter",
+        "agent_card"
+      ],
+      "title": "PublicDesk",
+      "type": "object"
+    },
+    "RenderedBlock": {
+      "properties": {
+        "kind": {
+          "enum": [
+            "prose",
+            "card"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "template": {
+          "anyOf": [
+            {
+              "enum": [
+                "quote",
+                "booking_options",
+                "booking_confirmed",
+                "payment_link",
+                "document_link",
+                "hours",
+                "policy",
+                "contact",
+                "handoff",
+                "verify_prompt",
+                "owner_said",
+                "charges",
+                "refund_issued",
+                "charge_confirmed",
+                "callback_confirmed",
+                "payment_confirmed"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Template"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "fact_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fact Id"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        },
+        "lines": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Lines",
+          "type": "array"
+        },
+        "href": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Href"
+        },
+        "options": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/CardOption"
+          },
+          "title": "Options",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "text"
+      ],
+      "title": "RenderedBlock",
+      "type": "object"
+    },
+    "ReplyDraft": {
+      "properties": {
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        },
+        "generation": {
+          "title": "Generation",
+          "type": "integer"
+        },
+        "prose": {
+          "title": "Prose",
+          "type": "string"
+        },
+        "clauses": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Clause"
+          },
+          "title": "Clauses",
+          "type": "array"
+        }
+      },
+      "required": [
+        "session_id",
+        "generation",
+        "prose"
+      ],
+      "title": "ReplyDraft",
+      "type": "object"
+    },
+    "ReplyVerdict": {
+      "properties": {
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "language": {
+          "enum": [
+            "en",
+            "es"
+          ],
+          "title": "Language",
+          "type": "string"
+        },
+        "blocks": {
+          "items": {
+            "$ref": "#/$defs/RenderedBlock"
+          },
+          "title": "Blocks",
+          "type": "array"
+        },
+        "violations": {
+          "items": {
+            "$ref": "#/$defs/Violation"
+          },
+          "title": "Violations",
+          "type": "array"
+        },
+        "message_id": {
+          "title": "Message Id",
+          "type": "string"
+        },
+        "generation": {
+          "title": "Generation",
+          "type": "integer"
+        },
+        "visitor_plain": {
+          "title": "Visitor Plain",
+          "type": "string"
+        },
+        "ledger_seq": {
+          "title": "Ledger Seq",
+          "type": "integer"
+        },
+        "signature": {
+          "title": "Signature",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok",
+        "language",
+        "blocks",
+        "violations",
+        "message_id",
+        "generation",
+        "visitor_plain",
+        "ledger_seq",
+        "signature"
+      ],
+      "title": "ReplyVerdict",
+      "type": "object"
+    },
+    "ResourceRef": {
+      "properties": {
+        "kind": {
+          "enum": [
+            "quote",
+            "slot",
+            "booking",
+            "document",
+            "charge",
+            "desk"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "owner_person_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Owner Person Id"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "owner_person_id"
+      ],
+      "title": "ResourceRef",
+      "type": "object"
+    },
+    "Review": {
+      "properties": {
+        "within_charter_bp": {
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Within Charter Bp",
+          "type": "integer"
+        },
+        "manipulation_bp": {
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Manipulation Bp",
+          "type": "integer"
+        },
+        "recommendation": {
+          "enum": [
+            "allow",
+            "hold",
+            "block"
+          ],
+          "title": "Recommendation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "within_charter_bp",
+        "manipulation_bp",
+        "recommendation"
+      ],
+      "title": "Review",
+      "type": "object"
+    },
+    "ReviewThresholds": {
+      "properties": {
+        "min_within_charter_bp": {
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Min Within Charter Bp",
+          "type": "integer"
+        },
+        "max_manipulation_bp": {
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Max Manipulation Bp",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "min_within_charter_bp",
+        "max_manipulation_bp"
+      ],
+      "title": "ReviewThresholds",
+      "type": "object"
+    },
+    "RuleCard": {
+      "properties": {
+        "card_id": {
+          "title": "Card Id",
+          "type": "string"
+        },
+        "applies_to": {
+          "title": "Applies To",
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "auto",
+            "ask",
+            "never"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "who": {
+          "enum": [
+            "anyone",
+            "verified",
+            "record_owner",
+            "person",
+            "agent"
+          ],
+          "title": "Who",
+          "type": "string"
+        },
+        "person_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Person Id"
+        },
+        "agent_key_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Key Id"
+        },
+        "max_amount_cents": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Amount Cents"
+        },
+        "max_discount_bp": {
+          "default": 0,
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Max Discount Bp",
+          "type": "integer"
+        },
+        "hours": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HoursWindow"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "review": {
+          "default": false,
+          "title": "Review",
+          "type": "boolean"
+        },
+        "is_default": {
+          "default": false,
+          "title": "Is Default",
+          "type": "boolean"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "card_id",
+        "applies_to",
+        "mode",
+        "who",
+        "reason"
+      ],
+      "title": "RuleCard",
+      "type": "object"
+    },
+    "SeedDocument": {
+      "properties": {
+        "ref": {
+          "title": "Ref",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "body": {
+          "title": "Body",
+          "type": "string"
+        },
+        "record_owner_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Record Owner Ref"
+        }
+      },
+      "required": [
+        "ref",
+        "title",
+        "body"
+      ],
+      "title": "SeedDocument",
+      "type": "object"
+    },
+    "SeedPerson": {
+      "properties": {
+        "ref": {
+          "title": "Ref",
+          "type": "string"
+        },
+        "display_name": {
+          "title": "Display Name",
+          "type": "string"
+        },
+        "contact": {
+          "title": "Contact",
+          "type": "string"
+        },
+        "notes": {
+          "default": "",
+          "title": "Notes",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ref",
+        "display_name",
+        "contact"
+      ],
+      "title": "SeedPerson",
+      "type": "object"
+    },
+    "SessionContext": {
+      "properties": {
+        "tools": {
+          "items": {
+            "$ref": "#/$defs/ToolProfile"
+          },
+          "title": "Tools",
+          "type": "array"
+        },
+        "tools_declared": {
+          "items": {
+            "$ref": "#/$defs/ToolProfile"
+          },
+          "title": "Tools Declared",
+          "type": "array"
+        },
+        "facts": {
+          "items": {
+            "$ref": "#/$defs/Fact"
+          },
+          "title": "Facts",
+          "type": "array"
+        },
+        "knowledge": {
+          "items": {
+            "$ref": "#/$defs/KnowledgeItem"
+          },
+          "title": "Knowledge",
+          "type": "array"
+        }
+      },
+      "required": [
+        "tools",
+        "tools_declared",
+        "facts",
+        "knowledge"
+      ],
+      "title": "SessionContext",
+      "type": "object"
+    },
+    "SessionCreated": {
+      "properties": {
+        "state": {
+          "$ref": "#/$defs/SessionState"
+        },
+        "session_token": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Session Token"
+        }
+      },
+      "required": [
+        "state",
+        "session_token"
+      ],
+      "title": "SessionCreated",
+      "type": "object"
+    },
+    "SessionState": {
+      "properties": {
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "visitor",
+            "agent",
+            "owner"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "verified": {
+          "title": "Verified",
+          "type": "boolean"
+        },
+        "assurance": {
+          "enum": [
+            "none",
+            "demo_code",
+            "owner_session"
+          ],
+          "title": "Assurance",
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "ai",
+            "owner",
+            "paused"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "generation": {
+          "title": "Generation",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "session_id",
+        "kind",
+        "verified",
+        "assurance",
+        "mode",
+        "generation"
+      ],
+      "title": "SessionState",
+      "type": "object"
+    },
+    "SseEvent": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/EvWriting"
+        },
+        {
+          "$ref": "#/$defs/EvMessage"
+        },
+        {
+          "$ref": "#/$defs/EvTurnEnd"
+        },
+        {
+          "$ref": "#/$defs/EvReceipt"
+        },
+        {
+          "$ref": "#/$defs/EvHeld"
+        },
+        {
+          "$ref": "#/$defs/EvResolved"
+        },
+        {
+          "$ref": "#/$defs/EvOwnerJoined"
+        },
+        {
+          "$ref": "#/$defs/EvOwnerLeft"
+        },
+        {
+          "$ref": "#/$defs/EvDemoInbox"
+        },
+        {
+          "$ref": "#/$defs/EvError"
+        }
+      ],
+      "discriminator": {
+        "propertyName": "type",
+        "mapping": {
+          "writing": "#/$defs/EvWriting",
+          "message": "#/$defs/EvMessage",
+          "turn_end": "#/$defs/EvTurnEnd",
+          "receipt": "#/$defs/EvReceipt",
+          "held": "#/$defs/EvHeld",
+          "resolved": "#/$defs/EvResolved",
+          "owner_joined": "#/$defs/EvOwnerJoined",
+          "owner_left": "#/$defs/EvOwnerLeft",
+          "demo_inbox": "#/$defs/EvDemoInbox",
+          "error": "#/$defs/EvError"
+        }
+      }
+    },
+    "ToolCall": {
+      "properties": {
+        "call_id": {
+          "title": "Call Id",
+          "type": "string"
+        },
+        "tool": {
+          "title": "Tool",
+          "type": "string"
+        },
+        "args": {
+          "additionalProperties": true,
+          "title": "Args",
+          "type": "object"
+        }
+      },
+      "required": [
+        "call_id",
+        "tool",
+        "args"
+      ],
+      "title": "ToolCall",
+      "type": "object"
+    },
+    "ToolConfirmed": {
+      "properties": {
+        "profile": {
+          "$ref": "#/$defs/ToolProfile"
+        },
+        "draft": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PolicyVersion"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "profile",
+        "draft"
+      ],
+      "title": "ToolConfirmed",
+      "type": "object"
+    },
+    "ToolProfile": {
+      "properties": {
+        "tool": {
+          "enum": [
+            "native.quote",
+            "native.find_slots",
+            "native.book",
+            "native.release_document",
+            "native.payment_link",
+            "native.charge_mandate",
+            "native.capture_lead",
+            "native.request_callback",
+            "native.start_verification",
+            "native.fetch_website",
+            "native.read_memory",
+            "payments.list_charges",
+            "payments.create_refund"
+          ],
+          "title": "Tool",
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "native",
+            "mcp"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "effects": {
+          "items": {
+            "enum": [
+              "read",
+              "private_data",
+              "change",
+              "charge",
+              "pay_out",
+              "send_message"
+            ],
+            "type": "string"
+          },
+          "title": "Effects",
+          "type": "array"
+        },
+        "reversible": {
+          "title": "Reversible",
+          "type": "boolean"
+        },
+        "adapter": {
+          "title": "Adapter",
+          "type": "string"
+        },
+        "resource_kind": {
+          "enum": [
+            "quote",
+            "slot",
+            "booking",
+            "document",
+            "charge",
+            "desk"
+          ],
+          "title": "Resource Kind",
+          "type": "string"
+        },
+        "description_confirmed": {
+          "title": "Description Confirmed",
+          "type": "string"
+        },
+        "input_schema": {
+          "additionalProperties": true,
+          "title": "Input Schema",
+          "type": "object"
+        },
+        "definition_sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Definition Sha256"
+        },
+        "pending_definition_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pending Definition Text"
+        },
+        "pending_sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pending Sha256"
+        },
+        "status": {
+          "enum": [
+            "enabled",
+            "needs_review",
+            "disabled"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool",
+        "source",
+        "effects",
+        "reversible",
+        "adapter",
+        "resource_kind",
+        "description_confirmed",
+        "input_schema",
+        "status"
+      ],
+      "title": "ToolProfile",
+      "type": "object"
+    },
+    "ToolsConfirmRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "desk_id": {
+          "title": "Desk Id",
+          "type": "string"
+        },
+        "tool": {
+          "enum": [
+            "native.quote",
+            "native.find_slots",
+            "native.book",
+            "native.release_document",
+            "native.payment_link",
+            "native.charge_mandate",
+            "native.capture_lead",
+            "native.request_callback",
+            "native.start_verification",
+            "native.fetch_website",
+            "native.read_memory",
+            "payments.list_charges",
+            "payments.create_refund"
+          ],
+          "title": "Tool",
+          "type": "string"
+        },
+        "enable": {
+          "title": "Enable",
+          "type": "boolean"
+        },
+        "definition_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Definition Sha256"
+        }
+      },
+      "required": [
+        "desk_id",
+        "tool",
+        "enable"
+      ],
+      "title": "ToolsConfirmRequest",
+      "type": "object"
+    },
+    "ToolsConnectRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "desk_id": {
+          "title": "Desk Id",
+          "type": "string"
+        },
+        "server": {
+          "const": "mock_payments",
+          "title": "Server",
+          "type": "string"
+        }
+      },
+      "required": [
+        "desk_id",
+        "server"
+      ],
+      "title": "ToolsConnectRequest",
+      "type": "object"
+    },
+    "ToolsSimulateChangeRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "desk_id": {
+          "title": "Desk Id",
+          "type": "string"
+        },
+        "tool": {
+          "enum": [
+            "native.quote",
+            "native.find_slots",
+            "native.book",
+            "native.release_document",
+            "native.payment_link",
+            "native.charge_mandate",
+            "native.capture_lead",
+            "native.request_callback",
+            "native.start_verification",
+            "native.fetch_website",
+            "native.read_memory",
+            "payments.list_charges",
+            "payments.create_refund"
+          ],
+          "title": "Tool",
+          "type": "string"
+        }
+      },
+      "required": [
+        "desk_id",
+        "tool"
+      ],
+      "title": "ToolsSimulateChangeRequest",
+      "type": "object"
+    },
+    "VerifyCheckRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        },
+        "code": {
+          "title": "Code",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "code"
+      ],
+      "title": "VerifyCheckRequest",
+      "type": "object"
+    },
+    "VerifyStartRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        },
+        "contact": {
+          "title": "Contact",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "contact"
+      ],
+      "title": "VerifyStartRequest",
+      "type": "object"
+    },
+    "VerifyStarted": {
+      "properties": {
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "inbox": {
+          "items": {
+            "$ref": "#/$defs/InboxNotice"
+          },
+          "title": "Inbox",
+          "type": "array"
+        }
+      },
+      "required": [
+        "message",
+        "inbox"
+      ],
+      "title": "VerifyStarted",
+      "type": "object"
+    },
+    "Violation": {
+      "properties": {
+        "kind": {
+          "enum": [
+            "number_in_prose",
+            "promise_word",
+            "soft_promise",
+            "unknown_fact",
+            "unentitled_fact",
+            "stale_fact",
+            "canary",
+            "unsupported_language",
+            "session_paused"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "span": {
+          "title": "Span",
+          "type": "string"
+        },
+        "fact_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Fact Ids",
+          "type": "array"
+        },
+        "rule_id": {
+          "title": "Rule Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "span",
+        "rule_id"
+      ],
+      "title": "Violation",
+      "type": "object"
+    },
+    "WhoAmI": {
+      "properties": {
+        "kind": {
+          "enum": [
+            "visitor",
+            "agent",
+            "owner"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "copy_id": {
+          "title": "Copy Id",
+          "type": "string"
+        },
+        "desk_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Desk Id"
+        },
+        "desk_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Desk Ids",
+          "type": "array"
+        },
+        "session": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "copy_id",
+        "desk_id",
+        "desk_ids",
+        "session"
+      ],
+      "title": "WhoAmI",
+      "type": "object"
+    }
+  }
+}

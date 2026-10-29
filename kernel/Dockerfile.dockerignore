@@ -1,0 +1,10 @@
+# The kernel image's build context is the repo root; send only the kernel's sources.
+*
+!kernel/Cargo.toml
+!kernel/Cargo.lock
+!kernel/rust-toolchain.toml
+!kernel/core/
+!kernel/py/
+!kernel/prove/
+!kernel/cedar/
+kernel/**/target

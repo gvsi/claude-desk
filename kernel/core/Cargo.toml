@@ -1,0 +1,17 @@
+[package]
+name = "desk-kernel-core"
+description = "Cedar decisions, policy lint, canonical JSON and ledger signing for the Claude Desk kernel"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+cedar-policy.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+zmij.workspace = true
+ed25519-dalek.workspace = true
+sha2.workspace = true
+hex.workspace = true
+anyhow.workspace = true
