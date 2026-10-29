@@ -184,6 +184,9 @@ def test_relative_links_that_leave_the_repository_are_broken(tmp_path):
     "The design is at https://claude.ai/code/artifact/abc123.",
     "See https://claude.ai/share/abc123 for the chat.",
     "Notes are in [my notes](~/notes.md).",
+    "See /Users/someone/notes.md for the steps.",
+    "Copied from /home/someone/notes.md.",
+    "    /Users/someone/bin/desk deploy",
 ])
 def test_flags_private_references(tmp_path, line):
     root = passing_tree(tmp_path)
@@ -197,12 +200,25 @@ def test_flags_private_references(tmp_path, line):
 
 def test_flags_private_paths_in_fenced_code(tmp_path):
     root = passing_tree(tmp_path)
-    write(root, "docs/deploy.md", "# Deploying\n\n```sh\n/Users/someone/bin/desk deploy\n```\n")
+    write(root, "docs/deploy.md", "# Deploying\n\n```sh\n/Users/someone/bin/desk deploy\ncat ~/scratch/key.txt\n```\n")
 
     code, out = run(root)
 
     assert code == 1
-    assert "docs/deploy.md:4: private reference (/Users/ in a link or code)" in out
+    assert "docs/deploy.md:4: private reference (/Users/)" in out
+    assert "docs/deploy.md:5: private reference (~/ in a link or code)" in out
+
+
+def test_flags_private_paths_in_code_nested_in_a_list(tmp_path):
+    root = passing_tree(tmp_path)
+    write(root, "docs/deploy.md", "# Deploying\n\n1. Run:\n\n    ```sh\n    cat ~/scratch/key.txt\n    ```\n"
+          "2. Then:\n\n    ~~~sh\n    cat ~/scratch/other.txt\n    ~~~\n")
+
+    code, out = run(root)
+
+    assert code == 1
+    assert "docs/deploy.md:6: private reference (~/ in a link or code)" in out
+    assert "docs/deploy.md:11: private reference (~/ in a link or code)" in out
 
 
 def test_private_references_in_prose_and_unshipped_docs_pass(tmp_path):

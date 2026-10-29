@@ -3,10 +3,10 @@
     python -m desk_tools.check_docs [--final] [--root PATH]
 
 Relative links across README.md, AGENTS.md and docs/**/*.md resolve inside the repository (anchors
-are ignored). The shipped docs (SHIPPED_DOCS) hold no private reference: no home-directory path in a
-link target or code, no run-ledger path or claude.ai artifact or share link anywhere, and no term
-from the optional, git-ignored .local/docs-deny.txt (one per line, `#` comments, matched ignoring
-case).
+are ignored). The shipped docs (SHIPPED_DOCS) hold no private reference: no `~/` path in a link target
+or code; no /Users/ or /home/ path, run-ledger path or claude.ai artifact or share link anywhere; and
+no term from the optional, git-ignored .local/docs-deny.txt (one per line, `#` comments, matched
+ignoring case).
 Each phrase in DISCLOSURES appears in every doc it names, ignoring case, line breaks and curly
 apostrophes. With --final, the shipped docs also hold no placeholder: a value still to be measured
 (`[measured: …]`) or a link the owner still has to give (`[owner: …]`).
@@ -40,8 +40,8 @@ SHIPPED_DOCS = (
 
 # Private anywhere in a shipped doc, and private in a link target or code (where a path is a path,
 # not prose such as "the AWS CLI reads ~/.aws").
-PRIVATE_ANYWHERE = (".plan-runs/", "claude.ai/artifact", "claude.ai/code/artifact", "claude.ai/share")
-PRIVATE_IN_PATHS = ("/Users/", "~/")
+PRIVATE_ANYWHERE = (".plan-runs/", "claude.ai/artifact", "claude.ai/code/artifact", "claude.ai/share", "/Users/", "/home/")
+PRIVATE_IN_PATHS = ("~/",)
 DENY_LIST = ".local/docs-deny.txt"
 
 PLACEHOLDERS = ("[measured:", "[owner:")
