@@ -173,7 +173,7 @@ def test_first_deploy_runs_every_step_in_order(deploy):
         "aws sts get-caller-identity",
         "uv preflight.py",
         "aws cloudformation describe-stacks",  # DeskApp's PublicUrl: none yet
-        "make image",
+        "make image image-check",              # built, then checked, before any change in AWS
         "npm ci",
         "cdk deploy DeskData",
         "uv run_admin_task.py",
@@ -236,6 +236,21 @@ def test_an_exported_image_setting_stops_the_deploy(deploy, name):
     assert run.status == 2
     assert f"unset {name}" in run.output
     assert run.calls == []
+
+
+def test_a_failed_image_check_stops_before_any_change(deploy):
+    """image-check catches a missing or stale proof report, among others, before cdk runs."""
+    run = deploy(FAIL_IMAGE="1")
+    assert run.status == 1
+    assert run.steps()[-1] == "make image image-check"
+    assert not run.cdk("DeskData") and not run.cdk("DeskApp")
+
+
+def test_make_image_check_reads_the_image_kernel_tag_built():
+    """With KERNEL_TAG, image-check checks the app image `make image` just tagged."""
+    dry_run = subprocess.run(["make", "-n", "-C", str(REPO), "image-check", "KERNEL_TAG=0a1b2c3"],
+                             capture_output=True, text=True, check=True).stdout
+    assert 'docker run --rm "desk-app:0a1b2c3"' in dry_run
 
 
 def test_make_image_tags_both_images_with_kernel_tag():

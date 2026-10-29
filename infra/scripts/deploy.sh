@@ -5,8 +5,9 @@
 #   1. the owner retypes the AWS account ID it prints;
 #   2. preflight.py: a clean tree, HEAD on origin/main, HEAD's passing tier 2 results file, both
 #      owner secrets set, the web app built and checked at HEAD;
-#   3. make image, tagged with the commit (desk-kernel:<sha>, which the app image is built on, and
-#      desk-app:<sha>); cdk deploy is given that kernel image and this checkout, never DESK_IMAGE_*;
+#   3. make image image-check, tagged with the commit (desk-kernel:<sha>, which the app image is
+#      built on, and desk-app:<sha>, checked for what it must hold, proof reports included); cdk
+#      deploy is given that kernel image and this checkout, never DESK_IMAGE_*;
 #   4. cdk deploy DeskData (network, database, secrets, the admin task definition);
 #   5. run_admin_task.py: migrations and role passwords, before any new app task starts;
 #   6. cdk deploy DeskApp with the commit and the Desk's public URL; on a first deploy without a
@@ -143,7 +144,7 @@ else
 fi
 
 step "Image"
-make -C "$ROOT" image KERNEL_TAG="$sha" || fail "make image failed"
+make -C "$ROOT" image image-check KERNEL_TAG="$sha" || fail "make image or image-check failed; nothing was deployed"
 
 step "Deploy DeskData"
 (cd "$INFRA" && npm ci --no-audit --no-fund) || fail "npm ci failed in infra/"
