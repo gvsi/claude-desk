@@ -398,6 +398,11 @@ def test_readme_states_what_is_real_mocked_unfinished():
     returning = row("Returning visitors")
     assert "cookie" in returning and "vision mock" in returning
     assert row("Suggested upgrades").startswith("Simple")
+    # The matrix's other rows, each in its own row; People is simple.
+    for start in ("Quotes and booking", "Spanish", "Passcode", "Accessibility", "Desk management"):
+        row(start)
+    owner_app = row("The owner app")
+    assert "People" in owner_app and "simple" in owner_app
     assert all(status for status in rows.values()), "every part has a status"
     unfinished = status.split("### Unfinished", 1)
     assert (len(unfinished) == 2 and unfinished[1].strip()) or "Nothing was cut" in status, \
