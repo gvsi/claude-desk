@@ -6,7 +6,7 @@
  *
  * Reused by setup's preview (`embedded`), which sits inside an owner screen.
  */
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 
 import type { SessionState } from '../api/contracts.ts';
 import {
@@ -153,23 +153,40 @@ function scrollerOf(el: Element): Element {
   return document.scrollingElement ?? document.documentElement;
 }
 
+/** The design system's classes for the shell around the page and its composer area, which stays at the bottom of the window. */
+const SHELL = '.cd-public-shell';
+const COMPOSER_AREA = '.cd-public-shell__composer';
+
 /**
  * How much of the conversation, up to `end`, is hidden under the composer that stays at the bottom
- * of the window (`composer` is inside the shell's composer area, whose top padding counts).
+ * of the window: measured to the top of the shell's composer area around `composer`, whose top
+ * padding counts.
  */
 function hiddenUnderComposer(end: HTMLElement, composer: HTMLElement): number {
-  const area = composer.parentElement ?? composer;
+  const area = composer.closest(COMPOSER_AREA) ?? composer;
   return end.getBoundingClientRect().bottom - area.getBoundingClientRect().top;
 }
 
 /**
  * Keeps the newest message in view, as a chat does: while the visitor is at the end of the
  * conversation, whatever arrives (a reply, its receipts, "Claude is writing", a notice) scrolls up
- * to sit just above the composer. A visitor who has scrolled back to read stays where they are
- * until they send. Returns the function to call when they send.
+ * to sit just above the composer, and so does the end when the page changes size (the window
+ * narrows and the rows rewrap, the composer grows). A visitor who has scrolled back to read stays
+ * where they are until they send. Returns the function to call when they send.
  */
-function useNewestInView(end: RefObject<HTMLElement | null>, composer: RefObject<HTMLElement | null>): () => void {
+function useNewestInView(end: RefObject<HTMLElement | null>, composer: RefObject<HTMLElement | null>, shown: boolean): () => void {
   const atTheEnd = useRef(true);
+
+  // Brings the end of the conversation up to the composer, at once and never animated, while the
+  // visitor is at the end.
+  const pin = useCallback(() => {
+    if (!atTheEnd.current || !end.current || !composer.current) return;
+    const hidden = hiddenUnderComposer(end.current, composer.current);
+    if (hidden <= 0) return;
+    const scroller = scrollerOf(end.current);
+    if (scroller === document.scrollingElement) window.scrollBy({ top: hidden, behavior: 'instant' });
+    else scroller.scrollBy({ top: hidden, behavior: 'instant' });
+  }, [end, composer]);
 
   useEffect(() => {
     const onScroll = () => {
@@ -180,16 +197,21 @@ function useNewestInView(end: RefObject<HTMLElement | null>, composer: RefObject
     return () => document.removeEventListener('scroll', onScroll, { capture: true });
   }, [end, composer]);
 
+  // The page changing size moves the end without a render: the shell rewraps when the window or
+  // the panel around it resizes, and the composer area grows with what is typed. Watched while the
+  // shell is `shown`.
+  useEffect(() => {
+    const shell = shown ? end.current?.closest(SHELL) : null;
+    const area = composer.current?.closest(COMPOSER_AREA);
+    if (typeof ResizeObserver === 'undefined' || !shell) return undefined;
+    const observer = new ResizeObserver(pin);
+    observer.observe(shell);
+    if (area) observer.observe(area);
+    return () => observer.disconnect();
+  }, [shown, end, composer, pin]);
+
   // After every render: the conversation may have grown under the composer.
-  useLayoutEffect(() => {
-    if (!atTheEnd.current || !end.current || !composer.current) return;
-    const hidden = hiddenUnderComposer(end.current, composer.current);
-    if (hidden <= 0) return;
-    const scroller = scrollerOf(end.current);
-    // At once, never animated: the words arrive in place.
-    if (scroller === document.scrollingElement) window.scrollBy({ top: hidden, behavior: 'instant' });
-    else scroller.scrollBy({ top: hidden, behavior: 'instant' });
-  });
+  useLayoutEffect(pin);
 
   return () => {
     atTheEnd.current = true;
@@ -237,7 +259,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
   const { openStatus, desk } = useOpenStatus(slug, chat.desk);
   const endRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
-  const followTheEnd = useNewestInView(endRef, composerRef);
+  const followTheEnd = useNewestInView(endRef, composerRef, desk !== null);
 
   useEffect(() => {
     if (chat.session !== null) onSession?.(chat.session);

@@ -5,6 +5,7 @@
  */
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { page } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import type { EvMessage, OpenStatus, PublicDesk, SseEvent } from '../api/contracts.ts';
@@ -14,7 +15,7 @@ import { worker } from '../mocks/browser.ts';
 import { SCRIPT, matchRule, type RuleName } from '../mocks/script.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
-import { renderRoute } from '../test/renderRoute.tsx';
+import { VIEWPORTS, renderRoute } from '../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
 
 const PAGE = `/d/${RIVERA.slug}`;
@@ -524,6 +525,14 @@ describe('public chat page', () => {
         await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
       }
       expect(document.scrollingElement?.scrollTop, viewport).toBeGreaterThan(0);
+
+      // Narrowing the window at the end (a phone turned, a window made smaller) rewraps the rows,
+      // and the newest still ends above the composer, with nothing sent.
+      if (viewport === 'desktop') {
+        await page.viewport(VIEWPORTS.phone.width, VIEWPORTS.phone.height);
+        await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
+        await page.viewport(VIEWPORTS.desktop.width, VIEWPORTS.desktop.height);
+      }
 
       // A visitor reading back up stays where they are while the chat goes on...
       window.scrollTo(0, 0);
