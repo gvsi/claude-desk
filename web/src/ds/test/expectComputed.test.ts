@@ -34,5 +34,8 @@ describe('expectComputed', () => {
     );
     // An empty expectation would prove nothing, so it fails.
     expect(() => expectComputed(el, {})).toThrow(/nothing to check/);
+    // A detached element computes empty styles, which a permissive RegExp would pass, so it fails.
+    const detached = document.createElement('div');
+    expect(() => expectComputed(detached, { display: /^(?!flex$)/ })).toThrow(/is not in a rendered document/);
   });
 });

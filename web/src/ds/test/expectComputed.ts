@@ -17,7 +17,7 @@ export function expectComputed(el: Element, expected: ComputedExpectation): void
   const entries = Object.entries(expected) as [StyleKey, string | RegExp][];
   if (entries.length === 0) throw new Error(`expectComputed: nothing to check on ${describeElement(el)}`);
   const view = el.ownerDocument.defaultView;
-  if (!view) throw new Error(`expectComputed: ${describeElement(el)} is not in a rendered document`);
+  if (!view || !el.isConnected) throw new Error(`expectComputed: ${describeElement(el)} is not in a rendered document`);
   const style = view.getComputedStyle(el);
   const mismatches: string[] = [];
   for (const [key, want] of entries) {

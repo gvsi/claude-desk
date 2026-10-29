@@ -12,8 +12,8 @@
 /** The footer on every surface, word for word (`[data-ds="concept-footer"]`). */
 export const CONCEPT_FOOTER_TEXT = 'Concept prototype by Giovanni Alcantara, not an Anthropic product';
 
-/** Unicode arrows (Arrows, Supplemental Arrows A and B, dingbat and miscellaneous arrows). */
-export const ARROW_CHARACTERS = /[\u2190-\u21FF\u27F0-\u27FF\u2794-\u27BF\u2900-\u297F\u2B00-\u2B11\u2B60-\u2BFF]/u;
+/** Unicode arrows (Arrows, Supplemental Arrows A, B and C, dingbat and miscellaneous arrows). */
+export const ARROW_CHARACTERS = /[\u2190-\u21FF\u27F0-\u27FF\u2794-\u27BF\u2900-\u297F\u2B00-\u2B11\u2B60-\u2BFF\u{1F800}-\u{1F8FF}]/u;
 
 /** Rendered copy also may not draw an arrow out of ASCII. */
 const ARROW = new RegExp(`${ARROW_CHARACTERS.source}|->`, 'u');
@@ -31,7 +31,7 @@ const CAPS_RUN = /\p{Lu}{2,}/gu;
 const EXCLAMATION = /[!\u00A1\u2755\u2757]/u;
 
 /** Attributes whose text is read aloud, shown as a tooltip or shown as a label. */
-const READ_ATTRIBUTES = ['aria-label', 'aria-description', 'aria-roledescription', 'aria-valuetext', 'title', 'placeholder', 'alt'];
+const READ_ATTRIBUTES = ['aria-label', 'aria-description', 'aria-roledescription', 'aria-valuetext', 'title', 'placeholder', 'alt', 'label'];
 
 /** An `<input>` of these types shows its `value` as its label. */
 const LABELLED_BY_VALUE = new Set(['button', 'submit', 'reset']);

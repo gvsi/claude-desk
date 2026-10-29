@@ -25,6 +25,8 @@ describe('assertCleanCopy', () => {
     expect(check('<button aria-label="Next →"></button>')).toThrow(/arrow in aria-label: "Next →"/);
     expect(check('<a href="/more">See more -></a>')).toThrow(/arrow in text/);
     expect(check('<input type="submit" value="Pay ⟶" />')).toThrow(/arrow in value/);
+    // Supplemental Arrows-C (U+1F800 to U+1F8FF) are arrows too.
+    expect(check('<button>Next \u{1F852}</button>')).toThrow(/arrow in text/);
     const live = fragment('<input type="button" value="Pay" />');
     (live.firstElementChild as HTMLInputElement).value = 'Pay →';
     expect(() => assertCleanCopy(live)).toThrow(/arrow in value: "Pay →"/);
@@ -37,6 +39,10 @@ describe('assertCleanCopy', () => {
     expect(check('<button>SEND NOW</button>')).toThrow(/all caps "SEND", "NOW" in text: "SEND NOW"/);
     expect(check('<input placeholder="SEARCH" />')).toThrow(/all caps "SEARCH" in placeholder/);
     expect(check('<button title="Close PANEL"></button>')).toThrow(/all caps "PANEL" in title/);
+    // An option or optgroup shows its label attribute in place of its text.
+    expect(check('<select><optgroup label="PICK ONE"><option label="Tuesday">x</option></optgroup></select>')).toThrow(
+      /all caps "PICK", "ONE" in label/,
+    );
     expect(check('<p>Recibido, ÁREA lista</p>')).toThrow(/all caps "ÁREA"/);
     expect(check('<p>A McDONALD visit</p>')).toThrow(/all caps "DONALD"/);
     for (const acronym of ['I', 'AI', 'PDF', 'QR', 'CPA', 'ZIP', 'SMS', 'USD']) {

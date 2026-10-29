@@ -124,7 +124,7 @@ function arrowsInSource(text: string): string[] {
 }
 
 // Formatting or computing money, dates and discounts: the kernel renders those, never the client.
-const FORMATS = /\bIntl\s*\.|toLocale|\bnew\s+Date\b|(?<![\w.])Date\s*\(|\bDate\s*\.\s*(?:now|parse|UTC)\b|\bTemporal\s*\.|\bto(?:Fixed|Precision)\s*\(/g;
+const FORMATS = /\bIntl\b|toLocale|\bnew\s+Date\b|(?<![\w.])Date\s*\(|\bDate\s*\.\s*(?:now|parse|UTC)\b|\bTemporal\s*\.|\bto(?:Fixed|Precision)\s*\(/g;
 
 /** Component folders under `components/`, each named for its main export. */
 function componentNames(): string[] {
@@ -210,6 +210,7 @@ describe('design system source guards', () => {
     const escapes = ['&rarr;', '&#8594;', '&#x2192;', `${bs}u2192`, `${bs}u{2192}`, `content: "${bs}2192"`, '&RightArrow;'];
     for (const escape of escapes) expect(arrowsInSource(escape), escape).toHaveLength(1);
     expect(arrowsInSource('Continue →')).toEqual(['→']);
+    expect(arrowsInSource(`Next ${String.fromCodePoint(0x1f852)} and ${bs}u{1F852}`)).toHaveLength(2);
     // Escapes of other characters, and regex escapes such as a word boundary, are not arrows.
     expect(arrowsInSource(`&amp; &#8212; ${bs}u00a0 /${bs}bword${bs}d/ &#x2014;`)).toEqual([]);
     expect(findAll(sources, matches(UPPERCASE))).toEqual([]);
@@ -220,7 +221,9 @@ describe('design system source guards', () => {
     const probe =
       'new Intl.NumberFormat(); d.toLocaleDateString(); new Date(); Date.now(); Date.parse(s); n.toFixed(2); Date(); Temporal.Now; n.toPrecision(3); Date.UTC(1)';
     expect(matches(FORMATS)(probe)).toHaveLength(10);
-    expect(matches(FORMATS)('const updatedDate = block.text; isDateLike(x); props.date')).toEqual([]);
+    // Intl taken as a value, not only through a dot, is still Intl.
+    expect(matches(FORMATS)('const { NumberFormat } = Intl; fmt(Intl)')).toEqual(['Intl', 'Intl']);
+    expect(matches(FORMATS)('const updatedDate = block.text; isDateLike(x); props.date; IntlLabel')).toEqual([]);
     expect(findAll(sources, matches(FORMATS))).toEqual([]);
   });
 
