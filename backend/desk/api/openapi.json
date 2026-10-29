@@ -194,7 +194,7 @@
     "/api/owner/approvals/{decision_id}/answer": {
       "post": {
         "summary": "Answer Approval",
-        "description": "The owner's answer to a held request. The kernel decides it with the owner's credential, and an allow runs\nthere and then, as the visitor's session (also during a take-over); the visitor sees the outcome, and Claude\nfollows up, once the resume job ran and the visitor's own credential is present (the open stream or the next\nrequest). Drafted rule cards come back in `card_diff`; proving them is a rules route's work, so an answer never\nwaits on a proof.\n\nWhen the kernel refuses the answer (409: answered before, expired or cancelled) or its response is lost, the\ndecision is read as it stands: once it left `held`, an outcome the visitor wasn't shown yet gets the (idempotent)\nresume job, so a lost response still resumes the chat, and the answer is 409 `already_resolved` with the\ndecision. A lost answer that never reached the kernel (still `held`), or a decision that can't be read, is 503:\nanswering again is safe. An answer the request doesn't offer is the kernel's 422 `invalid`.",
+        "description": "The owner's answer to a held request. The kernel decides it with the owner's credential, and an allow runs\nthere and then, as the visitor's session (also during a take-over); the visitor sees the outcome, and Claude\nfollows up, once the resume job ran and the visitor's own credential is present (the open stream or the next\nrequest). Drafted rule cards come back in `card_diff`; proving them is a rules route's work, so an answer never\nwaits on a proof.\n\nWhen the kernel refuses the answer (409: answered before, expired or cancelled) or its response is lost, the\ndecision is read as it stands: once it left `held`, an outcome the visitor wasn't shown yet gets the (idempotent)\nresume job, so a lost response still resumes the chat, and the answer is 409 `already_resolved` with the\ndecision. A decision still `held` keeps the kernel's own error, its code included (\"Errors\"): a 409 is\n`{error: \"kernel\", code}`, and an answer that never reached the kernel is 503, `seed_unproved` and `internal`\nkept. A decision that can't be read is 503 `kernel_unavailable`. In each case answering again is safe. An answer\nthe request doesn't offer is the kernel's 422 `invalid`.",
         "operationId": "owner_answer_approval",
         "parameters": [
           {
@@ -273,7 +273,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AlreadyResolved"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/AlreadyResolved"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    }
+                  ],
+                  "title": "Response 409 Owner Answer Approval"
                 }
               }
             },

@@ -21,6 +21,7 @@ from desk.api.kernel_client import KernelFailed, KernelUnavailable
 from desk.api.passcode import check_passcode
 from desk.api.schemas import (
     AlreadyResolved,
+    ApiError,
     ApprovalAnswerIn,
     ApprovalAnswerOut,
     CopyOut,
@@ -94,7 +95,7 @@ async def me(ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> CopyOut:
 
 
 @router.post("/approvals/{decision_id}/answer", response_model=ApprovalAnswerOut,
-             responses={**error_responses(401, 404, 422, 503), 409: {"model": AlreadyResolved}})
+             responses={**error_responses(401, 404, 422, 503), 409: {"model": AlreadyResolved | ApiError}})
 async def answer_approval(decision_id: Annotated[str, Path(max_length=128)], body: ApprovalAnswerIn,
                           request: Request,
                           ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> ApprovalAnswerOut | JSONResponse:
@@ -107,8 +108,10 @@ async def answer_approval(decision_id: Annotated[str, Path(max_length=128)], bod
     When the kernel refuses the answer (409: answered before, expired or cancelled) or its response is lost, the
     decision is read as it stands: once it left `held`, an outcome the visitor wasn't shown yet gets the (idempotent)
     resume job, so a lost response still resumes the chat, and the answer is 409 `already_resolved` with the
-    decision. A lost answer that never reached the kernel (still `held`), or a decision that can't be read, is 503:
-    answering again is safe. An answer the request doesn't offer is the kernel's 422 `invalid`."""
+    decision. A decision still `held` keeps the kernel's own error, its code included ("Errors"): a 409 is
+    `{error: "kernel", code}`, and an answer that never reached the kernel is 503, `seed_unproved` and `internal`
+    kept. A decision that can't be read is 503 `kernel_unavailable`. In each case answering again is safe. An answer
+    the request doesn't offer is the kernel's 422 `invalid`."""
     state = runtime(request).started()
     try:
         result = await ctx.kernel.call("POST /approvals/{decision_id}/answer", AnswerRequest(answer=body.answer),
@@ -116,23 +119,24 @@ async def answer_approval(decision_id: Annotated[str, Path(max_length=128)], bod
     except KernelFailed as failure:
         if failure.status != 409:
             raise
-        return await _no_longer_held(state, ctx, decision_id, lost=False)
-    except KernelUnavailable:
-        return await _no_longer_held(state, ctx, decision_id, lost=True)
+        return await _no_longer_held(state, ctx, decision_id, failure)
+    except KernelUnavailable as failure:
+        return await _no_longer_held(state, ctx, decision_id, failure)
     await _resume(state, ctx, result.decision)
     return ApprovalAnswerOut(decision=result.decision, card_diff=result.card_diff,
                              execution_state=result.execution.state if result.execution is not None else None)
 
 
-async def _no_longer_held(state: Runtime, ctx: OwnerCtx, decision_id: str, *, lost: bool) -> JSONResponse:
+async def _no_longer_held(state: Runtime, ctx: OwnerCtx, decision_id: str,
+                          failure: KernelFailed | KernelUnavailable) -> JSONResponse:
     """The answer of a request the kernel refused to answer, or whose answer's response was lost (route docstring)."""
     try:
         decision = await ctx.kernel.call("GET /decisions/{id}", path={"id": decision_id})
     except (KernelFailed, KernelUnavailable):
         raise ApiProblem(503, "kernel", code="kernel_unavailable") from None
-    if lost and decision.state == "held":
-        raise ApiProblem(503, "kernel", code="kernel_unavailable")
-    if decision.state != "held" and not await _shown(ctx, decision):
+    if decision.state == "held":                        # the answer didn't take: the kernel's own error stands
+        raise failure
+    if not await _shown(ctx, decision):
         await _resume(state, ctx, decision)
     return JSONResponse(AlreadyResolved(decision=decision).model_dump(mode="json"), status_code=409)
 

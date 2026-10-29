@@ -6,8 +6,9 @@ from scripts.export_openapi import OPENAPI_PATH, export_openapi
 
 ROUTERS = {"system", "owner", "public", "agents", "proxy"}
 ERROR = {"$ref": "#/components/schemas/ApiError"}
-# The error answers whose body is a model of its own, by (operation, status).
-OWN_ERROR_BODIES = {("system_health", "503"): "HealthOut", ("owner_answer_approval", "409"): "AlreadyResolved"}
+# The error answers whose body is a model of its own (or one of several), by (operation, status).
+OWN_ERROR_BODIES = {("system_health", "503"): ("HealthOut",),
+                    ("owner_answer_approval", "409"): ("AlreadyResolved", "ApiError")}
 
 
 def typed(schema: dict) -> bool:
@@ -51,7 +52,8 @@ def test_every_route_has_typed_responses():
             if status.startswith("2"):
                 assert typed(schema) and schema != ERROR, (operation_id, status)
             elif (operation_id, status) in OWN_ERROR_BODIES:
-                assert schema == {"$ref": f"#/components/schemas/{OWN_ERROR_BODIES[operation_id, status]}"}
+                refs = [{"$ref": f"#/components/schemas/{name}"} for name in OWN_ERROR_BODIES[operation_id, status]]
+                assert (schema if len(refs) == 1 else schema.get("anyOf")) == (refs[0] if len(refs) == 1 else refs)
             else:
                 assert schema == ERROR, (operation_id, status)
         if op.get("requestBody"):

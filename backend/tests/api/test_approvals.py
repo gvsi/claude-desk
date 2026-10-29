@@ -273,6 +273,26 @@ async def test_unreadable_or_unanswered_is_503(app, browser, fake, kernel_http, 
         "denied"]
 
 
+async def test_a_failed_answer_to_a_held_request_keeps_the_kernels_error(app, browser, fake, kernel_http, model,
+                                                                        engine, jobs_connector):
+    """Only a request that left `held` is `already_resolved`. A kernel refusal or fault while the request is still
+    held keeps the kernel's own status and code ("Errors"), so the owner's app shows an error and not an answer."""
+    held = await held_request(app, browser, fake, kernel_http, model)
+
+    fake.fail("POST /approvals/{decision_id}/answer", "409", times=1)
+    conflict = await answer(held, "allow_once")
+    assert (conflict.status_code, conflict.json()) == (409, {"error": "kernel", "code": "conflict"})
+    fake.fail("POST /approvals/{decision_id}/answer", "500", times=1)
+    fault = await answer(held, "allow_once")
+    assert (fault.status_code, fault.json()) == (503, {"error": "kernel", "code": "internal"})
+
+    assert fake.decisions[held.decision_id].decision.state == "held"
+    assert await jobs_done(jobs_connector) == []
+    assert [type for type, _ in await sse_events(engine, held.session_id)] == ["writing", "held", "message",
+                                                                              "turn_end"]
+    assert (await answer(held, "allow_once")).status_code == 200          # answering again is safe
+
+
 async def test_answer_during_take_over_executes_and_waits_for_hand_back(app, browser, fake, kernel_http, model,
                                                                         engine):
     held = await held_request(app, browser, fake, kernel_http, model)
