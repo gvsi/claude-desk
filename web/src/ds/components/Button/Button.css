@@ -10,6 +10,7 @@
    narrowest size break it, so even a button in a row of buttons can't be pushed past its line. */
 
 .cd-button {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -160,7 +161,7 @@ a.cd-button[aria-disabled='true']:not([aria-busy='true']) {
 }
 
 /* Busy: the click registered and the result is on its way. The button steps down in token colors,
-   never dimmed as a whole, so its label stays a contrast pair listed (contrast.ts) for a page
+   never dimmed as a whole, so its label color, which its dots take, stays a pair listed for a page
    (bg-app), a card on it (fill-card) and a dialog (bg-surface), and for a ghost button the sidebar
    (bg-panel) and the reviewer bar (bg-muted); every Button sits on one of them. On them a secondary
    or ghost label turns text-secondary on the button's own fill (5.3:1 or more), and the primary
@@ -190,9 +191,60 @@ a.cd-button[aria-disabled='true']:not([aria-busy='true']) {
   background: var(--fill-hover);
 }
 
+/* While busy, three dots take the label's place, in the label's busy color. The label and a menu
+   button's chevron keep their places, unseen, so the button keeps its width and the label still
+   names it. The dots rest at 0.7 and pulse to full strength one after another over the writing
+   loop, motion-stagger apart; at rest they still read at 3.4:1 or more on every ground a busy pair
+   is listed for (contrast.ts). */
+.cd-button[aria-busy='true'] > .cd-button__label {
+  opacity: 0;
+}
+
+.cd-button[aria-busy='true'] > .cd-button__chevron {
+  visibility: hidden;
+}
+
+.cd-button__dots {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  pointer-events: none;
+}
+
+.cd-button__dot {
+  flex: none;
+  width: var(--size-dot);
+  height: var(--size-dot);
+  border-radius: var(--radius-full);
+  background: currentColor;
+  opacity: 0.7;
+  animation: cd-button-dot var(--motion-writing) var(--motion-ease) infinite;
+}
+
+.cd-button__dot:nth-child(2) {
+  animation-delay: var(--motion-stagger);
+}
+
+.cd-button__dot:nth-child(3) {
+  animation-delay: calc(var(--motion-stagger) * 2);
+}
+
+@keyframes cd-button-dot {
+  50% {
+    opacity: 1;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .cd-button {
     transition: none;
+  }
+
+  .cd-button__dot {
+    animation: none;
   }
 
   .cd-button:active {

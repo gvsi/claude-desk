@@ -6,6 +6,15 @@ import './Button.css';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'danger-ghost';
 
+/** Three dots in place of the label while busy, drawn only: the label still names the button. */
+const BUSY_DOTS = (
+  <span className="cd-button__dots" aria-hidden="true">
+    <span className="cd-button__dot" />
+    <span className="cd-button__dot" />
+    <span className="cd-button__dot" />
+  </span>
+);
+
 interface ButtonBaseProps {
   /**
    * `primary` (inverted neutral, at most one per view), `secondary` or `ghost`; `danger` (a soft red
@@ -17,7 +26,10 @@ interface ButtonBaseProps {
   /** The button's `type`; `button` unless it submits a form. */
   type?: 'button' | 'submit' | 'reset';
   disabled?: boolean;
-  /** Waiting for the result of a click: announced with `aria-busy`, and further clicks do nothing. */
+  /**
+   * Waiting for the result of a click: three dots in the busy colors take the label's place, at the
+   * same width, the label still names it with `aria-busy`, and further clicks do nothing.
+   */
   busy?: boolean;
   /** The element's `id`, for a menu or a description that points back at it. */
   id?: string;
@@ -92,6 +104,7 @@ export function Button({
         onClick={handleClick}
       >
         <span className="cd-button__label">{children}</span>
+        {busy ? BUSY_DOTS : null}
       </a>
     );
   }
@@ -113,6 +126,7 @@ export function Button({
     >
       <span className="cd-button__label">{children}</span>
       {opensMenu ? <Icon name="chevron-down" size={16} className="cd-button__chevron" /> : null}
+      {busy ? BUSY_DOTS : null}
     </button>
   );
 }

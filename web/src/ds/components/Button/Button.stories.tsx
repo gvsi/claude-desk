@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn } from 'storybook/test';
 
+import { BUSY_DOT_REST } from '../../contrast.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { Button } from './Button.tsx';
 
@@ -65,8 +66,9 @@ export const Busy: Story = {
     await expect(button).toHaveAttribute('aria-disabled', 'true');
     await userEvent.click(button);
     await expect(args.onClick).not.toHaveBeenCalled();
-    // busy_label_keeps_contrast: a busy button is drawn in token colors, never dimmed as a whole, so
-    // its label is a listed contrast pair: button-primary-text on button-primary-hover, 12.2:1.
+    // busy_colors_keep_contrast: a busy button is drawn in token colors, never dimmed as a whole, so
+    // its dots, in its label's color, are a listed contrast pair: button-primary-text on
+    // button-primary-hover, 12.2:1.
     expectComputed(button, { opacity: '1', backgroundColor: 'rgb(221, 217, 207)', color: 'rgb(28, 27, 25)' });
   },
 };
@@ -87,8 +89,8 @@ export const BusySecondary: Story = {
   play: async ({ canvas }) => {
     const button = canvas.getByRole('button', { name: 'Keep it' });
     await expect(button).toHaveAttribute('aria-busy', 'true');
-    // The label steps down to text-secondary on the button's own fill: 5.3:1 on bg-surface, where
-    // dimming the whole button left it at 4.48:1.
+    // The label's color steps down to text-secondary on the button's own fill, and the dots take it:
+    // 5.3:1 on bg-surface, where dimming the whole button left it at 4.48:1.
     expectComputed(button, { opacity: '1', backgroundColor: 'rgba(250, 249, 245, 0.1)', color: 'rgba(250, 249, 245, 0.64)' });
   },
 };
@@ -130,11 +132,131 @@ export const BusyAndDisabled: Story = {
       const button = canvas.getByRole('button', { name: children });
       await expect(button).toBeDisabled();
       await expect(button).toHaveAttribute('aria-busy', 'true');
-      // busy_label_keeps_contrast: disabled as well doesn't dim it below its busy pair.
+      // busy_colors_keep_contrast: disabled as well doesn't dim it below its busy pair.
       expectComputed(button, { opacity: '1', backgroundColor, color });
       await userEvent.click(button);
     }
     await expect(args.onClick).not.toHaveBeenCalled();
+  },
+};
+
+/**
+ * busy_shows_dots: a busy button's three dots, in its busy color, where its label was. The label
+ * keeps its place in the layout, unseen, and still names the button; the dots are hidden from
+ * screen readers.
+ */
+async function expectBusyDots(button: HTMLElement, name: string): Promise<HTMLElement[]> {
+  await expect(button).toHaveAccessibleName(name);
+  await expect(button).toHaveAttribute('aria-busy', 'true');
+  await expect(button).toHaveAttribute('aria-disabled', 'true');
+  const label = button.querySelector<HTMLElement>('.cd-button__label');
+  if (!label) throw new Error('no label in the busy button');
+  expectComputed(label, { opacity: '0' });
+  await expect(label.getBoundingClientRect().width).toBeGreaterThan(0);
+  const dots = button.querySelector<HTMLElement>('.cd-button__dots');
+  if (!dots) throw new Error('no dots in the busy button');
+  await expect(dots).toHaveAttribute('aria-hidden', 'true');
+  await expect(dots.textContent).toBe('');
+  const each = [...dots.querySelectorAll<HTMLElement>('.cd-button__dot')];
+  await expect(each).toHaveLength(3);
+  const { color } = getComputedStyle(button);
+  for (const dot of each) expectComputed(dot, { width: '6px', height: '6px', borderTopLeftRadius: '999px', backgroundColor: color });
+  // Centered in the button, where the label was.
+  const box = button.getBoundingClientRect();
+  const [first, last] = [each[0]?.getBoundingClientRect(), each[2]?.getBoundingClientRect()];
+  if (!first || !last) throw new Error('missing dots');
+  await expect(Math.abs((first.left + last.right) / 2 - (box.left + box.right) / 2)).toBeLessThan(1);
+  await expect(Math.abs((first.top + first.bottom) / 2 - (box.top + box.bottom) / 2)).toBeLessThan(1);
+  return each;
+}
+
+/** The dots pulse one after another on the writing loop, motion-stagger apart. */
+function expectDotsPulse(dots: readonly HTMLElement[]): void {
+  for (const [index, dot] of dots.entries()) {
+    expectComputed(dot, {
+      animationName: /^(?!none$).+/,
+      animationDuration: '1.6s',
+      animationIterationCount: 'infinite',
+      animationDelay: ['0s', '0.15s', '0.3s'][index] as string,
+    });
+  }
+}
+
+export const BusyDots: Story = {
+  render: () => (
+    <div style={{ display: 'grid', gridTemplateColumns: 'max-content max-content', gap: 'var(--space-8)', justifyItems: 'start' }}>
+      {BUSY_LOOKS.flatMap(({ variant, children }) => [
+        <Button key={`${variant}-rest`} variant={variant} size="main">
+          {children}
+        </Button>,
+        <Button key={`${variant}-busy`} variant={variant} size="main" busy>
+          {children}
+        </Button>,
+      ])}
+    </div>
+  ),
+  parameters: {
+    canvasNote:
+      'The signed busy board (N-Typing-Owner-Busy): each variant at rest, then busy, with three small dots in its busy colors in place of its label, at the same width.',
+  },
+  play: async ({ canvas }) => {
+    for (const { children, backgroundColor, color } of BUSY_LOOKS) {
+      const [rest, busy] = canvas.getAllByRole('button', { name: children }) as [HTMLElement, HTMLElement];
+      await expect(rest).not.toHaveAttribute('aria-busy');
+      // The same size as at rest, so nothing around it moves.
+      const [before, after] = [rest.getBoundingClientRect(), busy.getBoundingClientRect()];
+      await expect(Math.abs(after.width - before.width)).toBeLessThan(0.5);
+      await expect(after.height).toBe(before.height);
+      expectComputed(busy, { opacity: '1', backgroundColor, color });
+      expectDotsPulse(await expectBusyDots(busy, children));
+      await expect(rest.querySelector('.cd-button__dots')).toBeNull();
+    }
+  },
+};
+
+export const BusyMenuButton: Story = {
+  render: () => (
+    <div style={{ display: 'flex', gap: 'var(--space-8)' }}>
+      <Button variant="secondary" size="main" menuOpen={false}>
+        Allow
+      </Button>
+      <Button variant="secondary" size="main" menuOpen={false} busy>
+        Allow
+      </Button>
+    </div>
+  ),
+  parameters: {
+    canvasNote: 'The signed busy board (N-Typing-Owner-Busy): a busy menu button shows the dots in place of its words and its chevron, at the same width, and can\'t open.',
+  },
+  play: async ({ canvas }) => {
+    const [rest, busy] = canvas.getAllByRole('button', { name: 'Allow' }) as [HTMLElement, HTMLElement];
+    await expect(Math.abs(busy.getBoundingClientRect().width - rest.getBoundingClientRect().width)).toBeLessThan(0.5);
+    await expect(busy).toHaveAttribute('aria-haspopup', 'menu');
+    await expect(busy).toHaveAttribute('aria-expanded', 'false');
+    await expectBusyDots(busy, 'Allow');
+    // The chevron keeps its place, unseen.
+    const chevron = busy.querySelector<SVGElement>('.cd-button__chevron');
+    if (!chevron) throw new Error('no chevron in the busy menu button');
+    expectComputed(chevron, { visibility: 'hidden' });
+    expectComputed(rest.querySelector('.cd-button__chevron') as SVGElement, { visibility: 'visible' });
+  },
+};
+
+export const BusyReducedMotion: Story = {
+  args: { busy: true },
+  parameters: {
+    canvasNote:
+      "The signed busy board (N-Typing-Owner-Busy): under reduced motion the dots stay still. Storybook shows the motion your system asks for; the design system's browser tests render this story under reduced motion.",
+  },
+  play: async ({ canvas }) => {
+    const button = canvas.getByRole('button', { name: 'Allow this time' });
+    const dots = await expectBusyDots(button, 'Allow this time');
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      // busy_dots_still_under_reduced_motion: no pulse, each dot at its resting strength.
+      for (const dot of dots) expectComputed(dot, { animationName: 'none', opacity: String(BUSY_DOT_REST) });
+    } else {
+      expectDotsPulse(dots);
+    }
   },
 };
 
@@ -322,7 +444,7 @@ export const DangerGhostBusy: Story = {
     const button = canvas.getByRole('button', { name: 'Deny always' });
     await expect(button).toHaveAttribute('aria-busy', 'true');
     await expect(button).toHaveAttribute('aria-disabled', 'true');
-    // busy_label_keeps_contrast: its red words on the hover ground are a listed pair.
+    // busy_colors_keep_contrast: its red color on the hover ground is a listed pair.
     expectComputed(button, { backgroundColor: 'rgba(250, 249, 245, 0.06)', color: DANGER_TEXT, opacity: '1' });
     await userEvent.click(button);
     await expect(args.onClick).not.toHaveBeenCalled();
