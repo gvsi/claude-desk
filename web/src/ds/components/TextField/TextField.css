@@ -1,8 +1,8 @@
-/* TextField: the label above, then the field on the page's own ground in the control outline at the
-   control radius, then the hint (with the counter near maxLength) and the error under it. The outline is never the only cue: the
-   label above always names the field. Margins, not a flex gap, space the lines, so the empty error
-   region takes no room. The outline's color changes at motion-instant; nothing moves under reduced
-   motion. */
+/* TextField: the label above, then the field on the page's own ground in the field outline at the
+   control radius, then the hint (with the counter near maxLength) and the error under it. The
+   outline is the field's boundary, so it is line-field, 3:1 against the ground, at rest and on
+   hover; it is never the only cue, because the label above always names the field. Margins, not a
+   flex gap, space the lines, so the empty error region takes no room. */
 
 .cd-text-field {
   display: block;
@@ -23,11 +23,10 @@
   height: var(--size-control-main);
   margin: 0;
   padding: 0 var(--space-12);
-  border: 1px solid var(--line-control);
+  border: 1px solid var(--line-field);
   border-radius: var(--radius-control);
   background: transparent;
   color: var(--text-primary);
-  transition: border-color var(--motion-instant) var(--motion-ease);
 }
 
 /* Four lines that grow taller by dragging, never wider; long words wrap. */
@@ -37,10 +36,6 @@
   padding: var(--space-10) var(--space-12);
   resize: vertical;
   overflow-wrap: anywhere;
-}
-
-.cd-text-field__input:hover {
-  border-color: var(--line-control-hover);
 }
 
 /* Under the field: the hint, and from 90% of maxLength the counter at the right. */
@@ -79,10 +74,4 @@
 /* The dot sits on the middle of the first line: (18 px line - 6 px dot) / 2. */
 .cd-text-field__error > .cd-status-dot {
   margin-top: var(--space-6);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .cd-text-field__input {
-    transition: none;
-  }
 }

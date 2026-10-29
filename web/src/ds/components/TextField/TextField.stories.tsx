@@ -55,16 +55,21 @@ export const Default: Story = {
     await expect(field).toHaveAccessibleDescription(args.hint as string);
     await expect(field).not.toHaveAttribute('aria-invalid');
 
-    // Control radius, the control outline, body type, on the page's own ground.
+    // Control radius, the field outline (line-field, 3:1 on the page), body type, on the page's own ground.
     expectComputed(field, {
       borderTopLeftRadius: '8px',
       borderTopWidth: '1px',
-      borderTopColor: 'rgba(250, 249, 245, 0.22)',
+      borderTopColor: 'rgba(250, 249, 245, 0.36)',
       fontSize: '14px',
       lineHeight: '20px',
       fontWeight: '380',
       color: 'rgba(250, 249, 245, 0.92)',
     });
+
+    // field_outline_keeps_contrast: the outline is the field's boundary, so hover never takes it under 3:1.
+    await userEvent.hover(field);
+    expectComputed(field, { borderTopColor: 'rgba(250, 249, 245, 0.36)' });
+    await userEvent.unhover(field);
 
     // Typing reports each change; the field shows what the form passes back.
     await userEvent.clear(field);
@@ -90,7 +95,7 @@ export const WithError: Story = {
     await expect(dot).not.toBeNull();
     await expect(dot).toHaveAttribute('aria-hidden', 'true');
     expectComputed(error, { color: 'rgba(250, 249, 245, 0.92)' });
-    expectComputed(field, { borderTopColor: 'rgba(250, 249, 245, 0.22)' });
+    expectComputed(field, { borderTopColor: 'rgba(250, 249, 245, 0.36)' });
   },
 };
 
