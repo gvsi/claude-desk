@@ -192,6 +192,8 @@ class _Turn:
             return await self._hand_off()
         if self.production:                                # past today's model budget: the handoff, no model call
             over = await over_daily_budget(conn, self.clock)
+            if over:                                       # as paused: what waits stops waking turns
+                await clear_wake(conn, caller.session_id)
             await conn.commit()
             if over:
                 return await self._hand_off()
@@ -542,9 +544,10 @@ async def _drain(conn: AsyncConnection, caller: Caller, model: ModelClient, end_
                  clock: Callable[[], datetime]) -> tuple[PendingOutcome, int | None]:
     """Under the turn lock: answer what an interrupted turn left open, then run turns while work waits.
 
-    A turn that hands off with no model call (past the daily budget) leaves its work waiting; no other turn is run
-    for it, so the run doesn't hand off again and again. The latest waiting row such a turn left is returned with the
-    outcome; work that arrives after it still gets a turn."""
+    A turn that hands off with no model call (past the daily budget, or paused) stops the work it answers from waking
+    turns (`clear_wake`), so neither this run nor the next request's hands off again for it; work that arrives after
+    it still gets a turn. Should work still wait after such a turn, no other turn is run for it here: its latest
+    waiting row is returned with the outcome."""
     open_tool_use = await unanswered_tool_use(conn, caller.session_id)
     waiting = await _waiting(conn, caller.session_id)
     if open_tool_use is None and waiting is None:

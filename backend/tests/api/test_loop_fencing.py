@@ -17,6 +17,7 @@ from desk.api import loop, tools
 from desk.api.deliver import Status, run_lock
 from desk.api.kernel_client import KernelHttp
 from desk.api.loop import TURN_LOCK_POOL_SIZE, run_pending, turn_lock
+from desk.api.runner import TurnRunner
 from desk.api.store import append_assistant, has_pending, lock_key, prepare_model_input
 from desk.api.tools import Caller, send_reply
 from desk.contracts import ToolCall
@@ -735,9 +736,9 @@ async def test_a_run_that_fails_outside_a_turn_leaves_its_work_for_the_next_requ
 
 async def test_a_handoff_that_leaves_the_message_waiting_runs_once(api_conn, engine, locks, caller, visitor, fake,
                                                                     clock):
-    # past today's model budget a turn hands off with no model call, so the visitor's message still waits: the run
-    # shows the handoff once and stops, rather than handing off again and again; a message that arrives meanwhile
-    # gets its own
+    # past today's model budget a turn hands off with no model call: the run shows the handoff once and stops,
+    # rather than handing off again and again, and the message waits for the model's next call without waking
+    # turns; a message that arrives meanwhile gets its own
     await api_conn.execute(text(
         "INSERT INTO app.model_calls (copy_id, route, model, input_tokens, cached_tokens, cache_write_tokens,"
         " output_tokens, latency_ms, stop_reason, created_at) VALUES ('copy-earlier', 'conversation',"
@@ -758,4 +759,29 @@ async def test_a_handoff_that_leaves_the_message_waiting_runs_once(api_conn, eng
     assert outcome == "handoff" and busy == ["busy"] and model.requests == []
     assert [event.type for event in await events(api_conn, caller.session_id)] == [
         "message", "turn_end", "message", "turn_end"]
-    assert await has_pending(api_conn, caller.session_id)
+    assert await rows(api_conn, caller.session_id, "visitor_text", "model_seq", "wake") == [(None, False)] * 2
+
+
+async def test_past_the_budget_reopening_the_stream_hands_off_once(api_conn, engine, locks, caller, fake, clock):
+    """Past today's model budget a message gets the handoff with no model call and then stops waking turns, as in a
+    paused session, so a visitor who reopens the stream or reloads the page (each starts the session's work) sees
+    no further handoff. A message they send after it gets its own."""
+    await api_conn.execute(text(
+        "INSERT INTO app.model_calls (copy_id, route, model, input_tokens, cached_tokens, cache_write_tokens,"
+        " output_tokens, latency_ms, stop_reason, created_at) VALUES ('copy-earlier', 'conversation',"
+        " 'claude-opus-5-5', 0, 0, 0, 5000000, 900, 'end_turn', :at)"), {"at": clock()})
+    await said(api_conn, caller, "Hello!")
+    model = ScriptedModel()
+    runner = TurnRunner(model, engine=engine, lock_engine=locks, production=True, clock=clock)
+
+    async def stream_opens() -> list[list[str]]:
+        runner.start(caller)
+        await asyncio.wait_for(runner.drain(), 5)
+        return [[block.template for block in event.blocks] for event in await events(api_conn, caller.session_id)
+                if event.type == "message"]
+
+    assert [await stream_opens() for _ in range(2)] == [[["handoff"]], [["handoff"]]]
+    assert model.requests == []
+    assert await rows(api_conn, caller.session_id, "visitor_text", "model_seq", "wake") == [(None, False)]
+    await said(api_conn, caller, "Is anyone there?")
+    assert await stream_opens() == [["handoff"], ["handoff"]]
