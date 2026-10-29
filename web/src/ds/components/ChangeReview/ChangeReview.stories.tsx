@@ -327,3 +327,65 @@ export const ConfirmFailed: Story = {
     await expect(args.onConfirm).toHaveBeenCalledTimes(1);
   },
 };
+
+const link = rivera.ruleCards['rv-link'];
+
+const widenScope: ChangeRowView[] = [
+  {
+    key: link.card_id,
+    change: 'changed',
+    title: 'Payment link',
+    connector: rivera.connectors.views.payments,
+    before: { appliesTo: 'Payment link', mode: 'auto', limit: '$300', reason: link.reason, words: rivera.ruleWords['rv-link'] },
+    after: {
+      appliesTo: 'Every tool that charges money',
+      mode: 'auto',
+      limit: '$300',
+      reason: link.reason,
+      words: rivera.ruleWords['rv-link'],
+    },
+    changed: ['applies_to'],
+  },
+];
+
+export const WidenScope: Story = {
+  args: { rows: widenScope, confirmLabel: undefined, cancelLabel: undefined },
+  parameters: { canvas: 'N-Conn-02-Payments', canvasNote: 'A rule widened from one tool to every tool that charges money; no board draws this review.' },
+  play: async ({ canvas }) => {
+    // What a rule applies to is enforced too: each side says it, and the new one is tagged.
+    const before = canvas.getByRole('group', { name: 'Before' });
+    const after = canvas.getByRole('group', { name: 'After' });
+    await expect(within(before).getByText('Payment link')).toBeVisible();
+    const target = within(after).getByText('Every tool that charges money');
+    await expect(target).toBeVisible();
+    const line = target.closest('p');
+    if (line === null) throw new Error('The target is not on its own line');
+    await expect(within(line).getByText('Changed')).toBeVisible();
+    // Only the target changed: the words, reason and outcome aren't tagged, and nothing on the before side is.
+    await expect(within(after).getAllByText('Changed')).toHaveLength(1);
+    await expect(within(before).queryByText('Changed')).toBeNull();
+    await expect(before).toHaveTextContent('Automatic up to $300; over $300, ask me first');
+    await expect(after).toHaveTextContent('Automatic up to $300; over $300, ask me first');
+  },
+};
+
+export const ScopeChangedWithoutTargets: Story = {
+  args: {
+    rows: widenScope.map((row) => ({
+      ...row,
+      before: row.before && { ...row.before, appliesTo: undefined },
+      after: row.after && { ...row.after, appliesTo: undefined },
+    })),
+    confirmLabel: undefined,
+    cancelLabel: undefined,
+  },
+  parameters: { canvasNote: "A screen that reports a changed target without its words; no board draws it." },
+  play: async ({ canvasElement }) => {
+    // A change of what the rule applies to never goes unmarked: without the screen's words for
+    // it, the title says the change.
+    const title = canvasElement.querySelector<HTMLElement>('.cd-change-review__title');
+    if (title === null) throw new Error('No title');
+    await expect(title).toHaveTextContent('Payment link Changed');
+    await expect(within(title).getByText('Changed')).toBeVisible();
+  },
+};

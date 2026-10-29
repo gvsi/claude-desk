@@ -12,9 +12,10 @@
 
 - A "Changes" card (`section`), a row per change under a hairline:
   - A tag in words in an outlined pill: "Added", "Removed", "Changed" or "Turned on".
-  - `title` in weight 520, then a meta line: the `connector`'s name and badge (`ConnectorName`, so a mock is never named without "Mock"), then the side's `words`, joined by " · ".
+  - `title` in weight 520, then a meta line: the `connector`'s name and badge (`ConnectorName`, so a mock is never named without "Mock"), then the side's `appliesTo` when given, then its `words`, joined by " · ".
   - The side's `reason`, and at the right the outcome with its dot, `outcomePhrase(mode, limit)`.
-  - A `changed` row shows its connector, then a "Before" and an "After" group, each with its words, reason and outcome. On the After side each line whose field is in `changed` is tagged "Changed" in words: the words line for `who`, `limits`, `hours` and `review`, the reason for `reason`, the outcome for `mode`. Status is never shown by color alone.
+  - A `changed` row shows its connector, then a "Before" and an "After" group, each with what its rule applies to (`appliesTo`, on its own line), its words, reason and outcome. On the After side each line whose field is in `changed` is tagged "Changed" in words: the target line for `applies_to`, the words line for `who`, `limits`, `hours` and `review`, the reason for `reason`, the outcome for `mode`. Status is never shown by color alone.
+  - Pass `appliesTo` on both sides whenever a rule's target can change, such as a rule widened from Payment link to every tool that charges money. If `changed` has `applies_to` and a side has no `appliesTo`, the title is tagged "Changed" instead, so the change is never unmarked.
   - An added or turned-on row shows its after side; a removed row the rule it removes.
 - No rows: "No rules change." and no confirm button. With `hasOtherChanges` (the draft changes something the screen shows above it, such as the money limit) it reads "Your rules stay the same." instead, and the controls stay.
 - A card for the checks, headed by `checks.status`: "Checked before you confirm", "This change can't be applied" or "Rules can't be checked right now", with `checks.lines` as a list in secondary meta: the screen's words from the proof report.
@@ -24,7 +25,7 @@
 
 ## Types
 
-- `ChangeSide = { mode: RuleMode; limit?: string; reason: string; words: RuleWord[] }`.
+- `ChangeSide = { appliesTo?: string; mode: RuleMode; limit?: string; reason: string; words: RuleWord[] }`. `appliesTo` is the screen's words for what the rule covers ("Payment link", "Every tool that charges money"); the design system formats none.
 - `ChangeRowView = { key: string; change: 'added' | 'removed' | 'changed' | 'turned_on'; title: string; connector?: ConnectorView; before: ChangeSide | null; after: ChangeSide | null; changed: RuleField[] }`.
 
 ## Diffing rules: `ruleDiff`

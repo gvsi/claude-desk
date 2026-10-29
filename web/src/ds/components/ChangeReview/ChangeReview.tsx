@@ -13,6 +13,8 @@ import './ChangeReview.css';
 
 /** One side of a change: what a rule enforces before or after it, in the screen's words. */
 export interface ChangeSide {
+  /** What the rule applies to, in the screen's words: "Payment link", "Every tool that charges money". */
+  appliesTo?: string;
   mode: RuleMode;
   /** The formatted amount limit of an auto card ("$300"). */
   limit?: string;
@@ -99,11 +101,23 @@ function Outcome({ side }: { side: ChangeSide }) {
   );
 }
 
-/** The connector's name and badge, then the side's words, joined by " · ". */
-function MetaLine({ connector, words, tag }: { connector?: ConnectorView; words: readonly RuleWord[]; tag?: boolean }) {
+/** The connector's name and badge, then what the rule applies to, then the side's words, joined by " · ". */
+function MetaLine({
+  connector,
+  appliesTo,
+  words,
+  tag,
+}: {
+  connector?: ConnectorView;
+  appliesTo?: string;
+  words: readonly RuleWord[];
+  tag?: boolean;
+}) {
   const text = joinWords(words);
+  const target = appliesTo?.trim() ?? '';
   const parts: ReactNode[] = [];
   if (connector) parts.push(<ConnectorName key="connector" connector={connector} size="inline" />);
+  if (target !== '') parts.push(<span key="target">{target}</span>);
   if (text !== '') parts.push(<span key="words">{text}</span>);
   if (parts.length === 0) return null;
   return (
@@ -127,6 +141,17 @@ function Side({ label, side, changed }: { label: 'Before' | 'After'; side: Chang
       <p className="cd-change-review__side-label cd-type-caption">{label}</p>
       <div className="cd-change-review__side-main">
         <div className="cd-change-review__side-text">
+          {hasTarget(side) ? (
+            <p className="cd-change-review__meta cd-change-review__target cd-type-meta">
+              {side.appliesTo}
+              {has('applies_to') ? (
+                <>
+                  {' '}
+                  <ChangedTag />
+                </>
+              ) : null}
+            </p>
+          ) : null}
           <MetaLine words={side.words} tag={WORD_FIELDS.some(has)} />
           <p className="cd-change-review__reason cd-type-body">
             {side.reason}
@@ -147,14 +172,30 @@ function Side({ label, side, changed }: { label: 'Before' | 'After'; side: Chang
   );
 }
 
+/** True when the side says what its rule applies to. */
+function hasTarget(side: ChangeSide | null): boolean {
+  return side?.appliesTo !== undefined && side.appliesTo.trim() !== '';
+}
+
 function Row({ row }: { row: ChangeRowView }) {
   const single = row.after ?? row.before;
   const showsBoth = row.change === 'changed' && row.before !== null && row.after !== null;
+  // A changed target is tagged on the after side's target line; without the screen's words for
+  // it, the title carries the tag, so the change is never unmarked.
+  const untaggedTarget = showsBoth && row.changed.includes('applies_to') && !(hasTarget(row.before) && hasTarget(row.after));
   return (
     <li className="cd-change-review__row">
       <span className="cd-change-review__tag cd-type-caption">{TAGS[row.change] ?? TAGS.changed}</span>
       <div className="cd-change-review__body">
-        <p className="cd-change-review__title cd-type-body">{row.title}</p>
+        <p className="cd-change-review__title cd-type-body">
+          {row.title}
+          {untaggedTarget ? (
+            <>
+              {' '}
+              <ChangedTag />
+            </>
+          ) : null}
+        </p>
         {showsBoth && row.before && row.after ? (
           <>
             <MetaLine connector={row.connector} words={[]} />
@@ -165,7 +206,7 @@ function Row({ row }: { row: ChangeRowView }) {
           </>
         ) : single ? (
           <>
-            <MetaLine connector={row.connector} words={single.words} />
+            <MetaLine connector={row.connector} appliesTo={single.appliesTo} words={single.words} />
             <p className="cd-change-review__reason cd-type-body">{single.reason}</p>
           </>
         ) : null}
