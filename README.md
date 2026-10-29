@@ -19,28 +19,28 @@ The passcode comes with the link. Each visitor gets a fresh copy of the Rivera P
 
 ## What's real, mocked and unfinished
 
-| Part | Status |
-|---|---|
-| The safety kernel: rule cards compiled to Cedar policies, a decision on every action, proofs before rules go live, owner approvals, a signed ledger | Real |
-| The reply check: prices, dates, discounts and bookings only in cards rendered from the business's records, and Claude's prose checked in English and Spanish | Real |
-| Public chat, and the owner taking over, speaking, whispering to Claude and handing back | Real |
-| Returning visitors | Simple: the visitor cookie resumes the conversation. Signing in with a Claude account is a vision mock: a static screen |
-| Verifying a customer | Real rules: codes go only to the contact on record, with expiry, attempts and limits. Verification codes are simulated: they appear in a Demo inbox on screen instead of an email or a text |
-| Payment links, refunds and a visiting agent's charges | Payments are mocked: links open a checkout page labelled "Test payment, no money moves", and a mock payments server in this repository stands in for the provider |
-| The mock payments server as a connected tool (MCP), pinned by hash and listed again before every call | Real MCP, mocked payments |
-| Visiting agents: an Agent Card, signed requests and signed spending limits | Real; a demo wallet and a built-in agent stand in for someone else's |
-| The setup interview: rule cards, safety probes, a preview and a live link | Real; its reads of the owner's Claude memories are simulated |
-| The owner app: Today, Conversations, Rules, Safety, People and knowledge | Real |
-| Suggested upgrades: rules Claude offers from the owner's own approvals | Simple: three or more approvals of one kind in 30 days bring a suggested rule for the owner to confirm; the attack record isn't used |
-| Share kit | Link and QR real; mocks for the rest: the Google profile, email signature and voicemail texts are copy to paste, connected to nothing, and the website embed is marked "Coming later" |
-| Alerts to the owner (push, text, email) | Simulated in the Demo inbox |
-| Connectors, channels, a city office, a team Desk and phone screens | Vision mocks: static screens |
-| Evals: an attack suite, a legitimate-task suite, calibration and latency | Real |
-| Hosting: one CloudFront address, secrets split by container, a kernel reachable only inside its task | Real |
+| Part | Status | At this commit |
+|---|---|---|
+| The safety kernel: rule cards compiled to Cedar policies, a decision on every action, proofs before rules go live, owner approvals, a signed ledger | Real | The Rust core is on `main` ([`kernel/`](kernel/)): Cedar decisions, the proof binary, ledger hashing and signing. Rule cards, approvals and the kernel service land with [the kernel core (plan 01a)](docs/plans/2026-10-28-01a-safety-kernel-core.md) |
+| The reply check: prices, dates, discounts and bookings only in cards rendered from the business's records, and Claude's prose checked in English and Spanish | Real | Lands with the kernel core (plan 01a) and [the API core (plan 02a)](docs/plans/2026-10-28-02a-api-core.md) |
+| Public chat, and the owner taking over, speaking, whispering to Claude and handing back | Real | Lands with the API core (plan 02a), [the rest of the API (plan 02b)](docs/plans/2026-10-28-02b-api-owner-setup-agents.md) and [the web app (plan 04)](docs/plans/2026-10-28-04-web.md) |
+| Returning visitors | Simple: the visitor cookie resumes the conversation. Signing in with a Claude account is a vision mock: a static screen | Lands with the API core (plan 02a) and the web app (plan 04) |
+| Verifying a customer | Real rules: codes go only to the contact on record, with expiry, attempts and limits. Verification codes are simulated: they appear in a Demo inbox on screen instead of an email or a text | Lands with [kernel verification and owner data (plan 01b)](docs/plans/2026-10-28-01b-kernel-verification-owner-data.md), the rest of the API (plan 02b) and the web app (plan 04) |
+| Payment links, refunds and a visiting agent's charges | Payments are mocked: links open a checkout page labelled "Test payment, no money moves", and a mock payments server in this repository stands in for the provider | Lands with [kernel payments, agents and setup (plan 01c)](docs/plans/2026-10-28-01c-kernel-payments-agents-setup.md), the rest of the API (plan 02b) and the web app (plan 04) |
+| The mock payments server as a connected tool (MCP), pinned by hash and listed again before every call | Real MCP, mocked payments | Lands with kernel payments, agents and setup (plan 01c) |
+| Visiting agents: an Agent Card, signed requests and signed spending limits | Real; a demo wallet and a built-in agent stand in for someone else's | Lands with kernel payments, agents and setup (plan 01c), the rest of the API (plan 02b) and the web app (plan 04) |
+| The setup interview: rule cards, safety probes, a preview and a live link | Real; its reads of the owner's Claude memories are simulated | Lands with kernel payments, agents and setup (plan 01c), the rest of the API (plan 02b) and the web app (plan 04) |
+| The owner app: Today, Conversations, Rules, Safety, People and knowledge | Real | The design system is on `main` ([`web/src/ds/`](web/src/ds/)). The screens land with the rest of the API (plan 02b) and the web app (plan 04) |
+| Suggested upgrades: rules Claude offers from the owner's own approvals | Simple: three or more approvals of one kind in 30 days bring a suggested rule for the owner to confirm; the attack record isn't used | Lands with the rest of the API (plan 02b) and the web app (plan 04) |
+| Share kit | Link and QR real; mocks for the rest: the Google profile, email signature and voicemail texts are copy to paste, connected to nothing, and the website embed is marked "Coming later" | Lands with the web app (plan 04) |
+| Alerts to the owner (push, text, email) | Simulated in the Demo inbox | Lands with kernel verification and owner data (plan 01b), the rest of the API (plan 02b) and the web app (plan 04) |
+| Connectors, channels, a city office, a team Desk and phone screens | Vision mocks: static screens | Lands with the web app (plan 04) |
+| Evals: an attack suite, a legitimate-task suite, calibration and latency | Real | Lands with [tier 1 evals (plan 05a)](docs/plans/2026-10-28-05a-evals-tier1.md) and [tier 2 evals and the report (plan 05b)](docs/plans/2026-10-28-05b-evals-tier2-and-report.md) |
+| Hosting: one CloudFront address, secrets split by container, a kernel reachable only inside its task | Real | The deploy code is on `main` ([`infra/`](infra/)). The hosted demo goes up with the first deploy |
 
 ### Unfinished
 
-This README was written during the build and describes the prototype as designed. At this commit, `main` has the shared contracts, the kernel's Rust core (Cedar decisions, the proof binary, ledger hashing and signing), the database roles with per-copy isolation, CI, the design system and the deploy code. The kernel service, the API, the owner app and public page, and the evals are being built and reviewed on their own branches. A row above is real only once its part has landed on `main`, and the hosted demo goes up after that. Anything cut before the deadline will be listed here.
+This README was written during the build. The status column describes each part as designed, and the last column says what is on `main` at this commit. Besides the parts it names, `main` has the shared contracts, the database roles with per-copy isolation and CI. The other parts are being built and reviewed on their own branches, and this table is updated as each one lands; the hosted demo goes up after that. The security model below is the design too: the threat model's controls table says which controls are on `main`. Anything cut before the deadline will be listed here.
 
 ## Security model
 

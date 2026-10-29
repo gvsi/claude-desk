@@ -241,6 +241,23 @@ def test_readme_states_what_is_real_mocked_unfinished():
         "an Unfinished entry with something under it, or the line 'Nothing was cut'"
 
 
+def test_readme_says_what_is_on_main_for_each_part():
+    status = sections((REPO / "README.md").read_text())["What's real, mocked and unfinished"]
+    header, *rows = status_table(status)
+
+    assert header == ["Part", "Status", "At this commit"]
+    for part, *rest in rows:
+        assert len(rest) == 2 and all(rest), f"{part!r} needs a status and its state at this commit"
+        at_commit = rest[1].casefold()
+        on_main = "on `main`" in at_commit
+        assert on_main or re.search(r"lands with .*\(plan \d", at_commit), \
+            f"{part!r}: say what is on `main` or name the plan it lands with, not {rest[1]!r}"
+        if on_main:   # a link to the code, so the link check proves it is there
+            code = [target for target in re.findall(r"\]\(([^)]+)\)", rest[1]) if not target.startswith("docs/")]
+            assert code, f"{part!r} says it is on `main`, so it links the code that is"
+    assert check_docs.check_links(REPO) == []
+
+
 ADR_PARTS = ["Status", "Context", "Decision", "Alternatives", "Consequences"]
 ADR_TOPICS = [   # each record the plan asks for, by a word or two its title must carry
     "kernel", "Cedar", "reviewer", "cards", "loop", "Express Mode", "mocked",
