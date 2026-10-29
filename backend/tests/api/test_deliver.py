@@ -14,6 +14,7 @@ import desk.api
 from desk.api.deliver import Reply, Status, deliver, run_lock
 from desk.api.metrics import RevealMetric, TurnMetric, record_model_call, spent_today_cents
 from desk.api.sse import append_metric
+from desk.api.store import lock_key
 from desk.contracts import Decision, ReplyDraft, ReplyVerdict, ToolCall
 from desk.events import EvHeld, EvMessage, EvReceipt, EvResolved, SseEvent
 from desk.kernel_api import CancelRequest, CheckReplyRequest, DecideRequest, ExecuteRequest
@@ -82,6 +83,21 @@ async def test_reply_becomes_a_message_event_and_row(api_conn, visitor, ro_schem
         "type": "text", "text": "<shown_to_visitor>Thanks, that went through.</shown_to_visitor>"}
 
 
+async def waiting_for_lock(engine, name: str) -> None:
+    """Returns once another transaction is queued on the advisory lock `name` (a bigint key: classid holds its
+    high 32 bits, objid its low 32 bits)."""
+    key = lock_key(name)
+    while True:
+        async with engine.connect() as conn:
+            waiting = (await conn.execute(text(
+                "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted"
+                " AND classid::bigint = :high AND objid::bigint = :low AND objsubid = 1"),
+                {"high": (key >> 32) & 0xFFFFFFFF, "low": key & 0xFFFFFFFF})).scalar_one()
+        if waiting:
+            return
+        await asyncio.sleep(0.01)
+
+
 async def test_stale_reply_is_dropped_under_the_run_lock(engine, visitor, fake, ro_schema):
     ids = visitor.ids
     verdict = await check(visitor, "Happy to help with your drain.")
@@ -95,7 +111,7 @@ async def test_stale_reply_is_dropped_under_the_run_lock(engine, visitor, fake, 
     async with engine.connect() as take_over:
         await run_lock(take_over, ids.session_id)
         delivering = asyncio.create_task(deliver_reply(Reply(verdict, "claude", "model", call_id="toolu_1")))
-        await asyncio.sleep(0.3)
+        await asyncio.wait_for(waiting_for_lock(engine, "run:" + ids.session_id), 5)
         assert not delivering.done()                  # delivery waits for the lock
         fake.set_mode(ids.session_id, "owner")        # generation 1
         await take_over.commit()

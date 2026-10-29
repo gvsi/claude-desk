@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 import pytest
 from sqlalchemy import text
 
-from desk.api.sse import Listener, append_control, claim_control, emit, event_stream
+from desk.api.sse import Listener, Wakeup, append_control, claim_control, emit, event_stream
 from desk.db.session import database_url
 from desk.api.store import Ids
 from desk.contracts import RenderedBlock
@@ -189,7 +189,7 @@ async def listening_backends(conn) -> set[int]:
     return set(rows.scalars().all())
 
 
-async def test_streams_share_one_listener(engine, db):
+async def test_streams_share_one_listener(engine, db, monkeypatch):
     async with engine.connect() as conn:
         before = await listening_backends(conn)
     handed: list[tuple[str, str]] = []
@@ -197,12 +197,25 @@ async def test_streams_share_one_listener(engine, db):
     async def on_control(row) -> None:
         handed.append((row.session_id, row.type))
 
+    # a stream first waits for a wake-up once it has replayed and read what was already there
+    waiting: set[int] = set()
+    both_waiting = asyncio.Event()
+    wait = Wakeup.wait
+
+    async def watched_wait(self, timeout: float) -> bool:
+        waiting.add(id(self))
+        if len(waiting) == 2:
+            both_waiting.set()
+        return await wait(self, timeout)
+
+    monkeypatch.setattr(Wakeup, "wait", watched_wait)
+
     async with Listener(database_url("API")) as listener:
         # a long poll: what arrives within the test's few seconds came from a notification
         streams = [asyncio.create_task(read_frames(
             event_stream(engine, listener, ids, None, on_open=None, on_control=on_control, poll_s=60), 2,
             timeout=10)) for ids in (SESSION_A, SESSION_B)]
-        await asyncio.sleep(0.3)                    # both streams have replayed and wait
+        await asyncio.wait_for(both_waiting.wait(), 5)
         async with engine.connect() as conn:
             assert await listening_backends(conn) - before == {listener.backend_pid}
         async with engine.begin() as conn:
