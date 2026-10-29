@@ -1,13 +1,18 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { expect } from 'storybook/test';
+import { useEffect, useState } from 'react';
+import { expect, fn, waitFor } from 'storybook/test';
 
 import type { EvMessage, SseEvent, StatusEvent } from '../../../api/contracts.ts';
 import { rivera } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { expectSetOffName } from '../../test/expectSetOffName.ts';
 import { ClaudeMessage } from '../ClaudeMessage/ClaudeMessage.tsx';
+import { Composer } from '../Composer/Composer.tsx';
 import { MarginReceipt } from '../MarginReceipt/MarginReceipt.tsx';
 import { receiptFromEvent } from '../MarginReceipt/receiptTone.ts';
+import { PersonMessage } from '../PersonMessage/PersonMessage.tsx';
+import { PublicShell } from '../PublicShell/PublicShell.tsx';
+import { SystemLine } from '../SystemLine/SystemLine.tsx';
 import { Transcript } from '../Transcript/Transcript.tsx';
 import { TranscriptRow } from '../TranscriptRow/TranscriptRow.tsx';
 import { VisitorMessage } from '../VisitorMessage/VisitorMessage.tsx';
@@ -113,7 +118,11 @@ async function expectBubbleAnnouncedOnce(status: HTMLElement, label: string, nam
   await expect(bubble).toHaveAttribute('aria-hidden', 'true');
   await expect(bubble.textContent).toBe('');
   await expect(dots).toHaveLength(3);
+  await expectAnnouncedOnce(status, dots);
+}
 
+/** Over a whole loop of the slowest dot, nothing in the live line is added, removed or rewritten. */
+async function expectAnnouncedOnce(status: HTMLElement, dots: readonly HTMLElement[]) {
   const changes: MutationRecord[] = [];
   const observer = new MutationObserver((records) => changes.push(...records));
   observer.observe(status, { subtree: true, childList: true, characterData: true, attributes: true });
@@ -259,11 +268,206 @@ export const ReducedMotion: Story = {
   },
 };
 
-export const PersonSide: Story = {
-  args: { variant: 'bubble', who: ownerFirstName, side: 'person', language: 'es' },
+/** The owner, as the public page names her when she takes over. */
+const OWNER = rivera.business.ownerName;
+/** Maria's say once it lands: author `owner`, one `owner_said` block. */
+const said = required(
+  rivera.events.takeOver.find((event: SseEvent): event is EvMessage => event.type === 'message'),
+  'owner message',
+);
+
+const PERSON_NOTE =
+  'The signed owner-typing board (N-Typing-Owner-Busy): after Maria takes over, the visitor sees her initials and name, as on her messages, and three dots where her words will start, with no fill and no bubble.';
+
+/** The event a story sends to deliver Maria's message in place of her typing. */
+const MARIA_SENDS = 'cd-story:maria-sends';
+
+/**
+ * Dana's chat on Rivera's public page after she asked for Maria: Maria joined and is typing, until
+ * a story sends MARIA_SENDS and her message takes the typing's place.
+ */
+function MariaTakesOver({ language }: { language: 'en' | 'es' }) {
+  const [sent, setSent] = useState(false);
+  useEffect(() => {
+    const send = () => setSent(true);
+    window.addEventListener(MARIA_SENDS, send);
+    return () => window.removeEventListener(MARIA_SENDS, send);
+  }, []);
+  return (
+    <PublicShell
+      brand={{
+        name: rivera.publicDesk.en.business_name,
+        tagline: rivera.publicDesk.en.desk_name,
+        monogram: Array.from(rivera.publicDesk.en.business_name)[0] ?? '',
+        field: rivera.publicDesk.en.brand.primary ?? '',
+        ink: 'var(--text-primary)',
+        inkSecondary: 'var(--text-secondary)',
+        accent: rivera.publicDesk.en.brand.accent ?? '',
+      }}
+      ownerName={OWNER}
+      language={language}
+      onAskForOwner={fn()}
+      composer={<Composer variant="visitor" label="Message Rivera Plumbing" placeholder="Message Rivera Plumbing" maxLength={2000} onSend={fn()} />}
+    >
+      <Transcript label="Conversation with Rivera Plumbing">
+        <TranscriptRow>
+          <VisitorMessage text={`I'd like to talk to ${OWNER}.`} />
+        </TranscriptRow>
+        <SystemLine text={`${OWNER} joined the chat`} initials="MR" />
+        <TranscriptRow>
+          {sent ? (
+            <PersonMessage name={OWNER} blocks={said.blocks} language={said.language} />
+          ) : (
+            <WritingIndicator variant="person" who={OWNER} language={language} />
+          )}
+        </TranscriptRow>
+      </Transcript>
+    </PublicShell>
+  );
+}
+
+/** The person form's parts: its live line, the initials, the name and the dots. */
+function personParts(root: HTMLElement, label: string) {
+  const status = [...root.querySelectorAll<HTMLElement>('[role="status"]')].find((el) => el.textContent === label);
+  if (!status) throw new Error(`no status line reading "${label}"`);
+  const frame = status.closest<HTMLElement>('.cd-writing-indicator');
+  const avatar = frame?.querySelector<HTMLElement>('.cd-person-message__avatar');
+  const name = status.querySelector<HTMLElement>('.cd-user-name');
+  const dots = frame?.querySelector<HTMLElement>('.cd-writing-indicator__dots');
+  if (!frame || !avatar || !name || !dots) throw new Error('the person form is missing a part');
+  return { frame, status, avatar, name, dots, each: [...dots.querySelectorAll<HTMLElement>('.cd-writing-indicator__dot')] };
+}
+
+/**
+ * person_typing_draws_their_frame: their initials, hidden from screen readers, and their name, as
+ * on their messages, then three dots where their first line of words will start, with no fill and
+ * no bubble. Screen readers hear "{name} is typing" from the line that names them.
+ */
+async function expectPersonTyping(root: HTMLElement, label: string, name: string) {
+  const parts = personParts(root, label);
+  await expectSetOffName(parts.status, name);
+  await expect(parts.avatar).toHaveAttribute('aria-hidden', 'true');
+  await expect(parts.avatar.textContent).toBe('MR');
+  expectComputed(parts.avatar, { width: '28px', height: '28px', borderTopLeftRadius: '999px', backgroundColor: 'rgb(60, 57, 47)' });
+  // The words after the name are for screen readers only; the name is what shows.
+  const hidden = parts.status.querySelector<HTMLElement>('.cd-sr-only');
+  await expect(hidden?.textContent?.trim()).toBe(label.slice(name.length).trim());
+  expectComputed(parts.status, { fontSize: '13px', lineHeight: '18px' });
+  // The dots: hidden, three 6 px dots in one message line, no fill or padding around them.
+  await expect(parts.dots).toHaveAttribute('aria-hidden', 'true');
+  await expect(parts.dots.textContent).toBe('');
+  await expect(parts.each).toHaveLength(3);
+  for (const dot of parts.each) expectComputed(dot, { width: '6px', height: '6px', borderTopLeftRadius: '999px' });
+  for (const el of [parts.frame, parts.dots]) expectComputed(el, { backgroundColor: 'rgba(0, 0, 0, 0)', paddingLeft: '0px' });
+  expectComputed(parts.dots, { height: '21px', marginTop: '4px' });
+  // The dots start where the name starts, under it, and the frame starts at the row's left edge.
+  const nameBox = parts.name.getBoundingClientRect();
+  const first = parts.each[0]?.getBoundingClientRect();
+  if (!first) throw new Error('no first dot');
+  await expect(Math.abs(first.left - nameBox.left)).toBeLessThanOrEqual(0.5);
+  const row = parts.frame.closest('.cd-transcript-row')?.getBoundingClientRect();
+  if (!row) throw new Error('the person form is not in a transcript row');
+  await expect(Math.abs(parts.avatar.getBoundingClientRect().left - row.left)).toBeLessThanOrEqual(0.5);
+  return parts;
+}
+
+export const MariaTyping: Story = {
+  args: { variant: 'person', who: OWNER },
+  render: () => <MariaTakesOver language="en" />,
+  parameters: { layout: 'fullscreen', canvas: 'N-Public-Handoff', canvasNote: PERSON_NOTE },
+  play: async ({ canvasElement }) => {
+    // The public page at 1280: in the log, under "Maria Rivera joined the chat".
+    await expect(document.documentElement.clientWidth).toBe(1280);
+    const parts = await expectPersonTyping(canvasElement, `${OWNER} is typing`, OWNER);
+    await expect(parts.frame.closest('[role="log"]')).not.toBeNull();
+    // The dots pulse one after another on the writing loop, motion-stagger apart.
+    for (const [index, dot] of parts.each.entries()) {
+      expectComputed(dot, {
+        animationName: /^(?!none$).+/,
+        animationDuration: '1.6s',
+        animationIterationCount: 'infinite',
+        animationDelay: ['0s', '0.15s', '0.3s'][index] as string,
+      });
+    }
+    await expectAnnouncedOnce(parts.status, parts.each);
+  },
+};
+
+export const MariaTypingPhone: Story = {
+  args: { variant: 'person', who: OWNER },
+  render: () => (
+    <div data-testid="phone" style={{ width: PHONE }}>
+      <MariaTakesOver language="en" />
+    </div>
+  ),
+  parameters: { layout: 'fullscreen', canvas: 'N-Public-Handoff', canvasNote: `${PERSON_NOTE} On a phone, 390 px wide.` },
+  play: async ({ canvas, canvasElement }) => {
+    const phone = canvas.getByTestId('phone');
+    const parts = await expectPersonTyping(canvasElement, `${OWNER} is typing`, OWNER);
+    // Nothing reaches past the phone's width, and the frame keeps its 16 px gutter.
+    await expect(phone.scrollWidth).toBeLessThanOrEqual(PHONE);
+    await expect(parts.avatar.getBoundingClientRect().left - phone.getBoundingClientRect().left).toBeGreaterThanOrEqual(16 - 0.5);
+  },
+};
+
+export const MariaTypingEs: Story = {
+  args: { variant: 'person', who: OWNER, language: 'es' },
+  render: () => <MariaTakesOver language="es" />,
+  parameters: { layout: 'fullscreen', canvas: 'N-Public-Handoff', canvasNote: `${PERSON_NOTE} For a visitor reading in Spanish.` },
+  play: async ({ canvasElement }) => {
+    const parts = await expectPersonTyping(canvasElement, `${OWNER} está escribiendo`, OWNER);
+    await expect(parts.status).toHaveAttribute('lang', 'es');
+  },
+};
+
+export const MariaMessageLands: Story = {
+  args: { variant: 'person', who: OWNER },
+  render: () => <MariaTakesOver language="en" />,
+  parameters: {
+    layout: 'fullscreen',
+    canvas: 'N-Public-Handoff',
+    canvasNote: `${PERSON_NOTE} Her message then takes the typing's place, from the same left edge, so nothing jumps.`,
+  },
+  play: async ({ canvasElement }) => {
+    const parts = await expectPersonTyping(canvasElement, `${OWNER} is typing`, OWNER);
+    const before = {
+      avatar: parts.avatar.getBoundingClientRect(),
+      name: parts.name.getBoundingClientRect(),
+      dots: parts.dots.getBoundingClientRect(),
+    };
+
+    // person_message_replaces_typing_in_place: her message lands where the typing was.
+    window.dispatchEvent(new Event(MARIA_SENDS));
+    const words = await waitFor(() => {
+      const found = canvasElement.querySelector<HTMLElement>('.cd-person-message__text');
+      if (!found) throw new Error('her message has not landed');
+      return found;
+    });
+    await expect(canvasElement.querySelector('.cd-writing-indicator')).toBeNull();
+    const message = words.closest<HTMLElement>('.cd-person-message');
+    const avatar = message?.querySelector<HTMLElement>('.cd-person-message__avatar');
+    const name = message?.querySelector<HTMLElement>('.cd-person-message__name');
+    if (!avatar || !name) throw new Error('her message has no initials or name');
+    const range = document.createRange();
+    range.selectNodeContents(words);
+    const firstLine = range.getClientRects()[0];
+    if (!firstLine) throw new Error('her message has no line');
+    // The initials and the name don't move, and her first line starts where the dots were.
+    const same = (a: number, b: number) => expect(Math.abs(a - b)).toBeLessThanOrEqual(0.5);
+    await same(avatar.getBoundingClientRect().left, before.avatar.left);
+    await same(avatar.getBoundingClientRect().top, before.avatar.top);
+    await same(name.getBoundingClientRect().left, before.name.left);
+    await same(name.getBoundingClientRect().top, before.name.top);
+    await same(firstLine.left, before.dots.left);
+    await same(words.getBoundingClientRect().top, before.dots.top);
+  },
+};
+
+export const PersonReducedMotion: Story = {
+  args: { variant: 'person', who: OWNER },
   render: (args) => (
     <div style={{ maxWidth: 'var(--size-reading)' }}>
-      <Transcript label="Conversación con Rivera Plumbing">
+      <Transcript label="Conversation with Rivera Plumbing">
         <TranscriptRow>
           <WritingIndicator {...args} />
         </TranscriptRow>
@@ -272,20 +476,16 @@ export const PersonSide: Story = {
   ),
   parameters: {
     canvas: 'N-Public-Handoff',
-    canvasNote:
-      "The board shows Maria joining, not Maria typing; after a take-over a visitor reading in Spanish sees her typing bubble on the left, where her words will appear, in the same bubble fill.",
+    canvasNote: `${PERSON_NOTE} Under reduced motion the dots stay still in text-secondary; Storybook shows the motion your system asks for, and the design system's browser tests render this story under reduced motion.`,
   },
-  play: async ({ canvas }) => {
-    const status = canvas.getByRole('status');
-    await expect(status).toHaveAttribute('lang', 'es');
-    await expect(status.textContent).toBe('Maria está escribiendo');
-    await expectSetOffName(status, 'Maria');
-    expectBubbleLook(status);
-    // On the left: the bubble starts where the row starts.
-    const { bubble } = bubbleParts(status);
-    const row = status.closest('.cd-transcript-row')?.getBoundingClientRect();
-    if (!row) throw new Error('the typing bubble is not in a transcript row');
-    await expect(Math.abs(bubble.getBoundingClientRect().left - row.left)).toBeLessThanOrEqual(0.5);
+  play: async ({ canvasElement }) => {
+    const parts = await expectPersonTyping(canvasElement, `${OWNER} is typing`, OWNER);
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      // person_typing_still_under_reduced_motion: no pulse, every dot in text-secondary.
+      for (const dot of parts.each) expectComputed(dot, { animationName: 'none', backgroundColor: 'rgba(250, 249, 245, 0.64)' });
+    } else {
+      for (const dot of parts.each) expectComputed(dot, { animationName: /^(?!none$).+/ });
+    }
   },
 };
 

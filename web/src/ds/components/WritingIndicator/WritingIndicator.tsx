@@ -1,4 +1,5 @@
 import type { CopyLanguage, CopyPair } from '../Notice/errorCopy.ts';
+import { PersonFrame } from '../PersonMessage/PersonMessage.tsx';
 
 import './WritingIndicator.css';
 
@@ -7,12 +8,6 @@ const CLAUDE_WRITING_COPY: CopyPair = { en: 'Claude is writing', es: 'Claude est
 
 /** After a person's name while they type: "Dana is typing". */
 const PERSON_TYPING_COPY: CopyPair = { en: 'is typing', es: 'está escribiendo' };
-
-/**
- * Where a typing person's next message appears: `visitor` on the right, as a visitor's bubble;
- * `person` on the left, as the owner's words after a take-over.
- */
-export type TypingSide = 'visitor' | 'person';
 
 interface WritingIndicatorBase {
   /** The language of the line: the visitor's on the public page, the owner's on their screens. */
@@ -26,16 +21,24 @@ export interface WritingLineProps extends WritingIndicatorBase {
   who?: string;
 }
 
-/** A person typing, as three dots in a small bubble on their side of the transcript. */
+/** A visitor typing, as three dots in a small bubble on their side, the right, where their next bubble appears. */
 export interface TypingBubbleProps extends WritingIndicatorBase {
   variant: 'bubble';
   /** The name of the person typing ("Dana"), said to screen readers. A blank name shows nothing. */
   who: string;
-  /** Their side of the transcript; `visitor` (the right) by default. */
-  side?: TypingSide;
 }
 
-export type WritingIndicatorProps = WritingLineProps | TypingBubbleProps;
+/**
+ * The owner or another person typing on their side, the left: their initials and name, as on their
+ * messages, and three dots where their first line of words will start. No fill and no bubble.
+ */
+export interface PersonTypingProps extends WritingIndicatorBase {
+  variant: 'person';
+  /** Their name as their messages show it ("Maria Rivera"). A blank name shows nothing. */
+  who: string;
+}
+
+export type WritingIndicatorProps = WritingLineProps | TypingBubbleProps | PersonTypingProps;
 
 function inLanguage(copy: CopyPair, language: CopyLanguage): string {
   return Object.hasOwn(copy, language) ? copy[language] : copy.en;
@@ -54,10 +57,22 @@ function personTyping(person: string, language: CopyLanguage) {
   );
 }
 
+/** Three dots, drawn only: the pulse is the stylesheet's, so the live region never changes. */
+function Dots() {
+  return (
+    <>
+      <span className="cd-writing-indicator__dot" />
+      <span className="cd-writing-indicator__dot" />
+      <span className="cd-writing-indicator__dot" />
+    </>
+  );
+}
+
 /**
- * Says that someone is writing: "Claude is writing" or "Dana is typing", or, as a bubble, three
- * dots on the typing person's side with "Dana is typing" for screen readers. It takes no message
- * text, so a draft never shows before the kernel has checked and delivered the reply.
+ * Says that someone is writing: "Claude is writing" or "Dana is typing" as a line; a visitor's
+ * three dots in a bubble on their side; or a person's initials, name and three dots on theirs,
+ * with "{name} is typing" for screen readers. It takes no message text, so a draft never shows
+ * before the kernel has checked and delivered the reply.
  */
 export function WritingIndicator(props: WritingIndicatorProps) {
   const { language, who } = props;
@@ -66,16 +81,39 @@ export function WritingIndicator(props: WritingIndicatorProps) {
   if (props.variant === 'bubble') {
     // Only a named person types in a bubble; Claude's writing is always the line.
     if (person === null) return null;
-    const side = props.side === 'person' ? 'person' : 'visitor';
     return (
-      <div className={`cd-writing-indicator cd-writing-indicator--bubble cd-writing-indicator--${side}`} role="status" lang={language}>
-        {/* Drawn only: the pulse is the stylesheet's, so the live region never changes and is announced once. */}
+      <div className="cd-writing-indicator cd-writing-indicator--bubble" role="status" lang={language}>
         <span className="cd-writing-indicator__bubble cd-type-message" aria-hidden="true">
-          <span className="cd-writing-indicator__dot" />
-          <span className="cd-writing-indicator__dot" />
-          <span className="cd-writing-indicator__dot" />
+          <Dots />
         </span>
         <span className="cd-sr-only">{personTyping(person, language)}</span>
+      </div>
+    );
+  }
+
+  if (props.variant === 'person') {
+    if (person === null) return null;
+    // The line that names them is the live region: their name as it shows, then the rest of
+    // "{name} is typing" for screen readers only, announced once.
+    return (
+      <div className="cd-writing-indicator cd-writing-indicator--person">
+        <PersonFrame
+          name={person}
+          whoRole="status"
+          whoLang={language}
+          who={
+            <>
+              <bdi className="cd-user-name" data-copy="user">
+                {person}
+              </bdi>
+              <span className="cd-sr-only"> {inLanguage(PERSON_TYPING_COPY, language)}</span>
+            </>
+          }
+        >
+          <div className="cd-person-message__words cd-writing-indicator__dots cd-type-message" aria-hidden="true">
+            <Dots />
+          </div>
+        </PersonFrame>
       </div>
     );
   }

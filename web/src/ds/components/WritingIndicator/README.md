@@ -1,20 +1,21 @@
 # WritingIndicator
 
-`WritingIndicator` says that someone is writing, "Claude is writing" or "Dana is typing", and nothing more: as one line, or, for a person, as a typing bubble on their side of the transcript.
+`WritingIndicator` says that someone is writing, "Claude is writing" or "Dana is typing", and nothing more: as one line, as a typing bubble on a visitor's side, or as a person's initials and name with three dots on theirs.
 
 ## When to use
 
 - The line, while a visitor's turn is between `EvWriting` and the delivered message or the turn's end: "Claude is writing", on Claude's side.
 - In the setup interview while Claude prepares its next question.
-- The bubble (`variant="bubble"`) when a person on the other side is typing, with their name: the visitor on the owner's conversation screen (`side="visitor"`, the right), or the owner after a take-over on the public page (`side="person"`, the left). Put it in a `TranscriptRow` at the end of the `Transcript`, where their next message will appear; the message replaces it.
-- Claude never types in a bubble: Claude's writing is always the line.
+- The bubble (`variant="bubble"`) when the visitor is typing, with their name, on the owner's conversation screen: at the right, where their next bubble will appear.
+- The person form (`variant="person"`) when the owner or another person is typing on their side, at the left: on the public page after a take-over, with the name their messages show ("Maria Rivera").
+- Put the bubble or the person form in a `TranscriptRow` at the end of the `Transcript`, where the next message will appear; the message replaces it.
+- Claude never types in a bubble or a person form: Claude's writing is always the line.
 
 ## What the consumer provides
 
 - `language`: the reader's language.
-- `who`: a person's name when they are the one typing. Without it, the line is about Claude. The bubble needs it: a blank name shows no bubble, never "Claude is writing".
-- `variant`: `line` (the default) or `bubble`.
-- `side` (bubble only): `visitor` (the default) or `person`.
+- `who`: a person's name when they are the one typing. Without it, the line is about Claude. The bubble and the person form need it: a blank name shows nothing, never "Claude is writing".
+- `variant`: `line` (the default), `bubble` or `person`.
 
 It takes no message text. Claude's draft is checked by the kernel before anyone sees it, and a person's draft is theirs until they send it, so the screen shows this indicator until the delivered message replaces it.
 
@@ -25,7 +26,7 @@ It takes no message text. Claude's draft is checked by the kernel before anyone 
 | Claude | Claude is writing | Claude está escribiendo |
 | A person | {who} is typing | {who} está escribiendo |
 
-The name is someone's own words: it is set off as user text (`.cd-user-name`, `data-copy="user"`) at the start of the line, so a visitor who calls themselves "Claude" reads as a name, never as Claude writing. The rest is interface copy. The bubble says the same words to screen readers, visually hidden.
+The name is someone's own words: it is set off as user text (`.cd-user-name`, `data-copy="user"`) at the start of the line, so a visitor who calls themselves "Claude" reads as a name, never as Claude writing. The rest is interface copy. The bubble says the whole line to screen readers, visually hidden; the person form shows the name and says the rest, visually hidden, after it.
 
 ## Look and motion
 
@@ -37,19 +38,24 @@ The line:
 The bubble:
 
 - Three `size-dot` round dots, `space-4` apart, in a bubble with the visitor bubble's fill (`fill-bubble`) and radius (`radius-card`), padded `space-14` at the sides and one message line tall (37 px, as a one-line bubble is), so the message that replaces it doesn't move what is around it.
-- On the visitor's side it ends where their bubbles end, at the right; on the person's side it starts at the left, where their words appear.
-- The dots pulse one after another over the same `motion-writing` loop, `motion-stagger` apart, between `text-secondary` and `text-primary` (6.6:1 and 12.0:1 on `fill-bubble` over `bg-app`).
+- It ends at the right of the row, where the visitor's bubbles end.
 
-Both:
+The person form:
 
-- `role="status"`, so a screen reader announces the words once when they appear. The bubble's dots are `aria-hidden`, and the pulse is drawn by the stylesheet alone, so nothing in the live region changes while it pulses and it is never announced again.
+- `PersonMessage`'s own frame (`PersonFrame`): the 28 px initials circle (`size-avatar`, `bg-selected`) and the name in the meta type, `space-10` apart, at the left of the row. Under the name, `space-4` down, three `size-dot` dots, `space-4` apart, in one message line (21 px), starting where the name starts: where the first line of their words will start. No fill and no bubble: on the public page a bubble on that side could read as Claude typing.
+- Their message takes its place in place: the initials, the name and the first line of words sit exactly where the initials, the name and the dots were, so nothing jumps.
+
+The dots of both pulse one after another over the same `motion-writing` loop, `motion-stagger` apart, between `text-secondary` and `text-primary` (6.6:1 and 12.0:1 on `fill-bubble` over `bg-app`; 7.3:1 and 13.9:1 on `bg-app`).
+
+All three:
+
+- A `role="status"` line, so a screen reader announces "{who} is typing" (or "Claude is writing") once, politely, when it appears: the indicator itself for the line and the bubble, and the line that names the person in the person form. The dots and the initials are `aria-hidden`, and the pulse is drawn by the stylesheet alone, so nothing in the live region changes while it pulses and it is never announced again.
 - Under `prefers-reduced-motion: reduce` they stay still: the line in `text-secondary`, the dots in `text-secondary`.
 
 ## Props
 
 | Prop | Type | Notes |
 | --- | --- | --- |
-| `language` | `'en' \| 'es'` | Required. Sets `lang` on the indicator. |
-| `variant` | `'line' \| 'bubble'` | `line` by default. |
-| `who` | `string` | Optional for the line, required for the bubble. A blank name is treated as absent. |
-| `side` | `'visitor' \| 'person'` | Bubble only. `visitor` (the right) by default. |
+| `language` | `'en' \| 'es'` | Required. Sets `lang` on the live line. |
+| `variant` | `'line' \| 'bubble' \| 'person'` | `line` by default. |
+| `who` | `string` | Optional for the line, required for the bubble and the person form. A blank name is treated as absent. |

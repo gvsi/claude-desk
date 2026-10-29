@@ -51,7 +51,7 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 ### Motion
 
 - Keep transitions between 60 and 200 ms: `motion-instant` for color, `motion-fast` for press feedback, `motion-base` for a check that draws once or a reveal. Ease with `motion-ease`, or `motion-ease-emphasis` for a screen's one small moment. Results that arrive one by one are `motion-stagger` apart.
-- The only loops are `motion-breathe` for presence glyphs and `motion-writing` for the writing indicator, its line and its typing bubble's dots.
+- The only loops are `motion-breathe` for presence glyphs and `motion-writing` for the writing indicator's line and typing dots, and for a busy button's dots.
 - Allow at most one small moment per screen. Motion explains a change; it never decorates.
 - Under `prefers-reduced-motion: reduce` nothing animates or transitions; the base stylesheet enforces it on every element.
 

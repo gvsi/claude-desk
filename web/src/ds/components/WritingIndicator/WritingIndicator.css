@@ -4,10 +4,16 @@
    secondary and primary text colors, so every moment of it keeps the contrast of the two tokens it
    moves between.
 
-   The bubble: a person typing, as three dots in a small bubble on their side of the transcript,
-   where their next message will appear. It has the visitor bubble's fill and radius and is one
-   message line tall, as a one-line bubble is, so the message that replaces it doesn't move what is
-   around it. The dots pulse one after another over the same writing loop, motion-stagger apart,
+   The bubble: a visitor typing, as three dots in a small bubble on their side, the right, where
+   their next message will appear. It has the visitor bubble's fill and radius and is one message
+   line tall, as a one-line bubble is, so the message that replaces it doesn't move what is around
+   it.
+
+   The person form: the owner or another person typing on their side, the left, in PersonMessage's
+   own frame, their initials and name, with three dots where their first line of words will start,
+   one message line tall, with no fill and no bubble, so their message takes its place in place.
+
+   In both, the dots pulse one after another over the same writing loop, motion-stagger apart,
    between the secondary and primary text colors. */
 
 .cd-writing-indicator {
@@ -32,8 +38,13 @@
   min-width: 0;
 }
 
-.cd-writing-indicator--person {
-  justify-content: flex-start;
+/* The dots where a person's first line of words will start: one message line, the dots centered
+   on it, from the line's start. */
+.cd-writing-indicator__dots {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  height: 1lh;
 }
 
 .cd-writing-indicator__bubble {
