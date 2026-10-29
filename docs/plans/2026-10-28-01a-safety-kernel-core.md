@@ -123,7 +123,7 @@ Card data (the master's "Clauses" row): `title` is the headline, `lines` the det
 |---|---|---|---|
 | `quote` | `quote`, status `available`, not expired | `{total}` / `{items}` / `Includes {pct} off {list}` (only with a discount) / `Good until {expires}` | `{total}` / `{items}` / `Incluye {pct} de descuento sobre {list}` / `Válido hasta {expires}` |
 | `booking_options` | `slots`, status `available`, not expired | `Times that are open` / one line and option per slot still free | `Horarios disponibles` / una línea y opción por horario libre |
-| `booking_confirmed` | `booking` with prefix `booking:`, status `committed` | `{starts_at}` / `{minutes} minutes` / `Booking {booking_id}` | `{starts_at}` / `{minutes} minutos` / `Reserva {booking_id}` |
+| `booking_confirmed` | `booking` with prefix `booking:`, status `committed` | `{date}` / `Arriving {start} to {end}` / `With {owner}` (date "Tuesday, November 3"; the window formatted like `hours`, from `starts_at` to `starts_at + minutes`; `{owner}` is `owner_display_name`; no booking id on the visitor's card) | `{date}` / `Llegada de {start} a {end}` / `Con {owner}` ("martes 3 de noviembre"; "de 14:00 a 16:00") |
 | `hours` | `charter:hours` (claim `windows`, written from `DeskSeed.hours`) | one line per window: `Monday to Friday, 8:00 am to 6:00 pm` | `De lunes a viernes, de 8:00 a 18:00` |
 | `policy` | a `charter:policy:*` fact | the policy text | the policy text |
 | `contact` | `charter:contact` | the contact | the contact |
@@ -701,3 +701,5 @@ PR round 1, 2026-10-29: one `anthropic` pin across the backend, 2.3.0 (master Te
 PR round 2, 2026-10-29: the reply check's kernel-only templates include the kernel payments plan's `link_cancelled` (plan 01c), which also adds an `ON_ACTIVATE` hook list to `confirm` for open payment links (master "Payment links"); "Charter money cap" is "Money cap". Nothing else in this plan's tasks changes.
 
 PR round 3, 2026-10-29: the seam note says `ExecCtx` carries `recheck_version` from T1 to T2, that the kernel payments plan's payment-link adapter (plan 01c) takes `FOR SHARE` on the Desk's active `policy_versions` row in T2 and in reconciliation and may raise `AdapterFailure("rules changed")` from T2 before its side effect, and that `ON_ACTIVATE` hooks return the `payment` events `confirm` appends after its own `policy` entry. Owner decision: `deny_always` is offered only on a hold an `ask` card decided (Task 14's note, applied code-side). The header names the review panel. T1–T3 are otherwise unchanged.
+
+Amendment (2026-10-29, design check against the canvas): `booking_confirmed` reads as an arrival window with the owner's name, matching the public page board, instead of a duration and a booking id.
