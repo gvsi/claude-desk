@@ -1,8 +1,9 @@
 """The model client: the conversation call and the structured routes, built as Plan 02a's Task 4 says, and the
 provider (Task 4b): the same calls on Amazon Bedrock for local evals, under the one credential rule.
 
-No test reaches the live API or the network: `AnthropicModel` and `BedrockModel` get an `httpx2.MockTransport`
-(the SDK's HTTP client) that records each request and answers as the Messages API would.
+No test reaches the live API or the network: `AnthropicModel` and `BedrockModel` get `FakeMessagesApi`
+(tests/api/fakes.py), an `httpx2.MockTransport` for the SDK's HTTP client that records each request and answers as
+the Messages API would.
 """
 
 import asyncio
@@ -38,7 +39,7 @@ from desk.api.model import (
     strict_schema,
 )
 from desk.api.settings import Settings
-from tests.api.fakes import ScriptedModel, gated, response, text, thinking, tool_use, unavailable
+from tests.api.fakes import FakeMessagesApi, ScriptedModel, gated, response, text, thinking, tool_use, unavailable
 from tests.kernel_contract.fake_kernel import fake_kernel_app
 
 BACKEND = Path(__file__).resolve().parents[2]
@@ -51,22 +52,6 @@ TOOLS = [
         "type": "object", "properties": {}, "required": [], "additionalProperties": False}},
 ]
 MESSAGES = [{"role": "user", "content": [{"type": "text", "text": "<visitor_message>Hi</visitor_message>"}]}]
-
-
-class FakeMessagesApi:
-    """The Messages API as an `httpx2.MockTransport`: records each request and gives the next scripted answer
-    (the last one again once the script runs out)."""
-
-    def __init__(self, *answers: httpx2.Response):
-        self.answers = list(answers)
-        self.requests: list[httpx2.Request] = []
-
-    def handle(self, request: httpx2.Request) -> httpx2.Response:
-        self.requests.append(request)
-        return self.answers.pop(0) if len(self.answers) > 1 else self.answers[0]
-
-    def client(self) -> httpx2.AsyncClient:
-        return httpx2.AsyncClient(transport=httpx2.MockTransport(self.handle))
 
 
 def stream_events(*blocks: dict, stop_reason: str, usage: dict, model: str = "claude-opus-5-5") -> httpx2.Response:
@@ -313,7 +298,8 @@ async def test_scripted_model_plays_its_script():
 
 DATABASE_URL = "postgresql+psycopg://desk_api:pw-in-the-url@localhost:5433/desk"
 BEDROCK_KEY = "bedrock-key-for-tests"
-PROVIDER_VARIABLES = ("DESK_ENV", "API_DATABASE_URL", "ANTHROPIC_API_KEY", "PASSCODE_HASH", "PUBLIC_ORIGIN",
+# Not API_DATABASE_URL: each case that reads it sets its own, and `api_settings` reads the real one first.
+PROVIDER_VARIABLES = ("DESK_ENV", "ANTHROPIC_API_KEY", "PASSCODE_HASH", "PUBLIC_ORIGIN",
                       "TRUSTED_PROXY_HOPS", "KERNEL_URL", "ANTHROPIC_BASE_URL", "MODEL_PROVIDER", "AWS_REGION",
                       "AWS_DEFAULT_REGION", "BEDROCK_BEARER_TOKEN", "AWS_BEARER_TOKEN_BEDROCK", "ANTHROPIC_AWS_API_KEY",
                       "ANTHROPIC_BEDROCK_MANTLE_BASE_URL", "ANTHROPIC_CUSTOM_HEADERS", "AWS_ACCESS_KEY_ID",
@@ -331,6 +317,15 @@ def environ(monkeypatch):
             monkeypatch.setenv(name, value)
 
     return set_all
+
+
+def test_environ_leaves_the_database_url(monkeypatch, request):
+    """`environ` clears the provider's variables but not the database URL: `api_settings`, set up before it, reads that
+    URL, so clearing it would point the app's lifespan at whatever the repository's .env names, or at nothing."""
+    monkeypatch.setenv("API_DATABASE_URL", DATABASE_URL)
+    request.getfixturevalue("environ")
+    url = os.environ.get("API_DATABASE_URL")                    # a failure shows the one value, not the environment
+    assert url == DATABASE_URL
 
 
 def settings(**fields) -> Settings:

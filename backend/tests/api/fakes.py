@@ -10,6 +10,10 @@ request it was sent (`requests`). An item is:
   event is set once the call is waiting, so a test can act while a model call is in flight.
 
 A call with nothing left to play fails the test.
+
+`FakeMessagesApi(*answers)` stands in for the Messages API behind the SDK's own HTTP client (an
+`httpx2.MockTransport`): it records each request and gives the next scripted answer, the last one again once
+the script runs out, so the real `AnthropicModel` and `BedrockModel` run with no network.
 """
 
 import asyncio
@@ -21,10 +25,27 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
+import httpx2
+
 from desk.api.model import CONVERSATION_MODEL, ModelRequest, ModelResponse, ModelUnavailable, ModelUsage
 
 FINISHED_AT = datetime(2026, 10, 30, 17, 0, tzinfo=UTC)
 USAGE = ModelUsage(input_tokens=1500, cache_read_input_tokens=4500, cache_creation_input_tokens=0, output_tokens=350)
+
+
+class FakeMessagesApi:
+    """The Messages API as an `httpx2.MockTransport` (module docstring)."""
+
+    def __init__(self, *answers: httpx2.Response):
+        self.answers = list(answers)
+        self.requests: list[httpx2.Request] = []
+
+    def handle(self, request: httpx2.Request) -> httpx2.Response:
+        self.requests.append(request)
+        return self.answers.pop(0) if len(self.answers) > 1 else self.answers[0]
+
+    def client(self) -> httpx2.AsyncClient:
+        return httpx2.AsyncClient(transport=httpx2.MockTransport(self.handle))
 
 
 def text(value: str) -> dict:

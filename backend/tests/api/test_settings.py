@@ -2,7 +2,8 @@
 model provider (`MODEL_PROVIDER`: the Claude API, or Amazon Bedrock for local evals), whose credential rules
 `make_model` closes in code.
 
-No test reaches the network: model calls go through an `httpx2.MockTransport`, or to a loopback server.
+No test reaches the network: model calls go through `FakeMessagesApi` (an `httpx2.MockTransport`), or to a
+loopback server.
 """
 
 import dataclasses
@@ -18,6 +19,7 @@ from pydantic import BaseModel
 
 from desk.api.model import NO_API_KEY, AnthropicModel, ModelRequest, ModelUnavailable, make_model
 from desk.api.settings import Settings
+from tests.api.fakes import FakeMessagesApi
 
 VARIABLES = ("DESK_ENV", "API_DATABASE_URL", "ANTHROPIC_API_KEY", "PASSCODE_HASH", "KERNEL_URL", "PUBLIC_ORIGIN",
              "TRUSTED_PROXY_HOPS", "ANTHROPIC_BASE_URL",
@@ -140,21 +142,6 @@ def structured() -> ModelRequest:
                         output_schema=Verdict, effort="low", max_tokens=200)
 
 
-class Recorder:
-    """An `httpx2.MockTransport` that records each request and answers every one with `answer`."""
-
-    def __init__(self, answer: httpx2.Response):
-        self.answer = answer
-        self.requests: list[httpx2.Request] = []
-
-    def handle(self, request: httpx2.Request) -> httpx2.Response:
-        self.requests.append(request)
-        return self.answer
-
-    def client(self) -> httpx2.AsyncClient:
-        return httpx2.AsyncClient(transport=httpx2.MockTransport(self.handle))
-
-
 def shown(request: httpx2.Request) -> str:
     return str(request.url) + json.dumps(dict(request.headers)) + request.content.decode()
 
@@ -182,7 +169,7 @@ async def test_provider_defaults_to_anthropic(environ, monkeypatch, tmp_path):
     # With no key of its own, the client never falls back to the SDK's ambient credentials: an explicit
     # placeholder key is sent instead, so the Claude API answers 401 and a fake at ANTHROPIC_BASE_URL answers.
     environ({"ANTHROPIC_AUTH_TOKEN": "ambient", "ANTHROPIC_PROFILE": "ambient", "ANTHROPIC_CONFIG_DIR": str(tmp_path)})
-    server = Recorder(UNAUTHORIZED)
+    server = FakeMessagesApi(UNAUTHORIZED)
     model = make_model(Settings.from_env(), http_client=server.client())
     assert isinstance(model, AnthropicModel)
     sdk = model._client
@@ -195,7 +182,7 @@ async def test_provider_defaults_to_anthropic(environ, monkeypatch, tmp_path):
 
     # Nor does it read ANTHROPIC_BASE_URL itself: the host comes from Settings, the Claude API by default.
     environ({"ANTHROPIC_BASE_URL": "https://gateway.example"})
-    server = Recorder(UNAUTHORIZED)
+    server = FakeMessagesApi(UNAUTHORIZED)
     model = make_model(dataclasses.replace(Settings.from_env(), anthropic_base_url=None), http_client=server.client())
     with pytest.raises(ModelUnavailable):
         await model.call(structured())
