@@ -1,4 +1,6 @@
 import { Icon } from '../../icons/index.tsx';
+import { Pill } from '../Pill/Pill.tsx';
+import { StatusDot } from '../StatusDot/StatusDot.tsx';
 
 import './AgentMessage.css';
 
@@ -19,25 +21,34 @@ export interface AgentMessageProps {
 
 /**
  * A visiting agent's request on the owner's side: who sent it and whether it was signed, then a
- * bordered bubble on the right with the request, the agent's text and a meta line.
+ * bordered bubble on the right with the request, the agent's text and a meta line. The agent's
+ * name and words are its own (untrusted) and stay apart from the screen's: the name is an isolated
+ * run of user text with the signed status in a pill beside it, and the words are quoted under the
+ * title, so nothing an agent writes can read as the status, the title or the meta line.
  */
 export function AgentMessage({ agentName, signed, title, meta, time, text }: AgentMessageProps) {
   const hasText = text !== undefined && text.trim() !== '';
   const hasTime = time !== undefined && time.trim() !== '';
+  // Only a signature the kernel accepted reads as signed.
+  const isSigned = signed === true;
   return (
     <div className="cd-agent-message">
       <p className="cd-agent-message__who cd-type-caption">
         <Icon name="agent" size={14} />
-        <span>
-          <span data-copy="user">{agentName}</span>, {signed ? 'signed request' : 'not signed'}
-        </span>
+        <bdi className="cd-agent-message__name" data-copy="user">
+          {agentName}
+        </bdi>
+        <Pill>
+          <StatusDot tone={isSigned ? 'handled' : 'refused'} />
+          {isSigned ? 'Signed' : 'Not signed'}
+        </Pill>
       </p>
       <div className="cd-agent-message__bubble">
         <p className="cd-agent-message__title cd-type-body">{title}</p>
         {hasText ? (
-          <p className="cd-agent-message__text cd-type-body" data-copy="user">
+          <blockquote className="cd-agent-message__text cd-type-body" data-copy="user">
             {text}
-          </p>
+          </blockquote>
         ) : null}
         <p className="cd-agent-message__meta cd-type-caption">
           <span className="cd-agent-message__meta-words">{meta}</span>

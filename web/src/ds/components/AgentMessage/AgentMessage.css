@@ -8,7 +8,7 @@
   min-width: 0;
 }
 
-/* "Alex Kim's assistant, signed request", with the agent glyph. */
+/* The agent glyph, its name and the signed status in a pill: "Alex Kim's assistant" [Signed]. */
 .cd-agent-message__who {
   display: flex;
   align-items: center;
@@ -24,8 +24,13 @@
   flex: none;
 }
 
-.cd-agent-message__who > span {
+/* The name the agent gave, set off from the interface's words: its own isolated run of text in
+   text-primary, so it can't run into the status or reorder what is around it. */
+.cd-agent-message__name {
   min-width: 0;
+  unicode-bidi: isolate;
+  color: var(--text-primary);
+  font-weight: 520;
 }
 
 .cd-agent-message__bubble {
@@ -43,9 +48,12 @@
   color: var(--text-primary);
 }
 
-/* The agent's own words, line breaks kept. */
+/* The agent's own words, quoted under the title with a rule at their left so they read apart from
+   the screen's title and meta line. Line breaks kept. */
 .cd-agent-message__text {
-  margin: var(--space-4) 0 0;
+  margin: var(--space-6) 0 var(--space-4);
+  padding: 0 0 0 var(--space-10);
+  border-left: 2px solid var(--line-control);
   color: var(--text-primary);
   white-space: pre-wrap;
 }
