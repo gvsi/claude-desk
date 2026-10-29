@@ -157,6 +157,7 @@ class ActorSession(Base):
     mode: Mapped[str] = mapped_column(Text, server_default=text("'ai'"))
     generation: Mapped[int] = mapped_column(Integer, server_default=text("0"))
     strikes: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    preview: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))   # the owner trying the Desk as a customer
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -224,6 +225,7 @@ class Tool(Base):
     reversible: Mapped[bool] = mapped_column(Boolean)
     status: Mapped[str] = mapped_column(Text)
     description_confirmed: Mapped[str] = mapped_column(Text)
+    definition_sha256: Mapped[str | None] = mapped_column(Text)     # MCP tools' pinned definition; None for native tools
     pending_definition_text: Mapped[str | None] = mapped_column(Text)
     pending_sha256: Mapped[str | None] = mapped_column(Text)
 

@@ -20,20 +20,21 @@ APP_TABLES: tuple[str, ...] = ("messages", "run_events", "setup_interviews", "a2
 MOCKPAY_TABLES: tuple[str, ...] = ("checkouts", "charges", "refunds", "tool_definitions")
 
 # Each kernel_ro view selects these columns, in this order, from the kernel table of the same
-# name. No view exposes secret hashes, codes, Demo inbox entries, document bodies or canaries,
-# agent or wallet keys, approval nonces or raw args.
+# name: the master plan's "Data model" table, which tests/test_db.py compares with this one. No
+# view exposes secret hashes, codes, Demo inbox entries, document bodies or canaries, agent or
+# wallet keys, approval nonces or raw args.
 KERNEL_RO_COLUMNS: dict[str, tuple[str, ...]] = {
     "businesses": ("business_id", "copy_id", "name", "owner_display_name", "timezone", "brand"),
     "desks": ("desk_id", "copy_id", "business_id", "name", "slug", "hours", "answering", "created_at"),
     "sessions": ("session_id", "copy_id", "desk_id", "kind", "verified", "assurance", "person_id", "agent_key_id",
-                 "mandate_id", "last_language", "mode", "generation", "strikes", "created_at", "closed_at"),
+                 "mandate_id", "last_language", "mode", "generation", "strikes", "preview", "created_at", "closed_at"),
     "people": ("person_id", "copy_id", "desk_id", "display_name", "masked_contact", "notes", "created_at"),
     "mandates": ("mandate_id", "copy_id", "desk_id", "agent_key_id", "on_behalf_of", "per_charge_cents",
                  "total_cents", "committed_cents", "reserved_cents", "expires_at"),
     "documents": ("document_id", "copy_id", "desk_id", "title", "record_owner_person_id", "created_at"),
     "leads": ("lead_id", "copy_id", "desk_id", "session_id", "display_name", "note", "created_at"),
     "tools": ("copy_id", "desk_id", "tool", "source", "effects", "reversible", "status", "description_confirmed",
-              "pending_definition_text", "pending_sha256"),
+              "definition_sha256", "pending_definition_text", "pending_sha256"),   # the pin is public, not a secret
     "price_items": ("item_id", "copy_id", "desk_id", "title", "unit_cents"),
     "calendar_slots": ("slot_id", "copy_id", "desk_id", "starts_at", "minutes"),
     "notification_prefs": ("copy_id", "desk_id", "now", "briefing"),

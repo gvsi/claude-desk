@@ -179,6 +179,28 @@ def test_api_views_hide_secrets(admin, api):
     assert {"body", "canary"}.isdisjoint(columns(admin, "kernel_ro", "documents"))
 
 
+MASTER_PLAN = Path(__file__).resolve().parents[2] / "docs" / "plans" / "2026-10-28-00-master-plan.md"
+
+
+def plan_kernel_ro_columns() -> dict[str, tuple[str, ...]]:
+    """The master plan's "Data model" `| View | Columns |` table, in order, parenthetical notes dropped."""
+    lines = MASTER_PLAN.read_text().splitlines()
+    start = lines.index("| View | Columns |") + 2
+    views: dict[str, tuple[str, ...]] = {}
+    for line in lines[start:]:
+        if not line.startswith("|"):
+            break
+        view, listed = (cell.strip() for cell in line.strip().strip("|").split("|", 1))
+        listed = re.sub(r"\s*\([^()]*\)", "", listed)    # notes such as "(a public pin, not a secret)" hold commas
+        views[view.strip("`")] = tuple(column.strip() for column in listed.split(","))
+    return views
+
+
+def test_ro_views_match_the_data_model():
+    # with test_api_views_hide_secrets (live views == KERNEL_RO_COLUMNS), this ties the database to the plan
+    assert list(KERNEL_RO_COLUMNS.items()) == list(plan_kernel_ro_columns().items())
+
+
 def test_kernel_ro_views_carry_copy_id(admin, api):
     assert views_in(admin, "kernel_ro") == set(KERNEL_RO_VIEWS)
     for view in KERNEL_RO_VIEWS:
