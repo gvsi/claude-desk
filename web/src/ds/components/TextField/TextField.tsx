@@ -20,6 +20,8 @@ export interface TextFieldProps {
   error?: string;
   /** The browser's autofill hint: "current-password", "organization". */
   autoComplete?: string;
+  /** The most characters the field takes; the browser stops typing and pasting there (1500 for a business description). */
+  maxLength?: number;
 }
 
 /**
@@ -27,7 +29,7 @@ export interface TextFieldProps {
  * and any error under it. The hint and the error describe the field (`aria-describedby`), and an
  * error also marks it `aria-invalid`. The error line is announced when it appears.
  */
-export function TextField({ label, value, onChange, type = 'text', multiline = false, hint, error, autoComplete }: TextFieldProps) {
+export function TextField({ label, value, onChange, type = 'text', multiline = false, hint, error, autoComplete, maxLength }: TextFieldProps) {
   const id = useId();
   const fieldId = `${id}-field`;
   const hintId = `${id}-hint`;
@@ -40,6 +42,7 @@ export function TextField({ label, value, onChange, type = 'text', multiline = f
     className: 'cd-text-field__input cd-type-body',
     value,
     autoComplete,
+    maxLength,
     'aria-invalid': invalid || undefined,
     'aria-describedby': describedBy,
     onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => onChange(event.target.value),

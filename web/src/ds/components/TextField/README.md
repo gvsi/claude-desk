@@ -27,6 +27,7 @@
 - `value` and `onChange`. The field shows whatever `value` the form passes back.
 - `error` in plain words that say what to do, never a code: "That passcode didn't work. Check it and try again." Clear it when the owner fixes the field or submits again.
 - `autoComplete` where the browser can help: `current-password` for the passcode.
+- `maxLength` where the text has a limit: 1500 for the business description that starts setup. Typing and pasting stop there.
 - The form around it, and its submit button. The field doesn't submit anything itself.
 
 ## Props
@@ -41,5 +42,6 @@
 | `hint` | `string` | One line under the field. |
 | `error` | `string` | Shown under the hint; sets `aria-invalid`. |
 | `autoComplete` | `string` | Passed to the field. |
+| `maxLength` | `number` | The most characters the field takes; the browser stops there. |
 
 The outline's color changes at `motion-instant`. Nothing moves under reduced motion.

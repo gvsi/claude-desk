@@ -121,6 +121,7 @@ export const Multiline: Story = {
     multiline: true,
     value: 'I run Rivera Plumbing in Oakland. ',
     hint: 'Include your first name as customers should see it.',
+    maxLength: 1500,
   },
   play: async ({ args, canvas, userEvent }) => {
     const field = canvas.getByRole('textbox', { name: 'Your business' });
@@ -137,5 +138,11 @@ export const Multiline: Story = {
     await userEvent.type(field, ` ${'x'.repeat(120)}`);
     await expect(field.getBoundingClientRect().width).toBe(box.width);
     await expect(field.scrollWidth).toBeLessThanOrEqual(field.clientWidth);
+
+    // maxLength caps the text: a paste past it stops at the limit.
+    await expect(field).toHaveAttribute('maxlength', '1500');
+    await userEvent.clear(field);
+    await userEvent.paste('x'.repeat(1600));
+    await expect(args.onChange).toHaveBeenLastCalledWith('x'.repeat(1500));
   },
 };
