@@ -22,7 +22,7 @@ export interface PublicBrand {
   field: string;
   /** The name's color over the field; it keeps 4.5:1. */
   ink: string;
-  /** The tagline's and status line's color over the field; it keeps 4.5:1 too. */
+  /** The tagline's color over the field; it keeps 4.5:1 too. */
   inkSecondary: string;
   /** Decorative only: the 2 px rule under the header. */
   accent: string;
@@ -30,8 +30,6 @@ export interface PublicBrand {
 
 export interface PublicShellProps {
   brand: PublicBrand;
-  /** One quiet line at the right of the header, from the screen. */
-  statusLine?: string;
   /** `owner_display_name`: "Maria Rivera". */
   ownerName: string;
   /** The visitor's language: every line of the shell's own copy, and `lang` on the page. */
@@ -92,7 +90,6 @@ const COPY = {
  */
 export function PublicShell({
   brand,
-  statusLine,
   ownerName,
   language,
   onAskForOwner,
@@ -139,11 +136,6 @@ export function PublicShell({
           <BrandName className="cd-public-shell__brand-name cd-type-brand-name">{brand.name}</BrandName>
           <p className="cd-public-shell__tagline cd-type-meta">{brand.tagline}</p>
         </div>
-        {statusLine ? (
-          <p className="cd-public-shell__status cd-type-meta" data-copy="user">
-            {statusLine}
-          </p>
-        ) : null}
       </Header>
       <div className="cd-public-shell__body">
         <Chat className="cd-public-shell__chat">

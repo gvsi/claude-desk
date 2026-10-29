@@ -63,20 +63,13 @@
 }
 
 .cd-public-shell__brand-name,
-.cd-public-shell__tagline,
-.cd-public-shell__status {
+.cd-public-shell__tagline {
   margin: 0;
   overflow-wrap: anywhere;
 }
 
-.cd-public-shell__tagline,
-.cd-public-shell__status {
+.cd-public-shell__tagline {
   color: var(--brand-ink-secondary);
-}
-
-.cd-public-shell__status {
-  flex: 0 1 auto;
-  min-width: 0;
 }
 
 /* The chat and the about column. */

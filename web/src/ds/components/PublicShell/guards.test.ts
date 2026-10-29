@@ -1,6 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import { aboutLinkHref, brandColor } from './guards.ts';
+import { PublicShell, type PublicShellProps } from './PublicShell.tsx';
 
 describe('PublicShell guards', () => {
   it('brand_colors_are_hex_or_tokens', () => {
@@ -21,4 +24,24 @@ describe('PublicShell guards', () => {
       expect(aboutLinkHref(href), href).toBeNull();
     }
   });
+
+  it('no_free_text_header_line', () => {
+    // Everything a visitor reads comes from the kernel or is the shell's own static copy. A header
+    // status line was a free-text slot outside both, which a screen could fill with a time or an
+    // amount worked out on the page, so the shell has none.
+    expectTypeOf<PublicShellProps>().not.toHaveProperty('statusLine');
+    const props = {
+      brand: { name: 'Rivera Plumbing', tagline: 'Main line', monogram: 'R', field: '#1F4E4A', ink: '#ffffff', inkSecondary: '#e6e6e6', accent: '#B87333' },
+      ownerName: 'Maria Rivera',
+      language: 'en',
+      onAskForOwner: () => {},
+      composer: null,
+      children: null,
+      statusLine: 'Open until 6:00 pm',
+    } as PublicShellProps;
+    const markup = renderToStaticMarkup(createElement(PublicShell, props));
+    expect(markup).toContain('Rivera Plumbing');
+    expect(markup).not.toContain('Open until');
+  });
 });
+

@@ -12,7 +12,7 @@
 
 - **The brand header**, `size-brand-header` tall, in the business's colors:
   - The monogram (`aria-hidden`) in a square ringed in the secondary ink.
-  - The name and the tagline, with `statusLine` at the right when given.
+  - The name and the tagline. The header holds no other line: everything a visitor reads is the kernel's or the shell's own copy.
   - The `accent` only as the 2 px rule under the header: never text, never a ground for text, never the only sign of a control.
   - Colors are set as `--brand-field`, `--brand-ink`, `--brand-ink-secondary` and `--brand-accent`. Only a plain `#rrggbb` or a token (`var(--token)`) is used; anything else falls back to `bg-panel`, `text-primary`, `text-secondary` and `line-hairline` (`guards.ts`).
 - **The chat** in a column at most 680 px wide:
@@ -53,7 +53,6 @@ The shell is an inline-size container, so it lays out by its own width, not the 
 | Prop | Type | Notes |
 | --- | --- | --- |
 | `brand` | `PublicBrand` | Required. `{ name; tagline; monogram; field; ink; inkSecondary; accent }`. |
-| `statusLine` | `string` | At the right of the header, in the secondary ink. |
 | `ownerName` | `string` | Required. |
 | `language` | `'en' \| 'es'` | Required. |
 | `onAskForOwner` | `() => void` | Required. |
