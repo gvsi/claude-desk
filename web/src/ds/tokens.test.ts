@@ -54,6 +54,37 @@ describe('design tokens', () => {
     expect(actual).toEqual(expected);
   });
 
+  test('intro_dialog_tokens_match_the_board', () => {
+    const expected = {
+      scrim: 'rgba(0,0,0,0.5)',
+      'illustration-card': '#faf9f5',
+      'illustration-ink': '{bg-app}',
+      'illustration-ink-secondary': 'rgba(28,27,25,0.66)',
+      'illustration-avatar': '#e6e0d4',
+      'illustration-line': 'rgba(28,27,25,0.14)',
+      'illustration-handled': '#3f7a2e',
+      'illustration-arc': 'rgba(250,249,245,0.12)',
+      'shadow-dialog': '0 4px 8px rgba(11,11,11,0.08), 0 12px 28px -2px rgba(0,0,0,0.24)',
+      'shadow-illustration-card': '0 1px 2px rgba(28,27,25,0.16)',
+      'size-intro': '880px',
+      'size-intro-illustration': '400px',
+    };
+    const actual = Object.fromEntries(Object.keys(expected).map((name) => [name, tokenValue(name)]));
+    expect(actual).toEqual(expected);
+
+    // The dialog's title speaks in Claude's voice.
+    const voice = tokens.type.groups.find((group) => group.name === "Claude's voice");
+    const title = voice?.styles.find((style) => style.name === 'intro-title');
+    expect(voice?.family).toBe('serif');
+    expect(title).toMatchObject({
+      fontSize: '28px',
+      lineHeight: '35px',
+      fontWeight: 460,
+      letterSpacing: '-0.2px',
+      opticalSize: 28,
+    });
+  });
+
   test('one_dark_theme_only', () => {
     expect(tokens.color.themes).toEqual([{ id: 'dark', name: 'Dark' }]);
     for (const token of tokens.color.tokens) {
@@ -124,6 +155,13 @@ describe('design tokens', () => {
     add(['text-secondary'], ['fill-secondary'], 3, 'bg-panel');
     // The switch row's label and description while it is hovered in the sidebar.
     add(['text-primary', 'text-secondary'], ['fill-hover'], 4.5, 'bg-panel');
+    // The first-visit intro dialog: the mark on its surface and the passcode in its field.
+    add(['clay'], ['bg-surface'], 3);
+    add(['text-primary'], ['fill-card'], 4.5, 'bg-surface');
+    // The intro illustration's light cards: their text, the initials, the check and receipt dots.
+    add(['illustration-ink', 'illustration-ink-secondary'], ['illustration-card'], 4.5);
+    add(['illustration-ink'], ['illustration-avatar'], 4.5);
+    add(['illustration-handled'], ['illustration-card'], 3);
 
     // Every required pair is listed, at no lower a minimum, so dropping one can't pass.
     for (const want of required) {
@@ -143,10 +181,13 @@ describe('design tokens', () => {
 
   test('every_color_token_is_classified', () => {
     expect(Object.keys(DECORATIVE_COLORS).sort()).toEqual([
+      'illustration-arc',
+      'illustration-line',
       'line-card',
       'line-control',
       'line-control-hover',
       'line-hairline',
+      'scrim',
     ]);
     for (const [name, reason] of Object.entries(DECORATIVE_COLORS)) {
       expect(colorNames, `${name} is a color token`).toContain(name);
