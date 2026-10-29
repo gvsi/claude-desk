@@ -1,0 +1,116 @@
+/* OutcomeMenu: a rule's outcome. Read-only, its dot and words in meta type. As a menu, an outlined
+   button (a chip's outline at the control radius) with the dot, the words and a chevron, and a
+   popover of the three outcomes under it, aligned to its right edge. */
+
+.cd-outcome {
+  display: inline-flex;
+  flex: none;
+  min-width: 0;
+  color: var(--text-primary);
+}
+
+.cd-outcome-menu {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: flex-start;
+  max-width: 100%;
+}
+
+.cd-outcome-menu__button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-8);
+  box-sizing: border-box;
+  max-width: 100%;
+  min-height: var(--size-control);
+  margin: 0;
+  padding: var(--space-4) var(--space-10) var(--space-4) var(--space-12);
+  border: 1px solid var(--line-control);
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--motion-instant) var(--motion-ease);
+}
+
+.cd-outcome-menu__button:hover,
+.cd-outcome-menu__button[aria-expanded='true'] {
+  border-color: var(--line-control-hover);
+}
+
+.cd-outcome-menu__button:disabled {
+  cursor: default;
+}
+
+/* A long phrase ("Automatic up to $300; over $300, ask me first") wraps inside the button on a
+   narrow line rather than leaving it. */
+.cd-outcome-menu__phrase {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.cd-outcome-menu__chevron {
+  flex: none;
+}
+
+.cd-outcome-menu__menu {
+  position: absolute;
+  top: calc(100% + var(--space-6));
+  right: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  box-sizing: border-box;
+  min-width: 100%;
+  padding: var(--space-4);
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-card);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-dialog);
+}
+
+.cd-outcome-menu__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--size-nav-row);
+  margin: 0;
+  padding: var(--space-8) var(--space-12) var(--space-8) var(--space-8);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--motion-instant) var(--motion-ease);
+}
+
+.cd-outcome-menu__item:hover,
+.cd-outcome-menu__item:focus-visible {
+  background: var(--fill-hover);
+}
+
+/* The ring sits just inside the item, so it clears the menu's edge and the next item. */
+.cd-outcome-menu__item:focus-visible {
+  outline-offset: -2px;
+}
+
+/* The current outcome's check, in a fixed column so the words line up. */
+.cd-outcome-menu__check {
+  display: inline-flex;
+  flex: none;
+  width: 16px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cd-outcome-menu__button,
+  .cd-outcome-menu__item {
+    transition: none;
+  }
+}

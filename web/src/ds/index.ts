@@ -120,6 +120,38 @@ export { MarginNote, type MarginNoteProps } from './components/MarginNote/Margin
 export { ApprovalCard, type ApprovalCardProps } from './components/ApprovalCard/ApprovalCard.tsx';
 export { TakeOverBar, type TakeOverBarProps } from './components/TakeOverBar/TakeOverBar.tsx';
 
+// Rules and connectors
+export {
+  OUTCOME_TONE,
+  OUTCOME_WORDS,
+  PRESET_WORDS,
+  outcomePhrase,
+  type RuleMode,
+  type RulesPreset,
+} from './components/OutcomeMenu/outcomeWords.ts';
+export { OutcomeMenu, type OutcomeMenuProps } from './components/OutcomeMenu/OutcomeMenu.tsx';
+export { RuleRow, type RuleRowProps, type RuleWord } from './components/RuleRow/RuleRow.tsx';
+export { ToolRulesCard, type RulesLinkProps, type ToolRulesCardProps } from './components/ToolRulesCard/ToolRulesCard.tsx';
+export { rulesForTool, type RulesTool } from './components/ToolRulesCard/toolRules.ts';
+export { ConnectorIcon, type ConnectorIconName, type ConnectorIconProps } from './components/ConnectorIcon/ConnectorIcon.tsx';
+export { ConnectorName, type ConnectorNameProps, type ConnectorView } from './components/ConnectorName/ConnectorName.tsx';
+export {
+  ConnectorSection,
+  type ConnectorSectionProps,
+  type ToolSummaryView,
+} from './components/ConnectorSection/ConnectorSection.tsx';
+export { describeEffects } from './components/ConnectorSection/describeEffects.ts';
+export { ConnectorList, type ConnectorListProps } from './components/ConnectorList/ConnectorList.tsx';
+export { AlwaysOnList, type AlwaysOnListProps } from './components/AlwaysOnList/AlwaysOnList.tsx';
+export {
+  ChangeReview,
+  type ChangeReviewProps,
+  type ChangeRowView,
+  type ChangeSide,
+} from './components/ChangeReview/ChangeReview.tsx';
+export { ruleDiff, type RuleDiffRow, type RuleField } from './components/ChangeReview/ruleDiff.ts';
+export { AskClaudePanel, type AskClaudePanelProps } from './components/AskClaudePanel/AskClaudePanel.tsx';
+
 // Safety
 export { FullTrace, type FullTraceProps } from './components/FullTrace/FullTrace.tsx';
 export { ChainStatus, type ChainStatusProps } from './components/ChainStatus/ChainStatus.tsx';

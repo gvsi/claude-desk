@@ -1,0 +1,57 @@
+/* ConnectorIcon: a square tile at the control radius. Built in, a line icon on the secondary fill;
+   a third-party connector, its own mark on the light brand tile, the one light surface besides the
+   intro illustration's cards. The icon scales with the tile, as on the boards: 26 px on a 48 px
+   tile, 20 px on 36 px, 13 px on 24 px. */
+
+.cd-connector-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  border-radius: var(--radius-control);
+  color: var(--text-primary);
+}
+
+.cd-connector-icon--built-in {
+  background: var(--fill-secondary);
+}
+
+.cd-connector-icon--brand {
+  background: var(--connector-tile-brand);
+}
+
+.cd-connector-icon__mark {
+  display: block;
+  flex: none;
+}
+
+.cd-connector-icon--page {
+  width: 48px;
+  height: 48px;
+}
+
+.cd-connector-icon--page .cd-connector-icon__mark {
+  width: 26px;
+  height: 26px;
+}
+
+.cd-connector-icon--section {
+  width: 36px;
+  height: 36px;
+}
+
+.cd-connector-icon--section .cd-connector-icon__mark {
+  width: var(--size-icon);
+  height: var(--size-icon);
+}
+
+.cd-connector-icon--inline {
+  width: var(--space-24);
+  height: var(--space-24);
+}
+
+.cd-connector-icon--inline .cd-connector-icon__mark {
+  width: 13px;
+  height: 13px;
+}

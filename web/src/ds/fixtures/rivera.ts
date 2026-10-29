@@ -28,6 +28,9 @@ import type {
   VerifyStarted,
 } from '../../api/contracts';
 import type { Bilingual, ConversationFixture, ProseBlock } from './index';
+import type { ConnectorView } from '../components/ConnectorName/ConnectorName';
+import type { ConnectorSectionProps } from '../components/ConnectorSection/ConnectorSection';
+import type { RuleWord } from '../components/RuleRow/RuleRow';
 import { executedLine, type ExecutedTool } from './receipts';
 
 /**
@@ -53,6 +56,8 @@ const sha256 = (label: string) => placeholderHex(`sha256:${label}`, 32);
 const COPY_ID = 'copy-demo-7f3a';
 const DESK_ID = 'desk-rivera-main';
 const OWNER = 'Maria Rivera';
+/** The built-in visiting agent's key: Alex Kim's assistant. */
+const DEMO_AGENT_KEY_ID = 'demo-agent';
 
 /**
  * Rivera Plumbing's money cap, $500: the most its active rules version lets an auto card take or pay
@@ -966,6 +971,257 @@ const ruleCards = {
   }),
 } satisfies Record<string, RuleCard>;
 
+/**
+ * A rule shared by every tool that charges money, for the stories of a shared rule. It is not in
+ * the seed (the board's example is illustrative), so it stays out of `ruleCards`. It is for one
+ * visiting agent, Alex Kim's assistant, so under "Coverage and overlap" it outranks each tool's own
+ * card for everyone (`rv-link`, `rv-mandate`) and governs Payment link and Charge within a signed
+ * limit for that agent. It agrees with the seed: the assistant's $20 deposit is still automatic.
+ */
+const sharedChargeCard = rule({
+  card_id: 'rv-agent-charges',
+  applies_to: 'effect:charge',
+  mode: 'auto',
+  who: 'agent',
+  agent_key_id: DEMO_AGENT_KEY_ID,
+  max_amount_cents: 2000,
+  reason: "Alex Kim's assistant can pay up to $20 from its signed limit.",
+});
+
+/** The screen's words for what the shared rule covers, shown under each tool it governs. */
+const sharedChargeAppliesTo = 'Applies to every tool that charges money: Payment link and Charge within a signed limit.';
+
+const word = (field: RuleWord['field'], text: string): RuleWord => ({ field, text });
+
+/** Each card's words as the web app's `ruleWords` renders what it enforces, in the boards' words. */
+const ruleWords = {
+  'rv-quote': [word('who', 'Anyone'), word('limits', 'No discounts')],
+  'rv-book-wk': [word('who', 'Anyone'), word('hours', 'Weekdays, 8:00 am to 6:00 pm'), word('review', 'Checked by the reviewer')],
+  'rv-book-sat': [word('who', 'Anyone'), word('hours', 'Saturdays, 9:00 am to 1:00 pm'), word('review', 'Checked by the reviewer')],
+  'rv-docs': [word('who', "The record's owner, verified")],
+  'rv-link': [word('who', 'Anyone'), word('limits', 'Up to $300'), word('review', 'Checked by the reviewer')],
+  'rv-charges': [word('who', "The record's owner, verified")],
+  'rv-refund': [word('who', 'The customer who paid, verified')],
+  'rv-mandate': [word('who', 'Signed agents'), word('limits', 'Up to $20')],
+  'rv-agent-charges': [word('who', "Alex Kim's assistant"), word('limits', 'Up to $20')],
+} satisfies Record<keyof typeof ruleCards | 'rv-agent-charges', RuleWord[]>;
+
+/** The amount limit of each auto card that has one, formatted as the screen formats it. */
+const ruleLimits = {
+  'rv-link': '$300',
+  'rv-mandate': '$20',
+  'rv-agent-charges': '$20',
+} satisfies Partial<Record<keyof typeof ruleWords, string>>;
+
+// ---------------------------------------------------------------------------------------------
+// Connectors on the Rules page (N-Conn-01-Rules)
+
+const connectorViews = {
+  quotes: {
+    id: 'quotes',
+    name: 'Quotes',
+    icon: 'quotes',
+    description: 'Prices jobs from your price list.',
+    source: { kind: 'built_in' },
+  },
+  bookings: {
+    id: 'bookings',
+    name: 'Bookings',
+    icon: 'bookings',
+    description: 'Finds open times and books visits.',
+    source: { kind: 'built_in' },
+  },
+  leads: {
+    id: 'leads',
+    name: 'Leads and callbacks',
+    icon: 'leads',
+    description: "Saves visitors' details and asks you to call back.",
+    source: { kind: 'built_in' },
+  },
+  verification: {
+    id: 'verification',
+    name: 'Verification',
+    icon: 'verification',
+    description: 'Confirms a customer is who they say.',
+    source: { kind: 'built_in' },
+  },
+  documents: {
+    id: 'documents',
+    name: 'Documents',
+    icon: 'documents',
+    description: "Sends customers their own documents after they confirm it's them.",
+    source: { kind: 'built_in' },
+  },
+  payments: {
+    id: 'payments',
+    name: 'Payments',
+    icon: 'payments',
+    description: 'Payment links and charges within a signed limit. Test payments, no money moves.',
+    source: { kind: 'built_in' },
+  },
+  stripe: {
+    id: 'stripe',
+    name: 'Stripe',
+    icon: 'stripe',
+    description: "Your customers' charges and refunds. Test mode, no money moves.",
+    source: { kind: 'external', mock: true },
+  },
+} satisfies Record<string, ConnectorView>;
+
+/** One connector's section on the hub: its page and its tools, each with its line, rule words and outcome. */
+type HubSection = Pick<ConnectorSectionProps, 'connector' | 'href' | 'tools'>;
+
+const hubSections = [
+  {
+    connector: connectorViews.quotes,
+    href: '/rules/quotes',
+    tools: [
+      {
+        key: 'native.quote',
+        name: 'Quote',
+        description: 'Prices a job from your price list. Changes something. Can be undone.',
+        summary: 'Anyone · No discounts',
+        mode: 'auto',
+        status: 'enabled',
+        href: '/rules/quotes/quote',
+      },
+    ],
+  },
+  {
+    connector: connectorViews.bookings,
+    href: '/rules/bookings',
+    tools: [
+      {
+        key: 'native.find_slots',
+        name: 'Find open times',
+        description: "Reads the times you're free. Changes nothing.",
+        summary: 'Anyone',
+        mode: 'auto',
+        status: 'enabled',
+        href: '/rules/bookings/find-open-times',
+      },
+      {
+        key: 'native.book',
+        name: 'Book a visit',
+        description: 'Puts a visit on your calendar. Can be undone.',
+        summary: '2 rules',
+        mode: 'auto',
+        status: 'enabled',
+        href: '/rules/bookings/book-a-visit',
+      },
+    ],
+  },
+  {
+    connector: connectorViews.leads,
+    href: '/rules/leads',
+    tools: [
+      {
+        key: 'native.capture_lead',
+        name: 'Save a lead',
+        description: "Keeps a visitor's details for you. Can be undone.",
+        summary: 'Anyone',
+        mode: 'auto',
+        status: 'enabled',
+        href: '/rules/leads/save-a-lead',
+      },
+      {
+        key: 'native.request_callback',
+        name: 'Request a callback',
+        description: 'Asks you to call someone back. Can be undone.',
+        summary: 'Anyone',
+        mode: 'auto',
+        status: 'enabled',
+        href: '/rules/leads/request-a-callback',
+      },
+    ],
+  },
+  {
+    connector: connectorViews.verification,
+    href: '/rules/verification',
+    tools: [
+      {
+        key: 'native.start_verification',
+        name: "Confirm it's them",
+        description: 'Sends a code to the contact on record.',
+        summary: 'Always on',
+        mode: 'auto',
+        status: 'enabled',
+        href: '/rules/verification/confirm-its-them',
+      },
+    ],
+  },
+  {
+    connector: connectorViews.documents,
+    href: '/rules/documents',
+    tools: [
+      {
+        key: 'native.release_document',
+        name: 'Share a document',
+        description: "Sends customers their own documents. Touches private data. Can't be undone.",
+        summary: "The record's owner, verified",
+        mode: 'auto',
+        status: 'enabled',
+        href: '/rules/documents/share-a-document',
+      },
+    ],
+  },
+  {
+    connector: connectorViews.payments,
+    href: '/rules/payments',
+    tools: [
+      {
+        key: 'native.payment_link',
+        name: 'Payment link',
+        description: 'Makes a one-time link for a quote. Charges money. Can be undone.',
+        summary: '2 rules · 1 shared',
+        mode: 'auto',
+        status: 'enabled',
+        href: '/rules/payments/payment-link',
+      },
+      {
+        key: 'native.charge_mandate',
+        name: 'Charge within a signed limit',
+        description: "Lets a visiting agent pay from its owner's signed limit. Charges money. Can be undone.",
+        summary: '2 rules · 1 shared',
+        mode: 'auto',
+        status: 'enabled',
+        href: '/rules/payments/charge-within-a-signed-limit',
+      },
+    ],
+  },
+  {
+    connector: connectorViews.stripe,
+    href: '/rules/stripe',
+    tools: [
+      {
+        key: 'payments.list_charges',
+        name: 'See charges',
+        description: 'Shows customers their own charges. Touches private data.',
+        summary: "The record's owner, verified",
+        mode: 'auto',
+        status: 'enabled',
+        href: '/rules/stripe/see-charges',
+      },
+      {
+        key: 'payments.create_refund',
+        name: 'Refund',
+        description: "Refunds a payment to the card it came from. Moves money out. Can't be undone.",
+        summary: 'The customer who paid, verified',
+        mode: 'ask',
+        status: 'enabled',
+        href: '/rules/stripe/refund',
+      },
+    ],
+  },
+] satisfies HubSection[];
+
+/** Rivera Plumbing's Rules hub: six built-in connectors and Stripe, in the hub's order. */
+const connectors = {
+  views: connectorViews,
+  summary: '6 built-in connectors and 1 you connected · Version 7, checked against the always-on rules',
+  sections: hubSections,
+};
+
 const listChargesProfile = {
   tool: 'payments.list_charges',
   source: 'mcp',
@@ -1167,8 +1423,6 @@ const paymentLinks = {
   unknown: paymentLink('unknown'),
 } satisfies Record<PaymentLinkState, PaymentLinkView>;
 
-const DEMO_AGENT_KEY_ID = 'demo-agent';
-
 /**
  * The built-in agent's credentials and mandate, as `POST /agents/demo` returns them: $20 per
  * charge, $100 in total, for one hour (issued 17:04:05 UTC). The private key is a dummy that
@@ -1207,6 +1461,11 @@ export const rivera = {
   heldVerified,
   heldRefund,
   ruleCards,
+  sharedChargeCard,
+  sharedChargeAppliesTo,
+  ruleWords,
+  ruleLimits,
+  connectors,
   toolProfiles,
   ledger,
   verifyStarted,

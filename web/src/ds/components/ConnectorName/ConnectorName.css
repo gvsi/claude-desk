@@ -1,0 +1,45 @@
+/* ConnectorName: the name, then "Built in" or the Mock pill beside it, on one line that wraps
+   under the name only when the line is too narrow for both. */
+
+.cd-connector-name {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--space-8);
+  row-gap: var(--space-2);
+  min-width: 0;
+  margin: 0;
+  font: inherit;
+}
+
+/* A page title sets its badge a little further off, as the boards do. */
+.cd-connector-name--page {
+  display: flex;
+  column-gap: var(--space-10);
+}
+
+.cd-connector-name__name {
+  min-width: 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.cd-connector-name__built-in {
+  flex: none;
+  color: var(--text-secondary);
+}
+
+/* Inline, in a line of meta ("From Stripe", a change's meta line): it flows as text on the line's
+   baseline, in the line's own color, and only the badge stands apart. */
+.cd-connector-name--inline {
+  display: inline;
+}
+
+.cd-connector-name--inline > .cd-connector-name__name {
+  color: inherit;
+}
+
+.cd-connector-name--inline > .cd-pill {
+  display: inline-flex;
+  vertical-align: middle;
+}

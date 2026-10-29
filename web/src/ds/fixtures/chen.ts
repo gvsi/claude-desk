@@ -16,6 +16,9 @@ import type {
   VerifyStarted,
 } from '../../api/contracts';
 import type { Bilingual, ConversationFixture, DemoInboxFixture, ProseBlock } from './index';
+import type { ConnectorView } from '../components/ConnectorName/ConnectorName';
+import type { ConnectorSectionProps } from '../components/ConnectorSection/ConnectorSection';
+import type { RuleWord } from '../components/RuleRow/RuleRow';
 import { executedLine } from './receipts';
 import { cardBlock, placeholderHex, proseBlock } from './rivera';
 
@@ -98,13 +101,8 @@ const plain = {
   held: 'Waiting for Linda Chen to approve',
 } as const satisfies Partial<Record<DecisionState | 'reply_checked', string>>;
 
-/** Linda's own card: every booking waits for her answer, whoever asks. */
-const ruleCards = {
-  'cc-consult': {
-    card_id: 'cc-consult',
-    applies_to: 'native.book',
-    mode: 'ask',
-    who: 'anyone',
+function rule(fields: Pick<RuleCard, 'card_id' | 'applies_to' | 'mode' | 'who' | 'reason'>): RuleCard {
+  return {
     person_id: null,
     agent_key_id: null,
     max_amount_cents: null,
@@ -112,9 +110,198 @@ const ruleCards = {
     hours: null,
     review: false,
     is_default: false,
+    ...fields,
+  };
+}
+
+/**
+ * Linda's cards: every booking waits for her answer, whoever asks; quotes are automatic at list
+ * price (a discount holds for her); clients get their own documents once they confirm it's them.
+ * The preset's always-auto cards (open times, leads, callbacks, verification) are not repeated.
+ */
+const ruleCards = {
+  'cc-consult': rule({
+    card_id: 'cc-consult',
+    applies_to: 'native.book',
+    mode: 'ask',
+    who: 'anyone',
     reason: 'Bookings wait for your answer.',
-  },
+  }),
+  'cc-quote': rule({
+    card_id: 'cc-quote',
+    applies_to: 'native.quote',
+    mode: 'auto',
+    who: 'anyone',
+    reason: 'Quotes from your price list, at list price.',
+  }),
+  'cc-docs': rule({
+    card_id: 'cc-docs',
+    applies_to: 'native.release_document',
+    mode: 'auto',
+    who: 'record_owner',
+    reason: "Clients get their own documents after confirming it's them.",
+  }),
 } satisfies Record<string, RuleCard>;
+
+const word = (field: RuleWord['field'], text: string): RuleWord => ({ field, text });
+
+/** Each card's words as the web app's `ruleWords` renders what it enforces. */
+const ruleWords = {
+  'cc-consult': [word('who', 'Anyone')],
+  'cc-quote': [word('who', 'Anyone'), word('limits', 'No discounts')],
+  'cc-docs': [word('who', "The record's owner, verified")],
+} satisfies Record<keyof typeof ruleCards, RuleWord[]>;
+
+const connectorViews = {
+  quotes: {
+    id: 'quotes',
+    name: 'Quotes',
+    icon: 'quotes',
+    description: 'Prices work from your price list.',
+    source: { kind: 'built_in' },
+  },
+  bookings: {
+    id: 'bookings',
+    name: 'Bookings',
+    icon: 'bookings',
+    description: 'Finds open times and books consultations.',
+    source: { kind: 'built_in' },
+  },
+  leads: {
+    id: 'leads',
+    name: 'Leads and callbacks',
+    icon: 'leads',
+    description: "Saves visitors' details and asks you to call back.",
+    source: { kind: 'built_in' },
+  },
+  verification: {
+    id: 'verification',
+    name: 'Verification',
+    icon: 'verification',
+    description: 'Confirms a client is who they say.',
+    source: { kind: 'built_in' },
+  },
+  documents: {
+    id: 'documents',
+    name: 'Documents',
+    icon: 'documents',
+    description: "Sends clients their own documents after they confirm it's them.",
+    source: { kind: 'built_in' },
+  },
+  /** Not on Chen & Co.'s Desk yet: the built-in connector Linda adds in the add-a-connector example. */
+  payments: {
+    id: 'payments',
+    name: 'Payments',
+    icon: 'payments',
+    description: 'Lets clients pay an invoice from a one-time link. Test payments, no money moves.',
+    source: { kind: 'built_in' },
+  },
+} satisfies Record<string, ConnectorView>;
+
+type HubSection = Pick<ConnectorSectionProps, 'connector' | 'href' | 'tools'>;
+
+const hubSections = [
+  {
+    connector: connectorViews.quotes,
+    href: '/rules/quotes',
+    tools: [
+      {
+        key: 'native.quote',
+        name: 'Quote',
+        description: 'Prices work from your price list. Changes something. Can be undone.',
+        summary: 'Anyone · No discounts',
+        mode: 'auto',
+        status: 'enabled',
+        href: '/rules/quotes/quote',
+      },
+    ],
+  },
+  {
+    connector: connectorViews.bookings,
+    href: '/rules/bookings',
+    tools: [
+      {
+        key: 'native.find_slots',
+        name: 'Find open times',
+        description: "Reads the times you're free. Changes nothing.",
+        summary: 'Anyone',
+        mode: 'auto',
+        status: 'enabled',
+        href: '/rules/bookings/find-open-times',
+      },
+      {
+        key: 'native.book',
+        name: 'Book a consultation',
+        description: 'Puts a consultation on your calendar. Can be undone.',
+        summary: 'Anyone',
+        mode: 'ask',
+        status: 'enabled',
+        href: '/rules/bookings/book-a-consultation',
+      },
+    ],
+  },
+  {
+    connector: connectorViews.leads,
+    href: '/rules/leads',
+    tools: [
+      {
+        key: 'native.capture_lead',
+        name: 'Save a lead',
+        description: "Keeps a visitor's details for you. Can be undone.",
+        summary: 'Anyone',
+        mode: 'auto',
+        status: 'enabled',
+        href: '/rules/leads/save-a-lead',
+      },
+      {
+        key: 'native.request_callback',
+        name: 'Request a callback',
+        description: 'Asks you to call someone back. Can be undone.',
+        summary: 'Anyone',
+        mode: 'auto',
+        status: 'enabled',
+        href: '/rules/leads/request-a-callback',
+      },
+    ],
+  },
+  {
+    connector: connectorViews.verification,
+    href: '/rules/verification',
+    tools: [
+      {
+        key: 'native.start_verification',
+        name: "Confirm it's them",
+        description: 'Sends a code to the contact on record.',
+        summary: 'Always on',
+        mode: 'auto',
+        status: 'enabled',
+        href: '/rules/verification/confirm-its-them',
+      },
+    ],
+  },
+  {
+    connector: connectorViews.documents,
+    href: '/rules/documents',
+    tools: [
+      {
+        key: 'native.release_document',
+        name: 'Share a document',
+        description: "Sends clients their own documents. Touches private data. Can't be undone.",
+        summary: "The record's owner, verified",
+        mode: 'auto',
+        status: 'enabled',
+        href: '/rules/documents/share-a-document',
+      },
+    ],
+  },
+] satisfies HubSection[];
+
+/** Chen & Co. CPA's Rules hub: five built-in connectors, without Payments. */
+const connectors = {
+  views: connectorViews,
+  summary: '5 built-in connectors · Version 3, checked against the always-on rules',
+  sections: hubSections,
+};
 
 /**
  * A visitor not on record asks for a first consultation. Linda's ask card holds every booking, so
@@ -288,6 +475,8 @@ export const chen = {
   sessions,
   conversations,
   ruleCards,
+  ruleWords,
+  connectors,
   heldConsultation,
   verifyStarted,
   demoInbox,

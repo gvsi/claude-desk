@@ -3,15 +3,13 @@ import { useState } from 'react';
 import { expect, fn } from 'storybook/test';
 
 import { expectComputed } from '../../test/expectComputed.ts';
+import { PRESET_WORDS, type RulesPreset } from '../OutcomeMenu/outcomeWords.ts';
 import { SegmentedControl, type SegmentedControlProps } from './SegmentedControl.tsx';
 
-type Preset = 'ask_first' | 'auto' | 'custom';
+type Preset = RulesPreset;
 
-const PRESETS = [
-  { value: 'ask_first', label: 'Ask me first' },
-  { value: 'auto', label: 'Auto' },
-  { value: 'custom', label: 'Custom' },
-] as const satisfies readonly { value: Preset; label: string }[];
+/** The Desk's mode switch, in the words the Rules page uses. */
+const PRESETS = PRESET_WORDS;
 
 /** The control as a screen holds it: it shows the new choice, and reports each change. */
 function Controlled(props: SegmentedControlProps<Preset>) {
@@ -33,7 +31,11 @@ const meta = {
   component: SegmentedControl<Preset>,
   args: { label: 'Mode for this Desk', options: PRESETS, value: 'custom', onChange: fn() },
   render: (args) => <Controlled {...args} />,
-  parameters: { layout: 'padded', canvas: 'N-Rules-Rivera' },
+  parameters: {
+    layout: 'padded',
+    canvas: 'none',
+    canvasNote: "The Desk's mode switch on the Rules page. No signed board draws it; the nearest is N-Conn-01-Rules.",
+  },
 } satisfies Meta<typeof SegmentedControl<Preset>>;
 
 export default meta;
@@ -44,7 +46,7 @@ export const Mode: Story = {
   play: async ({ args, canvas, userEvent }) => {
     const group = canvas.getByRole('radiogroup', { name: 'Mode for this Desk' });
     const option = (name: string) => canvas.getByRole('radio', { name });
-    await expect(canvas.getAllByRole('radio').map((radio) => radio.textContent)).toEqual(['Ask me first', 'Auto', 'Custom']);
+    await expect(canvas.getAllByRole('radio').map((radio) => radio.textContent)).toEqual(['Ask me first', 'Automatic', 'Custom']);
     expectComputed(group, { backgroundColor: 'rgba(250, 249, 245, 0.05)', borderTopLeftRadius: '8px' });
     expectComputed(option('Custom'), {
       height: '28px',
@@ -54,7 +56,7 @@ export const Mode: Story = {
       backgroundColor: 'rgb(60, 57, 47)',
       color: 'rgba(250, 249, 245, 0.92)',
     });
-    expectComputed(option('Auto'), { backgroundColor: 'rgba(0, 0, 0, 0)', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(option('Automatic'), { backgroundColor: 'rgba(0, 0, 0, 0)', color: 'rgba(250, 249, 245, 0.64)' });
 
     // One tab stop: Tab lands on the chosen option.
     await userEvent.tab();
@@ -63,14 +65,14 @@ export const Mode: Story = {
 
     // segments_follow_arrow_keys
     await userEvent.keyboard('{ArrowLeft}');
-    await expect(option('Auto')).toHaveFocus();
-    await expect(option('Auto')).toHaveAttribute('aria-checked', 'true');
+    await expect(option('Automatic')).toHaveFocus();
+    await expect(option('Automatic')).toHaveAttribute('aria-checked', 'true');
     await expect(args.onChange).toHaveBeenLastCalledWith('auto');
 
     await userEvent.keyboard('{ArrowRight}');
     await expect(option('Custom')).toHaveFocus();
     await expect(option('Custom')).toHaveAttribute('aria-checked', 'true');
-    await expect(option('Auto')).toHaveAttribute('aria-checked', 'false');
+    await expect(option('Automatic')).toHaveAttribute('aria-checked', 'false');
     await expect(args.onChange).toHaveBeenLastCalledWith('custom');
 
     // From the last option, the next one is the first.

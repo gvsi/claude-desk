@@ -186,6 +186,8 @@ describe('design tokens', () => {
     add(['illustration-ink', 'illustration-ink-secondary'], ['illustration-card'], 4.5);
     add(['illustration-ink'], ['illustration-avatar'], 4.5);
     add(['illustration-handled'], ['illustration-card'], 3);
+    // The owner's words in a bubble in the Ask Claude panel, on the panel ground.
+    add(['text-primary'], ['fill-bubble'], 4.5, 'bg-panel');
     // A text field's outline is its boundary, so it needs 3:1 on every ground a field sits on.
     add(['line-field'], ['bg-surface', 'bg-app'], 3);
     // The deny answers in a held request's card: danger at rest and on hover, then danger-ghost,

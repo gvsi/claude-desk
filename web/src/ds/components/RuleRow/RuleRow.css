@@ -1,0 +1,47 @@
+/* RuleRow: the reason, the words under it and a shared rule's line on the left, the outcome at the
+   right. When the line is too narrow for both, the outcome moves under the words. */
+
+.cd-rule-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--space-16);
+  row-gap: var(--space-8);
+  min-width: 0;
+}
+
+.cd-rule-row__text {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.cd-rule-row__reason {
+  margin: 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.cd-rule-row__words {
+  margin: var(--space-2) 0 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.cd-rule-row__shared {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-6);
+  margin: var(--space-6) 0 0;
+  color: var(--text-secondary);
+}
+
+/* The 14 px icon sits on the middle of the caption's 17 px first line. */
+.cd-rule-row__shared > svg {
+  flex: none;
+  margin-top: 1.5px;
+}
+
+.cd-rule-row__shared > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

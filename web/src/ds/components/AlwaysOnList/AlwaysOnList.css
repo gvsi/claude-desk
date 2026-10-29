@@ -1,0 +1,30 @@
+/* AlwaysOnList: the section header, then each rule on its own line beside a quiet lock. */
+
+.cd-always-on {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-14);
+  min-width: 0;
+}
+
+.cd-always-on__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cd-always-on__item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-10);
+  padding: var(--space-6) 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+/* The 16 px lock sits on the middle of the body's 20 px first line. */
+.cd-always-on__lock {
+  flex: none;
+  margin-top: var(--space-2);
+  color: var(--text-secondary);
+}

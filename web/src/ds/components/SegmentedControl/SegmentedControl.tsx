@@ -4,7 +4,7 @@ import './SegmentedControl.css';
 
 export interface SegmentedOption<T extends string> {
   value: T;
-  /** The option in words: "Ask me first", "Auto", "Custom". */
+  /** The option in words: "Ask me first", "Automatic", "Custom". */
   label: string;
 }
 
