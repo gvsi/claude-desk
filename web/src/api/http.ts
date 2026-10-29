@@ -184,7 +184,15 @@ function decisionOf(value: unknown): Decision | null {
     : null;
 }
 
-const PAYMENT_LINK_STATES: ReadonlySet<string> = new Set<PaymentLinkState>(['issued', 'paid', 'expired', 'cancelled', 'unknown']);
+/** Every `PaymentLinkState`; a state added to the contract fails to compile until it is listed. */
+const paymentLinkStates = {
+  issued: true,
+  paid: true,
+  expired: true,
+  cancelled: true,
+  unknown: true,
+} as const satisfies Record<PaymentLinkState, true>;
+const PAYMENT_LINK_STATES: ReadonlySet<string> = new Set(Object.keys(paymentLinkStates));
 
 function stateOf(value: unknown): PaymentLinkState | null {
   return typeof value === 'string' && PAYMENT_LINK_STATES.has(value) ? (value as PaymentLinkState) : null;
@@ -309,7 +317,9 @@ export async function request<K extends RouteKey>(key: K, ...[opts]: RequestArgs
     let answer = await send(key, route.method, path, options.body, timeoutFor(route));
     if (answer.status === 202 && route.proving) answer = await followRetry(key, answer, startedAt);
     if (answer.status < 200 || answer.status > 299) throw errorFrom(key, route.method, answer);
-    if (answer.unreadable) throw new ApiError('unavailable', { route: key, method: route.method, status: answer.status });
+    // A body that isn't JSON, or none where only a 202 or 204 may answer without one, isn't an answer.
+    const empty = answer.body === undefined && answer.status !== 202 && answer.status !== 204;
+    if (answer.unreadable || empty) throw new ApiError('unavailable', { route: key, method: route.method, status: answer.status });
     notify({ key, ok: true });
     return answer.body as RouteResponse<K>;
   } catch (err) {

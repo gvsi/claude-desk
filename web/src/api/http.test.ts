@@ -128,6 +128,11 @@ describe('request', () => {
     // A 2xx whose body isn't JSON is not trusted as an answer.
     replies = [{ status: 200, raw: 'not json' }];
     expect((await failure(request('me'))).kind).toBe('unavailable');
+    // Nor is an empty one, unless its status says there is nothing to send.
+    replies = [{ status: 200 }];
+    expect((await failure(request('me'))).kind).toBe('unavailable');
+    replies = [{ status: 204 }];
+    await expect(request('deleteDesk', { params: { desk_id: 'd1' } })).resolves.toBeUndefined();
   });
 
   it('client_never_sets_auth_headers', async () => {
