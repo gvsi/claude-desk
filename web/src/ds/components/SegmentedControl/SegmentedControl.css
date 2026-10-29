@@ -1,0 +1,52 @@
+/* SegmentedControl: options on a faint track, the chosen one on the selected fill. Colors change
+   at motion-instant; nothing moves under reduced motion. */
+
+.cd-segmented {
+  display: inline-flex;
+  flex: none;
+  gap: var(--space-2);
+  box-sizing: border-box;
+  max-width: 100%;
+  padding: var(--space-2);
+  border-radius: var(--radius-control);
+  background: var(--fill-count);
+}
+
+.cd-segmented__option {
+  box-sizing: border-box;
+  height: var(--space-28);
+  margin: 0;
+  padding: 0 var(--space-12);
+  border: 0;
+  /* The track's radius less its inset, so the thumb's corners run parallel to the track's. */
+  border-radius: calc(var(--radius-control) - var(--space-2));
+  background: transparent;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-instant) var(--motion-ease),
+    color var(--motion-instant) var(--motion-ease);
+}
+
+/* The control weight (.cd-type-control's 420) at meta size, as the canvas draws segments. Two
+   classes, so it wins over .cd-type-meta whatever order the stylesheets load in. */
+.cd-segmented .cd-segmented__option {
+  font-weight: 420;
+}
+
+.cd-segmented__option:hover {
+  background: var(--fill-hover);
+}
+
+.cd-segmented__option[aria-checked='true'],
+.cd-segmented__option[aria-checked='true']:hover {
+  background: var(--bg-selected);
+  color: var(--text-primary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cd-segmented__option {
+    transition: none;
+  }
+}

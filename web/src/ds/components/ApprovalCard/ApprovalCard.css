@@ -1,0 +1,87 @@
+/* ApprovalCard: the status line, Claude's summary in serif, the context and the rule that held it,
+   then the answers as main secondary buttons, two to a row on the board's card. */
+
+.cd-approval-card__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  column-gap: var(--space-16);
+  row-gap: var(--space-2);
+  color: var(--text-secondary);
+}
+
+.cd-approval-card__status {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: flex-start;
+  gap: var(--space-8);
+  min-width: 0;
+  color: var(--text-primary);
+  font-weight: 520;
+}
+
+/* Centers the 6 px dot on the caption's 17 px first line. */
+.cd-approval-card__status > .cd-status-dot {
+  margin-top: 5px;
+}
+
+/* Focus lands here only when the answers it replaced had it; it is not a control, so no ring. */
+.cd-approval-card__status-line:focus {
+  outline: none;
+}
+
+.cd-approval-card__waiting {
+  margin-left: auto;
+}
+
+.cd-approval-card__reason {
+  margin: var(--space-12) 0 0;
+  color: var(--text-primary);
+}
+
+.cd-approval-card__context {
+  margin: var(--space-8) 0 0;
+  color: var(--text-secondary);
+}
+
+.cd-approval-card__held-by {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-8);
+  margin: var(--space-14) 0 0;
+  color: var(--text-secondary);
+}
+
+/* The 16 px icon sits on the middle of the 18 px meta line. */
+.cd-approval-card__held-by-icon {
+  flex: none;
+  margin-top: 1px;
+}
+
+.cd-approval-card__rule {
+  color: var(--text-primary);
+}
+
+/* As many 208 px columns as fit, so the longest answer never clips: two on the board's card, one
+   on a phone, all of them in a row across the content column. */
+.cd-approval-card__answers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 208px), 1fr));
+  gap: var(--space-8);
+  margin-top: var(--space-16);
+}
+
+.cd-approval-card__note,
+.cd-approval-card__progress {
+  margin: var(--space-8) 0 0;
+  color: var(--text-secondary);
+}
+
+/* Empty until an answer is being sent; it stays in place so the change is announced. */
+.cd-approval-card__progress:empty {
+  margin: 0;
+}
+
+.cd-approval-card__error {
+  margin-top: var(--space-12);
+}

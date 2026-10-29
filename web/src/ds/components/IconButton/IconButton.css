@@ -1,0 +1,66 @@
+/* IconButton: a size-control square or circle holding one icon. */
+
+.cd-icon-button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: var(--size-control);
+  height: var(--size-control);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-instant) var(--motion-ease),
+    transform var(--motion-fast) var(--motion-ease-emphasis);
+}
+
+.cd-icon-button--round {
+  border-radius: var(--radius-full);
+}
+
+.cd-icon-button--primary {
+  background: var(--button-primary);
+  color: var(--button-primary-text);
+}
+
+.cd-icon-button--ghost:hover {
+  background: var(--fill-hover);
+}
+
+.cd-icon-button--primary:hover {
+  background: var(--button-primary-hover);
+}
+
+.cd-icon-button:active {
+  transform: scale(0.98);
+}
+
+.cd-icon-button:disabled {
+  cursor: default;
+  opacity: 0.4;
+  transform: none;
+}
+
+.cd-icon-button--ghost:disabled {
+  background: transparent;
+}
+
+.cd-icon-button--primary:disabled {
+  background: var(--button-primary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cd-icon-button {
+    transition: none;
+  }
+
+  .cd-icon-button:active {
+    transform: none;
+  }
+}

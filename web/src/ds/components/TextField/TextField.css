@@ -1,0 +1,88 @@
+/* TextField: the label above, then the field on the page's own ground in the control outline at the
+   control radius, then the hint (with the counter near maxLength) and the error under it. The outline is never the only cue: the
+   label above always names the field. Margins, not a flex gap, space the lines, so the empty error
+   region takes no room. The outline's color changes at motion-instant; nothing moves under reduced
+   motion. */
+
+.cd-text-field {
+  display: block;
+  min-width: 0;
+}
+
+.cd-text-field__label {
+  display: block;
+  margin-bottom: var(--space-6);
+  color: var(--text-primary);
+}
+
+.cd-text-field__input {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: var(--size-control-main);
+  margin: 0;
+  padding: 0 var(--space-12);
+  border: 1px solid var(--line-control);
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-primary);
+  transition: border-color var(--motion-instant) var(--motion-ease);
+}
+
+/* Four lines that grow taller by dragging, never wider; long words wrap. */
+.cd-text-field--multiline .cd-text-field__input {
+  height: auto;
+  min-height: calc(4lh + var(--space-20));
+  padding: var(--space-10) var(--space-12);
+  resize: vertical;
+  overflow-wrap: anywhere;
+}
+
+.cd-text-field__input:hover {
+  border-color: var(--line-control-hover);
+}
+
+/* Under the field: the hint, and from 90% of maxLength the counter at the right. */
+.cd-text-field__meta {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-16);
+  margin-top: var(--space-6);
+  min-width: 0;
+}
+
+.cd-text-field__hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cd-text-field__counter {
+  flex: none;
+  margin: 0 0 0 auto;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* An error asks for something, so its words are in the primary text color, beside a refused dot. */
+.cd-text-field__error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-8);
+  margin: var(--space-6) 0 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+/* The dot sits on the middle of the first line: (18 px line - 6 px dot) / 2. */
+.cd-text-field__error > .cd-status-dot {
+  margin-top: var(--space-6);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cd-text-field__input {
+    transition: none;
+  }
+}

@@ -1,0 +1,22 @@
+/* ClaudeMessage: Claude's words as serif paragraphs, document style. No bubble, no avatar: the
+   reading column itself is Claude's voice. Cards sit in the same flow. */
+
+.cd-claude-message {
+  min-width: 0;
+}
+
+.cd-claude-message__prose {
+  margin: 0;
+  color: var(--text-primary);
+  /* Claude's line breaks stay; a long unbroken word wraps inside the column. */
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.cd-claude-message > * + * {
+  margin-top: var(--space-12);
+}
+
+.cd-claude-message__prose + .cd-claude-message__prose {
+  margin-top: var(--space-10);
+}

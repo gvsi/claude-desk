@@ -1,0 +1,13 @@
+/* CountPill: a small number on a faint fill, beside the thing it counts. Never a colored badge. */
+
+.cd-count-pill {
+  display: inline-block;
+  flex: none;
+  box-sizing: border-box;
+  min-width: var(--space-20);
+  padding: 0 var(--space-6);
+  border-radius: var(--radius-full);
+  background: var(--fill-count);
+  color: var(--text-secondary);
+  text-align: center;
+}

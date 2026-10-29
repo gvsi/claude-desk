@@ -1,0 +1,18 @@
+/* The Claude Desk mark: the only place clay appears. The stroke is set here, not as an SVG
+   attribute, because presentation attributes can't read custom properties. */
+
+.cd-mark {
+  display: block;
+  flex: none;
+  stroke: var(--clay);
+}
+
+.cd-wordmark {
+  display: inline-flex;
+  flex-direction: column;
+  color: var(--text-primary);
+}
+
+.cd-wordmark__beta {
+  color: var(--text-secondary);
+}

@@ -1,0 +1,238 @@
+/* PublicShell: the public page. A brand header in the business's colors (--brand-* from the
+   props, the accent only as the 2 px rule under it); under it the chat column (at most 680 px,
+   centered) and the about column at the right on the panel, 300 px as on the board.
+
+   The shell is an inline-size container: below 900 px wide the about column moves under the chat,
+   and below 640 px the gutters are 16 px. The composer and the footer stay at the bottom of the
+   window while the conversation scrolls above them. */
+
+.cd-public-shell {
+  container: cd-public-shell / inline-size;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  min-height: 100dvh;
+  background: var(--bg-app);
+  color: var(--text-primary);
+}
+
+/* Inside an owner screen: as tall as the panel that holds it. */
+.cd-public-shell--embedded {
+  min-height: 100%;
+}
+
+/* The brand header. */
+.cd-public-shell__brand {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--space-14);
+  row-gap: var(--space-4);
+  box-sizing: border-box;
+  min-height: var(--size-brand-header);
+  padding: var(--space-12) var(--space-40);
+  border-bottom: 2px solid var(--brand-accent);
+  background: var(--brand-field);
+  color: var(--brand-ink);
+}
+
+.cd-public-shell__monogram {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: var(--size-control-main);
+  height: var(--size-control-main);
+  border: 1.5px solid var(--brand-ink-secondary);
+  border-radius: var(--radius-card);
+  color: var(--brand-ink);
+}
+
+/* Two classes, so the weight wins over .cd-type-page-title whatever order the stylesheets load in. */
+.cd-public-shell .cd-public-shell__monogram {
+  font-weight: 600;
+}
+
+.cd-public-shell__brand-text {
+  display: flex;
+  flex: 1 1 12em;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.cd-public-shell__brand-name,
+.cd-public-shell__tagline {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.cd-public-shell__tagline {
+  color: var(--brand-ink-secondary);
+}
+
+/* The chat and the about column. */
+.cd-public-shell__body {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: stretch;
+  min-height: 0;
+}
+
+.cd-public-shell__chat {
+  display: flex;
+  flex: 1 1 auto;
+  box-sizing: border-box;
+  min-width: 0;
+  padding: 0 var(--space-40);
+}
+
+.cd-public-shell__column {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  max-width: calc(var(--size-reading) + var(--space-40));
+  margin: 0 auto;
+}
+
+.cd-public-shell__chat-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--space-16);
+  row-gap: var(--space-10);
+  padding: var(--space-16) 0 var(--space-14);
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+.cd-public-shell__chat-title {
+  display: flex;
+  flex: 1 1 18em;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.cd-public-shell__heading {
+  margin: 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.cd-public-shell__disclosure {
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.cd-public-shell__chat-head > .cd-button {
+  flex: none;
+}
+
+.cd-public-shell__conversation {
+  /* The chat column is the reading width here, so conversation rows fill it, as the composer does. */
+  --cd-row-max: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-top: var(--space-20);
+}
+
+/* The composer and the footer: held at the bottom of the window over the app background. */
+.cd-public-shell__composer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  padding: var(--space-16) 0;
+  background: var(--bg-app);
+}
+
+/* The about column. */
+.cd-public-shell__about {
+  display: flex;
+  flex: 0 0 300px;
+  flex-direction: column;
+  gap: var(--space-16);
+  box-sizing: border-box;
+  width: 300px;
+  min-width: 0;
+  padding: var(--space-24) var(--space-24) var(--space-20);
+  border-left: 1px solid var(--line-hairline);
+  background: var(--bg-panel);
+}
+
+.cd-public-shell__blocks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+}
+
+.cd-public-shell__prose {
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.cd-public-shell__links {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  padding-top: var(--space-16);
+  border-top: 1px solid var(--line-hairline);
+}
+
+.cd-public-shell__links-heading {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+/* Two classes, so the weight wins over .cd-type-meta whatever order the stylesheets load in. */
+.cd-public-shell .cd-public-shell__links-heading {
+  font-weight: 520;
+}
+
+.cd-public-shell__link-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-wrap: anywhere;
+}
+
+/* Narrow: the about column moves under the chat, full width, with a hairline above it. */
+@container cd-public-shell (max-width: 899.98px) {
+  .cd-public-shell__body {
+    flex-direction: column;
+  }
+
+  .cd-public-shell__about {
+    flex: none;
+    width: auto;
+    border-top: 1px solid var(--line-hairline);
+    border-left: 0;
+  }
+}
+
+/* A phone, or the owner's side panel: 16 px gutters. */
+@container cd-public-shell (max-width: 639.98px) {
+  .cd-public-shell__brand {
+    padding-right: var(--space-16);
+    padding-left: var(--space-16);
+  }
+
+  .cd-public-shell__chat {
+    padding-right: var(--space-16);
+    padding-left: var(--space-16);
+  }
+
+  .cd-public-shell__about {
+    padding-right: var(--space-16);
+    padding-left: var(--space-16);
+  }
+}

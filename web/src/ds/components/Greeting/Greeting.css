@@ -1,0 +1,114 @@
+/* Greeting: the serif greeting with the presence line under it, and the public link in an
+   outlined pill at the right, level with the greeting's first line. On a narrow line the pill
+   drops under the text. The presence glyphs sit in a short row and breathe slowly over
+   motion-breathe, each half a breath out of step with the one before; under reduced motion they
+   are still. */
+
+.cd-greeting {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  column-gap: var(--space-16);
+  row-gap: var(--space-12);
+  min-width: 0;
+}
+
+.cd-greeting__text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-width: 0;
+}
+
+.cd-greeting__title {
+  margin: 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.cd-greeting__presence {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cd-greeting__glyphs {
+  display: flex;
+  flex: none;
+  align-items: center;
+  padding-left: var(--space-2);
+}
+
+/* 22 px circles on the raised surface, side by side, each ringed in the app background against
+   the next. None covers another's icon or initials (the count type, 11 px). */
+.cd-greeting__glyph {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: calc(var(--size-avatar) - var(--space-6));
+  height: calc(var(--size-avatar) - var(--space-6));
+  border-radius: var(--radius-full);
+  background: var(--bg-surface);
+  box-shadow:
+    inset 0 0 0 1px var(--line-card),
+    0 0 0 var(--space-2) var(--bg-app);
+  color: var(--text-primary);
+  animation: cd-breathe var(--motion-breathe) var(--motion-ease) infinite alternate;
+}
+
+.cd-greeting__glyph:nth-child(2n) {
+  animation-delay: calc(var(--motion-breathe) / -2);
+}
+
+@keyframes cd-breathe {
+  from {
+    opacity: 0.5;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+/* The public link: an outlined pill, its copy button inside the right end. */
+.cd-greeting__link {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: var(--space-8);
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  height: var(--size-control);
+  margin-top: var(--space-6);
+  padding: 0 var(--space-2) 0 var(--space-12);
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-full);
+  color: var(--text-secondary);
+}
+
+.cd-greeting__link-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The copy button fits inside the 32 px pill. */
+.cd-greeting__link > .cd-icon-button {
+  width: calc(var(--size-control) - var(--space-6));
+  height: calc(var(--size-control) - var(--space-6));
+  color: var(--text-secondary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cd-greeting__glyph {
+    animation: none;
+    opacity: 1;
+  }
+}

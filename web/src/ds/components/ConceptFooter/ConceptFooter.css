@@ -1,0 +1,31 @@
+/* ConceptFooter: one quiet caption line, with "Powered by Claude Desk" on its right when asked.
+   On a narrow screen the two lines stack. */
+
+.cd-concept-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--space-16);
+  row-gap: var(--space-4);
+  color: var(--text-secondary);
+}
+
+.cd-concept-footer__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+}
+
+.cd-concept-footer__powered {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-6);
+  margin: 0;
+}
+
+.cd-concept-footer__brand {
+  font-family: var(--font-serif);
+  font-weight: 460;
+  color: var(--text-primary);
+}

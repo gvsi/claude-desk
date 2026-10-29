@@ -1,0 +1,79 @@
+/* Switch: one row, the label and description then a pill track. On is the inverted neutral (the
+   primary button's fill) with a dark knob at the end; off is a faint track with a secondary knob at
+   the start. The knob slides at motion-fast; nothing moves under reduced motion. */
+
+.cd-switch {
+  --cd-switch-knob: var(--space-16);
+  --cd-switch-inset: var(--space-2);
+
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0;
+  padding: var(--space-6) var(--space-8);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--motion-instant) var(--motion-ease);
+}
+
+.cd-switch:hover {
+  background: var(--fill-hover);
+}
+
+.cd-switch__text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.cd-switch__description {
+  color: var(--text-secondary);
+}
+
+.cd-switch__track {
+  display: flex;
+  flex: none;
+  align-items: center;
+  box-sizing: border-box;
+  width: calc(var(--cd-switch-knob) * 2 + var(--cd-switch-inset) * 2);
+  height: calc(var(--cd-switch-knob) + var(--cd-switch-inset) * 2);
+  padding: var(--cd-switch-inset);
+  border-radius: var(--radius-full);
+  background: var(--fill-secondary);
+  transition: background-color var(--motion-fast) var(--motion-ease);
+}
+
+.cd-switch__knob {
+  width: var(--cd-switch-knob);
+  height: var(--cd-switch-knob);
+  border-radius: var(--radius-full);
+  background: var(--text-secondary);
+  transition:
+    transform var(--motion-fast) var(--motion-ease-emphasis),
+    background-color var(--motion-fast) var(--motion-ease);
+}
+
+.cd-switch[aria-checked='true'] .cd-switch__track {
+  background: var(--button-primary);
+}
+
+.cd-switch[aria-checked='true'] .cd-switch__knob {
+  background: var(--bg-app);
+  transform: translateX(var(--cd-switch-knob));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cd-switch,
+  .cd-switch__track,
+  .cd-switch__knob {
+    transition: none;
+  }
+}

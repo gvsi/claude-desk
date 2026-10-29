@@ -1,0 +1,87 @@
+/* AttemptRow: a row link at the control radius, at least 50 px tall, in three columns: the time,
+   what they tried over where it came from (each one line with an ellipsis), and the checkpoint that
+   stopped it. The open attempt is on the selected fill; others fill on hover at motion-instant.
+   In a narrow list the checkpoint moves under the words. Nothing moves under reduced motion. */
+
+.cd-attempt-row {
+  display: block;
+  container-type: inline-size;
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 50px;
+  padding: var(--space-6) var(--space-10);
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-primary);
+  text-decoration: none;
+  transition: background-color var(--motion-instant) var(--motion-ease);
+}
+
+.cd-attempt-row:hover {
+  background: var(--fill-hover);
+}
+
+.cd-attempt-row[aria-current='true'],
+.cd-attempt-row[aria-current='true']:hover {
+  background: var(--bg-selected);
+}
+
+/* The time column fits a screen's clock time ("10:46 am"), the last column the longest checkpoint
+   name ("Action checkpoint"). */
+.cd-attempt-row__grid {
+  display: grid;
+  grid-template-areas: 'time what stopped';
+  grid-template-columns: 64px minmax(0, 1fr) 112px;
+  align-items: center;
+  column-gap: var(--space-12);
+  min-height: calc(50px - var(--space-12));
+}
+
+.cd-attempt-row__time {
+  grid-area: time;
+  align-self: start;
+  padding-top: 1px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.cd-attempt-row__what {
+  display: flex;
+  grid-area: what;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.cd-attempt-row__title,
+.cd-attempt-row__who {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cd-attempt-row__who {
+  color: var(--text-secondary);
+}
+
+.cd-attempt-row__stopped {
+  grid-area: stopped;
+  min-width: 0;
+}
+
+/* A phone's list: the checkpoint goes under the words, beside the time's column. */
+@container (max-width: 400px) {
+  .cd-attempt-row__grid {
+    grid-template-areas:
+      'time what'
+      'time stopped';
+    grid-template-columns: 64px minmax(0, 1fr);
+    row-gap: var(--space-6);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cd-attempt-row {
+    transition: none;
+  }
+}

@@ -1,0 +1,94 @@
+/* ReplyCard: a Card holding the kernel's fields under a fixed label. No date tile, no price column
+   and no colored tile: the label says what the card is, and its fields are the kernel's text. */
+
+/* At most 520 px wide (the brand book's typed-card rule), and never wider than its column. */
+.cd-reply-card {
+  max-width: 520px;
+  min-width: 0;
+}
+
+.cd-reply-card p,
+.cd-reply-card ul {
+  margin: 0;
+}
+
+/* The top line: a 16 px template icon and the label, in a secondary caption. */
+.cd-reply-card__label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  color: var(--text-secondary);
+}
+
+.cd-reply-card__label > svg {
+  flex: none;
+}
+
+.cd-reply-card__label > span {
+  min-width: 0;
+}
+
+.cd-reply-card__label + .cd-reply-card__data > :first-child {
+  margin-top: var(--space-4);
+}
+
+.cd-reply-card__headline {
+  color: var(--text-primary);
+}
+
+.cd-reply-card__detail {
+  color: var(--text-secondary);
+}
+
+.cd-reply-card__headline + .cd-reply-card__detail,
+.cd-reply-card__detail + .cd-reply-card__detail {
+  margin-top: var(--space-2);
+}
+
+/* Options are a plain list of their labels: the visitor answers in the chat, so they aren't controls. */
+.cd-reply-card__options {
+  display: grid;
+  row-gap: var(--space-4);
+  padding: 0;
+  list-style: none;
+  color: var(--text-primary);
+}
+
+.cd-reply-card__data > * + .cd-reply-card__options {
+  margin-top: var(--space-8);
+}
+
+.cd-reply-card__note {
+  margin-top: var(--space-8);
+  color: var(--text-secondary);
+}
+
+.cd-reply-card__action {
+  display: flex;
+  margin-top: var(--space-12);
+}
+
+/* An outcome (booked, paid): a sage check beside the label, drawn once. */
+.cd-reply-card__check {
+  color: var(--status-handled);
+}
+
+.cd-reply-card__check path {
+  stroke-dasharray: 24;
+  stroke-dashoffset: 24;
+  animation: cd-reply-card-draw var(--motion-base) var(--motion-ease-emphasis) forwards;
+}
+
+@keyframes cd-reply-card-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* Reduced motion: the check is drawn from the start. */
+@media (prefers-reduced-motion: reduce) {
+  .cd-reply-card__check path {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+}

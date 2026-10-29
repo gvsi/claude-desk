@@ -1,0 +1,43 @@
+/* PageHeader: the serif page title at the left with its subtitle beneath, and the page's actions
+   at the right of the title's line. The title's 32 px line is a control's height, so a button
+   there sits level with it. On a narrow line the actions wrap under the text. */
+
+.cd-page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  column-gap: var(--space-16);
+  row-gap: var(--space-12);
+  min-width: 0;
+}
+
+.cd-page-header__text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+/* A word with no break in it (a long business name) breaks rather than leaving the line. */
+.cd-page-header__title {
+  margin: 0;
+  color: var(--text-primary);
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+
+.cd-page-header__subtitle {
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.cd-page-header__actions {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+  min-height: var(--size-control);
+}

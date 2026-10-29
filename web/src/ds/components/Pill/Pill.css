@@ -1,0 +1,15 @@
+/* Pill: a label in a thin outline, 20 px tall. Never filled and never colored. */
+
+.cd-pill {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-4);
+  box-sizing: border-box;
+  height: var(--space-20);
+  padding: 0 var(--space-8);
+  border: 1px solid var(--line-control);
+  border-radius: var(--radius-full);
+  color: var(--text-primary);
+  white-space: nowrap;
+}

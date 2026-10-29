@@ -1,0 +1,188 @@
+import type { Meta, StoryObj } from '@storybook/react-vite';
+import { useState } from 'react';
+import { expect, fn, within } from 'storybook/test';
+
+import { rivera } from '../../fixtures/index.ts';
+import { expectComputed } from '../../test/expectComputed.ts';
+import { Sidebar, type NavKey, type SidebarProps } from './Sidebar.tsx';
+
+const MAIN_LINE = { id: 'desk-rivera-main', name: rivera.business.deskName };
+const EMERGENCIES = { id: 'desk-rivera-emergencies', name: 'Emergencies' };
+
+const hrefs = {
+  today: '#today',
+  conversations: '#conversations',
+  people: '#customers',
+  rules: '#rules',
+  safety: '#safety',
+  share: '#share',
+  settings: '#settings',
+} satisfies Record<NavKey, string>;
+
+/**
+ * The sidebar as the owner layout holds it: the Answering switch and the Desk picker show what the
+ * screen passes back, and each change is reported to the story.
+ */
+function Layout(props: SidebarProps) {
+  const [answering, setAnswering] = useState(props.answering);
+  const [deskId, setDeskId] = useState(props.currentDeskId);
+  return (
+    <Sidebar
+      {...props}
+      answering={answering}
+      onAnsweringChange={(next) => {
+        setAnswering(next);
+        props.onAnsweringChange(next);
+      }}
+      currentDeskId={deskId}
+      onSwitchDesk={(id) => {
+        setDeskId(id);
+        props.onSwitchDesk(id);
+      }}
+    />
+  );
+}
+
+const meta = {
+  title: 'Layout/Sidebar',
+  component: Sidebar,
+  args: {
+    business: rivera.business.name,
+    onSwitchBusiness: fn(),
+    desks: [MAIN_LINE, EMERGENCIES],
+    currentDeskId: MAIN_LINE.id,
+    onSwitchDesk: fn(),
+    current: 'today',
+    hrefs,
+    peopleLabel: 'Customers',
+    counts: {
+      conversations: { n: 2, label: '2 need you' },
+      safety: { n: 2, label: '2 blocked', attention: true },
+    },
+    answering: true,
+    onAnsweringChange: fn(),
+    owner: { name: rivera.business.ownerName, status: 'Available for chats' },
+  },
+  render: (args) => <Layout {...args} />,
+  // The owner app's sidebar column: 264 px on the panel, the board's full height.
+  decorators: [
+    (Story) => (
+      <div style={{ display: 'flex', width: 'var(--size-sidebar)', minHeight: 820, background: 'var(--bg-panel)' }}>
+        <Story />
+      </div>
+    ),
+  ],
+  parameters: { layout: 'fullscreen', canvas: 'N-Today-NeedsYou' },
+} satisfies Meta<typeof Sidebar>;
+
+export default meta;
+
+type Story = StoryObj<typeof meta>;
+
+/** The nav's links, each by the words of its row (its count is read separately). */
+function navRows(root: HTMLElement): { link: HTMLElement; text: string }[] {
+  const nav = within(root).getByRole('navigation', { name: 'Main' });
+  return within(nav)
+    .getAllByRole('link')
+    .map((link) => ({ link, text: link.querySelector('.cd-sidebar__label')?.textContent ?? '' }));
+}
+
+export const TwoDesks: Story = {
+  parameters: {
+    canvasNote:
+      "The board's Desk picker opens a popover list with a green dot beside the Desk's name; here it opens the list under itself, with no dot, since no words say what it means. The owner row isn't a button, because it opens nothing yet.",
+  },
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
+    // nav_order_is_fixed: the seven rows in their fixed order, the people row third.
+    const rows = navRows(canvasElement);
+    await expect(rows.map((row) => row.text)).toEqual(['Today', 'Conversations', 'Customers', 'Rules', 'Safety', 'Share', 'Settings']);
+    await expect(rows.map((row) => row.link.getAttribute('href'))).toEqual(Object.values(hrefs));
+
+    // current_page_marked: only Today is the current page, on the selected fill, with no accent bar.
+    const current = rows.filter((row) => row.link.getAttribute('aria-current') !== null);
+    await expect(current.map((row) => [row.text, row.link.getAttribute('aria-current')])).toEqual([['Today', 'page']]);
+    const today = rows[0]?.link as HTMLElement;
+    expectComputed(today, { height: '36px', backgroundColor: 'rgb(60, 57, 47)', borderLeftWidth: '0px', borderRadius: '8px' });
+    expectComputed(rows[1]?.link as HTMLElement, { backgroundColor: 'rgba(0, 0, 0, 0)' });
+
+    // Counts only on Conversations and Safety, read as what they mean; Safety's held dot asks for attention.
+    await expect(canvas.getAllByRole('img').map((pill) => pill.getAttribute('aria-label'))).toEqual(['2 need you', '2 blocked']);
+    await expect(within(rows[1]?.link as HTMLElement).getByRole('img', { name: '2 need you' })).toBeVisible();
+    const safety = rows[4]?.link as HTMLElement;
+    await expect(within(safety).getByRole('img', { name: '2 blocked' })).toBeVisible();
+    await expect(safety.querySelectorAll('.cd-status-dot--held')).toHaveLength(1);
+    await expect(canvasElement.querySelectorAll('.cd-status-dot')).toHaveLength(1);
+
+    // The business row opens the switcher.
+    await userEvent.click(canvas.getByRole('button', { name: 'Switch business, current: Rivera Plumbing' }));
+    await expect(args.onSwitchBusiness).toHaveBeenCalledTimes(1);
+
+    // desk_picker_only_with_two_desks: the picker opens the Desks under it, the current one marked.
+    const picker = canvas.getByRole('button', { name: 'Switch Desk, current: Main line' });
+    await expect(picker).toHaveAttribute('aria-expanded', 'false');
+    await userEvent.click(picker);
+    await expect(picker).toHaveAttribute('aria-expanded', 'true');
+    const list = canvas.getByRole('list', { name: 'Desks in Rivera Plumbing' });
+    const choices = within(list).getAllByRole('button');
+    await expect(choices.map((choice) => choice.textContent)).toEqual(['Main line', 'Emergencies']);
+    await expect(choices[0]).toHaveAttribute('aria-current', 'true');
+    await expect(choices[1]).not.toHaveAttribute('aria-current');
+
+    // Escape closes the list and returns focus to the picker.
+    await userEvent.tab();
+    await expect(choices[0]).toHaveFocus();
+    await userEvent.keyboard('{Escape}');
+    await expect(canvas.queryByRole('list', { name: 'Desks in Rivera Plumbing' })).toBeNull();
+    await expect(picker).toHaveFocus();
+
+    // Picking another Desk switches to it and closes the list.
+    await userEvent.keyboard('{Enter}');
+    await userEvent.click(canvas.getByRole('button', { name: 'Emergencies' }));
+    await expect(args.onSwitchDesk).toHaveBeenCalledTimes(1);
+    await expect(args.onSwitchDesk).toHaveBeenLastCalledWith(EMERGENCIES.id);
+    await expect(canvas.queryByRole('list', { name: 'Desks in Rivera Plumbing' })).toBeNull();
+    await expect(canvas.getByRole('button', { name: 'Switch Desk, current: Emergencies' })).toHaveFocus();
+
+    // Answering is a switch at the bottom, with what "on" means.
+    const answering = canvas.getByRole('switch', { name: 'Answering' });
+    await expect(answering).toHaveAccessibleDescription('Claude answers under your rules');
+    await userEvent.click(answering);
+    await expect(args.onAnsweringChange).toHaveBeenLastCalledWith(false);
+
+    // The owner row: the name and status in words, the initials avatar hidden beside them.
+    await expect(canvas.getByText('Maria Rivera')).toBeVisible();
+    await expect(canvas.getByText('Available for chats')).toBeVisible();
+    const avatar = canvasElement.querySelector('.cd-sidebar__avatar');
+    await expect(avatar).toHaveAttribute('aria-hidden', 'true');
+    await expect(avatar).toHaveTextContent('MR');
+
+    // Nothing reaches past the 264 px column.
+    const column = canvasElement.querySelector<HTMLElement>('.cd-sidebar');
+    await expect(column?.scrollWidth).toBeLessThanOrEqual(column?.clientWidth ?? 0);
+  },
+};
+
+export const OneDesk: Story = {
+  args: {
+    desks: [MAIN_LINE],
+    current: 'safety',
+    peopleLabel: 'Clients',
+    counts: { safety: { n: 1, label: '1 blocked' } },
+  },
+  parameters: {
+    canvasNote: 'The board shows two Desks; with one there is nothing to switch to, so the picker is left out.',
+  },
+  play: async ({ canvas, canvasElement }) => {
+    // desk_picker_only_with_two_desks
+    await expect(canvas.queryByRole('button', { name: /Switch Desk/ })).toBeNull();
+    await expect(canvas.getByRole('button', { name: 'Switch business, current: Rivera Plumbing' })).toBeVisible();
+
+    // The people row takes the business's word for them, and only Safety is current.
+    const rows = navRows(canvasElement);
+    await expect(rows.map((row) => row.text)).toEqual(['Today', 'Conversations', 'Clients', 'Rules', 'Safety', 'Share', 'Settings']);
+    await expect(rows.filter((row) => row.link.hasAttribute('aria-current')).map((row) => row.text)).toEqual(['Safety']);
+    // A count without attention has no dot; Conversations has no count to show.
+    await expect(canvas.getAllByRole('img').map((pill) => pill.getAttribute('aria-label'))).toEqual(['1 blocked']);
+    await expect(canvasElement.querySelectorAll('.cd-status-dot')).toHaveLength(0);
+  },
+};

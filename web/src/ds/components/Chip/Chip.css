@@ -1,0 +1,55 @@
+/* Chip: an outlined pill for a suggestion or an option. */
+
+.cd-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  box-sizing: border-box;
+  height: var(--space-28);
+  margin: 0;
+  padding: 0 var(--space-12);
+  border: 1px solid var(--line-control);
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--text-primary);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-instant) var(--motion-ease),
+    border-color var(--motion-instant) var(--motion-ease),
+    transform var(--motion-fast) var(--motion-ease-emphasis);
+}
+
+.cd-chip:hover {
+  background: var(--fill-hover);
+  border-color: var(--line-control-hover);
+}
+
+.cd-chip:active {
+  transform: scale(0.98);
+}
+
+.cd-chip--selected,
+.cd-chip--selected:hover {
+  background: var(--bg-selected);
+  border-color: var(--line-control-hover);
+}
+
+/* The check sits a little closer to the edge, so the chip's words keep their place. */
+.cd-chip--selected {
+  padding-left: var(--space-8);
+}
+
+.cd-chip__check {
+  flex: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cd-chip {
+    transition: none;
+  }
+
+  .cd-chip:active {
+    transform: none;
+  }
+}
