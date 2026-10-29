@@ -433,8 +433,10 @@ def is_money(tool: str, effects: Iterable[str]) -> bool:
 
 def held_answers(principal: Principal, action: NormalizedAction | None) -> list[ApprovalAnswer]:
     """The owner's answers to a hold ("Decision lifecycle"): `allow_person` only for a verified
-    person or an agent key and, on a money tool, an amount within the hard cap."""
-    scoped = principal.person_id is not None or principal.agent_key_id is not None
+    person or an agent key and, on a money tool, an amount within the hard cap. A session that
+    names a person without having confirmed it's them is no person to allow."""
+    person = principal.person_id is not None and verified(principal.kind, principal.assurance, principal.person_id)
+    scoped = person or principal.agent_key_id is not None
     if action is not None and is_money(action.tool, action.effects):
         scoped = scoped and action.amount_cents is not None and action.amount_cents <= AUTO_MONEY_HARD_CAP_CENTS
     return [answer for answer in get_args(ApprovalAnswer) if answer != "allow_person" or scoped]

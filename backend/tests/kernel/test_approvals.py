@@ -1,0 +1,673 @@
+"""POST /approvals/{decision_id}/answer and POST /decisions/{decision_id}/cancel: the owner answers
+a held request once, and an approval runs the exact action it was given for, as the session that
+asked.
+
+Most tests answer the held quote every Rivera Plumbing copy is seeded with (drain clearing at 15%
+off, which `rv-quote` holds for Maria); the rest hold calls on a Desk of scripted adapters
+(`FakeAdapter`) under `ask` cards. The owner answers with the copy's owner token, as the API
+does, and reads the outcome back through `GET /decisions/{decision_id}` and the safety ledger.
+"""
+
+import asyncio
+import logging
+import re
+
+import httpx
+import pytest
+from fastapi import FastAPI
+from sqlalchemy import select
+
+from desk.contracts import ApprovalResult, Decision, ExecResult, PolicyVersion, Principal, Review, RuleCard
+from desk.db.models import Action, ActorSession, Approval, Booking, Execution, Person, Quote
+from desk.db.models import Decision as DecisionRow
+from desk.kernel_service import activation, adapters, approvals, compiler, demo_inbox, desks, execute
+from desk.kernel_service.adapters.base import AdapterRefusal, AdapterResult
+from desk.kernel_service.repo import new_id
+from desk.kernel_service.seed import RIVERA_CARDS
+
+from .fakes import FakeAdapter
+from .helpers import CopyRows, kernel_ctx, ledger_rows, rows_of, verify_session
+from .test_adapters import Rivera, add_slot, book, local, quote_args, rivera, visitor_of
+from .test_compiler import card
+from .test_decide import (Visitor, decided, desk_with, open_visitor, payment_link, set_mode, set_session,
+                          verify_signature)
+from .test_execute import activate, change_records, committed, reservations
+
+
+async def post_answer(client: httpx.AsyncClient, headers: dict[str, str], decision_id: str,
+                      answer: str) -> httpx.Response:
+    return await client.post(f"/approvals/{decision_id}/answer", headers=headers, json={"answer": answer})
+
+
+async def answered(client: httpx.AsyncClient, headers: dict[str, str], decision_id: str,
+                   answer: str) -> ApprovalResult:
+    response = await post_answer(client, headers, decision_id, answer)
+    assert response.status_code == 200, response.text
+    return ApprovalResult.model_validate(response.json())
+
+
+async def read_id(client: httpx.AsyncClient, headers: dict[str, str], decision_id: str) -> Decision:
+    response = await client.get(f"/decisions/{decision_id}", headers=headers)
+    assert response.status_code == 200, response.text
+    return Decision.model_validate(response.json())
+
+
+async def approvals_of(app: FastAPI, copy_id: str) -> list[Approval]:
+    return await rows_of(app, copy_id, select(Approval).order_by(Approval.created_at, Approval.approval_id))
+
+
+async def seeded_hold(app: FastAPI, client: httpx.AsyncClient) -> tuple[Rivera, DecisionRow]:
+    """A fresh Rivera copy and the held quote it was seeded with."""
+    copy = await rivera(app, client)
+    [held] = await rows_of(app, copy.copy_id, select(DecisionRow))
+    assert held.state == "held"
+    return copy, held
+
+
+async def public_key(client: httpx.AsyncClient) -> str:
+    return (await client.get("/health")).json()["public_key_hex"]
+
+
+async def test_allow_once_executes_inside_the_answer(app, client, frozen_clock):
+    copy, held = await seeded_hold(app, client)
+    result = await answered(client, copy.owner, held.decision_id, "allow_once")
+
+    decision, execution = result.decision, result.execution
+    assert (decision.decision_id, decision.state, decision.visitor_plain) == (held.decision_id, "executed", "Done")
+    assert result.card_diff is None                                       # allow_once drafts no rule
+    [quote] = await rows_of(app, copy.copy_id, select(Quote))
+    assert (quote.action_id, quote.session_id, quote.discount_bp, quote.amount_cents) == (
+        held.action_id, held.session_id, 1500, 15_300)                   # the action Maria approved, at its price
+    [fact] = execution.facts
+    assert (execution.action_id, execution.state, fact.fact_id) == (held.action_id, "succeeded",
+                                                                    f"quote:{quote.quote_id}")
+    [run] = await rows_of(app, copy.copy_id, select(Execution))
+    assert (run.action_id, run.decision_id, run.state, run.result) == (held.action_id, held.decision_id, "succeeded",
+                                                                       execution)
+
+    # one approval, bound to the action and its nonce, consumed by this answer
+    [approval] = await rows_of(app, copy.copy_id, select(Approval))
+    assert (approval.decision_id, approval.answer, approval.policy_version) == (held.decision_id, "allow_once", 1)
+    assert (approval.consumed_at, approval.created_at, approval.expires_at) == (
+        frozen_clock.now(), frozen_clock.now(), held.expires_at)
+    assert re.fullmatch(r"[0-9a-f]{32}", approval.nonce)
+    [action] = await rows_of(app, copy.copy_id, select(Action))
+    assert approval.binding_sha256 == execute.binding_sha256(
+        copy_id=copy.copy_id, desk_id=copy.desk_id, session_id=held.session_id, action_id=held.action_id,
+        args_sha256=action.args_sha256, profile_sha256=action.profile_sha256, nonce=approval.nonce)
+
+    # the approval, then the execution, on the ledger; the decision signed at its last entry
+    entries = [e for e in await ledger_rows(app, copy) if e.seq > held.ledger_seq]
+    base = {"decision_id": held.decision_id, "action_id": held.action_id}
+    assert [(e.event.kind, e.event.session_id, e.event.ref_id, e.event.summary) for e in entries] == [
+        ("approval", held.session_id, held.decision_id, {**base, "answer": "allow_once", "state": "approved"}),
+        ("execute", held.session_id, held.decision_id, {**base, "state": "executed"}),
+    ]
+    assert decision.ledger_seq == entries[-1].seq
+    verify_signature(await public_key(client), decision)
+    response = await client.get(f"/decisions/{held.decision_id}", headers=copy.owner)
+    assert response.json() == decision.model_dump(mode="json")
+
+
+async def held_on(client: httpx.AsyncClient, rows: CopyRows, tool: str = "native.quote", args: dict | None = None,
+                  *, visitor: Visitor | None = None, call_id: str = "call-1") -> tuple[Visitor, Decision]:
+    """A visitor of `rows`' Desk (a new one unless given) and a call of theirs the Desk holds."""
+    visitor = visitor or await open_visitor(client, rows)
+    decision = await decided(client, visitor, tool, args if args is not None else {"qty": 1}, call_id=call_id)
+    assert decision.state == "held", decision.reason_plain
+    return visitor, decision
+
+
+ASK_QUOTES = [card("quote", "native.quote", mode="ask")]
+
+
+async def test_the_approved_action_runs_as_the_held_session(app, client, registry):
+    # the seeded quote: its fact is the asking visitor's and the business's, never the owner session's
+    copy, held = await seeded_hold(app, client)
+    execution = (await answered(client, copy.owner, held.decision_id, "allow_once")).execution
+    [fact] = execution.facts
+    assert fact.label.readers == ["owner", f"session:{held.session_id}"]
+    assert set(execution.model_view) == adapters.ADAPTERS["native.quote"].model_view_keys
+
+    # a scripted adapter sees whom it runs as, and what it returns is filtered for that session
+    quote = FakeAdapter("native.quote")
+    rows = await desk_with(app, [quote], ASK_QUOTES)
+    visitor, decision = await held_on(client, rows)
+    ran_as = []
+
+    def side_effect(xctx, action, args) -> AdapterResult:
+        ran_as.append((xctx.principal.kind, xctx.principal.session_id, xctx.session_row.session_id))
+        return AdapterResult(model_view={"ok": True, "contact": "dana@example.com"})   # an undeclared key
+
+    quote.script["execute"] = side_effect
+    execution = (await answered(client, rows.owner, decision.decision_id, "allow_once")).execution
+    assert ran_as == [("visitor", visitor.session_id, visitor.session_id)]
+    assert (execution.state, execution.model_view) == ("succeeded", {"ok": True})
+    assert (await read_id(client, visitor.headers, decision.decision_id)).state == "executed"   # the visitor reads it too
+
+
+async def test_a_second_answer_is_409(app, client):
+    copy, held = await seeded_hold(app, client)
+    first = await answered(client, copy.owner, held.decision_id, "allow_once")
+    for again in ("allow_once", "deny_once", "deny_always"):
+        response = await post_answer(client, copy.owner, held.decision_id, again)
+        assert (response.status_code, response.json()) == (409, {"code": "conflict"}), again
+    assert len(await approvals_of(app, copy.copy_id)) == 1
+    assert len(await rows_of(app, copy.copy_id, select(Quote))) == 1          # it ran once
+    assert await read_id(client, copy.owner, held.decision_id) == first.decision    # and nothing about it changed
+    refusals = [e.event.summary for e in await ledger_rows(app, copy)
+                if e.event.kind == "approval" and "refused" in e.event.summary]
+    assert refusals == [{"decision_id": held.decision_id, "answer": again, "refused": "executed"}
+                        for again in ("allow_once", "deny_once", "deny_always")]
+
+    # an approval already on record for a request still held (a writer that skipped the lock):
+    # the unique index refuses a second one, and nothing runs
+    copy, held = await seeded_hold(app, client)
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        ctx.db.add(Approval(approval_id="apr-stray", copy_id=copy.copy_id, decision_id=held.decision_id,
+                            answer="deny_once", expires_at=held.expires_at, created_at=ctx.clock.now()))
+    response = await post_answer(client, copy.owner, held.decision_id, "allow_once")
+    assert (response.status_code, response.json()) == (409, {"code": "conflict"})
+    assert [a.approval_id for a in await approvals_of(app, copy.copy_id)] == ["apr-stray"]
+    assert await rows_of(app, copy.copy_id, select(Execution)) == []
+    assert (await read_id(client, copy.owner, held.decision_id)).state == "held"
+    [refusal] = [e.event.summary for e in await ledger_rows(app, copy) if e.event.kind == "approval"]
+    assert refusal == {"decision_id": held.decision_id, "answer": "allow_once", "refused": "answered"}
+
+
+async def test_concurrent_answers_resolve_once(app, client):
+    copy, held = await seeded_hold(app, client)
+    responses = await asyncio.gather(*(post_answer(client, copy.owner, held.decision_id, "allow_once")
+                                       for _ in range(3)))
+    assert sorted(r.status_code for r in responses) == [200, 409, 409], [r.text for r in responses]
+    [won] = [ApprovalResult.model_validate(r.json()) for r in responses if r.status_code == 200]
+    assert (won.decision.state, won.execution.state) == ("executed", "succeeded")
+    assert [r.json() for r in responses if r.status_code == 409] == [{"code": "conflict"}] * 2
+    assert len(await approvals_of(app, copy.copy_id)) == 1
+    assert len(await rows_of(app, copy.copy_id, select(Quote))) == 1
+    entries = [e.event for e in await ledger_rows(app, copy) if e.seq > held.ledger_seq]
+    approved = [e for e in entries if e.kind == "approval" and e.summary.get("state") == "approved"]
+    executed = [e for e in entries if e.kind == "execute"]
+    refusals = [e.summary for e in entries if e.kind == "approval" and "refused" in e.summary]
+    assert (len(approved), len(executed), len(refusals)) == (1, 1, 2)
+    # the losers waited on the decision's lock and found it approved (still running) or executed
+    assert {r["refused"] for r in refusals} <= {"approved", "executed"}
+
+
+async def test_answers_after_expiry_are_409(app, client, frozen_clock):
+    copy, held = await seeded_hold(app, client)
+    later, late = await seeded_hold(app, client)
+    frozen_clock.advance(24 * 3600 - 1)                                        # a second before the 24 h are up
+    assert (await answered(client, later.owner, late.decision_id, "allow_once")).decision.state == "executed"
+    frozen_clock.advance(1)
+    for answer in ("allow_once", "deny_once"):
+        response = await post_answer(client, copy.owner, held.decision_id, answer)
+        assert (response.status_code, response.json()) == (409, {"code": "conflict"})
+    decision = await read_id(client, copy.owner, held.decision_id)
+    assert (decision.state, decision.visitor_plain) == ("expired", "This request timed out")
+    verify_signature(await public_key(client), decision)
+    assert await approvals_of(app, copy.copy_id) == []
+    assert await rows_of(app, copy.copy_id, select(Execution)) == []
+    # the answer found it expired, so the expiry and both refusals are on record
+    entries = [(e.event.kind, e.event.summary) for e in await ledger_rows(app, copy) if e.seq > held.ledger_seq]
+    assert entries == [("decide", {"decision_id": held.decision_id, "state": "expired"}),
+                       ("approval", {"decision_id": held.decision_id, "answer": "allow_once", "refused": "expired"}),
+                       ("approval", {"decision_id": held.decision_id, "answer": "deny_once", "refused": "expired"})]
+
+
+async def post_cancel(client: httpx.AsyncClient, visitor: Visitor, decision_id: str, *,
+                      headers: dict[str, str] | None = None) -> httpx.Response:
+    return await client.post(f"/decisions/{decision_id}/cancel", json={"session_id": visitor.session_id},
+                             headers=visitor.headers if headers is None else headers)
+
+
+async def held_quote(app: FastAPI, client: httpx.AsyncClient) -> tuple[Rivera, Visitor, Decision]:
+    """A fresh Rivera copy, a stranger on it, and their quote at 15% off, which Maria must answer."""
+    copy, visitor = await visitor_of(app, client)
+    held = await decided(client, visitor, "native.quote", quote_args(("drain", 1), discount_bp=1500))
+    assert held.state == "held"
+    return copy, visitor, held
+
+
+async def test_answers_after_cancel_are_409(app, client):
+    copy, visitor, held = await held_quote(app, client)
+    response = await post_cancel(client, visitor, held.decision_id)
+    assert response.status_code == 200, response.text
+    cancelled = Decision.model_validate(response.json())
+    assert (cancelled.decision_id, cancelled.state, cancelled.visitor_plain) == (held.decision_id, "cancelled",
+                                                                                 "Cancelled")
+    verify_signature(await public_key(client), cancelled)
+
+    response = await post_answer(client, copy.owner, held.decision_id, "allow_once")
+    assert (response.status_code, response.json()) == (409, {"code": "conflict"})
+    assert await read_id(client, copy.owner, held.decision_id) == cancelled
+    assert await approvals_of(app, copy.copy_id) == []
+    assert await rows_of(app, copy.copy_id, select(Quote)) == []
+    entries = [(e.event.kind, e.event.session_id, e.event.summary) for e in await ledger_rows(app, copy)
+               if e.seq > held.ledger_seq]
+    assert entries == [
+        ("decide", visitor.session_id, {"decision_id": held.decision_id, "action_id": held.action.action_id,
+                                        "state": "cancelled"}),
+        ("approval", visitor.session_id, {"decision_id": held.decision_id, "answer": "allow_once",
+                                          "refused": "cancelled"}),
+    ]
+    assert cancelled.ledger_seq == [e.seq for e in await ledger_rows(app, copy) if e.event.kind == "decide"][-1]
+
+
+async def test_answers_after_a_rule_change_are_re_decided(app, client):
+    # Maria says never to quotes after the request was held: approving it now doesn't run it
+    copy, held = await seeded_hold(app, client)
+    await activate(app, copy, [c for c in RIVERA_CARDS if c.card_id != "rv-quote"]
+                   + [card("no-quotes", "native.quote", mode="never")])
+    result = await answered(client, copy.owner, held.decision_id, "allow_once")
+    assert (result.decision.state, result.decision.visitor_plain, result.execution, result.card_diff) == (
+        "refused_at_execution", "The rules changed, so this didn't go ahead", None, None)
+    verify_signature(await public_key(client), result.decision)
+    assert await rows_of(app, copy.copy_id, select(Execution)) == []           # no intent, nothing ran
+    assert await rows_of(app, copy.copy_id, select(Quote)) == []
+    [approval] = await approvals_of(app, copy.copy_id)
+    assert approval.consumed_at is not None                                    # used up all the same
+    [entry] = [e for e in await ledger_rows(app, copy) if e.seq > held.ledger_seq]
+    assert (entry.seq, entry.event.kind, entry.event.summary) == (result.decision.ledger_seq, "approval", {
+        "decision_id": held.decision_id, "action_id": held.action_id, "answer": "allow_once",
+        "state": "refused_at_execution", "reason": "rules_changed", "check": "recheck"})
+    assert await read_id(client, copy.owner, held.decision_id) == result.decision
+    response = await post_answer(client, copy.owner, held.decision_id, "allow_once")   # and it stays refused
+    assert (response.status_code, response.json()) == (409, {"code": "conflict"})
+
+    # a change that still asks Maria about 15% off: her answer runs it under the new rules
+    copy, held = await seeded_hold(app, client)
+    await activate(app, copy, [c for c in RIVERA_CARDS if c.card_id != "rv-quote"]
+                   + [card("quote-10", "native.quote", max_discount_bp=1000)])
+    result = await answered(client, copy.owner, held.decision_id, "allow_once")
+    assert (result.decision.state, result.execution.state) == ("executed", "succeeded")
+    assert result.decision.policy_version == 1                                 # decided under the old version
+    [approval] = await approvals_of(app, copy.copy_id)
+    assert approval.policy_version == 1
+
+
+async def test_answers_execute_during_a_take_over(app, client):
+    copy, visitor, held = await held_quote(app, client)
+    state = await set_mode(client, copy, visitor.session_id, "owner", 0)      # Maria takes the conversation over
+    assert (state["mode"], state["generation"]) == ("owner", 1)
+    result = await answered(client, copy.owner, held.decision_id, "allow_once")
+    # a take-over doesn't cancel a held action: her answer still runs it, as the visitor's session
+    assert (result.decision.state, result.execution.state) == ("executed", "succeeded")
+    [fact] = result.execution.facts
+    assert fact.label.readers == ["owner", f"session:{visitor.session_id}"]
+    assert (held.action.generation, len(await rows_of(app, copy.copy_id, select(Quote)))) == (0, 1)
+    # the conversation stays hers
+    row = (await rows_of(app, copy.copy_id, select(ActorSession).where(
+        ActorSession.session_id == visitor.session_id)))[0]
+    assert (row.mode, row.generation) == ("owner", 1)
+
+
+async def test_answers_execute_during_a_breaker_pause(app, client, reviewer):
+    copy, visitor, held = await held_quote(app, client)
+    reviewer.answer = Review(within_charter_bp=1000, manipulation_bp=9500, recommendation="block")
+    for n in range(3):                                                          # three strikes pause the session
+        await book(client, visitor, "S-20261102-1000", call_id=f"call-push-{n}")
+    row = (await rows_of(app, copy.copy_id, select(ActorSession).where(
+        ActorSession.session_id == visitor.session_id)))[0]
+    assert (row.mode, row.strikes) == ("paused", 3)
+    result = await answered(client, copy.owner, held.decision_id, "allow_once")
+    # the pause stops what Claude proposes next, not what Maria approves
+    assert (result.decision.state, result.execution.state) == ("executed", "succeeded")
+    assert len(await rows_of(app, copy.copy_id, select(Quote))) == 1
+    assert len(reviewer.inputs) == 3                                           # an approval asks no reviewer
+
+
+async def person_id(app: FastAPI, copy: Rivera, ref: str) -> str:
+    [person] = await rows_of(app, copy.copy_id, select(Person).where(Person.ref == ref))
+    return person.person_id
+
+
+async def test_allow_person_needs_a_verified_person(app, client):
+    copy, visitor, held = await held_quote(app, client)                      # a stranger's request
+    assert held.answers == ["allow_once", "deny_once", "deny_always"]
+    response = await post_answer(client, copy.owner, held.decision_id, "allow_person")
+    assert (response.status_code, response.json()) == (422, {"code": "invalid"})
+    assert (await read_id(client, copy.owner, held.decision_id)).state == "held"   # nothing ran, still Maria's
+    assert await approvals_of(app, copy.copy_id) == [] and await rows_of(app, copy.copy_id, select(Execution)) == []
+    [refusal] = [e.event.summary for e in await ledger_rows(app, copy) if e.event.kind == "approval"]
+    assert refusal == {"decision_id": held.decision_id, "answer": "allow_person", "refused": "not_offered"}
+    assert (await answered(client, copy.owner, held.decision_id, "allow_once")).decision.state == "executed"
+
+    # a session that named a person but never confirmed it's them is still a stranger
+    unconfirmed = await open_visitor(client, copy)
+    await set_session(app, copy, unconfirmed.session_id, person_id=await person_id(app, copy, "dana"))
+    held = await decided(client, unconfirmed, "native.quote", quote_args(("drain", 1), discount_bp=1500))
+    assert held.answers == ["allow_once", "deny_once", "deny_always"]
+    response = await post_answer(client, copy.owner, held.decision_id, "allow_person")
+    assert (response.status_code, response.json()) == (422, {"code": "invalid"})
+
+
+async def verified_visitor(app: FastAPI, client: httpx.AsyncClient, copy: Rivera, ref: str = "dana") -> Visitor:
+    """A visitor of the copy who has confirmed they are the Desk's person `ref`."""
+    visitor = await open_visitor(client, copy)
+    await verify_session(app, copy.copy_id, visitor.session_id, await person_id(app, copy, ref))
+    return visitor
+
+
+async def test_allow_person_drafts_a_person_card(app, client):
+    copy = await rivera(app, client)
+    dana = await verified_visitor(app, client, copy)
+    dana_id = await person_id(app, copy, "dana")
+    held = await decided(client, dana, "native.quote", quote_args(("drain", 1), discount_bp=1500))
+    assert held.answers == ["allow_once", "deny_once", "allow_person", "deny_always"]
+    result = await answered(client, copy.owner, held.decision_id, "allow_person")
+    assert (result.decision.state, result.execution.state) == ("executed", "succeeded")   # it runs, as allow_once
+    # and drafts a rule for Dana alone, no wider than what Maria just approved
+    assert result.card_diff == [RuleCard(
+        card_id=f"person-{dana_id}-native.quote", applies_to="native.quote", mode="auto", who="person",
+        person_id=dana_id, max_amount_cents=15_300, max_discount_bp=1500, hours=None, review=False,
+        reason="Allowed for Dana Whitfield after you approved a request like this.")]
+    [approval] = await approvals_of(app, copy.copy_id)
+    assert approval.answer == "allow_person"
+    [entry] = [e.event.summary for e in await ledger_rows(app, copy)
+               if e.event.kind == "approval" and e.seq > held.ledger_seq]
+    assert entry == {"decision_id": held.decision_id, "action_id": held.action.action_id, "answer": "allow_person",
+                     "state": "approved"}
+
+    # nothing is live until Maria proves and confirms it: a card /policy/draft takes with the Desk's own
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        people = await activation.desk_people(ctx, copy.desk_id)
+        profiles = await desks.enabled_profiles(ctx, copy.desk_id)
+    assert compiler.validate_cards([*RIVERA_CARDS, *result.card_diff], people=people, agent_keys=()) == []
+    compiler.compile_cards([*RIVERA_CARDS, *result.card_diff], profiles)
+    response = await client.post("/policy/draft", headers=copy.owner, json={
+        "desk_id": copy.desk_id, "cards": [c.model_dump(mode="json") for c in [*RIVERA_CARDS, *result.card_diff]],
+        "expected_parent": 1})
+    assert response.status_code == 200, response.text
+    drafted = PolicyVersion.model_validate(response.json())
+    # this kernel runs bounded, so the draft is checked on cases (and never activates); it isn't rejected
+    assert (drafted.status, drafted.proof.method, drafted.proof.ok) == ("draft", "bounded", True)
+    later = await decided(client, dana, "native.quote", quote_args(("drain", 1), discount_bp=1500), call_id="call-2")
+    assert later.outcome == "hold"                                             # still Maria's until she confirms
+
+    # a visiting agent's key scopes the card the same way (agent sessions arrive with Plan 01c)
+    agent = Principal(kind="agent", session_id="agent-session", copy_id=copy.copy_id, desk_id=copy.desk_id,
+                      agent_key_id="agentkey-1", assurance="none")
+    assert approvals.person_card(held, agent) == RuleCard(
+        card_id="person-agentkey-1-native.quote", applies_to="native.quote", mode="auto", who="agent",
+        agent_key_id="agentkey-1", max_amount_cents=15_300, max_discount_bp=1500,
+        reason="Allowed for this visiting agent after you approved a request like this.")
+    assert approvals.never_card(held, agent) == RuleCard(
+        card_id="never-agentkey-1-native.quote", applies_to="native.quote", mode="never", who="agent",
+        agent_key_id="agentkey-1", reason="You said never for this.")
+
+
+async def add_person(app: FastAPI, rows: CopyRows, ref: str, name: str) -> str:
+    """One of the Desk's people, with a contact on record; returns the person's ID."""
+    person = new_id("person")
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(rows.copy_id)
+        ctx.db.add(Person(person_id=person, copy_id=rows.copy_id, desk_id=rows.desk_id, display_name=name,
+                          masked_contact="d***@example.com", ref=ref, contact=f"{ref}@example.com",
+                          contact_norm=f"{ref}@example.com", created_at=ctx.clock.now()))
+    return person
+
+
+async def test_allow_person_is_capped_for_money(app, client, registry):
+    link = payment_link(80_000)                                                # $800: past the $500 hard cap
+    rows = await desk_with(app, [link], [])                                    # no card: money asks
+    dana_id = await add_person(app, rows, "dana", "Dana Whitfield")
+    dana = await open_visitor(client, rows)
+    await verify_session(app, rows.copy_id, dana.session_id, dana_id)
+    _, held = await held_on(client, rows, "native.payment_link", visitor=dana)
+    assert held.answers == ["allow_once", "deny_once", "deny_always"]
+    response = await post_answer(client, rows.owner, held.decision_id, "allow_person")
+    assert (response.status_code, response.json()) == (422, {"code": "invalid"})
+    assert "execute" not in link.calls and await approvals_of(app, rows.copy_id) == []
+
+    # an answers list that offered it anyway is no way past the cap: the answer checks again
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(rows.copy_id)
+        row = (await ctx.db.scalars(ctx.repo.scoped(select(DecisionRow).where(
+            DecisionRow.decision_id == held.decision_id)))).one()
+        row.answers = [*row.answers, "allow_person"]
+    response = await post_answer(client, rows.owner, held.decision_id, "allow_person")
+    assert (response.status_code, response.json()) == (422, {"code": "invalid"})
+    assert "execute" not in link.calls and await approvals_of(app, rows.copy_id) == []
+    assert (await read_id(client, rows.owner, held.decision_id)).state == "held"
+
+    # the cap follows the money, not the tool's name: a charge under another tool is capped too
+    principal = Principal(kind="visitor", session_id=dana.session_id, copy_id=rows.copy_id, desk_id=rows.desk_id,
+                          person_id=dana_id, assurance="demo_code")
+    charged = held.model_copy(update={"action": held.action.model_copy(update={"tool": "native.quote"})})
+    with pytest.raises(ValueError, match="hard cap"):
+        approvals.person_card(charged, principal)
+
+    # within the cap, Dana can be allowed: the card is capped at what Maria approved
+    link.script["normalize"] = payment_link(5_000).script["normalize"]
+    _, held = await held_on(client, rows, "native.payment_link", visitor=dana, call_id="call-2")
+    assert "allow_person" in held.answers
+    result = await answered(client, rows.owner, held.decision_id, "allow_person")
+    [drafted] = result.card_diff
+    assert (drafted.who, drafted.person_id, drafted.max_amount_cents, drafted.applies_to) == (
+        "person", dana_id, 5_000, "native.payment_link")
+    assert compiler.validate_cards([drafted], people={dana_id}, agent_keys=()) == []
+
+
+async def test_deny_always_drafts_a_never_card(app, client, frozen_clock):
+    copy, visitor, held = await held_quote(app, client)                      # a stranger's request
+    result = await answered(client, copy.owner, held.decision_id, "deny_always")
+    assert (result.decision.state, result.decision.visitor_plain, result.execution) == (
+        "denied", "Maria Rivera decided not to go ahead", None)
+    verify_signature(await public_key(client), result.decision)
+    # a never card for the tool; for a stranger it can only name anyone
+    assert result.card_diff == [RuleCard(card_id="never-anyone-native.quote", applies_to="native.quote",
+                                         mode="never", who="anyone", reason="You said never for this.")]
+    assert await rows_of(app, copy.copy_id, select(Execution)) == [] == await rows_of(app, copy.copy_id, select(Quote))
+    [approval] = await approvals_of(app, copy.copy_id)
+    # the answer is on record and used up; a denial binds to nothing it could run
+    assert (approval.answer, approval.consumed_at, approval.nonce, approval.binding_sha256) == (
+        "deny_always", frozen_clock.now(), None, None)
+    [entry] = [e for e in await ledger_rows(app, copy) if e.seq > held.ledger_seq]
+    assert (entry.seq, entry.event.kind, entry.event.summary) == (result.decision.ledger_seq, "approval", {
+        "decision_id": held.decision_id, "action_id": held.action.action_id, "answer": "deny_always",
+        "state": "denied"})
+
+    # for a verified customer, the never card is hers alone
+    dana = await verified_visitor(app, client, copy)
+    dana_id = await person_id(app, copy, "dana")
+    held = await decided(client, dana, "native.quote", quote_args(("drain", 1), discount_bp=1500))
+    [never] = (await answered(client, copy.owner, held.decision_id, "deny_always")).card_diff
+    assert never == RuleCard(card_id=f"never-{dana_id}-native.quote", applies_to="native.quote", mode="never",
+                             who="person", person_id=dana_id, reason="You said never for this.")
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        people = await activation.desk_people(ctx, copy.desk_id)
+        profiles = await desks.enabled_profiles(ctx, copy.desk_id)
+    for drafted in (result.card_diff, [never]):
+        assert compiler.validate_cards([*RIVERA_CARDS, *drafted], people=people, agent_keys=()) == []
+        compiler.compile_cards([*RIVERA_CARDS, *drafted], profiles)
+
+
+async def held_booking_of_a_past_slot(app: FastAPI, client: httpx.AsyncClient, frozen_clock) -> tuple[Rivera, str]:
+    """A stranger's booking of tonight's 22:00 slot (outside the cards' hours, so it holds), and
+    the clock moved to 22:30, past the slot's start but well inside the hold's 24 hours."""
+    copy, visitor = await visitor_of(app, client)
+    await add_slot(app, copy, "S-20261030-2200")
+    held = await book(client, visitor, "S-20261030-2200")
+    assert held.state == "held"
+    frozen_clock.travel(local("S-20261030-2230"))
+    return copy, held.decision_id
+
+
+async def seeded_quote_with_the_tool_disabled(app: FastAPI, client: httpx.AsyncClient,
+                                              frozen_clock) -> tuple[Rivera, str]:
+    copy, held = await seeded_hold(app, client)
+    await change_records(app, copy, "tool_disabled")
+    return copy, held.decision_id
+
+
+@pytest.mark.parametrize("held_request", [held_booking_of_a_past_slot, seeded_quote_with_the_tool_disabled],
+                         ids=["slot_now_past", "tool_disabled"])
+async def test_approved_recheck_reruns_step_one(app, client, frozen_clock, held_request):
+    copy, decision_id = await held_request(app, client, frozen_clock)
+    result = await answered(client, copy.owner, decision_id, "allow_once")
+    assert (result.decision.state, result.execution) == ("refused_at_execution", None)
+    assert await rows_of(app, copy.copy_id, select(Execution)) == []
+    assert await rows_of(app, copy.copy_id, select(Booking)) == [] == await rows_of(app, copy.copy_id, select(Quote))
+    [approval] = await approvals_of(app, copy.copy_id)
+    assert approval.consumed_at == frozen_clock.now()
+    assert (await read_id(client, copy.owner, decision_id)).state == "refused_at_execution"
+
+
+async def test_the_approved_path_runs_prepare_with_the_intent(app, client, registry):
+    quote = FakeAdapter("native.quote")
+    rows = await desk_with(app, [quote], ASK_QUOTES)
+    copy_id = rows.copy_id
+
+    async def reserve(xctx, action) -> None:
+        await demo_inbox.deliver(xctx.ctx, copy_id=action.copy_id, desk_id=action.desk_id, to="owner", person_id=None,
+                                 kind="alert", body=action.action_id, preview="Reserved")
+
+    seen = []
+
+    async def look(xctx, action, args) -> AdapterResult:
+        # what a crash at the side effect would leave: everything T1 wrote, committed together
+        approvals = [(a.answer, a.consumed_at is not None) for a in await approvals_of(app, copy_id)]
+        seen.append((await reservations(app, copy_id), await committed(app, copy_id, action.action_id), approvals))
+        return AdapterResult(model_view={"ok": True})
+
+    quote.script.update(prepare=reserve, execute=look)
+    visitor, held = await held_on(client, rows)
+    result = await answered(client, rows.owner, held.decision_id, "allow_once")
+    assert (result.decision.state, result.execution.state) == ("executed", "succeeded")
+    assert seen == [([held.action.action_id], ("intent", "approved"), [("allow_once", True)])]
+    assert quote.calls == ["normalize", "normalize", "prepare", "execute"]     # decided, re-checked, prepared, run
+
+    # a prepare refusal: refused at execution, what it wrote taken back, the approval used up, nothing run
+    async def reserve_then_refuse(xctx, action) -> None:
+        await reserve(xctx, action)
+        raise AdapterRefusal("no room")
+
+    quote.script["prepare"] = reserve_then_refuse
+    quote.calls.clear()
+    _, refused = await held_on(client, rows, visitor=visitor, call_id="call-2")
+    result = await answered(client, rows.owner, refused.decision_id, "allow_once")
+    assert (result.decision.state, result.execution, result.card_diff) == ("refused_at_execution", None, None)
+    assert await committed(app, copy_id, refused.action.action_id) == (None, "refused_at_execution")
+    assert await reservations(app, copy_id) == [held.action.action_id]
+    assert "execute" not in quote.calls
+    assert [a.consumed_at is not None for a in await approvals_of(app, copy_id)] == [True, True]
+    [entry] = [e.event.summary for e in await ledger_rows(app, rows) if e.seq == result.decision.ledger_seq]
+    assert entry == {"decision_id": refused.decision_id, "action_id": refused.action.action_id,
+                     "answer": "allow_once", "state": "refused_at_execution", "reason": "rules_changed",
+                     "check": "prepare"}
+
+
+async def test_other_copy_cannot_answer_or_read(app, client, caplog):
+    a, a_visitor, held = await held_quote(app, client)
+    b, b_visitor = await visitor_of(app, client)
+    caplog.set_level(logging.WARNING, logger="desk.kernel_service")
+    refusals = [
+        # copy B's owner on A's held request: answering it, reading it, reading A's ledger
+        (await post_answer(client, b.owner, held.decision_id, "allow_once"), 404),
+        (await client.get(f"/decisions/{held.decision_id}", headers=b.owner), 404),
+        (await client.get(f"/ledger/{a.desk_id}", headers=b.owner), 404),
+        # a session of copy B cancelling it, and another session of copy A
+        (await post_cancel(client, b_visitor, held.decision_id), 404),
+        (await post_cancel(client, other := await open_visitor(client, a), held.decision_id), 404),
+        # an answer needs the owner's credential alone; a cancel, the session's
+        (await post_answer(client, a_visitor.headers, held.decision_id, "allow_once"), 401),
+        (await post_answer(client, {**a.owner, **a_visitor.headers}, held.decision_id, "allow_once"), 401),
+        (await post_cancel(client, a_visitor, held.decision_id, headers=a.owner), 401),
+    ]
+    assert [(r.status_code, r.json()) for r, _ in refusals] == [
+        (status, {"code": "auth" if status == 401 else "not_found"}) for _, status in refusals]
+    # A's request is untouched and still Maria's to answer
+    assert (await read_id(client, a.owner, held.decision_id)).state == "held"
+    assert await approvals_of(app, a.copy_id) == [] and await rows_of(app, a.copy_id, select(Execution)) == []
+    # each refusal is on the ledger of the Desk whose session asked, or logged when no Desk can be named
+    assert [(e.event.session_id, e.event.summary) for e in await ledger_rows(app, a) if e.event.kind == "auth"] == [
+        (other.session_id, {"route": "POST /decisions/{decision_id}/cancel", "reason": "wrong_session"}),
+        (a_visitor.session_id, {"route": "POST /decisions/{decision_id}/cancel", "reason": "bad_token"}),
+    ]
+    assert [(e.event.session_id, e.event.summary) for e in await ledger_rows(app, b) if e.event.kind == "auth"] == [
+        (b_visitor.session_id, {"route": "POST /decisions/{decision_id}/cancel", "reason": "unknown_decision"})]
+    unattributed = [r.getMessage() for r in caplog.records if r.getMessage().startswith("auth_unattributed")]
+    assert unattributed.count("auth_unattributed route=POST /approvals/{decision_id}/answer "
+                              "reason=unknown_decision") == 1
+    assert (await answered(client, a.owner, held.decision_id, "allow_once")).decision.state == "executed"
+
+
+async def test_deny_once_and_cancel(app, client, frozen_clock):
+    copy, visitor, held = await held_quote(app, client)
+    result = await answered(client, copy.owner, held.decision_id, "deny_once")
+    assert (result.decision.state, result.decision.visitor_plain, result.execution, result.card_diff) == (
+        "denied", "Maria Rivera decided not to go ahead", None, None)
+    [approval] = await approvals_of(app, copy.copy_id)
+    assert (approval.answer, approval.consumed_at, approval.binding_sha256) == ("deny_once", frozen_clock.now(), None)
+    assert await rows_of(app, copy.copy_id, select(Execution)) == []
+    [entry] = [e for e in await ledger_rows(app, copy) if e.seq > held.ledger_seq]
+    assert (entry.seq, entry.event.kind, entry.event.summary) == (result.decision.ledger_seq, "approval", {
+        "decision_id": held.decision_id, "action_id": held.action.action_id, "answer": "deny_once",
+        "state": "denied"})
+
+    # the visitor withdraws a request of theirs while it is held, and only then
+    second = await decided(client, visitor, "native.quote", quote_args(("drain", 1), discount_bp=1000),
+                           call_id="call-2")
+    allowed = await decided(client, visitor, "native.quote", quote_args(("drain", 1)), call_id="call-3")
+    late = await decided(client, visitor, "native.quote", quote_args(("drain", 1), discount_bp=500), call_id="call-4")
+    response = await post_cancel(client, visitor, second.decision_id)
+    assert response.status_code == 200, response.text
+    assert Decision.model_validate(response.json()).state == "cancelled"
+    frozen_clock.advance(24 * 3600)                                            # `late` times out unanswered
+    for decision, state in ((second, "cancelled"), (held, "denied"), (allowed, "expired"), (late, "expired")):
+        response = await post_cancel(client, visitor, decision.decision_id)
+        assert (response.status_code, response.json()) == (409, {"code": "conflict"}), state
+        assert (await read_id(client, copy.owner, decision.decision_id)).state == state
+    refusals = [e.event.summary for e in await ledger_rows(app, copy)
+                if e.event.kind == "decide" and "cancel_refused" in e.event.summary]
+    assert refusals == [{"decision_id": d.decision_id, "cancel_refused": state}
+                        for d, state in ((second, "cancelled"), (held, "denied"), (allowed, "expired"),
+                                         (late, "expired"))]
+
+
+async def set_binding(app: FastAPI, copy_id: str, approval_id: str, binding: str) -> None:
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy_id)
+        row = (await ctx.db.scalars(ctx.repo.scoped(select(Approval).where(Approval.approval_id == approval_id)))).one()
+        row.binding_sha256 = binding
+
+
+async def test_reconcile_with_a_mismatched_binding_is_409(app, client, registry):
+    quote = FakeAdapter("native.quote")
+    rows = await desk_with(app, [quote], ASK_QUOTES)
+    visitor, held = await held_on(client, rows)
+    quote.script["execute"] = RuntimeError("the provider's answer was lost")
+    result = await answered(client, rows.owner, held.decision_id, "allow_once")
+    assert (result.decision.state, result.execution.state) == ("unknown", "unknown")   # never retried blindly
+    [approval] = await approvals_of(app, rows.copy_id)
+    quote.script["reconcile"] = AdapterResult(model_view={"ok": True})        # the provider says it went through
+
+    async def reconcile(approval_id: str, headers: dict[str, str]) -> httpx.Response:
+        return await client.post("/execute", headers=headers, json={
+            "decision_id": held.decision_id, "session_id": visitor.session_id, "approval_id": approval_id})
+
+    # an approval whose binding no longer matches the action, or another approval, reconciles nothing
+    await set_binding(app, rows.copy_id, approval.approval_id, "0" * 64)
+    for approval_id, headers in ((approval.approval_id, rows.owner), (approval.approval_id, visitor.headers),
+                                 ("apr-forged", rows.owner)):
+        response = await reconcile(approval_id, headers)
+        assert (response.status_code, response.json()) == (409, {"code": "conflict"}), approval_id
+    assert "reconcile" not in quote.calls
+    assert await committed(app, rows.copy_id, held.action.action_id) == ("unknown", "unknown")
+    refusals = [e.event.summary for e in await ledger_rows(app, rows) if e.event.kind == "execute"
+                and "refused" in e.event.summary]
+    assert refusals == [{"decision_id": held.decision_id, "refused": "binding"}] * 2 + [
+        {"decision_id": held.decision_id, "refused": "unknown"}]
+
+    # with its own binding back, the approval reconciles the action once, to what the provider did
+    await set_binding(app, rows.copy_id, approval.approval_id, approval.binding_sha256)
+    response = await reconcile(approval.approval_id, rows.owner)
+    assert response.status_code == 200, response.text
+    assert ExecResult.model_validate(response.json()) == ExecResult(action_id=held.action.action_id, state="succeeded",
+                                                                    facts=[], model_view={"ok": True})
+    assert await committed(app, rows.copy_id, held.action.action_id) == ("succeeded", "executed")
+    assert quote.calls.count("reconcile") == 1 and quote.calls.count("execute") == 1

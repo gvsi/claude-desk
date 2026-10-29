@@ -66,6 +66,16 @@ async def rows_of(app: FastAPI, copy_id: str, stmt) -> list:
         return list((await ctx.db.scalars(repo.scoped(stmt))).all())
 
 
+async def verify_session(app: FastAPI, copy_id: str, session_id: str, person_id: str) -> None:
+    """Test only: marks a visitor session verified as `person_id`, as `POST /verify/check` (Plan
+    01b) records a correct code: the person bound to the session, assurance `demo_code`."""
+    async with kernel_ctx(app) as ctx:
+        repo = ctx.bind(copy_id)
+        row = (await ctx.db.scalars(repo.scoped(select(ActorSession).where(
+            ActorSession.session_id == session_id)))).one()
+        row.person_id, row.assurance, row.verified = person_id, "demo_code", True
+
+
 async def ledger_rows(app: FastAPI, rows: CopyRows) -> list[LedgerEntry]:
     return await rows_of(app, rows.copy_id,
                          select(LedgerEntry).where(LedgerEntry.desk_id == rows.desk_id).order_by(LedgerEntry.seq))
