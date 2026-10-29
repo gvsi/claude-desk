@@ -22,7 +22,8 @@ next message.
   that died mid-job) go back to `todo`, as Procrastinate documents ("Retry stalled jobs").
 
 `jobs_app(connector)` builds the Procrastinate app; the API's lifespan opens it and runs `run_worker`. The
-connector is `jobs_connector(database_url)`, its own small pool; tests use Procrastinate's `InMemoryConnector`.
+connector is `desk.db.session.procrastinate_connector(url)`, its own small pool; tests use Procrastinate's
+`InMemoryConnector`.
 """
 
 import asyncio
@@ -33,7 +34,7 @@ from datetime import datetime
 from typing import Any
 
 import procrastinate
-from procrastinate import JobContext, PsycopgConnector
+from procrastinate import JobContext
 from procrastinate.connector import BaseConnector
 from procrastinate.manager import JobManager
 from sqlalchemy import and_, exists, or_, select
@@ -44,7 +45,6 @@ from desk.api.ro import KERNEL_RO, due_decisions
 from desk.api.sse import RUN_EVENTS, append_control
 from desk.api.store import Ids, append_message
 from desk.contracts import Decision
-from desk.db.session import API_CONNECT_OPTIONS, libpq_url
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,6 @@ RESUME_AFTER_ANSWER = "desk.resume_after_answer"
 SURFACE_DUE_DECISIONS = "desk.surface_due_decisions"
 RETRY_STALLED_JOBS = "desk.retry_stalled_jobs"
 SCHEDULE = {SURFACE_DUE_DECISIONS: "* * * * *", RETRY_STALLED_JOBS: "*/10 * * * *"}
-POOL_MAX = 5                       # "Connections and state": the job queue's pool
 SHUTDOWN_GRACE_S = 5.0             # a stopping worker waits this long for its running jobs
 RESTART_S = 5.0                    # a failed worker starts again after this long
 ENV = "desk"                       # the worker's `additional_context` key for the jobs' `JobEnv`
@@ -68,13 +67,6 @@ class JobEnv:
     engine: AsyncEngine
     ro_schema: str
     clock: Callable[[], datetime]
-
-
-def jobs_connector(database_url: str) -> PsycopgConnector:
-    """The job queue's own connections, as desk_api. Procrastinate bypasses SQLAlchemy, so it gets a plain
-    `postgresql://` URL (Plan 06b's URL rule), with schema procrastinate first on its search_path."""
-    return PsycopgConnector(conninfo=libpq_url(database_url), kwargs={"options": API_CONNECT_OPTIONS}, min_size=1,
-                            max_size=POOL_MAX)
 
 
 def jobs_app(connector: BaseConnector, *, schedule: bool = True) -> procrastinate.App:

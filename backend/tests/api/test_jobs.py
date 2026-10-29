@@ -21,7 +21,6 @@ from desk.api.jobs import (
     SURFACE_DUE_DECISIONS,
     JobEnv,
     jobs_app,
-    jobs_connector,
     resume_after_answer,
     retry_stalled_jobs,
     run_worker,
@@ -31,7 +30,7 @@ from desk.api.runner import TurnRunner
 from desk.api.sse import append_control
 from desk.api.tools import Caller
 from desk.contracts import Decision, ToolCall
-from desk.db.session import database_url
+from desk.db.session import procrastinate_connector
 from desk.kernel_api import AnswerRequest, CreateCopyRequest, CreateSessionRequest, DecideRequest, ExecuteRequest
 from tests.api.fakes import ScriptedModel
 
@@ -246,7 +245,7 @@ async def test_due_decisions_get_one_control_row(copy, engine, fake, ro_schema, 
 async def test_stalled_job_is_retried(db):
     """A job whose worker stopped sending heartbeats (its task died mid-job) goes back to `todo` on the next retry
     run, on the real job queue in Postgres; the retry and the due-decisions job run on a schedule."""
-    app = jobs_app(jobs_connector(database_url("API")))
+    app = jobs_app(procrastinate_connector())
     periodic = {task.task.name: (task.cron, task.task.queue, task.task.queueing_lock)
                 for task in app.periodic_registry.periodic_tasks.values()}
     assert periodic == {SURFACE_DUE_DECISIONS: (SCHEDULE[SURFACE_DUE_DECISIONS], QUEUE, None),

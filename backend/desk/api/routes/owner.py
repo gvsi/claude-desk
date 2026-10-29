@@ -11,10 +11,9 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Path, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, StringConstraints
-from sqlalchemy import func, select
 
 from desk.api.cookies import set_owner_cookie
-from desk.api.deliver import PHASES
+from desk.api.deliver import status_shown
 from desk.api.deps import ApiProblem, OwnerCtx, Runtime, client_ip, owner_context, owner_ctx, runtime
 from desk.api.jobs import defer_resume_after_answer, resume_after_answer
 from desk.api.kernel_client import KernelFailed, KernelUnavailable
@@ -29,7 +28,6 @@ from desk.api.schemas import (
     error_responses,
     operation_ids,
 )
-from desk.api.sse import RUN_EVENTS
 from desk.api.store import Ids
 from desk.contracts import Decision
 from desk.kernel_api import AnswerRequest, CreateCopyRequest
@@ -136,19 +134,9 @@ async def _no_longer_held(state: Runtime, ctx: OwnerCtx, decision_id: str,
         raise ApiProblem(503, "kernel", code="kernel_unavailable") from None
     if decision.state == "held":                        # the answer didn't take: the kernel's own error stands
         raise failure
-    if not await _shown(ctx, decision):
+    if not await status_shown(ctx.ro.conn, decision, or_later=True):
         await _resume(state, ctx, decision)
     return JSONResponse(AlreadyResolved(decision=decision).model_dump(mode="json"), status_code=409)
-
-
-async def _shown(ctx: OwnerCtx, decision: Decision) -> bool:
-    """Whether the visitor was shown the decision in this state (its ledger entry)."""
-    shown = await ctx.ro.conn.execute(select(func.count()).where(
-        RUN_EVENTS.c.copy_id == ctx.copy_id, RUN_EVENTS.c.session_id == decision.session_id,
-        RUN_EVENTS.c.kind == "sse", RUN_EVENTS.c.type.in_(PHASES),
-        RUN_EVENTS.c.payload["decision_id"].astext == decision.decision_id,
-        RUN_EVENTS.c.payload["ledger_seq"].astext == str(decision.ledger_seq)))
-    return shown.scalar_one() > 0
 
 
 async def _resume(state: Runtime, ctx: OwnerCtx, decision: Decision) -> None:

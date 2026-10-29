@@ -192,12 +192,18 @@ async def get_api_session() -> AsyncIterator[AsyncSession]:
         yield session
 
 
-def procrastinate_connector() -> "procrastinate.PsycopgConnector":
-    """The API's job queue connection, as desk_api, with api_engine()'s search_path."""
+JOB_QUEUE_POOL_MAX = 5   # the job queue's own pool (Plan 02a, "Connections and state")
+
+
+def procrastinate_connector(url: str | None = None) -> "procrastinate.PsycopgConnector":
+    """The API's job queue connections, as desk_api, with api_engine()'s search_path, in a small pool of their own:
+    to `url` (a SQLAlchemy URL, as `Settings.api_database_url` holds it), else `API_DATABASE_URL`. Procrastinate
+    bypasses SQLAlchemy, so it gets the plain `postgresql://` form (`libpq_url`)."""
     import procrastinate   # only the API process needs the job queue
 
     return procrastinate.PsycopgConnector(
-        conninfo=libpq_url(database_url("API")), kwargs={"options": API_CONNECT_OPTIONS}
+        conninfo=libpq_url(url if url is not None else database_url("API")),
+        kwargs={"options": API_CONNECT_OPTIONS}, min_size=1, max_size=JOB_QUEUE_POOL_MAX,
     )
 
 

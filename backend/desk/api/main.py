@@ -35,7 +35,6 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from desk.api.deps import ApiProblem, Runtime, runtime
 from desk.api.jobs import JobEnv, jobs_app, run_worker
-from desk.api.jobs import jobs_connector as postgres_jobs_connector
 from desk.api.kernel_client import KernelFailed, KernelHttp, KernelUnavailable, assert_production_safe
 from desk.api.loop import TURN_LOCK_POOL_SIZE
 from desk.api.model import make_model
@@ -46,7 +45,7 @@ from desk.api.runner import TurnRunner
 from desk.api.schemas import ApiError, HealthOut, operation_ids
 from desk.api.settings import Settings
 from desk.api.sse import Listener
-from desk.db.session import API_CONNECT_OPTIONS
+from desk.db.session import API_CONNECT_OPTIONS, procrastinate_connector
 
 logger = logging.getLogger(__name__)
 
@@ -147,7 +146,7 @@ def create_app(settings: Settings, *, kernel_transport: Any = None, model: Any =
             raise RuntimeError(str(malformed)) from None    # the message names the variable, never its value
     now = clock or _utc_now
     built = make_model(settings, clock=now) if model is None else None   # closed by the lifespan; an injected one isn't
-    jobs = (jobs_app(postgres_jobs_connector(settings.api_database_url)) if jobs_connector is None
+    jobs = (jobs_app(procrastinate_connector(settings.api_database_url)) if jobs_connector is None
             else jobs_app(jobs_connector, schedule=False))
     state = Runtime(settings=settings, clock=now, limiter=RateLimiter(now), stream_slots=StreamSlots(),
                     model=model if model is not None else built, kernel_transport=kernel_transport, jobs=jobs)
