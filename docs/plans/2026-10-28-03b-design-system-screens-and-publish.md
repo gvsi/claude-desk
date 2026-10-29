@@ -353,3 +353,5 @@ Fix round 2, 2026-10-29: Task 0 adds `N-Intro-D` to `REFERENCE_BOARDS`, since it
 Recheck, 2026-10-29: board plays check the receipt's placement by bounding box, as the design system code's `receipts_sit_under_their_message` does, and its type and color with `expectComputed`; the boards' `canvasNote`s name the web app by what it builds.
 
 Round 2 (seam review, 2026-10-29): seam-20: `ToolStatusRow` and `ToolReviewCard` take `profile: ToolRowView`, a `Pick` of `ToolProfile` that includes `definition_sha256`, so the API's `ToolRow` fits as well as a `ToolProfile`.
+
+PR round 1, 2026-10-29: the copied Global Constraints name the organization's $1,000 monthly limit. Nothing in this plan's tasks changes.
