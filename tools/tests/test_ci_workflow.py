@@ -113,18 +113,89 @@ def test_actions_pinned_by_commit_sha():
         for scope in [job, *job["steps"]]:
             assert not any(name.startswith("UV_") for name in scope.get("env", {})), scope
 
-    # A script that fetches a tool checks it against a pinned sha256 after the fetch; under
-    # `bash -e` with no `||` (test_gated_jobs_go_through_the_gate), a mismatch stops the script.
-    # A fetch is curl or wget run as a command: first on a line, or after a pipe, `;`, `&` or `$(`.
-    fetching = []
+    # Only the pinned downloads fetch, and each checks what it fetched (download_problems).
     for step in all_steps():
-        run = step.get("run", "")
-        if fetch := re.search(r"(?:^|[|;&]|\$\()\s*(curl|wget)\b", run, flags=re.MULTILINE):
-            fetching.append(step["name"])
-            assert "sha256sum -c" in run[fetch.end() :], run
-        assert not re.search(r"\|\s*(ba)?sh\b", run), run
-    # The scan finds every pinned download, and nothing else fetches.
+        assert download_problems(step) == [], (step.get("name"), step.get("run"))
+    fetching = [step["name"] for step in all_steps() if FETCH.search(step.get("run", ""))]
     assert sorted(fetching) == sorted(PINNED_DOWNLOADS)
+
+
+# curl or wget given an option or a URL, wherever it stands in a script: after sudo, env, xargs,
+# if, then, do, !, a brace, a parenthesis, a backtick or a quote.
+FETCH = re.compile(r"\b(curl|wget)\s+(?:-|\"?https?://)")
+
+
+def download_problems(step: dict) -> list[str]:
+    """What is wrong with how a step fetches. Only the pinned downloads may fetch or name a URL; each
+    fetch is followed by a sha256 check, which under `bash -e` with no `||`
+    (test_gated_jobs_go_through_the_gate) stops the script on a mismatch; and nothing is piped into a shell."""
+    run, pinned = step.get("run", ""), step.get("name") in PINNED_DOWNLOADS
+    problems = []
+    fetches = list(FETCH.finditer(run))
+    if fetches and not pinned:
+        problems.append("fetches but isn't a pinned download")
+    if any("sha256sum -c" not in run[fetch.end() :] for fetch in fetches):
+        problems.append("fetches with no sha256 check after it")
+    if re.search(r"https?://", run) and not pinned:
+        problems.append("names a URL but isn't a pinned download")
+    if re.search(r"\|\s*(ba)?sh\b", run):
+        problems.append("pipes into a shell")
+    return problems
+
+
+# Ways a script can fetch, each of which the download rule must see.
+FETCH_FORMS = [
+    "sudo curl -sSfL -o tool.tgz https://example.com/tool.tgz",
+    "if curl -sSfL -o tool.tgz https://example.com/tool.tgz; then echo fetched; fi",
+    "if true; then curl -sSfL -o tool.tgz https://example.com/tool.tgz; fi",
+    'for url in https://example.com/tool.tgz; do curl -sSfLO "$url"; done',
+    "env curl -sSfL -o tool.tgz https://example.com/tool.tgz",
+    "echo https://example.com/tool.tgz | xargs curl -sSfLO",
+    'bash -c "curl -sSfL -o tool.tgz https://example.com/tool.tgz"',
+    "tool=`curl -sSfL https://example.com/tool`",
+    "(curl -sSfL -o tool.tgz https://example.com/tool.tgz)",
+    "{ curl -sSfL -o tool.tgz https://example.com/tool.tgz; }",
+    "! curl -sSfL -o tool.tgz https://example.com/tool.tgz",
+    "sudo wget -q https://example.com/tool.tgz",
+    'curl "https://example.com/tool.tgz" -o tool.tgz',
+    "wget https://example.com/tool.tgz",
+]
+
+
+@pytest.mark.parametrize("run", FETCH_FORMS)
+def test_download_rule_sees_every_way_a_script_fetches(run):
+    # Under a pinned download's name, only the fetch itself can give it away: nothing checks it after.
+    assert "fetches with no sha256 check after it" in download_problems({"name": "Install gitleaks 8.30.1", "run": run})
+    # Under any other name, a step must not fetch or name a URL at all.
+    problems = download_problems({"name": "Build the thing", "run": run})
+    assert "fetches but isn't a pinned download" in problems or "names a URL but isn't a pinned download" in problems
+
+
+@pytest.mark.parametrize(
+    "step, problem",
+    [
+        ({"name": "Build the thing", "run": 'curl -sSfL -o tool.tgz "$url"\necho "$sha256  tool.tgz" | sha256sum -c'},
+         "fetches but isn't a pinned download"),
+        ({"name": "Build the thing", "run": "echo see https://example.com"}, "names a URL but isn't a pinned download"),
+        ({"name": "Install gitleaks 8.30.1", "run": 'curl -sSfL "$url" | sh'}, "pipes into a shell"),
+        ({"name": "Install gitleaks 8.30.1", "run": 'echo "$sha256  t" | sha256sum -c\ncurl -sSfL -o t "$url"'},
+         "fetches with no sha256 check after it"),
+    ],
+)
+def test_download_rule_catches_each_problem(step, problem):
+    assert problem in download_problems(step)
+
+
+@pytest.mark.parametrize(
+    "step",
+    [
+        # Naming curl as a word isn't a fetch.
+        {"name": "Check the runner", "run": "for tool in curl unzip make cc; do command -v \"$tool\"; done"},
+        {"name": "Install gitleaks 8.30.1", "run": 'curl -sSfL -o t "https://example.com/t"\necho "$sha256  t" | sha256sum -c --strict'},
+    ],
+)
+def test_download_rule_allows_checked_pinned_downloads_and_words(step):
+    assert download_problems(step) == []
 
 
 def test_ci_has_no_secrets_and_reads_only():
