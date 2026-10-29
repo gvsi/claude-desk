@@ -4,12 +4,23 @@ Every error answer is an `ApiError`; `error_responses` documents them in the Ope
 """
 
 from collections.abc import Callable
+from datetime import date as LocalDate
 from typing import Annotated, Any, Literal
 
 from fastapi.routing import APIRoute
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
-from desk.contracts import ApprovalAnswer, Decision, HoursWindow, RuleCard, SessionState
+from desk.contracts import (
+    ActorKind,
+    ApprovalAnswer,
+    Assurance,
+    Decision,
+    DecisionState,
+    HoursWindow,
+    RuleCard,
+    SessionMode,
+    SessionState,
+)
 from desk.events import EvHeld, EvMessage, EvReceipt, EvResolved
 from desk.kernel_api import Health
 
@@ -152,3 +163,183 @@ class AlreadyResolved(BaseModel):
 
     error: Literal["already_resolved"] = "already_resolved"
     decision: Decision
+
+
+# The owner's reads (Task 9) --------------------------------------------------------------------------------------
+
+
+class BusinessOut(BaseModel):
+    """`GET /api/owner/desks`: one of the copy's businesses, with its Desks (the Desk switcher)."""
+
+    business_id: str
+    name: str
+    owner_display_name: str
+    timezone: str                         # IANA name: Today's windows are in it
+    desks: list[DeskSummary]
+
+
+class AnsweringIn(BaseModel):
+    """`PUT /api/owner/desks/{desk_id}/answering`: the Answering switch. Off, visitors can only leave their details
+    or ask for a callback."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    on: bool
+
+
+class NeedsYouSession(BaseModel):
+    """Who a held request or a callback request came from. `display_name` is the verified person's, else the name
+    the session's lead gave (untrusted text), else None."""
+
+    session_id: str
+    kind: ActorKind
+    display_name: str | None
+    verified: bool
+    assurance: Assurance
+
+
+class Handoff(BaseModel):
+    """An open callback request (`kernel_ro.handoffs`). `reason` is "<name> · <contact> · <reason>" as the visitor
+    typed them (untrusted text); `callback_window` is "<start>/<end>" in ISO 8601, or None without one."""
+
+    handoff_id: str
+    session_id: str
+    reason: str
+    callback_window: str | None
+    status: Literal["open", "done"]
+
+
+class NeedsYouItem(BaseModel):
+    """`GET /api/owner/desks/{desk_id}/needs_you`: a held request (`decision`, as the kernel signed it when read, which
+    applies expiry, with `held_by`, the reason of the rule card that held it, and `held_at`, when it was decided) or
+    an open callback request (`handoff`), never both; who it came from, and the last thing they wrote (untrusted)."""
+
+    decision: Decision | None
+    held_by: str | None
+    held_at: AwareDatetime | None
+    handoff: Handoff | None
+    session: NeedsYouSession
+    from_the_visitor: str | None
+
+    @model_validator(mode="after")
+    def _one_of(self) -> "NeedsYouItem":
+        if (self.decision is None) == (self.handoff is None):
+            raise ValueError("an item is a held request or a callback request")
+        if self.decision is None and (self.held_by is not None or self.held_at is not None):
+            raise ValueError("only a held request has held_by and held_at")
+        if self.decision is not None and self.held_at is None:
+            raise ValueError("a held request has held_at")
+        return self
+
+
+class ConversationSummary(BaseModel):
+    """A conversation on the Desk: who it is with (`display_name` as `NeedsYouSession`'s), who has it (`mode`), when
+    anything last happened in it, how its requests stand (decisions by state), and whether it is the owner's own
+    preview."""
+
+    session_id: str
+    kind: ActorKind
+    display_name: str | None
+    verified: bool
+    mode: SessionMode
+    last_activity: AwareDatetime
+    outcome_counts: dict[DecisionState, int]
+    owner_preview: bool
+
+
+class OwnerTranscript(BaseModel):
+    """`GET /api/owner/conversations/{session_id}?after=n`: the session's state and its transcript after the cursor, as
+    the owner sees it (agent text, whispers, translations and triage included; model, note and context rows never)."""
+
+    state: SessionState
+    items: list[OwnerTranscriptItem]
+
+
+class BriefingItem(BaseModel):
+    """One thing that happened since last night. `ref_id` is what it links to: the attempt's `ref_id` for `blocked`,
+    the decision for a booking, the `lead_id`, the session for an answer. `line` is the kernel's owner text for a
+    refusal or a booking, a lead's note (untrusted, as the visitor or Claude wrote it), else None."""
+
+    kind: Literal["blocked", "booking", "lead", "answer"]
+    at: AwareDatetime
+    session_id: str | None
+    display_name: str | None
+    ref_id: str
+    line: str | None
+
+
+class BriefingNewest(BaseModel):
+    """The newest blocked attempt, booking, and lead or answer (the lead when both share a time); None when none."""
+
+    blocked: BriefingItem | None
+    booking: BriefingItem | None
+    lead_or_answer: BriefingItem | None
+
+
+class Briefing(BaseModel):
+    """"Since last night": from 18:00 yesterday in the business's time zone (`since`) to now. `total` is the length of
+    the full list (`BriefingList`)."""
+
+    since: AwareDatetime
+    conversations: int
+    bookings: int
+    leads: int
+    blocked: int
+    total: int
+    newest: BriefingNewest
+
+
+class BriefingList(BaseModel):
+    """`GET /api/owner/desks/{desk_id}/briefing`: every item since last night, newest first."""
+
+    since: AwareDatetime
+    items: list[BriefingItem]
+
+
+class WeekDay(BaseModel):
+    date: LocalDate                        # a local date in the business's time zone
+    conversations: int
+    bookings: int
+    stopped: int
+
+
+class ThisWeek(BaseModel):
+    """"Last 7 days": the seven local dates ending today, in `timezone`. Totals run from 00:00 on `start` to now;
+    `handled + stepped_in == conversations`; `days` holds all seven, oldest first, the last one `end`."""
+
+    timezone: str
+    start: LocalDate
+    end: LocalDate
+    bookings: int
+    conversations: int
+    handled: int
+    stepped_in: int
+    stopped: int
+    days: list[WeekDay]
+
+
+class Today(BaseModel):
+    """`GET /api/owner/desks/{desk_id}/today`, computed from the rows on each read. `live` holds the conversations with
+    activity in the last 5 minutes."""
+
+    greeting_name: str
+    needs_you_count: int
+    live: list[ConversationSummary]
+    briefing: Briefing
+    this_week: ThisWeek
+
+
+class Attempt(BaseModel):
+    """An attempt the checkpoint stopped (`GET /api/owner/desks/{desk_id}/safety`): a refused decision (`ref_id` its
+    `decision_id`) or a reply of Claude's it blocked (`ref_id` the reply entry's `seq`, as text). `reason_plain` is the
+    kernel's owner text for a decision, or a line the API composes for a reply; `origin` is the ledger entry's;
+    `ledger_seq` is the entry to show it with. `triage` is AI-written, when there is one."""
+
+    ref_id: str
+    kind: Literal["refused", "held", "reply_blocked"]
+    reason_plain: str
+    card_ids: list[str]
+    origin: Literal["kernel", "api"]
+    created_at: AwareDatetime
+    triage: str | None
+    ledger_seq: int

@@ -1495,13 +1495,15 @@ class FakeKernelState:
                            session_id=event.session_id, ref_id=event.ref_id)
 
     def ledger_page(self, request: Request, body: Any) -> LedgerPage:
+        """The Desk's ledger, verified as the kernel verifies it: each entry's hash, link and signature."""
         copy, _ = self.owner_of(request)
         desk_id = request.path_params["desk_id"]
         if desk_id not in copy.desk_ids:
             raise Refusal(404, "not_found")
         entries = list(self.desks[desk_id].ledger)
-        return LedgerPage(entries=entries, head=entries[-1].hash if entries else GENESIS, chain_ok=True,
-                          first_bad_seq=None, public_key_hex=PUBLIC_KEY_HEX, key_id=KEY_ID)
+        first_bad = first_bad_seq(entries)
+        return LedgerPage(entries=entries, head=entries[-1].hash if entries else GENESIS, chain_ok=first_bad is None,
+                          first_bad_seq=first_bad, public_key_hex=PUBLIC_KEY_HEX, key_id=KEY_ID)
 
     def decision_by_call(self, request: Request, body: Any) -> Decision:
         session_id = self._query(request, "session_id")
@@ -1519,6 +1521,20 @@ class FakeKernelState:
         if known is None:
             raise Refusal(404, "not_found")
         return self._refresh(self.decisions[known])
+
+
+def first_bad_seq(entries: list[LedgerEntry]) -> int | None:
+    """The first entry whose hash, link to the one before or (fake) signature doesn't check out, else None."""
+    prev_hash = GENESIS
+    for entry in entries:
+        envelope = entry.model_dump(mode="json", include={"copy_id", "desk_id", "seq", "prev_hash", "created_at",
+                                                          "event"})
+        digest = sha256_hex(canonical(envelope))
+        signature = "fake:" + sha256_hex(b"desk-ledger-v1\0" + bytes.fromhex(digest))
+        if entry.prev_hash != prev_hash or entry.hash != digest or entry.signature != signature:
+            return entry.seq
+        prev_hash = entry.hash
+    return None
 
 
 # Routing -----------------------------------------------------------------------------------------
