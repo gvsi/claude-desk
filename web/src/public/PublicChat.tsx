@@ -243,6 +243,18 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
     if (chat.session !== null) onSession?.(chat.session);
   }, [chat.session, onSession]);
 
+  // A cancel that went through takes its button away: the visitor's place moves to the composer,
+  // unless they have already moved on to something else.
+  const lastCancel = useRef<string | null>(null);
+  useEffect(() => {
+    const cancelled = lastCancel.current;
+    lastCancel.current = chat.cancelling;
+    if (cancelled === null || chat.cancelling !== null) return;
+    if (chat.state.openHolds.includes(cancelled) || chat.cancelFailed === cancelled) return;
+    if (document.activeElement !== null && document.activeElement !== document.body) return;
+    composerRef.current?.querySelector('textarea')?.focus();
+  }, [chat.cancelling, chat.cancelFailed, chat.state.openHolds]);
+
   // Words that didn't send when the chat ended wait in the new chat's composer once it can be used.
   const carried = useRef<string | null>(null);
   // The chat can be written in: it loaded, and its session hasn't ended.

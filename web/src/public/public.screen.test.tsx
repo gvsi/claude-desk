@@ -214,6 +214,8 @@ describe('public chat page', () => {
 
     await screen.getByRole('button', { name: 'Cancel this request' }).click();
     await expect.element(screen.getByRole('button', { name: 'Cancel this request' })).not.toBeInTheDocument();
+    // The button is gone, so the visitor's place moves to the composer rather than the page.
+    await expect.element(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toHaveFocus();
     expect(requests('cancelRequest').map((r) => r.path)).toEqual([
       `/api/public/desks/${RIVERA.slug}/decisions/${encodeURIComponent(held.decision_id)}/cancel`,
     ]);
