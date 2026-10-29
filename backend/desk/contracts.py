@@ -7,7 +7,7 @@ order (each class is defined before it is used). Field comments are part of the 
 from datetime import time
 from typing import Annotated, Literal, Self
 
-from pydantic import AwareDatetime, BaseModel, Field, StringConstraints, model_validator
+from pydantic import AwareDatetime, BaseModel, Field, StrictInt, StringConstraints, model_validator
 
 # Identity and sessions: built by the kernel from its own tables; never accepted over HTTP.
 ActorKind = Literal["visitor", "agent", "owner"]
@@ -60,7 +60,7 @@ class Label(BaseModel):
 class Claim(BaseModel):
     key: str                              # "total", "starts_at", "title", "contact"; never "hours" (DeskSeed.hours)
     kind: Literal["money", "percent_bp", "datetime", "text", "ref"]
-    value: int | str                      # money in USD cents; percent in bp; datetime ISO 8601 with offset
+    value: StrictInt | str                # money in USD cents; percent in bp; datetime ISO 8601 with offset
 
 class InboxNotice(BaseModel):             # code-free; safe for SSE and app.*, never for Claude's context
     entry_id: str
@@ -83,7 +83,7 @@ class SeedDocument(BaseModel):
 class PriceItem(BaseModel):
     item_id: str
     title: str
-    unit_cents: int = Field(ge=0, le=1_000_000)
+    unit_cents: StrictInt = Field(ge=0, le=1_000_000)
 
 class CalendarSlot(BaseModel):
     slot_id: str
@@ -176,8 +176,8 @@ class ReviewThresholds(BaseModel):        # one row of review_thresholds.py (per
     max_manipulation_bp: int = Field(ge=0, le=10_000)
 
 class Review(BaseModel):                  # Sonnet 5.5 structured output; a validation failure = absent
-    within_charter_bp: int = Field(ge=0, le=10_000)
-    manipulation_bp: int = Field(ge=0, le=10_000)
+    within_charter_bp: StrictInt = Field(ge=0, le=10_000)
+    manipulation_bp: StrictInt = Field(ge=0, le=10_000)
     recommendation: Literal["allow", "hold", "block"]   # anything but "allow" turns an allow into a hold; "block" also adds a strike
 
 # Decisions
@@ -213,8 +213,8 @@ class RuleCard(BaseModel):                # Claude drafts, code compiles, the ow
     who: Literal["anyone", "verified", "record_owner", "person", "agent"]
     person_id: str | None = None          # required iff who == "person"
     agent_key_id: str | None = None       # required iff who == "agent"
-    max_amount_cents: int | None = None   # auto only; required and <= AUTO_MONEY_HARD_CAP_CENTS when applies_to is in MONEY_TOOLS or effect:charge|pay_out
-    max_discount_bp: int = 0              # auto only; a larger requested discount asks
+    max_amount_cents: StrictInt | None = None   # auto only; required and <= AUTO_MONEY_HARD_CAP_CENTS when applies_to is in MONEY_TOOLS or effect:charge|pay_out
+    max_discount_bp: StrictInt = 0        # auto only; a larger requested discount asks
     hours: HoursWindow | None = None      # auto only
     review: bool = False                  # auto only: gate on the reviewer, thresholds from review_thresholds.py
     is_default: bool = False              # compiler-emitted "ask" (who="anyone") unless cards for anyone cover the tool; ranks below every card
@@ -270,11 +270,11 @@ class Probe(BaseModel):                   # a setup safety probe: a hypothetical
     actor: ActorKind
     who: Literal["anyone", "verified", "record_owner", "person", "agent"]   # the caller's standing, as in RuleCard
     subject_id: str | None = None         # the person_id or agent_key_id when who is "person" or "agent"
-    agent_mandate_remaining_cents: int | None = None   # agent probes only
+    agent_mandate_remaining_cents: StrictInt | None = None   # agent probes only
     call: ToolCall                        # args are normalized; the resource and price are the stand-ins below
     resource_kind: Literal["quote", "slot", "booking", "document", "charge", "desk"]
     resource_owner: Literal["caller", "other", "none"] = "none"
-    amount_cents: int | None = None       # stand-in price for money tools
+    amount_cents: StrictInt | None = None   # stand-in price for money tools
 
 class ProbeResult(BaseModel):
     probe: Probe
@@ -397,8 +397,8 @@ class Mandate(BaseModel):                 # signed delegation envelope
     desk_id: str                          # audience
     on_behalf_of: str | None = None       # display only; grants nothing
     allowed_effects: list[Literal["charge"]]   # a visitor's mandate never authorizes pay_out
-    per_charge_cents: int
-    total_cents: int                      # cumulative; the kernel reserves, commits and releases under FOR UPDATE
+    per_charge_cents: StrictInt
+    total_cents: StrictInt                # cumulative; the kernel reserves, commits and releases under FOR UPDATE
     currency: Literal["usd"]
     expires_at: SignedTime                # signed as the literal string
     nonce: str

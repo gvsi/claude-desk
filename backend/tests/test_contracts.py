@@ -10,6 +10,7 @@ from desk.contracts import (
     A2ARequest,
     AgentAuth,
     BusinessSeed,
+    Claim,
     CopyCreated,
     DeskSeed,
     Effect,
@@ -18,6 +19,8 @@ from desk.contracts import (
     LedgerEntry,
     Mandate,
     NormalizedAction,
+    PriceItem,
+    Probe,
     Review,
     RuleCard,
     SeedDocument,
@@ -50,6 +53,39 @@ def test_money_effect_is_split():
 def test_review_scores_are_bounded_basis_points():
     with pytest.raises(ValidationError):
         Review(within_charter_bp=10_001, manipulation_bp=0, recommendation="allow")
+
+
+def test_review_scores_are_strict_integers():
+    valid = {"within_charter_bp": 9_500, "manipulation_bp": 500, "recommendation": "allow"}
+    assert Review.model_validate_json(json.dumps(valid)).manipulation_bp == 500
+    for field in ("within_charter_bp", "manipulation_bp"):
+        for malformed in (False, "0", 1.0):           # lax parsing would turn each into a favorable score
+            with pytest.raises(ValidationError):
+                Review.model_validate_json(json.dumps({**valid, field: malformed}))
+
+
+def test_outside_amounts_and_basis_points_are_strict_integers():
+    card = {"card_id": "rv-link", "applies_to": "native.payment_link", "mode": "auto", "who": "anyone", "reason": "x",
+            "max_amount_cents": 30_000, "max_discount_bp": 500}
+    probe = {"actor": "agent", "who": "agent", "subject_id": "k1", "agent_mandate_remaining_cents": 2_000,
+             "call": {"call_id": "c1", "tool": "native.charge_mandate", "args": {}}, "resource_kind": "quote",
+             "amount_cents": 2_000}
+    mandate = {"mandate_id": "m1", "issuer": "demo-wallet", "agent_key_id": "k1", "desk_id": "d1",
+               "allowed_effects": ["charge"], "per_charge_cents": 2_000, "total_cents": 10_000, "currency": "usd",
+               "expires_at": "2026-11-03T00:00:00.000000Z", "nonce": "n", "sig": "s"}
+    cases = [
+        (Claim, {"key": "total", "kind": "money", "value": 18_000}, ["value"], (False, 1.0)),   # a str value is a text claim
+        (PriceItem, {"item_id": "drain", "title": "Drain clearing", "unit_cents": 18_000}, ["unit_cents"], None),
+        (RuleCard, card, ["max_amount_cents", "max_discount_bp"], None),
+        (Probe, probe, ["agent_mandate_remaining_cents", "amount_cents"], None),
+        (Mandate, mandate, ["per_charge_cents", "total_cents"], None),
+    ]
+    for model, valid, fields, malformed_values in cases:
+        model.model_validate_json(json.dumps(valid))
+        for field in fields:
+            for malformed in malformed_values or (False, "100", 1.0):
+                with pytest.raises(ValidationError):
+                    model.model_validate_json(json.dumps({**valid, field: malformed}))
 
 
 def test_review_and_limits_only_on_auto_cards():
