@@ -11,7 +11,7 @@
 
 | `mode` | Lines | Controls | What the visitor sees |
 | --- | --- | --- | --- |
-| `ai` | "{visitorName} never sees whispers. They steer Claude, and your rules still apply." | secondary "Take over" | "{visitorName} sees “{ownerName} joined the chat.”" |
+| `ai` | "{visitorName} never sees whispers. Whispers steer Claude, and your rules still apply." | secondary "Take over" | "{visitorName} sees “{ownerName} joined the chat.”" |
 | `owner` | "You're in this chat", "Claude won't send anything here until you hand it back." | secondary "Hand back to Claude" | "{visitorName} sees “Claude is helping again.”" |
 | `paused` | The held dot and "Claude paused this chat after repeated blocked attempts." | primary "Resume Claude", secondary "Take over" | None |
 

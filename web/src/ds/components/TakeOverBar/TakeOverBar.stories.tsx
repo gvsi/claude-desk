@@ -23,7 +23,7 @@ function lineReading(root: HTMLElement, text: string): HTMLElement {
 
 /** The whisper line while Claude answers: the visitor's name set off at its start. */
 async function expectWhisperLine(root: HTMLElement, visitor: string): Promise<HTMLElement> {
-  const line = lineReading(root, `${visitor} never sees whispers. They steer Claude, and your rules still apply.`);
+  const line = lineReading(root, `${visitor} never sees whispers. Whispers steer Claude, and your rules still apply.`);
   await expectSetOffName(line, visitor);
   return line;
 }

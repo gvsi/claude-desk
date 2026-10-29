@@ -115,7 +115,7 @@ export function TakeOverBar({
       // `ai`, and a mode this build doesn't know: only Take over is offered.
       lead = (
         <FirstLine lineRef={firstLine}>
-          <VisitorName>{visitorName}</VisitorName> never sees whispers. They steer Claude, and your rules still apply.
+          <VisitorName>{visitorName}</VisitorName> never sees whispers. Whispers steer Claude, and your rules still apply.
         </FirstLine>
       );
       buttons = button('secondary', 'Take over', onTakeOver);
