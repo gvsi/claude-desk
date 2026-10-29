@@ -365,6 +365,32 @@ def test_admin_stops_unless_the_migration_reaches_head(scratch, monkeypatch):
     assert rolpassword(scratch.admin, probe) is None
 
 
+LATER_REVISION = "9999_from_a_later_release"
+
+
+def test_a_database_ahead_of_the_code_stops_the_admin_run(scratch):
+    """An earlier release can't be redeployed once a later release's migration ran.
+
+    deploy.sh runs the admin task on every deploy, before DeskApp. When the database is at a
+    revision this code doesn't have, the run stops (1) and names it: nothing is restamped and no
+    password is set, so the deploy stops with the running release untouched (docs/deploy.md,
+    "Rollback and teardown", rolls forward instead).
+    """
+    url = scratch.database()
+    assert run_admin(url, {scratch.role("probe"): PROBE_PASSWORD}).code == 0
+    with psycopg.connect(libpq_url(url_text(url)), autocommit=True) as conn:
+        conn.execute("UPDATE alembic_version SET version_num = %s", (LATER_REVISION,))
+    probe = scratch.role("probe")
+    run = run_admin(url, {probe: PROBE_PASSWORD})
+    assert run.code == 1
+    assert "admin: the migration failed" in run.stderr
+    # It names the revision this code doesn't have, in the words docs/deploy.md quotes.
+    assert f"Can't locate revision identified by '{LATER_REVISION}'" in run.stderr
+    assert "can log in" not in run.stdout
+    assert version(url) == LATER_REVISION                  # never restamped to this code's head
+    assert rolpassword(scratch.admin, probe) is None
+
+
 def test_cli_needs_every_variable(capsys):
     """A missing or unusable variable stops the command (2) before any database work, naming it, never a value."""
     env = {"ADMIN_DATABASE_URL": "postgresql+psycopg://desk_admin:adminPlaceholder@nowhere.invalid/desk",
