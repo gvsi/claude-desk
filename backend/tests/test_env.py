@@ -41,3 +41,12 @@ def test_the_signer_and_database_urls_agree_on_development(monkeypatch):
             database_url("KERNEL")                                    # no repository .env outside development
     monkeypatch.setenv("KERNEL_DATABASE_URL", "postgresql+psycopg://from-environment")
     assert database_url("KERNEL") == "postgresql+psycopg://from-environment"
+
+
+def test_is_development_reads_a_given_value(monkeypatch):
+    monkeypatch.setenv("DESK_ENV", "production")
+    for env in DEVELOPMENT:
+        assert is_development(env), repr(env)
+    monkeypatch.setenv("DESK_ENV", "dev")
+    for env in NOT_DEVELOPMENT:
+        assert not is_development(env), repr(env)
