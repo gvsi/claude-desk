@@ -871,12 +871,12 @@ export const SendingStartsWhileOpen: Story = {
     await expect(deny).toHaveFocus();
     await expect(deny).toHaveAttribute('aria-expanded', 'false');
     await expect(deny).toHaveAttribute('aria-disabled', 'true');
-    // No answer was chosen here, so neither button shows the busy dots: both wait in their busy
+    // No answer was chosen here, so neither button shows the busy spinner: both wait in their busy
     // colors, and the line under them says what is happening.
     for (const button of answerButtons(canvasElement)) {
       await expect(button).toHaveAttribute('aria-disabled', 'true');
       await expect(button).not.toHaveAttribute('aria-busy');
-      await expect(button.querySelector('.cd-button__dots')).toBeNull();
+      await expect(button.querySelector('.cd-button__spinner')).toBeNull();
     }
 
     // That answer fails and the answers come back: the menu stays closed until the owner opens it.
@@ -926,7 +926,7 @@ export const SendingYourAnswer: Story = {
   args: refundArgs,
   render: (args) => <SendingScreen {...args} />,
   parameters: {
-    canvasNote: `${ANSWERS_BOARD} The signed busy board (N-Typing-Owner-Busy) shows an answer being sent: the chosen answer shows the busy dots, the other waits in its busy colors without them, and a line under them says so.`,
+    canvasNote: `${ANSWERS_BOARD} The N-Typing-Owner-Busy board and the owner's spinner decision show an answer being sent: the chosen answer shows the busy spinner, the other waits in its busy colors without one, and a line under them says so.`,
   },
   play: async ({ args, canvas, canvasElement, userEvent }) => {
     const [allow, deny] = answerButtons(canvasElement) as [HTMLElement, HTMLElement];
@@ -956,19 +956,19 @@ export const SendingYourAnswer: Story = {
     await expect(canvas.getByText('Sending your answer').closest('[role="status"]')).not.toBeNull();
     for (const button of answerButtons(canvasElement)) await expect(button).toHaveAttribute('aria-disabled', 'true');
 
-    // dots_on_the_chosen_answer: Deny, the side chosen, shows the busy dots in place of its word and
-    // chevron, and stays named "Deny"; Allow waits without dots, its word and chevron still shown.
+    // spinner_on_the_chosen_answer: Deny, the side chosen, shows the busy spinner in place of its word
+    // and chevron, and stays named "Deny"; Allow waits without one, its word and chevron still shown.
     await expect(deny).toHaveAttribute('aria-busy', 'true');
     await expect(deny).toHaveAccessibleName('Deny');
-    await expect(deny.querySelectorAll('.cd-button__dot')).toHaveLength(3);
+    await expect(deny.querySelectorAll('.cd-button__spinner')).toHaveLength(1);
     expectComputed(deny.querySelector('.cd-button__label') as HTMLElement, { opacity: '0' });
     expectComputed(deny.querySelector('.cd-button__chevron') as SVGElement, { visibility: 'hidden' });
     await expect(allow).not.toHaveAttribute('aria-busy');
-    await expect(allow.querySelector('.cd-button__dots')).toBeNull();
+    await expect(allow.querySelector('.cd-button__spinner')).toBeNull();
     expectComputed(allow.querySelector('.cd-button__label') as HTMLElement, { opacity: '1' });
     expectComputed(allow.querySelector('.cd-button__chevron') as SVGElement, { visibility: 'visible' });
 
-    // Each steps to its busy colors, never dimmed, so its words or dots still read in the card:
+    // Each steps to its busy colors, never dimmed, so its words or spinner still read in the card:
     // Allow's label turns text-secondary on its fill, and the red Deny keeps its color on its hover
     // fill. They step over the instant color transition, so wait for it to end.
     const BUSY_LABEL = 'rgba(250, 249, 245, 0.64)';

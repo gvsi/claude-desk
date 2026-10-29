@@ -214,11 +214,11 @@ export const Default: Story = {
 };
 
 /**
- * The demo is starting: the button shows the three busy dots in place of its words, which still
- * name it, and a status line, seen only by screen readers, says so.
+ * The demo is starting: the button shows the busy spinner in place of its words, which still name
+ * it, and a status line, seen only by screen readers, says so.
  */
-async function expectStartingDots(button: HTMLElement, status: HTMLElement): Promise<void> {
-  await expect(button.querySelectorAll('.cd-button__dot')).toHaveLength(3);
+async function expectStartingSpinner(button: HTMLElement, status: HTMLElement): Promise<void> {
+  await expect(button.querySelectorAll('.cd-button__spinner')).toHaveLength(1);
   expectComputed(button.querySelector('.cd-button__label') as HTMLElement, { opacity: '0' });
   await expect(status.textContent).toBe('Starting the demo');
   await expect(status).toHaveClass('cd-sr-only');
@@ -227,11 +227,11 @@ async function expectStartingDots(button: HTMLElement, status: HTMLElement): Pro
 export const Busy: Story = {
   args: { busy: true },
   play: async ({ args, canvas, userEvent }) => {
-    // busy_submits_once: while the demo starts the button shows the dots, like every busy button,
+    // busy_submits_once: while the demo starts the button shows the spinner, like every busy button,
     // is still named "Start the demo", stays focusable but inert, and nothing is sent.
     const button = canvas.getByRole('button', { name: 'Start the demo' });
     await expect(canvas.queryByRole('button', { name: 'Starting' })).toBeNull();
-    await expectStartingDots(button, canvas.getByRole('status'));
+    await expectStartingSpinner(button, canvas.getByRole('status'));
     await expect(button).toHaveAttribute('aria-disabled', 'true');
     await expect(button).not.toHaveAttribute('disabled');
     await expect(button).toHaveAttribute('aria-busy', 'true');
@@ -246,7 +246,7 @@ export const Busy: Story = {
 export const StartingFlow: Story = {
   render: (args) => <StartingPage {...args} />,
   play: async ({ args, canvas, userEvent }) => {
-    // busy_submits_once, from a click: the button then shows the dots and keeps focus, still
+    // busy_submits_once, from a click: the button then shows the spinner and keeps focus, still
     // reachable but inert (aria-disabled, not disabled), and nothing more is sent. The status line,
     // empty until then, says the demo is starting.
     const field = canvas.getByLabelText('Passcode');
@@ -254,13 +254,13 @@ export const StartingFlow: Story = {
     const button = canvas.getByRole('button', { name: 'Start the demo' });
     const status = canvas.getByRole('status');
     await expect(status.textContent).toBe('');
-    await expect(button.querySelector('.cd-button__dots')).toBeNull();
+    await expect(button.querySelector('.cd-button__spinner')).toBeNull();
     await userEvent.click(button);
     await expect(args.onSubmit).toHaveBeenCalledTimes(1);
     await expect(args.onSubmit).toHaveBeenCalledWith('rivera-demo');
 
     await expect(canvas.getByRole('button', { name: 'Start the demo' })).toBe(button);
-    await expectStartingDots(button, status);
+    await expectStartingSpinner(button, status);
     await expect(button).toHaveAttribute('aria-disabled', 'true');
     await expect(button).not.toHaveAttribute('disabled');
     await expect(button).toHaveAttribute('aria-busy', 'true');

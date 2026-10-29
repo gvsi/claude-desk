@@ -6,13 +6,15 @@ import './Button.css';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'danger-ghost';
 
-/** Three dots in place of the label while busy, drawn only: the label still names the button. */
-const BUSY_DOTS = (
-  <span className="cd-button__dots" aria-hidden="true">
-    <span className="cd-button__dot" />
-    <span className="cd-button__dot" />
-    <span className="cd-button__dot" />
-  </span>
+/**
+ * A spinner in place of the label while busy, drawn only: the label still names the button. A
+ * faint ring with a quarter arc on it, both in the busy label color, turned by the stylesheet.
+ */
+const BUSY_SPINNER = (
+  <svg className="cd-button__spinner" viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false">
+    <circle cx="8" cy="8" r="6" stroke="currentColor" strokeOpacity="0.3" strokeWidth="2" />
+    <path d="M8 2a6 6 0 0 1 6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+  </svg>
 );
 
 interface ButtonBaseProps {
@@ -27,13 +29,13 @@ interface ButtonBaseProps {
   type?: 'button' | 'submit' | 'reset';
   disabled?: boolean;
   /**
-   * Waiting for the result of a click: three dots in the busy colors take the label's place, at the
-   * same width, the label still names it with `aria-busy`, and further clicks do nothing.
+   * Waiting for the result of a click: a small spinner in the busy colors takes the label's place,
+   * at the same width, the label still names it with `aria-busy`, and further clicks do nothing.
    */
   busy?: boolean;
   /**
    * Waiting while another button's request is in flight, such as the answer a held request's owner
-   * didn't choose: the busy colors without the dots, its words still shown, and clicks do nothing.
+   * didn't choose: the busy colors without the spinner, its words still shown, and clicks do nothing.
    */
   waiting?: boolean;
   /** The element's `id`, for a menu or a description that points back at it. */
@@ -83,7 +85,9 @@ export function Button({
   onKeyDown,
   children,
 }: ButtonProps) {
-  const className = `cd-button cd-button--${variant} cd-button--${size} cd-type-control${waiting && !busy ? ' cd-button--waiting' : ''}`;
+  // A busy button is the one in flight; only the others wait.
+  const waitingClass = waiting && !busy ? ' cd-button--waiting' : '';
+  const className = `cd-button cd-button--${variant} cd-button--${size} cd-type-control${waitingClass}`;
   // Busy and waiting keep focus where it is (aria-disabled, not disabled), so a keyboard user isn't
   // dropped to the top of the page mid-request; the handler below swallows the click instead.
   const inert = disabled || busy || waiting;
@@ -110,7 +114,7 @@ export function Button({
         onClick={handleClick}
       >
         <span className="cd-button__label">{children}</span>
-        {busy ? BUSY_DOTS : null}
+        {busy ? BUSY_SPINNER : null}
       </a>
     );
   }
@@ -132,7 +136,7 @@ export function Button({
     >
       <span className="cd-button__label">{children}</span>
       {opensMenu ? <Icon name="chevron-down" size={16} className="cd-button__chevron" /> : null}
-      {busy ? BUSY_DOTS : null}
+      {busy ? BUSY_SPINNER : null}
     </button>
   );
 }

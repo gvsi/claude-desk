@@ -17,8 +17,6 @@ export type ContrastPair = {
   readonly under?: string;
   /** The control's own opacity when it is drawn faded as a whole: its label and fill fade together over `over`. */
   readonly opacity?: number;
-  /** A mark drawn fainter than its color, such as a busy button's dots at rest: only the mark fades. */
-  readonly fgOpacity?: number;
   /** 4.5:1 for text; 3:1 for focus rings, dots, the mark and text at 24 px and up. */
   readonly min: 4.5 | 3;
   readonly use: string;
@@ -79,13 +77,12 @@ function luminance({ r, g, b }: Rgba): number {
  * WCAG contrast of a pair as it is drawn. Each color is a color token name, a `{token}` alias, a
  * `var(--token)`, a hex color, an `rgb()`/`rgba()` color or `transparent`. The ground sits on
  * `over`, and a translucent `over` on an opaque `under`; at an `opacity` under 1 the label and the
- * ground fade together over what is beneath them, and at an `fgOpacity` under 1 only the label does. Throws on anything it can't read, and on layers
+ * ground fade together over what is beneath them. Throws on anything it can't read, and on layers
  * that don't end on something opaque.
  */
-export function pairContrast({ fg, ground, over, under, opacity = 1, fgOpacity = 1 }: Omit<ContrastPair, 'min' | 'use'>): number {
+export function pairContrast({ fg, ground, over, under, opacity = 1 }: Omit<ContrastPair, 'min' | 'use'>): number {
   if (under !== undefined && over === undefined) throw new Error(`${under} is under nothing; name the layer it sits under as over`);
   if (!(opacity > 0 && opacity <= 1)) throw new Error(`opacity ${opacity} is not in (0, 1]`);
-  if (!(fgOpacity > 0 && fgOpacity <= 1)) throw new Error(`fgOpacity ${fgOpacity} is not in (0, 1]`);
   let beneath: Rgba | undefined;
   if (over !== undefined) {
     beneath = parseColor(over);
@@ -100,8 +97,7 @@ export function pairContrast({ fg, ground, over, under, opacity = 1, fgOpacity =
 
   const groundColor = parseColor(ground);
   const fade = (c: Rgba): Rgba => ({ ...c, a: c.a * opacity });
-  const mark = parseColor(fg);
-  const label = fade(composite({ ...mark, a: mark.a * fgOpacity }, groundColor));
+  const label = fade(composite(parseColor(fg), groundColor));
   const fill = fade(groundColor);
   const back = beneath === undefined ? fill : composite(fill, beneath);
   if (back.a !== 1) throw new Error(`${ground} is translucent; pass the opaque color it sits over`);
@@ -126,7 +122,7 @@ function pairs(
   min: 4.5 | 3,
   use: string,
   over?: string,
-  beneath: Pick<ContrastPair, 'under' | 'opacity' | 'fgOpacity'> = {},
+  beneath: Pick<ContrastPair, 'under' | 'opacity'> = {},
 ): ContrastPair[] {
   return fgs.flatMap((fg) =>
     grounds.map((ground) => ({ fg, ground, ...(over === undefined ? {} : { over }), ...beneath, min, use })),
@@ -135,8 +131,6 @@ function pairs(
 
 const TEXT = ['text-primary', 'text-secondary', 'text-tertiary', 'accent-blue'] as const;
 
-/** How strong a busy button's dots are at rest, before each pulses to full (Button.css). */
-export const BUSY_DOT_REST = 0.7;
 const MARKS = ['accent-blue', 'ring-composer', 'status-handled', 'status-held', 'status-refused', 'status-info'] as const;
 const SURFACES = ['bg-app', 'bg-panel', 'bg-surface', 'bg-selected'] as const;
 
@@ -172,23 +166,14 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = Object.freeze([
   ...pairs(['button-danger-text'], ['bg-app'], 4.5, 'A danger-ghost button on the app background.'),
   ...pairs(['button-danger-text'], ['button-danger-fill', 'button-danger-fill-hover', 'fill-hover'], 4.5, 'Danger and danger-ghost buttons on the app background, at rest and on hover.', 'bg-app'),
   // A busy button's pairs are listed only for a page, a card on it and a dialog, and for a ghost
-  // button the sidebar and the reviewer bar: every Button sits on one. None is listed on bg-selected,
+  // button the sidebar and the reviewer bar: every Button sits on one. Its spinner's arc is drawn in
+  // the busy label color at full strength, so these 4.5:1 pairs cover it too, where a graphic needs
+  // 3:1 (tokens.test.ts requires them at 3:1 for the spinner). None is listed on bg-selected,
   // where a busy secondary label would read 4.45 and a busy danger one 3.98; the guard
   // no_button_on_the_selected_ground (guards.test.ts) keeps Buttons off that ground.
   ...pairs(['text-secondary'], ['fill-secondary'], 4.5, "A busy secondary answer in a card: its text-secondary label on the button's fill.", 'fill-card', { under: 'bg-app' }),
   ...pairs(['button-danger-text'], ['bg-surface'], 4.5, "Deny's answers in its menu on a held request, This time and Always, in red words on the raised surface."),
   ...pairs(['button-danger-text'], ['fill-hover'], 4.5, "Deny's answers in its menu while one is hovered or has focus.", 'bg-surface'),
-  // A busy button's three dots are marks (3:1) in its busy label color, resting at 0.7 and pulsing
-  // to full strength, which is the 4.5:1 busy pair above. At rest, on the same grounds.
-  ...pairs(['button-primary-text'], ['button-primary-hover'], 3, "A busy primary button's dots at rest.", undefined, { fgOpacity: BUSY_DOT_REST }),
-  ...pairs(['text-secondary'], ['fill-secondary'], 3, "A busy secondary button's dots at rest, on a page.", 'bg-app', { fgOpacity: BUSY_DOT_REST }),
-  ...pairs(['text-secondary'], ['fill-secondary'], 3, "A busy secondary button's dots at rest, in a dialog.", 'bg-surface', { fgOpacity: BUSY_DOT_REST }),
-  ...pairs(['text-secondary'], ['fill-secondary'], 3, "A busy secondary answer's dots at rest, in a card.", 'fill-card', { under: 'bg-app', fgOpacity: BUSY_DOT_REST }),
-  ...pairs(['text-secondary'], ['bg-app', 'bg-panel', 'bg-surface', 'bg-muted'], 3, "A busy ghost button's dots at rest, on a page, the sidebar, a dialog or the reviewer bar.", undefined, { fgOpacity: BUSY_DOT_REST }),
-  ...pairs(['text-secondary'], ['fill-card'], 3, "A busy ghost button's dots at rest, in a card.", 'bg-app', { fgOpacity: BUSY_DOT_REST }),
-  ...pairs(['button-danger-text'], ['button-danger-fill-hover', 'fill-hover'], 3, 'A busy danger or danger-ghost answer\'s dots at rest, on a page.', 'bg-app', { fgOpacity: BUSY_DOT_REST }),
-  ...pairs(['button-danger-text'], ['button-danger-fill-hover', 'fill-hover'], 3, 'A busy danger or danger-ghost answer\'s dots at rest, in a card.', 'fill-card', { under: 'bg-app', fgOpacity: BUSY_DOT_REST }),
-  ...pairs(['button-danger-text'], ['fill-hover'], 3, "A busy danger-ghost button's dots at rest, in a dialog.", 'bg-surface', { fgOpacity: BUSY_DOT_REST }),
 ]);
 
 export const DECORATIVE_COLORS: Readonly<Record<string, string>> = Object.freeze({

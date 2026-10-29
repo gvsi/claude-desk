@@ -106,7 +106,7 @@ export interface ApprovalCardProps {
 interface AnswerLock {
   /** Which click this is, so a late rejection releases only its own lock. */
   click: number;
-  /** The side whose answer was chosen: its button shows the busy dots while the answer is sent. */
+  /** The side whose answer was chosen: its button shows the busy spinner while the answer is sent. */
   side: Side;
   key: string;
   pending: boolean;

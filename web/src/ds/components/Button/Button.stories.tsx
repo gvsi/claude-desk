@@ -1,7 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn } from 'storybook/test';
 
-import { BUSY_DOT_REST } from '../../contrast.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { Button } from './Button.tsx';
 
@@ -67,7 +66,7 @@ export const Busy: Story = {
     await userEvent.click(button);
     await expect(args.onClick).not.toHaveBeenCalled();
     // busy_colors_keep_contrast: a busy button is drawn in token colors, never dimmed as a whole, so
-    // its dots, in its label's color, are a listed contrast pair: button-primary-text on
+    // its spinner, in its label's color, is a listed contrast pair: button-primary-text on
     // button-primary-hover, 12.2:1.
     expectComputed(button, { opacity: '1', backgroundColor: 'rgb(221, 217, 207)', color: 'rgb(28, 27, 25)' });
   },
@@ -89,7 +88,7 @@ export const BusySecondary: Story = {
   play: async ({ canvas }) => {
     const button = canvas.getByRole('button', { name: 'Keep it' });
     await expect(button).toHaveAttribute('aria-busy', 'true');
-    // The label's color steps down to text-secondary on the button's own fill, and the dots take it:
+    // The label's color steps down to text-secondary on the button's own fill, and the spinner takes it:
     // 5.3:1 on bg-surface, where dimming the whole button left it at 4.48:1.
     expectComputed(button, { opacity: '1', backgroundColor: 'rgba(250, 249, 245, 0.1)', color: 'rgba(250, 249, 245, 0.64)' });
   },
@@ -141,11 +140,11 @@ export const BusyAndDisabled: Story = {
 };
 
 /**
- * busy_shows_dots: a busy button's three dots, in its busy color, where its label was. The label
- * keeps its place in the layout, unseen, and still names the button; the dots are hidden from
- * screen readers.
+ * busy_shows_spinner: a busy button's spinner where its label was: a 16 px ring, a faint track with
+ * a quarter arc drawn 2 px wide in its busy label color. The label keeps its place in the layout,
+ * unseen, and still names the button; the spinner is hidden from screen readers.
  */
-async function expectBusyDots(button: HTMLElement, name: string): Promise<HTMLElement[]> {
+async function expectBusySpinner(button: HTMLElement, name: string): Promise<SVGElement> {
   await expect(button).toHaveAccessibleName(name);
   await expect(button).toHaveAttribute('aria-busy', 'true');
   await expect(button).toHaveAttribute('aria-disabled', 'true');
@@ -153,36 +152,43 @@ async function expectBusyDots(button: HTMLElement, name: string): Promise<HTMLEl
   if (!label) throw new Error('no label in the busy button');
   expectComputed(label, { opacity: '0' });
   await expect(label.getBoundingClientRect().width).toBeGreaterThan(0);
-  const dots = button.querySelector<HTMLElement>('.cd-button__dots');
-  if (!dots) throw new Error('no dots in the busy button');
-  await expect(dots).toHaveAttribute('aria-hidden', 'true');
-  await expect(dots.textContent).toBe('');
-  const each = [...dots.querySelectorAll<HTMLElement>('.cd-button__dot')];
-  await expect(each).toHaveLength(3);
+  const spinners = button.querySelectorAll<SVGElement>('svg.cd-button__spinner');
+  await expect(spinners).toHaveLength(1);
+  const spinner = spinners[0] as SVGElement;
+  await expect(spinner).toHaveAttribute('aria-hidden', 'true');
+  await expect(spinner.textContent).toBe('');
+  // In the button's busy label color: the arc at full strength, the track behind it faint.
   const { color } = getComputedStyle(button);
-  for (const dot of each) expectComputed(dot, { width: '6px', height: '6px', borderTopLeftRadius: '999px', backgroundColor: color });
+  expectComputed(spinner, { width: '16px', height: '16px', color });
+  const track = spinner.querySelector('circle');
+  const arc = spinner.querySelector('path');
+  if (!track || !arc) throw new Error('the spinner has no track or arc');
+  for (const part of [track, arc]) {
+    await expect(part).toHaveAttribute('stroke', 'currentColor');
+    await expect(part).toHaveAttribute('stroke-width', '2');
+  }
+  await expect(track).toHaveAttribute('stroke-opacity', '0.3');
+  await expect(arc).not.toHaveAttribute('stroke-opacity');
+  await expect(arc).toHaveAttribute('stroke-linecap', 'round');
   // Centered in the button, where the label was.
   const box = button.getBoundingClientRect();
-  const [first, last] = [each[0]?.getBoundingClientRect(), each[2]?.getBoundingClientRect()];
-  if (!first || !last) throw new Error('missing dots');
-  await expect(Math.abs((first.left + last.right) / 2 - (box.left + box.right) / 2)).toBeLessThan(1);
-  await expect(Math.abs((first.top + first.bottom) / 2 - (box.top + box.bottom) / 2)).toBeLessThan(1);
-  return each;
+  const ring = spinner.getBoundingClientRect();
+  await expect(Math.abs((ring.left + ring.right) / 2 - (box.left + box.right) / 2)).toBeLessThan(1);
+  await expect(Math.abs((ring.top + ring.bottom) / 2 - (box.top + box.bottom) / 2)).toBeLessThan(1);
+  return spinner;
 }
 
-/** The dots pulse one after another on the writing loop, motion-stagger apart. */
-function expectDotsPulse(dots: readonly HTMLElement[]): void {
-  for (const [index, dot] of dots.entries()) {
-    expectComputed(dot, {
-      animationName: /^(?!none$).+/,
-      animationDuration: '1.6s',
-      animationIterationCount: 'infinite',
-      animationDelay: ['0s', '0.15s', '0.3s'][index] as string,
-    });
-  }
+/** The spinner turns at an even speed, a whole turn every motion-spin, without end. */
+function expectSpins(spinner: SVGElement): void {
+  expectComputed(spinner, {
+    animationName: /^(?!none$).+/,
+    animationDuration: '0.8s',
+    animationIterationCount: 'infinite',
+    animationTimingFunction: 'linear',
+  });
 }
 
-export const BusyDots: Story = {
+export const BusySpinner: Story = {
   render: () => (
     <div style={{ display: 'grid', gridTemplateColumns: 'max-content max-content', gap: 'var(--space-8)', justifyItems: 'start' }}>
       {BUSY_LOOKS.flatMap(({ variant, children }) => [
@@ -197,7 +203,7 @@ export const BusyDots: Story = {
   ),
   parameters: {
     canvasNote:
-      'The signed busy board (N-Typing-Owner-Busy): each variant at rest, then busy, with three small dots in its busy colors in place of its label, at the same width.',
+      "The owner's busy-button decision after the N-Typing-Owner-Busy board: each variant at rest, then busy, with a small spinner in its busy colors in place of its label, at the same width.",
   },
   play: async ({ canvas }) => {
     for (const { children, backgroundColor, color } of BUSY_LOOKS) {
@@ -208,8 +214,8 @@ export const BusyDots: Story = {
       await expect(Math.abs(after.width - before.width)).toBeLessThan(0.5);
       await expect(after.height).toBe(before.height);
       expectComputed(busy, { opacity: '1', backgroundColor, color });
-      expectDotsPulse(await expectBusyDots(busy, children));
-      await expect(rest.querySelector('.cd-button__dots')).toBeNull();
+      expectSpins(await expectBusySpinner(busy, children));
+      await expect(rest.querySelector('.cd-button__spinner')).toBeNull();
     }
   },
 };
@@ -226,14 +232,15 @@ export const BusyMenuButton: Story = {
     </div>
   ),
   parameters: {
-    canvasNote: 'The signed busy board (N-Typing-Owner-Busy): a busy menu button shows the dots in place of its words and its chevron, at the same width, and can\'t open.',
+    canvasNote:
+      "The owner's busy-button decision after the N-Typing-Owner-Busy board: a busy menu button shows the spinner in place of its words and its chevron, at the same width, and can't open.",
   },
   play: async ({ canvas }) => {
     const [rest, busy] = canvas.getAllByRole('button', { name: 'Allow' }) as [HTMLElement, HTMLElement];
     await expect(Math.abs(busy.getBoundingClientRect().width - rest.getBoundingClientRect().width)).toBeLessThan(0.5);
     await expect(busy).toHaveAttribute('aria-haspopup', 'menu');
     await expect(busy).toHaveAttribute('aria-expanded', 'false');
-    await expectBusyDots(busy, 'Allow');
+    await expectBusySpinner(busy, 'Allow');
     // The chevron keeps its place, unseen.
     const chevron = busy.querySelector<SVGElement>('.cd-button__chevron');
     if (!chevron) throw new Error('no chevron in the busy menu button');
@@ -246,16 +253,16 @@ export const BusyReducedMotion: Story = {
   args: { busy: true },
   parameters: {
     canvasNote:
-      "The signed busy board (N-Typing-Owner-Busy): under reduced motion the dots stay still. Storybook shows the motion your system asks for; the design system's browser tests render this story under reduced motion.",
+      "The owner's busy-button decision after the N-Typing-Owner-Busy board: under reduced motion the spinner is a still arc. Storybook shows the motion your system asks for; the design system's browser tests render this story under reduced motion.",
   },
   play: async ({ canvas }) => {
     const button = canvas.getByRole('button', { name: 'Allow this time' });
-    const dots = await expectBusyDots(button, 'Allow this time');
+    const spinner = await expectBusySpinner(button, 'Allow this time');
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      // busy_dots_still_under_reduced_motion: no pulse, each dot at its resting strength.
-      for (const dot of dots) expectComputed(dot, { animationName: 'none', opacity: String(BUSY_DOT_REST) });
+      // busy_spinner_still_under_reduced_motion: no turning, the arc stays where it is.
+      expectComputed(spinner, { animationName: 'none' });
     } else {
-      expectDotsPulse(dots);
+      expectSpins(spinner);
     }
   },
 };
@@ -272,16 +279,16 @@ export const WaitingForAnother: Story = {
   ),
   parameters: {
     canvasNote:
-      "The signed busy board (N-Typing-Owner-Busy): while a held request's chosen answer is sent, the other answer steps to its busy colors without dots and can't be pressed; here every variant does.",
+      "The owner's busy-button decision after the N-Typing-Owner-Busy board: while a held request's chosen answer is sent, the other answer steps to its busy colors without a spinner and can't be pressed; here every variant does.",
   },
   play: async ({ args, canvas, userEvent }) => {
     for (const { children, backgroundColor, color } of BUSY_LOOKS) {
       const button = canvas.getByRole('button', { name: children });
-      // waiting_steps_without_dots: the busy colors, its words still shown, no dots and no aria-busy,
+      // waiting_steps_without_spinner: the busy colors, its words still shown, no spinner and no aria-busy,
       // since its own request isn't the one in flight; it can't be pressed.
       expectComputed(button, { opacity: '1', backgroundColor, color });
       expectComputed(button.querySelector('.cd-button__label') as HTMLElement, { opacity: '1' });
-      await expect(button.querySelector('.cd-button__dots')).toBeNull();
+      await expect(button.querySelector('.cd-button__spinner')).toBeNull();
       await expect(button).not.toHaveAttribute('aria-busy');
       await expect(button).toHaveAttribute('aria-disabled', 'true');
       await expect(button).toBeEnabled();

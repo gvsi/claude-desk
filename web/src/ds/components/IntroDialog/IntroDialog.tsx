@@ -40,13 +40,13 @@ export interface IntroDialogProps {
   submitLabel: string;
   /** Called once with the trimmed passcode. A rejection is ignored; report failures through `error`. */
   onSubmit: (passcode: string) => Promise<void>;
-  /** The demo is starting: the button shows the busy dots, a status line says so, and nothing more is submitted. */
+  /** The demo is starting: the button shows the busy spinner, a status line says so, and nothing more is submitted. */
   busy?: boolean;
   /** Why the last try failed, shown as a line under the field. */
   error?: IntroErrorCode;
 }
 
-/** What the status line says while the demo starts; the button itself only shows the busy dots. */
+/** What the status line says while the demo starts; the button itself only shows the busy spinner. */
 const STARTING_LINE = 'Starting the demo';
 
 /** What a keyboard can reach, before leaving out what is disabled, hidden or decorative. */

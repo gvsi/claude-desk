@@ -161,13 +161,13 @@ a.cd-button[aria-disabled='true']:not([aria-busy='true'], .cd-button--waiting) {
 }
 
 /* Busy: the click registered and the result is on its way. The button steps down in token colors,
-   never dimmed as a whole, so its label color, which its dots take, stays a pair listed for a page
-   (bg-app), a card on it (fill-card) and a dialog (bg-surface), and for a ghost button the sidebar
-   (bg-panel) and the reviewer bar (bg-muted); every Button sits on one of them. On them a secondary
-   or ghost label turns text-secondary on the button's own fill (5.3:1 or more), and the primary
-   button's fill turns button-primary-hover (12.2:1, on any ground). No Button sits on bg-selected,
-   where a busy secondary label would read 4.45:1 (guards.test.ts). After the disabled rules, which
-   busy also matches through aria-disabled. */
+   never dimmed as a whole, so its label color, which its spinner takes, stays a pair listed for a
+   page (bg-app), a card on it (fill-card) and a dialog (bg-surface), and for a ghost button the
+   sidebar (bg-panel) and the reviewer bar (bg-muted); every Button sits on one of them. On them a
+   secondary or ghost label turns text-secondary on the button's own fill (5.3:1 or more), and the
+   primary button's fill turns button-primary-hover (12.2:1, on any ground). No Button sits on
+   bg-selected, where a busy secondary label would read 4.45:1 (guards.test.ts). After the disabled
+   rules, which busy also matches through aria-disabled. */
 .cd-button[aria-busy='true'],
 .cd-button.cd-button--waiting {
   cursor: progress;
@@ -197,11 +197,12 @@ a.cd-button[aria-disabled='true']:not([aria-busy='true'], .cd-button--waiting) {
   background: var(--fill-hover);
 }
 
-/* While busy, three dots take the label's place, in the label's busy color. The label and a menu
-   button's chevron keep their places, unseen, so the button keeps its width and the label still
-   names it. The dots rest at 0.7 and pulse to full strength one after another over the writing
-   loop, motion-stagger apart; at rest they still read at 3.4:1 or more on every ground a busy pair
-   is listed for (contrast.ts). */
+/* While busy, a small spinner takes the label's place, in the label's busy color: a faint ring and
+   a quarter arc on it, turning once every motion-spin at an even speed, and still under reduced
+   motion. The label and a menu button's chevron keep their places, unseen, so the button keeps
+   its width and the label still names it. The arc is the busy label color at full strength, so it
+   reads at the busy pair's ratio, 5.3:1 or more, where a graphic needs 3:1; the ring behind it is
+   decoration. Dots are only for someone typing (WritingIndicator). */
 .cd-button[aria-busy='true'] > .cd-button__label {
   opacity: 0;
 }
@@ -210,37 +211,19 @@ a.cd-button[aria-disabled='true']:not([aria-busy='true'], .cd-button--waiting) {
   visibility: hidden;
 }
 
-.cd-button__dots {
+.cd-button__spinner {
   position: absolute;
   inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-4);
+  width: var(--size-spinner);
+  height: var(--size-spinner);
+  margin: auto;
   pointer-events: none;
+  animation: cd-button-spin var(--motion-spin) linear infinite;
 }
 
-.cd-button__dot {
-  flex: none;
-  width: var(--size-dot);
-  height: var(--size-dot);
-  border-radius: var(--radius-full);
-  background: currentColor;
-  opacity: 0.7;
-  animation: cd-button-dot var(--motion-writing) var(--motion-ease) infinite;
-}
-
-.cd-button__dot:nth-child(2) {
-  animation-delay: var(--motion-stagger);
-}
-
-.cd-button__dot:nth-child(3) {
-  animation-delay: calc(var(--motion-stagger) * 2);
-}
-
-@keyframes cd-button-dot {
-  50% {
-    opacity: 1;
+@keyframes cd-button-spin {
+  to {
+    transform: rotate(1turn);
   }
 }
 
@@ -249,7 +232,7 @@ a.cd-button[aria-disabled='true']:not([aria-busy='true'], .cd-button--waiting) {
     transition: none;
   }
 
-  .cd-button__dot {
+  .cd-button__spinner {
     animation: none;
   }
 

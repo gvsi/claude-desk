@@ -157,10 +157,10 @@ describe('design tokens', () => {
     expect(() => contrastRatio('text-primary', 'fill-card')).toThrow();
     expect(() => contrastRatio('not-a-color', 'bg-app')).toThrow();
 
-    type Required = { fg: string; ground: string; over?: string; under?: string; opacity?: number; fgOpacity?: number; min: 4.5 | 3 };
+    type Required = { fg: string; ground: string; over?: string; under?: string; opacity?: number; min: 4.5 | 3 };
     const required: Required[] = [];
-    const add = (fgs: string[], grounds: string[], min: 4.5 | 3, over?: string, under?: string, opacity?: number, fgOpacity?: number) => {
-      for (const fg of fgs) for (const ground of grounds) required.push({ fg, ground, over, under, opacity, fgOpacity, min });
+    const add = (fgs: string[], grounds: string[], min: 4.5 | 3, over?: string, under?: string, opacity?: number) => {
+      for (const fg of fgs) for (const ground of grounds) required.push({ fg, ground, over, under, opacity, min });
     };
     const text = ['text-primary', 'text-secondary', 'text-tertiary', 'accent-blue'];
     add(text, ['bg-app', 'bg-panel', 'bg-surface', 'bg-muted', 'bg-selected'], 4.5);
@@ -209,30 +209,24 @@ describe('design tokens', () => {
     // while one is hovered or has focus.
     add(['button-danger-text'], ['bg-surface'], 4.5);
     add(['button-danger-text'], ['fill-hover'], 4.5, 'bg-surface');
-    // A busy button's three dots, marks in its busy color, at 0.7 when they rest, on every ground its
-    // busy pair is listed for: the primary's on its own fill, a secondary's on its fill on a page, a
-    // dialog and a card, a ghost's on the page, the sidebar, a dialog, the reviewer bar and a card,
-    // and the red answers' on their busy grounds on a page and in a card (danger-ghost in a dialog too).
-    const DOT = 0.7;
-    add(['button-primary-text'], ['button-primary-hover'], 3, undefined, undefined, undefined, DOT);
-    for (const over of ['bg-app', 'bg-surface']) add(['text-secondary'], ['fill-secondary'], 3, over, undefined, undefined, DOT);
-    add(['text-secondary'], ['fill-secondary'], 3, 'fill-card', 'bg-app', undefined, DOT);
-    add(['text-secondary'], ['bg-app', 'bg-panel', 'bg-surface', 'bg-muted'], 3, undefined, undefined, undefined, DOT);
-    add(['text-secondary'], ['fill-card'], 3, 'bg-app', undefined, undefined, DOT);
-    add(['button-danger-text'], ['button-danger-fill-hover', 'fill-hover'], 3, 'bg-app', undefined, undefined, DOT);
-    add(['button-danger-text'], ['button-danger-fill-hover', 'fill-hover'], 3, 'fill-card', 'bg-app', undefined, DOT);
-    add(['button-danger-text'], ['fill-hover'], 3, 'bg-surface', undefined, undefined, DOT);
+    // A busy button's spinner, a graphic (3:1) in its busy label color, on every ground its busy pair
+    // is listed for: the primary's on its own fill, a secondary's on its fill on a page, a dialog and
+    // a card, a ghost's on the page, the sidebar, a dialog, the reviewer bar and a card, and the red
+    // answers' on their busy grounds on a page and in a card (danger-ghost in a dialog too).
+    add(['button-primary-text'], ['button-primary-hover'], 3);
+    for (const over of ['bg-app', 'bg-surface']) add(['text-secondary'], ['fill-secondary'], 3, over);
+    add(['text-secondary'], ['fill-secondary'], 3, 'fill-card', 'bg-app');
+    add(['text-secondary'], ['bg-app', 'bg-panel', 'bg-surface', 'bg-muted'], 3);
+    add(['text-secondary'], ['fill-card'], 3, 'bg-app');
+    add(['button-danger-text'], ['button-danger-fill-hover', 'fill-hover'], 3, 'bg-app');
+    add(['button-danger-text'], ['button-danger-fill-hover', 'fill-hover'], 3, 'fill-card', 'bg-app');
+    add(['button-danger-text'], ['fill-hover'], 3, 'bg-surface');
 
     // Every required pair is listed, at no lower a minimum, so dropping one can't pass.
     for (const want of required) {
       const listed = CONTRAST_PAIRS.find(
         (p) =>
-          p.fg === want.fg &&
-          p.ground === want.ground &&
-          p.over === want.over &&
-          p.under === want.under &&
-          p.opacity === want.opacity &&
-          p.fgOpacity === want.fgOpacity,
+          p.fg === want.fg && p.ground === want.ground && p.over === want.over && p.under === want.under && p.opacity === want.opacity,
       );
       expect(listed, label(want)).toBeDefined();
       expect(listed?.min).toBeGreaterThanOrEqual(want.min);
@@ -273,15 +267,6 @@ describe('design tokens', () => {
       contrastRatio('rgba(0,0,0,0.5)', '#ffffff'),
       6,
     );
-    // A mark drawn fainter than its color, as a busy button's resting dots: only the mark fades, its
-    // own alpha times fgOpacity, so text-secondary (0.64) at 0.7 is the same white at 0.448.
-    expect(pairContrast({ fg: '#000000', ground: '#ffffff', fgOpacity: 0.5 })).toBeCloseTo(contrastRatio('rgba(0,0,0,0.5)', '#ffffff'), 6);
-    expect(pairContrast({ fg: 'text-secondary', ground: 'fill-secondary', over: 'bg-app', fgOpacity: 0.7 })).toBeCloseTo(
-      contrastRatio('rgba(250,249,245,0.448)', 'fill-secondary', 'bg-app'),
-      6,
-    );
-    expect(() => pairContrast({ fg: 'text-primary', ground: 'bg-app', fgOpacity: 0 })).toThrow(/fgOpacity/);
-    expect(() => pairContrast({ fg: 'text-primary', ground: 'bg-app', fgOpacity: 1.2 })).toThrow(/fgOpacity/);
     // Faded or not, the layers under a control must end on something opaque.
     expect(() => pairContrast({ fg: 'text-primary', ground: 'fill-secondary', over: 'fill-card' })).toThrow(/translucent/);
     expect(() => pairContrast({ fg: 'text-primary', ground: 'fill-secondary', under: 'bg-app' })).toThrow(/under/);
@@ -310,7 +295,7 @@ describe('design tokens', () => {
   });
 
   test('motion_stays_in_range', () => {
-    const loops = ['motion-breathe', 'motion-writing'];
+    const loops = ['motion-breathe', 'motion-writing', 'motion-spin'];
     const easings = ['motion-ease', 'motion-ease-emphasis'];
     const names = tokens.motion.tokens.map((t) => t.name);
     for (const name of [...loops, ...easings]) expect(names).toContain(name);
