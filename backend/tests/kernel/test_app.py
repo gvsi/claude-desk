@@ -61,6 +61,8 @@ async def test_startup_loads_the_baseline_engine(app, monkeypatch):
 async def test_production_without_seed_refuses_to_start(monkeypatch):
     url = database_url("KERNEL")
     monkeypatch.delenv("DESK_SIGNING_SEED", raising=False)
+    for hook in ("DESK_DECISIONS", "ANTHROPIC_BASE_URL", "DESK_PROVE"):   # test hooks a shell may export
+        monkeypatch.delenv(hook, raising=False)
     monkeypatch.setenv("KERNEL_DATABASE_URL", url)   # outside development there is no .env fallback
     monkeypatch.setenv("DESK_ENV", "production")
     kernel = create_app()

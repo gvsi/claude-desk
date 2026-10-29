@@ -1,7 +1,9 @@
 """The kernel's FastAPI app, its settings and how it is served.
 
 The kernel binds 127.0.0.1:8701 and nothing changes that: the API process in the same task is
-its only client. The lifespan builds the signer first, so a production kernel without
+its only client. The lifespan first refuses the test hooks outside development (a fake model
+server, a stand-in prover, an offline reviewer, a frozen clock), then builds the reviewer
+(`app.state.kernel.decisions`) and the signer, so a production kernel without
 `DESK_SIGNING_SEED` refuses to start, then the policy engine over the always-on baseline
 (`app.state.engine`; a baseline it can't take stops the start too) with the shipped proof reports
 in its cache, then runs `desk-prove --selftest` once to pick the proof mode for the whole process
@@ -37,6 +39,7 @@ from desk.kernel_api import Health, KernelError, LedgerAppendRequest, PolicyConf
 from desk.kernel_service import activation, auth, copies, ledger, sessions
 from desk.kernel_service.auth import AuthError, Named
 from desk.kernel_service.clock import Clock, SystemClock
+from desk.kernel_service.decisions import DecisionsBackend, make_decisions
 from desk.kernel_service.repo import Ctx, KernelFailure, KernelRuntime, kernel_transaction, route_template
 
 log = logging.getLogger("desk.kernel_service")
@@ -46,18 +49,46 @@ log = logging.getLogger("desk.kernel_service")
 class KernelSettings:
     database_url: str = field(repr=False)   # carries the role's password
     env: str = "dev"                        # DESK_ENV
+    decisions: str = "anthropic"            # DESK_DECISIONS: "anthropic", or "offline" (a test hook)
 
     @classmethod
     def from_env(cls) -> "KernelSettings":
-        return cls(database_url=database_url("KERNEL"), env=os.environ.get("DESK_ENV", "dev"))
+        return cls(database_url=database_url("KERNEL"), env=os.environ.get("DESK_ENV", "dev"),
+                   decisions=os.environ.get("DESK_DECISIONS", "anthropic"))
 
 
-def create_app(settings: KernelSettings | None = None, clock: Clock | None = None) -> FastAPI:
+TEST_HOOK_VARIABLES = ("ANTHROPIC_BASE_URL", "DESK_PROVE")   # a fake model server; a stand-in prover
+
+
+def refuse_test_hooks(settings: KernelSettings, clock: Clock, decisions: DecisionsBackend | None) -> None:
+    """Outside development (the settings' DESK_ENV or the process's), a test hook stops the kernel
+    from starting: either variable above set at all, a decisions backend other than `anthropic`
+    (named or passed in) or a clock other than `SystemClock`."""
+    if is_development(settings.env) and is_development():
+        return
+    hooks = [name for name in TEST_HOOK_VARIABLES if name in os.environ]
+    if settings.decisions != "anthropic":
+        hooks.append("DESK_DECISIONS")
+    if decisions is not None:
+        hooks.append("a decisions backend passed to create_app")
+    if type(clock) is not SystemClock:
+        hooks.append("a clock other than SystemClock")
+    if hooks:
+        env = settings.env if not is_development(settings.env) else os.environ.get("DESK_ENV", "")
+        raise RuntimeError(f"test hooks can't run with DESK_ENV={env!r}: {', '.join(hooks)}")
+
+
+def create_app(settings: KernelSettings | None = None, clock: Clock | None = None,
+               decisions: DecisionsBackend | None = None) -> FastAPI:
+    """The kernel app. `clock` and `decisions` are test hooks (the reviewer by default comes from
+    `DESK_DECISIONS`); the lifespan refuses them outside development."""
     settings = settings or KernelSettings.from_env()
     clock = clock or SystemClock()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        refuse_test_hooks(settings, clock, decisions)
+        reviewer = decisions if decisions is not None else make_decisions(settings)
         signer = desk_kernel.Signer.from_env()   # raises without a seed outside development
         if signer.dev_key and not is_development(settings.env):
             # the process environment and the settings each name the environment; either one
@@ -69,7 +100,7 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
         engine = create_async_engine(settings.database_url, pool_pre_ping=True)
         factory = async_sessionmaker(engine, expire_on_commit=False, sync_session_class=KernelSession)
         app.state.kernel = KernelRuntime(settings=settings, clock=clock, signer=signer, engine=engine,
-                                         sessions=factory, policies=policies)
+                                         sessions=factory, policies=policies, decisions=reviewer)
         try:
             yield
         finally:

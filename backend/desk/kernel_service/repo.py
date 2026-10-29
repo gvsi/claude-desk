@@ -32,6 +32,7 @@ from desk.kernel_service.clock import Clock
 if TYPE_CHECKING:
     from desk.kernel_service.activation import PolicyRuntime
     from desk.kernel_service.app import KernelSettings
+    from desk.kernel_service.decisions import DecisionsBackend
 
 ErrorCode = KernelError.model_fields["code"].annotation
 ERROR_CODES = frozenset(get_args(ErrorCode))
@@ -54,6 +55,7 @@ class KernelRuntime:
     engine: AsyncEngine
     sessions: async_sessionmaker[AsyncSession]
     policies: PolicyRuntime               # the policy engine, its loaded versions and the proof cache
+    decisions: DecisionsBackend           # the auto reviewer
 
 
 @dataclass
@@ -64,6 +66,7 @@ class KernelCtx:
     settings: KernelSettings
     engine: AsyncEngine                   # for the credential lookups below, on their own connection
     policies: PolicyRuntime               # the policy engine, its loaded versions and the proof cache
+    decisions: DecisionsBackend           # the auto reviewer
 
     def bind(self, copy_id: str) -> KernelRepo:
         """Run this context's transaction as `copy_id`. Binding again to the same copy is a no-op;
@@ -89,7 +92,7 @@ async def kernel_transaction(runtime: KernelRuntime) -> AsyncIterator[KernelCtx]
     """A `KernelCtx` on a new session: committed when the block ends, rolled back on an exception."""
     async with runtime.sessions() as db:
         ctx = KernelCtx(db=db, clock=runtime.clock, signer=runtime.signer, settings=runtime.settings,
-                        engine=runtime.engine, policies=runtime.policies)
+                        engine=runtime.engine, policies=runtime.policies, decisions=runtime.decisions)
         try:
             yield ctx
         except Exception:

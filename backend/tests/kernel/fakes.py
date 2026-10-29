@@ -1,16 +1,20 @@
-"""Test doubles for the kernel service: a frozen clock and a scriptable adapter."""
+"""Test doubles for the kernel service: a frozen clock, a scriptable adapter, a scripted reviewer
+and a stand-in for the Anthropic client, so no test calls a model."""
 
+import asyncio
 import inspect
 from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from anthropic.types import Message, TextBlock, Usage
 from pydantic import BaseModel, ConfigDict
 
-from desk.contracts import MCP_TOOLS, Effect, NormalizedAction, ResourceRef, ToolName, ToolProfile
+from desk.contracts import MCP_TOOLS, Effect, NormalizedAction, ResourceRef, Review, ToolName, ToolProfile
 from desk.db.models import Tool
 from desk.kernel_service.adapters import profile_sha256
 from desk.kernel_service.adapters.base import AdapterResult, ExecCtx, Normalized, NormalizeCtx
+from desk.kernel_service.decisions import REVIEW_MODEL, CallUsage, ReviewInput, Reviewed
 
 
 class FrozenClock:
@@ -104,3 +108,64 @@ class FakeAdapter:
                     description_confirmed=profile.description_confirmed,
                     definition_sha256=profile.definition_sha256, profile=profile,
                     profile_sha256=profile_sha256(profile))
+
+
+class FakeDecisions:
+    """A `DecisionsBackend` whose every review is `answer` (None stands for any reviewer failure),
+    with a fixed usage a ledger summary can be checked against. `inputs` lists what each call was
+    shown, so a test can count the calls and read what the reviewer saw."""
+
+    USAGE = {"model": REVIEW_MODEL, "input_tokens": 1_830, "cached_tokens": 1_200, "cache_write_tokens": 0,
+             "output_tokens": 41, "latency_ms": 850}
+
+    def __init__(self, answer: Review | None = None):
+        self.answer = answer
+        self.inputs: list[ReviewInput] = []
+
+    async def review(self, data: ReviewInput) -> Reviewed:
+        self.inputs.append(data)
+        status = "ok" if self.answer is not None else "error"
+        return Reviewed(review=self.answer, usage=CallUsage(status=status, **self.USAGE))
+
+
+def model_message(text: str | None, *, stop_reason: str = "end_turn", model: str = "claude-sonnet-5-5",
+                  input_tokens: int = 1_830, cached_tokens: int = 1_200, cache_write_tokens: int = 0,
+                  output_tokens: int = 41) -> Message:
+    """A Messages API response as the SDK returns it: one text block (none when `text` is None)."""
+    return Message(id="msg_fake", type="message", role="assistant", model=model,
+                   content=[] if text is None else [TextBlock(type="text", text=text)],
+                   stop_reason=stop_reason, stop_sequence=None,
+                   usage=Usage(input_tokens=input_tokens, output_tokens=output_tokens,
+                               cache_read_input_tokens=cached_tokens,
+                               cache_creation_input_tokens=cache_write_tokens))
+
+
+class FakeAnthropicClient:
+    """Stands in for `anthropic.AsyncAnthropic`. `with_options(**opts)` records its options and returns
+    the client; `messages.create(**kwargs)` records the request, waits `delay` seconds, then raises
+    `reply` if it is an exception or returns it (a `Message`, see `model_message`)."""
+
+    def __init__(self, reply: Message | BaseException, *, delay: float = 0.0):
+        self.reply = reply
+        self.delay = delay
+        self.options: list[dict[str, Any]] = []
+        self.requests: list[dict[str, Any]] = []
+        self.messages = _FakeMessages(self)
+
+    def with_options(self, **opts: Any) -> "FakeAnthropicClient":
+        self.options.append(opts)
+        return self
+
+
+class _FakeMessages:
+    def __init__(self, client: FakeAnthropicClient):
+        self._client = client
+
+    async def create(self, **kwargs: Any) -> Message:
+        client = self._client
+        client.requests.append(kwargs)
+        if client.delay:
+            await asyncio.sleep(client.delay)
+        if isinstance(client.reply, BaseException):
+            raise client.reply
+        return client.reply
