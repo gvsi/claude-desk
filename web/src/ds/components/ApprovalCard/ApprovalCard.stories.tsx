@@ -212,7 +212,7 @@ export const ThreeAnswersOnOneRow: Story = {
 export const FourAnswersOnTwoRows: Story = {
   args: { decision: heldVerified, heldBy: rivera.ruleCards['rv-book-sat'].reason, context: undefined, waiting: 'Web chat, just now' },
   parameters: {
-    canvasNote: `${ANSWERS_BOARDS} Layout B of N-Answers-Verified: Dana's Sunday booking, from a verified customer, so all four answers show. The counter-offer row is static vision.`,
+    canvasNote: `${ANSWERS_BOARDS} Layout B of N-Answers-Verified: Dana's Saturday afternoon booking, from a verified customer, so all four answers show. The counter-offer row is static vision.`,
   },
   play: async ({ canvas, canvasElement }) => {
     // only_offered_answers: all four, in their fixed order.

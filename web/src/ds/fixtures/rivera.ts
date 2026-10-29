@@ -785,42 +785,42 @@ const decisions = {
   refused_at_execution: afterHold('refused_at_execution', 5),
 } satisfies Record<DecisionState, Decision>;
 
-/** Verified Dana asks for a Sunday visit, outside both booking cards' hours: all four answers. */
+/** Verified Dana asks for a Saturday afternoon visit, after the Saturday card's morning hours: all four answers. */
 const heldVerified = {
-  decision_id: 'dec-dana-sunday',
+  decision_id: 'dec-dana-saturday',
   session_id: sessions.demoCode.session_id,
-  call_id: 'call-dana-sunday',
+  call_id: 'call-dana-saturday',
   action: {
-    action_id: 'act-dana-sunday',
+    action_id: 'act-dana-saturday',
     copy_id: COPY_ID,
     desk_id: DESK_ID,
     session_id: sessions.demoCode.session_id,
     generation: 1,
     tool: 'native.book',
     effects: ['change'],
-    args_sha256: sha256('args:dana-sunday'),
+    args_sha256: sha256('args:dana-saturday'),
     profile_sha256: sha256('profile:native.book'),
     resource: { kind: 'slot', id: 'S-20261108-1000', owner_person_id: null },
     list_cents: null,
     discount_bp: null,
     amount_cents: null,
     recipient: null,
-    starts_at: '2026-11-08T10:00:00-08:00',
+    starts_at: '2026-11-07T14:00:00-08:00',
   },
   outcome: 'hold',
   state: 'held',
   policy_version: 1,
-  policy_ids: ['H.rv-book-sat.hold', 'H.rv-book-wk.hold'],
-  card_ids: ['rv-book-sat', 'rv-book-wk'],
+  policy_ids: ['H.rv-book-sat.hold'],
+  card_ids: ['rv-book-sat'],
   review: null,
   reason_plain:
-    'Dana Whitfield, verified with a code, asked to book Sunday, November 8 at 10:00 am. Your booking rules cover weekdays 8:00 am to 6:00 pm and Saturdays 9:00 am to 1:00 pm.',
+    'Dana Whitfield, verified with a code, asked to book Saturday, November 7 at 2:00 pm. Your Saturday bookings run 9:00 am to 1:00 pm.',
   visitor_plain: plain.en.held,
   answers: ['allow_once', 'deny_once', 'allow_person', 'deny_always'],
   expires_at: '2026-10-31T16:40:00.552013Z',
-  inbox: [{ entry_id: 'inbox-hold-sunday', to: 'owner', preview: 'A request needs your answer' }],
+  inbox: [{ entry_id: 'inbox-hold-saturday', to: 'owner', preview: 'A request needs your answer' }],
   ledger_seq: 28,
-  signature: signature('dec-dana-sunday:held'),
+  signature: signature('dec-dana-saturday:held'),
 } satisfies Decision;
 
 // ---------------------------------------------------------------------------------------------
