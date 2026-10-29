@@ -19,7 +19,7 @@ export interface DialogProps {
   /** The confirmation is being sent: both buttons wait with `aria-busy`, and Escape does nothing. */
   pending?: boolean;
   onConfirm: () => void;
-  /** Called by the cancel button and by Escape. */
+  /** Called by the cancel button, by Escape, and when the browser closes the dialog itself. */
   onCancel: () => void;
 }
 
@@ -34,6 +34,8 @@ const TABBABLE = 'a[href], button:not([disabled]), input:not([disabled]), select
  */
 export function Dialog({ title, body, confirmLabel, cancelLabel, tone = 'default', pending = false, onConfirm, onCancel }: DialogProps) {
   const ref = useRef<HTMLDialogElement>(null);
+  // Set while the screen removes the dialog, so the close that removal causes isn't reported back.
+  const removing = useRef(false);
   const id = useId();
   const titleId = `${id}-title`;
   const bodyId = `${id}-body`;
@@ -45,9 +47,11 @@ export function Dialog({ title, body, confirmLabel, cancelLabel, tone = 'default
     if (!dialog) return undefined;
     const doc = dialog.ownerDocument;
     const opener = doc.activeElement instanceof HTMLElement && doc.activeElement !== doc.body ? doc.activeElement : null;
+    removing.current = false;
     if (!dialog.open) dialog.showModal();
     dialog.querySelector<HTMLElement>('.cd-dialog__actions button')?.focus();
     return () => {
+      removing.current = true;
       const active = doc.activeElement;
       const focusInside = active === null || active === doc.body || dialog.contains(active);
       if (dialog.open) dialog.close();
@@ -83,8 +87,19 @@ export function Dialog({ title, body, confirmLabel, cancelLabel, tone = 'default
     }
   };
 
-  // The browser's own close request (Escape it handled itself) never closes it behind the screen's back.
-  const onNativeCancel = (event: SyntheticEvent<HTMLDialogElement>) => event.preventDefault();
+  // The browser's own close request (not a key press: Escape is handled above) asks the screen,
+  // like Escape, rather than closing the dialog behind its back.
+  const onNativeCancel = (event: SyntheticEvent<HTMLDialogElement>) => {
+    event.preventDefault();
+    if (!pending) onCancel();
+  };
+
+  // A close the screen didn't make: the browser may close a modal itself after a repeated close
+  // request (a second back gesture on Android). The dialog is gone, so the screen hears about it.
+  // A close event that finds the dialog open again is stale (StrictMode reopens it), not a close.
+  const onNativeClose = (event: SyntheticEvent<HTMLDialogElement>) => {
+    if (!removing.current && !event.currentTarget.open) onCancel();
+  };
 
   return (
     <dialog
@@ -97,6 +112,7 @@ export function Dialog({ title, body, confirmLabel, cancelLabel, tone = 'default
       className="cd-dialog"
       onKeyDown={onKeyDown}
       onCancel={onNativeCancel}
+      onClose={onNativeClose}
     >
       <h2 id={titleId} className="cd-dialog__title cd-type-section">
         {tone === 'danger' ? <StatusDot tone="refused" /> : null}

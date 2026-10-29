@@ -133,3 +133,39 @@ export const Danger: Story = {
     await expect(canvas.getByRole('dialog', { name: TITLE })).toBeVisible();
   },
 };
+
+/** Lets a queued close event, if any, arrive before the next check. */
+const nextTask = () => new Promise<void>((resolve) => setTimeout(resolve, 50));
+
+export const ClosedByTheBrowser: Story = {
+  parameters: {
+    canvasNote:
+      'No board draws a dialog; here the browser closes it itself, as a back gesture on Android can, and the screen hears about it.',
+  },
+  play: async ({ args, canvas, userEvent }) => {
+    // dialog_reports_a_browser_close: a close the screen didn't ask for calls onCancel once, so
+    // the screen removes the dialog and its opener works again.
+    const dialog = canvas.getByRole('dialog', { name: TITLE }) as HTMLDialogElement;
+    dialog.close();
+    await nextTask();
+    await expect(args.onCancel).toHaveBeenCalledTimes(1);
+    await expect(canvas.queryByRole('dialog')).toBeNull();
+
+    // The browser's own close request (a cancel event that isn't a key press) cancels like Escape.
+    const opener = canvas.getByRole('button', { name: 'Delete this Desk' });
+    await userEvent.click(opener);
+    const reopened = (await canvas.findByRole('dialog', { name: TITLE })) as HTMLDialogElement;
+    reopened.dispatchEvent(new Event('cancel', { cancelable: true }));
+    await nextTask();
+    await expect(args.onCancel).toHaveBeenCalledTimes(2);
+    await expect(canvas.queryByRole('dialog')).toBeNull();
+
+    // Escape, and the close when the screen removes the dialog, still cancel only once.
+    await userEvent.click(opener);
+    await canvas.findByRole('dialog', { name: TITLE });
+    await userEvent.keyboard('{Escape}');
+    await nextTask();
+    await expect(args.onCancel).toHaveBeenCalledTimes(3);
+    await expect(canvas.queryByRole('dialog')).toBeNull();
+  },
+};

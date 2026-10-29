@@ -20,7 +20,8 @@
 
 - When it opens, focus moves to the cancel button, the least destructive answer.
 - Tab and Shift+Tab cycle between the buttons and never leave the dialog.
-- Escape calls `onCancel`, as the cancel button does.
+- Escape calls `onCancel`, as the cancel button does, and so does the browser's own close request (a back gesture, say).
+- If the browser closes the dialog itself, as Android can after a repeated back gesture, it calls `onCancel` too, even while `pending`, so the screen removes it and its opener works again. A confirmation already sent goes on.
 - When the screen removes it, focus returns to the control that opened it, unless the screen has moved focus somewhere else.
 
 ## States
@@ -43,4 +44,4 @@
 | `tone` | `'default' \| 'danger'` | `danger` adds a refused dot beside the title. |
 | `pending` | `boolean` | Both buttons wait with `aria-busy`; Escape does nothing. |
 | `onConfirm` | `() => void` | Required. |
-| `onCancel` | `() => void` | Required. The cancel button and Escape. |
+| `onCancel` | `() => void` | Required. The cancel button, Escape, and a close by the browser. |
