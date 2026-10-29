@@ -7,9 +7,11 @@ the rows `committed_copies` commits as desk_admin (another role sees only commit
 removes afterwards.
 """
 
+import re
 import warnings
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import get_args
 from uuid import uuid4
 
 import procrastinate
@@ -23,7 +25,8 @@ from sqlalchemy.orm import DeclarativeBase, Session, aliased, column_property, d
 from sqlalchemy.pool import NullPool
 
 import desk.db
-from desk.contracts import Claim, RenderedBlock, Review
+from desk.contracts import ActorKind, Assurance, Claim, DecisionState, Outcome, RenderedBlock, Review, SessionMode
+from desk.contracts import PolicyVersion as PolicyVersionContract
 from desk.db.models import (
     ActorSession,
     Approval,
@@ -40,6 +43,7 @@ from desk.db.models import (
     KnowledgeItem,
     LedgerEntry,
     Message,
+    PolicyVersion,
     PriceItem,
     Quote,
     Tool,
@@ -447,6 +451,41 @@ def test_unique_keys_follow_the_data_model(kernel_tx):
     assert_second_collides(kernel_tx, decision("decision-1"), decision("decision-2"))  # one decision per call
     assert_second_collides(kernel_tx, approval("approval-1"), approval("approval-2"))  # one approval per decision
     assert_second_collides(kernel_tx, session("session-1"), session("session-2"))      # token hashes are unique
+
+
+STATE_COLUMNS = {   # each kernel state column admits exactly its contract's values
+    ("sessions", "kind"): ActorKind,
+    ("sessions", "assurance"): Assurance,
+    ("sessions", "mode"): SessionMode,
+    ("policy_versions", "status"): PolicyVersionContract.model_fields["status"].annotation,
+    ("decisions", "outcome"): Outcome,
+    ("decisions", "state"): DecisionState,
+}
+
+
+def test_state_columns_admit_only_contract_values(admin):
+    for (table, column), literal in STATE_COLUMNS.items():
+        checks = admin.execute(
+            "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = %s::regclass AND contype = 'c'"
+            " AND pg_get_constraintdef(oid) LIKE %s",
+            (f"kernel.{table}", f"CHECK (({column} = ANY %"),
+        ).fetchall()
+        assert len(checks) == 1, (table, column, checks)
+        assert set(re.findall(r"'([^']*)'::text", checks[0][0])) == set(get_args(literal)), (table, column)
+
+
+def test_one_active_policy_version_per_desk(kernel_tx):
+    def version(desk_id: str, number: int, status: str) -> PolicyVersion:
+        return PolicyVersion(desk_id=desk_id, version=number, copy_id="copy-a", cards=[], status=status,
+                             cedar_sha256="c", schema_sha256="s", baseline_sha256="b", profiles_sha256="p",
+                             invariants_sha256="i", review_thresholds_version=1)
+
+    kernel_tx.add_all([version("desk-a", 1, "superseded"), version("desk-a", 2, "active"),
+                       version("desk-b", 1, "active")])
+    kernel_tx.flush()
+    kernel_tx.add(version("desk-a", 3, "active"))
+    with pytest.raises(IntegrityError):
+        kernel_tx.flush()
 
 
 def assert_refused_before_the_database(session: Session, row: Base) -> None:
