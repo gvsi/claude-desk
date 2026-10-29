@@ -95,7 +95,9 @@ def _secret(stub: Stubber, secret_id: str, tags: list[dict] | None, current: str
         stub.add_client_error("describe_secret", "ResourceNotFoundException", "Secrets Manager can't find it.",
                               expected_params={"SecretId": secret_id})
         return
-    stages = {current: ["AWSCURRENT"], **({} if current == PLACEHOLDER_VERSION else {PLACEHOLDER_VERSION: ["AWSPREVIOUS"]})}
+    stages = {current: ["AWSCURRENT"]}
+    if current != PLACEHOLDER_VERSION:
+        stages[PLACEHOLDER_VERSION] = ["AWSPREVIOUS"]
     stub.add_response("describe_secret", {"Name": secret_id, "Tags": tags, "VersionIdsToStages": stages},
                       {"SecretId": secret_id})
 
