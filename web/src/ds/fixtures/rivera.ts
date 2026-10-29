@@ -785,7 +785,11 @@ const decisions = {
   refused_at_execution: afterHold('refused_at_execution', 5),
 } satisfies Record<DecisionState, Decision>;
 
-/** Verified Dana asks for a Saturday afternoon visit, after the Saturday card's morning hours: all four answers. */
+/**
+ * Verified Dana asks for a Saturday afternoon visit, after the Saturday card's morning hours: all
+ * four answers. Both booking cards' hold twins match, since a hold twin drops its card's hours; the
+ * Saturday card, the one the reason names, comes first.
+ */
 const heldVerified = {
   decision_id: 'dec-dana-saturday',
   session_id: sessions.demoCode.session_id,
@@ -800,7 +804,7 @@ const heldVerified = {
     effects: ['change'],
     args_sha256: sha256('args:dana-saturday'),
     profile_sha256: sha256('profile:native.book'),
-    resource: { kind: 'slot', id: 'S-20261108-1000', owner_person_id: null },
+    resource: { kind: 'slot', id: 'S-20261107-1400', owner_person_id: null },
     list_cents: null,
     discount_bp: null,
     amount_cents: null,
@@ -810,8 +814,8 @@ const heldVerified = {
   outcome: 'hold',
   state: 'held',
   policy_version: 1,
-  policy_ids: ['H.rv-book-sat.hold'],
-  card_ids: ['rv-book-sat'],
+  policy_ids: ['H.rv-book-sat.hold', 'H.rv-book-wk.hold'],
+  card_ids: ['rv-book-sat', 'rv-book-wk'],
   review: null,
   reason_plain:
     'Dana Whitfield, verified with a code, asked to book Saturday, November 7 at 2:00 pm. Your Saturday bookings run 9:00 am to 1:00 pm.',
