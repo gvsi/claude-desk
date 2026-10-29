@@ -5,7 +5,9 @@
    A label longer than its line (a phone's, or a narrow column's) wraps inside the button, in
    balanced lines, and the button grows taller with the same padding: it is never wider than its
    container, and the vertical padding makes one line exactly size-control (or size-control-main)
-   tall, so a short label looks as it always has. */
+   tall, so a short label looks as it always has. A word wider than the line, such as a long name
+   with no spaces, breaks inside the button too: overflow-wrap anywhere also lets the button's
+   narrowest size break it, so even a button in a row of buttons can't be pushed past its line. */
 
 .cd-button {
   display: inline-flex;
@@ -23,7 +25,7 @@
   color: var(--text-primary);
   text-align: center;
   text-wrap: balance;
-  overflow-wrap: break-word;
+  overflow-wrap: anywhere;
   text-decoration: none;
   cursor: pointer;
   transition:

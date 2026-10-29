@@ -141,6 +141,9 @@ export const BusyAndDisabled: Story = {
 /** A phone's line: 390 px less the 16 px gutter on each side. */
 const PHONE_LINE = 358;
 
+/** A label whose name has no break opportunity and is wider than a 220 px column on its own. */
+const UNBROKEN_LABEL = 'Pedir hablar con MaximilianAlexanderMontgomerySmith';
+
 /** The text's line boxes inside a button, from the browser's layout. */
 function lineBoxes(button: HTMLElement): DOMRect[] {
   const range = document.createRange();
@@ -160,6 +163,13 @@ export const LongLabel: Story = {
       <div data-testid="narrow" style={{ display: 'flex', flexDirection: 'column', width: 'var(--size-margin)' }}>
         <Button {...args} size="main" />
       </div>
+      {/* A name with no spaces, wider than the take-over bar's 220 px controls column, in its
+          wrapping row of buttons: the name itself breaks inside the button. */}
+      <div data-testid="narrow" style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-8)', width: 'var(--size-margin)' }}>
+        <Button {...args} size="main">
+          {UNBROKEN_LABEL}
+        </Button>
+      </div>
       {/* A short label keeps the control heights. */}
       <div data-testid="short" style={{ display: 'flex', gap: 'var(--space-8)', alignItems: 'flex-start' }}>
         <Button variant="secondary">Keep it</Button>
@@ -172,7 +182,7 @@ export const LongLabel: Story = {
   parameters: {
     canvas: 'none',
     canvasNote:
-      "No board shows a label wider than its line; on a phone, or in the take-over bar's controls column, a long label wraps inside the button instead of running past it.",
+      "No board shows a label wider than its line; on a phone, or in the take-over bar's controls column, a long label wraps inside the button instead of running past it, and a name with no spaces breaks inside it.",
   },
   play: async ({ canvas }) => {
     for (const container of canvas.getAllByTestId('narrow')) {
