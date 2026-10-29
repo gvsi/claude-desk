@@ -297,6 +297,16 @@ describe('fixtures', () => {
     for (const decision of decisions) {
       const session = sessions.get(decision.session_id);
       expect(session, `${decision.decision_id} has a session fixture`).toBeDefined();
+      // The kernel can't know who an unverified visitor is: a reason names a person on record only
+      // when the session is verified or that person owns the record asked for.
+      for (const person of Object.values(rivera.people)) {
+        const firstName = person.name.split(' ')[0];
+        if (!new RegExp(`${NOT_LETTER_BEFORE}${firstName}${NOT_LETTER_AFTER}`, 'u').test(decision.reason_plain)) continue;
+        expect(
+          session?.verified === true || decision.action?.resource.owner_person_id === person.personId,
+          `${decision.decision_id} names ${person.name}`,
+        ).toBe(true);
+      }
       if (!decision.answers?.includes('allow_person')) continue;
       expect(session?.verified === true || session?.kind === 'agent', `${decision.decision_id} allow_person`).toBe(true);
       const action = decision.action;

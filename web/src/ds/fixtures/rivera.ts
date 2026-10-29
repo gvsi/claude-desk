@@ -676,7 +676,7 @@ const allowedQuote = {
   policy_ids: ['A.rv-quote'],
   card_ids: ['rv-quote'],
   review: null,
-  reason_plain: 'Dana Whitfield asked for a drain clearing quote at list price, $180.00.',
+  reason_plain: 'A visitor asked for a drain clearing quote at list price, $180.00.',
   visitor_plain: plain.en.allowed,
   answers: [],
   expires_at: '2026-10-30T19:05:05.123456Z',
