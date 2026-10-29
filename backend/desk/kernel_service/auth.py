@@ -214,14 +214,14 @@ async def require_owner(ctx: KernelCtx, request: Request, *, desk_id: str | None
     return OwnerCtx(copy_id=copy_id, session_id=row.session_id)
 
 
-async def require_caller(ctx: KernelCtx, request: Request, session_id: str, desk_id: str | None, *,
-                         generation: int | None = None, lock: bool = False) -> tuple[SessionRow, Desk]:
-    """The session a call that takes either credential acts for, and the Desk it acts on, once the
-    session-state rows pass ("Session state responses"): a session's own token, on its own Desk; or
-    the owner's token, for the owner's own session and a Desk of its copy. Then open, at
-    `generation` when the call carries one, on a Desk not deleted (409 `closed`). Binds the
-    request's transaction to the caller's copy. With `lock`, the closed and generation checks run
-    on the session's row as `lock_session` reads it, held until the transaction ends.
+async def caller_session(ctx: KernelCtx, request: Request, session_id: str, desk_id: str | None, *,
+                         generation: int | None = None, lock: bool = False) -> SessionRow:
+    """The session a call that takes either credential acts for, once its session-state rows pass
+    ("Session state responses"): a session's own token, on its own Desk; or the owner's token, for
+    the owner's own session and a Desk of its copy. Then open, at `generation` when the call
+    carries one. Binds the request's transaction to the caller's copy. With `lock`, the closed and
+    generation checks run on the session's row as `lock_session` reads it, held until the
+    transaction ends.
 
     The owner must name its Desk, and a request that doesn't is 422 only once the caller is
     known, so a bad token is always 401 and acting as another session is always ledgered."""
@@ -236,8 +236,15 @@ async def require_caller(ctx: KernelCtx, request: Request, session_id: str, desk
         row = await lock_session(ctx, owner.session_id) if lock else (await ctx.db.scalars(ctx.repo.scoped(
             select(SessionRow).where(SessionRow.session_id == owner.session_id)))).one()
         require_open(ctx, request, row, generation=generation)
-    else:
-        row = await require_session(ctx, request, session_id, generation=generation, desk_id=desk_id, lock=lock)
+        return row
+    return await require_session(ctx, request, session_id, generation=generation, desk_id=desk_id, lock=lock)
+
+
+async def require_caller(ctx: KernelCtx, request: Request, session_id: str, desk_id: str | None, *,
+                         generation: int | None = None) -> tuple[SessionRow, Desk]:
+    """The session a call that takes either credential acts for (`caller_session`), and the Desk it
+    acts on, not deleted (409 `closed`)."""
+    row = await caller_session(ctx, request, session_id, desk_id, generation=generation)
     return row, await require_desk(ctx, request, row, desk_id or row.desk_id)
 
 

@@ -442,6 +442,27 @@ def test_guard_refuses_set_config_calls():
     assert admitted == []
 
 
+def test_guard_refuses_unicode_escape_identifiers():
+    """`U&"\\0073et_config"` names set_config through a Unicode escape, which no name check reads.
+    SQLAlchemy never spells an identifier that way, so the guard refuses the spelling itself, in
+    any case, wherever it appears outside a string literal."""
+    repo = KernelRepo(f"copy-{uuid4().hex}")
+    escaped = ('U&"\\0073et_config"', 'u&"\\0073et_config"', 'U&"\\0073ET_CONFIG"', 'u&"\\0073ET_CONFIG"',
+               'pg_catalog.U&"\\0073et_config"')
+    calls = [literal_column(f"{name}('{COPY_SETTING}', 'copy-b', true)") for name in escaped]
+    statements = [select(calling(n, call)) for n, call in enumerate(calls, start=1000)]   # hidden from layer 1
+    admitted = []
+    for statement in statements:
+        try:
+            repo.scoped(statement)
+        except ValueError:
+            continue
+        admitted.append(str(statement).split(" FROM")[0])
+    assert admitted == []
+    # the spelling inside a string literal is text, not an identifier
+    repo.scoped(select(calling(2000, literal_column("'U&\"\\0073et_config\"'"))))
+
+
 async def test_guard_treats_bound_text_as_data(kernel_db):
     repo = KernelRepo(f"copy-{uuid4().hex}")
     repo.bind(kernel_db)

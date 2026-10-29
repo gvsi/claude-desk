@@ -252,7 +252,8 @@ class KernelRepo:
        side would drop the row), FROM items that aren't kernel tables, and calls to
        `REFUSED_FUNCTIONS` (`set_config` and the built-ins that run query text they are given).
     2. A check on the SQL itself. The scoped statement is compiled for Postgres and refused unless
-       it holds exactly one SELECT, reads no kernel table it didn't filter and calls none of
+       it holds exactly one SELECT, reads no kernel table it didn't filter, spells no identifier
+       with Unicode escapes (`U&"..."`, outside string literals) and calls none of
        `REFUSED_FUNCTIONS` (its string literals and quoted identifiers included), which catches
        what the statement hides, such as a mapped column that reads another table.
 
@@ -314,10 +315,14 @@ def _check_allowed(stmt: Select) -> None:
 
 
 def _check_compiled(stmt: Select, scoped_tables: set[str]) -> None:
-    """Layer 2: the compiled SQL holds one SELECT, reads only kernel tables it filters and calls none
-    of `REFUSED_FUNCTIONS`."""
+    """Layer 2: the compiled SQL holds one SELECT, reads only kernel tables it filters, spells no
+    identifier with Unicode escapes and calls none of `REFUSED_FUNCTIONS`."""
     compiled = stmt.compile(dialect=_POSTGRES)
     sql = re.sub(r"'(?:[^']|'')*'", "''", str(compiled))   # drop string literals
+    # U&"..." spells an identifier with Unicode escapes (U&"\0073et_config" is set_config), which no check
+    # on names reads through. SQLAlchemy never emits one, so the spelling itself is refused.
+    if re.search(r'u&"', sql, flags=re.IGNORECASE):
+        raise ValueError("KernelRepo refused a statement whose SQL spells an identifier with Unicode escapes")
     keywords = re.sub(r'"(?:[^"]|"")*"', '""', sql)        # and quoted identifiers
     if len(re.findall(r"\bselect\b", keywords, flags=re.IGNORECASE)) != 1:
         raise ValueError("KernelRepo refused a statement whose SQL holds a nested SELECT")

@@ -24,8 +24,8 @@ from sqlalchemy import select
 
 from desk.contracts import Claim, Decision, Fact, Label, NotificationDefaults, ResourceRef, Review, RuleCard
 from desk.db import session as db_session
-from desk.db.models import Action, ActorSession, DemoInboxEntry, Desk
 from desk.db.session import database_url, libpq_url
+from desk.db.models import Action, ActorSession, DemoInboxEntry, Desk
 from desk.db.models import Decision as DecisionRow
 from desk.kernel_service import activation, adapters, auth, compiler, desks, ledger, render
 from desk.kernel_service.adapters.base import Normalized, NormalizeCtx
@@ -414,13 +414,17 @@ async def test_decide_after_a_committed_take_over_is_409(app, client, registry, 
                        ("auth", visitor.session_id, {"route": "POST /decide", "reason": "stale_generation"})]
 
 
-async def a_statement_waits_for_a_lock(within: float = 5.0) -> bool:
-    """Whether a statement in this test database comes to wait for a lock another transaction holds."""
-    async with await psycopg.AsyncConnection.connect(libpq_url(database_url("ADMIN")), autocommit=True) as admin:
+async def a_take_over_waits_for_the_session_row(within: float = 5.0) -> bool:
+    """Whether a kernel backend running the take-over's lock, `SELECT ... FROM kernel.sessions ...
+    FOR UPDATE`, comes to wait for a lock another transaction holds. Another wait in the database
+    doesn't count. Read as the kernel role, which sees its own backends' queries and waits."""
+    async with await psycopg.AsyncConnection.connect(libpq_url(database_url("KERNEL")), autocommit=True) as kernel:
         for _ in range(int(within / 0.02)):
-            waiting = await (await admin.execute(
-                "SELECT count(*) FROM pg_locks JOIN pg_stat_activity USING (pid)"
-                " WHERE NOT granted AND datname = current_database()")).fetchone()
+            waiting = await (await kernel.execute(
+                "SELECT count(*) FROM pg_stat_activity"
+                " WHERE datname = current_database() AND pid <> pg_backend_pid()"
+                "   AND wait_event_type = 'Lock' AND cardinality(pg_blocking_pids(pid)) > 0"
+                "   AND query LIKE '%FROM kernel.sessions %FOR UPDATE%'")).fetchone()
             if waiting[0]:
                 return True
             await asyncio.sleep(0.02)
@@ -442,7 +446,7 @@ async def test_take_over_waits_for_a_decision_in_flight(app, client, registry):
     deciding = asyncio.create_task(decided(client, visitor, "native.quote"))
     await asyncio.wait_for(evaluating.wait(), 5)                          # the decision is mid-evaluation
     taking_over = asyncio.create_task(set_mode(client, rows, visitor.session_id, "owner", 0))
-    assert await a_statement_waits_for_a_lock()                           # the session row the decision holds
+    assert await a_take_over_waits_for_the_session_row()                  # the row the decision holds
     assert not taking_over.done()
     release.set()
     decision, state = await asyncio.wait_for(asyncio.gather(deciding, taking_over), 10)
@@ -635,6 +639,51 @@ async def test_a_guard_refusal_on_decide_is_ledgered(app, client, registry, monk
     added = [e.event for e in (await ledger_rows(app, rows))[before:]]
     assert [(e.kind, e.session_id, e.ref_id, e.summary) for e in added] == [
         ("decide", visitor.session_id, None, {"outcome": "refuse", "tool": "native.quote", "reason": "internal_error"})]
+    assert await decisions_of(app, rows) == []
+
+
+async def test_a_guard_refusal_in_the_caller_is_ledgered(app, client, registry, monkeypatch):
+    website = FakeAdapter("native.fetch_website", effects=["read"])
+    rows = await desk_with(app, [FakeAdapter("native.quote"), website],
+                           [card("quote", "native.quote"), card("site", "native.fetch_website")])
+    visitor = await open_visitor(client, rows)
+    check = db_session._check_compiled
+
+    def refusing(stmt, scoped_tables):
+        # the Desk read once the session is known (`auth.require_desk`): only desks have deleted_at
+        if "deleted_at" in [column.key for column in stmt.selected_columns]:
+            raise ValueError(db_session.SETS_THE_COPY)
+        check(stmt, scoped_tables)
+
+    before = len(await ledger_rows(app, rows))
+    monkeypatch.setattr(db_session, "_check_compiled", refusing)
+    visitors = await post_decide(client, visitor, "native.quote")
+    owners = await owner_decide(client, rows, "native.fetch_website", desk_id=rows.desk_id)
+    monkeypatch.setattr(db_session, "_check_compiled", check)
+    for response in (visitors, owners):
+        assert (response.status_code, response.json()) == (500, {"code": "internal"})
+    added = [e.event for e in (await ledger_rows(app, rows))[before:]]
+    assert [(e.kind, e.session_id, e.ref_id, e.summary) for e in added] == [
+        ("decide", visitor.session_id, None, {"outcome": "refuse", "tool": "native.quote", "reason": "internal_error"}),
+        ("decide", rows.owner_session_id, None,
+         {"outcome": "refuse", "tool": "native.fetch_website", "reason": "internal_error"})]
+    assert await decisions_of(app, rows) == []
+
+
+async def test_uncanonical_call_is_refused_and_ledgered(app, client, registry):
+    rows = await desk_with(app, [FakeAdapter("native.quote")], [card("quote", "native.quote")])
+    visitor = await open_visitor(client, rows)
+    before = len(await ledger_rows(app, rows))
+    # 1e400 parses as infinity, which canonical JSON can't hold, so the call has no hash to be stored under
+    body = ('{"session_id": "%s", "generation": 0,'
+            ' "call": {"call_id": "call-1", "tool": "native.quote", "args": {"n": 1e400}}}' % visitor.session_id)
+    response = await client.post("/decide", content=body.encode(),
+                                 headers={**visitor.headers, "content-type": "application/json"})
+    assert (response.status_code, response.json()) == (422, {"code": "invalid"})
+    added = [e.event for e in (await ledger_rows(app, rows))[before:]]
+    assert [(e.kind, e.session_id, e.ref_id, e.summary) for e in added] == [
+        ("decide", visitor.session_id, None,
+         {"outcome": "refuse", "tool": "native.quote", "reason": "uncanonical_call"})]
     assert await decisions_of(app, rows) == []
 
 

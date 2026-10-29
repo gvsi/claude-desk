@@ -9,7 +9,8 @@ Optional attributes appear only when set, since the schema reads them behind `ha
 rows ("Session state responses": token, copy, closed, generation, mode `owner`) on the session
 row, which the route holds locked until the decision commits:
 
-0. A call ID the decisions table can't keep (`keepable_call_id`) is 422 `invalid`.
+0. A call ID the decisions table can't keep (`keepable_call_id`), or args canonical JSON can't hold
+   (`call_sha256`), is 422 `invalid`.
 1. Idempotency on `(session_id, generation, call_id)`: the same call returns its stored decision,
    another Desk, tool or args is 409 `conflict`.
 2. A paused session (the breaker) gets a stored `refuse`.
@@ -24,8 +25,8 @@ Everything a decision writes commits in the caller's transaction: the action, th
 ledger entries (`review`, `decide`, `breaker`) and the owner's alerts. A decision is signed over
 its state and status line (`sign_decision`), and every later state change ledgers and re-signs it
 (`set_state`). Expiry is lazy (`expire_if_due`). A call refused before it has a decision (that
-call ID, or an internal error such as a `KernelRepo` refusal, 500 `internal`) still gets its
-`decide` entry, written after the transaction has rolled back.
+call ID or those args, or an internal error such as a `KernelRepo` refusal, 500 `internal`) still
+gets its `decide` entry, written after the transaction has rolled back.
 
 Visitor text reaches the decision only as data: the reviewer sees free-text arguments under
 `untrusted_args`, and the owner reads them quoted after "From the visitor".
@@ -550,7 +551,7 @@ async def decide_call(ctx: KernelCtx, principal: Principal, session_row: Session
     try:
         sha = call_sha256(req)
     except ValueError:
-        raise KernelFailure(422, "invalid", "uncanonical_call") from None
+        raise _refused_call(422, "invalid", "uncanonical_call", principal, req) from None
     existing = await find_call(ctx, session_row.session_id, session_row.generation, req.call.call_id)
     if existing is not None:
         return await _repeat(ctx, existing, sha)
@@ -616,6 +617,14 @@ async def _ledger_refused_call(ctx: KernelCtx, *, copy_id: str, desk_id: str, se
     ctx.bind(copy_id)
     await ledger.append(ctx, copy_id=copy_id, desk_id=desk_id, event=LedgerEvent(
         kind="decide", origin="kernel", session_id=session_id, summary=summary))
+
+
+def _internal_error(principal: Principal, req: DecideRequest) -> KernelFailure:
+    """An internal error while deciding, such as `KernelRepo` refusing a statement kernel code built
+    (call it from the `except`, so the log keeps the traceback): 500 `internal`, with the attempt
+    still on record (`_refused_call`)."""
+    log.exception("decide_internal_error")
+    return _refused_call(500, "internal", "internal_error", principal, req)
 
 
 async def _review(ctx: KernelCtx, call: _Call, pending: list[RuleCard]) -> Reviewed:
@@ -765,13 +774,20 @@ async def _decide_caller(ctx: KernelCtx, request: Request, body: DecideRequest) 
 
     Once the token is proved, the session row is locked (`auth.lock_session`) for the rest of the
     request, so the closed, generation and mode checks see its current state, and a take-over or
-    hand-back comes either before the whole decision (409) or after it commits."""
-    row, desk_row = await auth.require_caller(ctx, request, body.session_id, body.desk_id,
-                                              generation=body.generation, lock=True)
+    hand-back comes either before the whole decision (409) or after it commits. From then on the
+    session is known, so an internal error (a `KernelRepo` refusal) is a 500 `internal` with its
+    `decide` entry, as in `post_decide`, never a bare 500."""
+    row = await auth.caller_session(ctx, request, body.session_id, body.desk_id, generation=body.generation,
+                                    lock=True)
+    principal = principal_for(row, desk_id=body.desk_id or row.desk_id)
+    try:
+        desk_row = await auth.require_desk(ctx, request, row, principal.desk_id)
+    except ValueError:
+        raise _internal_error(principal, body) from None
     if row.mode == "owner":
         raise AuthError(409, "mode_owner", "mode_owner", route=route_template(request),
                         named=Named(copy_id=row.copy_id, desk_id=desk_row.desk_id, session_id=row.session_id))
-    return principal_for(row, desk_id=desk_row.desk_id), row
+    return principal, row
 
 
 @router.post("/decide", response_model=Decision)
@@ -780,9 +796,7 @@ async def post_decide(body: DecideRequest, ctx: Ctx, request: Request) -> Decisi
     try:
         return await decide_call(ctx, principal, row, body)
     except ValueError:
-        # an internal error, such as KernelRepo refusing a statement kernel code built: 500, still on record
-        log.exception("decide_internal_error")
-        raise _refused_call(500, "internal", "internal_error", principal, body) from None
+        raise _internal_error(principal, body) from None
 
 
 @router.get("/decisions/by_call", response_model=Decision)
