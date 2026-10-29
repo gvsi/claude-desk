@@ -6,7 +6,8 @@ a booking card are checked against the slot, not against the time of asking.
 
 `execute` books it through `commit_booking`, the one side effect, then writes a `booking:<id>`
 fact labelled for the session (the booking confirmed card) and alerts the owner per the Desk's
-notification defaults.
+notification defaults. The alert is read only from the owner's Demo inbox, so the result's `inbox`
+stays empty.
 """
 
 from datetime import datetime, timedelta
@@ -128,10 +129,9 @@ class BookAdapter:
                                    action_id=action.action_id))
         await ctx.db.flush()
         who = await _who(ctx, xctx.principal, label.record_owner)
-        notice = await demo_inbox.alert_owner(ctx, action.desk_id, "booking", render.owner_preview("booking"),
-                                              f"{who} booked {owner_when(slot.starts_at, slot.minutes, tz)}.")
-        return AdapterResult(facts=[fact], model_view=model_view(fact.fact_id, booking.booking_id),
-                             inbox=[notice] if notice is not None else [])
+        await demo_inbox.alert_owner(ctx, action.desk_id, "booking", render.owner_preview("booking"),
+                                     f"{who} booked {owner_when(slot.starts_at, slot.minutes, tz)}.")
+        return AdapterResult(facts=[fact], model_view=model_view(fact.fact_id, booking.booking_id))
 
     async def reconcile(self, xctx: ExecCtx, action: NormalizedAction) -> AdapterResult | None:
         """The booking the action made, if it made one."""

@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from desk.contracts import Claim, Decision, ExecResult, Fact, Label, Review
 from desk.db.models import Decision as DecisionRow
-from desk.db.models import DemoInboxEntry, Document, Execution, PriceItem, Quote, Tool
+from desk.db.models import DemoInboxEntry, Document, Execution, NotificationPref, PriceItem, Quote, Tool
 from desk.kernel_service import demo_inbox, execute, ledger
 from desk.kernel_service.adapters.base import AdapterFailure, AdapterRefusal, AdapterResult, AdapterUnknown
 from desk.kernel_service.app import create_app
@@ -139,6 +139,24 @@ async def test_a_repeat_returns_the_stored_result(app, client, reviewer):
     assert failed == ExecResult(action_id=lost.action.action_id, state="failed", facts=[], model_view={})
     assert await executed(client, second, lost) == failed
     assert (await read(client, second.headers, lost)).state == "failed"
+
+
+async def test_a_bookings_owner_alert_reaches_only_the_owners_inbox(app, client, reviewer):
+    """An owner alert never rides in the visitor's result, whose `inbox` holds only a code notice:
+    the owner reads it from `GET /demo_inbox`."""
+    reviewer.answer = PASS
+    copy, visitor = await visitor_of(app, client)
+    async with kernel_ctx(app) as ctx:                                          # Maria wants bookings at once
+        ctx.bind(copy.copy_id)
+        prefs = (await ctx.db.scalars(ctx.repo.scoped(select(NotificationPref)))).one()
+        prefs.now = [*prefs.now, "booking"]
+    result = await executed(client, visitor, await book(client, visitor, "S-20261102-1000"))
+    assert (result.state, result.inbox) == ("succeeded", [])
+    response = await client.get("/demo_inbox", headers=copy.owner)
+    assert response.status_code == 200, response.text
+    assert [(entry["to"], entry["kind"], entry["body"]) for entry in response.json()
+            if " booked " in entry["body"]] == [
+        ("owner", "alert", "A stranger booked Monday, November 2, from 10:00 am to 12:00 pm.")]
 
 
 async def activate(app: FastAPI, copy: Rivera, cards) -> None:

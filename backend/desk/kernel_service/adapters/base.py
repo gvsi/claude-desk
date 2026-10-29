@@ -61,7 +61,7 @@ class AdapterResult(BaseModel):
 
     facts: list[Fact] = []
     model_view: dict[str, Any] = {}       # filtered to model_view_keys and the session's readers before Claude sees it
-    inbox: list[InboxNotice] = []
+    inbox: list[InboxNotice] = []         # a verification code's notice only; owner alerts stay in the Demo inbox
 
 
 @dataclass(frozen=True)
