@@ -16,11 +16,12 @@ import type {
   PaymentLinkView,
   PolicyVersion,
   RenderedBlock,
+  RuleCard,
   SessionState,
   SseEvent,
   StatusEvent,
 } from '../api/contracts.ts';
-import type { DeskSummary, Handoff, TranscriptItem, TranscriptKind } from '../api/views.ts';
+import type { DeskSummary, Handoff, RulesDraft, TranscriptItem, TranscriptKind } from '../api/views.ts';
 import { placeholderHex, rivera } from '../ds/fixtures/index.ts';
 import { BUSINESS, activePolicy, copyIds, type CopyIds, type MockSeed } from './seed.ts';
 import {
@@ -79,6 +80,8 @@ export interface DeskRecord {
   ledger: LedgerEntry[];
   /** The kernel's open status for the Desk's public page, by language; null when it makes no claim. */
   openStatus: Record<Language, OpenStatus> | null;
+  /** Rule drafts made from the active rules, by version; none is active until the owner confirms it. */
+  drafts: Map<number, RulesDraft>;
 }
 
 export interface DecisionRecord {
@@ -93,6 +96,18 @@ export interface HandoffRecord {
   deskId: string;
   createdAt: number;
   fromTheVisitor: string | null;
+}
+
+/** A lead, as the kernel keeps one: someone who left their name and how to reach them. */
+export interface LeadRecord {
+  leadId: string;
+  deskId: string;
+  sessionId: string;
+  /** As the visitor typed it. Untrusted. */
+  displayName: string;
+  /** What they want and how to reach them, as typed. Untrusted. */
+  note: string;
+  createdAt: number;
 }
 
 export interface InboxRecord {
@@ -125,6 +140,7 @@ export class MockWorld {
   readonly sessions = new Map<string, SessionRecord>();
   readonly decisions = new Map<string, DecisionRecord>();
   readonly handoffs = new Map<string, HandoffRecord>();
+  readonly leads: LeadRecord[] = [];
   readonly inbox: InboxRecord[] = [];
   readonly links = new Map<string, LinkRecord>();
   private counter = 0;
@@ -191,6 +207,7 @@ export class MockWorld {
       policy: activePolicy(fields.desk_id),
       ledger: [],
       openStatus,
+      drafts: new Map(),
     };
     this.desks.push(desk);
     return desk;
@@ -542,6 +559,7 @@ export class MockWorld {
     return { type: 'demo_inbox', entry_id: entry.entry_id, to: entry.to, preview: fields.preview };
   }
 
+  /** A callback request in Needs you, and the lead it makes: the name, and the rest of what they typed as its note. */
   private openHandoff(session: SessionRecord, fields: { reason: string; callbackWindow: string | null; lead: string }): void {
     const handoffId = this.id('handoff');
     this.handoffs.set(handoffId, {
@@ -556,7 +574,88 @@ export class MockWorld {
       createdAt: this.now(),
       fromTheVisitor: session.lastVisitorText,
     });
+    const named = `${fields.lead} · `;
+    this.leads.push({
+      leadId: this.id('lead'),
+      deskId: session.deskId,
+      sessionId: session.state.session_id,
+      displayName: fields.lead,
+      note: fields.reason.startsWith(named) ? fields.reason.slice(named.length) : fields.reason,
+      createdAt: this.now(),
+    });
     session.displayName ??= fields.lead;
+  }
+
+  /** The owner closes a callback request, as the kernel records it. */
+  closeHandoff(record: HandoffRecord): void {
+    const desk = this.desk(record.deskId);
+    if (!desk) throw new Error(`handoff ${record.handoff.handoff_id} has no Desk`);
+    record.handoff = { ...record.handoff, status: 'done' };
+    this.appendLedger(desk, {
+      kind: 'desk_data',
+      origin: 'kernel',
+      session_id: record.handoff.session_id,
+      ref_id: record.handoff.handoff_id,
+      summary: { handoff: 'done' },
+    });
+  }
+
+  /**
+   * The owner takes over the chat, as the kernel records it: the owner's mode at the next
+   * generation, so anything still running for the old one is fenced off, and the visitor is told.
+   */
+  takeOver(session: SessionRecord): SessionState {
+    session.state = { ...session.state, mode: 'owner', generation: session.state.generation + 1 };
+    this.appendLedger(this.deskOf(session), {
+      kind: 'takeover',
+      origin: 'kernel',
+      session_id: session.state.session_id,
+      ref_id: null,
+      summary: { mode: 'owner', generation: session.state.generation },
+    });
+    this.emit(session, { type: 'owner_joined', name: BUSINESS.owner_display_name });
+    return session.state;
+  }
+
+  /**
+   * A draft of the Desk's rules with `add` merged in by `card_id`, as the kernel drafts an
+   * approval's card diff: the next version, checked, and stored until the owner confirms it.
+   * Default cards are left out of what it shows.
+   */
+  draft(desk: DeskRecord, add: readonly RuleCard[]): RulesDraft {
+    const before = desk.policy.cards.filter((card) => !card.is_default);
+    const cards = before.map((card) => ({ ...card }));
+    const added: RuleCard[] = [];
+    const changed: [RuleCard, RuleCard][] = [];
+    for (const card of add) {
+      const at = cards.findIndex((c) => c.card_id === card.card_id);
+      const copy = { ...card };
+      if (at === -1) {
+        cards.push(copy);
+        added.push(copy);
+      } else {
+        const old = cards[at];
+        if (old) changed.push([old, copy]);
+        cards[at] = copy;
+      }
+    }
+    const reasons = (mode: RuleCard['mode']) => cards.filter((c) => c.mode === mode).map((c) => c.reason);
+    const proof = desk.policy.proof;
+    const draft: RulesDraft = {
+      version: desk.policy.version + desk.drafts.size + 1,
+      cards,
+      diff: { added, removed: [], changed },
+      proof: {
+        ok: true,
+        method: 'symcc',
+        cases: null,
+        timed_out: false,
+        checks: (proof?.checks ?? []).map((check) => ({ ...check })),
+      },
+      summary: { on_its_own: reasons('auto'), asks_you: reasons('ask'), never: reasons('never') },
+    };
+    desk.drafts.set(draft.version, draft);
+    return draft;
   }
 
   /** Writes seeded turns into history from `from`, each step `EVENT_GAP_MS` apart and turns `gap` apart. */

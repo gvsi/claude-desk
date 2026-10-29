@@ -17,6 +17,7 @@ const PLAN_02: Record<RouteKey, string> = {
   openPreview: 'POST /api/owner/desks/{desk_id}/preview_session',
   // Today
   today: 'GET /api/owner/desks/{desk_id}/today',
+  briefing: 'GET /api/owner/desks/{desk_id}/briefing',
   needsYou: 'GET /api/owner/desks/{desk_id}/needs_you',
   reports: 'GET /api/owner/desks/{desk_id}/reports',
   answer: 'POST /api/owner/approvals/{decision_id}/answer',

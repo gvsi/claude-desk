@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DecisionState, EvMessage, LedgerPage, PublicDesk, SseEvent } from '../api/contracts.ts';
 import type { RouteKey } from '../api/routes.ts';
 import type {
+  BriefingList,
   ConversationSummary,
   CopyOut,
   NeedsYouItem,
@@ -545,5 +546,155 @@ describe('planted faults', () => {
       { key: 'setAnswering', body: { on: false }, path: `/api/owner/desks/${deskId}/answering` },
       { key: 'setAnswering', body: { on: false }, path: `/api/owner/desks/${deskId}/answering` },
     ]);
+  });
+});
+
+describe("Today's windows", () => {
+  /** Thursday, October 29, 10:30 am in Los Angeles. */
+  const NOW = new Date('2026-10-29T17:30:00Z');
+  const HOUR = 60 * 60_000;
+  const read = async () => (await call('today', { params: { desk_id: deskId } })).body as Today;
+  const list = async () => (await call('briefing', { params: { desk_id: deskId } })).body as BriefingList;
+
+  beforeEach(() => {
+    vi.setSystemTime(NOW);
+  });
+
+  it('today_counts_what_happened', async () => {
+    // A quiet copy: every figure zero, seven empty days ending today, and nothing since last night.
+    mockStore.reset('rivera_quiet');
+    const quiet = await read();
+    expect(quiet.briefing).toEqual({
+      since: '2026-10-28T18:00:00-07:00',
+      conversations: 0,
+      bookings: 0,
+      leads: 0,
+      blocked: 0,
+      total: 0,
+      newest: { blocked: null, booking: null, lead_or_answer: null },
+    });
+    expect(quiet.this_week).toEqual({
+      timezone: 'America/Los_Angeles',
+      start: '2026-10-23',
+      end: '2026-10-29',
+      bookings: 0,
+      booked_cents: 0,
+      conversations: 0,
+      handled: 0,
+      stepped_in: 0,
+      stopped: 0,
+      days: ['2026-10-23', '2026-10-24', '2026-10-25', '2026-10-26', '2026-10-27', '2026-10-28', '2026-10-29'].map((date) => ({
+        date,
+        conversations: 0,
+        bookings: 0,
+        stopped: 0,
+      })),
+    });
+    expect('recorded_history' in quiet).toBe(false);
+    expect(await list()).toEqual({ since: '2026-10-28T18:00:00-07:00', items: [] });
+
+    // Rivera's seed: the held visitor, whose drafted reply was stopped, and Dana's chat, where Maria
+    // whispered and Claude booked her at the quoted list price.
+    mockStore.reset('rivera');
+    const seeded = await read();
+    expect(seeded.this_week).toMatchObject({ bookings: 1, booked_cents: 18_000, conversations: 2, handled: 1, stepped_in: 1, stopped: 1 });
+    expect(seeded.this_week.days.at(-1)).toEqual({ date: '2026-10-29', conversations: 2, bookings: 1, stopped: 1 });
+    expect(seeded.briefing).toMatchObject({ conversations: 2, bookings: 1, leads: 0, blocked: 1, total: 2 });
+    const blockedReply = mockStore.world.desks[0]?.ledger.find((e) => e.event.kind === 'reply' && e.event.summary.ok === false);
+    expect(seeded.briefing.newest.blocked).toMatchObject({
+      kind: 'blocked',
+      session_id: 'ses-visitor-web',
+      ref_id: String(blockedReply?.seq),
+      line: null,
+    });
+    expect(seeded.briefing.newest.booking).toMatchObject({
+      kind: 'booking',
+      session_id: 'ses-dana-web',
+      line: DECISIONS.book.reasonPlain,
+    });
+    expect(seeded.briefing.newest.lead_or_answer).toBeNull();
+    // The blocked reply's attempt on Safety has the same ref.
+    const attempts = (await call('safety', { params: { desk_id: deskId } })).body as { kind: string; ref_id: string }[];
+    expect(attempts.find((a) => a.kind === 'reply_blocked')?.ref_id).toBe(String(blockedReply?.seq));
+
+    // Maria allows the seeded hold: she stepped into that chat, and a quote isn't a booking.
+    const held = ((await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[])[0]?.decision;
+    await call('answer', { params: { decision_id: held?.decision_id ?? '' }, body: { answer: 'allow_once' } });
+    await drain();
+    expect((await read()).this_week).toMatchObject({ bookings: 1, conversations: 2, handled: 0, stepped_in: 2 });
+
+    // A visitor Claude answers, and Maria's own preview that Claude answers too: both count.
+    await openChat();
+    await send('Hello there');
+    await drain();
+    await call('openPreview', { params: { desk_id: deskId } });
+    await send('Do you work weekends?');
+    await drain();
+    const both = await read();
+    expect(both.this_week).toMatchObject({ conversations: 4, stepped_in: 2, handled: 2 });
+    expect(both.briefing).toMatchObject({ conversations: 4, total: 4 });
+    expect(both.briefing.newest.lead_or_answer).toMatchObject({ kind: 'answer', display_name: null });
+
+    // And a visitor who asks for a callback is a lead, not an answer.
+    mockStore.reset('rivera');
+    await openChat();
+    await send('Can you call me back?');
+    await drain();
+    const withLead = await read();
+    expect(withLead.briefing).toMatchObject({ leads: 1, total: 3 });
+    expect(withLead.briefing.newest.lead_or_answer).toMatchObject({
+      kind: 'lead',
+      display_name: 'Dana Wells',
+      line: '(503) 555-0142 · Leaking water heater',
+    });
+    await openChat();
+    await vi.advanceTimersByTimeAsync(60_000);
+    await call('openPreview', { params: { desk_id: deskId } });
+    await send('Do you work weekends?');
+    await drain();
+    const answered = await read();
+    const preview = [...mockStore.world.sessions.values()].find((s) => s.ownerPreview);
+    expect(answered.briefing.newest.lead_or_answer).toEqual({
+      kind: 'answer',
+      at: expect.any(String),
+      session_id: preview?.state.session_id,
+      display_name: null,
+      ref_id: preview?.state.session_id,
+      line: null,
+    });
+    expect(answered.this_week).toMatchObject({ conversations: 4, stepped_in: 1, handled: 3 });
+
+    // The full list, newest first, and the short form's rows are its own.
+    const full = await list();
+    expect(full.items.map((item) => item.kind)).toEqual(['answer', 'lead', 'booking', 'blocked']);
+    expect(full.items).toHaveLength(answered.briefing.total);
+    expect(full.items).toContainEqual(answered.briefing.newest.blocked);
+    expect(full.items).toContainEqual(answered.briefing.newest.booking);
+  });
+
+  it('windows_follow_the_business_clock', async () => {
+    mockStore.reset('rivera_quiet');
+    const desk = mockStore.world.desks[0];
+    if (!desk) throw new Error('the copy has its Desk');
+    const chatAt = (ms: number, text: string) => {
+      const session = mockStore.world.at(ms, () => mockStore.world.addSession(desk));
+      mockStore.world.replay(session, ms, [{ text, steps: matchRule(text).steps }]);
+    };
+    // Yesterday at 5:30 pm, before last night began at 6:00 pm: in the last 7 days, not the briefing.
+    chatAt(Date.parse('2026-10-29T00:30:00Z'), 'Hello there');
+    // Yesterday at 7:00 pm: in both.
+    chatAt(Date.parse('2026-10-29T02:00:00Z'), 'How much is drain clearing?');
+    // Eight days ago: in neither.
+    chatAt(NOW.getTime() - 8 * 24 * HOUR, 'Hello there');
+    // Friday the 23rd just after midnight, the first of the seven days.
+    chatAt(Date.parse('2026-10-23T07:01:00Z'), 'Hello there');
+
+    const today = await read();
+    expect(today.this_week.conversations).toBe(3);
+    expect(today.this_week.days.map((d) => d.conversations)).toEqual([1, 0, 0, 0, 0, 2, 0]);
+    expect(today.briefing.conversations).toBe(1);
+    // The quote at 7:00 pm answered a question: Claude replied with no booking, lead, hold or stop.
+    expect(today.briefing.newest.lead_or_answer).toMatchObject({ kind: 'answer', line: null });
+    expect(today.briefing.total).toBe(1);
   });
 });

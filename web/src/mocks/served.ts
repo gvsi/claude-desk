@@ -6,11 +6,13 @@
  * cookies: kept in the store for the screen tests' one page, real ones on the dev server. Nothing
  * here is a credential.
  */
-import type { ApprovalAnswer, Decision, DeskUpdated } from '../api/contracts.ts';
+import type { ApprovalAnswer, Decision, DeskUpdated, RuleCard } from '../api/contracts.ts';
 import { ROUTES, type RouteKey, type RouteResponse, type RouteSpec } from '../api/routes.ts';
 import type { ApprovalAnswerOut, CancelAccepted, MessageAccepted, VisitorSession } from '../api/views.ts';
+import { RIVERA_MONEY_CAP_CENTS } from '../ds/fixtures/index.ts';
 import {
   attempts,
+  briefingList,
   businessOut,
   conversationSummary,
   copyOut,
@@ -69,6 +71,8 @@ export interface ErrorBody {
   error: string;
   code?: string;
   decision?: Decision;
+  /** An `above_money_cap` refusal's limit for taking money without asking. */
+  cap_cents?: number;
 }
 
 /** A route's refusal: a 4xx or 5xx with an `{error}` body. */
@@ -103,6 +107,24 @@ const NOT_FOUND = failWith(404, 'not_found');
 const INVALID = failWith(422, 'invalid');
 
 const ANSWERS: ReadonlySet<string> = new Set<ApprovalAnswer>(['allow_once', 'deny_once', 'allow_person', 'deny_always']);
+
+const CARD_MODES: ReadonlySet<unknown> = new Set<RuleCard['mode']>(['auto', 'ask', 'never']);
+const CARD_WHO: ReadonlySet<unknown> = new Set<RuleCard['who']>(['anyone', 'verified', 'record_owner', 'person', 'agent']);
+
+/** A rule card as a draft takes one: its id, tool, mode, who and reason, and a limit that is a whole number of cents or none. */
+function isRuleCard(value: unknown): value is RuleCard {
+  if (!isRecord(value)) return false;
+  const cap = value.max_amount_cents;
+  return (
+    typeof value.card_id === 'string' &&
+    value.card_id !== '' &&
+    typeof value.applies_to === 'string' &&
+    CARD_MODES.has(value.mode) &&
+    CARD_WHO.has(value.who) &&
+    typeof value.reason === 'string' &&
+    (cap === undefined || cap === null || (Number.isSafeInteger(cap) && (cap as number) >= 0))
+  );
+}
 
 type Scheduled = { step: Step; language: Language; text: string };
 
@@ -235,6 +257,10 @@ const SERVED: ServedRoutes = {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
     return isFailure(desk) ? desk : ok(today(sv.world, desk));
   },
+  briefing(sv, req) {
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
+    return isFailure(desk) ? desk : ok(briefingList(sv.world, desk));
+  },
   needsYou(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
     return isFailure(desk) ? desk : ok(needsYou(sv.world, desk));
@@ -262,6 +288,14 @@ const SERVED: ServedRoutes = {
     };
     return ok(out);
   },
+  handoffDone(sv, req) {
+    if (!req.cookies.owner) return NO_OWNER;
+    const record = sv.world.handoffs.get(req.params.handoff_id ?? '');
+    if (!record) return NOT_FOUND;
+    if (record.handoff.status !== 'open') return failWith(409, 'kernel', { code: 'conflict' });
+    sv.world.closeHandoff(record);
+    return ok({ desk_id: record.deskId, updated_at: isoTime(sv.world.now()) } satisfies DeskUpdated);
+  },
   conversations(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
     if (isFailure(desk)) return desk;
@@ -275,6 +309,17 @@ const SERVED: ServedRoutes = {
     const after = Number(req.query.get('after') ?? '0');
     return ok(ownerTranscript(session, Number.isSafeInteger(after) ? after : 0));
   },
+  takeover(sv, req) {
+    if (!req.cookies.owner) return NO_OWNER;
+    const session = sv.world.sessions.get(req.params.session_id ?? '');
+    if (!session) return NOT_FOUND;
+    const generation = isRecord(req.body) ? req.body.generation : undefined;
+    if (req.malformed || !Number.isSafeInteger(generation)) return INVALID;
+    // The owner acted on a chat that has moved on since they last read it.
+    if (generation !== session.state.generation) return failWith(409, 'kernel', { code: 'stale_generation' });
+    if (session.state.mode === 'owner') return failWith(409, 'kernel', { code: 'mode_owner' });
+    return ok(sv.world.takeOver(session));
+  },
   safety(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
     return isFailure(desk) ? desk : ok(attempts(sv.world, desk));
@@ -282,6 +327,17 @@ const SERVED: ServedRoutes = {
   ledger(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
     return isFailure(desk) ? desk : ok(ledgerPage(desk));
+  },
+  draftRules(sv, req) {
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
+    if (isFailure(desk)) return desk;
+    const add = isRecord(req.body) ? req.body.add : undefined;
+    if (req.malformed || !Array.isArray(add) || add.length === 0 || !add.every(isRuleCard)) return INVALID;
+    // The kernel won't draft a card that takes more money on its own than the Desk's limit allows.
+    if (add.some((card) => card.mode === 'auto' && (card.max_amount_cents ?? 0) > RIVERA_MONEY_CAP_CENTS)) {
+      return failWith(422, 'above_money_cap', { cap_cents: RIVERA_MONEY_CAP_CENTS });
+    }
+    return ok(sv.world.draft(desk, add));
   },
   publicDesk(sv, req) {
     const desk = sv.world.deskBySlug(req.params.slug);

@@ -72,15 +72,84 @@ export interface ConversationSummary {
   owner_preview: boolean;
 }
 
+export type BriefingKind = 'blocked' | 'booking' | 'lead' | 'answer';
+
+/** One thing that happened since last night, as the API core's briefing lists it. */
+export interface BriefingItem {
+  kind: BriefingKind;
+  /** When it happened (a replayed row's recorded time). */
+  at: string;
+  /** The conversation it happened in, or null. */
+  session_id: string | null;
+  /** As `ConversationSummary.display_name`. Untrusted. */
+  display_name: string | null;
+  /** The `Attempt.ref_id` for `blocked`; the decision for a booking; the `lead_id`; the session for an answer. */
+  ref_id: string;
+  /**
+   * A refusal's or a booking's `reason_plain` (the kernel's owner text); a lead's note (untrusted, and
+   * it may hold the contact as typed); null for a blocked reply and for an answer.
+   */
+  line: string | null;
+}
+
+/** "Since last night": from 18:00 yesterday in the business's time zone, to now. */
 export interface Briefing {
-  /** The owner's previous read of Today; null on the first ("So far"). */
-  since: string | null;
+  /** The window's start, 18:00 yesterday, local. */
+  since: string;
   conversations: number;
   bookings: number;
   leads: number;
-  held: number;
   blocked: number;
-  paid_cents: number;
+  /** The full list's length (`BriefingList.items`). */
+  total: number;
+  newest: {
+    blocked: BriefingItem | null;
+    booking: BriefingItem | null;
+    /** The newer of the newest lead and the newest answer. */
+    lead_or_answer: BriefingItem | null;
+  };
+}
+
+/** `GET …/briefing`: every item since last night, newest first. */
+export interface BriefingList {
+  since: string;
+  items: BriefingItem[];
+}
+
+/** One local date of the last seven. */
+export interface ThisWeekDay {
+  /** Local `YYYY-MM-DD`. */
+  date: string;
+  conversations: number;
+  bookings: number;
+  stopped: number;
+}
+
+/**
+ * "Last 7 days": the seven local dates in the business's time zone ending today, today included,
+ * totals from the first of them at 00:00 to now. `handled + stepped_in = conversations`.
+ */
+export interface ThisWeek {
+  timezone: string;
+  /** Six days before `end`, local `YYYY-MM-DD`. */
+  start: string;
+  /** Today, local `YYYY-MM-DD`. */
+  end: string;
+  bookings: number;
+  booked_cents: number;
+  conversations: number;
+  handled: number;
+  stepped_in: number;
+  stopped: number;
+  /** Always seven, oldest first, ending with `end`. */
+  days: ThisWeekDay[];
+}
+
+/** Which of Today's figures count replayed history (from plan 02b); a missing object or key is false. */
+export interface RecordedHistory {
+  needs_you?: boolean;
+  briefing?: boolean;
+  this_week?: boolean;
 }
 
 export interface Today {
@@ -90,6 +159,9 @@ export interface Today {
   /** Conversations with activity in the last 5 minutes. */
   live: ConversationSummary[];
   briefing: Briefing;
+  this_week: ThisWeek;
+  /** Optional until plan 02b sends it. */
+  recorded_history?: RecordedHistory;
 }
 
 export interface Reports {
@@ -373,7 +445,8 @@ export interface AnswerBody {
   answer: ApprovalAnswer;
 }
 
-export interface ResumeBody {
+/** Take-over, hand-back and resume: the session's generation as last read, which fences a stale act. */
+export interface GenerationBody {
   generation: number;
 }
 

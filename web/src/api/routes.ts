@@ -30,6 +30,7 @@ import type {
   AnsweringBody,
   ApprovalAnswerOut,
   Attempt,
+  BriefingList,
   BusinessOut,
   CancelAccepted,
   ConfirmRulesBody,
@@ -40,6 +41,7 @@ import type {
   CopyOut,
   DemoAgentRun,
   DraftAddBody,
+  GenerationBody,
   HealthOut,
   KnowledgeBody,
   MessageAccepted,
@@ -50,7 +52,6 @@ import type {
   PeopleOut,
   PresetBody,
   Reports,
-  ResumeBody,
   RuleChatOut,
   RulesDraft,
   RulesView,
@@ -93,6 +94,7 @@ export const ROUTES = {
 
   // Today
   today: { method: 'GET', path: '/api/owner/desks/{desk_id}/today', owner: true },
+  briefing: { method: 'GET', path: '/api/owner/desks/{desk_id}/briefing', owner: true },
   needsYou: { method: 'GET', path: '/api/owner/desks/{desk_id}/needs_you', owner: true },
   reports: { method: 'GET', path: '/api/owner/desks/{desk_id}/reports', owner: true },
   answer: { method: 'POST', path: '/api/owner/approvals/{decision_id}/answer', owner: true },
@@ -174,6 +176,7 @@ interface RouteShapes {
   openPreview: { body: undefined; response: VisitorSession };
 
   today: { body: undefined; response: Today };
+  briefing: { body: undefined; response: BriefingList };
   needsYou: { body: undefined; response: NeedsYouItem[] };
   reports: { body: undefined; response: Reports };
   answer: { body: AnswerBody; response: ApprovalAnswerOut };
@@ -181,9 +184,9 @@ interface RouteShapes {
 
   conversations: { body: undefined; response: ConversationSummary[] };
   conversation: { body: undefined; response: OwnerTranscript };
-  takeover: { body: undefined; response: SessionState };
-  handback: { body: undefined; response: SessionState };
-  resume: { body: ResumeBody; response: SessionState };
+  takeover: { body: GenerationBody; response: SessionState };
+  handback: { body: GenerationBody; response: SessionState };
+  resume: { body: GenerationBody; response: SessionState };
   ownerMessage: { body: OwnerMessageBody; response: OwnerMessageResult };
 
   safety: { body: undefined; response: Attempt[] };
