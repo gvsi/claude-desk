@@ -234,6 +234,13 @@ describe('design tokens', () => {
       contrastRatio('rgba(0,0,0,0.5)', '#ffffff'),
       6,
     );
+    // A control with an opaque fill on a different ground, at half opacity: the label and the
+    // fill fade together, so the label sits over only what's beneath, once. Black on a white
+    // button over black reads as black on mid gray.
+    expect(pairContrast({ fg: '#000000', ground: '#ffffff', over: '#000000', opacity: 0.5 })).toBeCloseTo(
+      contrastRatio('#000000', 'rgba(255,255,255,0.5)', '#000000'),
+      6,
+    );
     // A ghost control has no fill of its own: only its label fades.
     expect(pairContrast({ fg: '#000000', ground: 'transparent', over: '#ffffff', opacity: 0.5 })).toBeCloseTo(
       contrastRatio('rgba(0,0,0,0.5)', '#ffffff'),

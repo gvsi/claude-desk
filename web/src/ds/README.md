@@ -106,7 +106,7 @@ Text and links, 4.5:1:
 
 `button-danger-text` reads 6.1 on `button-danger-fill` and 5.3 on `button-danger-fill-hover` over `fill-card` (6.6 and 5.7 straight on `bg-app`), 7.9 on `fill-card` and 6.7 on `fill-hover` over `fill-card` (8.5 and 7.3 on `bg-app`).
 
-Busy buttons are measured as drawn, faded by their own opacity, in the card where all four answers wait together: the danger and danger-ghost answers at 80% read 4.7 and 5.6, the secondary and ghost answers at 60% read 5.1 and 5.6. The red buttons fade less, because red text loses contrast faster.
+Busy buttons are measured as drawn, faded by their own opacity, in the card where all four answers wait together: the danger and danger-ghost answers at 80% read 4.5 and 5.6, the secondary and ghost answers at 60% read 4.8 and 5.6. The red buttons fade less, because red text loses contrast faster.
 
 Focus rings and status dots, 3:1 (`ring-composer` is `accent-blue`):
 

@@ -101,7 +101,9 @@ export function pairContrast({ fg, ground, over, under, opacity = 1 }: Omit<Cont
   const fill = fade(groundColor);
   const back = beneath === undefined ? fill : composite(fill, beneath);
   if (back.a !== 1) throw new Error(`${ground} is translucent; pass the opaque color it sits over`);
-  const front = composite(label, back);
+  // The control fades as one: under its label is only what's beneath it, not its faded fill
+  // again. Compositing is associative, so at full opacity this is the label over the fill.
+  const front = beneath === undefined ? label : composite(label, beneath);
   const [light, dark] = [luminance(front), luminance(back)].sort((x, y) => y - x) as [number, number];
   return (light + 0.05) / (dark + 0.05);
 }
