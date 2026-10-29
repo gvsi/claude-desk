@@ -39,4 +39,4 @@
 | `onAttach` | `() => void` | Adds "Add a photo or file". |
 | `onSpeak` | `() => void` | Adds "Speak instead". |
 
-`bg-surface`, `radius-composer`, an inset `line-hairline` and `shadow-composer`. The text is `.cd-type-message`. While the text box has focus the whole composer shows the focus ring (`ring-composer`, 2 px at a 2 px offset), because the canvas's 55% ring is 2.9:1. The single-row composer is 52 px high with one line of text.
+`bg-surface`, `radius-composer`, an inset `line-hairline` and `shadow-composer`. The text is `.cd-type-message`. While the text box has focus the whole composer shows the focus ring (`ring-composer`, 2 px at a 2 px offset), because the canvas's 55% ring is 2.9:1. A button inside it (attach, speak, send) shows its own ring instead, so there is only ever one. The single-row composer is 52 px high with one line of text.

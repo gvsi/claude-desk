@@ -130,7 +130,7 @@ On the intro illustration's light cards, `illustration-ink` reads 16.3 and `illu
 
 - Don't put `text-tertiary` or a link on `fill-secondary-hover`: those pairs aren't listed.
 - `line-hairline`, `line-card`, `line-control`, `line-control-hover`, `scrim`, `illustration-line` and `illustration-arc` are decorative (`DECORATIVE_COLORS`): they separate, dim or outline things that are identified otherwise, or carry nothing. `line-control` is flagged: it is 2.0:1 on `bg-app`, under the 3:1 for control borders, which is acceptable only because a chip or pill is identified by its own text. Never make an outline the only cue that something is a control.
-- Show focus with a solid 2 px `accent-blue` outline at a 2 px offset on every focusable element; the base stylesheet sets it. The composer shows `ring-composer` when focus is inside it, solid too, because a translucent ring falls under 3:1.
+- Show focus with a solid 2 px `accent-blue` outline at a 2 px offset on every focusable element; the base stylesheet sets it. The composer shows `ring-composer` while its text box has focus, solid too, because a translucent ring falls under 3:1; a button inside the composer shows its own ring instead, so only one ring ever shows.
 - Never show status by color alone: a dot always sits beside words that say the same thing, and the dot is `aria-hidden`.
 - Put replies and receipts inside the transcript's `role="log"` so screen readers announce them. Chat, approvals and take-over all work from the keyboard.
 
