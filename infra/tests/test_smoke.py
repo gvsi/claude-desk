@@ -379,17 +379,39 @@ def test_wrong_passcode_fails_the_signed_in_checks(smoke, capsys):
         {"owner_cookie": OWNER_COOKIE.replace("; HttpOnly", "")},
         {"owner_cookie": OWNER_COOKIE.replace("Path=/api/owner", "Path=/")},
         {"owner_cookie": OWNER_COOKIE.replace("SameSite=Strict", "SameSite=Lax")},
+        {"owner_cookie": OWNER_COOKIE.replace("; SameSite=Strict", "")},
         {"owner_cookie": f"other=1; Path=/; HttpOnly; Secure; SameSite=Strict"},  # no owner cookie
         {"visitor_cookie": VISITOR_COOKIE + "; Domain=example.com"},
         {"visitor_cookie": VISITOR_COOKIE.replace("; HttpOnly", "")},
+        {"visitor_cookie": VISITOR_COOKIE.replace("; Secure", "")},
+        {"visitor_cookie": VISITOR_COOKIE.replace(f"Path=/api/public/desks/{SLUG}", "Path=/")},
+        {"visitor_cookie": VISITOR_COOKIE.replace(f"Path=/api/public/desks/{SLUG}", "Path=/api/public/desks")},
+        {"visitor_cookie": VISITOR_COOKIE.replace(f"Path=/api/public/desks/{SLUG}", "Path=/api/public/desks/other-desk")},
+        {"visitor_cookie": VISITOR_COOKIE.replace(f"; Path=/api/public/desks/{SLUG}", "")},
+        {"visitor_cookie": VISITOR_COOKIE.replace("; SameSite=Strict", "")},
+        {"visitor_cookie": VISITOR_COOKIE.replace("SameSite=Strict", "SameSite=None")},
+        {"visitor_cookie": VISITOR_COOKIE.replace("SameSite=Strict", "SameSite=Lax")},
     ],
-    ids=["owner_domain", "owner_not_secure", "owner_not_httponly", "owner_path", "owner_samesite", "no_owner",
-         "visitor_domain", "visitor_not_httponly"],
+    ids=["owner_domain", "owner_not_secure", "owner_not_httponly", "owner_path", "owner_samesite_lax",
+         "owner_no_samesite", "no_owner", "visitor_domain", "visitor_not_httponly", "visitor_not_secure",
+         "visitor_path_root", "visitor_path_every_desk", "visitor_path_other_desk", "visitor_no_path",
+         "visitor_no_samesite", "visitor_samesite_none", "visitor_samesite_lax"],
 )
 def test_cookie_check_requires_first_party_flags(smoke, capsys, cookies):
+    """Each cookie as the API plan's "Cookies carry only tokens" sets it: HttpOnly, Secure,
+    SameSite=Strict and host-only, the owner's on /api/owner and the visitor's on its own Desk's
+    public routes. Breaking any one fails the check."""
     with Stub(Behavior(**cookies)) as stub:
         assert run(smoke, stub, "--only", "cookies_first_party") == 1
     assert results(capsys.readouterr().out) == {"cookies_first_party": "FAIL"}
+
+
+def test_cookie_check_names_each_cookies_scope(smoke, capsys):
+    with Stub(Behavior()) as stub:
+        assert run(smoke, stub, "--only", "cookies_first_party") == 0
+    out = capsys.readouterr().out
+    assert "desk_owner: Secure, HttpOnly, SameSite=Strict, Path=/api/owner, no Domain" in out
+    assert f"desk_visitor: Secure, HttpOnly, SameSite=Strict, Path=/api/public/desks/{SLUG}, no Domain" in out
 
 
 def test_public_links_ignore_forged_hosts(smoke, capsys):

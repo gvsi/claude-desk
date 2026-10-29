@@ -21,9 +21,9 @@ Checks, in order:
   80 from here; only CloudFront reaches it.
 - task_ports_refused (`--cluster`): each running app task's public IP takes no connection on
   8700 or 8701.
-- cookies_first_party (`DESK_PASSCODE`): a new copy's cookies are Secure, HttpOnly and host-only;
-  the owner cookie is SameSite=Strict on Path=/api/owner; the visitor cookie is the same but for
-  its path.
+- cookies_first_party (`DESK_PASSCODE`): a new copy's cookies are Secure, HttpOnly, SameSite=Strict
+  and host-only; the owner cookie's path is /api/owner, the visitor cookie's its own Desk's
+  /api/public/desks/{slug}.
 - public_links_use_public_url (`DESK_PASSCODE`): the copy's agent card endpoint starts with the
   base URL, also when the request forges X-Desk-Public-Host and X-Forwarded-Host.
 - sse_survives_idle (`DESK_PASSCODE`): a visitor's event stream stays open past CloudFront's
@@ -61,8 +61,10 @@ ROUTES = {
     "visitor_sessions": "/api/public/desks/{slug}/sessions",
     "visitor_events": "/api/public/desks/{slug}/events",
 }
+# The cookies as Plan 02a's "Cookies carry only tokens" sets them: both HttpOnly, Secure and
+# SameSite=Strict, the owner's on the owner routes and the visitor's on its own Desk's public routes.
 OWNER_COOKIE, OWNER_COOKIE_PATH = "desk_owner", "/api/owner"
-VISITOR_COOKIE = "desk_visitor"
+VISITOR_COOKIE, VISITOR_COOKIE_PATH = "desk_visitor", "/api/public/desks/{slug}"
 FORGED_HOST = "evil.example"
 FORGED_HEADERS = {"X-Desk-Public-Host": FORGED_HOST, "X-Forwarded-Host": FORGED_HOST}
 # The app task definition's family (infra/stacks/task.py); the admin task's is desk-admin.
@@ -429,11 +431,13 @@ def cookies_first_party(smoke: Smoke) -> str:
         owner = parse_cookie(header)[0] == OWNER_COOKIE
         problems += _check_cookie(header, path=OWNER_COOKIE_PATH if owner else None,
                                   same_site="Strict" if owner else None)
-    problems += _check_cookie(smoke.visitor(copy.slugs[0]), path=None, same_site=None)
+    slug = copy.slugs[0]
+    visitor_path = VISITOR_COOKIE_PATH.format(slug=quote(slug, safe=""))
+    problems += _check_cookie(smoke.visitor(slug), path=visitor_path, same_site="Strict")
     if problems:
         raise CheckFailed("; ".join(problems))
     return (f"{OWNER_COOKIE}: Secure, HttpOnly, SameSite=Strict, Path={OWNER_COOKIE_PATH}, no Domain; "
-            f"{VISITOR_COOKIE}: Secure, HttpOnly, no Domain")
+            f"{VISITOR_COOKIE}: Secure, HttpOnly, SameSite=Strict, Path={visitor_path}, no Domain")
 
 
 def public_links_use_public_url(smoke: Smoke) -> str:
