@@ -102,6 +102,13 @@ image-smoke:
 infra-check:
 	cd infra && node --test 'functions/**/*.test.mjs' && uv run pytest -q && npm ci && npx cdk synth --quiet
 
+# The docs check CI runs: relative links resolve across README.md, AGENTS.md and docs/, and the
+# shipped docs carry the required disclosures and no private reference. FINAL=1 also refuses
+# placeholders ([measured: …], [owner: …]), for the docs as they ship.
+.PHONY: docs-check
+docs-check:
+	uv run --project tools python -m desk_tools.check_docs $(if $(FINAL),--final)
+
 .PHONY: cvc5 setup dev
 # cvc5 1.4.2, the static build for this machine, checked against tools/cvc5.sha256 and unpacked to
 # .tools/cvc5 (git-ignored). desk-prove finds it through CVC5 or PATH; make dev sets both.
