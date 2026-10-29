@@ -67,6 +67,8 @@ class AlbCompute(Construct):
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_ISOLATED),
             security_group=self.security_group,
             idle_timeout=IDLE_TIMEOUT,
+            # The API's TRUSTED_PROXY_HOPS=2 counts on the balancer appending to X-Forwarded-For.
+            xff_header_processing_mode=elbv2.XffHeaderProcessingMode.APPEND,
         )
 
         # DeskData owns the app group's rules (8700 from the VPC, which holds the balancer), so no

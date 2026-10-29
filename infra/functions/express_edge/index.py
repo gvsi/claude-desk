@@ -6,6 +6,9 @@ load balancer named by `LoadBalancerArn`, this:
 
 - sets `idle_timeout.timeout_seconds` to 300: above the API's 15 s SSE heartbeat, below
   uvicorn's 310 s keep-alive, so the balancer closes idle connections first;
+- sets `routing.http.xff_header_processing.mode` to `append` (the ALB default, set so Express
+  can't change it unseen): the API's TRUSTED_PROXY_HOPS=2 takes the second entry from the right of
+  X-Forwarded-For, which is the visitor's address only while the balancer appends CloudFront's;
 - on each of the load balancer's security groups, revokes every ingress rule open to 0.0.0.0/0
   or ::/0, then admits 443 only from `PrefixListId`, CloudFront's origin-facing prefix list.
 
@@ -17,6 +20,7 @@ so a failure part-way leaves the load balancer closed, never open.
 import boto3
 
 IDLE_TIMEOUT = {"Key": "idle_timeout.timeout_seconds", "Value": "300"}
+XFF_APPEND = {"Key": "routing.http.xff_header_processing.mode", "Value": "append"}
 HTTPS = 443
 WORLD_V4, WORLD_V6 = "0.0.0.0/0", "::/0"
 
@@ -50,7 +54,7 @@ def handler(event: dict, context: object) -> dict:
         raise RuntimeError(f"load balancer {load_balancer} has no security groups to lock")
     for group in ec2.describe_security_groups(GroupIds=group_ids)["SecurityGroups"]:
         _lock(ec2, group, prefix_list)
-    elbv2.modify_load_balancer_attributes(LoadBalancerArn=load_balancer, Attributes=[IDLE_TIMEOUT])
+    elbv2.modify_load_balancer_attributes(LoadBalancerArn=load_balancer, Attributes=[IDLE_TIMEOUT, XFF_APPEND])
     return {"PhysicalResourceId": load_balancer}
 
 

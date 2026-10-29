@@ -89,6 +89,8 @@ def test_alb_is_internal_behind_a_vpc_origin(alb_stacks):
     assert props["Scheme"] == "internal"
     assert [alb_stacks.source(subnet) for subnet in props["Subnets"]] == _subnet_refs(alb_stacks, "Isolated")
     assert {"Key": "idle_timeout.timeout_seconds", "Value": "300"} in props["LoadBalancerAttributes"]
+    # Appends to X-Forwarded-For, as the Express balancer is set to: the API's TRUSTED_PROXY_HOPS counts on it.
+    assert {"Key": "routing.http.xff_header_processing.mode", "Value": "append"} in props["LoadBalancerAttributes"]
 
     # One listener: plain HTTP on 80, reached only through CloudFront's private connection.
     _, listener = _only(template, "AWS::ElasticLoadBalancingV2::Listener")

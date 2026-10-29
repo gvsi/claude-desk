@@ -75,7 +75,7 @@ A deploy migrates the database before any new task starts, and during the deploy
 ## After a deploy
 
 - The log ends with `deploy: done. <commit> serves at <url>`, and `curl -s <url>/api/health` shows `"dev_signing_key": false` and `"proof_mode": "symcc"`.
-- The load balancer Express created (linked from the service in the ECS console) has an idle timeout of 300 seconds, and its security groups admit 443 only from the CloudFront prefix list `com.amazonaws.global.cloudfront.origin-facing`.
+- The load balancer Express created (linked from the service in the ECS console) has an idle timeout of 300 seconds and appends to `X-Forwarded-For` (the client address the API's rate limits read), and its security groups admit 443 only from the CloudFront prefix list `com.amazonaws.global.cloudfront.origin-facing`.
 - Both containers are running and healthy:
 
   ```sh

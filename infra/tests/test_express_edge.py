@@ -81,15 +81,25 @@ def _expect_describe(elbv2: Stubber, ec2: Stubber, groups: dict[str, list[dict]]
     )
 
 
+# The attributes the lock sets: the idle timeout, and X-Forwarded-For appended to, never kept as
+# the client sent it or removed, since the API counts its trusted hops from the right of it.
+ATTRIBUTES = [
+    {"Key": "idle_timeout.timeout_seconds", "Value": "300"},
+    {"Key": "routing.http.xff_header_processing.mode", "Value": "append"},
+]
+
+
 def _expect_idle_timeout(elbv2: Stubber) -> None:
     elbv2.add_response(
         "modify_load_balancer_attributes",
-        {"Attributes": [{"Key": "idle_timeout.timeout_seconds", "Value": "300"}]},
-        {"LoadBalancerArn": LOAD_BALANCER, "Attributes": [{"Key": "idle_timeout.timeout_seconds", "Value": "300"}]},
+        {"Attributes": ATTRIBUTES},
+        {"LoadBalancerArn": LOAD_BALANCER, "Attributes": ATTRIBUTES},
     )
 
 
-def test_sets_idle_timeout_to_300(edge):
+def test_sets_idle_timeout_to_300_and_appends_x_forwarded_for(edge):
+    """TRUSTED_PROXY_HOPS=2 holds only while the balancer appends CloudFront's address to the
+    header; in `preserve` mode the second entry from the right would be the visitor's own."""
     module, elbv2, ec2 = edge
     _expect_describe(elbv2, ec2, {GROUP: [_cloudfront_rule()]})
     _expect_idle_timeout(elbv2)
