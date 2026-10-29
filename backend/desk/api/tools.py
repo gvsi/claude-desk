@@ -440,14 +440,17 @@ async def _show(conn: AsyncConnection, caller: Caller, verdict: ReplyVerdict, ca
     return ToolOutcome(result, delivered == "handoff", delivered=delivered, message_id=verdict.message_id, **timing)
 
 
-async def hand_off(conn: AsyncConnection, caller: Caller, generation: int) -> ToolOutcome:
+async def hand_off(conn: AsyncConnection, caller: Caller, generation: int, *,
+                   call_id: str | None = None) -> ToolOutcome:
     """Hand the conversation to the owner: the handoff clause alone, checked like any reply (a paused session's
-    check answers with the handoff verdict too), then shown."""
+    check answers with the handoff verdict too), then shown. `call_id` is the `send_reply` call it answers, if any,
+    so the delivered row records what that call put on screen."""
     started = time.monotonic()
     verdict = await _check(caller, generation, "", [Clause(template="handoff")])
     if isinstance(verdict, ToolOutcome):
         return replace(verdict, check_reply_ms=_ms(started))
-    return await _show(conn, caller, verdict, None, dict(DELIVERED_HANDOFF), "handoff", check_reply_ms=_ms(started))
+    return await _show(conn, caller, verdict, call_id, dict(DELIVERED_HANDOFF), "handoff",
+                       check_reply_ms=_ms(started))
 
 
 async def send_reply(conn: AsyncConnection, caller: Caller, generation: int, tool_input: Any, attempt: int, *,
@@ -465,7 +468,7 @@ async def send_reply(conn: AsyncConnection, caller: Caller, generation: int, too
     if isinstance(draft, list):
         if attempt == 1:
             return _blocked(draft)
-        return await hand_off(conn, caller, generation)
+        return await hand_off(conn, caller, generation, call_id=call_id)
     started = time.monotonic()
     verdict = await _check(caller, generation, *draft)
     timing = {"check_reply_ms": _ms(started)}

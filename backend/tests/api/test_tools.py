@@ -424,14 +424,14 @@ async def test_reply_rejects_owner_said_and_bad_input(api_conn, caller, fake):
         assert (outcome.is_error, outcome.delivered) == (True, None)
     assert fake.called("/check_reply") == [] and await events(api_conn, caller.session_id) == []
 
-    # wrong twice: the handoff, checked as the API's own draft
+    # wrong twice: the handoff, checked as the API's own draft and recorded as what the call put on screen
     twice = await send_reply(api_conn, caller, 0, cases[0][0], 2, call_id="toolu_bad")
     assert (twice.result, twice.is_error, twice.delivered) == ({"outcome": "delivered_handoff"}, True, "handoff")
     assert check_drafts(fake) == [{"session_id": caller.session_id, "generation": 0, "prose": "",
                                    "clauses": [{"template": "handoff", "fact_id": None}]}]
     (message,) = await events(api_conn, caller.session_id)
     assert [block.template for block in message.blocks] == ["handoff"]
-    assert await delivered_rows(api_conn, caller.session_id) == [("claude", None, message.message_id, 1)]
+    assert await delivered_rows(api_conn, caller.session_id) == [("claude", "toolu_bad", message.message_id, 1)]
 
 
 async def test_recover_call_finds_the_decision_and_never_redecides(api_conn, caller, visitor, fake):
