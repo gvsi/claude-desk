@@ -385,6 +385,10 @@ async def test_session_state_responses(kernel, ro_read, arrange):
             assert isinstance(await call(), SessionContext)
         else:
             assert await refused(call()) == (409, "mode_owner"), route
+    # A stale generation answers before the mode: the generation from before the take-over is refused as stale.
+    for route, call in routes(view, created.state.session_id, generation - 1, allow).items():
+        if route != "context":
+            assert await refused(call()) == (409, "stale_generation"), route
 
     # Mode paused: /decide stores a refusal, /execute is 409, the reply check gives only the handoff.
     created, view, allow = await visitor_with_an_allow()
@@ -398,14 +402,18 @@ async def test_session_state_responses(kernel, ro_read, arrange):
     assert not verdict.ok and [violation.kind for violation in verdict.violations] == ["session_paused"]
     assert [block.template for block in verdict.blocks] == ["handoff"]
     assert isinstance(await paused["context"](), SessionContext)
+    for route, call in routes(view, created.state.session_id, generation + 1, allow).items():
+        if route != "context":
+            assert await refused(call()) == (409, "stale_generation"), route   # before the pause
 
     # Session closed: 409 closed on all four (last, since the fake's clock moves a day on). /whoami, which the
     # API calls first on every request and which decides whether a returning visitor resumes, refuses it too.
     created, view, allow = await visitor_with_an_allow()
     arrange.close_idle_sessions(created.state.session_id)
     assert await refused(view.whoami()) == (409, "closed")
-    for route, call in routes(view, created.state.session_id, 0, allow).items():
-        assert await refused(call()) == (409, "closed"), route
+    for stale in (False, True):                                     # closed answers before a stale generation
+        for route, call in routes(view, created.state.session_id, int(stale), allow).items():
+            assert await refused(call()) == (409, "closed"), route
 
 
 @pytest.mark.kernel_plan("01a")
