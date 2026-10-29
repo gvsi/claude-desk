@@ -1,7 +1,9 @@
 import json
 import re
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import get_args
+from zoneinfo import ZoneInfo
 
 import pytest
 from pydantic import TypeAdapter, ValidationError
@@ -466,6 +468,20 @@ def test_open_status_names_only_its_own_boundary():
     ):
         with pytest.raises(ValidationError):
             OpenStatus.model_validate_json(json.dumps(wrong))
+
+
+def test_open_status_compares_instants_across_the_fold():
+    # 01:00-02:00 happens twice in Los Angeles on 2026-11-01, and Python compares two times that share a ZoneInfo by
+    # wall clock, ignoring fold, so the kernel's own local times are compared as instants
+    pdt = datetime(2026, 11, 1, 1, 30, tzinfo=ZoneInfo("America/Los_Angeles"))           # 08:30Z
+    pst = datetime(2026, 11, 1, 1, 15, fold=1, tzinfo=ZoneInfo("America/Los_Angeles"))   # 09:15Z, 45 minutes later
+    assert pdt.tzinfo is pst.tzinfo and pst - pdt == timedelta(minutes=-15)   # wall-clock arithmetic
+    assert (pdt.utcoffset(), pst.utcoffset()) == (timedelta(hours=-7), timedelta(hours=-8))
+    for open_, boundary in ((True, "until"), (False, "opens_at")):
+        empty = {"until": None, "opens_at": None}
+        OpenStatus(open=open_, **empty | {boundary: pst}, text="x", as_of=pdt)   # a future boundary
+        with pytest.raises(ValidationError):
+            OpenStatus(open=open_, **empty | {boundary: pdt}, text="x", as_of=pst)   # a past one
 
 
 def test_schema_export_is_current():

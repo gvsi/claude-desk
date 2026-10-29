@@ -5,6 +5,7 @@ carries a principal, person, level or assurance: the kernel builds identity from
 own tables and the tokens or signatures it checks.
 """
 
+from datetime import UTC
 from typing import Annotated, Literal, Self
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, StringConstraints, model_validator
@@ -289,7 +290,8 @@ class OpenStatus(BaseModel):              # PublicDesk's header line: computed f
         boundary, other = (self.until, self.opens_at) if self.open else (self.opens_at, self.until)
         if other is not None:
             raise ValueError("an open status names only until, a closed one only opens_at")
-        if boundary is not None and boundary <= self.as_of:
+        # in UTC: two times sharing a ZoneInfo compare by wall clock, ignoring the fold of a repeated hour
+        if boundary is not None and boundary.astimezone(UTC) <= self.as_of.astimezone(UTC):
             raise ValueError("the boundary is after as_of: windows end exclusive, and a past one would refetch at once")
         return self
 
