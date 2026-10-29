@@ -382,7 +382,7 @@ export const AllowMenuOpen: Story = {
 export const AllowAndDenyMenus: Story = {
   args: refundArgs,
   parameters: {
-    canvasNote: `${ANSWERS_BOARD} Dana's refund: the refund card asks about every refund, so the tool itself is held, and she is verified with an amount under the hard cap, so all four answers show, two on each side. One menu opens at a time.`,
+    canvasNote: `${ANSWERS_BOARD} Dana's refund: the refund card asks about every refund, so the tool itself is held, and she is verified with an amount within the rules' money cap, so all four answers show, two on each side. One menu opens at a time.`,
   },
   play: async ({ args, canvas, canvasElement, userEvent }) => {
     const buttons = answerButtons(canvasElement);

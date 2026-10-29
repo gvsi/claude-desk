@@ -54,6 +54,13 @@ const COPY_ID = 'copy-demo-7f3a';
 const DESK_ID = 'desk-rivera-main';
 const OWNER = 'Maria Rivera';
 
+/**
+ * Rivera Plumbing's money cap, $500: the most its active rules version lets an auto card take or pay
+ * out in one action without asking (the master plan's "Money cap", at the Rivera seed's value). Allow
+ * only for this person on a money request needs an amount within it.
+ */
+export const RIVERA_MONEY_CAP_CENTS = 50_000;
+
 const business = {
   name: 'Rivera Plumbing',
   deskName: 'Main line',
@@ -835,7 +842,7 @@ const heldVerified = {
 /**
  * Verified Dana asks for her drain clearing payment back. The refund card asks Maria about every
  * refund, so the tool itself is held and Deny always is offered; she is verified and the amount is
- * under the hard cap, so Allow only for this person is too: all four answers.
+ * within the rules' money cap, so Allow only for this person is too: all four answers.
  */
 const heldRefund = {
   decision_id: 'dec-dana-refund',

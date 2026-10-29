@@ -43,4 +43,4 @@ export interface DemoInboxFixture {
 
 export { chen } from './chen';
 export type { CardData } from './rivera';
-export { cardBlock, placeholderHex, proseBlock, rivera } from './rivera';
+export { cardBlock, placeholderHex, proseBlock, rivera, RIVERA_MONEY_CAP_CENTS } from './rivera';

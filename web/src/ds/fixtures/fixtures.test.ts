@@ -17,7 +17,7 @@ import type {
   SessionState,
   SseEvent,
 } from '../../api/contracts';
-import { chen, rivera } from './index';
+import { chen, rivera, RIVERA_MONEY_CAP_CENTS } from './index';
 import type { ConversationFixture, TranscriptTurn } from './index';
 
 const FIXTURES = { rivera, chen };
@@ -28,7 +28,10 @@ const SCHEMA = JSON.parse(readFileSync(path.join(BACKEND, 'contracts.schema.json
   $defs: { SseEvent: { discriminator: { mapping: Record<string, string> } } };
 };
 
-/** MONEY_TOOLS and AUTO_MONEY_HARD_CAP_CENTS as backend/desk/contracts.py defines them. */
+/**
+ * MONEY_TOOLS and AUTO_MONEY_HARD_CAP_CENTS, the platform ceiling, as backend/desk/contracts.py
+ * defines them. A Desk's own money cap is its active rules version's, at or under the ceiling.
+ */
 function backendMoneyRules(): { moneyTools: string[]; hardCapCents: number } {
   const source = readFileSync(CONTRACTS_PY, 'utf8');
   const tools = /^MONEY_TOOLS: frozenset\[str\] = frozenset\(\{([^}]*)\}\)/m.exec(source)?.[1];
@@ -607,6 +610,14 @@ describe('fixtures', () => {
     const { moneyTools, hardCapCents } = backendMoneyRules();
     expect(moneyTools).toContain('payments.create_refund');
 
+    // Rivera's money cap is its rules version's, at or under the platform ceiling, and every auto
+    // card that moves money stays within it.
+    expect(RIVERA_MONEY_CAP_CENTS).toBeLessThanOrEqual(hardCapCents);
+    for (const card of Object.values(rivera.ruleCards)) {
+      if (card.mode !== 'auto' || !moneyTools.includes(card.applies_to)) continue;
+      expect(card.max_amount_cents ?? Number.POSITIVE_INFINITY, card.card_id).toBeLessThanOrEqual(RIVERA_MONEY_CAP_CENTS);
+    }
+
     expect(Object.keys(rivera.decisions).sort()).toEqual([...DECISION_STATES].sort());
     for (const state of DECISION_STATES) {
       expect(rivera.decisions[state].state, state).toBe(state);
@@ -627,7 +638,8 @@ describe('fixtures', () => {
       expect(rivera.decisions[state].answers, state).toEqual(held.answers);
     }
 
-    // allow_person only for a verified person or an agent, and never on money above the hard cap.
+    // allow_person only for a verified person or an agent, and on money only within the rules'
+    // money cap.
     const sessions = new Map(
       collect<SessionState>((node) => typeof node.session_id === 'string' && typeof node.verified === 'boolean' && 'assurance' in node).map(
         (session) => [session.session_id, session],
@@ -651,25 +663,26 @@ describe('fixtures', () => {
       expect(session?.verified === true || session?.kind === 'agent', `${decision.decision_id} allow_person`).toBe(true);
       const action = decision.action;
       if (action && moneyTools.includes(action.tool)) {
-        expect(action.amount_cents ?? Number.POSITIVE_INFINITY, `${decision.decision_id} amount`).toBeLessThanOrEqual(hardCapCents);
+        expect(action.amount_cents ?? Number.POSITIVE_INFINITY, `${decision.decision_id} amount`).toBeLessThanOrEqual(RIVERA_MONEY_CAP_CENTS);
       }
     }
   });
 
   test('answers_follow_what_held_the_request', () => {
-    const { moneyTools, hardCapCents } = backendMoneyRules();
+    const { moneyTools } = backendMoneyRules();
     const sessions = new Map(
       collect<SessionState>((node) => typeof node.session_id === 'string' && typeof node.verified === 'boolean' && 'assurance' in node).map(
         (session) => [session.session_id, session],
       ),
     );
-    // Every held request in each business's fixtures, beside that business's rule cards.
-    const businesses: { name: string; fixture: unknown; cards: Record<string, RuleCard> }[] = [
-      { name: 'rivera', fixture: rivera, cards: rivera.ruleCards },
-      { name: 'chen', fixture: chen, cards: chen.ruleCards },
+    // Every held request in each business's fixtures, beside that business's rule cards and money
+    // cap. Chen & Co. has no money tools and no cap, so no money request of theirs could offer it.
+    const businesses: { name: string; fixture: unknown; cards: Record<string, RuleCard>; moneyCapCents: number | null }[] = [
+      { name: 'rivera', fixture: rivera, cards: rivera.ruleCards, moneyCapCents: RIVERA_MONEY_CAP_CENTS },
+      { name: 'chen', fixture: chen, cards: chen.ruleCards, moneyCapCents: null },
     ];
     const shapes = new Set<string>();
-    for (const { name, fixture, cards } of businesses) {
+    for (const { name, fixture, cards, moneyCapCents } of businesses) {
       // A decision, not a status event about one: it carries its reason and its answers.
       const held = collect<Decision>(
         (node) => typeof node.decision_id === 'string' && typeof node.reason_plain === 'string' && Array.isArray(node.answers) && node.state === 'held',
@@ -696,10 +709,13 @@ describe('fixtures', () => {
         expect(answers.includes('deny_always'), `${where} deny_always`).toBe(askHeld);
 
         // Allow only for this person exactly when there is a person or an agent key to scope it to,
-        // and a money action stays under the hard cap.
+        // and a money action stays within the rules' money cap.
         const session = sessions.get(decision.session_id);
         const action = decision.action;
-        const underCap = !action || !moneyTools.includes(action.tool) || (action.amount_cents ?? Number.POSITIVE_INFINITY) <= hardCapCents;
+        const underCap =
+          !action ||
+          !moneyTools.includes(action.tool) ||
+          (moneyCapCents !== null && (action.amount_cents ?? Number.POSITIVE_INFINITY) <= moneyCapCents);
         const scoped = session?.verified === true || session?.kind === 'agent';
         expect(answers.includes('allow_person'), `${where} allow_person`).toBe(scoped && underCap);
 
