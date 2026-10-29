@@ -1028,7 +1028,8 @@ class FakeKernelState:
             policy_ids=[f"{tier}.{card_id}" for card_id in card_ids], card_ids=card_ids,
             reason_plain=self._reason(session, desk, call, action, card_ids),
             visitor_plain=STATUS_TEXT[state].format(owner=desk.owner_display_name), answers=answers,
-            expires_at=expires_at, inbox=inbox, ledger_seq=entry.seq, signature=""))
+            expires_at=expires_at, ledger_seq=entry.seq, signature=""))
+        # the alerts travel once, on this answer: the record every read answers from carries none
         record = DecisionRecord(decision=decision, copy_id=desk.copy_id, desk_id=desk.desk_id,
                                 generation=session.generation, call_sha256=digest, tool=tool, created_at=self.now)
         self.decisions[decision_id] = record
@@ -1041,7 +1042,7 @@ class FakeKernelState:
                                              "effects", "list_cents", "discount_bp", "amount_cents", "recipient",
                                              "starts_at"}),
                 "resource_kind": action.resource.kind, "created_at": self.now})
-        return decision
+        return decision.model_copy(update={"inbox": inbox})
 
     def _alert_owner(self, desk: Desk, preview: str) -> InboxNotice:
         """An owner alert in the copy's Demo inbox ("approval" alerts at once by the seed's defaults), and its

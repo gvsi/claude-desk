@@ -313,18 +313,26 @@ async def test_limit_hold_offers_no_deny_always(kernel, ro_read, arrange):
 @pytest.mark.kernel_plan("01a")
 async def test_owner_reads_its_copys_decisions(kernel, ro_read):
     """The API reads a held request with the owner's credential when an answer's own response was lost or refused:
-    any decision of the owner's copy, with expiry applied as on every read, and no other copy's."""
+    any decision of the owner's copy, with expiry applied as on every read, and no other copy's. Owner alerts
+    travel once, on the `/decide` answer that created them: a session reads its own decisions through the same
+    reads, so every read, the owner's included, carries `inbox == []`."""
     http, ro_schema, _ = kernel
     copy, other = await new_copy(http), await new_copy(http)
     visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
     view, session_id = http.session(visitor.session_token), visitor.state.session_id
-    held = await decide(view, session_id, 0, "call-1", "native.quote",
-                        quote_args(item_id(ro_read, ro_schema, copy, "Drain clearing"), 1500))
+    call = ("call-1", "native.quote", quote_args(item_id(ro_read, ro_schema, copy, "Drain clearing"), 1500))
+    held = await decide(view, session_id, 0, *call)
+    assert held.state == "held" and held.inbox                    # the answer that created the alert carries it
     owner = http.owner(copy.owner_token)
 
     read = await read_decision(owner, held.decision_id)
-    assert read == held                                           # the signed record, as the session reads it
+    assert read == held.model_copy(update={"inbox": []})          # the signed record, as the session reads it
+    by_call = {"session_id": session_id, "generation": 0, "call_id": "call-1"}
+    for again in (await read_decision(view, held.decision_id), await decide(view, session_id, 0, *call),
+                  await view.call("GET /decisions/by_call?session_id=&generation=&call_id=", query=by_call)):
+        assert again == read                                      # a repeated /decide is a read too
     approved = await answer(owner, held.decision_id, "allow_once")
+    assert approved.decision.inbox == []
     assert await read_decision(owner, held.decision_id) == approved.decision == await read_decision(
         view, held.decision_id)
     assert await refused(read_decision(http.owner(other.owner_token), held.decision_id)) == (404, "not_found")
