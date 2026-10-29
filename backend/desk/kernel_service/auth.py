@@ -18,6 +18,7 @@ import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from functools import partial
+from typing import Literal
 
 from fastapi import Request
 from sqlalchemy import select
@@ -96,6 +97,15 @@ async def _ledger_refusal(ctx: KernelCtx, *, named: Named, route: str, reason: s
     await ledger.append(ctx, copy_id=named.copy_id, desk_id=desk_id,
                         event=LedgerEvent(kind="auth", origin="kernel", session_id=named.session_id,
                                           summary={"route": route, "reason": reason}))
+
+
+def caller(request: Request) -> Literal["owner", "session"]:
+    """Which credential a call that takes either carries: the owner's or a session's, never both
+    (else 401)."""
+    owner, session = OWNER_HEADER in request.headers, SESSION_HEADER in request.headers
+    if owner != session:
+        return "owner" if owner else "session"
+    raise AuthError(401, "auth", "bad_token", route=route_template(request))
 
 
 async def require_session(ctx: KernelCtx, request: Request, session_id: str, *, generation: int | None = None,

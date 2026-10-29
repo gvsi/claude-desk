@@ -34,7 +34,7 @@ import re
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Any, Literal, get_args
+from typing import Any, get_args
 from zoneinfo import ZoneInfo
 
 import desk_kernel
@@ -148,6 +148,29 @@ def with_review(request: dict[str, Any], review: Review) -> dict[str, Any]:
 OWNER_TOOLS: frozenset[str] = frozenset({"native.fetch_website", "native.read_memory"})
 ANSWERING_OFF_TOOLS: frozenset[str] = frozenset({"native.capture_lead", "native.request_callback"})
 TOOL_NAMES: frozenset[str] = frozenset(get_args(ToolName))
+
+# The "Given to" column by session kind alone: every tool a session of that kind could be given
+# in some standing (verified or not, with a mandate or not, Answering on or off).
+_VISITOR_OR_AGENT = frozenset({
+    "native.quote", "native.find_slots", "native.book", "native.release_document", "native.payment_link",
+    "native.capture_lead", "native.request_callback", "native.start_verification", "payments.list_charges"})
+DECLARED_TOOLS: dict[str, frozenset[str]] = {
+    "visitor": _VISITOR_OR_AGENT | {"payments.create_refund"},
+    "agent": _VISITOR_OR_AGENT | {"native.charge_mandate"},
+    "owner": OWNER_TOOLS,
+}
+
+
+def declared_tools(kind: str) -> frozenset[str]:
+    """Every tool a session of `kind` could ever be given; `tools_given` is always a subset."""
+    return DECLARED_TOOLS.get(kind, frozenset())
+
+
+async def enabled_tools(ctx: KernelCtx, desk_id: str) -> dict[str, Tool]:
+    """The Desk's enabled `tools` rows that carry a pinned profile, by tool name: the only tools
+    `tools_given` may give."""
+    rows = await ctx.db.scalars(ctx.repo.scoped(select(Tool).where(Tool.desk_id == desk_id, Tool.status == "enabled")))
+    return {row.tool: row for row in rows if row.profile is not None and row.profile_sha256}
 
 
 def tools_given(principal: Principal, session_row: SessionRow, desk_row: Desk, enabled: Iterable[str]) -> set[str]:
@@ -531,9 +554,7 @@ async def decide_call(ctx: KernelCtx, principal: Principal, session_row: Session
     call.adapter = adapters.ADAPTERS.get(tool) if tool in TOOL_NAMES else None
     if call.adapter is None:
         return await _refuse(ctx, call, "unknown_tool")
-    enabled = await ctx.db.scalars(ctx.repo.scoped(select(Tool).where(
-        Tool.desk_id == principal.desk_id, Tool.status == "enabled")))
-    tools = {row.tool: row for row in enabled if row.profile is not None and row.profile_sha256}
+    tools = await enabled_tools(ctx, principal.desk_id)
     if tool not in tools_given(principal, session_row, desk_row, tools):
         return await _refuse(ctx, call, "not_given")
     if not _storable_json(req.call.args):           # text that can't be stored can't be decided on either
@@ -709,20 +730,12 @@ async def _strike(ctx: KernelCtx, row: DecisionRow, session_row: SessionRow) -> 
 router = APIRouter()
 
 
-def _caller(request: Request) -> Literal["owner", "session"]:
-    """Which credential a call carries: the owner's or a session's, never both (else 401)."""
-    owner, session = auth.OWNER_HEADER in request.headers, auth.SESSION_HEADER in request.headers
-    if owner != session:
-        return "owner" if owner else "session"
-    raise AuthError(401, "auth", "bad_token", route=route_template(request))
-
-
 async def _decide_caller(ctx: KernelCtx, request: Request, body: DecideRequest) -> tuple[Principal, SessionRow]:
     """The session `/decide` acts for, once the session-state rows pass: its token (or the owner's,
     for the owner's own session and a Desk of its copy), copy and Desk, open, at its generation, and
     not taken over by the owner. A paused session passes: its decisions are stored refusals."""
     route = route_template(request)
-    if _caller(request) == "owner":
+    if auth.caller(request) == "owner":
         if body.desk_id is None:
             raise KernelFailure(422, "invalid", "owner_names_no_desk")
         owner = await auth.require_owner(ctx, request, desk_id=body.desk_id, session_id=body.session_id)
@@ -756,7 +769,7 @@ async def post_decide(body: DecideRequest, ctx: Ctx, request: Request) -> Decisi
 async def get_by_call(session_id: str, generation: int, call_id: str, ctx: Ctx, request: Request) -> Decision:
     """The decision `/decide` committed for a call, after the API lost its answer, settled as any
     read is; 404 when none was. A session reads its own calls, the owner its own session's."""
-    if _caller(request) == "owner":
+    if auth.caller(request) == "owner":
         owner = await auth.require_owner(ctx, request, session_id=session_id)
         if session_id != owner.session_id:
             raise AuthError(404, "not_found", "wrong_session", route=route_template(request),
@@ -776,7 +789,7 @@ async def get_decision(decision_id: str, ctx: Ctx, request: Request) -> Decision
     orphaned execution reconciled, lazy expiry applied). Any other session gets 404, ledgered on
     its Desk; another copy's decisions are invisible."""
     session = None
-    if _caller(request) == "owner":
+    if auth.caller(request) == "owner":
         await auth.require_owner(ctx, request)
     else:
         session = await auth.require_session_token(ctx, request)
