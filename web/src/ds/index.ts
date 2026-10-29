@@ -88,7 +88,7 @@ export { INTRO_ERROR_COPY } from './components/IntroDialog/introCopy.ts';
 // Reply cards
 export { ReplyCard, type ReplyCardProps } from './components/ReplyCard/ReplyCard.tsx';
 export { cardView, type CardView } from './components/ReplyCard/cardView.ts';
-export { CARD_CHROME, type CardChrome } from './components/ReplyCard/chrome.ts';
+export { CARD_CHROME, MONEY_TEMPLATES, type CardChrome } from './components/ReplyCard/chrome.ts';
 
 // Conversation
 export { Transcript, type TranscriptProps } from './components/Transcript/Transcript.tsx';

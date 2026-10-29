@@ -63,7 +63,7 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 ## Typed cards
 
 - Show prices, dates, times, discounts, bookings and policies only in typed reply cards rendered from checked facts, never in Claude's free prose. A card shows exactly the fields it receives; nothing in the design system computes or formats money or dates.
-- Give each card template fixed English and Spanish chrome with no amounts, dates or promises. Payment cards and the checkout always say "Test payment, no money moves" / "Pago de prueba, no se mueve dinero".
+- Give each card template fixed English and Spanish chrome with no amounts, dates or promises. Every card about money moving (a payment link, a paid link, a charge or a refund) and the checkout always say "Test payment, no money moves" / "Pago de prueba, no se mueve dinero".
 - Draw a card as `fill-card` with a `line-card` border at `radius-card`, at most 520 px wide, and never put a card inside another card.
 
 ## Iconography

@@ -38,9 +38,9 @@ The kernel fills these fields for each template (the master plan's "Clauses" row
 
 ## Chrome
 
-`CARD_CHROME` holds each template's fixed words in English and Spanish: the label on the top line, the button on a link card and the note on a payment card. A missing template or language is a compile error. There are no amounts, dates or promises in the chrome.
+`CARD_CHROME` holds each template's fixed words in English and Spanish: the label on the top line, the button on a link card and the note on a card about money moving. A missing template or language is a compile error. There are no amounts, dates or promises in the chrome.
 
-- `payment_link` and `payment_confirmed` always say "Test payment, no money moves" / "Pago de prueba, no se mueve dinero".
+- Every card about money moving always says "Test payment, no money moves" / "Pago de prueba, no se mueve dinero". `MONEY_TEMPLATES` lists them: `payment_link`, `payment_confirmed`, `charge_confirmed` and `refund_issued`. `chrome.test.ts` fails if one of them lacks the note in either language, or if a template outside the list carries it, so a new money card goes in the list.
 - `payment_link` ends with a secondary "Open payment page" button. `document_link` ends with a primary "Download" button. Both go to the proxied path, and the path is never shown as text.
 - `contact` lines stay text. They never become `tel:` or `mailto:` links.
 - `owner_said`, `policy` and `contact` carry the owner's own words verbatim, so their fields are marked `data-copy="user"`.
@@ -59,4 +59,4 @@ Card data carries no separate amount or date. The kernel renders money and times
 | `language` | `'en' \| 'es'` | Required. The chrome's language. |
 | `ownerName` | `string` | Required. The owner's display name. |
 
-The card is a `Card` at most 520 px wide with 16 px padding, an `article` named by its label. Label in secondary `caption`, headline in `section`, details in secondary `meta`, options in `body`, note in secondary `caption`. Also exported: `cardView`, `CARD_CHROME` and the `CardView` and `CardChrome` types.
+The card is a `Card` at most 520 px wide with 16 px padding, an `article` named by its label. Label in secondary `caption`, headline in `section`, details in secondary `meta`, options in `body`, note in secondary `caption`. Also exported: `cardView`, `CARD_CHROME`, `MONEY_TEMPLATES` and the `CardView` and `CardChrome` types.
