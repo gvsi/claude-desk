@@ -41,15 +41,17 @@ web-e2e:
 
 # The app image, linux/arm64: the kernel image (kernel/Dockerfile), then the backend layered on it
 # (infra/app.Dockerfile). Needs a buildx builder on the `docker` driver (Docker's default), which
-# sees the local desk-kernel:dev.
+# sees the local desk-kernel:$(KERNEL_TAG). KERNEL_TAG tags both images; deploy.sh passes the commit,
+# so a build in another checkout, which shares the Docker daemon, can't take its place.
+KERNEL_TAG ?= dev
+APP_IMAGE ?= desk-app:$(KERNEL_TAG)
 image:
-	docker buildx build --load --platform linux/arm64 -f kernel/Dockerfile -t desk-kernel:dev .
+	docker buildx build --load --platform linux/arm64 -f kernel/Dockerfile -t desk-kernel:$(KERNEL_TAG) .
 	docker buildx build --load --platform linux/arm64 -f infra/app.Dockerfile \
-		--build-arg KERNEL_IMAGE=desk-kernel:dev -t desk-app:dev .
+		--build-arg KERNEL_IMAGE=desk-kernel:$(KERNEL_TAG) -t $(APP_IMAGE) .
 
 # What the app image must hold, and must not. Checks whose code hasn't landed yet (the API, the
 # kernel service's compiler, the proof reports) say they are skipped; once it exists they run.
-APP_IMAGE ?= desk-app:dev
 SHA256 := $(shell command -v sha256sum >/dev/null 2>&1 && echo sha256sum || echo "shasum -a 256")
 image-check:
 	@set -eu; \

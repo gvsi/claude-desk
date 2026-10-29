@@ -99,8 +99,11 @@ def deploy(tmp_path):
                     steps.append(f"cdk {argv[2]} {argv[3]}")
                 elif call["tool"] == "aws":
                     steps.append("aws " + " ".join(argv[:2]))
+                elif call["tool"] == "make":                        # its targets: no -C <dir>, no VAR=value
+                    targets = [a for i, a in enumerate(argv) if a != "-C" and argv[i - 1:i] != ["-C"] and "=" not in a]
+                    steps.append("make " + " ".join(targets))
                 else:
-                    steps.append(f"{call['tool']} {argv[-1] if call['tool'] == 'make' else argv[0]}")
+                    steps.append(f"{call['tool']} {argv[0]}")
             return steps
 
         def cdk(self, stack: str) -> list[dict]:
@@ -205,6 +208,48 @@ def test_cdk_deploys_ask_for_approval_on_the_terminal(deploy):
         assert context["compute"] == "express"
         assert context["git_sha"] == _head()
         assert context["web_dist"] == str(REPO / "web" / "dist")
+
+
+def test_the_image_is_built_from_this_checkout_at_head(deploy):
+    """The kernel image the app image is built on is tagged with HEAD, and cdk is given every image
+    input, so neither another worktree's desk-kernel:dev nor an exported DESK_IMAGE_* setting can
+    reach the image that ships while DeployedSha reports HEAD."""
+    run = deploy()
+    assert run.status == 0, run.output
+    [make] = [call for call in run.calls if call["tool"] == "make"]
+    assert make["argv"][:2] == ["-C", str(REPO)]
+    assert f"KERNEL_TAG={_head()}" in make["argv"]
+    cdk_calls = [call for call in run.calls if call["tool"] == "npx"]
+    assert len(cdk_calls) == 3
+    for call in cdk_calls:
+        context = _context(call)
+        assert context["kernel_image"] == f"desk-kernel:{_head()}"
+        assert context["image_dir"] == str(REPO)
+        assert context["image_file"] == "infra/app.Dockerfile"
+
+
+@pytest.mark.parametrize("name", ["DESK_IMAGE_DIR", "DESK_IMAGE_FILE", "DESK_KERNEL_IMAGE"])
+def test_an_exported_image_setting_stops_the_deploy(deploy, name):
+    """cdk would read DESK_<KEY> for a setting the deploy doesn't pass; deploy.sh passes these, and
+    refuses to start while one is exported rather than leave it to a reader to wonder which won."""
+    run = deploy(**{name: "/elsewhere"})
+    assert run.status == 2
+    assert f"unset {name}" in run.output
+    assert run.calls == []
+
+
+def test_make_image_tags_both_images_with_kernel_tag():
+    """`make image` builds desk-kernel:<KERNEL_TAG> and the app image on it (dev unless given)."""
+    def dry_run(*args: str) -> str:
+        return subprocess.run(["make", "-n", "-C", str(REPO), "image", *args], capture_output=True, text=True,
+                              check=True).stdout
+
+    tagged = dry_run("KERNEL_TAG=0a1b2c3")
+    assert "-f kernel/Dockerfile -t desk-kernel:0a1b2c3 ." in tagged
+    assert "--build-arg KERNEL_IMAGE=desk-kernel:0a1b2c3 -t desk-app:0a1b2c3 ." in tagged
+    assert "desk-kernel:dev" not in tagged and "desk-app:dev" not in tagged
+    plain = dry_run()
+    assert "-t desk-kernel:dev ." in plain and "--build-arg KERNEL_IMAGE=desk-kernel:dev -t desk-app:dev ." in plain
 
 
 def test_everything_is_logged(deploy):

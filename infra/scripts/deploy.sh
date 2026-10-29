@@ -5,7 +5,8 @@
 #   1. the owner retypes the AWS account ID it prints;
 #   2. preflight.py: a clean tree, HEAD on origin/main, HEAD's passing tier 2 results file, both
 #      owner secrets set, the web app built and checked at HEAD;
-#   3. make image (desk-kernel:dev, which the app image is built on, and desk-app:dev);
+#   3. make image, tagged with the commit (desk-kernel:<sha>, which the app image is built on, and
+#      desk-app:<sha>); cdk deploy is given that kernel image and this checkout, never DESK_IMAGE_*;
 #   4. cdk deploy DeskData (network, database, secrets, the admin task definition);
 #   5. run_admin_task.py: migrations and role passwords, before any new app task starts;
 #   6. cdk deploy DeskApp with the commit and the Desk's public URL; on a first deploy without a
@@ -54,6 +55,12 @@ if [[ ! -t 0 || ! -t 1 ]]; then
   echo "deploy: run this in your own terminal: cdk deploy asks for approval there, and you retype the account ID" >&2
   exit 2
 fi
+for name in DESK_IMAGE_DIR DESK_IMAGE_FILE DESK_KERNEL_IMAGE; do
+  if [[ -n ${!name:-} ]]; then
+    echo "deploy: unset $name: the deploy builds the image from this checkout at HEAD" >&2
+    exit 2
+  fi
+done
 if [[ -z ${DESK_PASSCODE:-} ]]; then
   echo "deploy: export DESK_PASSCODE first (read -rs DESK_PASSCODE; export DESK_PASSCODE); the smoke checks sign in with it" >&2
   exit 2
@@ -98,7 +105,8 @@ cdk_deploy() {  # cdk_deploy <stack> [cdk options...]: the pinned CLI, its outpu
   local stack=$1
   shift
   (cd "$INFRA" && npx --no-install cdk deploy "$stack" --exclusively --require-approval broadening \
-    --progress events -c "compute=$compute" -c "git_sha=$sha" -c "web_dist=$ROOT/web/dist" "$@") >&3
+    --progress events -c "compute=$compute" -c "git_sha=$sha" -c "web_dist=$ROOT/web/dist" \
+    -c "kernel_image=desk-kernel:$sha" -c "image_dir=$ROOT" -c "image_file=infra/app.Dockerfile" "$@") >&3
 }
 
 sha=$(git -C "$ROOT" rev-parse HEAD)
@@ -135,7 +143,7 @@ else
 fi
 
 step "Image"
-make -C "$ROOT" image || fail "make image failed"
+make -C "$ROOT" image KERNEL_TAG="$sha" || fail "make image failed"
 
 step "Deploy DeskData"
 (cd "$INFRA" && npm ci --no-audit --no-fund) || fail "npm ci failed in infra/"

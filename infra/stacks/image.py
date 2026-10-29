@@ -1,5 +1,6 @@
 """The one app image both task containers and the admin task run: infra/app.Dockerfile layered on
-the kernel image (`make image` builds `desk-kernel:dev` first), linux/arm64."""
+the kernel image (`make image` builds `desk-kernel:<KERNEL_TAG>` first; deploy.sh tags it with the
+commit and passes it as `kernel_image`), linux/arm64."""
 
 from aws_cdk import aws_ecr_assets as ecr_assets
 from aws_cdk import aws_ecs as ecs
