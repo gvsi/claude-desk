@@ -76,7 +76,7 @@ export const BusySecondary: Story = {
   args: { busy: true, children: 'Keep it' },
   parameters: {
     canvasNote:
-      "The board shows no button mid-request; this is a dialog's cancel button while the confirmation sends, on the dialog's raised surface.",
+      "The board shows no button mid-request; this is a secondary button on a dialog's raised surface while its own request is in flight.",
   },
   decorators: [
     (Story) => (

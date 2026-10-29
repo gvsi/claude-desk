@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { useState } from 'react';
-import { expect, fn, within } from 'storybook/test';
+import { expect, fn, waitFor, within } from 'storybook/test';
 
 import { expectComputed } from '../../test/expectComputed.ts';
 import { Button } from '../Button/Button.tsx';
@@ -115,18 +115,25 @@ export const Danger: Story = {
     await expect(canvas.queryByRole('dialog')).toBeNull();
     await expect(opener).toHaveFocus();
 
-    // Pending: both buttons wait with aria-busy, focus stays put, and Escape does nothing.
+    // Pending: neither button can be pressed, focus stays put, and Escape does nothing.
     await userEvent.keyboard('{Enter}');
     const waiting = canvas.getByRole('dialog', { name: TITLE });
     await userEvent.click(within(waiting).getByRole('button', { name: 'Delete Desk' }));
     await expect(args.onConfirm).toHaveBeenCalledTimes(1);
     await expect(waiting).toHaveAttribute('aria-busy', 'true');
-    for (const button of within(waiting).getAllByRole('button')) {
-      await expect(button).toHaveAttribute('aria-busy', 'true');
-      await expect(button).toHaveAttribute('aria-disabled', 'true');
-    }
-    await expect(within(waiting).getByRole('button', { name: 'Delete Desk' })).toHaveFocus();
-    await userEvent.click(within(waiting).getByRole('button', { name: 'Delete Desk' }));
+    const confirm = within(waiting).getByRole('button', { name: 'Delete Desk' });
+    const cancel = within(waiting).getByRole('button', { name: 'Keep it' });
+    for (const button of [confirm, cancel]) await expect(button).toHaveAttribute('aria-disabled', 'true');
+    // spinner_on_the_pressed_button: Delete Desk, the one pressed, shows the busy spinner; Keep it
+    // steps to its busy colors with no spinner, as the answer a held request's owner didn't choose.
+    await expect(confirm).toHaveAttribute('aria-busy', 'true');
+    await expect(confirm.querySelectorAll('.cd-button__spinner')).toHaveLength(1);
+    await expect(cancel).not.toHaveAttribute('aria-busy');
+    await expect(cancel.querySelector('.cd-button__spinner')).toBeNull();
+    await waitFor(() => expectComputed(cancel, { color: 'rgba(250, 249, 245, 0.64)', backgroundColor: 'rgba(250, 249, 245, 0.1)', opacity: '1' }));
+    await expect(confirm).toHaveFocus();
+    await userEvent.click(confirm);
+    await userEvent.click(cancel);
     await userEvent.keyboard('{Escape}');
     await expect(args.onConfirm).toHaveBeenCalledTimes(1);
     await expect(args.onCancel).toHaveBeenCalledTimes(2);
