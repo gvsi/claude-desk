@@ -11,7 +11,7 @@
 Tests read their arguments (prices, slots, Desks) from `ro_schema` as `desk_api`, with the copy set the
 way the API sets it, so the fake's mirror is checked by the same reads. `arrange` puts a session in a
 state the HTTP API can't reach on demand (closed, paused): through the fake's knobs, or for the real
-kernel as `desk_admin` on its tables, which only tests may do.
+kernel as `desk_admin` on its tables, which only tests may do, or through the owner's own kernel calls.
 """
 
 import os
@@ -25,7 +25,8 @@ from psycopg.rows import dict_row
 
 from desk.api.kernel_client import CredentialView, KernelHttp
 from desk.db.session import database_url, libpq_url
-from desk.kernel_api import ModeRequest
+from desk.contracts import CopyCreated, RuleCard
+from desk.kernel_api import ModeRequest, PolicyConfirmRequest, PolicyDraftRequest
 from tests.kernel_contract.fake_kernel import IDLE_LIMIT, FakeKernelState, fake_kernel_app
 from tests.kernel_contract.ro_tables import FAKE_RO_SCHEMA, FakeRO, create_fake_ro
 
@@ -119,6 +120,26 @@ class Arrange:
         else:
             self._admin.execute("UPDATE kernel.sessions SET mode = 'paused', strikes = 3 WHERE session_id = %s",
                                 (session_id,))
+
+    async def never(self, owner: CredentialView, ro_read: Callable[..., list[dict]], ro_schema: str, copy: CopyCreated,
+                    tool: str) -> None:
+        """The owner's rules change: a `never` card for `tool` is confirmed on the copy's first Desk. The real kernel
+        gets it the way the owner does, drafted on the active version's cards, proved and confirmed; it skips when
+        the kernel can't prove drafts (bounded mode activates no owner draft)."""
+        desk_id = copy.desk_ids[0]
+        if self._state is not None:
+            self._state.never(desk_id, tool)
+            return
+        (active,) = ro_read(ro_schema, copy.copy_id, "SELECT version, cards FROM {ro}.policy_versions"
+                                                     " WHERE desk_id = %s AND status = 'active'", (desk_id,))
+        cards = [RuleCard.model_validate(card) for card in active["cards"]]
+        cards = [card for card in cards if not card.is_default] + [RuleCard(
+            card_id=f"never-{tool}", applies_to=tool, mode="never", who="anyone", reason="You said never for this.")]
+        draft = await owner.call("POST /policy/draft", PolicyDraftRequest(desk_id=desk_id, cards=cards,
+                                                                          expected_parent=active["version"]))
+        if draft.status != "proved":
+            pytest.skip(f"the kernel didn't prove the draft ({draft.status})")
+        await owner.call("POST /policy/confirm", PolicyConfirmRequest(desk_id=desk_id, version=draft.version))
 
     def close_idle_sessions(self, session_id: str) -> None:
         """Closes the session: the fake's clock moves past the 24-hour idle limit (closing every idle visitor

@@ -16,8 +16,7 @@ contract test, before the task that first uses them.
   (with `called(route)`); `now` drives expiry and the 24-hour idle close. A `"timeout"` or `"connect"`
   failure is raised as httpx's own exception, which reaches the client through `httpx.ASGITransport`.
 - Not modelled: Cedar, the reviewer, the breaker's strikes (`set_mode` pauses), `auth` ledger entries
-  for refused calls, owner reads of decisions (Task 9), agents, verification routes and payments (Plans
-  01b, 01c and 02b add them).
+  for refused calls, agents, verification routes and payments (Plans 01b, 01c and 02b add them).
 """
 
 import hashlib
@@ -567,6 +566,22 @@ class FakeKernelState:
             raise ValueError("unknown outcome or execution state")
         self._scripts[tool] = Script(outcome, exec_state, model_view, facts)
 
+    def never(self, desk_id: str, tool: str) -> None:
+        """The owner confirms a `never` card for `tool` for anyone (a new active policy version, ledgered `policy`):
+        new calls of it are refused, and approving one of its held requests fails the re-check inside the answer
+        call (`refused_at_execution`, "rules changed"), as `/policy/draft` and `/policy/confirm` would leave it."""
+        desk = self.desks[desk_id]
+        parent = desk.policy_version
+        self._put_policy(desk, status="superseded")
+        desk.cards = [*desk.cards, _card(f"never-{tool}", tool, "never", "anyone", "You said never for this.")]
+        desk.policy_version += 1
+        self._put_policy(desk, parent_version=parent)
+        self.append(desk, "policy", {"version": desk.policy_version, "activated": True})
+        self.flush()
+
+    def _never(self, desk: Desk, tool: str) -> bool:
+        return any(card.mode == "never" and card.applies_to == tool for card in desk.cards)
+
     def violation(self, kind: str, *, times: int = 1) -> None:
         """The next `times` reply checks carry a `kind` violation (any `Violation.kind`, `canary` included)."""
         Violation(kind=kind, span="", rule_id="fake")           # refuses an unknown kind
@@ -622,11 +637,11 @@ class FakeKernelState:
             "slug": desk.slug, "hours": [window.model_dump(mode="json") for window in desk.hours],
             "answering": desk.answering, "created_at": desk.created_at})
 
-    def _put_policy(self, desk: Desk) -> None:
+    def _put_policy(self, desk: Desk, *, status: str = "active", parent_version: int | None = None) -> None:
         cards = [card.model_dump(mode="json") for card in desk.cards]
         self._put("policy_versions", (desk.desk_id, desk.policy_version), {
-            "copy_id": desk.copy_id, "desk_id": desk.desk_id, "version": desk.policy_version, "parent_version": None,
-            "cards": cards, "status": "active",
+            "copy_id": desk.copy_id, "desk_id": desk.desk_id, "version": desk.policy_version,
+            "parent_version": parent_version, "cards": cards, "status": status,
             "proof": {"ok": True, "method": "symcc", "cases": None, "timed_out": False, "checks": []},
             "cedar_sha256": sha256_hex(canonical(cards)), "schema_sha256": sha256_hex("schema"),
             "baseline_sha256": sha256_hex("baseline"),
@@ -947,6 +962,8 @@ class FakeKernelState:
     def _rule(self, session: Session, desk: Desk, action: NormalizedAction) -> tuple[str, list[str]]:
         """The Rivera cards' outcome for a normalized call (the kernel evaluates Cedar)."""
         tool = action.tool
+        if self._never(desk, tool):
+            return "refuse", [f"never-{tool}"]
         if tool == "native.quote":
             return ("hold" if action.discount_bp else "allow"), ["rv-quote"]
         if tool == "native.book":
@@ -1068,7 +1085,15 @@ class FakeKernelState:
         return session, record
 
     def read_decision(self, request: Request, body: Any) -> Decision:
-        _, record = self._own_decision(request, None, request.path_params["id"])
+        """The decision for its own session, or for the owner of its copy (404 for any other copy's)."""
+        decision_id = request.path_params["id"]
+        if request.headers.get("x-owner-session") is not None:
+            copy, _ = self.owner_of(request)
+            record = self.decisions.get(decision_id)
+            if record is None or record.copy_id != copy.copy_id:
+                raise Refusal(404, "not_found")
+            return self._refresh(record)
+        _, record = self._own_decision(request, None, decision_id)
         return self._refresh(record)
 
     def execute(self, request: Request, body: ExecuteRequest) -> ExecResult:
@@ -1231,7 +1256,11 @@ class FakeKernelState:
             "answer": body.answer, "expires_at": decision.expires_at, "consumed_at": self.now})
         session, action = self.sessions[decision.session_id], decision.action
         execution, card_diff = None, None
-        if body.answer in ("allow_once", "allow_person"):
+        if body.answer in ("allow_once", "allow_person") and self._never(desk, action.tool):
+            # the re-check at execution (step 6): the rules in force no longer let the owner approve it
+            self._transition(record, "refused_at_execution", kind="approval", answer=body.answer,
+                             approval_id=approval_id, reason="rules changed")
+        elif body.answer in ("allow_once", "allow_person"):
             self._transition(record, "approved", kind="approval", answer=body.answer, approval_id=approval_id)
             execution = self._run(record, session)
             if body.answer == "allow_person":

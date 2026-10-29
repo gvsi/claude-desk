@@ -282,6 +282,50 @@ async def test_discounted_quote_holds_and_answers_once(kernel, ro_read):
 
 
 @pytest.mark.kernel_plan("01a")
+async def test_owner_reads_its_copys_decisions(kernel, ro_read):
+    """The API reads a held request with the owner's credential when an answer's own response was lost or refused:
+    any decision of the owner's copy, with expiry applied as on every read, and no other copy's."""
+    http, ro_schema, _ = kernel
+    copy, other = await new_copy(http), await new_copy(http)
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    view, session_id = http.session(visitor.session_token), visitor.state.session_id
+    held = await decide(view, session_id, 0, "call-1", "native.quote",
+                        quote_args(item_id(ro_read, ro_schema, copy, "Drain clearing"), 1500))
+    owner = http.owner(copy.owner_token)
+
+    read = await read_decision(owner, held.decision_id)
+    assert read == held                                           # the signed record, as the session reads it
+    approved = await answer(owner, held.decision_id, "allow_once")
+    assert await read_decision(owner, held.decision_id) == approved.decision == await read_decision(
+        view, held.decision_id)
+    assert await refused(read_decision(http.owner(other.owner_token), held.decision_id)) == (404, "not_found")
+    assert await refused(read_decision(owner, "dec-never-made")) == (404, "not_found")
+
+
+@pytest.mark.kernel_plan("01a")
+async def test_approving_after_the_rules_changed_runs_nothing(kernel, ro_read, arrange):
+    """An approved hold is re-checked against the rules in force when the owner answers (step 6): once a `never`
+    card covers the tool, approving it ends `refused_at_execution`, "rules changed", and nothing runs."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    view, session_id = http.session(visitor.session_token), visitor.state.session_id
+    held = await decide(view, session_id, 0, "call-1", "native.quote",
+                        quote_args(item_id(ro_read, ro_schema, copy, "Drain clearing"), 1500))
+    owner = http.owner(copy.owner_token)
+    await arrange.never(owner, ro_read, ro_schema, copy, "native.quote")
+
+    result = await answer(owner, held.decision_id, "allow_once")
+    assert (result.decision.decision_id, result.decision.state) == (held.decision_id, "refused_at_execution")
+    assert result.execution is None and result.card_diff is None
+    assert result.decision.ledger_seq > held.ledger_seq and result.decision.answers == []
+    assert await read_decision(view, held.decision_id) == result.decision
+    assert ro_read(ro_schema, copy.copy_id, "SELECT count(*) AS n FROM {ro}.quotes WHERE session_id = %s",
+                   (session_id,)) == [{"n": 0}]
+    assert await refused(answer(owner, held.decision_id, "allow_once")) == (409, "conflict")
+
+
+@pytest.mark.kernel_plan("01a")
 async def test_cancel_held_decision(kernel, ro_read):
     http, ro_schema, _ = kernel
     copy = await new_copy(http)
