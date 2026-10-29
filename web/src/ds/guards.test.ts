@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
+import { pairContrast } from './contrast.ts';
 import { ARROW_CHARACTERS } from './test/copy.ts';
 
 const DS = path.dirname(fileURLToPath(import.meta.url));
@@ -197,6 +198,27 @@ function everyTextFile(): Source[] {
     .map((file) => ({ file, text: readFileSync(path.join(DS, file), 'utf8') }));
 }
 
+// A stylesheet that paints the selected row's ground, and a component that renders a Button.
+const PAINTS_SELECTED = /\bbackground(?:-color)?\s*:[^;{}]*var\(\s*--bg-selected\s*\)/;
+const RENDERS_BUTTON = /<Button\b/;
+
+/** A source's component folder, "components/<Comp>/", or null outside the components. */
+function componentFolder(file: string): string | null {
+  return /^components\/[^/]+\//.exec(file)?.[0] ?? null;
+}
+
+/** The component folders whose styles paint `bg-selected`. */
+function paintsTheSelectedGround(sources: Source[]): string[] {
+  const folders = sources.filter(({ file, text }) => file.endsWith('.css') && PAINTS_SELECTED.test(text)).map(({ file }) => componentFolder(file));
+  return [...new Set(folders.filter((folder) => folder !== null))].sort();
+}
+
+/** The component folders that paint `bg-selected` and render a Button. */
+function buttonsOnTheSelectedGround(sources: Source[]): string[] {
+  const renders = new Set(sources.filter(({ file, text }) => file.endsWith('.tsx') && RENDERS_BUTTON.test(text)).map(({ file }) => componentFolder(file)));
+  return paintsTheSelectedGround(sources).filter((folder) => renders.has(folder));
+}
+
 /** Component folders under `components/`, each named for its main export. */
 function componentNames(): string[] {
   const dir = path.join(DS, 'components');
@@ -286,6 +308,42 @@ describe('design system source guards', () => {
     expect(findAll(code.filter(({ file }) => mayUseDangerVariants(file)), dangerVariants).length).toBeGreaterThan(0);
     expect(findAll(code.filter(({ file }) => !mayUseDangerTokens(file)), matches(DANGER_TOKEN))).toEqual([]);
     expect(findAll(code.filter(({ file }) => !mayUseDangerVariants(file)), dangerVariants)).toEqual([]);
+  });
+
+  it('no_button_on_the_selected_ground', () => {
+    // Why: a busy button's label is a listed contrast pair only on the grounds a Button sits on. On
+    // bg-selected a busy secondary label would read 4.45 and a busy danger one 3.98, under 4.5,
+    // and no busy pair is listed there. To put a Button on it, list those pairs in contrast.ts
+    // first, with colors that clear 4.5, and lift this guard.
+    expect(pairContrast({ fg: 'text-secondary', ground: 'fill-secondary', over: 'bg-selected' })).toBeCloseTo(4.45, 2);
+    expect(pairContrast({ fg: 'button-danger-text', ground: 'button-danger-fill-hover', over: 'bg-selected' })).toBeCloseTo(3.98, 2);
+    const ground = (file: string, text: string): Source => ({ file, text });
+    // A component that paints the selected ground and renders a Button, in either order of files.
+    expect(
+      buttonsOnTheSelectedGround([
+        ground('components/Row/Row.css', ".cd-row[aria-current='page'] { background: var(--bg-selected); }"),
+        ground('components/Row/Row.tsx', '<Button variant="ghost">Open</Button>'),
+      ]),
+    ).toEqual(['components/Row/']);
+    expect(
+      buttonsOnTheSelectedGround([
+        ground('components/Row/Row.tsx', '<Button\n  variant="ghost">Open</Button>'),
+        ground('components/Row/Row.css', '.cd-row { background-color: var( --bg-selected ) }'),
+      ]),
+    ).toEqual(['components/Row/']);
+    // Not: a Button in another component, a comment naming the ground, an IconButton, or a sibling
+    // folder whose name only starts the same way.
+    expect(
+      buttonsOnTheSelectedGround([
+        ground('components/Row/Row.css', '/* the current row, on bg-selected */ .cd-row { background: var(--bg-panel); }'),
+        ground('components/Row/Row.tsx', '<IconButton label="Open" icon="plus" />'),
+        ground('components/RowGroup/RowGroup.tsx', '<Button variant="ghost">Open</Button>'),
+        ground('components/Pill/Pill.css', '.cd-pill { background: var(--bg-selected); }'),
+      ]),
+    ).toEqual([]);
+    // The scan reads the components that do paint it, and none of them renders a Button.
+    expect(paintsTheSelectedGround(sources).length).toBeGreaterThan(5);
+    expect(buttonsOnTheSelectedGround(sources)).toEqual([]);
   });
 
   it('no_raw_durations', () => {

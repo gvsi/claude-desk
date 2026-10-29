@@ -164,6 +164,10 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = Object.freeze([
   ...pairs(['button-danger-text'], ['fill-hover'], 4.5, 'A danger-ghost button in a card while it is hovered.', 'fill-card', { under: 'bg-app' }),
   ...pairs(['button-danger-text'], ['bg-app'], 4.5, 'A danger-ghost button on the app background.'),
   ...pairs(['button-danger-text'], ['button-danger-fill', 'button-danger-fill-hover', 'fill-hover'], 4.5, 'Danger and danger-ghost buttons on the app background, at rest and on hover.', 'bg-app'),
+  // A busy button's pairs are listed only for a page, a card on it and a dialog, and for a ghost
+  // button the sidebar and the reviewer bar: every Button sits on one. None is listed on bg-selected,
+  // where a busy secondary label would read 4.45 and a busy danger one 3.98; the guard
+  // no_button_on_the_selected_ground (guards.test.ts) keeps Buttons off that ground.
   ...pairs(['text-secondary'], ['fill-secondary'], 4.5, "A busy secondary answer in a card: its text-secondary label on the button's fill.", 'fill-card', { under: 'bg-app' }),
   ...pairs(['button-danger-text'], ['bg-surface'], 4.5, "Deny's answers in its menu on a held request, This time and Always, in red words on the raised surface."),
   ...pairs(['button-danger-text'], ['fill-hover'], 4.5, "Deny's answers in its menu while one is hovered or has focus.", 'bg-surface'),

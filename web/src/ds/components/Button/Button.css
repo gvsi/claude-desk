@@ -160,10 +160,13 @@ a.cd-button[aria-disabled='true']:not([aria-busy='true']) {
 }
 
 /* Busy: the click registered and the result is on its way. The button steps down in token colors,
-   never dimmed as a whole, so its label stays a listed contrast pair: on a secondary or ghost
-   button the label turns text-secondary on the button's own fill (5.3:1 or more), and the primary
-   button's fill turns button-primary-hover (12.2:1). After the disabled rules, which busy also
-   matches through aria-disabled. */
+   never dimmed as a whole, so its label stays a contrast pair listed (contrast.ts) for a page
+   (bg-app), a card on it (fill-card) and a dialog (bg-surface), and for a ghost button the sidebar
+   (bg-panel) and the reviewer bar (bg-muted); every Button sits on one of them. On them a secondary
+   or ghost label turns text-secondary on the button's own fill (5.3:1 or more), and the primary
+   button's fill turns button-primary-hover (12.2:1, on any ground). No Button sits on bg-selected,
+   where a busy secondary label would read 4.45:1 (guards.test.ts). After the disabled rules, which
+   busy also matches through aria-disabled. */
 .cd-button[aria-busy='true'] {
   cursor: progress;
 }
