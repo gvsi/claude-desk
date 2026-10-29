@@ -567,7 +567,10 @@ def step_named(name: str) -> dict:
 
 
 class Runner:
-    """Runs a step's script as GitHub runs a `shell: bash` step, on a runner of the given architecture."""
+    """Runs a step's script as GitHub runs a `shell: bash` step, on a runner of the given architecture.
+
+    PATH is only a sandbox bin holding the stubs and links to REAL_TOOLS, so nothing else on the
+    machine running the tests is found."""
 
     def __init__(self, tmp_path: Path):
         self.dir = tmp_path
@@ -577,6 +580,10 @@ class Runner:
             stub = self.bin / name
             stub.write_text(f"#!{sys.executable} -I\n{STUB_PRELUDE}\n{body}")
             stub.chmod(0o755)
+        for tool in REAL_TOOLS:
+            real = shutil.which(tool)
+            assert real, tool
+            (self.bin / tool).symlink_to(real)
         (tmp_path / "home").mkdir()
         (tmp_path / "runner-temp").mkdir()
         self.github_path = tmp_path / "github-path"
@@ -591,7 +598,7 @@ class Runner:
         result = subprocess.run(
             [BASH, "--noprofile", "--norc", "-eo", "pipefail", str(script)],
             env={
-                "PATH": f"{self.bin}:/usr/bin:/bin",
+                "PATH": str(self.bin),
                 "HOME": str(self.dir / "home"),
                 "RUNNER_ARCH": arch,
                 "RUNNER_TEMP": str(self.dir / "runner-temp"),
@@ -607,6 +614,20 @@ class Runner:
         )
         events = [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
         return result, events
+
+
+# The real commands the steps' scripts run besides bash's builtins and the stubs.
+REAL_TOOLS = ["chmod", "grep", "mkdir"]
+
+
+def test_steps_see_only_the_sandbox(tmp_path):
+    """A tool on the machine running the tests, such as rustup or psql, can't stand in for one a runner lacks."""
+    runner = Runner(tmp_path)
+
+    result, _ = runner.run({"run": 'echo "$PATH"'}, "X64")
+
+    assert result.stdout == f"{runner.bin}\n"
+    assert sorted(path.name for path in runner.bin.iterdir()) == sorted([*STUBS, *REAL_TOOLS])
 
 
 @pytest.mark.parametrize("arch", ["X64", "ARM64"])
@@ -665,7 +686,6 @@ def test_rustup_init_runs_only_after_its_check_passes(tmp_path, arch):
     """The checked rustup-init installs rustup with no toolchain; setup-desk then installs the pinned one."""
     url, sha256 = PINNED_DOWNLOADS[INSTALL_RUSTUP][arch]
     runner = Runner(tmp_path)
-    assert shutil.which("rustup", path=f"{runner.bin}:/usr/bin:/bin") is None
     rustup_init = f"#!{sys.executable} -I\n{STUB_PRELUDE}\nlog('rustup-init', *sys.argv[1:])\n"
 
     result, events = runner.run(step_named(INSTALL_RUSTUP), arch, STUB_CHECK_PASSES="1", STUB_BODY=rustup_init)
@@ -721,8 +741,7 @@ def test_apt_installs_only_where_the_command_is_missing(tmp_path, install):
     [step, *same] = [step for name in users for step in job_named(name)["steps"] if step.get("name") == install]
     assert all(other == step for other in same)
 
-    # Only the stubs on PATH, so the command on the machine running the test can't stand in.
-    result, events = runner.run(step, "ARM64", PATH=str(runner.bin))
+    result, events = runner.run(step, "ARM64")
 
     assert result.returncode == 0, result.stderr
     # A freshly booted runner may still hold the dpkg lock for its own updates, so apt waits for it.
@@ -733,7 +752,7 @@ def test_apt_installs_only_where_the_command_is_missing(tmp_path, install):
     ]
 
     (runner.bin / command).symlink_to(runner.bin / "tar")
-    result, events = runner.run(step, "X64", PATH=str(runner.bin))
+    result, events = runner.run(step, "X64")
 
     assert result.returncode == 0, result.stderr
     assert events == []
@@ -763,7 +782,7 @@ def test_setup_desk_first_checks_the_runner_has_what_it_needs(tmp_path):
     runner = Runner(tmp_path)
 
     # The stubs give curl and unzip but no make or cc.
-    result, events = runner.run(steps[0], "ARM64", PATH=str(runner.bin))
+    result, events = runner.run(steps[0], "ARM64")
 
     assert result.returncode == 1
     assert "the runner has no make cc;" in result.stderr
@@ -771,7 +790,7 @@ def test_setup_desk_first_checks_the_runner_has_what_it_needs(tmp_path):
 
     for tool in ["make", "cc"]:
         (runner.bin / tool).symlink_to(runner.bin / "tar")
-    result, events = runner.run(steps[0], "ARM64", PATH=str(runner.bin))
+    result, events = runner.run(steps[0], "ARM64")
 
     assert result.returncode == 0, result.stderr
     assert events == []
