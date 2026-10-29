@@ -16,7 +16,8 @@ import {
 
 import type { SseEvent } from '../api/contracts.ts';
 import { ROUTES, type RouteKey } from '../api/routes.ts';
-import { SERVED_KEYS, mockStore, streamAfter, type MockAnswer } from './store.ts';
+import { SERVED_KEYS } from './served.ts';
+import { mockStore, streamAfter, type MockAnswer } from './store.ts';
 
 /** `/api/owner/desks/{desk_id}/today` as MSW writes it: `/api/owner/desks/:desk_id/today`. */
 function mswPath(key: RouteKey): string {

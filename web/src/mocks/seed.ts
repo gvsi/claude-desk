@@ -8,7 +8,7 @@
 import type { HoursWindow, PolicyVersion } from '../api/contracts.ts';
 import { placeholderHex, rivera } from '../ds/fixtures/index.ts';
 import { DECISIONS, ruleNamed, writing, type Step } from './script.ts';
-import type { MockWorld, ReplayTurn } from './store.ts';
+import type { MockWorld, ReplayTurn } from './world.ts';
 
 export type MockSeed = 'rivera' | 'rivera_quiet' | 'rivera_two_desks';
 
