@@ -309,8 +309,8 @@ const proseBlocks = {
     es: proseBlock('Estos horarios están libres en el calendario de Maria. ¿Cuál te viene bien?'),
   },
   booked: {
-    en: proseBlock("You're booked. Maria texts before she arrives."),
-    es: proseBlock('Listo, quedó reservado. Maria te escribe antes de llegar.'),
+    en: proseBlock("You're booked."),
+    es: proseBlock('Listo, quedó reservado.'),
   },
   deposit: {
     en: proseBlock("To hold the visit, here's a link for the service call deposit. It's a test payment, so no money moves."),

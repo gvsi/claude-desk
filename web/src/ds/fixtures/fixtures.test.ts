@@ -126,6 +126,35 @@ function proseProblems(text: string): string[] {
 
 const proseBlocks = allBlocks.filter((block) => block.kind === 'prose');
 
+// Cards whose text is a statement only the card may make: the charter's hours, contact and
+// policies, the kernel's handoff, verification and callback commitments, and the owner's own
+// words. Prose that restates one carries a policy or a promise outside its card, which invariant 2
+// and the soft-promise check block even when the words hold no number.
+const STATEMENT_TEMPLATES: readonly ClauseTemplate[] = [
+  'hours', 'contact', 'policy', 'handoff', 'verify_prompt', 'callback_confirmed', 'owner_said',
+];
+
+/** `text` as lower-case words joined by single spaces, so punctuation and case don't matter. */
+function wordsOf(text: string): string {
+  return (text.normalize('NFKC').toLowerCase().match(/[\p{L}\p{N}]+(?:['’][\p{L}]+)*/gu) ?? []).join(' ');
+}
+
+const statementSentences = [
+  ...new Set(
+    cardBlocks
+      .filter((block) => STATEMENT_TEMPLATES.includes(block.template as ClauseTemplate))
+      .flatMap((block) => block.text.split(/(?<=[.!?])\s+|\n/u))
+      .map(wordsOf)
+      .filter((sentence) => sentence !== ''),
+  ),
+];
+
+/** The statement-card sentences that `text` repeats word for word. */
+function restatedStatements(text: string): string[] {
+  const prose = ` ${wordsOf(text)} `;
+  return statementSentences.filter((sentence) => prose.includes(` ${sentence} `));
+}
+
 // What people wrote: visitors, visiting agents, owner whispers and what the owner said.
 const userTexts = [
   ...collect<TranscriptTurn & { text: string }>(
@@ -189,6 +218,16 @@ describe('fixtures', () => {
     expect(proseBlocks.length).toBeGreaterThan(15);
     for (const block of proseBlocks) {
       expect(proseProblems(block.text), block.text).toEqual([]);
+    }
+  });
+
+  test('fixture_prose_restates_no_card_statement', () => {
+    // The oracle catches a charter policy repeated in prose, so a clean result means something.
+    expect(restatedStatements("You're booked. Maria texts before she arrives.")).toEqual(['maria texts before she arrives']);
+    expect(statementSentences.length).toBeGreaterThan(10);
+
+    for (const block of proseBlocks) {
+      expect(restatedStatements(block.text), block.text).toEqual([]);
     }
   });
 
