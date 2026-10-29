@@ -5,11 +5,12 @@ from dataclasses import dataclass
 
 import httpx
 from fastapi import FastAPI
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from desk.contracts import NotificationDefaults, PolicyVersion, RuleCard
 from desk.db.models import ActorSession, Business, Copy, Desk, LedgerEntry, NotificationPref
-from desk.kernel_service import auth
+from desk.db.models import PolicyVersion as PolicyVersionRow
+from desk.kernel_service import activation, auth, compiler, desks
 from desk.kernel_service.repo import KernelCtx, kernel_transaction, new_id
 
 NOTIFICATIONS = NotificationDefaults(now=["approval", "emergency", "breaker"], briefing=["lead", "callback", "booking"])
@@ -68,6 +69,30 @@ async def rows_of(app: FastAPI, copy_id: str, stmt) -> list:
 async def ledger_rows(app: FastAPI, rows: CopyRows) -> list[LedgerEntry]:
     return await rows_of(app, rows.copy_id,
                          select(LedgerEntry).where(LedgerEntry.desk_id == rows.desk_id).order_by(LedgerEntry.seq))
+
+
+async def activate_cards(ctx: KernelCtx, desk_id: str, cards: list[RuleCard]) -> PolicyVersionRow:
+    """Test only: compiles `cards` over the Desk's enabled profiles and stores them as its active
+    version, with no proof, superseding the version that was active. Decisions then run on it as
+    on any active version; nothing outside tests ever activates a version without a proof."""
+    profiles = await desks.enabled_profiles(ctx, desk_id)
+    schema = compiler.desk_schema(profiles)
+    compiled = compiler.compile_cards(cards, profiles)
+    current = await activation.active_version(ctx, desk_id)
+    if current is not None:
+        current.status = "superseded"
+        await ctx.db.flush()                  # one active version per Desk
+    latest = (await ctx.db.scalars(ctx.repo.scoped(
+        select(func.max(PolicyVersionRow.version)).where(PolicyVersionRow.desk_id == desk_id)))).one()
+    row = activation.version_row(
+        copy_id=ctx.copy_id, desk_id=desk_id, version=(latest or 0) + 1,
+        parent_version=current.version if current is not None else None, compiled=compiled,
+        a0=compiler.compile_cards(cards, profiles, review=False).A, schema=schema,
+        hashes=activation.version_hashes(compiled, schema, profiles, cards=cards), status="active", proof=None,
+        created_at=ctx.clock.now())
+    ctx.db.add(row)
+    await ctx.db.flush()
+    return row
 
 
 async def active_version_number(client: httpx.AsyncClient, owner_token: str, desk_id: str) -> int | None:

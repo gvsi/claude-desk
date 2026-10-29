@@ -27,7 +27,7 @@ from desk.db.tables import KERNEL_TABLES
 from desk.kernel_service import activation, adapters
 from desk.kernel_service.app import create_app
 
-from .fakes import FrozenClock
+from .fakes import FakeDecisions, FrozenClock
 
 BACKEND = Path(__file__).resolve().parents[2]
 REPO = BACKEND.parent
@@ -88,16 +88,23 @@ def frozen_clock() -> FrozenClock:
 
 
 @pytest.fixture
-async def app(frozen_clock: FrozenClock, monkeypatch: pytest.MonkeyPatch,
+def reviewer() -> FakeDecisions:
+    """The app's reviewer: every review fails (the action holds) until a test sets `answer`."""
+    return FakeDecisions(None)
+
+
+@pytest.fixture
+async def app(frozen_clock: FrozenClock, reviewer: FakeDecisions, monkeypatch: pytest.MonkeyPatch,
               request: pytest.FixtureRequest) -> AsyncIterator:
     """The kernel app with its lifespan entered, signing with the dev key, in `bounded` proof mode
-    (`symcc` when the test asks for `desk_prove`)."""
+    (`symcc` when the test asks for `desk_prove`), with the scripted `reviewer`, so no test calls
+    a model."""
     monkeypatch.delenv("DESK_SIGNING_SEED", raising=False)
     if "desk_prove" in request.fixturenames:
         request.getfixturevalue("desk_prove")
     else:
         monkeypatch.setenv("DESK_PROVE", NO_PROVER)
-    kernel = create_app(clock=frozen_clock)
+    kernel = create_app(clock=frozen_clock, decisions=reviewer)
     try:
         async with kernel.router.lifespan_context(kernel):
             yield kernel

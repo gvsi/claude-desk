@@ -37,7 +37,8 @@ IDLE_LIMIT = timedelta(hours=24)          # visitor and agent sessions close aft
 
 REASONS = frozenset({
     "unknown_session", "bad_token", "wrong_copy", "closed", "stale_generation", "bad_owner_token",
-    "agent_auth_unavailable", "preview_unavailable", "wrong_session",
+    "agent_auth_unavailable", "preview_unavailable", "wrong_session", "mode_owner", "call_conflict",
+    "unknown_decision",
 })
 
 
