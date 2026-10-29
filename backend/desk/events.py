@@ -67,9 +67,9 @@ class EvDemoInbox(BaseModel):             # code-free; the panel fetches entry b
     to: str
     preview: str
 
-class EvError(BaseModel):
+class EvError(BaseModel):                 # the client shows a static build-time string per code
     type: Literal["error"]
-    code: str
+    code: Literal["kernel_unavailable", "session", "rate_limited", "internal"]
 
 SseEvent = Annotated[
     EvWriting | EvMessage | EvTurnEnd | EvReceipt | EvHeld | EvResolved | EvOwnerJoined | EvOwnerLeft

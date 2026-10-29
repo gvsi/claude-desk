@@ -111,6 +111,14 @@ class CreateSessionRequest(KernelRequest):    # POST /sessions; agents authentic
     desk_slug: str
     kind: Literal["visitor", "agent"]
     mandate: Mandate | None = None
+    preview: bool = False                 # the owner tries the Desk as a customer before Answering is on: needs a valid
+                                          # X-Owner-Session for the slug's copy (else 401 auth); ledgered, owner-only
+
+    @model_validator(mode="after")
+    def _previews_are_visitors(self) -> Self:
+        if self.preview and self.kind == "agent":
+            raise ValueError("a preview is a visitor session")   # 422 invalid
+        return self
 
 class ModeRequest(KernelRequest):             # POST /sessions/{id}/mode (bumps generation; resumes a paused session)
     mode: SessionMode
@@ -229,7 +237,7 @@ class DeskCreated(BaseModel):             # POST /desks
     desk_id: str
     slug: str
 
-class DeskUpdated(BaseModel):             # PUT /desks/{id}/{part}
+class DeskUpdated(BaseModel):             # PUT /desks/{id}/{part}; POST /handoffs/{id}/done
     desk_id: str
     updated_at: AwareDatetime
 
@@ -286,7 +294,7 @@ class Health(BaseModel):                  # GET /health (selftest result cached 
 
 class KernelError(BaseModel):             # the body of every non-2xx kernel answer
     code: Literal["auth", "not_found", "closed", "stale_generation", "mode_owner", "mode_paused", "replayed",
-                  "conflict", "invalid", "seed_unproved", "internal"]
+                  "conflict", "invalid", "rate_limited", "seed_unproved", "internal"]   # rate_limited: 429 (POST /agents/demo)
 
 KERNEL_RESPONSES: tuple[type[BaseModel], ...] = (
     DeskCreated, DeskUpdated, DocumentCreated, VerifyStarted, WhoAmI, SessionContext, ToolConfirmed,
@@ -294,7 +302,7 @@ KERNEL_RESPONSES: tuple[type[BaseModel], ...] = (
 )
 
 # Every row of the kernel API table: (request model, response model). None only for a bodiless
-# request, the document bytes and 204.
+# request, the document bytes and 204. tests/test_contracts.py compares the keys with the plan's table.
 KERNEL_ROUTES: dict[str, tuple[type[BaseModel] | None, type | None]] = {
     "POST /copies": (CreateCopyRequest, CopyCreated),
     "POST /desks": (CreateDeskRequest, DeskCreated),
@@ -333,6 +341,7 @@ KERNEL_ROUTES: dict[str, tuple[type[BaseModel] | None, type | None]] = {
     "POST /tools/confirm": (ToolsConfirmRequest, ToolConfirmed),
     "POST /tools/simulate_change": (ToolsSimulateChangeRequest, ToolProfile),
     "POST /knowledge": (KnowledgeRequest, KnowledgeItem),
+    "POST /handoffs/{id}/done": (None, DeskUpdated),   # status open -> done, ledgered desk_data
     "GET /payment_links/{token}": (None, PaymentLinkView),
     "POST /payment_links/{token}/complete": (PaymentLinkActionRequest, PaymentLinkStateResult),
     "POST /payment_links/{token}/cancel": (PaymentLinkActionRequest, PaymentLinkStateResult),

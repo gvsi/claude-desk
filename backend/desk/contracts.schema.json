@@ -305,6 +305,7 @@
     "CalendarSlot": {
       "properties": {
         "slot_id": {
+          "pattern": "^S-\\d{8}-\\d{4}$",
           "title": "Slot Id",
           "type": "string"
         },
@@ -529,6 +530,11 @@
             }
           ],
           "default": null
+        },
+        "preview": {
+          "default": false,
+          "title": "Preview",
+          "type": "boolean"
         }
       },
       "required": [
@@ -1119,6 +1125,12 @@
           "type": "string"
         },
         "code": {
+          "enum": [
+            "kernel_unavailable",
+            "session",
+            "rate_limited",
+            "internal"
+          ],
           "title": "Code",
           "type": "string"
         }
@@ -1701,6 +1713,7 @@
             "replayed",
             "conflict",
             "invalid",
+            "rate_limited",
             "seed_unproved",
             "internal"
           ],
@@ -2609,6 +2622,7 @@
     "PriceItem": {
       "properties": {
         "item_id": {
+          "pattern": "^[a-z0-9-]{1,40}$",
           "title": "Item Id",
           "type": "string"
         },
@@ -2713,6 +2727,19 @@
           ],
           "default": null,
           "title": "Amount Cents"
+        },
+        "starts_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Starts At"
         }
       },
       "required": [

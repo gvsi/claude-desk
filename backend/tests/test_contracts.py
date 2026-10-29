@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 from typing import get_args
 
@@ -7,9 +8,12 @@ from pydantic import TypeAdapter, ValidationError
 
 from desk.contracts import (
     AUTO_MONEY_HARD_CAP_CENTS,
+    ITEM_ID_PATTERN,
+    SLOT_ID_PATTERN,
     A2ARequest,
     AgentAuth,
     BusinessSeed,
+    CalendarSlot,
     Claim,
     CopyCreated,
     DeskSeed,
@@ -30,11 +34,13 @@ from desk.contracts import (
     SessionState,
     ToolName,
 )
-from desk.events import EvDemoInbox, EvHeld, SseEvent
+from desk.events import EvDemoInbox, EvError, EvHeld, SseEvent
 from desk.kernel_api import (
     KERNEL_REQUESTS,
     KERNEL_RESPONSES,
     KERNEL_ROUTES,
+    CreateSessionRequest,
+    DeskUpdated,
     ExecuteRequest,
     DecideRequest,
     KernelError,
@@ -226,6 +232,56 @@ def test_probes_name_their_subject_exactly_when_scoped():
             Probe(**base | wrong)
 
 
+def test_probe_names_a_start_time():
+    # hours probes ask about a slot or booking at a given time; without one the kernel uses its own now
+    base = {"actor": "visitor", "who": "anyone", "call": {"call_id": "c1", "tool": "native.book", "args": {}},
+            "resource_kind": "slot"}
+    assert Probe(**base).starts_at is None
+    saturday = Probe(**base, starts_at="2026-11-07T10:00:00-08:00").starts_at
+    assert (saturday.isoformat(), saturday.utcoffset().total_seconds()) == ("2026-11-07T10:00:00-08:00", -8 * 3600)
+    with pytest.raises(ValidationError):
+        Probe(**base, starts_at="2026-11-07T10:00:00")   # a time without its offset is ambiguous
+
+
+def test_create_session_takes_preview():
+    # the owner previews a draft as a customer before Answering goes live; a plain visitor session is no preview
+    assert CreateSessionRequest(desk_slug="rivera-plumbing-abc123", kind="visitor").preview is False
+    assert CreateSessionRequest(desk_slug="rivera-plumbing-abc123", kind="visitor", preview=True).preview is True
+    with pytest.raises(ValidationError):          # a preview is the owner acting as a visitor, never an agent: 422 invalid
+        CreateSessionRequest(desk_slug="rivera-plumbing-abc123", kind="agent", preview=True)
+
+
+def test_kernel_error_codes_include_rate_limited():
+    # 429 (POST /agents/demo) has its own code, so a refused tool call is told apart from a bad request
+    assert KernelError(code="rate_limited").code == "rate_limited"
+    assert set(get_args(KernelError.model_fields["code"].annotation)) == {
+        "auth", "not_found", "closed", "stale_generation", "mode_owner", "mode_paused", "replayed", "conflict",
+        "invalid", "rate_limited", "seed_unproved", "internal"}
+
+
+def test_ev_error_codes_are_closed():
+    # the web app shows a static string per code, so the list is fixed and nothing else gets through
+    events = TypeAdapter(SseEvent)
+    for code in ("kernel_unavailable", "session", "rate_limited", "internal"):
+        assert isinstance(events.validate_python({"type": "error", "code": code}), EvError)
+    for code in ("auth", "stale_generation", "Session", "", "Something broke: see the logs"):
+        with pytest.raises(ValidationError):
+            events.validate_python({"type": "error", "code": code})
+
+
+def test_ids_follow_their_patterns():
+    # price item and slot ids repeat across Desks and reach cards and probes, so their shape is fixed
+    assert re.fullmatch(ITEM_ID_PATTERN, "drain") and re.fullmatch(SLOT_ID_PATTERN, "S-20261102-0800")
+    PriceItem(item_id="drain", title="Drain clearing", unit_cents=18_000)
+    CalendarSlot(slot_id="S-20261102-0800", starts_at="2026-11-02T08:00:00-08:00", minutes=120)
+    for item_id in ("Drain", "", "a" * 41, "drain clearing", "drain/1"):
+        with pytest.raises(ValidationError):
+            PriceItem(item_id=item_id, title="Drain clearing", unit_cents=18_000)
+    for slot_id in ("S-2026112-800", "s-20261102-0800", "S-20261102-0800-x", "20261102-0800"):
+        with pytest.raises(ValidationError):
+            CalendarSlot(slot_id=slot_id, starts_at="2026-11-02T08:00:00-08:00", minutes=120)
+
+
 def test_kernel_requests_refuse_unknown_fields():
     # an identity field the API shouldn't send is refused, not silently dropped
     for model in KERNEL_REQUESTS:
@@ -292,6 +348,33 @@ def test_every_kernel_route_names_its_models():
     used = {request for request, _ in KERNEL_ROUTES.values()}
     assert set(KERNEL_REQUESTS) <= used
     assert KernelError in KERNEL_RESPONSES            # the body of every non-2xx answer, so it is exported
+
+
+MASTER_PLAN = Path(__file__).resolve().parents[2] / "docs" / "plans" / "2026-10-28-00-master-plan.md"
+
+
+def plan_kernel_routes() -> set[str]:
+    """The calls in the master plan's "Kernel HTTP API v2" table, with PUT /desks/{id}/{part} one route per part."""
+    lines = MASTER_PLAN.read_text().splitlines()
+    start = lines.index("| Call | Auth | Body → response |") + 2
+    routes: set[str] = set()
+    for line in lines[start:]:
+        if not line.startswith("|"):
+            break
+        call, _auth, body = (cell.strip() for cell in line.strip("|").split(" | ", 2))
+        call = call.strip("`")
+        if call.endswith("/{part}"):
+            parts = re.findall(r"`(\w+)`", body.split("part ∈ ", 1)[1].split(";", 1)[0])
+            routes |= {call.replace("{part}", part) for part in parts}
+        else:
+            routes.add(call)
+    return routes
+
+
+def test_kernel_routes_match_the_plan():
+    # the fake kernel and the contract suite are built from KERNEL_ROUTES, so it lists every call the plan does
+    assert set(KERNEL_ROUTES) == plan_kernel_routes()
+    assert KERNEL_ROUTES["POST /handoffs/{id}/done"] == (None, DeskUpdated)   # bodiless; closes an open handoff
 
 
 def test_execute_names_generation_or_approval():
