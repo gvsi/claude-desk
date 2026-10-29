@@ -1,4 +1,4 @@
-.PHONY: kernel test db-roles web-test web-e2e image image-check infra-check
+.PHONY: kernel test db-roles web-test web-e2e image image-check infra-check image-smoke
 
 # Rebuild the kernel's Python module into the backend environment, and the
 # proof binary the kernel runs. desk-prove and its tests find cvc5 through
@@ -82,6 +82,13 @@ image-check:
 		echo "image-check: proof reports match kernel/cedar/proofs ($$(echo "$$want" | wc -l | tr -d ' ') files)"; \
 	else echo "image-check: skipped the proof reports, no kernel/cedar/proofs yet"; fi; \
 	echo "image-check: ok"
+
+# The app image run as the deploy runs it, against the compose Postgres (`docker compose up -d db`
+# first): the admin task, then the kernel and the API in production mode in one network namespace,
+# each with only its own environment and secrets. Passes when api_health passes, mock payments
+# answers inside the kernel's container and the kernel's 8701 refuses connections from outside it.
+image-smoke:
+	APP_IMAGE="$(APP_IMAGE)" DB_NAME="$(DB_NAME)" infra/scripts/image_smoke.sh
 
 # The CDK stacks: the CloudFront function's tests (Node 24 expands the quoted glob itself and no
 # longer searches a directory argument), the stacks' tests, then a synth of every stack (synth

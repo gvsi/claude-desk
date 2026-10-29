@@ -1,6 +1,8 @@
 """Shared helpers for the CDK tests: apps built with the repo's feature flags, never the caller's
-environment, and the small Dockerfile fixture the stacks build their image from."""
+environment, and the small Dockerfile fixture the stacks build their image from; and a loader
+for the deploy scripts in infra/scripts, which run as plain files, not as a package."""
 
+import importlib.util
 import json
 import os
 from collections.abc import Iterator
@@ -13,6 +15,7 @@ import aws_cdk as cdk
 import pytest
 
 INFRA = Path(__file__).resolve().parents[1]
+SCRIPTS = INFRA / "scripts"
 FIXTURE_IMAGE = Path(__file__).resolve().parent / "fixtures" / "image"
 # What a test app sets so the stacks build their image from the fixture, not the repo.
 FIXTURE_CONTEXT = {"image_dir": str(FIXTURE_IMAGE), "image_file": "Dockerfile"}
@@ -137,3 +140,22 @@ def build_stacks(**context: str) -> DeskStacks:
 @pytest.fixture(scope="session")
 def desk_stacks() -> DeskStacks:
     return build_stacks()
+
+
+def load_script(name: str):
+    """A fresh copy of infra/scripts/<name>.py as a module, loaded the way `python <file>` runs it
+    (its own directory, no package), so each test patches its own copy."""
+    path = SCRIPTS / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(f"desk_script_{name}", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def unsigned_client(service: str):
+    """A boto3 client in us-west-2 that never signs or looks for credentials, for Stubber tests."""
+    import boto3
+    import botocore
+    from botocore.config import Config
+
+    return boto3.client(service, region_name="us-west-2", config=Config(signature_version=botocore.UNSIGNED))
