@@ -1,7 +1,8 @@
 /**
  * The public page's own words, in the visitor's language (the browser's, `browserLanguage()`).
  * Everything else a visitor reads is the kernel's (messages, cards, receipts, the open status) or
- * the design system's (the disclosure, error lines, card labels). Names are passed in as written.
+ * the design system's (the disclosure, the closed line under the open status, error lines, card
+ * labels). Names are passed in as written.
  */
 import type { CopyLanguage } from '../ds/index.ts';
 
@@ -26,8 +27,6 @@ export interface PublicCopy {
   opening: string;
   deskUnavailableTitle: string;
   deskUnavailableBody: string;
-  /** After the open status when the business is closed. Goes when PublicShell's slot lands. */
-  stillHelps: string;
 }
 
 export const PUBLIC_COPY: Readonly<Record<CopyLanguage, PublicCopy>> = {
@@ -46,7 +45,6 @@ export const PUBLIC_COPY: Readonly<Record<CopyLanguage, PublicCopy>> = {
     opening: 'Opening the chat',
     deskUnavailableTitle: "This Desk isn't available",
     deskUnavailableBody: 'Check the link, or contact the business another way.',
-    stillHelps: 'Claude can still help.',
   },
   es: {
     message: (business) => `Mensaje para ${business}`,
@@ -63,6 +61,5 @@ export const PUBLIC_COPY: Readonly<Record<CopyLanguage, PublicCopy>> = {
     opening: 'Abriendo el chat',
     deskUnavailableTitle: 'Este Desk no está disponible',
     deskUnavailableBody: 'Revisa el enlace o comunícate con el negocio de otra forma.',
-    stillHelps: 'Claude puede ayudarte igual.',
   },
 };

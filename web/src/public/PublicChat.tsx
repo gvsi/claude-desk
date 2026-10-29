@@ -36,7 +36,6 @@ import { browserLanguage } from '../lib/language.ts';
 import { brandFrom } from './brand.ts';
 import type { ChatRow, SendFailure } from './chatReducer.ts';
 import { PUBLIC_COPY, type PublicCopy } from './copy.ts';
-import { PlainOpenStatus } from './PlainOpenStatus.tsx';
 import { useVisitorChat } from './PublicChatProvider.tsx';
 import { useOpenStatus } from './useOpenStatus.ts';
 
@@ -305,6 +304,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
       brand={brand}
       ownerName={ownerName}
       language={language}
+      openStatus={openStatus}
       onAskForOwner={() => send(copy.askForOwner(ownerName))}
       about={desk.charter}
       footer={!embedded}
@@ -322,7 +322,6 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
         </div>
       }
     >
-      <PlainOpenStatus openStatus={openStatus} language={language} />
       <Transcript label={copy.conversation(brand.name)}>
         {state.leading.length > 0 ? (
           <TranscriptRow

@@ -723,7 +723,7 @@ describe('public chat page', () => {
     await settle();
     await vi.advanceTimersByTimeAsync(90_000);
     await until(() => expect(requests('publicDesk')).toHaveLength(2));
-    await until(() => expect(document.querySelector('.cd-plain-open-status')).toBeNull());
+    await until(() => expect(document.querySelector(OPEN_STATUS)).toBeNull());
     expect(screen.container.textContent).not.toContain('Open now');
     expect(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing' }).query()).not.toBeNull();
     expect(screen.getByRole('complementary', { name: 'About Rivera Plumbing' }).query()).not.toBeNull();
@@ -743,24 +743,28 @@ describe('public chat page', () => {
     mockStore.inject({ route: 'publicDesk', status: 'network' });
     window.dispatchEvent(new Event('focus'));
     await until(() => expect(requests('publicDesk')).toHaveLength(4));
-    await until(() => expect(document.querySelector('.cd-plain-open-status')).toBeNull());
+    await until(() => expect(document.querySelector(OPEN_STATUS)).toBeNull());
     expect(chatRequests()).toEqual(chat);
   });
 
   it('no_open_status_line_when_null', async () => {
     const open = await renderRoute(PAGE);
     await ready(open.screen);
-    const header = (screen: RenderResult) => screen.getByRole('banner').element().innerHTML;
-    const withStatus = header(open.screen);
+    const header = (screen: RenderResult) => screen.getByRole('banner').element();
+    // The header with the open status, less the status itself: what a Desk without hours shows.
+    const withStatus = header(open.screen).cloneNode(true) as HTMLElement;
+    const status = withStatus.querySelector(OPEN_STATUS);
+    expect(status, 'the open header has a status to leave out').not.toBeNull();
+    status?.remove();
 
     mockStore.inject({ route: 'publicDesk', status: 200, body: deskWith('en', null) });
     const { screen } = await renderRoute(PAGE);
     await ready(screen);
     await sleep(100);
-    expect(document.querySelector('.cd-plain-open-status')).toBeNull();
-    expect(document.querySelector('.cd-plain-open-status__dot')).toBeNull();
+    expect(document.querySelector(OPEN_STATUS)).toBeNull();
+    expect(header(screen).querySelector('.cd-status-dot')).toBeNull();
     expect(screen.container.textContent).not.toMatch(/Open now|Closed now|Claude can still help/);
-    expect(header(screen)).toBe(withStatus);
+    expect(header(screen).innerHTML).toBe(withStatus.innerHTML);
   });
 
   it('unknown_desk_is_kind', async () => {
@@ -806,16 +810,20 @@ function expectEndAboveTheComposer(screen: RenderResult): void {
   expect(last?.bottom ?? 0).toBeGreaterThan(0);
 }
 
-/** The open status the page shows (the plain line until the design system's header slot lands). */
+/** The open status, as the design system's PublicShell draws it in the header. */
+const OPEN_STATUS = '.cd-public-shell__open-status';
+
+/** The open status the page shows, in the header. */
 function statusLine(): HTMLElement {
-  const line = document.querySelector<HTMLElement>('.cd-plain-open-status');
+  const line = document.querySelector<HTMLElement>(OPEN_STATUS);
   if (!line) throw new Error('no open status line');
+  expect(line.closest('header'), 'the open status sits in the header').not.toBeNull();
   return line;
 }
 
 /** The kernel's words in the open status line. */
 function statusText(): HTMLElement {
-  const text = statusLine().querySelector<HTMLElement>('.cd-plain-open-status__text');
+  const text = statusLine().querySelector<HTMLElement>('.cd-public-shell__open-status-text');
   if (!text) throw new Error('no open status text');
   return text;
 }
@@ -830,14 +838,17 @@ function textBox(el: Element): DOMRect {
 /** The kernel's words, exactly, with a dot that says the same: filled when open, hollow when closed. */
 async function expectOpenStatus(screen: RenderResult, text: string, dot: 'open' | 'closed'): Promise<void> {
   await expect.element(screen.getByText(text, { exact: true })).toBeVisible();
-  const line = statusLine();
-  expect(line.querySelector('.cd-plain-open-status__text')?.textContent).toBe(text);
-  const shown = line.querySelector('.cd-plain-open-status__dot');
+  expect(statusText().textContent).toBe(text);
+  const shown = statusLine().querySelector('.cd-status-dot');
   expect(shown?.getAttribute('aria-hidden')).toBe('true');
   const style = getComputedStyle(shown as Element);
-  if (dot === 'open') expect(style.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
-  else expect(style.backgroundColor).toBe('rgba(0, 0, 0, 0)');
-  expect(style.borderTopStyle).toBe('solid');
+  if (dot === 'open') {
+    expect(style.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
+  } else {
+    // Hollow: no fill, and an outline that still draws the dot.
+    expect(style.backgroundColor).toBe('rgba(0, 0, 0, 0)');
+    expect(style.borderTopStyle).toBe('solid');
+  }
 }
 
 /** Rivera's public Desk as the kernel would serve it with `status` in its header. */
