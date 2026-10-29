@@ -609,7 +609,7 @@ async def test_an_internal_error_ends_the_turn_with_the_static_error(api_conn, e
 
 
 async def test_a_run_that_fails_outside_a_turn_leaves_its_work_for_the_next_request(api_conn, engine, locks, caller,
-                                                                                    fake, monkeypatch):
+                                                                                    fake, monkeypatch, caplog):
     await said(api_conn, caller, "Hello!")
     assert await pending(caller, ScriptedModel([response(reply("Hi, how can I help?"))]), engine, locks) == "done"
     shown = len(await events(api_conn, caller.session_id))
@@ -627,6 +627,10 @@ async def test_a_run_that_fails_outside_a_turn_leaves_its_work_for_the_next_requ
 
     monkeypatch.setattr(loop, "recover_call", failing)
     assert await pending(caller, ScriptedModel(), engine, locks) == "internal"
+    # the log says where it broke, for tracing, and never what the error said, which can carry bound parameters
+    (logged,) = [record.getMessage() for record in caplog.records if record.name == "desk.api.loop"]
+    assert f"RuntimeError at {__file__}:{failing.__code__.co_firstlineno + 1}" in logged
+    assert "recovery broke" not in logged
     assert [(event.type, getattr(event, "code", None)) for event in await events(api_conn, caller.session_id)][
         shown:] == [("error", "internal"), ("turn_end", None)]
     assert len(await rows(api_conn, caller.session_id, "model_tool_results", "n")) == 1      # the first turn's only

@@ -17,6 +17,7 @@ import json
 import logging
 import secrets
 import time
+import traceback
 from collections.abc import AsyncIterator, Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -85,6 +86,14 @@ def _utc_now() -> datetime:
 
 def _ms(started: float) -> int:
     return round((time.monotonic() - started) * 1000)
+
+
+def _raised(error: BaseException) -> str:
+    """An error for the log: its type and where it was raised (the innermost frame's file and line), never its
+    message, which can carry bound parameters, contacts or tokens."""
+    frames = traceback.extract_tb(error.__traceback__)
+    where = f" at {frames[-1].filename}:{frames[-1].lineno}" if frames else ""
+    return type(error).__name__ + where
 
 
 def _failed(failure: KernelFailed) -> TurnOutcome:
@@ -309,7 +318,7 @@ class _Turn:
         raised = False
         for block, outcome in zip(calls, routed, strict=True):
             if isinstance(outcome, BaseException):         # it never reached a result: not run, as far as Claude knows
-                logger.warning("tool call %s raised %s", block["id"], type(outcome).__name__)
+                logger.warning("tool call %s raised %s", block["id"], _raised(outcome))
                 outcome, raised = not_run(), True
             outcomes[block["id"]] = outcome
             self.decide_ms += outcomes[block["id"]].decide_ms
@@ -376,7 +385,7 @@ async def run_turn(conn: AsyncConnection, caller: Caller, model: ModelClient, *,
     try:
         outcome = await turn.run()
     except Exception as error:                             # anything unexpected: the static error, never a silent end
-        logger.error("a turn failed with %s", type(error).__name__)
+        logger.error("a turn failed with %s", _raised(error))
         await conn.rollback()
         outcome = "internal"
     await turn.finish(outcome)
@@ -476,12 +485,12 @@ async def run_pending(caller: Caller, model: ModelClient, *, engine: AsyncEngine
                 return outcome
             retry = True                                  # work arrived as the lock was let go: its request was busy
     except Exception as error:
-        logger.error("running a session's turns failed with %s", type(error).__name__)
+        logger.error("running a session's turns failed with %s", _raised(error))
         try:
             async with engine.connect() as conn:
                 await _end(conn, caller, model, "internal")
         except Exception as again:
-            logger.error("the internal error couldn't be shown: %s", type(again).__name__)
+            logger.error("the internal error couldn't be shown: %s", _raised(again))
         return "internal"
 
 
