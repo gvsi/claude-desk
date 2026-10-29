@@ -246,7 +246,7 @@ CHECKS = {
         ["--name", "web-e2e", "--run-if", "web/playwright.config.ts", "--", "make", "web-e2e"],
     ],
     "infra synth": [["--name", "infra", "--run-if", "infra/cdk.json", "--", "make", "infra-check"]],
-    "secret scan": ["gitleaks git --redact --no-banner --exit-code 1 ."],
+    "secret scan": ["gitleaks git --redact --verbose --no-banner --exit-code 1 ."],
     "repo checks": [
         "actionlint",
         "cd tools && uv run pytest -q",

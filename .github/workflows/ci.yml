@@ -200,7 +200,7 @@ jobs:
           tar -xzf gitleaks_8.30.1_linux_x64.tar.gz gitleaks
           echo "$dir" >> "$GITHUB_PATH"
       - name: Scan the history for secrets
-        run: gitleaks git --redact --no-banner --exit-code 1 .
+        run: gitleaks git --redact --verbose --no-banner --exit-code 1 .
 
   repo:
     name: repo checks
