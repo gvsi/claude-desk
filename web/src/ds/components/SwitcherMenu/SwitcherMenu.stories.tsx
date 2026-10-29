@@ -72,7 +72,6 @@ const meta = {
   args: {
     businesses,
     currentBusinessId: 'biz-rivera',
-    currentDeskId: MAIN_LINE.id,
     onPick: fn(),
     onNewBusiness: fn(),
     onClose: fn(),
@@ -82,7 +81,7 @@ const meta = {
     layout: 'fullscreen',
     canvas: 'N-Switcher',
     canvasNote:
-      "The board's two columns become one menu: the current business's Desks sit under it, and New business comes last. New Desk, the Desks' status dots and their captions aren't in the menu, and it has no shadow, which the brand book keeps for the composer.",
+      "The board's two columns become one menu of businesses, with New business last. The current business's Desks, New Desk and the Desks' status dots and captions aren't in it: the sidebar's Desk picker has the Desks. It has no shadow, which the brand book keeps for the composer.",
   },
 } satisfies Meta<typeof SwitcherMenu>;
 
@@ -92,7 +91,7 @@ type Story = StoryObj<typeof meta>;
 
 export const RiveraTwoDesks: Story = {
   play: async ({ args, canvas, userEvent }) => {
-    const menu = canvas.getByRole('menu', { name: 'Switch business or Desk' });
+    const menu = canvas.getByRole('menu', { name: 'Switch business' });
     expectComputed(menu, {
       backgroundColor: 'rgb(42, 41, 39)',
       borderTopColor: 'rgba(250, 249, 245, 0.14)',
@@ -100,34 +99,28 @@ export const RiveraTwoDesks: Story = {
       boxShadow: 'none',
     });
 
-    // The businesses, the current one's Desks under it, then New business last.
+    // The businesses, then New business last. No Desks: the sidebar's Desk picker has those.
     const riveraRow = within(menu).getByRole('menuitemradio', { name: 'Rivera Plumbing 2 Desks' });
-    const main = within(menu).getByRole('menuitemradio', { name: 'Main line' });
-    const emergencies = within(menu).getByRole('menuitemradio', { name: 'Emergencies' });
     const chenRow = within(menu).getByRole('menuitemradio', { name: 'Chen & Co. CPA 1 Desk' });
     const newBusiness = within(menu).getByRole('menuitem', { name: 'New business' });
     const items = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemradio"]')];
-    await expect(items).toEqual([riveraRow, main, emergencies, chenRow, newBusiness]);
-    const desks = within(menu).getByRole('group', { name: 'Desks in Rivera Plumbing' });
-    await expect(within(desks).getAllByRole('menuitemradio')).toEqual([main, emergencies]);
+    await expect(items).toEqual([riveraRow, chenRow, newBusiness]);
+    await expect(within(menu).queryByRole('group')).toBeNull();
+    await expect(within(menu).queryByText(MAIN_LINE.name)).toBeNull();
+    await expect(within(menu).queryByText(EMERGENCIES.name)).toBeNull();
 
     // new_business_is_last
     const last = items[items.length - 1] as HTMLElement;
     await expect(last).toBe(newBusiness);
     await expect(last).not.toHaveAttribute('aria-checked');
 
-    // The current business and Desk are checked, and the Desk sits on the selected fill.
+    // The current business is checked.
     await expect(riveraRow).toHaveAttribute('aria-checked', 'true');
-    await expect(main).toHaveAttribute('aria-checked', 'true');
-    await expect(emergencies).toHaveAttribute('aria-checked', 'false');
     await expect(chenRow).toHaveAttribute('aria-checked', 'false');
-    expectComputed(main, { backgroundColor: 'rgb(60, 57, 47)' });
 
-    // menu_arrows_and_escape: focus starts on the current Desk, the arrows move through every
+    // menu_arrows_and_escape: focus starts on the current business, the arrows move through every
     // item and wrap, Home and End jump, and only the focused item is in the tab order.
-    await expect(main).toHaveFocus();
-    await userEvent.keyboard('{ArrowDown}');
-    await expect(emergencies).toHaveFocus();
+    await expect(riveraRow).toHaveFocus();
     await userEvent.keyboard('{ArrowDown}');
     await expect(chenRow).toHaveFocus();
     await userEvent.keyboard('{ArrowDown}');
@@ -150,27 +143,29 @@ export const RiveraTwoDesks: Story = {
     // Opened from the business row, Escape returns focus to the row.
     const opener = canvas.getByRole('button', { name: OPENER });
     await userEvent.click(opener);
-    await expect(within(canvas.getByRole('menu')).getByRole('menuitemradio', { name: 'Main line' })).toHaveFocus();
-    await userEvent.keyboard('{ArrowUp}{Escape}');
+    await expect(within(canvas.getByRole('menu')).getByRole('menuitemradio', { name: 'Rivera Plumbing 2 Desks' })).toHaveFocus();
+    await userEvent.keyboard('{ArrowDown}{Escape}');
     await expect(args.onClose).toHaveBeenCalledTimes(2);
     await expect(canvas.queryByRole('menu')).toBeNull();
     await expect(opener).toHaveFocus();
     await expect(args.onPick).not.toHaveBeenCalled();
 
-    // Picking another Desk reports it, closes the menu and returns focus to the row.
+    // Another business opens at its first Desk. Picking it reports it, closes the menu and returns
+    // focus to the row.
     await userEvent.keyboard('{Enter}');
     await userEvent.keyboard('{ArrowDown}{Enter}');
     await expect(args.onPick).toHaveBeenCalledTimes(1);
-    await expect(args.onPick).toHaveBeenLastCalledWith({ businessId: 'biz-rivera', deskId: EMERGENCIES.id });
+    await expect(args.onPick).toHaveBeenLastCalledWith({ businessId: 'biz-chen', deskId: CHEN_MAIN.id });
     await expect(args.onClose).toHaveBeenCalledTimes(3);
     await expect(opener).toHaveFocus();
 
-    // Another business opens at its first Desk.
+    // A click picks it too.
     await userEvent.keyboard('{Enter}');
     await userEvent.click(within(canvas.getByRole('menu')).getByRole('menuitemradio', { name: 'Chen & Co. CPA 1 Desk' }));
+    await expect(args.onPick).toHaveBeenCalledTimes(2);
     await expect(args.onPick).toHaveBeenLastCalledWith({ businessId: 'biz-chen', deskId: CHEN_MAIN.id });
 
-    // The current Desk changes nothing: the menu only closes.
+    // The current business changes nothing: the menu only closes.
     await userEvent.click(opener);
     await userEvent.keyboard('{Enter}');
     await expect(args.onPick).toHaveBeenCalledTimes(2);

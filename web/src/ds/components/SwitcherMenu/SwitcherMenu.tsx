@@ -1,18 +1,18 @@
-import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 
 import { Icon } from '../../icons/index.tsx';
 import { initialsOf } from '../Sidebar/Sidebar.tsx';
 
 import './SwitcherMenu.css';
 
-/** A business the owner can switch to, with its Desks in their order. */
+/** A business the owner can switch to, with its Desks in their order (the first is where it opens). */
 export interface SwitcherBusiness {
   id: string;
   name: string;
   desks: { id: string; name: string }[];
 }
 
-/** Where the owner is going: always a Desk, with the business it belongs to. */
+/** Where the owner is going: another business, at its first Desk. */
 export interface SwitcherPick {
   businessId: string;
   deskId: string;
@@ -22,8 +22,7 @@ export interface SwitcherMenuProps {
   /** The owner's businesses, in the order the menu lists them. */
   businesses: SwitcherBusiness[];
   currentBusinessId: string;
-  currentDeskId: string;
-  /** Another Desk was picked: one of the current business's, or another business's first Desk. */
+  /** Another business was picked; the menu passes its first Desk. */
   onPick: (pick: SwitcherPick) => void;
   /** "New business" was picked. */
   onNewBusiness: () => void;
@@ -40,25 +39,22 @@ function deskCount(n: number): string {
 }
 
 /**
- * The owner's businesses as a menu, with the current business's Desks under it and "New business"
- * last. It opens with focus on the current Desk; the arrow keys, Home and End move through it,
- * Enter or Space picks, and Escape closes it and returns focus to whatever opened it.
+ * The owner's businesses as a menu, with "New business" last. The current business's Desks are
+ * picked in the sidebar's Desk picker, not here. It opens with focus on the current business; the
+ * arrow keys, Home and End move through it, Enter or Space picks, and Escape closes it and returns
+ * focus to whatever opened it.
  */
-export function SwitcherMenu({ businesses, currentBusinessId, currentDeskId, onPick, onNewBusiness, onClose }: SwitcherMenuProps) {
+export function SwitcherMenu({ businesses, currentBusinessId, onPick, onNewBusiness, onClose }: SwitcherMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLElement | null>(null);
-  const groupId = useId();
-  const current = businesses.find((business) => business.id === currentBusinessId);
-  const currentDesk = current?.desks.find((desk) => desk.id === currentDeskId);
-  const [active, setActive] = useState(() =>
-    currentDesk ? `desk:${currentDesk.id}` : current ? `business:${current.id}` : (businesses[0] ? `business:${businesses[0].id}` : 'new'),
-  );
+  const current = businesses.find((business) => business.id === currentBusinessId) ?? businesses[0];
+  const [active, setActive] = useState(() => (current ? `business:${current.id}` : 'new'));
 
   // The latest onClose, for the document listener below.
   const close = useRef(onClose);
   close.current = onClose;
 
-  // Focus moves to the current Desk when the menu opens. When it goes, focus returns to what
+  // Focus moves to the current business when the menu opens. When it goes, focus returns to what
   // opened it, unless the owner has moved focus somewhere else since.
   useLayoutEffect(() => {
     const menu = ref.current;
@@ -133,59 +129,31 @@ export function SwitcherMenu({ businesses, currentBusinessId, currentDeskId, onP
   );
 
   return (
-    <div ref={ref} role="menu" aria-label="Switch business or Desk" className="cd-switcher-menu" onKeyDown={onKeyDown}>
+    <div ref={ref} role="menu" aria-label="Switch business" className="cd-switcher-menu" onKeyDown={onKeyDown}>
       {businesses.map((business) => {
         const isCurrent = business.id === currentBusinessId;
         const first = business.desks[0];
-        return (
-          <Fragment key={business.id}>
-            {item(`business:${business.id}`, {
-              role: 'menuitemradio',
-              checked: isCurrent,
-              disabled: !isCurrent && first === undefined,
-              className: 'cd-switcher-menu__business',
-              onSelect: () => pick(isCurrent || !first ? null : { businessId: business.id, deskId: first.id }),
-              children: (
-                <>
-                  <span className="cd-switcher-menu__monogram cd-type-count" aria-hidden="true">
-                    {initialsOf(business.name)}
-                  </span>
-                  <span className="cd-switcher-menu__text">
-                    <span className="cd-switcher-menu__name cd-type-control" data-copy="user">
-                      {business.name}
-                    </span>
-                    <span className="cd-switcher-menu__caption cd-type-caption">{deskCount(business.desks.length)}</span>
-                  </span>
-                  {isCurrent ? <Icon name="check" size={16} className="cd-switcher-menu__check" /> : null}
-                </>
-              ),
-            })}
-            {isCurrent && business.desks.length > 0 ? (
-              <div role="group" aria-labelledby={groupId} className="cd-switcher-menu__desks">
-                <span id={groupId} className="cd-switcher-menu__group-label cd-type-caption">
-                  Desks in <span data-copy="user">{business.name}</span>
+        return item(`business:${business.id}`, {
+          role: 'menuitemradio',
+          checked: isCurrent,
+          disabled: !isCurrent && first === undefined,
+          className: 'cd-switcher-menu__business',
+          onSelect: () => pick(isCurrent || !first ? null : { businessId: business.id, deskId: first.id }),
+          children: (
+            <>
+              <span className="cd-switcher-menu__monogram cd-type-count" aria-hidden="true">
+                {initialsOf(business.name)}
+              </span>
+              <span className="cd-switcher-menu__text">
+                <span className="cd-switcher-menu__name cd-type-control" data-copy="user">
+                  {business.name}
                 </span>
-                {business.desks.map((desk) => {
-                  const isCurrentDesk = desk.id === currentDeskId;
-                  return item(`desk:${desk.id}`, {
-                    role: 'menuitemradio',
-                    checked: isCurrentDesk,
-                    className: 'cd-switcher-menu__desk',
-                    onSelect: () => pick(isCurrentDesk ? null : { businessId: business.id, deskId: desk.id }),
-                    children: (
-                      <>
-                        <span className="cd-switcher-menu__name cd-type-control" data-copy="user">
-                          {desk.name}
-                        </span>
-                        {isCurrentDesk ? <Icon name="check" size={16} className="cd-switcher-menu__check" /> : null}
-                      </>
-                    ),
-                  });
-                })}
-              </div>
-            ) : null}
-          </Fragment>
-        );
+                <span className="cd-switcher-menu__caption cd-type-caption">{deskCount(business.desks.length)}</span>
+              </span>
+              {isCurrent ? <Icon name="check" size={16} className="cd-switcher-menu__check" /> : null}
+            </>
+          ),
+        });
       })}
       <div role="separator" className="cd-switcher-menu__separator" />
       {item('new', {
