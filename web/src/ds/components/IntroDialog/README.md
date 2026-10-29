@@ -9,7 +9,7 @@
 
 ## What it does
 
-- It is a native modal `<dialog>` that draws its own scrim (`scrim`, fixed to the whole window), so the page behind is inert and the consumer needs no portal or stacking order.
+- It is a native modal `<dialog>` that draws its own scrim (`scrim`, fixed to the whole window), so the page behind is inert and the consumer needs no portal or stacking order. While it is open the page behind doesn't scroll.
 - It can't be dismissed. There is no close button. Escape does nothing: the key is stopped before the browser handles it, a cancel is always refused, and `closedby="none"` is set where browsers support it (Chrome otherwise closes a modal on a second Escape). A press on the scrim does nothing, and doesn't move focus either.
 - Focus starts in the passcode field. Tab and Shift+Tab go round the dialog's own controls and nowhere else.
 - Enter in the field or the button calls `onSubmit` once, with the trimmed passcode. The button is disabled while the trimmed field is empty.
@@ -40,7 +40,7 @@
 - The passcode field is `size-control-main` tall at `radius-control`, on `fill-card`, outlined in `line-field`: a field's outline is its boundary, so it reaches 3:1 against the dialog.
 - The content column (padded 28 px) holds the wordmark and the "Demo" pill, the title in `.cd-type-intro-title` with balanced lines (the dialog's name) and the intro (its description), "Things to try" with each icon centered against its title and detail, and at the bottom the passcode form and the `ConceptFooter`.
 - The illustration column is `size-intro-illustration` wide: a `clay` field with two soft arcs in `illustration-arc` and two light cards, Dana's request and Claude's booked reply with two receipts. It is `aria-hidden` and holds nothing focusable. Its cards are the only light surface in the product, and the `illustration-*` colors are for them alone. Its date and names are fixed illustration copy, never a real booking.
-- Under 720 px (a media query: the dialog always fills the window, so the window's width is the dialog's) the illustration isn't drawn, the panel has 16 px of scrim around it, and the field and button stack with the button full width. In a short window the panel scrolls inside itself.
+- The breakpoints are media queries, because the dialog always fills the window, so the window's width is the dialog's. Under 960 px, where the panel can't keep both columns at full width, the illustration isn't drawn and the panel is one column at most 560 px wide. Under 720 px the panel has 16 px of scrim around it, and the field and button stack with the button full width. In a short window the panel scrolls inside itself.
 
 ## Props
 

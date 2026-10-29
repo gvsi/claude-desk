@@ -140,6 +140,8 @@ export const Default: Story = {
     expectComputed(dialog, { position: 'fixed', backgroundColor: 'rgba(0, 0, 0, 0.5)' });
     const scrim = dialog.getBoundingClientRect();
     await expect([scrim.left, scrim.top, scrim.width, scrim.height]).toEqual([0, 0, window.innerWidth, window.innerHeight]);
+    // The page behind doesn't scroll while the dialog is open.
+    expectComputed(document.documentElement, { overflowX: 'hidden', overflowY: 'hidden' });
 
     // focus_stays_inside: Tab and Shift+Tab cycle between the field and the button, and nowhere else.
     await userEvent.type(field, 'rivera-demo');
@@ -194,6 +196,9 @@ export const Default: Story = {
     await expect(art).toHaveAttribute('aria-hidden', 'true');
     await expect(art?.querySelectorAll(FOCUSABLE)).toHaveLength(0);
     expectComputed(art as HTMLElement, { backgroundColor: 'rgb(224, 137, 104)', width: '400px' });
+    // Claude's line on the reply card is in serif, like everything Claude says.
+    const reply = art?.querySelector('.cd-intro__reply') as HTMLElement;
+    expectComputed(reply, { fontFamily: /Source Serif 4/, fontSize: '16px', lineHeight: '24px', fontWeight: '380' });
   },
 };
 
@@ -293,5 +298,24 @@ export const Phone: Story = {
     await expect(buttonBox.top).toBeGreaterThanOrEqual(fieldBox.bottom);
     await expect([buttonBox.left, buttonBox.width]).toEqual([fieldBox.left, fieldBox.width]);
     await expect(field).toHaveFocus();
+  },
+};
+
+export const Tablet: Story = {
+  globals: { viewport: { value: 'tablet', isRotated: false } },
+  play: async ({ canvas, canvasElement }) => {
+    // Below 960 px the panel can't hold both columns at full width, so the illustration goes and the
+    // content keeps a comfortable measure: one column, at most 560 px wide, centered.
+    await expect(window.innerWidth).toBe(768);
+    const field = canvas.getByLabelText('Passcode');
+    await expect(field.getBoundingClientRect().width).toBeGreaterThanOrEqual(200);
+    await expect(canvasElement.querySelector('.cd-intro__illustration')).not.toBeVisible();
+    const panel = canvasElement.querySelector('.cd-intro__panel') as HTMLElement;
+    const panelBox = panel.getBoundingClientRect();
+    await expect(panelBox.width).toBe(560);
+    await expect(Math.abs(panelBox.left - (window.innerWidth - panelBox.right))).toBeLessThanOrEqual(1);
+    // The field and the button still share a row at this width.
+    const button = canvas.getByRole('button', { name: 'Start the demo' });
+    await expect(button.getBoundingClientRect().top).toBe(field.getBoundingClientRect().top);
   },
 };

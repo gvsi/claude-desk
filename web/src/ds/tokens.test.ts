@@ -83,6 +83,10 @@ describe('design tokens', () => {
       letterSpacing: '-0.2px',
       opticalSize: 28,
     });
+    // So does Claude's line on the illustration's reply card.
+    const reply = voice?.styles.find((style) => style.name === 'illustration-reply');
+    expect(reply).toMatchObject({ fontSize: '16px', lineHeight: '24px', fontWeight: 380, opticalSize: 20 });
+    expect(reply).not.toHaveProperty('letterSpacing');
   });
 
   test('one_dark_theme_only', () => {

@@ -255,7 +255,7 @@ function Illustration() {
           <p className="cd-intro__who cd-type-body">
             Rivera Plumbing <span className="cd-intro__where cd-type-caption">Claude, an AI</span>
           </p>
-          <p className="cd-intro__reply">You’re booked, Dana. Maria will text you when she’s on her way.</p>
+          <p className="cd-intro__reply cd-type-illustration-reply">You’re booked, Dana. Maria will text you when she’s on her way.</p>
           <div className="cd-intro__booked">
             <p className="cd-intro__booked-label cd-type-caption">
               <Icon name="check" size={14} className="cd-intro__check" />

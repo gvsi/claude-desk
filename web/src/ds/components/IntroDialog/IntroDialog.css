@@ -3,8 +3,9 @@
    and shadow-dialog: the content column, then the clay illustration column at
    size-intro-illustration. Clay is a field here and nowhere else but the mark.
 
-   Under 720 px (a media query: the dialog always fills the window, so the window's width is the
-   dialog's) the illustration isn't drawn and the field and button stack. A short window scrolls
+   Media queries, because the dialog always fills the window, so the window's width is the
+   dialog's. Under 960 px the illustration isn't drawn and the panel is one column, at most 560 px;
+   under 720 px the scrim margin is 16 px and the field and button stack. A short window scrolls
    the panel inside itself. Nothing moves beyond the button's own transitions. */
 
 .cd-intro {
@@ -27,6 +28,11 @@
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+/* While it is open the page behind doesn't scroll. */
+:root:has(.cd-intro[open]) {
+  overflow: hidden;
 }
 
 /* The dialog draws the scrim itself, so the browser's backdrop stays clear. */
@@ -266,15 +272,6 @@
   margin-top: var(--space-2);
 }
 
-/* Claude's reply, in serif. */
-.cd-intro__reply {
-  font-family: var(--font-serif);
-  font-size: 16px;
-  line-height: 24px;
-  font-weight: 380;
-  font-variation-settings: 'opsz' 20;
-}
-
 .cd-intro__booked {
   padding: var(--space-10) var(--space-12);
   border: 1px solid var(--illustration-line);
@@ -324,17 +321,22 @@
   background: var(--illustration-handled);
 }
 
-@media (max-width: 719.98px) {
-  .cd-intro {
-    padding: var(--space-16);
-  }
-
+/* Below 960 px the two columns can't both have their width, so the illustration goes and the
+   content keeps a comfortable measure. */
+@media (max-width: 959.98px) {
   .cd-intro__panel {
     grid-template-columns: minmax(0, 1fr);
+    max-width: 560px;
   }
 
   .cd-intro__illustration {
     display: none;
+  }
+}
+
+@media (max-width: 719.98px) {
+  .cd-intro {
+    padding: var(--space-16);
   }
 
   .cd-intro__row {
