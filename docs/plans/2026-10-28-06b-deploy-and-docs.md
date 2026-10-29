@@ -314,3 +314,11 @@ Round 2 (seam review, 2026-10-29): seam-03 Friday's deploy gated by tier 1 and t
 PR round 2, 2026-10-29: the deployment guide names the organization's $1,000 monthly limit, and the path to MVP task drafts the written documents where the owner writes them, not in the repo.
 
 PR round 3, 2026-10-29: the header names the review panel. Nothing in this plan's tasks changes.
+
+PR #13 round 1, 2026-10-29: seats Opus (P1 1, P2 1, P3 9) and Sol (P2 2, P3 1); 13 findings, 12 fixed, 1 invalid (Sol's daily model budget: the API reads `DAILY_MODEL_BUDGET_CENTS` as a code constant, not from the environment). Changes:
+- Migrations run as RDS's master user, which has CREATEROLE and CREATEDB but not SUPERUSER: 0004 to 0006 lend the admin SET on each new owner role and that role CREATE on the schema for the `ALTER … OWNER` statements only, then take both back; 0004 sets the resolvers' grants while the admin still owns them. A superuser's run ends exactly as before.
+- Every migration must pass the RDS-like admin test (`backend/tests/ops/test_admin.py::test_migrations_reach_head_as_an_admin_without_superuser`).
+- The deployed image is bound to `HEAD`: `make image image-check KERNEL_TAG=<HEAD>`, every image input passed to `cdk deploy`, and `DESK_IMAGE_DIR`, `DESK_IMAGE_FILE` and `DESK_KERNEL_IMAGE` refused.
+- Smoke: the visitor cookie must be `SameSite=Strict` on its own Desk's path; `origin_groups_locked` reads the Express balancer's groups with describe calls, the TCP probes kept as a second signal; image smoke connects to 8700 before trusting a refused 8701.
+- Both balancers append to `X-Forwarded-For`; DeskData's two functions run on arm64; the API runs with `--no-access-log`; `owner-set=<VersionId>` checked against `AWSCURRENT`, each secret's generator frozen by a test; `deploy.sh --data-only` deploys the first DeskData behind the account check; image smoke migrates the checkout's own database; the approval wording matches `--require-approval broadening`.
+Deferred: none.
