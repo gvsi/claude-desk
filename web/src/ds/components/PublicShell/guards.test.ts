@@ -2,6 +2,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
+import type { PublicDesk } from '../../../api/contracts.ts';
 import { aboutLinkHref, brandColor, openStatusLine } from './guards.ts';
 import { PublicShell, type PublicOpenStatus, type PublicShellProps } from './PublicShell.tsx';
 
@@ -56,7 +57,7 @@ describe('PublicShell guards', () => {
     // worked out on the page, so the shell has none. Its one status line is the kernel's open
     // status, `PublicDesk.open_status` as served, of which it reads the words and the boolean.
     expectTypeOf<PublicShellProps>().not.toHaveProperty('statusLine');
-    expectTypeOf<PublicShellProps['openStatus']>().toEqualTypeOf<PublicOpenStatus | undefined>();
+    expectTypeOf<PublicShellProps['openStatus']>().toEqualTypeOf<PublicDesk['open_status'] | undefined>();
     const base: PublicShellProps = {
       brand: { name: 'Rivera Plumbing', tagline: 'Main line', monogram: 'R', field: '#1F4E4A', ink: '#ffffff', inkSecondary: '#e6e6e6', accent: '#B87333' },
       ownerName: 'Maria Rivera',
