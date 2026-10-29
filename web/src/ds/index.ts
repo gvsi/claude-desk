@@ -99,6 +99,9 @@ export {
   type DemoInboxPanelProps,
 } from './components/DemoInboxPanel/DemoInboxPanel.tsx';
 
+// Payments
+export { MockCheckout, type MockCheckoutProps } from './components/MockCheckout/MockCheckout.tsx';
+
 // Reply cards
 export { ReplyCard, type ReplyCardProps } from './components/ReplyCard/ReplyCard.tsx';
 export { cardView, type CardView } from './components/ReplyCard/cardView.ts';
