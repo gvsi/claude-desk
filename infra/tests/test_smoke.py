@@ -227,7 +227,22 @@ def aws():
         stub.deactivate()
 
 
-def expect_task(stubs, public_ip: str | None = "127.0.0.1", family: str = "desk") -> None:
+APP_GROUP = "sg-0123456789abcdef0"
+# DeskData's app group: the API on 8700 from the VPC's range, which holds the load balancer.
+APP_RULES = [{"IpProtocol": "tcp", "FromPort": 8700, "ToPort": 8700,
+              "IpRanges": [{"CidrIp": "10.0.0.0/16", "Description": "The API, from the load balancer in this VPC"}]}]
+
+
+def expect_task(stubs, public_ip: str | None = "127.0.0.1", family: str = "desk", groups: list[str] | None = None,
+                permissions: list[dict] | None = None, found: list[str] | None = None,
+                group_error: str | None = None) -> None:
+    """The describe calls task_ports_refused makes, in order; by default one app task in the app group.
+
+    `found` is the groups the security group describe returns (the interface's, unless given), and
+    `group_error` an error code that describe raises instead.
+    """
+    groups = [APP_GROUP] if groups is None else groups
+    found = groups if found is None else found
     stubs["ecs"].add_response("list_tasks", {"taskArns": [TASK_ARN]}, {"cluster": CLUSTER, "desiredStatus": "RUNNING"})
     task = {
         "taskArn": TASK_ARN,
@@ -241,11 +256,23 @@ def expect_task(stubs, public_ip: str | None = "127.0.0.1", family: str = "desk"
                               {"cluster": CLUSTER, "tasks": [TASK_ARN]})
     if family != "desk":
         return
-    interface = {"NetworkInterfaceId": ENI, "PrivateIpAddress": "10.0.0.12"}
+    interface = {"NetworkInterfaceId": ENI, "PrivateIpAddress": "10.0.0.12",
+                 "Groups": [{"GroupId": group, "GroupName": "desk-app"} for group in groups]}
     if public_ip is not None:
         interface["Association"] = {"PublicIp": public_ip}
     stubs["ec2"].add_response("describe_network_interfaces", {"NetworkInterfaces": [interface]},
                               {"NetworkInterfaceIds": [ENI]})
+    if not groups:
+        return
+    if group_error is not None:
+        stubs["ec2"].add_client_error("describe_security_groups", group_error, "not allowed")
+        return
+    stubs["ec2"].add_response(
+        "describe_security_groups",
+        {"SecurityGroups": [{"GroupId": group, "IpPermissions": APP_RULES if permissions is None else permissions}
+                            for group in found]},
+        {"GroupIds": groups},
+    )
 
 
 def cloudfront_443(prefix_list: str = CLOUDFRONT_LIST) -> dict:
@@ -494,6 +521,59 @@ def test_task_ports_fail_closed_without_a_task_to_probe(smoke, aws, capsys, case
     assert results(capsys.readouterr().out) == {"task_ports_refused": "FAIL"}
 
 
+def test_task_ports_refused_reads_the_task_groups(smoke, aws, capsys):
+    """What the task's own groups admit, read with describe calls, beside the TCP probes, which a
+    network that filters 8700 and 8701 would refuse too."""
+    clients, stubs = aws
+    expect_task(stubs)
+    with Stub(Behavior()) as stub:
+        assert run(smoke, stub, "--cluster", CLUSTER, "--only", "task_ports_refused", clients=clients) == 0
+    out = capsys.readouterr().out
+    assert results(out) == {"task_ports_refused": "pass"}
+    assert APP_GROUP in out
+
+
+@pytest.mark.parametrize(
+    "permissions",
+    [
+        [{**APP_RULES[0], "IpRanges": [{"CidrIp": "0.0.0.0/0"}]}],
+        [*APP_RULES, {"IpProtocol": "tcp", "FromPort": 8701, "ToPort": 8701, "Ipv6Ranges": [{"CidrIpv6": "::/0"}]}],
+        [*APP_RULES, {"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22, "IpRanges": [{"CidrIp": "0.0.0.0/0"}]}],
+        [*APP_RULES, {"IpProtocol": "-1", "IpRanges": [{"CidrIp": "0.0.0.0/0"}]}],
+        [{**APP_RULES[0], "IpRanges": [{"CidrIp": "198.51.100.0/24"}]}],
+        [*APP_RULES, {"IpProtocol": "tcp", "FromPort": 8000, "ToPort": 9000,
+                      "IpRanges": [{"CidrIp": "203.0.113.0/24"}]}],
+        [*APP_RULES, {"IpProtocol": "tcp", "FromPort": 8701, "ToPort": 8701,
+                      "PrefixListIds": [{"PrefixListId": OTHER_LIST}]}],
+    ],
+    ids=["world_8700", "world_v6_8701", "world_22", "world_all_traffic", "public_8700", "public_range_over_8701",
+         "prefix_list_8701"],
+)
+def test_task_ports_refused_fails_on_a_group_open_beyond_the_vpc(smoke, aws, capsys, permissions):
+    """The probes refuse here (closed local ports); the groups alone fail the check."""
+    clients, stubs = aws
+    expect_task(stubs, permissions=permissions)
+    with Stub(Behavior()) as stub:
+        assert run(smoke, stub, "--cluster", CLUSTER, "--only", "task_ports_refused", clients=clients) == 1
+    out = capsys.readouterr().out
+    assert results(out) == {"task_ports_refused": "FAIL"}
+    assert APP_GROUP in out
+
+
+@pytest.mark.parametrize("case", ["no_groups", "describe_error", "group_not_found"])
+def test_task_ports_refused_fails_closed_without_the_groups(smoke, aws, capsys, case):
+    clients, stubs = aws
+    if case == "no_groups":
+        expect_task(stubs, groups=[])
+    elif case == "describe_error":
+        expect_task(stubs, group_error="UnauthorizedOperation")
+    else:
+        expect_task(stubs, found=[])
+    with Stub(Behavior()) as stub:
+        assert run(smoke, stub, "--cluster", CLUSTER, "--only", "task_ports_refused", clients=clients) == 1
+    assert results(capsys.readouterr().out) == {"task_ports_refused": "FAIL"}
+
+
 def test_without_a_passcode_the_signed_in_checks_are_not_run(smoke, capsys):
     with Stub(Behavior()) as stub:
         assert run(smoke, stub, passcode=None) == 2
@@ -540,6 +620,58 @@ def test_origin_groups_locked_passes_when_only_cloudfront_reaches_443(smoke, aws
 
 
 WORLD_443 = {"IpProtocol": "tcp", "FromPort": 443, "ToPort": 443, "IpRanges": [{"CidrIp": "0.0.0.0/0"}]}
+VPC_RANGE = "10.0.0.0/16"
+
+
+def express_edge_kept() -> list[dict]:
+    """A balancer group as ExpressEdge's lock leaves one (test_express_edge's
+    test_replaces_world_ingress_with_the_prefix_list): CloudFront admitted on 443, the world's sources
+    revoked, and the private ones kept: another group on 443, a VPC range on 80, and the group's
+    reference to itself, which admits all traffic."""
+    return [
+        cloudfront_443(),
+        {"IpProtocol": "tcp", "FromPort": 443, "ToPort": 443,
+         "UserIdGroupPairs": [{"GroupId": "sg-0f0e0d0c0b0a09080", "UserId": "123456789012"}]},
+        {"IpProtocol": "tcp", "FromPort": 80, "ToPort": 80, "IpRanges": [{"CidrIp": VPC_RANGE}]},
+        {"IpProtocol": "tcp", "FromPort": 443, "ToPort": 443, "IpRanges": [{"CidrIp": VPC_RANGE}]},
+        {"IpProtocol": "-1", "UserIdGroupPairs": [{"GroupId": LB_GROUP, "UserId": "123456789012"}]},
+    ]
+
+
+def test_origin_groups_locked_passes_on_the_private_sources_express_edge_keeps(smoke, aws, capsys):
+    """Express may leave private sources on its balancer's group, and the lock keeps them on purpose:
+    traffic from them can only come from inside the VPC. A correct deploy's smoke passes on them."""
+    clients, stubs = aws
+    expect_balancer(stubs, permissions=express_edge_kept())
+    with Stub(Behavior()) as stub:
+        assert _origin_groups(smoke, clients, stub) == 0
+    out = capsys.readouterr().out
+    assert results(out) == {"origin_groups_locked": "pass"}, out
+
+
+@pytest.mark.parametrize(
+    "opened",
+    [
+        {**WORLD_443, "Ipv6Ranges": [{"CidrIpv6": "::/0"}]},
+        {"IpProtocol": "tcp", "FromPort": 80, "ToPort": 80,
+         "IpRanges": [{"CidrIp": "0.0.0.0/0"}, {"CidrIp": VPC_RANGE}]},
+    ],
+    ids=["world_443", "world_beside_the_vpc_on_80"],
+)
+def test_origin_groups_locked_fails_when_the_kept_sources_come_with_the_world(smoke, aws, capsys, opened):
+    clients, stubs = aws
+    expect_balancer(stubs, permissions=[*express_edge_kept(), opened])
+    with Stub(Behavior()) as stub:
+        assert _origin_groups(smoke, clients, stub) == 1
+    out = capsys.readouterr().out
+    assert results(out) == {"origin_groups_locked": "FAIL"}
+    assert f"{LB_GROUP} admits port {opened['FromPort']} from anywhere" in out
+
+
+def test_origin_groups_locked_reads_the_kept_sources_from_express_edge(smoke):
+    """One rule for what may stay beside CloudFront's list, in the lock's own code, not a copy here."""
+    edge = smoke.INFRA / "functions" / "express_edge" / "index.py"
+    assert smoke._express_edge().kept_source.__code__.co_filename == str(edge)
 
 
 @pytest.mark.parametrize(
@@ -548,16 +680,19 @@ WORLD_443 = {"IpProtocol": "tcp", "FromPort": 443, "ToPort": 443, "IpRanges": [{
         [cloudfront_443(), WORLD_443],
         [cloudfront_443(), {"IpProtocol": "tcp", "FromPort": 80, "ToPort": 80, "Ipv6Ranges": [{"CidrIpv6": "::/0"}]}],
         [cloudfront_443(), {"IpProtocol": "-1", "IpRanges": [{"CidrIp": "0.0.0.0/0"}]}],
-        [cloudfront_443(), {**WORLD_443, "IpRanges": [{"CidrIp": "10.0.0.0/16"}]}],
+        [cloudfront_443(), {**WORLD_443, "IpRanges": [{"CidrIp": "198.51.100.0/24"}]}],
+        [cloudfront_443(), {**WORLD_443, "IpRanges": [{"CidrIp": VPC_RANGE}, {"CidrIp": "198.51.100.7/32"}]}],
+        [cloudfront_443(), {**WORLD_443, "IpRanges": [{"CidrIp": "10.0.0.0/7"}]}],
+        [cloudfront_443(), {**WORLD_443, "Ipv6Ranges": [{"CidrIpv6": "2001:db8::/32"}]}],
         [cloudfront_443(), {**WORLD_443, "FromPort": 400, "ToPort": 500, "IpRanges": [{"CidrIp": "192.0.2.0/24"}]}],
         [cloudfront_443(), cloudfront_443(OTHER_LIST)],
-        [cloudfront_443(), {"IpProtocol": "tcp", "FromPort": 443, "ToPort": 443,
-                            "UserIdGroupPairs": [{"GroupId": "sg-0f0e0d0c0b0a09080"}]}],
         [],
         [cloudfront_443(OTHER_LIST)],
+        [express_edge_kept()[1]],
     ],
-    ids=["world_443", "world_v6_80", "world_all_traffic", "cidr_443", "cidr_range_over_443", "other_prefix_list",
-         "group_443", "no_ingress", "only_another_prefix_list"],
+    ids=["world_443", "world_v6_80", "world_all_traffic", "public_cidr_443", "public_beside_private_443",
+         "wider_than_private_443", "public_v6_443", "cidr_range_over_443", "other_prefix_list", "no_ingress",
+         "only_another_prefix_list", "only_kept_sources"],
 )
 def test_origin_groups_locked_fails_on_any_other_ingress(smoke, aws, capsys, permissions):
     clients, stubs = aws

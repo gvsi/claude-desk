@@ -11,11 +11,14 @@ load balancer named by `LoadBalancerArn`, this:
   X-Forwarded-For, which is the visitor's address only while the balancer appends CloudFront's;
 - on each of the load balancer's security groups, revokes every ingress rule open to 0.0.0.0/0
   or ::/0, then admits 443 only from `PrefixListId`, CloudFront's origin-facing prefix list.
+  The private sources a group may also carry are kept on purpose (`kept_source`).
 
 Delete changes nothing (the service, and with it the load balancer, is going away). Any error
 raises, so the provider reports FAILED and the stack rolls back. Revoking comes before admitting,
 so a failure part-way leaves the load balancer closed, never open.
 """
+
+import ipaddress
 
 import boto3
 
@@ -23,6 +26,8 @@ IDLE_TIMEOUT = {"Key": "idle_timeout.timeout_seconds", "Value": "300"}
 XFF_APPEND = {"Key": "routing.http.xff_header_processing.mode", "Value": "append"}
 HTTPS = 443
 WORLD_V4, WORLD_V6 = "0.0.0.0/0", "::/0"
+# The private address ranges (RFC 1918, and IPv6 unique local addresses): no internet traffic comes from them.
+PRIVATE_RANGES = tuple(map(ipaddress.ip_network, ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7")))
 
 
 def _client(name: str):
@@ -95,6 +100,26 @@ def _world_part(permission: dict) -> dict | None:
     if v6:
         part["Ipv6Ranges"] = v6
     return part
+
+
+def kept_source(kind: str, value: str) -> bool:
+    """Whether an ingress source is one the lock keeps on purpose: another security group, or a range
+    inside the private ranges, so traffic from it can only come from inside the VPC or a network
+    joined to it. `kind` is EC2's key for the source: `CidrIp`, `CidrIpv6`, `GroupId` or `PrefixListId`.
+
+    The lock revokes the world's sources only. Any other source on 443 (a public range, another
+    prefix list) is one nothing in this stack writes, and smoke.py's origin_groups_locked, which
+    reads this function, fails on it.
+    """
+    if kind == "GroupId":
+        return bool(value)
+    if kind not in ("CidrIp", "CidrIpv6"):
+        return False
+    try:
+        network = ipaddress.ip_network(value, strict=False)
+    except ValueError:
+        return False
+    return any(network.version == private.version and network.subnet_of(private) for private in PRIVATE_RANGES)
 
 
 def _admits(permission: dict, prefix_list: str) -> bool:

@@ -261,3 +261,30 @@ def test_missing_properties_fail(edge, missing):
 
     with pytest.raises(ValueError, match=missing):
         module.handler(event, None)
+
+
+@pytest.mark.parametrize(
+    ("kind", "value", "kept"),
+    [
+        ("GroupId", OTHER_GROUP, True),
+        ("GroupId", GROUP, True),                          # the group itself
+        ("CidrIp", "10.0.0.0/16", True),                   # the VPC's own range
+        ("CidrIp", "172.20.1.0/24", True),
+        ("CidrIp", "192.168.0.10/32", True),
+        ("CidrIpv6", "fd12:3456:789a::/48", True),         # unique local
+        ("CidrIp", "0.0.0.0/0", False),
+        ("CidrIpv6", "::/0", False),
+        ("CidrIp", "198.51.100.0/24", False),              # a public range
+        ("CidrIp", "10.0.0.0/7", False),                   # wider than 10.0.0.0/8, so public addresses too
+        ("CidrIpv6", "2001:db8::/32", False),
+        ("PrefixListId", PREFIX_LIST, False),              # CloudFront's list is admitted, never "kept"
+        ("PrefixListId", "pl-0f1e2d3c4b5a69788", False),
+        ("CidrIp", "not-a-range", False),
+        ("GroupId", "", False),
+    ],
+)
+def test_keeps_only_other_groups_and_private_ranges(edge, kind, value, kept):
+    """The sources the lock leaves on purpose beside CloudFront's: traffic from them can only come
+    from inside the VPC or a network joined to it. smoke.py's origin_groups_locked reads this rule."""
+    module, _, _ = edge
+    assert module.kept_source(kind, value) is kept
