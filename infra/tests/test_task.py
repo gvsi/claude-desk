@@ -38,6 +38,9 @@ API_COMMAND = [
     "--host", "0.0.0.0", "--port", "8700",
     # Above the load balancer's 300 s idle timeout, so the balancer always closes first.
     "--timeout-keep-alive", "310",
+    # No access log: a request path can carry a single-use token (a document link, /api/d/{token}),
+    # and the log stream is readable by anyone with CloudWatch read access.
+    "--no-access-log",
 ]
 
 

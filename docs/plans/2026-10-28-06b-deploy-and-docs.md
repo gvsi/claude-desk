@@ -54,7 +54,7 @@ The master plan's "Global Constraints" apply as written. Specific to this plan:
 
 | | Kernel container `kernel` | API container `Main` | Admin task `admin` |
 |---|---|---|---|
-| Command | `python -m desk.kernel_service` (01a) | `uvicorn --factory desk.api.main:app_factory --host 0.0.0.0 --port 8700 --timeout-keep-alive 310` (02 Task 3; this plan adds `--timeout-keep-alive 310`, above the load balancer's 300 s idle timeout) | `python -m desk.ops.admin migrate-and-roles` (Task 2) |
+| Command | `python -m desk.kernel_service` (01a) | `uvicorn --factory desk.api.main:app_factory --host 0.0.0.0 --port 8700 --timeout-keep-alive 310 --no-access-log` (02 Task 3; this plan adds `--timeout-keep-alive 310`, above the load balancer's 300 s idle timeout, and `--no-access-log`, since a request path can carry a single-use token such as `/api/d/{token}`) | `python -m desk.ops.admin migrate-and-roles` (Task 2) |
 | Health; ports | `127.0.0.1:8701/health` 200; none | `/api/health` 200; 8700, named `api` | exit 0; none |
 | Plain environment | `DESK_ENV=production`, `DESK_DB_URLS=KERNEL,MOCKPAY`, `KERNEL_DB_USER=desk_kernel`, `MOCKPAY_DB_USER=desk_mockpay`, `DB_HOST`, `DB_PORT`, `DB_NAME` | `DESK_ENV=production`, `DESK_DB_URLS=API`, `API_DB_USER=desk_api`, `DB_*`, `KERNEL_URL=http://127.0.0.1:8701`, `PUBLIC_ORIGIN`, `TRUSTED_PROXY_HOPS=2` | `DESK_DB_URLS=ADMIN`, `ADMIN_DB_USER=desk_admin`, `DB_*` |
 | ECS secrets | `KERNEL_DB_PASSWORD`, `MOCKPAY_DB_PASSWORD`, `DESK_SIGNING_SEED`, `ANTHROPIC_API_KEY`, `MOCKPAY_KEY` | `API_DB_PASSWORD`, `ANTHROPIC_API_KEY`, `PASSCODE_HASH` | `ADMIN_DB_PASSWORD`, `KERNEL_ROLE_PASSWORD`, `API_ROLE_PASSWORD`, `MOCKPAY_ROLE_PASSWORD` |

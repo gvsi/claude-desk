@@ -29,6 +29,9 @@ API_COMMAND = [
     # Above the load balancer's 300 s idle timeout, so the balancer, not uvicorn, closes idle
     # connections and never sends a request down one uvicorn has just closed.
     "--timeout-keep-alive", "310",
+    # No access log: a request path can carry a single-use token (a document link, /api/d/{token}),
+    # which would otherwise reach the api log stream.
+    "--no-access-log",
 ]
 KERNEL_URL = "http://127.0.0.1:8701"
 KERNEL_HEALTH_URL = f"{KERNEL_URL}/health"

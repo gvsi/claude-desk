@@ -35,7 +35,7 @@ API=$RUN-api
 # The deploy seam's commands (infra/stacks/task.py and data_stack.py).
 ADMIN_COMMAND=(python -m desk.ops.admin migrate-and-roles)
 KERNEL_COMMAND=(python -m desk.kernel_service)
-API_COMMAND=(uvicorn --factory desk.api.main:app_factory --host 0.0.0.0 --port 8700 --timeout-keep-alive 310)
+API_COMMAND=(uvicorn --factory desk.api.main:app_factory --host 0.0.0.0 --port 8700 --timeout-keep-alive 310 --no-access-log)
 # Exits 0 only on a 200 from the given URL inside a container: the kernel's own health check.
 HEALTH_CHECK='import sys, urllib.request; sys.exit(0 if urllib.request.urlopen(sys.argv[1], timeout=2).status == 200 else 1)'
 MOCKPAY_CHECK='import json, os, sys, urllib.request
