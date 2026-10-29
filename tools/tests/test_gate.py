@@ -140,3 +140,51 @@ def test_usage_errors_exit_2(repo, capsys):
         assert not (repo / "ran").exists(), argv
         assert "usage:" in capsys.readouterr().err, argv
     assert summary(repo) == ""
+
+
+# The `tier 2 results` row of Plan 06a Task 2's job table; the workflow must pass exactly these arguments.
+TIER2_RESULTS_GATE = [
+    "--name", "tier2-results",
+    "--run-if", "evals/results.py",
+    "--required-if", "evals/results",
+    "--", "make", "evals-results-check", "BASE=origin/main",
+]
+
+
+def test_tier2_results_gate_fails_when_results_are_missing(repo, capsys):
+    """The checker's code decides whether tier 2 results are checked; the results data never does."""
+    (repo / "evals").mkdir()
+    (repo / "evals/results.py").write_text("")
+    # Stands in for Plan 05b's check, which fails when the head has no results file.
+    (repo / "Makefile").write_text("evals-results-check:\n\ttest -d evals/results\n")
+
+    # A change that deletes the results directory but keeps the checker still runs it, and fails.
+    code = main(TIER2_RESULTS_GATE)
+
+    assert code == 2
+    assert "skipped" not in capsys.readouterr().out
+    assert summary(repo) == ""
+
+    # Results without the checker (deleted or renamed) fail too, rather than skip.
+    (repo / "evals/results.py").unlink()
+    (repo / "evals/results").mkdir()
+    (repo / "evals/results/.gitkeep").write_text("")
+
+    code = main(TIER2_RESULTS_GATE)
+
+    assert code == 1
+    assert capsys.readouterr().err == (
+        "`tier2-results` is required by `evals/results` but `evals/results.py` is missing\n"
+    )
+    assert summary(repo) == ""
+
+    # Before Plan 05b lands there is neither, and the check skips.
+    (repo / "evals/results/.gitkeep").unlink()
+    (repo / "evals/results").rmdir()
+
+    code = main(TIER2_RESULTS_GATE)
+
+    assert code == 0
+    line = "`tier2-results`: skipped, `evals/results.py` is not in the repo yet\n"
+    assert capsys.readouterr().out == line
+    assert summary(repo) == line
