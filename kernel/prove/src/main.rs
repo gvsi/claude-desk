@@ -14,26 +14,30 @@
 //!   request_json, is in the report); 2 tool error or timeout, also reported
 //!   as `timed_out`.
 //!
-//! The whole run gets `--timeout-ms`: each check runs under a timer for what
-//! remains, cvc5 starts with `--tlimit-per`, and when time runs out the solver
-//! is killed and reaped before the report is written. A solver `unknown`, an
-//! error or a timeout never counts as a proof. Calls go through the
-//! `cedar-policy-symcc` API with one cvc5 process per run, never the Cedar CLI
-//! (which exits 0 on a failed proof).
+//! The whole run gets `--timeout-ms`, counted from before any input is read.
+//! The work (reading, parsing, compiling, solving) runs on a worker thread;
+//! the main thread waits for it until the deadline and a short grace, then
+//! kills the solver itself and reports a timeout, so synchronous work can't
+//! stretch the budget. The worker also stops at the deadline on its own: each
+//! check runs under a timer, the deadline is checked between steps, cvc5
+//! starts with `--tlimit-per`, and a result that arrives late counts as a
+//! timeout. A solver `unknown`, an error or a timeout never counts as a proof.
+//! Calls go through the `cedar-policy-symcc` API with one cvc5 process per
+//! run, never the Cedar CLI (which exits 0 on a failed proof).
 use anyhow::{Context as _, Result, anyhow, bail};
 use cedar_policy::{
     ActionConstraint, Entities, EntityUid, Policy, PolicyId, PolicySet, RequestEnv, Schema,
 };
-use cedar_policy_symcc::{
-    CedarSymCompiler, CompiledPolicy, CompiledPolicySet, Env, solver::LocalSolver,
-};
+use cedar_policy_symcc::solver::{Decision, DecisionWithModel, Solver, SolverError};
+use cedar_policy_symcc::{CedarSymCompiler, CompiledPolicy, CompiledPolicySet, Env, SmtLibScript};
 use serde_json::{Value, json};
 use std::collections::HashMap;
-use std::process::ExitCode;
+use std::process::{ExitCode, Stdio};
 use std::str::FromStr;
-use std::time::Duration;
-use tokio::process::Command;
-use tokio::time::Instant;
+use std::sync::{Arc, Mutex, mpsc};
+use std::time::{Duration, Instant};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
+use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 
 /// Every check this binary knows, with the sets it reads (master plan, "Proof obligations").
 const CHECKS: [(&str, &[&str]); 7] = [
@@ -48,7 +52,156 @@ const CHECKS: [(&str, &[&str]); 7] = [
 const TEXT_SETS: [&str; 7] = ["B", "F", "A", "A0", "H", "R", "R_hold"];
 const LIST_SETS: [&str; 2] = ["always", "auto"];
 
-type Solver = CedarSymCompiler<LocalSolver>;
+type Symcc = CedarSymCompiler<ProofSolver>;
+
+/// The pid of the live solver, if any, shared with the main thread so it can
+/// kill the solver at the deadline even while the worker is busy. The worker
+/// kills its solver before clearing the slot and clears it before reaping, so
+/// the pid here is never one the system could have reused.
+type SolverSlot = Arc<Mutex<Option<u32>>>;
+
+/// How long the main thread waits past the deadline for the worker to stop
+/// its solver and report on its own.
+const GRACE: Duration = Duration::from_millis(250);
+/// Proving a large set recurses deeply; the worker gets room for it.
+const WORKER_STACK: usize = 256 * 1024 * 1024;
+
+/// cvc5 as a child this binary spawns itself, so its pid is known. It speaks
+/// the same SMT-LIB protocol as the library's `LocalSolver`, and never reaps
+/// the child except in `stop`.
+struct ProofSolver {
+    child: Child,
+    stdin: BufWriter<ChildStdin>,
+    stdout: BufReader<ChildStdout>,
+}
+
+impl ProofSolver {
+    fn spawn(budget: Duration, slot: &SolverSlot) -> Result<Self> {
+        let cvc5 = std::env::var("CVC5").unwrap_or_else(|_| "cvc5".into());
+        let mut child = Command::new(&cvc5)
+            .args([
+                "--lang",
+                "smt",
+                &format!("--tlimit-per={}", budget.as_millis().max(1)),
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .with_context(|| format!("starting {cvc5}"))?;
+        *slot.lock().unwrap_or_else(|e| e.into_inner()) = child.id();
+        let stdin = child.stdin.take().context("the solver's input")?;
+        let stdout = child.stdout.take().context("the solver's output")?;
+        Ok(Self {
+            child,
+            stdin: BufWriter::new(stdin),
+            stdout: BufReader::new(stdout),
+        })
+    }
+
+    async fn line(&mut self) -> Result<String, SolverError> {
+        let mut line = String::new();
+        if self.stdout.read_line(&mut line).await? == 0 {
+            return Err(SolverError::Solver("the solver closed its output".into()));
+        }
+        Ok(line)
+    }
+
+    /// Kills the solver and reaps it, unless the main thread already killed it.
+    async fn stop(&mut self, slot: &SolverSlot) {
+        let ours = {
+            let mut pid = slot.lock().unwrap_or_else(|e| e.into_inner());
+            let ours = pid.is_some();
+            if ours {
+                let _ = self.child.start_kill();
+                *pid = None;
+            }
+            ours
+        };
+        if ours {
+            let _ = tokio::time::timeout(Duration::from_secs(2), self.child.wait()).await;
+        }
+    }
+}
+
+impl Solver for ProofSolver {
+    fn smtlib_input(&mut self) -> &mut (dyn tokio::io::AsyncWrite + Unpin + Send) {
+        &mut self.stdin
+    }
+
+    async fn enable_models(&mut self) -> Result<(), SolverError> {
+        Ok(self.stdin.set_option("produce-models", "true").await?)
+    }
+
+    async fn check_sat(&mut self) -> Result<Decision, SolverError> {
+        self.stdin.check_sat().await?;
+        self.stdin.flush().await?;
+        match self.line().await?.trim() {
+            "sat" => Ok(Decision::Sat),
+            "unsat" => Ok(Decision::Unsat),
+            "unknown" => Ok(Decision::Unknown),
+            other => Err(SolverError::Solver(other.to_string())),
+        }
+    }
+
+    async fn check_sat_with_model(&mut self) -> Result<DecisionWithModel, SolverError> {
+        match self.check_sat().await? {
+            Decision::Sat => {
+                self.stdin.get_model().await?;
+                self.stdin.flush().await?;
+                // A model is "(" on its own line, the definitions, then ")".
+                let mut model = self.line().await?;
+                if model.trim() != "(" {
+                    return Err(SolverError::Solver(model.trim().to_string()));
+                }
+                loop {
+                    let line = self.line().await?;
+                    let end = line.trim() == ")";
+                    model.push_str(&line);
+                    if end {
+                        break Ok(DecisionWithModel::Sat { model });
+                    }
+                }
+            }
+            Decision::Unsat => Ok(DecisionWithModel::Unsat),
+            Decision::Unknown => Ok(DecisionWithModel::Unknown),
+        }
+    }
+}
+
+/// Debug builds only: block the worker after it starts its solver, standing in
+/// for synchronous work that overruns the deadline, so a test can check that
+/// the main thread still kills the solver. Release builds have no such hook.
+fn stall_for_tests() {
+    #[cfg(debug_assertions)]
+    if let Some(ms) = std::env::var("DESK_PROVE_TEST_STALL_MS")
+        .ok()
+        .and_then(|ms| ms.parse().ok())
+    {
+        std::thread::sleep(Duration::from_millis(ms));
+    }
+}
+
+/// The deadline passed during a check.
+#[derive(Debug)]
+struct OutOfTime;
+
+impl std::fmt::Display for OutOfTime {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("out of time")
+    }
+}
+
+impl std::error::Error for OutOfTime {}
+
+fn in_time(deadline: Instant) -> Result<()> {
+    if Instant::now() >= deadline {
+        Err(OutOfTime.into())
+    } else {
+        Ok(())
+    }
+}
 
 /// A Desk's proof inputs, parsed.
 struct Inputs {
@@ -252,12 +405,14 @@ fn request_json(env: &Env) -> Value {
 
 /// Does `lhs` imply `rhs` in every request env? The first counterexample if not.
 async fn implies(
-    symcc: &mut Solver,
+    deadline: Instant,
+    symcc: &mut Symcc,
     inputs: &Inputs,
     lhs: &PolicySet,
     rhs: &PolicySet,
 ) -> Result<Option<Value>> {
     for env in inputs.schema.request_envs() {
+        in_time(deadline)?;
         let left = CompiledPolicySet::compile(lhs, &env, &inputs.schema).map_err(symcc_err)?;
         let right = CompiledPolicySet::compile(rhs, &env, &inputs.schema).map_err(symcc_err)?;
         if let Some(cex) = symcc
@@ -273,7 +428,12 @@ async fn implies(
 
 /// Runs one check. `Ok(false)` results are proofs that failed; `Err` is a tool
 /// problem (including a solver `unknown`), never a pass.
-async fn run_check(symcc: &mut Solver, inputs: &Inputs, name: &str) -> Result<CheckResult> {
+async fn run_check(
+    deadline: Instant,
+    symcc: &mut Symcc,
+    inputs: &Inputs,
+    name: &str,
+) -> Result<CheckResult> {
     let result = |ok: bool, counterexample: Option<Value>| CheckResult {
         name: name.to_string(),
         ok,
@@ -293,6 +453,7 @@ async fn run_check(symcc: &mut Solver, inputs: &Inputs, name: &str) -> Result<Ch
         "never_errors" => {
             for policy in ["B", "F", "A", "H"].iter().flat_map(|set| inputs.set(set)) {
                 for env in inputs.envs_for(policy) {
+                    in_time(deadline)?;
                     let compiled =
                         CompiledPolicy::compile(policy, &env, &inputs.schema).map_err(symcc_err)?;
                     if !symcc
@@ -317,7 +478,7 @@ async fn run_check(symcc: &mut Solver, inputs: &Inputs, name: &str) -> Result<Ch
             };
             let lhs = inputs.union_of(lhs)?;
             for invariant in kinds.iter().flat_map(|kind| &inputs.invariants[*kind]) {
-                if let Some(cex) = implies(symcc, inputs, &lhs, invariant).await? {
+                if let Some(cex) = implies(deadline, symcc, inputs, &lhs, invariant).await? {
                     return Ok(result(false, Some(cex)));
                 }
             }
@@ -329,7 +490,7 @@ async fn run_check(symcc: &mut Solver, inputs: &Inputs, name: &str) -> Result<Ch
                 "review_only_narrows" => implication(&["B", "F", "A"], &["B", "F", "A0"])?,
                 _ => implication(&["B", "F", "H"], &["R_hold"])?,
             };
-            let cex = implies(symcc, inputs, &lhs, &rhs).await?;
+            let cex = implies(deadline, symcc, inputs, &lhs, &rhs).await?;
             Ok(result(cex.is_none(), cex))
         }
         "money_needs_card" => {
@@ -340,6 +501,7 @@ async fn run_check(symcc: &mut Solver, inputs: &Inputs, name: &str) -> Result<Ch
                     .request_envs()
                     .filter(|env| env.action().id().unescaped() == tool)
                 {
+                    in_time(deadline)?;
                     let compiled = CompiledPolicySet::compile(&auto, &env, &inputs.schema)
                         .map_err(symcc_err)?;
                     if !symcc
@@ -359,47 +521,44 @@ async fn run_check(symcc: &mut Solver, inputs: &Inputs, name: &str) -> Result<Ch
     }
 }
 
-fn spawn_solver(budget: Duration) -> Result<Solver> {
-    let cvc5 = std::env::var("CVC5").unwrap_or_else(|_| "cvc5".into());
-    let mut command = Command::new(&cvc5);
-    command
-        .args([
-            "--lang",
-            "smt",
-            &format!("--tlimit-per={}", budget.as_millis().max(1)),
-        ])
-        .kill_on_drop(true);
-    let solver =
-        LocalSolver::from_command(&mut command).map_err(|e| anyhow!("starting {cvc5}: {e}"))?;
+fn spawn_solver(deadline: Instant, slot: &SolverSlot) -> Result<Symcc> {
+    let solver = ProofSolver::spawn(deadline.saturating_duration_since(Instant::now()), slot)?;
     CedarSymCompiler::new(solver).map_err(symcc_err)
 }
 
-/// Runs the requested checks within `budget` and returns the ones that finished.
-async fn prove(inputs: &Inputs, budget: Duration) -> (Vec<CheckResult>, Option<Stop>) {
-    let deadline = Instant::now() + budget;
+/// Runs the requested checks and returns the ones that finished before the
+/// deadline; a check that finishes after it counts as unfinished.
+async fn prove(
+    inputs: &Inputs,
+    deadline: Instant,
+    slot: &SolverSlot,
+) -> (Vec<CheckResult>, Option<Stop>) {
     let mut results = vec![];
-    let mut stop = None;
-    match spawn_solver(budget) {
-        Err(e) => stop = Some(Stop::Tool(e)),
-        Ok(mut symcc) => {
-            for name in &inputs.checks {
-                match tokio::time::timeout_at(deadline, run_check(&mut symcc, inputs, name)).await {
-                    Ok(Ok(result)) => results.push(result),
-                    Ok(Err(e)) => {
-                        stop = Some(Stop::Tool(e));
-                        break;
-                    }
-                    Err(_) => {
-                        stop = Some(Stop::Timeout);
-                        break;
-                    }
-                }
-            }
-            // Kill the solver and wait for it, so nothing outlives the report.
-            let _ =
-                tokio::time::timeout(Duration::from_secs(2), symcc.solver_mut().clean_up()).await;
-        }
+    if in_time(deadline).is_err() {
+        return (results, Some(Stop::Timeout));
     }
+    let mut symcc = match spawn_solver(deadline, slot) {
+        Ok(symcc) => symcc,
+        Err(e) => return (results, Some(Stop::Tool(e))),
+    };
+    stall_for_tests();
+    let mut stop = None;
+    for name in &inputs.checks {
+        let timer = tokio::time::Instant::from_std(deadline);
+        let outcome =
+            tokio::time::timeout_at(timer, run_check(deadline, &mut symcc, inputs, name)).await;
+        stop = match outcome {
+            Ok(Ok(result)) if in_time(deadline).is_ok() => {
+                results.push(result);
+                continue;
+            }
+            Ok(Err(e)) if !e.is::<OutOfTime>() => Some(Stop::Tool(e)),
+            _ => Some(Stop::Timeout),
+        };
+        break;
+    }
+    // Kill the solver and reap it, so nothing outlives the report.
+    symcc.solver_mut().stop(slot).await;
     (results, stop)
 }
 
@@ -455,8 +614,7 @@ type Expectation = fn(&CheckResult) -> bool;
 /// true implication, refute an OR-ed review gate with a counterexample that
 /// sets the score, and catch a forbid that can error. Any other answer,
 /// error or timeout fails it (exit 2), and the kernel uses bounded mode.
-async fn selftest(budget: Duration) -> (Value, u8) {
-    let deadline = Instant::now() + budget;
+async fn selftest(deadline: Instant, slot: &SolverSlot) -> (Value, u8) {
     let erroring_baseline = format!("{SELFTEST_BASELINE}\n{SELFTEST_ERRORING_FORBID}");
     let cases: [(&str, &str, &str, &str, Expectation); 3] = [
         (
@@ -499,8 +657,7 @@ async fn selftest(budget: Duration) -> (Value, u8) {
                 false
             }
             Ok(inputs) => {
-                let (finished, stop) =
-                    prove(&inputs, deadline.saturating_duration_since(Instant::now())).await;
+                let (finished, stop) = prove(&inputs, deadline, slot).await;
                 stopped |= stop.is_some();
                 stop.is_none() && finished.first().is_some_and(expected)
             }
@@ -547,22 +704,16 @@ fn parse_args() -> Result<Args> {
     Ok(args)
 }
 
-async fn run_cli() -> (Value, u8) {
-    let tool_error = |e: anyhow::Error| report(&[], &[], Some(&Stop::Tool(e)));
-    let args = match parse_args() {
-        Ok(args) => args,
-        Err(e) => return tool_error(e),
-    };
+fn tool_error(e: anyhow::Error) -> (Value, u8) {
+    report(&[], &[], Some(&Stop::Tool(e)))
+}
+
+/// Everything after argument parsing, on the worker thread, within `deadline`.
+async fn job(args: Args, deadline: Instant, slot: SolverSlot) -> (Value, u8) {
     if args.selftest {
-        return selftest(
-            args.timeout_ms
-                .map_or(SELFTEST_BUDGET, Duration::from_millis),
-        )
-        .await;
+        return selftest(deadline, &slot).await;
     }
-    let (Some(schema), Some(sets), Some(checks), Some(timeout_ms)) =
-        (args.schema, args.sets, args.checks, args.timeout_ms)
-    else {
+    let (Some(schema), Some(sets), Some(checks)) = (args.schema, args.sets, args.checks) else {
         return tool_error(anyhow!(
             "usage: desk-prove --schema <file> --sets <file> --checks <file> --timeout-ms <n>"
         ));
@@ -573,16 +724,95 @@ async fn run_cli() -> (Value, u8) {
         Ok(inputs) => inputs,
         Err(e) => return tool_error(e),
     };
-    let (finished, stop) = prove(&inputs, Duration::from_millis(timeout_ms)).await;
+    let (finished, stop) = prove(&inputs, deadline, &slot).await;
     report(&inputs.checks, &finished, stop.as_ref())
 }
 
-fn main() -> ExitCode {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("a tokio runtime");
-    let (report, code) = runtime.block_on(run_cli());
+/// The check names in a checks file, for a report the main thread writes
+/// without the worker; empty when the file can't be read.
+fn requested_checks(path: &str) -> Vec<String> {
+    let names = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .and_then(|file| file.get("checks").and_then(Value::as_array).cloned());
+    names
+        .into_iter()
+        .flatten()
+        .filter_map(|n| n.as_str().map(str::to_string))
+        .collect()
+}
+
+/// Kills the live solver, if any. Holding the slot's lock keeps the worker
+/// from reaping it in between, so the pid can't have been reused.
+fn kill_solver(slot: &SolverSlot) {
+    let pid = slot.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(pid) = *pid {
+        // SAFETY: kill(2) takes plain integers and touches no memory of ours;
+        // the pid is our own unreaped child (see `SolverSlot`).
+        unsafe {
+            libc::kill(pid as libc::pid_t, libc::SIGKILL);
+        }
+    }
+}
+
+fn finish((report, code): (Value, u8)) -> ExitCode {
     println!("{report}");
     ExitCode::from(code)
+}
+
+fn main() -> ExitCode {
+    // The budget covers the whole run, so it starts before any input is read.
+    let started = Instant::now();
+    let args = match parse_args() {
+        Ok(args) => args,
+        Err(e) => return finish(tool_error(e)),
+    };
+    let budget = match (args.selftest, args.timeout_ms) {
+        (true, ms) => ms.map_or(SELFTEST_BUDGET, Duration::from_millis),
+        (false, Some(ms)) => Duration::from_millis(ms),
+        (false, None) => return finish(tool_error(anyhow!("--timeout-ms is required"))),
+    };
+    let deadline = started + budget;
+    let requested = args
+        .checks
+        .as_deref()
+        .map(requested_checks)
+        .unwrap_or_default();
+    let slot = SolverSlot::default();
+    let (sender, receiver) = mpsc::channel();
+    let worker_slot = slot.clone();
+    let worker = std::thread::Builder::new()
+        .name("desk-prove".into())
+        .stack_size(WORKER_STACK)
+        .spawn(move || {
+            let outcome = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(runtime) => runtime.block_on(job(args, deadline, worker_slot)),
+                Err(e) => tool_error(e.into()),
+            };
+            let _ = sender.send(outcome);
+        });
+    if let Err(e) = worker {
+        return finish(tool_error(e.into()));
+    }
+    let wait = deadline.saturating_duration_since(Instant::now()) + GRACE;
+    let outcome = match receiver.recv_timeout(wait) {
+        Ok(outcome) => outcome,
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            kill_solver(&slot);
+            report(&requested, &[], Some(&Stop::Timeout))
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            kill_solver(&slot);
+            report(
+                &requested,
+                &[],
+                Some(&Stop::Tool(anyhow!("the proof worker stopped"))),
+            )
+        }
+    };
+    // Returning ends the process, and with it a worker still busy past the deadline.
+    finish(outcome)
 }

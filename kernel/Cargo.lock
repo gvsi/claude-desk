@@ -450,6 +450,7 @@ dependencies = [
  "anyhow",
  "cedar-policy",
  "cedar-policy-symcc",
+ "libc",
  "serde_json",
  "tokio",
 ]

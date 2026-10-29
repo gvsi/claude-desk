@@ -26,6 +26,8 @@ serde = "1"
 # also what serde_json itself formats floats with.
 zmij = "1"
 anyhow = "1"
+# desk-prove kills its solver by pid at the deadline.
+libc = "0.2"
 
 [profile.release]
 strip = true

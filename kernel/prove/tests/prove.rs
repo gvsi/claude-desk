@@ -460,3 +460,67 @@ fn agent_payout_is_proved_impossible() {
         assert_eq!(cex["action"], "payments.create_refund", "{name}: {cex}");
     }
 }
+
+#[test]
+fn deadline_covers_the_whole_run() {
+    // 20,000 auto permits take far longer than 50 ms to read, parse and compile.
+    // The budget starts before any of that, so the run must stop at its
+    // deadline and report a timeout, never a proof.
+    let many: String = (0..20_000)
+        .map(|i| {
+            format!(
+                "@id(\"p{i}\") @card(\"c{i}\") @tier(\"auto\") @applies_to(\"native.book\")\n\
+                 permit (principal, action == Action::\"native.book\", resource) \
+                 when {{ context.local_minute != {i} }};\n"
+            )
+        })
+        .collect();
+    let mut sets = fixture_sets();
+    sets["A"] = json!(many.clone());
+    sets["A0"] = json!(many);
+    let checks = json!({"checks": ["review_only_narrows", "never_errors"], "money_uncovered": []});
+    let run = prove("deadline_covers_the_whole_run", &sets, &checks, 50, &[]);
+    assert_eq!(run.code, 2, "{}", run.report);
+    assert_eq!(run.report["ok"], false);
+    assert_eq!(run.report["timed_out"], true);
+    assert!(
+        run.elapsed < Duration::from_secs(2),
+        "took {:?}",
+        run.elapsed
+    );
+    for name in ["review_only_narrows", "never_errors"] {
+        assert_eq!(check(&run.report, name)["ok"], false, "{name}");
+    }
+}
+
+#[test]
+fn deadline_kills_the_solver_during_synchronous_work() {
+    // The worker starts the stub solver, then blocks in synchronous work past
+    // the deadline. The main thread must report the timeout and kill the solver.
+    let pids = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("stalled_solver.pids");
+    let _ = std::fs::remove_file(&pids);
+    let stub = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/sleeping_solver.sh");
+    let checks = json!({"checks": ["review_only_narrows"], "money_uncovered": []});
+    let run = prove(
+        "deadline_kills_the_solver_during_synchronous_work",
+        &fixture_sets(),
+        &checks,
+        300,
+        &[
+            ("CVC5", stub),
+            ("SLEEPING_SOLVER_PIDS", pids.to_str().unwrap()),
+            ("DESK_PROVE_TEST_STALL_MS", "10000"),
+        ],
+    );
+    assert_eq!(run.code, 2, "{}", run.report);
+    assert_eq!(run.report["timed_out"], true);
+    assert!(
+        run.elapsed < Duration::from_secs(2),
+        "took {:?}",
+        run.elapsed
+    );
+    let started = std::fs::read_to_string(&pids).expect("the stub solver started");
+    for pid in started.lines() {
+        assert!(!alive(pid), "stub solver {pid} is still running");
+    }
+}
