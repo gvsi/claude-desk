@@ -205,7 +205,7 @@ class ToolOutcome:
 
 
 def not_run() -> ToolOutcome:
-    """The answer for a call that never reached the kernel (a block that raised)."""
+    """The answer for a call that never ran: the kernel never had it, or refused it without a decision."""
     return ToolOutcome(dict(NOT_RUN), True)
 
 
@@ -350,7 +350,8 @@ async def _settle(conn: AsyncConnection, caller: Caller, generation: int | None,
     return ToolOutcome(_executed(decision, decision.decision_id, result), result.state != "succeeded", status=status)
 
 
-def _tool_call(block: dict) -> ToolCall:
+def tool_call(block: dict) -> ToolCall:
+    """The call a `tool_use` block proposes, as `/decide` takes it; raises for a block that can't be one."""
     if block.get("name") == SEND_REPLY:
         raise ValueError("send_reply goes to the kernel's reply check, never to /decide")
     return ToolCall(call_id=block["id"], tool=from_api_name(block["name"]), args=block["input"])
@@ -359,7 +360,7 @@ def _tool_call(block: dict) -> ToolCall:
 async def route_call(conn: AsyncConnection, caller: Caller, generation: int, block: dict) -> ToolOutcome:
     """One `tool_use` block, decided by the kernel under its ID and run only on an allow. A lost `/decide` answer
     is found by call ID, never decided again."""
-    call = _tool_call(block)
+    call = tool_call(block)
     started = time.monotonic()
     try:
         decision = await caller.kernel.call("POST /decide", DecideRequest(
@@ -383,12 +384,19 @@ async def recover_call(conn: AsyncConnection, caller: Caller, generation: int, b
     session generation that turn ran at, never decided again. No decision means it never ran; an allow runs now (a
     repeat returns the stored result); a final decision answers with what it ended as. When the session has left
     that generation since (`generation` is the session's now), the decision is only shown and answered from its
-    state (`_settle`)."""
-    call = _tool_call(block)
+    state (`_settle`). If settling it raises (a publication that failed), a decision that isn't final is left as a
+    `decision_pending` row before the error goes on, so its final state is still shown once it has one."""
+    call = tool_call(block)
     found = await _by_call(caller, made_at, call.call_id)
     if isinstance(found, ToolOutcome):
         return found
-    return await _settle(conn, caller, generation if made_at == generation else None, found)
+    try:
+        return await _settle(conn, caller, generation if made_at == generation else None, found)
+    except Exception:
+        await conn.rollback()
+        if found.state in NOT_FINAL:
+            await _pending(conn, caller, found.decision_id)
+        raise
 
 
 # Replies -------------------------------------------------------------------------------------------------

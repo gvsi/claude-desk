@@ -64,6 +64,7 @@ from desk.api.tools import (
     recover_call,
     route_call,
     send_reply,
+    tool_call,
     tool_delta,
 )
 from desk.contracts import SessionState
@@ -146,6 +147,11 @@ async def desk_identity(conn: AsyncConnection, caller: Caller) -> DeskIdentity:
         raise LookupError("the caller's business isn't in its copy")
     return DeskIdentity(business_name=business["name"], desk_name=desk["name"],
                         owner_name=business["owner_display_name"], kind=caller.kind)
+
+
+class NotSent(Exception):
+    """A tool call that failed on its way to the kernel (a block no call fits, no pooled connection left for it):
+    the kernel never had it."""
 
 
 @dataclass
@@ -309,24 +315,41 @@ class _Turn:
     async def _tool_use(self, content: list[dict], tool_uses: list[dict]) -> TurnOutcome | None:
         """Claude called tools. Its response is stored before any call runs. The other calls run together, each
         status shown as it is known; only then the replies, one at a time, so a reply never goes out (or spends an
-        agent's request) while a sibling call still runs. One results row answers every call, in block order."""
+        agent's request) while a sibling call still runs. One results row answers every call, in block order.
+
+        A call that raised before the kernel had it didn't run, and ends the turn with the static error. One that
+        raised once the kernel may have had it is found by its call ID and settled (`_recover_raised`); if nothing
+        can settle it, the response is left without its results row and the turn stops, so the session's next
+        request answers it by call ID (`_recover`) before Claude is asked anything."""
         conn, ids = self.conn, self.caller.ids
         assistant_n = await append_assistant(conn, ids, content, generation=self.generation)
         await conn.commit()
         calls = [block for block in tool_uses if block["name"] != SEND_REPLY]
         routed = await asyncio.gather(*(self._route(block) for block in calls), return_exceptions=True)
         outcomes: dict[str, ToolOutcome] = {}
+        unasked: list[ToolOutcome] = []                    # calls left open as the kernel couldn't be asked about them
         raised = False
         for block, outcome in zip(calls, routed, strict=True):
-            if isinstance(outcome, BaseException):         # it never reached a result: not run, as far as Claude knows
-                logger.warning("tool call %s raised %s", block["id"], _raised(outcome))
+            if isinstance(outcome, NotSent):               # the kernel never had it: not run
+                logger.warning("tool call %s didn't reach the kernel: %s", block["id"],
+                               _raised(outcome.__cause__ or outcome))
                 outcome, raised = not_run(), True
+            elif isinstance(outcome, BaseException):       # the kernel may have had it: found by its call ID
+                logger.warning("tool call %s raised %s", block["id"], _raised(outcome))
+                outcome = await self._recover_raised(block)
+                if outcome is None:                        # recovering it raised too: left open
+                    raised = True
+                    continue
+                if outcome.unavailable and outcome.status is None:
+                    unasked.append(outcome)
+                    continue
             outcomes[block["id"]] = outcome
-            self.decide_ms += outcomes[block["id"]].decide_ms
-            self.execute_ms += outcomes[block["id"]].execute_ms
+            self.decide_ms += outcome.decide_ms
+            self.execute_ms += outcome.execute_ms
         self.tool_calls += len(calls)
-        # a call that raised (no pooled connection left for it, say) ends the turn with the static error
-        stop = _stop(outcomes.values()) or ("internal" if raised else None)
+        stop = _stop([*outcomes.values(), *unasked]) or ("internal" if raised else None)
+        if len(outcomes) < len(calls):                     # a call left open: no results row until it is settled
+            return stop
         shown = False
         for block in (block for block in tool_uses if block["name"] == SEND_REPLY):
             # A fenced turn's replies still go to the kernel, which fences them too (409 at a generation the session
@@ -348,9 +371,29 @@ class _Turn:
         return None                                        # Claude reads its results (or the handoff) and goes on
 
     async def _route(self, block: dict) -> ToolOutcome:
-        """One call, decided and run on a pooled connection of its own, so its status shows as soon as it is known."""
-        async with self.conn.engine.connect() as conn:
+        """One call, decided and run on a pooled connection of its own, so its status shows as soon as it is known.
+        A call that fails on its way to the kernel (a block no call fits, no pooled connection left for it) raises
+        `NotSent`: the kernel never had it."""
+        try:
+            tool_call(block)
+            conn = await self.conn.engine.connect()
+        except Exception as error:
+            raise NotSent from error
+        try:
             return await route_call(conn, self.caller, self.generation, block)
+        finally:
+            await conn.close()
+
+    async def _recover_raised(self, block: dict) -> ToolOutcome | None:
+        """A call whose routing raised once the kernel may have had it (a publication failed after `/decide` or
+        `/execute`): found by its call ID and settled on the turn's connection (`recover_call`, never decided
+        again), so Claude and the visitor learn what the kernel did. None when that raises too."""
+        try:
+            return await recover_call(self.conn, self.caller, self.generation, block, made_at=self.generation)
+        except Exception as error:
+            logger.warning("recovering tool call %s raised %s", block["id"], _raised(error))
+            await self.conn.rollback()
+            return None
 
     async def _reply(self, tool_input: object, call_id: str | None) -> ToolOutcome:
         attempt = self.attempt

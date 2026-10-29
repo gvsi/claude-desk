@@ -14,7 +14,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from desk.api import loop, tools
-from desk.api.deliver import run_lock
+from desk.api.deliver import Status, run_lock
 from desk.api.kernel_client import KernelHttp
 from desk.api.loop import TURN_LOCK_POOL_SIZE, run_pending, turn_lock
 from desk.api.store import append_assistant, has_pending, lock_key, prepare_model_input
@@ -279,6 +279,82 @@ async def test_interrupted_turn_recovers_by_call_without_redeciding(api_conn, en
         "toolu_book", "done", decision_id, False)
     assert [(event.type, getattr(event, "decision_id", None)) for event in await events(api_conn, caller.session_id)] \
         == [("writing", None), ("receipt", decision_id), ("writing", None), ("message", None), ("turn_end", None)]
+
+
+def failing_statuses(times: int) -> tuple[list[str], Callable]:
+    """A `deliver` whose first `times` statuses fail as a dropped connection would, after the kernel acted; it records
+    each failed phase. Replies are delivered as usual."""
+    publish, failed = tools.deliver, []
+
+    async def deliver(conn, ids, item, **options):
+        if isinstance(item, Status) and len(failed) < times:
+            failed.append(item.phase)
+            raise ConnectionError("the connection dropped")
+        return await publish(conn, ids, item, **options)
+
+    return failed, deliver
+
+
+def session_decisions(fake, session_id: str) -> list[str]:
+    return [record.decision.decision_id for record in fake.decisions.values()
+            if record.decision.session_id == session_id]
+
+
+async def test_a_call_that_raised_once_the_kernel_had_it_is_found_by_its_id(api_conn, engine, locks, caller, fake,
+                                                                             monkeypatch):
+    """A call whose routing raised once the kernel had it (here its receipt failed to publish, after the booking ran)
+    is found by its call ID and settled in the same turn, never answered `not_run`: Claude and the visitor learn what
+    the kernel did, and nothing is decided or run again."""
+    failed, deliver = failing_statuses(1)
+    monkeypatch.setattr(tools, "deliver", deliver)
+    await said(api_conn, caller, "Book me the earliest visit.")
+    model = ScriptedModel([response(tool_use("native__book", {"slot_id": open_slot(fake, caller)}, id="toolu_book")),
+                           response(reply("You're booked.", id="toolu_say"))])
+
+    assert await pending(caller, model, engine, locks) == "done"
+
+    assert failed == ["receipt"]
+    (decision_id,) = session_decisions(fake, caller.session_id)
+    assert len(fake.called("/decide")) == 1 and len(fake.desks[caller.desk_id].booked) == 1
+    assert [entry.event.summary.get("repeat", False) for entry in fake.desks[caller.desk_id].ledger
+            if entry.event.kind == "execute"] == [False, True]  # one booking; the repeat returned its stored result
+    (result,) = tool_results(model.requests[1])
+    assert (result["tool_use_id"], result["content"]["outcome"], result["content"]["decision_id"],
+            result["is_error"]) == ("toolu_book", "done", decision_id, False)
+    assert [(event.type, getattr(event, "decision_id", None)) for event in await events(api_conn, caller.session_id)] \
+        == [("writing", None), ("receipt", decision_id), ("message", None), ("turn_end", None)]
+    assert await control_rows(api_conn, caller.session_id) == []
+
+
+async def test_a_call_nothing_could_settle_stays_open_for_the_next_request(api_conn, engine, locks, caller, fake,
+                                                                           monkeypatch):
+    """When settling a call that raised fails too, the turn leaves Claude's call open, and a decision that isn't final
+    as a `decision_pending` row; the session's next request settles it by call ID before Claude is asked anything."""
+    failed, deliver = failing_statuses(2)
+    monkeypatch.setattr(tools, "deliver", deliver)
+    await said(api_conn, caller, "Can I get the drain clearing at half price?")
+    model = ScriptedModel([response(tool_use("native__quote", {**DRAIN, "requested_discount_bp": 5000},
+                                             id="toolu_half"))])
+
+    assert await pending(caller, model, engine, locks) == "internal"
+
+    assert failed == ["held", "held"]                          # the call's publication, then the recovery's
+    (decision_id,) = session_decisions(fake, caller.session_id)
+    assert fake.decisions[decision_id].decision.state == "held"
+    assert await rows(api_conn, caller.session_id, "model_tool_results", "n") == []      # the call stays open
+    assert await control_rows(api_conn, caller.session_id) == [("decision_pending", {"decision_id": decision_id})]
+    assert [(event.type, getattr(event, "code", None)) for event in await events(api_conn, caller.session_id)] == [
+        ("writing", None), ("error", "internal"), ("turn_end", None)]
+
+    model = ScriptedModel([response(reply("I've asked Maria Rivera, and her answer will show up here."))])
+    assert await pending(caller, model, engine, locks) == "done"
+    assert len(fake.called("/decide")) == 1                    # never decided again
+    (held,) = tool_results(model.requests[0])
+    assert (held["tool_use_id"], held["content"]) == ("toolu_half", {
+        "outcome": "held_for_owner", "decision_id": decision_id, "message": "I've asked Maria Rivera to look at this."})
+    assert [(event.type, getattr(event, "decision_id", None)) for event in await events(
+        api_conn, caller.session_id)][3:] == [("held", decision_id), ("writing", None), ("message", None),
+                                              ("turn_end", None)]
 
 
 async def interrupt_after(path: str, caller: Caller, visitor, fake, engine: AsyncEngine, locks: AsyncEngine,
