@@ -7,6 +7,7 @@ CI holds no secrets and no model key, and it can only read the repository:
 - The workflow's token has `contents: read`, and no job widens it.
 - No checkout keeps the token in the git config.
 - Every action is pinned by commit.
+- Python dependencies come only from the committed uv lockfiles (`UV_LOCKED=1`), and a missing or out-of-date lockfile fails the job.
 - Every downloaded tool (cvc5, gitleaks and actionlint) is checked against a pinned sha256 before it runs.
 
 ## The checks
@@ -16,7 +17,7 @@ The workflow has nine jobs. Their names are the check names, in this order:
 1. `backend tests`: the backend's tests pass against a real Postgres 16. First the migrations apply to an empty database and the service roles get their passwords. The job fails before migrating if the migration chain has more than one head.
 2. `kernel tests`: the Rust kernel's tests pass (`cargo test --locked`), with cvc5 available to the proof binary's tests.
 3. `proofs`: two things pass. The proof binary's self-test runs against cvc5 (`desk-prove --selftest`). Then every shipped rule set is proved again and has to match its committed proof report (`make check-presets`). A report that is missing, out of date or failing fails the check.
-4. `tier 1 evals`: two suites pass against the real kernel and database, with no network and no model key:
+4. `tier 1 evals`: two suites pass against the real kernel and database. Both need no network and no model key:
    - the model-free attack suite (`make evals-tier1`);
    - the API's kernel contract tests, against the real kernel and not only the fake one, for each part of the kernel that `evals/tier1/landed.toml` lists as landed (`make kernel-contract`).
 5. `tier 2 results`: on pull requests only. A change to the gated inputs has to carry a passing tier 2 results file for exactly those inputs (`make evals-results-check BASE=origin/main`). The gated inputs are the kernel, prompts, rule presets, shared contracts, mock payments and the eval judging code.
@@ -71,7 +72,8 @@ Tier 2 is the model-driven attack suite and legitimate-task suite. It needs a mo
 
 - It runs locally with the development key.
 - Its results file is committed to `evals/results/`, named by a hash of the gated inputs.
-- On a pull request, `tier 2 results` recomputes that hash for the head. It fails when gated inputs changed and no passing results file covers them.
+- On a pull request, `tier 2 results` recomputes that hash for the merge of the pull request into `main`, which is what CI checks out. It fails when gated inputs changed and no passing results file covers them.
+- When `main` gains gated changes after the results file was made, rebase the pull request and run tier 2 again to regenerate the file.
 - Pushes to `main` skip the job, since the pull request already ran it.
 
 ## Runner minutes
