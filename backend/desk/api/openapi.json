@@ -1,0 +1,422 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Claude Desk API",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/health": {
+      "get": {
+        "summary": "Health",
+        "description": "The kernel's health, for the load balancer and the smoke checks; no cookie is read.",
+        "operationId": "system_health",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/owner/copies": {
+      "post": {
+        "summary": "Create Copy",
+        "description": "A fresh copy of the Rivera seed for whoever holds the passcode, and the owner cookie for it.",
+        "operationId": "owner_create_copy",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CopyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CopyOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/owner/start_over": {
+      "post": {
+        "summary": "Start Over",
+        "description": "A fresh copy for an owner who already has one; the old copy is left as it is, and the cookie moves on.",
+        "operationId": "owner_start_over",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CopyOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/owner/me": {
+      "get": {
+        "summary": "Me",
+        "description": "The copy the owner cookie names.",
+        "operationId": "owner_me",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CopyOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ApiError": {
+        "properties": {
+          "error": {
+            "type": "string",
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "retry_after": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry After"
+          }
+        },
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "title": "ApiError",
+        "description": "Every error answer: `error` names what went wrong; `code` is the kernel's, when `error` is \"kernel\";\n`retry_after` is the seconds to wait, on a 429. Fields that don't apply are left out."
+      },
+      "CopyOut": {
+        "properties": {
+          "copy_id": {
+            "type": "string",
+            "title": "Copy Id"
+          },
+          "desks": {
+            "items": {
+              "$ref": "#/components/schemas/DeskSummary"
+            },
+            "type": "array",
+            "title": "Desks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "copy_id",
+          "desks"
+        ],
+        "title": "CopyOut",
+        "description": "The owner's copy: what `POST /api/owner/copies`, `start_over` and `me` answer with."
+      },
+      "CopyRequest": {
+        "properties": {
+          "passcode": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Passcode"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "passcode"
+        ],
+        "title": "CopyRequest"
+      },
+      "DeskSummary": {
+        "properties": {
+          "desk_id": {
+            "type": "string",
+            "title": "Desk Id"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "business_name": {
+            "type": "string",
+            "title": "Business Name"
+          },
+          "hours": {
+            "items": {
+              "$ref": "#/components/schemas/HoursWindow"
+            },
+            "type": "array",
+            "title": "Hours"
+          },
+          "answering": {
+            "type": "boolean",
+            "title": "Answering"
+          }
+        },
+        "type": "object",
+        "required": [
+          "desk_id",
+          "slug",
+          "name",
+          "business_name",
+          "hours",
+          "answering"
+        ],
+        "title": "DeskSummary"
+      },
+      "Health": {
+        "properties": {
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "proof_mode": {
+            "type": "string",
+            "enum": [
+              "symcc",
+              "bounded"
+            ],
+            "title": "Proof Mode"
+          },
+          "dev_signing_key": {
+            "type": "boolean",
+            "title": "Dev Signing Key"
+          },
+          "public_key_hex": {
+            "type": "string",
+            "title": "Public Key Hex"
+          },
+          "key_id": {
+            "type": "string",
+            "title": "Key Id"
+          },
+          "unproved_seeds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Unproved Seeds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "version",
+          "proof_mode",
+          "dev_signing_key",
+          "public_key_hex",
+          "key_id",
+          "unproved_seeds"
+        ],
+        "title": "Health"
+      },
+      "HealthOut": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "kernel": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Health"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "kernel"
+        ],
+        "title": "HealthOut",
+        "description": "`GET /api/health`: 200 with the kernel's health, or 503 with `ok` false and no kernel field."
+      },
+      "HoursWindow": {
+        "properties": {
+          "days": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "mon",
+                "tue",
+                "wed",
+                "thu",
+                "fri",
+                "sat",
+                "sun"
+              ]
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Days"
+          },
+          "start": {
+            "type": "string",
+            "format": "time",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "format": "time",
+            "title": "End"
+          }
+        },
+        "type": "object",
+        "required": [
+          "days",
+          "start",
+          "end"
+        ],
+        "title": "HoursWindow"
+      }
+    }
+  }
+}

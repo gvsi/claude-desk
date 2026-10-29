@@ -3,7 +3,9 @@
 A model call's row holds its usage, never its content, and `created_at` is the call's finish
 (`finished_at`), written right after the call; a failed call is recorded with `stop_reason: "error"` and
 zero tokens. `spent_today_cents` prices today's (UTC) calls at the master plan's list prices, for the
-daily model budget. Reveal and turn timings are `metric` rows in `app.run_events` (`sse.append_metric`).
+daily model budget: in production, once today's spend reaches `DAILY_MODEL_BUDGET_CENTS`, turns hand off with
+no model call and other model routes answer 503 `demo_budget`. Reveal and turn timings are `metric` rows in
+`app.run_events` (`sse.append_metric`).
 """
 
 from collections.abc import Callable
@@ -30,6 +32,9 @@ PRICES_PER_MTOK: dict[str, tuple[Fraction, Fraction, Fraction, Fraction]] = {
 }
 # A model missing from the table is priced at the highest rate of each kind, so the budget never undercounts.
 HIGHEST_PRICES = tuple(max(prices[i] for prices in PRICES_PER_MTOK.values()) for i in range(4))
+# Production's daily model spend, in US cents, shared by every copy (the owner may change it): it keeps the demo
+# inside the monthly limit that evals and the demo share.
+DAILY_MODEL_BUDGET_CENTS = 8000
 
 
 class Usage(Protocol):
@@ -83,6 +88,12 @@ async def spent_today_cents(conn: AsyncConnection, clock: Callable[[], datetime]
         prices = PRICES_PER_MTOK.get(model, HIGHEST_PRICES)
         dollars += sum((Fraction(int(count)) * price for count, price in zip(tokens, prices, strict=True)), Fraction(0)) / 1_000_000
     return ceil(dollars * 100)
+
+
+async def over_daily_budget(conn: AsyncConnection, clock: Callable[[], datetime],
+                            budget_cents: int = DAILY_MODEL_BUDGET_CENTS) -> bool:
+    """True once today's (UTC) spend has reached the daily budget."""
+    return await spent_today_cents(conn, clock) >= budget_cents
 
 
 class RevealMetric(BaseModel):

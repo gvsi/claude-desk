@@ -8,13 +8,17 @@
   client pointed at it.
 - `visitor` / `ids`: a visitor session on a new Rivera copy: its token (memory only, as in the API) and the
   `Ids` its `/whoami` answer names.
+- `clock`: a clock the test moves by hand. `api`: the API app on FakeKernel and `fake_kernel_ro`, its lifespan
+  running, with that clock and `PASSCODE`'s hash; `browser(app, ip=...)`: an HTTPS client on it from one address,
+  keeping its cookies as a browser would.
 
 sse-starlette keeps a process-wide shutdown flag and a per-thread watcher bound to the event loop that
 started it; both are reset before each test, since every test runs on a loop of its own.
 """
 
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -22,10 +26,14 @@ import psycopg
 import pytest
 from alembic.config import Config
 from alembic.script import ScriptDirectory
+from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 from sse_starlette import sse as sse_starlette
 
 from desk.api.kernel_client import CredentialView, KernelHttp
+from desk.api.main import create_app
+from desk.api.passcode import hash_passcode
+from desk.api.settings import Settings
 from desk.api.store import Ids
 from desk.db.session import API_CONNECT_OPTIONS, database_url, libpq_url
 from desk.db.tables import APP_TABLES
@@ -135,3 +143,60 @@ def _reset_sse_starlette() -> Iterator[None]:
     yield
     sse_starlette.AppStatus.should_exit = False
     sse_starlette._thread_state.__dict__.clear()
+
+
+class Clock:
+    """A clock a test moves by hand."""
+
+    def __init__(self) -> None:
+        self.now = datetime(2026, 10, 30, 17, 0, tzinfo=UTC)
+
+    def __call__(self) -> datetime:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += timedelta(seconds=seconds)
+
+
+@pytest.fixture
+def clock() -> Clock:
+    return Clock()
+
+
+PASSCODE = "rivera-demo-passcode"
+CLIENT_IP = "203.0.113.7"          # a documentation address: not loopback, so per-IP limits apply
+
+
+@pytest.fixture(scope="session")
+def passcode_hash() -> str:
+    return hash_passcode(PASSCODE)
+
+
+@pytest.fixture
+def api_settings(passcode_hash: str) -> Settings:
+    return Settings(api_database_url=database_url("API"), desk_env="test", passcode_hash=passcode_hash,
+                    kernel_ro_schema=FAKE_RO_SCHEMA)
+
+
+@pytest.fixture
+async def api(db: psycopg.Connection, fake: FakeKernelState, api_settings: Settings, clock: Clock) -> AsyncIterator[FastAPI]:
+    """The API app on FakeKernel, its lifespan running."""
+    app = create_app(api_settings, kernel_transport=httpx.ASGITransport(app=fake_kernel_app(fake)), clock=clock)
+    async with app.router.lifespan_context(app):
+        yield app
+
+
+@pytest.fixture
+async def browser() -> AsyncIterator[Callable[..., httpx.AsyncClient]]:
+    """Clients on an app over HTTPS (so `Secure` cookies are kept and sent), each from one client address."""
+    clients: list[httpx.AsyncClient] = []
+
+    def open_client(app: FastAPI, ip: str = CLIENT_IP) -> httpx.AsyncClient:
+        client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app, client=(ip, 50000)),
+                                   base_url="https://desk.test")
+        clients.append(client)
+        return client
+
+    yield open_client
+    for client in clients:
+        await client.aclose()
