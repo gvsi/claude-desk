@@ -25,8 +25,13 @@ export const Primary: Story = {
   args: { variant: 'primary', children: 'Send counter-offer' },
   play: async ({ args, canvas, userEvent }) => {
     // The control for Disabled and Busy: an enabled button does call its handler.
-    await userEvent.click(canvas.getByRole('button', { name: 'Send counter-offer' }));
+    const button = canvas.getByRole('button', { name: 'Send counter-offer' });
+    await userEvent.click(button);
     await expect(args.onClick).toHaveBeenCalledTimes(1);
+    // A plain button says nothing about a menu.
+    await expect(button).not.toHaveAttribute('aria-haspopup');
+    await expect(button).not.toHaveAttribute('aria-expanded');
+    await expect(button.querySelector('svg')).toBeNull();
   },
 };
 
@@ -124,5 +129,45 @@ export const DangerDisabled: Story = {
     expectComputed(button, { backgroundColor: DANGER_FILL, opacity: '0.4' });
     await userEvent.click(button);
     await expect(args.onClick).not.toHaveBeenCalled();
+  },
+};
+
+const MENU_NOTE =
+  'N-Answers-TwoButtons, option 2: a side of a held request with two answers is a menu button, its words and then a chevron. The card owns the menu.';
+
+export const OpensAMenu: Story = {
+  args: { variant: 'danger', size: 'main', menuOpen: false, id: 'deny-answers', onKeyDown: fn(), children: 'Deny' },
+  parameters: { canvasNote: MENU_NOTE },
+  play: async ({ args, canvas, userEvent }) => {
+    // Named by its words alone; it says it opens a menu, and that the menu is closed.
+    const button = canvas.getByRole('button', { name: 'Deny' });
+    await expect(button).toHaveAttribute('id', 'deny-answers');
+    await expect(button).toHaveAttribute('aria-haspopup', 'menu');
+    await expect(button).toHaveAttribute('aria-expanded', 'false');
+
+    // The chevron follows the words: a 16 px line icon, hidden from assistive tech, in the words' color.
+    const chevron = button.lastElementChild;
+    if (!(chevron instanceof SVGElement)) throw new Error('no chevron after the words');
+    await expect(chevron).toHaveAttribute('aria-hidden', 'true');
+    await expect(chevron).toHaveAttribute('width', '16');
+    expectComputed(chevron, { color: DANGER_TEXT });
+    // The chevron's own margin sits inside the icon, so the button's right edge is a little tighter.
+    expectComputed(button, { backgroundColor: DANGER_FILL, color: DANGER_TEXT, height: '40px', paddingLeft: '14px', paddingRight: '10px' });
+
+    // It is still a button: a click and its keys reach the screen.
+    await userEvent.click(button);
+    await expect(args.onClick).toHaveBeenCalledTimes(1);
+    await userEvent.keyboard('{ArrowDown}');
+    await expect(args.onKeyDown).toHaveBeenCalled();
+  },
+};
+
+export const MenuOpen: Story = {
+  args: { variant: 'secondary', size: 'main', menuOpen: true, children: 'Allow' },
+  parameters: { canvasNote: `${MENU_NOTE} Here its menu is open; the card draws the menu under it.` },
+  play: async ({ canvas }) => {
+    const button = canvas.getByRole('button', { name: 'Allow' });
+    await expect(button).toHaveAttribute('aria-haspopup', 'menu');
+    await expect(button).toHaveAttribute('aria-expanded', 'true');
   },
 };

@@ -40,6 +40,20 @@
   padding: 0 var(--space-16);
 }
 
+/* A menu button: its words, then a 16 px chevron. The chevron's own margin sits inside the icon,
+   so the right edge is a little tighter than the left. */
+.cd-button--menu.cd-button--main {
+  padding-right: var(--space-10);
+}
+
+.cd-button--menu.cd-button--inline {
+  padding-right: var(--space-8);
+}
+
+.cd-button__chevron {
+  flex: none;
+}
+
 .cd-button--secondary {
   background: var(--fill-secondary);
 }

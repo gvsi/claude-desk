@@ -12,12 +12,14 @@
 - The red variants are only for refusing. They are never a status, a warning or decoration, and their words still say exactly what happens.
 - `size="main"` for a screen's main actions (`size-control-main`, 40 px); `inline` (`size-control`, 32 px) everywhere else.
 - With `href`, the same look as a link: the button a payment or document card ends with ("Open payment page").
+- With `menuOpen`, a menu button: its words, then a 16 px `chevron-down` icon, with `aria-haspopup="menu"` and `aria-expanded`. A held request's card uses it for a side of the answer that has two answers ("Allow", "Deny"). The screen draws the menu, opens it on a click, Enter, Space or Down, and moves focus into it.
 
 ## What the consumer provides
 
 - The label, in words that say what happens. Never "OK" or "Continue" when a verb can say more, and never an arrow.
 - `busy` while the click's request is in flight. The button keeps focus, dims a little (to 60%, the red variants to 80%, so every label still reads at 4.5:1 in a card), announces `aria-busy` and ignores further clicks; change the label too if the wait is long ("Sending").
 - `disabled` only when the action can't be taken at all. A disabled button is dimmed and leaves the tab order.
+- For a menu button, `menuOpen` (`true` while its menu shows), an `id` the menu can be labelled by, and `onKeyDown` for the keys that open it. A busy menu button ignores clicks like any busy button; the screen ignores its keys too.
 
 ## Props
 
@@ -29,7 +31,10 @@
 | `href` | `string` | Renders an `<a rel="noopener noreferrer">`. A disabled or busy link loses its `href` and says `aria-disabled`. |
 | `disabled` | `boolean` | Native `disabled`. |
 | `busy` | `boolean` | `aria-busy` and `aria-disabled`; clicks are swallowed. |
+| `menuOpen` | `boolean` | Makes it a menu button: a chevron, `aria-haspopup="menu"`, `aria-expanded`. Leave it out for a plain button. |
+| `id` | `string` | The element's `id`. |
 | `onClick` | `(event) => void` | Not called while disabled or busy. |
+| `onKeyDown` | `(event) => void` | Keys pressed on the button; not on a link. |
 | `children` | `ReactNode` | The label, in `.cd-type-control` (primary at weight 500). |
 
 ## States
@@ -41,6 +46,8 @@
 | `ghost` | No fill, `text-primary` | `fill-hover` | No fill |
 | `danger` | `button-danger-fill`, `button-danger-text` | `button-danger-fill-hover` | Rest fill |
 | `danger-ghost` | No fill, `button-danger-text` | `fill-hover` | No fill |
+
+A menu button keeps its variant's look; its padding is `space-14` before the words and `space-10` after the chevron (`space-12` and `space-8` inline), because the icon carries its own margin.
 
 Disabled dims every variant to 40%. Busy dims to 60%, and `danger` and `danger-ghost` to 80%, because red words lose contrast faster as they fade. Focus shows the base stylesheet's 2 px `accent-blue` ring at a 2 px offset on every variant.
 
