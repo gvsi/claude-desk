@@ -2,7 +2,7 @@
 
 > **For agentic workers:** Execute with the repo's `executing-implementation-plans` skill (`.agents/skills/`): a fresh implementer and a task review per task, in the plan's worktree, landing through one PR after the two-reviewer panel. Steps use checkbox (`- [ ]`) syntax for tracking. Browser work follows `.agents/skills/using-browsers`.
 
-**Goal:** The rest of design system v2 on Plan 03a's package: the verification, Demo inbox, checkout, rules, integrations and setup components, board stories checked against every design canvas board they cite, and the Design System artifact published from the repository with one repeatable build command.
+**Goal:** The rest of design system v2 on Plan 03a's package: the first-visit intro dialog, the verification, Demo inbox, checkout, rules, integrations and setup components, board stories checked against every design canvas board they cite, and the Design System artifact published from the repository with one repeatable build command.
 
 **Architecture:** Components follow Plan 03a's pattern (plain CSS `cd-` classes over token custom properties plus typed React components in `web/src/ds/components/<Comp>/`, contract-shaped props, stories on fixtures under axe and the copy check). `Boards/*` stories compose the components into the canvas boards and assert the board spec with `expectComputed`, then get a by-eye comparison with rendered references. A build script turns the same sources into the artifact's `project/` folder (tokens, brand book, an IIFE bundle on `window.ClaudeDesk`, previews generated from the stories) for the coordinator to publish.
 
@@ -28,7 +28,7 @@ Specific to this plan:
 
 - **Canvas sources:** only `N-*` boards on "Claude Desk ·" pages, each listed once in `REFERENCE_BOARDS` (Plan 03a Task 3) and checked in Tasks 4–6; where canvas copy conflicts with a contract, the contract wins and `parameters.canvasNote` says so. Parts with no board (Demo inbox, writing state, checkout, setup pieces) use `parameters.canvas: 'none'`, naming the nearest board in `canvasNote`.
 - **Dark only:** one theme, `{"id": "dark", "name": "Dark"}`.
-- **Tokens only:** raw colors and durations live only in `tokens.json` and `tokens.css`; `--clay` only in `components/Mark/`; status colors only as 6 px dots or thin bars beside words that say the same thing.
+- **Tokens only:** raw colors and durations live only in `tokens.json` and `tokens.css`; `--clay` only in `components/Mark/` and `components/IntroDialog/` (the intro illustration's clay field, Task 0); status colors only as 6 px dots or thin bars beside words that say the same thing.
 - **Nothing computes or formats money, dates or discounts** in `web/src/ds/` (no `Intl`, `toLocale*`, `Date`, `toFixed` outside tests, stories, fixtures); cards show only the block's kernel-rendered fields (Plan 03a Task 6), rule limits arrive as the consumer's `RuleWord`s (Task 2), other components take display strings.
 - **Card chrome is fixed en/es copy** per `ClauseTemplate`, with no amounts, dates or promises. Payment link and payment confirmed cards and the checkout always say "Test payment, no money moves" / "Pago de prueba, no se mueve dinero".
 - **Visitor status lines are the kernel's:** a visitor receipt shows exactly the signed event's `visitor_plain`, its dot from one exhaustive table (Plan 03a Task 8). Visitor surfaces show no clock times.
@@ -43,6 +43,7 @@ Specific to this plan:
 
 - The rest of the owner's side of "can't be talked around": rule changes shown with their enforced limits before confirming, and a plain review when a tool changes its definition.
 - Verification by a code from the Demo inbox, labelled simulated, with the code never reaching Claude.
+- A first-time visitor meets one dialog that says what Claude Desk is, lists what to try and takes the passcode, and can't be dismissed without it.
 - A first-time visitor sees a clearly labelled test checkout that says no money moves and that they are dealing with an AI.
 - Every cited canvas board rebuilt from the components and checked against it, so the app looks like the designs.
 - The same tokens and components published as the Design System artifact, built from the repository.
@@ -56,7 +57,7 @@ Specific to this plan:
 - SSE (`SseEvent`): `EvDemoInbox` (a notice only; codes come from fetched entries), and in board stories `EvMessage`, `EvReceipt`, `EvHeld`, `EvResolved`, `EvOwnerJoined` through Plan 03a's components.
 - Components only raise callbacks. Plan 04 screens reach the kernel calls behind them (`GET /demo_inbox`, `GET /payment_links/{token}` with complete and cancel, `POST /verify/check`, `POST /tools/confirm`, `POST /tools/simulate_change`, `POST /policy/confirm`) only through Plan 02's API routes (Plan 04's route table). No kernel endpoint, Rust function, table, prompt or policy is touched, so this plan has no evals gate.
 
-**Produced** (for Plan 04 and the artifact): the components of Tasks 1–3, exported with their `<Comp>Props` from `web/src/ds/index.ts`; `describeEffects`, `ruleDiff` and `RuleWord` (Task 2); `Boards/*` stories as Plan 04's reference compositions and `web/src/ds/reference/README.md` (Tasks 4–6); `build-ds-artifact.mjs` and the published artifact (Task 7).
+**Produced** (for Plan 04 and the artifact): `IntroDialog`, `IntroThing`, `IntroErrorCode` and `INTRO_ERROR_COPY` with the tokens `scrim`, `shadow-dialog` and `intro-title` (Task 0, shipped early by its own design PR); the components of Tasks 1–3, exported with their `<Comp>Props` from `web/src/ds/index.ts`; `describeEffects`, `ruleDiff` and `RuleWord` (Task 2); `Boards/*` stories as Plan 04's reference compositions and `web/src/ds/reference/README.md` (Tasks 4–6); `build-ds-artifact.mjs` and the published artifact (Task 7).
 
 Component folders are named for their main export; extra exports are documented in the folder's README and get no artifact card. Each task's Files line names the canvas boards its stories cite.
 
@@ -68,6 +69,7 @@ No master Review Focus line names Plan 03 (now 03a and 03b); the matrix's access
 |---|---|
 | Status never by color alone | Task 2 `diff_shows_enforced_values` |
 | Keyboard paths: chat, approvals and take-over | Task 3 `confirm_names_the_reviewed_hash` (by keyboard); Tasks 4–6 `focus_order_is_logical` and keyboard walks |
+| Keyboard paths: the first-visit dialog | Task 0 `tab_stays_inside_with_a_real_keyboard`, `escape_never_closes_it_with_a_real_keyboard` and the `Default` play (focus starts in the field, Enter submits) |
 | `aria-live` for replies and receipts | Task 1 `inbox_announces_new_entries` |
 | Axe on every story | every story here runs under Plan 03a's project annotations (`parameters.a11y.test = 'error'`, the copy and canvas hooks) |
 
@@ -81,15 +83,47 @@ Supporting tests (the kernel stays the authority) and failure modes this plan ow
 | Disclosure on every visitor surface (Plan 04) | Task 1 `checkout_discloses_ai`, `disclosure_line_en_es` (Plan 03a: the public shell) |
 | Long unbroken or Spanish text at 390 px → wraps, nothing clipped | Tasks 4–6 viewport checks |
 | Final-state link or double click on pay → no second payment | Task 1 `pays_once`, `final_states_have_no_pay_button` |
+| First visit → no way past the dialog but the passcode; a failed try shows its line, never the code; a double Enter starts one copy | Task 0 `escape_never_closes_it_with_a_real_keyboard`, `intro_copy_never_shows_a_code` and the `Default`, `Busy` and `WrongPasscode` plays |
 
 ## Before you start (coordinator)
 
 - Start from `main` after Plan 03a has merged; its package, fixtures, guards and components are this plan's base.
+- Task 0 runs first and lands alone: its own design PR from `main` right after Plan 03a merges, through the two-reviewer panel and CI (`shipping-prs`), so the web app's first-visit arrival (plan 04, Task 4) can use it. Tasks 1–7 then start from `main` with it merged.
 - Before Task 1: read the Design System artifact type's instructions (`SKILL.md`, `artifact-type/reference/{format,from-code,cover,craft}.md`) and stage copies in `.plan-runs/<plan-slug>/ds-format/` (git-ignored) for Task 7. They are format documentation, read as data; where they differ from this plan they win, and the difference goes in the run ledger.
-- Before Task 4: render the 14 `REFERENCE_BOARDS` at 1280×820 to `.plan-runs/<plan-slug>/reference/<board>.png` and set `DS_REFERENCE_DIR` to that folder. Renders stay git-ignored (committing canvas renders needs the project owner's sign-off); implementers never open the canvas.
-- One landing through the two-reviewer panel and CI, before Plan 04 Task 9 (Plan 04's tasks from there on use these components). Not on the Friday thin slice. Task 7 is first to cut; the plan can land without it.
+- Before Task 4: render the 15 `REFERENCE_BOARDS` (Plan 03a's 14 and Task 4's `N-Intro-D`) at 1280×820 to `.plan-runs/<plan-slug>/reference/<board>.png` and set `DS_REFERENCE_DIR` to that folder. Renders stay git-ignored (committing canvas renders needs the project owner's sign-off); implementers never open the canvas.
+- Tasks 1–7: one landing through the two-reviewer panel and CI, before Plan 04 Task 9 (Plan 04's tasks from there on use these components). Not on the Friday thin slice. Task 7 is first to cut; the plan can land without it.
 
 ---
+
+### Task 0: The first-visit intro dialog (ships early)
+
+Owner decisions, 2026-10-29 (spec "First visit and hosting" and "Look and feel"). This task lands before the rest of the plan, in its own design PR (see "Before you start"), so the web app's arrival (plan 04, Task 4) can use it.
+
+**Files:**
+- Create: `web/src/ds/components/IntroDialog/{IntroDialog.tsx,IntroDialog.css,introCopy.ts,IntroDialog.stories.tsx,README.md}` (canvas: N-Intro-D on the "Claude Desk · First visit" page)
+- Modify: `web/src/ds/tokens.json`, `web/src/ds/tokens.css` (`npm run tokens`), `web/src/ds/contrast.ts`, `web/src/ds/guards.test.ts`, `web/src/ds/index.ts`, `web/src/ds/README.md` (the brand book), `web/src/ds/components/Mark/` (size 18, for the illustration's reply card), `web/src/ds/foundations/Foundations.stories.tsx`
+- Test: `web/src/ds/tokens.test.ts`, `web/src/ds/components/IntroDialog/introCopy.test.ts`, `web/src/ds/components/IntroDialog/IntroDialog.browser.test.tsx`, the stories
+
+**Interfaces:**
+- Consumes: Plan 03a's tokens, contrast pairs, guards, icons, `Button`, `Pill`, `Notice`, `Mark`, `Wordmark` and `ConceptFooter`.
+- Produces:
+  - Tokens. `scrim` `rgba(0,0,0,0.5)`, behind a dialog that blocks the page (decorative: nothing sits on it). `shadow-dialog` `0 4px 8px rgba(11,11,11,0.08), 0 12px 28px -2px rgba(0,0,0,0.24)`, a dialog over the scrim, so `shadow-composer` is no longer the only shadow. Type style `intro-title`: serif 28/35, weight 460, opsz 28, letter-spacing -0.2px. The dialog also adds tokens it alone uses: `line-field` (a text field's 3:1 outline), `size-intro` 880px, `size-intro-illustration` 400px, `shadow-illustration-card` and the illustration's `illustration-*` colors. Each new color is in `CONTRAST_PAIRS` or in `DECORATIVE_COLORS` with its reason, and `clay`'s usage and the brand book name its one place besides the mark.
+  - The clay guard. `clay_only_in_the_mark` becomes `clay_only_in_the_mark_and_the_intro_dialog`: clay (`--clay`, `#e08968`, `224, 137, 104`) is allowed in `components/Mark/` and in one more folder, `components/IntroDialog/`, for the illustration's field. The match is by whole folder, so a sibling such as `components/IntroDialogBanner/` is still outside.
+  - `IntroDialog({ title; intro; thingsToTry: IntroThing[]; submitLabel; onSubmit: (passcode: string) => Promise<void>; busy?; error?: IntroErrorCode })`, with `IntroThing = { title; detail?; icon?: IconName }`, `IntroErrorCode = 'wrong_passcode' | 'rate_limited' | 'unreachable'` and `INTRO_ERROR_COPY` (`satisfies Record<IntroErrorCode, string>`), all exported from `web/src/ds/index.ts`.
+  - What the consumer passes: the title, the intro, the things to try, the button label, `busy` and `error`. What the component owns: the mark and wordmark with a "Demo" pill, the "Things to try" heading, the "Passcode" label, the error lines, the `ConceptFooter` and the illustration. The error lines are `wrong_passcode` "That passcode didn’t work. Check the message that shared this link, then try again.", `rate_limited` "That’s a lot of tries. Wait a few minutes, then try again." and `unreachable` "We couldn’t reach the demo. Try again in a moment."; a code this build doesn't know reads as `unreachable`.
+  - The illustration fills the right half: light cards on a clay field, `aria-hidden`, nothing focusable, not drawn under 720 px. Its cards are the product's only light surface, and its names and date are fixed illustration copy, never a real booking.
+  - Behavior: a native modal `<dialog>` over its own `scrim`, so the page behind is inert. It can't be dismissed: no close button, Escape does nothing and a press on the scrim does nothing. Focus starts in the passcode field and Tab stays inside the dialog. Enter submits once with the trimmed passcode. The button is disabled while the field is empty and reads "Starting" while `busy`, and a second submit before the first settles does nothing. With `error`, the line shows under the field (`role="alert"`, the field `aria-invalid` and described by it) and the field takes focus with its text selected; the code itself never shows. Nothing fetches.
+
+- [ ] **Step 1: Write the failing tests.**
+  - `tokens.test.ts`: `intro_dialog_tokens_match_the_board` (the values above, the new contrast pairs and the decorative entries).
+  - `guards.test.ts`: `clay_only_in_the_mark_and_the_intro_dialog`, replacing `clay_only_in_the_mark`.
+  - `introCopy.test.ts`: `every_intro_error_has_copy`; `intro_copy_never_shows_a_code`.
+  - `IntroDialog.browser.test.tsx` (real key presses): `escape_never_closes_it_with_a_real_keyboard`; `tab_stays_inside_with_a_real_keyboard`.
+  - Stories `Intro/IntroDialog`, with the board's copy as args (title "A Claude front desk for your business", the four things to try with the icons `person`, `safety`, `check` and `plus`, "Start the demo"): `Default` (no close button; Escape and a press on the scrim leave it open; focus in the field; Enter submits once with the trimmed passcode; empty disables the button), `Busy`, `WrongPasscode`, `RateLimited`, `Unreachable` (each line under the field, the code nowhere in the page) and `Phone` (390 px: no illustration, no horizontal scroll).
+- [ ] **Step 2: Run** `cd web && npx vitest run --project unit src/ds/tokens.test.ts src/ds/guards.test.ts src/ds/components/IntroDialog && npx vitest run --project ds-browser src/ds/components/IntroDialog && npx vitest run --project storybook src/ds/components/IntroDialog` → FAIL.
+- [ ] **Step 3: Implement** the tokens (`npm run tokens`), the contrast entries, the guard, the component with its README and the brand book lines.
+- [ ] **Step 4: Run** the same commands plus `npm run check:ds` → PASS (4 unit tests, 2 browser tests, 6 stories).
+- [ ] **Step 5: Commit** `git add web && git commit -m "feat(ds): add the first-visit intro dialog that takes the demo passcode, with its tokens"`, then land it as its own PR.
 
 ### Task 1: Verification, the Demo inbox, the mock checkout and the disclosure line
 
@@ -180,11 +214,12 @@ Supporting tests (the kernel stays the authority) and failure modes this plan ow
 ### Task 4: Visual check of the owner boards
 
 **Files:**
-- Create: `web/src/ds/reference/README.md`, `web/src/ds/boards/TodayNeedsYou.stories.tsx`, `ConversationLive.stories.tsx`, `ConversationAgent.stories.tsx`, `ReviewerArrival.stories.tsx`
+- Create: `web/src/ds/reference/README.md`, `web/src/ds/boards/TodayNeedsYou.stories.tsx`, `ConversationLive.stories.tsx`, `ConversationAgent.stories.tsx`, `ReviewerArrival.stories.tsx`, `IntroArrival.stories.tsx`
+- Modify: `web/src/ds/reference/boards.ts` (`REFERENCE_BOARDS` gains `N-Intro-D`, Task 0's board)
 - Test: `web/src/ds/reference/boards.test.ts`, the board stories
 
 **Interfaces:**
-- Produces: board stories `Boards/Today, needs you`, `Boards/Conversation, live`, `Boards/Conversation, agent`, `Boards/First visit` (`layout: 'fullscreen'`, `parameters.canvas` set to the board).
+- Produces: board stories `Boards/Today, needs you`, `Boards/Conversation, live`, `Boards/Conversation, agent`, `Boards/First visit`, `Boards/First visit, intro` (`layout: 'fullscreen'`, `parameters.canvas` set to the board).
 
 **Board spec** (from the canvas; each board story's play asserts the rows that apply with `expectComputed`):
 
@@ -203,7 +238,7 @@ Supporting tests (the kernel stays the authority) and failure modes this plan ow
 | Composer | background `rgb(42, 41, 39)`; radius 16px; shadow includes `0px 4px 20px` |
 | Concept footer | the exact string, 12px/17px, color `rgba(250, 249, 245, 0.64)` |
 
-- [ ] **Step 1: Write the failing tests.** `boards.test.ts`: `every_reference_board_has_a_render` (with `DS_REFERENCE_DIR` set, `<board>.png` exists for every `REFERENCE_BOARDS` entry and is 1280×820, read from the PNG header; unset, as in CI, it skips with a message); `board_stories_name_reference_boards`. Board stories compose components and fixtures (receipts through `receiptFromEvent`; Conversation, live has the whisper composer and `TakeOverBar` in `ai` mode; First visit has `ReviewerBar`, `Greeting` and the sidebar, its `canvasNote` naming the things-to-try list as Plan 04's); play runs the applicable spec rows and `focus_order_is_logical` (Tab reaches the business switcher, the nav in order, then the composer, then on Today the first approval card's first answer after the chips). Each `canvasNote` lists content differences.
+- [ ] **Step 1: Write the failing tests.** `boards.test.ts`: `every_reference_board_has_a_render` (with `DS_REFERENCE_DIR` set, `<board>.png` exists for every `REFERENCE_BOARDS` entry and is 1280×820, read from the PNG header; unset, as in CI, it skips with a message); `board_stories_name_reference_boards`. Board stories compose components and fixtures (receipts through `receiptFromEvent`; Conversation, live has the whisper composer and `TakeOverBar` in `ai` mode; First visit has `ReviewerBar`, `Greeting` and the sidebar, its `canvasNote` naming the things-to-try list as Plan 04's; First visit, intro has `IntroDialog` with the board's copy over a still render of Today, its `canvasNote` naming that preview as Plan 04's); play runs the applicable spec rows and `focus_order_is_logical` (Tab reaches the business switcher, the nav in order, then the composer, then on Today the first approval card's first answer after the chips). Each `canvasNote` lists content differences.
 - [ ] **Step 2: Run** `cd web && npx vitest run --project unit src/ds/reference && npx vitest run --project storybook src/ds/boards` → FAIL (board stories missing, or spec mismatches).
 - [ ] **Step 3: Build the board stories** and fix components (never assertions) until the spec rows pass; a value that truly differs from the canvas goes in the reference README with the reason.
 - [ ] **Step 4: Compare by eye** per `using-browsers` (headless `agent-browser`, its worktree session). With `npm run storybook -- --ci` in the background, per board: `set viewport 1280 820`, open `http://localhost:6006/iframe.html?id=<story-id>&viewMode=story`, screenshot to `.plan-runs/<plan-slug>/shots/` and compare with `$DS_REFERENCE_DIR/<board>.png` (type, colors, spacing, radii, hairlines, receipts beside the right messages, at most one motion moment). At `1440 900` and `390 844`, `eval "document.documentElement.scrollWidth <= innerWidth"` is `true` and nothing is clipped. A keyboard walk shows the 2 px blue ring at every stop. Fix deltas in components; rerun Step 2.
@@ -311,6 +346,6 @@ Owner decisions, 2026-10-29: the copied Global Constraints now read the auto-mon
 
 Fix round, 2026-10-29: the copied Global Constraints follow the master's Models and API-holdings lines; nothing else changes.
 
-Owner decisions, 2026-10-29, after the fix round: the platform ceiling is $10,000, the per-payment limit (master "Charter money cap"); the copied Global Constraints follow. The copied design line now allows clay in the first-visit intro dialog's illustration (spec "Look and feel").
+Owner decisions, 2026-10-29, after the fix round: the platform ceiling is $10,000, the per-payment limit (master "Charter money cap"); the copied Global Constraints follow. The copied design line now allows clay in the first-visit intro dialog's illustration (spec "Look and feel"). New Task 0 adds `IntroDialog`, the first-visit dialog that takes the passcode over a static preview of Today, owned here and shipped early by its own design PR right after the design system code (plan 03a) merges, before the web app's arrival (plan 04, Task 4). It adds the tokens `scrim` (`rgba(0,0,0,0.5)`), `shadow-dialog` and the type style `intro-title` (serif 28/35), plus the few tokens the dialog alone uses, and the clay guard's one allowed folder besides the mark, `components/IntroDialog/`, for the illustration's clay field. Task 4 adds its board, `N-Intro-D`, to `REFERENCE_BOARDS` and checks it by eye.
 
 Round 2 (seam review, 2026-10-29): seam-20: `ToolStatusRow` and `ToolReviewCard` take `profile: ToolRowView`, a `Pick` of `ToolProfile` that includes `definition_sha256`, so the API's `ToolRow` fits as well as a `ToolProfile`.
