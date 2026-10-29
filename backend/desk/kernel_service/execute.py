@@ -294,8 +294,8 @@ async def execute_allowed(ctx: KernelCtx, session_row: SessionRow, decision_id: 
         raise AuthError(404, "not_found", "unknown_decision" if found is None else "wrong_session",
                         route=EXECUTE_ROUTE, named=named)
     named = Named(copy_id=found.copy_id, desk_id=found.desk_id, session_id=found.session_id)
+    session = await _share_session(ctx, found.session_id)          # the session row before the decision row
     row = await _lock_decision(ctx, found.decision_id)
-    session = await _share_session(ctx, row.session_id)
     if generation != session.generation or row.generation != session.generation:
         raise _stale(named, row.decision_id)
     if session.mode in ("owner", "paused"):
