@@ -177,6 +177,19 @@ function AlwaysFailingScreen(props: ApprovalCardProps) {
   );
 }
 
+/** A screen whose every answer comes back unconfirmed at once, so the card takes the next try. */
+function UnconfirmedScreen(props: ApprovalCardProps) {
+  return (
+    <ApprovalCard
+      {...props}
+      onAnswer={(answer: ApprovalAnswer) => {
+        props.onAnswer(answer);
+        return Promise.reject(new Error('the answer was not confirmed'));
+      }}
+    />
+  );
+}
+
 /** The event a story sends the screen below, carrying new props for its card. */
 const SCREEN_UPDATE = 'cd-story-screen-update';
 
@@ -520,6 +533,54 @@ export const KeyboardThroughTheMenus: Story = {
     await expect(canvas.queryByRole('menu')).toBeNull();
     await expect(allow).toHaveFocus();
     await expect(allow).toHaveAttribute('aria-disabled', 'true');
+  },
+};
+
+export const ThisTimeOnEachSide: Story = {
+  args: refundArgs,
+  render: (args) => <UnconfirmedScreen {...args} />,
+  parameters: {
+    canvasNote: `${ANSWERS_BOARD} Both menus offer "This time", and each sends its own side's answer, by click and by Enter. Here every answer comes back unconfirmed at once, so the next can be tried.`,
+  },
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
+    const allow = canvas.getByRole('button', { name: 'Allow' });
+    const deny = canvas.getByRole('button', { name: 'Deny' });
+    const thisTime = (menu: 'Allow' | 'Deny') => within(canvas.getByRole('menu', { name: menu })).getByRole('menuitem', { name: 'This time' });
+    // The answer comes back unconfirmed, and the answers can be tried again.
+    const answersBack = () =>
+      waitFor(async () => {
+        for (const button of answerButtons(canvasElement)) await expect(button).not.toHaveAttribute('aria-disabled');
+      });
+
+    // By click: This time in Allow's menu allows once, and in Deny's denies once.
+    await userEvent.click(allow);
+    await userEvent.click(thisTime('Allow'));
+    await expect(args.onAnswer).toHaveBeenLastCalledWith('allow_once');
+    await answersBack();
+    await userEvent.click(deny);
+    await userEvent.click(thisTime('Deny'));
+    await expect(args.onAnswer).toHaveBeenLastCalledWith('deny_once');
+    await answersBack();
+
+    // By Enter: Enter opens each menu on This time, and Enter again chooses it.
+    await userEvent.tab({ shift: true });
+    await expect(allow).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+    await expect(thisTime('Allow')).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+    await expect(args.onAnswer).toHaveBeenLastCalledWith('allow_once');
+    await answersBack();
+    await userEvent.tab();
+    await expect(deny).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+    await expect(thisTime('Deny')).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+    await expect(args.onAnswer).toHaveBeenLastCalledWith('deny_once');
+
+    await expect(args.onAnswer).toHaveBeenCalledTimes(4);
+    for (const [n, answer] of (['allow_once', 'deny_once', 'allow_once', 'deny_once'] as const).entries()) {
+      await expect(args.onAnswer).toHaveBeenNthCalledWith(n + 1, answer);
+    }
   },
 };
 
