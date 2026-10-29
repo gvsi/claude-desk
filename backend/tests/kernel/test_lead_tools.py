@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 import httpx
 import pytest
 from fastapi import FastAPI
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from desk.contracts import Claim, Decision, DemoInboxEntry, ExecResult, HoursWindow
 from desk.db.models import Desk, Fact, Handoff, Lead, LedgerEntry, NotificationPref, Person, VerificationChallenge
@@ -336,6 +336,56 @@ async def test_parallel_verification_starts_take_turns(app, client, monkeypatch)
     assert sorted(statuses) == ["cancelled", "live"]
     assert [entry.event.summary["outcome"] for entry in await ledger_rows(app, copy)
             if entry.event.kind == "verify"] == ["started", "started"]
+
+
+async def lock_waiters(app: FastAPI) -> int:
+    """How many of this database's connections are waiting on a lock now."""
+    async with app.state.kernel.engine.connect() as conn:
+        return (await conn.execute(text(
+            "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'"
+        ))).scalar_one()
+
+
+async def until_waiting(app: FastAPI, task: asyncio.Task, timeout: float = 5.0) -> None:
+    """Returns once `task` has answered or a connection waits on a lock."""
+    deadline = asyncio.get_running_loop().time() + timeout
+    while not task.done() and await lock_waiters(app) == 0:
+        assert asyncio.get_running_loop().time() < deadline, "nothing waited on a lock"
+        await asyncio.sleep(0.01)
+
+
+async def test_a_repeated_start_waits_for_the_running_one(app, client, monkeypatch):
+    """A repeat `/execute` of a verification start that is running waits for the session row the
+    start holds, then answers with the start's stored result. It must not hold the decision while
+    it waits: the start locks the decision once it has sent the code, so each would wait on the
+    other until Postgres ended one, answering 500 or leaving the start `unknown`."""
+    copy, visitor = await visitor_of(app, client)
+    allowed = await decided(client, visitor, "native.start_verification", {"contact": "dana@example.com"})
+    assert allowed.outcome == "allow", allowed.reason_plain
+    start, running, go_on = verification.start, asyncio.Event(), asyncio.Event()
+
+    async def start_when_told(ctx, session_row, contact):
+        running.set()
+        await go_on.wait()
+        return await start(ctx, session_row, contact)
+
+    monkeypatch.setattr(verification, "start", start_when_told)
+    first = asyncio.create_task(post_execute(client, visitor, allowed))
+    await asyncio.wait_for(running.wait(), timeout=5)
+    repeat = asyncio.create_task(post_execute(client, visitor, allowed))
+    await until_waiting(app, repeat)
+    go_on.set()
+    answers = await asyncio.gather(first, repeat)
+
+    assert [response.status_code for response in answers] == [200, 200], [response.text for response in answers]
+    result, again = (ExecResult.model_validate(response.json()) for response in answers)
+    assert (result.state, again) == ("succeeded", result)          # the stored result, not a second start
+    statuses = [row.status for row in await rows_of(app, copy.copy_id, select(VerificationChallenge))]
+    assert statuses == ["live"]
+    entries = [entry.event for entry in await ledger_rows(app, copy)]
+    assert [event.summary["outcome"] for event in entries if event.kind == "verify"] == ["started"]
+    assert [event.summary.get("repeat") for event in entries if event.kind == "execute"
+            and event.ref_id == allowed.decision_id] == [None, True]
 
 
 async def test_start_verification_is_for_unverified_sessions(app, client):
