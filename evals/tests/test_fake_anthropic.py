@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 import time
 
 import anthropic
@@ -129,6 +130,27 @@ async def test_unscripted_call_is_recorded(fake: FakeAnthropic, client: AsyncAnt
     assert fake.unscripted()[-1]["path"] == "/v1/messages/count_tokens"
     with pytest.raises(AssertionError, match="4 unscripted model calls"):
         fake.check()
+
+
+async def test_check_reports_scripted_replies_left_unused(fake: FakeAnthropic, client: AsyncAnthropic):
+    """A scripted reply is one the case expects a call to use: `check()` fails while any is left,
+    naming the model (and schema) and how many, since a call the kernel skipped would otherwise
+    pass unnoticed. A default answers only if called, so it is never owed one."""
+    fake.script("claude-sonnet-5-5", Json(REVIEW_PASS), Text("Never asked for"))
+    fake.script("claude-haiku-5-5", Text("Checked"), schema="SoftPromiseVerdict")
+    fake.script("claude-opus-5-5", Text("Again and again"), repeat_last=True)
+    fake.default("claude-opus-5-5", Text("A default"), schema="Other")
+    await client.messages.create(model="claude-sonnet-5-5", **ask())
+    with pytest.raises(AssertionError, match=re.escape(
+            "3 scripted replies were never used (claude-haiku-5-5 with schema SoftPromiseVerdict: 1, "
+            "claude-opus-5-5: 1, claude-sonnet-5-5: 1)")):
+        fake.check()
+
+    structured = {"output_config": {"format": {"type": "json_schema", "schema": SOFT_PROMISE_SCHEMA}}}
+    for model, extra in (("claude-sonnet-5-5", {}), ("claude-haiku-5-5", structured), ("claude-opus-5-5", {}),
+                         ("claude-opus-5-5", {})):
+        await client.messages.create(model=model, **ask(**extra))
+    fake.check()   # every scripted reply used, the repeated one more than once; the default never called
 
 
 async def test_calls_are_recorded_by_model(fake: FakeAnthropic, client: AsyncAnthropic):

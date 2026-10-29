@@ -2,8 +2,9 @@
 
 `FakeAnthropic` serves `POST /v1/messages` on a free loopback port. A case scripts the replies a
 model gives (`script`, `default`), and the server answers each request from the script for its
-model, or fails it with 500 and records it as unscripted. It keeps each request body for the case
-to check, and never the request's headers, so no key it was sent is stored.
+model, or fails it with 500 and records it as unscripted; `check()` fails on an unscripted call
+and on a scripted reply no request used. It keeps each request body for the case to check, and
+never the request's headers, so no key it was sent is stored.
 """
 
 import asyncio
@@ -222,13 +223,25 @@ class FakeAnthropic:
         with self._lock:
             return [json.loads(json.dumps(body)) for body in self._unscripted]
 
+    def unused(self) -> dict[tuple[str, str | None], int]:
+        """How many scripted replies no request has used yet, by model and schema. A default is
+        never counted: it answers only if a request comes."""
+        with self._lock:
+            return {key: len(script.replies) for key, script in sorted(self._scripts.items(), key=_by_model)
+                    if script.replies}
+
     def check(self) -> None:
-        """Fail when any request went unscripted or an `on_request` callback failed: every model
-        call a case causes is one it scripted."""
+        """Fail when any request went unscripted, a scripted reply was never used or an
+        `on_request` callback failed: every model call a case causes is one it scripted, and every
+        reply it scripted is one a call it expects used."""
         problems = []
         if unscripted := self.unscripted():
             models = ", ".join(str(body.get("model")) for body in unscripted)
             problems.append(f"{len(unscripted)} unscripted model calls reached the fake model server ({models})")
+        if unused := self.unused():
+            left = ", ".join(f"{model}{f' with schema {schema}' if schema else ''}: {n}"
+                             for (model, schema), n in unused.items())
+            problems.append(f"{sum(unused.values())} scripted replies were never used ({left})")
         with self._lock:
             problems += [f"an on_request callback failed: {error!r}" for error in self._errors]
         if problems:
@@ -300,6 +313,11 @@ class FakeAnthropic:
         if body.get("stream") is True:
             return StreamingResponse(_stream(message), media_type="text/event-stream")
         return JSONResponse(message)
+
+
+def _by_model(item: tuple[tuple[str, str | None], Any]) -> tuple[str, str]:
+    (model, schema), _ = item
+    return model, schema or ""
 
 
 def schema_of(body: dict) -> str | None:

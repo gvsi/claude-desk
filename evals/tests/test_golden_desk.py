@@ -7,17 +7,20 @@ from types import SimpleNamespace
 from typing import Literal
 from zoneinfo import ZoneInfo
 
+import httpx
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
 from desk.contracts import DemoInboxEntry, Review
-from evals.fakes import HttpError, Json, Refusal, Sleep, Text
+from evals.fakes import FakeAnthropic, HttpError, Json, Refusal, Sleep, Text
+from evals.tier1 import test_decide_golden as decide_golden
 from evals.tier1.args import quote_args, schema_mismatches
 from desk.kernel_api import DeskCalendarRequest, DeskPricesRequest
 from evals.tier1.golden_desk import (
     CUSTOM_ITEMS,
     CUSTOM_SLOTS,
     REVIEW_PASS,
+    REVIEWER_MODEL,
     Slot,
     charge_id,
     code_from_inbox,
@@ -211,7 +214,8 @@ def test_rows_load_with_the_plans_counts():
         assert fields["state"] == states[fields["outcome"]], row.id
     # A scripted reviewer reply is one call; {if_called} allows any number, and with no reviewer any call fails.
     calls = {row.id: row.checks.reviewer_calls for row in rows if row.reviewer is not None}
-    assert calls["review-timeout"] == calls["send-message-reviewer-down"] == 1
+    assert {row_id: n for row_id, n in calls.items() if row_id.startswith("review-") and n != 1} == {}
+    assert calls["send-message-review"] == calls["send-message-reviewer-down"] == 1
     assert calls["s-discount-8000"] is None
 
 
@@ -238,6 +242,8 @@ GOOD_ROW = {
     {"expect": {"outcome": "allow", "strikes": "0"}},
     {"expect": {"outcome": "allow", "default_ask": "native.dance"}},
     {"reviewer": "maybe"},
+    {"reviewer": "pass", "expect": {"outcome": "allow", "reviewer_calls": 0}},   # a scripted reply is one call
+    {"reviewer": {"http_error": 500}, "expect": {"outcome": "hold", "reviewer_calls": 2}},
     {"call": {"tool": "native.quote", "item": "drain", "slot": "wk"}},      # names what a quote doesn't take
     {"call": {"tool": "native.quote", "item": "boiler"}},
     {"call": {"tool": "native.book", "slot": "mon-0600"}},
@@ -290,3 +296,52 @@ async def test_quote_facts_come_from_the_adapters_model_view():
     no_fact = ScriptedKernel(allow, SimpleNamespace(model_view={"quote_id": "Q-7f3a"}))
     with pytest.raises(AssertionError, match="no fact_id"):
         await make_quote_fact(no_fact, None, quoting_visitor(), "drain")
+
+
+async def run_review_row(monkeypatch: pytest.MonkeyPatch, row_id: str, *, reviewed: bool) -> FakeAnthropic:
+    """`test_decide_row` for a reviewer row on a real-kernel stand-in whose `/decide` calls the
+    started fake reviewer once, or never; returns the fake, stopped."""
+    row = {row.id: row for row in load_rows()}[row_id]
+    caller = SimpleNamespace(state=SimpleNamespace(session_id="s-1", generation=0), auth=None, turn=lambda: None)
+
+    async def returns(value: object = None) -> object:
+        return value
+
+    async def decide(k, who, tool, args, *, expect):
+        if reviewed:
+            async with httpx.AsyncClient(base_url=fake.url) as client:
+                await client.post("/v1/messages", json={"model": REVIEWER_MODEL, "max_tokens": 64,
+                                                       "messages": [{"role": "user", "content": "Review this."}]})
+
+    for name, stand_in in {
+        "golden_desk": lambda *args, **kwargs: returns(SimpleNamespace()),
+        "open_caller": lambda *args, **kwargs: returns(caller),
+        "call_args": lambda *args, **kwargs: returns({}),
+        "confirm_cards": lambda *args, **kwargs: returns(),
+        "check_args_schema": lambda *args, **kwargs: returns(),
+        "decide": decide,
+    }.items():
+        monkeypatch.setattr(decide_golden, name, stand_in)
+    fake = FakeAnthropic().start()
+    try:
+        await decide_golden.test_decide_row(SimpleNamespace(is_real=True), fake, None, row)
+    finally:
+        fake.stop()
+    return fake
+
+
+@pytest.mark.parametrize("row_id", ["review-unparsable", "review-error", "review-refusal"])
+async def test_a_reviewer_row_fails_when_the_reviewer_is_never_called(
+    monkeypatch: pytest.MonkeyPatch, row_id: str,
+):
+    """A row that scripts the reviewer's reply holds because the reviewer failed, not because it
+    was skipped: with no reviewer call the row fails, and the fake reports the reply unused; with
+    the one call it passes and the fake is satisfied."""
+    with pytest.raises(AssertionError, match="0 reviewer calls"):
+        await run_review_row(monkeypatch, row_id, reviewed=False)
+    fake = await run_review_row(monkeypatch, row_id, reviewed=True)
+    fake.check()
+    skipped = FakeAnthropic()
+    skipped.script(REVIEWER_MODEL, Text("Never asked for"))
+    with pytest.raises(AssertionError, match="1 scripted replies were never used"):
+        skipped.check()

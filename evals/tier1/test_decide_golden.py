@@ -62,8 +62,8 @@ async def test_decide_row(k: KernelHarness, fake: FakeAnthropic, records, row: R
         )
     if row.reviewer is not None:
         reply, required = reviewer_reply(row.reviewer)
-        if required:
-            fake.script(REVIEWER_MODEL, reply)   # one reply: a second reviewer call is unscripted and fails the case
+        if required:   # one reply: a second call is unscripted, and none leaves it unused; either fails the case
+            fake.script(REVIEWER_MODEL, reply)
         else:
             fake.default(REVIEWER_MODEL, reply)
     caller.turn()
@@ -73,8 +73,9 @@ async def test_decide_row(k: KernelHarness, fake: FakeAnthropic, records, row: R
 
     checks = row.checks
     if k.is_real:
-        if checks.reviewer_calls is not None:
-            assert len(fake.calls(REVIEWER_MODEL)) == checks.reviewer_calls
+        if checks.reviewer_calls is not None:   # one wherever the row scripts a reply (`Row.checks`)
+            made = len(fake.calls(REVIEWER_MODEL))
+            assert made == checks.reviewer_calls, f"{made} reviewer calls, expected {checks.reviewer_calls}"
         if checks.strikes is not None:
             assert (await session_row(records, desk, caller))["strikes"] == checks.strikes
         if checks.default_ask is not None:

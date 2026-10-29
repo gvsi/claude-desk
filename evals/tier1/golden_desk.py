@@ -575,8 +575,10 @@ class Row(BaseModel):
                 raise ValueError(f"{key} is a count")
         if "default_ask" in values and values["default_ask"] not in get_args(ToolName):
             raise ValueError("default_ask names a tool")
-        if "reviewer_calls" not in values and self.reviewer is not None and reviewer_reply(self.reviewer)[1]:
-            values["reviewer_calls"] = 1   # the hold comes from the reviewer's answer, never from skipping it
+        if self.reviewer is not None and reviewer_reply(self.reviewer)[1]:
+            # The hold comes from the reviewer's answer, never from skipping it: one call, used.
+            if values.setdefault("reviewer_calls", 1) != 1:
+                raise ValueError("a scripted reviewer reply is exactly one reviewer call; {if_called} allows any")
         return Checks(**values)
 
 
