@@ -3,7 +3,7 @@
 //! timeout). These tests need cvc5, found through `CVC5` or `PATH`.
 use serde_json::{Value, json};
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../cedar/fixtures");
@@ -40,24 +40,54 @@ struct Run {
     elapsed: Duration,
 }
 
+/// No run in these tests should take this long; one that does is killed and fails.
+const HARD_LIMIT: Duration = Duration::from_secs(60);
+
 fn run(name: &str, args: &[&str], env: &[(&str, &str)]) -> Run {
+    run_within(name, args, env, HARD_LIMIT)
+}
+
+/// Runs desk-prove, killing it and failing the test if it outlives `limit`.
+fn run_within(name: &str, args: &[&str], env: &[(&str, &str)], limit: Duration) -> Run {
+    use std::io::Read;
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_desk-prove"));
-    cmd.args(args);
+    cmd.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
     for (k, v) in env {
         cmd.env(k, v);
     }
     let start = Instant::now();
-    let out = cmd.output().expect("desk-prove runs");
+    let mut child = cmd.spawn().expect("desk-prove starts");
+    let drain = |mut pipe: Box<dyn Read + Send>| {
+        std::thread::spawn(move || {
+            let mut bytes = vec![];
+            let _ = pipe.read_to_end(&mut bytes);
+            bytes
+        })
+    };
+    let stdout = drain(Box::new(child.stdout.take().unwrap()));
+    let stderr = drain(Box::new(child.stderr.take().unwrap()));
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if start.elapsed() > limit {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("{name}: desk-prove was still running after {limit:?}");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
     let elapsed = start.elapsed();
-    let report = serde_json::from_slice(&out.stdout).unwrap_or_else(|e| {
+    let (stdout, stderr) = (stdout.join().unwrap(), stderr.join().unwrap());
+    let report = serde_json::from_slice(&stdout).unwrap_or_else(|e| {
         panic!(
             "{name}: stdout is not a report ({e}): {}\nstderr: {}",
-            String::from_utf8_lossy(&out.stdout),
-            String::from_utf8_lossy(&out.stderr)
+            String::from_utf8_lossy(&stdout),
+            String::from_utf8_lossy(&stderr)
         )
     });
     Run {
-        code: out.status.code().unwrap_or(-1),
+        code: status.code().unwrap_or(-1),
         report,
         elapsed,
     }
@@ -523,4 +553,83 @@ fn deadline_kills_the_solver_during_synchronous_work() {
     for pid in started.lines() {
         assert!(!alive(pid), "stub solver {pid} is still running");
     }
+}
+
+#[test]
+fn deadline_covers_reading_the_inputs() {
+    // A checks file that never delivers (a FIFO nobody writes to): reading it
+    // blocks forever, and the run must still stop at its deadline.
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("deadline_covers_reading_the_inputs");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let (schema, sets, checks) = (
+        dir.join("schema.json"),
+        dir.join("sets.json"),
+        dir.join("checks.fifo"),
+    );
+    std::fs::write(&schema, fixture("schema.cedarschema.json")).unwrap();
+    std::fs::write(&sets, fixture_sets().to_string()).unwrap();
+    assert!(
+        Command::new("mkfifo")
+            .arg(&checks)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let run = run_within(
+        "deadline_covers_reading_the_inputs",
+        &[
+            "--schema",
+            schema.to_str().unwrap(),
+            "--sets",
+            sets.to_str().unwrap(),
+            "--checks",
+            checks.to_str().unwrap(),
+            "--timeout-ms",
+            "50",
+        ],
+        &[],
+        Duration::from_secs(5),
+    );
+    assert_eq!(run.code, 2, "{}", run.report);
+    assert_eq!(run.report["ok"], false);
+    assert_eq!(run.report["timed_out"], true);
+    assert!(
+        run.elapsed < Duration::from_secs(1),
+        "took {:?}",
+        run.elapsed
+    );
+}
+
+#[test]
+fn timeout_report_keeps_finished_checks() {
+    // The first check finishes (and fails, with a counterexample); the worker
+    // then blocks past the deadline before the second. The main thread's
+    // report keeps the first result, so the run exits 1, not 2.
+    let mut sets = fixture_sets();
+    sets["A"] = json!(fixture("buggy_or_gate.cedar"));
+    let checks = json!({"checks": ["review_only_narrows", "never_errors"], "money_uncovered": []});
+    let run = prove(
+        "timeout_report_keeps_finished_checks",
+        &sets,
+        &checks,
+        4_000,
+        &[
+            ("DESK_PROVE_TEST_STALL_MS", "20000"),
+            ("DESK_PROVE_TEST_STALL_BEFORE", "1"),
+        ],
+    );
+    assert_eq!(run.code, 1, "{}", run.report);
+    assert!(
+        run.elapsed < Duration::from_secs(6),
+        "took {:?}",
+        run.elapsed
+    );
+    let narrows = check(&run.report, "review_only_narrows");
+    assert_eq!(narrows["ok"], false);
+    assert_eq!(
+        narrows["counterexample_raw"]["action"], "native.quote",
+        "{narrows}"
+    );
+    assert_eq!(check(&run.report, "never_errors")["ok"], false);
 }

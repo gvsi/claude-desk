@@ -170,18 +170,34 @@ impl Solver for ProofSolver {
     }
 }
 
-/// Debug builds only: block the worker after it starts its solver, standing in
-/// for synchronous work that overruns the deadline, so a test can check that
-/// the main thread still kills the solver. Release builds have no such hook.
-fn stall_for_tests() {
+/// Debug builds only: before check number `DESK_PROVE_TEST_STALL_BEFORE`
+/// (default 0, just after the solver starts), block the worker for
+/// `DESK_PROVE_TEST_STALL_MS`. This stands in for synchronous work that
+/// overruns the deadline, so tests can check what the main thread does then.
+/// Release builds have no such hook.
+fn stall_for_tests(check_index: usize) {
+    let _ = check_index;
     #[cfg(debug_assertions)]
-    if let Some(ms) = std::env::var("DESK_PROVE_TEST_STALL_MS")
-        .ok()
-        .and_then(|ms| ms.parse().ok())
     {
-        std::thread::sleep(Duration::from_millis(ms));
+        let var = |name: &str| std::env::var(name).ok().and_then(|v| v.parse::<u64>().ok());
+        if let Some(ms) = var("DESK_PROVE_TEST_STALL_MS")
+            && var("DESK_PROVE_TEST_STALL_BEFORE").unwrap_or(0) == check_index as u64
+        {
+            std::thread::sleep(Duration::from_millis(ms));
+        }
     }
 }
+
+/// What the worker has done so far: the requested checks once they are parsed,
+/// and each check that finished before the deadline. A timeout report the main
+/// thread writes keeps them.
+#[derive(Default)]
+struct Progress {
+    requested: Vec<String>,
+    finished: Vec<CheckResult>,
+}
+
+type SharedProgress = Arc<Mutex<Progress>>;
 
 /// The deadline passed during a check.
 #[derive(Debug)]
@@ -213,6 +229,7 @@ struct Inputs {
     money_uncovered: Vec<String>,
 }
 
+#[derive(Clone)]
 struct CheckResult {
     name: String,
     ok: bool,
@@ -532,6 +549,7 @@ async fn prove(
     inputs: &Inputs,
     deadline: Instant,
     slot: &SolverSlot,
+    progress: &SharedProgress,
 ) -> (Vec<CheckResult>, Option<Stop>) {
     let mut results = vec![];
     if in_time(deadline).is_err() {
@@ -541,14 +559,16 @@ async fn prove(
         Ok(symcc) => symcc,
         Err(e) => return (results, Some(Stop::Tool(e))),
     };
-    stall_for_tests();
     let mut stop = None;
-    for name in &inputs.checks {
+    for (index, name) in inputs.checks.iter().enumerate() {
+        stall_for_tests(index);
         let timer = tokio::time::Instant::from_std(deadline);
         let outcome =
             tokio::time::timeout_at(timer, run_check(deadline, &mut symcc, inputs, name)).await;
         stop = match outcome {
             Ok(Ok(result)) if in_time(deadline).is_ok() => {
+                let mut shared = progress.lock().unwrap_or_else(|e| e.into_inner());
+                shared.finished.push(result.clone());
                 results.push(result);
                 continue;
             }
@@ -657,7 +677,8 @@ async fn selftest(deadline: Instant, slot: &SolverSlot) -> (Value, u8) {
                 false
             }
             Ok(inputs) => {
-                let (finished, stop) = prove(&inputs, deadline, slot).await;
+                let (finished, stop) =
+                    prove(&inputs, deadline, slot, &SharedProgress::default()).await;
                 stopped |= stop.is_some();
                 stop.is_none() && finished.first().is_some_and(expected)
             }
@@ -709,7 +730,14 @@ fn tool_error(e: anyhow::Error) -> (Value, u8) {
 }
 
 /// Everything after argument parsing, on the worker thread, within `deadline`.
-async fn job(args: Args, deadline: Instant, slot: SolverSlot) -> (Value, u8) {
+/// Only the worker reads inputs, so a slow or blocked file can't hold up the
+/// main thread's timeout report.
+async fn job(
+    args: Args,
+    deadline: Instant,
+    slot: SolverSlot,
+    progress: SharedProgress,
+) -> (Value, u8) {
     if args.selftest {
         return selftest(deadline, &slot).await;
     }
@@ -720,25 +748,32 @@ async fn job(args: Args, deadline: Instant, slot: SolverSlot) -> (Value, u8) {
     };
     let read =
         |path: &str| std::fs::read_to_string(path).with_context(|| format!("reading {path}"));
-    let inputs = match (|| Inputs::parse(&read(&schema)?, &read(&sets)?, &read(&checks)?))() {
+    // The small checks file goes first, so a timeout while the sets are still
+    // being read or parsed can name the checks it didn't prove.
+    let checks = match read(&checks) {
+        Ok(text) => text,
+        Err(e) => return tool_error(e),
+    };
+    progress.lock().unwrap_or_else(|e| e.into_inner()).requested = check_names(&checks);
+    let inputs = match (|| Inputs::parse(&read(&schema)?, &read(&sets)?, &checks))() {
         Ok(inputs) => inputs,
         Err(e) => return tool_error(e),
     };
-    let (finished, stop) = prove(&inputs, deadline, &slot).await;
+    progress.lock().unwrap_or_else(|e| e.into_inner()).requested = inputs.checks.clone();
+    let (finished, stop) = prove(&inputs, deadline, &slot, &progress).await;
     report(&inputs.checks, &finished, stop.as_ref())
 }
 
-/// The check names in a checks file, for a report the main thread writes
-/// without the worker; empty when the file can't be read.
-fn requested_checks(path: &str) -> Vec<String> {
-    let names = std::fs::read_to_string(path)
-        .ok()
-        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-        .and_then(|file| file.get("checks").and_then(Value::as_array).cloned());
-    names
+/// The check names a checks file asks for, before it is fully validated.
+fn check_names(checks_json: &str) -> Vec<String> {
+    let file: Value = serde_json::from_str(checks_json).unwrap_or(Value::Null);
+    let names = file
+        .get("checks")
+        .and_then(Value::as_array)
         .into_iter()
-        .flatten()
-        .filter_map(|n| n.as_str().map(str::to_string))
+        .flatten();
+    names
+        .filter_map(|name| name.as_str().map(str::to_string))
         .collect()
 }
 
@@ -773,14 +808,10 @@ fn main() -> ExitCode {
         (false, None) => return finish(tool_error(anyhow!("--timeout-ms is required"))),
     };
     let deadline = started + budget;
-    let requested = args
-        .checks
-        .as_deref()
-        .map(requested_checks)
-        .unwrap_or_default();
     let slot = SolverSlot::default();
+    let progress = SharedProgress::default();
     let (sender, receiver) = mpsc::channel();
-    let worker_slot = slot.clone();
+    let (worker_slot, worker_progress) = (slot.clone(), progress.clone());
     let worker = std::thread::Builder::new()
         .name("desk-prove".into())
         .stack_size(WORKER_STACK)
@@ -789,7 +820,7 @@ fn main() -> ExitCode {
                 .enable_all()
                 .build()
             {
-                Ok(runtime) => runtime.block_on(job(args, deadline, worker_slot)),
+                Ok(runtime) => runtime.block_on(job(args, deadline, worker_slot, worker_progress)),
                 Err(e) => tool_error(e.into()),
             };
             let _ = sender.send(outcome);
@@ -800,17 +831,18 @@ fn main() -> ExitCode {
     let wait = deadline.saturating_duration_since(Instant::now()) + GRACE;
     let outcome = match receiver.recv_timeout(wait) {
         Ok(outcome) => outcome,
-        Err(mpsc::RecvTimeoutError::Timeout) => {
+        Err(waited) => {
             kill_solver(&slot);
-            report(&requested, &[], Some(&Stop::Timeout))
-        }
-        Err(mpsc::RecvTimeoutError::Disconnected) => {
-            kill_solver(&slot);
-            report(
-                &requested,
-                &[],
-                Some(&Stop::Tool(anyhow!("the proof worker stopped"))),
-            )
+            let stop = match waited {
+                mpsc::RecvTimeoutError::Timeout => Stop::Timeout,
+                mpsc::RecvTimeoutError::Disconnected => {
+                    Stop::Tool(anyhow!("the proof worker stopped"))
+                }
+            };
+            // Checks that finished in time keep their results: a failed one
+            // still makes the exit 1, with its counterexample.
+            let done = progress.lock().unwrap_or_else(|e| e.into_inner());
+            report(&done.requested, &done.finished, Some(&stop))
         }
     };
     // Returning ends the process, and with it a worker still busy past the deadline.
