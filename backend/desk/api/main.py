@@ -204,15 +204,16 @@ def create_app(settings: Settings, *, kernel_transport: Any = None, model: Any =
                 stack.push_async_callback(built.aclose)
             stack.push_async_callback(kernel.aclose)
             assert_production_safe(settings, kernel)
+            # Neither pool puts a statement's parameters in its errors: a route's failure is logged by the server.
             engine = create_async_engine(settings.api_database_url, connect_args={"options": API_CONNECT_OPTIONS},
                                          pool_size=POOL_SIZE, max_overflow=MAX_OVERFLOW, pool_timeout=POOL_TIMEOUT_S,
-                                         pool_pre_ping=True)
+                                         pool_pre_ping=True, hide_parameters=True)
             stack.push_async_callback(engine.dispose)
             # The turn locks' own pool: each running turn holds its session's lock on one of these connections.
             lock_engine = create_async_engine(settings.api_database_url,
                                               connect_args={"options": API_CONNECT_OPTIONS},
                                               pool_size=TURN_LOCK_POOL_SIZE, max_overflow=0,
-                                              pool_timeout=POOL_TIMEOUT_S, pool_pre_ping=True)
+                                              pool_timeout=POOL_TIMEOUT_S, pool_pre_ping=True, hide_parameters=True)
             stack.push_async_callback(lock_engine.dispose)
             listener = await stack.enter_async_context(Listener(settings.api_database_url))
             runner = TurnRunner(state.model, engine=engine, lock_engine=lock_engine, production=settings.production,

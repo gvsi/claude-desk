@@ -8,6 +8,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import traceback
 from collections.abc import AsyncIterator
 
 import httpx
@@ -15,15 +16,18 @@ import psycopg
 import pytest
 from fastapi import FastAPI
 from procrastinate.testing import InMemoryConnector
+from sqlalchemy import text as sql
+from sqlalchemy.exc import DBAPIError
 
 from desk.api import jobs
 from desk.api.jobs import RESUME_AFTER_ANSWER
 from desk.api.main import create_app
+from desk.api.routes import public
 from desk.db.tables import APP_TABLES
 from tests.api.conftest import PASSCODE
 from tests.api.fakes import ScriptedModel, response, tool_use
 from tests.api.test_approvals import jobs_done, resolved
-from tests.api.test_public_chat import DISCOUNTED_QUOTE, Stream, cookie, events_path, reply, types
+from tests.api.test_public_chat import DISCOUNTED_QUOTE, Stream, cookie, events_path, new_slug, reply, types
 from tests.kernel_contract.fake_kernel import fake_kernel_app
 
 
@@ -162,3 +166,27 @@ async def test_a_failed_resume_job_logs_no_arguments(app, browser, fake, model, 
     logged = "\n".join([caplog.text, *(record.getMessage() + repr(record.args) + repr(vars(record))
                                        for record in caplog.records)])
     assert [text for text in (JOB_FAILED, said) if text in logged] == []
+
+
+async def test_a_database_error_in_a_route_logs_no_parameter_value(app, browser, fake, kernel_http, monkeypatch,
+                                                                    caplog):
+    """A route whose database work fails answers the static 500, and the error the server then logs (the exception
+    Starlette raises again once the 500 is sent) names the statement but never its parameters, so the visitor's words
+    don't reach a log through it."""
+    caplog.set_level(logging.DEBUG)
+    said = "Call me on 555 0100, I'm at 12 Elm Street"
+
+    async def failing(conn, ids, kind, **fields):                     # storing the message fails in the database
+        await conn.execute(sql("SELECT 1 / 0 WHERE CAST(:said AS text) IS NOT NULL"), {"said": fields["text"]})
+
+    monkeypatch.setattr(public, "append_message", failing)
+    slug = await new_slug(kernel_http, fake)
+    visitor = browser(app)
+    assert (await visitor.post(f"/api/public/desks/{slug}/sessions")).status_code == 200
+    with pytest.raises(DBAPIError) as raised:
+        await visitor.post(f"/api/public/desks/{slug}/messages", json={"text": said})
+
+    server_log = "".join(traceback.format_exception(raised.value))
+    assert "division by zero" in server_log and "SQL parameters hidden" in server_log
+    logged = "\n".join([server_log, caplog.text, *(repr(vars(record)) for record in caplog.records)])
+    assert said not in logged
