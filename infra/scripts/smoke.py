@@ -19,15 +19,17 @@ Checks, in order:
   and every seed is proved.
 - security_headers: HSTS on `/` and `/api/health`.
 - origin_groups_locked (`--load-balancer-arn`): the Express load balancer's security groups, read
-  with describe calls, admit nothing from 0.0.0.0/0 or ::/0, and 443 only from CloudFront's
-  origin-facing prefix list, which at least one rule admits, and from the private sources
-  ExpressEdge's lock keeps (its `kept_source`: another group, or a private range).
+  with describe calls, admit CloudFront's origin-facing prefix list on TCP 443, which at least one
+  rule does, and otherwise, on any protocol or port, only the private sources ExpressEdge's lock
+  keeps (its `kept_source`: another group, or a range inside the private ranges). Ranges are
+  judged as address ranges, so the world written another way (0.0.0.0/1 with 128.0.0.0/1, ::0/0)
+  fails as 0.0.0.0/0 does, and so does any public range.
 - origin_direct_refused (`--origin-host`): the Express origin takes no TCP connection on 443 or
   80 from here; only CloudFront reaches it. A second signal beside origin_groups_locked: a network
   that filters these ports would refuse them too.
 - task_ports_refused (`--cluster`): each running app task's security groups, read with describe
-  calls, admit nothing from 0.0.0.0/0 or ::/0, and 8700 and 8701 only from those same private
-  sources; and its public IP takes no connection on 8700 or 8701, the second signal.
+  calls, admit only those same private sources, on any protocol or port; and its public IP takes
+  no connection on 8700 or 8701, the second signal.
 - cookies_first_party (`DESK_PASSCODE`): a new copy's cookies are Secure, HttpOnly, SameSite=Strict
   and host-only; the owner cookie's path is /api/owner, the visitor cookie's its own Desk's
   /api/public/desks/{slug}.
@@ -44,6 +46,7 @@ import argparse
 import functools
 import http.client
 import importlib.util
+import ipaddress
 import json
 import os
 import re
@@ -85,7 +88,9 @@ FORGED_HEADERS = {"X-Desk-Public-Host": FORGED_HOST, "X-Forwarded-Host": FORGED_
 APP_FAMILY = "desk"
 # AWS's managed list of the addresses CloudFront reaches origins from (as DeskData looks it up).
 CLOUDFRONT_ORIGIN_FACING = "com.amazonaws.global.cloudfront.origin-facing"
-HTTPS, WORLD = 443, ("0.0.0.0/0", "::/0")
+HTTPS = 443
+# Every IPv4 and every IPv6 address.
+WORLD = tuple(map(ipaddress.ip_network, ("0.0.0.0/0", "::/0")))
 # The labelled stand-in page synth serves without a web build (infra/site-placeholder).
 PLACEHOLDER = re.compile(r"""<meta\s+name=["']desk-site["']\s+content=["']placeholder["']""", re.IGNORECASE)
 ASSET_SCRIPT = re.compile(r"""["'](/assets/[^"'?#\s]+\.js)["']""")
@@ -375,12 +380,10 @@ def _resolves(host: str) -> None:
         raise CheckFailed(f"{host} doesn't resolve, so nothing was probed") from None
 
 
-def _covers(permission: dict, port: int) -> bool:
-    """Whether an ingress permission admits TCP on `port` (all traffic does)."""
-    if permission.get("IpProtocol") == "-1":
-        return True
-    return permission.get("IpProtocol") in ("tcp", "6") and permission.get("FromPort", 0) <= port <= permission.get(
-        "ToPort", -1)
+def _only_tcp(permission: dict, port: int) -> bool:
+    """Whether an ingress permission admits TCP on `port` and nothing else."""
+    return permission.get("IpProtocol") in ("tcp", "6") and permission.get("FromPort") == port == permission.get(
+        "ToPort")
 
 
 # Where an ingress permission lists its sources, and each source's key, as EC2 names them.
@@ -402,24 +405,57 @@ def _express_edge():
     return module
 
 
-def _open_beyond(group: dict, ports: tuple[int, ...], also: frozenset[tuple[str, str]] = frozenset()) -> list[str]:
-    """What a security group admits beyond what the stack intends, one line each naming the group:
-    any source in the world on any port, and on `ports` any source that is neither one ExpressEdge's
-    lock keeps (`kept_source`) nor in `also`."""
+def _traffic(permission: dict) -> str:
+    """What an ingress permission admits, as a person reads it: `all traffic`, `port 443` (TCP),
+    `udp ports 1000-2000`, `protocol icmp`."""
+    protocol = permission.get("IpProtocol")
+    if protocol == "-1":
+        return "all traffic"
+    if protocol not in ("tcp", "6", "udp", "17"):
+        return f"protocol {protocol}"
+    low, high = permission.get("FromPort"), permission.get("ToPort")
+    ports = f"port {low}" if low == high else f"ports {low}-{high}"
+    return ports if protocol in ("tcp", "6") else f"udp {ports}"
+
+
+def _anywhere(values: list[str]) -> bool:
+    """Whether these ranges, together, hold every IPv4 or every IPv6 address."""
+    networks = []
+    for value in values:
+        try:
+            networks.append(ipaddress.ip_network(value, strict=False))
+        except ValueError:
+            continue
+    return any(list(ipaddress.collapse_addresses(n for n in networks if n.version == world.version)) == [world]
+               for world in WORLD)
+
+
+def _admitted_beyond(group: dict, intended: tuple[str, str, int] | None = None) -> list[str]:
+    """What a security group admits beyond what the stack intends, one line per ingress rule naming
+    the group, the rule's traffic and the sources it shouldn't have.
+
+    A source is intended only when ExpressEdge's lock keeps it on purpose (`kept_source`: another
+    group, or a range inside the private ranges, judged as an address range), on any protocol or
+    port; or when it is `intended`, a (kind, value, port) source the caller means to admit on TCP
+    `port` alone. Anything else fails: a public range, the world however it is written, another
+    prefix list, or the intended source on other traffic. Ranges that together hold every address
+    read "from anywhere".
+    """
     try:
         kept = _express_edge().kept_source
     except Exception as error:
         raise CheckFailed(f"can't read the sources ExpressEdge keeps: {type(error).__name__}: {error}") from None
     problems = []
     for permission in group.get("IpPermissions", []):
-        sources = _sources(permission)
-        if any(value in WORLD for _, value in sources):
-            problems.append(f"{group.get('GroupId')} admits port {permission.get('FromPort', 'all')} from anywhere")
+        others = [(kind, value) for kind, value in _sources(permission)
+                  if not kept(kind, value)
+                  and not (intended and (kind, value) == intended[:2] and _only_tcp(permission, intended[2]))]
+        if not others:
             continue
-        for port in ports:
-            others = [value for kind, value in sources if (kind, value) not in also and not kept(kind, value)]
-            if others and _covers(permission, port):
-                problems.append(f"{group.get('GroupId')} admits {port} from {', '.join(others)}")
+        named = ", ".join(value or f"a {kind} with no value" for _, value in others)
+        if _anywhere([value for kind, value in others if kind in ("CidrIp", "CidrIpv6")]):
+            named = f"anywhere ({named})"
+        problems.append(f"{group.get('GroupId')} admits {_traffic(permission)} from {named}")
     return problems
 
 
@@ -447,14 +483,14 @@ def origin_groups_locked(smoke: Smoke) -> str:
     if sorted(group.get("GroupId") for group in groups) != sorted(group_ids):
         raise CheckFailed("a security group of the load balancer wasn't found")
     from_cloudfront = ("PrefixListId", cloudfront)
-    problems = [problem for group in groups for problem in _open_beyond(group, (HTTPS,), frozenset([from_cloudfront]))]
-    if not any(_covers(permission, HTTPS) and from_cloudfront in _sources(permission)
+    problems = [problem for group in groups for problem in _admitted_beyond(group, (*from_cloudfront, HTTPS))]
+    if not any(_only_tcp(permission, HTTPS) and from_cloudfront in _sources(permission)
                for group in groups for permission in group.get("IpPermissions", [])):
         problems.append(f"no rule admits {HTTPS} from CloudFront's prefix list {cloudfront}")
     if problems:
         raise CheckFailed("; ".join(problems))
-    return (f"{', '.join(group_ids)}: nothing from anywhere, {HTTPS} only from CloudFront's prefix list "
-            f"{cloudfront} and private sources")
+    return (f"{', '.join(group_ids)}: CloudFront's prefix list {cloudfront} on {HTTPS}, otherwise only private "
+            "sources")
 
 
 def origin_direct_refused(smoke: Smoke) -> str:
@@ -511,15 +547,15 @@ def task_ports_refused(smoke: Smoke) -> str:
         addresses.append(address)
     if len(addresses) < len(interfaces):
         raise CheckFailed("a task's network interface wasn't found")
-    problems = [problem for group in groups for problem in _open_beyond(group, APP_PORTS)]
+    problems = [problem for group in groups for problem in _admitted_beyond(group)]
     if problems:
         raise CheckFailed("; ".join(problems))
     for address in addresses:
         for port in TASK_PORTS:
             if _connects(address, port, TASK_TIMEOUT):
                 raise CheckFailed(f"{address}:{port} took a connection: the task is reachable without the load balancer")
-    return (f"{', '.join(group_ids)}: nothing from anywhere, {', '.join(map(str, APP_PORTS))} only from private "
-            f"sources; {', '.join(addresses)} takes no connection on {', '.join(map(str, TASK_PORTS))}")
+    return (f"{', '.join(group_ids)}: only private sources; {', '.join(addresses)} takes no connection on "
+            f"{', '.join(map(str, TASK_PORTS))}")
 
 
 def _check_cookie(header: str, *, path: str | None, same_site: str | None) -> list[str]:

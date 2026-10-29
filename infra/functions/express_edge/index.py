@@ -107,9 +107,9 @@ def kept_source(kind: str, value: str) -> bool:
     inside the private ranges, so traffic from it can only come from inside the VPC or a network
     joined to it. `kind` is EC2's key for the source: `CidrIp`, `CidrIpv6`, `GroupId` or `PrefixListId`.
 
-    The lock revokes the world's sources only. Any other source on 443 (a public range, another
-    prefix list) is one nothing in this stack writes, and smoke.py's origin_groups_locked, which
-    reads this function, fails on it.
+    The lock revokes the world's sources only. Any other source, on any port (a public range,
+    another prefix list, CloudFront's list off 443), is one nothing in this stack writes, and
+    smoke.py's origin_groups_locked, which reads this function, fails on it.
     """
     if kind == "GroupId":
         return bool(value)

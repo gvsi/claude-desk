@@ -521,11 +521,17 @@ def test_task_ports_fail_closed_without_a_task_to_probe(smoke, aws, capsys, case
     assert results(capsys.readouterr().out) == {"task_ports_refused": "FAIL"}
 
 
-def test_task_ports_refused_reads_the_task_groups(smoke, aws, capsys):
+# The fallback's load balancer group, which the service gives a rule of its own on the app group.
+ALB_GROUP_RULE = {"IpProtocol": "tcp", "FromPort": 8700, "ToPort": 8700,
+                  "UserIdGroupPairs": [{"GroupId": "sg-0f0e0d0c0b0a09080", "UserId": "123456789012"}]}
+
+
+@pytest.mark.parametrize("permissions", [APP_RULES, [*APP_RULES, ALB_GROUP_RULE]], ids=["express", "alb"])
+def test_task_ports_refused_reads_the_task_groups(smoke, aws, capsys, permissions):
     """What the task's own groups admit, read with describe calls, beside the TCP probes, which a
     network that filters 8700 and 8701 would refuse too."""
     clients, stubs = aws
-    expect_task(stubs)
+    expect_task(stubs, permissions=permissions)
     with Stub(Behavior()) as stub:
         assert run(smoke, stub, "--cluster", CLUSTER, "--only", "task_ports_refused", clients=clients) == 0
     out = capsys.readouterr().out
@@ -545,9 +551,14 @@ def test_task_ports_refused_reads_the_task_groups(smoke, aws, capsys):
                       "IpRanges": [{"CidrIp": "203.0.113.0/24"}]}],
         [*APP_RULES, {"IpProtocol": "tcp", "FromPort": 8701, "ToPort": 8701,
                       "PrefixListIds": [{"PrefixListId": OTHER_LIST}]}],
+        [*APP_RULES, {"IpProtocol": "-1", "IpRanges": [{"CidrIp": "198.51.100.0/24"}]}],
+        [*APP_RULES, {"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22, "IpRanges": [{"CidrIp": "198.51.100.0/24"}]}],
+        [*APP_RULES, {"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22,
+                      "IpRanges": [{"CidrIp": "0.0.0.0/1"}, {"CidrIp": "128.0.0.0/1"}]}],
+        [*APP_RULES, {"IpProtocol": "tcp", "FromPort": 80, "ToPort": 80, "Ipv6Ranges": [{"CidrIpv6": "::0/0"}]}],
     ],
     ids=["world_8700", "world_v6_8701", "world_22", "world_all_traffic", "public_8700", "public_range_over_8701",
-         "prefix_list_8701"],
+         "prefix_list_8701", "public_all_traffic", "public_22", "world_halves_22", "world_v6_spelled_long_80"],
 )
 def test_task_ports_refused_fails_on_a_group_open_beyond_the_vpc(smoke, aws, capsys, permissions):
     """The probes refuse here (closed local ports); the groups alone fail the check."""
@@ -649,14 +660,23 @@ def test_origin_groups_locked_passes_on_the_private_sources_express_edge_keeps(s
     assert results(out) == {"origin_groups_locked": "pass"}, out
 
 
+# The world, written other ways: two halves of every IPv4 address, and ::/0 spelled long.
+WORLD_HALVES_22 = {"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22,
+                   "IpRanges": [{"CidrIp": "0.0.0.0/1"}, {"CidrIp": "128.0.0.0/1"}]}
+WORLD_V6_LONG_80 = {"IpProtocol": "tcp", "FromPort": 80, "ToPort": 80, "Ipv6Ranges": [{"CidrIpv6": "::0/0"}]}
+PUBLIC_22 = {"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22, "IpRanges": [{"CidrIp": "198.51.100.0/24"}]}
+
+
 @pytest.mark.parametrize(
     "opened",
     [
         {**WORLD_443, "Ipv6Ranges": [{"CidrIpv6": "::/0"}]},
         {"IpProtocol": "tcp", "FromPort": 80, "ToPort": 80,
          "IpRanges": [{"CidrIp": "0.0.0.0/0"}, {"CidrIp": VPC_RANGE}]},
+        WORLD_HALVES_22,
+        WORLD_V6_LONG_80,
     ],
-    ids=["world_443", "world_beside_the_vpc_on_80"],
+    ids=["world_443", "world_beside_the_vpc_on_80", "world_halves_22", "world_v6_spelled_long_80"],
 )
 def test_origin_groups_locked_fails_when_the_kept_sources_come_with_the_world(smoke, aws, capsys, opened):
     clients, stubs = aws
@@ -689,10 +709,20 @@ def test_origin_groups_locked_reads_the_kept_sources_from_express_edge(smoke):
         [],
         [cloudfront_443(OTHER_LIST)],
         [express_edge_kept()[1]],
+        [*express_edge_kept(), {"IpProtocol": "-1", "IpRanges": [{"CidrIp": "198.51.100.0/24"}]}],
+        [*express_edge_kept(), PUBLIC_22],
+        [*express_edge_kept(), {"IpProtocol": "udp", "FromPort": 53, "ToPort": 53,
+                                "IpRanges": [{"CidrIp": "198.51.100.0/24"}]}],
+        [*express_edge_kept(), WORLD_HALVES_22],
+        [*express_edge_kept(), WORLD_V6_LONG_80],
+        [*express_edge_kept(), {"IpProtocol": "tcp", "FromPort": 80, "ToPort": 80,
+                                "PrefixListIds": [{"PrefixListId": CLOUDFRONT_LIST}]}],
+        [*express_edge_kept(), {"IpProtocol": "-1", "PrefixListIds": [{"PrefixListId": CLOUDFRONT_LIST}]}],
     ],
     ids=["world_443", "world_v6_80", "world_all_traffic", "public_cidr_443", "public_beside_private_443",
          "wider_than_private_443", "public_v6_443", "cidr_range_over_443", "other_prefix_list", "no_ingress",
-         "only_another_prefix_list", "only_kept_sources"],
+         "only_another_prefix_list", "only_kept_sources", "public_all_traffic", "public_22", "public_udp_53",
+         "world_halves_22", "world_v6_spelled_long_80", "cloudfront_on_80", "cloudfront_all_traffic"],
 )
 def test_origin_groups_locked_fails_on_any_other_ingress(smoke, aws, capsys, permissions):
     clients, stubs = aws
