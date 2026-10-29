@@ -1,7 +1,8 @@
 // Rivera Plumbing, the demo business, as the master plan's Rivera seed describes it: Maria Rivera's
 // Desk "Main line", Dana and Bob on record, Alex Kim's assistant visiting as a signed agent, and
 // Lucía Herrera writing in Spanish. Card text follows the kernel's clause rendering; status lines
-// are the kernel's visitor templates, word for word.
+// are the kernel's visitor templates, word for word, except that an executed receipt has its tool's
+// own line (`executedLine` in receipts.ts).
 
 import type {
   CardBlock,
@@ -27,6 +28,7 @@ import type {
   VerifyStarted,
 } from '../../api/contracts';
 import type { Bilingual, ConversationFixture, ProseBlock } from './index';
+import { executedLine, type ExecutedTool } from './receipts';
 
 /**
  * Deterministic hex standing in for hashes, signatures and key material. Nothing in the web app
@@ -65,7 +67,8 @@ const people = {
   bob: { personId: 'per-bob', name: 'Bob Okafor', maskedContact: 'b•••@example.com' },
 } as const;
 
-// Visitor status lines: the kernel's en/es templates for Maria Rivera's Desk.
+// Visitor status lines: the kernel's en/es templates for Maria Rivera's Desk. An action that ran has
+// no line here: its receipt says what ran (`executedLine`).
 const plain = {
   en: {
     allowed: "Checked against Maria Rivera's rules",
@@ -75,7 +78,6 @@ const plain = {
     denied: 'Maria Rivera decided not to go ahead',
     expired: 'This request timed out',
     cancelled: 'Cancelled',
-    executed: 'Done',
     failed: "That didn't go through",
     unknown: 'Still confirming this',
     refused_at_execution: "The rules changed, so this didn't go ahead",
@@ -91,7 +93,6 @@ const plain = {
     denied: 'Maria Rivera decidió no seguir adelante',
     expired: 'Esta solicitud venció',
     cancelled: 'Cancelado',
-    executed: 'Hecho',
     failed: 'No se pudo completar',
     unknown: 'Todavía lo estamos confirmando',
     refused_at_execution: 'Las reglas cambiaron, así que no se hizo',
@@ -99,7 +100,9 @@ const plain = {
     reply_handed_off: 'Pasado a Maria Rivera para responder',
     owner_said: 'Escrito por Maria Rivera',
   },
-} as const satisfies Bilingual<Record<DecisionState | 'reply_checked' | 'reply_handed_off' | 'owner_said', string>>;
+} as const satisfies Bilingual<
+  Record<Exclude<DecisionState, 'executed'> | 'reply_checked' | 'reply_handed_off' | 'owner_said', string>
+>;
 
 // ---------------------------------------------------------------------------------------------
 // Blocks
@@ -384,21 +387,43 @@ function message(
   };
 }
 
-function status<T extends StatusEvent['type']>(
+function statusEvent<T extends StatusEvent['type']>(
   type: T,
   decisionId: string,
   state: DecisionState,
-  language: 'en' | 'es',
+  visitorPlain: string,
   ledgerSeq: number,
 ): Extract<StatusEvent, { type: T }> {
   return {
     type,
     decision_id: decisionId,
     state,
-    visitor_plain: plain[language][state],
+    visitor_plain: visitorPlain,
     ledger_seq: ledgerSeq,
     signature: signature(`${decisionId}:${state}`),
   } as Extract<StatusEvent, { type: T }>;
+}
+
+/** A status event with the state's own line. */
+function status<T extends StatusEvent['type']>(
+  type: T,
+  decisionId: string,
+  state: Exclude<DecisionState, 'executed'>,
+  language: 'en' | 'es',
+  ledgerSeq: number,
+): Extract<StatusEvent, { type: T }> {
+  return statusEvent(type, decisionId, state, plain[language][state], ledgerSeq);
+}
+
+/** A status event for an action that ran, with the line that says what `tool` did. */
+function ran<T extends StatusEvent['type']>(
+  type: T,
+  decisionId: string,
+  tool: ExecutedTool,
+  language: 'en' | 'es',
+  ledgerSeq: number,
+): Extract<StatusEvent, { type: T }> {
+  return statusEvent(type, decisionId, 'executed', executedLine(tool, language, OWNER), ledgerSeq);
 }
 
 const writing = { type: 'writing' } satisfies SseEvent;
@@ -411,14 +436,14 @@ const discountedQuote = cardBlock('quote', {
 });
 
 // Events that appear both in a live stream and in a stored conversation.
-const danaQuoteReceipt = status('receipt', 'dec-dana-quote', 'executed', 'en', 12);
+const danaQuoteReceipt = ran('receipt', 'dec-dana-quote', 'native.quote', 'en', 12);
 const danaQuote = message('msg-dana-quote', {
   language: 'en',
   blocks: [proseBlocks.quoteIntro.en, cards.quote.en],
   visitor_plain: plain.en.reply_checked,
   ledger_seq: 13,
 });
-const luciaQuoteReceipt = status('receipt', 'dec-lucia-quote', 'executed', 'es', 31);
+const luciaQuoteReceipt = ran('receipt', 'dec-lucia-quote', 'native.quote', 'es', 31);
 const luciaQuote = message('msg-lucia-quote-es', {
   language: 'es',
   blocks: [proseBlocks.quoteIntro.es, cards.quote.es],
@@ -449,7 +474,7 @@ const events = {
   heldTurn: [heldReceipt, writing, handoffReply, turnEnd],
   /** Maria allowed the discount: the resolved receipt, then Claude's follow-up with the quote. */
   resolvedTurn: [
-    status('resolved', 'dec-held-quote', 'executed', 'en', 6),
+    ran('resolved', 'dec-held-quote', 'native.quote', 'en', 6),
     writing,
     message('msg-visitor-discount', {
       language: 'en',
@@ -502,7 +527,7 @@ const conversations = {
       { kind: 'event', event: danaQuote },
       { kind: 'visitor', text: "Yes please. Is anything sooner open? There's water on the floor." },
       { kind: 'whisper', text: 'offer Thursday morning too' },
-      { kind: 'event', event: status('receipt', 'dec-dana-slots', 'executed', 'en', 15) },
+      { kind: 'event', event: ran('receipt', 'dec-dana-slots', 'native.find_slots', 'en', 15) },
       {
         kind: 'event',
         event: message('msg-dana-slots', {
@@ -513,7 +538,7 @@ const conversations = {
         }),
       },
       { kind: 'visitor', text: 'Tuesday at 2 works.' },
-      { kind: 'event', event: status('receipt', 'dec-dana-book', 'executed', 'en', 18) },
+      { kind: 'event', event: ran('receipt', 'dec-dana-book', 'native.book', 'en', 18) },
       {
         kind: 'event',
         event: message('msg-dana-booked', {
@@ -535,7 +560,7 @@ const conversations = {
         signed: true,
         text: 'Service call for Alex Kim: a leaking water heater, ZIP 94610.\nPlease quote the service call deposit.',
       },
-      { kind: 'event', event: status('receipt', 'dec-alex-quote', 'executed', 'en', 22) },
+      { kind: 'event', event: ran('receipt', 'dec-alex-quote', 'native.quote', 'en', 22) },
       {
         kind: 'event',
         event: message('msg-alex-quote', {
@@ -553,7 +578,7 @@ const conversations = {
         }),
       },
       { kind: 'agent', signed: true, text: 'Charge the deposit to the signed limit.' },
-      { kind: 'event', event: status('receipt', 'dec-alex-charge', 'executed', 'en', 25) },
+      { kind: 'event', event: ran('receipt', 'dec-alex-charge', 'native.charge_mandate', 'en', 25) },
       {
         kind: 'event',
         event: message('msg-alex-charged', {
@@ -586,7 +611,7 @@ const conversations = {
       },
       { kind: 'visitor', text: 'Lucía Herrera, (510) 555-0187.' },
       // native.request_callback ran: the kernel wrote the handoff and its callback_confirmed fact.
-      { kind: 'event', event: status('receipt', 'dec-lucia-callback', 'executed', 'es', 34) },
+      { kind: 'event', event: ran('receipt', 'dec-lucia-callback', 'native.request_callback', 'es', 34) },
       {
         kind: 'event',
         event: message('msg-lucia-callback', {
@@ -668,13 +693,14 @@ const heldQuote = {
 
 /**
  * The held quote after each answer or event. Every one keeps the hold's `answers`, so a test
- * shows that `state`, not the list, decides whether answer buttons appear.
+ * shows that `state`, not the list, decides whether answer buttons appear. Once it ran, its line
+ * says the quote was made.
  */
 function afterHold(state: DecisionState, ledgerSeq: number): Decision {
   return {
     ...heldQuote,
     state,
-    visitor_plain: plain.en[state],
+    visitor_plain: state === 'executed' ? executedLine('native.quote', 'en', OWNER) : plain.en[state],
     inbox: [],
     ledger_seq: ledgerSeq,
     signature: signature(`dec-held-quote:${state}`),

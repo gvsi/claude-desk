@@ -13,6 +13,7 @@ import type {
   VerifyStarted,
 } from '../../api/contracts';
 import type { Bilingual, ConversationFixture, DemoInboxFixture, ProseBlock } from './index';
+import { executedLine } from './receipts';
 import { cardBlock, placeholderHex, proseBlock } from './rivera';
 
 const OWNER = 'Linda Chen';
@@ -86,7 +87,6 @@ const sessions = {
 } satisfies Record<string, SessionState>;
 
 const plain = {
-  executed: 'Done',
   reply_checked: "Reply checked against Linda Chen's rules",
 } as const satisfies Partial<Record<DecisionState | 'reply_checked', string>>;
 
@@ -109,7 +109,7 @@ const releaseReceipt = {
   type: 'receipt',
   decision_id: 'dec-raj-return',
   state: 'executed',
-  visitor_plain: plain.executed,
+  visitor_plain: executedLine('native.release_document', 'en', OWNER),
   ledger_seq: 74,
   signature: placeholderHex('signature:dec-raj-return:executed', 64),
 } satisfies StatusEvent;

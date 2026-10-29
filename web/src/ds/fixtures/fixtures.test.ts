@@ -7,7 +7,7 @@ import { describe, expect, test } from 'vitest';
 import { CLAUSE_TEMPLATES, DECISION_STATES, EV_ERROR_CODES } from '../../api/contracts';
 import type { CardOption, ClauseTemplate, Decision, DecisionState, EvMessage, RenderedBlock, SessionState, SseEvent } from '../../api/contracts';
 import { chen, rivera } from './index';
-import type { TranscriptTurn } from './index';
+import type { ConversationFixture, TranscriptTurn } from './index';
 
 const FIXTURES = { rivera, chen };
 
@@ -29,8 +29,8 @@ function backendMoneyRules(): { moneyTools: string[]; hardCapCents: number } {
   };
 }
 
-/** Every object in the fixture trees that `match` accepts, each once. */
-function collect<T>(match: (node: Record<string, unknown>) => boolean): T[] {
+/** Every object under `root` (all the fixtures by default) that `match` accepts, each once. */
+function collect<T>(match: (node: Record<string, unknown>) => boolean, root: unknown = FIXTURES): T[] {
   const found: T[] = [];
   const seen = new Set<unknown>();
   const visit = (node: unknown) => {
@@ -44,7 +44,7 @@ function collect<T>(match: (node: Record<string, unknown>) => boolean): T[] {
     if (match(record)) found.push(record as T);
     Object.values(record).forEach(visit);
   };
-  visit(FIXTURES);
+  visit(root);
   return found;
 }
 
@@ -204,10 +204,58 @@ const STATEMENT_TEMPLATES: readonly ClauseTemplate[] = [
   'hours', 'contact', 'policy', 'handoff', 'verify_prompt', 'callback_confirmed', 'owner_said',
 ];
 
-// Cards that report an action the kernel carried out.
-const ACTION_TEMPLATES: readonly ClauseTemplate[] = [
-  'booking_confirmed', 'charge_confirmed', 'refund_issued', 'callback_confirmed', 'document_link',
-];
+// The signed line an executed receipt shows a visitor, per tool: what ran and whose records it
+// used, never a bare "Done". `{owner}` is the owner's display name.
+const EXECUTED_LINES = {
+  'native.quote': { en: "Quoted from {owner}'s price list", es: 'Cotizado con la lista de precios de {owner}' },
+  'native.find_slots': { en: "Times read from {owner}'s calendar", es: 'Horarios tomados del calendario de {owner}' },
+  'native.book': { en: "Booked on {owner}'s calendar", es: 'Reservado en el calendario de {owner}' },
+  'native.capture_lead': { en: 'Details saved for {owner}', es: 'Datos guardados para {owner}' },
+  'native.request_callback': { en: 'Callback request saved for {owner}', es: 'Solicitud de llamada guardada para {owner}' },
+  'native.start_verification': { en: 'Verification started', es: 'Verificación iniciada' },
+  'native.release_document': { en: "Document shared from {owner}'s records", es: 'Documento compartido desde los registros de {owner}' },
+  'native.payment_link': { en: 'Payment link made for this quote', es: 'Enlace de pago creado para esta cotización' },
+  'native.charge_mandate': { en: 'Charged within the limit of your mandate', es: 'Cobrado dentro del límite de tu mandato' },
+  'payments.list_charges': { en: "Charges read from {owner}'s payments", es: 'Cargos tomados de los pagos de {owner}' },
+  'payments.create_refund': { en: 'Refunded to the original payment', es: 'Reembolsado al pago original' },
+} as const;
+
+type Tool = keyof typeof EXECUTED_LINES;
+type Language = 'en' | 'es';
+
+/** The signed executed line for `tool`, with the owner's name in it. */
+function executedLine(tool: Tool, language: Language, owner: string): string {
+  return EXECUTED_LINES[tool][language].replaceAll('{owner}', owner);
+}
+
+/** Every signed executed line in `language` for this owner. */
+function executedLines(language: Language, owner: string): string[] {
+  return (Object.keys(EXECUTED_LINES) as Tool[]).map((tool) => executedLine(tool, language, owner));
+}
+
+// Cards that report an action the kernel carried out, and the tool whose executed receipt says so.
+const ACTION_TOOLS = {
+  booking_confirmed: 'native.book',
+  charge_confirmed: 'native.charge_mandate',
+  refund_issued: 'payments.create_refund',
+  callback_confirmed: 'native.request_callback',
+  document_link: 'native.release_document',
+} as const satisfies Partial<Record<ClauseTemplate, Tool>>;
+
+function isActionTemplate(template: RenderedBlock['template']): template is keyof typeof ACTION_TOOLS {
+  return template != null && Object.hasOwn(ACTION_TOOLS, template);
+}
+
+/** A conversation in the fixtures, with the name of the owner whose Desk it is. */
+interface OwnedConversation {
+  name: string;
+  conversation: ConversationFixture;
+  owner: string;
+}
+
+const allConversations: OwnedConversation[] = Object.values(FIXTURES).flatMap((fixture) =>
+  Object.entries(fixture.conversations).map(([name, conversation]) => ({ name, conversation, owner: fixture.business.ownerName })),
+);
 
 /** `text` as lower-case words joined by single spaces, so punctuation and case don't matter. */
 function wordsOf(text: string): string {
@@ -345,28 +393,79 @@ describe('fixtures', () => {
 
   test('action_cards_follow_an_executed_receipt', () => {
     // A card that reports an action as done (a booking, a charge, a refund, a callback, a released
-    // document) shows only after the kernel's executed receipt for it, since the previous message.
-    const conversations = Object.values(FIXTURES).flatMap((fixture) => Object.entries(fixture.conversations));
+    // document) shows only after the kernel's executed receipt for it, since the previous message,
+    // and that receipt is the tool's own line.
     let checked = 0;
-    for (const [name, conversation] of conversations) {
-      let executedSinceLastMessage = false;
+    for (const { name, conversation, owner } of allConversations) {
+      let executedSinceLastMessage: string[] = [];
       for (const turn of conversation.turns) {
         if (turn.kind !== 'event') continue;
         const { event } = turn;
         if (event.type === 'receipt' || event.type === 'resolved') {
-          if (event.state === 'executed') executedSinceLastMessage = true;
+          if (event.state === 'executed') executedSinceLastMessage.push(event.visitor_plain);
           continue;
         }
         if (event.type !== 'message') continue;
         for (const block of event.blocks) {
-          if (block.kind !== 'card' || !ACTION_TEMPLATES.includes(block.template as ClauseTemplate)) continue;
+          if (block.kind !== 'card' || !isActionTemplate(block.template)) continue;
           checked += 1;
-          expect(executedSinceLastMessage, `${name}: ${event.message_id} shows ${block.template}`).toBe(true);
+          const line = executedLine(ACTION_TOOLS[block.template], event.language, owner);
+          expect(executedSinceLastMessage, `${name}: ${event.message_id} shows ${block.template}`).toContain(line);
         }
-        executedSinceLastMessage = false;
+        executedSinceLastMessage = [];
       }
     }
     expect(checked).toBeGreaterThanOrEqual(4);
+  });
+
+  test('executed_receipts_say_what_ran', () => {
+    // Every executed receipt, resolved event and decision is a signed per-tool line with its
+    // owner's name, never "Done" or "Hecho".
+    let checked = 0;
+    for (const [name, fixture] of Object.entries(FIXTURES)) {
+      const owner = fixture.business.ownerName;
+      const signed = [...executedLines('en', owner), ...executedLines('es', owner)];
+      const executed = collect<{ visitor_plain: string }>(
+        (node) => node.state === 'executed' && typeof node.visitor_plain === 'string',
+        fixture,
+      );
+      for (const node of executed) {
+        expect(signed, `${name}: "${node.visitor_plain}"`).toContain(node.visitor_plain);
+        checked += 1;
+      }
+    }
+    expect(checked).toBeGreaterThanOrEqual(10);
+
+    // In a conversation or a live sequence, the line is in the language of its messages.
+    const sequences = [
+      ...allConversations.map(({ name, conversation, owner }) => ({
+        name,
+        owner,
+        language: conversation.language,
+        events: conversation.turns.flatMap((turn) => (turn.kind === 'event' ? [turn.event] : [])),
+      })),
+      ...Object.entries(rivera.events).flatMap(([name, events]) => {
+        const languages = [...new Set(events.flatMap((event) => (event.type === 'message' ? [event.language] : [])))];
+        return languages.length === 1 ? [{ name, owner: rivera.business.ownerName, language: languages[0] as Language, events }] : [];
+      }),
+    ];
+    let inLanguage = 0;
+    for (const { name, owner, language, events } of sequences) {
+      for (const event of events) {
+        if ((event.type !== 'receipt' && event.type !== 'resolved') || event.state !== 'executed') continue;
+        expect(executedLines(language, owner), `${name}: "${event.visitor_plain}"`).toContain(event.visitor_plain);
+        inLanguage += 1;
+      }
+    }
+    expect(inLanguage).toBeGreaterThanOrEqual(10);
+
+    // A decision that ran says its own tool's line.
+    const ran = [...Object.values(rivera.decisions), rivera.heldVerified].filter((decision) => decision.state === 'executed');
+    expect(ran.length).toBeGreaterThan(0);
+    for (const decision of ran) {
+      const tool = decision.action?.tool as Tool;
+      expect(decision.visitor_plain, decision.decision_id).toBe(executedLine(tool, 'en', rivera.business.ownerName));
+    }
   });
 
   test('callbacks_use_details_the_visitor_gave', () => {
