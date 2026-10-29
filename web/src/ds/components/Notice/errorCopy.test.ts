@@ -138,5 +138,8 @@ describe('static error copy', () => {
     ];
     expect(lines.length).toBeGreaterThan(0);
     expect(lines.filter((line) => shownCodes(line).length > 0)).toEqual([]);
+    // The plain-word exception covers one sentence of one line, the owner's auth line in English,
+    // so it can't quietly spread to another line.
+    expect(lines.filter((line) => PLAIN_PHRASES.some((phrase) => line.includes(phrase)))).toEqual([errorCopy('auth', 'en')]);
   });
 });
