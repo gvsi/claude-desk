@@ -351,7 +351,8 @@ def rds_like_admin(scratch) -> tuple[str, URL]:
 
     Where the admin creates a role, Postgres 16 gives it ADMIN OPTION on the role, but neither SET nor
     INHERIT. This cluster is shared, so a role the migrations create may already exist: the admin gets
-    that same grant on each one that does, and creates the rest itself.
+    that same grant on each one that does, and creates the rest itself. Nothing may create a chain role
+    between this fixture and the admin's run (the superuser run the test compares against comes after).
     """
     password = f"rds-like-{uuid.uuid4().hex}"
     admin_role = scratch.role("rdsadmin", options="LOGIN CREATEROLE CREATEDB NOSUPERUSER NOBYPASSRLS",
@@ -405,12 +406,15 @@ def privileges(url: URL) -> dict[str, list[tuple]]:
             for name, rows in found.items()}
 
 
-def test_migrations_reach_head_as_an_admin_without_superuser(rds_like_admin, first_run, role_passwords):
+def test_migrations_reach_head_as_an_admin_without_superuser(rds_like_admin, role_passwords, request):
     """RDS's master user isn't a superuser: every migration still runs as it, and ends as a superuser's run does.
 
     Changing an object's owner then needs SET ROLE on the new owner, which needs CREATE on the
     object's schema; each migration that changes an owner lends both for the change and takes them
     back, so the admin is left only the grants Postgres gave it, and the owners only their own.
+
+    The superuser run is set up only after the admin's, so on a fresh cluster the admin creates
+    every role itself, as on RDS, whatever order the tests run in.
     """
     admin_role, url = rds_like_admin
     run = run_admin(url, role_passwords)
@@ -422,7 +426,7 @@ def test_migrations_reach_head_as_an_admin_without_superuser(rds_like_admin, fir
     with psycopg.connect(libpq_url(url_text(url))) as conn:
         assert conn.execute("SELECT current_user, rolsuper, rolbypassrls FROM pg_roles"
                             " WHERE rolname = current_user").fetchone() == (admin_role, False, False)
-    superuser_url, _ = first_run
+    superuser_url, _ = request.getfixturevalue("first_run")
     assert privileges(url) == privileges(superuser_url)
 
 
