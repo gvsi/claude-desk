@@ -154,8 +154,10 @@ setup:
 
 # Claude Desk on this machine: the kernel (make kernel-serve, 127.0.0.1:8701), the API (make
 # api-serve, 127.0.0.1:8700) and the web app (Vite, which sends /api to the API), with the release
-# desk-prove and .tools/cvc5 on PATH and CVC5 set. Ctrl-C, or any of the three exiting, stops all
-# three. Until the kernel service, the API and the web app have landed, it names what is missing.
+# desk-prove and .tools/cvc5 on PATH and CVC5 set. It stops first if either is missing: without
+# them the kernel would run in bounded mode, where no owner rule goes live. Ctrl-C, or any of the
+# three exiting, stops all three. Until the kernel service, the API and the web app have landed, it
+# names what is missing.
 dev:
 	@set -eu; \
 	missing() { echo "dev: $$1 isn't in this checkout yet; it lands with $$2" >&2; exit 1; }; \
@@ -163,6 +165,7 @@ dev:
 	$(MAKE) -n api-serve >/dev/null 2>&1 || missing "make api-serve" "the API"; \
 	grep -q '"dev":' web/package.json || missing "the web app's dev script" "the web app"; \
 	[ -x "$(CVC5_DIR)/bin/cvc5" ] || { echo "dev: no cvc5 in .tools/cvc5; run make setup first" >&2; exit 1; }; \
+	[ -x "$(CURDIR)/kernel/target/release/desk-prove" ] || { echo "dev: no desk-prove in kernel/target/release; run make setup first" >&2; exit 1; }; \
 	PATH="$(CURDIR)/kernel/target/release:$(CVC5_DIR)/bin:$$PATH"; CVC5="$(CVC5_DIR)/bin/cvc5"; export PATH CVC5; \
 	killtree() { for child in $$(pgrep -P "$$1" 2>/dev/null); do killtree "$$child"; done; kill -TERM "$$1" 2>/dev/null || true; }; \
 	pids=""; \
