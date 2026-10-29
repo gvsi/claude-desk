@@ -8,7 +8,7 @@ CI holds no secrets and no model key, and it can only read the repository:
 - No checkout keeps the token in the git config.
 - Every action is pinned by commit.
 - Python dependencies come only from the committed uv lockfiles (`UV_LOCKED=1`), and a missing or out-of-date lockfile fails the job.
-- Every downloaded tool (cvc5, gitleaks and actionlint) is the build for the runner's architecture, x86-64 or arm64, and is checked against a pinned sha256 before it runs. Any other architecture fails the job before anything is downloaded.
+- Every downloaded tool (cvc5, gitleaks, actionlint, and rustup-init on a runner without rustup) is the build for the runner's architecture, x86-64 or arm64, and is checked against a pinned sha256 before it runs. Any other architecture fails the job before anything is downloaded.
 
 ## The checks
 

@@ -423,7 +423,19 @@ PINNED_DOWNLOADS = {
             "325e971b6ba9bfa504672e29be93c24981eeb1c07576d730e9f7c8805afff0c6",
         ),
     },
+    # Only on a runner without rustup; GitHub-hosted runners have it.
+    "Install rustup 1.29.1 if the runner has none": {
+        "X64": (
+            "https://static.rust-lang.org/rustup/archive/1.29.1/x86_64-unknown-linux-gnu/rustup-init",
+            "dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71",
+        ),
+        "ARM64": (
+            "https://static.rust-lang.org/rustup/archive/1.29.1/aarch64-unknown-linux-gnu/rustup-init",
+            "15f6e4ce9f583b929c996c91562bad6d4454f3281de858b02cdfdef615fac433",
+        ),
+    },
 }
+INSTALL_RUSTUP = "Install rustup 1.29.1 if the runner has none"
 
 BASH = shutil.which("bash")
 
@@ -544,3 +556,42 @@ def test_cvc5_checksums_cover_both_linux_builds():
     lines = (ROOT / "tools/cvc5.sha256").read_text().splitlines()
     for url, sha256 in PINNED_DOWNLOADS["Install cvc5 1.4.2"].values():
         assert f"{sha256}  {url.rsplit('/', 1)[1]}" in lines, url
+
+
+def test_rustup_is_left_alone_where_the_runner_has_it(tmp_path):
+    runner = Runner(tmp_path)
+    (runner.bin / "rustup").symlink_to(runner.bin / "tar")
+
+    result, events = runner.run(step_named(INSTALL_RUSTUP), "X64")
+
+    assert result.returncode == 0, result.stderr
+    assert events == []
+    assert not runner.github_path.exists()
+
+
+@pytest.mark.parametrize("arch", ["X64", "ARM64"])
+def test_rustup_init_runs_only_after_its_check_passes(tmp_path, arch):
+    """The checked rustup-init installs rustup with no toolchain; setup-desk then installs the pinned one."""
+    url, sha256 = PINNED_DOWNLOADS[INSTALL_RUSTUP][arch]
+    runner = Runner(tmp_path)
+    assert shutil.which("rustup", path=f"{runner.bin}:/usr/bin:/bin") is None
+    rustup_init = f"#!{sys.executable} -I\n{STUB_PRELUDE}\nlog('rustup-init', *sys.argv[1:])\n"
+
+    result, events = runner.run(step_named(INSTALL_RUSTUP), arch, STUB_CHECK_PASSES="1", STUB_BODY=rustup_init)
+
+    assert result.returncode == 0, result.stderr
+    assert events[:2] == [
+        ["curl", url, events[0][2]],
+        ["sha256sum -c", str(Path(events[0][2]).parent), [f"{sha256}  rustup-init"]],
+    ]
+    assert events[2:] == [["rustup-init", "-y", "--profile", "minimal", "--default-toolchain", "none", "--no-modify-path"]]
+    assert runner.github_path.read_text() == f"{tmp_path / 'home'}/.cargo/bin\n"
+
+
+def test_setup_desk_installs_the_pinned_toolchain_after_rustup():
+    steps = load(ROOT / ".github/actions/setup-desk/action.yml")["runs"]["steps"]
+    names = [step.get("name") for step in steps]
+
+    toolchain = step_named("Install Rust 1.99.1")
+    assert names.index(INSTALL_RUSTUP) + 1 == names.index("Install Rust 1.99.1")
+    assert toolchain["run"] == "rustup toolchain install 1.99.1 --profile minimal --no-self-update\nrustup default 1.99.1\n"
