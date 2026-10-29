@@ -267,6 +267,28 @@ def test_a_cached_proof_answers_only_the_cards_it_was_proved_for(monkeypatch):
     assert cache.get(sound._replace(review_thresholds_version=sound.review_thresholds_version + 1)) is None
 
 
+def test_reports_that_prove_nothing_are_left_out(monkeypatch, tmp_path, caplog):
+    """A file that isn't a report, or a report with no answer, seeds nothing and is logged; a
+    kernel left with no report at all says so at startup, not one `seed_unproved` at a time."""
+    rivera = shipped("rivera")
+    monkeypatch.setattr(activation, "PROOFS_DIR", tmp_path)
+    (tmp_path / "broken.json").write_text("not a report")
+    timed_out = ProofReport(ok=False, method="symcc", timed_out=True,
+                            checks=[ProofCheck(name=name, ok=False) for name in activation.PROOF_CHECKS])
+    (tmp_path / "slow.json").write_text(activation.report_text(rivera.model_copy(update={"proof": timed_out})))
+    assert len(activation.ProofCache.shipped()) == 0
+    logged = [(r.levelname, r.getMessage()) for r in caplog.records]
+    assert ("WARNING", "proof_report_unreadable file=broken.json") in logged
+    assert ("WARNING", "proof_report_inconclusive file=slow.json") in logged
+    assert ("ERROR", f"proof_reports_missing dir={tmp_path}") in logged
+
+    caplog.clear()
+    (tmp_path / "rivera.json").write_text(activation.report_text(rivera))
+    cache = activation.ProofCache.shipped()
+    assert len(cache) == 1 and cache.get(rivera.hashes) == rivera.proof
+    assert not [r for r in caplog.records if r.getMessage().startswith("proof_reports_missing")]
+
+
 def force_mode(monkeypatch: pytest.MonkeyPatch, mode: str) -> None:
     """The startup selftest answers `mode`, whatever is installed."""
     async def run_selftest():

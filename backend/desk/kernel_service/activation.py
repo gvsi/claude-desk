@@ -401,7 +401,8 @@ class ProofCache:
     @classmethod
     def shipped(cls) -> "ProofCache":
         """A cache holding the shipped reports in PROOFS_DIR. A file that isn't a report is logged
-        and left out: what it would have activated answers `seed_unproved`."""
+        and left out: what it would have activated answers `seed_unproved`. With no report at all
+        (a missing or empty directory) every shipped set will, so that is logged as an error."""
         cache = cls()
         for path in sorted(PROOFS_DIR.glob("*.json")):
             try:
@@ -411,6 +412,8 @@ class ProofCache:
                 continue
             if not cache.put(report.hashes, report.proof):
                 log.warning("proof_report_inconclusive file=%s", path.name)
+        if not len(cache):
+            log.error("proof_reports_missing dir=%s", PROOFS_DIR)
         return cache
 
     def put(self, hashes: VersionHashes, report: ProofReport) -> bool:

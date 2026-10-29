@@ -32,12 +32,6 @@ async def prove_set(preset: str, cards: list[RuleCard], profiles: list[ToolProfi
     return activation.shipped_report(preset, hashes, proof)
 
 
-def holds(report: activation.ShippedReport) -> bool:
-    proof = report.proof
-    return (proof.ok and proof.method == "symcc" and not proof.timed_out
-            and [(c.name, c.ok) for c in proof.checks] == [(name, True) for name in activation.PROOF_CHECKS])
-
-
 def failing_checks(report: activation.ShippedReport) -> str:
     if report.proof.timed_out:
         return "desk-prove timed out or couldn't run"
@@ -54,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
     for preset, cards in activation.SHIPPED_PRESETS.items():
         path = activation.PROOFS_DIR / f"{preset}.json"
         report = asyncio.run(prove_set(preset, cards, profiles))
-        if not holds(report):
+        if not activation.proved(report.proof):           # the kernel's own activation test
             print(f"{preset}: not proved ({failing_checks(report)})", file=sys.stderr)
             ok = False
         elif args.check:
