@@ -281,8 +281,8 @@ class OpenStatus(BaseModel):              # PublicDesk's header line: computed f
     open: bool
     until: AwareDatetime | None           # open: the end of the current window, contiguous windows merged; None if open
                                           # through the next 7 days
-    opens_at: AwareDatetime | None        # closed: the start of the next window within 7 days, else None
-    text: str                             # kernel en/es template in the business's time zone (?lang=), shown verbatim
+    opens_at: AwareDatetime | None        # closed: the start of the next window, which weekly hours always have within 7 days
+    text: str                           # kernel en/es template in the business's time zone (?lang=), shown verbatim
     as_of: AwareDatetime                  # the kernel's clock
     refresh_at: AwareDatetime             # the next moment text may change: the earlier of the boundary and the next local
                                           # midnight; the web's one scheduled refetch is at refresh_at - as_of
@@ -292,6 +292,8 @@ class OpenStatus(BaseModel):              # PublicDesk's header line: computed f
         boundary, other = (self.until, self.opens_at) if self.open else (self.opens_at, self.until)
         if other is not None:
             raise ValueError("an open status names only until, a closed one only opens_at")
+        if not self.open and boundary is None:
+            raise ValueError("a closed status names when it opens: without hours there is no status at all")
         # as instants in UTC: two times sharing a ZoneInfo compare and subtract by wall clock, ignoring a repeated hour's fold
         as_of, refresh_at = self.as_of.astimezone(UTC), self.refresh_at.astimezone(UTC)
         boundary = boundary.astimezone(UTC) if boundary is not None else None
@@ -310,7 +312,7 @@ class PublicDesk(BaseModel):              # GET /public/{desk_slug}: public-labe
     brand: dict[str, str]
     charter: list[RenderedBlock]
     agent_card: list[RenderedBlock]
-    open_status: OpenStatus | None = None   # None when the Desk has no charter:hours
+    open_status: OpenStatus | None = None   # None without charter:hours or with no windows in it, or when computing it fails
 
 class Health(BaseModel):                  # GET /health (selftest result cached at startup)
     version: str

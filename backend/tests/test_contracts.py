@@ -427,13 +427,14 @@ def test_public_desk_open_status_is_optional():
 
 AS_OF = "2026-11-02T12:04:00-08:00"   # a Monday in the business's time zone, on the kernel's clock
 MIDNIGHT = "2026-11-03T00:00:00-08:00"   # the next local midnight
-OPEN_STATUSES = (   # open until a time, open all week, closed until a time, closed with no window within 7 days
+OPEN_STATUSES = (   # open until a time, open all week, closed until later today, closed until tomorrow
     {"open": True, "until": "2026-11-02T18:00:00-08:00", "opens_at": None, "text": "Open now, until 6:00 pm",
      "refresh_at": "2026-11-02T18:00:00-08:00"},
     {"open": True, "until": None, "opens_at": None, "text": "Abierto ahora", "refresh_at": MIDNIGHT},
     {"open": False, "until": None, "opens_at": "2026-11-02T13:00:00-08:00", "text": "Closed now. Opens today at 1:00 pm",
      "refresh_at": "2026-11-02T13:00:00-08:00"},
-    {"open": False, "until": None, "opens_at": None, "text": "Cerrado ahora", "refresh_at": MIDNIGHT},
+    {"open": False, "until": None, "opens_at": "2026-11-03T08:00:00-08:00", "text": "Cerrado ahora. Abre mañana a las 8:00",
+     "refresh_at": MIDNIGHT},
 )
 
 
@@ -465,6 +466,7 @@ def test_open_status_names_only_its_own_boundary():
     for wrong in (
         open_until | {"opens_at": "2026-11-03T08:00:00-08:00"},   # open, with a next opening
         closed_until | {"until": "2026-11-02T18:00:00-08:00"},    # closed, with an end of window
+        closed_until | {"opens_at": None},   # no hours means no status, and weekly hours always open within a week
         open_until | {"until": AS_OF},
         open_until | {"until": "2026-11-02T20:04:00Z"},           # the same instant as as_of, in UTC
         closed_until | {"opens_at": "2026-11-02T11:00:00-08:00"},
