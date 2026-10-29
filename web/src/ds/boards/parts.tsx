@@ -7,7 +7,7 @@
 import type { ReactNode } from 'react';
 import { fn } from 'storybook/test';
 
-import type { EvMessage, StatusEvent } from '../../api/contracts.ts';
+import type { EvMessage, PublicDesk, RenderedBlock, StatusEvent } from '../../api/contracts.ts';
 import { AgentMessage } from '../components/AgentMessage/AgentMessage.tsx';
 import { ApprovalCard } from '../components/ApprovalCard/ApprovalCard.tsx';
 import { ClaudeMessage } from '../components/ClaudeMessage/ClaudeMessage.tsx';
@@ -28,11 +28,12 @@ import { AppShell } from '../components/AppShell/AppShell.tsx';
 import { Button } from '../components/Button/Button.tsx';
 import { Card } from '../components/Card/Card.tsx';
 import { ConversationListItem } from '../components/ConversationListItem/ConversationListItem.tsx';
+import type { PublicBrand, PublicOpenStatus } from '../components/PublicShell/PublicShell.tsx';
 import { ReviewerBar } from '../components/ReviewerBar/ReviewerBar.tsx';
 import { Sidebar, initialsOf, type NavCount, type NavKey } from '../components/Sidebar/Sidebar.tsx';
 import { StatusDot, StatusLabel, type StatusTone } from '../components/StatusDot/StatusDot.tsx';
 import { TextLink } from '../components/TextLink/TextLink.tsx';
-import { rivera } from '../fixtures/index.ts';
+import { placeholderHex, rivera } from '../fixtures/index.ts';
 import { Icon, type IconName } from '../icons/index.tsx';
 
 import './boards.css';
@@ -428,7 +429,7 @@ export const CONVERSATION_LIST: ListedConversation[] = [
  * The conversations page: the list of today's conversations in its own column at the left, and the
  * open conversation in the reading column beside it.
  */
-export function ConversationsPage({ open, children }: { open: string; children: ReactNode }) {
+export function ConversationsPage({ open, items = CONVERSATION_LIST, children }: { open: string; items?: ListedConversation[]; children: ReactNode }) {
   return (
     <div className="board-conversations">
       <nav className="board-conversations__list" aria-labelledby="board-conversations-title">
@@ -437,7 +438,7 @@ export function ConversationsPage({ open, children }: { open: string; children: 
         </h1>
         <p className="board-quiet cd-type-meta">Today</p>
         <ul className="board-conversations__items">
-          {CONVERSATION_LIST.map((item) => (
+          {items.map((item) => (
             <li key={item.name}>
               <ConversationListItem {...item} href={`#conversation-${item.time}`} current={item.name === open} />
             </li>
@@ -461,13 +462,23 @@ export interface TurnRowsProps {
   agentName?: string;
   /** The decisions whose receipt draws the sage check: an executed booking or a paid link. */
   checks?: readonly string[];
+  /** Claude's translations for the owner of what the visitor wrote, by the turn's index. */
+  translations?: Record<number, string>;
 }
 
 /**
  * A stored conversation as rows: each message in its own `TranscriptRow`, with the status events
  * that came before it and its own reply check attached under it, through `receiptFromEvent`.
  */
-export function TurnRows({ turns, onOpenTrace, whisperCaption = 'Your whisper. Only Claude sees this.', notes = {}, agentName, checks = [] }: TurnRowsProps) {
+export function TurnRows({
+  turns,
+  onOpenTrace,
+  whisperCaption = 'Your whisper. Only Claude sees this.',
+  notes = {},
+  agentName,
+  checks = [],
+  translations = {},
+}: TurnRowsProps) {
   const rows: ReactNode[] = [];
   let pending: StatusEvent[] = [];
   let requests = 0;
@@ -485,7 +496,7 @@ export function TurnRows({ turns, onOpenTrace, whisperCaption = 'Your whisper. O
       case 'visitor':
         rows.push(
           <TranscriptRow key={index} margin={notes[index] === undefined ? undefined : attached(index, [])}>
-            <VisitorMessage text={turn.text} />
+            <VisitorMessage text={turn.text} translation={translations[index]} />
           </TranscriptRow>,
         );
         return;
@@ -561,4 +572,53 @@ export function Panel({ label, phone = false, bare = false, children }: { label:
       <div className="board-panel__frame">{children}</div>
     </section>
   );
+}
+
+// ---------------------------------------------------------------------------------------------
+// The public page
+
+/** The public page's brand, as the screen maps `PublicDesk` to it: the seed's field and accent, the text tokens as inks. */
+export function brandOf(publicDesk: PublicDesk): PublicBrand {
+  return {
+    name: publicDesk.business_name,
+    tagline: publicDesk.desk_name,
+    monogram: Array.from(publicDesk.business_name)[0] ?? '',
+    field: publicDesk.brand.primary ?? '',
+    ink: 'var(--text-primary)',
+    inkSecondary: 'var(--text-secondary)',
+    accent: publicDesk.brand.accent ?? '',
+  };
+}
+
+/** Thursday 10:00, open until 18:00: the kernel's words, which the header shows as written. */
+export const OPEN_NOW: NonNullable<PublicOpenStatus> = {
+  open: true,
+  until: '2026-10-29T18:00:00-07:00',
+  opens_at: null,
+  text: 'Open now, until 6:00 pm',
+  as_of: '2026-10-29T10:00:00-07:00',
+  refresh_at: '2026-10-29T18:00:00-07:00',
+};
+
+/** The kernel's line under a reply that passed the check, read from a fixture reply that did. */
+const REPLY_CHECKED = (() => {
+  const reply = rivera.events.quoteTurn.find((event): event is EvMessage => event.type === 'message');
+  if (!reply) throw new Error('the Rivera fixture has no checked reply');
+  return reply.visitor_plain;
+})();
+
+/** A reply from Claude that passed the check, as the stream delivers it, for a board's own turn. */
+export function checkedReply(id: string, blocks: RenderedBlock[], ledgerSeq: number): EvMessage {
+  return {
+    type: 'message',
+    message_id: id,
+    generation: 1,
+    author: 'claude',
+    language: 'en',
+    handoff: false,
+    blocks,
+    visitor_plain: REPLY_CHECKED,
+    ledger_seq: ledgerSeq,
+    signature: placeholderHex(`signature:${id}`, 64),
+  };
 }

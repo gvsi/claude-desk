@@ -469,3 +469,46 @@
 .board-busy tbody tr {
   border-top: 1px solid var(--line-hairline);
 }
+
+/* Ask for Maria: the public page in two states side by side, a hairline between them. */
+.board-handoff {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  background: var(--bg-app);
+}
+
+.board-handoff__state {
+  min-width: 0;
+}
+
+.board-handoff__state {
+  position: relative;
+}
+
+/* The hairline between the states takes no width, so each state keeps the board's 640 px. */
+.board-handoff__state + .board-handoff__state::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: 1;
+  width: 1px;
+  background: var(--line-hairline);
+  content: '';
+}
+
+.board-handoff__footer {
+  grid-column: 1 / -1;
+  padding: var(--space-16) var(--space-16) var(--space-20);
+  border-top: 1px solid var(--line-hairline);
+}
+
+@media (max-width: 899.98px) {
+  .board-handoff {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .board-handoff__state + .board-handoff__state::before {
+    inset: 0 0 auto;
+    width: auto;
+    height: 1px;
+  }
+}

@@ -107,7 +107,7 @@ export async function expectFooter(root: HTMLElement): Promise<void> {
 
 /** Claude's words in serif, every visitor bubble in its fill, every card in its look. */
 export function expectConversationType(root: HTMLElement): void {
-  for (const prose of some(root, '.cd-claude-message__prose')) expectComputed(prose, SPEC.reply);
+  for (const prose of root.querySelectorAll<HTMLElement>('.cd-claude-message__prose')) expectComputed(prose, SPEC.reply);
   for (const bubble of root.querySelectorAll<HTMLElement>('.cd-visitor-message__bubble')) expectComputed(bubble, SPEC.bubble);
 }
 

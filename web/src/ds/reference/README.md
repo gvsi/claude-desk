@@ -31,6 +31,7 @@ npx vitest run --project storybook src/ds/boards
 | Primary button | background `rgb(239, 236, 228)`; color `rgb(28, 27, 25)` |
 | Composer | background `rgb(42, 41, 39)`; radius 16px; shadow includes `0px 4px 20px` |
 | Concept footer | the exact string, 12px/17px, color `rgba(250, 249, 245, 0.64)` |
+| Brand header (public page) | 76px high; padding 12px 40px |
 
 ### Where the signed renders differ from the plan
 
@@ -40,6 +41,7 @@ The owner signed these boards on 2026-10-29, after the design system screens pla
 |---|---|---|---|
 | Content column | Every owner page padded 24px 40px 20px, its content at most 960px wide | The conversation pages fill the main area: no padding and no content width, the conversation list starting at the sidebar's seam | N-Conv-Run1 and N-Conv-Agent-Run1 draw the list column flush with the sidebar and the conversation beside it. `AppShell` gained `fill` for a page with its own columns. |
 | Card | Padding 20px | 16px for Today's things to try and the agent's signed limit | Both boards draw those cards compact; 16px is `Card`'s compact padding. |
+| Brand header | Padding 0px 40px | 12px 40px, still 76px high when its content fits on one line | The signed open-status board grows the header by that padding when a closed status takes two lines or a phone wraps it under the name; on one line it reads the same. |
 | Focus order on Today | The switcher, the nav, then the composer, then the first approval answer after the chips | The reviewer bar, the switcher, the nav, Answering, the public link, the things to try, then the first approval answer | Today has no "Ask Claude" composer: N-Today-Run1 signs that asking Claude to change a rule happens on Rules. |
 
 ## Boards
@@ -56,3 +58,6 @@ One line per board: its story, when it was checked, at which viewports, the delt
 | N-Typing-Bubble-Run1 | Boards/Typing | 2026-10-29 | 1280×820, 1440×900, 390×844, keyboard | None. | The board's title, description and "How it behaves" are sign-off notes and stay in the canvas; the reduced-motion panel isn't repeated, as the design system's browser tests render every story under reduced motion. |
 | N-Typing-Owner-Busy | Boards/Owner typing and busy | 2026-10-29 | 1280×820, 1440×900, 390×844, keyboard | None. | Busy buttons show the spinner signed later the same day, not the board's three dots; no red busy row, since only an approval card's Deny is red; panels two to a row. |
 | N-Answers-TwoButtons | Boards/Approval answers | 2026-10-29 | 1280×820, 1440×900, 390×844, keyboard | Cards sit in their panels without a second frame. | Only the signed option, menu buttons, on three held requests; the board's earlier rows and other explorations stay in the canvas. |
+| N-Public-Rivera-Run1 | Boards/Public page, booked | 2026-10-29 | 1280×820, 1440×900, 390×844, keyboard; the Spanish page at 390×844 | None. | The fixture's chat with Dana up to the booking, where the board ends with a held discount; each action's line comes before the reply check; the about column holds the whole charter, five cards where the board shows three. |
+| N-Public-Handoff-Run1 | Boards/Ask for Maria | 2026-10-29 | 1280×820, 1440×900, 390×844, keyboard | Each state is the board's 640px, its divider taking no width. | Both states are the public page embedded, with one footer under them, since one document can't hold two pages' landmarks; at 640px the shell keeps its 40px sides where the board draws 16px, since it moves to 16px gutters, with the open status under the name, below 640px, as the open-status board draws a phone. |
+| N-Conv-TakeOver | Boards/Conversation, taken over | 2026-10-29 | 1280×820, 1440×900, 390×844, keyboard | None. | The page follows the later conversation boards, the list at the sidebar's seam and receipts under each message, where this board draws a row of conversations and a margin column; Maria's own message keeps her name and initials where the board writes "You" with none (an open design question: `PersonMessage` would draw a "Y"); "Claude suggests" and the translated composer line are static vision. |
