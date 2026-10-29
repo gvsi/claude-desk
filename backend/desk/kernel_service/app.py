@@ -37,7 +37,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from desk.contracts import DemoInboxEntry, LedgerEntry, LedgerEvent, LedgerPage, PolicyVersion
-from desk.db.models import Desk, Handoff
+from desk.db.models import Desk, Fact, Handoff
 from desk.db.session import KernelSession, database_url
 from desk.env import is_development
 from desk.kernel_api import (CreateDeskRequest, DeskCreated, DeskUpdated, DocumentCreated, DocumentUploadRequest,
@@ -217,10 +217,11 @@ handoff_router = APIRouter()
 @handoff_router.post("/handoffs/{handoff_id}/done", response_model=DeskUpdated)
 async def close_handoff(handoff_id: str, ctx: Ctx, request: Request) -> DeskUpdated:
     """The owner has called the visitor back: the handoff goes from `open` to `done` under its
-    row's lock, ledgered `desk_data` `{part: "handoffs", refs: [handoff_id]}`, with the owner's
-    credential alone. One already done is 409 `conflict`, changing nothing. One the owner's copy
-    doesn't have, unknown or another copy's (row-level security hides those), is 404
-    `not_found`, logged, since there is no Desk of the copy to ledger it on."""
+    row's lock, and its `handoff:<id>` fact to `expired` (a callback that happened can't be
+    promised again), ledgered `desk_data` `{part: "handoffs", refs: [handoff_id]}` in the same
+    transaction, with the owner's credential alone. One already done is 409 `conflict`, changing
+    nothing. One the owner's copy doesn't have, unknown or another copy's (row-level security
+    hides those), is 404 `not_found`, logged, since there is no Desk of the copy to ledger it on."""
     route = route_template(request)
     if auth.SESSION_HEADER in request.headers:
         raise AuthError(401, "auth", "bad_token", route=route)
@@ -234,6 +235,11 @@ async def close_handoff(handoff_id: str, ctx: Ctx, request: Request) -> DeskUpda
     if handoff.status != "open":
         raise KernelFailure(409, "conflict", "handoff_done")
     handoff.status = "done"
+    fact = (await ctx.db.scalars(ctx.repo.scoped(select(Fact).where(
+        Fact.desk_id == handoff.desk_id, Fact.fact_id == f"handoff:{handoff.handoff_id}")
+        .with_for_update()))).one_or_none()
+    if fact is not None:
+        fact.status = "expired"
     await ledger.append(ctx, copy_id=handoff.copy_id, desk_id=handoff.desk_id, event=LedgerEvent(
         kind="desk_data", origin="kernel", summary={"part": "handoffs", "refs": [handoff.handoff_id]}))
     return DeskUpdated(desk_id=handoff.desk_id, updated_at=ctx.clock.now())

@@ -4,8 +4,10 @@ The call names who to call, how to reach them and why, all the visitor's own tex
 a time. `execute` writes an `open` handoff whose reason carries that text for the owner and whose
 window is the Desk's next open hour (`desks.next_open_window`), or none, and a `handoff:<id>`
 fact labelled for the session (the callback confirmed card) whose only claims are the window, so
-no visitor text reaches a card. The owner is alerted per the Desk's notification defaults; the
-alert is read only from the Demo inbox, so the result's `inbox` stays empty.
+no visitor text reaches a card. The fact expires when its window ends, and when the owner closes
+the handoff (`POST /handoffs/{id}/done`), so a callback that happened is never promised again.
+The owner is alerted per the Desk's notification defaults; the alert is read only from the Demo
+inbox, so the result's `inbox` stays empty.
 """
 
 from datetime import datetime
@@ -80,9 +82,10 @@ class RequestCallbackAdapter:
         window = desks.next_open_window(xctx.desk_row.hours, await business_timezone(ctx, xctx.desk_row), now)
         session_id = xctx.session_row.session_id
         handoff_id = new_id("handoff")
-        fact = Fact(fact_id=f"handoff:{handoff_id}", kind="handoff", status="committed", source="kernel",
-                    claims=window_claims(window), label=labels.new_fact_label(xctx.session_row))
         start, end = window or (None, None)
+        # a callback whose window has passed can't be promised again
+        fact = Fact(fact_id=f"handoff:{handoff_id}", kind="handoff", status="committed", source="kernel",
+                    claims=window_claims(window), label=labels.new_fact_label(xctx.session_row), expires_at=end)
         ctx.db.add(Handoff(handoff_id=handoff_id, copy_id=action.copy_id, desk_id=action.desk_id,
                            session_id=session_id, reason=f"{args.name} · {args.contact} · {args.reason}",
                            callback_window=f"{start.isoformat()}/{end.isoformat()}" if start and end else None,

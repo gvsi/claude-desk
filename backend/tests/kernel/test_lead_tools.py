@@ -22,7 +22,7 @@ from sqlalchemy import select
 from desk.contracts import Claim, Decision, DemoInboxEntry, ExecResult, HoursWindow
 from desk.db.models import Desk, Fact, Handoff, Lead, LedgerEntry, NotificationPref, Person, VerificationChallenge
 from desk.kernel_api import DeskUpdated
-from desk.kernel_service import adapters, compiler, desks, verification
+from desk.kernel_service import adapters, compiler, desks, ledger, verification
 from desk.kernel_service.desks import mask_contact
 
 from .helpers import kernel_ctx, ledger_rows, rows_of, verify_session
@@ -128,7 +128,7 @@ async def test_callback_window_comes_from_the_hours(app, client, frozen_clock):
         (visitor.session_id, "Sam Lee · (510) 555-0100 · The water heater is leaking", window, "open")]
     [fact] = await rows_of(app, copy.copy_id, select(Fact).where(Fact.kind == "handoff"))
     assert (fact.fact_id, fact.status, fact.source, fact.expires_at) == (
-        f"handoff:{handoff.handoff_id}", "committed", "kernel", None)
+        f"handoff:{handoff.handoff_id}", "committed", "kernel", end)          # promised until the window ends
     assert fact.claims == [Claim(key="window_start", kind="datetime", value="2026-11-02T08:00:00-08:00"),
                            Claim(key="window_end", kind="datetime", value="2026-11-02T09:00:00-08:00")]
     assert (fact.readers, fact.session_id, fact.action_id) == (
@@ -250,6 +250,23 @@ async def test_callback_clause_renders(app, client, language, prose, title):
     shown = [text for block in verdict.blocks for text in (block.text, block.title or "", *block.lines)]
     assert not [text for text in shown for typed in CALLBACK.values() if typed in text], shown
     assert not [text for text in shown for word in ("Sam", "555", "heater") if word in text], shown
+
+
+async def test_a_callback_card_lasts_until_its_window_ends(app, client, frozen_clock):
+    """A callback that has happened can't be promised again: its fact expires at the window's end."""
+    copy, visitor = await visitor_of(app, client)                    # Friday at 10:04 in Oakland
+    [fact] = (await callback(client, visitor)).facts
+    end = datetime(2026, 10, 30, 12, 0, tzinfo=TZ)                   # the 11:00 to 12:00 window's end
+    assert fact.expires_at == end
+    [row] = await rows_of(app, copy.copy_id, select(Fact).where(Fact.kind == "handoff"))
+    assert row.expires_at == end
+    cited = [clause("callback_confirmed", fact.fact_id)]
+    frozen_clock.travel(datetime(2026, 10, 30, 11, 59, tzinfo=TZ))
+    assert (await checked(client, visitor, "I passed your request on.", cited)).ok
+    frozen_clock.travel(end)
+    verdict = await checked(client, visitor, "I passed your request on.", cited)
+    assert [(v.kind, v.rule_id, v.fact_ids) for v in verdict.violations] == [
+        ("stale_fact", "not_current", [fact.fact_id])]
 
 
 async def test_start_verification_reveals_nothing_to_claude(app, client):
@@ -389,6 +406,44 @@ async def test_owner_closes_a_handoff_once(app, client, frozen_clock):
     assert (response.status_code, response.json()) == (409, {"code": "conflict"})
     assert api_rows(copy.copy_id, "SELECT status FROM kernel_ro.handoffs") == [("done",)]
     assert [entry.event.summary for entry in await ledger_rows(app, copy) if entry.event.kind == "desk_data"] == closed
+
+
+async def test_closing_a_handoff_expires_its_fact(app, client, monkeypatch):
+    """Once the owner has called back, the callback card can't be shown again, window or not; the
+    fact expires in the transaction that closes the handoff."""
+    copy, visitor = await visitor_of(app, client)
+    with_window = await callback(client, visitor)
+    await set_hours(app, copy, [])
+    without = await callback(client, visitor, "call-2")
+    facts = [result.facts[0].fact_id for result in (with_window, without)]
+    handoff_ids = [result.model_view["handoff_id"] for result in (with_window, without)]
+
+    # a close whose ledger entry fails changes nothing
+    append = ledger.append
+
+    async def desk_data_fails(ctx, *, copy_id, desk_id, event):
+        if event.kind == "desk_data":
+            raise RuntimeError("the ledger is unavailable")
+        return await append(ctx, copy_id=copy_id, desk_id=desk_id, event=event)
+
+    monkeypatch.setattr(ledger, "append", desk_data_fails)
+    response = await handoff_done(client, handoff_ids[0], copy.owner)
+    assert (response.status_code, response.json()) == (500, {"code": "internal"})
+    monkeypatch.setattr(ledger, "append", append)
+    statuses = {row.fact_id: row.status for row in await rows_of(app, copy.copy_id, select(Fact).where(
+        Fact.kind == "handoff"))}
+    assert statuses == dict.fromkeys(facts, "committed")
+
+    for handoff_id in handoff_ids:
+        response = await handoff_done(client, handoff_id, copy.owner)
+        assert response.status_code == 200, response.text
+    statuses = {row.fact_id: row.status for row in await rows_of(app, copy.copy_id, select(Fact).where(
+        Fact.kind == "handoff"))}
+    assert statuses == dict.fromkeys(facts, "expired")
+    for fact_id in facts:
+        verdict = await checked(client, visitor, "I passed your request on.", [clause("callback_confirmed", fact_id)])
+        assert [(v.kind, v.rule_id, v.fact_ids) for v in verdict.violations] == [
+            ("stale_fact", "not_current", [fact_id])]
 
 
 async def test_handoff_done_is_copy_scoped(app, client, caplog):
