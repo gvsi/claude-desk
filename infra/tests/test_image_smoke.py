@@ -1,10 +1,12 @@
 """image_smoke.sh: the app image run as the deploy runs it, against local Postgres. Here `docker`
 and `uv` are stubs that record each call and the env files they were handed, so the test checks
-what each container would get against the synthesized task definitions, without Docker."""
+what each container would get against the synthesized task definitions, without Docker. The script
+runs from a copy in a temporary checkout, so a test chooses which code has landed in it."""
 
 import json
 import os
 import re
+import shutil
 import stat
 import subprocess
 import sys
@@ -27,6 +29,8 @@ DOT_ENV = {
 PASSCODE_HASH = "scrypt$16384$8$1$c2FsdHNhbHRzYWx0$aGFzaGhhc2hoYXNoaGFzaA=="
 KERNEL_IP = "172.17.0.5"
 LOCAL = {"DB_HOST": "host.docker.internal", "DB_PORT": "5433", "DB_SSLMODE": "disable", "DB_NAME": "desk_lane"}
+MOCKPAY_SERVER = Path("backend/desk/mockpay/server.py")
+MOCKPAY_SKIPPED = "image-smoke: skipped mock payments, no backend/desk/mockpay/server.py yet"
 
 DOCKER_STUB = """#!{python}
 import json, os, stat, sys
@@ -72,7 +76,12 @@ def _names(container: dict, key: str) -> set[str]:
 
 @pytest.fixture
 def smoke_run(tmp_path):
-    """Runs image_smoke.sh with the stubs; returns (completed process, docker calls, uv calls)."""
+    """Runs image_smoke.sh with the stubs from a temporary checkout that holds the mock payments
+    server unless `mockpay=False`; returns (completed process, docker calls, uv calls)."""
+    checkout = tmp_path / "checkout"
+    script = checkout / SCRIPT.relative_to(INFRA.parent)
+    script.parent.mkdir(parents=True)
+    shutil.copy2(SCRIPT, script)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     docker = bin_dir / "docker"
@@ -84,7 +93,13 @@ def smoke_run(tmp_path):
     dot_env.write_text("".join(f"{name}={value}\n" for name, value in DOT_ENV.items()))
     out = tmp_path / "out"      # never the worktree's infra/out, where a real run may be writing
 
-    def run(**extra_env: str):
+    def run(*, mockpay: bool = True, **extra_env: str):
+        server = checkout / MOCKPAY_SERVER
+        if mockpay:
+            server.parent.mkdir(parents=True, exist_ok=True)
+            server.touch()
+        else:
+            server.unlink(missing_ok=True)
         env = {
             "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
             "HOME": os.environ.get("HOME", str(tmp_path)),
@@ -95,7 +110,7 @@ def smoke_run(tmp_path):
             "IMAGE_SMOKE_OUT": str(out),
             **extra_env,
         }
-        result = subprocess.run(["bash", str(SCRIPT)], capture_output=True, text=True, env=env, timeout=60)
+        result = subprocess.run(["bash", str(script)], capture_output=True, text=True, env=env, timeout=60)
         log = tmp_path / "docker.log"
         calls = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
         uv_log = tmp_path / "uv.log"
@@ -291,3 +306,44 @@ def test_a_failed_positive_control_fails_before_the_8701_probe(smoke_run):
     assert result.returncode != 0
     assert f"{KERNEL_IP}:8700" in result.stderr and "8701" in result.stderr
     assert _probes(calls) == [[KERNEL_IP, "8700"]]
+
+
+def _mockpay_probes(calls: list[dict]) -> list[list[str]]:
+    """The argv of each call that asks mock payments for its health."""
+    return [call["argv"] for call in calls
+            if "8702/provider/health" in " ".join(call["argv"]) or "X-Mockpay-Key" in " ".join(call["argv"])]
+
+
+def test_mock_payments_is_checked_once_its_server_is_in_the_checkout(smoke_run):
+    result, calls, _ = smoke_run(mockpay=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    kernel_name = next(name for name in _env_runs(calls) if name.endswith("-kernel"))
+    [probe] = _mockpay_probes(calls)
+    assert probe[:2] == ["exec", kernel_name]  # from inside the kernel's container
+    assert "8702/provider/health" in " ".join(probe) and "X-Mockpay-Key" in " ".join(probe)
+    assert "image-smoke: mock payments answers {ok: true} inside the kernel's container" in result.stdout
+    assert "skipped mock payments" not in result.stdout
+
+
+def test_a_mock_payments_failure_still_stops_the_smoke(smoke_run):
+    result, calls, _ = smoke_run(mockpay=True, DOCKER_FAIL="provider/health")
+    assert result.returncode != 0
+    assert "mock payments didn't answer {ok: true} on 127.0.0.1:8702" in result.stderr
+    assert _probes(calls) == []
+
+
+def test_mock_payments_is_skipped_until_its_server_is_in_the_checkout(smoke_run):
+    """Mock payments lands after the rest of the kernel; until its server is in the checkout being
+    imaged, the smoke says it skipped the check, as `make image-check` does, and runs every other step."""
+    result, calls, uv_calls = smoke_run(mockpay=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    lines = result.stdout.splitlines()
+    assert lines.count(MOCKPAY_SKIPPED) == 1
+    assert _mockpay_probes(calls) == []
+    assert "mock payments answers" not in result.stdout
+    assert lines.index("image-smoke: the API is healthy") < lines.index(MOCKPAY_SKIPPED) < \
+        lines.index(f"image-smoke: {KERNEL_IP}:8700 takes connections from outside the namespace")
+    assert "MOCKPAY_KEY" in _by_role(_env_runs(calls))["kernel"]["env"]  # the kernel's env is unchanged
+    assert uv_calls and "--base-url http://localhost:8700 --only api_health" in uv_calls[-1]
+    assert _probes(calls) == [[KERNEL_IP, "8700"], [KERNEL_IP, "8701"]]
+    assert lines[-1] == "image-smoke: ok"
