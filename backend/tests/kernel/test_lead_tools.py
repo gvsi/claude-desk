@@ -11,7 +11,7 @@ and `/execute` as the API sends them; the starter preset's cards auto-allow all 
 import asyncio
 import contextlib
 import logging
-from datetime import datetime, time
+from datetime import UTC, datetime, time
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -163,6 +163,19 @@ async def test_callback_window_comes_from_the_hours(app, client, frozen_clock):
         datetime(2026, 11, 8, 23, 0, tzinfo=TZ), datetime(2026, 11, 9, 0, 0, tzinfo=TZ))
     assert desks.next_open_window([late], TZ, datetime(2026, 11, 8, 23, 30, tzinfo=TZ))[0] == datetime(
         2026, 11, 15, 22, 0, tzinfo=TZ)
+    # the night the clocks go back, hours are compared as instants: at the second 1:00 am the first
+    # has passed, and the repeated hour isn't offered again, so 2:00 am is next, whichever zone
+    # `after` is given in
+    early = HoursWindow(days=["sun"], start=time(1), end=time(3))
+    second_one_am = datetime(2026, 11, 1, 1, 0, fold=1, tzinfo=TZ)
+    for after in (second_one_am, second_one_am.astimezone(UTC)):
+        assert [moment.isoformat() for moment in desks.next_open_window([early], TZ, after)] == [
+            "2026-11-01T02:00:00-08:00", "2026-11-01T03:00:00-08:00"], after
+    # the night the clocks go forward, an hour ending at 2:00 am, which the clocks skip, ends when
+    # they land: 3:00 am, the same instant
+    gap_night = HoursWindow(days=["sun"], start=time(1), end=time(2))
+    window = desks.next_open_window([gap_night], TZ, datetime(2027, 3, 14, 0, 30, tzinfo=TZ))
+    assert [moment.isoformat() for moment in window] == ["2027-03-14T01:00:00-08:00", "2027-03-14T03:00:00-07:00"]
 
     # the call can't name a time, or leave out who to call and why
     for call_id, args in (("call-2", {**CALLBACK, "window": "2026-11-03T15:00:00-08:00/2026-11-03T16:00:00-08:00"}),
@@ -202,6 +215,22 @@ async def test_callback_without_an_open_hour_has_no_window(app, client):
     card = verdict.blocks[-1]
     assert (card.template, card.title, card.lines, card.text) == (
         "callback_confirmed", "Maria Rivera will call you back", [], "Maria Rivera will call you back")
+
+
+async def test_card_and_alert_agree_on_a_window_the_clocks_cut_short(app, client, frozen_clock):
+    """The night the clocks go forward, the hour from 1:00 am ends at 3:00 am in the visitor's card
+    and in the owner's alert alike."""
+    frozen_clock.travel(datetime(2027, 3, 14, 0, 30, tzinfo=TZ))
+    copy, visitor = await visitor_of(app, client)
+    await set_hours(app, copy, [HoursWindow(days=["sun"], start=time(1), end=time(2))])
+    await alert_now(app, copy, "callback")
+    [fact] = (await callback(client, visitor)).facts
+    [alert] = [entry.body for entry in await owner_alerts(client, copy) if "Sam Lee" in entry.body]
+    assert alert.startswith("Call back on Sunday, March 14, between 1:00 am and 3:00 am. ")
+    verdict = await checked(client, visitor, "I passed your request on.", [clause("callback_confirmed", fact.fact_id)])
+    assert verdict.ok, verdict.violations
+    assert verdict.blocks[-1].title == (
+        "Maria Rivera will call you back on Sunday, March 14, between 1:00 am and 3:00 am")
 
 
 @pytest.mark.parametrize("language, prose, title", [

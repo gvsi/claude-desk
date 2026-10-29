@@ -625,11 +625,13 @@ def next_open_window(hours: Sequence[HoursWindow], tz: tzinfo, after: datetime) 
     exclusive, 00:00 the end of the day), within 14 days. None when there is none: no hours, or
     only windows shorter than an hour. Hours are read on the wall clock, so a day the clocks
     change keeps its hours; an hour the change skips is never offered, and of an hour it repeats
-    only the first."""
+    only the first. `after` is compared as an instant, whatever zone it is given in, and an end
+    the change skips is the instant it names (2:00 am becomes 3:00 am)."""
     if after.tzinfo is None:
         raise ValueError("after must be an aware datetime")
     spans = [(set(window.days), window.start.hour * 60 + window.start.minute,
               DAY_END if window.end == time(0) else window.end.hour * 60 + window.end.minute) for window in hours]
+    after_utc = after.astimezone(UTC)
     local = after.astimezone(tz).replace(tzinfo=None, fold=0)
     first = local.replace(minute=0, second=0, microsecond=0)
     if first < local:
@@ -641,9 +643,12 @@ def next_open_window(hours: Sequence[HoursWindow], tz: tzinfo, after: datetime) 
                    for days, start, end in spans):
             continue
         start = wall.replace(tzinfo=tz)
-        if start.astimezone(UTC).astimezone(tz).replace(tzinfo=None) != wall or start < after:
+        # instants, never wall clocks: two datetimes sharing one zone compare on the wall clock
+        if start.astimezone(UTC).astimezone(tz).replace(tzinfo=None) != wall or start.astimezone(UTC) < after_utc:
             continue                      # a wall time the clocks skip, or the repeated hour before `after`
-        return start, (wall + timedelta(hours=1)).replace(tzinfo=tz)
+        # an end the clocks skip (2:00 am the night they go forward) is read as the instant it
+        # names, 3:00 am, so every reader of the window shows the same end
+        return start, (wall + timedelta(hours=1)).replace(tzinfo=tz).astimezone(UTC).astimezone(tz)
     return None
 
 
