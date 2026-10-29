@@ -32,11 +32,14 @@ from desk.contracts import SessionState
 
 
 class ApiProblem(Exception):
-    """An error answer: `status` with `ApiError{error, code, retry_after}`."""
+    """An error answer: `status` with `ApiError{error, code, retry_after}`. `clear_visitor` names the Desk slug whose
+    visitor cookie the answer clears (its session is gone)."""
 
-    def __init__(self, status: int, error: str, *, code: str | None = None, retry_after: int | None = None):
+    def __init__(self, status: int, error: str, *, code: str | None = None, retry_after: int | None = None,
+                 clear_visitor: str | None = None):
         super().__init__(f"{status} {error}")
         self.status, self.error, self.code, self.retry_after = status, error, code, retry_after
+        self.clear_visitor = clear_visitor
 
 
 @dataclass
@@ -195,25 +198,27 @@ class VisitorCtx:
 @contextlib.asynccontextmanager
 async def visitor_context(state: Runtime, token: str | None, slug: str) -> AsyncIterator[VisitorCtx]:
     """The visitor context for `token`, read with `GET /whoami` once; 401 `no_session` unless the kernel says it
-    names an open visitor session on the slug's Desk. Holds one database connection for the request."""
+    names an open visitor session on the slug's Desk, which clears the cookie the token came in (Plan 02a,
+    "API fail-closed rules"). Holds one database connection for the request."""
     if not token:
         raise ApiProblem(401, "no_session")
+    gone = ApiProblem(401, "no_session", clear_visitor=slug)
     try:
         kernel = state.kernel.session(token)
         who = await kernel.whoami()
     except ValueError:                                   # not a header value a kernel token could be
-        raise ApiProblem(401, "no_session") from None
+        raise gone from None
     except KernelFailed as failure:
         if failure.ends_session:
-            raise ApiProblem(401, "no_session") from None
+            raise gone from None
         raise
     if who.kind != "visitor" or who.session is None or who.desk_id is None:
-        raise ApiProblem(401, "no_session")
+        raise gone
     async with state.engine.connect() as conn:
         ro = KernelRO(conn, who.copy_id, state.settings.kernel_ro_schema)
         desk = await ro.one("desks", desk_id=who.desk_id)
         if desk is None or desk["slug"] != slug:         # a session of another Desk: not this route's
-            raise ApiProblem(401, "no_session")
+            raise gone
         ids = Ids(copy_id=who.copy_id, desk_id=who.desk_id, session_id=who.session.session_id)
         caller = Caller(copy_id=ids.copy_id, desk_id=ids.desk_id, session_id=ids.session_id, kind="visitor",
                         kernel=kernel, ro_schema=state.settings.kernel_ro_schema)

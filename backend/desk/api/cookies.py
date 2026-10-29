@@ -3,7 +3,8 @@
 
 - `desk_owner`: the owner token, sent only to `/api/owner` paths, for 7 days.
 - `desk_visitor`: a visitor session token, sent only to its Desk's `/api/public/desks/{slug}` paths, for 24 hours,
-  renewed on each request: the kernel closes a session after 24 hours idle.
+  renewed on each request: the kernel closes a session after 24 hours idle. A route that finds its session gone
+  (401 `no_session`) clears it.
 """
 
 import re

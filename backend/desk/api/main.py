@@ -17,7 +17,8 @@ clock, model, kernel transport or job queue connector. A passcode hash that isn'
 Every error answer is an `ApiError` ("Errors"): a kernel refusal keeps its status with `{error: "kernel",
 code}`, an unreachable kernel is 503 `{error: "kernel", code}` (`seed_unproved`, `internal`, else
 `kernel_unavailable`), a limit is 429 `{error: "rate_limited", retry_after}`, and a body that doesn't fit is
-422 `{error: "invalid"}`, never echoing what was sent.
+422 `{error: "invalid"}`, never echoing what was sent. A visitor route whose cookie names no open session on its
+Desk answers 401 `{error: "no_session"}` and clears that cookie.
 """
 
 import asyncio
@@ -33,6 +34,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import create_async_engine
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from desk.api.cookies import clear_visitor_cookie
 from desk.api.deps import ApiProblem, Runtime, runtime
 from desk.api.jobs import WORKER, JobEnv, jobs_app, run_worker
 from desk.api.kernel_client import KernelFailed, KernelHttp, KernelUnavailable, assert_production_safe
@@ -122,7 +124,10 @@ def _error(status: int, error: str, *, code: str | None = None, retry_after: int
 def _install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(ApiProblem)
     async def api_problem(request: Request, problem: ApiProblem) -> JSONResponse:
-        return _error(problem.status, problem.error, code=problem.code, retry_after=problem.retry_after)
+        response = _error(problem.status, problem.error, code=problem.code, retry_after=problem.retry_after)
+        if problem.clear_visitor is not None:
+            clear_visitor_cookie(response, problem.clear_visitor)
+        return response
 
     @app.exception_handler(RateLimited)
     async def rate_limited(request: Request, limited: RateLimited) -> JSONResponse:

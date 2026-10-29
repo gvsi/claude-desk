@@ -321,6 +321,29 @@ async def test_returning_visitor_resumes_the_session(app, browser, fake, kernel_
     assert read.json()["state"]["session_id"] == new_id
 
 
+async def test_a_session_the_kernel_closed_clears_its_cookie(app, browser, fake, kernel_http):
+    """Once the cookie's session is gone (closed after a day idle, unknown, or another Desk's), a visitor route answers
+    401 `no_session` and clears the cookie on its Desk's path, so the browser stops sending a dead token."""
+    slug = await new_slug(kernel_http, fake)
+    client, token, _ = await open_session(app, browser, slug)
+    cleared = ["HttpOnly", "Max-Age=0", f"Path=/api/public/desks/{slug}", "SameSite=Strict", "Secure"]
+    fake.now += timedelta(hours=24, seconds=1)                           # the kernel closes it after a day idle
+
+    sent = await client.post(f"/api/public/desks/{slug}/messages", json={"text": "Still there?"})
+    assert (sent.status_code, sent.json()) == (401, {"error": "no_session"})
+    assert visitor_cookie(sent) == ("", cleared)
+    async with Stream(app, events_path(slug), headers=[cookie(token)]) as stream:
+        pass
+    assert (stream.status, stream.json()) == (401, {"error": "no_session"})
+    (header,) = [value for name, value in stream.response_headers if name == "set-cookie"]
+    name_value, *attributes = [part.strip() for part in header.split(";")]
+    assert (name_value, sorted(attributes)) == ("desk_visitor=", cleared)
+
+    # with no cookie there is nothing to clear
+    bare = await browser(app).post(f"/api/public/desks/{slug}/messages", json={"text": "Hello?"})
+    assert bare.status_code == 401 and "set-cookie" not in bare.headers
+
+
 # Messages and the event stream -------------------------------------------------------------------------------
 
 HOURS = {"template": "hours", "fact_id": "charter:hours"}
