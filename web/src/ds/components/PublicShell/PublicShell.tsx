@@ -1,6 +1,6 @@
 import { useId, type CSSProperties, type ReactNode } from 'react';
 
-import type { CardBlock, RenderedBlock } from '../../../api/contracts.ts';
+import type { CardBlock, PublicDesk, RenderedBlock } from '../../../api/contracts.ts';
 import { Button } from '../Button/Button.tsx';
 import { ConceptFooter } from '../ConceptFooter/ConceptFooter.tsx';
 import type { CopyLanguage } from '../Notice/errorCopy.ts';
@@ -36,11 +36,10 @@ export interface PublicBrand {
  * "Cerrado ahora. Abre el lunes a las 8:00"). The shell reads only `text` and `open`, shows `text`
  * as written and works out no time.
  *
- * The generated contracts don't carry the kernel's `OpenStatus` yet. Until they do, this alias
- * stands in for it with only the two fields the shell reads; then it becomes
- * `PublicDesk['open_status']`, the one line to change.
+ * It is the kernel's own `OpenStatus`, as `PublicDesk` carries it, so a screen can only pass what
+ * the kernel served, never a time it made up.
  */
-export type PublicOpenStatus = { text: string; open: boolean } | null;
+export type PublicOpenStatus = PublicDesk['open_status'];
 
 export interface PublicShellProps {
   brand: PublicBrand;

@@ -72,7 +72,17 @@ describe('PublicShell guards', () => {
     expect(freeText).not.toContain('Open until');
 
     // The kernel's words, exactly once and exactly as written.
-    const kernelLine = render({ ...base, openStatus: { text: 'Open now, until 6:00 pm', open: true } });
+    const kernelLine = render({
+      ...base,
+      openStatus: {
+        open: true,
+        until: '2026-10-29T18:00:00-07:00',
+        opens_at: null,
+        text: 'Open now, until 6:00 pm',
+        as_of: '2026-10-29T10:00:00-07:00',
+        refresh_at: '2026-10-29T18:00:00-07:00',
+      },
+    });
     expect(kernelLine.split('Open now, until 6:00 pm')).toHaveLength(2);
 
     // A Desk without hours: the kernel sends null, passed straight through, and there is no line.
