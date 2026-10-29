@@ -88,11 +88,12 @@ export async function ensureSession(slug: string, previewDeskId?: string): Promi
 
 const sessionGone = (err: unknown) => err instanceof ApiError && err.kind === 'unauthorized';
 
+/** Why a send was refused. Only a 422 is the length (Plan 02's limit); any other refusal didn't send. */
 function failureOf(err: unknown): SendFailure {
   if (!(err instanceof ApiError)) return 'not_sent';
   if (err.kind === 'unauthorized') return 'session';
   if (err.kind === 'rate_limited') return 'rate_limited';
-  if (err.kind === 'unprocessable') return 'too_long';
+  if (err.status === 422) return 'too_long';
   return 'not_sent';
 }
 

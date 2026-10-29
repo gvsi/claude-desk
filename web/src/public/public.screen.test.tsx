@@ -478,8 +478,16 @@ describe('public chat page', () => {
     await type(screen, 'Can someone come Tuesday afternoon?');
     await expect.element(screen.getByText("That's too long. Shorten it and try again.", { exact: true })).toBeVisible();
     await expect.element(screen.getByText('Can someone come Tuesday afternoon?', { exact: true })).toBeVisible();
+
+    // Only a 422 is about the length: any other refusal says it didn't send, with "Try again".
+    mockStore.inject({ route: 'sendMessage', status: 400 });
+    await type(screen, 'Can you call me back?');
+    const notSent = () => rowOf(screen.getByText('Can you call me back?', { exact: true }).element()).querySelector('[role="alert"]');
+    await vi.waitFor(() => expect(notSent()?.textContent ?? '').toContain("That didn't send. Your message is still here."));
+    expect(notSent()?.textContent).not.toContain('too long');
+    expect(notSent()?.querySelector('button')?.textContent).toBe('Try again');
     // Rejected outright: the chat neither checks nor sends again on its own.
-    expect(requests('sendMessage')).toHaveLength(2);
+    expect(requests('sendMessage')).toHaveLength(3);
     expect(requests('visitorSession')).toHaveLength(1);
 
     // The composer stops at Plan 02's limit, with a counter near it.
