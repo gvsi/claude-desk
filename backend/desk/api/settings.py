@@ -8,7 +8,7 @@ are not read from the environment; tests and `make_api_target` override them wit
 
 The model provider (`MODEL_PROVIDER`) is the Claude API (`anthropic`, the default) or, for local
 evals, Amazon Bedrock (`bedrock`) in `AWS_REGION` with the one Bedrock credential the API ever
-holds: a short-term Bedrock API key in `BEDROCK_BEARER_TOKEN`, a name only this process reads.
+holds: a short-term Bedrock API key in `BEDROCK_BEARER_TOKEN`, a name the SDK never reads.
 The SDK's own key variables (`AWS_BEARER_TOKEN_BEDROCK`, `ANTHROPIC_AWS_API_KEY`) are never used
 as a credential, and `AWS_REGION` is read only for Bedrock, so ECS setting it changes nothing.
 

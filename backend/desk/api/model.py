@@ -52,7 +52,7 @@ import anthropic
 import httpx2
 from pydantic import BaseModel, ValidationError
 
-from desk.api.metrics import PRICES_PER_MTOK, ROUTES
+from desk.api.metrics import ROUTES
 from desk.api.settings import Settings
 
 CONVERSATION_MODEL = "claude-opus-5-5"
@@ -61,13 +61,13 @@ ANTHROPIC_API_URL = "https://api.anthropic.com"
 # the SDK, given a key, reads no ambient credential. Production requires the real key.
 NO_API_KEY = "no-key"
 # The production models on Amazon Bedrock: each name to the account's cross-region inference profile. Tests and
-# the tier 2 evals read this table, so a refused profile id changes only this table.
+# the tier 2 evals read this table, so a refused profile id changes only this table. Its names are the priced
+# models' (metrics.PRICES_PER_MTOK), which test_model.py checks.
 BEDROCK_MODEL_IDS: dict[str, str] = {
     "claude-opus-5-5": "us.anthropic.claude-opus-5-5",
     "claude-sonnet-5-5": "us.anthropic.claude-sonnet-5-5",
     "claude-haiku-5-5": "us.anthropic.claude-haiku-5-5",
 }
-assert BEDROCK_MODEL_IDS.keys() == PRICES_PER_MTOK.keys(), "every production model is priced and mapped"
 # What a Bedrock answer may call a model, back to its production name.
 _BEDROCK_SERVED_NAMES = {served: name for name, profile in BEDROCK_MODEL_IDS.items()
                          for served in (name, profile, profile.removeprefix("us."))}
@@ -339,8 +339,9 @@ class BedrockModel(_SdkModel):
 
 
 def make_model(settings: Settings, *, http_client: httpx2.AsyncClient | None = None,
-               clock: Callable[[], datetime] = _utc_now) -> ModelClient:
-    """The model client `settings` names, with every credential and host passed explicitly (the module docstring).
+               clock: Callable[[], datetime] = _utc_now) -> AnthropicModel | BedrockModel:
+    """The model client `settings` names, with every credential and host passed explicitly (the module docstring);
+    its owner closes it with `aclose()`.
     Raises `RuntimeError` naming a variable, never its value, before any client exists: `ANTHROPIC_CUSTOM_HEADERS`
     set to anything but empty refuses either provider."""
     if os.environ.get("ANTHROPIC_CUSTOM_HEADERS"):
