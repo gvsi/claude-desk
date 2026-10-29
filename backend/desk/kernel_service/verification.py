@@ -128,10 +128,13 @@ async def _lock_people(ctx: KernelCtx, person_ids: Iterable[str | None]) -> None
             select(Person.person_id).where(Person.person_id.in_(ids)).order_by(Person.person_id).with_for_update()))
 
 
-async def _removed(ctx: KernelCtx, person_id: str) -> bool:
-    """Whether the person, whose row this transaction has locked, was removed from the record."""
-    return (await ctx.db.execute(ctx.repo.scoped(select(Person.removed_at).where(
-        Person.person_id == person_id)))).scalar_one() is not None
+async def _still_on_record(ctx: KernelCtx, person: Person, key: str) -> Person | None:
+    """The person a start found by `key`, read afresh once this transaction has locked their row:
+    None if the owner changed their contact or removed them while the start waited for the lock,
+    so a code goes only to the contact on record now."""
+    return (await ctx.db.scalars(ctx.repo.scoped(select(Person).where(
+        Person.person_id == person.person_id, Person.contact_norm == key, Person.removed_at.is_(None))
+        .execution_options(populate_existing=True)))).one_or_none()
 
 
 async def _live(ctx: KernelCtx, *, session_id: str | None = None, person_id: str | None = None,
@@ -227,8 +230,8 @@ async def start(ctx: KernelCtx, session_row: SessionRow, contact: str) -> Verify
             Person.desk_id == session.desk_id, Person.contact_norm == key, Person.removed_at.is_(None))))).one_or_none()
     own = await _live(ctx, session_id=session.session_id)
     await _lock_people(ctx, [*(challenge.person_id for challenge in own), person.person_id if person else None])
-    if person is not None and await _removed(ctx, person.person_id):
-        person = None                     # removed while this start waited for the lock: on record for no one
+    if person is not None:
+        person = await _still_on_record(ctx, person, key)
     await _cancel(ctx, await _live(ctx, session_id=session.session_id, lock=True), now)
     if person is None:
         ctx.db.add(Lead(lead_id=new_id("lead"), copy_id=session.copy_id, desk_id=session.desk_id,

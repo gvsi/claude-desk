@@ -14,6 +14,7 @@ import re
 from datetime import time
 
 import httpx
+import pytest
 from fastapi import FastAPI
 from sqlalchemy import select
 
@@ -23,9 +24,10 @@ from desk.db.models import (ActorSession, Business, Desk, Document, Execution, F
                              Person, PolicyVersion, Quote, Tool, VerificationChallenge)
 from desk.db.models import CalendarSlot as SlotRow
 from desk.db.models import Decision as DecisionRow
+from desk.db.models import DemoInboxEntry as InboxRow
 from desk.db.models import PriceItem as PriceRow
 from desk.kernel_api import DeskCreated, DeskUpdated, DocumentCreated, PublicDesk
-from desk.kernel_service import activation, adapters, auth, desks
+from desk.kernel_service import activation, adapters, auth, desks, verification
 from desk.presets import PRESETS
 
 from .helpers import active_version_number, rows_of
@@ -320,6 +322,38 @@ async def test_people_contacts_are_unique_and_valid(app, client):
     assert (await people_of(app, copy))["eve"].contact_norm == "+442079460958"
     assert api_rows(copy.copy_id, "SELECT masked_contact FROM kernel_ro.people WHERE display_name = 'Eve Santos'") == [
         ("•••• 0958",)]
+
+
+@pytest.mark.parametrize("change", ["recontact", "remove"])
+async def test_a_people_write_racing_a_start_sends_no_code(app, client, monkeypatch, change):
+    """A start looks Dana up by the contact typed, then waits on her row. If the owner moves her to
+    another contact or removes her meanwhile, the start finds her not on record: no code goes to
+    the old contact, and no challenge is made."""
+    copy = await rivera(app, client)
+    dana = (await people_of(app, copy))["dana"]
+    visitor = await open_visitor(client, copy)
+    write = ({"upsert": [{"ref": "dana", "display_name": "Dana Whitfield", "contact": "whitfield@example.net"}]}
+             if change == "recontact" else {"remove": ["dana"]})
+    lock_people, raced = verification._lock_people, []
+
+    async def owner_writes_first(ctx, person_ids):
+        if not raced:                     # the owner's write commits before this start holds her row
+            raced.append(await put_part(client, copy, "people", write))
+        await lock_people(ctx, person_ids)
+
+    monkeypatch.setattr(verification, "_lock_people", owner_writes_first)
+    answer = await started(client, visitor, "dana@example.com")
+    [response] = raced
+    assert response.status_code == 200, response.text
+    assert answer.inbox == []
+    assert await rows_of(app, copy.copy_id, select(VerificationChallenge)) == []
+    assert await rows_of(app, copy.copy_id, select(InboxRow).where(InboxRow.person_id == dana.person_id)) == []
+    [summary] = [e.event.summary for e in await entries_of(app, copy)
+                 if e.event.kind == "verify" and e.event.session_id == visitor.session_id]
+    assert summary == {"outcome": "not_on_record"}
+    if change == "recontact":             # she is on record at the contact the owner gave her
+        [notice] = (await started(client, visitor, "whitfield@example.net")).inbox
+        assert notice.to == "w•••@example.net"
 
 
 async def entry_of_owner(client: httpx.AsyncClient, copy: Rivera, notice) -> DemoInboxEntry:
