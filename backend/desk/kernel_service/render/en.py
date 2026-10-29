@@ -25,6 +25,8 @@ STATUS: dict[str, str] = {
     "refused_at_execution": "The rules changed, so this didn't go ahead",
     "reply_checked": "Reply checked against {owner}'s rules",
     "reply_handed_off": "Passed to {owner} to answer",
+    "owner_said": "Written by {owner}",
+    "owner_say_blocked": "Not sent: it included text from a private document",   # shown to the owner alone
 }
 
 # The kernel's other visitor texts, key for key with `es.MESSAGES`: the verify card's messages,
@@ -145,3 +147,8 @@ def callback_confirmed(fact: Fact | None, desk: DeskInfo) -> Card:
         return Card(title=f"{owner} will call you back")
     start, end = window
     return Card(title=f"{owner} will call you back on {date(start)}, between {clock(start)} and {clock(end)}")
+
+
+def owner_said(fact: Fact | None, desk: DeskInfo) -> Card:
+    """The owner's words, as the owner wrote them."""
+    return Card(title=text_claim(fact))

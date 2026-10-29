@@ -76,10 +76,11 @@ def percent_text(bp: int, decimal_mark: str) -> str:
 
 
 def text_claim(fact: Fact) -> str:
-    """The one text claim of a charter fact (a policy, the contact), as the owner wrote it."""
+    """The one text claim of a charter fact (a policy, the contact) or of an owner's statement, as
+    the owner wrote it."""
     [claim] = fact.claims
     if claim.kind != "text" or not isinstance(claim.value, str):
-        raise TypeError("a charter fact holds one text claim")
+        raise TypeError("a charter fact or an owner's statement holds one text claim")
     return claim.value
 
 

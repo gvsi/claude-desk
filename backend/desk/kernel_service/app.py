@@ -36,15 +36,16 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from desk.contracts import DemoInboxEntry, LedgerEntry, LedgerEvent, LedgerPage, PolicyVersion
+from desk.contracts import DemoInboxEntry, LedgerEntry, LedgerEvent, LedgerPage, OwnerMessageResult, PolicyVersion
 from desk.db.models import Desk, Fact, Handoff
 from desk.db.session import KernelSession, database_url
 from desk.env import is_development
 from desk.kernel_api import (CreateDeskRequest, DeskCreated, DeskUpdated, DocumentCreated, DocumentUploadRequest,
-                             Health, KernelError, LedgerAppendRequest, PolicyConfirmRequest, PolicyDraftRequest)
+                             Health, KernelError, LedgerAppendRequest, OwnerMessageRequest, PolicyConfirmRequest,
+                             PolicyDraftRequest)
 from desk.kernel_service import (activation, approvals, auth, context, copies, decide, demo_inbox, desks, execute,
                                  ledger, public, reply_check, sessions, verification)
-from desk.kernel_service.auth import AuthError, Named
+from desk.kernel_service.auth import AuthError, Named, SessionRow
 from desk.kernel_service.clock import Clock, SystemClock
 from desk.kernel_service.decisions import DecisionsBackend, make_decisions
 from desk.kernel_service.repo import (Ctx, KernelCtx, KernelFailure, KernelRuntime, kernel_transaction, log_error,
@@ -140,6 +141,7 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
     app.include_router(desk_router)
     app.include_router(inbox_router)
     app.include_router(handoff_router)
+    app.include_router(owner_router)
     app.include_router(ledger_router)
     app.include_router(policy_router)
 
@@ -244,6 +246,31 @@ async def close_handoff(handoff_id: str, ctx: Ctx, request: Request) -> DeskUpda
     await ledger.append(ctx, copy_id=handoff.copy_id, desk_id=handoff.desk_id, event=LedgerEvent(
         kind="desk_data", origin="kernel", summary={"part": "handoffs", "refs": [handoff.handoff_id]}))
     return DeskUpdated(desk_id=handoff.desk_id, updated_at=ctx.clock.now())
+
+
+owner_router = APIRouter()
+
+
+@owner_router.post("/owner/messages", response_model=OwnerMessageResult)
+async def post_owner_message(body: OwnerMessageRequest, ctx: Ctx, request: Request) -> OwnerMessageResult:
+    """The owner says something in a conversation, or whispers to Claude in it
+    (`reply_check.owner_message`), with the owner's credential alone (a session token beside it is
+    401). The session must be a visitor's or an agent's of the owner's copy (another copy's is 404,
+    the owner's own session 422 `invalid`), open and on a Desk not deleted (409 `closed`), in any
+    mode, a take-over and a pause included; each refusal of the session is ledgered on its Desk.
+    Its row is held `FOR SHARE` until the answer commits, so a take-over running alongside is seen
+    whole and the verdict carries the generation the conversation is at."""
+    route = route_template(request)
+    if auth.SESSION_HEADER in request.headers:
+        raise AuthError(401, "auth", "bad_token", route=route, named=await auth.named_session(ctx, body.session_id))
+    owner = await auth.require_owner(ctx, request, session_id=body.session_id)
+    row = (await ctx.db.scalars(ctx.repo.scoped(select(SessionRow).where(
+        SessionRow.session_id == body.session_id).with_for_update(read=True)))).one()
+    if row.kind == "owner":
+        raise KernelFailure(422, "invalid", "owner_session")
+    auth.require_open(ctx, request, row)
+    await auth.require_desk(ctx, request, row, row.desk_id)
+    return await reply_check.owner_message(ctx, owner, row, body)
 
 
 ledger_router = APIRouter()

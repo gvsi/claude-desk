@@ -1174,7 +1174,8 @@ async def test_a_refusal_no_rule_decided_keeps_its_words(app, client, registry):
 def test_status_lines_are_digit_free():
     states = {"allowed", "held", "refused", "approved", "denied", "expired", "cancelled", "executed", "failed",
               "unknown", "refused_at_execution"}
-    assert render.STATUS_KEYS == states | {"reply_checked", "reply_handed_off"}   # one line per decision state
+    receipts = {"reply_checked", "reply_handed_off", "owner_said", "owner_say_blocked"}   # a reply's, an owner say's
+    assert render.STATUS_KEYS == states | receipts                         # one line per decision state
     for lang in ("en", "es"):
         for key in render.STATUS_KEYS:
             line = render.status(key, lang, owner="Maria Rivera")

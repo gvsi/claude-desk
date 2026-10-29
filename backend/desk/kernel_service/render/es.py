@@ -25,6 +25,8 @@ STATUS: dict[str, str] = {
     "refused_at_execution": "Las reglas cambiaron, así que no se hizo",
     "reply_checked": "Respuesta revisada con las reglas de {owner}",
     "reply_handed_off": "Pasado a {owner} para responder",
+    "owner_said": "Escrito por {owner}",
+    "owner_say_blocked": "No se envió: incluía texto de un documento privado",
 }
 
 MESSAGES: dict[str, str] = {
@@ -133,3 +135,8 @@ def callback_confirmed(fact: Fact | None, desk: DeskInfo) -> Card:
         return Card(title=f"{owner} te llamará")
     start, end = window
     return Card(title=f"{owner} te llamará el {date(start)}, entre las {clock(start)} y las {clock(end)}")
+
+
+def owner_said(fact: Fact | None, desk: DeskInfo) -> Card:
+    """Las palabras del dueño, tal como las escribió."""
+    return Card(title=text_claim(fact))

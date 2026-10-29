@@ -1,6 +1,7 @@
 """Visitor-visible text the kernel writes itself, in English and Spanish.
 
-Status lines (`status`) are fixed templates, one per decision state plus the reply receipts;
+Status lines (`status`) are fixed templates, one per decision state plus the reply receipts
+(an owner's say has its own two: written by the owner, or not sent, which only the owner sees);
 they name the business's owner and nothing else, so they never carry an amount, a date or a
 limit. `status` also serves the kernel's other visitor texts (`MESSAGES`): the verify card's
 messages and the Demo inbox's code entry, the one text that carries a code. A session reads them
@@ -8,10 +9,11 @@ in its `last_language`, else English (`language`). Owner alert previews (`owner_
 English and owner-only.
 
 Clause cards (`render_clause`) are the only visitor text that carries amounts and dates, and
-they are rendered by code from a fact, never from text a model wrote. Each template is registered
-once (`register_template`) with the fact kinds it renders, the fact ID (or ID prefix) it reads,
-the fact statuses that count as current, and a renderer per language that returns the card's
-headline (`title`) and details (`lines`), plus a choice per open time on a booking options card.
+they are rendered by code from a fact, never from text a model wrote; the `owner_said` card holds
+the owner's own words, and only the kernel issues it. Each template is registered once
+(`register_template`) with the fact kinds it renders, the fact ID (or ID prefix) it reads, the
+fact statuses that count as current, and a renderer per language that returns the card's headline
+(`title`) and details (`lines`), plus a choice per open time on a booking options card.
 A card's `text` is the headline and then the details, one per line. A template that names no fact
 kinds (handoff, verify_prompt) renders without one. `Template.current` says whether a fact may
 still be shown (a status the template renders, not expired), and a fact with nothing to render,
@@ -120,5 +122,6 @@ register_template("policy", {"charter"}, en.charter_text, es.charter_text, key="
 register_template("contact", {"charter"}, en.charter_text, es.charter_text, key="charter:contact")
 register_template("callback_confirmed", {"handoff"}, en.callback_confirmed, es.callback_confirmed, key="handoff:",
                   statuses=("committed",))
+register_template("owner_said", {"owner_statement"}, en.owner_said, es.owner_said, key="owner:")
 register_template("handoff", (), en.handoff, es.handoff)
 register_template("verify_prompt", (), en.verify_prompt, es.verify_prompt)

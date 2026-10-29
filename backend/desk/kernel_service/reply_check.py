@@ -32,6 +32,9 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    lines (its row written only now, so no lock on it is held while the model reads the draft),
    and the verdict is ledgered (`reply`) and signed in the same transaction.
 
+The owner's messages (`owner_message`) end in the same record: a say is checked for canaries
+alone and shown in an `owner_said` card, and a whisper is only ledgered.
+
 What is shown is exactly what was checked: the prose block holds the prose as the scan read it
 (`shown`: NFKC, without the characters no font draws, such as zero-width spaces, soft hyphens,
 variation selectors and control characters, and with Hangul fillers as the blank they are drawn
@@ -53,15 +56,16 @@ import desk_kernel
 from fastapi import APIRouter, Request
 from sqlalchemy import select
 
-from desk.contracts import Clause, Fact, LedgerEvent, RenderedBlock, ReplyDraft, ReplyVerdict, Violation
+from desk.contracts import (Claim, Clause, Fact, Label, LedgerEvent, OwnerMessageResult, RenderedBlock, ReplyDraft,
+                            ReplyVerdict, Violation)
 from desk.db.models import Booking, Business, CalendarSlot, Desk, Document
 from desk.db.models import Fact as FactRow
-from desk.kernel_api import CheckReplyRequest
+from desk.kernel_api import CheckReplyRequest, OwnerMessageRequest
 from desk.kernel_service import auth, context, labels, lang, ledger, render
-from desk.kernel_service.auth import AuthError, Named, SessionRow
+from desk.kernel_service.auth import AuthError, Named, OwnerCtx, SessionRow
 from desk.kernel_service.decisions import CallUsage, SoftPromiseInput
 from desk.kernel_service.render.cards import DeskInfo, slot_claims
-from desk.kernel_service.repo import Ctx, KernelCtx, new_id, route_template
+from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, new_id, route_template
 
 VERDICT_DOMAIN = b"desk-verdict-v1\0"
 SPAN_CHARS = 40
@@ -598,11 +602,14 @@ def sign_verdict(signer: desk_kernel.Signer, *, session_id: str, generation: int
 async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[RenderedBlock],
                    violations: Sequence[Violation], language: render.Language, author: str,
                    fact_ids: Sequence[str] = (), soft_promise: CallUsage | None = None, seen: bool = False,
-                   detected: render.Language | None = None) -> ReplyVerdict:
+                   detected: render.Language | None = None, visitor_plain_key: str | None = None,
+                   message_id: str | None = None) -> ReplyVerdict:
     """Step 7's record, in the caller's transaction: the `reply` ledger entry
     `{message_id, author, ok, language, violations, rule_ids, fact_ids, soft_promise}`, the reply
     receipt and the signature, at the session's generation as the request read it. `ok` is no
-    violations. Plan 01b's owner say ends here too.
+    violations. The receipt is the status line `visitor_plain_key`, or without one `reply_checked`
+    when ok and `reply_handed_off` otherwise. The owner's say ends here too, with its own receipts
+    and the message ID its fact is named after (`message_id`; a new one otherwise).
 
     With `seen` (a draft the session's own call sent), the session row is written first: seen
     now (`last_seen_at`) and, when its prose was English or Spanish, `detected` kept as its
@@ -617,7 +624,7 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
             session_row.last_language = detected
         await ctx.db.flush()
     ok = not violations
-    message_id = new_id("msg")
+    message_id = message_id if message_id is not None else new_id("msg")
     summary = {"message_id": message_id, "author": author, "ok": ok, "language": language,
                "violations": [violation.kind for violation in violations],
                "rule_ids": [violation.rule_id for violation in violations],
@@ -626,12 +633,67 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
     entry = await ledger.append(ctx, copy_id=session_row.copy_id, desk_id=session_row.desk_id, event=LedgerEvent(
         kind="reply", origin="kernel", session_id=session_row.session_id, ref_id=message_id, summary=summary))
     owner = (await _desk_info(ctx, session_row.desk_id)).owner_display_name
-    visitor_plain = render.status("reply_checked" if ok else "reply_handed_off", language, owner=owner)
+    if visitor_plain_key is None:
+        visitor_plain_key = "reply_checked" if ok else "reply_handed_off"
+    visitor_plain = render.status(visitor_plain_key, language, owner=owner)
     signature = sign_verdict(ctx.signer, session_id=session_row.session_id, generation=session_row.generation,
                              message_id=message_id, blocks=blocks, visitor_plain=visitor_plain, ledger_seq=entry.seq)
     return ReplyVerdict(ok=ok, language=language, blocks=list(blocks), violations=list(violations),
                         message_id=message_id, generation=session_row.generation, visitor_plain=visitor_plain,
                         ledger_seq=entry.seq, signature=signature)
+
+
+# ---- The owner's messages -------------------------------------------------------------------------
+
+OWNER_TEXT_CHARS = 2000
+
+
+async def owner_message(ctx: KernelCtx, owner: OwnerCtx, session_row: SessionRow,
+                        req: OwnerMessageRequest) -> OwnerMessageResult:
+    """The owner's message in a conversation the route has checked (`POST /owner/messages`): a
+    visitor's or agent's session of the owner's copy, open, on a Desk not deleted, in any mode. The
+    text holds 1 to 2000 characters and something to show, else 422 `invalid`.
+
+    A `say` is shown to the visitor as the owner wrote it (as `shown` reads it, like Claude's
+    prose), in one `owner_said` card. It is checked for the canaries of the Desk's documents and
+    nothing else: the number rule is for Claude's prose, and no model reads the owner's words.
+    Clean, the words become the `owner_statement` fact `owner:<message_id>` (one text claim, read
+    by the owner and this session; only the kernel's `owner_said` card renders it, so it backs no
+    price), and `finalize` ledgers and signs the verdict with the `owner_said` receipt, in the
+    session's last language. With a canary there is no fact and no card: `ok: false`, a `canary`
+    violation per document, and the `owner_say_blocked` receipt, which the API shows the owner
+    and never delivers.
+
+    A `whisper` is a note for Claude, which the API adds to its context as untrusted text. The
+    kernel ledgers it (`whisper` `{message_id, chars}`, never the text) and keeps nothing else."""
+    if session_row.copy_id != owner.copy_id or session_row.kind == "owner":
+        raise ValueError("the owner writes only in the conversations of its own copy")
+    text = shown(req.text)
+    if len(req.text) > OWNER_TEXT_CHARS or not text.strip():
+        raise KernelFailure(422, "invalid", "owner_message_text")
+    copy_id, desk_id, session_id = session_row.copy_id, session_row.desk_id, session_row.session_id
+    message_id = new_id("msg")
+    if req.kind == "whisper":
+        entry = await ledger.append(ctx, copy_id=copy_id, desk_id=desk_id, event=LedgerEvent(
+            kind="whisper", origin="kernel", session_id=session_id, ref_id=message_id,
+            summary={"message_id": message_id, "chars": len(req.text)}))
+        return OwnerMessageResult(message_id=message_id, verdict=None, ledger_seq=entry.seq)
+    language = render.language(session_row.last_language)
+    _, found = _blank_canaries(text, await desk_canaries(ctx, desk_id))
+    if found:
+        verdict = await finalize(ctx, session_row, blocks=[], language=language, author="owner",
+                                 violations=[Violation(kind="canary", span="", rule_id="canary") for _ in found],
+                                 visitor_plain_key="owner_say_blocked", message_id=message_id)
+        return OwnerMessageResult(message_id=message_id, verdict=verdict, ledger_seq=verdict.ledger_seq)
+    fact = Fact(fact_id=f"owner:{message_id}", kind="owner_statement", status="available", source="owner",
+                claims=[Claim(key="text", kind="text", value=text)],
+                label=Label(readers=["owner", f"session:{session_id}"]))
+    ctx.db.add(labels.fact_row(copy_id, desk_id, fact, ctx.clock.now(), session_id=session_id))
+    block = render.render_clause(Clause(template="owner_said", fact_id=fact.fact_id), fact, language,
+                                 await _desk_info(ctx, desk_id))
+    verdict = await finalize(ctx, session_row, blocks=[block], violations=[], language=language, author="owner",
+                             fact_ids=[fact.fact_id], visitor_plain_key="owner_said", message_id=message_id)
+    return OwnerMessageResult(message_id=message_id, verdict=verdict, ledger_seq=verdict.ledger_seq)
 
 
 # ---- Route ----------------------------------------------------------------------------------------
