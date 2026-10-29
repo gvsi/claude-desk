@@ -163,21 +163,21 @@ export const BubbleWithNote: Story = {
   },
 };
 
-export const Narrow: Story = {
+export const Stacked: Story = {
   render: () => <DanaOpening onOpenTrace={fn()} />,
   decorators: [
     (Story) => (
-      <div style={{ width: 360, maxWidth: '100%' }}>
+      <div style={{ width: 600, maxWidth: '100%' }}>
         <Story />
       </div>
     ),
   ],
   parameters: {
-    canvasNote: 'The board is wide; on a phone the same rows take the full width, with the receipts attached under each message.',
+    canvasNote: 'The board is wide; in a column narrower than the reading width, as on a phone or the public page, the same rows take the full width, with the receipts attached under each message.',
   },
   play: async ({ canvas, canvasElement }) => {
-    // The same layout in a phone's column: the row takes its full width.
-    await expectAttachedUnder(canvasElement, '.cd-claude-message__prose', 360);
+    // stacks_when_narrow: the same layout in a narrower column, where the row takes its full width.
+    await expectAttachedUnder(canvasElement, '.cd-claude-message__prose', 600);
     const log = canvas.getByRole('log');
     await expect(log.scrollWidth).toBeLessThanOrEqual(log.clientWidth);
   },
