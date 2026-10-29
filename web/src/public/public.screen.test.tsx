@@ -274,19 +274,26 @@ describe('public chat page', () => {
       await expect.element(screen.getByText(CHAT_ENDED_COPY.en, { exact: true })).not.toBeInTheDocument();
     };
 
-    // The stream says the session ended.
+    // The stream says the session ended: the new chat starts with an empty composer.
     const first = await renderRoute(PAGE, { seed: 'rivera' });
     await ready(first.screen);
     mockStore.emit(RIVERA.slug, { type: 'error', code: 'session' });
     await newChat(first.screen);
+    await expect.element(first.screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toHaveValue('');
 
-    // Sending answers 401.
+    // Sending answers 401: the words that didn't send wait in the new chat's composer, ready to send.
     const second = await renderRoute(PAGE, { seed: 'rivera' });
     await ready(second.screen);
     mockStore.inject({ route: 'sendMessage', status: 401 });
     await second.screen.getByRole('textbox', { name: 'Message Rivera Plumbing' }).fill('How much is drain clearing?');
     await second.screen.getByRole('button', { name: 'Send' }).click();
     await newChat(second.screen);
+    const carried = second.screen.getByRole('textbox', { name: 'Message Rivera Plumbing' });
+    await expect.element(carried).toHaveValue('How much is drain clearing?');
+    await expect.element(carried).toHaveFocus();
+    await second.screen.getByRole('button', { name: 'Send' }).click();
+    await vi.waitFor(() => expect(requests('sendMessage').map((r) => r.body)).toEqual([{ text: 'How much is drain clearing?' }, { text: 'How much is drain clearing?' }]));
+    await expect.element(carried).toHaveValue('');
 
     // Requests from a chat that ended never change the new one. First a send, the read after a lost
     // send and a cancel, each answering 401 after "Start a new chat"; then a cancel whose answer is

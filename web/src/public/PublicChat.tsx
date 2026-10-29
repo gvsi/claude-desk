@@ -196,6 +196,24 @@ function useNewestInView(end: RefObject<HTMLElement | null>, composer: RefObject
   };
 }
 
+/**
+ * Puts `text` in the composer's text box as if the visitor had typed it, so the design system's
+ * Composer takes it as its own (it keeps its text itself and takes none from outside), then
+ * focuses the box with the caret at the end.
+ */
+function fillComposer(box: HTMLTextAreaElement, text: string): void {
+  // The prototype's setter, so React sees the change, then the input event it listens for.
+  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(box, text);
+  box.dispatchEvent(new Event('input', { bubbles: true }));
+  box.focus();
+  box.setSelectionRange(box.value.length, box.value.length);
+}
+
+/** The visitor's words that didn't send because the chat ended (a 401), in order. */
+function unsentWhenEnded(rows: readonly ChatRow[]): string[] {
+  return rows.flatMap(({ item }) => (item.kind === 'visitor' && item.status === 'failed' && item.failure === 'session' ? [item.text] : []));
+}
+
 /** A page without the chat: loading, a Desk that isn't there, or one that couldn't load. */
 function PublicState({ embedded, language, children }: { embedded: boolean; language: CopyLanguage; children: ReactNode }) {
   const Main = embedded ? 'div' : 'main';
@@ -224,6 +242,18 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
   useEffect(() => {
     if (chat.session !== null) onSession?.(chat.session);
   }, [chat.session, onSession]);
+
+  // Words that didn't send when the chat ended wait in the new chat's composer once it can be used.
+  const carried = useRef<string | null>(null);
+  // The chat can be written in: it loaded, and its session hasn't ended.
+  const ready = chat.status === 'ready' && chat.state.error !== 'session';
+  useEffect(() => {
+    const text = carried.current;
+    const box = composerRef.current?.querySelector('textarea');
+    if (!ready || text === null || !box) return;
+    carried.current = null;
+    fillComposer(box, text);
+  }, [ready]);
 
   if (chat.status === 'not_found') {
     return (
@@ -258,7 +288,6 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
   const { brand, ownerName } = brandFrom(desk);
   const { state } = chat;
   const ended = state.error === 'session';
-  const ready = chat.status === 'ready' && !ended;
   // "Cancel this request" under each message that holds an open hold's receipt, once it is there,
   // so it stays with the request however far the chat goes on.
   const cancelsUnder = (receipts: readonly ReceiptView[]): ReactNode[] => {
@@ -278,6 +307,11 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
       ));
   };
 
+  const startNewChat = () => {
+    const unsent = unsentWhenEnded(state.rows);
+    carried.current = unsent.length > 0 ? unsent.join('\n') : null;
+    chat.newChat();
+  };
   const tryAgain = (
     <Button variant="secondary" onClick={chat.retry}>
       {copy.tryAgain}
@@ -289,7 +323,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
       <Notice
         tone="error"
         action={
-          <Button variant="secondary" onClick={chat.newChat}>
+          <Button variant="secondary" onClick={startNewChat}>
             {NEW_CHAT_LABEL[language]}
           </Button>
         }
