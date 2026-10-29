@@ -51,6 +51,7 @@ from evals.tier1.harness import (
     parse_route,
     response_type,
     undeclared_fields,
+    validation_summary,
 )
 
 __all__ = [
@@ -393,8 +394,9 @@ class KernelTarget:
                 raise ContractError(f"{route}: the kernel's {status} answer isn't JSON, so it breaks {name}") from None
             try:
                 value = TypeAdapter(tp).validate_json(response.content)
-            except ValidationError as error:
-                raise ContractError(f"{route}: the kernel's {status} answer breaks {name}: {error}") from None
+            except ValidationError as error:   # told by place and kind: pydantic's own text quotes the answer
+                raise ContractError(f"{route}: the kernel's {status} answer breaks {name}: "
+                                    f"{validation_summary(error, tp)}") from None
             if undeclared := undeclared_fields(raw, value):
                 raise ContractError(f"{route}: the kernel's {status} answer carries fields {name} doesn't declare: "
                                     f"{undeclared}")

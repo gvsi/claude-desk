@@ -29,6 +29,7 @@ from evals.tier1.targets import DUMMY_KEY, SYMCC_REQUIRED, KernelTarget, Mockpay
 
 WATCHED = ("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "DESK_ENV", "DESK_DECISIONS", "DESK_SIGNING_SEED")
 LEAKED_CODE = "482913"   # what the stand-in's /verify/start puts in a field the contract doesn't declare
+BROKEN_CONTACT = "broken@example.com"   # the stand-in's /verify/start breaks VerifyStarted for this contact
 
 
 class StandInKernel:
@@ -79,9 +80,17 @@ class StandInKernel:
 
         async def verify_start(request: Request) -> JSONResponse:
             self.requests += 1
+            if (await request.json())["contact"] == BROKEN_CONTACT:   # no message, a mistyped id, and the leak
+                notice = {"entry_id": 314159, "to": "d•••@example.com",
+                          "preview": f"Your code {LEAKED_CODE} is here."}
+                return JSONResponse({"inbox": [notice], "verification_code": LEAKED_CODE})
             notice = {"entry_id": "e-1", "to": "d•••@example.com", "preview": "A code is on its way."}
             return JSONResponse({"message": "If that contact is on record, a code is on its way.", "inbox": [notice],
                                  "verification_code": LEAKED_CODE})   # a valid VerifyStarted, plus a leak
+
+        async def public(request: Request) -> JSONResponse:
+            self.requests += 1
+            return JSONResponse({"business_name": "Rivera Plumbing", "brand": {LEAKED_CODE: 7}})   # a key it chose
 
         async def not_found(request: Request) -> JSONResponse:
             self.requests += 1
@@ -90,6 +99,7 @@ class StandInKernel:
         return Starlette(lifespan=lifespan, routes=[
             Route("/health", health), Route("/whoami", whoami), Route("/copies", copies, methods=["POST"]),
             Route("/decisions/{id}", decision), Route("/verify/start", verify_start, methods=["POST"]),
+            Route("/public/{slug}", public),
             Route("/{rest:path}", not_found, methods=["GET", "POST", "PUT", "DELETE"]),
         ])
 
@@ -221,6 +231,30 @@ async def test_an_undeclared_response_field_fails_the_call(kernel: StandInKernel
         assert called.raw == {"kind": "visitor", "copy_id": "c-1", "desk_id": "d-1", "desk_ids": ["d-1"],
                               "session": None}
         assert called.body == called.raw
+    finally:
+        await target.stop()
+
+
+async def test_a_malformed_response_fails_without_printing_what_it_held(kernel: StandInKernel):
+    """A response that breaks its model fails the call as a contract break naming the fields and
+    the kinds of error only: a `/verify/start` answer missing `message`, with a mistyped id and a
+    code in a field the contract doesn't declare, shows neither the code nor any other value it
+    held; nor does a `PublicDesk` whose `brand` holds a value under a key the answer chose."""
+    target = await KernelTarget(models="fake").start()
+    try:
+        with pytest.raises(ContractError, match=r"breaks VerifyStarted: .*message: missing") as failure:
+            await target.call("POST /verify/start", body={"session_id": "s-1", "contact": BROKEN_CONTACT},
+                              auth=Auth.none())
+        shown = str(failure.value)
+        assert "inbox.0.entry_id: string_type" in shown, shown
+        held = [value for value in (LEAKED_CODE, "314159", "d•••@example.com", "is here") if value in shown]
+        assert held == [], f"the failure shows {held}"
+        with pytest.raises(ContractError, match="breaks PublicDesk") as failure:
+            await target.call("GET /public/{desk_slug}", path={"desk_slug": "rivera"}, auth=Auth.none())
+        shown = str(failure.value)
+        assert "desk_name: missing" in shown and "brand.*: string_type" in shown, shown
+        assert LEAKED_CODE not in shown and "Rivera" not in shown, shown
+        assert target.responses == []
     finally:
         await target.stop()
 

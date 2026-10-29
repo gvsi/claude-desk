@@ -16,7 +16,7 @@ import types
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Annotated, Any, Protocol, Union, get_args, get_origin, runtime_checkable
+from typing import Annotated, Any, Literal, Protocol, Union, get_args, get_origin, runtime_checkable
 
 import rfc8785
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -420,6 +420,44 @@ def check_request(
 def response_type(route: str, status: int) -> Any:
     """The type a route answers with at `status`: its response model on 2xx, else `KernelError`."""
     return KERNEL_ROUTES[route][1] if 200 <= status < 300 else KernelError
+
+
+def validation_summary(error: ValidationError, tp: Any) -> str:
+    """A validation failure of an answer read as `tp`, told by where each error is and its kind
+    ("message: missing; inbox.0.entry_id: string_type"), never by what the answer held: pydantic's
+    own text quotes the input, which may be a code or a token. A place is shown by its field names
+    and list indexes; any other part of it (a key the answer chose, a union member's label) is
+    `*`."""
+    names = declared_names(tp)
+
+    def where(loc: tuple[int | str, ...]) -> str:
+        return ".".join(str(part) if isinstance(part, int) or part in names else "*" for part in loc) or "the answer"
+
+    errors = error.errors(include_url=False, include_context=False, include_input=False)
+    return "; ".join(dict.fromkeys(f"{where(item['loc'])}: {item['type']}" for item in errors))
+
+
+def declared_names(tp: Any) -> frozenset[str]:
+    """Every field name and alias of the models `tp` reaches, and every string a `Literal` in it
+    allows (a tagged union's tags): the parts of an error's place that come from the contract."""
+    names: set[str] = set()
+    seen: set[type] = set()
+
+    def walk(node: Any) -> None:
+        if isinstance(node, type) and issubclass(node, BaseModel):
+            if node not in seen:
+                seen.add(node)
+                for name, info in node.model_fields.items():
+                    names.update(alias for alias in (name, info.alias) if alias)
+                    walk(info.annotation)
+        elif get_origin(node) is Literal:
+            names.update(arg for arg in get_args(node) if isinstance(arg, str))
+        else:
+            for arg in get_args(node):
+                walk(arg)
+
+    walk(tp)
+    return frozenset(names)
 
 
 def undeclared_fields(raw: Any, value: Any, path: str = "") -> list[str]:
