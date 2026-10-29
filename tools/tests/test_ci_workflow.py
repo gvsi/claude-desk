@@ -586,6 +586,9 @@ class Runner:
             (self.bin / tool).symlink_to(real)
         (tmp_path / "home").mkdir()
         (tmp_path / "runner-temp").mkdir()
+        # The system the runner reports, read in place of /etc/os-release.
+        self.os_release = tmp_path / "os-release"
+        self.os_release.write_text('NAME="Ubuntu"\nVERSION_ID="24.04"\nVERSION_CODENAME=noble\n')
         self.github_path = tmp_path / "github-path"
         self.github_env = tmp_path / "github-env"
         self.log = tmp_path / "stub-log"
@@ -594,7 +597,7 @@ class Runner:
         """The step's result and the stub calls it made, in order; env adds to or replaces the runner's."""
         self.log.unlink(missing_ok=True)
         script = self.dir / "step.sh"
-        script.write_text(step["run"])
+        script.write_text(step["run"].replace("/etc/os-release", str(self.os_release)))
         result = subprocess.run(
             [BASH, "--noprofile", "--norc", "-eo", "pipefail", str(script)],
             env={
@@ -770,7 +773,7 @@ def test_ci_doc_says_where_jobs_run_and_how_to_switch_back():
     assert "pull requests from forks" in section.lower()
 
 
-CHECK_RUNNER = "Check the runner has curl, unzip, make and cc"
+CHECK_RUNNER = "Check the runner is Ubuntu 24.04 with curl, unzip, make and cc"
 # What a runner must have before any job starts, as docs/ci.md's Runners section lists it.
 RUNNER_PREREQUISITES = ["docker", "sudo", "curl", "git", "make", "unzip", "cc", "tar"]
 
@@ -898,3 +901,38 @@ def test_runner_label_rules_catch_a_job_that_could_take_the_wrong_runner(file, k
 )
 def test_runner_label_rules_allow_hosted_images_and_a_jobs_own_desk_expression(file, key, job):
     assert runner_label_problems(file, {"jobs": {key: job}}) == []
+
+
+@pytest.mark.parametrize(
+    "environment, os_release, passes",
+    [
+        ("self-hosted", "VERSION_CODENAME=noble\n", True),
+        ("self-hosted", "VERSION_CODENAME=jammy\n", False),
+        ("self-hosted", 'NAME="Debian GNU/Linux"\n', False),
+        ("self-hosted", None, False),
+        # A runner that doesn't say it is GitHub-hosted is checked.
+        (None, "VERSION_CODENAME=jammy\n", False),
+        # GitHub-hosted runners are the ubuntu-24.04 image runs-on names.
+        ("github-hosted", "VERSION_CODENAME=jammy\n", True),
+    ],
+)
+def test_runner_check_requires_ubuntu_24_04_on_any_runner_not_github_hosted(tmp_path, environment, os_release, passes):
+    step = step_named(CHECK_RUNNER)
+    assert "/etc/os-release" in step["run"]
+    runner = Runner(tmp_path)
+    for tool in ["make", "cc"]:
+        (runner.bin / tool).symlink_to(runner.bin / "tar")
+    if os_release is None:
+        runner.os_release.unlink()
+    else:
+        runner.os_release.write_text(os_release)
+    env = {} if environment is None else {"RUNNER_ENVIRONMENT": environment}
+
+    result, events = runner.run(step, "ARM64", **env)
+
+    assert events == []
+    if passes:
+        assert result.returncode == 0, result.stderr
+    else:
+        assert result.returncode == 1
+        assert "must be Ubuntu 24.04 (noble)" in result.stderr

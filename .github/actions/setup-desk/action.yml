@@ -12,11 +12,23 @@ inputs:
 runs:
   using: composite
   steps:
-    # Fail early and by name, not halfway through a download or a build: curl and unzip fetch and
-    # unpack the tools, make builds the kernel, and cc links Rust code.
-    - name: Check the runner has curl, unzip, make and cc
+    # Fail early and by name, not halfway through a download or a build. The pinned downloads, apt
+    # packages and setup assume Ubuntu 24.04 (noble), which GitHub-hosted runners are; curl and unzip
+    # fetch and unpack the tools, make builds the kernel, and cc links Rust code.
+    - name: Check the runner is Ubuntu 24.04 with curl, unzip, make and cc
       shell: bash
       run: |
+        if [ "${RUNNER_ENVIRONMENT:-}" != github-hosted ]; then
+          codename=""
+          if [ -r /etc/os-release ]; then
+            # shellcheck source=/dev/null
+            codename=$(. /etc/os-release && echo "${VERSION_CODENAME:-}")
+          fi
+          if [ "$codename" != noble ]; then
+            echo "setup-desk: a self-hosted runner must be Ubuntu 24.04 (noble), not ${codename:-an unknown system}; docs/ci.md, \"Runners\", lists what a runner needs" >&2
+            exit 1
+          fi
+        fi
         missing=""
         for tool in curl unzip make cc; do
           if ! command -v "$tool" >/dev/null 2>&1; then
