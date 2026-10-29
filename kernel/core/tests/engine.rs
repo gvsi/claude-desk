@@ -234,7 +234,7 @@ fn money_allow_needs_owner_card() {
         assert_eq!(verdict["outcome"], "hold", "{phase}: {verdict}");
         assert_eq!(
             ids(&verdict["policy_ids"]),
-            ["H.default_charge_mandate"],
+            ["A.capture_lead_and_more"],
             "{phase}"
         );
     }
@@ -812,6 +812,34 @@ fn decide_fails_closed_on_bad_input() {
         assert_eq!(
             decide(&engine, KEY, &book, phase)["outcome"],
             "hold",
+            "{phase}"
+        );
+    }
+}
+
+#[test]
+fn money_without_a_card_holds_even_with_no_ask() {
+    // Step 5 makes an uncovered money allow a hold, whatever H says: the owner's
+    // approval path stays open, and execution re-checks `approvable` anyway.
+    let engine = PolicyEngine::new(BASELINE).expect("baseline loads");
+    let errors = engine.load(
+        KEY,
+        SCHEMA,
+        &sets("", &format!("{AUTO}\n{WIDE_LEAD_PERMIT}"), ""),
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+    let charge = request(
+        agent(Some(5_000)),
+        "native.charge_mandate",
+        resource("Quote", "quote-1"),
+        json!({"amount_cents": 1_000}),
+    );
+    for phase in ["pre", "final"] {
+        let verdict = decide(&engine, KEY, &charge, phase);
+        assert_eq!(verdict["outcome"], "hold", "{phase}: {verdict}");
+        assert_eq!(
+            ids(&verdict["policy_ids"]),
+            ["A.capture_lead_and_more"],
             "{phase}"
         );
     }

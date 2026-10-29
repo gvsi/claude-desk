@@ -275,8 +275,9 @@ impl Version {
             if money.is_empty() || self.owner_card_allows(&p.action, &money, &auto.reasons) {
                 return Ok(Verdict::new(Outcome::Allow, auto.reasons));
             }
-            // Step 5: money no owner card covers is never an allow; `approvable`
-            // decides between hold and refuse.
+            // Step 5: money no owner card covers is never an allow, but the
+            // owner can still approve it. Execution re-checks `approvable`.
+            return Ok(Verdict::new(Outcome::Hold, auto.reasons));
         }
         let approvable = self.evaluate(&self.approvable, p, true, review)?;
         if !approvable.errors.is_empty() {
