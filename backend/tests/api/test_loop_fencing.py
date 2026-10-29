@@ -327,6 +327,43 @@ async def test_a_call_that_raised_once_the_kernel_had_it_is_found_by_its_id(api_
     assert await control_rows(api_conn, caller.session_id) == []
 
 
+@pytest.mark.parametrize(("mode", "code"), [("owner", "stale_generation"), ("paused", "mode_paused")])
+async def test_a_call_that_raised_before_a_take_over_is_answered_from_what_ran(
+        api_conn, engine, locks, caller, visitor, fake, monkeypatch, mode, code):
+    """A take-over (or the breaker's pause) that lands between a call that raised and its recovery leaves the kernel
+    refusing the repeat of /execute that would return the stored result. The booking ran, so the call is answered from
+    its decision, as its receipt shows it, never `not_run`, and the turn stops quietly: once the conversation comes
+    back to Claude, it reads that the booking went through and has no reason to propose it again."""
+    publish, failed = tools.deliver, []
+
+    async def deliver(conn, ids, item, **options):
+        if isinstance(item, Status) and not failed:
+            failed.append(item.phase)
+            fake.set_mode(caller.session_id, mode)             # the owner takes over meanwhile
+            raise ConnectionError("the connection dropped")
+        return await publish(conn, ids, item, **options)
+
+    monkeypatch.setattr(tools, "deliver", deliver)
+    await said(api_conn, caller, "Book me the earliest visit.")
+    model = ScriptedModel([response(tool_use("native__book", {"slot_id": open_slot(fake, caller)}, id="toolu_book"))])
+    kernel = Kernel(fake)
+    async with KernelHttp("http://fake-kernel", transport=kernel) as http:
+        outcome = await pending(replace(caller, kernel=http.session(visitor.token)), model, engine, locks)
+
+    assert (outcome, failed, len(model.requests)) == ("fenced", ["receipt"], 1)
+    assert kernel.answered("/execute") == [(200, None), (409, code)]      # the booking, then the refused repeat
+    (decision_id,) = session_decisions(fake, caller.session_id)
+    decision = fake.decisions[decision_id].decision
+    assert decision.state == "executed" and len(fake.desks[caller.desk_id].booked) == 1
+    assert len(fake.called("/decide")) == 1
+    ((results,),) = await rows(api_conn, caller.session_id, "model_tool_results", "model_content")
+    assert [(result["tool_use_id"], json.loads(result["content"]), result["is_error"]) for result in results] == [
+        ("toolu_book", {"outcome": "done", "decision_id": decision_id, "message": decision.visitor_plain}, False)]
+    assert [(event.type, getattr(event, "decision_id", None)) for event in await events(api_conn, caller.session_id)] \
+        == [("writing", None), ("receipt", decision_id), ("turn_end", None)]
+    assert await control_rows(api_conn, caller.session_id) == []
+
+
 async def test_a_call_nothing_could_settle_stays_open_for_the_next_request(api_conn, engine, locks, caller, fake,
                                                                            monkeypatch):
     """When settling a call that raised fails too, the turn leaves Claude's call open, and a decision that isn't final

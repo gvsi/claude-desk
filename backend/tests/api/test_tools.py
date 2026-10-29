@@ -301,6 +301,34 @@ async def test_execute_timeout_polls_and_never_redecides(api_conn, caller, fake,
     assert len(await events(api_conn, caller.session_id)) == 1
 
 
+async def test_a_repeat_refused_after_a_take_over_is_answered_from_what_ran(api_conn, caller, fake, monkeypatch):
+    """The owner takes over while a lost /execute answer is polled for: the call ran, and the kernel now refuses the
+    repeat that would return its stored result (409 `stale_generation`). The call is answered from its decision, as
+    its receipt shows it, never `not_run`, and the turn is told to stop quietly."""
+    monkeypatch.setattr(tools, "EXECUTE_POLL_S", 0)
+    read = tools._read
+
+    async def read_then_take_over(polled_for: Caller, decision_id: str) -> Decision:
+        found = await read(polled_for, decision_id)
+        fake.set_mode(caller.session_id, "owner")               # the owner takes over once the poll found it
+        return found
+
+    monkeypatch.setattr(tools, "_read", read_then_take_over)
+    fake.drop_response("/execute")                             # it ran, and the answer was lost
+    ran = await route_call(api_conn, caller, 0, tool_use("native__quote", DRAIN, id="toolu_quote"))
+
+    decision = ran.status.decision
+    assert decision.state == "executed"
+    assert (ran.result, ran.is_error, ran.fenced) == (
+        {"outcome": "done", "decision_id": decision.decision_id, "message": decision.visitor_plain}, False, True)
+    assert not (ran.unavailable or ran.session_ended or ran.turn_over)
+    assert routes(fake, "/decide", "/execute") == ["POST /decide", "POST /execute", "POST /execute"]
+    assert [entry.event.summary.get("repeat", False) for entry in fake.desks[caller.desk_id].ledger
+            if entry.event.kind == "execute"] == [False]            # it ran once; the repeat was refused
+    assert await events(api_conn, caller.session_id) == [receipt(decision)]
+    assert await control_rows(api_conn, caller.session_id) == []
+
+
 async def test_an_unknown_outcome_is_left_until_it_is_final(api_conn, caller, fake, monkeypatch):
     """An execution the kernel can't yet say succeeded or failed (`unknown`, reconciled later) is shown as signed and
     left for the visitor's next request, which publishes its final state; a final one leaves nothing behind."""

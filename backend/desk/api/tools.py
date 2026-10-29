@@ -325,7 +325,9 @@ async def _settle(conn: AsyncConnection, caller: Caller, generation: int | None,
 
     A call that ran is sent to /execute again, for its stored result, only once it finished (`executed`, `failed`):
     the kernel refuses to repeat one whose outcome isn't known (409 `conflict`), so an `unknown` decision is answered
-    from its state, as its receipt shows it, and left for the visitor's next request."""
+    from its state, as its receipt shows it, and left for the visitor's next request. A finished one whose repeat the
+    kernel refuses silently (the session moved on since: a take-over or a pause came between the turn's look at the
+    decision and the repeat) is answered from its state too, never `not_run`, and stops the turn as fenced."""
     message = {"decision_id": decision.decision_id, "message": decision.visitor_plain}
     if decision.outcome == "hold":
         status = None
@@ -341,15 +343,18 @@ async def _settle(conn: AsyncConnection, caller: Caller, generation: int | None,
     status = await _publish(conn, caller, Status(decision, "receipt"))
     if decision.state not in EXECUTED:                  # refused, at the decision or at execution, or expired
         return ToolOutcome({"outcome": "refused", **message}, True, status=status)
+    ran = "done" if decision.state == "executed" else decision.state
+    from_state = ToolOutcome({"outcome": ran, **message}, ran != "done", status=status)
     if generation is None or decision.state == "unknown":
         # ran at a generation the session has left, or its outcome isn't known yet (a repeat of an execution in
         # doubt is refused): answered from the decision, and an `unknown` one is left pending by `_publish`
-        ran = "done" if decision.state == "executed" else decision.state
-        return ToolOutcome({"outcome": ran, **message}, ran != "done", status=status)
+        return from_state
     try:                                                # finished: a repeat returns the stored result
         result = await caller.kernel.call("POST /execute", ExecuteRequest(
             decision_id=decision.decision_id, session_id=caller.session_id, generation=generation))
     except KernelFailed as failure:
+        if failure.silent:                              # the session moved on since: what ran, and the turn stops
+            return replace(from_state, fenced=True)
         return replace(_refusal(failure), status=status)
     except KernelUnavailable:
         return replace(_unavailable(), status=status)

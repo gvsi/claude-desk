@@ -389,7 +389,8 @@ class _Turn:
     async def _recover_raised(self, block: dict) -> ToolOutcome | None:
         """A call whose routing raised once the kernel may have had it (a publication failed after `/decide` or
         `/execute`): found by its call ID and settled on the turn's connection (`recover_call`, never decided
-        again), so Claude and the visitor learn what the kernel did. None when that raises too."""
+        again), so Claude and the visitor learn what the kernel did. A take-over that lands first still leaves a call
+        that ran answered from its decision (`_settle`), and stops the turn. None when that raises too."""
         try:
             return await recover_call(self.conn, self.caller, self.generation, block, made_at=self.generation)
         except Exception as error:
