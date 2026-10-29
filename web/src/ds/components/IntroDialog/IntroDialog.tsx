@@ -268,17 +268,18 @@ function Illustration() {
               <Icon name="check" size={14} className="cd-intro__check" />
               Booked
             </p>
-            <p className="cd-intro__booked-when cd-type-body">Tuesday, November 3, 2:00 pm</p>
+            <p className="cd-intro__booked-when cd-type-body">Tuesday, November 3</p>
+            <p className="cd-intro__booked-with cd-type-meta">Arriving 2:00 pm to 4:00 pm</p>
             <p className="cd-intro__booked-with cd-type-meta">With Maria Rivera</p>
           </div>
           <div className="cd-intro__receipts cd-type-caption">
             <p className="cd-intro__receipt">
               <span className="cd-intro__dot" />
-              Booked within Maria’s rules
+              Reply checked against Maria Rivera’s rules
             </p>
             <p className="cd-intro__receipt">
               <span className="cd-intro__dot" />
-              Reply checked before Dana saw it
+              Booked on Maria Rivera’s calendar
             </p>
           </div>
         </div>

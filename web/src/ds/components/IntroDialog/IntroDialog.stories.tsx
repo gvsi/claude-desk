@@ -89,7 +89,7 @@ const meta = {
     intro:
       'You’re Maria Rivera today, owner of Rivera Plumbing. Her Desk answers customers and their agents under her rules. Try it, then try to break it.',
     thingsToTry: [
-      { title: 'Chat as a customer', detail: 'Rivera’s public page opens beside you.', icon: 'person' },
+      { title: 'Chat as a customer', detail: 'Rivera’s public page opens in a new tab.', icon: 'person' },
       { title: 'Try to break it', detail: 'Ask for a discount or someone else’s details.', icon: 'safety' },
       { title: 'Answer a held request', detail: 'One is waiting for you on Today.', icon: 'check' },
       { title: 'Create your own Desk', detail: 'It gets a live link you can share.', icon: 'plus' },
