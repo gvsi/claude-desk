@@ -6,6 +6,9 @@ import string
 from pathlib import Path
 
 import aws_cdk as cdk
+from conftest import actions as _actions
+from conftest import resource_list as _resource_list
+from conftest import role_statements as _statements
 
 
 def _resources(template, kind: str) -> dict:
@@ -248,28 +251,6 @@ def test_admin_task_runs_the_seam_command(data_stack, data_template):
 
 def _role_id(task: dict, key: str) -> str:
     return task[key]["Fn::GetAtt"][0]
-
-
-def _statements(template, role_id: str) -> list[dict]:
-    """Every statement of every inline or attached customer policy on a role."""
-    statements = []
-    for policy in _resources(template, "AWS::IAM::Policy").values():
-        if {"Ref": role_id} in policy["Properties"]["Roles"]:
-            statements += policy["Properties"]["PolicyDocument"]["Statement"]
-    role = _resources(template, "AWS::IAM::Role")[role_id]["Properties"]
-    for policy in role.get("Policies", []):
-        statements += policy["PolicyDocument"]["Statement"]
-    return statements
-
-
-def _actions(statement: dict) -> list[str]:
-    actions = statement["Action"]
-    return [actions] if isinstance(actions, str) else actions
-
-
-def _resource_list(statement: dict) -> list:
-    resources = statement["Resource"]
-    return resources if isinstance(resources, list) else [resources]
 
 
 def test_admin_task_reads_only_admin_and_role_secrets(data_template):

@@ -24,6 +24,8 @@ from stacks.config import DeskConfig
 from stacks.image import desk_image
 
 DATABASE_NAME = "desk"
+# The ECS cluster, by name: the Express service names it, and the scripts run the admin task in it.
+CLUSTER_NAME = "desk"
 ADMIN_ROLE = "desk_admin"
 # The process roles migration 0001_core creates NOLOGIN; the admin task gives them these passwords.
 KERNEL_ROLE, API_ROLE, MOCKPAY_ROLE = "desk_kernel", "desk_api", "desk_mockpay"
@@ -134,7 +136,7 @@ class DeskData(Stack):
 
         self.cloudfront_prefix_list_id = self._cloudfront_prefix_list_id()
         self.cluster = ecs.Cluster(
-            self, "Cluster", cluster_name="desk", vpc=self.vpc, enable_fargate_capacity_providers=True
+            self, "Cluster", cluster_name=CLUSTER_NAME, vpc=self.vpc, enable_fargate_capacity_providers=True
         )
         self.admin_task_definition = self._admin_task(config)
 
