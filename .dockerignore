@@ -1,0 +1,29 @@
+# Build context of the app image (infra/app.Dockerfile, context the repo root). The image copies
+# only backend/ and kernel/cedar/; this keeps local secrets, run notes, tests and build outputs
+# out of the context altogether. kernel/Dockerfile has its own ignore file next to it.
+
+# Secrets and local-only files
+.env
+.env.*
+**/.env
+**/.env.*
+.local
+.plan-runs
+.worktrees
+.git
+
+# Dependencies, caches and build outputs
+**/node_modules
+**/.venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+kernel/target
+kernel/**/target
+infra/cdk.out
+infra/out
+
+# Not part of the running app
+backend/tests
+evals
+web
