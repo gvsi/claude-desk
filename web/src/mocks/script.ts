@@ -157,10 +157,13 @@ const bookedCard: Record<Language, CardBlock> = {
   es: blocks.booking_confirmed.es,
 };
 
-/** Claude's checked words when nothing more specific fits: no digits, amounts, dates or promises. */
+/**
+ * Claude's checked words when nothing more specific fits, as the signed board answers a question
+ * only Maria can: no digits, amounts, dates or promises, and the way to reach her.
+ */
 const helpProse: Record<Language, RenderedBlock> = {
-  en: proseBlock('I can help with prices, open times, bookings and invoices for Rivera Plumbing. What do you need?'),
-  es: proseBlock('Puedo ayudarte con precios, horarios, reservas y facturas de Rivera Plumbing. ¿Qué necesitas?'),
+  en: proseBlock('Maria can tell you once she sees it. You can ask for her here anytime.'),
+  es: proseBlock('Maria te lo puede decir cuando lo vea. Puedes pedir hablar con ella aquí cuando quieras.'),
 };
 
 const inboxPreview: Record<Language, string> = {

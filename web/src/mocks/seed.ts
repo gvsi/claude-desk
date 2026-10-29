@@ -59,8 +59,12 @@ export const RIVERA_HOURS: HoursWindow[] = [
   { days: ['sat'], start: '09:00:00', end: '13:00:00' },
 ];
 
+/**
+ * Around the clock: each day's window ends at midnight (an end of 00:00 closes the day), where the
+ * next day's begins, so the windows touch and the kernel says "Open now" with no end.
+ */
 const ALL_DAY_EVERY_DAY: HoursWindow[] = [
-  { days: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'], start: '00:00:00', end: '23:59:59' },
+  { days: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'], start: '00:00:00', end: '00:00:00' },
 ];
 
 /** When the kernel computed the mock's open statuses: a Friday, 90 seconds before Rivera's 6:00 pm close. */

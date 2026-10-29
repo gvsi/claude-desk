@@ -4,7 +4,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { DecisionState, EvMessage, LedgerPage, SseEvent } from '../api/contracts.ts';
+import type { DecisionState, EvMessage, LedgerPage, PublicDesk, SseEvent } from '../api/contracts.ts';
 import type { RouteKey } from '../api/routes.ts';
 import type {
   ConversationSummary,
@@ -62,7 +62,7 @@ afterEach(() => {
 });
 
 describe('the scripted Desk', () => {
-  it('script_matches_the_first_rule', () => {
+  it('script_matches_the_first_rule', async () => {
     const cases: [text: string, rule: RuleName, language: 'en' | 'es'][] = [
       // "off" comes before "pay": a discount asked with cash is held, not a payment link.
       ['Can I get 50% off if I pay cash?', 'discount', 'en'],
@@ -95,6 +95,18 @@ describe('the scripted Desk', () => {
       expect(matchRule(text).name, text).toBe(rule);
       expect(turnLanguage(text), text).toBe(language);
     }
+
+    // The last rule, which takes anything, answers with the signed board's line, in the turn's language.
+    const { events } = await openChat();
+    await send('Is it better to replace my water heater than to repair it?');
+    await drain();
+    await send('Hola');
+    await drain();
+    const replies = events.flatMap(([, ev]) => (ev.type === 'message' ? [[ev.language, ev.blocks.map((b) => [b.kind, b.text])]] : []));
+    expect(replies).toEqual([
+      ['en', [['prose', 'Maria can tell you once she sees it. You can ask for her here anytime.']]],
+      ['es', [['prose', 'Maria te lo puede decir cuando lo vea. Puedes pedir hablar con ella aquí cuando quieras.']]],
+    ]);
   });
 
   it('discount_holds_and_reaches_needs_you', async () => {
@@ -105,6 +117,14 @@ describe('the scripted Desk', () => {
     expect(seeded.greeting_name).toBe('Maria');
     expect(seeded.needs_you_count).toBe(1);
     expect(seeded.live.map((c) => [c.session_id, c.display_name])).toEqual([['ses-dana-web', null]]);
+
+    // The Emergencies Desk is open around the clock: each day's window ends at midnight, where the
+    // next begins, so the windows touch and its status says "Open now" with no end.
+    mockStore.reset('rivera_two_desks');
+    const emergencies = ((await call('me')).body as CopyOut).desks.find((d) => d.desk_id === RIVERA.emergenciesDeskId);
+    expect(emergencies?.hours).toEqual([{ days: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'], start: '00:00:00', end: '00:00:00' }]);
+    const open = (await call('publicDesk', { params: { slug: RIVERA.emergenciesSlug } })).body as PublicDesk;
+    expect(open.open_status).toMatchObject({ open: true, until: null, text: 'Open now' });
 
     mockStore.reset('rivera_quiet');
     expect((await call('needsYou', { params: { desk_id: deskId } })).body).toEqual([]);
