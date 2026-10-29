@@ -3,21 +3,24 @@ owner's answer (`run_approved`).
 
 An execution takes up to three transactions, so that a crash leaves a record of how far it got:
 
-- T1 locks the decision, settles it as any read does (`refresh_decision`), re-checks it against
-  the current rows (`recheck`, step 6 of "Evaluation"), runs the adapter's `prepare` and commits
-  the `executions` row in state `intent`, with whatever `prepare` reserved. Nothing outside the
-  kernel has happened yet.
-- T2 locks the intent row and, for an allow, holds the session row `FOR SHARE`, so a take-over
-  waits for a running execution and one that came first stops it (the fence). It runs the
-  adapter's `execute`, then commits `succeeded` with the result and the decision `executed`,
-  ledgered and signed again.
+- T1 locks the decision (for an allow, once it holds the session row `FOR SHARE`), settles it as
+  any read does (`refresh_decision`), re-checks it against the current rows (`recheck`, step 6
+  of "Evaluation"), runs the adapter's `prepare` and commits the `executions` row in state
+  `intent`, with whatever `prepare` reserved. Nothing outside the kernel has happened yet.
+- T2, for an allow, holds the session row `FOR SHARE` first, so a take-over waits for a running
+  execution and one that came first stops it (the fence); then it locks the decision and the
+  intent row. It runs the adapter's `execute`, then commits `succeeded` with the result and the
+  decision `executed`, ledgered and signed again.
 - T3 runs after an `Exception` in T2, which rolled back: `AdapterFailure` (raised only before any
   external side effect) is `failed`, after the adapter's `on_failed`; anything else, a failed T2
   commit included, is `unknown`, left to reconciliation. A `BaseException` (the process dying, a
   cancelled task) skips T3 and leaves the intent row.
 
+Every step takes its locks in the kernel's order (`repo.py`): the session row, the decision, the
+execution row, then the ledger head.
+
 Reconciliation (`reconcile_orphans`) settles an intent no execution is running (older than
-`ORPHAN_AFTER`, and its row not locked) and an `unknown` action by asking the adapter what
+`ORPHAN_AFTER`, and its rows not locked) and an `unknown` action by asking the adapter what
 happened (`reconcile`, by `action_id`), on every read of the decision and at startup. Nothing is
 retried blindly.
 
@@ -274,8 +277,9 @@ def _stale(named: Named, decision_id: str) -> AuthError:
     record_refusal = error.persist
 
     async def persist(ctx: KernelCtx) -> None:
-        await record_refusal(ctx)                        # binds the copy
-        row = await _lock_decision(ctx, decision_id)
+        ctx.bind(named.copy_id)
+        row = await _lock_decision(ctx, decision_id)     # the decision row before the ledger head
+        await record_refusal(ctx)
         if row.state == "allowed" and await _execution(ctx, row.action_id) is None:
             await decide.set_state(ctx, row, "expired", kind="execute", summary={
                 "decision_id": row.decision_id, "action_id": row.action_id, "state": "expired",
@@ -331,30 +335,34 @@ async def _run(ctx: KernelCtx, decision_id: str, action_id: str, *, path: ExecPa
         outcome = await _side_effect(ctx, decision_id, action_id, path)
     except AdapterFailure as failure:
         await ctx.db.rollback()
-        return await _settle_failed(ctx, action_id, failure)
+        return await _settle_failed(ctx, decision_id, action_id, failure)
     except Exception:
         # an outcome nobody knows, a failed commit included: never retried, left to reconciliation
         log.exception("execution_unknown action_id=%s", action_id)
         await ctx.db.rollback()
-        return await _settle_unknown(ctx, action_id)
+        return await _settle_unknown(ctx, decision_id, action_id)
     if isinstance(outcome, KernelFailure):
         raise outcome
     return outcome
 
 
 async def _side_effect(ctx: KernelCtx, decision_id: str, action_id: str, path: ExecPath) -> ExecResult | KernelFailure:
-    """T2: under the intent row's lock (and, for an allow, the session's), the adapter's `execute`,
-    then `succeeded` and `executed`, committed. A failure answer comes back as a `KernelFailure`,
-    already committed, for `_run` to raise."""
+    """T2: under the decision's and the intent row's locks (and, for an allow, the session's,
+    taken first), the adapter's `execute`, then `succeeded` and `executed`, committed. A failure
+    answer comes back as a `KernelFailure`, already committed, for `_run` to raise."""
+    session = None
+    if path == "allow":
+        session_id = await _one(ctx, select(DecisionRow.session_id).where(DecisionRow.decision_id == decision_id))
+        session = await _share_session(ctx, session_id)
+    decision = await _lock_decision(ctx, decision_id)
     execution = await _execution(ctx, action_id, lock=True)
     if execution is None or execution.state != "intent":
         # reconciliation settled it first
         if execution is not None and execution.state in ("succeeded", "failed") and execution.result is not None:
             return execution.result
         return KernelFailure(409, "conflict", "not_an_intent")
-    target = await _target(ctx, await _one(ctx, select(DecisionRow).where(DecisionRow.decision_id == decision_id)))
-    if path == "allow":
-        session = await _share_session(ctx, target.session_row.session_id)
+    target = await _target(ctx, decision)
+    if session is not None:
         if session.generation != target.decision.generation:
             return await _fenced(ctx, target, execution, "stale_generation")
         if session.mode != "ai":
@@ -402,20 +410,22 @@ async def _finish(ctx: KernelCtx, target: _Target, execution: Execution, result:
     await decide.set_state(ctx, decision, decision_state, kind="execute", summary=summary)
 
 
-async def _settle_failed(ctx: KernelCtx, action_id: str, failure: AdapterFailure) -> ExecResult:
-    """T3 after `AdapterFailure`: `on_failed`, then `failed`. If `on_failed` itself fails, the
-    reservation may still stand, so the action is `unknown` instead."""
+async def _settle_failed(ctx: KernelCtx, decision_id: str, action_id: str, failure: AdapterFailure) -> ExecResult:
+    """T3 after `AdapterFailure`, under the decision's and the execution's locks: `on_failed`,
+    then `failed`. If `on_failed` itself fails, the reservation may still stand, so the action is
+    `unknown` instead."""
+    decision = await _lock_decision(ctx, decision_id)
     execution = await _execution(ctx, action_id, lock=True)
     if execution is None or execution.state != "intent":
         return await _settled_elsewhere(execution, action_id)
-    target = await _target(ctx, await _lock_decision(ctx, execution.decision_id))
+    target = await _target(ctx, decision)
     try:
         async with ctx.db.begin_nested():
             await _undo(ctx, target)
     except Exception:
         log.exception("on_failed_failed action_id=%s", action_id)
         await ctx.db.rollback()
-        return await _settle_unknown(ctx, action_id)
+        return await _settle_unknown(ctx, decision_id, action_id)
     code = failure.args[0] if failure.args and isinstance(failure.args[0], str) else "adapter_failure"
     result = _no_result(action_id, "failed")
     await _finish(ctx, target, execution, result, "failed", _summary(target, "failed", reason=ledger.safe_ref(code)))
@@ -423,12 +433,14 @@ async def _settle_failed(ctx: KernelCtx, action_id: str, failure: AdapterFailure
     return result
 
 
-async def _settle_unknown(ctx: KernelCtx, action_id: str) -> ExecResult:
-    """T3 after any other exception: `unknown`, with `prepare`'s reservation kept."""
+async def _settle_unknown(ctx: KernelCtx, decision_id: str, action_id: str) -> ExecResult:
+    """T3 after any other exception, under the decision's and the execution's locks: `unknown`,
+    with `prepare`'s reservation kept."""
+    decision = await _lock_decision(ctx, decision_id)
     execution = await _execution(ctx, action_id, lock=True)
     if execution is None or execution.state != "intent":
         return await _settled_elsewhere(execution, action_id)
-    target = await _target(ctx, await _lock_decision(ctx, execution.decision_id))
+    target = await _target(ctx, decision)
     result = _no_result(action_id, "unknown")
     await _mark_unknown(ctx, target, execution, result)
     await ctx.db.commit()
@@ -497,15 +509,15 @@ async def reconcile_orphans(ctx: KernelCtx, *, at_startup: bool, action_id: str 
     False) everything happens in the caller's transaction; at startup each action commits on its
     own, and one that fails is logged and left for the next read."""
     cutoff = ctx.clock.now() - ORPHAN_AFTER
-    stmt = select(Execution.action_id).where(_orphaned(cutoff))
+    stmt = select(Execution.action_id, Execution.decision_id).where(_orphaned(cutoff))
     if action_id is not None:
         stmt = stmt.where(Execution.action_id == action_id)
-    candidates = list(await ctx.db.scalars(ctx.repo.scoped(stmt.order_by(Execution.started_at,
+    candidates = list(await ctx.db.execute(ctx.repo.scoped(stmt.order_by(Execution.started_at,
                                                                           Execution.action_id))))
     reconciled = []
-    for candidate in candidates:
+    for candidate, decision_id in candidates:
         try:
-            if await _reconcile(ctx, candidate, cutoff):
+            if await _reconcile(ctx, candidate, decision_id, cutoff):
                 reconciled.append(candidate)
             if at_startup:
                 await ctx.db.commit()
@@ -517,17 +529,23 @@ async def reconcile_orphans(ctx: KernelCtx, *, at_startup: bool, action_id: str 
     return reconciled
 
 
-async def _reconcile(ctx: KernelCtx, action_id: str, cutoff: datetime) -> bool:
-    """One orphaned execution, under both rows' locks: an intent becomes `unknown` (ledgered), then
-    the adapter says what happened. A result is `executed`, rebuilt as the session may see it;
-    None is `failed`, after `on_failed`; `AdapterUnknown` (or any error) leaves it `unknown`. A row
-    a running execution holds is skipped."""
+async def _reconcile(ctx: KernelCtx, action_id: str, decision_id: str, cutoff: datetime) -> bool:
+    """One orphaned execution, under both rows' locks, the decision's first: an intent becomes
+    `unknown` (ledgered), then the adapter says what happened. A result is `executed`, rebuilt as
+    the session may see it; None is `failed`, after `on_failed`; `AdapterUnknown` (or any error)
+    leaves it `unknown`. Rows another transaction holds (a running execution holds both) are
+    skipped, never waited on; a lock this transaction holds already is no wait."""
+    decision = (await ctx.db.scalars(ctx.repo.scoped(
+        select(DecisionRow).where(DecisionRow.decision_id == decision_id)
+        .with_for_update(skip_locked=True).execution_options(populate_existing=True)))).one_or_none()
+    if decision is None:
+        return False
     execution = (await ctx.db.scalars(ctx.repo.scoped(
         select(Execution).where(Execution.action_id == action_id, _orphaned(cutoff))
         .with_for_update(skip_locked=True).execution_options(populate_existing=True)))).one_or_none()
     if execution is None:
         return False
-    target = await _target(ctx, await _lock_decision(ctx, execution.decision_id))
+    target = await _target(ctx, decision)
     if execution.state == "intent":
         await _mark_unknown(ctx, target, execution, _no_result(action_id, "unknown"), orphaned=True)
     if target.adapter is None:

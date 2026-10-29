@@ -1,19 +1,80 @@
-"""The kernel's lock order: the session row before the decision row, so an execution and a
-decision on the same session never deadlock.
+"""The kernel's lock order (`repo.py`): the session row, then the decision row, then the execution
+row, then the ledger head, so two kernel transactions never deadlock.
+
+The first test races two requests that once took the session and decision rows in opposite
+orders. The others record the row locks each transaction of a path takes (`LockLog`) and check
+that they come in that order.
 """
 
 import asyncio
+import re
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 import psycopg
+import pytest
+from fastapi import FastAPI
+from sqlalchemy import event
+from sqlalchemy.engine import Connection
 
 from desk.contracts import Decision
 from desk.db.session import database_url, libpq_url
 from desk.kernel_service import execute
+from desk.kernel_service.adapters.base import AdapterFailure
 
 from .fakes import FakeAdapter
 from .helpers import ledger_rows
+from .test_approvals import ASK_QUOTES, answered, held_on, post_cancel
 from .test_compiler import card
-from .test_decide import desk_with, owner_decide
+from .test_decide import desk_with, owner_decide, set_mode
+from .test_execute import executed, fake_quote_desk, post_execute, read, store_intent
+
+# The tables whose rows the kernel locks, in the order it locks them (repo.py).
+LOCK_ORDER = ("sessions", "decisions", "executions", "policy_versions", "payment_links", "ledger_heads")
+_LOCKING = re.compile(
+    r"^\s*(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+kernel\.(?P<written>\w+)"
+    r"|^\s*SELECT\b.*?\bFROM\s+kernel\.(?P<read>\w+)\b.*\bFOR\s+(?:NO\s+KEY\s+UPDATE|UPDATE|KEY\s+SHARE|SHARE)\b",
+    re.S | re.I)
+
+
+class LockLog:
+    """The row locks each kernel transaction takes while the log is open, as the tables of
+    `LOCK_ORDER` in the order the transaction first locks a row of each: a `SELECT ... FOR UPDATE`
+    or `FOR SHARE` on the table, or an `INSERT`, `UPDATE` or `DELETE` on it. It goes by table, not
+    row, so a second lock on a table counts as one the transaction holds already; each path here
+    works on one session, one decision and one execution."""
+
+    def __init__(self) -> None:
+        self.transactions: list[list[str]] = []
+        self._open: dict[Connection, list[str]] = {}
+
+    def begin(self, conn: Connection) -> None:
+        self._open[conn] = []
+
+    def statement(self, conn: Connection, cursor, statement: str, parameters, context, executemany) -> None:
+        found = _LOCKING.match(statement)
+        table = found and (found["written"] or found["read"])
+        if table in LOCK_ORDER and table not in self._open.setdefault(conn, []):
+            self._open[conn].append(table)
+
+    def end(self, conn: Connection) -> None:
+        if locked := self._open.pop(conn, None):
+            self.transactions.append(locked)
+
+
+@contextmanager
+def lock_log(app: FastAPI) -> Iterator[LockLog]:
+    """A `LockLog` of the kernel app's transactions until the block ends."""
+    log, engine = LockLog(), app.state.kernel.engine.sync_engine
+    listeners = [("begin", log.begin), ("before_cursor_execute", log.statement), ("commit", log.end),
+                 ("rollback", log.end)]
+    for name, listener in listeners:
+        event.listen(engine, name, listener)
+    try:
+        yield log
+    finally:
+        for name, listener in listeners:
+            event.remove(engine, name, listener)
 
 
 async def a_kernel_backend_waits(within: float = 5.0) -> bool:
@@ -67,3 +128,73 @@ async def test_an_owner_execute_and_a_repeated_decide_never_deadlock(app, client
     assert "execute" not in website.calls
     expired = [e.event.summary for e in await ledger_rows(app, rows) if e.event.summary.get("state") == "expired"]
     assert expired == [{"decision_id": allowed.decision_id, "state": "expired"}]
+
+
+async def test_an_allow_runs_in_the_lock_order(app, client, registry):
+    _, _, visitor, allowed = await fake_quote_desk(app, client)
+    with lock_log(app) as log:
+        assert (await executed(client, visitor, allowed)).state == "succeeded"
+    assert log.transactions == [
+        ["sessions", "decisions", "executions"],                    # T1: the intent
+        ["sessions", "decisions", "executions", "ledger_heads"],    # T2: the side effect and its outcome
+    ]
+
+
+@pytest.mark.parametrize("how", ["read", "startup"])
+async def test_reconciliation_runs_in_the_lock_order(app, client, registry, frozen_clock, how):
+    _, rows, _, allowed = await fake_quote_desk(app, client)
+    await store_intent(app, rows.copy_id, allowed)                  # a kernel died after T1
+    frozen_clock.advance(31)
+    with lock_log(app) as log:
+        if how == "read":
+            assert (await read(client, rows.owner, allowed)).state == "failed"
+        else:
+            assert await execute.reconcile_at_startup(app.state.kernel) == [allowed.action.action_id]
+    assert log.transactions == [["decisions", "executions", "ledger_heads"]]
+
+
+@pytest.mark.parametrize(("error", "state"), [(AdapterFailure("slot_taken"), "failed"),
+                                               (RuntimeError("bad provider output"), "unknown")])
+async def test_a_run_that_raises_settles_in_the_lock_order(app, client, registry, error, state):
+    quote, _, visitor, allowed = await fake_quote_desk(app, client)
+    quote.script["execute"] = error
+    with lock_log(app) as log:
+        assert (await executed(client, visitor, allowed)).state == state
+    assert log.transactions == [
+        ["sessions", "decisions", "executions"],                    # T1: the intent
+        ["sessions", "decisions", "executions"],                    # T2, rolled back when the adapter raised
+        ["decisions", "executions", "ledger_heads"],                # T3: the outcome
+    ]
+
+
+async def test_a_stale_execute_is_recorded_in_the_lock_order(app, client, registry):
+    _, rows, visitor, allowed = await fake_quote_desk(app, client)
+    await set_mode(client, rows, visitor.session_id, "owner", 0)            # Maria takes over
+    with lock_log(app) as log:
+        response = await post_execute(client, visitor, allowed)
+    assert (response.status_code, response.json()) == (409, {"code": "stale_generation"})
+    assert log.transactions == [
+        ["sessions", "decisions"],                                  # the request's, rolled back at the refusal
+        ["decisions", "ledger_heads"],                              # the refusal and the allow's expiry, recorded
+    ]
+
+
+async def test_an_approved_hold_runs_in_the_lock_order(app, client, registry):
+    rows = await desk_with(app, [FakeAdapter("native.quote")], ASK_QUOTES)
+    _, held = await held_on(client, rows)
+    with lock_log(app) as log:
+        assert (await answered(client, rows.owner, held.decision_id, "allow_once")).decision.state == "executed"
+    assert log.transactions == [
+        ["decisions", "executions", "ledger_heads"],                # the answer: approved, with its intent
+        ["decisions", "executions", "ledger_heads"],                # T2 on the approved path
+    ]
+
+
+async def test_a_cancel_keeps_the_lock_order(app, client, registry, frozen_clock):
+    rows = await desk_with(app, [FakeAdapter("native.quote")], ASK_QUOTES)
+    visitor, held = await held_on(client, rows)
+    frozen_clock.advance(1)                                         # so the visitor's last_seen_at is written
+    with lock_log(app) as log:
+        response = await post_cancel(client, visitor, held.decision_id)
+    assert (response.status_code, response.json()["state"]) == (200, "cancelled")
+    assert log.transactions == [["sessions", "decisions", "ledger_heads"]]

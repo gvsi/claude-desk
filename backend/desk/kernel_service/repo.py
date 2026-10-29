@@ -6,12 +6,34 @@ until a copy is bound (`ctx.bind(copy_id)`), and row-level security then admits 
 rows. A route takes it as `ctx: Ctx`: the transaction commits after the route returns and before
 the answer is sent, so a failed commit answers 500, and it rolls back on any exception.
 
-Row locks are taken in one order, so no two kernel transactions wait on each other: the session
-row first (`auth.lock_session`, `FOR UPDATE`; a decision holds it until it commits, and a
-take-over, a hand-back and the breaker's strike write it), then the decision row (a repeated
-call past its expiry, an execution), then the execution row, then the Desk's ledger head
-(`ledger.append`, where every entry ends). A transaction that holds a later lock never takes an
-earlier one.
+Row locks are taken in one order, so no two kernel transactions wait on each other:
+
+1. the session row: `FOR UPDATE` by a decision (`auth.lock_session`, held until it commits; the
+   breaker's strike writes it under that lock) and by a take-over or hand-back; `FOR SHARE` by
+   an allow's execution, in T1 and T2; written by a visitor's or agent's own requests
+   (`last_seen_at`, `last_language`);
+2. the decision row, `FOR UPDATE`: lazy expiry, an answer, a cancel, each step of an execution,
+   reconciliation;
+3. the execution row: inserted with the intent, `FOR UPDATE` in T2, T3 and reconciliation;
+4. the Desk's active `policy_versions` row, `FOR SHARE`, which issuing a payment link takes
+   (Plan 01c);
+5. a payment link (Plan 01c);
+6. the Desk's ledger head (`ledger.append`, `FOR UPDATE`, where every entry ends; `ledger.page`
+   reads it `FOR SHARE`).
+
+A transaction that holds a later lock never asks for an earlier one: a refusal's `persist` locks
+the decision before it appends, and nothing holds a payment link and then asks for the policy
+row. A row is taken the first time in the strongest mode the transaction will need, since going
+from `FOR SHARE` to `FOR UPDATE` waits like a new lock. Reading a row without a lock (the session
+a decision names, say) waits for nothing and can come at any point. Reconciliation takes the
+decision and the execution `SKIP LOCKED`, so it skips an execution that is running rather than
+wait for it.
+
+Activation (`activation.confirm`) holds no session, decision or execution row and starts at step
+4: the Desk's `versions` advisory lock, then its `policy_versions` rows `FOR UPDATE`, then the
+payment links its `ON_ACTIVATE` hooks lock and move (Plan 01c; a hook appends nothing), then the
+ledger head: its own `policy` entry first, then the hooks' `payment` events. A draft takes its
+key's advisory lock before the `versions` lock.
 
 A route refuses with `KernelFailure`. Its answer is always a `KernelError{code}`; when the refusal
 must be on record (a ledgered auth failure, an allow that expired), `persist` writes that record
