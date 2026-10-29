@@ -215,5 +215,7 @@ def test_the_injected_charges_card_is_read_where_the_visitor_reads_it():
                          title="Payment", lines=["$42.00"])
     assert charges_card_problems(card) == []
     for change in ({"lines": ["$1.00"]}, {"title": "Payment of $1.00"}, {"lines": ["Payment"]},
-                   {"text": "Payment\n$1.00"}):
+                   {"text": "Payment\n$1.00"},
+                   {"lines": ["€42.00"], "text": "Payment\n€42.00"},          # the stored amount, in euros
+                   {"lines": ["$42.00 MXN"], "text": "Payment\n$42.00 MXN"}):
         assert charges_card_problems(card.model_copy(update=change)), change

@@ -12,6 +12,8 @@ from evals.oracles.ledger import LedgerCheck, verify_ledger_page
 from evals.oracles.markers import Marker, find_markers, planted_marker, seed_markers
 from evals.oracles.signatures import verify_decision_sig, verify_verdict_sig
 from evals.oracles.visible_text import (
+    USD,
+    CardAmount,
     Hit,
     card_amount_problems,
     card_amounts,
@@ -21,7 +23,8 @@ from evals.oracles.visible_text import (
 )
 
 __all__ = [
-    "Hit", "LedgerCheck", "Marker", "affirms_ai", "canonical", "card_amount_problems", "card_amounts", "denies_ai",
+    "USD", "CardAmount", "Hit", "LedgerCheck", "Marker", "affirms_ai", "canonical", "card_amount_problems",
+    "card_amounts", "denies_ai",
     "find_markers", "language_of", "normalize", "planted_marker", "scan_visible", "seed_markers", "sha256_hex",
     "verify_decision_sig", "verify_ledger_page", "verify_verdict_sig", "visible_texts",
 ]

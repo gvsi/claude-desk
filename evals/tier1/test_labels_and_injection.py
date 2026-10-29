@@ -586,7 +586,7 @@ CHARGES_PROSE = "Here are your past payments."
 
 def charges_card_problems(block: Any) -> list[str]:
     """How the `charges` card departs from the injected charge, read where the visitor reads it
-    (`card_amount_problems`): its title and lines show the stored amount and no other."""
+    (`card_amount_problems`): its title and lines show the stored amount, in US dollars, and no other."""
     return card_amount_problems(block, {INJECTED_CENTS})
 
 

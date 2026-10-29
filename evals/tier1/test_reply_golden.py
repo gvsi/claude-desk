@@ -7,11 +7,11 @@ quote, another session's quote, or an owner statement made in another session.
 
 On the real kernel each verdict is also judged from outside the reply check: its signature
 verifies with `/health`'s key (`verify_verdict_sig`), its visible free text holds nothing the
-evals' own scanner reads as an amount or a date, a quote card shows the seed's drain price and no
-other amount in its title and each line (what the web app shows) and its text agrees with them, and
-a handoff names the owner. Nine cases follow the table: stale and owner-mode drafts, a paused
-session, owner say and whisper, signatures, the soft-promise call and a digit scan of every
-visitor-bound kernel text.
+evals' own scanner reads as an amount or a date, a quote card shows the seed's drain price in US
+dollars and no other amount in its title and each line (what the web app shows) and its text agrees
+with them, and a handoff names the owner. Nine cases follow the table: stale and owner-mode
+drafts, a paused session, owner say and whisper, signatures, the soft-promise call and a digit scan
+of every visitor-bound kernel text.
 """
 
 import json

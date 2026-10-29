@@ -406,15 +406,41 @@ def test_visible_fields_skip_ids_and_cards():
 
 def test_card_amounts_parse_en_and_es():
     cases = {
-        "$180.00": [18000],
-        "1.234,56 US$": [123456],
-        "$1,234.56": [123456],
-        "$180": [18000],
-        "Drain cleaning\n$180.00\nDeposit $20.00": [18000, 2000],
-        "Total: 1.234 €": [123400],
-        "Limpieza de drenaje\n180,00 US$": [18000],
-        "USD 89.5": [8950],
+        "$180.00": [("USD", 18000)],
+        "1.234,56 US$": [("USD", 123456)],
+        "$1,234.56": [("USD", 123456)],
+        "$180": [("USD", 18000)],
+        "Drain cleaning\n$180.00\nDeposit $20.00": [("USD", 18000), ("USD", 2000)],
+        "Total: 1.234 €": [("€", 123400)],
+        "Limpieza de drenaje\n180,00 US$": [("USD", 18000)],
+        "USD 89.5": [("USD", 8950)],
         "Serie 4, visit 2": [],
+    }
+    assert {text: card_amounts(text) for text in cases} == cases
+    assert card_amounts("$180.00")[0].currency == "USD" and card_amounts("$180.00")[0].cents == 18000
+
+
+def test_card_amounts_keep_their_currency():
+    """Each amount keeps the currency it is shown in: only the US dollar spellings ("$", "US$",
+    "USD") read as US dollars. Any other sign or code, letters joined to a dollar sign ("MX$",
+    "CA$") and a second mark after the number ("$180.00 MXN") keep the amount out of US dollars."""
+    cases = {
+        "€180.00": [("€", 18000)],
+        "£180.00": [("£", 18000)],
+        "¥18000": [("¥", 1800000)],
+        "180,00 €": [("€", 18000)],
+        "EUR 180.00": [("EUR", 18000)],
+        "180.00 GBP": [("GBP", 18000)],
+        "MX$180.00": [("MX$", 18000)],
+        "CA$ 180": [("CA$", 18000)],
+        "R$ 180,00": [("R$", 18000)],
+        "＄180.00": [("USD", 18000)],          # a full-width dollar sign reads as "$"
+        "US$180.00": [("USD", 18000)],
+        "$180.00 USD": [("USD", 18000)],
+        "$180.00 MXN": [("$ MXN", 18000)],
+        "$180.00 €": [("$ €", 18000)],
+        "Includes 80% off €180.00": [("€", 18000)],
+        "$36.00 $180.00": [("USD", 3600), ("USD", 18000)],
     }
     assert {text: card_amounts(text) for text in cases} == cases
 
@@ -449,6 +475,39 @@ def test_card_amount_problems_read_what_the_visitor_reads():
     assert any("option 1" in problem for problem in found["option"]), found["option"]
     assert any("text" in problem for problem in found["text"]), found["text"]
     assert card_amount_problems({**charges, "lines": ["$1.00"]}, {432100})
+
+
+def test_card_amount_problems_require_us_dollars():
+    """Money claims are USD cents (master "Shared contracts v2"), so a card showing the right
+    number in another currency misstates the price: each field showing one fails, whatever its
+    text says, and so does a text whose currency differs from what the title and lines show."""
+    card = {**QUOTE_CARD, "text": "$180.00\nDrain clearing", "title": "$180.00", "lines": ["Drain clearing"]}
+    discounted = {**card, "text": "$36.00\nDrain clearing\nIncludes 80% off $180.00", "title": "$36.00",
+                  "lines": ["Drain clearing", "Includes 80% off $180.00"]}
+    assert card_amount_problems(card, {18000}, headline=18000) == []
+    assert card_amount_problems({**card, "title": "US$180.00", "text": "US$180.00\nDrain clearing"},
+                                {18000}, headline=18000) == []
+
+    def shown(title: str, *lines: str) -> dict:
+        return {**card, "title": title, "lines": list(lines), "text": "\n".join([title, *lines])}
+
+    wrong = {
+        "euros in the title": (shown("€180.00", "Drain clearing"), "the title"),
+        "pounds in the title": (shown("£180.00", "Drain clearing"), "the title"),
+        "pesos in the title": (shown("MX$180.00", "Drain clearing"), "the title"),
+        "a code after the title": (shown("$180.00 MXN", "Drain clearing"), "the title"),
+        "euros in a line": (shown("$180.00", "Drain clearing €180.00"), "line 1"),
+        "euros off the list": (shown("$36.00", "Drain clearing", "Includes 80% off €180.00"), "line 2"),
+        "euros in an option": ({**card, "options": [{"option_id": "o-1", "label": "Pay €180.00"}]}, "option 1"),
+        "euros in the text alone": ({**card, "text": "€180.00\nDrain clearing"}, "text"),
+    }
+    for name, (block, where) in wrong.items():
+        allowed = {3600, 18000} if block["title"].startswith("$36") else {18000}
+        problems = card_amount_problems(block, allowed, headline=3600 if block["title"].startswith("$36") else 18000)
+        assert any(where in problem for problem in problems), (name, problems)
+    assert card_amount_problems(discounted, {3600, 18000}, headline=3600) == []
+    charges = {**card, "template": "charges", "text": "Payment\n€42.00", "title": "Payment", "lines": ["€42.00"]}
+    assert any("US dollars" in problem for problem in card_amount_problems(charges, {4200}))
 
 
 def test_a_quote_cards_percentages_and_numbers_are_read_too():

@@ -240,3 +240,22 @@ async def test_quote_row_fails_a_signed_card_misstating_the_price(monkeypatch: p
     The signature authenticates what the kernel rendered, not that it agrees with the fact."""
     with pytest.raises(AssertionError, match="quote card"):
         await run_quote_row(monkeypatch, ROW_CARD.model_copy(update=change))
+
+
+def shown_as(title: str, *lines: str) -> dict:
+    """A change to `ROW_CARD` showing `title` and `lines`, with the text Plan 01a renders from them."""
+    return {"title": title, "lines": list(lines), "text": "\n".join([title, *lines])}
+
+
+@pytest.mark.parametrize("change", [
+    shown_as("€180.00", "Drain clearing"),
+    shown_as("£180.00", "Drain clearing"),
+    shown_as("$180.00", "Drain clearing €180.00"),
+], ids=["euros in the title", "pounds in the title", "euros in a line"])
+async def test_quote_row_fails_a_signed_card_showing_the_price_in_another_currency(
+    monkeypatch: pytest.MonkeyPatch, change,
+):
+    """The drain's price is $180: a correctly signed card showing 180.00 in euros or pounds, in its
+    title or a line, with a text that agrees, misstates it and fails the row."""
+    with pytest.raises(AssertionError, match="US dollars"):
+        await run_quote_row(monkeypatch, ROW_CARD.model_copy(update=change))

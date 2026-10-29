@@ -244,3 +244,8 @@ def test_the_slices_quote_card_is_read_where_the_visitor_reads_it():
                     "text": "$36.00\nDrain clearing\nIncludes 99% off $180.00"},
                    {"lines": ["Drain clearing", "Includes 80% off $180.00", "Was 1.00"]}):
         assert held_quote_card_problems(card.model_copy(update=change)), change
+    for title, *lines in (("€36.00", "Drain clearing", "Includes 80% off €180.00"),   # the right numbers in euros
+                          ("$36.00", "Drain clearing", "Includes 80% off £180.00")):  # the list price in pounds
+        problems = held_quote_card_problems(card.model_copy(update={
+            "title": title, "lines": lines, "text": "\n".join([title, *lines])}))
+        assert any("US dollars" in problem for problem in problems), (title, lines, problems)

@@ -11,11 +11,12 @@ matches words with accents folded and case ignored.
 """
 
 import re
+import sys
 import unicodedata
 from collections.abc import Collection
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Any, Literal, NamedTuple
 
 from pydantic import BaseModel
 
@@ -64,25 +65,51 @@ def _scan(shown: str) -> list[Hit]:
     return hits
 
 
-def card_amounts(text: str) -> list[int]:
-    """The cents of every currency amount in a card's text, in order: "$1,234.56", "1.234,56 US$",
-    "$180", "USD 89.5". A separator followed by one or two digits at the end of a number is the
-    decimal mark (en "." or es ","); followed by three, it groups thousands."""
+USD = "USD"   # every money claim's currency: the master's "Shared contracts v2" states money in USD cents
+
+
+class CardAmount(NamedTuple):
+    """A currency amount a card shows: its currency and its cents. The currency is `USD` for the
+    US dollar spellings ("$", which Plan 01a renders in both languages, "US$" and "USD"), and
+    otherwise the mark as the card writes it ("€", "MX$", "EUR"), or both marks when one stands
+    before the number and another after it ("$ MXN" for "$180.00 MXN")."""
+
+    currency: str
+    cents: int
+
+
+def card_amounts(text: str) -> list[CardAmount]:
+    """Every currency amount in a card's text, in order, with its currency (`CardAmount`):
+    "$1,234.56" and "1.234,56 US$" are 123456 cents in US dollars, "€180" 18000 cents in euros. A
+    mark is a currency sign with any letters joined to it ("$", "US$", "MX$") or a three-letter
+    code ("USD", "EUR"), before or after the number. A separator followed by one or two digits at
+    the end of a number is the decimal mark (en "." or es ","); followed by three, it groups
+    thousands."""
     shown = normalize(text)
-    return [_cents(m.group(1) or m.group(2)) for m in _CARD_AMOUNT.finditer(shown)]
+    found = []
+    for m in _CARD_AMOUNT.finditer(shown):
+        marks = [mark for mark in (m.group("lead"), m.group("trail"), m.group("suffix")) if mark]
+        found.append(CardAmount(_currency(marks), _cents(m.group("number") or m.group("suffixed"))))
+    return found
+
+
+def _currency(marks: list[str]) -> str:
+    read = {USD if mark in _USD_MARKS else mark for mark in marks}
+    return read.pop() if len(read) == 1 else " ".join(marks)
 
 
 def card_amount_problems(
     block: Any, allowed: Collection[int], *, headline: int | None = None, percents: Collection[int] | None = None
 ) -> list[str]:
-    """How a card's amounts depart from those its fact states (`allowed`, in cents), judged on
-    what a visitor reads. The web app shows a card's `title`, its `lines` and its option labels,
-    and its `text` only when those are all empty, so each is read on its own: every amount any of
-    them shows is one of `allowed`; the title and lines show at least one; with `headline`, the
-    title shows that amount and no other (a quote's total); and `text` states the same amounts as
-    the title and lines together. With `percents`, the card is a quote (Plan 01a's template), read
-    for every number (`_quote_number_problems`). Empty when the card agrees; `block` is a
-    `RenderedBlock` or its JSON."""
+    """How a card's amounts depart from those its fact states (`allowed`, in US dollar cents),
+    judged on what a visitor reads. The web app shows a card's `title`, its `lines` and its option
+    labels, and its `text` only when those are all empty, so each is read on its own: every amount
+    any of them shows is in US dollars (money claims are USD cents, so the right number in another
+    currency misstates the price) and one of `allowed`; the title and lines show at least one; with
+    `headline`, the title shows that amount and no other (a quote's total); and `text` states the
+    same amounts, in the same currencies, as the title and lines together. With `percents`, the
+    card is a quote (Plan 01a's template), read for every number (`_quote_number_problems`). Empty
+    when the card agrees; `block` is a `RenderedBlock` or its JSON."""
     data = block.model_dump(mode="json") if isinstance(block, BaseModel) else block
     title = card_amounts(_string(data.get("title")))
     lines = [card_amounts(_string(line)) for line in data.get("lines") or []]
@@ -90,19 +117,27 @@ def card_amount_problems(
               if isinstance(option, dict)]
     shown = {"the title": title} | {f"line {n}": amounts for n, amounts in enumerate(lines, start=1)}
     shown |= {f"option {n}": amounts for n, amounts in enumerate(labels, start=1)}
-    problems = [f"{where} shows {outside} cents, none of {sorted(allowed)}" for where, amounts in shown.items()
-                if (outside := [cents for cents in amounts if cents not in allowed])]
-    in_card = title + [cents for amounts in lines for cents in amounts]
+    problems = []
+    for where, amounts in shown.items():
+        if foreign := list(dict.fromkeys(amount.currency for amount in amounts if amount.currency != USD)):
+            problems.append(f"{where} shows an amount in {', '.join(foreign)}, not US dollars")
+        if outside := [amount.cents for amount in amounts if amount.cents not in allowed]:
+            problems.append(f"{where} shows {outside} cents, none of {sorted(allowed)}")
+    in_card = title + [amount for amounts in lines for amount in amounts]
     if not in_card:
         problems.append("its title and lines show no amount")
-    if headline is not None and title != [headline]:
-        problems.append(f"the title shows {title} cents, not the total alone ({headline})")
+    if headline is not None and [amount.cents for amount in title] != [headline]:
+        problems.append(f"the title shows {_amounts(title)}, not the total alone ({headline} cents)")
     text = card_amounts(_string(data.get("text")))
     if sorted(text) != sorted(in_card):
-        problems.append(f"its text states {text} cents, but its title and lines show {in_card}")
+        problems.append(f"its text states {_amounts(text)}, but its title and lines show {_amounts(in_card)}")
     if percents is not None:
         problems += _quote_number_problems(data, percents)
     return problems
+
+
+def _amounts(amounts: list[CardAmount]) -> str:
+    return ", ".join(f"{amount.cents} cents in {amount.currency}" for amount in amounts) or "no amount"
 
 
 def _quote_number_problems(data: dict[str, Any], percents: Collection[int]) -> list[str]:
@@ -345,11 +380,16 @@ _DISCOUNT_WORD = re.compile(_words("off", "discount", "discounts", "descuento", 
                                    "precio", "precios"), re.IGNORECASE)
 
 
-# Card amounts: a currency mark before or after a number. Thousands group with ".", "," or a space
-# (NFKC turns no-break spaces into spaces), never a line break, so a card's lines stay apart.
-_MARK = r"(?:US\$|\$|€|£|¥|USD|EUR|MXN)"
-_AMOUNT = r"(\d{1,3}(?:[., ]\d{3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?)"
-_CARD_AMOUNT = re.compile(rf"{_MARK} ?{_AMOUNT}(?!\d)|(?<![\d.,]){_AMOUNT} ?{_MARK}(?! ?\d)")
+# Card amounts: a currency mark before or after a number, or one on each side ("$180.00 MXN").
+# A mark is any currency sign (Unicode Sc) with the letters joined before it ("US$", "MX$", "R$"),
+# or a three-letter code standing on its own ("USD", "EUR"). Thousands group with ".", "," or a
+# space (NFKC turns no-break spaces into spaces), never a line break, so a card's lines stay apart.
+_SIGNS = re.escape("".join(ch for ch in map(chr, range(sys.maxunicode + 1)) if unicodedata.category(ch) == "Sc"))
+_MARK = rf"(?:[^\W\d_]*[{_SIGNS}]|(?<![^\W\d_])[A-Z]{{3}}(?![^\W\d_]))"
+_USD_MARKS = frozenset({"$", "US$", "USD"})   # the US dollar spellings; any other mark is another currency
+_AMOUNT = r"\d{1,3}(?:[., ]\d{3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?"
+_CARD_AMOUNT = re.compile(rf"(?P<lead>{_MARK}) ?(?P<number>{_AMOUNT})(?!\d)(?: ?(?P<trail>{_MARK})(?! ?\d))?"
+                          rf"|(?<![\d.,])(?P<suffixed>{_AMOUNT}) ?(?P<suffix>{_MARK})(?! ?\d)")
 # A quote card's discount (en "80%", es "80 %") and its expiry line, matched on the folded text:
 # en "Good until Tuesday, November 3, 2:00 pm", es "Válido hasta martes 3 de noviembre, 14:00".
 _CARD_PERCENT = re.compile(r"(?<![\d.,])(\d+(?:[.,]\d+)?) ?%")
