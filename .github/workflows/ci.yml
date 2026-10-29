@@ -49,6 +49,13 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-desk
+      # make db-roles uses psql. GitHub-hosted runners have it; elsewhere it comes from apt.
+      - name: Install the Postgres client if the runner has none
+        run: |
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get update -q
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends postgresql-client
+          fi
       - name: Use the local settings
         run: |
           cp .env.example .env
@@ -111,6 +118,13 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-desk
+      # make db-roles uses psql. GitHub-hosted runners have it; elsewhere it comes from apt.
+      - name: Install the Postgres client if the runner has none
+        run: |
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get update -q
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends postgresql-client
+          fi
       - name: Use the local settings
         run: |
           cp .env.example .env

@@ -462,6 +462,7 @@ sys.exit(0 if os.environ.get("STUB_CHECK_PASSES") == "1" else 1)
 """,
     "tar": 'log("tar", *sys.argv[1:])',
     "unzip": 'log("unzip", *sys.argv[1:])',
+    "sudo": 'log("sudo", *sys.argv[1:])',
 }
 STUB_PRELUDE = """
 import json, os, sys
@@ -495,6 +496,8 @@ class Runner:
         self.log = tmp_path / "stub-log"
 
     def run(self, step: dict, arch: str, **env: str) -> tuple[subprocess.CompletedProcess, list[list]]:
+        """The step's result and the stub calls it made, in order; env adds to or replaces the runner's."""
+        self.log.unlink(missing_ok=True)
         script = self.dir / "step.sh"
         script.write_text(step["run"])
         result = subprocess.run(
@@ -595,3 +598,46 @@ def test_setup_desk_installs_the_pinned_toolchain_after_rustup():
     toolchain = step_named("Install Rust 1.99.1")
     assert names.index(INSTALL_RUSTUP) + 1 == names.index("Install Rust 1.99.1")
     assert toolchain["run"] == "rustup toolchain install 1.99.1 --profile minimal --no-self-update\nrustup default 1.99.1\n"
+
+
+INSTALL_PSQL = "Install the Postgres client if the runner has none"
+
+
+def test_jobs_that_set_role_passwords_have_psql_first():
+    """make db-roles needs psql; GitHub-hosted runners have it, and other runners get it from apt."""
+    for name in ["backend tests", "tier 1 evals"]:
+        steps = job_named(name)["steps"]
+        names = [step.get("name") for step in steps]
+        commands = [step.get("run", "").strip() for step in steps]
+        assert names.count(INSTALL_PSQL) == 1, name
+        assert names.index(INSTALL_PSQL) < commands.index("make db-roles"), name
+    for job in jobs(load(WORKFLOW)):
+        if job["name"] not in ("backend tests", "tier 1 evals"):
+            assert INSTALL_PSQL not in [step.get("name") for step in job["steps"]], job["name"]
+
+
+def test_psql_is_installed_only_where_it_is_missing(tmp_path):
+    runner = Runner(tmp_path)
+    [step, same] = [
+        step for name in ["backend tests", "tier 1 evals"] for step in job_named(name)["steps"]
+        if step.get("name") == INSTALL_PSQL
+    ]
+    assert step == same
+
+    # Only the stubs on PATH, so a psql on the machine running the test can't stand in.
+    result, events = runner.run(step, "ARM64", PATH=str(runner.bin))
+
+    assert result.returncode == 0, result.stderr
+    assert events == [
+        ["sudo", "apt-get", "update", "-q"],
+        [
+            "sudo", "DEBIAN_FRONTEND=noninteractive",
+            "apt-get", "install", "-y", "-q", "--no-install-recommends", "postgresql-client",
+        ],
+    ]
+
+    (runner.bin / "psql").symlink_to(runner.bin / "tar")
+    result, events = runner.run(step, "X64", PATH=str(runner.bin))
+
+    assert result.returncode == 0, result.stderr
+    assert events == []
