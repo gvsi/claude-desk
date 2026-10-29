@@ -282,7 +282,7 @@ class OpenStatus(BaseModel):              # PublicDesk's header line: computed f
     until: AwareDatetime | None           # open: the end of the current window, contiguous windows merged; None if open
                                           # through the next 7 days
     opens_at: AwareDatetime | None        # closed: the start of the next window, which weekly hours always have within 7 days
-    text: str                           # kernel en/es template in the business's time zone (?lang=), shown verbatim
+    text: str                             # kernel en/es template in the business's time zone (?lang=), shown verbatim
     as_of: AwareDatetime                  # the kernel's clock
     refresh_at: AwareDatetime             # the next moment text may change: the earlier of the boundary and the next local
                                           # midnight; the web's one scheduled refetch is at refresh_at - as_of
