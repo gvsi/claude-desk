@@ -599,6 +599,14 @@ export interface ModeRequest {
   mode: "ai" | "owner" | "paused";
   generation: number;
 }
+export interface OpenStatus {
+  open: boolean;
+  until: string | null;
+  opens_at: string | null;
+  text: string;
+  as_of: string;
+  refresh_at: string;
+}
 export interface OwnerMessageRequest {
   session_id: string;
   text: string;
@@ -714,6 +722,7 @@ export interface PublicDesk {
   };
   charter: RenderedBlock[];
   agent_card: RenderedBlock[];
+  open_status?: OpenStatus | null;
 }
 export interface ReviewThresholds {
   min_within_charter_bp: number;
