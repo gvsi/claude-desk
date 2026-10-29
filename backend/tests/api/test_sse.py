@@ -146,6 +146,25 @@ async def test_heartbeat_is_a_comment(engine, listener):
     assert frames == [": keep-alive\r\n\r\n"] * 2           # a comment: no event, id or data for the client
 
 
+async def test_a_hang_up_that_a_read_reports_as_its_own_error_ends_the_stream_quietly(engine, listener):
+    # A hang-up cancels the stream wherever it is. SQLAlchemy's pool ping reports a cancellation that lands in it as
+    # a ProgrammingError (its `finally` changes autocommit on a connection still busy); on_open stands in for it.
+    await publish(engine, SESSION_A, EvWriting(type="writing"))
+    reading = asyncio.Event()
+
+    async def on_open() -> None:
+        reading.set()
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            raise RuntimeError("can't change 'autocommit' now: connection in transaction status ACTIVE") from None
+
+    stream = event_stream(engine, listener, SESSION_A, None, on_open=on_open, on_control=None)
+    frames = await read_frames(stream, 1)                  # hangs up after the first frame, while on_open reads
+
+    assert reading.is_set() and len(frames) == 1            # ended as a hang-up ends it, with nothing raised
+
+
 async def until(condition, timeout: float = 3.0) -> None:
     """Waits until `condition()` holds; fails after `timeout` seconds."""
     async def poll() -> None:

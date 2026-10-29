@@ -15,7 +15,8 @@ The stream: one `Listener` per process holds the only `LISTEN desk_run_events` c
 streams of the session each notification names. `event_stream` replays the session's events after the
 client's `Last-Event-ID`, calls `on_open`, then sends each new event as it is committed (a wake-up, or a
 poll every 2 s when a notification is missed) and hands each control row that appears unhandled while it is
-open to `on_control`, once per stream; an idle stream gets a `keep-alive` comment every `ping_s`.
+open to `on_control`, once per stream; an idle stream gets a `keep-alive` comment every `ping_s`. A hang-up
+ends the stream wherever it is, as a cancellation, even when a database read reports it as an error of its own.
 """
 
 import asyncio
@@ -234,31 +235,46 @@ async def _unhandled_controls(engine: AsyncEngine, ids: Ids) -> list[ControlRow]
                            session_id=row.session_id) for row in rows]
 
 
+def being_cancelled() -> bool:
+    """Whether the running task is being cancelled (a client's hang-up, a shutdown), even when a database driver
+    reported the cancellation as an error of its own."""
+    task = asyncio.current_task()
+    return task is not None and task.cancelling() > 0
+
+
 async def _frames(engine: AsyncEngine, listener: Listener, ids: Ids, after: int,
                   on_control: Callable[[ControlRow], Awaitable[None]] | None,
                   on_open: Callable[[], Awaitable[None]] | None, poll_s: float) -> AsyncIterator[ServerSentEvent]:
-    async with listener.subscribe(ids.session_id) as wakeup:
-        # Control rows are tracked by the IDs this stream has seen, not by a high-water mark: a row's ID is
-        # taken at insert and rows commit in any order, so a lower ID can become visible after a higher one.
-        # Rows already waiting are on_open's.
-        handed = set() if on_control is None else {row.id for row in await _unhandled_controls(engine, ids)}
-        for seq, payload in await _events_after(engine, ids, after):
-            yield _frame(seq, payload)
-            after = seq
-        if on_open is not None:
-            await on_open()
-        while True:
-            if on_control is not None:
-                unhandled = await _unhandled_controls(engine, ids)
-                handed &= {row.id for row in unhandled}           # a handled row is never unhandled again
-                for row in unhandled:
-                    if row.id not in handed:                      # each row is handed over once per stream
-                        handed.add(row.id)
-                        await on_control(row)
+    try:
+        async with listener.subscribe(ids.session_id) as wakeup:
+            # Control rows are tracked by the IDs this stream has seen, not by a high-water mark: a row's ID is
+            # taken at insert and rows commit in any order, so a lower ID can become visible after a higher one.
+            # Rows already waiting are on_open's.
+            handed = set() if on_control is None else {row.id for row in await _unhandled_controls(engine, ids)}
             for seq, payload in await _events_after(engine, ids, after):
                 yield _frame(seq, payload)
                 after = seq
-            await wakeup.wait(poll_s)
+            if on_open is not None:
+                await on_open()
+            while True:
+                if on_control is not None:
+                    unhandled = await _unhandled_controls(engine, ids)
+                    handed &= {row.id for row in unhandled}           # a handled row is never unhandled again
+                    for row in unhandled:
+                        if row.id not in handed:                      # each row is handed over once per stream
+                            handed.add(row.id)
+                            await on_control(row)
+                for seq, payload in await _events_after(engine, ids, after):
+                    yield _frame(seq, payload)
+                    after = seq
+                await wakeup.wait(poll_s)
+    except Exception:
+        # A hang-up (or a shutdown) cancels the stream wherever it is, and a database driver may report the
+        # cancellation as an error of its own: SQLAlchemy's pool ping does, from a `finally` that changes autocommit
+        # on a connection still busy. While the task is being cancelled, such an error is the cancellation.
+        if being_cancelled():
+            raise asyncio.CancelledError() from None
+        raise
 
 
 def event_stream(engine: AsyncEngine, listener: Listener, ids: Ids, last_event_id: int | None, *,
