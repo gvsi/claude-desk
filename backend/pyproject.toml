@@ -10,6 +10,9 @@ dependencies = [
     "alembic==1.20.0",
     "psycopg[binary]==3.3.6",
     "procrastinate==3.10.0",
+    "fastapi==0.143.0",
+    "uvicorn==0.54.0",
+    "anthropic==1.13.0",
 ]
 
 # The kernel's Rust module, built from source by maturin; `make kernel` rebuilds it.
@@ -20,6 +23,8 @@ desk-kernel = { path = "../kernel/py" }
 dev = [
     "pytest>=8",
     "pytest-asyncio==1.4.0",
+    "httpx==0.28.1",
+    "cryptography==50.0.2",
 ]
 # The evals (evals/): `uv run --project backend --group evals ...` from the repository root.
 evals = [
@@ -49,3 +54,6 @@ testpaths = ["tests"]
 pythonpath = ["."]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "solver: needs the cvc5 solver (CVC5 or PATH); skipped without it",
+]

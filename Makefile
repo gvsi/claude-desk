@@ -1,4 +1,4 @@
-.PHONY: kernel test db-roles web-test web-e2e image image-check infra-check image-smoke evals-unit evals-tier1 evals-tier1-stub evals-tier1-kernel evals-tier1-api
+.PHONY: kernel test db-roles web-test web-e2e image image-check infra-check image-smoke evals-unit evals-tier1 evals-tier1-stub evals-tier1-kernel evals-tier1-api kernel-serve
 
 # Rebuild the kernel's Python module into the backend environment, and the
 # proof binary the kernel runs. desk-prove and its tests find cvc5 through
@@ -6,6 +6,10 @@
 kernel:
 	cd backend && uv sync --reinstall-package desk-kernel
 	cd kernel && cargo build --release --locked -p desk-prove
+
+# The kernel process on 127.0.0.1:8701 (`python -m desk.kernel_service`), with the settings in .env.
+kernel-serve:
+	cd backend && uv run --env-file ../.env python -m desk.kernel_service
 
 test:
 	cd kernel && cargo test --locked
