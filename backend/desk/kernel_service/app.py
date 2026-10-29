@@ -28,8 +28,10 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from desk.db.session import KernelSession, database_url
 from desk.env import is_development
 from desk.kernel_api import Health, KernelError
+from desk.kernel_service import sessions
+from desk.kernel_service.auth import AuthError
 from desk.kernel_service.clock import Clock, SystemClock
-from desk.kernel_service.repo import KernelFailure, KernelRuntime, kernel_transaction
+from desk.kernel_service.repo import KernelFailure, KernelRuntime, kernel_transaction, route_template
 
 log = logging.getLogger("desk.kernel_service")
 
@@ -56,8 +58,9 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
             # that isn't development refuses the public dev key
             raise RuntimeError(f"DESK_SIGNING_SEED is required: the kernel settings name DESK_ENV={settings.env!r}")
         engine = create_async_engine(settings.database_url, pool_pre_ping=True)
-        sessions = async_sessionmaker(engine, expire_on_commit=False, sync_session_class=KernelSession)
-        app.state.kernel = KernelRuntime(settings=settings, clock=clock, signer=signer, sessions=sessions)
+        factory = async_sessionmaker(engine, expire_on_commit=False, sync_session_class=KernelSession)
+        app.state.kernel = KernelRuntime(settings=settings, clock=clock, signer=signer, engine=engine,
+                                         sessions=factory)
         try:
             yield
         finally:
@@ -70,6 +73,7 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
     app.add_exception_handler(RequestValidationError, _invalid_request)
     app.add_exception_handler(StarletteHTTPException, _framework_error)
     app.add_middleware(InternalErrors)
+    app.include_router(sessions.router)
 
     @app.get("/health", response_model=Health)
     async def health(request: Request) -> Health:
@@ -85,21 +89,21 @@ def error_response(status: int, code: str, headers: dict[str, str] | None = None
     return JSONResponse(KernelError(code=code).model_dump(), status_code=status, headers=headers)
 
 
-def _route(request: Request) -> str:
-    """The route template ("POST /decide"), never the raw path, which may hold a token."""
-    route = request.scope.get("route")
-    return f"{request.method} {getattr(route, 'path', '<unmatched>')}"
-
-
 async def _kernel_failure(request: Request, exc: KernelFailure) -> JSONResponse:
     if exc.persist is not None:
         try:
             async with kernel_transaction(request.app.state.kernel) as ctx:
                 await exc.persist(ctx)
         except Exception:
-            log.exception("kernel_failure_unrecorded route=%s code=%s reason=%s", _route(request), exc.code, exc.reason)
+            log.exception("kernel_failure_unrecorded route=%s code=%s reason=%s", route_template(request), exc.code,
+                          exc.reason)
             return error_response(500, "internal")
-    log.info("kernel_failure route=%s status=%d code=%s reason=%s", _route(request), exc.status, exc.code, exc.reason)
+    if isinstance(exc, AuthError) and exc.named is None:
+        # a request naming no existing session or Desk has no ledger to go on
+        log.warning("auth_unattributed route=%s reason=%s", route_template(request), exc.reason)
+    else:
+        log.info("kernel_failure route=%s status=%d code=%s reason=%s", route_template(request), exc.status,
+                 exc.code, exc.reason)
     return error_response(exc.status, exc.code)
 
 

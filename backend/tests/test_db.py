@@ -637,7 +637,8 @@ def test_visitor_payloads_validate_against_contracts(api_tx):
 
 COPY_POLICY = "(copy_id = NULLIF(current_setting('desk.copy_id'::text, true), ''::text))"
 # What the copy resolvers' role may read: the copy and the lookup key of each table, in every copy.
-RESOLVER_READS = {"copies": {"copy_id"}, "sessions": {"copy_id", "secret_hash"}, "desks": {"copy_id", "slug"}}
+RESOLVER_READS = {"copies": {"copy_id"}, "sessions": {"copy_id", "secret_hash", "session_id"},
+                  "desks": {"copy_id", "slug"}}
 
 
 def test_every_kernel_table_forces_copy_row_security(admin):
@@ -903,7 +904,8 @@ def test_api_reads_kernel_ro_for_its_copy_only(committed_copies, api):
 # go through narrow SECURITY DEFINER resolvers that return only copy ids, and only the kernel
 # may call them.
 
-COPY_RESOLVERS = ("kernel.copy_of_session(text)", "kernel.copy_of_desk_slug(text)", "kernel.copy_ids()")
+COPY_RESOLVERS = ("kernel.copy_of_session(text)", "kernel.copy_of_session_id(text)",
+                  "kernel.copy_of_desk_slug(text)", "kernel.copy_ids()")
 
 
 def test_copy_resolvers_are_narrow(admin):
@@ -931,8 +933,10 @@ async def test_copy_resolvers_find_a_copy_before_it_is_bound(committed_copies):
     try:
         for copy_id in committed_copies:
             assert await resolve_copy("copy_of_session", token_hash(copy_id)) == copy_id
+            assert await resolve_copy("copy_of_session_id", f"session-{copy_id}") == copy_id
             assert await resolve_copy("copy_of_desk_slug", f"slug-{copy_id}") == copy_id
         assert await resolve_copy("copy_of_session", "0" * 64) is None
+        assert await resolve_copy("copy_of_session_id", "no-such-session") is None
         assert await resolve_copy("copy_of_desk_slug", "no-such-desk") is None
         assert set(committed_copies) <= set(await copy_ids())
         with pytest.raises(ValueError):
@@ -950,7 +954,8 @@ async def test_copy_resolvers_find_a_copy_before_it_is_bound(committed_copies):
 def test_only_the_kernel_runs_the_copy_resolvers(committed_copies):
     for prefix in ("API", "MOCKPAY"):
         with connect(prefix) as conn:
-            for call in ("kernel.copy_of_session(%s)", "kernel.copy_of_desk_slug(%s)"):
+            for call in ("kernel.copy_of_session(%s)", "kernel.copy_of_session_id(%s)",
+                         "kernel.copy_of_desk_slug(%s)"):
                 with pytest.raises(psycopg.errors.InsufficientPrivilege):
                     conn.execute(f"SELECT {call}", (token_hash(committed_copies[0]),))
             with pytest.raises(psycopg.errors.InsufficientPrivilege):

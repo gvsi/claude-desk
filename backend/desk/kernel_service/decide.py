@@ -11,6 +11,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from desk.contracts import NormalizedAction, Principal, Review
+from desk.kernel_service.sessions import verified
 
 PRINCIPAL_TYPES = {"visitor": "Visitor", "agent": "Agent", "owner": "Owner"}
 RESOURCE_TYPES = {"quote": "Quote", "slot": "Slot", "booking": "Booking", "document": "Document",
@@ -29,8 +30,8 @@ def cedar_request(principal: Principal, action: NormalizedAction, *, tz: str, no
 
     principal_type = PRINCIPAL_TYPES[principal.kind]
     attrs: dict[str, Any] = {
-        # verified: an owner session, or a session /verify/check bound to a person (one per session)
-        "verified": principal.assurance != "none" and (principal.kind == "owner" or principal.person_id is not None),
+        # the rule SessionState.verified reports, so the API and Cedar agree
+        "verified": verified(principal.kind, principal.assurance, principal.person_id),
         "assurance": principal.assurance,
         "copy": principal.copy_id,
     }

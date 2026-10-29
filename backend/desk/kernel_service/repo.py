@@ -23,9 +23,9 @@ from typing import TYPE_CHECKING, Annotated, get_args
 
 import desk_kernel
 from fastapi import Depends, Request
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from desk.db.session import KernelRepo
+from desk.db.session import KernelRepo, resolve_copy
 from desk.kernel_api import KernelError
 from desk.kernel_service.clock import Clock
 
@@ -50,6 +50,7 @@ class KernelRuntime:
     settings: KernelSettings
     clock: Clock
     signer: desk_kernel.Signer
+    engine: AsyncEngine
     sessions: async_sessionmaker[AsyncSession]
 
 
@@ -59,6 +60,7 @@ class KernelCtx:
     clock: Clock
     signer: desk_kernel.Signer
     settings: KernelSettings
+    engine: AsyncEngine                   # for the credential lookups below, on their own connection
 
     def bind(self, copy_id: str) -> KernelRepo:
         """Run this context's transaction as `copy_id`. Binding again to the same copy is a no-op;
@@ -83,7 +85,8 @@ class KernelCtx:
 async def kernel_transaction(runtime: KernelRuntime) -> AsyncIterator[KernelCtx]:
     """A `KernelCtx` on a new session: committed when the block ends, rolled back on an exception."""
     async with runtime.sessions() as db:
-        ctx = KernelCtx(db=db, clock=runtime.clock, signer=runtime.signer, settings=runtime.settings)
+        ctx = KernelCtx(db=db, clock=runtime.clock, signer=runtime.signer, settings=runtime.settings,
+                        engine=runtime.engine)
         try:
             yield ctx
         except Exception:
@@ -123,3 +126,28 @@ class KernelFailure(Exception):
         self.code = code
         self.reason = reason or code
         self.persist = persist
+
+
+def route_template(request: Request) -> str:
+    """The route template ("POST /decide"), never the raw path, which may hold a token."""
+    route = request.scope.get("route")
+    return f"{request.method} {getattr(route, 'path', '<unmatched>')}"
+
+
+# Credential lookups. A request names a session token, a session ID or a public slug, not a copy;
+# these find the copy it belongs to through the database's copy resolvers (SECURITY DEFINER
+# functions that return only a copy id), on their own connection, so the caller can bind the
+# request's transaction to that copy and read the rows through KernelRepo as usual. Only auth.py,
+# GET /whoami, POST /sessions and GET /public/{desk_slug} use them, and they run before the
+# request's transaction has run anything.
+
+async def copy_of_desk_slug(ctx: KernelCtx, slug: str) -> str | None:
+    return await resolve_copy("copy_of_desk_slug", slug, engine=ctx.engine)
+
+
+async def copy_of_session_id(ctx: KernelCtx, session_id: str) -> str | None:
+    return await resolve_copy("copy_of_session_id", session_id, engine=ctx.engine)
+
+
+async def copy_of_session_token(ctx: KernelCtx, token_hash: str) -> str | None:
+    return await resolve_copy("copy_of_session", token_hash, engine=ctx.engine)
