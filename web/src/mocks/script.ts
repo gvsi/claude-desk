@@ -22,6 +22,7 @@ import type {
   ToolName,
 } from '../api/contracts.ts';
 import { RIVERA_MONEY_CAP_CENTS, cardBlock, proseBlock, rivera } from '../ds/fixtures/index.ts';
+import { executedLine, type ExecutedTool } from '../ds/fixtures/receipts.ts';
 
 export type Language = 'en' | 'es';
 
@@ -40,8 +41,9 @@ export function turnLanguage(text: string): Language {
 // Visitor-facing text: the kernel's templates and the fixture cards, by language
 
 /**
- * The kernel's visitor status lines for Maria Rivera's Desk, as the Rivera fixtures write them. An
- * executed action has no line here: it carries its tool's own line (`EXECUTED_LINES`).
+ * The kernel's visitor status lines for Maria Rivera's Desk, as the Rivera fixtures write them (a
+ * store test holds each one to the fixtures). An executed action has no line here: it carries its
+ * tool's own line, the design system's `executedLine`.
  */
 export const VISITOR_PLAIN = {
   en: {
@@ -75,34 +77,29 @@ export const VISITOR_PLAIN = {
 } as const satisfies Record<Language, Record<Exclude<DecisionState, 'executed'> | 'reply_checked' | 'reply_handed_off', string>>;
 
 /**
- * The signed line an executed action shows a visitor, per tool: what ran and whose records it
- * used, never a bare "Done". `{owner}` is the owner's display name. These are the kernel's lines,
- * which the visitor's page shows verbatim.
+ * Tools that only read for Claude and so have no executed line of their own. Every other tool has
+ * one in the design system's fixtures: the record is exhaustive, so a new tool without a line
+ * fails the typecheck here.
  */
-export const EXECUTED_LINES = {
-  'native.quote': { en: "Quoted from {owner}'s price list", es: 'Cotizado con la lista de precios de {owner}' },
-  'native.find_slots': { en: "Times read from {owner}'s calendar", es: 'Horarios tomados del calendario de {owner}' },
-  'native.book': { en: "Booked on {owner}'s calendar", es: 'Reservado en el calendario de {owner}' },
-  'native.capture_lead': { en: 'Details saved for {owner}', es: 'Datos guardados para {owner}' },
-  'native.request_callback': { en: 'Callback request saved for {owner}', es: 'Solicitud de llamada guardada para {owner}' },
-  'native.start_verification': { en: 'Verification started', es: 'Verificación iniciada' },
-  'native.release_document': { en: "Document shared from {owner}'s records", es: 'Documento compartido desde los registros de {owner}' },
-  'native.payment_link': { en: 'Payment link made for this quote', es: 'Enlace de pago creado para esta cotización' },
-  // Only a visiting agent pays from a signed limit, so "your" is the agent.
-  'native.charge_mandate': { en: 'Charged within the limit of your mandate', es: 'Cobrado dentro del límite de tu mandato' },
-  'payments.list_charges': { en: "Charges read from {owner}'s payments", es: 'Cargos tomados de los pagos de {owner}' },
-  'payments.create_refund': { en: 'Refunded to the original payment', es: 'Reembolsado al pago original' },
-} as const satisfies Partial<Record<ToolName, Record<Language, string>>>;
+const NO_EXECUTED_LINE = {
+  'native.fetch_website': true,
+  'native.read_memory': true,
+} as const satisfies Record<Exclude<ToolName, ExecutedTool>, true>;
+
+function hasExecutedLine(tool: ToolName): tool is ExecutedTool {
+  return !Object.hasOwn(NO_EXECUTED_LINE, tool);
+}
 
 const OWNER = rivera.business.ownerName;
 
-/** The visitor's line for a decision in `state`: an executed one names what its tool did. */
+/**
+ * The visitor's line for a decision in `state`: an executed one names what its tool did, in the
+ * signed per-tool words the design system's fixtures carry, never a bare "Done".
+ */
 export function statusLine(language: Language, state: DecisionState, tool: ToolName | null): string {
   if (state !== 'executed') return VISITOR_PLAIN[language][state];
-  const lines: Partial<Record<ToolName, Record<Language, string>>> = EXECUTED_LINES;
-  const line = tool === null ? undefined : lines[tool];
-  if (line === undefined) throw new Error(`the mock has no executed line for ${tool ?? 'a decision with no tool'}`);
-  return line[language].replaceAll('{owner}', OWNER);
+  if (tool === null || !hasExecutedLine(tool)) throw new Error(`the mock has no executed line for ${tool ?? 'a decision with no tool'}`);
+  return executedLine(tool, language, OWNER);
 }
 
 const { blocks } = rivera;

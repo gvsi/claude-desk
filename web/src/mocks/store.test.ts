@@ -4,7 +4,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { LedgerPage, SseEvent } from '../api/contracts.ts';
+import type { DecisionState, EvMessage, LedgerPage, SseEvent } from '../api/contracts.ts';
 import type { RouteKey } from '../api/routes.ts';
 import type {
   ConversationSummary,
@@ -15,7 +15,9 @@ import type {
   VisitorSession,
   VisitorTranscript,
 } from '../api/views.ts';
-import { DECISIONS, EVENT_GAP_MS, matchRule, turnLanguage, type RuleName } from './script.ts';
+import { rivera } from '../ds/fixtures/index.ts';
+import { executedLine } from '../ds/fixtures/receipts.ts';
+import { DECISIONS, EVENT_GAP_MS, VISITOR_PLAIN, matchRule, turnLanguage, type RuleName } from './script.ts';
 import { RIVERA } from './seed.ts';
 import { mockStore, streamAfter, type MockAnswer, type MockRequestInit } from './store.ts';
 
@@ -215,6 +217,24 @@ describe('the scripted Desk', () => {
     const receipts = events.flatMap(([, ev]) => (ev.type === 'receipt' ? [ev] : []));
     expect(receipts.map((ev) => [ev.state, ev.visitor_plain])).toEqual(turns.map(([, line]) => ['executed', line]));
     expect(events.some(([, ev]) => 'visitor_plain' in ev && /^(?:Done|Hecho)$/.test(ev.visitor_plain))).toBe(false);
+    // Each is the design system's signed line for its tool, word for word.
+    expect(receipts.map((ev) => ev.visitor_plain)).toEqual([
+      ...(['native.quote', 'native.find_slots', 'native.book', 'native.payment_link', 'native.request_callback'] as const).map((tool) =>
+        executedLine(tool, 'en', 'Maria Rivera'),
+      ),
+      executedLine('native.quote', 'es', 'Maria Rivera'),
+      executedLine('native.book', 'es', 'Maria Rivera'),
+    ]);
+
+    // The other status lines are the design system's too: every decision state's, and each reply's.
+    const states = Object.keys(rivera.decisions).filter((state): state is Exclude<DecisionState, 'executed'> => state !== 'executed');
+    for (const state of states) expect(VISITOR_PLAIN.en[state], state).toBe(rivera.decisions[state].visitor_plain);
+    const reply = (turn: readonly SseEvent[]) => turn.find((ev): ev is EvMessage => ev.type === 'message')?.visitor_plain;
+    expect([VISITOR_PLAIN.en.reply_checked, VISITOR_PLAIN.en.reply_handed_off, VISITOR_PLAIN.es.reply_checked]).toEqual([
+      reply(rivera.events.quoteTurn),
+      reply(rivera.events.heldTurn),
+      reply(rivera.events.quoteTurnEs),
+    ]);
 
     // "Book the first one" books the first time offered: the kernel's booked card, in its words,
     // after a prose line with no price or date.
