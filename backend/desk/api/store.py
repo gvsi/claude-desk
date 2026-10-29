@@ -241,6 +241,14 @@ async def unanswered_tool_use(conn: AsyncConnection, session_id: str) -> OpenToo
     return None if answered else OpenToolUse(assistant_n=last.n, tool_uses=tool_uses)
 
 
+async def delivered_reply(conn: AsyncConnection, session_id: str, call_id: str) -> Any | None:
+    """What Claude's `send_reply` call `call_id` put on the visitor's screen: its `delivered` row's kernel message ID
+    (`ref_id`) and `blocks`, or None when nothing was shown for that call."""
+    return (await conn.execute(select(MESSAGES.c.ref_id, MESSAGES.c.blocks).where(
+        MESSAGES.c.session_id == session_id, MESSAGES.c.kind == "delivered", MESSAGES.c.call_id == call_id)
+        .order_by(MESSAGES.c.n).limit(1))).first()
+
+
 async def _refuse_open_tool_use(conn: AsyncConnection, session_id: str) -> None:
     if (open_tool_use := await unanswered_tool_use(conn, session_id)) is not None:
         raise UnansweredToolUse(open_tool_use)
@@ -407,9 +415,14 @@ async def last_context_hash(conn: AsyncConnection, session_id: str) -> str | Non
 async def has_pending(conn: AsyncConnection, session_id: str) -> bool:
     """Pending work: a row the model hasn't been sent whose `wake` starts a turn (visitor and agent text in mode
     `ai`, whispers, action updates, the verification note)."""
-    return bool((await conn.execute(select(func.count()).where(
+    return await latest_pending(conn, session_id) is not None
+
+
+async def latest_pending(conn: AsyncConnection, session_id: str) -> int | None:
+    """The `n` of the session's latest pending row (`has_pending`), or None when no work is waiting."""
+    return (await conn.execute(select(func.max(MESSAGES.c.n)).where(
         MESSAGES.c.session_id == session_id, MESSAGES.c.model_seq.is_(None), MESSAGES.c.wake,
-        MESSAGES.c.model_content.is_not(None)))).scalar_one())
+        MESSAGES.c.model_content.is_not(None)))).scalar_one()
 
 
 async def clear_wake(conn: AsyncConnection, session_id: str) -> int:

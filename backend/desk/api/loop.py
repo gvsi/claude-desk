@@ -6,19 +6,25 @@ from the kernel (`GET /whoami`) and its tools and facts (`GET /context`), brings
 (a `desk_context` row when the facts change, tool changes or a fresh context), then calls Claude and acts on each
 response by its stop reason. Claude only proposes: every tool call goes through `/decide` (`tools.route_call`),
 and every reply through `/check_reply` and `deliver()` (`tools.send_reply`).
+
+`run_pending(caller, model, ...)` is how a request starts turns (Task 6): one session's turns run one at a time,
+under the turn lock (`turn_lock`), until no work is waiting.
 """
 
 import asyncio
+import contextlib
 import json
 import logging
 import secrets
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import AsyncIterator, Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Any, Literal
 
-from sqlalchemy.ext.asyncio import AsyncConnection
+from sqlalchemy import func, select
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from desk.api.kernel_client import KernelFailed, KernelUnavailable
 from desk.api.metrics import RevealMetric, TurnMetric, over_daily_budget, record_model_call
@@ -27,6 +33,7 @@ from desk.api.prompts import NOTES, DeskIdentity, conversation_system
 from desk.api.ro import KernelRO
 from desk.api.sse import append_metric, emit
 from desk.api.store import (
+    OpenToolUse,
     append_assistant,
     append_message,
     append_tool_change,
@@ -35,11 +42,16 @@ from desk.api.store import (
     context_hash,
     context_text,
     context_tools,
+    delivered_reply,
     last_context_hash,
+    latest_pending,
+    lock_key,
     prepare_model_input,
     start_fresh_context,
+    unanswered_tool_use,
 )
 from desk.api.tools import (
+    DELIVERED_HANDOFF,
     SEND_REPLY,
     UNAVAILABLE,
     Caller,
@@ -48,20 +60,23 @@ from desk.api.tools import (
     hand_off,
     model_tools,
     not_run,
+    recover_call,
     route_call,
     send_reply,
     tool_delta,
 )
+from desk.contracts import SessionState
 from desk.events import EvError, EvTurnEnd, EvWriting
 from desk.kernel_api import SessionContext
 
-TurnOutcome = Literal["done", "fenced", "session_ended", "kernel_unavailable", "handoff", "turn_over", "not_ai"]
+TurnOutcome = Literal["done", "fenced", "session_ended", "kernel_unavailable", "handoff", "turn_over", "not_ai",
+                      "internal"]
 logger = logging.getLogger(__name__)
 # The model calls one turn may make before it hands off.
 MAX_MODEL_CALLS = 6
 THINKING = frozenset({"thinking", "redacted_thinking"})
 # The static error a visitor sees when a turn fails ("Fail-closed behavior"); other ends are silent.
-ERROR_CODES = {"session_ended": "session", "kernel_unavailable": "kernel_unavailable"}
+ERROR_CODES = {"session_ended": "session", "kernel_unavailable": "kernel_unavailable", "internal": "internal"}
 
 
 def _utc_now() -> datetime:
@@ -92,6 +107,22 @@ def _stop(outcomes: Iterable[ToolOutcome]) -> TurnOutcome | None:
         if any(getattr(found, flag) for found in outcomes):
             return outcome
     return None
+
+
+async def _session(caller: Caller) -> SessionState | TurnOutcome:
+    """The caller's session as the kernel has it now (`GET /whoami`: its mode and generation), or how the turn ends
+    when there is none to act in."""
+    try:
+        who = await caller.kernel.whoami()
+    except KernelFailed as failure:
+        return _failed(failure)
+    except KernelUnavailable:
+        return "kernel_unavailable"
+    session = who.session
+    if session is None or (who.copy_id, who.desk_id, session.session_id) != (
+            caller.copy_id, caller.desk_id, caller.session_id):
+        return "session_ended"                            # the credential no longer names this session
+    return session
 
 
 async def desk_identity(conn: AsyncConnection, caller: Caller) -> DeskIdentity:
@@ -133,16 +164,9 @@ class _Turn:
 
     async def run(self) -> TurnOutcome:
         conn, caller = self.conn, self.caller
-        try:
-            who = await caller.kernel.whoami()
-        except KernelFailed as failure:
-            return _failed(failure)
-        except KernelUnavailable:
-            return "kernel_unavailable"
-        session = who.session
-        if session is None or (who.copy_id, who.desk_id, session.session_id) != (
-                caller.copy_id, caller.desk_id, caller.session_id):
-            return "session_ended"                        # the credential no longer names this session
+        session = await _session(caller)
+        if isinstance(session, str):
+            return session
         self.generation = session.generation
         if session.mode == "owner":                        # the owner took over: Claude stays quiet
             return "not_ai"
@@ -282,23 +306,28 @@ class _Turn:
         calls = [block for block in tool_uses if block["name"] != SEND_REPLY]
         routed = await asyncio.gather(*(self._route(block) for block in calls), return_exceptions=True)
         outcomes: dict[str, ToolOutcome] = {}
+        raised = False
         for block, outcome in zip(calls, routed, strict=True):
             if isinstance(outcome, BaseException):         # it never reached a result: not run, as far as Claude knows
                 logger.warning("tool call %s raised %s", block["id"], type(outcome).__name__)
-                outcome = not_run()
+                outcome, raised = not_run(), True
             outcomes[block["id"]] = outcome
             self.decide_ms += outcomes[block["id"]].decide_ms
             self.execute_ms += outcomes[block["id"]].execute_ms
         self.tool_calls += len(calls)
-        stop = _stop(outcomes.values())
+        # a call that raised (no pooled connection left for it, say) ends the turn with the static error
+        stop = _stop(outcomes.values()) or ("internal" if raised else None)
         shown = False
         for block in (block for block in tool_uses if block["name"] == SEND_REPLY):
-            if stop is not None or shown:                  # stopped, or one message of this response is on screen
+            # A fenced turn's replies still go to the kernel, which fences them too (409 at a generation the session
+            # has left; a paused session's check answers with its handoff). Any other stop, or one message of this
+            # response already on screen, leaves them unchecked.
+            if stop not in (None, "fenced") or shown:
                 outcomes[block["id"]] = (ToolOutcome(dict(UNAVAILABLE), True) if stop == "kernel_unavailable"
                                          else not_run())
                 continue
             outcomes[block["id"]] = outcome = await self._reply(block["input"], block["id"])
-            stop, shown = _stop([outcome]), outcome.delivered is not None
+            stop, shown = stop or _stop([outcome]), outcome.delivered is not None
         await append_tool_results(conn, ids, assistant_n, [outcomes[block["id"]].block(block["id"])
                                                            for block in tool_uses])
         await conn.commit()
@@ -344,6 +373,189 @@ async def run_turn(conn: AsyncConnection, caller: Caller, model: ModelClient, *,
                    production: bool = False, clock: Callable[[], datetime] = _utc_now) -> TurnOutcome:
     """Answer what is waiting in the caller's session, as the module docstring says; returns how the turn ended."""
     turn = _Turn(conn, caller, model, end_on_reply, production, clock)
-    outcome = await turn.run()
+    try:
+        outcome = await turn.run()
+    except Exception as error:                             # anything unexpected: the static error, never a silent end
+        logger.error("a turn failed with %s", type(error).__name__)
+        await conn.rollback()
+        outcome = "internal"
     await turn.finish(outcome)
     return outcome
+
+
+# Turns per session (Task 6) ---------------------------------------------------------------------------------
+
+# The turn-lock pool: each running turn holds its session's lock on a connection of this pool, apart from the API's.
+TURN_LOCK_POOL_SIZE = 10
+# How long an agent's request waits for the turn running in its session (Plan 02b answers 409 `in_progress` after).
+TURN_LOCK_WAIT_S = 30
+LOCK_NOT_AVAILABLE = "55P03"                              # Postgres: lock_timeout ran out
+PendingOutcome = TurnOutcome | Literal["busy", "idle"]
+# Outcomes after which the session's next waiting work gets a turn.
+GO_ON = frozenset({"done", "handoff", "idle"})
+
+
+@contextlib.asynccontextmanager
+async def turn_lock(engine: AsyncEngine, session_id: str, *, blocking: bool = False) -> AsyncIterator[bool]:
+    """Hold the session's turn lock while the block runs; yields whether it was taken.
+
+    The lock is a session-level advisory lock keyed by sha256("turn:" + session_id), held on a connection of the
+    turn-lock pool `engine` for the whole turn, so it serializes a session's turns across workers and tasks.
+    Without `blocking` (a visitor's request) a turn already holding it isn't waited for: `pg_try_advisory_lock`.
+    With it (an agent's request, which answers only once its turn ran) it is waited for up to `TURN_LOCK_WAIT_S`.
+    A pooled connection keeps session-level locks, so the lock is let go explicitly, and a connection that may
+    still hold it (an error or a cancellation while taking or letting go) is closed instead of reused.
+    """
+    key = lock_key("turn:" + session_id)
+    async with engine.connect() as conn:
+        try:
+            taken = await _take_lock(conn, key, blocking)
+        except BaseException:
+            await conn.invalidate()
+            raise
+        if not taken:
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            try:
+                await conn.execute(select(func.pg_advisory_unlock(key)))
+                await conn.commit()
+            except BaseException:
+                await conn.invalidate()
+                raise
+
+
+async def _take_lock(conn: AsyncConnection, key: int, blocking: bool) -> bool:
+    if not blocking:
+        taken = (await conn.execute(select(func.pg_try_advisory_lock(key)))).scalar_one()
+        await conn.commit()
+        return taken
+    # the wait's bound applies to this transaction only; the lock outlives it
+    await conn.execute(select(func.set_config("lock_timeout", f"{round(TURN_LOCK_WAIT_S * 1000)}ms", True)))
+    try:
+        await conn.execute(select(func.pg_advisory_lock(key)))
+    except DBAPIError as error:
+        if getattr(error.orig, "sqlstate", None) != LOCK_NOT_AVAILABLE:
+            raise
+        await conn.rollback()
+        return False
+    await conn.commit()
+    return True
+
+
+async def run_pending(caller: Caller, model: ModelClient, *, engine: AsyncEngine, lock_engine: AsyncEngine,
+                      production: bool, clock: Callable[[], datetime] = _utc_now, blocking: bool = False,
+                      end_on_reply: bool = False) -> PendingOutcome:
+    """Run the caller's session's waiting work, one turn at a time, as a request does once it has stored its own.
+
+    Takes the session's turn lock on `lock_engine` (the turn-lock pool), or returns "busy": the turn holding it runs
+    this work too, since it looks for waiting work again after letting go and takes the lock back for any it finds.
+    Under the lock, an interrupted turn's open tool calls are answered first (`_recover`), then turns run while work
+    waits and the session is Claude's (`run_turn`, on a connection of `engine`, the API's pool); in mode `owner` the
+    work waits for the hand-back. Returns "idle" when nothing was waiting, else how the last turn ended.
+
+    It never raises but to be cancelled: an error outside a turn (no pooled connection, a recovery that broke) shows
+    the static error when it can and returns "internal", leaving the work for the next request.
+    """
+    retry = False
+    outcome: PendingOutcome = "idle"
+    try:
+        while True:
+            async with turn_lock(lock_engine, caller.session_id, blocking=blocking and not retry) as taken:
+                if not taken:
+                    return outcome if retry else "busy"
+                async with engine.connect() as conn:
+                    outcome, left = await _drain(conn, caller, model, end_on_reply, production, clock)
+            if outcome not in GO_ON:
+                return outcome
+            async with engine.connect() as conn:
+                waiting = await _waiting(conn, caller.session_id)
+            if waiting is None or waiting == left:
+                return outcome
+            retry = True                                  # work arrived as the lock was let go: its request was busy
+    except Exception as error:
+        logger.error("running a session's turns failed with %s", type(error).__name__)
+        try:
+            async with engine.connect() as conn:
+                await _end(conn, caller, model, "internal")
+        except Exception as again:
+            logger.error("the internal error couldn't be shown: %s", type(again).__name__)
+        return "internal"
+
+
+async def _drain(conn: AsyncConnection, caller: Caller, model: ModelClient, end_on_reply: bool, production: bool,
+                 clock: Callable[[], datetime]) -> tuple[PendingOutcome, int | None]:
+    """Under the turn lock: answer what an interrupted turn left open, then run turns while work waits.
+
+    A turn that hands off with no model call (past the daily budget) leaves its work waiting; no other turn is run
+    for it, so the run doesn't hand off again and again. The latest waiting row such a turn left is returned with the
+    outcome; work that arrives after it still gets a turn."""
+    open_tool_use = await unanswered_tool_use(conn, caller.session_id)
+    waiting = await _waiting(conn, caller.session_id)
+    if open_tool_use is None and waiting is None:
+        return "idle", None
+    session = await _session(caller)
+    if isinstance(session, str):
+        return await _end(conn, caller, model, session), None
+    must_call = False
+    if open_tool_use is not None:
+        recovered = await _recover(conn, caller, session.generation, open_tool_use)
+        if (stop := _stop(recovered)) is not None:
+            return await _end(conn, caller, model, stop), None
+        shown = {outcome.delivered for outcome in recovered} - {None}
+        must_call = not ("reply" in shown or (end_on_reply and shown))     # Claude reads the results, as in a turn
+    if session.mode == "owner":
+        return "not_ai", None                             # the owner has the conversation: work waits for hand-back
+    outcome: PendingOutcome = "idle"
+    while must_call or waiting is not None:
+        must_call = False
+        outcome = await run_turn(conn, caller, model, end_on_reply=end_on_reply, production=production, clock=clock)
+        if outcome not in GO_ON:
+            return outcome, None
+        before, waiting = waiting, await _waiting(conn, caller.session_id)
+        if waiting is not None and waiting == before:
+            return outcome, waiting
+    return outcome, None
+
+
+async def _end(conn: AsyncConnection, caller: Caller, model: ModelClient, outcome: TurnOutcome) -> TurnOutcome:
+    """End a turn that stopped before any model call, as `run_turn` ends one."""
+    await _Turn(conn, caller, model, False, False, _utc_now).finish(outcome)
+    return outcome
+
+
+async def _recover(conn: AsyncConnection, caller: Caller, generation: int,
+                   open_tool_use: OpenToolUse) -> list[ToolOutcome]:
+    """Answer the tool calls a turn left without results (it stopped after they went out), before any model call
+    and never by deciding again: a reply is `delivered` when a `delivered` row carries its call ID, else `not_run`;
+    any other call is found by its ID (`recover_call`)."""
+    outcomes = []
+    for block in open_tool_use.tool_uses:
+        if block["name"] == SEND_REPLY:
+            outcomes.append(_recovered_reply(await delivered_reply(conn, caller.session_id, block["id"])))
+            await conn.commit()
+        else:
+            outcomes.append(await recover_call(conn, caller, generation, block))
+    await append_tool_results(conn, caller.ids, open_tool_use.assistant_n, [
+        outcome.block(block["id"]) for block, outcome in zip(open_tool_use.tool_uses, outcomes, strict=True)])
+    await conn.commit()
+    return outcomes
+
+
+def _recovered_reply(shown: Any | None) -> ToolOutcome:
+    """A `send_reply` call's result from what it put on screen: nothing, the handoff alone, or the reply."""
+    if shown is None:
+        return not_run()
+    if [block.template for block in shown.blocks] == ["handoff"]:
+        return ToolOutcome(dict(DELIVERED_HANDOFF), True, delivered="handoff", message_id=shown.ref_id)
+    return ToolOutcome({"outcome": "delivered", "message_id": shown.ref_id}, False, delivered="reply",
+                       message_id=shown.ref_id)
+
+
+async def _waiting(conn: AsyncConnection, session_id: str) -> int | None:
+    """The session's latest waiting row (`latest_pending`), read in a transaction of its own."""
+    found = await latest_pending(conn, session_id)
+    await conn.commit()
+    return found

@@ -114,7 +114,8 @@ class TurnMetric(BaseModel):
     decide_ms: int
     execute_ms: int
     total_ms: int
-    outcome: Literal["done", "fenced", "session_ended", "kernel_unavailable", "handoff", "turn_over", "not_ai"]
+    outcome: Literal["done", "fenced", "session_ended", "kernel_unavailable", "handoff", "turn_over", "not_ai",
+                     "internal"]
 
 
 def metric_row(metric: Any) -> tuple[str, dict]:
