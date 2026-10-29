@@ -44,7 +44,7 @@ class FinishedCall(Protocol):
 
     model: str
     usage: Usage | None                   # None for a call that failed
-    stop_reason: str | None
+    stop_reason: str | None               # None for a call that failed
     latency_ms: int
     finished_at: datetime
 
@@ -57,13 +57,16 @@ async def record_model_call(conn: AsyncConnection, copy_id: str, session_id: str
     if response.finished_at.tzinfo is None:
         raise ValueError("a model call's finish time carries its time zone")
     usage = response.usage
+    if usage is not None and not response.stop_reason:
+        raise ValueError("a call that finished carries its stop reason")
     tokens = (0, 0, 0, 0) if usage is None else (
         usage.input_tokens, usage.cache_read_input_tokens or 0, usage.cache_creation_input_tokens or 0,
         usage.output_tokens)
+    stop_reason = "error" if usage is None else response.stop_reason
     return (await conn.execute(insert(MODEL_CALLS).values(
         copy_id=copy_id, session_id=session_id, route=route, model=response.model, input_tokens=tokens[0],
         cached_tokens=tokens[1], cache_write_tokens=tokens[2], output_tokens=tokens[3],
-        latency_ms=response.latency_ms, stop_reason=response.stop_reason or "unknown",
+        latency_ms=response.latency_ms, stop_reason=stop_reason,
         created_at=response.finished_at).returning(MODEL_CALLS.c.model_call_id))).scalar_one()
 
 

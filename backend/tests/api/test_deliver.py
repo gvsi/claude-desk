@@ -265,7 +265,8 @@ async def model_call_rows(conn) -> list[dict]:
 
 async def test_model_call_rows_carry_the_finish_time(api_conn, ids):
     await record_model_call(api_conn, ids.copy_id, ids.session_id, "conversation", model_response(written=1200))
-    failed = SimpleNamespace(model="claude-opus-5-5", usage=None, stop_reason="error", latency_ms=6100,
+    # a failed call has no usage and no stop reason of its own: it is recorded as an error
+    failed = SimpleNamespace(model="claude-opus-5-5", usage=None, stop_reason=None, latency_ms=6100,
                              finished_at=FINISHED + timedelta(seconds=9))
     await record_model_call(api_conn, ids.copy_id, None, "triage", failed)      # an owner route: no visitor session
 
@@ -279,7 +280,8 @@ async def test_model_call_rows_carry_the_finish_time(api_conn, ids):
         {"copy_id": ids.copy_id, "session_id": None, "route": "triage", "model": "claude-opus-5-5", "input_tokens": 0,
          "cached_tokens": 0, "cache_write_tokens": 0, "output_tokens": 0, "latency_ms": 6100, "stop_reason": "error",
          "created_at": FINISHED + timedelta(seconds=9)}]
-    for wrong in ({"route": "chat"}, {"response": model_response(finished_at=FINISHED.replace(tzinfo=None))}):
+    for wrong in ({"route": "chat"}, {"response": model_response(finished_at=FINISHED.replace(tzinfo=None))},
+                  {"response": model_response(stop_reason=None)}, {"response": model_response(stop_reason="")}):
         call = {"route": "conversation", "response": model_response()} | wrong
         with pytest.raises(ValueError):
             await record_model_call(api_conn, ids.copy_id, ids.session_id, call["route"], call["response"])
