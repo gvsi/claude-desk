@@ -21,6 +21,7 @@ from sqlalchemy import Alias, ColumnClause, Connection, FromClause, Join, Select
 from sqlalchemy.dialects.postgresql import psycopg as postgresql_psycopg
 from sqlalchemy.orm import Session, SessionTransaction
 from sqlalchemy.sql import visitors
+from sqlalchemy.sql.functions import FunctionElement
 from sqlalchemy.sql.selectable import SelectBase
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
@@ -207,6 +208,9 @@ async def dispose_engines() -> None:
     _api_sessions.cache_clear()
 
 
+# set_config changes a setting mid-transaction; on desk.copy_id it would switch the copy.
+SET_CONFIG = "set_config"
+SETS_THE_COPY = "KernelRepo refused a statement that calls set_config; only a session's copy binding sets desk.copy_id"
 # Execution options that never change the SQL a statement compiles to.
 SAFE_EXECUTION_OPTIONS = frozenset({"populate_existing", "autoflush", "yield_per", "stream_results", "max_row_buffer"})
 _POSTGRES = postgresql_psycopg.dialect()
@@ -216,8 +220,11 @@ class KernelRepo:
     """One copy's view of the kernel tables.
 
     Postgres enforces the copy: `session()` and `bind()` make every transaction of a kernel
-    session run as this copy, and row-level security then admits only this copy's rows to every
-    read and write, whatever the SQL (functions that run query text, UPDATE and DELETE included).
+    session run as this copy, and row-level security then admits only this copy's rows to the
+    reads and writes a slip makes: a missing copy filter, an UPDATE or DELETE, query text that a
+    function such as `query_to_xml` runs. Row security keys on the `desk.copy_id` setting, which SQL
+    can change too: a statement that calls `set_config` on it reads and writes as another copy.
+    Only `CopySession` sets it, as each transaction begins; kernel code never does.
     A lookup made before the copy is known (a session token, a public slug) goes through
     `resolve_copy`, and work across copies visits each id from `copy_ids()` with its own session.
 
@@ -229,14 +236,16 @@ class KernelRepo:
        `with_expression`), execution options other than `SAFE_EXECUTION_OPTIONS`, raw SQL
        (`text()`, `literal_column()`, prefixes, suffixes, hints), a nested SELECT anywhere (scalar,
        IN and EXISTS subqueries, derived tables, CTEs), outer joins (a copy filter on the missing
-       side would drop the row) and FROM items that aren't kernel tables.
+       side would drop the row), FROM items that aren't kernel tables, and calls to `set_config`.
     2. A check on the SQL itself. The scoped statement is compiled for Postgres and refused unless
-       it holds exactly one SELECT and reads no kernel table it didn't filter, which catches what
-       the statement hides, such as a mapped column that reads another table.
+       it holds exactly one SELECT, reads no kernel table it didn't filter and names `set_config`
+       neither in its SQL nor in a bound value (query text for a function to run), which catches
+       what the statement hides, such as a mapped column that reads another table.
 
-    These checks can't see query text passed to a function (`query_to_xml`), which row-level
-    security covers. Execute the returned statement as it is: options added afterwards aren't
-    checked.
+    These checks see query text passed to a function only as a bound value: row-level security
+    covers what it reads, and text assembled at run time that calls `set_config` is beyond both
+    layers, which is why kernel code never passes such text. Execute the returned statement as
+    it is: options added afterwards aren't checked.
     """
 
     def __init__(self, copy_id: str):
@@ -286,17 +295,35 @@ def _check_allowed(stmt: Select) -> None:
             raise ValueError("KernelRepo can't scope a nested SELECT; query each table through scoped()")
         if isinstance(element, TextClause) or (isinstance(element, ColumnClause) and element.is_literal):
             raise ValueError("KernelRepo can't scope raw SQL text")
+        if isinstance(element, FunctionElement) and getattr(element, "name", "").lower() == SET_CONFIG:
+            raise ValueError(SETS_THE_COPY)
 
 
 def _check_compiled(stmt: Select, scoped_tables: set[str]) -> None:
-    """Layer 2: the compiled SQL holds one SELECT and reads only kernel tables it filters."""
-    sql = re.sub(r"'(?:[^']|'')*'", "''", str(stmt.compile(dialect=_POSTGRES)))   # drop string literals
-    keywords = re.sub(r'"(?:[^"]|"")*"', '""', sql)                              # and quoted identifiers
+    """Layer 2: the compiled SQL holds one SELECT, reads only kernel tables it filters and sets nothing."""
+    compiled = stmt.compile(dialect=_POSTGRES)
+    sql = re.sub(r"'(?:[^']|'')*'", "''", str(compiled))   # drop string literals
+    keywords = re.sub(r'"(?:[^"]|"")*"', '""', sql)        # and quoted identifiers
     if len(re.findall(r"\bselect\b", keywords, flags=re.IGNORECASE)) != 1:
         raise ValueError("KernelRepo refused a statement whose SQL holds a nested SELECT")
     read = set(re.findall(r"\bkernel\.(\w+)", sql.replace('"', "")))
     if unscoped := read - scoped_tables:
         raise ValueError(f"KernelRepo refused a statement that reads kernel tables it can't scope: {sorted(unscoped)}")
+    if SET_CONFIG in sql.replace('"', "").lower() or any(SET_CONFIG in text.lower()
+                                                          for text in _bound_text(compiled.params)):
+        raise ValueError(SETS_THE_COPY)
+
+
+def _bound_text(value: object) -> Iterator[str]:
+    """Every string in a statement's bound values, lists and mappings included."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _bound_text(item)
+    elif isinstance(value, (list, tuple, set, frozenset)):
+        for item in value:
+            yield from _bound_text(item)
 
 
 def _kernel_tables(clause: FromClause) -> Iterator[FromClause]:

@@ -311,6 +311,13 @@ class DeskWithDocumentTitle(LeakyBase):
     document_title = column_property(select(Document.title).limit(1).scalar_subquery())
 
 
+class DeskSwitchingCopy(LeakyBase):
+    """A Desk model with a column that points the transaction at another copy (only in this test)."""
+
+    __table__ = Desk.__table__
+    switched = column_property(func.set_config(COPY_SETTING, "copy-b", True))
+
+
 def test_kernel_repo_refuses_what_it_cannot_scope():
     repo = KernelRepo(f"copy-{uuid4().hex}")
     title = select(Document.title).scalar_subquery()
@@ -344,7 +351,15 @@ def test_kernel_repo_refuses_what_it_cannot_scope():
         select(Desk.desk_id, Business.name).outerjoin(Business, Desk.business_id == Business.business_id),
         select(Desk.desk_id, Business.name).join(Business, Desk.business_id == Business.business_id, full=True),
     )
-    for unscopable in (*nested, *raw_sql, *options, *mapped, *outer):
+    # row-level security keys on desk.copy_id, so a statement that sets it would read as another copy
+    switching = (
+        select(Desk.desk_id, func.set_config(COPY_SETTING, "copy-b", True),
+               func.query_to_xml("select body from kernel.documents", True, False, "")),   # the reviewer's probe
+        select(Desk.desk_id).where(func.pg_catalog.SET_CONFIG(COPY_SETTING, "copy-b", True) != ""),
+        select(Desk.desk_id, func.query_to_xml("select set_config('desk.copy_id', 'copy-b', true)", True, False, "")),
+        select(DeskSwitchingCopy),
+    )
+    for unscopable in (*nested, *raw_sql, *options, *mapped, *outer, *switching):
         with pytest.raises(ValueError):
             repo.scoped(unscopable)
 
