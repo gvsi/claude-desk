@@ -13,8 +13,8 @@
 ## Global Constraints
 
 - Deadline Monday 2026-11-02, with a scope gate Friday 18:00 ("Schedule, lanes and gates"). Never cut: proofs at activation, data labels, reply checks, the attack gate.
-- Models: `claude-opus-5-5` (conversations), `claude-sonnet-5-5` (auto reviewer), `claude-haiku-5-5` (soft-promise check, triage, owner translations), set up as "Model cost and latency budget" says. Structured outputs use `output_config.format`, never forced `tool_choice`, which returns 400 on Opus 5.5 and Sonnet 5.5.
-- The API holds only `ANTHROPIC_API_KEY`, the `desk_api` role and the built-in agent's demo key, sends the kernel no principal, person, level or assurance, and can't write kernel tables ("Trust boundary").
+- Models: `claude-opus-5-5` (conversations), `claude-sonnet-5-5` (auto reviewer), `claude-haiku-5-5` (soft-promise check, triage, owner translations), set up as "Model cost and latency budget" says, and the same three on every provider: local evals may send the API's and the simulated visitor's calls to Amazon Bedrock (`MODEL_PROVIDER=bedrock`, Plans 02a and 05b), while the hosted demo stays on the Claude API. Structured outputs use `output_config.format`, never forced `tool_choice`, which returns 400 on Opus 5.5 and Sonnet 5.5.
+- The API holds only `ANTHROPIC_API_KEY`, the `desk_api` role and the built-in agent's demo key (and locally, with `MODEL_PROVIDER=bedrock`, a Bedrock-only credential that can call nothing but the three models, never the default AWS credential chain and never in production, Plan 02a), sends the kernel no principal, person, level or assurance, and can't write kernel tables ("Trust boundary").
 - Every tool call except `send_reply` goes through `/decide` and executes only on a fresh `allow` or a single-use owner approval, both re-decided at execution ("Decision semantics"). Every visitor-visible message, card and status line passes the kernel and leaves through `deliver()`, except the kernel-served items listed under Delivery ("Reply check and visitor-visible text").
 - Amounts come only from the kernel; prices, discounts, dates and policies appear only in clauses rendered from facts; documents and messages go only to entitled recipients ("Decision semantics", "Reply check and visitor-visible text", "Invariants").
 - Rules: Claude drafts rule cards, `compiler.py` emits Cedar, proofs gate activation, the owner confirms. No hand-written or model-written owner policy is ever activated (the baseline is hand-written and reviewed in the repo). Review scores are integer basis points that can only narrow ("Decision semantics").
@@ -308,5 +308,7 @@ Deferred: a pointer instead of the copied Global Constraints (Sol 11, Opus 18): 
 Master plan changes requested: none new; open questions 1 and 2 stand.
 
 Owner decisions, 2026-10-29: the copied Global Constraints now read the auto-money cap as each Desk's charter cap under the $20,000 `AUTO_MONEY_HARD_CAP_CENTS` platform ceiling (master "Charter money cap"). No component changes: Plan 04 shows the cap with the existing rule components.
+
+Fix round, 2026-10-29: the copied Global Constraints follow the master's Models and API-holdings lines; nothing else changes.
 
 Round 2 (seam review, 2026-10-29): seam-20: `ToolStatusRow` and `ToolReviewCard` take `profile: ToolRowView`, a `Pick` of `ToolProfile` that includes `definition_sha256`, so the API's `ToolRow` fits as well as a `ToolProfile`.
