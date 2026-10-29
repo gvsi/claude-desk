@@ -219,7 +219,7 @@ Owner decisions, 2026-10-29 (the signed boards on the design canvas's "Claude De
 Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, so none has Spanish. Components display what the screen passes; nothing here decides an outcome or formats money, dates or times.
 
 **Files:**
-- Create under `web/src/ds/components/`: `ConnectorIcon/`, `ConnectorName/`, `OutcomeMenu/` (also `outcomeWords.ts`), `RuleRow/`, `ToolRulesCard/`, `ConnectorSection/` (also `describeEffects.ts`), `ConnectorList/`, `AlwaysOnList/`, `ChangeReview/` (also `ruleDiff.ts`), `AskClaudePanel/` (canvas: N-Conn-01-Rules, N-Conn-02-Payments, N-Conn-10-GCal-Confirm, N-Conn-12-Chat, N-Conn-16-Phone-Rules)
+- Create under `web/src/ds/components/`: `ConnectorIcon/`, `ConnectorName/`, `OutcomeMenu/` (also `outcomeWords.ts`), `RuleRow/`, `ToolRulesCard/` (also `toolRules.ts`), `ConnectorSection/` (also `describeEffects.ts`), `ConnectorList/`, `AlwaysOnList/`, `ChangeReview/` (also `ruleDiff.ts`), `AskClaudePanel/` (canvas: N-Conn-01-Rules, N-Conn-02-Payments, N-Conn-10-GCal-Confirm, N-Conn-12-Chat, N-Conn-16-Phone-Rules)
 - Modify:
   - `web/src/ds/index.ts`.
   - `web/src/ds/icons/index.tsx`: `chevron-right`, `shared` and `quote` join `ICON_NAMES`, drawn as the boards draw them.
@@ -259,6 +259,9 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
     - With `tool` (on a connector's page) it starts with the tool's name and `description` as one link to the tool's page, with `chevron-right`.
     - Then a `RuleRow` per rule.
     - With `fallback` (true unless the screen passes false, as it does when a `never` card for anyone covers the tool), the last row is "Anything else here: ask me.", with a ghost "Add a rule" → `onAddRule` when given.
+  - `rulesForTool(tool: { tool: ToolName; effects: Effect[] }, cards: RuleCard[]): RuleCard[]` (`toolRules.ts`), the rules that govern a tool under the master's "Coverage and overlap", most specific first, for the screen to build a tool's `RuleRow`s from. It lists cards and decides nothing:
+    - The tool's own cards always; an effect card (`effect:charge`) only where it covers the tool and none of the tool's own cards outranks it for everyone it is for. A tool card outranks an effect card; a card for one person or agent outranks a tool card; a tool card for fewer people (record owners) leaves the group rule deciding for the rest. An `auto` effect card covers a multi-effect tool only jointly, with an `auto` card per effect at its specificity. A `never` effect card always shows. Default cards are left out (the fallback row says what they do).
+    - So a group rule for anyone shows under a tool with no card of its own and is hidden under a tool with its own card for anyone.
   - `describeEffects(effects, reversible): string`, in the boards' words, first match wins:
     - `pay_out` "Moves money out."; `charge` "Charges money."; `private_data` "Touches private data."; `send_message` "Sends a message out."; `change` "Changes something."; `read` "Changes nothing.".
     - Then " Can be undone." or " Can't be undone.", only when an effect changes something (`change`, `charge`, `pay_out`, `send_message`). A tool that only reads, or reads private data, has no suffix.
@@ -300,15 +303,16 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
     - An owner `Composer` at the bottom, labelled "Ask Claude", with the placeholder "Ask Claude".
     - Escape inside the panel calls `onClose`; the screen returns focus to what opened it.
   - **Fixtures.**
-    - `rivera.ts` gains `ruleWords`: each `rv-*` card's words as Plan 04's `ruleWords` renders them, in the boards' words. `rv-quote`: "Anyone", "No discounts". `rv-link`: "Anyone", "Up to $300", "Checked by the reviewer". `rv-mandate`: "Signed agents", "Up to $20". `rv-charges`: "The record's owner, verified". `rv-refund`: "The customer who paid, verified".
+    - `rivera.ts` gains `ruleWords`: each `rv-*` card's words as Plan 04's `ruleWords` renders them, in the boards' words. `rv-quote`: "Anyone", "No discounts". `rv-link`: "Anyone", "Up to $300", "Checked by the reviewer". `rv-mandate`: "Signed agents", "Up to $20". `rv-charges`: "The record's owner, verified". `rv-refund`: "The customer who paid, verified". `rv-agent-charges`: "Alex Kim's assistant", "Up to $20". It also gains `ruleLimits`, the formatted amount of each auto card with `max_amount_cents` ("$300", "$20").
     - `rivera.ts` gains `connectors`: the hub on N-Conn-01-Rules, a `ConnectorView` and its `ToolSummaryView`s for Quotes, Bookings, Leads and callbacks, Verification, Documents ("Share a document", under `rv-docs`), Payments and Stripe.
-    - `rivera.ts` gains `sharedChargeCard`, for the shared-rule stories, outside `ruleCards`, since Rivera's seed has no shared card and the board's note says the example is illustrative: `{card_id: 'rv-charge-limit', applies_to: 'effect:charge', mode: 'auto', who: 'anyone', max_amount_cents: 10000, reason: 'Charges over $100 wait for your answer.'}`. Its words are "Anyone", "Up to $100", and its `limit` "$100", so its outcome reads "Automatic up to $100; over $100, ask me first". Its hold twin holds anything above $100 for the owner.
-    - `chen.ts` gains `connectors`: Chen & Co. CPA's hub without Payments: Quotes, Bookings (`cc-consult`, "Ask me first"), Leads and callbacks, Verification and Documents. It also gains `ruleWords`.
+    - `rivera.ts` gains `sharedChargeCard`, for the shared-rule stories, outside `ruleCards`, since Rivera's seed has no shared card and the board's note says the example is illustrative: `{card_id: 'rv-agent-charges', applies_to: 'effect:charge', mode: 'auto', who: 'agent', agent_key_id: 'demo-agent', max_amount_cents: 2000, reason: "Alex Kim's assistant can pay up to $20 from its signed limit."}`, and `sharedChargeAppliesTo`, "Applies to every tool that charges money: Payment link and Charge within a signed limit.". It agrees with the seed: it is the seed's $20 agent limit, for the visiting agent's own key (`who: 'agent'` requires one). A card for one agent outranks each tool's card for anyone, so it governs Payment link and Charge within a signed limit for that agent, beside `rv-link` and `rv-mandate`. Its words are "Alex Kim's assistant", "Up to $20", and its `limit` "$20", so its outcome reads "Automatic up to $20; over $20, ask me first". Its hold twin holds anything above $20 from that agent for the owner.
+    - `chen.ts` gains `connectors`: Chen & Co. CPA's hub without Payments: Quotes, Bookings (`cc-consult`, "Ask me first"), Leads and callbacks, Verification and Documents, plus the Payments `ConnectorView` it adds. It also gains `ruleWords`, and the cards its hub and conversations imply: `cc-quote` (quotes auto at list price, so the discounted quote in its Demo inbox held) and `cc-docs` (documents auto for the record's owner, as Raj's return was released).
 
 - [ ] **Step 1: Write the failing tests.**
   - `describeEffects.test.ts`: `money_out_wins` (`['pay_out', 'private_data']`, not reversible → "Moves money out. Can't be undone."); `charge_reversible` ("Charges money. Can be undone."); `read_only_has_no_suffix` ("Changes nothing."); `private_data_alone_has_no_suffix` (reversible → "Touches private data."); `documents_line` (`['private_data', 'send_message']`, not reversible → "Touches private data. Can't be undone.").
   - `outcomeWords.test.ts`: `outcome_phrase_with_limit` (`auto` with "$100" → "Automatic up to $100; over $100, ask me first"; `ask` with "$100" → "Ask me first"; `auto` alone → "Automatic").
   - `ruleDiff.test.ts`: `same_reason_new_limit_is_changed` (`max_discount_bp` 1000 → 5000 with `reason` unchanged → one `changed` row, `fields` `['limits']`); `defaults_and_unchanged_are_omitted`; `added_and_removed_rows`; `subject_change_is_who` (a new `person_id` → `['who']`).
+  - `toolRules.test.ts`: `a_tool_card_hides_the_group_rule_it_outranks` (a tool with its own card for anyone doesn't list a group rule for anyone; a tool without one does); `a_person_scoped_group_rule_outranks_tool_cards_for_everyone_else`; `a_narrower_tool_card_leaves_the_group_rule_for_everyone_else`; `an_auto_group_rule_covers_a_tool_only_with_every_effect`; `never_group_rules_always_show_and_defaults_never_do`.
   - `tokens.test.ts`: `connector_tokens_are_decorative` (every `connector-*` color is in `DECORATIVE_COLORS` with its reason; `size-side-panel` is 400px).
   - Stories:
     - `Connectors/ConnectorIcon`: `BuiltIn` (the six tiles), `Brands` (Stripe and Google Calendar).
@@ -319,14 +323,14 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
     - `Connectors/ConnectorSection`: `Quotes`, `Payments`, `Stripe`, `NeedsReview` (Refund `needs_review`), `AddedJustNow`, `Phone`.
     - `Connectors/ConnectorList`: `RiveraHub` (seven sections), `Phone`.
     - `Rules/AlwaysOnList`: `Default`.
-    - `Rules/ChangeReview`: `TurnOnPayments` (Chen: two "Turned on" rows at "Ask me first"), `RaiseDiscount`, `AddAndRemove`, `TurnBackOnRefund` (one "Turned on" row for Stripe's Refund at "Ask me first"), `ChecksFailed`, `ChecksUnavailable`, `Confirming`, `LimitOnly` (no rows, with `hasOtherChanges`).
+    - `Rules/ChangeReview`: `TurnOnPayments` (Chen: two "Turned on" rows at "Ask me first"), `RaiseDiscount`, `AddAndRemove`, `TurnBackOnRefund` (one "Turned on" row for Stripe's Refund at "Ask me first"), `ChecksFailed`, `ChecksUnavailable`, `Confirming`, `LimitOnly` (no rows, with `hasOtherChanges`), `NothingChanges` (no rows: "No rules change." and no confirm), `ConfirmFailed` (the screen's error, and confirm works again).
     - `Rules/AskClaudePanel`: `AddPayments` (Chen's owner: "Add Payments, so clients can pay their invoices"; Claude, in serif: "I can add Payments, so clients can pay with a test payment link. Have a look before anything turns on."), `Writing`, `Phone`.
   - Plays:
     - `mock_badge_always_beside_external_names`: `Mock`, `Brands`, `Stripe` and `RiveraHub` show "Mock" beside every "Stripe" and "Google Calendar".
     - `outcome_named_for_screen_readers`: `Automatic` has the button "Automatic. Change the outcome of: Payment links up to $300, checked by the reviewer.".
     - `outcome_menu_by_keyboard`: Tab to the button, then Enter → a menu with "Automatic" checked. Down twice, then Enter → `onChange('never')` once, and focus is back on the button, which still reads "Automatic". Open again, then Escape → closed, focus on the button, no call.
     - `outcome_read_only_without_on_change`: `ReadOnly` has no button.
-    - `limit_reads_automatic_up_to`: `AutomaticWithLimit` and `RuleRow`'s `Shared` read "Automatic up to $100; over $100, ask me first".
+    - `limit_reads_automatic_up_to`: `AutomaticWithLimit` and `RuleRow`'s `Shared` read "Automatic up to $20; over $20, ask me first".
     - `shared_rule_says_what_it_covers`: `Shared` shows "Shared rule. Applies to every tool that charges money: Payment link and Charge within a signed limit.".
     - `fallback_and_add_a_rule`: in `PaymentLinkOnPayments`, "Anything else here: ask me." shows and "Add a rule" → `onAddRule` once; `NoFallback` has neither.
     - `section_header_and_rows_are_links`: in `Payments`, the header is a link to its `href` that names "Payments", "Built in" and "2 tools", and each tool row is a link named "{name}: {summary}, {outcome}. Open".
@@ -339,12 +343,12 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
     - `confirm_only_when_checked`: in `ChecksFailed` and `ChecksUnavailable`, confirm is disabled under their headings and lines.
     - `limit_only_change_keeps_confirm`: `LimitOnly` shows "Your rules stay the same.", "Confirm change" and "Keep my rules", and no "No rules change.".
     - `ask_claude_panel_is_a_log`: in `AddPayments`, an `aside` named "Ask Claude" holds the replies inside a `role="log"` with `aria-live="polite"`. "Close" → `onClose`; Escape → `onClose`; sending "Turn off Payments" → `onSend('Turn off Payments')`.
-- [ ] **Step 2: Run** `cd web && npx vitest run --project unit src/ds/tokens.test.ts src/ds/components/{ConnectorSection,ChangeReview,OutcomeMenu} && npx vitest run --project storybook src/ds/components/{ConnectorIcon,ConnectorName,OutcomeMenu,RuleRow,ToolRulesCard,ConnectorSection,ConnectorList,AlwaysOnList,ChangeReview,AskClaudePanel,Card,SegmentedControl}` → FAIL.
+- [ ] **Step 2: Run** `cd web && npx vitest run --project unit src/ds/tokens.test.ts src/ds/components/{ConnectorSection,ChangeReview,OutcomeMenu,ToolRulesCard} && npx vitest run --project storybook src/ds/components/{ConnectorIcon,ConnectorName,OutcomeMenu,RuleRow,ToolRulesCard,ConnectorSection,ConnectorList,AlwaysOnList,ChangeReview,AskClaudePanel,Card,SegmentedControl}` → FAIL.
 - [ ] **Step 3: Implement** with READMEs, the tokens (`npm run tokens`), the icons, the fixtures and the two story updates. `canvasNote`s:
-  - `RuleRow`'s `Shared` and `ToolRulesCard`'s `PaymentLinkOnPayments`: the shared rule is an auto card up to $100, shown as "Automatic up to $100; over $100, ask me first", as the boards now draw it.
+  - `RuleRow`'s `Shared` and `ToolRulesCard`'s `PaymentLinkOnPayments`: the shared rule is the demo agent's charges up to $20, automatic, shown as "Automatic up to $20; over $20, ask me first"; the board's example is illustrative. A rule for one agent outranks the tool's own rule, so `rulesForTool` lists it first.
   - `ChangeReview`'s `RaiseDiscount`: the board shows only the after side of a changed row; a changed rule shows both, because the owner confirms what is enforced.
   - `ConnectorList`'s `RiveraHub`: Rivera keeps Documents, so the hub has six built-in connectors.
-- [ ] **Step 4: Run** the same commands plus `npm run check:ds` → PASS (11 unit tests; 35 story tests, with the Card and SegmentedControl stories still passing).
+- [ ] **Step 4: Run** the same commands plus `npm run check:ds` → PASS (16 unit tests; 37 story tests, with the Card and SegmentedControl stories still passing).
 - [ ] **Step 5: Commit** `git add web && git commit -m "feat(ds): add the rules hub pieces: connector sections, rule rows with outcome menus, the change review and the Ask Claude panel"`.
 
 ### Task 3: Connector and tool pages, adding a connector, and a changed tool
@@ -649,7 +653,7 @@ None is open. Three questions raised when Tasks 2–3 were re-specified were ans
    - Adding drafts one rules version for the group and proves it, then the usual confirm.
    - Turning off applies atomically and at once, unproved, with each tool's change ledgered. The web app shows a plain confirm first.
    - `enable: false` for `native.start_verification` is refused, since Verification is always on.
-3. **The shared-rule example.** It is an `auto` card for `effect:charge` with `max_amount_cents` 10000, whose hold twin holds anything above $100 for the owner. It reads "Automatic up to $100; over $100, ask me first". No mode asks with a limit.
+3. **The shared-rule example.** It is an `auto` card for `effect:charge` with `max_amount_cents` 2000 for the visiting agent's key, whose hold twin holds anything above $20 from that agent for the owner. It reads "Automatic up to $20; over $20, ask me first". No mode asks with a limit. (It was a card for anyone up to $100 until 2026-10-29; that card's hold would have caught the $100 to $300 links the seed's own `rv-link` allows.)
 
 ## Review Ledger
 
@@ -702,7 +706,12 @@ Tasks 2–3 re-specified from the owner-signed Connectors and rules boards (2026
 Answers and owner decisions on the re-specified Tasks 2–3 (2026-10-29):
 - **Built-in connectors.** Native tools go through `POST /tools/confirm` with their adapter profile's `profile_sha256`, so a built-in connector turns on through a proved draft.
 - **One action per connector.** `/tools/confirm` takes a list of tools, so a connector is one action both ways. Adding proves one version for the group in `ChangeReview`. Turning off or disconnecting applies at once, unproved, after `ConnectionPanel`'s plain confirm, which lists the tools that stop and the rules that stop applying. `ChangeReview` loses its turned-off rows and its optional checks (`TurnBackOnRefund` replaces `TurnOffPayments`).
-- **The shared-rule example** is an auto `effect:charge` card up to $100. `outcomePhrase` reads it "Automatic up to $100; over $100, ask me first" (`AutomaticWithLimit`, `limit_reads_automatic_up_to`, `outcome_phrase_with_limit`).
+- **The shared-rule example** is an auto `effect:charge` card up to $100. `outcomePhrase` reads it "Automatic up to $100; over $100, ask me first" (`AutomaticWithLimit`, `limit_reads_automatic_up_to`, `outcome_phrase_with_limit`). Replaced during Task 2, below.
 - **Verification is always on**: "Always on" in its header, `ConnectionPanel`'s `always_on` with the owner's line, and never in the picker (`always_on_has_no_turn_off`).
 - **Connectors live only under Rules**: the `SubNav` story lists no Connectors entry, and the web app's Settings drops its Integrations entry.
 - The three master-plan questions are closed. Task 2 now has 11 unit tests and 35 story tests; Task 3 has 36 story tests.
+
+Rulings during Task 2 (2026-10-29):
+- **The shared-rule example agrees with the seed.** A group rule for anyone up to $100 would hold the $100 to $300 links `rv-link` allows, so the example is now the seed's $20 agent limit as a shared rule for the visiting agent's key (`rv-agent-charges`, "Automatic up to $20; over $20, ask me first"). `who: 'agent'` needs an `agent_key_id`, so it names the one demo agent rather than every visiting agent. Every auto rule with an amount limit shows its limit phrase through `outcomePhrase`.
+- **A tool lists only the rules that govern it.** `rulesForTool` applies the master's "Coverage and overlap": a group rule shows under a tool only where none of the tool's own cards outranks it, so a group rule for anyone never shows under a tool with its own rule for anyone. Plan 04's `capabilities` should take its `rules` from it, rather than every card that covers the tool. The shared example governs Payment link and Charge within a signed limit for the demo agent, since a card for one agent outranks each tool's card for anyone.
+- `ChangeReview` gains two stories, `NothingChanges` and `ConfirmFailed`, for its empty and error states; `Card` takes `padding={0}` for a card of rows that pad themselves (`ConnectorSection`). Task 2 has 16 unit tests and 37 story tests.
