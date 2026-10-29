@@ -841,6 +841,8 @@ class FakeKernelState:
         named = request.query_params.get("session_id")
         if named is not None and named != session.session_id:
             raise Refusal(401, "auth")
+        if session.kind != "owner":
+            self._check_open(session)        # the session a token names must be open (master, session auth)
         copy = self.copies[session.copy_id]
         if session.kind == "owner":
             return WhoAmI(kind="owner", copy_id=copy.copy_id, desk_id=None, desk_ids=list(copy.desk_ids),

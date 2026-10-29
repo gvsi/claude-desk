@@ -399,9 +399,11 @@ async def test_session_state_responses(kernel, ro_read, arrange):
     assert [block.template for block in verdict.blocks] == ["handoff"]
     assert isinstance(await paused["context"](), SessionContext)
 
-    # Session closed: 409 closed on all four (last, since the fake's clock moves a day on).
+    # Session closed: 409 closed on all four (last, since the fake's clock moves a day on). /whoami, which the
+    # API calls first on every request and which decides whether a returning visitor resumes, refuses it too.
     created, view, allow = await visitor_with_an_allow()
     arrange.close_idle_sessions(created.state.session_id)
+    assert await refused(view.whoami()) == (409, "closed")
     for route, call in routes(view, created.state.session_id, 0, allow).items():
         assert await refused(call()) == (409, "closed"), route
 
