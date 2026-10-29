@@ -13,14 +13,18 @@ const STEMS: Record<string, string> = {
   ring: 'Accent and focus',
   status: 'Status',
   clay: 'The mark',
+  scrim: 'Scrim',
+  illustration: 'The intro illustration',
 };
 
 const SAMPLES: Record<string, string> = {
   greeting: 'Good morning, Maria',
   'page-title': 'Conversations',
+  'intro-title': 'A Claude front desk for your business',
   wordmark: 'Claude Desk',
   summary: 'Dana wants to move her drain cleaning to the weekend.',
   reply: 'I can book that for you. Which of these times works best?',
+  'illustration-reply': 'You’re booked, Dana. Maria will text you when she’s on her way.',
   body: 'Claude answers for your business when you can’t.',
   control: 'Allow this time',
   section: 'Needs you',

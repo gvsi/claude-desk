@@ -5,11 +5,11 @@
 ## When to use
 
 - At the top of the owner app's sidebar, beside the `Wordmark`, and in "Powered by Claude Desk" on the public page.
-- It is the only mark and the only use of `clay`. Never recolor it, never put it on a light ground, and never place it beside a Claude or Anthropic logo.
+- It is the only mark, and the only use of `clay` apart from the field behind the first-visit intro's illustration (`IntroDialog`). Never recolor it, never put it on a light ground, and never place it beside a Claude or Anthropic logo.
 
 ## What the consumer provides
 
-- A `size`: 20 px in the sidebar, 16 px at the smallest, 24 px at most.
+- A `size`: 20 px in the sidebar, 16 px at the smallest, 18 px on the intro illustration's reply card, 24 px at most.
 - The name written out next to it (`Wordmark`, or text): the mark is `aria-hidden`.
 
 ## Props
@@ -18,7 +18,7 @@
 
 | Prop | Type | Notes |
 | --- | --- | --- |
-| `size` | `16 \| 20 \| 24` | 20 by default. |
+| `size` | `16 \| 18 \| 20 \| 24` | 20 by default. |
 
 `Wordmark`:
 

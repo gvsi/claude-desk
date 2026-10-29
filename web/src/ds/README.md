@@ -19,11 +19,12 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 
 - Set pages on `bg-app`. Put the sidebar and side panels on `bg-panel` with a `line-hairline` seam; the composer, menus and popovers on `bg-surface`; quiet fills on `bg-muted`; the active nav row, the segmented control thumb and the initials avatar on `bg-selected`.
 - Set body text and everything Claude says in `text-primary`; captions, meta lines, helper text and receipts in `text-secondary`. Use `text-tertiary` only for placeholders and labels at 13 px and up.
-- Separate regions by fill and a hairline, not by shadow. A card is `fill-card` with a 1 px `line-card` border. Chips, outlined pills and the whisper composer are outlined in `line-control`, `line-control-hover` on hover.
+- Separate regions by fill and a hairline, not by shadow. A card is `fill-card` with a 1 px `line-card` border. Chips, outlined pills and the whisper composer are outlined in `line-control`, `line-control-hover` on hover. The intro's passcode field is outlined in `line-field` (3:1).
 - Make the primary button `button-primary` with `button-primary-text`, `button-primary-hover` on hover: an inverted neutral, at most one per view. Secondary buttons are `fill-secondary` (`fill-secondary-hover` on hover) with `text-primary`; ghost buttons are transparent with `fill-hover` on hover. Visitor bubbles are `fill-bubble`; count pills and the segmented track are `fill-count`.
 - Use `accent-blue` only for links, the focus ring and selection. Never put text on it and never use it as decoration.
 - Show status only as a `size-dot` dot or a thin bar in `status-handled` (handled or allowed), `status-held` (held, needs you), `status-refused` (refused or blocked) or `status-info` (a hollow dot), always beside words that say the same thing. Never a colored tile, a filled badge or colored text.
-- Use `clay` only inside the Claude Desk mark.
+- Use `clay` only inside the Claude Desk mark, and as the field behind the first-visit intro's illustration.
+- The intro illustration's cards (`illustration-card`, with `illustration-ink`, `illustration-ink-secondary`, `illustration-avatar`, `illustration-line` and `illustration-handled`) are the only light surface in the product. They are decorative and hidden from assistive tech, and nothing else uses these colors.
 
 ### Brand colors on the public page
 
@@ -35,16 +36,16 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 ### Type
 
 - Use `serif` (Source Serif 4) for Claude's voice and page identity, `sans` (Hanken Grotesk) for the whole interface, and `mono` (JetBrains Mono) only inside an expanded full trace. All three load from Google Fonts.
-- Apply a style with its class, `.cd-type-<style>`. Claude's voice: `greeting`, `page-title`, `wordmark`, `summary`, `reply`. Interface: `body` (already set on the page body), `control`, `section`, `message`, `meta`, `caption`, `pill`, `count`, `beta`, `brand-name`. Trace: `trace`.
+- Apply a style with its class, `.cd-type-<style>`. Claude's voice: `greeting`, `page-title`, `intro-title`, `wordmark`, `summary`, `reply`, `illustration-reply`. Interface: `body` (already set on the page body), `control`, `section`, `message`, `meta`, `caption`, `pill`, `count`, `beta`, `brand-name`. Trace: `trace`.
 - Set page titles in `page-title`, left-aligned. Claude's replies are `reply` paragraphs with no bubble and no avatar, like a document; a visitor's message is `message` in a `fill-bubble` bubble at `radius-card`, aligned right.
 
 ### Space, size and shape
 
 - Space with the steps `space-2` to `space-40`. Pad cards with `space-16` to `space-20`; pad content with `space-40` at the sides on desktop and `space-16` on a phone.
 - Lay out the owner app with a `size-sidebar` sidebar and content no wider than `size-content`. A conversation is a `size-reading` column, with each message's receipts attached under it.
-- Make controls `size-control` tall and a screen's main action `size-control-main`; nav rows are `size-nav-row`, icons `size-icon`, avatars `size-avatar`, and the public page's brand header `size-brand-header`.
+- Make controls `size-control` tall and a screen's main action `size-control-main`; nav rows are `size-nav-row`, icons `size-icon`, avatars `size-avatar`, and the public page's brand header `size-brand-header`. The first-visit intro dialog is `size-intro` wide, its illustration half `size-intro-illustration`.
 - Round controls with `radius-control`; cards, dialogs and bubbles with `radius-card`; the composer with `radius-composer`; pills, chips, switches and avatars with `radius-full`.
-- Use `shadow-composer` on the composer and nowhere else.
+- Use `shadow-composer` on the composer and nowhere else. The first-visit intro dialog sits over `scrim` and lifts with `shadow-dialog`.
 
 ### Motion
 
@@ -68,7 +69,7 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 ## Iconography
 
 - Use 20 px (`size-icon`) line icons with a 1.5 px effective stroke in the current text color. No filled icons, no emoji, no sparkles or other "AI" glyphs.
-- The Claude Desk mark, a rounded square with one horizontal line stroked in `clay`, is the only mark and the only use of `clay`. Never use a Claude or Anthropic logo.
+- The Claude Desk mark, a rounded square with one horizontal line stroked in `clay`, is the only mark, and the only use of `clay` apart from the field behind the first-visit intro's illustration. Never use a Claude or Anthropic logo.
 - Render initials avatars and monograms `aria-hidden`, beside the name written out as text.
 
 ## Accessibility
@@ -94,6 +95,7 @@ Text and links, 4.5:1:
 | `fill-secondary` over `bg-surface` | 8.9 | 5.3 | 4.8 | 4.6 |
 | `fill-secondary-hover` over `bg-surface` | 7.6 | 4.7 | not used | not used |
 | `fill-card` over `bg-panel` | 12.0 | 6.6 | 6.0 | 6.3 |
+| `fill-card` over `bg-surface` | 11.0 | not used | not used | not used |
 | `fill-count` over `bg-panel` | not used | 6.3 | not used | not used |
 | `fill-count` over `bg-selected` | not used | 5.0 | not used | not used |
 | `fill-hover` over `bg-muted` | 9.7 | not used | not used | not used |
@@ -112,10 +114,14 @@ Focus rings and status dots, 3:1 (`ring-composer` is `accent-blue`):
 | `fill-hover` over `bg-app` | 6.3 | 5.2 | 8.0 | 5.3 | 6.6 |
 | `fill-card` over `bg-panel` | 6.3 | 5.2 | 8.0 | 5.3 | 6.6 |
 
-The mark in `clay` reads 6.5 on `bg-app` and 6.0 on `bg-panel`.
+The mark in `clay` reads 6.5 on `bg-app`, 6.0 on `bg-panel` and 5.5 on `bg-surface` (the intro dialog).
+
+`line-field`, the intro's passcode field outline, reads 3.1 on `bg-surface` and 3.2 on `bg-app` (3:1).
+
+On the intro illustration's light cards, `illustration-ink` reads 16.3 and `illustration-ink-secondary` 5.4 on `illustration-card`, and `illustration-ink` reads 13.1 on `illustration-avatar`. The check and the receipt dots in `illustration-handled` read 4.9 (3:1).
 
 - Don't put `text-tertiary` or a link on `fill-secondary-hover`: those pairs aren't listed.
-- `line-hairline`, `line-card`, `line-control` and `line-control-hover` are decorative (`DECORATIVE_COLORS`): they separate or outline things that are identified otherwise. `line-control` is flagged: it is 2.0:1 on `bg-app`, under the 3:1 for control borders, which is acceptable only because a chip or pill is identified by its own text. Never make an outline the only cue that something is a control.
+- `line-hairline`, `line-card`, `line-control`, `line-control-hover`, `scrim`, `illustration-line` and `illustration-arc` are decorative (`DECORATIVE_COLORS`): they separate, dim or outline things that are identified otherwise, or carry nothing. `line-control` is flagged: it is 2.0:1 on `bg-app`, under the 3:1 for control borders, which is acceptable only because a chip or pill is identified by its own text. Never make an outline the only cue that something is a control.
 - Show focus with a solid 2 px `accent-blue` outline at a 2 px offset on every focusable element; the base stylesheet sets it. The composer shows `ring-composer` when focus is inside it, solid too, because a translucent ring falls under 3:1.
 - Never show status by color alone: a dot always sits beside words that say the same thing, and the dot is `aria-hidden`.
 - Put replies and receipts inside the transcript's `role="log"` so screen readers announce them. Chat, approvals and take-over all work from the keyboard.
