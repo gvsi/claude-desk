@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Run the app image as the deploy runs it, against the local compose Postgres, in production mode:
 # the admin task (migrations and role passwords), then the kernel and the API in one network
-# namespace, as the two containers of the Fargate task share one. Then:
+# namespace, as the two containers of the Fargate task share one, each with an init process as
+# PID 1 as on ECS (initProcessEnabled). Then:
 #   - smoke.py's api_health through the API's published port (the kernel proves with SymCC, signs
 #     with the production key, every seed proved);
 #   - mock payments answers {ok: true} on 127.0.0.1:8702 inside the kernel's container;
@@ -10,17 +11,18 @@
 #   docker compose up -d db && make image image-smoke
 #
 # Each container gets only its own column of the deploy seam (Plan 06b), from env files written
-# here (mode 600 in infra/out/, deleted on exit), never from the command line. Database passwords
-# come from .env (DESK_ENV_FILE overrides the path), as `make db-roles` reads them; the signing seed
-# and the mock payments key are random, the Anthropic key is a dummy (no model call is made), and
-# the passcode hash is of a random passcode. Nothing here prints a value. DB_NAME (default desk)
-# picks the database; Docker Desktop's host.docker.internal reaches the compose port 5433.
+# here (mode 600 in infra/out/, or IMAGE_SMOKE_OUT when set; deleted on exit), never from the
+# command line. Database passwords come from .env (DESK_ENV_FILE overrides the path), as
+# `make db-roles` reads them; the signing seed and the mock payments key are random, the Anthropic
+# key is a dummy (no model call is made), and the passcode hash is of a random passcode. Nothing
+# here prints a value. DB_NAME (default desk) picks the database; Docker Desktop's
+# host.docker.internal reaches the compose port 5433.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 IMAGE=${APP_IMAGE:-desk-app:dev}
 ENV_FILE=${DESK_ENV_FILE:-$ROOT/.env}
-OUT=$ROOT/infra/out
+OUT=${IMAGE_SMOKE_OUT:-$ROOT/infra/out}
 DB_NAME=${DB_NAME:-desk}
 POLL_SECONDS=${IMAGE_SMOKE_POLL_SECONDS:-2}
 POLLS=60
@@ -96,7 +98,7 @@ passcode_hash=$(openssl rand -hex 16 | docker run --rm -i "$IMAGE" python script
 
 umask 077
 mkdir -p "$OUT"
-# Each env file is new, mode 600 in infra/out, and listed for the exit trap in this shell (never in
+# Each env file is new, mode 600 in $OUT, and listed for the exit trap in this shell (never in
 # a $(...) subshell, whose list the trap wouldn't see).
 admin_env=$(mktemp "$OUT/image-smoke-admin.XXXXXX") && env_files+=("$admin_env")
 kernel_env=$(mktemp "$OUT/image-smoke-kernel.XXXXXX") && env_files+=("$kernel_env")
@@ -132,11 +134,11 @@ docker run --rm --name "$ADMIN" --env-file "$admin_env" "$IMAGE" "${ADMIN_COMMAN
   die "the admin task failed; the kernel and the API weren't started"
 
 say "kernel, in production mode"
-docker run -d --name "$KERNEL" --env-file "$kernel_env" -p 127.0.0.1:8700:8700 "$IMAGE" "${KERNEL_COMMAND[@]}" >/dev/null
+docker run -d --init --name "$KERNEL" --env-file "$kernel_env" -p 127.0.0.1:8700:8700 "$IMAGE" "${KERNEL_COMMAND[@]}" >/dev/null
 wait_healthy "$KERNEL" http://127.0.0.1:8701/health "the kernel"
 
 say "API, in production mode, in the kernel's network namespace"
-docker run -d --name "$API" --network "container:$KERNEL" --env-file "$api_env" "$IMAGE" "${API_COMMAND[@]}" >/dev/null
+docker run -d --init --name "$API" --network "container:$KERNEL" --env-file "$api_env" "$IMAGE" "${API_COMMAND[@]}" >/dev/null
 wait_healthy "$API" http://127.0.0.1:8700/api/health "the API"
 
 uv run --project "$ROOT/infra" python "$ROOT/infra/scripts/smoke.py" --base-url http://localhost:8700 --only api_health ||

@@ -80,6 +80,7 @@ def smoke_run(tmp_path):
         stub.chmod(stat.S_IRWXU)
     dot_env = tmp_path / "dot.env"
     dot_env.write_text("".join(f"{name}={value}\n" for name, value in DOT_ENV.items()))
+    out = tmp_path / "out"      # never the worktree's infra/out, where a real run may be writing
 
     def run(**extra_env: str):
         env = {
@@ -89,6 +90,7 @@ def smoke_run(tmp_path):
             "UV_LOG": str(tmp_path / "uv.log"),
             "DESK_ENV_FILE": str(dot_env),
             "IMAGE_SMOKE_POLL_SECONDS": "0",
+            "IMAGE_SMOKE_OUT": str(out),
             **extra_env,
         }
         result = subprocess.run(["bash", str(SCRIPT)], capture_output=True, text=True, env=env, timeout=60)
@@ -97,11 +99,12 @@ def smoke_run(tmp_path):
         uv_log = tmp_path / "uv.log"
         return result, calls, uv_log.read_text().splitlines() if uv_log.exists() else []
 
+    run.out = out
     return run
 
 
 def _env_runs(calls: list[dict]) -> dict[str, dict]:
-    """Container name -> {"argv", "env", "mode"} for each `docker run` given an env file."""
+    """Container name -> {"argv", "env", "mode", "path"} for each `docker run` given an env file."""
     runs = {}
     for call in calls:
         if call["argv"][0] != "run" or not call["env_files"]:
@@ -110,7 +113,8 @@ def _env_runs(calls: list[dict]) -> dict[str, dict]:
         env = dict(line.split("=", 1) for line in env_file["lines"] if line)
         argv = call["argv"]
         name = argv[argv.index("--name") + 1]
-        runs[name] = {"argv": argv, "env": env, "mode": env_file["mode"]}
+        runs[name] = {"argv": argv, "env": env, "mode": env_file["mode"],
+                      "path": Path(argv[argv.index("--env-file") + 1])}
     return runs
 
 
@@ -171,6 +175,21 @@ def test_image_smoke_env_covers_the_seam(smoke_run, desk_stacks):
     assert roles["api"]["env"]["PASSCODE_HASH"] == PASSCODE_HASH
 
 
+def test_image_smoke_runs_an_init_process_where_the_task_does(smoke_run, desk_stacks):
+    """Each container gets `--init` exactly when its synthesized container sets InitProcessEnabled,
+    so the kernel's mock payments child runs under the same PID 1 as on ECS."""
+    result, calls, _ = smoke_run()
+    assert result.returncode == 0, result.stdout + result.stderr
+    roles = _by_role(_env_runs(calls))
+    expected = {"admin": _container(desk_stacks.data_template, "admin"),
+                "kernel": _container(desk_stacks.template, "kernel"), "api": _container(desk_stacks.template, "Main")}
+    assert expected["kernel"]["LinuxParameters"]["InitProcessEnabled"] is True
+    for role, container in expected.items():
+        argv = roles[role]["argv"]
+        options = argv[:argv.index("desk-app:dev")]
+        assert ("--init" in options) == container.get("LinuxParameters", {}).get("InitProcessEnabled", False), role
+
+
 def test_image_smoke_runs_the_task_shape_and_prints_no_value(smoke_run):
     result, calls, uv_calls = smoke_run()
     assert result.returncode == 0, result.stdout + result.stderr
@@ -196,7 +215,8 @@ def test_image_smoke_runs_the_task_shape_and_prints_no_value(smoke_run):
               if name.endswith(("PASSWORD", "KEY", "SEED", "HASH"))]
     printed = result.stdout + result.stderr + joined + "\n".join(uv_calls)
     assert values and not [value for value in values if value in printed]
-    assert not list((INFRA / "out").glob("image-smoke*")), "env files are deleted on exit"
+    assert {run["path"].parent for run in roles.values()} == {smoke_run.out}     # IMAGE_SMOKE_OUT
+    assert not list(smoke_run.out.glob("image-smoke*")), "env files are deleted on exit"
     assert any(call["argv"][:2] == ["rm", "-f"] for call in calls)
 
 
@@ -206,7 +226,7 @@ def test_admin_failure_stops_before_the_app(smoke_run):
     assert "admin" in result.stderr
     assert set(_by_role(_env_runs(calls))) == {"admin"}
     assert uv_calls == []
-    assert not list((INFRA / "out").glob("image-smoke*"))
+    assert not list(smoke_run.out.glob("image-smoke*"))
 
 
 @pytest.mark.parametrize("missing", sorted(DOT_ENV))
