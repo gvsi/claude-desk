@@ -117,8 +117,9 @@ def bind_copy(session: Session | AsyncSession, copy_id: str) -> None:
 
 @functools.cache
 def kernel_engine() -> AsyncEngine:
-    """The kernel process's engine, as desk_kernel."""
-    return create_async_engine(database_url("KERNEL"), pool_pre_ping=True)
+    """The kernel process's engine, as desk_kernel. A failed statement's error names no bound value,
+    since some carry a verification code or a link token."""
+    return create_async_engine(database_url("KERNEL"), pool_pre_ping=True, hide_parameters=True)
 
 
 @functools.cache

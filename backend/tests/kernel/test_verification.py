@@ -24,10 +24,10 @@ from desk.contracts import DemoInboxEntry, Fact, InboxNotice, Label, SessionStat
 from desk.db.models import ActorSession, Desk, LedgerEntry, NotificationPref, Person, VerificationChallenge
 from desk.db.models import DemoInboxEntry as DemoInboxRow
 from desk.db.models import Fact as FactRow
-from desk.db.session import COPY_SETTING, database_url, libpq_url
+from desk.db.session import COPY_SETTING, database_url, kernel_engine, libpq_url
 from desk.db.tables import KERNEL_RO_VIEWS
 from desk.kernel_api import VerifyStarted
-from desk.kernel_service import auth, ledger, verification
+from desk.kernel_service import auth, demo_inbox, ledger, verification
 from desk.kernel_service.desks import mask_contact, normalize_contact
 
 from .helpers import kernel_ctx, rows_of
@@ -569,6 +569,31 @@ async def test_codes_stay_in_the_kernel(app, client, monkeypatch, caplog):
     assert any(record.getMessage().startswith("kernel_failure") for record in caplog.records)   # the 422s logged
     for code in ("424242", "737373"):
         assert not [text for text in exposed if holds(text, code)], code
+
+
+async def test_a_failed_inbox_write_logs_no_code(app, client, monkeypatch, caplog):
+    """A statement that fails is logged without its bound values, so a Demo inbox insert that
+    fails can't write the code it carried into a log line."""
+    caplog.set_level(logging.DEBUG)
+    codes(monkeypatch, 424242, 737373)
+    copy = await rivera_copy(app, client)
+    visitor = await open_session(client, copy)
+    [notice] = (await started(client, visitor, DANA_PHONE)).inbox
+    monkeypatch.setattr(demo_inbox, "new_id", lambda prefix: notice.entry_id)   # the next entry's ID is taken
+    response = await start(client, visitor, DANA_PHONE)
+    assert (response.status_code, response.json()) == (500, {"code": "internal"})
+    assert "INSERT INTO kernel.demo_inbox" in caplog.text                       # the failed insert was logged
+    assert [(row.status, code_in(await entry_of(client, visitor, notice))) for row in await challenges(app, copy)] == [
+        ("live", "424242")]                                                     # and nothing of it was kept
+    for code in ("424242", "737373"):
+        assert not holds(caplog.text, code), code
+
+
+def test_every_kernel_engine_hides_bound_values(app):
+    """The kernel app's engine and the module's kernel engine both log failed statements without
+    their bound values."""
+    assert app.state.kernel.engine.sync_engine.hide_parameters
+    assert kernel_engine().sync_engine.hide_parameters
 
 
 async def test_attempt_and_ledger_share_a_transaction(app, client, monkeypatch):

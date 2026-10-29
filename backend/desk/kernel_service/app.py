@@ -105,7 +105,8 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
         policies = activation.PolicyRuntime.start(app.state.unproved_seeds)   # raises on a baseline it can't take
         app.state.engine, app.state.loaded_versions = policies.engine, policies.versions
         app.state.proof_mode = await activation.run_selftest()               # symcc or bounded, for the whole process
-        engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+        # a failed statement's error names no bound value: some carry a code or a token
+        engine = create_async_engine(settings.database_url, pool_pre_ping=True, hide_parameters=True)
         factory = async_sessionmaker(engine, expire_on_commit=False, sync_session_class=KernelSession)
         app.state.kernel = KernelRuntime(settings=settings, clock=clock, signer=signer, engine=engine,
                                          sessions=factory, policies=policies, decisions=reviewer)
