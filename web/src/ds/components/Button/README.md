@@ -19,7 +19,7 @@
 - The label, in words that say what happens. Never "OK" or "Continue" when a verb can say more, and never an arrow.
 - `busy` while the click's request is in flight. The button keeps focus, dims a little (to 60%, the red variants to 80%, so every label still reads at 4.5:1 in a card), announces `aria-busy` and ignores further clicks; change the label too if the wait is long ("Sending").
 - `disabled` only when the action can't be taken at all. A disabled button is dimmed and leaves the tab order.
-- For a menu button, `menuOpen` (`true` while its menu shows), an `id` the menu can be labelled by, and `onKeyDown` for the keys that open it. A busy menu button ignores clicks like any busy button; the screen ignores its keys too.
+- For a menu button, `menuOpen` (`true` while its menu shows), an `id` the menu can be labelled by, and `onKeyDown` for the keys that open it. A busy menu button ignores clicks like any busy button; the screen ignores its keys too. Only a button opens a menu: `menuOpen` and `onKeyDown` with `href` are a type error (`ButtonProps` is a union of a button and a link), and a link never takes the menu look.
 
 ## Props
 
@@ -28,13 +28,13 @@
 | `variant` | `'primary' \| 'secondary' \| 'ghost' \| 'danger' \| 'danger-ghost'` | Required. |
 | `size` | `'inline' \| 'main'` | `inline` by default. |
 | `type` | `'button' \| 'submit' \| 'reset'` | `button` by default, so it never submits a form by accident. |
-| `href` | `string` | Renders an `<a rel="noopener noreferrer">`. A disabled or busy link loses its `href` and says `aria-disabled`. |
+| `href` | `string` | Renders an `<a rel="noopener noreferrer">`. A disabled or busy link loses its `href` and says `aria-disabled`. Not with `menuOpen` or `onKeyDown`. |
 | `disabled` | `boolean` | Native `disabled`. |
 | `busy` | `boolean` | `aria-busy` and `aria-disabled`; clicks are swallowed. |
-| `menuOpen` | `boolean` | Makes it a menu button: a chevron, `aria-haspopup="menu"`, `aria-expanded`. Leave it out for a plain button. |
+| `menuOpen` | `boolean` | Makes it a menu button: a chevron, `aria-haspopup="menu"`, `aria-expanded`. Leave it out for a plain button. Not on a link. |
 | `id` | `string` | The element's `id`. |
 | `onClick` | `(event) => void` | Not called while disabled or busy. |
-| `onKeyDown` | `(event) => void` | Keys pressed on the button; not on a link. |
+| `onKeyDown` | `(event) => void` | Keys pressed on the button. Not on a link. |
 | `children` | `ReactNode` | The label, in `.cd-type-control` (primary at weight 500). |
 
 ## States

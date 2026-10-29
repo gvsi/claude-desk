@@ -6,7 +6,7 @@ import './Button.css';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'danger-ghost';
 
-export interface ButtonProps {
+interface ButtonBaseProps {
   /**
    * `primary` (inverted neutral, at most one per view), `secondary` or `ghost`; `danger` (a soft red
    * fill) and `danger-ghost` (red words only) only for answers that refuse, such as "Deny this time".
@@ -16,24 +16,37 @@ export interface ButtonProps {
   size?: 'inline' | 'main';
   /** The button's `type`; `button` unless it submits a form. */
   type?: 'button' | 'submit' | 'reset';
-  /** Renders a link with the same look, opened with `rel="noopener noreferrer"`. */
-  href?: string;
   disabled?: boolean;
   /** Waiting for the result of a click: announced with `aria-busy`, and further clicks do nothing. */
   busy?: boolean;
+  /** The element's `id`, for a menu or a description that points back at it. */
+  id?: string;
+  onClick?: (event: MouseEvent<HTMLButtonElement | HTMLAnchorElement>) => void;
+  /** What happens, in words: "Allow this time", "Open payment page". */
+  children: ReactNode;
+}
+
+/** A button, which may open a menu. */
+interface ButtonAsButton extends ButtonBaseProps {
+  href?: undefined;
   /**
    * Makes it a menu button: a chevron after the words, `aria-haspopup="menu"`, and `aria-expanded`
    * from this value. The screen draws the menu and moves focus into it. Leave it out for a plain button.
    */
   menuOpen?: boolean;
-  /** The button's `id`, for a menu or a description that points back at it. */
-  id?: string;
-  onClick?: (event: MouseEvent<HTMLButtonElement | HTMLAnchorElement>) => void;
-  /** Keys pressed on the button, such as the arrow keys that open its menu. Not on a link. */
+  /** Keys pressed on the button, such as the arrow keys that open its menu. */
   onKeyDown?: (event: KeyboardEvent<HTMLButtonElement>) => void;
-  /** What happens, in words: "Allow this time", "Open payment page". */
-  children: ReactNode;
 }
+
+/** A link with a button's look. It never opens a menu. */
+interface ButtonAsLink extends ButtonBaseProps {
+  /** Renders a link with the same look, opened with `rel="noopener noreferrer"`. */
+  href: string;
+  menuOpen?: undefined;
+  onKeyDown?: undefined;
+}
+
+export type ButtonProps = ButtonAsButton | ButtonAsLink;
 
 export function Button({
   variant,
@@ -48,8 +61,7 @@ export function Button({
   onKeyDown,
   children,
 }: ButtonProps) {
-  const opensMenu = menuOpen !== undefined;
-  const className = `cd-button cd-button--${variant} cd-button--${size}${opensMenu ? ' cd-button--menu' : ''} cd-type-control`;
+  const className = `cd-button cd-button--${variant} cd-button--${size} cd-type-control`;
   // Busy keeps focus where it is (aria-disabled, not disabled), so a keyboard user isn't dropped
   // to the top of the page mid-request; the handler below swallows the click instead.
   const inert = disabled || busy;
@@ -79,10 +91,12 @@ export function Button({
     );
   }
 
+  // Only a button opens a menu.
+  const opensMenu = menuOpen !== undefined;
   return (
     <button
       id={id}
-      className={className}
+      className={opensMenu ? `${className} cd-button--menu` : className}
       type={type}
       disabled={disabled}
       aria-haspopup={opensMenu ? 'menu' : undefined}
