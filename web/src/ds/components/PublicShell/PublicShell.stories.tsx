@@ -461,7 +461,7 @@ async function expectOpen(status: HTMLElement, dot: HTMLElement): Promise<void> 
 
 /**
  * Closed: a hollow dot, and under the kernel's words the shell's quieter line in the page's
- * language, in meta type and the tagline's ink, lined up with the words.
+ * language, in caption type and the tagline's ink, lined up with the words.
  */
 async function expectClosed(header: HTMLElement, status: HTMLElement, line: HTMLElement, dot: HTMLElement, help: string): Promise<void> {
   expectComputed(dot, { backgroundColor: 'rgba(0, 0, 0, 0)', borderTopWidth: '1px', borderTopStyle: 'solid' });
@@ -469,8 +469,8 @@ async function expectClosed(header: HTMLElement, status: HTMLElement, line: HTML
   const helpLine = lineReading(status, help);
   await expect(helpLine).not.toHaveAttribute('data-copy');
   expectComputed(helpLine, {
-    fontSize: '13px',
-    lineHeight: '18px',
+    fontSize: '12px',
+    lineHeight: '17px',
     color: getComputedStyle(partOf(header, '.cd-public-shell__tagline')).color,
   });
   await expect(contrastRatio(getComputedStyle(helpLine).color, groundOf(helpLine))).toBeGreaterThanOrEqual(4.5);
@@ -505,7 +505,11 @@ async function expectOwnLineOnAPhone(phone: HTMLElement, header: HTMLElement, st
   await expect(box.top).toBeCloseTo(Math.max(monogram.bottom, brandText.bottom) + 8, 1);
   await expect(box.left).toBe(monogram.left);
   await expect(box.left).toBe(header.getBoundingClientRect().left + 16);
-  for (const line of status.querySelectorAll('p')) await expect(line.getBoundingClientRect().height).toBe(18);
+  // The kernel's words on one meta line, and the closed line on one caption line.
+  for (const line of status.querySelectorAll('p')) {
+    const caption = line.classList.contains('cd-public-shell__still-helps');
+    await expect(line.getBoundingClientRect().height).toBe(caption ? 17 : 18);
+  }
 }
 
 const phone: Pick<Story, 'decorators'> = {

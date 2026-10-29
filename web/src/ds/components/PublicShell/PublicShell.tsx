@@ -168,7 +168,7 @@ export function PublicShell({
               <p className="cd-public-shell__open-status-text cd-type-meta" data-copy="user">
                 {status.text}
               </p>
-              {status.open ? null : <p className="cd-public-shell__still-helps cd-type-meta">{copy.stillHelps}</p>}
+              {status.open ? null : <p className="cd-public-shell__still-helps cd-type-caption">{copy.stillHelps}</p>}
             </div>
           </div>
         ) : null}

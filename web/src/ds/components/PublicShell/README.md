@@ -39,7 +39,7 @@ The header says whether the business is open now, in the kernel's words.
 - **Closed adds one line of the shell's own**, under the kernel's words in the secondary ink. It follows `language` like the rest of the shell's copy, and isn't shown when open:
   - "Claude can still help."
   - "Claude puede ayudarte igual."
-- **Type and color.** Both lines are `meta`. The kernel's words are in the brand's ink and marked `data-copy="user"`, as the name is.
+- **Type and color.** The kernel's words are `meta`, in the brand's ink and marked `data-copy="user"`, as the name is. The closed line is `caption`, a step quieter, 2 px under them.
 - **Placement.** At the right end of the header's row, level with the monogram. Below 640 px of shell width it takes its own line under the monogram and name, from the left gutter, 8 px below them, however short it is. A long line wraps inside the header and never scrolls sideways.
 - **No status, no line.** Without `openStatus`, with `null` (a Desk without hours, or a computation the kernel dropped), or with anything that isn't a non-empty `text` and a boolean `open`, there is no line and no dot, and the header is exactly as it is without hours.
 
