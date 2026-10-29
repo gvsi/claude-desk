@@ -350,8 +350,10 @@ Invalid: `minted_by_session_id` (01b moved the minted-agent inbox here with `min
 
 Master plan changes requested: open questions 1, 2, 3, 5 and 6.
 
-Owner decisions, 2026-10-29: the auto-money cap comes from each Desk's charter under a $20,000 platform ceiling (master "Charter money cap"; Plan 01b's Task 3b switches it). Here: test Desks from `POST /desks` set their cap before drafting auto money cards (Global Constraints, Task 7), and probes evaluate at the version's cap (Task 9). The setup interview and the per-business-type templates that carry a suggested cap are Plan 02b's (`setup.py`, `setup_templates.py`), so that change lives there.
+Owner decisions, 2026-10-29: the auto-money cap comes from each Desk's charter under a $10,000 platform ceiling (master "Charter money cap"; Plan 01b's Task 3b switches it). Here: test Desks from `POST /desks` set their cap before drafting auto money cards (Global Constraints, Task 7), and probes evaluate at the version's cap (Task 9). The setup interview and the per-business-type templates that carry a suggested cap are Plan 02b's (`setup.py`, `setup_templates.py`), so that change lives there.
 
 Fix round, 2026-10-29: Task 4's `/tools/confirm` draft brings carried-over money cards down to a lowered cap with Plan 01b's `lower_to_cap`, tested in `test_new_desk_enables_payments_through_a_proved_draft`.
+
+Owner decisions, 2026-10-29, after the fix round: the platform ceiling is $10,000, the per-payment limit (master "Charter money cap"). Nothing in this plan's tasks changes.
 
 Round 2 (seam review, 2026-10-29): seam-02 Tasks 8–9 rows `requires("01c-setup")`, landed per PR; seam-03 05b's runner merges Friday morning, so Task 10 commits a run-free results file at the rebased head; seam-14 demo-agent limit is 429 `rate_limited`; seam-15 probes take time from `probe.starts_at` (`test_probe_uses_its_start_time`); seam-16 a resent opening request after its turn returns the bound session; seam-35 plan names 05a, 06b; seam-36 01a runs `prepare` on approval, open questions 3 and 5 answered; seam-40 `test_context.py` in Tasks 2, 4, 6, 8; seam-42 `native.charge_mandate` takes `Args{quote_id}`; seam-43 the mock child runs via `sys.executable -m` from the backend root.
