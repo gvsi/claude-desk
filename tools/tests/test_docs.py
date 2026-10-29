@@ -55,6 +55,17 @@ def test_relative_links_resolve(tmp_path):
     assert code == 0, out
 
 
+def test_relative_links_that_leave_the_repository_are_broken(tmp_path):
+    root = passing_tree(tmp_path / "repo")
+    write(tmp_path, "outside/notes.md", "# Only on this machine\n")
+    write(root, "AGENTS.md", "See [the notes](../outside/notes.md).\n")
+
+    code, out = run(root)
+
+    assert code == 1
+    assert "AGENTS.md:1: broken link ../outside/notes.md (it leaves the repository)" in out
+
+
 @pytest.mark.parametrize("line", [
     "Notes are in [my notes](/Users/someone/notes.md).",
     "Run `cat ~/scratch/key.txt` first.",
@@ -63,6 +74,7 @@ def test_relative_links_resolve(tmp_path):
     "The design is at https://claude.ai/artifact/abc123.",
     "The design is at https://claude.ai/code/artifact/abc123.",
     "See https://claude.ai/share/abc123 for the chat.",
+    "Notes are in [my notes](~/notes.md).",
 ])
 def test_flags_private_references(tmp_path, line):
     root = passing_tree(tmp_path)
@@ -72,6 +84,16 @@ def test_flags_private_references(tmp_path, line):
 
     assert code == 1
     assert "docs/deploy.md:3: private reference" in out
+
+
+def test_flags_private_paths_in_fenced_code(tmp_path):
+    root = passing_tree(tmp_path)
+    write(root, "docs/deploy.md", "# Deploying\n\n```sh\n/Users/someone/bin/desk deploy\n```\n")
+
+    code, out = run(root)
+
+    assert code == 1
+    assert "docs/deploy.md:4: private reference (/Users/ in a link or code)" in out
 
 
 def test_private_references_in_prose_and_unshipped_docs_pass(tmp_path):

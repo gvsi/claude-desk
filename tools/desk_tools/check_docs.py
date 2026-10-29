@@ -2,10 +2,11 @@
 
     python -m desk_tools.check_docs [--final] [--root PATH]
 
-Relative links resolve across README.md, AGENTS.md and docs/**/*.md (anchors are ignored). The
-shipped docs (SHIPPED_DOCS) hold no private reference: no home-directory path in a link target or
-code, no run-ledger path or claude.ai artifact or share link anywhere, and no term from the
-optional, git-ignored .local/docs-deny.txt (one per line, `#` comments, matched ignoring case).
+Relative links across README.md, AGENTS.md and docs/**/*.md resolve inside the repository (anchors
+are ignored). The shipped docs (SHIPPED_DOCS) hold no private reference: no home-directory path in a
+link target or code, no run-ledger path or claude.ai artifact or share link anywhere, and no term
+from the optional, git-ignored .local/docs-deny.txt (one per line, `#` comments, matched ignoring
+case).
 Each phrase in DISCLOSURES appears in every doc it names, ignoring case, line breaks and curly
 apostrophes. With --final, the shipped docs also hold no placeholder: a value still to be measured
 (`[measured: …]`) or a link the owner still has to give (`[owner: …]`).
@@ -129,6 +130,7 @@ def link_targets(text: str) -> Iterator[tuple[int, str]]:
 
 def check_links(root: Path) -> list[Problem]:
     problems = []
+    inside = root.resolve()
     for doc in linked_docs(root):
         for number, raw in link_targets(doc.read_text()):
             target = raw[1:-1] if raw.startswith("<") and raw.endswith(">") else raw
@@ -136,8 +138,11 @@ def check_links(root: Path) -> list[Problem]:
                 continue
             path = unquote(target.split("#", 1)[0].split("?", 1)[0])
             resolved = root / path.lstrip("/") if path.startswith("/") else doc.parent / path
-            if not resolved.exists():
-                problems.append(Problem(doc.relative_to(root).as_posix(), number, f"broken link {target}"))
+            where = doc.relative_to(root).as_posix()
+            if not resolved.resolve().is_relative_to(inside):   # it may exist here, but not in a clone
+                problems.append(Problem(where, number, f"broken link {target} (it leaves the repository)"))
+            elif not resolved.exists():
+                problems.append(Problem(where, number, f"broken link {target}"))
     return problems
 
 
