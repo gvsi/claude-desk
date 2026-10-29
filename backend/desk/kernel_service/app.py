@@ -15,23 +15,26 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from typing import Annotated, Any
 
 import desk_kernel
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import APIRouter, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from pydantic import BeforeValidator
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from desk.contracts import LedgerEntry, LedgerPage
 from desk.db.session import KernelSession, database_url
 from desk.env import is_development
-from desk.kernel_api import Health, KernelError
-from desk.kernel_service import copies, sessions
-from desk.kernel_service.auth import AuthError
+from desk.kernel_api import Health, KernelError, LedgerAppendRequest
+from desk.kernel_service import auth, copies, ledger, sessions
+from desk.kernel_service.auth import AuthError, Named
 from desk.kernel_service.clock import Clock, SystemClock
-from desk.kernel_service.repo import KernelFailure, KernelRuntime, kernel_transaction, route_template
+from desk.kernel_service.repo import Ctx, KernelFailure, KernelRuntime, kernel_transaction, route_template
 
 log = logging.getLogger("desk.kernel_service")
 
@@ -75,6 +78,7 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
     app.add_middleware(InternalErrors)
     app.include_router(sessions.router)
     app.include_router(copies.router)
+    app.include_router(ledger_router)
 
     @app.get("/health", response_model=Health)
     async def health(request: Request) -> Health:
@@ -84,6 +88,54 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
                       key_id=signer.key_id(), unproved_seeds=list(request.app.state.unproved_seeds))
 
     return app
+
+
+ledger_router = APIRouter()
+
+
+def _as_reported(body: Any) -> Any:
+    """Whatever origin the API's event claims, the kernel records it as `api`: reported, not verified."""
+    if isinstance(body, dict) and isinstance(body.get("event"), dict):
+        return {**body, "event": {**body["event"], "origin": "api"}}
+    return body
+
+
+ApiEntry = Annotated[LedgerAppendRequest, BeforeValidator(_as_reported)]
+
+
+@ledger_router.post("/ledger/append", response_model=LedgerEntry)
+async def append_api_entry(body: ApiEntry, ctx: Ctx, request: Request) -> LedgerEntry:
+    """The API's own `session`, `rate_limit` and `agent_auth` entries (the request model refuses any
+    other kind). A visitor's token may write only to its session's Desk, the owner's only to a Desk
+    of the copy, and an entry that names a session must name the one whose token sent it."""
+    route = route_template(request)
+    if auth.OWNER_HEADER in request.headers and auth.SESSION_HEADER not in request.headers:
+        owner = await auth.require_owner(ctx, request, desk_id=body.desk_id)
+        copy_id, session_id = owner.copy_id, owner.session_id
+    elif auth.SESSION_HEADER in request.headers and auth.OWNER_HEADER not in request.headers:
+        row = await auth.require_session_token(ctx, request)
+        copy_id, session_id = row.copy_id, row.session_id
+        if body.desk_id != row.desk_id:
+            raise AuthError(404, "not_found", "wrong_copy", route=route,
+                            named=Named(copy_id=copy_id, desk_id=row.desk_id, session_id=session_id))
+    else:
+        raise AuthError(401, "auth", "bad_token", route=route)
+    if body.event.session_id not in (None, session_id):
+        raise AuthError(404, "not_found", "wrong_session", route=route,
+                        named=Named(copy_id=copy_id, desk_id=body.desk_id, session_id=session_id))
+    try:
+        ledger.check_reported(body.event)
+    except ledger.UnsafeSummary:
+        raise KernelFailure(422, "invalid", "unsafe_api_entry") from None
+    return await ledger.append(ctx, copy_id=copy_id, desk_id=body.desk_id, event=body.event)
+
+
+@ledger_router.get("/ledger/{desk_id}", response_model=LedgerPage)
+async def read_ledger(desk_id: str, ctx: Ctx, request: Request) -> LedgerPage:
+    """The owner's view of a Desk's safety ledger. It always verifies the chain, whatever the
+    `verify` flag of the documented route (`?verify=true`) says."""
+    await auth.require_owner(ctx, request, desk_id=desk_id)
+    return await ledger.page(ctx, desk_id)
 
 
 def error_response(status: int, code: str, headers: dict[str, str] | None = None) -> JSONResponse:
