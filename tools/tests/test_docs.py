@@ -10,6 +10,30 @@ from desk_tools import check_docs
 
 REPO = Path(__file__).resolve().parents[2]
 
+# The contract, written out as Task 9 of the deploy and docs plan (docs/plans/2026-10-28-06b-deploy-and-docs.md)
+# defines it rather than read from the checker, so a weakened table in the checker fails these tests.
+README, THREAT_MODEL = "README.md", "docs/threat-model.md"
+REQUIRED_DISCLOSURES = {
+    "shows codes to whoever entered the contact": (README, THREAT_MODEL),
+    "does not establish possession of the contact": (README, THREAT_MODEL),
+    "whether a contact is on record": (README, THREAT_MODEL),
+    "cancel a contact's live challenge": (README, THREAT_MODEL),
+    "use up its hourly limit": (README, THREAT_MODEL),
+    "verification codes are simulated": (README, THREAT_MODEL),
+    "payments are mocked": (README, THREAT_MODEL),
+    "a buggy API process": (THREAT_MODEL,),
+    "out of the attacker's reach": (THREAT_MODEL,),
+}
+SHIPPED_DOCS = (
+    README,
+    THREAT_MODEL,
+    "docs/architecture-decisions.md",
+    "docs/path-to-mvp.md",
+    "docs/deploy.md",
+    "docs/ci.md",
+    "docs/evals.md",
+)
+
 
 def write(root: Path, path: str, text: str) -> Path:
     target = root / path
@@ -19,8 +43,8 @@ def write(root: Path, path: str, text: str) -> Path:
 
 
 def disclosures_for(path: str) -> str:
-    """One sentence per phrase the docs check requires in `path`."""
-    return "".join(f"It {phrase}.\n" for phrase, files in check_docs.DISCLOSURES.items() if path in files)
+    """One sentence per phrase the plan requires in `path`."""
+    return "".join(f"It {phrase}.\n" for phrase, files in REQUIRED_DISCLOSURES.items() if path in files)
 
 
 def passing_tree(root: Path) -> Path:
@@ -228,10 +252,14 @@ def test_final_mode_checks_placeholders_in_shipped_docs_only(tmp_path):
     assert "plans/plan.md" not in out and "specs/spec.md" not in out
 
 
-@pytest.mark.parametrize("phrase", list(check_docs.DISCLOSURES))
+def test_the_checker_holds_the_plans_disclosures_and_shipped_docs():
+    assert check_docs.DISCLOSURES == REQUIRED_DISCLOSURES
+    assert sorted(check_docs.SHIPPED_DOCS) == sorted(SHIPPED_DOCS)
+
+
+@pytest.mark.parametrize("phrase", list(REQUIRED_DISCLOSURES))
 def test_each_required_disclosure_is_enforced(tmp_path, phrase):
-    assert len(check_docs.DISCLOSURES) == 9
-    for path in check_docs.DISCLOSURES[phrase]:
+    for path in REQUIRED_DISCLOSURES[phrase]:
         root = passing_tree(tmp_path / path.replace("/", "_"))
         assert run(root)[0] == 0
         doc = root / path
@@ -241,6 +269,18 @@ def test_each_required_disclosure_is_enforced(tmp_path, phrase):
 
         assert code == 1
         assert f'{path}: missing the disclosure "{phrase}"' in out
+
+
+@pytest.mark.parametrize("path", SHIPPED_DOCS)
+def test_every_shipped_doc_is_scanned(tmp_path, path):
+    root = passing_tree(tmp_path)
+    doc = root / path
+    before = doc.read_text() if doc.is_file() else "# A shipped doc\n"
+    write(root, path, before + "\nNotes are in .plan-runs/06b/progress.md.\n\nCost: [measured: cost per conversation].\n")
+    lines = len(before.splitlines())
+
+    assert f"{path}:{lines + 2}: private reference (.plan-runs/)" in run(root)[1]
+    assert f"{path}:{lines + 4}: placeholder [measured:" in run(root, "--final")[1]
 
 
 def test_disclosures_match_across_case_line_breaks_and_apostrophes(tmp_path):
