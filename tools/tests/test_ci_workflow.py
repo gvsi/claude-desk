@@ -1,11 +1,16 @@
 """The CI workflow and its setup action, read as data: what runs, when, with which pins and rights."""
 
+import json
 import re
 import shlex
+import shutil
+import subprocess
+import sys
 import tomllib
 from pathlib import Path
 from urllib.parse import urlsplit
 
+import pytest
 import yaml
 from test_gate import PROOFS_GATE, TIER2_RESULTS_GATE
 
@@ -383,3 +388,159 @@ def test_secret_scan_has_no_exceptions():
     # Nothing points gitleaks at another config.
     for path in [WORKFLOW, *ACTIONS]:
         assert "GITLEAKS_" not in path.read_text(), path
+
+
+# Each tool CI downloads, by runner architecture (GitHub's RUNNER_ARCH): the release asset and
+# its sha256, taken from the release and checked with sha256sum before it was pinned here.
+PINNED_DOWNLOADS = {
+    "Install cvc5 1.4.2": {
+        "X64": (
+            "https://github.com/cvc5/cvc5/releases/download/cvc5-1.4.2/cvc5-Linux-x86_64-static.zip",
+            "7eb18f8c814c36a46c5a7d003983e9cfbc4b0a9828d6dd596239291bd4cc61d8",
+        ),
+        "ARM64": (
+            "https://github.com/cvc5/cvc5/releases/download/cvc5-1.4.2/cvc5-Linux-arm64-static.zip",
+            "765ebee59d9e5efccb60a445fa66fbddfb07a8de9fe7a5b6d128e5c2aafec974",
+        ),
+    },
+    "Install gitleaks 8.30.1": {
+        "X64": (
+            "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz",
+            "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb",
+        ),
+        "ARM64": (
+            "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_arm64.tar.gz",
+            "e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080",
+        ),
+    },
+    "Install actionlint 1.7.12": {
+        "X64": (
+            "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz",
+            "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8",
+        ),
+        "ARM64": (
+            "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_arm64.tar.gz",
+            "325e971b6ba9bfa504672e29be93c24981eeb1c07576d730e9f7c8805afff0c6",
+        ),
+    },
+}
+
+BASH = shutil.which("bash")
+
+# Stand-ins for the commands a download step runs, as Python scripts that log each call to
+# $STUB_LOG. curl writes $STUB_BODY (or a line that is no release) where -o says. sha256sum -c
+# logs the lines it was asked to check, from its file argument or stdin, and passes only when
+# $STUB_CHECK_PASSES is 1, so by default it fails as a tampered download would.
+STUBS = {
+    "curl": """
+args = sys.argv[1:]
+saved = os.path.join(os.getcwd(), args[args.index("-o") + 1])
+[url] = [arg for arg in args if arg.startswith("https://")]
+log("curl", url, saved)
+with open(saved, "w") as file:
+    file.write(os.environ.get("STUB_BODY", "not the release\\n"))
+""",
+    "sha256sum": """
+args = sys.argv[1:]
+assert "-c" in args, args
+files = [arg for arg in args if not arg.startswith("-")]
+lines = (open(files[0]).read() if files else sys.stdin.read()).splitlines()
+log("sha256sum -c", os.getcwd(), lines)
+sys.exit(0 if os.environ.get("STUB_CHECK_PASSES") == "1" else 1)
+""",
+    "tar": 'log("tar", *sys.argv[1:])',
+    "unzip": 'log("unzip", *sys.argv[1:])',
+}
+STUB_PRELUDE = """
+import json, os, sys
+
+def log(*event):
+    with open(os.environ["STUB_LOG"], "a") as file:
+        file.write(json.dumps(event) + "\\n")
+"""
+
+
+def step_named(name: str) -> dict:
+    [step] = [step for step in all_steps() if step.get("name") == name]
+    return step
+
+
+class Runner:
+    """Runs a step's script as GitHub runs a `shell: bash` step, on a runner of the given architecture."""
+
+    def __init__(self, tmp_path: Path):
+        self.dir = tmp_path
+        self.bin = tmp_path / "bin"
+        self.bin.mkdir()
+        for name, body in STUBS.items():
+            stub = self.bin / name
+            stub.write_text(f"#!{sys.executable} -I\n{STUB_PRELUDE}\n{body}")
+            stub.chmod(0o755)
+        (tmp_path / "home").mkdir()
+        (tmp_path / "runner-temp").mkdir()
+        self.github_path = tmp_path / "github-path"
+        self.github_env = tmp_path / "github-env"
+        self.log = tmp_path / "stub-log"
+
+    def run(self, step: dict, arch: str, **env: str) -> tuple[subprocess.CompletedProcess, list[list]]:
+        script = self.dir / "step.sh"
+        script.write_text(step["run"])
+        result = subprocess.run(
+            [BASH, "--noprofile", "--norc", "-eo", "pipefail", str(script)],
+            env={
+                "PATH": f"{self.bin}:/usr/bin:/bin",
+                "HOME": str(self.dir / "home"),
+                "RUNNER_ARCH": arch,
+                "RUNNER_TEMP": str(self.dir / "runner-temp"),
+                "GITHUB_WORKSPACE": str(ROOT),
+                "GITHUB_PATH": str(self.github_path),
+                "GITHUB_ENV": str(self.github_env),
+                "STUB_LOG": str(self.log),
+                **env,
+            },
+            cwd=self.dir,
+            capture_output=True,
+            text=True,
+        )
+        events = [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
+        return result, events
+
+
+@pytest.mark.parametrize("arch", ["X64", "ARM64"])
+@pytest.mark.parametrize("name", PINNED_DOWNLOADS)
+def test_downloads_are_chosen_by_architecture_and_checked_first(tmp_path, name, arch):
+    """Each tool is the pinned asset for the runner's architecture, and a failed check stops the step."""
+    url, sha256 = PINNED_DOWNLOADS[name][arch]
+    runner = Runner(tmp_path)
+
+    result, events = runner.run(step_named(name), arch)
+
+    assert [event[0] for event in events] == ["curl", "sha256sum -c"], (result.stderr, events)
+    [[_, fetched, saved], [_, checked_in, lines]] = events
+    assert fetched == url
+    assert Path(saved).name == url.rsplit("/", 1)[1]
+    # The check names exactly the file just fetched, with the pinned digest and nothing else.
+    assert lines == [f"{sha256}  {Path(saved).name}"]
+    assert Path(checked_in, Path(saved).name) == Path(saved)
+    # The failed check fails the step before anything is unpacked or put on PATH.
+    assert result.returncode == 1, result.stderr
+    assert not runner.github_path.exists() and not runner.github_env.exists()
+
+
+@pytest.mark.parametrize("name", PINNED_DOWNLOADS)
+def test_an_unknown_architecture_downloads_nothing(tmp_path, name):
+    runner = Runner(tmp_path)
+
+    result, events = runner.run(step_named(name), "ARM")
+
+    assert result.returncode == 1
+    assert events == []
+    assert "runner architecture ARM" in result.stderr
+    assert not runner.github_path.exists() and not runner.github_env.exists()
+
+
+def test_cvc5_checksums_cover_both_linux_builds():
+    """setup-desk checks cvc5 against tools/cvc5.sha256, which local setup also reads."""
+    lines = (ROOT / "tools/cvc5.sha256").read_text().splitlines()
+    for url, sha256 in PINNED_DOWNLOADS["Install cvc5 1.4.2"].values():
+        assert f"{sha256}  {url.rsplit('/', 1)[1]}" in lines, url

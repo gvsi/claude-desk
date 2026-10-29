@@ -30,19 +30,28 @@ runs:
         # The kernel tests job never runs uv, so it has no uv cache to save.
         ignore-nothing-to-cache: true
 
+    # The build for the runner's architecture, checked against its line in tools/cvc5.sha256.
     - name: Install cvc5 1.4.2
       shell: bash
       run: |
+        case "$RUNNER_ARCH" in
+          X64) build=cvc5-Linux-x86_64-static ;;
+          ARM64) build=cvc5-Linux-arm64-static ;;
+          *)
+            echo "cvc5: no build is pinned for runner architecture $RUNNER_ARCH" >&2
+            exit 1
+            ;;
+        esac
         dir="$RUNNER_TEMP/cvc5"
         mkdir -p "$dir"
-        grep ' cvc5-Linux-x86_64-static.zip$' "$GITHUB_WORKSPACE/tools/cvc5.sha256" > "$dir/cvc5.sha256"
+        grep " $build.zip\$" "$GITHUB_WORKSPACE/tools/cvc5.sha256" > "$dir/cvc5.sha256"
         cd "$dir"
-        curl -sSfL -o cvc5-Linux-x86_64-static.zip \
-          https://github.com/cvc5/cvc5/releases/download/cvc5-1.4.2/cvc5-Linux-x86_64-static.zip
+        curl -sSfL -o "$build.zip" \
+          "https://github.com/cvc5/cvc5/releases/download/cvc5-1.4.2/$build.zip"
         sha256sum -c --strict cvc5.sha256
-        unzip -q cvc5-Linux-x86_64-static.zip
-        echo "CVC5=$dir/cvc5-Linux-x86_64-static/bin/cvc5" >> "$GITHUB_ENV"
-        echo "$dir/cvc5-Linux-x86_64-static/bin" >> "$GITHUB_PATH"
+        unzip -q "$build.zip"
+        echo "CVC5=$dir/$build/bin/cvc5" >> "$GITHUB_ENV"
+        echo "$dir/$build/bin" >> "$GITHUB_PATH"
 
     - name: Build the kernel module and desk-prove
       if: inputs.build == 'true'
