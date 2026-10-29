@@ -8,3 +8,7 @@ dist/
 .env.*
 *.so
 .DS_Store
+.plan-runs/
+.agents/skills/impeccable/
+.claude/skills/impeccable
+.worktrees/
