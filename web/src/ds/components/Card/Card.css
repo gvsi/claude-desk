@@ -19,3 +19,8 @@
 .cd-card--padding-16 {
   padding: var(--space-16);
 }
+
+/* A card of rows, such as a connector's section on the Rules page: each row pads itself. */
+.cd-card--padding-0 {
+  padding: 0;
+}
