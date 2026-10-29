@@ -201,3 +201,33 @@ The master plan's "Global Constraints" and the kernel core's plan-specific const
 4. Replayed callbacks are already handled: terminal, never open on "Needs you".
 5. A replay that can't run (the file missing or stale, a claim that can't be re-derived, or an error) gives a copy with live data only, and the reason is logged; never a 500.
 6. "Recorded history" labels everywhere a replayed row shows: Today, Conversations, People and Safety's attempts, with boards for the three new surfaces before code.
+
+## Review Ledger
+
+Round 1 (2026-10-29): seats GPT-6.1 Sol (5 P1, 6 P2, 1 P3) and Opus 5.5 (3 P1, 13 P2, 4 P3), on the draft before it entered the repo; 23 root causes: 22 fixed here, 1 partly (Opus 20, below); none invalid. The six safety items were ruled on by the kernel lane before this amendment, and its tightenings are applied as given.
+
+Safety rules:
+- The replay marker is reserved for kernel replay (Sol 1, Opus 9): `ledger.append(..., replayed=)` is the only writer; `POST /ledger/append` and every other kernel append refuse a summary carrying the key, with a test for each (rule 4).
+- Terminal states had holes (Sol 2, Opus 2): the terminal set is spelled out, quotes replay expired, callbacks handled, `consumed` dropped, links and the other live kinds never replayed, and the closing step refuses a live record instead of dropping it (rule 2; Task 3).
+- Facts from a session verified as Dana could reach a visitor who verifies as the copy's Dana (Opus 2): replay carries no person at all (rule 3).
+- Replayed claims came from the file (Opus 6): the recording holds refs only, every price, amount and slot is re-derived from the copy's seed, and a miss refuses the whole replay (rule 5).
+- The scrub refused the callback persona's own contact (Opus 7): one reserved contact, matched exactly, masked in owner views (rule 6).
+- Eval and recording copies could replay, and nothing could turn replay off (Sol 3, Opus 10): the API's code constant is off in both targets, an environment flag can only turn replay off, and a missing, stale or failing recording gives a live copy (rule 7).
+
+Other findings and changes:
+- Sessions had no time of day and `day_offset` 6 fell outside "Last 7 days" (Opus 1, Sol 9): `start_local`, offsets 0–5 and the validator's time windows ("Times").
+- The seven views were unnamed and the master table could land apart from the code (Sol 4, Opus 3): named, with the table, `KERNEL_RO_COLUMNS` and the migration in Task 2's one commit.
+- `requires("01d")` was a collection error and the gate stopped at tier 1 (Sol 5, Opus 14): Task 5 wires `01d` into the harness, adds API-target and marker cases and commits a tier 2 results file.
+- The migration skipped the non-superuser view pattern (Sol 6, Opus 4): Task 2 follows `0006_preview_and_pins` and runs the RDS-like admin test.
+- The export had no source for delivered text, dropped `origin` and `ref_id`, and copied seed and checkpoint entries (Sol 7, Opus 5): replies come from the API's delivered transcript, entries keep their refs and are kernel-origin only, `ledger_seq` is remapped, and the night boundary leaves the seed and checkpoints out.
+- Appointment references weren't remapped consistently (Sol 8): one slot map for every representation, with collision tests.
+- The freshness key took no path subset and missed `money_cap.py` (Sol 10, Opus 13): `KERNEL_INPUT_PATHS` with the tier 2 evals' algorithm on the host, plus a content key the kernel checks at startup; the recorder refuses a dirty tree.
+- The live-data-only fallback wasn't executable (Sol 11, Opus 10): the kernel's startup check, the savepoint and the off switch, with Task 4's live-only Sunday path.
+- Persona outcomes weren't checked (Opus 8): each session declares its outcomes, failing sessions are rerun twice, and the recorder refuses otherwise.
+- One PR couldn't land Friday with a Saturday recording (Opus 11): two PRs, recording after calibration ("Landing").
+- `CopyCreated` would have referred to later classes, and the web types weren't regenerated (Opus 12): class order, regenerated types and the owner's sign-off in Task 2.
+- Recorded rows showed unlabelled on Conversations, People and Safety (Opus 15): owner decision 6, assigned to the API owner plan and the web app (plans 02b and 04).
+- Tests ran at one date, without slot collisions, owner actions on replayed chats or a time budget (Opus 16): six dates around the clock change, collision, 409 and budget tests.
+- P3s: cross-references now name their owners and the recorder's run command (Opus 17); `ReplayedEvent`'s storage questions are answered in "Produced" and the API owner plan's part (Opus 18); exactly seven personas with a fixed session table (Sol 12, Opus 19).
+
+Partly: the master amendment (Opus 20). This plan's docs PR adds its plan index entry, contracts note and schedule; a requirement-matrix row, a Review Focus line and a decisions-log entry in the spec are left to the coordinator.
