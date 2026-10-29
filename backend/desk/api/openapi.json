@@ -1802,6 +1802,62 @@
         ],
         "title": "NormalizedAction"
       },
+      "OpenStatus": {
+        "properties": {
+          "open": {
+            "type": "boolean",
+            "title": "Open"
+          },
+          "until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Until"
+          },
+          "opens_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opens At"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time",
+            "title": "As Of"
+          },
+          "refresh_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Refresh At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "open",
+          "until",
+          "opens_at",
+          "text",
+          "as_of",
+          "refresh_at"
+        ],
+        "title": "OpenStatus"
+      },
       "PublicDesk": {
         "properties": {
           "business_name": {
@@ -1836,6 +1892,16 @@
             },
             "type": "array",
             "title": "Agent Card"
+          },
+          "open_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OpenStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
