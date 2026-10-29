@@ -17,8 +17,8 @@ export type Models = [
   C.DeskAnsweringRequest, C.DeskBusinessRequest, C.DeskCalendarRequest, C.DeskCharterRequest,
   C.DeskCreated, C.DeskHoursRequest, C.DeskNotificationsRequest, C.DeskPeopleRequest,
   C.DeskPricesRequest, C.DeskSeed, C.DeskUpdated, C.DocumentCreated, C.DocumentUploadRequest,
-  C.EvDemoInbox, C.EvError, C.EvHeld, C.EvMessage, C.EvOwnerJoined, C.EvOwnerLeft, C.EvReceipt,
-  C.EvResolved, C.EvTurnEnd, C.EvWriting, C.ExecResult, C.ExecuteRequest, C.Fact, C.Health,
+  C.EvDemoInbox, C.EvError, C.EvHeld, C.EvMessage, C.EvOwnerJoined, C.EvOwnerLeft, C.EvOwnerTyping,
+  C.EvReceipt, C.EvResolved, C.EvTurnEnd, C.EvWriting, C.ExecResult, C.ExecuteRequest, C.Fact, C.Health,
   C.HoursWindow, C.InboxNotice, C.KernelError, C.KnowledgeItem, C.KnowledgeRequest, C.Label,
   C.LedgerAppendRequest, C.LedgerEntry, C.LedgerEvent, C.LedgerPage, C.Mandate, C.ModeRequest,
   C.NormalizedAction, C.NotificationDefaults, C.OwnerMessageRequest, C.OwnerMessageResult,
@@ -42,12 +42,12 @@ export type Aliases = [
 export type Checks = [
   // A Desk's brand is a dictionary of colors: a closed object would reject this read.
   Assert<Equal<C.PublicDesk['brand']['primary'], string>>,
-  // The SSE union has its ten members, discriminated by `type`.
+  // The SSE union has its eleven members, discriminated by `type`.
   Assert<
     Equal<
       C.SseEvent['type'],
       | 'writing' | 'message' | 'turn_end' | 'receipt' | 'held' | 'resolved'
-      | 'owner_joined' | 'owner_left' | 'demo_inbox' | 'error'
+      | 'owner_joined' | 'owner_typing' | 'owner_left' | 'demo_inbox' | 'error'
     >
   >,
   Assert<Equal<Extract<C.SseEvent, C.StatusEvent>, C.StatusEvent>>,

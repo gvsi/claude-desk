@@ -5,7 +5,7 @@ the session's events lock, writes `max + 1` and notifies `desk_run_events` with 
 caller's transaction, so a reader never sees a later event before an earlier one. The locks are taken in one
 order, the run lock (`deliver.run_lock`) before the events lock: `deliver()` takes both, so a transaction that
 emits and also delivers takes the run lock before its first `emit`. Only `deliver()` writes
-the four signed events (message, receipt, held, resolved); `emit` writes the other six. Control rows
+the four signed events (message, receipt, held, resolved); `emit` writes the other seven. Control rows
 (`run_resumable`, `decision_due`, `decision_pending`) are work for the next request that holds the
 session's credential, claimed once each; metric rows record reveal and turn timings.
 
@@ -70,7 +70,8 @@ async def append_event(conn: AsyncConnection, ids: Ids, event: BaseModel) -> int
 
 
 async def emit(conn: AsyncConnection, ids: Ids, event: Any) -> int:
-    """Publish one of the six unsigned events (writing, turn_end, owner_joined, owner_left, demo_inbox, error)."""
+    """Publish one of the seven unsigned events (writing, turn_end, owner_joined, owner_typing, owner_left,
+    demo_inbox, error)."""
     if not isinstance(event, BaseModel) or getattr(event, "type", None) in SIGNED_TYPES:
         raise TypeError("emit() publishes unsigned events only; signed ones go through deliver()")
     return await append_event(conn, ids, event)

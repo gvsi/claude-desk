@@ -34,8 +34,8 @@ MESSAGE_KINDS = ("visitor_text", "agent_text", "delivered", "status", "owner_say
                  "triage")
 AUTHORS = ("visitor", "agent", "claude", "owner", "desk", "api")
 VISIBILITIES = ("public", "owner", "model")
-SSE_TYPES = ("writing", "message", "turn_end", "receipt", "held", "resolved", "owner_joined", "owner_left",
-             "demo_inbox", "error")
+SSE_TYPES = ("writing", "message", "turn_end", "receipt", "held", "resolved", "owner_joined", "owner_typing",
+             "owner_left", "demo_inbox", "error")
 CONTROL_TYPES = ("run_resumable", "decision_due", "decision_pending")
 METRIC_TYPES = ("reveal", "turn")
 SETUP_STEPS = ("questions", "tools", "rules", "situations", "safety_check", "preview", "live")

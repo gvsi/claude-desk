@@ -3,6 +3,7 @@
 import asyncio
 import json
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import text
@@ -11,7 +12,7 @@ from desk.api.sse import Listener, Wakeup, append_control, claim_control, emit, 
 from desk.db.session import database_url
 from desk.api.store import Ids
 from desk.contracts import RenderedBlock
-from desk.events import EvError, EvHeld, EvMessage, EvReceipt, EvResolved, EvTurnEnd, EvWriting
+from desk.events import EvError, EvHeld, EvMessage, EvOwnerTyping, EvReceipt, EvResolved, EvTurnEnd, EvWriting
 
 SESSION_A = Ids(copy_id="copy-1", desk_id="desk-1", session_id="session-a")
 SESSION_B = Ids(copy_id="copy-1", desk_id="desk-1", session_id="session-b")
@@ -88,6 +89,16 @@ async def test_emit_rejects_signed_event_types(api_conn):
     assert await emit(api_conn, SESSION_A, EvWriting(type="writing")) == 1
     assert await emit(api_conn, SESSION_A, EvError(type="error", code="kernel_unavailable")) == 2
     assert await emit(api_conn, SESSION_A, EvTurnEnd(type="turn_end")) == 3
+
+
+async def test_emit_takes_owner_typing_as_unsigned(api_conn):
+    # The dots after a take-over: emit() publishes the name and how long they show, and nothing else is stored.
+    until = datetime(2026, 10, 29, 15, 4, 30, tzinfo=UTC)
+    assert await emit(api_conn, SESSION_A, EvOwnerTyping(type="owner_typing", name="Maria Rivera", until=until)) == 1
+    stored = (await api_conn.execute(text("SELECT type, payload FROM app.run_events WHERE session_id = :s"),
+                                     {"s": SESSION_A.session_id})).one()
+    assert stored.type == "owner_typing"
+    assert stored.payload == {"type": "owner_typing", "name": "Maria Rivera", "until": "2026-10-29T15:04:30Z"}
 
 
 async def test_control_rows_are_claimed_once(engine):

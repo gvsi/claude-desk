@@ -483,6 +483,8 @@ const handoffReply = message('msg-visitor-handoff', {
   ledger_seq: 3,
 });
 const ownerJoined = { type: 'owner_joined', name: OWNER } satisfies SseEvent;
+/** Maria's name with three dots, shown until `until` or until her message replaces them. */
+const ownerTyping = { type: 'owner_typing', name: OWNER, until: '2026-10-30T17:21:10Z' } satisfies SseEvent;
 
 const errorEvents = (['kernel_unavailable', 'session', 'rate_limited', 'internal'] as const).map(
   (code) => ({ type: 'error', code }) satisfies EvError,
@@ -507,9 +509,10 @@ const events = {
     }),
     turnEnd,
   ],
-  /** Maria joins, speaks in her own words, then hands back to Claude. */
+  /** Maria joins, types, speaks in her own words, then hands back to Claude. */
   takeOver: [
     ownerJoined,
+    ownerTyping,
     message('msg-maria-said', {
       author: 'owner',
       generation: 2,

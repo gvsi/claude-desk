@@ -10,6 +10,7 @@ export type SseEvent =
   | EvHeld
   | EvResolved
   | EvOwnerJoined
+  | EvOwnerTyping
   | EvOwnerLeft
   | EvDemoInbox
   | EvError;
@@ -499,6 +500,11 @@ export interface EvOwnerJoined {
 }
 export interface EvOwnerLeft {
   type: "owner_left";
+}
+export interface EvOwnerTyping {
+  type: "owner_typing";
+  name: string;
+  until: string;
 }
 export interface EvTurnEnd {
   type: "turn_end";
