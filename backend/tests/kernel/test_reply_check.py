@@ -119,6 +119,9 @@ def assert_handed_off(verdict: ReplyVerdict, language: str = "en") -> None:
     ("１２", {"digit"}, "12"),                                    # full-width digits
     ("tomorrow at noon", {"lex.en.date"}, "tomorrow"),
     ("1​2", {"digit"}, "12"),                                        # a zero-width space inside
+    ("See you Tu\u0435sday", {"lex.en.date", "mixed_script"}, "Tu\u0435sday"),   # a Cyrillic e
+    ("That is tw\u0435nty", {"lex.en.number", "mixed_script"}, "tw\u0435nty"),   # a Cyrillic e
+    ("That will be \u039d\u0399\u039d\u0395", {"lex.en.number"}, "\u039d\u0399\u039d\u0395"),   # Greek NINE, iota as I
 ])
 async def test_numbers_and_dates_in_prose_are_blocked(app, client, prose, rule_ids, span):
     copy, visitor = await visitor_of(app, client)
@@ -141,6 +144,17 @@ async def test_promise_words_are_blocked(app, client, prose, rule_id, span, lang
     verdict = await checked(client, visitor, prose)
     assert [(v.kind, v.rule_id, v.span) for v in verdict.violations] == [("promise_word", rule_id, span)]
     assert_handed_off(verdict, language)
+
+
+@pytest.mark.parametrize(("prose", "span"), [
+    ("Come by on the wee\u043aend.", "wee\u043aend"),        # a Cyrillic k, which no table reads as k
+    ("H\u0435llo, how can I help?", "H\u0435llo"),            # a Cyrillic e in a word no lexicon holds
+])
+async def test_a_word_mixing_scripts_is_blocked(app, client, prose, span):
+    copy, visitor = await visitor_of(app, client)
+    verdict = await checked(client, visitor, prose)
+    assert [(v.kind, v.rule_id, v.span) for v in verdict.violations] == [("unsupported_language", "mixed_script", span)]
+    assert_handed_off(verdict)
 
 
 @pytest.mark.parametrize(("prose", "language"), [

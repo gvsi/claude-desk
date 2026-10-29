@@ -7,8 +7,10 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    nothing is scanned.
 2. Language: `lang.detect` on the prose. Another language is `unsupported_language`; too little to
    tell falls back to the session's last language, else English. Cards render in this language.
-3. `scan_prose`: numerals, currency and percent signs, both lexicons (`lexicon/en.txt` and
-   `lexicon/es.txt`, whatever the language) and the Desk's document canaries.
+3. `scan_prose`: numerals, currency and percent signs, words mixing Latin letters with another
+   script, both lexicons (`lexicon/en.txt` and `lexicon/es.txt`, whatever the language, with
+   each letter that looks like a Latin one read as it, from `lexicon/lookalikes.txt`) and the
+   Desk's document canaries.
 4. Each clause renders from a fact this session may read, current, of the template's kind and ID,
    with no canary in what it renders.
 5. (The soft-promise check, Task 17.)
@@ -93,9 +95,53 @@ def shown(text: str) -> str:
     return _drawn(unicodedata.normalize("NFKC", _drawn(text)))
 
 
-def _fold(text: str) -> tuple[str, list[int]]:
-    """`text` with accents and other combining marks dropped and each run of whitespace one space,
-    for the lexicons, and the index in `text` each folded character came from."""
+def _load_lookalikes() -> dict[str, str]:
+    """`lexicon/lookalikes.txt`: the letters of other scripts, and the rarer Latin ones, that look
+    like one ASCII letter (Unicode's confusables.txt), one `<code point>\\t<letter>` per line. A
+    malformed line stops the kernel from starting."""
+    path = LEXICON_DIR / "lookalikes.txt"
+    table = {}
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip() or line.startswith("#"):
+            continue
+        code, tab, rest = line.partition("\t")
+        letter = rest.split("#", 1)[0].strip()
+        if (not tab or not re.fullmatch(r"[0-9A-F]{4,6}", code) or int(code, 16) < 0x80
+                or not re.fullmatch(r"[A-Za-z]", letter)):
+            raise ValueError(f"{path.name}:{number} is not a <code point>\\t<letter> line")
+        table[chr(int(code, 16))] = letter
+    return table
+
+
+LOOKALIKES = _load_lookalikes()
+STROKES = frozenset(ch for ch, letter in LOOKALIKES.items() if letter == "l")   # drawn as a bare stroke: l or I
+SCRIPT_LETTERS = frozenset(("Lu", "Ll", "Lt", "Lo"))     # modifier letters (Lm), such as ʼ, belong to no script
+
+
+def _words(text: str) -> Iterable[tuple[int, str]]:
+    """Each run of letters and combining marks in `text`, and where it starts."""
+    start = None
+    for i, ch in enumerate(f"{text} "):
+        if unicodedata.category(ch)[0] in "LM":
+            start = i if start is None else start
+        elif start is not None:
+            yield start, text[start:i]
+            start = None
+
+
+def _mixes_scripts(word: str) -> bool:
+    """Whether `word` has Latin letters and letters of another script ("Tuеsday" with a Cyrillic
+    е), telling scripts apart the way `lang.detect` does."""
+    latin = [unicodedata.name(ch, "").startswith("LATIN ") for ch in word
+             if unicodedata.category(ch) in SCRIPT_LETTERS]
+    return any(latin) and not all(latin)
+
+
+def _fold(text: str, stroke: str = "l") -> tuple[str, list[int]]:
+    """`text` for the lexicons: accents and other combining marks dropped, each letter that looks
+    like an ASCII one read as it ("Tuеsday" with a Cyrillic е is Tuesday), a bare stroke read as
+    `stroke`, and each run of whitespace one space; and the index in `text` each folded character
+    came from."""
     chars: list[str] = []
     origin: list[int] = []
     for i, ch in enumerate(text):
@@ -106,7 +152,7 @@ def _fold(text: str) -> tuple[str, list[int]]:
             continue
         for part in unicodedata.normalize("NFKD", ch):
             if unicodedata.category(part) not in ("Mn", "Me"):
-                chars.append(part)
+                chars.append(stroke if part in STROKES else LOOKALIKES.get(part, part))
                 origin.append(i)
     return "".join(chars), origin
 
@@ -151,7 +197,9 @@ def scan_prose(text: str, canaries: Iterable[str] = ()) -> list[Violation]:
     numeral (`digit`, with the separators inside one number in the same span), currency sign
     (`currency`) or percent sign (`percent_sign`) and every match of both lexicons
     (`lex.<lang>.<category>`) is `number_in_prose`, or `promise_word` for the promise category; a
-    canary verbatim is `canary`. Canaries come first, then the rest in the order they appear."""
+    word mixing Latin letters with another script is `unsupported_language` (`mixed_script`); a
+    canary verbatim is `canary`. The lexicons read lookalike letters as the Latin ones, and a
+    bare stroke both as l and as I. Canaries come first, then the rest in the order they appear."""
     text, found = _blank_canaries(shown(text), canaries)
     hits: list[tuple[int, str, Violation]] = [
         (-1, "canary", Violation(kind="canary", span="", rule_id="canary")) for _ in found]
@@ -174,12 +222,15 @@ def scan_prose(text: str, canaries: Iterable[str] = ()) -> list[Violation]:
         if category == "Sc":
             hits.append((i, "currency", Violation(kind="number_in_prose", span=text[i], rule_id="currency")))
         i += 1
+    hits += [(start, "mixed_script", Violation(kind="unsupported_language", span=_span(word), rule_id="mixed_script"))
+             for start, word in _words(text) if _mixes_scripts(word)]
     folded, origin = _fold(text)
+    readings = dict.fromkeys((folded, _fold(text, stroke="i")[0]))     # a bare stroke as l, and as I
     seen: set[tuple[str, int, int]] = set()
     for language, entries in LEXICONS.items():
         for category, pattern in entries:
             rule_id = f"lex.{language}.{category}"
-            for match in pattern.finditer(folded):
+            for match in (match for reading in readings for match in pattern.finditer(reading)):
                 if match.end() == match.start():
                     continue
                 start, end = origin[match.start()], origin[match.end() - 1] + 1
