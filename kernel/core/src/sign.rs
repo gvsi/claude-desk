@@ -54,17 +54,19 @@ impl Signer {
     }
 
     /// `from_env` over an explicit map, so tests never touch the process
-    /// environment. A missing seed with `DESK_ENV=production` is an error (the
-    /// kernel refuses to start); elsewhere it gives the dev key. A malformed
-    /// seed is always an error.
+    /// environment. A missing seed gives the dev key only in a development
+    /// environment (`DESK_ENV` unset, empty, `development`, `test` or `local`);
+    /// anywhere else, `production` and any misspelling of it included, it is an
+    /// error and the kernel refuses to start. A malformed seed is always an error.
     pub fn from_env_with(vars: &HashMap<String, String>) -> Result<Self> {
         let seed = vars
             .get(SEED_VAR)
             .map(|s| s.trim())
             .filter(|s| !s.is_empty());
-        let production = vars
-            .get(ENV_VAR)
-            .is_some_and(|env| env.trim().eq_ignore_ascii_case("production"));
+        let env = vars.get(ENV_VAR).map_or("", |env| env.trim());
+        let development = ["", "development", "test", "local"]
+            .iter()
+            .any(|dev| env.eq_ignore_ascii_case(dev));
         match seed {
             Some(seed) => {
                 let bytes: [u8; 32] = hex::decode(seed)
@@ -76,7 +78,9 @@ impl Signer {
                     dev_key: false,
                 })
             }
-            None if production => bail!("{SEED_VAR} is required when {ENV_VAR}=production"),
+            None if !development => {
+                bail!("{SEED_VAR} is required unless {ENV_VAR} is development, test or local")
+            }
             None => Ok(Self {
                 key: SigningKey::from_bytes(&DEV_SEED),
                 dev_key: true,

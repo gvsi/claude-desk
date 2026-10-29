@@ -615,10 +615,21 @@ fn signer_fails_closed_in_production() {
     let public = hex::decode(RFC8032_PUBLIC).unwrap();
     assert_eq!(signer.key_id(), hex::encode(Sha256::digest(&public))[..16]);
 
-    // Outside production a missing seed gives a dev key, labelled as one.
+    // Only a development environment, named or unset, falls back to the dev
+    // key, labelled as one; a misspelt production name doesn't.
     let dev = Signer::from_env_with(&vars(&[])).unwrap();
     assert!(dev.dev_key());
     assert_ne!(dev.public_key_hex(), signer.public_key_hex());
+    for env in ["", "development", "test", "local", " Development "] {
+        let signer = Signer::from_env_with(&vars(&[("DESK_ENV", env)]));
+        assert!(signer.is_ok_and(|s| s.dev_key()), "{env:?}");
+    }
+    for env in ["prod", "staging", "Production", "producton"] {
+        assert!(
+            Signer::from_env_with(&vars(&[("DESK_ENV", env)])).is_err(),
+            "{env:?}"
+        );
+    }
 
     // A malformed seed is an error everywhere, never a quiet fallback to the dev key.
     for bad in ["zz".repeat(32), "11".repeat(31), "11".repeat(33)] {

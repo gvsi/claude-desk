@@ -50,8 +50,9 @@ struct Signer {
 
 #[pymethods]
 impl Signer {
-    /// Reads `DESK_SIGNING_SEED` (64 hex). Raises ValueError when it is missing
-    /// with `DESK_ENV=production` (the kernel then refuses to start) or malformed.
+    /// Reads `DESK_SIGNING_SEED` (64 hex). Raises ValueError when it is malformed,
+    /// or missing outside a development `DESK_ENV` (unset, empty, `development`,
+    /// `test` or `local`); the kernel then refuses to start.
     #[staticmethod]
     fn from_env() -> PyResult<Self> {
         kernel::Signer::from_env()
@@ -67,7 +68,7 @@ impl Signer {
             .map_err(|e| value_error(format!("{e:#}")))
     }
 
-    /// True when signing with the public dev key (no seed outside production).
+    /// True when signing with the public dev key (no seed, development only).
     #[getter]
     fn dev_key(&self) -> bool {
         self.inner.dev_key()
