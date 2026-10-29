@@ -37,7 +37,8 @@ from desk.contracts import LedgerEntry, LedgerPage, PolicyVersion
 from desk.db.session import KernelSession, database_url
 from desk.env import is_development
 from desk.kernel_api import Health, KernelError, LedgerAppendRequest, PolicyConfirmRequest, PolicyDraftRequest
-from desk.kernel_service import activation, approvals, auth, context, copies, decide, execute, ledger, sessions
+from desk.kernel_service import (activation, approvals, auth, context, copies, decide, execute, ledger, public,
+                                 reply_check, sessions)
 from desk.kernel_service.auth import AuthError, Named
 from desk.kernel_service.clock import Clock, SystemClock
 from desk.kernel_service.decisions import DecisionsBackend, make_decisions
@@ -126,6 +127,8 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
     app.include_router(execute.router)
     app.include_router(approvals.router)
     app.include_router(context.router)
+    app.include_router(reply_check.router)
+    app.include_router(public.router)
     app.include_router(ledger_router)
     app.include_router(policy_router)
 

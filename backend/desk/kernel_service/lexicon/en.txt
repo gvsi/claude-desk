@@ -1,0 +1,36 @@
+# English words free prose may not use: amounts, percentages, dates and promises reach a visitor
+# only in cards rendered from the business's records. One `<category>\t<regex>` per line, matched
+# case-insensitively as whole words on the prose with accents and other marks dropped and each run
+# of whitespace read as one space. Categories: number, money, percent and date (number_in_prose),
+# and promise (promise_word). Both lexicons run on every draft, whatever its language.
+
+# Spelled-out numbers. A bare "one" counts only next to a unit or another number word, so "one
+# moment" passes.
+number	two|three|four|five|six|seven|eight|nine|ten|eleven|twelve
+number	(?:thir|four|fif|six|seven|eigh|nine)teen
+number	(?:twen|thir|for|four|fif|six|seven|eigh|nine)ty
+number	hundreds?|thousands?|millions?|billions?|dozens?|half|halves
+number	one(?:[\s-]+and)?[\s-]+(?:hundreds?|thousands?|millions?|billions?|dozens?|half|dollars?|bucks?|cents?|euros?|pesos?|usd|per[\s-]?cent|percent)
+
+# Money
+money	dollars?|bucks?|cents?|usd|eur|euros?|pesos?|mxn
+
+# Percentages
+percent	percent(?:age)?s?|per[\s-]?cent|pct
+
+# Days, months and times. "May" counts only capitalized after a word in the same sentence or after
+# in, on, by, until, till, next, this, early, late, mid or last, so the modal "may" passes.
+date	mondays?|tuesdays?|wednesdays?|thursdays?|fridays?|saturdays?|sundays?
+date	january|february|march|april|june|july|august|september|october|november|december
+date	(?:(?<=[^\W\d_] )|(?<=[^\W\d_], )|(?:in|on|by|until|till|next|this|early|late|mid|last)[\s-]+)(?-i:May)
+date	today|tonight|tomorrow|yesterday|weekends?|noon|midnight|o['’]?clock
+date	(?:next|this|last)[\s-]+(?:week|month|year)|this[\s-]+(?:morning|afternoon|evening)
+date	[ap]\.\s?m\.?|pm
+
+# Promises only the owner's rules or a card can make. "free" passes in "feel free" and in "free to"
+# followed by a verb ("free to ask"), never in "free to you".
+promise	guarant(?:ee|ees|eed|eeing|y)|promis(?:e|es|ed|ing)
+promise	(?<!feel )free(?! to (?!you\b|your\b))
+promise	discount(?:s|ed|ing)?|refund(?:s|ed|ing|able)?|waiv(?:e|es|ed|er|ing)|complimentary
+promise	no[\s-]+charge|on[\s-]+the[\s-]+house|warrant(?:y|ies)|money[\s-]+back
+promise	(?:at[\s-]+)?no[\s-]+(?:extra[\s-]+|additional[\s-]+)?cost

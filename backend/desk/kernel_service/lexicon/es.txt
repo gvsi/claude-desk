@@ -1,0 +1,33 @@
+# Spanish words free prose may not use: amounts, percentages, dates and promises reach a visitor
+# only in cards rendered from the business's records. One `<category>\t<regex>` per line, matched
+# case-insensitively as whole words on the prose with accents and other marks dropped ("dólares"
+# is matched as "dolares") and each run of whitespace read as one space. Categories: number,
+# money, percent and date (number_in_prose), and promise (promise_word). Both lexicons run on
+# every draft, whatever its language.
+
+# Spelled-out numbers. A bare "uno", "una", "once" or "medio" counts only next to a unit or another
+# number word, so "una pregunta" passes.
+number	dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|doce|trece|catorce|quince
+number	dieci(?:seis|siete|ocho|nueve)|veinte|veinti[a-z]+
+number	treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa
+number	cien|cientos?|(?:dos|tres|cuatro|seis|sete|ocho|nove)cient[oa]s|quinient[oa]s
+number	mil|miles|millon(?:es)?|docenas?|mitad
+number	(?:uno|una|once|medio)[\s-]+(?:y[\s-]+)?(?:cien|cientos?|mil|miles|millon(?:es)?|docenas?|dolar(?:es)?|pesos?|euros?|centavos?|por[\s-]?ciento)
+
+# Money ("dólar" and "dólares" are matched without the accent)
+money	dolar(?:es)?|pesos?|euros?|centavos?|usd|mxn
+
+# Percentages
+percent	por[\s-]?ciento|porcentajes?
+
+# Days, months and times ("miércoles", "sábado", "mañana", "mediodía" without accents)
+date	lunes|martes|miercoles|jueves|viernes|sabados?|domingos?
+date	enero|febrero|marzo|abril|mayo|junio|julio|agosto|sept?iembre|octubre|noviembre|diciembre
+date	hoy|manana|ayer|anoche|mediodia|medianoche
+date	fin(?:es)?[\s-]+de[\s-]+semana|(?:la[\s-]+)?(?:proxima|siguiente)[\s-]+semana|semana[\s-]+(?:que[\s-]+viene|proxima|entrante)
+date	esta[\s-]+(?:noche|tarde|semana)|(?:este|el[\s-]+proximo)[\s-]+mes
+
+# Promises only the owner's rules or a card can make ("garantía" without the accent)
+promise	garantias?|garantiz[a-z]*|promet[a-z]*|promesas?
+promise	gratis|gratuit[oa]s?|descuentos?|descont[a-z]*|reembols[a-z]*
+promise	sin[\s-]+(?:ningun[\s-]+)?(?:costo|coste|cargo)|de[\s-]+regalo
