@@ -1,4 +1,5 @@
-"""Spanish: the visitor's status lines, key for key with `en.STATUS`, and the clause cards.
+"""Spanish: the visitor's status lines and other texts, key for key with `en.STATUS` and
+`en.MESSAGES`, and the clause cards.
 
 Cards read datetimes in the business's time zone ("martes 3 de noviembre, 14:00"), money as
 `$1,234.56`, as in English, and percentages as "10 %".
@@ -24,6 +25,15 @@ STATUS: dict[str, str] = {
     "refused_at_execution": "Las reglas cambiaron, así que no se hizo",
     "reply_checked": "Respuesta revisada con las reglas de {owner}",
     "reply_handed_off": "Pasado a {owner} para responder",
+}
+
+MESSAGES: dict[str, str] = {
+    "verify_started": ("Si ese contacto está registrado, te enviamos un código. Escríbelo abajo para confirmar "
+                       "que eres tú."),
+    "verify_already": "Ya confirmaste quién eres en este chat.",
+    "inbox_code_preview": "Nuevo código de verificación",
+    "inbox_code_body": ("Tu código de {business} es {code}. Vence en diez minutos. "
+                        "Si no lo pediste, ignora este mensaje."),
 }
 
 WEEKDAYS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")

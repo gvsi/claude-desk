@@ -5,6 +5,11 @@ Entries live only in `kernel.demo_inbox`, read back only through the kernel's `G
 routes. A writer returns an `InboxNotice` (entry, masked recipient, preview), which is code-free
 and safe for SSE and `app.*`, never the body. Writers run in the caller's transaction and never
 commit, so an entry exists only if the record that caused it does.
+
+Two reads serve those routes. A session reads only the verification codes of the people whose
+challenges it started: the Demo inbox stands in for each person's own inbox, and in the demo
+whoever typed a person's contact is shown it. A session never reads an owner alert or a head
+checkpoint. The owner reads every entry of the copy.
 """
 
 from typing import get_args
@@ -12,8 +17,8 @@ from typing import get_args
 from sqlalchemy import insert, select
 
 from desk.contracts import DemoInboxEntry, InboxNotice
+from desk.db.models import ActorSession, NotificationPref, VerificationChallenge
 from desk.db.models import DemoInboxEntry as DemoInboxRow
-from desk.db.models import NotificationPref
 from desk.kernel_service.repo import KernelCtx, new_id
 
 KINDS = frozenset(get_args(DemoInboxEntry.model_fields["kind"].annotation))
@@ -56,3 +61,30 @@ async def alert_owner(ctx: KernelCtx, desk_id: str, event_kind: str, preview: st
         return None
     return await deliver(ctx, copy_id=ctx.copy_id, desk_id=desk_id, to="owner", person_id=None, kind="alert",
                          body=body, preview=preview, decision_id=decision_id)
+
+
+def _entry(row: DemoInboxRow) -> DemoInboxEntry:
+    return DemoInboxEntry(entry_id=row.entry_id, to=row.to, kind=row.kind, body=row.body, created_at=row.created_at)
+
+
+def _ordered(stmt):
+    return stmt.order_by(DemoInboxRow.created_at, DemoInboxRow.entry_id)
+
+
+async def session_entries(ctx: KernelCtx, session_row: ActorSession) -> list[DemoInboxEntry]:
+    """The `verification_code` entries, on the session's Desk, of the people whose challenges the
+    session started; nothing else."""
+    people = await ctx.db.scalars(ctx.repo.scoped(select(VerificationChallenge.person_id).where(
+        VerificationChallenge.session_id == session_row.session_id)))
+    person_ids = sorted(set(people.all()))
+    if not person_ids:
+        return []
+    rows = await ctx.db.scalars(ctx.repo.scoped(_ordered(select(DemoInboxRow).where(
+        DemoInboxRow.desk_id == session_row.desk_id, DemoInboxRow.kind == "verification_code",
+        DemoInboxRow.person_id.in_(person_ids)))))
+    return [_entry(row) for row in rows]
+
+
+async def owner_entries(ctx: KernelCtx) -> list[DemoInboxEntry]:
+    """Every entry of the copy the context is bound to: codes, alerts and head checkpoints."""
+    return [_entry(row) for row in await ctx.db.scalars(ctx.repo.scoped(_ordered(select(DemoInboxRow))))]

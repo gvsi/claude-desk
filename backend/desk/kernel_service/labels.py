@@ -4,7 +4,9 @@ A fact's label lists its readers: `"public"`, `"owner"`, `"person:<id>"` or `"se
 session reads a fact when the two share a reader (`can_read`): every session reads public facts
 and its own session's, a verified one also its person's, and the owner reads the business's. A
 fact an adapter writes in a session is labelled for the owner and that session, and for the
-verified person when there is one (`new_fact_label`). A fact with no label is the owner's alone.
+verified person when there is one (`new_fact_label`); when the session verifies, the facts it
+already holds gain that person too (`relabel_on_verify`). A fact with no label is the owner's
+alone.
 
 `fact_row` and `fact_of` map between the `Fact` contract and its `facts` row, which also keeps
 the session and action that wrote it.
@@ -13,9 +15,12 @@ the session and action that wrote it.
 from collections.abc import Iterable, Sequence
 from datetime import datetime
 
+from sqlalchemy import select
+
 from desk.contracts import Fact, Label
 from desk.db.models import ActorSession
 from desk.db.models import Fact as FactRow
+from desk.kernel_service.repo import KernelCtx
 from desk.kernel_service.sessions import verified
 
 OWNER_ONLY = ("owner",)
@@ -48,6 +53,26 @@ def new_fact_label(session_row: ActorSession) -> Label:
     if person is not None:
         readers.append(f"person:{person}")
     return Label(readers=readers, record_owner=person)
+
+
+async def relabel_on_verify(ctx: KernelCtx, session_row: ActorSession, person_id: str) -> None:
+    """The session has just verified as `person_id`: the facts adapters wrote in it before, labelled
+    for the session, become the person's too (`person:<id>` joins their readers, and the person is
+    their record owner if they had none), so the person reads them from any session they verify
+    in. Later facts get the same from `new_fact_label`. Runs in the verification's transaction."""
+    session_reader, person_reader = f"session:{session_row.session_id}", f"person:{person_id}"
+    rows = await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
+        FactRow.desk_id == session_row.desk_id, FactRow.session_id == session_row.session_id,
+        FactRow.source == "kernel").with_for_update()))
+    for row in rows:
+        readers = list(row.readers or OWNER_ONLY)
+        if session_reader not in readers:
+            continue
+        if person_reader not in readers:
+            row.readers = [*readers, person_reader]
+        if row.record_owner is None:
+            row.record_owner = person_id
+    await ctx.db.flush()
 
 
 def label_of(readers: Sequence[str] | None, record_owner: str | None = None) -> Label:

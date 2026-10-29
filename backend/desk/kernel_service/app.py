@@ -35,12 +35,12 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from desk.contracts import LedgerEntry, LedgerPage, PolicyVersion
+from desk.contracts import DemoInboxEntry, LedgerEntry, LedgerPage, PolicyVersion
 from desk.db.session import KernelSession, database_url
 from desk.env import is_development
 from desk.kernel_api import Health, KernelError, LedgerAppendRequest, PolicyConfirmRequest, PolicyDraftRequest
-from desk.kernel_service import (activation, approvals, auth, context, copies, decide, execute, ledger, public,
-                                 reply_check, sessions)
+from desk.kernel_service import (activation, approvals, auth, context, copies, decide, demo_inbox, execute, ledger,
+                                 public, reply_check, sessions, verification)
 from desk.kernel_service.auth import AuthError, Named
 from desk.kernel_service.clock import Clock, SystemClock
 from desk.kernel_service.decisions import DecisionsBackend, make_decisions
@@ -131,6 +131,8 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
     app.include_router(context.router)
     app.include_router(reply_check.router)
     app.include_router(public.router)
+    app.include_router(verification.router)
+    app.include_router(inbox_router)
     app.include_router(ledger_router)
     app.include_router(policy_router)
 
@@ -142,6 +144,21 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
                       key_id=signer.key_id(), unproved_seeds=sorted(request.app.state.unproved_seeds))
 
     return app
+
+
+inbox_router = APIRouter()
+
+
+@inbox_router.get("/demo_inbox", response_model=list[DemoInboxEntry])
+async def read_demo_inbox(ctx: Ctx, request: Request, session_id: str | None = None) -> list[DemoInboxEntry]:
+    """The Demo inbox: with `session_id`, that session's own codes (`X-Session-Token`); without it,
+    every entry of the owner's copy (`X-Owner-Session`)."""
+    if session_id is None:
+        await auth.require_owner(ctx, request)
+        return await demo_inbox.owner_entries(ctx)
+    row = await auth.require_session(ctx, request, session_id)
+    await auth.require_desk(ctx, request, row, row.desk_id)
+    return await demo_inbox.session_entries(ctx, row)
 
 
 ledger_router = APIRouter()

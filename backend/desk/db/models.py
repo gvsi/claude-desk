@@ -17,7 +17,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, TypeAdapter
 from sqlalchemy import BigInteger, Boolean, DateTime, Integer, Text, text
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
 
@@ -170,11 +170,22 @@ class ActorSession(Base):
 
 
 class VerificationChallenge(Base):
+    """A demo code sent to a person on record; never in a view. At most one is live per person
+    and per session (01b_1_verification)."""
+
     __tablename__ = "verification_challenges"
     __table_args__ = {"schema": "kernel"}
     challenge_id: Mapped[str] = mapped_column(Text, primary_key=True)
     copy_id: Mapped[str] = mapped_column(Text)
-    code_hash: Mapped[str] = mapped_column(Text)
+    code_hash: Mapped[str] = mapped_column(Text)             # sha256 of canonical JSON {challenge_id, code}
+    desk_id: Mapped[str] = mapped_column(Text)
+    session_id: Mapped[str] = mapped_column(Text)            # the session that asked; only it may check the code
+    person_id: Mapped[str] = mapped_column(Text)             # the person on record the code went to
+    status: Mapped[str] = mapped_column(Text)                # live, consumed, cancelled, expired, failed
+    failed_at: Mapped[list[datetime]] = mapped_column(ARRAY(DateTime(timezone=True)),
+                                                      server_default=text("'{}'"))   # one per wrong code
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class AgentKey(Base):

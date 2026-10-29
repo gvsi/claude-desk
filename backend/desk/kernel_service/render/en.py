@@ -27,11 +27,23 @@ STATUS: dict[str, str] = {
     "reply_handed_off": "Passed to {owner} to answer",
 }
 
+# The kernel's other visitor texts, key for key with `es.MESSAGES`: the verify card's messages,
+# the same whether or not a contact is on record, and the Demo inbox's code entry, whose body is the
+# only kernel text that carries a code.
+MESSAGES: dict[str, str] = {
+    "verify_started": "If that contact is on record, a code is on its way. Enter it below to confirm it's you.",
+    "verify_already": "You're already confirmed in this chat.",
+    "inbox_code_preview": "New verification code",
+    "inbox_code_body": ("Your {business} code is {code}. It expires in ten minutes. "
+                        "If you didn't ask for it, ignore this message."),
+}
+
 # Owner-only, in English: the preview line of a Demo inbox alert.
 OWNER_PREVIEWS: dict[str, str] = {
     "approval": "A request needs your answer",
     "breaker": "A conversation was paused",
     "booking": "New booking",
+    "lockout": "Verification paused for a contact",
 }
 
 

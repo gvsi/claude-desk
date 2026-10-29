@@ -2,8 +2,10 @@
 
 Status lines (`status`) are fixed templates, one per decision state plus the reply receipts;
 they name the business's owner and nothing else, so they never carry an amount, a date or a
-limit. A session reads them in its `last_language`, else English (`language`). Owner alert
-previews (`owner_preview`) are English and owner-only.
+limit. `status` also serves the kernel's other visitor texts (`MESSAGES`): the verify card's
+messages and the Demo inbox's code entry, the one text that carries a code. A session reads them
+in its `last_language`, else English (`language`). Owner alert previews (`owner_preview`) are
+English and owner-only.
 
 Clause cards (`render_clause`) are the only visitor text that carries amounts and dates, and
 they are rendered by code from a fact, never from text a model wrote. Each template is registered
@@ -28,9 +30,13 @@ from desk.kernel_service.render.cards import Card, DeskInfo, NothingToShow
 Language = Literal["en", "es"]
 LANGUAGES: dict[str, dict[str, str]] = {"en": en.STATUS, "es": es.STATUS}
 STATUS_KEYS = frozenset(en.STATUS)
+MESSAGES: dict[str, dict[str, str]] = {"en": en.MESSAGES, "es": es.MESSAGES}
+MESSAGE_KEYS = frozenset(en.MESSAGES)
 
 if any(set(templates) != STATUS_KEYS for templates in LANGUAGES.values()):
     raise RuntimeError("every language has a template for every status line")
+if any(set(templates) != MESSAGE_KEYS for templates in MESSAGES.values()) or MESSAGE_KEYS & STATUS_KEYS:
+    raise RuntimeError("every language has every message, and no message shares a status line's key")
 
 
 def language(last_language: str | None) -> Language:
@@ -39,10 +45,13 @@ def language(last_language: str | None) -> Language:
     return "es" if last_language == "es" else "en"
 
 
-def status(key: str, lang: str, *, owner: str) -> str:
-    """The status line `key` ("allowed", "held", ...) in `lang`, naming `owner`. An unknown key or
-    language raises KeyError: there is no free-text fallback."""
-    return LANGUAGES[lang][key].format(owner=owner)
+def status(key: str, lang: str, *, owner: str | None = None, **fields: str) -> str:
+    """The status line `key` ("allowed", "held", ...) in `lang`, naming `owner`, or the message
+    `key` ("verify_started", "inbox_code_body", ...) filled with its `fields`. An unknown key or
+    language, or a field the template names and the call doesn't give, raises KeyError: there is
+    no free-text fallback."""
+    template = LANGUAGES[lang][key] if key in STATUS_KEYS else MESSAGES[lang][key]
+    return template.format(**fields, **({"owner": owner} if owner is not None else {}))
 
 
 def owner_preview(kind: str) -> str:
