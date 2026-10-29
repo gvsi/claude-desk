@@ -1,0 +1,134 @@
+"""Fixtures for the kernel contract suite: the same tests against FakeKernel and the real kernel.
+
+`kernel` yields `(KernelHttp, ro_schema, state)`:
+
+- `fake`: FakeKernel in this process (httpx's `ASGITransport`), its rows mirrored into schema
+  `fake_kernel_ro`, and its `FakeKernelState`;
+- `real` (marker `real_kernel`): the kernel process at `DESK_KERNEL_URL`, which the API reads through
+  `kernel_ro`, and None. It skips unless `DESK_KERNEL_PLANS` lists the plan the test names with
+  `@pytest.mark.kernel_plan(...)`; every test that uses `kernel` names one.
+
+Tests read their arguments (prices, slots, Desks) from `ro_schema` as `desk_api`, with the copy set the
+way the API sets it, so the fake's mirror is checked by the same reads. `arrange` puts a session in a
+state the HTTP API can't reach on demand (closed, paused): through the fake's knobs, or for the real
+kernel as `desk_admin` on its tables, which only tests may do.
+"""
+
+import os
+from collections.abc import AsyncIterator, Callable, Iterator
+from datetime import timedelta
+
+import httpx
+import psycopg
+import pytest
+from psycopg.rows import dict_row
+
+from desk.api.kernel_client import CredentialView, KernelHttp
+from desk.db.session import database_url, libpq_url
+from desk.kernel_api import ModeRequest
+from tests.kernel_contract.fake_kernel import IDLE_LIMIT, FakeKernelState, fake_kernel_app
+from tests.kernel_contract.ro_tables import FAKE_RO_SCHEMA, FakeRO, create_fake_ro
+
+REAL_RO_SCHEMA = "kernel_ro"
+IDLE_CLOSE = IDLE_LIMIT + timedelta(seconds=1)   # a visitor session idle this long is closed
+
+
+def _connect(prefix: str) -> psycopg.Connection:
+    return psycopg.connect(libpq_url(database_url(prefix)), autocommit=True)
+
+
+@pytest.fixture(scope="session")
+def admin() -> Iterator[psycopg.Connection]:
+    """desk_admin: builds fake_kernel_ro, writes the fake's rows and arranges the real kernel's tables."""
+    with _connect("ADMIN") as conn:
+        yield conn
+
+
+@pytest.fixture(scope="session")
+def fake_ro(admin: psycopg.Connection) -> FakeRO:
+    return create_fake_ro(admin)
+
+
+@pytest.fixture(scope="session")
+def api_conn() -> Iterator[psycopg.Connection]:
+    with _connect("API") as conn:
+        conn.row_factory = dict_row
+        yield conn
+
+
+@pytest.fixture
+def ro_read(api_conn: psycopg.Connection) -> Callable[..., list[dict]]:
+    """`read(ro_schema, copy_id, query, params)`: rows as desk_api, with `{ro}` in the query naming the schema."""
+
+    def read(ro_schema: str, copy_id: str, query: str, params: tuple = ()) -> list[dict]:
+        if ro_schema not in (FAKE_RO_SCHEMA, REAL_RO_SCHEMA):
+            raise ValueError(f"not a kernel_ro schema: {ro_schema!r}")
+        with api_conn.transaction():
+            api_conn.execute("SELECT set_config('desk.copy_id', %s, true)", (copy_id,))
+            return api_conn.execute(query.format(ro=ro_schema), params).fetchall()
+
+    return read
+
+
+def _named_plan(request: pytest.FixtureRequest) -> str:
+    marker = request.node.get_closest_marker("kernel_plan")
+    if marker is None or len(marker.args) != 1:
+        pytest.fail("a contract test names the kernel plan that serves its routes: @pytest.mark.kernel_plan(\"01a\")")
+    return marker.args[0]
+
+
+@pytest.fixture(params=["fake", pytest.param("real", marks=pytest.mark.real_kernel)])
+async def kernel(request: pytest.FixtureRequest, fake_ro: FakeRO) -> AsyncIterator[tuple]:
+    plan = _named_plan(request)
+    if request.param == "fake":
+        state = FakeKernelState(ro=fake_ro)
+        http = KernelHttp("http://fake-kernel", transport=httpx.ASGITransport(app=fake_kernel_app(state)))
+        ro_schema = FAKE_RO_SCHEMA
+    else:
+        url = os.environ.get("DESK_KERNEL_URL")
+        if not url:
+            pytest.skip("DESK_KERNEL_URL is not set")
+        landed = {name.strip() for name in os.environ.get("DESK_KERNEL_PLANS", "").split(",") if name.strip()}
+        if plan not in landed:
+            pytest.skip(f"kernel plan {plan} is not in DESK_KERNEL_PLANS")
+        state, http, ro_schema = None, KernelHttp(url), REAL_RO_SCHEMA
+    try:
+        yield http, ro_schema, state
+    finally:
+        await http.aclose()
+
+
+class Arrange:
+    """Session states the contract needs that a test can't reach through the kernel's HTTP API alone."""
+
+    def __init__(self, state: FakeKernelState | None, admin: psycopg.Connection):
+        self._state, self._admin = state, admin
+
+    async def take_over(self, owner: CredentialView, session_id: str, generation: int) -> None:
+        """Mode `owner` (generation + 1), as the owner's take-over sets it."""
+        if self._state is not None:
+            self._state.set_mode(session_id, "owner")
+        else:
+            await owner.call("POST /sessions/{id}/mode", ModeRequest(mode="owner", generation=generation),
+                             path={"id": session_id})
+
+    def pause(self, session_id: str) -> None:
+        """Mode `paused`, as the breaker's third strike sets it (generation unchanged)."""
+        if self._state is not None:
+            self._state.set_mode(session_id, "paused")
+        else:
+            self._admin.execute("UPDATE kernel.sessions SET mode = 'paused', strikes = 3 WHERE session_id = %s",
+                                (session_id,))
+
+    def close_idle_sessions(self, session_id: str) -> None:
+        """Closes the session: the fake's clock moves past the 24-hour idle limit (closing every idle visitor
+        session of the fake), the real kernel's row gets `closed_at`."""
+        if self._state is not None:
+            self._state.now += IDLE_CLOSE
+        else:
+            self._admin.execute("UPDATE kernel.sessions SET closed_at = now() WHERE session_id = %s", (session_id,))
+
+
+@pytest.fixture
+def arrange(kernel: tuple, admin: psycopg.Connection) -> Arrange:
+    return Arrange(kernel[2], admin)
