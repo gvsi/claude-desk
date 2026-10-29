@@ -260,6 +260,34 @@ describe('public chat page', () => {
     await expect.element(second.screen.getByRole('button', { name: 'Cancel this request' })).not.toBeInTheDocument();
     await vi.waitFor(() => expect(receiptsOf(heldRow)).toEqual(['Passed to Maria Rivera to answer', held.visitor_plain, 'Cancelled']));
     expect(receiptsOf(bookedRow)).toEqual(booked);
+
+    // In a third chat two requests are held. While the first one's cancel is out, the other
+    // request's button can't be pressed, so no click is lost; once it is back, that one cancels too.
+    const third = await renderRoute(PAGE, { seed: 'rivera' });
+    await ready(third.screen);
+    await say(third.screen, 'Can I get 15% off if I pay cash?');
+    await say(third.screen, 'Can I get 15% off if I pay cash?');
+    const holds = chatEvents().flatMap(({ ev }) => (ev.type === 'held' ? [ev.decision_id] : []));
+    expect(holds).toHaveLength(2);
+    const cancels = third.screen.getByRole('button', { name: 'Cancel this request' });
+    await vi.waitFor(() => expect(cancels.elements()).toHaveLength(2));
+    const [firstHold, secondHold] = cancels.elements();
+    // The first cancel goes through a second late, answered as the route answers.
+    mockStore.inject({ route: 'cancelRequest', status: 202, body: { decision_id: holds[0] }, delayMs: 1_000, afterCommit: true });
+    const before = requests('cancelRequest').length;
+    await cancels.first().click();
+    await expect.element(cancels.first()).toHaveAttribute('aria-busy', 'true');
+    await expect.element(cancels.last()).toBeDisabled();
+    expect(secondHold?.getAttribute('aria-busy')).toBeNull();
+    await vi.waitFor(() => expect(firstHold?.isConnected).toBe(false), { timeout: 3_000 });
+    await expect.element(cancels).toBeEnabled();
+    await cancels.click();
+    await expect.element(cancels).not.toBeInTheDocument();
+    expect(requests('cancelRequest').slice(before).map((r) => r.path)).toEqual(
+      holds.map((id) => `/api/public/desks/${RIVERA.slug}/decisions/${encodeURIComponent(id)}/cancel`),
+    );
+    const states = chatEvents().flatMap(({ ev }) => (ev.type === 'resolved' ? [[ev.decision_id, ev.state]] : []));
+    expect(states).toEqual(holds.map((id) => [id, 'cancelled']));
   });
 
   it('error_event_shows_static_copy', async () => {
