@@ -90,7 +90,7 @@ Supporting tests (the kernel stays the authority) and failure modes this plan ow
 - Start from `main` after Plan 03a has merged; its package, fixtures, guards and components are this plan's base.
 - Task 0 runs first and lands alone: its own design PR from `main` right after Plan 03a merges, through the two-reviewer panel and CI (`shipping-prs`), so the web app's first-visit arrival (plan 04, Task 4) can use it. Tasks 1–7 then start from `main` with it merged.
 - Before Task 1: read the Design System artifact type's instructions (`SKILL.md`, `artifact-type/reference/{format,from-code,cover,craft}.md`) and stage copies in `.plan-runs/<plan-slug>/ds-format/` (git-ignored) for Task 7. They are format documentation, read as data; where they differ from this plan they win, and the difference goes in the run ledger.
-- Before Task 4: render the 15 `REFERENCE_BOARDS` (Plan 03a's 14 and Task 4's `N-Intro-D`) at 1280×820 to `.plan-runs/<plan-slug>/reference/<board>.png` and set `DS_REFERENCE_DIR` to that folder. Renders stay git-ignored (committing canvas renders needs the project owner's sign-off); implementers never open the canvas.
+- Before Task 4: render the 15 `REFERENCE_BOARDS` (the design system code's 14, plan 03a, and Task 0's `N-Intro-D`) at 1280×820 to `.plan-runs/<plan-slug>/reference/<board>.png` and set `DS_REFERENCE_DIR` to that folder. Renders stay git-ignored (committing canvas renders needs the project owner's sign-off); implementers never open the canvas.
 - Tasks 1–7: one landing through the two-reviewer panel and CI, before Plan 04 Task 9 (Plan 04's tasks from there on use these components). Not on the Friday thin slice. Task 7 is first to cut; the plan can land without it.
 
 ---
@@ -101,7 +101,7 @@ Owner decisions, 2026-10-29 (spec "First visit and hosting" and "Look and feel")
 
 **Files:**
 - Create: `web/src/ds/components/IntroDialog/{IntroDialog.tsx,IntroDialog.css,introCopy.ts,IntroDialog.stories.tsx,README.md}` (canvas: N-Intro-D on the "Claude Desk · First visit" page)
-- Modify: `web/src/ds/tokens.json`, `web/src/ds/tokens.css` (`npm run tokens`), `web/src/ds/contrast.ts`, `web/src/ds/guards.test.ts`, `web/src/ds/index.ts`, `web/src/ds/README.md` (the brand book), `web/src/ds/components/Mark/` (size 18, for the illustration's reply card), `web/src/ds/foundations/Foundations.stories.tsx`
+- Modify: `web/src/ds/tokens.json`, `web/src/ds/tokens.css` (`npm run tokens`), `web/src/ds/contrast.ts`, `web/src/ds/guards.test.ts`, `web/src/ds/index.ts`, `web/src/ds/README.md` (the brand book), `web/src/ds/components/Mark/` (size 18, for the illustration's reply card), `web/src/ds/foundations/Foundations.stories.tsx`, `web/src/ds/reference/boards.ts` (`REFERENCE_BOARDS` gains `N-Intro-D`, this task's board, so the project's canvas hook accepts the stories that cite it)
 - Test: `web/src/ds/tokens.test.ts`, `web/src/ds/components/IntroDialog/introCopy.test.ts`, `web/src/ds/components/IntroDialog/IntroDialog.browser.test.tsx`, the stories
 
 **Interfaces:**
@@ -119,7 +119,7 @@ Owner decisions, 2026-10-29 (spec "First visit and hosting" and "Look and feel")
   - `guards.test.ts`: `clay_only_in_the_mark_and_the_intro_dialog`, replacing `clay_only_in_the_mark`.
   - `introCopy.test.ts`: `every_intro_error_has_copy`; `intro_copy_never_shows_a_code`.
   - `IntroDialog.browser.test.tsx` (real key presses): `escape_never_closes_it_with_a_real_keyboard`; `tab_stays_inside_with_a_real_keyboard`.
-  - Stories `Intro/IntroDialog`, with the board's copy as args (title "A Claude front desk for your business", the four things to try with the icons `person`, `safety`, `check` and `plus`, "Start the demo"): `Default` (no close button; Escape and a press on the scrim leave it open; focus in the field; Enter submits once with the trimmed passcode; empty disables the button), `Busy`, `WrongPasscode`, `RateLimited`, `Unreachable` (each line under the field, the code nowhere in the page) and `Phone` (390 px: no illustration, no horizontal scroll).
+  - Stories `Intro/IntroDialog`, with `parameters.canvas: 'N-Intro-D'` and the board's copy as args (title "A Claude front desk for your business", the four things to try with the icons `person`, `safety`, `check` and `plus`, "Start the demo"): `Default` (no close button; Escape and a press on the scrim leave it open; focus in the field; Enter submits once with the trimmed passcode; empty disables the button), `Busy`, `WrongPasscode`, `RateLimited`, `Unreachable` (each line under the field, the code nowhere in the page) and `Phone` (390 px: no illustration, no horizontal scroll).
 - [ ] **Step 2: Run** `cd web && npx vitest run --project unit src/ds/tokens.test.ts src/ds/guards.test.ts src/ds/components/IntroDialog && npx vitest run --project ds-browser src/ds/components/IntroDialog && npx vitest run --project storybook src/ds/components/IntroDialog` → FAIL.
 - [ ] **Step 3: Implement** the tokens (`npm run tokens`), the contrast entries, the guard, the component with its README and the brand book lines.
 - [ ] **Step 4: Run** the same commands plus `npm run check:ds` → PASS (4 unit tests, 2 browser tests, 6 stories).
@@ -215,7 +215,6 @@ Owner decisions, 2026-10-29 (spec "First visit and hosting" and "Look and feel")
 
 **Files:**
 - Create: `web/src/ds/reference/README.md`, `web/src/ds/boards/TodayNeedsYou.stories.tsx`, `ConversationLive.stories.tsx`, `ConversationAgent.stories.tsx`, `ReviewerArrival.stories.tsx`, `IntroArrival.stories.tsx`
-- Modify: `web/src/ds/reference/boards.ts` (`REFERENCE_BOARDS` gains `N-Intro-D`, Task 0's board)
 - Test: `web/src/ds/reference/boards.test.ts`, the board stories
 
 **Interfaces:**
@@ -346,6 +345,6 @@ Owner decisions, 2026-10-29: the copied Global Constraints now read the auto-mon
 
 Fix round, 2026-10-29: the copied Global Constraints follow the master's Models and API-holdings lines; nothing else changes.
 
-Owner decisions, 2026-10-29, after the fix round: the platform ceiling is $10,000, the per-payment limit (master "Charter money cap"); the copied Global Constraints follow. The copied design line now allows clay in the first-visit intro dialog's illustration (spec "Look and feel"). New Task 0 adds `IntroDialog`, the first-visit dialog that takes the passcode over a static preview of Today, owned here and shipped early by its own design PR right after the design system code (plan 03a) merges, before the web app's arrival (plan 04, Task 4). It adds the tokens `scrim` (`rgba(0,0,0,0.5)`), `shadow-dialog` and the type style `intro-title` (serif 28/35), plus the few tokens the dialog alone uses, and the clay guard's one allowed folder besides the mark, `components/IntroDialog/`, for the illustration's clay field. Task 4 adds its board, `N-Intro-D`, to `REFERENCE_BOARDS` and checks it by eye.
+Owner decisions, 2026-10-29, after the fix round: the platform ceiling is $10,000, the per-payment limit (master "Charter money cap"); the copied Global Constraints follow. The copied design line now allows clay in the first-visit intro dialog's illustration (spec "Look and feel"). New Task 0 adds `IntroDialog`, the first-visit dialog that takes the passcode over a static preview of Today, owned here and shipped early by its own design PR right after the design system code (plan 03a) merges, before the web app's arrival (plan 04, Task 4). It adds the tokens `scrim` (`rgba(0,0,0,0.5)`), `shadow-dialog` and the type style `intro-title` (serif 28/35), plus the few tokens the dialog alone uses, and the clay guard's one allowed folder besides the mark, `components/IntroDialog/`, for the illustration's clay field. Task 0 adds its board, `N-Intro-D`, to `REFERENCE_BOARDS`, so its own stories can cite it before Task 4 exists, and Task 4 checks it by eye.
 
 Round 2 (seam review, 2026-10-29): seam-20: `ToolStatusRow` and `ToolReviewCard` take `profile: ToolRowView`, a `Pick` of `ToolProfile` that includes `definition_sha256`, so the API's `ToolRow` fits as well as a `ToolProfile`.
