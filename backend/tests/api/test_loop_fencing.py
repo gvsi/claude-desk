@@ -281,6 +281,92 @@ async def test_interrupted_turn_recovers_by_call_without_redeciding(api_conn, en
         == [("writing", None), ("receipt", decision_id), ("writing", None), ("message", None), ("turn_end", None)]
 
 
+async def interrupt_after(path: str, caller: Caller, visitor, fake, engine: AsyncEngine, locks: AsyncEngine,
+                          script: list) -> None:
+    """Run a turn on `script` and stop its worker (a deploy, a crash) once the kernel answered `path`, before the
+    API hears the answer: Claude's call stays on record with no result."""
+    answered = asyncio.Event()
+
+    async def stall(request: httpx.Request) -> None:
+        answered.set()
+        await asyncio.Event().wait()
+
+    async with KernelHttp("http://fake-kernel", transport=Kernel(fake, after={path: stall})) as http:
+        run = asyncio.create_task(pending(replace(caller, kernel=http.session(visitor.token)), ScriptedModel(script),
+                                          engine, locks))
+        await asyncio.wait_for(answered.wait(), 5)
+        run.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await run
+
+
+async def test_recovery_after_a_take_over_and_hand_back_answers_from_what_ran(
+        api_conn, engine, locks, caller, visitor, fake):
+    # the booking ran at generation 0, and the worker stopped before Claude or the visitor heard of it
+    await said(api_conn, caller, "Book me the earliest visit.")
+    await interrupt_after("/execute", caller, visitor, fake, engine, locks, [
+        response(tool_use("native__book", {"slot_id": open_slot(fake, caller)}, id="toolu_book"))])
+    (decision_id,) = [call.body["decision_id"] for call in fake.called("/execute")]
+    decision = fake.decisions[decision_id].decision
+    assert decision.state == "executed"
+    # the visitor saw nothing, so the owner takes the conversation over and hands it back: generation 2
+    fake.set_mode(caller.session_id, "owner")
+    fake.set_mode(caller.session_id, "ai")
+    assert fake.sessions[caller.session_id].generation == 2
+
+    await said(api_conn, caller, "Did that go through?")
+    model = ScriptedModel([response(reply("You're booked.", id="toolu_done"))])
+    assert await pending(caller, model, engine, locks) == "done"
+
+    # the call is found at the generation its turn ran at, and nothing is decided or run again
+    (lookup,) = fake.called("/decisions/by_call")
+    assert lookup.query == {"session_id": caller.session_id, "generation": "0", "call_id": "toolu_book"}
+    assert len(fake.called("/decide")) == 1 and len(fake.called("/execute")) == 1
+    assert len(fake.desks[caller.desk_id].booked) == 1
+    # Claude learns the booking ran, so it isn't proposed again under a new ID, and the visitor sees the receipt
+    (request,) = model.requests
+    (result,) = [block for block in request.messages[-1]["content"] if block["type"] == "tool_result"]
+    assert (result["tool_use_id"], json.loads(result["content"]), result["is_error"]) == (
+        "toolu_book", {"outcome": "done", "decision_id": decision_id, "message": decision.visitor_plain}, False)
+    assert [(event.type, getattr(event, "decision_id", None)) for event in await events(api_conn, caller.session_id)] \
+        == [("writing", None), ("receipt", decision_id), ("writing", None), ("message", None), ("turn_end", None)]
+
+
+async def test_recovery_during_a_take_over_runs_nothing_and_leaves_an_open_allow_pending(
+        api_conn, engine, locks, caller, visitor, fake):
+    # an earlier take-over and hand-back: the session is at generation 2
+    fake.set_mode(caller.session_id, "owner")
+    fake.set_mode(caller.session_id, "ai")
+    # the kernel allowed the booking at generation 2, and the worker stopped before it asked to run it
+    await said(api_conn, caller, "Book me the earliest visit.")
+    await interrupt_after("/decide", caller, visitor, fake, engine, locks, [
+        response(tool_use("native__book", {"slot_id": open_slot(fake, caller)}, id="toolu_book"))])
+    (decision,) = [found.decision for found in fake.decisions.values() if found.decision.call_id == "toolu_book"]
+    assert decision.state == "allowed"
+    fake.set_mode(caller.session_id, "owner")                # the owner takes over: generation 3
+
+    # the visitor writes meanwhile: their request answers the open call, and Claude stays quiet
+    await said(api_conn, caller, "Hello?")
+    model = ScriptedModel()
+    assert await pending(caller, model, engine, locks) == "not_ai"
+
+    # found at generation 2 and never run at generation 3, where the kernel would refuse it; how it ends is left
+    # for the visitor's next request, which publishes its final state
+    (lookup,) = fake.called("/decisions/by_call")
+    assert lookup.query["generation"] == "2"
+    assert fake.called("/execute") == [] and len(fake.called("/decide")) == 1
+    assert fake.desks[caller.desk_id].booked == set()
+    assert await control_rows(api_conn, caller.session_id) == [
+        ("decision_pending", {"decision_id": decision.decision_id})]
+    # Claude will read that it's not known to have gone through, rather than that it never ran
+    ((results,),) = await rows(api_conn, caller.session_id, "model_tool_results", "model_content")
+    assert [(result["tool_use_id"], json.loads(result["content"]), result["is_error"]) for result in results] == [
+        ("toolu_book", {"outcome": "unknown", "decision_id": decision.decision_id,
+                        "message": decision.visitor_plain}, True)]
+    assert model.requests == []
+    assert [event.type for event in await events(api_conn, caller.session_id)] == ["writing"]
+
+
 async def test_context_unavailable_leaves_work_pending(api_conn, engine, locks, caller, fake):
     await said(api_conn, caller, "Do you fix leaks?")
     fake.fail("/context/{session_id}", "connect", times=1)    # the kernel is out of reach for the context
@@ -430,7 +516,7 @@ async def test_recovered_replies_answer_from_what_was_delivered(api_conn, engine
     shown = reply("Yes, we fix leaks.", id="toolu_shown")
     bad = tool_use("send_reply", {"prose": 7}, id="toolu_bad")
     lost = reply("Want me to find a time?", id="toolu_lost")
-    await append_assistant(api_conn, caller.ids, [shown, bad, lost])
+    await append_assistant(api_conn, caller.ids, [shown, bad, lost], generation=0)
     await api_conn.commit()
     for block, attempt in ((shown, 1), (bad, 2)):
         await send_reply(api_conn, caller, 0, block["input"], attempt, call_id=block["id"])
@@ -451,7 +537,7 @@ async def test_recovered_replies_answer_from_what_was_delivered(api_conn, engine
 
     # a reply that never showed leaves the visitor unanswered: Claude is asked again, and reads why
     await prepare_model_input(api_conn, caller.session_id)
-    await append_assistant(api_conn, caller.ids, [reply("We do.", id="toolu_gone")])
+    await append_assistant(api_conn, caller.ids, [reply("We do.", id="toolu_gone")], generation=0)
     await api_conn.commit()
     model = ScriptedModel([response(reply("Yes, we fix leaks."))])
     assert await pending(caller, model, engine, locks) == "done"
@@ -532,11 +618,11 @@ async def test_a_run_that_fails_outside_a_turn_leaves_its_work_for_the_next_requ
     # and Claude isn't asked anything
     await said(api_conn, caller, "Quote me a drain clearing.")
     await prepare_model_input(api_conn, caller.session_id)
-    await append_assistant(api_conn, caller.ids, [tool_use("native__quote", DRAIN, id="toolu_quote")])
+    await append_assistant(api_conn, caller.ids, [tool_use("native__quote", DRAIN, id="toolu_quote")], generation=0)
     await api_conn.commit()
     recover, broken = loop.recover_call, RuntimeError("recovery broke")
 
-    async def failing(*args):
+    async def failing(*args, **kwargs):
         raise broken
 
     monkeypatch.setattr(loop, "recover_call", failing)

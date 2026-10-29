@@ -452,10 +452,10 @@ async def test_recover_call_finds_the_decision_and_never_redecides(api_conn, cal
     ran_decision = fake.decisions[ran_id]
     decided = len(fake.called("/decide"))
 
-    lost = await recover_call(api_conn, caller, 0, never)
-    executed_now = await recover_call(api_conn, caller, 0, allowed)
-    stored = await recover_call(api_conn, caller, 0, ran)
-    waiting = await recover_call(api_conn, caller, 0, held)
+    lost = await recover_call(api_conn, caller, 0, never, made_at=0)
+    executed_now = await recover_call(api_conn, caller, 0, allowed, made_at=0)
+    stored = await recover_call(api_conn, caller, 0, ran, made_at=0)
+    waiting = await recover_call(api_conn, caller, 0, held, made_at=0)
 
     assert len(fake.called("/decide")) == decided                     # nothing is decided again
     assert (lost.result, lost.unavailable, lost.session_ended) == ({"outcome": "not_run"}, False, False)
@@ -466,4 +466,51 @@ async def test_recover_call_finds_the_decision_and_never_redecides(api_conn, cal
     assert waiting.result["outcome"] == "held_for_owner" and waiting.status.phase == "held"
     assert [event.type for event in await events(api_conn, caller.session_id)] == ["receipt", "receipt", "held"]
     with pytest.raises(ValueError):
-        await recover_call(api_conn, caller, 0, tool_use("send_reply", {"prose": "Hi", "clauses": []}))
+        await recover_call(api_conn, caller, 0, tool_use("send_reply", {"prose": "Hi", "clauses": []}), made_at=0)
+
+
+async def test_recover_call_from_a_generation_the_session_left_runs_nothing(api_conn, caller, visitor, fake):
+    """A take-over and a hand-back came between the interrupted turn (generation 0) and its recovery (generation
+    2): each call is found where it was made, shown and answered from its decision, and nothing is run."""
+    async def decide(block: dict, *, run: bool = False) -> Decision:
+        decision = await visitor.kernel.call("POST /decide", DecideRequest(
+            session_id=caller.session_id, generation=0,
+            call=ToolCall(call_id=block["id"], tool=from_api_name(block["name"]), args=block["input"])))
+        if run:
+            await visitor.kernel.call("POST /execute", ExecuteRequest(
+                decision_id=decision.decision_id, session_id=caller.session_id, generation=0))
+        return fake.decisions[decision.decision_id].decision
+
+    fake.script("native.request_callback", exec_state="failed")
+    blocks = {"open": tool_use("native__quote", DRAIN), "ran": tool_use("native__find_slots", {"days": 3}),
+              "failed": tool_use("native__request_callback", {"name": "Dana", "contact": "dana@example.com",
+                                                              "reason": "A leak under the sink."}),
+              "held": tool_use("native__quote", {**DRAIN, "requested_discount_bp": 1000}),
+              "refused": tool_use("native__transfer_funds", {})}
+    made = {name: await decide(block, run=name in ("ran", "failed")) for name, block in blocks.items()}
+    assert {name: decision.state for name, decision in made.items()} == {
+        "open": "allowed", "ran": "executed", "failed": "failed", "held": "held", "refused": "refused"}
+    fake.set_mode(caller.session_id, "owner")
+    fake.set_mode(caller.session_id, "ai")
+    decided, executed = len(fake.called("/decide")), len(fake.called("/execute"))
+
+    found = {name: await recover_call(api_conn, caller, 2, block, made_at=0) for name, block in blocks.items()}
+
+    assert (len(fake.called("/decide")), len(fake.called("/execute"))) == (decided, executed)
+    assert [call.query["generation"] for call in fake.called("/decisions/by_call")] == ["0"] * 5
+    said = {name: {"decision_id": made[name].decision_id, "message": made[name].visitor_plain} for name in made}
+    assert {name: (outcome.result, outcome.is_error) for name, outcome in found.items()} == {
+        "open": ({"outcome": "unknown", **said["open"]}, True),       # not final: left for the next request
+        "ran": ({"outcome": "done", **said["ran"]}, False),
+        "failed": ({"outcome": "failed", **said["failed"]}, True),
+        "held": ({"outcome": "held_for_owner", **said["held"]}, False),
+        "refused": ({"outcome": "refused", **said["refused"]}, True)}
+    assert not any(outcome.fenced or outcome.unavailable or outcome.session_ended or outcome.turn_over
+                   for outcome in found.values())
+    assert [(event.type, event.decision_id) for event in await events(api_conn, caller.session_id)] == [
+        ("receipt", made["ran"].decision_id), ("receipt", made["failed"].decision_id),
+        ("held", made["held"].decision_id), ("receipt", made["refused"].decision_id)]
+    pending = await api_conn.execute(text("SELECT payload FROM app.run_events WHERE session_id = :s"
+                                          " AND kind = 'control' AND type = 'decision_pending'"),
+                                     {"s": caller.session_id})
+    assert pending.scalars().all() == [{"decision_id": made["open"].decision_id}]

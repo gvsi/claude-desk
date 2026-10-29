@@ -173,6 +173,25 @@ async def test_decide_is_idempotent_and_found_by_call(kernel, ro_read):
 
 
 @pytest.mark.kernel_plan("01a")
+async def test_by_call_finds_a_call_made_before_a_take_over(kernel, ro_read, arrange):
+    """The API recovers an interrupted turn's calls by the generation the turn ran at, even once a take-over or a
+    hand-back moved the session on: `by_call` is keyed by the generation it names, not fenced by the current one."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    view, session_id = http.session(visitor.session_token), visitor.state.session_id
+    made = await decide(view, session_id, 0, "call-1", "native.quote",
+                        quote_args(item_id(ro_read, ro_schema, copy, "Drain clearing")))
+    await arrange.take_over(http.owner(copy.owner_token), session_id, 0)
+
+    query = {"session_id": session_id, "generation": 0, "call_id": "call-1"}
+    found = await view.call("GET /decisions/by_call?session_id=&generation=&call_id=", query=query)
+    assert found.decision_id == made.decision_id
+    assert await refused(view.call("GET /decisions/by_call?session_id=&generation=&call_id=",
+                                   query={**query, "generation": 1})) == (404, "not_found")
+
+
+@pytest.mark.kernel_plan("01a")
 async def test_unknown_tool_is_a_refused_decision(kernel, ro_read):
     http, ro_schema, _ = kernel
     copy = await new_copy(http)

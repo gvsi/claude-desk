@@ -309,8 +309,15 @@ async def _execute(conn: AsyncConnection, caller: Caller, generation: int, decis
     return ToolOutcome(_executed(final, decision.decision_id, result), result.state != "succeeded", status=status)
 
 
-async def _settle(conn: AsyncConnection, caller: Caller, generation: int, decision: Decision) -> ToolOutcome:
-    """Act on a decision as it stands: run an allow, show a hold, and answer with what it ended as."""
+async def _settle(conn: AsyncConnection, caller: Caller, generation: int | None, decision: Decision) -> ToolOutcome:
+    """Act on a decision as it stands: run an allow, show a hold, and answer with what it ended as.
+
+    `generation` None settles a decision made at a generation the session has since left (a take-over or a
+    hand-back came after the turn that made it stopped): it is shown and answered from its state alone. Nothing goes
+    to /execute, which the kernel refuses at another generation than the decision's (an allow would expire there,
+    and the turn stop as fenced), so a call that ran is answered without the stored result a repeat returns, and
+    an allow that isn't final yet (an execution may still be under way) is left for the visitor's next request,
+    which publishes its final state, and answered `unknown`."""
     message = {"decision_id": decision.decision_id, "message": decision.visitor_plain}
     if decision.outcome == "hold":
         status = None
@@ -319,10 +326,16 @@ async def _settle(conn: AsyncConnection, caller: Caller, generation: int, decisi
         # an answered hold reaches the visitor through the owner's answer (Task 8), as resolved
         return ToolOutcome({"outcome": "held_for_owner", **message}, False, status=status)
     if decision.state == "allowed":
+        if generation is None:
+            await _pending(conn, caller, decision.decision_id)
+            return ToolOutcome({"outcome": "unknown", **message}, True)
         return await _execute(conn, caller, generation, decision)
     status = await _publish(conn, caller, Status(decision, "receipt"))
     if decision.state not in EXECUTED:                  # refused, at the decision or at execution, or expired
         return ToolOutcome({"outcome": "refused", **message}, True, status=status)
+    if generation is None:                              # ran at a generation the session has left
+        ran = "done" if decision.state == "executed" else decision.state
+        return ToolOutcome({"outcome": ran, **message}, ran != "done", status=status)
     try:                                                # ran already: a repeat returns the stored result
         result = await caller.kernel.call("POST /execute", ExecuteRequest(
             decision_id=decision.decision_id, session_id=caller.session_id, generation=generation))
@@ -360,15 +373,18 @@ async def route_call(conn: AsyncConnection, caller: Caller, generation: int, blo
     return replace(outcome, decide_ms=decide_ms, execute_ms=_ms(started))
 
 
-async def recover_call(conn: AsyncConnection, caller: Caller, generation: int, block: dict) -> ToolOutcome:
-    """A `tool_use` block a turn left unanswered (it stopped after the call): found by call ID, never decided
-    again. No decision means it never ran; an allow runs now (a repeat returns the stored result); a final
-    decision answers with what it ended as."""
+async def recover_call(conn: AsyncConnection, caller: Caller, generation: int, block: dict, *,
+                       made_at: int) -> ToolOutcome:
+    """A `tool_use` block a turn left unanswered (it stopped after the call): found by call ID at `made_at`, the
+    session generation that turn ran at, never decided again. No decision means it never ran; an allow runs now (a
+    repeat returns the stored result); a final decision answers with what it ended as. When the session has left
+    that generation since (`generation` is the session's now), the decision is only shown and answered from its
+    state (`_settle`)."""
     call = _tool_call(block)
-    found = await _by_call(caller, generation, call.call_id)
+    found = await _by_call(caller, made_at, call.call_id)
     if isinstance(found, ToolOutcome):
         return found
-    return await _settle(conn, caller, generation, found)
+    return await _settle(conn, caller, generation if made_at == generation else None, found)
 
 
 # Replies -------------------------------------------------------------------------------------------------

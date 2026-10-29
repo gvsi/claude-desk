@@ -66,10 +66,12 @@ class ModelInput:
 
 @dataclass(frozen=True)
 class OpenToolUse:
-    """An assistant row whose `tool_use` blocks have no results row yet."""
+    """An assistant row whose `tool_use` blocks have no results row yet, and the session generation its turn made
+    them at (the kernel keys a call's decision by it)."""
 
     assistant_n: int
     tool_uses: list[dict]
+    generation: int
 
 
 class UnansweredToolUse(Exception):
@@ -227,7 +229,8 @@ async def _pending(conn: AsyncConnection, session_id: str) -> list[Any]:
 
 async def unanswered_tool_use(conn: AsyncConnection, session_id: str) -> OpenToolUse | None:
     """The session's last assistant row, when it has `tool_use` blocks and no results row follows it."""
-    last = (await conn.execute(select(MESSAGES.c.n, MESSAGES.c.model_seq, MESSAGES.c.model_content).where(
+    last = (await conn.execute(select(MESSAGES.c.n, MESSAGES.c.model_seq, MESSAGES.c.model_content,
+                                      MESSAGES.c.generation).where(
         MESSAGES.c.session_id == session_id, MESSAGES.c.kind == "model_assistant")
         .order_by(MESSAGES.c.model_seq.desc()).limit(1))).first()
     if last is None:
@@ -238,7 +241,7 @@ async def unanswered_tool_use(conn: AsyncConnection, session_id: str) -> OpenToo
     answered = (await conn.execute(select(func.count()).where(
         MESSAGES.c.session_id == session_id, MESSAGES.c.kind == "model_tool_results",
         MESSAGES.c.model_seq > last.model_seq))).scalar_one()
-    return None if answered else OpenToolUse(assistant_n=last.n, tool_uses=tool_uses)
+    return None if answered else OpenToolUse(assistant_n=last.n, tool_uses=tool_uses, generation=last.generation)
 
 
 async def delivered_reply(conn: AsyncConnection, session_id: str, call_id: str) -> Any | None:
@@ -365,9 +368,10 @@ async def prepare_model_input(conn: AsyncConnection, session_id: str) -> ModelIn
     return ModelInput(tools=tools, messages=messages)
 
 
-async def append_assistant(conn: AsyncConnection, ids: Ids, content: list[dict]) -> int:
+async def append_assistant(conn: AsyncConnection, ids: Ids, content: list[dict], *, generation: int) -> int:
     """Write Claude's response (frozen, thinking included) as the next step of the current context, before any
-    of its blocks is routed; returns its `n`."""
+    of its blocks is routed; returns its `n`. `generation` is the session generation its turn runs at, which its
+    tool calls are decided at: a turn interrupted after a call finds the call's decision by it."""
     await _lock_transcript(conn, ids.session_id)
     current = await _current_context(conn, ids.session_id)
     if current is None:
@@ -375,7 +379,7 @@ async def append_assistant(conn: AsyncConnection, ids: Ids, content: list[dict])
     await _refuse_open_tool_use(conn, ids.session_id)
     return await _insert(conn, ids, kind="model_assistant", author="claude", visibility="model",
                          model_context=current, model_seq=await _next_seq(conn, ids.session_id),
-                         model_content=content)
+                         model_content=content, generation=generation)
 
 
 async def append_tool_results(conn: AsyncConnection, ids: Ids, assistant_n: int, results: list[dict]) -> int:

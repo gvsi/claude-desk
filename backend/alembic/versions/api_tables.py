@@ -5,7 +5,8 @@
 reach `app.*`.
 
 - `messages` is the append-only transcript. `n` is the cursor; a row the model sees carries a frozen
-  `model_content` and, once sent, its `model_context` and a `model_seq` unique per session.
+  `model_content` and, once sent, its `model_context` and a `model_seq` unique per session. An assistant
+  row records the session `generation` its tool calls were made at, which the kernel finds them by.
 - `run_events` holds each session's SSE events (`seq`, gapless per session), control rows the API
   handles once (`handled_at`) and metric rows. A signed status is published once per decision and
   ledger entry, and a due decision waits in at most one unhandled control row.
@@ -58,11 +59,13 @@ def upgrade() -> None:
             ADD COLUMN IF NOT EXISTS ref_id text,
             ADD COLUMN IF NOT EXISTS call_id text,
             ADD COLUMN IF NOT EXISTS event_seq bigint,
+            ADD COLUMN IF NOT EXISTS generation integer,
             ALTER COLUMN visibility SET NOT NULL,
             ADD CONSTRAINT messages_kind CHECK (kind IN {_in(MESSAGE_KINDS)}),
             ADD CONSTRAINT messages_author CHECK (author IN {_in(AUTHORS)}),
             ADD CONSTRAINT messages_visibility CHECK (visibility IN {_in(VISIBILITIES)}),
-            ADD CONSTRAINT messages_model_place CHECK ((model_seq IS NULL) = (model_context IS NULL));
+            ADD CONSTRAINT messages_model_place CHECK ((model_seq IS NULL) = (model_context IS NULL)),
+            ADD CONSTRAINT messages_generation CHECK ((generation IS NOT NULL) = (kind = 'model_assistant'));
         CREATE UNIQUE INDEX messages_model_seq ON app.messages (session_id, model_seq);
         CREATE INDEX messages_session ON app.messages (session_id, n);
         CREATE INDEX messages_pending ON app.messages (session_id, n) WHERE model_seq IS NULL;
@@ -158,11 +161,13 @@ def downgrade() -> None:
         DROP INDEX app.messages_session;
         DROP INDEX app.messages_model_seq;
         ALTER TABLE app.messages
+            DROP CONSTRAINT messages_generation,
             DROP CONSTRAINT messages_model_place,
             DROP CONSTRAINT messages_visibility,
             DROP CONSTRAINT messages_author,
             DROP CONSTRAINT messages_kind,
             ALTER COLUMN visibility DROP NOT NULL,
+            DROP COLUMN generation,
             DROP COLUMN event_seq,
             DROP COLUMN call_id,
             DROP COLUMN ref_id,

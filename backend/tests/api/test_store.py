@@ -63,7 +63,7 @@ def tool_results(message: dict) -> list[dict]:
 APP_COLUMNS = {
     "messages": {"n", "message_id", "copy_id", "desk_id", "session_id", "kind", "author", "text", "blocks", "language",
                  "owner_translation", "visibility", "wake", "model_context", "model_seq", "model_content", "ref_id",
-                 "call_id", "event_seq", "created_at"},
+                 "call_id", "event_seq", "generation", "created_at"},
     "run_events": {"id", "copy_id", "desk_id", "session_id", "kind", "seq", "type", "payload", "handled_at",
                    "created_at"},
     "setup_interviews": {"interview_id", "copy_id", "desk_id", "business_type", "step", "consent", "answers",
@@ -111,6 +111,11 @@ def test_migration_sets_app_columns(db):
         "INSERT INTO app.run_events (copy_id, session_id, kind, type, payload) VALUES ('c-1', 's-1', 'sse', 'writing', '{}')",
         "INSERT INTO app.run_events (copy_id, session_id, kind, seq, type, payload)"
         " VALUES ('c-1', 's-1', 'control', 1, 'run_resumable', '{}')",
+        # an assistant row records the generation its calls were made at, and only an assistant row has one
+        "INSERT INTO app.messages (message_id, copy_id, session_id, kind, author, visibility, model_context,"
+        " model_seq, model_content) VALUES ('m-1', 'c-1', 's-1', 'model_assistant', 'claude', 'model', 0, 1, '[]')",
+        "INSERT INTO app.messages (message_id, copy_id, session_id, kind, author, visibility, generation)"
+        " VALUES ('m-1', 'c-1', 's-1', 'visitor_text', 'visitor', 'public', 0)",
         "INSERT INTO app.model_calls (copy_id, route, model, input_tokens, cached_tokens, cache_write_tokens,"
         " output_tokens, latency_ms, stop_reason, created_at)"
         " VALUES ('c-1', 'chat', 'claude-opus-5-5', 1, 0, 0, 1, 1, 'end_turn', now())",
@@ -184,7 +189,7 @@ async def test_model_input_is_append_only(api_conn, ids):
 
     answer = first["response"]["content"]
     assert [block["type"] for block in answer] == ["thinking", "tool_use"]
-    assistant_n = await append_assistant(api_conn, ids, answer)
+    assistant_n = await append_assistant(api_conn, ids, answer, generation=0)
     await append_tool_results(api_conn, ids, assistant_n, tool_results(second["request"]["messages"][2]))
     await append_message(api_conn, ids, "visitor_text", text="Done, I typed in the code.")
     await api_conn.commit()                    # what comes back is what the database stored
@@ -215,7 +220,7 @@ async def test_tool_results_merge_first(api_conn, ids):
         {"type": "text", "text": "Let me check."},
         tool_use("toolu_quote", "native__quote", items=[{"item_id": "drain", "qty": 1}]),
         tool_use("toolu_slots", "native__find_slots"),
-    ])
+    ], generation=0)
     # the visitor writes again while the calls run, so their row comes before the results row
     late_n = await append_message(api_conn, ids, "visitor_text", text="Mornings are best.")
     quote = tool_result("toolu_quote", {"outcome": "done", "decision_id": "d-1", "result": {}, "fact_ids": []})
@@ -237,7 +242,7 @@ async def test_tool_change_is_an_appended_system_message(api_conn, ids):
     await start_fresh_context(api_conn, ids, TOOLS)
     await append_message(api_conn, ids, "visitor_text", text="Hi, I'd like my invoice.")
     await prepare_model_input(api_conn, ids.session_id)
-    await append_assistant(api_conn, ids, [{"type": "text", "text": "I can help once you verify."}])
+    await append_assistant(api_conn, ids, [{"type": "text", "text": "I can help once you verify."}], generation=0)
     before = await prepare_model_input(api_conn, ids.session_id)
 
     await append_message(api_conn, ids, "visitor_text", text="Done, I typed in the code.")
@@ -281,7 +286,7 @@ async def rebuild_tool_change_fixture(conn, ids, name: str) -> None:
     assert canonical(built.tools) == canonical(first["request"]["tools"])
 
     assistant, user, system = second["request"]["messages"][1:]
-    assistant_n = await append_assistant(conn, ids, first["response"]["content"])
+    assistant_n = await append_assistant(conn, ids, first["response"]["content"], generation=0)
     await append_tool_results(conn, ids, assistant_n, tool_results(user))
     for change, tool_name in tool_changes(system):
         await append_tool_change(conn, ids, change, tool_name)
@@ -301,7 +306,7 @@ async def test_tool_changes_go_last_before_the_assistant_turn(api_conn, kernel_h
     await start_fresh_context(api_conn, ids, TOOLS)
     await append_message(api_conn, ids, "visitor_text", text="Hi, I'd like my invoice.")
     await prepare_model_input(api_conn, ids.session_id)
-    await append_assistant(api_conn, ids, [{"type": "text", "text": "I can help once you verify."}])
+    await append_assistant(api_conn, ids, [{"type": "text", "text": "I can help once you verify."}], generation=0)
 
     assert await last_context_hash(api_conn, ids.session_id) is None
     await append_tool_change(api_conn, ids, "tool_removal", "native__start_verification")
@@ -328,14 +333,16 @@ async def test_unanswered_tool_use_blocks_the_next_input(api_conn, ids):
     await prepare_model_input(api_conn, ids.session_id)
     book = tool_use("toolu_book", "native__book", slot_id="S-20261102-0800")
     reply = tool_use("toolu_reply", "send_reply", prose="Booking that now.", clauses=[])
-    assistant_n = await append_assistant(api_conn, ids, [{"type": "text", "text": "On it."}, book, reply])
+    assistant_n = await append_assistant(api_conn, ids, [{"type": "text", "text": "On it."}, book, reply],
+                                         generation=3)
     await api_conn.commit()                    # an interrupted turn: the response is stored, its calls unanswered
 
     open_tool_use = await unanswered_tool_use(api_conn, ids.session_id)
     assert open_tool_use.assistant_n == assistant_n and open_tool_use.tool_uses == [book, reply]
+    assert open_tool_use.generation == 3      # the session generation its calls were made at, to find them by
     await append_message(api_conn, ids, "visitor_text", text="Hello?")
     for blocked in (prepare_model_input(api_conn, ids.session_id), start_fresh_context(api_conn, ids, TOOLS),
-                    append_assistant(api_conn, ids, [{"type": "text", "text": "Again."}])):
+                    append_assistant(api_conn, ids, [{"type": "text", "text": "Again."}], generation=0)):
         with pytest.raises(UnansweredToolUse) as raised:
             await blocked
         assert raised.value.open == open_tool_use
@@ -359,7 +366,7 @@ async def test_fresh_context_starts_from_a_code_built_summary(api_conn, kernel_h
     await prepare_model_input(api_conn, ids.session_id)
     assistant_n = await append_assistant(api_conn, ids, [
         tool_use("toolu_verify", "native__start_verification", contact="dana@example.com"),
-        tool_use("toolu_reply", "send_reply", prose="I can send it once you verify.", clauses=[])])
+        tool_use("toolu_reply", "send_reply", prose="I can send it once you verify.", clauses=[])], generation=0)
     await append_message(api_conn, ids, "delivered", author="claude", call_id="toolu_reply", blocks=[
         {"kind": "prose", "text": "I can send it once you verify. I've sent a code to the contact on record."}])
     await append_tool_results(api_conn, ids, assistant_n, [
@@ -456,7 +463,8 @@ async def test_transcript_projects_each_audience(api_conn, kernel_http, fake, vi
                                  owner_translation="Hi, how much is it?")
     await append_message(api_conn, other, "visitor_text", text="Someone else's question.")
     await prepare_model_input(api_conn, ids.session_id)
-    await append_assistant(api_conn, ids, [{"type": "text", "text": "It's $89."}])       # never shown as written
+    await append_assistant(api_conn, ids, [{"type": "text", "text": "It's $89."}],
+                           generation=0)                              # never shown as written
     await deliver(api_conn, ids, Reply(verdict, "claude", "api"), ro_schema=ro_schema)
     await deliver(api_conn, ids, Status(held, "held"), ro_schema=ro_schema)
     await append_message(api_conn, ids, "triage", ref_id=held.decision_id, text="Pushed for a discount.")
@@ -522,7 +530,7 @@ async def test_fresh_context_restates_the_desk_context_once(api_conn, visitor, r
     await append_message(api_conn, ids, "desk_context", text=facts)
     await append_message(api_conn, ids, "visitor_text", text="When are you open?")
     await prepare_model_input(api_conn, ids.session_id)
-    await append_assistant(api_conn, ids, [{"type": "text", "text": "Let me show you."}])
+    await append_assistant(api_conn, ids, [{"type": "text", "text": "Let me show you."}], generation=0)
     # the owner says something, delivered and waiting for the model, as the context starts afresh
     draft = ReplyDraft(session_id=ids.session_id, generation=0, prose="I can come by at noon.")
     said = await visitor.kernel.call("POST /check_reply", CheckReplyRequest(draft=draft))

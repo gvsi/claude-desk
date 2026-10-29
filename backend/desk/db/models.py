@@ -545,6 +545,7 @@ class Message(Base):
     ref_id: Mapped[str | None] = mapped_column(Text)               # the kernel's message_id or decision_id
     call_id: Mapped[str | None] = mapped_column(Text)              # the tool_use id of Claude's delivered reply
     event_seq: Mapped[int | None] = mapped_column(BigInteger)      # the run_events.seq a delivered or status row published
+    generation: Mapped[int | None] = mapped_column(Integer)        # an assistant row's calls' session generation
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
 
 

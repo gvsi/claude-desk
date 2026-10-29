@@ -257,7 +257,7 @@ class _Turn:
         if all(block.get("type") in THINKING or (block.get("type") == "text" and not block["text"].strip())
                for block in content):
             return
-        assistant_n = await append_assistant(self.conn, self.caller.ids, content)
+        assistant_n = await append_assistant(self.conn, self.caller.ids, content, generation=self.generation)
         if tool_uses:
             await append_tool_results(self.conn, self.caller.ids, assistant_n,
                                       [not_run().block(block["id"]) for block in tool_uses])
@@ -301,7 +301,7 @@ class _Turn:
         status shown as it is known; only then the replies, one at a time, so a reply never goes out (or spends an
         agent's request) while a sibling call still runs. One results row answers every call, in block order."""
         conn, ids = self.conn, self.caller.ids
-        assistant_n = await append_assistant(conn, ids, content)
+        assistant_n = await append_assistant(conn, ids, content, generation=self.generation)
         await conn.commit()
         calls = [block for block in tool_uses if block["name"] != SEND_REPLY]
         routed = await asyncio.gather(*(self._route(block) for block in calls), return_exceptions=True)
@@ -530,14 +530,15 @@ async def _recover(conn: AsyncConnection, caller: Caller, generation: int,
                    open_tool_use: OpenToolUse) -> list[ToolOutcome]:
     """Answer the tool calls a turn left without results (it stopped after they went out), before any model call
     and never by deciding again: a reply is `delivered` when a `delivered` row carries its call ID, else `not_run`;
-    any other call is found by its ID (`recover_call`)."""
+    any other call is found by its ID at the generation its turn ran at (`recover_call`), even after a take-over
+    or a hand-back moved the session on (`generation`, the session's now)."""
     outcomes = []
     for block in open_tool_use.tool_uses:
         if block["name"] == SEND_REPLY:
             outcomes.append(_recovered_reply(await delivered_reply(conn, caller.session_id, block["id"])))
             await conn.commit()
         else:
-            outcomes.append(await recover_call(conn, caller, generation, block))
+            outcomes.append(await recover_call(conn, caller, generation, block, made_at=open_tool_use.generation))
     await append_tool_results(conn, caller.ids, open_tool_use.assistant_n, [
         outcome.block(block["id"]) for block, outcome in zip(open_tool_use.tool_uses, outcomes, strict=True)])
     await conn.commit()
