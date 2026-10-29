@@ -17,3 +17,8 @@ __screenshots__/
 .claude/skills/impeccable
 .worktrees/
 .local/
+cdk.out/
+infra/out/
+# CDK's lookup cache from a deploy with credentials (it holds the account ID); the deploy
+# preflight needs a clean tree, so it stays local.
+infra/cdk.context.json

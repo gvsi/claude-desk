@@ -1,0 +1,11 @@
+{
+  "name": "desk-infra",
+  "private": true,
+  "description": "The pinned AWS CDK CLI for the Claude Desk stacks",
+  "engines": {
+    "node": ">=24"
+  },
+  "devDependencies": {
+    "aws-cdk": "2.1145.0"
+  }
+}

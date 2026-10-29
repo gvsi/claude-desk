@@ -9,6 +9,9 @@ columns the views show, and its `copy_read` policy admits the rows of the copy t
 in `desk.copy_id`: the same rule as each view's own filter, which stays, so the views behave the
 same wherever they run and no longer run as a superuser.
 
+The admin needn't be a superuser to give the views away either: `_change_owner` lends it SET on
+desk_ro_owner, and desk_ro_owner CREATE on kernel_ro, for the change only (as in 0004_copy_resolvers).
+
 Revision ID: 0005_kernel_ro_owner
 Revises: 0004_copy_resolvers
 """
@@ -60,6 +63,23 @@ def _script(sql: str) -> None:
     op.get_bind().connection.driver_connection.execute(sql)
 
 
+def _change_owner(role: str, schema: str, statements: str) -> None:
+    """Run `statements`, which make `role` the owner of objects in `schema`, as any admin role.
+
+    A superuser may change an owner as it is. Any other admin (one with CREATEROLE, which Postgres 16
+    gives ADMIN OPTION on the roles it creates, but not SET) is lent SET on `role`, and `role` CREATE
+    on `schema`, for these statements only. Both are taken back after, so the admin and `role` end
+    as a superuser's run leaves them.
+    """
+    _script(f"""
+        GRANT {role} TO CURRENT_USER WITH INHERIT FALSE, SET TRUE;
+        GRANT CREATE ON SCHEMA {schema} TO {role};
+        {statements}
+        REVOKE CREATE ON SCHEMA {schema} FROM {role};
+        REVOKE {role} FROM CURRENT_USER;
+    """)
+
+
 def upgrade() -> None:
     # Roles are cluster-wide: created only if missing, and kept by a downgrade (as in roles.sql).
     _script("""
@@ -76,8 +96,9 @@ def upgrade() -> None:
         _script(f"""
             GRANT SELECT ({columns}) ON kernel.{view} TO desk_ro_owner;
             CREATE POLICY copy_read ON kernel.{view} FOR SELECT TO desk_ro_owner USING (copy_id = {CURRENT_COPY});
-            ALTER VIEW kernel_ro.{view} OWNER TO desk_ro_owner;
         """)
+    _change_owner("desk_ro_owner", "kernel_ro", "".join(
+        f"ALTER VIEW kernel_ro.{view} OWNER TO desk_ro_owner;" for view in KERNEL_RO_VIEWS))
 
 
 def downgrade() -> None:
