@@ -94,8 +94,8 @@ function rawColors(text: string, file: string): string[] {
 // The clay of the Claude Desk mark: its token, its hex and its RGB triplet.
 const CLAY = /--clay\b|#e08968\b|224\s*,\s*137\s*,\s*104/gi;
 
-// A number with a time unit ("200ms", ".2s", "0s"), not part of a name like "space-2s".
-const RAW_DURATION = /(?<![\w.-])\d*\.?\d+(?:ms|s)\b/g;
+// A number with a time unit ("200ms", ".2s", "0s", "-200ms"), not part of a name like "space-2s".
+const RAW_DURATION = /(?<![\w.])(?<!\w-)\d*\.?\d+(?:ms|s)\b/g;
 
 const MOVES = /\b(?:animation|transition)(?:-[a-z]+)*\s*:|@keyframes\b/;
 const REDUCED_MOTION_BLOCK = /@media[^{]*\(\s*prefers-reduced-motion\s*:\s*reduce\s*\)[^{]*\{/;
@@ -180,7 +180,10 @@ describe('design system source guards', () => {
       '.2s',
       '0s',
     ]);
+    // Negative delays, the usual way to offset looping dots, are raw durations too.
+    expect(matches(RAW_DURATION)('animation-delay: -200ms; transition-delay: -.1s')).toEqual(['200ms', '.1s']);
     expect(matches(RAW_DURATION)('transition: opacity var(--motion-fast) var(--motion-ease); gap: var(--space-2)')).toEqual([]);
+    expect(matches(RAW_DURATION)('gap: var(--space-2s); --delay-1s: 0; .x-3ms {}')).toEqual([]);
     // Scanned TypeScript too, so an inline style can't carry a duration past the tokens.
     expect(findAll(sources, matches(RAW_DURATION))).toEqual([]);
   });
