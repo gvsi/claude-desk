@@ -38,7 +38,7 @@ const fromTheVisitor = (
   </>
 );
 
-/** Each held request with its rule, as Today passes them. */
+/** Each held request with its rule, as Today passes them, with the person's name when she is verified. */
 const consultationArgs = {
   decision: heldConsultation,
   heldBy: chen.ruleCards['cc-consult'].reason,
@@ -50,12 +50,14 @@ const saturdayArgs = {
   heldBy: rivera.ruleCards['rv-book-sat'].reason,
   context: undefined,
   waiting: 'Web chat, just now',
+  personName: DANA,
 } satisfies Partial<ApprovalCardProps>;
 const refundArgs = {
   decision: heldRefund,
   heldBy: rivera.ruleCards['rv-refund'].reason,
   context: undefined,
   waiting: 'Web chat, 1 min ago',
+  personName: DANA,
 } satisfies Partial<ApprovalCardProps>;
 
 /** The card's answer buttons, in the order shown, without the items of an open menu. */
@@ -327,7 +329,7 @@ export const DenyMenuOpen: Story = {
 };
 
 export const AllowMenu: Story = {
-  args: { ...saturdayArgs, personName: DANA },
+  args: saturdayArgs,
   parameters: {
     canvasNote: `${ANSWERS_BOARD} Dana's Saturday afternoon request, held by the Saturday card's hours: a limit, not the tool, so Deny always isn't offered; she is verified, so Allow has two answers and opens a menu.`,
   },
@@ -347,7 +349,7 @@ export const AllowMenu: Story = {
 };
 
 export const AllowMenuOpen: Story = {
-  args: { ...saturdayArgs, personName: DANA },
+  args: saturdayArgs,
   parameters: {
     canvasNote: `${ANSWERS_BOARD} Allow's menu, open, naming the verified person as the board does; its rule line stays generic.`,
   },
@@ -388,11 +390,11 @@ export const AllowAndDenyMenus: Story = {
     expectComputed(deny, DANGER);
     for (const button of buttons) await expect(button).toHaveAttribute('aria-haspopup', 'menu');
 
-    // Without a name for the person, Allow's rule answer says "this person".
+    // She is verified, so Allow's rule answer names her.
     await userEvent.click(allow);
     await expectItems(canvas.getByRole('menu', { name: 'Allow' }), [
       ['This time', ONCE_LINE],
-      ['Only for this person, always', RULE_LINE],
+      [`Only for ${DANA}, always`, RULE_LINE],
     ]);
 
     // One menu at a time: opening Deny closes Allow.
@@ -420,7 +422,7 @@ export const AllowAndDenyMenus: Story = {
 };
 
 export const KeyboardThroughTheMenus: Story = {
-  args: { ...refundArgs, personName: DANA },
+  args: refundArgs,
   parameters: {
     canvasNote: `${ANSWERS_BOARD} No board shows the keys; this is the menu button pattern, through both menus, ending on Allow only for Dana.`,
   },
