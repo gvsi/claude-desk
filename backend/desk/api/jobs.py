@@ -17,7 +17,8 @@ next message.
 - `surface_due_decisions`, each minute: every decision the visitor was shown as held, or that an unhandled
   `decision_pending` row names, whose final state isn't shown yet, and whose kernel_ro state is final or whose
   `expires_at` has passed (expiry is lazy: the kernel applies it on the next read) gets one `decision_due` control
-  row. The session's next request reads the decision with its own credential and shows its final state.
+  row. The session's next request reads the decision with its own credential and shows its final state; until
+  then the decision isn't read again.
 - `retry_stalled_jobs`, every 10 minutes and one at a time: jobs whose worker stopped sending heartbeats (a task
   that died mid-job) go back to `todo`, as Procrastinate documents ("Retry stalled jobs").
 
@@ -156,16 +157,21 @@ async def resume_after_answer(conn: AsyncConnection, ids: Ids, decision: Decisio
 
 def _waiting_decisions() -> Any:
     """Each decision the visitor was shown as held, or that an unhandled `decision_pending` row names, with no final
-    state shown in its session yet: (copy_id, desk_id, session_id, decision_id)."""
-    row, shown = RUN_EVENTS.alias("waiting"), RUN_EVENTS.alias("shown")
+    state shown in its session yet and no unhandled `decision_due` row (it is due already: a visitor who never comes
+    back leaves that row waiting, and the decision isn't read again each minute): (copy_id, desk_id, session_id,
+    decision_id)."""
+    row, shown, due = RUN_EVENTS.alias("waiting"), RUN_EVENTS.alias("shown"), RUN_EVENTS.alias("due")
     decision_id = row.c.payload["decision_id"].astext
     final_shown = exists().where(
         shown.c.session_id == row.c.session_id, shown.c.kind == "sse", shown.c.type.in_(("receipt", "resolved")),
         shown.c.payload["decision_id"].astext == decision_id, shown.c.payload["state"].astext.not_in(sorted(NOT_FINAL)))
+    due_already = exists().where(
+        due.c.session_id == row.c.session_id, due.c.kind == "control", due.c.type == "decision_due",
+        due.c.handled_at.is_(None), due.c.payload["decision_id"].astext == decision_id)
     return select(row.c.copy_id, row.c.desk_id, row.c.session_id, decision_id.label("decision_id")).distinct().where(
         or_(and_(row.c.kind == "sse", row.c.type == "held"),
             and_(row.c.kind == "control", row.c.type == "decision_pending", row.c.handled_at.is_(None))),
-        ~final_shown)
+        ~final_shown, ~due_already)
 
 
 def _due(decision: dict, now: datetime) -> bool:

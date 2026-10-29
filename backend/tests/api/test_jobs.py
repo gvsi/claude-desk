@@ -243,15 +243,36 @@ async def test_due_decisions_get_one_control_row(copy, engine, fake, ro_schema, 
     assert await due(waiting) == [("decision_due", still.decision_id)]
 
 
+async def test_an_abandoned_hold_is_read_once(copy, engine, fake, ro_schema, monkeypatch):
+    """A visitor who never comes back leaves their decision's `decision_due` row unhandled. The minute scan reads that
+    decision in kernel_ro once, when it comes due, and not again each minute while the row waits."""
+    asked: list[list[str]] = []
+    read = jobs.due_decisions
+
+    async def reading(conn, decision_ids, schema):
+        asked.append(list(decision_ids))
+        return await read(conn, decision_ids, schema)
+
+    monkeypatch.setattr(jobs, "due_decisions", reading)
+    caller = await copy.visitor()
+    held = await copy.decide(caller, "call-1", discount_bp=1500)
+    await show(engine, caller, held, "held")
+    await copy.answer(held, "deny_once")                       # final; its resume never reached the visitor
+
+    assert [await surface_due_decisions(engine, now=fake.now, ro_schema=ro_schema) for _ in range(3)] == [1, 0, 0]
+    assert [decision_ids for decision_ids in asked if decision_ids] == [[held.decision_id]]
+
+
 async def test_the_minute_scan_reads_held_events_through_their_own_index(engine):
     """`surface_due_decisions` looks, every minute, at each held event ever shown, so it reads them through a partial
     index of their own, never the whole run_events table, and checks each for a final state through the index that
-    keeps statuses unique. Sequential scans are off, so the plan names an index wherever one serves the query."""
+    keeps statuses unique and for a waiting `decision_due` row through the one that keeps those unique. Sequential
+    scans are off, so the plan names an index wherever one serves the query."""
     sql = jobs._waiting_decisions().compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True})
     async with engine.connect() as conn:
         await conn.execute(text("SET LOCAL enable_seqscan = off"))
         plan = "\n".join((await conn.execute(text(f"EXPLAIN {sql}"))).scalars())
-    assert "run_events_held" in plan and "run_events_status_once" in plan, plan
+    assert "run_events_held" in plan and "run_events_status_once" in plan and "run_events_due_once" in plan, plan
     assert "Seq Scan" not in plan, plan
 
 
