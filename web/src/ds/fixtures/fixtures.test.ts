@@ -129,6 +129,42 @@ function proseProblems(text: string): string[] {
 
 const proseBlocks = allBlocks.filter((block) => block.kind === 'prose');
 
+/** One alternation of words, each standing alone (not inside a longer word), case-insensitive. */
+function wordsRule(words: readonly string[]): RegExp {
+  return new RegExp(`${NOT_LETTER_BEFORE}(?:${words.join('|')})${NOT_LETTER_AFTER}`, 'iu');
+}
+
+// Claims only a card may make, even without a number: that something is booked, paid, charged or
+// refunded, what it costs, or that a price is lowered. Past forms and participles in both
+// languages; infinitives and nouns ("to book", "reservar", "a test payment", "un pago") stay
+// allowed, so Claude can still say what a card will do.
+const CLAIM_RULES: [string, RegExp][] = [
+  ['booking claim', wordsRule([
+    'booked', 'rebooked', 'reserved', 'scheduled', 'confirmed', 'all set',
+    'reservad[oa]s?', 'reservé', 'reservamos', 'agendad[oa]s?', 'agendé', 'confirmad[oa]s?', 'confirmé',
+    'programad[oa]s?', 'apartad[oa]s?',
+  ])],
+  ['payment claim', wordsRule([
+    'paid', 'charged', 'refunded', 'billed', 'invoiced', 'payment (?:went through|is complete|received)',
+    'pagad[oa]s?', 'pagué', 'pagaste', 'pagó', 'cobrad[oa]s?', 'cobré', 'cobramos', 'reembolsad[oa]s?', 'reembolsé',
+    'facturad[oa]s?', 'pago (?:recibido|completado|confirmado)',
+  ])],
+  ['price claim', wordsRule([
+    'costs?', 'costing', 'priced', 'cheap(?:er|est)?', 'affordable', 'inexpensive',
+    'cuesta', 'cuestan', 'costar[áa]n?', 'costó', 'costo', 'barat[oa]s?', 'económic[oa]s?',
+  ])],
+  ['discount claim', wordsRule([
+    'markdown', 'marked down', 'price cut', 'special price', 'waived?', 'knock(?:ed)? off', 'half off',
+    'rebaj\\p{L}*', 'precio especial', 'sin cargo', 'sin costo', 'mitad de precio',
+  ])],
+];
+
+/** The claims `text` makes that only a card may make, after the same normalization as `proseProblems`. */
+function claimProblems(text: string): string[] {
+  const normalized = text.normalize('NFKC').replace(/[​-‍⁠﻿­]/g, '');
+  return CLAIM_RULES.filter(([, rule]) => rule.test(normalized)).map(([name]) => name);
+}
+
 // Cards whose text is a statement only the card may make: the charter's hours, contact and
 // policies, the kernel's handoff, verification and callback commitments, and the owner's own
 // words. Prose that restates one carries a policy or a promise outside its card, which invariant 2
@@ -228,9 +264,29 @@ describe('fixtures', () => {
     }
   });
 
+  test('fixture_prose_claims_no_booking_payment_price_or_discount', () => {
+    // The claims lexicon catches each kind in both languages, so a clean result means something.
+    expect(claimProblems("You're booked.")).toEqual(['booking claim']);
+    expect(claimProblems('Listo, quedó reservado.')).toEqual(['booking claim']);
+    expect(claimProblems('The deposit is paid within your signed limit.')).toEqual(['payment claim']);
+    expect(claimProblems('Ya te cobré la visita y te reembolsé el resto.')).toEqual(['payment claim']);
+    expect(claimProblems("It's cheaper than a new tap.")).toEqual(['price claim']);
+    expect(claimProblems('Cuesta menos que una llave nueva.')).toEqual(['price claim']);
+    expect(claimProblems('Maria waived the call-out fee.')).toEqual(['discount claim']);
+    expect(claimProblems('Te hago una rebaja si pagas hoy.')).toEqual(['discount claim']);
+    // What a card will do is not a claim that it was done.
+    expect(claimProblems("To hold the visit, here's a link. It's a test payment, so no money moves.")).toEqual([]);
+    expect(claimProblems('Para reservar la visita, aquí tienes un enlace. Es un pago de prueba.')).toEqual([]);
+    expect(claimProblems("I can help with that after you confirm it's you.")).toEqual([]);
+
+    for (const block of proseBlocks) {
+      expect(claimProblems(block.text), block.text).toEqual([]);
+    }
+  });
+
   test('fixture_prose_restates_no_card_statement', () => {
     // The oracle catches a charter policy repeated in prose, so a clean result means something.
-    expect(restatedStatements("You're booked. Maria texts before she arrives.")).toEqual(['maria texts before she arrives']);
+    expect(restatedStatements('Thanks. Maria texts before she arrives.')).toEqual(['maria texts before she arrives']);
     expect(statementSentences.length).toBeGreaterThan(10);
 
     for (const block of proseBlocks) {

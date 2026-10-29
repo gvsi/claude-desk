@@ -298,7 +298,8 @@ const cards = {
   },
 } satisfies Record<ClauseTemplate, Bilingual<CardBlock>>;
 
-// Claude's checked prose: no digits, amounts, dates or promise words, in either language.
+// Claude's checked prose: no digits, amounts, dates or promise words, and no claim that something
+// is booked, paid or priced, in either language.
 const proseBlocks = {
   quoteIntro: {
     en: proseBlock("Here's the price for clearing a drain, from Maria's price list."),
@@ -308,9 +309,10 @@ const proseBlocks = {
     en: proseBlock("These times are open on Maria's calendar. Which of them works for you?"),
     es: proseBlock('Estos horarios están libres en el calendario de Maria. ¿Cuál te viene bien?'),
   },
-  booked: {
-    en: proseBlock("You're booked."),
-    es: proseBlock('Listo, quedó reservado.'),
+  // Leads into a card that reports what was done; the card, not the prose, says it.
+  details: {
+    en: proseBlock('Here are the details.'),
+    es: proseBlock('Aquí tienes los detalles.'),
   },
   deposit: {
     en: proseBlock("To hold the visit, here's a link for the service call deposit. It's a test payment, so no money moves."),
@@ -509,7 +511,7 @@ const conversations = {
         kind: 'event',
         event: message('msg-dana-booked', {
           language: 'en',
-          blocks: [proseBlocks.booked.en, cards.booking_confirmed.en],
+          blocks: [proseBlocks.details.en, cards.booking_confirmed.en],
           visitor_plain: plain.en.reply_checked,
           ledger_seq: 19,
         }),
@@ -549,7 +551,7 @@ const conversations = {
         kind: 'event',
         event: message('msg-alex-charged', {
           language: 'en',
-          blocks: [proseBlock('The deposit is paid within your signed limit.'), cards.charge_confirmed.en],
+          blocks: [proseBlocks.details.en, cards.charge_confirmed.en],
           visitor_plain: plain.en.reply_checked,
           ledger_seq: 26,
         }),

@@ -5,7 +5,8 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 - Write in sentence case everywhere: page titles, buttons, labels and menus. Never set words in all caps; acronyms such as AI, PDF and SMS stay as they are.
 - Be plain, literal and specific. No wordplay, no exclamation marks, and no "→" or other arrows on buttons.
 - Make buttons say exactly what happens: "Allow this time", "Open payment page", "Download". Never "Continue" or "OK" when a verb can say more.
-- Let Claude speak in the first person, in serif (`reply`, `summary`, `greeting`): "I've booked Dana in. Here are the details." People speak in sans (`message`).
+- Let Claude speak in the first person, in serif (`reply`, `summary`, `greeting`): "These times are open on Maria's calendar. Which of them works for you?" People speak in sans (`message`).
+- Never let Claude's prose say that something is booked, paid, refunded, discounted or what it costs, or that Claude did something no receipt records. The typed card and its receipt say it; the prose only leads into them: "Here are the details."
 - Separate facts with commas or separate lines, never with "A · B · C" strings.
 - Write English and Spanish wherever a visitor reads.
 - Call the product Claude Desk: one is "your Desk", several are "Desks". Every surface carries the footer "Concept prototype by Giovanni Alcantara, not an Anthropic product" in `caption`.
