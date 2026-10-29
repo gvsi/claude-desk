@@ -133,6 +133,8 @@
 }
 
 .cd-public-shell__conversation {
+  /* The chat column is the reading width here, so conversation rows fill it, as the composer does. */
+  --cd-row-max: 100%;
   flex: 1 1 auto;
   min-width: 0;
   padding-top: var(--space-20);

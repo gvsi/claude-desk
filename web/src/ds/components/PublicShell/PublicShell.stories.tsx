@@ -134,6 +134,22 @@ function groundOf(el: HTMLElement): string {
   throw new Error('no ground under the element');
 }
 
+/**
+ * public_rows_fill_the_chat: on the public page each conversation row takes the chat column's full
+ * width, so the last row ends where the composer ends, rather than at the owner app's reading width.
+ */
+async function expectRowsFillTheChat(root: HTMLElement): Promise<void> {
+  const rows = [...root.querySelectorAll<HTMLElement>('.cd-transcript-row')];
+  const last = rows[rows.length - 1];
+  const composerBox = root.querySelector<HTMLElement>('.cd-composer');
+  if (!last || !composerBox) throw new Error('no conversation row or composer');
+  const row = last.getBoundingClientRect();
+  const composer = composerBox.getBoundingClientRect();
+  await expect(row.right).toBe(composer.right);
+  await expect(row.left).toBe(composer.left);
+  for (const other of rows) await expect(other.getBoundingClientRect().width).toBe(row.width);
+}
+
 export const Rivera: Story = {
   play: async ({ args, canvas, canvasElement, userEvent }) => {
     // The brand header in the business's colors: field, inks and the accent's 2 px rule.
@@ -196,6 +212,35 @@ export const Rivera: Story = {
     await expect(about.getBoundingClientRect().left).toBeGreaterThanOrEqual(main.getBoundingClientRect().right);
     expectComputed(about, { width: '300px', backgroundColor: 'rgb(34, 34, 32)', borderLeftWidth: '1px' });
     await expect(canvasElement.querySelector('.cd-public-shell')).toHaveAttribute('lang', 'en');
+
+    // At 1280 px the rows take the 680 px chat column, as the composer does.
+    await expect(document.documentElement.clientWidth).toBe(1280);
+    await expectRowsFillTheChat(canvasElement);
+    await expect(canvasElement.querySelector<HTMLElement>('.cd-transcript-row')?.getBoundingClientRect().width).toBe(680);
+  },
+};
+
+/** A small tablet's width, where the about column has moved under the chat. */
+const TABLET = 800;
+
+export const Tablet: Story = {
+  decorators: [
+    (Story) => (
+      <div data-testid="tablet" style={{ width: TABLET }}>
+        <Story />
+      </div>
+    ),
+  ],
+  parameters: {
+    canvas: 'none',
+    canvasNote: 'No board shows the public page at 800 px; the about column of N-Public-Rivera moves under the chat, and the rows still fill the chat column.',
+  },
+  play: async ({ canvas, canvasElement }) => {
+    await expect(canvas.getByTestId('tablet').getBoundingClientRect().width).toBe(TABLET);
+    const main = canvas.getByRole('main');
+    const about = canvas.getByRole('complementary', { name: 'About Rivera Plumbing' });
+    await expect(about.getBoundingClientRect().top).toBeGreaterThanOrEqual(main.getBoundingClientRect().bottom);
+    await expectRowsFillTheChat(canvasElement);
   },
 };
 

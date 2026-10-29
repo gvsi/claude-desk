@@ -20,7 +20,7 @@
     - "You're chatting with Claude, an AI answering for {name}. Ask for {ownerName} anytime."
     - "Estás hablando con Claude, una IA que responde por {name}. Puedes pedir hablar con {ownerName} cuando quieras."
   - A secondary "Ask for {ownerName}" / "Pedir hablar con {ownerName}" button, which calls `onAskForOwner`.
-  - The conversation (`children`), then the `composer` with `ConceptFooter poweredBy` under it. The composer and footer stay at the bottom of the window while the conversation scrolls.
+  - The conversation (`children`), then the `composer` with `ConceptFooter poweredBy` under it. The composer and footer stay at the bottom of the window while the conversation scrolls. The conversation sets `--cd-row-max: 100%`, so each `TranscriptRow` fills the chat column, edge to edge with the composer.
 - **The about column**, 300 px on the panel at the right, named "About {name}" / "Sobre {name}":
   - The `about` blocks in order: cards as `ReplyCard`s in the page's language, prose as text.
   - The `aboutLinks` under "For AI agents" / "Para agentes de IA". Only paths on this site become links (`/d/…`); a scheme or another host is left out.
