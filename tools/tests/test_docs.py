@@ -206,20 +206,39 @@ def test_readme_evidence_links_the_evals_guide():
         assert held, "with no docs/evals.md yet, Evidence must hold a [measured: …] placeholder naming it"
 
 
+def status_table(section: str) -> list[list[str]]:
+    """The cells of each row of the section's table, the header row first and the divider left out."""
+    table = []
+    for line in section.splitlines():
+        if line.startswith("|"):
+            cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+            if not all(set(cell) <= set("-:") for cell in cells):
+                table.append(cells)
+    return table
+
+
 def test_readme_states_what_is_real_mocked_unfinished():
     status = sections((REPO / "README.md").read_text())["What's real, mocked and unfinished"]
-    rows = {}
-    for line in status.splitlines():
-        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
-        if line.startswith("|") and len(cells) == 2 and not set(cells[1]) <= set("-"):
-            rows[cells[0]] = cells[1]
+    rows = {cells[0]: cells[1] for cells in status_table(status)[1:]}
 
-    payments = [status for part, status in rows.items() if part.startswith("Payment")]
-    verification = [status for part, status in rows.items() if part.startswith("Verifying")]
-    assert payments and payments[0].startswith("Payments are mocked")
-    assert verification and "Verification codes are simulated" in verification[0]
+    def row(start: str) -> str:
+        found = [status for part, status in rows.items() if part.startswith(start)]
+        assert found, f"the table has no row for {start!r}"
+        return found[0]
+
+    assert row("Payment").startswith("Payments are mocked")
+    assert "Verification codes are simulated" in row("Verifying")
+    # Every mock and simple part in the master plan's requirement matrix is named in its own row.
+    share_kit = row("Share kit")
+    assert "Link and QR real" in share_kit
+    assert all(word in share_kit for word in ("Google profile", "embed", "signature", "voicemail", "mock"))
+    returning = row("Returning visitors")
+    assert "cookie" in returning and "vision mock" in returning
+    assert row("Suggested upgrades").startswith("Simple")
     assert all(status for status in rows.values()), "every part has a status"
-    assert "### Unfinished" in status or "Nothing was cut" in status
+    unfinished = status.split("### Unfinished", 1)
+    assert (len(unfinished) == 2 and unfinished[1].strip()) or "Nothing was cut" in status, \
+        "an Unfinished entry with something under it, or the line 'Nothing was cut'"
 
 
 ADR_PARTS = ["Status", "Context", "Decision", "Alternatives", "Consequences"]

@@ -24,12 +24,15 @@ The passcode comes with the link. Each visitor gets a fresh copy of the Rivera P
 | The safety kernel: rule cards compiled to Cedar policies, a decision on every action, proofs before rules go live, owner approvals, a signed ledger | Real |
 | The reply check: prices, dates, discounts and bookings only in cards rendered from the business's records, and Claude's prose checked in English and Spanish | Real |
 | Public chat, and the owner taking over, speaking, whispering to Claude and handing back | Real |
+| Returning visitors | Simple: the visitor cookie resumes the conversation. Signing in with a Claude account is a vision mock: a static screen |
 | Verifying a customer | Real rules: codes go only to the contact on record, with expiry, attempts and limits. Verification codes are simulated: they appear in a Demo inbox on screen instead of an email or a text |
 | Payment links, refunds and a visiting agent's charges | Payments are mocked: links open a checkout page labelled "Test payment, no money moves", and a mock payments server in this repository stands in for the provider |
 | The mock payments server as a connected tool (MCP), pinned by hash and listed again before every call | Real MCP, mocked payments |
 | Visiting agents: an Agent Card, signed requests and signed spending limits | Real; a demo wallet and a built-in agent stand in for someone else's |
 | The setup interview: rule cards, safety probes, a preview and a live link | Real; its reads of the owner's Claude memories are simulated |
 | The owner app: Today, Conversations, Rules, Safety, People and knowledge | Real |
+| Suggested upgrades: rules Claude offers from the owner's own approvals | Simple: three or more approvals of one kind in 30 days bring a suggested rule for the owner to confirm; the attack record isn't used |
+| Share kit | Link and QR real; mocks for the rest: the Google profile, email signature and voicemail texts are copy to paste, connected to nothing, and the website embed is marked "Coming later" |
 | Alerts to the owner (push, text, email) | Simulated in the Demo inbox |
 | Connectors, channels, a city office, a team Desk and phone screens | Vision mocks: static screens |
 | Evals: an attack suite, a legitimate-task suite, calibration and latency | Real |
