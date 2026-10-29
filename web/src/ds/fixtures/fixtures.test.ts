@@ -48,9 +48,12 @@ function collect<T>(match: (node: Record<string, unknown>) => boolean): T[] {
   return found;
 }
 
-const allBlocks = collect<RenderedBlock>(
-  (node) => (node.kind === 'card' || node.kind === 'prose') && typeof node.text === 'string' && 'options' in node,
-);
+/** A rendered block, cards and prose alike, whether or not its optional fields are written out. */
+function isRenderedBlock(node: Record<string, unknown>): boolean {
+  return (node.kind === 'card' || node.kind === 'prose') && typeof node.text === 'string';
+}
+
+const allBlocks = collect<RenderedBlock>(isRenderedBlock);
 const cardBlocks = allBlocks.filter((block) => block.kind === 'card');
 
 type CardField = 'title' | 'lines' | 'options' | 'href';
@@ -180,6 +183,10 @@ describe('fixtures', () => {
   });
 
   test('card_fixtures_are_cards', () => {
+    // A block literal that leaves out its optional fields is still checked here and by the prose tests.
+    expect(isRenderedBlock({ kind: 'card', template: 'policy', text: 'Cash only.', title: 'Cash only.' })).toBe(true);
+    expect(isRenderedBlock({ kind: 'prose', text: 'Cash only.' })).toBe(true);
+
     for (const template of CLAUSE_TEMPLATES) {
       for (const language of ['en', 'es'] as const) {
         expect(rivera.blocks[template][language].kind, `${template} ${language}`).toBe('card');
