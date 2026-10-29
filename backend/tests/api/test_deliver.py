@@ -17,7 +17,14 @@ from desk.api.sse import append_metric
 from desk.api.store import lock_key
 from desk.contracts import Decision, ReplyDraft, ReplyVerdict, ToolCall
 from desk.events import EvHeld, EvMessage, EvReceipt, EvResolved, SseEvent
-from desk.kernel_api import CancelRequest, CheckReplyRequest, DecideRequest, ExecuteRequest
+from desk.kernel_api import (
+    AnswerRequest,
+    CancelRequest,
+    CheckReplyRequest,
+    CreateCopyRequest,
+    DecideRequest,
+    ExecuteRequest,
+)
 from tests.api.conftest import new_visitor
 
 EVENT = TypeAdapter(SseEvent)
@@ -205,6 +212,38 @@ async def test_status_delivery_is_idempotent(engine, visitor, ro_schema):
     assert await show(Status(gone, "resolved")) is None
     async with engine.connect() as conn:
         assert [seq for seq, _ in await events(conn, ids.session_id)] == [1, 2]
+        assert len(await message_rows(conn, ids.session_id, "status")) == 2
+
+
+async def test_an_older_status_never_follows_a_later_one(engine, kernel_http, fake, ro_schema):
+    """A status can reach deliver() after a later state of its decision was shown: a `/decide` answer held up while
+    the owner answered the hold, or a receipt read before the kernel reconciled an `unknown` outcome. It is dropped,
+    so the visitor never sees a decision go back."""
+    copy = await kernel_http.public().call("POST /copies", CreateCopyRequest())
+    visitor = await new_visitor(kernel_http, fake, copy)
+    ids = visitor.ids
+
+    async def show(status: Status) -> int | None:
+        async with engine.begin() as conn:
+            return await deliver(conn, ids, status, ro_schema=ro_schema)
+
+    held = await decide(visitor, "toolu_held", quote(500))
+    answered = await kernel_http.owner(copy.owner_token).call(
+        "POST /approvals/{decision_id}/answer", AnswerRequest(answer="allow_once"),
+        path={"decision_id": held.decision_id})
+    assert answered.decision.state == "executed" and answered.decision.ledger_seq > held.ledger_seq
+    assert await show(Status(answered.decision, "resolved")) == 1
+    assert await show(Status(held, "held")) is None                    # the held-up `/decide` answer
+
+    fake.script("native.quote", exec_state="unknown")
+    unsure = await executed(visitor, await decide(visitor, "toolu_unsure", quote()))
+    assert unsure.state == "unknown"
+    assert await show(Status(fake.reconcile(unsure.decision_id), "receipt")) == 2
+    assert await show(Status(unsure, "receipt")) is None                # the receipt read before it was reconciled
+
+    async with engine.connect() as conn:
+        assert [(event.type, event.state) for _, event in await events(conn, ids.session_id)] == [
+            ("resolved", "executed"), ("receipt", "executed")]
         assert len(await message_rows(conn, ids.session_id, "status")) == 2
 
 

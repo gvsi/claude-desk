@@ -36,6 +36,7 @@ from desk.api.main import create_app
 from desk.api.passcode import hash_passcode
 from desk.api.settings import Settings
 from desk.api.store import Ids
+from desk.contracts import CopyCreated
 from desk.db.session import API_CONNECT_OPTIONS, database_url, libpq_url
 from desk.db.tables import APP_TABLES
 from desk.kernel_api import CreateCopyRequest, CreateSessionRequest
@@ -111,9 +112,9 @@ class Visitor:
         return f"Visitor({self.ids!r})"
 
 
-async def new_visitor(http: KernelHttp, fake: FakeKernelState) -> Visitor:
-    """A new Rivera copy and a visitor session on its Desk."""
-    copy = await http.public().call("POST /copies", CreateCopyRequest())
+async def new_visitor(http: KernelHttp, fake: FakeKernelState, copy: CopyCreated | None = None) -> Visitor:
+    """A visitor session on the Desk of `copy`, or of a new Rivera copy."""
+    copy = copy or await http.public().call("POST /copies", CreateCopyRequest())
     slug = fake.desks[copy.desk_ids[0]].slug
     created = await http.public().call("POST /sessions", CreateSessionRequest(desk_slug=slug, kind="visitor"))
     kernel = http.session(created.session_token)

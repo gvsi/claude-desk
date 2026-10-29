@@ -40,7 +40,7 @@ from procrastinate.manager import JobManager
 from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
-from desk.api.deliver import NOT_FINAL, Status, deliver, run_lock, status_shown
+from desk.api.deliver import NOT_FINAL, Status, deliver, run_lock
 from desk.api.ro import KERNEL_RO, due_decisions
 from desk.api.sse import RUN_EVENTS, append_control
 from desk.api.store import Ids, append_message
@@ -139,8 +139,7 @@ async def resume_after_answer(conn: AsyncConnection, ids: Ids, decision: Decisio
     await conn.commit()                                    # a READ COMMITTED transaction of its own, for deliver()
     try:
         await run_lock(conn, ids.session_id)               # what the session shows can't change until this commits
-        if (await status_shown(conn, decision, or_later=True)
-                or await deliver(conn, ids, Status(decision, "resolved")) is None):
+        if await deliver(conn, ids, Status(decision, "resolved")) is None:     # that state, or a later one, shown
             await conn.rollback()
             return False
         await append_message(conn, ids, "action_update", text=decision.visitor_plain, ref_id=decision.decision_id,

@@ -11,9 +11,11 @@ reach the session as one of the four signed events, which only this module build
   are Claude's, `owner` (a say) the owner's and `kernel` (a payment confirmation) the Desk's.
 - `Status(decision, phase)`: a signed decision becomes `EvReceipt`, `EvHeld` or `EvResolved` with its
   signed fields unchanged, and a `status` row. Statuses aren't generation-fenced (an approved hold
-  resumes across a take-over); a decision's state at a ledger entry is shown once, and again it is None.
-  `status_shown` answers whether it is (or, for a caller holding an older snapshot, whether a later
-  state of the same decision is).
+  resumes across a take-over); a decision's state at a ledger entry is shown once, and a state older than
+  one already shown (a `/decide` answer held up while the owner answered, a receipt read before the
+  kernel reconciled an `unknown` outcome) never is: either way it is None, so the visitor never sees a
+  decision go back. `status_shown` answers whether it is shown (or, with `or_later`, whether that state or
+  a later one is).
 
 Each call runs in the caller's transaction under the session's run lock (`run_lock`, a transaction-level
 advisory lock held until the caller commits), the lock take-over and hand-back hold around a mode change.
@@ -131,7 +133,7 @@ async def _deliver_status(conn: AsyncConnection, ids: Ids, status: Status) -> in
     decision = status.decision
     if decision.session_id != ids.session_id:
         raise ValueError("a decision is shown only in its own session")
-    if await status_shown(conn, decision):
+    if await status_shown(conn, decision, or_later=True):     # under the run lock: nothing can show meanwhile
         return None
     signed = {"decision_id": decision.decision_id, "state": decision.state, "visitor_plain": decision.visitor_plain,
               "ledger_seq": decision.ledger_seq, "signature": decision.signature}
