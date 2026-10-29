@@ -642,3 +642,13 @@ def test_psql_is_installed_only_where_it_is_missing(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert events == []
+
+
+def test_ci_doc_says_where_jobs_run_and_how_to_switch_back():
+    section = CI_DOC.read_text().split("\n## Runners\n", 1)[1].split("\n## ", 1)[0]
+
+    assert "`ubuntu-24.04`" in section
+    # The variable and value the workflow's switch reads, and its kill switch.
+    [(variable, value)] = set(re.findall(r"vars\.(\w+) == '(\w+)'", RUNS_ON))
+    assert f"`{variable}={value}`" in section
+    assert "unset the variable" in section.lower()

@@ -76,6 +76,14 @@ Tier 2 is the model-driven attack suite and legitimate-task suite. It needs a mo
 - When `main` gains gated changes after the results file was made, rebase the pull request and run tier 2 again to regenerate the file.
 - Pushes to `main` skip the job, since the pull request already ran it.
 
+## Runners
+
+- **Default.** Every job runs on a GitHub-hosted `ubuntu-24.04` runner (x86-64).
+- **Self-hosted.** The repository variable `CI_RUNNER_MODE=ec2` moves every job to self-hosted, single-use arm64 runners on AWS. They have no cloud role and run on an isolated network. Pull request runs use spot capacity; pushes and manual runs use on-demand.
+- **Labels.** Each job asks for a label of its own, `desk-ci-<spot or ondemand>-<run id>-<attempt>-<job>`, so no two jobs share a runner.
+- **Setup.** Where a runner has no rustup or psql, the jobs install them first: rustup from a checked rustup-init, the Postgres client from Ubuntu's archive. GitHub-hosted runners have both, so nothing is installed there.
+- **Kill switch.** Unset the variable, and the next run is back on GitHub-hosted runners. Any value other than `ec2` does the same. Jobs that already asked for a self-hosted runner keep waiting for one until they are cancelled.
+
 ## Runner minutes
 
 One run takes 27 billed runner minutes, summed over the nine jobs (21 minutes of job time; GitHub rounds each job up to the minute). Measured on the first run, on October 29, 2026, before most suites had landed, so expect more as the web, infrastructure and eval suites arrive. The longest jobs were backend tests (6m 22s), proofs (5m 46s), tier 1 evals (5m 13s) and kernel tests (2m 18s); the run took about 6.5 minutes end to end.
