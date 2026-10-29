@@ -1496,7 +1496,8 @@ def _endpoint(state: FakeKernelState, key: str, handler: Callable[[Request, Any]
             return _error(result.status, result.code)
         if response_adapter is None:
             return Response(status_code=204)
-        payload = response_adapter.dump_json(response_adapter.validate_python(result))
+        payload = response_adapter.dump_json(result)
+        response_adapter.validate_json(payload)    # as JSON: validate_python accepts any instance of the model
         return Response(payload, media_type="application/json")
 
     return endpoint

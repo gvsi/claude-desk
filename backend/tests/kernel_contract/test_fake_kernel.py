@@ -7,10 +7,11 @@ from datetime import timedelta
 import httpx
 import psycopg
 import pytest
+from pydantic import ValidationError
 
 from desk.api.kernel_client import KernelFailed, KernelHttp, KernelUnavailable
 from desk.contracts import CopyCreated, SessionCreated
-from desk.kernel_api import CreateCopyRequest, CreateSessionRequest
+from desk.kernel_api import CreateCopyRequest, CreateSessionRequest, Health
 from tests.kernel_contract.fake_kernel import FakeKernelState, fake_kernel_app
 from tests.kernel_contract.ro_tables import FAKE_RO_SCHEMA, FakeRO
 from tests.kernel_contract.test_contract import (
@@ -219,3 +220,13 @@ async def test_an_owner_recovers_only_its_own_decisions(fake):
         assert await refused(owner.call(BY_CALL, query=query)) == (404, "not_found")
     assert [call.query["session_id"] for call in state.called(BY_CALL)] == [
         visitor.state.session_id, copy.owner_session.session_id]
+
+
+async def test_an_answer_that_breaks_its_response_model_never_leaves(fake_ro: FakeRO, monkeypatch):
+    state = FakeKernelState(ro=fake_ro)
+    bogus = Health.model_construct(version="fake", proof_mode="unproved", dev_signing_key=True, public_key_hex="00",
+                                   key_id="key", unproved_seeds=[])
+    monkeypatch.setattr(state, "health", lambda request, body: bogus)
+    async with KernelHttp("http://fake-kernel", transport=httpx.ASGITransport(app=fake_kernel_app(state))) as http:
+        with pytest.raises(ValidationError, match="proof_mode"):     # raised by the fake, before the client
+            await http.public().call("GET /health")
