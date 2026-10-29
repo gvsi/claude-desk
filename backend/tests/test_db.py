@@ -179,6 +179,47 @@ def test_api_views_hide_secrets(admin, api):
     assert {"body", "canary"}.isdisjoint(columns(admin, "kernel_ro", "documents"))
 
 
+MASTER_PLAN = Path(__file__).resolve().parents[2] / "docs" / "plans" / "2026-10-28-00-master-plan.md"
+
+
+def plan_kernel_ro_columns() -> dict[str, tuple[str, ...]]:
+    """The master plan's "Data model" `| View | Columns |` table, in order, parenthetical notes dropped."""
+    lines = MASTER_PLAN.read_text().splitlines()
+    start = lines.index("| View | Columns |") + 2
+    views: dict[str, tuple[str, ...]] = {}
+    for line in lines[start:]:
+        if not line.startswith("|"):
+            break
+        view, listed = (cell.strip() for cell in line.strip().strip("|").split("|", 1))
+        listed = re.sub(r"\s*\([^()]*\)", "", listed)    # notes such as "(a public pin, not a secret)" hold commas
+        views[view.strip("`")] = tuple(column.strip() for column in listed.split(","))
+    return views
+
+
+def test_ro_views_match_the_data_model():
+    # with test_api_views_hide_secrets (live views == KERNEL_RO_COLUMNS), this ties the database to the plan
+    assert list(KERNEL_RO_COLUMNS.items()) == list(plan_kernel_ro_columns().items())
+
+
+def plan_model_call_columns() -> list[str]:
+    """The `app.model_calls` columns the master plan's "Data model" lists, notes dropped."""
+    bullet = next(line for line in MASTER_PLAN.read_text().splitlines() if line.startswith("- **`app.*` (`APP_TABLES`):**"))
+    listed = bullet.split("`model_calls` (", 1)[1].split("; one row per API model call", 1)[0]
+    return [column.strip() for column in re.sub(r"\s*\([^()]*\)", "", listed).replace("`", "").split(",")]
+
+
+def test_model_calls_follow_the_data_model(admin, api):
+    # Plan 02a's migration adds the usage columns this table still lacks; every column it has is the plan's
+    assert set(columns(admin, "app", "model_calls")) <= set(plan_model_call_columns())
+    key = admin.execute("SELECT a.attname FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid"
+                        " AND a.attnum = ANY(i.indkey) WHERE i.indrelid = 'app.model_calls'::regclass AND i.indisprimary")
+    assert key.fetchall() == [("model_call_id",)]
+    # created_at is the call's finish, which only the writer knows: no default stands in for it
+    with pytest.raises(psycopg.errors.NotNullViolation), api.transaction(force_rollback=True):
+        api.execute("INSERT INTO app.model_calls (copy_id, route, model, input_tokens, cached_tokens, output_tokens,"
+                    " latency_ms) VALUES ('copy-a', 'conversation', 'claude-opus-5-5', 1200, 0, 80, 2400)")
+
+
 def test_kernel_ro_views_carry_copy_id(admin, api):
     assert views_in(admin, "kernel_ro") == set(KERNEL_RO_VIEWS)
     for view in KERNEL_RO_VIEWS:

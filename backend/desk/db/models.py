@@ -157,6 +157,7 @@ class ActorSession(Base):
     mode: Mapped[str] = mapped_column(Text, server_default=text("'ai'"))
     generation: Mapped[int] = mapped_column(Integer, server_default=text("0"))
     strikes: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    preview: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))   # the owner trying the Desk as a customer
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -224,6 +225,7 @@ class Tool(Base):
     reversible: Mapped[bool] = mapped_column(Boolean)
     status: Mapped[str] = mapped_column(Text)
     description_confirmed: Mapped[str] = mapped_column(Text)
+    definition_sha256: Mapped[str | None] = mapped_column(Text)     # MCP tools' pinned definition; None for native tools
     pending_definition_text: Mapped[str | None] = mapped_column(Text)
     pending_sha256: Mapped[str | None] = mapped_column(Text)
 
@@ -520,11 +522,11 @@ class A2ATurn(Base):
 
 
 class ModelCall(Base):
-    """One API model call's usage; never its content."""
+    """One API model call's usage; never its content. `created_at` is the call's finish, set by the writer."""
 
     __tablename__ = "model_calls"
     __table_args__ = {"schema": "app"}
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    model_call_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     copy_id: Mapped[str] = mapped_column(Text)
     session_id: Mapped[str | None] = mapped_column(Text)
     route: Mapped[str] = mapped_column(Text)
@@ -533,7 +535,7 @@ class ModelCall(Base):
     cached_tokens: Mapped[int] = mapped_column(Integer)
     output_tokens: Mapped[int] = mapped_column(Integer)
     latency_ms: Mapped[int] = mapped_column(Integer)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))   # the call's finish; no default stands in
 
 
 # mockpay.*: the mock payments server (role desk_mockpay); keys are unique per copy

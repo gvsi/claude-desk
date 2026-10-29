@@ -100,13 +100,16 @@ class SeedDocument(BaseModel):
     body: str                             # the kernel adds a fresh canary to every document
     record_owner_ref: str | None = None   # a SeedPerson.ref; None = owner-only
 
+ITEM_ID_PATTERN = r"^[a-z0-9-]{1,40}$"
+SLOT_ID_PATTERN = r"^S-[0-9]{8}-[0-9]{4}$"   # ASCII digits, as in SignedTime
+
 class PriceItem(BaseModel):
-    item_id: str
+    item_id: str = Field(pattern=ITEM_ID_PATTERN)
     title: str
     unit_cents: StrictInt = Field(ge=0, le=1_000_000)
 
 class CalendarSlot(BaseModel):
-    slot_id: str
+    slot_id: str = Field(pattern=SLOT_ID_PATTERN)   # S-<yyyymmdd>-<hhmm>, the start in business time
     starts_at: AwareDatetime
     minutes: int
 
@@ -145,7 +148,8 @@ class DeskSeed(BaseModel):
     people: list[SeedPerson]
     documents: list[SeedDocument]
     notifications: NotificationDefaults
-    connections: list[Literal["mock_payments"]] = []   # connected and confirmed with the seed's profiles at creation
+    connections: list[Literal["mock_payments"]] = []   # connected and confirmed with the seed's profiles by POST /copies (the Rivera seed);
+                                          # POST /desks rejects a non-empty list (422 invalid), and new Desks connect through /tools/connect
 
 # Tools
 Effect = Literal["read", "private_data", "change", "charge", "pay_out", "send_message"]
@@ -167,8 +171,8 @@ class ToolProfile(BaseModel):
     resource_kind: Literal["quote", "slot", "booking", "document", "charge", "desk"]
     description_confirmed: str            # the owner-confirmed text Claude sees, never the server's description
     input_schema: dict                    # the adapter's JSON Schema of the args it accepts (additionalProperties: false), never the server's
-    definition_sha256: str | None = None  # MCP only: sha256 of canonical_json_any(the parsed tools/list entry, every field the server
-                                          # sent, client list cache off); re-listed before every execution
+    definition_sha256: str | None = None  # MCP only: sha256 of canonical_json_any(every field of the parsed tools/list entry, client
+                                          # list cache off; fields the SDK drops reach no one); re-listed before every execution
     pending_definition_text: str | None = None   # a drifted tools/list entry, shown to the owner as quoted untrusted text
     pending_sha256: str | None = None     # its hash; the owner's confirm must name it
     status: Literal["enabled", "needs_review", "disabled"]
@@ -309,6 +313,7 @@ class Probe(BaseModel):                   # a setup safety probe: a hypothetical
     resource_kind: Literal["quote", "slot", "booking", "document", "charge", "desk"]
     resource_owner: Literal["caller", "other", "none"] = "none"
     amount_cents: StrictInt | None = None   # stand-in price for money tools
+    starts_at: AwareDatetime | None = None  # slot and booking probes; None = the kernel's now
 
     @model_validator(mode="after")
     def _subject_when_scoped(self) -> Self:
@@ -413,7 +418,8 @@ class RenderedBlock(BaseModel):           # every field is kernel-rendered and c
 class ReplyVerdict(BaseModel):
     ok: bool
     language: Literal["en", "es"]         # the blocks' language: detected, else the fallback ("Language" row)
-    blocks: list[RenderedBlock]           # exactly what may be shown; on a failed check, the handoff clause
+    blocks: list[RenderedBlock]           # exactly what may be shown; a failed check of Claude's draft gives the handoff clause,
+                                          # a blocked owner say none
     violations: list[Violation]
     message_id: str
     generation: int                       # the session generation it was checked at; deliver() drops it once stale
