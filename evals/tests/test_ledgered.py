@@ -2,6 +2,7 @@
 on the `auth` entries a refused call leaves."""
 
 import hashlib
+import secrets
 
 import pytest
 
@@ -137,3 +138,14 @@ def test_other_entries_fail_naming_what_leaked_never_its_value(bad, message):
     with pytest.raises(AssertionError, match=message) as failure:
         assert_only_auth([entry(1), bad], copy_secrets(COPY_B, "B's"))
     assert OWNER_TOKEN not in str(failure.value)
+
+
+def test_an_auth_entry_missing_its_reason_never_shows_the_keys_it_chose():
+    """A summary is a `dict`, so its keys are the kernel's own choice and may be a token spelled
+    like a field name: the failure names only the route and reason it looks for, never another key."""
+    token_key = "tok_" + secrets.token_hex(16)
+    for summary in ({"route": "/decide", token_key: "x"}, {token_key: "/decide", "e" + secrets.token_hex(19): 1}):
+        with pytest.raises(AssertionError, match="route and reason") as failure:
+            assert_only_auth([entry(1, summary=summary)], copy_secrets(COPY_B, "B's"))
+        assert not [key for key in summary if key not in ("route", "reason") and key in str(failure.value)], (
+            str(failure.value))

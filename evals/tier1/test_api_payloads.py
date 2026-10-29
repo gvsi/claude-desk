@@ -34,7 +34,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from desk.contracts import DemoAgentIssued
+from desk.contracts import Decision, DemoAgentIssued, LedgerPage
 from desk.events import A2AResponse, SseEvent
 from desk.kernel_api import Health
 from evals.client import ApiCallFailed, DeskClient, StreamEvent
@@ -44,7 +44,7 @@ from evals.oracles.markers import find_markers
 from evals.routes import ROUTES
 from evals.tier1.args import quote_args, start_verification_args
 from evals.tier1.golden_desk import REVIEW_PASS, REVIEWER_MODEL, START, GoldenDesk, golden_desk
-from evals.tier1.harness import AgentTurns, Auth, Expect, is_field_name
+from evals.tier1.harness import UNDECLARED, AgentTurns, Auth, Expect
 from evals.tier1.targets import SOFT_PROMISE_MODEL, SOFT_PROMISE_PASS, ApiTarget, KernelTarget
 from evals.tier1.test_verification import DANA, code_in, holds_a_code, redacted, wrong_codes
 
@@ -223,7 +223,8 @@ def turn_problems(turns: list[list[StreamEvent]]) -> list[str]:
             if event.type == "message" and "writing" not in types[:i]:
                 problems.append(f"turn {n}: message {event.id} has no writing before it")
             if event.type == "writing" and (event.data != {"type": "writing"} or event.event != "writing"):
-                problems.append(f"turn {n}: writing {event.id} carries {sorted(event.data)} as {event.event!r}")
+                carried = sorted(key if key == "type" else UNDECLARED for key in event.data)   # never another key
+                problems.append(f"turn {n}: writing {event.id} carries {carried} as {event.event!r}")
     return problems
 
 
@@ -274,6 +275,14 @@ EMPTY_SUCCESS: dict[str, dict[str, Any]] = {
                      "public_key_hex": _is_hex(64), "key_id": _is_hex()},
 }
 REQUIRED = {"error": "error", "owner_session": "items", "owner_ledger": "entries"}   # the field each shape needs
+# The fields each answer's contract declares: the only keys a problem names. Any other key is the
+# answer's own choice, which may be a token spelled like a field name, so it is never shown.
+DECLARED: dict[str, frozenset[str]] = {
+    "error": frozenset(ERROR_BODY),                                # ApiError (Plan 02a)
+    "owner_session": frozenset(EMPTY_SUCCESS["owner_session"]),    # OwnerTranscript (Plan 02a): items, state
+    "owner_decision": frozenset(Decision.model_fields),
+    "owner_ledger": frozenset(LedgerPage.model_fields),
+}
 
 
 def empty_read_problems(op: str, status: int, body: Any) -> list[str]:
@@ -284,19 +293,23 @@ def empty_read_problems(op: str, status: int, body: Any) -> list[str]:
     status, field or value is a problem, a scalar field or body above all; a problem names fields
     and types, never what they hold."""
     if status == 404:
-        return [] if body is None else _shape_problems(body, ERROR_BODY, REQUIRED["error"], "the API's error body")
+        if body is None:
+            return []
+        return _shape_problems(body, ERROR_BODY, REQUIRED["error"], DECLARED["error"], "the API's error body")
     if not 200 <= status < 300:
         return [f"it answered {status}, neither 404 nor a success holding nothing"]
     if body is None or body == [] or body == {}:
         return []
-    return _shape_problems(body, EMPTY_SUCCESS[op], REQUIRED.get(op), f"an empty {op} answer")
+    return _shape_problems(body, EMPTY_SUCCESS[op], REQUIRED.get(op), DECLARED[op], f"an empty {op} answer")
 
 
-def _shape_problems(body: Any, shape: dict[str, Any], required: str | None, what: str) -> list[str]:
+def _shape_problems(
+    body: Any, shape: dict[str, Any], required: str | None, declared: frozenset[str], what: str
+) -> list[str]:
     if not isinstance(body, dict):
         held = f"a list of {len(body)}" if isinstance(body, list) else f"a {type(body).__name__}"
         return [f"its body is {held}, not {what}"]
-    problems = [f"its body has {_field(key)}, which {what} doesn't" for key in body if key not in shape]
+    problems = [f"its body has {_field(key, declared)}, which {what} doesn't" for key in body if key not in shape]
     problems += [f"its {key!r} holds a {type(body[key]).__name__}, which {what} can't"
                  for key in body if key in shape and not shape[key](body[key])]
     if required is not None and required not in body:
@@ -304,8 +317,9 @@ def _shape_problems(body: Any, shape: dict[str, Any], required: str | None, what
     return problems
 
 
-def _field(key: str) -> str:
-    return repr(key) if is_field_name(key) else "a field with an unusual name, not shown"
+def _field(key: str, declared: frozenset[str]) -> str:
+    """A key as a problem names it: a field the contract declares by its name, any other unnamed."""
+    return repr(key) if key in declared else "a field its contract doesn't declare (its name not shown)"
 
 
 # The conversation the payload cases play

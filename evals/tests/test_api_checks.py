@@ -6,6 +6,7 @@ checks they judge with, each on crafted input that passes and on input each rule
 
 import asyncio
 import json
+import secrets
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
@@ -140,7 +141,10 @@ def test_turn_problems_hold_writing_first_and_one_turn_end():
         "turn 1: message 1 has no writing before it"]
     assert turn_problems([[event(1, "writing", {"type": "writing", "text": "Thinking about $89"}),
                            event(2, "message", message), event(3, "turn_end")]]) == [
-        "turn 1: writing 1 carries ['text', 'type'] as 'writing'"]
+        "turn 1: writing 1 carries ['*', 'type'] as 'writing'"]
+    assert turn_problems([[event(1, "writing", {"type": "writing", TOKEN_KEY: 1, HEX_KEY: 2}),
+                           event(2, "turn_end")]]) == [   # keys a token could have are never shown
+        "turn 1: writing 1 carries ['*', '*', 'type'] as 'writing'"]
     assert turn_problems([[event(1, "writing", name="message"), event(2, "turn_end")]]) == [
         "turn 1: writing 1 carries ['type'] as 'message'"]
     assert turn_problems([[event(1, "writing"), event(2, "message", message)]]) == [
@@ -206,6 +210,43 @@ def test_empty_read_problems_allow_only_errors_and_empty_shapes():
     assert passed == []
     problems = [problem for op, status, body in something.values() for problem in empty_read_problems(op, status, body)]
     assert not [problem for problem in problems if "Bob" in problem], "a problem names what the answer held"
+
+
+# Keys an answer chooses that a token could have: one spelled like a field name, and one in
+# hexadecimal that starts with a letter. Made fresh each run, so no token-like text is in the source.
+TOKEN_KEY = "tok_" + secrets.token_hex(16)
+HEX_KEY = "e" + secrets.token_hex(19)
+
+
+def test_empty_read_problems_name_only_the_contracts_fields():
+    """A problem names a field only when the read's contract declares it (the API's error body,
+    `Decision`, `LedgerPage`, a transcript's `items` and `state`); any other key is the answer's
+    own choice, so it may be a token, and is never shown, however it is spelled."""
+    keyed = {
+        "a token-shaped key": ("owner_session", 200, {"items": [], TOKEN_KEY: True}),
+        "a hexadecimal key": ("owner_ledger", 200, {**EMPTY_LEDGER, HEX_KEY: 1}),
+        "both beside a decision": ("owner_decision", 200, {"decision_id": "dec-b", TOKEN_KEY: 1, HEX_KEY: 2}),
+        "both in an error body": ("owner_decision", 404, {**NOT_FOUND, TOKEN_KEY: 1, HEX_KEY: 2}),
+        "a field-shaped key": ("owner_session", 200, {"items": [], "summary": FOREIGN_NOTE}),
+    }
+    for name, (op, status, body) in keyed.items():
+        problems = empty_read_problems(op, status, body)
+        assert problems, name
+        shown = [problem for problem in problems if TOKEN_KEY in problem or HEX_KEY in problem or "summary" in problem]
+        assert shown == [], (name, shown)
+    assert len(empty_read_problems("owner_decision", 404, {**NOT_FOUND, TOKEN_KEY: 1, HEX_KEY: 2})) == 2   # one each
+    decision = empty_read_problems("owner_decision", 200, {"decision_id": "dec-b", TOKEN_KEY: 1})
+    assert any("'decision_id'" in problem for problem in decision), decision   # Decision declares it
+
+
+@pytest.mark.parametrize("key", ["token", "hex"])
+async def test_cross_copy_case_never_prints_an_undeclared_key(monkeypatch: pytest.MonkeyPatch, key):
+    """The whole case fails a read whose answer holds a key the contract doesn't declare, and its
+    failure shows the key nowhere: a token-shaped or hexadecimal key is never printed."""
+    chosen = TOKEN_KEY if key == "token" else HEX_KEY
+    with pytest.raises(AssertionError, match="A's owner reading B's") as failure:
+        await run_cross_copy_case(monkeypatch, 200, {"items": [], chosen: True})
+    assert chosen not in str(failure.value), str(failure.value)
 
 
 class StreamOf:

@@ -463,13 +463,7 @@ def declared_names(tp: Any) -> frozenset[str]:
     return frozenset(names)
 
 
-FIELD_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")   # a key a problem may name; any other isn't shown
-
-
-def is_field_name(key: Any) -> bool:
-    """Whether a problem may name `key`, a key an answer chose: only when it is shaped like a field
-    name, since any other (a code or a token used as a key) could be what the answer leaked."""
-    return isinstance(key, str) and FIELD_NAME.fullmatch(key) is not None
+UNDECLARED = "*"   # how a path shows a key the answer chose: never the key itself, whatever its spelling
 
 
 def undeclared_fields(raw: Any, value: Any, path: str = "") -> list[str]:
@@ -478,27 +472,28 @@ def undeclared_fields(raw: Any, value: Any, path: str = "") -> list[str]:
     says what each part was read as. The models drop what they don't declare, so a code or a
     canary in such a field would vanish before any scan saw it: a field the contract doesn't
     declare is itself a contract break. Whatever a `dict` or `Any` field holds is declared by it.
-    A path shows the keys the answer chose only when `is_field_name`, and `*` for any other."""
-    def at(key: Any) -> str:
-        shown = str(key) if isinstance(key, int) or is_field_name(key) else "*"
-        return f"{path}.{shown}" if path else shown
+    A path shows only the contract's own field names and list indexes; every key the answer chose
+    (one the model doesn't declare, or a `dict` field's key) shows as `*`, since a code or a token
+    can be spelled like a field name."""
+    def at(segment: str) -> str:
+        return f"{path}.{segment}" if path else segment
 
     if isinstance(value, BaseModel) and isinstance(raw, dict):
         fields = type(value).model_fields
         by_key = {name: name for name in fields} | {field.alias: name for name, field in fields.items() if field.alias}
         found = []
         for key, item in raw.items():
-            if key in by_key:
+            if key in by_key:   # a name the contract declares, so safe to show
                 found += undeclared_fields(item, getattr(value, by_key[key]), at(key))
             else:
-                found.append(at(key))
+                found.append(at(UNDECLARED))
         return found
     if isinstance(value, list | tuple) and isinstance(raw, list):
         return [found for n, (item, element) in enumerate(zip(raw, value, strict=False))
-                for found in undeclared_fields(item, element, at(n))]
+                for found in undeclared_fields(item, element, at(str(n)))]
     if isinstance(value, dict) and isinstance(raw, dict):
         return [found for key, item in raw.items() if key in value
-                for found in undeclared_fields(item, value[key], at(key))]
+                for found in undeclared_fields(item, value[key], at(UNDECLARED))]
     return []
 
 

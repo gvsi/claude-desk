@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import secrets
 import shutil
 import sys
 import textwrap
@@ -12,7 +13,7 @@ from zoneinfo import ZoneInfo
 import pytest
 import rfc8785
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from pydantic import TypeAdapter
+from pydantic import BaseModel, TypeAdapter
 
 from desk.contracts import CopyCreated, Decision, ExecResult, ProbeResult, SessionCreated
 from desk.kernel_api import KERNEL_RESPONSES, KERNEL_ROUTES, KernelError, VerifyStarted, WhoAmI
@@ -63,40 +64,55 @@ async def test_stub_rejects_an_unknown_route():
         await k.call("POST /transfer", body={"amount_cents": 100}, auth=Auth.none())
 
 
-def test_undeclared_response_fields_are_named_by_path():
-    """`undeclared_fields` names every field a kernel answer carries that its response model
-    doesn't declare, nested ones and a union member's included, by path and never by value. A
-    declared field the answer leaves out sits at its default, which isn't undeclared, and whatever
-    a `dict` field holds is declared by it."""
+def test_undeclared_response_fields_are_found_by_path():
+    """`undeclared_fields` finds every field a kernel answer carries that its response model
+    doesn't declare, nested ones and a union member's included, by where it sits and never by its
+    name or value: the path shows the contract's field names and list indexes, and `*` for the key
+    the answer chose. A declared field the answer leaves out sits at its default, which isn't
+    undeclared, and whatever a `dict` field holds is declared by it."""
     notice = {"entry_id": "e-1", "to": "d•••@example.com", "preview": "A code is on its way."}
     started = {"message": "If that contact is on record, a code is on its way.", "inbox": [notice]}
     assert undeclared_fields(started, VerifyStarted.model_validate(started)) == []
     leaking = {**started, "verification_code": "482913"}
-    assert undeclared_fields(leaking, VerifyStarted.model_validate(leaking)) == ["verification_code"]
+    assert undeclared_fields(leaking, VerifyStarted.model_validate(leaking)) == ["*"]
     nested = {**started, "inbox": [notice, {**notice, "code": "482913"}]}
-    assert undeclared_fields(nested, VerifyStarted.model_validate(nested)) == ["inbox.1.code"]
+    assert undeclared_fields(nested, VerifyStarted.model_validate(nested)) == ["inbox.1.*"]
     error = {"code": "invalid", "detail": "five attempts used"}
-    assert undeclared_fields(error, KernelError.model_validate(error)) == ["detail"]
+    assert undeclared_fields(error, KernelError.model_validate(error)) == ["*"]
     whoami = build(WhoAmI, Expect(fields={"session.kind": "visitor"})).model_dump(mode="json")
     in_session = {**whoami, "session": {**whoami["session"], "person_id": "p-dana"}}
-    assert undeclared_fields(in_session, WhoAmI.model_validate(in_session)) == ["session.person_id"]
+    assert undeclared_fields(in_session, WhoAmI.model_validate(in_session)) == ["session.*"]
     result = build(ExecResult, Expect(fields={"inbox": {"$len": 0}})).model_dump(mode="json")
     del result["inbox"]   # left out: at its default
     viewed = {**result, "model_view": {"quote_id": "q-1", "lines": [{"item": "drain", "cents": 18000}]}}
     assert undeclared_fields(viewed, ExecResult.model_validate(viewed)) == []
     twice = {**viewed, "receipt": {}, "facts": [{**fact, "extra": 1} for fact in viewed["facts"]]}
     assert undeclared_fields(twice, ExecResult.model_validate(twice)) == [
-        f"facts.{n}.extra" for n in range(len(viewed["facts"]))] + ["receipt"]
+        f"facts.{n}.*" for n in range(len(viewed["facts"]))] + ["*"]
 
 
-def test_an_undeclared_key_is_named_only_when_shaped_like_a_field():
+class Keyed(BaseModel):
+    """A model with a `dict` of models, so a key the answer chose sits on the path to a field."""
+
+    by_key: dict[str, VerifyStarted]
+
+
+def test_an_undeclared_or_dynamic_key_is_never_named():
     """A key the contract doesn't declare is the answer's own choice, so it may be a code or a
-    token: `undeclared_fields` names it only when it is shaped like a field name, and any other
-    as `*`."""
+    token, and a token can be spelled like a field name: `undeclared_fields` shows `*` for every
+    such key, and for every key of a `dict` field, whatever its spelling. Only the contract's own
+    field names and list indexes are shown."""
+    token = "tok_" + secrets.token_hex(16)        # shaped like an identifier
+    hex_key = "e" + secrets.token_hex(19)          # hexadecimal, starting with a letter
     notice = {"entry_id": "e-1", "to": "d•••@example.com", "preview": "A code is on its way."}
     keyed = {"message": "If that contact is on record, a code is on its way.",
-             "inbox": [{**notice, "c-482913": 1}], "482913": True, "named_like_a_field": 1}
-    assert undeclared_fields(keyed, VerifyStarted.model_validate(keyed)) == ["inbox.0.*", "*", "named_like_a_field"]
+             "inbox": [{**notice, "c-482913": 1, hex_key: 2}], "482913": True, "named_like_a_field": 1, token: 3}
+    found = undeclared_fields(keyed, VerifyStarted.model_validate(keyed))
+    assert found == ["inbox.0.*", "inbox.0.*", "*", "*", "*"]
+    by_key = {"by_key": {token: {**keyed, "inbox": [notice]}, hex_key: {"message": "Hi", "inbox": [], "x": 1}}}
+    found = undeclared_fields(by_key, Keyed.model_validate(by_key))
+    assert found == ["by_key.*.*", "by_key.*.*", "by_key.*.*", "by_key.*.*"]
+    assert not [path for path in found if token in path or hex_key in path]
 
 
 async def test_a_request_off_contract_is_told_without_its_values():

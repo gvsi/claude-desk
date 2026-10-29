@@ -117,8 +117,10 @@ def assert_only_auth(entries: list[LedgerEntry], forbidden: dict[str, str]) -> N
         event = entry.event
         assert (event.kind, event.origin) == ("auth", "kernel"), (
             f"entry {entry.seq} is not an auth refusal the kernel wrote: {event.kind} from {event.origin}")
-        assert {"route", "reason"} <= event.summary.keys(), (
-            f"auth entry {entry.seq} names its route and reason: it has {sorted(event.summary)}")
+        named = event.summary.keys() & {"route", "reason"}   # the summary's other keys are its own: never shown
+        assert named == {"route", "reason"}, (
+            f"auth entry {entry.seq} names its route and reason: it has {sorted(named)} and "
+            f"{len(event.summary) - len(named)} other keys")
         dumped = json.dumps(entry.model_dump(mode="json"))
         leaked = [label for label, value in forbidden.items() if value and value in dumped]
         assert not leaked, f"auth entry {entry.seq} holds {leaked}"
