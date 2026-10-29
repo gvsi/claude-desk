@@ -3,10 +3,11 @@
 Run as `cd backend && uv run python -m tests.kernel_contract.real_kernel`. It reads the kernel ids (those
 starting `01`) from `evals/tier1/landed.toml`; with none, it prints "no kernel plan landed" and exits 0.
 Otherwise it starts `make kernel-serve` in a process group of its own, waits up to 30 s for
-`http://127.0.0.1:8701/health`, prints the proof mode the kernel reports there, runs
-`pytest tests/kernel_contract -m real_kernel -q` with `DESK_KERNEL_URL` and `DESK_KERNEL_PLANS` set, stops
-the kernel's whole process group and exits with pytest's status. A kernel already answering on the port is
-refused rather than tested, since it may be another checkout's.
+`http://127.0.0.1:8701/health`, prints the proof mode the kernel reports there (`unknown` when it reports
+none, with a warning for any mode but `symcc`), runs `pytest tests/kernel_contract -m real_kernel -q` with
+`DESK_KERNEL_URL` and `DESK_KERNEL_PLANS` set, stops the kernel's whole process group and exits with pytest's
+status. A kernel already answering on the port is refused rather than tested, since it may be another
+checkout's.
 
 The kernel runs with the development test hooks its own tests use, set in its environment only:
 `DESK_DECISIONS=offline` (its offline reviewer and soft-promise check, so a reply is judged on its content
@@ -108,7 +109,11 @@ def main() -> int:
                     return 1
                 time.sleep(0.5)
             env = {**os.environ, "DESK_KERNEL_URL": KERNEL_URL, "DESK_KERNEL_PLANS": ",".join(plans)}
-            print(f"kernel-contract: real kernel, plans {', '.join(plans)}, proof mode {health.get('proof_mode')}")
+            mode = health.get("proof_mode") or "unknown"
+            print(f"kernel-contract: real kernel, plans {', '.join(plans)}, proof mode {mode}")
+            if mode != "symcc":
+                print(f"kernel-contract: warning: the kernel's proof mode is {mode}, not symcc, so tests that need a"
+                      " proved draft skip", file=sys.stderr)
             return subprocess.run([sys.executable, "-m", "pytest", "tests/kernel_contract", "-m", "real_kernel", "-q"],
                                   cwd=REPO_ROOT / "backend", env=env).returncode
         finally:

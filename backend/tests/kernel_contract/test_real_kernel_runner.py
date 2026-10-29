@@ -91,3 +91,16 @@ def test_outside_development_no_kernel_starts(runner: SimpleNamespace, monkeypat
     assert real_kernel.main() == 1
     assert not runner.started and runner.pytest is None
     assert "DESK_ENV='production'" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(("health", "mode"), [({}, "unknown"), ({"proof_mode": "bounded"}, "bounded")],
+                         ids=["no proof mode", "bounded"])
+def test_a_proof_mode_other_than_symcc_is_called_out(runner: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+                                                     capsys: pytest.CaptureFixture, health: dict, mode: str):
+    """A kernel that doesn't say it proves with SymCC (its `/health` has no `proof_mode`, or isn't a JSON object, which
+    reads as `{}`) is reported as such, with a warning: drafts it can't prove make some contract tests skip."""
+    monkeypatch.setattr(real_kernel, "_health", lambda: health if runner.started else None)
+    assert real_kernel.main() == 0
+    out, err = capsys.readouterr()
+    assert f"proof mode {mode}" in out and "proof mode None" not in out
+    assert f"proof mode is {mode}, not symcc" in err
