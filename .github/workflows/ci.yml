@@ -278,6 +278,14 @@ jobs:
           echo "$sha256  $archive" | sha256sum -c --strict
           tar -xzf "$archive" actionlint
           echo "$dir" >> "$GITHUB_PATH"
+      # actionlint checks the workflow's scripts with shellcheck only when it is on PATH.
+      # GitHub-hosted runners have it; elsewhere it comes from apt.
+      - name: Install ShellCheck if the runner has none
+        run: |
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            sudo apt-get update -q
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends shellcheck
+          fi
       - name: Lint the workflow
         run: actionlint
       - name: Run the repository tooling tests

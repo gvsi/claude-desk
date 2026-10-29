@@ -601,43 +601,49 @@ def test_setup_desk_installs_the_pinned_toolchain_after_rustup():
     assert toolchain["run"] == "rustup toolchain install 1.99.1 --profile minimal --no-self-update\nrustup default 1.99.1\n"
 
 
-INSTALL_PSQL = "Install the Postgres client if the runner has none"
+# Commands GitHub-hosted runners have and other runners may not, installed from Ubuntu's archive
+# before their first use: step name -> (command, apt package, the jobs, the first command that needs it).
+APT_INSTALLS = {
+    # make db-roles sets the role passwords with psql.
+    "Install the Postgres client if the runner has none": (
+        "psql", "postgresql-client", ["backend tests", "tier 1 evals"], "make db-roles",
+    ),
+    # actionlint runs shellcheck on the workflow's scripts only when shellcheck is on PATH.
+    "Install ShellCheck if the runner has none": ("shellcheck", "shellcheck", ["repo checks"], "actionlint"),
+}
 
 
-def test_jobs_that_set_role_passwords_have_psql_first():
-    """make db-roles needs psql; GitHub-hosted runners have it, and other runners get it from apt."""
-    for name in ["backend tests", "tier 1 evals"]:
+@pytest.mark.parametrize("install", APT_INSTALLS)
+def test_jobs_install_what_hosted_runners_have_before_using_it(install):
+    _, _, users, first_use = APT_INSTALLS[install]
+    for name in users:
         steps = job_named(name)["steps"]
         names = [step.get("name") for step in steps]
         commands = [step.get("run", "").strip() for step in steps]
-        assert names.count(INSTALL_PSQL) == 1, name
-        assert names.index(INSTALL_PSQL) < commands.index("make db-roles"), name
+        assert names.count(install) == 1, name
+        assert names.index(install) < commands.index(first_use), name
     for job in jobs(load(WORKFLOW)):
-        if job["name"] not in ("backend tests", "tier 1 evals"):
-            assert INSTALL_PSQL not in [step.get("name") for step in job["steps"]], job["name"]
+        if job["name"] not in users:
+            assert install not in [step.get("name") for step in job["steps"]], job["name"]
 
 
-def test_psql_is_installed_only_where_it_is_missing(tmp_path):
+@pytest.mark.parametrize("install", APT_INSTALLS)
+def test_apt_installs_only_where_the_command_is_missing(tmp_path, install):
+    command, package, users, _ = APT_INSTALLS[install]
     runner = Runner(tmp_path)
-    [step, same] = [
-        step for name in ["backend tests", "tier 1 evals"] for step in job_named(name)["steps"]
-        if step.get("name") == INSTALL_PSQL
-    ]
-    assert step == same
+    [step, *same] = [step for name in users for step in job_named(name)["steps"] if step.get("name") == install]
+    assert all(other == step for other in same)
 
-    # Only the stubs on PATH, so a psql on the machine running the test can't stand in.
+    # Only the stubs on PATH, so the command on the machine running the test can't stand in.
     result, events = runner.run(step, "ARM64", PATH=str(runner.bin))
 
     assert result.returncode == 0, result.stderr
     assert events == [
         ["sudo", "apt-get", "update", "-q"],
-        [
-            "sudo", "DEBIAN_FRONTEND=noninteractive",
-            "apt-get", "install", "-y", "-q", "--no-install-recommends", "postgresql-client",
-        ],
+        ["sudo", "DEBIAN_FRONTEND=noninteractive", "apt-get", "install", "-y", "-q", "--no-install-recommends", package],
     ]
 
-    (runner.bin / "psql").symlink_to(runner.bin / "tar")
+    (runner.bin / command).symlink_to(runner.bin / "tar")
     result, events = runner.run(step, "X64", PATH=str(runner.bin))
 
     assert result.returncode == 0, result.stderr
