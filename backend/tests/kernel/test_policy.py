@@ -483,6 +483,32 @@ async def test_bounded_mode_never_activates_owner_drafts(app, client, monkeypatc
     assert (reproved.version, reproved.status, reproved.proof.method) == (3, "proved", "symcc") and len(runs) == 1
 
 
+@pytest.mark.parametrize("report", ["bounded", "none"])
+async def test_symcc_mode_refuses_a_proved_row_without_a_symcc_proof(report, app, client, monkeypatch):
+    """Past the mode check, confirm still reads the stored report: a row marked `proved` by
+    mistake that holds only a bounded report, or no report, doesn't activate in `symcc` mode."""
+    desk = await desk_with_tools(app)
+    runs = count_prover_runs(monkeypatch)
+    draft = await drafted(client, desk, BOOK_AND_ASK_CHARGES)
+    assert (draft.version, draft.status, draft.proof.method, draft.proof.ok) == (2, "draft", "bounded", True)
+    async with kernel_ctx(app) as ctx:
+        repo = ctx.bind(desk.rows.copy_id)
+        row = (await ctx.db.scalars(repo.scoped(select(PolicyVersionRow).where(
+            PolicyVersionRow.desk_id == desk.desk_id, PolicyVersionRow.version == 2)))).one()
+        row.status = "proved"
+        if report == "none":
+            row.proof = None
+    stored = draft.proof if report == "bounded" else None
+    monkeypatch.setattr(activation, "_proof_mode", "symcc")                     # as use_prover sets it
+    response = await post_confirm(client, desk, 2)
+    assert (response.status_code, response.json()) == (409, {"code": "conflict"})
+    assert (await policy_entries(app, desk))[-1] == {"version": 2, "refused": "not_proved"}
+    await assert_still_active(app, desk, 1)
+    [row] = [row for row in await versions(app, desk) if row.version == 2]
+    assert (row.status, row.proof) == ("proved", stored)                         # the row is left as it was
+    assert runs == []                                                            # confirm never proves
+
+
 @pytest.mark.solver
 async def test_bounded_mode_refuses_a_previously_proved_draft(desk_prove, app, client, monkeypatch):
     """A draft SymCC proved earlier doesn't activate once the kernel runs `bounded` (restarted
