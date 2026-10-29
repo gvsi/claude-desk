@@ -48,5 +48,10 @@ export { Mark, Wordmark, type MarkProps, type WordmarkProps } from './components
 export { MARK_GEOMETRY } from './components/Mark/markGeometry.ts';
 export { ConceptFooter, type ConceptFooterProps } from './components/ConceptFooter/ConceptFooter.tsx';
 
+// Reply cards
+export { ReplyCard, type ReplyCardProps } from './components/ReplyCard/ReplyCard.tsx';
+export { cardView, type CardView } from './components/ReplyCard/cardView.ts';
+export { CARD_CHROME, type CardChrome } from './components/ReplyCard/chrome.ts';
+
 // Icons
 export { Icon, ICON_NAMES, type IconName, type IconProps, type IconSize } from './icons/index.tsx';
