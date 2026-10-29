@@ -193,7 +193,7 @@ None open.
 - **Verification and messages:** nothing is really sent. Verification uses a fresh random code per challenge, shown in a small "Demo inbox" panel that stands in for the visitor's phone or email; owner email/text/push alerts are mocked the same way. The verification logic (codes only to the contact on record, expiry, attempts, notify the person on record) is real; only delivery is simulated. No email or SMS provider accounts are needed.
 - **Languages:** English and Spanish for real (the reply checker is tested on both); other languages fall back to handing off to the owner.
 - **Reply timing:** check, then reveal: a short "Claude is writing" state, then the checked reply appears whole, so nothing unchecked is ever shown. The added delay must be benchmarked (time from model finish to reveal, p50 and p95) and reported; a target is set once measured.
-- **Mock fixes:** the Desk picker shows on every Rivera screen; Settings uses one left sub-nav (General, Connectors, Knowledge, Notifications, Channels, Billing) with breadcrumbs only on detail pages; setup shows memory and website reads as claude.ai-style inline tool labels instead of a card.
+- **Mock fixes:** the Desk picker shows on every Rivera screen; Settings uses one left sub-nav (General, Knowledge, Notifications, Channels, Billing; connectors live under Rules, as a hub by connector with connector and tool pages, owner decision 2026-10-29) with breadcrumbs only on detail pages; setup shows memory and website reads as claude.ai-style inline tool labels instead of a card.
 
 **Decisions after the pre-implementation design reviews (2026-10-28; reviewers: Claude Opus 5.5, GPT-6 Astra and GPT-6.1 Sol at extra-high reasoning):**
 
