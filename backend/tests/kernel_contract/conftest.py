@@ -10,8 +10,9 @@
 
 Tests read their arguments (prices, slots, Desks) from `ro_schema` as `desk_api`, with the copy set the
 way the API sets it, so the fake's mirror is checked by the same reads. `arrange` puts a session in a
-state the HTTP API can't reach on demand (closed, paused): through the fake's knobs, or for the real
-kernel as `desk_admin` on its tables, which only tests may do, or through the owner's own kernel calls.
+state the HTTP API can't reach on demand (closed, paused, an execution in doubt): through the fake's knobs,
+or for the real kernel as `desk_admin` on its tables, which only tests may do, or through the owner's own
+kernel calls.
 """
 
 import os
@@ -25,8 +26,8 @@ from psycopg.rows import dict_row
 
 from desk.api.kernel_client import CredentialView, KernelHttp
 from desk.db.session import database_url, libpq_url
-from desk.contracts import CopyCreated, RuleCard
-from desk.kernel_api import ModeRequest, PolicyConfirmRequest, PolicyDraftRequest
+from desk.contracts import CopyCreated, Decision, RuleCard
+from desk.kernel_api import ExecuteRequest, ModeRequest, PolicyConfirmRequest, PolicyDraftRequest
 from tests.kernel_contract.fake_kernel import IDLE_LIMIT, FakeKernelState, fake_kernel_app
 from tests.kernel_contract.ro_tables import FAKE_RO_SCHEMA, FakeRO, create_fake_ro
 
@@ -161,6 +162,19 @@ class Arrange:
         if draft.status != "proved":
             pytest.skip(f"the kernel didn't prove the draft ({draft.status})")
         await owner.call("POST /policy/confirm", PolicyConfirmRequest(desk_id=desk_id, version=draft.version))
+
+    async def execution_in_doubt(self, view: CredentialView, decision: Decision) -> None:
+        """The allow's execution has begun and its outcome isn't known: on the fake it ran and ended `unknown` (left
+        to reconcile); on the real kernel its `intent` row is in place, as while it runs (reconciliation leaves an
+        intent alone for its first 30 s)."""
+        if self._state is not None:
+            self._state.script(decision.action.tool, exec_state="unknown")
+            await view.call("POST /execute", ExecuteRequest(decision_id=decision.decision_id,
+                                                            session_id=decision.session_id, generation=0))
+        else:
+            self._admin.execute("INSERT INTO kernel.executions (action_id, copy_id, decision_id, state, started_at)"
+                                " VALUES (%s, %s, %s, 'intent', now())",
+                                (decision.action.action_id, decision.action.copy_id, decision.decision_id))
 
     def close_idle_sessions(self, session_id: str) -> None:
         """Closes the session: the fake's clock moves past the 24-hour idle limit (closing every idle visitor

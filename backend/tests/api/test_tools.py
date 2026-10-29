@@ -320,6 +320,33 @@ async def test_an_unknown_outcome_is_left_until_it_is_final(api_conn, caller, fa
         ("decision_pending", {"decision_id": outcome.status.decision.decision_id}) for outcome in (ran, polled)]
 
 
+async def test_an_unknown_execution_is_answered_from_its_decision(api_conn, caller, fake, monkeypatch):
+    """The kernel returns a stored result on a repeated /execute only once the execution finished (`succeeded` or
+    `failed`): one whose outcome isn't known answers 409 `conflict`. So an `unknown` decision, found by the poll after
+    a lost /execute answer or by call ID in a recovery, is answered from the decision itself, as its receipt shows
+    it, and never sent to /execute again."""
+    monkeypatch.setattr(tools, "EXECUTE_POLL_S", 0)
+    fake.script("native.quote", exec_state="unknown")
+    fake.drop_response("/execute")                     # it ran, its outcome isn't known, and the answer was lost
+    block = tool_use("native__quote", DRAIN, id="toolu_unsure")
+    polled = await route_call(api_conn, caller, 0, block)
+
+    decision = polled.status.decision
+    unknown = {"outcome": "unknown", "decision_id": decision.decision_id, "message": decision.visitor_plain}
+    assert decision.state == "unknown" and (polled.result, polled.is_error) == (unknown, True)
+    assert not (polled.fenced or polled.unavailable or polled.session_ended or polled.turn_over)
+    assert routes(fake, "/execute") == ["POST /execute"]                 # the one that ran; never repeated
+    assert await events(api_conn, caller.session_id) == [receipt(decision)]
+    assert await control_rows(api_conn, caller.session_id) == [("decision_pending",
+                                                                {"decision_id": decision.decision_id})]
+
+    fake.calls.clear()
+    recovered = await recover_call(api_conn, caller, 0, block, made_at=0)
+    assert (recovered.result, recovered.is_error) == (unknown, True)
+    assert routes(fake, "/decide", "/execute") == []
+    assert len(await events(api_conn, caller.session_id)) == 1
+
+
 def check_drafts(fake) -> list[dict]:
     return [call.body["draft"] for call in fake.called("/check_reply")]
 

@@ -262,6 +262,24 @@ async def test_decide_execute_and_repeat(kernel, ro_read):
 
 
 @pytest.mark.kernel_plan("01a")
+async def test_a_repeat_of_an_execution_in_doubt_is_a_conflict(kernel, ro_read, arrange):
+    """A repeated /execute returns the stored result only once the execution finished (`succeeded` or `failed`).
+    While its outcome isn't known (still running, or `unknown`) it answers 409 `conflict` and changes nothing, so the
+    API answers from the decision instead."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    view, session_id = http.session(visitor.session_token), visitor.state.session_id
+    decision = await decide(view, session_id, 0, "call-1", "native.quote",
+                            quote_args(item_id(ro_read, ro_schema, copy, "Drain clearing")))
+    await arrange.execution_in_doubt(view, decision)
+    before = await read_decision(view, decision.decision_id)
+
+    assert await refused(execute(view, decision, 0)) == (409, "conflict")
+    assert await read_decision(view, decision.decision_id) == before
+
+
+@pytest.mark.kernel_plan("01a")
 async def test_discounted_quote_holds_and_answers_once(kernel, ro_read):
     http, ro_schema, _ = kernel
     copy = await new_copy(http)

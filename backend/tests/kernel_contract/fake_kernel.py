@@ -1147,6 +1147,8 @@ class FakeKernelState:
                 raise Refusal(409, "mode_paused")
         decision = self._refresh(record)
         if record.result is not None:
+            if record.result.state not in ("succeeded", "failed"):    # its outcome isn't known yet: no stored result
+                raise Refusal(409, "conflict")
             self.append(self.desks[record.desk_id], "execute", {"decision_id": decision.decision_id, "repeat": True},
                         session_id=session.session_id, ref_id=decision.decision_id)
             return record.result
