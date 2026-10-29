@@ -122,6 +122,8 @@ describe('design tokens', () => {
     add(['button-primary'], ['bg-app', 'bg-panel'], 3);
     add(['bg-app'], ['button-primary'], 3);
     add(['text-secondary'], ['fill-secondary'], 3, 'bg-panel');
+    // The switch row's label and description while it is hovered in the sidebar.
+    add(['text-primary', 'text-secondary'], ['fill-hover'], 4.5, 'bg-panel');
 
     // Every required pair is listed, at no lower a minimum, so dropping one can't pass.
     for (const want of required) {

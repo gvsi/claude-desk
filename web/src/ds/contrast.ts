@@ -113,6 +113,7 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = Object.freeze([
   ...pairs(['button-primary'], ['bg-app', 'bg-panel'], 3, 'The switch track when on, on a page and in the sidebar.'),
   ...pairs(['bg-app'], ['button-primary'], 3, 'The switch knob when on, against its track.'),
   ...pairs(['text-secondary'], ['fill-secondary'], 3, 'The switch knob when off, against its track in the sidebar.', 'bg-panel'),
+  ...pairs(['text-primary', 'text-secondary'], ['fill-hover'], 4.5, "The switch row's label and description while it is hovered in the sidebar.", 'bg-panel'),
 ]);
 
 export const DECORATIVE_COLORS: Readonly<Record<string, string>> = Object.freeze({
