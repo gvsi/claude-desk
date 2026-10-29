@@ -27,7 +27,7 @@
 | Prop | Type | Notes |
 | --- | --- | --- |
 | `children` | `ReactNode` | Required. The message. |
-| `margin` | `ReactNode` | Optional. Receipts and notes, attached under the message. |
+| `margin` | `ReactNode` | Optional. Receipts and notes, attached under the message. An empty list, or only `null` and `false`, attaches nothing. |
 
 `TranscriptHeader`:
 

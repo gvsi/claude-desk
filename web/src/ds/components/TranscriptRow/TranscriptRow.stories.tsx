@@ -182,3 +182,28 @@ export const Stacked: Story = {
     await expect(log.scrollWidth).toBeLessThanOrEqual(log.clientWidth);
   },
 };
+
+export const NothingAttached: Story = {
+  render: () => (
+    <Transcript label={`Conversation with ${dana.name}`}>
+      <TranscriptRow margin={[]}>
+        <VisitorMessage text={question} />
+      </TranscriptRow>
+      <TranscriptRow margin={[null, false]}>
+        <VisitorMessage text={followUp} />
+      </TranscriptRow>
+    </Transcript>
+  ),
+  parameters: {
+    canvasNote: "The boards show receipts under most messages; these are Dana's two messages before any receipt arrives, with an empty list attached.",
+  },
+  play: async ({ canvasElement }) => {
+    // An empty list of receipts attaches nothing: no empty block, and no gap under the message.
+    await expect(canvasElement.querySelectorAll('.cd-transcript-row')).toHaveLength(2);
+    await expect(canvasElement.querySelector('.cd-transcript-row__margin')).toBeNull();
+    for (const row of canvasElement.querySelectorAll<HTMLElement>('.cd-transcript-row')) {
+      const main = row.querySelector<HTMLElement>(':scope > .cd-transcript-row__main');
+      await expect(main?.getBoundingClientRect().height).toBe(row.getBoundingClientRect().height);
+    }
+  },
+};

@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { Children, type ReactNode } from 'react';
 
 import './TranscriptRow.css';
 
@@ -14,7 +14,8 @@ export interface TranscriptRowProps {
  * it, at every width.
  */
 export function TranscriptRow({ children, margin }: TranscriptRowProps) {
-  const hasMargin = margin !== undefined && margin !== null && margin !== false;
+  // Nothing to attach (no receipts, an empty list, or only null and false) adds no block and no gap.
+  const hasMargin = Children.toArray(margin).length > 0;
   return (
     <div className="cd-transcript-row">
       <div className="cd-transcript-row__main">{children}</div>
