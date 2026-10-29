@@ -20,7 +20,7 @@ from constructs import Construct
 
 from stacks.compute_express import HEALTH_CHECK_PATH, ORIGIN_READ_TIMEOUT
 from stacks.data_stack import DeskData
-from stacks.task import API_CONTAINER, API_PORT
+from stacks.task import API_PORT
 
 LISTENER_PORT = 80
 # Above the 15 s heartbeat on an open event stream, below uvicorn's 310 s keep-alive.
@@ -69,8 +69,6 @@ class AlbCompute(Construct):
             idle_timeout=IDLE_TIMEOUT,
         )
 
-        # The balancer targets the task's default container: Main, the API, never the kernel.
-        task.default_container = task.find_container(API_CONTAINER)
         # DeskData owns the app group's rules (8700 from the VPC, which holds the balancer), so no
         # rule waits on this stack; immutable here, the service adds none of its own to it.
         app_security_group = ec2.SecurityGroup.from_security_group_id(
@@ -80,6 +78,8 @@ class AlbCompute(Construct):
             self,
             "Service",
             cluster=data.cluster,
+            # The pattern targets the task's default container, which the task sets to Main, the
+            # API; never the kernel.
             task_definition=task,
             # One task: the demo's state lives in Postgres, and the per-IP limits in one process.
             desired_count=1,

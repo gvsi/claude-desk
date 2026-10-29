@@ -142,6 +142,9 @@ def desk_task_definition(scope: Construct, data: DeskData, config: DeskConfig) -
     api.add_container_dependencies(
         ecs.ContainerDependency(container=kernel, condition=ecs.ContainerDependencyCondition.HEALTHY)
     )
+    # A load balancer targets the default container, which would otherwise be the first essential
+    # one added: the kernel, which maps no port.
+    task.default_container = api
     return task
 
 

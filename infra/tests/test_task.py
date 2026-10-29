@@ -55,6 +55,13 @@ def test_main_is_the_api_with_one_named_port(desk_stacks):
     assert main["LogConfiguration"]["Options"]["awslogs-stream-prefix"] == "api"
 
 
+def test_main_is_the_default_container(desk_stacks):
+    # A load balancer integration targets the task's default container, which would otherwise be
+    # the first essential one added: the kernel, which maps no port and must never be a target.
+    # The task sets it, so no compute has to change the task it is given.
+    assert desk_stacks.desk_app.task_definition.default_container.container_name == "Main"
+
+
 def test_kernel_sidecar_has_no_port_and_a_local_health_check(desk_stacks):
     kernel = _container(desk_stacks, "kernel")
 
