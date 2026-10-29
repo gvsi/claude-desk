@@ -16,7 +16,7 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy import create_engine, exists, literal_column, select, text
 from sqlalchemy.exc import IntegrityError, StatementError
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy.orm import DeclarativeBase, Session, aliased, column_property, defer, with_expression
 from sqlalchemy.pool import NullPool
 
 import desk.db
@@ -247,6 +247,8 @@ async def test_kernel_repo_scopes_by_copy(kernel_db):
     other = aliased(Desk)
     pairs = select(Desk.desk_id, other.desk_id).join(other, other.business_id == Desk.business_id)
     assert (await kernel_db.execute(repo.scoped(pairs))).all() == [(f"desk-{copy_a}", f"desk-{copy_a}")]
+    locked = select(Desk).with_for_update().execution_options(populate_existing=True)   # the executor's pattern
+    assert [d.desk_id for d in (await kernel_db.scalars(repo.scoped(locked))).all()] == [f"desk-{copy_a}"]
 
 
 async def test_api_role_can_enqueue_jobs():
@@ -274,6 +276,17 @@ async def test_api_role_can_enqueue_jobs():
 # and JSON columns that hold contracts.
 
 
+class LeakyBase(DeclarativeBase):
+    pass
+
+
+class DeskWithDocumentTitle(LeakyBase):
+    """A Desk model with a column that reads kernel.documents unscoped (it exists only in this test)."""
+
+    __table__ = Desk.__table__
+    document_title = column_property(select(Document.title).limit(1).scalar_subquery())
+
+
 async def test_kernel_repo_refuses_what_it_cannot_scope(kernel_db):
     copy_a, copy_b = f"copy-{uuid4().hex}", f"copy-{uuid4().hex}"
     kernel_db.add_all([
@@ -296,13 +309,26 @@ async def test_kernel_repo_refuses_what_it_cannot_scope(kernel_db):
         select(select(Desk).subquery()),
         select(Desk).join(businesses, businesses.c.business_id == Desk.business_id),
     )
-    raw_sql = (select(text("1")), select(Desk).where(text("true")), select(Desk, literal_column("(SELECT 1)")))
+    raw_sql = (
+        select(text("1")),
+        select(Desk).where(text("true")),
+        select(Desk, literal_column("(SELECT 1)")),
+        select(Desk).suffix_with("OR TRUE"),                                 # would follow the copy filter
+    )
+    # ORM options and execution options change the SQL after scoped() has looked at it
+    options = (
+        select(Desk).options(with_expression(Desk.name, title)),             # the reviewer's copy B title
+        select(Desk).options(defer(Desk.hours)),
+        select(Desk).execution_options(schema_translate_map={"kernel": "kernel"}),
+    )
+    # a mapped column that reads another table is invisible in the statement; only the compiled SQL shows it
+    mapped = (select(DeskWithDocumentTitle),)
     # an outer join's missing side is NULL, so a copy filter in WHERE would drop the row: refused
     outer = (
         select(Desk.desk_id, Business.name).outerjoin(Business, Desk.business_id == Business.business_id),
         select(Desk.desk_id, Business.name).join(Business, Desk.business_id == Business.business_id, full=True),
     )
-    for unscopable in (*nested, *raw_sql, *outer):
+    for unscopable in (*nested, *raw_sql, *options, *mapped, *outer):
         with pytest.raises(ValueError):
             repo.scoped(unscopable)
 

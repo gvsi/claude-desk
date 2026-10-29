@@ -10,11 +10,13 @@ exported variables. Values are never logged.
 
 import functools
 import os
+import re
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Alias, ColumnClause, FromClause, Join, Select, Table, TextClause
+from sqlalchemy.dialects.postgresql import psycopg as postgresql_psycopg
 from sqlalchemy.sql import visitors
 from sqlalchemy.sql.selectable import SelectBase
 from sqlalchemy.engine import make_url
@@ -121,15 +123,28 @@ async def dispose_engines() -> None:
     _api_sessions.cache_clear()
 
 
+# Execution options that never change the SQL a statement compiles to.
+SAFE_EXECUTION_OPTIONS = frozenset({"populate_existing", "autoflush", "yield_per", "stream_results", "max_row_buffer"})
+_POSTGRES = postgresql_psycopg.dialect()
+
+
 class KernelRepo:
     """One copy's view of the kernel tables: every kernel query goes through `scoped()`.
 
     `scoped(stmt)` supports one shape: a SELECT over kernel tables, their aliases and inner joins
-    of them, and adds `copy_id = <copy>` for each of those tables. Anything it can't scope makes it
-    raise instead of returning a statement that would read other copies' rows: a nested SELECT
-    anywhere in the statement (scalar subqueries, IN and EXISTS subqueries, derived tables, CTEs),
-    raw SQL fragments (`text()`, `literal_column()`), outer joins (a copy filter on the missing
-    side would drop the row), and FROM items that aren't kernel tables. A later plan can widen it.
+    of them, and adds `copy_id = <copy>` for each of those tables. It fails closed in two layers:
+
+    1. An allowlist on the statement. It refuses ORM options of any kind (loader options,
+       `with_expression`), execution options other than `SAFE_EXECUTION_OPTIONS`, raw SQL
+       (`text()`, `literal_column()`, prefixes, suffixes, hints), a nested SELECT anywhere (scalar,
+       IN and EXISTS subqueries, derived tables, CTEs), outer joins (a copy filter on the missing
+       side would drop the row) and FROM items that aren't kernel tables.
+    2. A check on the SQL itself. The scoped statement is compiled for Postgres and refused unless
+       it holds exactly one SELECT and reads no kernel table it didn't filter, which catches what
+       the statement hides, such as a mapped column that reads another table.
+
+    Execute the returned statement as it is: options added afterwards aren't checked. A later
+    plan can widen the supported shapes.
     """
 
     def __init__(self, copy_id: str):
@@ -138,19 +153,47 @@ class KernelRepo:
         self.copy_id = copy_id
 
     def scoped(self, stmt: Select) -> Select:
-        if not isinstance(stmt, Select):
-            raise ValueError(f"KernelRepo scopes only SELECT statements, not {type(stmt).__name__}")
-        for element in visitors.iterate(stmt):
-            if element is stmt:
-                continue
-            if isinstance(element, SelectBase):
-                raise ValueError("KernelRepo can't scope a nested SELECT; query each table through scoped()")
-            if isinstance(element, TextClause) or (isinstance(element, ColumnClause) and element.is_literal):
-                raise ValueError("KernelRepo can't scope raw SQL text")
+        _check_allowed(stmt)
         tables = [table for clause in stmt.get_final_froms() for table in _kernel_tables(clause)]
         if not tables:
             raise ValueError("the statement reads no kernel table")
-        return stmt.where(*(table.c.copy_id == self.copy_id for table in tables))
+        scoped = stmt.where(*(table.c.copy_id == self.copy_id for table in tables))
+        _check_compiled(scoped, {(t.element if isinstance(t, Alias) else t).name for t in tables})
+        return scoped
+
+
+def _check_allowed(stmt: Select) -> None:
+    """Layer 1: refuse every statement feature outside the supported shape."""
+    if not isinstance(stmt, Select):
+        raise ValueError(f"KernelRepo scopes only SELECT statements, not {type(stmt).__name__}")
+    # Private Select attributes, read without defaults: if SQLAlchemy renames one, this raises
+    # instead of skipping the check.
+    if stmt._with_options:
+        raise ValueError("KernelRepo can't scope a statement with ORM options")
+    if set(stmt.get_execution_options()) - SAFE_EXECUTION_OPTIONS:
+        raise ValueError("KernelRepo can't scope a statement with execution options that change its SQL")
+    if stmt._prefixes or stmt._suffixes or stmt._hints or stmt._statement_hints:
+        raise ValueError("KernelRepo can't scope raw SQL text")
+    if stmt._independent_ctes:
+        raise ValueError("KernelRepo can't scope a nested SELECT; query each table through scoped()")
+    for element in visitors.iterate(stmt):
+        if element is stmt:
+            continue
+        if isinstance(element, SelectBase):
+            raise ValueError("KernelRepo can't scope a nested SELECT; query each table through scoped()")
+        if isinstance(element, TextClause) or (isinstance(element, ColumnClause) and element.is_literal):
+            raise ValueError("KernelRepo can't scope raw SQL text")
+
+
+def _check_compiled(stmt: Select, scoped_tables: set[str]) -> None:
+    """Layer 2: the compiled SQL holds one SELECT and reads only kernel tables it filters."""
+    sql = re.sub(r"'(?:[^']|'')*'", "''", str(stmt.compile(dialect=_POSTGRES)))   # drop string literals
+    keywords = re.sub(r'"(?:[^"]|"")*"', '""', sql)                              # and quoted identifiers
+    if len(re.findall(r"\bselect\b", keywords, flags=re.IGNORECASE)) != 1:
+        raise ValueError("KernelRepo refused a statement whose SQL holds a nested SELECT")
+    read = set(re.findall(r"\bkernel\.(\w+)", sql.replace('"', "")))
+    if unscoped := read - scoped_tables:
+        raise ValueError(f"KernelRepo refused a statement that reads kernel tables it can't scope: {sorted(unscoped)}")
 
 
 def _kernel_tables(clause: FromClause) -> Iterator[FromClause]:
