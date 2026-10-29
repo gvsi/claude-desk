@@ -10,18 +10,21 @@
   min-width: 0;
 }
 
-/* Grows to fill the line, which keeps the caption at the right while they share it. */
+/* Grows to fill the line, which keeps the caption at the right while they share it, and shrinks
+   so a title wider than the line wraps inside it. */
 .cd-section-header__title {
   display: flex;
-  flex: 1 0 auto;
+  flex: 1 1 auto;
   align-items: center;
   gap: var(--space-8);
   min-width: 0;
 }
 
+/* A word with no break in it (an address, a long name) breaks rather than leaving the line. */
 .cd-section-header__heading {
   margin: 0;
   color: var(--text-primary);
+  overflow-wrap: anywhere;
 }
 
 .cd-section-header__caption {

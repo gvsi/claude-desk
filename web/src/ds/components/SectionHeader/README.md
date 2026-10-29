@@ -11,7 +11,7 @@
 
 ## What the consumer provides
 
-- `title`, in sentence case.
+- `title`, in sentence case. A title wider than the line wraps inside it, and a word with no break in it (an address, a long name) breaks rather than leaving the line.
 - `level`, so the headings nest under the page's `h1`: `2` by default, `3` for a section inside a section.
 - `id` when the section is `aria-labelledby` its heading.
 - `count` as `{ n, label }`: the number shown and the words read instead of it, with the number in them.
