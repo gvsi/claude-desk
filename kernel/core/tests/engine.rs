@@ -172,6 +172,44 @@ fn out_of_range_score_is_absent() {
 }
 
 #[test]
+fn review_carries_the_contracts_recommendation() {
+    // The shared Review contract also carries the reviewer's recommendation.
+    // The engine reads the scores and lets any recommendation but "allow" only
+    // hold, as the review being absent does; any other extra field is malformed.
+    let engine = engine();
+    let quote = request(
+        visitor(false),
+        "native.quote",
+        resource("Desk", "desk-1"),
+        json!({}),
+    );
+    let reviewed = |recommendation: Value| {
+        let mut request = with_review(quote.clone(), json!(9500), json!(500));
+        request["context"]["review"]["recommendation"] = recommendation;
+        request
+    };
+
+    let agreed = decide(&engine, KEY, &reviewed(json!("allow")), "final");
+    assert_eq!(agreed["outcome"], "allow", "{agreed}");
+    assert_eq!(ids(&agreed["policy_ids"]), ["A.quote_reviewed"]);
+
+    for recommendation in [
+        json!("hold"),
+        json!("block"),
+        json!("maybe"),
+        json!(1),
+        json!(null),
+    ] {
+        let verdict = decide(&engine, KEY, &reviewed(recommendation.clone()), "final");
+        assert_eq!(verdict["outcome"], "hold", "{recommendation}: {verdict}");
+    }
+    let mut extra = reviewed(json!("allow"));
+    extra["context"]["review"]["note"] = json!("trust me");
+    let verdict = decide(&engine, KEY, &extra, "final");
+    assert_eq!(verdict["outcome"], "hold", "{verdict}");
+}
+
+#[test]
 fn erroring_baseline_refuses() {
     let engine = engine_with(&format!("{BASELINE}\n{ERRORING_FORBID}"), AUTO);
     let link = |amount_cents: i64| {

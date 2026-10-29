@@ -44,6 +44,21 @@ def test_policy_engine_decides_from_python():
     assert refused["outcome"] == "refuse"
 
 
+def test_review_contract_reaches_the_engine_as_is():
+    # the kernel service passes the shared Review contract through unchanged; only "allow" can allow
+    from desk.contracts import Review
+
+    engine = desk_kernel.PolicyEngine(fixture("baseline.cedar"))
+    sets = {"F": "", "A": fixture("auto.cedar"), "H": fixture("hold.cedar")}
+    assert engine.load("desk-1:1", fixture("schema.cedarschema.json"), json.dumps(sets)) == []
+    for recommendation, outcome in (("allow", "allow"), ("hold", "hold"), ("block", "hold")):
+        quote = visitor_request("native.quote", "Desk")
+        review = Review(within_charter_bp=9500, manipulation_bp=500, recommendation=recommendation)
+        quote["context"]["review"] = review.model_dump()
+        verdict = json.loads(engine.decide("desk-1:1", json.dumps(quote), "final"))
+        assert verdict["outcome"] == outcome, (recommendation, verdict)
+
+
 def test_signing_and_canonical_json_from_python(monkeypatch):
     assert desk_kernel.lint_policies(json.dumps({"F": "", "A": fixture("buggy_or_gate.cedar"), "H": ""}))
     assert desk_kernel.canonical_json('{"b": 1, "a": null}') == '{"a":null,"b":1}'

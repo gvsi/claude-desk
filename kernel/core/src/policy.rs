@@ -162,7 +162,10 @@ fn entity_ref(v: Option<&Value>, field: &str) -> Result<EntityUid> {
 
 /// Reviewer scores are integer basis points. A review with a score outside
 /// 0–10000, a non-integer score or any other shape is a reviewer failure, and
-/// a failed review is absent: it can only turn an allow into a hold.
+/// a failed review is absent: it can only turn an allow into a hold. The
+/// shared `Review` contract also carries `recommendation`: "allow" keeps the
+/// scores, and anything else makes the review absent, so it too can only hold.
+/// Cedar sees the two scores only.
 fn valid_review(review: Value) -> Option<Value> {
     let fields = review.as_object()?;
     let score = |name: &str| {
@@ -172,7 +175,12 @@ fn valid_review(review: Value) -> Option<Value> {
             .filter(|bp| (0..=10_000).contains(bp))
     };
     let (within, manipulation) = (score("within_charter_bp")?, score("manipulation_bp")?);
-    (fields.len() == 2)
+    let expected = match fields.get("recommendation") {
+        None => 2,
+        Some(recommendation) if recommendation == "allow" => 3,
+        Some(_) => return None,
+    };
+    (fields.len() == expected)
         .then(|| json!({"within_charter_bp": within, "manipulation_bp": manipulation}))
 }
 
