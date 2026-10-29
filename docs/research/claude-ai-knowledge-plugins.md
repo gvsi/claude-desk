@@ -4,24 +4,10 @@ Research date: 2026-10-28.
 
 Background research for the Claude Desk design; claims are cited, and anything not confirmed from a source is marked UNVERIFIED.
 
-This was a read-only look at the claude.ai web app's UI conventions, viewed with an organization admin role in dark theme: nothing was connected, toggled or saved.
-Sources: live DOM text and accessibility tree, plus `defaultMessage` strings pulled from the app's own JS chunks for states the account couldn't show (no connector is *connected* here, so the per-tool permission UI came from bundle strings, not a live render).
+A read-only look at the claude.ai web app in dark theme. States that weren't visible are marked 'from app strings'.
 Tokens and typography are in `claude-ai-design.md`; this file doesn't repeat them.
 
-Screenshots captured during the study (not included in this repository):
-- `kp-01-connectors-discover.png`: Customize → Connectors → Discover (hero carousel and a 2-col card grid)
-- `kp-02-add-custom-connector.png`: the "Add custom connector" modal (step 1)
-- `kp-03-connectors-yours.png`: Connectors → Yours (table view)
-- `kp-04-connector-detail-overview.png`: connector detail page (Notion), Overview tab with tool chips and a metadata rail
-- `kp-05-connector-tools-tab.png`: connector detail, Tools tab ("Tool permissions" empty/preview state)
-- `kp-06-skills-yours.png`: Skills → Yours (empty-state banner and a dense list)
-- `kp-07-plugin-detail.png`: plugin detail (Productivity) with a "Connectors & tools" side card and a risk badge
-- `kp-08-project-knowledge.png`: project page with a Context/knowledge rail
-- `kp-09-settings-notifications.png`: Settings modal → General → Notifications toggles
-- `kp-10-settings-memory.png`: Settings → Memory
-- `kp-11-composer-plus-menu.png`: composer "+" menu with the Add connector submenu
-- `kp-12-skill-detail.png`: skill detail with a stat strip and an enable toggle
-- `kp-13-project-file-preview.png`: knowledge file preview modal
+Screenshots and raw extractions were kept locally and are not published.
 
 ---
 
@@ -201,17 +187,17 @@ App-only tools                        …
 │ or create your own.                                        │
 │ [Discover skills]                                          │
 └───────────────────────────────────────────────────────────┘
-From Anthropic & Partners (5)
-[ic] skill-creator                                          8h ago   ⋯
-     from Anthropic · Create new skills, modify and improve…
-[ic] google-workspace                                       Oct 14   ⋯
+From Anthropic & Partners ({count})
+[ic] {skill}                                                {date}   ⋯
+     from {source} · {description}
+[ic] {skill}                                                {date}   ⋯
 ```
 - A dense one-line list: icon tile, name, then "from {source} · {description truncated}", relative date, and a kebab (menu: **Remove**).
 - `+ Add ▾` (Skills): **Upload skill** · **Create a skill** · **Create with Claude**.
-- Skill detail: "← Your skills"; header shows name, "by Anthropic · updated Sep 14", **[💬 Try in chat]**, ⋯, and an **enable toggle**. Tabs: Overview | Contents · 3. A **stat strip**: Adoption "— users in your organization · 30 days" | Activity "— runs · 30 days" | You "— runs by you · 90 days". Then Description, and a side card "Created by".
+- Skill detail: "← Your skills"; header shows name, "by Anthropic · updated {date}", **[💬 Try in chat]**, ⋯, and an **enable toggle**. Tabs: Overview | Contents · 3. A **stat strip**: Adoption "— users in your organization · 30 days" | Activity "— runs · 30 days" | You "— runs by you · 90 days". Then Description, and a side card "Created by".
 
 ### Skills/Plugins → Discover
-- "From Anthropic" hero card ("Data — Query, chart and explain your data…" [Add]); rows "New skills", "Most installed skills" with "by Anthropic · 8.4M installs" (tooltip "8,415,611 installs across all of Claude"); per-card **[Try]** and the provenance tag "Anthropic Directory".
+- "From Anthropic" hero card ("Data — Query, chart and explain your data…" [Add]); rows "New skills", "Most installed skills" with "by Anthropic · 8.4M installs" (tooltip "8,415,611 installs across all of Claude", as shown 2026-10-28); per-card **[Try]** and the provenance tag "Anthropic Directory".
 
 ### Plugins → Yours (empty state)
 "Add your first plugins" / "Give Claude role-level expertise with plugins. Add them from Discover, or create your own." [Discover plugins], plus the "Build for the Claude Directory" banner.
@@ -267,7 +253,7 @@ An example project that also doubles as a how-to guide…
 ```
 - The knowledge region is labelled **"Project knowledge"** (aria) and titled **"Context"**. Files render as **portrait tiles** (name, size, uppercase type badge). Clicking a tile opens a **preview modal** with the rendered markdown.
 - The Activity tab empty state reads: "Add to project knowledge or share your chats to spark ideas, learn from teammates, and discover how your team uses Claude."
-- Owner-only strings (from the bundle):
+- Owner-only strings (from app strings):
   - **Add menu:** "Upload from device", "Add text content" (fields "Title / Name your content", "Content / Type or paste in content..."), "Add files", plus MCP resources: "Search resources or paste URL".
   - **Drop zone:** "Drop files here to add to project knowledge".
   - **Capacity meter:** "{pct}% of project capacity used", and at the limit "Project knowledge at capacity. Remove an existing file in order to add to knowledge".
@@ -279,7 +265,7 @@ An example project that also doubles as a how-to guide…
 ### Settings → Memory
 - **Search and reference chats**: "Allow Claude to search for relevant details in past chats. Learn more". Toggle.
 - **Generate memory from chats**: "Allow Claude to generate memory from your chats. Learn more". Toggle.
-- When on (bundle strings): **"Manage memory"** modal, "Here's what Claude remembers about you! This summary is regenerated each night and does not include projects, which have their own specific memory." (tabs Summary / Edit, "Manage edits"). The two destructive confirmations:
+- When on (from app strings): **"Manage memory"** modal, "Here's what Claude remembers about you! This summary is regenerated each night and does not include projects, which have their own specific memory." (tabs Summary / Edit, "Manage edits"). The two destructive confirmations:
   - **Pause memory**: "Claude keeps its existing memory but won't use memory or make new memories."
   - **Reset memory** (danger): "This will permanently delete all memories, including project memories. This can't be undone."
 
@@ -288,20 +274,20 @@ An example project that also doubles as a how-to guide…
 ## 4. Notifications and approvals (Settings → General → Notifications)
 Each row is a label, a one-line description, and a right-aligned switch, separated by hairline dividers:
 
-| Label | Description | (state seen) |
-|---|---|---|
-| Response completions | Get notified when Claude has finished a response. Useful for long-running tasks. | off |
-| Scheduled tasks | Get notified when scheduled tasks finish, can't run, or need your input. | on |
-| Code notifications | Claude can choose to notify you about important updates from a Code session. | off |
-| **Code permission requests** | Get a push notification when Claude needs your approval to run a command in a Code session. | off |
-| Emails from Claude Code cloud sessions | Get an email when a cloud session has finished building or needs your response. | off |
-| Spend-limit alerts for {Org} | Emails when members reach their spend limit or request more usage. | on |
-| Mentions and replies | Get an email when someone @mentions you on an artifact, or replies in a comment thread you're part of. | on |
-| Comments on your artifacts | Get an email when someone comments on an artifact you own, even when you're not mentioned. Follows "Mentions and replies" until you change it. | on |
-| Artifacts shared with you | Get an email when someone shares an artifact with you. | on |
+| Label | Description |
+|---|---|
+| Response completions | Get notified when Claude has finished a response. Useful for long-running tasks. |
+| Scheduled tasks | Get notified when scheduled tasks finish, can't run, or need your input. |
+| Code notifications | Claude can choose to notify you about important updates from a Code session. |
+| **Code permission requests** | Get a push notification when Claude needs your approval to run a command in a Code session. |
+| Emails from Claude Code cloud sessions | Get an email when a cloud session has finished building or needs your response. |
+| Spend-limit alerts for {Org} | Emails when members reach their spend limit or request more usage. |
+| Mentions and replies | Get an email when someone @mentions you on an artifact, or replies in a comment thread you're part of. |
+| Comments on your artifacts | Get an email when someone comments on an artifact you own, even when you're not mentioned. Follows "Mentions and replies" until you change it. |
+| Artifacts shared with you | Get an email when someone shares an artifact with you. |
 
 - The list is flat: no channel matrix. The **channel goes in the copy** ("push notification", "email"), and each row covers one event family. One row inherits from another ("Follows "Mentions and replies" until you change it").
-- In-product notification affordances: sidebar badge **"19 new"** on a scheduled task, per-row **"Mark as unread"**, status dots (Idle/Done), and "Needs approval" chips in warning colour.
+- In-product notification affordances: sidebar badge **"{n} new"** on a scheduled task, per-row **"Mark as unread"**, status dots (Idle/Done), and "Needs approval" chips in warning colour.
 
 ---
 

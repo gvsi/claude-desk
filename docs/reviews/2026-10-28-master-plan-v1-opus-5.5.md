@@ -108,7 +108,7 @@ Inputs: `docs/specs/2026-10-28-claude-desk-design.md` (the "spec"), `docs/plans/
 **B4. The fixed demo code `424242` for every contact is unsound. This re-opens a locked choice for a concrete reason.**
 - **Where:** Plan: Global Constraints ("`424242` for every contact in seeds"). Spec: Decisions log › Verification and messages.
 - **What's wrong:**
-  - **Impersonation without inbox access.** Anyone who knows a contact on record can verify as that person without opening any inbox. They can learn the contact from the People list, the seed data, or a demo visitor's shared live link. "I'm Dana Lee, dana@…" → code sent → type 424242 → Dana's lease.
+  - **Impersonation without inbox access.** Anyone who knows a contact on record can verify as that person without opening any inbox. They can learn the contact from the People list, the seed data, or a demo visitor's shared live link. A visitor claiming to be a customer on record (name@example.com) → code sent → type 424242 → that customer's lease.
   - **Anyone can find it.** It takes minutes, and it amounts to a jailbreak, which is an anti-goal.
   - **It makes the baseline untestable.** Where the code is delivered no longer matters, so "codes only to the contact on record" can't be tested.
 - **Fix:**
@@ -204,7 +204,7 @@ Inputs: `docs/specs/2026-10-28-claude-desk-design.md` (the "spec"), `docs/plans/
   - **Claude drafts RuleCards (typed JSON), never Cedar.** A deterministic compiler emits Cedar with `@id`, `@card`, `@tier` and `@reason` annotations.
   - **Prove these at activation:**
     - `never_errors` on the baseline plus the active policies.
-    - `auto ⊆ reference(cards)`, where the reference is generated independently from the card fields. Show counterexamples in the owner's language ("Dana could get a $500 refund without asking you").
+    - `auto ⊆ reference(cards)`, where the reference is generated independently from the card fields. Show counterexamples in the owner's language ("A customer could get a $500 refund without asking you").
     - Review monotonicity (I1).
     - The price floor and recipient invariants (B2), the mandate invariant (B3), and a prototype-wide hard cap on auto-allowed money.
   - **Fail closed in the kernel:**
@@ -480,7 +480,7 @@ Inputs: `docs/specs/2026-10-28-claude-desk-design.md` (the "spec"), `docs/plans/
 
 ---
 
-## Feasibility by Monday
+## Feasibility within the build window
 
 | Piece | Risk | De-risk (when) | Fallback |
 |---|---|---|---|

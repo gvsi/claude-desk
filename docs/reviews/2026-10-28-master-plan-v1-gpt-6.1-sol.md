@@ -74,7 +74,7 @@ Findings were triaged into master plan v2; some were declined. This is the revie
     **Location:** Spec, [Knowledge](../specs/2026-10-28-claude-desk-design.md), [native tools](../specs/2026-10-28-claude-desk-design.md); master plan, [Task 2](../plans/2026-10-28-00-master-plan.md#L207).  
     Tables/contracts omit authoritative calendar inventory, quote terms, document content/entitlements, payment-provider references and knowledge provenance. Facts alone do not define those resources. **Fix:** assign these stores and adapter contracts explicitly to master/Plan 01. Assign ingestion to Plan 02, including upload limits and website-fetch restrictions against loopback, private networks, metadata endpoints and unsafe redirects. Knowledge/tool text must never acquire policy authority.
 
-### Important: product completeness and Monday delivery
+### Important: product completeness and delivery schedule
 
 16. **Important — Handoff, takeover, whispers and localization lack lifecycle contracts.**  
     **Location:** Spec, [Owner experience](../specs/2026-10-28-claude-desk-design.md), [Visitor experience](../specs/2026-10-28-claude-desk-design.md); master plan, [Shared contracts](../plans/2026-10-28-00-master-plan.md#L73).  

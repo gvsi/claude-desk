@@ -39,7 +39,7 @@ Sources are primary where I could reach them (Meta newsroom and help center, NIS
 
 ### Reception
 - Positive: one journalist called it "a really good tool" after several days' use (The Neuron). Alex Volkov called it "the most polished AI employee yet?" and said he was "genuinely impressed" (via [HackerNoon roundup](https://hackernoon.com/what-100-tech-people-think-metas-muse-is), secondary). An SMB owner said it audited her email automations and rebuilt templates ([Coverager](https://coverager.com/meta-expands-muse-to-small-businesses/), secondary).
-- Negative: The Verge reportedly found it works but felt uneasy about how it operates (secondhand via a Chinese roundup, **UNVERIFIED**). Forbes framed it as asking people to hand over "their inbox, their calendar and their credit card" (via HackerNoon, secondary). Meta says prompt injection is unresolved and that Muse will make mistakes. Meta can access data to operate the service, and a private "Confidential VM" is planned (The Neuron). A Hunterbrook investigation reported that Muse compiled lists of real accounts in vulnerable groups (via CellCog, secondary). The launch slipped from April to September over security and privacy (secondary, **UNVERIFIED**).
+- Negative: The Verge reportedly found it works but felt uneasy about how it operates (secondhand via a Chinese roundup, **UNVERIFIED**). Forbes framed it as asking people to hand over "their inbox, their calendar and their credit card" (via HackerNoon, secondary). Meta says prompt injection is unresolved and that Muse will make mistakes. Meta can access data to operate the service, and a private "Confidential VM" is planned (The Neuron).
 
 ### What Claude Desk should do
 1. **Copy the one-sentence promise**, rewritten for a public agent: *"Claude only does what your rules allow. Anything else waits for you."* Put it in setup, Rules and the public page footer.
@@ -131,12 +131,12 @@ Sources are primary where I could reach them (Meta newsroom and help center, NIS
 - **Procedures** (GA **Apr 2026**): "Combine natural language with if/else conditions and custom code". "Use code to enforce strict rules like verifying eligibility" ([fin.ai](https://fin.ai/updates/procedures-deterministic-controls)).
 - **Simulations**: Fin generates test scenarios from the procedure text. Testers mock data-connector outputs and run a multi-turn chat between Fin and an **AI customer**. Intercom's guidance is to use Preview for spot checks and **Simulations "before every publish"** ([help](https://www.intercom.com/help/en/articles/12599517-run-simulations-for-fin-procedures); [blog](https://intercom.com/blog/procedures-simulations-updates)).
 - **Insights**: AI **CX Score** on every conversation with a plain-language explanation and no survey. **Topics Explorer** auto-groups conversations. **Recommendations/Suggestions** reviews conversations Fin could not resolve and proposes weekly fixes to content, data and actions, which the team **approves** ([help](https://www.intercom.com/help/en/articles/10576273-measure-customer-service-with-insights-built-for-the-ai-agent-era)). Escalation rules are written in natural language ([Intercom ecommerce](https://www.intercom.com/solutions/ecommerce)).
-- I found **no documented approval gate** that holds a Fin action for human sign-off. Human-in-the-loop means escalation and handoff. This is a gap Claude Desk can fill.
-- **Praise and complaints** (G2 and competitor blogs, secondary): "everyone raves about the Fin AI bot itself. It actually works" and "improves over time". Complaints: the **$0.99-per-resolution** price makes bills unpredictable and grow with success; there is a steep learning curve with "ongoing monitoring of responses"; support is slow ([G2](https://g2.com/products/fin-by-intercom/reviews?page=4); [Unthread](https://unthread.io/blog/intercom-review/)). Salesforce reportedly agreed to acquire Intercom in June 2026 (secondary, **UNVERIFIED**).
+- The Fin documentation reviewed describes escalation and handoff, not an approval hold on actions.
+- **Reception and pricing** (G2 and a competitor blog, secondary): reviewers say "everyone raves about the Fin AI bot itself. It actually works" and that it "improves over time". Pricing is metered per resolution, at **$0.99 per resolution** ([G2](https://g2.com/products/fin-by-intercom/reviews?page=4); [Unthread](https://unthread.io/blog/intercom-review/)).
 
 ### Sierra
 - **Supervisors** run in real time, in parallel with each response. They check facts, policy and tone, can redirect, and "escalate to a human". **Monitors** score **every** conversation on coherence, repetitiveness, grounding and sentiment, and teams can add **custom monitors in natural language**. A flagged conversation opens "a single view that shows the transcript, context, tone, and outcome", and from there teams "leave feedback, retrain… or create new monitors in a few clicks" ([Sierra, 29 Oct 2025](https://sierra.ai/blog/confidence-in-every-conversation)). Agent Studio offers journeys "generated with AI from your existing operating procedures" and "real-time traces of every decision, tool call, and response" ([product](https://sierra.ai/product/agent-studio)).
-- Complaints (competitor reviews, secondary): months-long deployments with **forward-deployed engineers**, unpublished six-figure pricing, extra fees when policies change, "confusing to set up". Praise: best-in-class brand voice and edge-case handling ([eesel](https://www.eesel.ai/blog/sierra-reviews); [SiteGPT](https://sitegpt.ai/resources/sierra-review)).
+- Deployment and pricing (competitor reviews, secondary): deployments involve **forward-deployed engineers**, and pricing is not published. Praise: best-in-class brand voice and edge-case handling ([eesel](https://www.eesel.ai/blog/sierra-reviews); [SiteGPT](https://sitegpt.ai/resources/sierra-review)).
 
 ### Decagon
 - **AOPs**: "Business users can shape the behavior of the AI agent using natural language" while "technical teams can develop underlying integrations in parallel". Sensitive steps such as refunds and identity checks are validated in code ([Decagon, 8 Apr 2025](https://decagon.ai/blog/why-we-built-aop)).
@@ -144,7 +144,7 @@ Sources are primary where I could reach them (Meta newsroom and help center, NIS
 
 ### Zendesk AI agents
 - **Procedures are moving from visual flow maps to plain text** (announced **13 Oct 2026**): "Plain language provides an AI agent clearer intent to reason from". Read-only text versions are available now, text authoring arrives in Nov, and all procedures become text by Dec 2026 ([Zendesk](https://support.zendesk.com/hc/en-us/articles/11261279498266-Announcing-natural-language-text-procedures-for-AI-agents)). This is a strong signal that **rules-as-text beats flowcharts**, even for enterprise admins.
-- AI-agent conversations become **read-only tickets** for review (secondary). **Auto Assist** suggests replies and actions that a human agent approves before they go out, and pre-approved actions run automatically (secondary, [eesel](https://www.eesel.ai/blog/zendesk-automotive-support)). Pricing complaints focus on per-resolution fees (about $1.50–2.00) and bills 50–90% over list (secondary). Zendesk moved to billing only "Verified Resolutions" in **May 2026** (secondary).
+- AI-agent conversations become **read-only tickets** for review (secondary). **Auto Assist** suggests replies and actions that a human agent approves before they go out, and pre-approved actions run automatically (secondary, [eesel](https://www.eesel.ai/blog/zendesk-automotive-support)). Pricing is metered per resolution, at about $1.50–2.00 (secondary). Zendesk moved to billing only "Verified Resolutions" in **May 2026** (secondary).
 
 ### Ada
 - **Coaching from the transcript**: in Convos, hover over a message *or a reasoning step* and click "Provide coaching". The "When replying to" situation is pre-filled. You choose a behaviour (send message, handoff, use an article, run an action, follow a process, run a Playbook), and **Save** adds it to the agent's "memory". The Coaching page shows where each coaching was later applied and asks "**Should this coaching have been applied here?**" ([Ada docs](https://docs.ada.cx/docs/optimization/coaching/coaching-tools)). The docs mention **no review step** before coaching goes live, only "Test AI Agent".
@@ -160,9 +160,9 @@ Sources are primary where I could reach them (Meta newsroom and help center, NIS
 | Trace and flow analytics | Decagon Trace View and Flow Analysis, Sierra traces | Too technical for owners. Show as margin receipts |
 | Why it escalated, by rule | Decagon Escalation Drivers | Turn into "Why Claude needed you this week" |
 | AI-proposed fixes, human approves | Fin Recommendations, Decagon Duet | Weekly suggestion cards |
-| Human approves an action mid-conversation | Zendesk Auto Assist (for agents), Muse (for owners) | Rare in public-facing tools. A Claude Desk differentiator |
+| Human approves an action mid-conversation | Zendesk Auto Assist (for agents), Muse (for owners) | Rare in public-facing tools: the Fin documentation reviewed describes escalation and handoff, not an approval hold on actions |
 
-Common owner complaints: **unpredictable per-resolution bills**, **needing engineers or vendor staff to change behaviour**, **steep setup**, and **constant monitoring**. All of these products target support teams, not a solo owner.
+Fin and Zendesk meter pricing per resolution. All of these products target support teams, not a solo owner.
 
 ### What Claude Desk should do
 1. **Rules screen = sentences** (as in Zendesk's move to text), each with a status chip: *Enforced by code / Claude's judgment / Asks you*. Plain-English procedures can expand to show their steps, but there is no flowchart editor.
@@ -170,7 +170,7 @@ Common owner complaints: **unpredictable per-resolution bills**, **needing engin
 3. **Transcript with margin receipts**: every tool call, gate decision, verification and approval appears inline, citing the rule that allowed or blocked it. This is Sierra's single view and Decagon's trace, made readable.
 4. **Coach from the transcript, safely**: "Teach Claude" on any message, with a pre-filled situation. Coaching that only changes *wording or knowledge* applies after a preview. Coaching that would *widen what Claude may do* becomes a rule change with a diff and the owner's explicit confirmation. Adopt Ada's "Should this have applied here?" check.
 5. **Today shows why Claude needed you**, grouped by rule (Decagon Escalation Drivers), and makes weekly suggestions ("3 people asked about weekend rates, add an answer?") that the owner approves (Fin Recommendations).
-6. **Predictable pricing copy**: if outcomes are metered, count them visibly on Today. Owners hate surprise per-resolution bills.
+6. **Predictable pricing copy**: if outcomes are metered, count them visibly on Today so the owner sees usage before the bill arrives.
 
 ---
 

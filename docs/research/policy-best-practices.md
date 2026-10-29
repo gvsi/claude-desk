@@ -1,11 +1,11 @@
 # Policy enforcement and authorization for AI agents: best practices for the Claude Desk safety core
 
-Research date: 2026-10-29
+Research date: 2026-10-28
 
 Background research for the Claude Desk design; claims are cited, and anything not confirmed from a source is marked UNVERIFIED.
 
 This complements `safety-landscape.md` and `safety-patterns.md`; it does not repeat what they cover: AgentCore basics, OPA/Cerbos/Permit overviews, the CaMeL/FIDES/Progent summary table, the Rule of Two and the lethal trifecta.
-Package versions were read directly from the npm, crates.io, PyPI and GitHub APIs on 2026-10-28/29. Anything else marked UNVERIFIED comes from secondary sources or was not checked against a primary source.
+Package versions were read directly from the npm, crates.io, PyPI and GitHub APIs on 2026-10-28. Anything else marked UNVERIFIED comes from secondary sources or was not checked against a primary source.
 
 ---
 
@@ -56,7 +56,7 @@ Package versions were read directly from the npm, crates.io, PyPI and GitHub API
 **Background**
 - Cedar was built with "verification-guided development": a Lean model with proofs (soundness of validation, authorizer properties) plus differential random testing of the Rust code against the Lean model. Sources: "How We Built Cedar: A Verification-Guided Approach" (FSE 2024 Companion, arXiv 2407.01688) and the Cedar OOPSLA 2024 paper.
 
-**Usable from TypeScript in a week?**
+**Usable from TypeScript within a short build window?**
 - Runtime authorization and validation: **yes**, about one day.
 - Symbolic proofs: **yes, if run as a CI step or on owner save**. Shell out to `cedar symcc` or to a 50-line Rust binary, with cvc5 in the container. Allow one or two days, mostly for the cvc5 install and the schema.
 
@@ -273,7 +273,7 @@ The decision rule:
 
 Every decision goes into a hash-chained, Ed25519-checkpointed log that the owner can verify.
 
-## What is realistic in one week
+## What is realistic within a short build window
 
 **Day 1–2**
 - Cedar schema (native tools plus generated MCP schemas), baseline policies, the three-set decision function in `cedar-wasm`, and the PreToolUse hook.
@@ -294,4 +294,4 @@ Every decision goes into a hash-chained, Ed25519-checkpointed log that the owner
 **Day 6–7**
 - About 50 hostile-visitor τ²-style scenarios plus an AgentDojo-style injected-MCP-output set, wired as a gate with 0 baseline violations as the pass bar.
 
-**Out of scope for the week:** full CaMeL/FIDES taint propagation through model reasoning, Tessera or witnessing, Dogwood, and OpenFGA/SpiceDB.
+**Out of scope for this build window:** full CaMeL/FIDES taint propagation through model reasoning, Tessera or witnessing, Dogwood, and OpenFGA/SpiceDB.

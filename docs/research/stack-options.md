@@ -4,7 +4,7 @@ Research date: 2026-10-28.
 
 Background research for the Claude Desk design; claims are cited, and anything not confirmed from a source is marked UNVERIFIED.
 
-Scope: a hosted prototype, about 1 week, one engineer with agentic coding. It covers three options, a shared core, risks, costs, a recommendation and the decisions left to the project owner.
+Scope: a hosted prototype, built within a short build window with agentic coding. It covers three options, a shared core, risks, costs, a recommendation and the decisions left to the project owner.
 Inputs: the Claude Desk design decisions and design system as they stood then, `safety-anthropic.md`, `safety-landscape.md` and `safety-patterns.md`, plus the primary docs listed under Sources (fetched today).
 **UNVERIFIED** means I could not confirm it from a primary source today. Nothing was signed up for, and no product code was written.
 
@@ -30,7 +30,7 @@ Inputs: the Claude Desk design decisions and design system as they stood then, `
 | Supabase Realtime | Free: 200 concurrent connections, 100 msgs/s. Pro: 500 and 500. Free projects **pause after ~7 days inactive** (secondary sources) | A pause would break a demo link that sits idle for weeks. Pay for Pro while the demo must stay up, or keep the project warm (UNVERIFIED whether a cron ping counts as activity). |
 | Neon free tier | 100 CU-hours/project/month, scales to zero after 5 min, 0.5 GB | A fine alternative database, but it has no realtime, so it needs Ably, Pusher or similar. |
 | Resend free tier | 3,000 emails/month, 100/day | Enough for email OTP and magic links during a demo period. |
-| Twilio SMS | Test credentials only simulate (no real delivery). I found no doc saying Verify accepts test credentials (UNVERIFIED). US SMS to arbitrary numbers usually needs A2P 10DLC registration (UNVERIFIED for timeline) | Plan on **real email OTP plus SMS in clearly labelled test mode**, not real SMS in week 1. |
+| Twilio SMS | Test credentials only simulate (no real delivery). I found no doc saying Verify accepts test credentials (UNVERIFIED). US SMS to arbitrary numbers usually needs A2P 10DLC registration (UNVERIFIED for timeline) | Plan on **real email OTP plus SMS in clearly labelled test mode**, not real SMS during the build. |
 | Fly.io | No free tier for new organizations. shared-cpu-1x 1 GB is $6.70/month; shared-cpu-2x 2 GB is $13.39/month; extra RAM $6/GB | Prices the Agent SDK worker. |
 | Railway | Hobby $5/month including $5 usage. RAM $10/GB-month, vCPU $20/month | An alternative worker host, more expensive per GB. |
 
@@ -110,7 +110,7 @@ Either way, the owner's live view can stream raw output, because the owner is tr
 - The Supabase free tier pauses (pay for Pro or keep it warm).
 - It doesn't run on an Anthropic agent harness. Mitigation: document how the loop mirrors the Agent SDK's evaluation order (hooks, deny, ask, mode, allow) and the auto-mode reviewer design.
 
-**1-week feasibility: GREEN.** There's one deployable and no containers. The risk sits in product work (rule cards, the reply checkpoint, seeded demo polish), not infrastructure. Rough plan:
+**Feasibility within a short build window: GREEN.** There's one deployable and no containers. The risk sits in product work (rule cards, the reply checkpoint, seeded demo polish), not infrastructure. Rough plan:
 - Day 1: shell, database, auth and passcode.
 - Day 2: loop, Cedar and tools.
 - Day 3: approvals, realtime and the reply checkpoint.
@@ -122,7 +122,7 @@ Either way, the owner's live view can stream raw output, because the owner is tr
 **Cost ballpark**
 - Infrastructure: $0–45/month. That's Vercel Hobby $0 or Pro $20/seat; Supabase Free $0 or Pro about $25 (UNVERIFIED price); free tiers for Upstash, Resend and Stripe test; Twilio trial credit.
 - Model: about $0.30–0.50 per 8-turn visitor conversation on Opus 5.5 at low effort with caching, plus about $0.001 for Haiku reviewer calls (UNVERIFIED estimate: about 16 calls × (2k uncached input + 10k cached + 400 output)).
-- Build-week testing and red-team evals: about $100–500. Demo period after the build: about $20–100 (UNVERIFIED).
+- Build-period testing and red-team evals: about $100–500. Demo period after the build: about $20–100 (UNVERIFIED).
 
 ---
 
@@ -155,7 +155,7 @@ Either way, the owner's live view can stream raw output, because the owner is tr
 - The `defer` single-call limit, if you use it.
 - The upside: it is built on the same permission engine as Claude Code.
 
-**1-week feasibility: AMBER.** It's doable, but expect to spend about 1.5 days on worker infrastructure, the session store and streaming plumbing before product work starts. It's the most likely of the three to cause "slow or flaky", which is a stated anti-goal.
+**Feasibility within a short build window: AMBER.** It's doable, but expect to spend about 1.5 days on worker infrastructure, the session store and streaming plumbing before product work starts. It's the most likely of the three to cause "slow or flaky", which is a stated anti-goal.
 
 **Cost ballpark**
 - Infrastructure: Option A's $0–45/month plus a Fly worker. That's about $13–30/month for 2–4 GB always-on (shared-cpu-2x 2 GB is $13.39, plus $6/GB extra), or Railway at about $5 plus $10/GB-month. Call it **$15–75/month**.
@@ -194,7 +194,7 @@ Either way, the owner's live view can stream raw output, because the owner is tr
 - Holds block the visitor.
 - It's the least time-tested path.
 
-**1-week feasibility: AMBER-RED** as the sole runtime. A safer variant: use Managed Agents only for the **owner-side setup interview** (reading the owner's website with `web_fetch`, drafting charter and profiles), which is a long-running, owner-trusted task, and keep the visitor runtime on Option A's loop.
+**Feasibility within a short build window: AMBER-RED** as the sole runtime. A safer variant: use Managed Agents only for the **owner-side setup interview** (reading the owner's website with `web_fetch`, drafting charter and profiles), which is a long-running, owner-trusted task, and keep the visitor runtime on Option A's loop.
 
 **Cost ballpark**
 - Infrastructure: about the same as A ($0–45/month), plus session runtime at $0.08/session-hour, which is negligible (a 10-minute conversation is at most about $0.01).
@@ -215,7 +215,7 @@ Either way, the owner's live view can stream raw output, because the owner is tr
 | Real MCP gating | App is the MCP client, so per-call Cedar | Hooks on `mcp__*` | `always_ask` → app confirms |
 | Built on Anthropic's agent runtime | Medium (mirrors SDK and auto-mode design) | High | High (but beta) |
 | Infra $/month | $0–45 | $15–75 | $0–45 + about $0 runtime |
-| 1-week verdict | Green | Amber | Amber-red (green for the owner-setup sidecar) |
+| Short-build-window verdict | Green | Amber | Amber-red (green for the owner-setup sidecar) |
 
 ---
 
@@ -224,7 +224,7 @@ Either way, the owner's live view can stream raw output, because the owner is tr
 **Option A**: Next.js 16 on Vercel, Supabase (Postgres, Realtime, Storage), your own Messages API loop with Opus 5.5 (effort low or medium) plus a Haiku 5.5 reviewer, cedar-wasm in-process, the app as MCP client, park-and-resume approvals, Resend email OTP with Twilio in test mode, and Stripe test mode. Optionally run the owner setup interview on Managed Agents.
 
 Why A:
-- Every Desk tool is a custom business tool, so the Agent SDK's main asset (Claude Code's built-in file and bash harness) is dead weight, and its subprocess model fights serverless.
+- Every Desk tool is a custom business tool, so the Agent SDK's main asset (Claude Code's built-in file and bash harness) is unused here, and its subprocess model fights serverless.
 - The whole loop, with its visible `gate()` → Cedar → reviewer → `send_reply` check pipeline, can be read in one file.
 - Park-and-resume needs no waiting process, so the hosting is simple and the "owner answers, visitor sees it live" moment is reliable.
 
@@ -258,8 +258,8 @@ Write a short ADR explaining why A rather than B or C, citing the `defer` single
 - Agent SDK hooks: https://code.claude.com/docs/en/agent-sdk/hooks
 - Hooks reference ("Defer a tool call for later"): https://code.claude.com/docs/en/hooks.md
 - Managed Agents overview: https://platform.claude.com/docs/en/managed-agents/overview
-- Managed Agents permission policies, events, custom tools and pricing: claude-api skill reference, cached 2026-10-06 (mirrors platform.claude.com/docs/en/managed-agents/*)
-- Models and pricing (Opus 5.5, Haiku 5.5), MCP connector, forced tool choice, preserved thinking, mid-conversation system messages: claude-api skill reference, cached 2026-10-06
+- Managed Agents permission policies, events, custom tools and pricing: Anthropic API docs (platform.claude.com/docs/en/managed-agents/*), accessed 2026-10-06
+- Models and pricing (Opus 5.5, Haiku 5.5), MCP connector, forced tool choice, preserved thinking, mid-conversation system messages: Anthropic API docs (platform.claude.com), accessed 2026-10-06
 - A2A spec 1.0.0: https://a2a-protocol.org/latest/specification/
 - Stripe MCP: https://docs.stripe.com/mcp
 - Supabase Realtime limits: https://supabase.com/docs/guides/realtime/limits

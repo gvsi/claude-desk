@@ -8,20 +8,15 @@ This was a read-only look at the claude.ai web app's UI conventions, in one agen
 
 **Theme observed: dark.** `html[data-mode="dark"][data-theme="claude"][data-color-version="v2"][data-density="comfortable"]`, sidebar width 280, `data-reply-face="serif"`.
 
-**Important: the observed session is in a color experiment.** `data-cds-fizzy-lake="color icons panels type"` is set. It does four things:
+A neutral-gray variant of the theme was active; both palettes are recorded below.
 
-- Replaces the warm, cream-tinted grays with **pure neutral grays**: dark page `#191919`, sidebar `#1f1f1f`, composer `#303030`.
-- Switches to a new icon font: `Anthropicons-FizzyLake`.
-- Flattens the panels.
-- Uses variable-weight type tuned to wght 360 for body text and 395 for controls.
-
-The classic claude.ai palette (warm `#faf9f5`, `#262624`, `#141413`) is still in the stylesheets as the `[data-theme=claude]` base. **Claude Design (claude.ai/design) still uses the warm palette** (`#1c1b19` app background). Both are documented below. The prototype should pick one family and not mix them.
+The classic claude.ai palette (warm `#faf9f5`, `#262624`, `#141413`) is still in the stylesheets as the `[data-theme=claude]` base. **Claude Design (claude.ai/design) still uses the warm palette** (`#1c1b19` app background). The prototype should pick one family and not mix them.
 
 ---
 
 ## (a) Tokens
 
-### Color: active "fizzy-lake" neutral system (what the observed session showed)
+### Color: active neutral-gray variant (what the observed session showed)
 
 | Role | Light | Dark |
 |---|---|---|
@@ -56,7 +51,7 @@ The classic claude.ai palette (warm `#faf9f5`, `#262624`, `#141413`) is still in
 | Brand clay (Spark logo, brand fill) | `#d97757`; emphasized `#c6613f` | same |
 | Backdrop (modal scrim) | `#0006` | `rgba(0,0,0,.5)` |
 
-The neutral ramp (`--cds-gray-*`, fizzy) runs: 10 `#fcfcfc` · 20 `#f9f9f9` · 50 `#efefef` · 100 `#e0e0e0` · 200 `#c2c2c2` · 300 `#a4a4a4` · 400 `#878787` · 500 `#6b6b6b` · 600 `#515151` · 700 `#383838` · 750 `#2c2c2c` · 800 `#202020` · 840 `#181818`. There are also full red/orange/yellow/green/aqua/blue/violet/magenta ramps from 10 to 890.
+The neutral ramp (`--cds-gray-*`, neutral variant) runs: 10 `#fcfcfc` · 20 `#f9f9f9` · 50 `#efefef` · 100 `#e0e0e0` · 200 `#c2c2c2` · 300 `#a4a4a4` · 400 `#878787` · 500 `#6b6b6b` · 600 `#515151` · 700 `#383838` · 750 `#2c2c2c` · 800 `#202020` · 840 `#181818`. There are also full red/orange/yellow/green/aqua/blue/violet/magenta ramps from 10 to 890.
 
 ### Color: classic warm claude.ai palette (`[data-theme="claude"]` base; also what Claude Design uses)
 
@@ -76,7 +71,7 @@ The neutral ramp (`--cds-gray-*`, fizzy) runs: 10 `#fcfcfc` · 20 `#f9f9f9` · 5
 | `danger-100` | `#b53333` | `#dd5353` |
 | `accent-pro-100` | `hsl(251 40% 45%)` ≈ `#5a48a1` | `hsl(251 40% 54%)` ≈ `#7464be` |
 
-The "v2" warm gray ramp (`--cds-gray-*`, non-fizzy): 0 `#fff` · 10 `#fcfcfb` · 20 `#f9f9f7` · 50 `#f0efec` · 80 `#e7e6e1` · 100 `#e1e0d9` · 200 `#c3c2b7` · 300 `#a5a49a` · 400 `#898781` · 500 `#6d6b67` · 600 `#52514e` · 700 `#383835` · 750 `#2c2c2a` · 800 `#20201f` · 850 `#151515` · 900 `#0b0b0b`.
+The "v2" warm gray ramp (`--cds-gray-*`, warm variant): 0 `#fff` · 10 `#fcfcfb` · 20 `#f9f9f7` · 50 `#f0efec` · 80 `#e7e6e1` · 100 `#e1e0d9` · 200 `#c3c2b7` · 300 `#a5a49a` · 400 `#898781` · 500 `#6d6b67` · 600 `#52514e` · 700 `#383835` · 750 `#2c2c2a` · 800 `#20201f` · 850 `#151515` · 900 `#0b0b0b`.
 
 Supporting brand neutrals: heather `#cbcadb`, plum `#827dbd`, cactus `#bcd1ca`, mineral `#629987`. These are used for pictogram highlights.
 
@@ -110,9 +105,9 @@ Claude Design (`--om-*`, dark):
 | `--font-anthropic-sans` (UI) | `"anthropic-sans", system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif`. Variable weight 300–800 plus a `GRAD` axis. | **No** (proprietary) | **Hanken Grotesk** or **Instrument Sans** (variable). Inter is acceptable but reads generic. Use variable wght ~360 (body) and ~420 (controls). |
 | `--font-anthropic-serif` (greeting, page titles, Claude's replies, wordmark) | `"anthropic-serif", Georgia, …`. Variable wght 300–800 with an `opsz` axis (uses opsz 20/24/28/48). Wordmark uses `font-feature-settings: "ss01","dlig"`. | **No** | **Source Serif 4** (variable, opsz+wght: closest behavior) or **Newsreader** (opsz). Fallback: Georgia. Avoid Playfair/DM Serif (too high-contrast). |
 | `--font-anthropic-mono` (code) | `"anthropic-mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace` | **No** | **JetBrains Mono** or **IBM Plex Mono**, at 13–14px |
-| Icons | `Anthropicons-FizzyLake` / `Anthropicons-Variable` icon font (PUA glyphs, e.g. U+E064 "pencil") | **No** | Lucide or Phosphor (Regular) at 1.5px stroke, rounded caps, 16–20px |
+| Icons | `Anthropicons-Variable` icon font (PUA glyphs, e.g. U+E064 "pencil") | **No** | Lucide or Phosphor (Regular) at 1.5px stroke, rounded caps, 16–20px |
 
-Dark mode drops the weight axis: regular is wght 360, medium 460, semibold 540, bold 560. That compensates for halation on dark backgrounds, so dark text is visibly lighter than light-mode text. In fizzy "type" the role weights are body 400 (wght 360), control 435 (wght 395), header 520 (wght 480), badge 540 (wght 520).
+Dark mode drops the weight axis: regular is wght 360, medium 460, semibold 540, bold 560. That compensates for halation on dark backgrounds, so dark text is visibly lighter than light-mode text. In the neutral variant the role weights are body 400 (wght 360), control 435 (wght 395), header 520 (wght 480), badge 540 (wght 520).
 
 Type scale (comfortable density, measured):
 
@@ -151,7 +146,7 @@ The Tailwind base scale is also present: 12/16, 14/20, 16/24, 18/28, 20/28, 24/3
 | Segmented control | track 7–8px, thumb 5–6px |
 | `radius-card` | `cds-radius + 4px` → **11–12px** (cards, user bubble 12px, dialog 12px, hero 12px) |
 | Composer | **14px** (`--cds-radius-composer` .875rem). Claude Design composer: 16px. |
-| Panels | `--cds-panel-radius` 12px (fizzy flattens these to 0 for side panels). Project side column: 16px. |
+| Panels | `--cds-panel-radius` 12px (the neutral variant flattens these to 0 for side panels). Project side column: 16px. |
 | Code block | 8px |
 | Inline code | 4px |
 | Pills (badge 11px, counter, switch) | full (9999px) |
@@ -173,7 +168,7 @@ The Tailwind base scale is also present: 12/16, 14/20, 16/24, 18/28, 20/28, 24/3
 
 Controls are 32px tall (`--cds-h-control`). Sizes: xs 24, sm 28, lg 40.
 
-Chat column: `--fizzy-lake-column: 768` (transcript 768px max; messages measured at 736px wide). Content pages (Projects, Customize) use a 960px column, centered in the remaining space.
+Chat column: 768px (transcript 768px max; messages measured at 736px wide). Content pages (Projects, Customize) use a 960px column, centered in the remaining space.
 
 Sidebar geometry:
 
@@ -494,7 +489,7 @@ In dark mode, rings switch from outer to **inset** (`--cds-ring-outer 0, --cds-r
 ### Claude Design (`/design`)
 ```
 ┌──────────────────────────────────────────────────────────────────────────────────────┐
-│ Claude Design is moving to Artifacts in the Claude app. You can keep using… Learn more ✕│ clay 16% tint
+│ Claude Design is moving to Artifacts in the Claude app. You can keep using… Learn more ✕│ clay 16% tint (banner text observed 2026-10-28)
 ├──────────────────────────────────────────────────────────────────────────────────────┤
 │ Claude Design                                                                   (◌)  │ serif 20
 │ Beta                                                                                 │
@@ -529,8 +524,8 @@ In dark mode, rings switch from outer to **inset** (`--cds-ring-outer 0, --cds-r
   - "Set up recurring tasks for this project."
 - **Claude is referred to by name in the third person**, never "AI", "assistant" or "bot": "Claude is AI and can make mistakes. Please double-check responses."
 - **Reassurance about privacy is stated flatly:** "All chats are private unless shared."
-- **Status words are terse badges:** "Added", "Auto-connect", "Example project", "19 new", "Beta".
-- **Moved or deprecated notices are direct and give one action:** "Connectors have moved to Customize. Head there to browse, connect, and manage them." and "Claude Design is moving to Artifacts in the Claude app. You can keep using this version until December 14. Learn more".
+- **Status words are terse badges:** "Added", "Auto-connect", "Example project", "{n} new", "Beta".
+- **Moved or deprecated notices are direct and give one action:** "Connectors have moved to Customize. Head there to browse, connect, and manage them." and "Claude Design is moving to Artifacts in the Claude app. You can keep using this version until December 14. Learn more" (banner text observed 2026-10-28).
 - **Meta lines use a middle dot (" · "):** "{name} · {organization}", "Created by Anthropic · Shared with your organization", "Default · Anthropic Sans".
 - **Suggestion chips are verbs or nouns, not prompts:** Write, Learn, Code, Career chat, Claude's choice.
 - Uses curly apostrophes (’).
@@ -567,26 +562,8 @@ In dark mode, rings switch from outer to **inset** (`--cds-ring-outer 0, --cds-r
 
 ---
 
-## Screenshots (dark mode, 2× DPR)
+## Screenshots and raw extractions
 
-Captured during the study; not included in this repository:
-
-| File | Shows |
-|---|---|
-| `01-home-new.png` | Home: sidebar, serif greeting with Spark, composer, suggestion chips |
-| `02-chat.png` | Conversation: user bubble, serif reply with inline code, docked composer, disclaimer |
-| `03-settings.png` | Settings modal (General): nav, rows, ghost selects, segmented theme, toggle |
-| `04-customize-connectors.png` | Customize › Connectors: tabs, hero carousel, connector card grid, badges |
-| `05-projects.png` | Projects list: serif title, tabs, light primary button, project card |
-| `06-project-detail.png` | Project page: breadcrumb, embedded composer, empty state, context side panel |
-| `07-design.png` | Claude Design (warm palette): banner, serif hero, composer with pill controls, template grid |
-
-Raw extractions (for exact lookups), also not included in this repository:
-
-| File | Contents |
-|---|---|
-| `theme-rules.txt` | Every custom-property rule, with light, dark and system blocks |
-| `vars-home.parsed.json` | All 1,351 computed `:root` vars + rules |
-| `probe-*.json` | Computed styles per page |
+Screenshots and raw extractions were kept locally and are not published.
 
 **Gaps.** The menu/popover styles and the artifact panel were not observed directly. Menu values above come from tokens.

@@ -220,7 +220,7 @@ The same page says: "**If you relay untrusted end-user input in `user.message` e
   - Covered by the HackerOne bug bounty.
 
 ### Reuse vs mirror
-- **Reuse (as a product or routing target).** Duet is the natural *owner-side* approval inbox for Claude Desk escalations. Its testers already use it for customer support. No public API to Duet's classifier or approval flow is documented, so treat any integration as **UNVERIFIED**.
+- **Reuse (as a product or routing target).** Duet is the natural *owner-side* approval inbox for Claude Desk escalations. No public API to Duet's classifier or approval flow is documented, so treat any integration as **UNVERIFIED**.
 - **Mirror (design pattern).** Copy the full stack:
   - Action-intent check outside the model.
   - A two-tier outbound data classifier (never / consent), extended with Claude Desk tiers such as "never promise a price or discount that isn't in the price book" and "never release a doc above the requester's verified tier".
@@ -327,7 +327,7 @@ The same page says: "**If you relay untrusted end-user input in `user.message` e
    - Visitor sessions get `read_only` knowledge stores, and owner memory changes only through owner review (the poisoning warning).
 9. **Expect the stranger's own turn to be the weak spot.**
    - Opus 5.5 acts on planted pasted instructions in ~2–7.4% of attempts.
-   - Anthropic's pasted-text marking and probes were still rolling out and don't come with the API.
+   - Anthropic's pasted-text marking and probes were still rolling out, and the system card does not say whether they apply to API use.
    - Claude Desk must supply its own input screening and must measure legitimate-task completion alongside attack success.
 10. **Lean on the constitution, but build on Claude Desk's own measurements.**
     - Trained-in norms already cast visiting agents as non-principals and require AI disclosure.

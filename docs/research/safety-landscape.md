@@ -168,7 +168,7 @@ Legend for *Mechanism*: **D** = deterministic policy or rules; **M** = model-bas
 - An Apache-2.0 rule language with Python-like `raise "msg" if: (call: ToolCall) -> (call2: ToolCall) ...` rules over the whole trace. Its canonical example blocks `get_inbox` → `send_email` to an address outside the company domain.
 - It has built-in detectors such as `prompt_injection(threshold=0.7)`. It runs through Invariant Gateway (a proxy in front of the LLM and MCP that evaluates before and after each call) or locally with `LocalPolicy`.
 - Snyk acquired Invariant Labs in June 2025. Repo activity after early 2026 is unclear (aggregators disagree), and there is no archive notice.
-- **Fit:** the best model for **dataflow rules**, e.g. "content from the owner-private corpus may not appear in a reply to an unverified visitor". Mirror the idea in Claude Desk's own gate rather than depend on a possibly stagnant library.
+- **Fit:** the best model for **dataflow rules**, e.g. "content from the owner-private corpus may not appear in a reply to an unverified visitor". Mirror the idea in Claude Desk's own gate rather than depend on a library whose maintenance status is unclear.
 - Sources: https://github.com/invariantlabs-ai/invariant ; https://siliconangle.com/2025/06/24/snyk-acquires-invariant-labs-expand-ai-agent-security-capabilities/ .
 
 ### 3.13 Lakera Guard (now Check Point AI Guardrails)
@@ -257,7 +257,7 @@ Guardrails AI (open-source validators), Llama Guard 4 (12B safety classifier, Ap
    - *Model classifiers* (Lakera, Prompt Shields, Model Armor, PromptGuard, NemoGuard, Harden's advisor model) produce **signals**.
    - Even vendors with models keep the deterministic engine authoritative: Harden's model has zero authority, AgentCore uses the LLM only to *author* Cedar, and Oso says agents aren't reliable enough to control authorization.
 2. **Identity standards stop at the connection.** MCP OAuth, A2A schemes and Web Bot Auth tell you *who is connected* and *with what scopes*. Every source that discusses it (Permit, AWS, A2A §7.5) says per-call authorization is a separate layer.
-3. **Outgoing-message gating is the least mature area.** Products screen outputs for injection, PII, toxicity or URLs (Lakera, Model Armor, NeMo output rails, LLM Guard, now archived). None enforces *business* rules on replies, such as "never quote below the floor price", "never promise a slot that isn't booked", or "never reveal document X to an unverified visitor". Claude Desk has to build this, and it is a differentiator.
+3. **Outgoing-message gating is the least mature area.** Products screen outputs for injection, PII, toxicity or URLs (Lakera, Model Armor, NeMo output rails, LLM Guard, now archived). We found no product that enforces *business* rules on replies, such as "never quote below the floor price", "never promise a slot that isn't booked", or "never reveal document X to an unverified visitor". Claude Desk has to build this.
 4. **Human approval is converging on one shape:** allow / deny / **hold-for-human**, with full context shown and a timeout that defaults to deny. Examples are Kastra Hold, Harden Ask (blocks and queues by default), Auth0 CIBA with RAR, and A2A `AUTH_REQUIRED`.
 5. **Audit is converging on signed, hash-chained decision logs** that record the matched policy (Kastra, Harden's local store, AP2's mandate chain).
 
@@ -271,7 +271,7 @@ Guardrails AI (open-source validators), Llama Guard 4 (12B safety classifier, Ap
    - Tool arguments (price, slot, document ID, amount) are bounded by `when`/`unless` conditions.
    - Tools that are always denied are hidden from the tool list per visitor tier.
    - Owners may author rules in plain English that are compiled to Cedar, but only if schema validation passes and the diff is shown back to the owner.
-3. **Treat "send message to customer" as a tool and gate it like one.** This is the gap no product fills. Deterministic checks come first:
+3. **Treat "send message to customer" as a tool and gate it like one.** We found no product that enforces business rules on replies. Deterministic checks come first:
    - Any price or quote must match the server-side price table.
    - Any commitment (booking, discount, refund) must correspond to a tool call that the gate approved.
    - Any document link or content must have been released to *this* verified identity.
