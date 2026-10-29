@@ -17,6 +17,8 @@ export interface StreamHandlers<E> {
   state(state: StreamState): void;
 }
 
+const SEQ = /^\d+$/;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -42,8 +44,10 @@ export function openStream<E extends { type: string }>(
     if (!isRecord(payload) || typeof payload.type !== 'string' || !known.has(payload.type)) return;
     // An unnamed event arrives as "message" and may carry any known type; a named one must match.
     if (e.type !== 'message' && e.type !== payload.type) return;
+    // Plain digits only: `Number()` would also read '', '0x5', '1e1' and '7 ' as a seq.
+    if (!SEQ.test(e.lastEventId)) return;
     const seq = Number(e.lastEventId);
-    if (!Number.isSafeInteger(seq) || seq < 0) return;
+    if (!Number.isSafeInteger(seq)) return;
     on.event(seq, payload as E);
   };
 
@@ -53,8 +57,10 @@ export function openStream<E extends { type: string }>(
   source.onopen = () => {
     if (!stopped) on.state('open');
   };
-  source.onerror = () => {
-    if (stopped) return;
+  source.onerror = (e: Event) => {
+    // A named `error` event (an `EvError` payload, delivered above) also reaches `onerror`; only a
+    // plain `Event` means the connection failed.
+    if (stopped || e instanceof MessageEvent) return;
     if (source.readyState === EventSource.CLOSED) {
       stopped = true;
       source.close();

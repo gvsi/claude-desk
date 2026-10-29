@@ -26,7 +26,7 @@ afterAll(() => {
 const EVENTS_URL = '/api/public/desks/rivera-plumbing/events';
 
 /** The event names the handlers below send, so `client.send` accepts them. */
-type Named = { message: unknown; writing: unknown; turn_end: unknown; surprise: unknown };
+type Named = { message: unknown; writing: unknown; turn_end: unknown; error: unknown; surprise: unknown };
 const TYPES: readonly SseEvent['type'][] = [
   'writing',
   'message',
@@ -62,16 +62,20 @@ describe('openStream', () => {
     worker.use(
       sse<Named>(EVENTS_URL, ({ client }) => {
         client.send({ id: '7', event: 'writing', data: { type: 'writing' } });
-        client.send({ id: '8', data: { type: 'error', code: 'kernel_unavailable' } });
-        client.send({ id: '9', event: 'turn_end', data: { type: 'turn_end' } });
+        client.send({ id: '8', data: { type: 'error', code: 'internal' } });
+        // The API names every event by its type, so an error arrives as an `error` event, which
+        // the browser also hands to `onerror`. It is a payload, not a dropped connection.
+        client.send({ id: '9', event: 'error', data: { type: 'error', code: 'kernel_unavailable' } });
+        client.send({ id: '10', event: 'turn_end', data: { type: 'turn_end' } });
       }),
     );
     const { events, states } = listen();
-    await vi.waitFor(() => expect(events).toHaveLength(3));
+    await vi.waitFor(() => expect(events).toHaveLength(4));
     expect(events).toEqual([
       [7, { type: 'writing' }],
-      [8, { type: 'error', code: 'kernel_unavailable' }],
-      [9, { type: 'turn_end' }],
+      [8, { type: 'error', code: 'internal' }],
+      [9, { type: 'error', code: 'kernel_unavailable' }],
+      [10, { type: 'turn_end' }],
     ]);
     expect(states).toEqual(['open']);
   });
@@ -84,6 +88,10 @@ describe('openStream', () => {
         client.send({ id: '3', data: { type: 'surprise' } });
         client.send({ id: '4', event: 'writing', data: { type: 'turn_end' } });
         client.send({ id: '5', data: ['writing'] });
+        // Ids that `Number()` would read as a seq but that aren't plain digits.
+        client.send({ id: '0x5', event: 'writing', data: { type: 'writing' } });
+        client.send({ id: '1e1', event: 'writing', data: { type: 'writing' } });
+        client.send({ id: '7 ', event: 'writing', data: { type: 'writing' } });
         client.send({ id: '6', event: 'writing', data: { type: 'writing' } });
       }),
     );
