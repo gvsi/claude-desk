@@ -424,3 +424,5 @@ Round 2 (seam review, 2026-10-29): seam-05 Task 2 waits for master Tasks 0 and 2
 PR round 1, 2026-10-29: `MarginReceipt`'s owner line follows the web app's rule, a decision's first receipt when it reads `held`, `refused`, `executed` or `allowed`; the copied Global Constraints name the organization's $1,000 monthly limit. If the kernel verification and owner data plan (plan 01b) merges before this PR, this PR runs `npm run gen:contracts` after its rebase so `contract_types_are_current` stays green (master "Shared seams").
 
 PR round 2, 2026-10-29: the copied Global Constraints name the active rules version's money cap, and the fixtures' wording says "money cap". The kernel payments plan (plan 01c) adds the `link_cancelled` card's chrome and fixtures with its contract delta.
+
+PR round 3, 2026-10-29: the landing lines name the review panel. Nothing in this plan's tasks changes.

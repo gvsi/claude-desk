@@ -358,3 +358,5 @@ Round 2 (seam review, 2026-10-29): seam-20: `ToolStatusRow` and `ToolReviewCard`
 PR round 1, 2026-10-29: the copied Global Constraints name the organization's $1,000 monthly limit. Nothing in this plan's tasks changes.
 
 PR round 2, 2026-10-29: `MockCheckout` takes `cancelReason` and says when a rule change cancelled the link (`CancelledRulesChanged`, `rule_change_cancel_says_why`; 24 story tests). `RuleChangeDiff` takes `hasOtherChanges`, so a draft that changes only the money limit keeps Confirm (`LimitOnly`, `limit_only_change_keeps_confirm`; 11 story tests). The copied Global Constraints name the active rules version's money cap.
+
+PR round 3, 2026-10-29: the landing lines name the review panel. Nothing in this plan's tasks changes.

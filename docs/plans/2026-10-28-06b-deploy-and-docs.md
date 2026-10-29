@@ -312,3 +312,5 @@ Fix round, 2026-10-29: Task 9 consumes `docs/evals.md` from Plan 05b's PR 2, whi
 Round 2 (seam review, 2026-10-29): seam-03 Friday's deploy gated by tier 1 and the run-free file from Plan 05b's PR 1, said in the report; seam-23 latency rows labelled hosted or local with their source; seam-27 run 2 is Task 9 on Saturday, Task 10 became the coordinator operations (final deploy, then the path to MVP naming `pass_id` and date); seam-36 open question 1 answered; seam-43 image smoke checks the mock payments health; seam-46 stale reports caught by `make image-check` in preflight, `unproved_seeds` only after a miss; seam-47 per-container smoke env files with `test_image_smoke_env_covers_the_seam`; seam-48 `make dev` composes `kernel-serve`, `api-serve` and Vite.
 
 PR round 2, 2026-10-29: the deployment guide names the organization's $1,000 monthly limit, and the path to MVP task drafts the written documents where the owner writes them, not in the repo.
+
+PR round 3, 2026-10-29: the header names the review panel. Nothing in this plan's tasks changes.
