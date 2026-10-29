@@ -13,8 +13,10 @@ from desk.api.store import (
     append_message,
     append_tool_change,
     append_tool_results,
+    clear_wake,
     context_hash,
     context_text,
+    context_tools,
     has_pending,
     last_context_hash,
     prepare_model_input,
@@ -409,6 +411,35 @@ async def test_pending_needs_wake(api_conn, ids):
     assert [block["text"] for block in first[:2]] == [
         "<visitor_message>Are you there?</visitor_message>",
         "<owner_said_to_visitor>I'm here, give me a minute.</owner_said_to_visitor>"]
+
+
+async def test_clear_wake_keeps_the_rows_waiting(api_conn, ids):
+    await start_fresh_context(api_conn, ids, TOOLS)
+    await append_message(api_conn, ids, "visitor_text", text="Hello?")
+    await append_message(api_conn, ids, "whisper", text="Be brief.")
+    assert await clear_wake(api_conn, ids.session_id) == 2
+    # no turn starts for them, but they still reach the model at its next call
+    assert not await has_pending(api_conn, ids.session_id)
+    (user,) = (await prepare_model_input(api_conn, ids.session_id)).messages
+    assert [block["text"] for block in user["content"]] == ["<visitor_message>Hello?</visitor_message>",
+                                                           "<owner_whisper>Be brief.</owner_whisper>"]
+    assert await clear_wake(api_conn, ids.session_id) == 0
+
+
+async def test_context_tools_are_the_frozen_tools_and_the_changes_since(api_conn, ids):
+    assert await context_tools(api_conn, ids.session_id) is None              # no context yet
+    await start_fresh_context(api_conn, ids, TOOLS)
+    await append_message(api_conn, ids, "visitor_text", text="Hi")
+    await append_tool_change(api_conn, ids, "tool_addition", "native__release_document")
+    await prepare_model_input(api_conn, ids.session_id)                       # sent
+    await append_tool_change(api_conn, ids, "tool_removal", "native__start_verification")   # still waiting
+    tools, changes = await context_tools(api_conn, ids.session_id)
+    assert canonical(tools) == canonical(TOOLS)
+    assert changes == [("tool_addition", "native__release_document"), ("tool_removal", "native__start_verification")]
+    # a fresh context starts from its own tools; the old context's changes stay with it
+    await start_fresh_context(api_conn, ids, TOOLS[:3])
+    tools, changes = await context_tools(api_conn, ids.session_id)
+    assert (canonical(tools), changes) == (canonical(TOOLS[:3]), [])
 
 
 async def test_transcript_projects_each_audience(api_conn, kernel_http, fake, visitor, ro_schema):

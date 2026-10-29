@@ -1,8 +1,8 @@
 """The transcript store (`app.messages`): append-only conversations and the model input built from them.
 
 Rows are never edited or deleted. The only later writes are a pending row's place in the model's history
-(`model_context`, `model_seq`, set once) and an owner translation. Every function runs in the caller's
-transaction and never commits.
+(`model_context`, `model_seq`, set once), a pending row's `wake` cleared when a paused session hands off
+(`clear_wake`), and an owner translation. Every function runs in the caller's transaction and never commits.
 
 What the model sees (Plan 02a, "Transcript contract"):
 
@@ -36,7 +36,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import and_, func, insert, select, update
+from sqlalchemy import and_, func, insert, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from desk.api.schemas import OwnerTranscriptItem, TranscriptItem
@@ -293,6 +293,22 @@ async def start_fresh_context(conn: AsyncConnection, ids: Ids, tools: list[dict]
                          model_content={"tools": tools, "summary": summary})
 
 
+async def context_tools(conn: AsyncConnection, session_id: str) -> tuple[list[dict], list[tuple[str, str]]] | None:
+    """The current model context's tools as its `context_start` row froze them, and its tool changes since, as
+    (`tool_addition` or `tool_removal`, tool name) in order, those waiting for the next call included; None before
+    the session's first context."""
+    current = await _current_context(conn, session_id)
+    if current is None:
+        return None
+    start = (await conn.execute(select(MESSAGES.c.model_content).where(
+        MESSAGES.c.session_id == session_id, MESSAGES.c.kind == "context_start",
+        MESSAGES.c.model_context == current))).scalar_one()
+    changes = await conn.execute(select(MESSAGES.c.model_content).where(
+        MESSAGES.c.session_id == session_id, MESSAGES.c.kind == "tool_change",
+        or_(MESSAGES.c.model_context == current, MESSAGES.c.model_seq.is_(None))).order_by(MESSAGES.c.n))
+    return start["tools"], [(change["type"], change["tool"]["name"]) for (change,) in changes]
+
+
 async def prepare_model_input(conn: AsyncConnection, session_id: str) -> ModelInput:
     """Give the waiting rows their place (user-turn rows, then tool changes) and build the current context's
     request: its frozen tools and messages. Raises `UnansweredToolUse` while a tool call has no result."""
@@ -394,6 +410,14 @@ async def has_pending(conn: AsyncConnection, session_id: str) -> bool:
     return bool((await conn.execute(select(func.count()).where(
         MESSAGES.c.session_id == session_id, MESSAGES.c.model_seq.is_(None), MESSAGES.c.wake,
         MESSAGES.c.model_content.is_not(None)))).scalar_one())
+
+
+async def clear_wake(conn: AsyncConnection, session_id: str) -> int:
+    """Stop the session's pending work from starting turns (a paused session hands off instead); the rows still wait
+    for the model and reach it at its next call. Returns how many rows it cleared."""
+    cleared = await conn.execute(update(MESSAGES).where(
+        MESSAGES.c.session_id == session_id, MESSAGES.c.model_seq.is_(None), MESSAGES.c.wake).values(wake=False))
+    return cleared.rowcount
 
 
 
