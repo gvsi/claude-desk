@@ -207,8 +207,7 @@ def test_postgres_services_match_compose():
     settings = env_example()
     user, database = db["environment"]["POSTGRES_USER"], db["environment"]["POSTGRES_DB"]
     password = settings["DESK_ADMIN_PASSWORD"]
-    # Docker's official image, from its mirror on Amazon ECR Public, which has no anonymous pull limit.
-    assert db["image"] == "public.ecr.aws/docker/library/postgres:16"
+    assert db["image"] == "postgres:16"
     assert db["environment"]["POSTGRES_PASSWORD"] == f"${{DESK_ADMIN_PASSWORD:-{password}}}"
     [mapping] = db["ports"]
     host_port, container_port = mapping.split(":")[-2:]
@@ -218,12 +217,18 @@ def test_postgres_services_match_compose():
             url = urlsplit(value)
             assert (url.hostname, str(url.port), url.path) == ("localhost", host_port, f"/{database}"), name
 
+    # The image follows the runner switch. GitHub-hosted runners pull the compose file's image from
+    # Docker Hub, since their shared addresses run into ECR Public's anonymous limit; self-hosted
+    # runners pull the same official image and tag from its ECR Public mirror.
+    [switch] = set(re.findall(r"vars\.\w+ == '\w+'", RUNS_ON))
+    image = f"${{{{ {switch} && 'public.ecr.aws/docker/library/{db['image']}' || '{db['image']}' }}}}"
+
     with_services = {job["name"]: job["services"] for job in jobs(load(WORKFLOW)) if "services" in job}
     assert set(with_services) == {"backend tests", "tier 1 evals"}
     for name, services in with_services.items():
         assert services == {
             "postgres": {
-                "image": db["image"],
+                "image": image,
                 "ports": [f"{host_port}:{container_port}"],
                 "env": {"POSTGRES_USER": user, "POSTGRES_PASSWORD": password, "POSTGRES_DB": database},
                 "options": services["postgres"]["options"],
