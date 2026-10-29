@@ -53,21 +53,21 @@ export function AppShell({ sidebar, business, banner, layout = 'auto', children 
   const narrow = useSyncExternalStore(subscribeNarrow, isNarrow, () => false);
   const compact = layout === 'compact' || narrow;
 
+  // Only the navigation changes with the layout. The page stays in the same place in the tree, so
+  // crossing the breakpoint (a resized window, a turned phone) keeps its drafts and other state.
   return (
     <div className={`cd-app-shell${compact ? ' cd-app-shell--compact' : ''}`}>
       {banner}
-      {compact ? (
-        <CompactFrame sidebar={sidebar} business={business}>
-          {children}
-        </CompactFrame>
-      ) : (
-        <div className="cd-app-shell__body">
+      <div className="cd-app-shell__body">
+        {compact ? (
+          <CompactNav sidebar={sidebar} business={business} />
+        ) : (
           <aside className="cd-app-shell__column" aria-label="Claude Desk">
             {sidebar}
           </aside>
-          <Main>{children}</Main>
-        </div>
-      )}
+        )}
+        <Main>{children}</Main>
+      </div>
     </div>
   );
 }
@@ -80,7 +80,8 @@ function Main({ children }: { children: ReactNode }) {
   );
 }
 
-function CompactFrame({ sidebar, business, children }: { sidebar: ReactNode; business: string; children: ReactNode }) {
+/** The compact navigation: the top bar with the mark, the business and Menu, and the sheet Menu opens. */
+function CompactNav({ sidebar, business }: { sidebar: ReactNode; business: string }) {
   const [open, setOpen] = useState(false);
   const sheet = useRef<HTMLDialogElement>(null);
   const menu = useRef<HTMLButtonElement>(null);
@@ -149,7 +150,6 @@ function CompactFrame({ sidebar, business, children }: { sidebar: ReactNode; bus
           {sidebar}
         </dialog>
       ) : null}
-      <Main>{children}</Main>
     </>
   );
 }

@@ -20,6 +20,11 @@
   min-height: 0;
 }
 
+/* Compact: the top bar above the page instead of the column beside it. */
+.cd-app-shell--compact > .cd-app-shell__body {
+  flex-direction: column;
+}
+
 .cd-app-shell__column {
   display: flex;
   flex: 0 0 var(--size-sidebar);

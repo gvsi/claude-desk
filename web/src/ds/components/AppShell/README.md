@@ -12,6 +12,7 @@
 - The column is `size-sidebar` wide on `bg-panel`, with a `line-hairline` seam at its right. It is an `aside` named "Claude Desk", holding the `Sidebar`.
 - The page is a `main`, padded 24 px at the top, 40 px at the sides and 20 px at the bottom (16 px at the sides on a phone). Its content is at most `size-content` wide, centered.
 - Below 768 px, or with `layout="compact"`, a top bar on the panel replaces the column. It holds the mark, the business name and a ghost "Menu" button (`aria-expanded`).
+- Only the navigation changes at the breakpoint. The page stays mounted, so resizing the window or turning a phone keeps an unsent draft and the rest of the page's state.
 - Menu opens the sidebar as a modal sheet from the left, over a dimmed page, with focus inside it. Escape, "Close menu", the dimmed page or going to a page closes it, and focus returns to Menu. Escape inside the sidebar's Desk list closes only the list.
 - The sheet appears in place; nothing slides.
 
