@@ -14,7 +14,7 @@ import os
 import re
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, get_args
 
 from sqlalchemy import Alias, ColumnClause, Connection, FromClause, Join, Select, Table, TextClause, event, func, select
 from sqlalchemy.dialects.postgresql import psycopg as postgresql_psycopg
@@ -125,10 +125,35 @@ async def get_kernel_session() -> AsyncIterator[AsyncSession]:
     """A kernel session (a FastAPI dependency); the caller owns its transactions.
 
     It is bound to no copy: bind one (`KernelRepo(copy_id).bind(session)`) before the first query,
-    or every transaction is refused.
+    or every transaction is refused. A request that knows only a credential finds its copy with
+    `resolve_copy` first.
     """
     async with _kernel_sessions()() as session:
         yield session
+
+
+# Lookups made before the copy is known. Each resolver is a SECURITY DEFINER function in schema
+# kernel that returns only a copy id (migration 0004_copy_resolvers); only desk_kernel may call
+# them. They run on their own kernel connection, outside every KernelSession, so nothing else
+# runs with them.
+CopyResolver = Literal["copy_of_session", "copy_of_desk_slug"]
+
+
+async def resolve_copy(resolver: CopyResolver, key: str) -> str | None:
+    """The copy a credential belongs to: a session token's hash (`copy_of_session`) or a Desk's
+    public slug (`copy_of_desk_slug`); None when nothing matches. Bind the answer to a kernel
+    session, then authenticate the credential in that copy as usual."""
+    if resolver not in get_args(CopyResolver):
+        raise ValueError(f"no copy resolver named {resolver!r}")
+    async with kernel_engine().connect() as conn:
+        return (await conn.execute(select(getattr(func.kernel, resolver)(key)))).scalar_one()
+
+
+async def copy_ids() -> list[str]:
+    """Every copy's id, for work that visits each copy in turn (startup reconciliation, reaping):
+    open one `KernelRepo(copy_id).session()` per copy."""
+    async with kernel_engine().connect() as conn:
+        return list((await conn.scalars(select(func.kernel.copy_ids()))).all())
 
 
 # Procrastinate's functions name their tables unqualified, so every desk_api connection, the
@@ -189,9 +214,8 @@ class KernelRepo:
     Postgres enforces the copy: `session()` and `bind()` make every transaction of a kernel
     session run as this copy, and row-level security then admits only this copy's rows to every
     read and write, whatever the SQL (functions that run query text, UPDATE and DELETE included).
-    A lookup made before the copy is known (a session token, a public slug) must carry its copy or
-    go through a narrow SECURITY DEFINER resolver that returns only the copy_id; the plan that
-    needs one adds it.
+    A lookup made before the copy is known (a session token, a public slug) goes through
+    `resolve_copy`, and work across copies visits each id from `copy_ids()` with its own session.
 
     `scoped(stmt)` is a second layer for SELECTs. It supports one shape: a SELECT over kernel
     tables, their aliases and inner joins of them, and adds `copy_id = <copy>` for each of those

@@ -7,6 +7,7 @@ the rows `committed_copies` commits as desk_admin (another role sees only commit
 removes afterwards.
 """
 
+import hashlib
 import re
 import warnings
 from datetime import UTC, datetime
@@ -55,11 +56,13 @@ from desk.db.session import (
     KernelSession,
     api_engine,
     bind_copy,
+    copy_ids,
     database_url,
     dispose_engines,
     get_kernel_session,
     libpq_url,
     procrastinate_connector,
+    resolve_copy,
 )
 from desk.events import A2AResponse
 from desk.db.tables import APP_TABLES, KERNEL_RO_COLUMNS, KERNEL_RO_VIEWS, KERNEL_TABLES, MOCKPAY_TABLES
@@ -576,6 +579,11 @@ def test_visitor_payloads_validate_against_contracts(api_tx):
 # transaction that set no copy sees and writes nothing.
 
 
+COPY_POLICY = "(copy_id = NULLIF(current_setting('desk.copy_id'::text, true), ''::text))"
+# What the copy resolvers' role may read: the copy and the lookup key of each table, in every copy.
+RESOLVER_READS = {"copies": {"copy_id"}, "sessions": {"copy_id", "secret_hash"}, "desks": {"copy_id", "slug"}}
+
+
 def test_every_kernel_table_forces_copy_row_security(admin):
     rows = admin.execute(
         "SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class"
@@ -585,13 +593,16 @@ def test_every_kernel_table_forces_copy_row_security(admin):
     for name, enabled, forced in rows:
         assert enabled and forced, name
     policies = admin.execute(
-        "SELECT tablename, roles, cmd, permissive, qual, with_check FROM pg_policies WHERE schemaname = 'kernel'"
+        "SELECT tablename, policyname, roles, cmd, permissive, qual, with_check FROM pg_policies"
+        " WHERE schemaname = 'kernel'"
     ).fetchall()
-    assert sorted(table for table, *_ in policies) == sorted(KERNEL_TABLES)   # one policy per table
-    for table, roles, cmd, permissive, qual, with_check in policies:
-        assert (roles, cmd, permissive) == (["desk_kernel"], "ALL", "PERMISSIVE"), table
-        assert qual == with_check == policies[0][4], table
-    assert "copy_id = NULLIF(current_setting('desk.copy_id'::text, true), ''::text)" in policies[0][4]
+    expected = {(table, "copy_scope") for table in KERNEL_TABLES} | {(table, "resolve_copy") for table in RESOLVER_READS}
+    assert sorted((table, name) for table, name, *_ in policies) == sorted(expected)   # and no others
+    for table, name, *policy in policies:
+        if name == "copy_scope":
+            assert policy == [["desk_kernel"], "ALL", "PERMISSIVE", COPY_POLICY, COPY_POLICY], table
+        else:   # every copy, but only the columns in RESOLVER_READS (test_copy_resolvers_are_narrow)
+            assert policy == [["desk_resolver"], "SELECT", "PERMISSIVE", "true", None], table
 
 
 def test_kernel_ro_views_filter_by_the_transaction_copy(admin):
@@ -708,23 +719,32 @@ async def test_kernel_sessions_refuse_to_run_without_a_copy(kernel_db):
         KernelRepo("")
 
 
+def token_hash(copy_id: str) -> str:
+    """The secret_hash of the visitor session `committed_copies` opens in a copy."""
+    return hashlib.sha256(f"token-{copy_id}".encode()).hexdigest()
+
+
 @pytest.fixture
 def committed_copies(admin):
-    """A Desk and a document committed in each of two new copies, removed afterwards.
+    """Two new copies, each with a Desk, a visitor session and a document, removed afterwards.
 
     desk_admin, the superuser that owns the tables, isn't subject to row security."""
     copies = (f"copy-{uuid4().hex}", f"copy-{uuid4().hex}")
     try:
         for copy_id in copies:
+            admin.execute("INSERT INTO kernel.copies (copy_id) VALUES (%s)", (copy_id,))
             admin.execute("INSERT INTO kernel.desks (desk_id, copy_id, business_id, name, slug)"
                           " VALUES (%s, %s, 'biz', 'Main line', %s)", (f"desk-{copy_id}", copy_id, f"slug-{copy_id}"))
+            admin.execute("INSERT INTO kernel.sessions (session_id, copy_id, desk_id, kind, secret_hash)"
+                          " VALUES (%s, %s, %s, 'visitor', %s)",
+                          (f"session-{copy_id}", copy_id, f"desk-{copy_id}", token_hash(copy_id)))
             admin.execute("INSERT INTO kernel.documents (document_id, copy_id, desk_id, title, body, canary)"
                           " VALUES (%s, %s, %s, 'Warranty', 'private body', 'canary')",
                           (f"doc-{copy_id}", copy_id, f"desk-{copy_id}"))
         yield copies
     finally:
-        admin.execute("DELETE FROM kernel.documents WHERE copy_id = ANY(%s)", (list(copies),))
-        admin.execute("DELETE FROM kernel.desks WHERE copy_id = ANY(%s)", (list(copies),))
+        for table in ("documents", "sessions", "desks", "copies"):
+            admin.execute(f"DELETE FROM kernel.{table} WHERE copy_id = ANY(%s)", (list(copies),))
 
 
 def visible(conn: psycopg.Connection, relation: str, copies: tuple[str, ...]) -> set[str]:
@@ -767,3 +787,67 @@ def test_api_reads_kernel_ro_for_its_copy_only(committed_copies, api):
             session.rollback()
     finally:
         engine.dispose()
+
+
+# Lookups made before the copy is known (a session token, a public slug, every copy at startup)
+# go through narrow SECURITY DEFINER resolvers that return only copy ids, and only the kernel
+# may call them.
+
+COPY_RESOLVERS = ("kernel.copy_of_session(text)", "kernel.copy_of_desk_slug(text)", "kernel.copy_ids()")
+
+
+def test_copy_resolvers_are_narrow(admin):
+    for resolver in COPY_RESOLVERS:
+        definer, volatility, language, config, returns, owner = admin.execute(
+            "SELECT p.prosecdef, p.provolatile, l.lanname, p.proconfig, pg_get_function_result(p.oid),"
+            " pg_get_userbyid(p.proowner) FROM pg_proc p JOIN pg_language l ON l.oid = p.prolang"
+            " WHERE p.oid = %s::regprocedure",
+            (resolver,),
+        ).fetchone()
+        assert (definer, volatility, language) == (True, "s", "sql"), resolver
+        assert config == ["search_path=pg_catalog, kernel, pg_temp"], resolver   # nothing a caller creates is found
+        assert returns in ("text", "SETOF text"), resolver                       # a copy id, never a row
+        assert owner == "desk_resolver", resolver
+        executes = {role for role in (*ROLES, "public")
+                    if has(admin, "has_function_privilege", role, resolver, "EXECUTE")}
+        assert executes == {"desk_kernel"}, resolver
+    # their owner reads through row security, not around it, and only the columns a lookup needs
+    attributes = admin.execute("SELECT rolsuper, rolbypassrls, rolcanlogin FROM pg_roles WHERE rolname = 'desk_resolver'")
+    assert attributes.fetchone() == (False, False, False)
+    for table in KERNEL_TABLES:
+        for column in columns(admin, "kernel", table):
+            readable = admin.execute("SELECT has_column_privilege('desk_resolver', %s, %s, 'SELECT')",
+                                     (f"kernel.{table}", column)).fetchone()[0]
+            assert readable == (column in RESOLVER_READS.get(table, ())), (table, column)
+        for privilege in ("INSERT", "UPDATE", "DELETE", "TRUNCATE"):
+            assert not has(admin, "has_table_privilege", "desk_resolver", f"kernel.{table}", privilege), table
+
+
+async def test_copy_resolvers_find_a_copy_before_it_is_bound(committed_copies):
+    try:
+        for copy_id in committed_copies:
+            assert await resolve_copy("copy_of_session", token_hash(copy_id)) == copy_id
+            assert await resolve_copy("copy_of_desk_slug", f"slug-{copy_id}") == copy_id
+        assert await resolve_copy("copy_of_session", "0" * 64) is None
+        assert await resolve_copy("copy_of_desk_slug", "no-such-desk") is None
+        assert set(committed_copies) <= set(await copy_ids())
+        with pytest.raises(ValueError):
+            await resolve_copy("copy_of_anything", "x")
+    finally:
+        await dispose_engines()
+    with connect("KERNEL") as kernel:
+        # the same lookups made directly still find nothing: no copy is set
+        assert visible(kernel, "kernel.sessions", committed_copies) == set()
+        assert visible(kernel, "kernel.copies", committed_copies) == set()
+        assert kernel.execute("SELECT kernel.copy_of_session(%s)", (token_hash(committed_copies[0]),)).fetchone() == (
+            committed_copies[0],)
+
+
+def test_only_the_kernel_runs_the_copy_resolvers(committed_copies):
+    for prefix in ("API", "MOCKPAY"):
+        with connect(prefix) as conn:
+            for call in ("kernel.copy_of_session(%s)", "kernel.copy_of_desk_slug(%s)"):
+                with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                    conn.execute(f"SELECT {call}", (token_hash(committed_copies[0]),))
+            with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                conn.execute("SELECT kernel.copy_ids()")
