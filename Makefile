@@ -1,4 +1,4 @@
-.PHONY: kernel test db-roles web-test web-e2e image image-check
+.PHONY: kernel test db-roles web-test web-e2e image image-check infra-check
 
 # Rebuild the kernel's Python module into the backend environment, and the
 # proof binary the kernel runs. desk-prove and its tests find cvc5 through
@@ -82,3 +82,9 @@ image-check:
 		echo "image-check: proof reports match kernel/cedar/proofs ($$(echo "$$want" | wc -l | tr -d ' ') files)"; \
 	else echo "image-check: skipped the proof reports, no kernel/cedar/proofs yet"; fi; \
 	echo "image-check: ok"
+
+# The CDK stacks: their tests, then a synth of every stack (synth takes them all when none is
+# named; it has no --all). Synth only stages the image's build context and builds nothing; it
+# needs no AWS credentials.
+infra-check:
+	cd infra && uv run pytest -q && npm ci && npx cdk synth --quiet

@@ -1,0 +1,26 @@
+[project]
+name = "desk-infra"
+version = "0.1.0"
+description = "Claude Desk on AWS: the CDK app, its stacks and the deploy scripts"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "aws-cdk-lib==2.273.0",
+    "constructs==10.8.1",
+    "boto3==1.43.111",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==9.1.1",
+]
+
+# The CDK app and its tests run from this directory; nothing here is installed as a package.
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+# Synth's stand-in warnings (no web build, no public origin yet) are expected in tests; the tests
+# that check them catch them with pytest.warns.
+filterwarnings = ["ignore::stacks.config.ConfigWarning"]

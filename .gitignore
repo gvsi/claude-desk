@@ -17,3 +17,5 @@ __screenshots__/
 .claude/skills/impeccable
 .worktrees/
 .local/
+cdk.out/
+infra/out/

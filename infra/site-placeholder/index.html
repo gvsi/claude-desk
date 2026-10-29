@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<!-- Served when the stacks are built without web/dist: a labelled stand-in, never the app. -->
+<meta name="desk-site" content="placeholder">
+<title>Claude Desk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@380;420&family=Source+Serif+4:opsz,wght@20..24,360..460&display=swap">
+<style>
+  :root {
+    --bg-app: #1c1b19;
+    --text-primary: rgba(250, 249, 245, 0.92);
+    --text-secondary: rgba(250, 249, 245, 0.64);
+    --line-hairline: rgba(250, 249, 245, 0.12);
+    --font-serif: "Source Serif 4", Georgia, serif;
+    --font-sans: "Hanken Grotesk", system-ui, sans-serif;
+    --size-reading: 640px;
+    --space-8: 8px;
+    --space-16: 16px;
+    --space-24: 24px;
+    --space-40: 40px;
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--bg-app); color-scheme: dark; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-app);
+    color: var(--text-primary);
+    font: 380 14px/20px var(--font-sans);
+  }
+  main {
+    flex: 1;
+    width: 100%;
+    max-width: var(--size-reading);
+    margin: 0 auto;
+    padding: var(--space-40) var(--space-16);
+  }
+  .wordmark {
+    margin: 0 0 var(--space-40);
+    font: 460 18px/22px var(--font-serif);
+    letter-spacing: -0.1px;
+  }
+  h1 {
+    margin: 0 0 var(--space-16);
+    font: 460 24px/32px var(--font-serif);
+  }
+  p { margin: 0 0 var(--space-8); }
+  .secondary { color: var(--text-secondary); }
+  footer {
+    padding: var(--space-24) var(--space-16);
+    border-top: 1px solid var(--line-hairline);
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 18px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<main>
+  <p class="wordmark">Claude Desk</p>
+  <h1>This site is being built</h1>
+  <p>The Claude Desk web app isn't deployed here yet. Please check back soon.</p>
+  <p class="secondary" lang="es">Este sitio se está construyendo. Vuelve pronto.</p>
+</main>
+<footer>Concept prototype by Giovanni Alcantara, not an Anthropic product</footer>
+</body>
+</html>
