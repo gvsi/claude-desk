@@ -21,6 +21,7 @@
 - `busy` while the click's request is in flight. Three small dots take the label's place, at the same width: the label, and a menu button's chevron, keep their places unseen, so nothing around the button moves. The button steps down to its busy colors (the table below), and the dots take its label's busy color. They pulse one after another over `motion-writing`, `motion-stagger` apart, from 0.7 to full strength, and stay still at 0.7 under reduced motion. The button keeps focus, is still named by its label, announces `aria-busy` and `aria-disabled`, and ignores further clicks. If the wait needs words, a status line beside it says them, as a held request's "Sending your answer" does.
 - Every busy color is a listed contrast pair (`contrast.ts`) on the grounds its pairs are listed for: a page (`bg-app`), a card on it (`fill-card` over `bg-app`) and a dialog (`bg-surface`), the sidebar (`bg-panel`) and the reviewer bar (`bg-muted`) too for a ghost button, and a page or a card for the red answers. There the busy label color reads 4.5:1 or more on the busy fill, and the dots at rest, marks that need 3:1, read 3.4:1 or more.
 - A ground for it among those. No Button sits on `bg-selected`, the selected row's ground: a busy secondary label would read 4.45 there and a busy danger one 3.98, so the guard `no_button_on_the_selected_ground` keeps Buttons off it until its pairs are listed, with colors that clear 4.5.
+- `waiting` on the buttons beside a busy one whose request they wait for, such as the other answer on a held request: they step to the same busy colors without dots and ignore clicks.
 - `disabled` only when the action can't be taken at all. A disabled button is dimmed and leaves the tab order.
 - For a menu button, `menuOpen` (`true` while its menu shows), an `id` the menu can be labelled by, and `onKeyDown` for the keys that open it. A busy menu button ignores clicks like any busy button; the screen ignores its keys too. Only a button opens a menu: `menuOpen` and `onKeyDown` with `href` are a type error (`ButtonProps` is a union of a button and a link), and a link never takes the menu look.
 
@@ -35,6 +36,7 @@
 | `external` | `boolean` | Only with `href`: adds `target="_blank"` (dropped with the `href` while disabled or busy). Not with `menuOpen`. |
 | `disabled` | `boolean` | Native `disabled`. |
 | `busy` | `boolean` | Three dots in place of the label, at the same width; `aria-busy` and `aria-disabled`; clicks are swallowed. Never dimmed as a whole: its colors are listed contrast pairs. |
+| `waiting` | `boolean` | Another button's request is in flight, such as the answer a held request's owner didn't choose: the busy colors without the dots, its words still shown, `aria-disabled`, and clicks are swallowed. |
 | `menuOpen` | `boolean` | Makes it a menu button: a chevron, `aria-haspopup="menu"`, `aria-expanded`. Leave it out for a plain button. Not on a link. |
 | `id` | `string` | The element's `id`. |
 | `onClick` | `(event) => void` | Not called while disabled or busy. |

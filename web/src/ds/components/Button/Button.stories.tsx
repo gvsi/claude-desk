@@ -260,6 +260,37 @@ export const BusyReducedMotion: Story = {
   },
 };
 
+export const WaitingForAnother: Story = {
+  render: (args) => (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-8)' }}>
+      {BUSY_LOOKS.map(({ variant, children }) => (
+        <Button key={variant} variant={variant} waiting onClick={args.onClick}>
+          {children}
+        </Button>
+      ))}
+    </div>
+  ),
+  parameters: {
+    canvasNote:
+      "The signed busy board (N-Typing-Owner-Busy): while a held request's chosen answer is sent, the other answer steps to its busy colors without dots and can't be pressed; here every variant does.",
+  },
+  play: async ({ args, canvas, userEvent }) => {
+    for (const { children, backgroundColor, color } of BUSY_LOOKS) {
+      const button = canvas.getByRole('button', { name: children });
+      // waiting_steps_without_dots: the busy colors, its words still shown, no dots and no aria-busy,
+      // since its own request isn't the one in flight; it can't be pressed.
+      expectComputed(button, { opacity: '1', backgroundColor, color });
+      expectComputed(button.querySelector('.cd-button__label') as HTMLElement, { opacity: '1' });
+      await expect(button.querySelector('.cd-button__dots')).toBeNull();
+      await expect(button).not.toHaveAttribute('aria-busy');
+      await expect(button).toHaveAttribute('aria-disabled', 'true');
+      await expect(button).toBeEnabled();
+      await userEvent.click(button);
+    }
+    await expect(args.onClick).not.toHaveBeenCalled();
+  },
+};
+
 /** A phone's line: 390 px less the 16 px gutter on each side. */
 const PHONE_LINE = 358;
 

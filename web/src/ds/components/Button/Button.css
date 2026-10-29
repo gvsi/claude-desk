@@ -133,8 +133,8 @@
   transform: none;
 }
 
-.cd-button:disabled:not([aria-busy='true']),
-a.cd-button[aria-disabled='true']:not([aria-busy='true']) {
+.cd-button:disabled:not([aria-busy='true'], .cd-button--waiting),
+a.cd-button[aria-disabled='true']:not([aria-busy='true'], .cd-button--waiting) {
   opacity: 0.4;
 }
 
@@ -168,26 +168,32 @@ a.cd-button[aria-disabled='true']:not([aria-busy='true']) {
    button's fill turns button-primary-hover (12.2:1, on any ground). No Button sits on bg-selected,
    where a busy secondary label would read 4.45:1 (guards.test.ts). After the disabled rules, which
    busy also matches through aria-disabled. */
-.cd-button[aria-busy='true'] {
+.cd-button[aria-busy='true'],
+.cd-button.cd-button--waiting {
   cursor: progress;
 }
 
 .cd-button--secondary[aria-busy='true'],
-.cd-button--ghost[aria-busy='true'] {
+.cd-button--ghost[aria-busy='true'],
+.cd-button--secondary.cd-button--waiting,
+.cd-button--ghost.cd-button--waiting {
   color: var(--text-secondary);
 }
 
-.cd-button--primary[aria-busy='true'] {
+.cd-button--primary[aria-busy='true'],
+.cd-button--primary.cd-button--waiting {
   background: var(--button-primary-hover);
 }
 
 /* The red answers keep their red words while busy: the filled one takes its hover fill and the
    ghost one the hover ground, both listed pairs (contrast.ts). */
-.cd-button--danger[aria-busy='true'] {
+.cd-button--danger[aria-busy='true'],
+.cd-button--danger.cd-button--waiting {
   background: var(--button-danger-fill-hover);
 }
 
-.cd-button--danger-ghost[aria-busy='true'] {
+.cd-button--danger-ghost[aria-busy='true'],
+.cd-button--danger-ghost.cd-button--waiting {
   background: var(--fill-hover);
 }
 

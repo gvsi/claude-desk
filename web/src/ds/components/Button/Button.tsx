@@ -31,6 +31,11 @@ interface ButtonBaseProps {
    * same width, the label still names it with `aria-busy`, and further clicks do nothing.
    */
   busy?: boolean;
+  /**
+   * Waiting while another button's request is in flight, such as the answer a held request's owner
+   * didn't choose: the busy colors without the dots, its words still shown, and clicks do nothing.
+   */
+  waiting?: boolean;
   /** The element's `id`, for a menu or a description that points back at it. */
   id?: string;
   onClick?: (event: MouseEvent<HTMLButtonElement | HTMLAnchorElement>) => void;
@@ -71,16 +76,17 @@ export function Button({
   external = false,
   disabled = false,
   busy = false,
+  waiting = false,
   menuOpen,
   id,
   onClick,
   onKeyDown,
   children,
 }: ButtonProps) {
-  const className = `cd-button cd-button--${variant} cd-button--${size} cd-type-control`;
-  // Busy keeps focus where it is (aria-disabled, not disabled), so a keyboard user isn't dropped
-  // to the top of the page mid-request; the handler below swallows the click instead.
-  const inert = disabled || busy;
+  const className = `cd-button cd-button--${variant} cd-button--${size} cd-type-control${waiting && !busy ? ' cd-button--waiting' : ''}`;
+  // Busy and waiting keep focus where it is (aria-disabled, not disabled), so a keyboard user isn't
+  // dropped to the top of the page mid-request; the handler below swallows the click instead.
+  const inert = disabled || busy || waiting;
   const handleClick = (event: MouseEvent<HTMLButtonElement | HTMLAnchorElement>) => {
     if (inert) {
       event.preventDefault();
@@ -119,7 +125,7 @@ export function Button({
       disabled={disabled}
       aria-haspopup={opensMenu ? 'menu' : undefined}
       aria-expanded={opensMenu ? menuOpen : undefined}
-      aria-disabled={busy || undefined}
+      aria-disabled={busy || waiting || undefined}
       aria-busy={busy || undefined}
       onClick={handleClick}
       onKeyDown={onKeyDown}

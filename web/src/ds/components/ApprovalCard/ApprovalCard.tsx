@@ -106,6 +106,8 @@ export interface ApprovalCardProps {
 interface AnswerLock {
   /** Which click this is, so a late rejection releases only its own lock. */
   click: number;
+  /** The side whose answer was chosen: its button shows the busy dots while the answer is sent. */
+  side: Side;
   key: string;
   pending: boolean;
   error: boolean | string | undefined;
@@ -179,6 +181,9 @@ export function ApprovalCard({ decision, heldBy, context, waiting, personName, o
   const [lock, setLock] = useState<AnswerLock | null>(null);
   const clicks = useRef(0);
   let locked = false;
+  // The side whose answer is being sent, while this card knows it; null when the screen reports
+  // `pending` for an answer sent from somewhere else.
+  let chosen: Side | null = null;
   if (lock !== null) {
     if (lock.key !== answerKey) {
       setLock(null);
@@ -191,6 +196,7 @@ export function ApprovalCard({ decision, heldBy, context, waiting, personName, o
       setLock({ ...lock, pending, error });
     }
   }
+  if (locked && lock !== null) chosen = lock.side;
   const waitingForResult = pending || locked;
 
   // When the answers go while one of them had focus, focus moves to the status line, so a
@@ -210,7 +216,7 @@ export function ApprovalCard({ decision, heldBy, context, waiting, personName, o
     answeredHere.current = true;
     clicks.current += 1;
     const click = clicks.current;
-    setLock({ click, key: answerKey, pending, error });
+    setLock({ click, side: ANSWERS[value].side, key: answerKey, pending, error });
     const sent = onAnswer(value);
     if (sent !== undefined && typeof sent.then === 'function') {
       sent.then(undefined, () => setLock((current) => (current !== null && current.click === click ? null : current)));
@@ -323,7 +329,8 @@ export function ApprovalCard({ decision, heldBy, context, waiting, personName, o
                       id={buttonId(side)}
                       variant={SIDES[side].variant}
                       size="main"
-                      busy={waitingForResult}
+                      busy={waitingForResult && chosen === side}
+                      waiting={waitingForResult && chosen !== side}
                       menuOpen={single === undefined ? isOpen : undefined}
                       onClick={() => (single === undefined ? toggleMenu(side) : answer(single))}
                       onKeyDown={single === undefined ? (event) => onMenuButtonKey(side, event) : undefined}
