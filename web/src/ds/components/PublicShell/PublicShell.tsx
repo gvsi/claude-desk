@@ -181,8 +181,7 @@ export function PublicShell({
                 <p className="cd-public-shell__disclosure cd-type-meta">{copy.disclosure(name, owner)}</p>
               </div>
               <Button variant="secondary" onClick={onAskForOwner}>
-                {/* One span, so the button's gap doesn't open up between the words and the name. */}
-                <span>{copy.askFor(owner)}</span>
+                {copy.askFor(owner)}
               </Button>
             </div>
             <div className="cd-public-shell__conversation">{children}</div>

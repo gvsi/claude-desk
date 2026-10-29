@@ -39,6 +39,12 @@
   padding: calc((var(--size-control-main) - 1lh) / 2) var(--space-14);
 }
 
+/* The words are one run of text, one flex item: words around a name never come apart from it,
+   and the gap only separates them from a menu button's chevron. */
+.cd-button__label {
+  min-width: 0;
+}
+
 /* Two classes, so the weight wins over .cd-type-control whatever order the stylesheets load in. */
 .cd-button.cd-button--primary {
   background: var(--button-primary);

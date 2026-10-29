@@ -91,7 +91,7 @@ export function Button({
         aria-busy={busy || undefined}
         onClick={handleClick}
       >
-        {children}
+        <span className="cd-button__label">{children}</span>
       </a>
     );
   }
@@ -111,7 +111,7 @@ export function Button({
       onClick={handleClick}
       onKeyDown={onKeyDown}
     >
-      {children}
+      <span className="cd-button__label">{children}</span>
       {opensMenu ? <Icon name="chevron-down" size={16} className="cd-button__chevron" /> : null}
     </button>
   );

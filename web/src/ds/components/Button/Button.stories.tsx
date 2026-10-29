@@ -212,6 +212,37 @@ export const LongLabel: Story = {
   },
 };
 
+export const LabelWithAName: Story = {
+  args: {
+    children: (
+      <>
+        Allow only for{' '}
+        <span className="cd-user-name" data-copy="user">
+          Dana Whitfield
+        </span>
+        , always
+      </>
+    ),
+  },
+  parameters: {
+    canvasNote:
+      "The board shows no label around a person's name; a held request's card shows one when Allow offers only Allow only for Dana, always, her name set off as her own words.",
+  },
+  play: async ({ canvas }) => {
+    // The words and the name are one run of text: no gap opens around the name, and the comma
+    // follows it straight on.
+    const button = canvas.getByRole('button', { name: 'Allow only for Dana Whitfield, always' });
+    const name = canvas.getByText('Dana Whitfield');
+    const comma = document.createRange();
+    const after = name.nextSibling;
+    if (!after) throw new Error('no words after the name');
+    comma.setStart(after, 0);
+    comma.setEnd(after, 1);
+    await expect(Math.abs(comma.getBoundingClientRect().left - name.getBoundingClientRect().right)).toBeLessThan(1);
+    expectComputed(button, { height: '32px' });
+  },
+};
+
 export const AsLink: Story = {
   args: { href: '/pay/k7Hq2vX9', children: 'Open payment page' },
   parameters: { canvasNote: 'The board has no link styled as a button; payment and document cards end with one.' },

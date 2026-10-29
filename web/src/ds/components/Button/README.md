@@ -37,7 +37,7 @@
 | `id` | `string` | The element's `id`. |
 | `onClick` | `(event) => void` | Not called while disabled or busy. |
 | `onKeyDown` | `(event) => void` | Keys pressed on the button. Not on a link. |
-| `children` | `ReactNode` | The label, in `.cd-type-control` (primary at weight 500). |
+| `children` | `ReactNode` | The label, in `.cd-type-control` (primary at weight 500), held as one run of text, so words around a name stay together and the gap only separates them from a menu button's chevron. |
 
 ## States
 
