@@ -534,9 +534,10 @@ async def test_execute_needs_the_decisions_own_session(app, client, registry):
     refusals = [
         # another session's token on this session's allow
         (await post_execute(client, visitor, allowed, headers=other.headers), 401),
-        # a valid session naming another session's decision, on execute and on read
+        # a valid session naming another session's decision on execute; a read names the decision's
+        # own session, which another session's token doesn't prove
         (await post_execute(client, other, allowed), 404),
-        (await client.get(f"/decisions/{allowed.decision_id}", headers=other.headers), 404),
+        (await client.get(f"/decisions/{allowed.decision_id}", headers=other.headers), 401),
         # the owner on a visitor's allow, naming the visitor's session or its own
         (await post_execute(client, visitor, allowed, headers=rows.owner), 401),
         (await post_execute(client, visitor, allowed, headers=rows.owner, session_id=rows.owner_session_id), 401),
@@ -550,7 +551,7 @@ async def test_execute_needs_the_decisions_own_session(app, client, registry):
     assert entries == [
         (visitor.session_id, {"route": "POST /execute", "reason": "bad_token"}),
         (other.session_id, {"route": "POST /execute", "reason": "wrong_session"}),
-        (other.session_id, {"route": "GET /decisions/{decision_id}", "reason": "wrong_session"}),
+        (visitor.session_id, {"route": "GET /decisions/{decision_id}", "reason": "bad_token"}),
         (visitor.session_id, {"route": "POST /execute", "reason": "bad_token"}),
         (visitor.session_id, {"route": "POST /execute", "reason": "bad_token"}),
     ]

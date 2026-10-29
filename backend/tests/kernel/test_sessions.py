@@ -129,6 +129,30 @@ async def test_wrong_token_is_401_and_ledgered(app, client):
     assert [entry.event.kind for entry in await ledger_rows(app, b_rows)] == ["session"]
 
 
+async def test_a_call_without_one_credential_is_ledgered_on_the_session_it_names(app, client):
+    rows = await make_copy_rows(app)
+    visitor = await open_session(client, rows.slug)
+    session_id, token = visitor["state"]["session_id"], visitor["session_token"]
+    call = {"call_id": "call-1", "tool": "native.find_slots", "args": {}}
+    calls = [   # each session call that takes either credential, naming the visitor's session
+        ("POST /decide", "POST", "/decide", {"json": {"session_id": session_id, "generation": 0, "call": call}}),
+        ("POST /execute", "POST", "/execute",
+         {"json": {"decision_id": "dec-none", "session_id": session_id, "generation": 0}}),
+        ("GET /context/{session_id}", "GET", f"/context/{session_id}", {}),
+        ("GET /decisions/by_call", "GET", "/decisions/by_call",
+         {"params": {"session_id": session_id, "generation": 0, "call_id": "call-1"}}),
+    ]
+    neither, both = {}, {"X-Session-Token": token, **rows.owner}
+    for headers in (neither, both):
+        for route, method, url, kwargs in calls:
+            response = await client.request(method, url, headers=headers, **kwargs)
+            assert (response.status_code, response.json()) == (401, {"code": "auth"}), (route, sorted(headers))
+    refusals = [entry.event for entry in await ledger_rows(app, rows) if entry.event.kind == "auth"]
+    assert [(event.session_id, event.summary) for event in refusals] == [
+        (session_id, {"route": route, "reason": "bad_token"}) for _ in (neither, both) for route, *_ in calls]
+    assert token not in stored_text(rows.copy_id) and rows.owner_token not in stored_text(rows.copy_id)
+
+
 async def test_other_copy_is_404(app, client):
     add_session_probe(app)
     a_rows, b_rows = await make_copy_rows(app), await make_copy_rows(app)

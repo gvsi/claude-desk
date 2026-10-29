@@ -609,10 +609,7 @@ async def _caller_session(ctx: KernelCtx, request: Request, body: ExecuteRequest
     token acts for a session of its copy, but an allow runs only with its own session's credential,
     so the owner executes only its own session's allows (anyone else's: 401) and reconciles any
     session's approved hold, having answered it."""
-    owner_header, session_header = auth.OWNER_HEADER in request.headers, auth.SESSION_HEADER in request.headers
-    if owner_header == session_header:
-        raise AuthError(401, "auth", "bad_token", route=EXECUTE_ROUTE)
-    if session_header:
+    if await auth.caller(ctx, request, body.session_id) == "session":
         return await auth.require_session(ctx, request, body.session_id)
     owner = await auth.require_owner(ctx, request, session_id=body.session_id)
     row = await _one(ctx, select(SessionRow).where(SessionRow.session_id == body.session_id))

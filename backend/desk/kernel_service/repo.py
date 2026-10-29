@@ -143,12 +143,13 @@ def route_template(request: Request) -> str:
     return f"{request.method} {getattr(route, 'path', '<unmatched>')}"
 
 
-# Credential lookups. A request names a session token, a session ID or a public slug, not a copy;
-# these find the copy it belongs to through the database's copy resolvers (SECURITY DEFINER
-# functions that return only a copy id), on their own connection, so the caller can bind the
-# request's transaction to that copy and read the rows through KernelRepo as usual. Only auth.py,
-# GET /whoami, POST /sessions and GET /public/{desk_slug} use them, and they run before the
-# request's transaction has run anything.
+# Credential lookups. A request names a session token, a session ID, a decision ID (whose session
+# `GET /decisions/{id}` names) or a public slug, not a copy; these find the copy it belongs to
+# through the database's copy resolvers (SECURITY DEFINER functions that return only a copy id), on
+# their own connection, so the caller can bind the request's transaction to that copy and read the
+# rows through KernelRepo as usual. Only auth.py, GET /whoami, GET /decisions/{id}, POST /sessions
+# and GET /public/{desk_slug} use them, and they run before the request's transaction has run
+# anything.
 
 async def copy_of_desk_slug(ctx: KernelCtx, slug: str) -> str | None:
     return await resolve_copy("copy_of_desk_slug", slug, engine=ctx.engine)
@@ -160,6 +161,11 @@ async def copy_of_session_id(ctx: KernelCtx, session_id: str) -> str | None:
 
 async def copy_of_session_token(ctx: KernelCtx, token_hash: str) -> str | None:
     return await resolve_copy("copy_of_session", token_hash, engine=ctx.engine)
+
+
+async def copy_of_decision_id(ctx: KernelCtx, decision_id: str) -> str | None:
+    """The copy of a decision, whose session is the one `GET /decisions/{id}` names."""
+    return await resolve_copy("copy_of_decision_id", decision_id, engine=ctx.engine)
 
 
 # Startup reconciliation's one lookup across copies: which copies hold an execution to settle.

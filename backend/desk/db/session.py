@@ -138,16 +138,17 @@ async def get_kernel_session() -> AsyncIterator[AsyncSession]:
 
 
 # Lookups made before the copy is known. Each resolver is a SECURITY DEFINER function in schema
-# kernel that returns only a copy id (migrations 0004_copy_resolvers, 0009); only desk_kernel may call
+# kernel that returns only a copy id (migrations 0004_copy_resolvers, 0009, 0010); only desk_kernel may call
 # them. They run on their own kernel connection, outside every KernelSession, so nothing else
 # runs with them.
-CopyResolver = Literal["copy_of_session", "copy_of_session_id", "copy_of_desk_slug"]
+CopyResolver = Literal["copy_of_session", "copy_of_session_id", "copy_of_desk_slug", "copy_of_decision_id"]
 
 
 async def resolve_copy(resolver: CopyResolver, key: str, *, engine: AsyncEngine | None = None) -> str | None:
     """The copy a credential belongs to: a session token's hash (`copy_of_session`), a session's
-    ID (`copy_of_session_id`, migration 0009) or a Desk's public slug (`copy_of_desk_slug`); None
-    when nothing matches. Bind the answer to a kernel session, then authenticate the credential
+    ID (`copy_of_session_id`, migration 0009), a Desk's public slug (`copy_of_desk_slug`) or a
+    decision's ID (`copy_of_decision_id`, migration 0010, which names its session); None when
+    nothing matches. Bind the answer to a kernel session, then authenticate the credential
     in that copy as usual. `engine` is the kernel engine to ask on (the kernel app passes its
     own), else `kernel_engine()`."""
     if resolver not in get_args(CopyResolver):

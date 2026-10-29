@@ -99,13 +99,21 @@ async def _ledger_refusal(ctx: KernelCtx, *, named: Named, route: str, reason: s
                                           summary={"route": route, "reason": reason}))
 
 
-def caller(request: Request) -> Literal["owner", "session"]:
-    """Which credential a call that takes either carries: the owner's or a session's, never both
-    (else 401)."""
+async def named_session(ctx: KernelCtx, session_id: str | None) -> Named | None:
+    """The existing session a request names by ID, whose Desk's ledger records its refusal; None
+    when no session has that ID."""
+    copy_id = await repo.copy_of_session_id(ctx, session_id) if session_id is not None else None
+    return Named(copy_id=copy_id, session_id=session_id) if copy_id is not None else None
+
+
+async def caller(ctx: KernelCtx, request: Request, session_id: str | None) -> Literal["owner", "session"]:
+    """Which credential a call that takes either carries: the owner's or a session's. Neither, or
+    both, is 401, ledgered on the session the call names (`session_id`), as any refusal is."""
     owner, session = OWNER_HEADER in request.headers, SESSION_HEADER in request.headers
     if owner != session:
         return "owner" if owner else "session"
-    raise AuthError(401, "auth", "bad_token", route=route_template(request))
+    raise AuthError(401, "auth", "bad_token", route=route_template(request),
+                    named=await named_session(ctx, session_id))
 
 
 async def require_session(ctx: KernelCtx, request: Request, session_id: str, *, generation: int | None = None,
@@ -204,7 +212,7 @@ async def require_caller(ctx: KernelCtx, request: Request, session_id: str, desk
     The owner must name its Desk, and a request that doesn't is 422 only once the caller is
     known, so a bad token is always 401 and acting as another session is always ledgered."""
     route = route_template(request)
-    if caller(request) == "owner":
+    if await caller(ctx, request, session_id) == "owner":
         owner = await require_owner(ctx, request, desk_id=desk_id, session_id=session_id)
         if session_id != owner.session_id:
             raise AuthError(404, "not_found", "wrong_session", route=route,

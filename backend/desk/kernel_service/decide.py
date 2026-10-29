@@ -65,7 +65,7 @@ from desk.db.models import Decision as DecisionRow
 from desk.db.models import Fact as FactRow
 from desk.db.models import PolicyVersion as PolicyVersionRow
 from desk.kernel_api import DecideRequest
-from desk.kernel_service import activation, adapters, auth, demo_inbox, explain, ledger, render
+from desk.kernel_service import activation, adapters, auth, demo_inbox, explain, ledger, render, repo
 from desk.kernel_service.adapters.base import Adapter, AdapterRefusal, NormalizeCtx
 from desk.kernel_service.auth import AuthError, Named, SessionRow
 from desk.kernel_service.decisions import CallUsage, ReviewAction, ReviewCard, ReviewFact, ReviewInput, Reviewed
@@ -752,7 +752,7 @@ async def post_decide(body: DecideRequest, ctx: Ctx, request: Request) -> Decisi
 async def get_by_call(session_id: str, generation: int, call_id: str, ctx: Ctx, request: Request) -> Decision:
     """The decision `/decide` committed for a call, after the API lost its answer, settled as any
     read is; 404 when none was. A session reads its own calls, the owner its own session's."""
-    if auth.caller(request) == "owner":
+    if await auth.caller(ctx, request, session_id) == "owner":
         owner = await auth.require_owner(ctx, request, session_id=session_id)
         if session_id != owner.session_id:
             raise AuthError(404, "not_found", "wrong_session", route=route_template(request),
@@ -769,22 +769,35 @@ async def get_by_call(session_id: str, generation: int, call_id: str, ctx: Ctx, 
 @router.get("/decisions/{decision_id}", response_model=Decision)
 async def get_decision(decision_id: str, ctx: Ctx, request: Request) -> Decision:
     """A decision, read by its own session or by the owner of its copy, settled as a read does (an
-    orphaned execution reconciled, lazy expiry applied). Any other session gets 404, ledgered on
-    its Desk; another copy's decisions are invisible."""
-    session = None
-    if auth.caller(request) == "owner":
+    orphaned execution reconciled, lazy expiry applied). The session a read names is the
+    decision's ("Kernel HTTP API v2", Credentials), so any other session's token, or no single
+    credential, is 401, ledgered on the decision's session whatever copy the caller is in. A
+    decision no copy holds is 404, ledgered on the session whose token asked; another copy's owner
+    finds nothing (404)."""
+    storable = _storable(decision_id)
+    if auth.OWNER_HEADER in request.headers and auth.SESSION_HEADER not in request.headers:
         await auth.require_owner(ctx, request)
-    else:
+        row = await _decision_row(ctx, decision_id) if storable else None
+        if row is None:
+            raise KernelFailure(404, "not_found", "unknown_decision")
+        return await decision_contract(ctx, await _read(ctx, row))
+    copy_id = await repo.copy_of_decision_id(ctx, decision_id) if storable else None
+    row = await _decision_row(ctx, decision_id, copy_id) if copy_id is not None else None
+    if row is None:   # no decision has this ID, so it names no session: the token alone says who asks
+        await auth.caller(ctx, request, None)
         session = await auth.require_session_token(ctx, request)
-    row = (await ctx.db.scalars(ctx.repo.scoped(select(DecisionRow).where(
-        DecisionRow.decision_id == decision_id)))).one_or_none() if _storable(decision_id) else None
-    if session is not None and (row is None or row.session_id != session.session_id):
-        raise AuthError(404, "not_found", "wrong_session" if row is not None else "unknown_decision",
-                        route=route_template(request),
+        raise AuthError(404, "not_found", "unknown_decision", route=route_template(request),
                         named=Named(copy_id=session.copy_id, desk_id=session.desk_id, session_id=session.session_id))
-    if row is None:
-        raise KernelFailure(404, "not_found", "unknown_decision")
+    await auth.caller(ctx, request, row.session_id)
+    await auth.require_session(ctx, request, row.session_id)
     return await decision_contract(ctx, await _read(ctx, row))
+
+
+async def _decision_row(ctx: KernelCtx, decision_id: str, copy_id: str | None = None) -> DecisionRow | None:
+    """The decision with this ID in `copy_id` (bound here), else in the copy already bound."""
+    copy = ctx.bind(copy_id) if copy_id is not None else ctx.repo
+    return (await ctx.db.scalars(copy.scoped(select(DecisionRow).where(
+        DecisionRow.decision_id == decision_id)))).one_or_none()
 
 
 async def _read(ctx: KernelCtx, row: DecisionRow) -> DecisionRow:

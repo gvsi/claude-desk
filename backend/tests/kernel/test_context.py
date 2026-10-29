@@ -308,17 +308,18 @@ async def test_context_answers_session_states(app, client, frozen_clock, registr
     refused(await get_context(client, fresh.session_id, fresh.headers), 409, "closed")
     refused(await get_context(client, rows.owner_session_id, rows.owner, desk_id=rows.desk_id), 409, "closed")
 
-    # each refusal that names a session or Desk is on that Desk's ledger; the rest are logged
+    # each refusal that names a session or Desk is on that Desk's ledger, one with no credential
+    # at all included; the rest are logged
     refusals = [(e.event.session_id, e.event.summary["reason"]) for e in await ledger_rows(app, rows)
                 if e.event.kind == "auth"]
-    assert refusals == [(visitor.session_id, "bad_token"), (other.session_id, "bad_token"),
+    assert refusals == [(visitor.session_id, "bad_token"), (visitor.session_id, "bad_token"),
+                        (other.session_id, "bad_token"),
                         (visitor.session_id, "wrong_copy"), (visitor.session_id, "wrong_copy"),
                         (visitor.session_id, "closed"), (fresh.session_id, "closed"),
                         (rows.owner_session_id, "closed")]
     assert {e.event.summary["route"] for e in await ledger_rows(app, rows) if e.event.kind == "auth"} == {ROUTE}
     unattributed = [r.getMessage() for r in caplog.records if r.getMessage().startswith("auth_unattributed")]
-    assert sorted(unattributed) == [f"auth_unattributed route={ROUTE} reason=bad_token",
-                                    f"auth_unattributed route={ROUTE} reason=unknown_session"]
+    assert unattributed == [f"auth_unattributed route={ROUTE} reason=unknown_session"]
 
 
 async def test_context_and_decide_check_their_caller_alike(app, client, registry):

@@ -621,13 +621,39 @@ async def test_decisions_are_signed(app, client, registry, frozen_clock):
     frozen_clock.advance(24 * 3600)
     response = await client.get(f"/decisions/{held.decision_id}", headers=visitor.headers)
     assert Decision.model_validate(response.json()).state == "expired"
-    # another session, or another copy's owner, doesn't find it
+    # another session's token isn't the decision's session's; another copy's owner doesn't find it
     stranger, other = await open_visitor(client, rows), await make_copy_rows(app)
-    for headers in (stranger.headers, other.owner):
+    for headers, status, code in ((stranger.headers, 401, "auth"), (other.owner, 404, "not_found")):
         response = await client.get(f"/decisions/{allowed.decision_id}", headers=headers)
-        assert (response.status_code, response.json()) == (404, {"code": "not_found"})
+        assert (response.status_code, response.json()) == (status, {"code": code})
     refusals = [(e.event.session_id, e.event.summary) for e in await ledger_rows(app, rows) if e.event.kind == "auth"]
-    assert refusals == [(stranger.session_id, {"route": "GET /decisions/{decision_id}", "reason": "wrong_session"})]
+    assert refusals == [(visitor.session_id, {"route": "GET /decisions/{decision_id}", "reason": "bad_token"})]
+
+
+async def test_a_decision_is_read_only_with_its_own_sessions_token(app, client, registry):
+    quote = FakeAdapter("native.quote")
+    rows = await desk_with(app, [quote], [card("quote", "native.quote")])
+    elsewhere = await desk_with(app, [quote], [card("quote", "native.quote")])   # another copy
+    visitor, neighbour = await open_visitor(client, rows), await open_visitor(client, rows)
+    stranger = await open_visitor(client, elsewhere)
+    allowed = await decided(client, visitor, "native.quote", {"qty": 1})
+    # the session a read names is the decision's: any other session's token, or no single
+    # credential, is 401, ledgered on the decision's session, whatever copy the caller is in
+    for headers in (neighbour.headers, stranger.headers, {}, {**visitor.headers, **rows.owner}):
+        response = await client.get(f"/decisions/{allowed.decision_id}", headers=headers)
+        assert (response.status_code, response.json()) == (401, {"code": "auth"}), sorted(headers)
+    route = "GET /decisions/{decision_id}"
+    refusals = [(e.event.session_id, e.event.summary) for e in await ledger_rows(app, rows) if e.event.kind == "auth"]
+    assert refusals == [(visitor.session_id, {"route": route, "reason": "bad_token"})] * 4
+    assert [e for e in await ledger_rows(app, elsewhere) if e.event.kind == "auth"] == []
+    # a decision no copy has: the token alone says who asks, and the refusal is ledgered on it
+    response = await client.get("/decisions/dec-none", headers=neighbour.headers)
+    assert (response.status_code, response.json()) == (404, {"code": "not_found"})
+    [refusal] = [e.event for e in await ledger_rows(app, rows) if e.event.kind == "auth"][4:]
+    assert (refusal.session_id, refusal.summary) == (neighbour.session_id, {"route": route, "reason": "unknown_decision"})
+    # the decision's own session still reads it, unchanged
+    response = await client.get(f"/decisions/{allowed.decision_id}", headers=visitor.headers)
+    assert Decision.model_validate(response.json()) == allowed
 
 
 async def test_holds_alert_the_owner_per_notification_defaults(app, client, registry):
