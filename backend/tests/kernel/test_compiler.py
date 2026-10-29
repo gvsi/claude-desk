@@ -1,0 +1,503 @@
+"""The rule-card compiler: rule cards in, Cedar sets `F`, `A` and `H` out.
+
+Each behaviour test compiles cards, loads the result with the real baseline into a fresh
+`PolicyEngine` (`decide_with`) and checks the final outcome, so what is tested is the decision a
+visitor would get, not the text.
+"""
+
+import copy
+import hashlib
+import json
+import re
+from datetime import time
+from typing import get_args
+
+import desk_kernel
+import pytest
+
+from desk.contracts import HoursWindow, ReviewThresholds, RuleCard, ToolName, ToolProfile
+from desk.kernel_service import compiler, review_thresholds
+
+KEY = "desk-test:1"
+RESOURCE_TYPES = {"quote": "Quote", "slot": "Slot", "booking": "Booking", "document": "Document",
+                  "charge": "Charge", "desk": "Desk"}
+
+# Profiles for the native tools, read from the schema: effects from memberOf, resource from appliesTo.
+_ACTIONS = compiler.BASE_SCHEMA[""]["actions"]
+NATIVE_TOOLS = sorted(tool for tool in get_args(ToolName) if tool in _ACTIONS)
+
+
+def profile(tool: str, effects: list[str], resource_kind: str, source: str = "native") -> ToolProfile:
+    return ToolProfile(tool=tool, source=source, effects=effects, reversible=False, adapter=f"test.{tool}",
+                       resource_kind=resource_kind, description_confirmed=f"Test {tool}", input_schema={},
+                       status="enabled")
+
+
+def native_profile(tool: str) -> ToolProfile:
+    action = _ACTIONS[tool]
+    effects = [group["id"].removeprefix("effect:") for group in action["memberOf"]]
+    kind = action["appliesTo"]["resourceTypes"][0].lower()
+    return profile(tool, effects, kind)
+
+
+NATIVE = [native_profile(tool) for tool in NATIVE_TOOLS]
+# A refund tool with two effects, for joint coverage; its action is appended to the test schema.
+REFUND = profile("payments.create_refund", ["pay_out", "private_data"], "charge", source="mcp")
+
+
+def schema_for(profiles: list[ToolProfile]) -> dict:
+    """The base schema, plus an action for every profile it lacks (test tools only)."""
+    schema = copy.deepcopy(compiler.BASE_SCHEMA)
+    actions = schema[""]["actions"]
+    for p in profiles:
+        if p.tool not in actions:
+            actions[p.tool] = {"memberOf": [{"id": f"effect:{effect}"} for effect in p.effects],
+                               "appliesTo": {"principalTypes": ["Visitor", "Agent"],
+                                             "resourceTypes": [RESOURCE_TYPES[p.resource_kind]],
+                                             "context": {"type": "Ctx"}}}
+    return schema
+
+
+def load_compiled(cards: list[RuleCard], profiles: list[ToolProfile], *, review: bool = True,
+                  sets: compiler.CompiledSets | None = None) -> desk_kernel.PolicyEngine:
+    compiled = sets or compiler.compile_cards(cards, profiles, review=review)
+    engine = desk_kernel.PolicyEngine(compiler.BASELINE)
+    errors = engine.load(KEY, json.dumps(schema_for(profiles)), json.dumps(compiled.sets()))
+    assert errors == [], errors
+    return engine
+
+
+def decide_with(cards: list[RuleCard], profiles: list[ToolProfile], request: dict, *, phase: str = "final",
+                review: bool = True) -> str:
+    """Compiles `cards` over `profiles`, loads the version into a fresh engine with the real
+    baseline and returns the outcome of `request`."""
+    verdict = json.loads(load_compiled(cards, profiles, review=review).decide(KEY, json.dumps(request), phase))
+    assert verdict["errors"] == [], verdict
+    return verdict["outcome"]
+
+
+def req(tool: str, *, kind: str = "Visitor", verified: bool = False, person_id: str | None = None,
+        agent_key_id: str = "agent-key-1", record_owner: bool = False, dow: int = 1, minute: int = 600,
+        **context) -> dict:
+    """A request_json from one principal of `kind` on the tool's resource type; a person or a
+    record owner is verified. `context` adds amount_cents, discount_bp, recipient or review. The
+    default time is Tuesday 10:00."""
+    resource_type = schema_for([*NATIVE, REFUND])[""]["actions"][tool]["appliesTo"]["resourceTypes"][0]
+    verified = verified or record_owner or person_id is not None
+    attrs: dict = {"verified": verified, "assurance": "demo_code" if verified else "none", "copy": "copy-1"}
+    if person_id is not None:
+        attrs["person_id"] = person_id
+    if kind == "Agent":
+        attrs["agent_key_id"] = agent_key_id
+    principal = {"type": kind, "id": "session-1"}
+    resource = {"type": resource_type, "id": "record-1"}
+    return {"principal": principal, "action": tool, "resource": resource,
+            "context": {"record_owner_match": record_owner, "local_dow": dow, "local_minute": minute, **context},
+            "entities": [{"uid": principal, "attrs": attrs, "parents": []},
+                         {"uid": resource, "attrs": {"copy": "copy-1"}, "parents": []}]}
+
+
+def card(card_id: str, applies_to: str, mode: str = "auto", who: str = "anyone", **fields) -> RuleCard:
+    return RuleCard(card_id=card_id, applies_to=applies_to, mode=mode, who=who, reason=f"Test card {card_id}.",
+                    **fields)
+
+
+DANA = {"person_id": "dana"}
+WEEKDAYS = HoursWindow(days=["mon", "tue", "wed", "thu", "fri"], start=time(8), end=time(17))
+
+POLICY = re.compile(r'@id\("([^"]+)"\) @card\("([^"]+)"\) @tier\("([^"]+)"\) @applies_to\("([^"]+)"\)\n'
+                    r"(permit|forbid) \(")
+
+
+def policies(text: str) -> list[tuple[str, str, str, str, str]]:
+    return POLICY.findall(text)
+
+
+A_MIX_OF_CARDS = [
+    card("quote", "native.quote", max_discount_bp=1000, review=True),
+    card("book-weekdays", "native.book", hours=WEEKDAYS, review=True),
+    card("book-dana", "native.book", who="person", **DANA),
+    card("deposit", "native.payment_link", max_amount_cents=2000),
+    card("agent-charge", "native.charge_mandate", who="agent", agent_key_id="agent-key-1", max_amount_cents=5000),
+    card("docs", "native.release_document", who="record_owner"),
+    card("changes-verified", "effect:change", who="verified", max_amount_cents=30000),
+    card("charge-ask", "effect:charge", mode="ask"),
+    card("no-pay-out", "effect:pay_out", mode="never", who="agent", agent_key_id="agent-key-1"),
+    card("send-auto", "effect:send_message", who="verified", review=True),
+    card("private-auto", "effect:private_data", who="record_owner"),
+    card("callback-ask", "native.request_callback", mode="ask", who="person", **DANA),
+]
+
+
+def test_every_policy_is_annotated_and_lints():
+    profiles = [*NATIVE, REFUND]
+    compiled = compiler.compile_cards(A_MIX_OF_CARDS, profiles)
+    sets = compiled.sets()
+    assert set(sets) == {"F", "A", "H"}
+    assert desk_kernel.lint_policies(json.dumps(sets)) == []
+    load_compiled(A_MIX_OF_CARDS, profiles, sets=compiled)          # strict validation, no errors
+
+    expected = {"F": ("forbid", "refuse", ("never.",)), "A": ("permit", "auto", ("auto.",)),
+                "H": ("permit", "hold", ("ask.", "twin."))}
+    for name, text in sets.items():
+        assert "!(context has" not in text                          # the form strict validation rejects
+        found = policies(text)
+        assert found and len(found) == text.count(";"), name        # every policy carries the four annotations
+        effect, tier, prefixes = expected[name]
+        for policy_id, card_ids, policy_tier, applies_to, policy_effect in found:
+            assert policy_id.startswith(prefixes) and policy_tier == tier and policy_effect == effect, policy_id
+            assert card_ids and applies_to
+    ids = [found[0] for text in sets.values() for found in policies(text)]
+    assert len(ids) == len(set(ids))
+    # the mix reaches every shape: a joint permit, exclusions, hours, a review gate, money, agents
+    assert "auto.private-auto+send-auto" in ids and "twin.private-auto+send-auto" in ids
+    for shape in ("unless {", ".contains(context.local_dow)", "context has review &&",
+                  "context has amount_cents && context.amount_cents <= 2000", "principal is Agent &&",
+                  "principal has person_id &&", "context.record_owner_match"):
+        assert shape in sets["A"], shape
+
+    # deterministic: the same cards in any order compile to the same text and hash
+    again = compiler.compile_cards(list(reversed(A_MIX_OF_CARDS)), list(reversed(profiles)))
+    assert again.sets() == sets
+    assert [c.card_id for c in compiled.cards] == sorted(c.card_id for c in compiled.cards)
+    jcs = desk_kernel.canonical_json(json.dumps(sets))
+    assert compiler.cedar_sha256(compiled) == compiler.cedar_sha256(again) == hashlib.sha256(jcs.encode()).hexdigest()
+    assert compiler.cedar_sha256(sets) == compiler.cedar_sha256(compiled)
+    fewer = compiler.compile_cards(A_MIX_OF_CARDS[1:], profiles)
+    assert compiler.cedar_sha256(fewer) != compiler.cedar_sha256(compiled)
+
+
+def test_uncovered_tools_get_a_default_ask():
+    cards = [card("slots", "native.find_slots")]
+    with_defaults = compiler.with_defaults(cards, NATIVE)
+    defaults = {c.card_id: c for c in with_defaults if c.is_default}
+    assert set(defaults) == {f"default:{tool}" for tool in NATIVE_TOOLS if tool != "native.find_slots"}
+    assert defaults["default:native.book"] == RuleCard(
+        card_id="default:native.book", applies_to="native.book", mode="ask", who="anyone", is_default=True,
+        reason="Not covered by a rule yet, so it asks you.")
+    assert [c.card_id for c in with_defaults] == sorted(c.card_id for c in with_defaults)
+    assert compiler.compile_cards(cards, NATIVE).cards == with_defaults
+    assert decide_with(cards, NATIVE, req("native.book")) == "hold"
+    assert decide_with(cards, NATIVE, req("native.find_slots")) == "allow"
+
+    # a default given back as input is dropped and derived again: here it no longer applies
+    never_anyone = [card("no-booking", "native.book", mode="never"), defaults["default:native.book"]]
+    assert "default:native.book" not in {c.card_id for c in compiler.with_defaults(never_anyone, NATIVE)}
+    assert decide_with(never_anyone, NATIVE, req("native.book")) == "refuse"
+
+    never_dana = [card("no-booking-dana", "native.book", mode="never", who="person", **DANA)]
+    assert "default:native.book" in {c.card_id for c in compiler.with_defaults(never_dana, NATIVE)}
+    assert decide_with(never_dana, NATIVE, req("native.book")) == "hold"
+    assert decide_with(never_dana, NATIVE, req("native.book", **DANA)) == "refuse"
+
+
+def test_narrow_cards_keep_the_default_ask():
+    for mode, dana_gets in (("auto", "allow"), ("never", "refuse")):
+        cards = [card("dana-books", "native.book", mode=mode, who="person", **DANA)]
+        assert decide_with(cards, NATIVE, req("native.book", **DANA)) == dana_gets
+        assert decide_with(cards, NATIVE, req("native.book", person_id="eve")) == "hold"
+        assert decide_with(cards, NATIVE, req("native.book")) == "hold"
+
+    for applies_to in ("native.book", "effect:change"):
+        cards = [card("verified-books", applies_to, who="verified")]
+        assert "default:native.book" in {c.card_id for c in compiler.with_defaults(cards, NATIVE)}
+        assert decide_with(cards, NATIVE, req("native.book", verified=True)) == "allow", applies_to
+        assert decide_with(cards, NATIVE, req("native.book")) == "hold", applies_to
+
+
+def test_tool_ask_beats_effect_auto():
+    cards = [card("changes", "effect:change"), card("ask-booking", "native.book", mode="ask")]
+    assert decide_with(cards, NATIVE, req("native.book")) == "hold"
+    assert decide_with(cards, NATIVE, req("native.quote")) == "allow"
+    assert decide_with(cards, NATIVE, req("native.capture_lead")) == "allow"
+
+
+def test_person_auto_beats_effect_ask():
+    cards = [card("charges-ask", "effect:charge", mode="ask"),
+             card("dana-link", "native.payment_link", who="person", max_amount_cents=2000, **DANA)]
+    assert decide_with(cards, NATIVE, req("native.payment_link", amount_cents=2000, **DANA)) == "allow"
+    assert decide_with(cards, NATIVE, req("native.payment_link", amount_cents=2000, person_id="eve")) == "hold"
+    assert decide_with(cards, NATIVE, req("native.payment_link", amount_cents=2000)) == "hold"
+    assert decide_with(cards, NATIVE, req("native.payment_link", amount_cents=2001, **DANA)) == "hold"
+
+
+def test_more_specific_auto_decides():
+    cards = [card("charges", "effect:charge", max_amount_cents=10_000),
+             card("dana-link", "native.payment_link", who="person", max_amount_cents=2000, **DANA)]
+    assert decide_with(cards, NATIVE, req("native.payment_link", amount_cents=8000, **DANA)) == "hold"
+    assert decide_with(cards, NATIVE, req("native.payment_link", amount_cents=2000, **DANA)) == "allow"
+    assert decide_with(cards, NATIVE, req("native.payment_link", amount_cents=8000, person_id="eve")) == "allow"
+    assert decide_with(cards, NATIVE, req("native.payment_link", amount_cents=8000)) == "allow"
+    assert decide_with(cards, NATIVE, req("native.payment_link", amount_cents=10_001)) == "hold"
+
+
+
+def test_same_level_auto_and_ask_ask():
+    tool_level = [card("book", "native.book"), card("ask-verified", "native.book", mode="ask", who="verified")]
+    assert decide_with(tool_level, NATIVE, req("native.book", verified=True)) == "hold"
+    assert decide_with(tool_level, NATIVE, req("native.book")) == "allow"
+
+    effect_level = [card("changes", "effect:change", who="verified"), card("ask-changes", "effect:change", mode="ask")]
+    assert decide_with(effect_level, NATIVE, req("native.book", verified=True)) == "hold"
+
+    person_level = [card("dana-book", "native.book", who="person", **DANA),
+                    card("dana-ask", "native.book", mode="ask", who="person", **DANA)]
+    assert decide_with(person_level, NATIVE, req("native.book", **DANA)) == "hold"
+    # a less specific ask (an effect card, even Dana's) doesn't stop a tool card for Dana
+    below = [card("dana-book", "native.book", who="person", **DANA),
+             card("dana-ask", "effect:change", mode="ask", who="person", **DANA)]
+    assert decide_with(below, NATIVE, req("native.book", **DANA)) == "allow"
+    assert decide_with(below, NATIVE, req("native.quote", **DANA)) == "hold"
+
+
+def test_same_level_autos_add_up():
+    cards = [card("quote-anyone", "native.quote", max_discount_bp=1000),
+             card("quote-verified", "native.quote", who="verified", max_discount_bp=2000)]
+    assert decide_with(cards, NATIVE, req("native.quote", verified=True, discount_bp=1500)) == "allow"
+    assert decide_with(cards, NATIVE, req("native.quote", discount_bp=1500)) == "hold"
+    assert decide_with(cards, NATIVE, req("native.quote", discount_bp=1000)) == "allow"
+
+    effect_and_effect = [card("changes", "effect:change", max_amount_cents=1000),
+                         card("changes-verified", "effect:change", who="verified", max_amount_cents=5000)]
+    assert decide_with(effect_and_effect, NATIVE, req("native.quote", verified=True, amount_cents=4000)) == "allow"
+    assert decide_with(effect_and_effect, NATIVE, req("native.quote", amount_cents=4000)) == "hold"
+
+
+def test_never_always_wins():
+    cards = [card("no-changes", "effect:change", mode="never"),
+             card("dana-book", "native.book", who="person", **DANA),
+             card("ask-book", "native.book", mode="ask")]
+    assert decide_with(cards, NATIVE, req("native.book", **DANA)) == "refuse"
+    assert decide_with(cards, NATIVE, req("native.book")) == "refuse"
+    assert decide_with(cards, NATIVE, req("native.quote")) == "refuse"
+    assert decide_with(cards, NATIVE, req("native.find_slots")) == "hold"          # not a change: default ask
+
+    dana_never = [card("dana-no-book", "native.book", mode="never", who="person", **DANA),
+                  card("book", "native.book")]
+    assert decide_with(dana_never, NATIVE, req("native.book", **DANA)) == "refuse"
+    assert decide_with(dana_never, NATIVE, req("native.book")) == "allow"
+
+
+def test_one_effect_auto_does_not_cover_a_two_effect_tool():
+    send = card("send", "effect:send_message")
+    cards = [send]
+    assert not compiler.covers(send, "native.release_document", NATIVE, cards)
+    assert compiler.covers(send, "native.start_verification", NATIVE, cards)
+    assert not compiler.covers(send, "native.payment_link", NATIVE, cards)
+    assert not compiler.covers(card("book", "native.book"), "native.book", [], cards)    # not enabled: nothing
+    assert "default:native.release_document" in {c.card_id for c in compiler.with_defaults(cards, NATIVE)}
+    owner = {"record_owner": True, "recipient": "verified_contact"}
+    assert decide_with(cards, NATIVE, req("native.release_document", **owner)) == "hold"
+    assert decide_with(cards, NATIVE, req("native.start_verification", recipient="verified_contact")) == "allow"
+
+    # an ask or never effect card covers every tool with its effect
+    for mode, outcome in (("ask", "hold"), ("never", "refuse")):
+        other = card("private", "effect:private_data", mode=mode)
+        assert compiler.covers(other, "native.release_document", NATIVE, [send, other])
+        assert decide_with([send, other], NATIVE, req("native.release_document", **owner)) == outcome
+
+
+def test_joint_effect_autos_take_the_tightest_limits():
+    profiles = [*NATIVE, REFUND]
+    refunds = card("refunds", "effect:pay_out", max_amount_cents=5000)
+    private = card("private-verified", "effect:private_data", who="verified", max_amount_cents=20_000)
+    cards = [refunds, private]
+    assert compiler.covers(refunds, "payments.create_refund", profiles, cards)
+    assert compiler.covers(private, "payments.create_refund", profiles, cards)
+    owner = {"record_owner": True}
+    assert decide_with(cards, profiles, req("payments.create_refund", amount_cents=4000, **owner)) == "allow"
+    assert decide_with(cards, profiles, req("payments.create_refund", amount_cents=5001, **owner)) == "hold"
+    assert decide_with(cards, profiles, req("payments.create_refund", amount_cents=40_000, **owner)) == "hold"
+
+    compiled = compiler.compile_cards(cards, profiles)
+    autos = policies(compiled.A)
+    assert [(p[0], p[1], p[3]) for p in autos] == [
+        ("auto.private-verified+refunds", "private-verified,refunds", "effect:private_data,effect:pay_out")]
+    assert "principal.verified" in compiled.A and "context.amount_cents <= 5000" in compiled.A
+    assert "twin.private-verified+refunds" in compiled.H
+    assert "default:payments.create_refund" in {c.card_id for c in compiled.cards}     # not all for anyone
+
+
+def test_joint_coverage_keeps_the_review_gate():
+    cards = [card("send-reviewed", "effect:send_message", review=True),
+             card("private-owner", "effect:private_data", who="record_owner")]
+    owner = {"record_owner": True, "recipient": "verified_contact"}
+    assert decide_with(cards, NATIVE, req("native.release_document", **owner), phase="pre") == "needs_review"
+    assert decide_with(cards, NATIVE, req("native.release_document", **owner)) == "hold"       # review absent
+    # the strictest row across the tool's effects: private_data (8500, 1500) over send_message (8000, 2000)
+    passing = {"within_charter_bp": 8500, "manipulation_bp": 1500}
+    assert decide_with(cards, NATIVE, req("native.release_document", review=passing, **owner)) == "allow"
+    low = {"within_charter_bp": 8499, "manipulation_bp": 1500}
+    assert decide_with(cards, NATIVE, req("native.release_document", review=low, **owner)) == "hold"
+    assert decide_with(cards, NATIVE, req("native.release_document", recipient="verified_contact",
+                                          verified=True, review=passing)) == "refuse"   # not the record owner
+
+
+def test_money_without_an_owner_card_holds():
+    profiles = [*NATIVE, REFUND]
+    no_money_cards = [card("changes", "effect:change"), card("private", "effect:private_data", who="record_owner"),
+                      card("send", "effect:send_message")]
+    compiled = compiler.compile_cards(no_money_cards, profiles)
+    for tool in ("native.payment_link", "native.charge_mandate", "payments.create_refund"):
+        assert tool not in compiled.A                                       # no auto permit names it
+        assert f"default:{tool}" in {c.card_id for c in compiled.cards}
+    assert decide_with(no_money_cards, profiles, req("native.payment_link", amount_cents=2000)) == "hold"
+    assert decide_with(no_money_cards, profiles, req("payments.create_refund", amount_cents=2000,
+                                                     record_owner=True)) == "hold"
+    assert decide_with([], profiles, req("native.payment_link", amount_cents=1)) == "hold"
+
+
+def test_discount_limits():
+    cards = [card("quote", "native.quote", max_discount_bp=1000)]
+    assert decide_with(cards, NATIVE, req("native.quote")) == "allow"                       # no discount asked
+    assert decide_with(cards, NATIVE, req("native.quote", discount_bp=1000)) == "allow"
+    assert decide_with(cards, NATIVE, req("native.quote", discount_bp=1001)) == "hold"
+    assert decide_with(cards, NATIVE, req("native.quote", discount_bp=8000)) == "hold"
+    at_list_price = [card("quote", "native.quote")]                                          # max_discount_bp 0
+    assert decide_with(at_list_price, NATIVE, req("native.quote", discount_bp=0)) == "allow"
+    assert decide_with(at_list_price, NATIVE, req("native.quote", discount_bp=1)) == "hold"
+
+
+def test_weekday_hours_hold_a_sunday_night_slot():
+    cards = [card("book-weekdays", "native.book", hours=WEEKDAYS)]                          # Mon to Fri, 08:00 to 17:00
+    assert decide_with(cards, NATIVE, req("native.book", dow=6, minute=1320)) == "hold"     # Sunday 22:00
+    assert decide_with(cards, NATIVE, req("native.book", dow=1, minute=600)) == "allow"     # Tuesday 10:00
+    assert decide_with(cards, NATIVE, req("native.book", dow=1, minute=1020)) == "hold"     # 17:00, the end, excluded
+    assert decide_with(cards, NATIVE, req("native.book", dow=1, minute=1019)) == "allow"
+    assert decide_with(cards, NATIVE, req("native.book", dow=4, minute=480)) == "allow"     # Friday 08:00
+    assert decide_with(cards, NATIVE, req("native.book", dow=4, minute=479)) == "hold"
+    assert decide_with(cards, NATIVE, req("native.book", dow=5, minute=600)) == "hold"      # Saturday
+
+    to_midnight = [card("late", "native.book", hours=HoursWindow(days=["fri"], start=time(22), end=time(0)))]
+    assert decide_with(to_midnight, NATIVE, req("native.book", dow=4, minute=1439)) == "allow"
+    assert decide_with(to_midnight, NATIVE, req("native.book", dow=5, minute=0)) == "hold"
+
+
+def test_change_card_with_a_discount_limit_allows_a_booking():
+    cards = [card("changes", "effect:change", max_discount_bp=1000, max_amount_cents=30_000)]
+    assert decide_with(cards, NATIVE, req("native.book")) == "allow"           # no amount, no discount: within both
+    assert decide_with(cards, NATIVE, req("native.quote", discount_bp=1000, amount_cents=30_000)) == "allow"
+    assert decide_with(cards, NATIVE, req("native.quote", discount_bp=1001)) == "hold"
+    assert decide_with(cards, NATIVE, req("native.quote", amount_cents=30_001)) == "hold"
+    compiled = compiler.compile_cards(cards, NATIVE)
+    assert "(if context has discount_bp then context.discount_bp <= 1000 else true)" in compiled.A
+    assert "(if context has amount_cents then context.amount_cents <= 30000 else true)" in compiled.A
+
+
+def test_review_gate_only_narrows():
+    cards = [card("book", "native.book", hours=WEEKDAYS, review=True), card("quote", "native.quote", review=True),
+             card("ask-dana", "native.book", mode="ask", who="person", **DANA)]
+    gated, ungated = compiler.compile_cards(cards, NATIVE), compiler.compile_cards(cards, NATIVE, review=False)
+    assert "context.review" in gated.A and "context.review" not in ungated.A
+    assert (gated.F, gated.H, gated.cards) == (ungated.F, ungated.H, ungated.cards)
+    assert [p[0] for p in policies(gated.A)] == [p[0] for p in policies(ungated.A)]
+
+    a, a0 = load_compiled(cards, NATIVE, sets=gated), load_compiled(cards, NATIVE, sets=ungated)
+    scores = ((10_000, 0), (0, 10_000), (7500, 2500), (7499, 2500), (7500, 2501))
+    reviews = [None, *({"within_charter_bp": within, "manipulation_bp": manip} for within, manip in scores)]
+    outcomes = set()
+    for tool in ("native.book", "native.quote"):
+        for who in ({}, DANA):
+            for dow, minute in ((1, 600), (6, 600), (1, 1020)):
+                for review in reviews:
+                    request = req(tool, dow=dow, minute=minute, **who, **({"review": review} if review else {}))
+                    with_gate = json.loads(a.decide(KEY, json.dumps(request), "final"))["outcome"]
+                    without = json.loads(a0.decide(KEY, json.dumps(request), "final"))["outcome"]
+                    outcomes.add((with_gate, without))
+                    assert with_gate != "allow" or without == "allow", request
+    assert {("allow", "allow"), ("hold", "allow"), ("hold", "hold")} <= outcomes      # the gate narrowed, never widened
+
+    booking = req("native.book")
+    assert json.loads(a.decide(KEY, json.dumps(booking), "pre"))["outcome"] == "needs_review"
+    assert json.loads(a0.decide(KEY, json.dumps(booking), "pre"))["outcome"] == "allow"
+    sunday = req("native.book", dow=6)
+    assert json.loads(a.decide(KEY, json.dumps(sunday), "pre"))["outcome"] == "hold"   # the score can't matter
+
+
+def gate(compiled: compiler.CompiledSets) -> tuple[int, int]:
+    found = re.findall(r"within_charter_bp >= (\d+) && context\.review\.manipulation_bp <= (\d+)", compiled.A)
+    assert len(found) == 1, compiled.A
+    return int(found[0][0]), int(found[0][1])
+
+
+def test_review_thresholds_follow_the_strictest_effect(monkeypatch):
+    docs = [card("docs", "native.release_document", who="record_owner", review=True)]
+    assert gate(compiler.compile_cards(docs, NATIVE)) == (8500, 1500)      # private_data over send_message
+    assert gate(compiler.compile_cards([card("book", "native.book", review=True)], NATIVE)) == (7500, 2500)
+    link = [card("link", "native.payment_link", max_amount_cents=2000, review=True)]
+    assert gate(compiler.compile_cards(link, NATIVE)) == (9000, 1000)
+
+    owner = {"record_owner": True, "recipient": "verified_contact"}
+    for review, outcome in (((8500, 1500), "allow"), ((8499, 1500), "hold"), ((8500, 1501), "hold")):
+        scores = {"within_charter_bp": review[0], "manipulation_bp": review[1]}
+        assert decide_with(docs, NATIVE, req("native.release_document", review=scores, **owner)) == outcome, review
+
+    # the thresholds are read when the cards compile, each bound from its strictest effect
+    stricter = {**review_thresholds.THRESHOLDS,
+                "send_message": ReviewThresholds(min_within_charter_bp=9900, max_manipulation_bp=1800)}
+    monkeypatch.setattr(review_thresholds, "THRESHOLDS", stricter)
+    assert gate(compiler.compile_cards(docs, NATIVE)) == (9900, 1500)
+
+
+def test_auto_money_limit_is_capped():
+    # cards that skipped their contract checks: over the cap, or with no amount at all
+    over = RuleCard.model_construct(card_id="big-link", applies_to="native.payment_link", mode="auto", who="anyone",
+                                    person_id=None, agent_key_id=None, max_amount_cents=1_000_000, max_discount_bp=0,
+                                    hours=None, review=False, is_default=False, reason="Too big.")
+    unset = RuleCard.model_construct(card_id="charges", applies_to="effect:charge", mode="auto", who="verified",
+                                     person_id=None, agent_key_id=None, max_amount_cents=None, max_discount_bp=0,
+                                     hours=None, review=False, is_default=False, reason="No amount.")
+    for cards in ([over], [unset]):
+        compiled = compiler.compile_cards(cards, NATIVE)
+        assert compiled.A.count("context has amount_cents && context.amount_cents <= 50000") == 1, compiled.A
+        # without the baseline, the compiled permit alone stops at the hard cap
+        engine = desk_kernel.PolicyEngine("")
+        assert engine.load(KEY, json.dumps(schema_for(NATIVE)), json.dumps(compiled.sets())) == []
+        for amount, outcome in ((50_000, "allow"), (50_001, "hold")):
+            request = req("native.payment_link", verified=True, amount_cents=amount)
+            assert json.loads(engine.decide(KEY, json.dumps(request), "final"))["outcome"] == outcome, (cards, amount)
+        assert decide_with(cards, NATIVE, req("native.payment_link", verified=True, amount_cents=50_001)) == "hold"
+
+    # a money permit always needs an amount, and takes the card's own limit when it is lower
+    small = compiler.compile_cards([card("deposit", "native.payment_link", max_amount_cents=2000)], NATIVE)
+    assert "context has amount_cents && context.amount_cents <= 2000" in small.A
+    engine = desk_kernel.PolicyEngine("")
+    assert engine.load(KEY, json.dumps(schema_for(NATIVE)), json.dumps(small.sets())) == []
+    no_amount = json.loads(engine.decide(KEY, json.dumps(req("native.payment_link")), "final"))
+    assert no_amount["outcome"] == "hold"
+
+
+def test_invalid_cards_are_rejected():
+    people, agent_keys = {"dana", 'dana" || true || "'}, {"agent-key-1"}
+    valid = [card("quote", "native.quote"), card("dana-book", "native.book", who="person", **DANA),
+             card("agent-charge", "native.charge_mandate", who="agent", agent_key_id="agent-key-1",
+                  max_amount_cents=2000),
+             card("late", "native.book", hours=HoursWindow(days=["fri"], start=time(22), end=time(0))),
+             card("default:native.book", "native.book", mode="ask", is_default=True)]   # a default: dropped, unchecked
+    assert compiler.validate_cards(valid, people=people, agent_keys=agent_keys) == []
+
+    def errors(*cards: RuleCard) -> list[str]:
+        return compiler.validate_cards(list(cards), people=people, agent_keys=agent_keys)
+
+    assert errors(card("Quote", "native.quote"))                                # IDs are lower case
+    assert errors(card("-quote", "native.quote"))
+    assert errors(card("q" * 65, "native.quote"))
+    assert errors(card("quote one", "native.quote"))
+    assert len(errors(card("quote", "native.quote"), card("quote", "native.book"))) == 1   # IDs are unique
+    assert errors(card("default:native.book", "native.book", mode="ask"))       # reserved for the compiler's defaults
+    assert errors(card("eve-book", "native.book", who="person", person_id="eve"))
+    assert errors(card("other-agent", "native.book", who="agent", agent_key_id="agent-key-2"))
+    hostile = errors(card("inject", "native.book", who="person", person_id='dana" || true || "'))
+    assert hostile and all("||" not in error for error in hostile)              # refused, and not echoed back
+    backwards = HoursWindow.model_construct(days=["mon"], start=time(10), end=time(9))
+    assert errors(RuleCard.model_construct(**{**card("backwards", "native.book").model_dump(), "hours": backwards}))
+    assert errors(card("seconds", "native.book", hours=HoursWindow(days=["mon"], start=time(8, 0, 30), end=time(9))))
+    over = RuleCard.model_construct(**{**card("link", "native.payment_link", max_amount_cents=2000).model_dump(),
+                                       "max_amount_cents": 50_001})
+    assert errors(over)                                                         # the card's own contract, again
+
+    # the compiler itself never writes such a string into Cedar
+    with pytest.raises(ValueError):
+        compiler.compile_cards([card("inject", "native.book", who="person", person_id='dana" || true || "')], NATIVE)
+    with pytest.raises(ValueError):
+        compiler.compile_cards([card("quote", "native.quote"), card("quote", "native.book")], NATIVE)
