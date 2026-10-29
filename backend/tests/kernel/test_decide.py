@@ -451,6 +451,7 @@ async def test_take_over_waits_for_a_decision_in_flight(app, client, registry):
     assert not taking_over.done()
     release.set()
     decision, state = await asyncio.wait_for(asyncio.gather(deciding, taking_over), 10)
+    assert not await a_take_over_waits_for_the_session_row(within=0.3)   # both committed: nothing waits now
     assert (decision.outcome, decision.action.generation) == ("allow", 0)
     assert (state["mode"], state["generation"]) == ("owner", decision.action.generation + 1)
     seqs = {e.event.kind: e.seq for e in await ledger_rows(app, rows) if e.event.kind in ("decide", "takeover")}

@@ -830,20 +830,17 @@ async def confirm(ctx: KernelCtx, desk_id: str, version: int) -> PolicyVersion:
     """Activates a proved version (`POST /policy/confirm`) in the caller's transaction: it becomes
     `active`, the version it replaces `superseded`, ledgered `policy` `{version, activated: true,
     from: <old>}`. Confirms on the Desk are serialized by its `versions` lock, and the active row
-    is locked `FOR UPDATE`. Refused, in this order, with `ConfirmConflict`:
+    is locked `FOR UPDATE`. A version the Desk doesn't have is 404 `not_found`, with nothing
+    ledgered; one it has is refused, in this order, with `ConfirmConflict`:
 
-    - `not_proved`, before anything else: the process runs in `bounded` mode, where no owner
+    - `not_proved`, before the other conflicts: the process runs in `bounded` mode, where no owner
       draft activates, even one SymCC proved before a restart;
     - `not_proved`: the version isn't `proved` by a SymCC proof of all seven obligations (a
       bounded check, a rejection, or a version already active or superseded);
     - `parent_changed`: the version it was drafted on is no longer the active one;
     - `hash_changed`: the schema, baseline, enabled profiles, invariants or review thresholds it
-      was proved against aren't the current ones (`current_hashes`).
-
-    Past the mode check, a version the Desk doesn't have is 404 `not_found`."""
+      was proved against aren't the current ones (`current_hashes`)."""
     copy_id = ctx.copy_id
-    if proof_mode() != "symcc":
-        raise ConfirmConflict(copy_id, desk_id, version, "not_proved")
     await _lock(ctx, "versions", desk_id)
     active = (await ctx.db.scalars(ctx.repo.scoped(select(PolicyVersionRow).where(
         PolicyVersionRow.desk_id == desk_id, PolicyVersionRow.status == "active").with_for_update()))).one_or_none()
@@ -851,6 +848,8 @@ async def confirm(ctx: KernelCtx, desk_id: str, version: int) -> PolicyVersion:
         PolicyVersionRow.desk_id == desk_id, PolicyVersionRow.version == version).with_for_update()))).one_or_none()
     if row is None:
         raise KernelFailure(404, "not_found", "unknown_version")
+    if proof_mode() != "symcc":
+        raise ConfirmConflict(copy_id, desk_id, version, "not_proved")
     if row.status != "proved" or row.proof is None or not proved(row.proof):
         raise ConfirmConflict(copy_id, desk_id, version, "not_proved")
     if row.parent_version != (active.version if active is not None else None):

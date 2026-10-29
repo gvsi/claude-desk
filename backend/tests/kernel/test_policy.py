@@ -509,6 +509,19 @@ async def test_symcc_mode_refuses_a_proved_row_without_a_symcc_proof(report, app
     assert runs == []                                                            # confirm never proves
 
 
+async def test_bounded_mode_answers_an_unknown_version_with_404(app, client, monkeypatch):
+    """The version is looked up before the mode is checked: in `bounded` mode a version the Desk
+    doesn't have is 404 `not_found` with nothing ledgered, as it is in `symcc` mode, so the ledger
+    never carries a version number the request made up."""
+    desk = await desk_with_tools(app)
+    monkeypatch.setattr(activation, "_proof_mode", "bounded")
+    entries = await policy_entries(app, desk)
+    response = await post_confirm(client, desk, 99)
+    assert (response.status_code, response.json()) == (404, {"code": "not_found"})
+    assert await policy_entries(app, desk) == entries
+    await assert_still_active(app, desk, 1)
+
+
 @pytest.mark.solver
 async def test_bounded_mode_refuses_a_previously_proved_draft(desk_prove, app, client, monkeypatch):
     """A draft SymCC proved earlier doesn't activate once the kernel runs `bounded` (restarted

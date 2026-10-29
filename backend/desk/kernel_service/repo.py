@@ -6,6 +6,13 @@ until a copy is bound (`ctx.bind(copy_id)`), and row-level security then admits 
 rows. A route takes it as `ctx: Ctx`: the transaction commits after the route returns and before
 the answer is sent, so a failed commit answers 500, and it rolls back on any exception.
 
+Row locks are taken in one order, so no two kernel transactions wait on each other: the session
+row first (`auth.lock_session`, `FOR UPDATE`; a decision holds it until it commits, and a
+take-over, a hand-back and the breaker's strike write it), then the decision row (a repeated
+call past its expiry, an execution), then the execution row, then the Desk's ledger head
+(`ledger.append`, where every entry ends). A transaction that holds a later lock never takes an
+earlier one.
+
 A route refuses with `KernelFailure`. Its answer is always a `KernelError{code}`; when the refusal
 must be on record (a ledgered auth failure, an allow that expired), `persist` writes that record
 in a fresh transaction after the request's own has rolled back.
