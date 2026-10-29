@@ -56,8 +56,8 @@ jobs:
       - name: Install the Postgres client if the runner has none
         run: |
           if ! command -v psql >/dev/null 2>&1; then
-            sudo apt-get update -q
-            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends postgresql-client
+            sudo apt-get -o DPkg::Lock::Timeout=300 update -q
+            sudo DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y -q --no-install-recommends postgresql-client
           fi
       - name: Use the local settings
         run: |
@@ -127,8 +127,8 @@ jobs:
       - name: Install the Postgres client if the runner has none
         run: |
           if ! command -v psql >/dev/null 2>&1; then
-            sudo apt-get update -q
-            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends postgresql-client
+            sudo apt-get -o DPkg::Lock::Timeout=300 update -q
+            sudo DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y -q --no-install-recommends postgresql-client
           fi
       - name: Use the local settings
         run: |
@@ -288,8 +288,8 @@ jobs:
       - name: Install ShellCheck if the runner has none
         run: |
           if ! command -v shellcheck >/dev/null 2>&1; then
-            sudo apt-get update -q
-            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends shellcheck
+            sudo apt-get -o DPkg::Lock::Timeout=300 update -q
+            sudo DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y -q --no-install-recommends shellcheck
           fi
       - name: Lint the workflow
         run: actionlint

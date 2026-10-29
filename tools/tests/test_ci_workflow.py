@@ -649,9 +649,11 @@ def test_apt_installs_only_where_the_command_is_missing(tmp_path, install):
     result, events = runner.run(step, "ARM64", PATH=str(runner.bin))
 
     assert result.returncode == 0, result.stderr
+    # A freshly booted runner may still hold the dpkg lock for its own updates, so apt waits for it.
+    wait = ["-o", "DPkg::Lock::Timeout=300"]
     assert events == [
-        ["sudo", "apt-get", "update", "-q"],
-        ["sudo", "DEBIAN_FRONTEND=noninteractive", "apt-get", "install", "-y", "-q", "--no-install-recommends", package],
+        ["sudo", "apt-get", *wait, "update", "-q"],
+        ["sudo", "DEBIAN_FRONTEND=noninteractive", "apt-get", *wait, "install", "-y", "-q", "--no-install-recommends", package],
     ]
 
     (runner.bin / command).symlink_to(runner.bin / "tar")
