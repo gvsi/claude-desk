@@ -316,6 +316,46 @@ async def test_context_answers_session_states(app, client, frozen_clock, registr
                                     f"auth_unattributed route={ROUTE} reason=unknown_session"]
 
 
+async def test_context_and_decide_check_their_caller_alike(app, client, registry):
+    rows = await desk_with(app, [FakeAdapter("native.quote")], [card("quote", "native.quote")])
+    elsewhere = await make_copy_rows(app)
+    visitor = await open_visitor(client, rows)
+
+    async def answers(session_id: str, headers: dict[str, str], desk_id: str | None) -> list[tuple[int, dict]]:
+        """What `/context` and then `/decide` answer for the same caller, session and Desk."""
+        body = {"session_id": session_id, "generation": 0,
+                "call": {"call_id": "call-1", "tool": "native.quote", "args": {}}}
+        if desk_id is not None:
+            body["desk_id"] = desk_id
+        responses = [await get_context(client, session_id, headers, desk_id=desk_id),
+                     await client.post("/decide", headers=headers, json=body)]
+        return [(response.status_code, response.json()) for response in responses]
+
+    # the owner's token is checked first, then the session it names, then the Desk it must name
+    cases = [
+        (rows.owner_session_id, {auth.OWNER_HEADER: "not-a-token"}, None, 401, "auth"),
+        (elsewhere.owner_session_id, rows.owner, None, 404, "not_found"),
+        (visitor.session_id, rows.owner, None, 404, "not_found"),
+        (rows.owner_session_id, rows.owner, None, 422, "invalid"),
+        (rows.owner_session_id, rows.owner, elsewhere.desk_id, 404, "not_found"),
+        (visitor.session_id, rows.owner, rows.desk_id, 404, "not_found"),
+        (rows.owner_session_id, {**rows.owner, **visitor.headers}, rows.desk_id, 401, "auth"),
+        (visitor.session_id, {auth.SESSION_HEADER: "not-a-token"}, None, 401, "auth"),
+        (visitor.session_id, visitor.headers, elsewhere.desk_id, 404, "not_found"),
+    ]
+    for session_id, headers, desk_id, status, code in cases:
+        assert await answers(session_id, headers, desk_id) == [(status, {"code": code})] * 2, (status, code)
+
+    # a deleted Desk closes its sessions and the owner's work on it
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(rows.copy_id)
+        desk = (await ctx.db.scalars(ctx.repo.scoped(select(Desk).where(Desk.desk_id == rows.desk_id)))).one()
+        desk.deleted_at = ctx.clock.now()
+    for session_id, headers, desk_id in ((visitor.session_id, visitor.headers, None),
+                                         (rows.owner_session_id, rows.owner, rows.desk_id)):
+        assert await answers(session_id, headers, desk_id) == [(409, {"code": "closed"})] * 2, session_id
+
+
 async def test_the_follow_up_can_cite_the_approved_booking(app, client, frozen_clock):
     copy, visitor = await visitor_of(app, client)
     await add_slot(app, copy, "S-20261101-2200")                     # Sunday at 22:00, outside the cards' hours

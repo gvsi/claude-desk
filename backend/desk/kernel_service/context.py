@@ -33,8 +33,8 @@ from desk.db.models import Fact as FactRow
 from desk.db.models import KnowledgeItem as KnowledgeRow
 from desk.kernel_api import SessionContext
 from desk.kernel_service import auth, decide, labels
-from desk.kernel_service.auth import AuthError, Named, SessionRow
-from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, route_template
+from desk.kernel_service.auth import SessionRow
+from desk.kernel_service.repo import Ctx, KernelCtx
 from desk.kernel_service.sessions import principal_for
 
 
@@ -73,32 +73,7 @@ async def session_context(ctx: KernelCtx, principal: Principal, session_row: Ses
 router = APIRouter()
 
 
-async def _context_caller(ctx: KernelCtx, request: Request, session_id: str,
-                          desk_id: str | None) -> tuple[Principal, SessionRow, Desk]:
-    """The session `/context` reads for, once the session-state rows pass: its own token, or the
-    owner's for the owner's own session and a Desk of its copy; then open, on a Desk not deleted."""
-    route = route_template(request)
-    if auth.caller(request) == "owner":
-        owner = await auth.require_owner(ctx, request, desk_id=desk_id, session_id=session_id)
-        if desk_id is None:
-            raise KernelFailure(422, "invalid", "owner_names_no_desk")
-        if session_id != owner.session_id:
-            raise AuthError(404, "not_found", "wrong_session", route=route,
-                            named=Named(copy_id=owner.copy_id, session_id=session_id))
-        # an open owner session: `require_owner` refuses a closed one, and none goes idle
-        row = (await ctx.db.scalars(ctx.repo.scoped(
-            select(SessionRow).where(SessionRow.session_id == owner.session_id)))).one()
-    else:
-        row = await auth.require_session(ctx, request, session_id, desk_id=desk_id)
-    desk_row = (await ctx.db.scalars(ctx.repo.scoped(
-        select(Desk).where(Desk.desk_id == (desk_id or row.desk_id))))).one()
-    if desk_row.deleted_at is not None:
-        raise AuthError(409, "closed", "closed", route=route,
-                        named=Named(copy_id=row.copy_id, desk_id=desk_row.desk_id, session_id=row.session_id))
-    return principal_for(row, desk_id=desk_row.desk_id), row, desk_row
-
-
 @router.get("/context/{session_id}", response_model=SessionContext)
 async def get_context(session_id: str, ctx: Ctx, request: Request, desk_id: str | None = None) -> SessionContext:
-    principal, session_row, desk_row = await _context_caller(ctx, request, session_id, desk_id)
-    return await session_context(ctx, principal, session_row, desk_row)
+    session_row, desk_row = await auth.require_caller(ctx, request, session_id, desk_id)
+    return await session_context(ctx, principal_for(session_row, desk_id=desk_row.desk_id), session_row, desk_row)

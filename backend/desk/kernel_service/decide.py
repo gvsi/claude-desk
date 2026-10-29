@@ -734,29 +734,12 @@ async def _decide_caller(ctx: KernelCtx, request: Request, body: DecideRequest) 
     """The session `/decide` acts for, once the session-state rows pass: its token (or the owner's,
     for the owner's own session and a Desk of its copy), copy and Desk, open, at its generation, and
     not taken over by the owner. A paused session passes: its decisions are stored refusals."""
-    route = route_template(request)
-    if auth.caller(request) == "owner":
-        if body.desk_id is None:
-            raise KernelFailure(422, "invalid", "owner_names_no_desk")
-        owner = await auth.require_owner(ctx, request, desk_id=body.desk_id, session_id=body.session_id)
-        if body.session_id != owner.session_id:
-            raise AuthError(404, "not_found", "wrong_session", route=route,
-                            named=Named(copy_id=owner.copy_id, session_id=body.session_id))
-        row = (await ctx.db.scalars(ctx.repo.scoped(
-            select(SessionRow).where(SessionRow.session_id == owner.session_id)))).one()
-        auth.require_open(ctx, request, row, generation=body.generation)
-    else:
-        row = await auth.require_session(ctx, request, body.session_id, generation=body.generation,
-                                         desk_id=body.desk_id)
-    desk_id = body.desk_id or row.desk_id
-    named = Named(copy_id=row.copy_id, desk_id=desk_id, session_id=row.session_id)
-    deleted = (await ctx.db.execute(ctx.repo.scoped(
-        select(Desk.deleted_at).where(Desk.desk_id == desk_id)))).scalar_one()
-    if deleted is not None:
-        raise AuthError(409, "closed", "closed", route=route, named=named)
+    row, desk_row = await auth.require_caller(ctx, request, body.session_id, body.desk_id,
+                                              generation=body.generation)
     if row.mode == "owner":
-        raise AuthError(409, "mode_owner", "mode_owner", route=route, named=named)
-    return principal_for(row, desk_id=desk_id), row
+        raise AuthError(409, "mode_owner", "mode_owner", route=route_template(request),
+                        named=Named(copy_id=row.copy_id, desk_id=desk_row.desk_id, session_id=row.session_id))
+    return principal_for(row, desk_id=desk_row.desk_id), row
 
 
 @router.post("/decide", response_model=Decision)
