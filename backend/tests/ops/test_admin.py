@@ -113,10 +113,13 @@ class Scratch:
     databases: list[str]
     roles: list[str]
 
-    def database(self) -> URL:
-        """A new empty database next to the suite's; its admin URL."""
+    def database(self, owner: str | None = None) -> URL:
+        """A new empty database next to the suite's, owned by `owner` if given; its admin URL."""
         name = f"{self.base.database}_admin_{uuid.uuid4().hex[:8]}"
-        self.admin.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
+        statement = sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name))
+        if owner is not None:
+            statement += sql.SQL(" OWNER {}").format(sql.Identifier(owner))
+        self.admin.execute(statement)
         self.databases.append(name)
         return self.base.set(database=name)
 
@@ -331,6 +334,96 @@ def test_encoded_password_reaches_alembic(scratch, role_passwords):
         owner = conn.execute("SELECT tableowner FROM pg_tables WHERE tablename = 'alembic_version'").fetchone()[0]
     assert owner == admin_role
     assert log_in(url, "desk_api", role_passwords["desk_api"]) == "desk_api"
+
+
+# The cluster-wide roles the migrations create: the process roles (roles.sql) and the NOLOGIN owners
+# of the copy resolvers (0004_copy_resolvers) and of the kernel_ro views (0005_kernel_ro_owner).
+CHAIN_ROLES = ("desk_kernel", "desk_api", "desk_mockpay", "desk_resolver", "desk_ro_owner")
+
+# Each migration's schemas: every object in them, its owner and its grants are compared below.
+SCHEMAS = ("kernel", "kernel_ro", "app", "mockpay", "procrastinate")
+
+
+@pytest.fixture(scope="module")
+def rds_like_admin(scratch) -> tuple[str, URL]:
+    """An admin like RDS's master user (LOGIN CREATEROLE CREATEDB, not SUPERUSER) and the fresh
+    database it owns; its URL logs in as it.
+
+    Where the admin creates a role, Postgres 16 gives it ADMIN OPTION on the role, but neither SET nor
+    INHERIT. This cluster is shared, so a role the migrations create may already exist: the admin gets
+    that same grant on each one that does, and creates the rest itself.
+    """
+    password = f"rds-like-{uuid.uuid4().hex}"
+    admin_role = scratch.role("rdsadmin", options="LOGIN CREATEROLE CREATEDB NOSUPERUSER NOBYPASSRLS",
+                              password=password)
+    for role in CHAIN_ROLES:
+        if scratch.admin.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (role,)).fetchone():
+            scratch.admin.execute(sql.SQL("GRANT {} TO {} WITH ADMIN TRUE, INHERIT FALSE, SET FALSE").format(
+                sql.Identifier(role), sql.Identifier(admin_role)))
+    url = scratch.database(owner=admin_role).set(username=admin_role, password=password)
+    return admin_role, url
+
+
+def privileges(url: URL) -> dict[str, list[tuple]]:
+    """Who owns each object in the migrations' schemas and what each role may do with it, with the
+    admin that ran the migrations named `<admin>`, so two databases migrated by different admins compare.
+
+    Each access list is a set: Postgres orders one built from default privileges by role OID, so
+    its order follows when the roles were created, not what they may do.
+    """
+    queries = {
+        "schemas": "SELECT nspname, pg_get_userbyid(nspowner), nspacl::text[] FROM pg_namespace"
+                   " WHERE nspname = ANY(%(schemas)s)",
+        "relations": "SELECT c.oid::regclass::text, c.relkind::text, pg_get_userbyid(c.relowner), c.relacl::text[]"
+                     " FROM pg_class c WHERE c.relnamespace::regnamespace::text = ANY(%(schemas)s)",
+        "columns": "SELECT a.attrelid::regclass::text, a.attname, a.attacl::text[] FROM pg_attribute a"
+                   " JOIN pg_class c ON c.oid = a.attrelid"
+                   " WHERE c.relnamespace::regnamespace::text = ANY(%(schemas)s) AND a.attacl IS NOT NULL",
+        "functions": "SELECT p.oid::regprocedure::text, pg_get_userbyid(p.proowner), p.proacl::text[] FROM pg_proc p"
+                     " WHERE p.pronamespace::regnamespace::text = ANY(%(schemas)s)",
+        "default_acls": "SELECT pg_get_userbyid(defaclrole), defaclnamespace::regnamespace::text,"
+                        " defaclobjtype::text, defaclacl::text[] FROM pg_default_acl",
+        # what the admin granted itself in the migrations' roles (Postgres's grants to it aren't the migrations')
+        "self_grants": "SELECT r.rolname, a.admin_option, a.inherit_option, a.set_option FROM pg_auth_members a"
+                       " JOIN pg_roles r ON r.oid = a.roleid WHERE a.member = a.grantor"
+                       " AND a.member = (SELECT oid FROM pg_roles WHERE rolname = current_user)"
+                       " AND r.rolname = ANY(%(roles)s)",
+    }
+    with psycopg.connect(libpq_url(url_text(url))) as conn:
+        admin_role = re.compile(rf"\b{re.escape(conn.execute('SELECT current_user').fetchone()[0])}\b")
+        found = {name: conn.execute(query, {"schemas": list(SCHEMAS), "roles": list(CHAIN_ROLES)}).fetchall()
+                 for name, query in queries.items()}
+
+    def named(value: object) -> object:
+        if isinstance(value, str):
+            return admin_role.sub("<admin>", value)
+        if isinstance(value, list):                     # an access list
+            return tuple(sorted(named(item) for item in value))
+        return value
+
+    return {name: sorted((tuple(named(value) for value in row) for row in rows), key=repr)
+            for name, rows in found.items()}
+
+
+def test_migrations_reach_head_as_an_admin_without_superuser(rds_like_admin, first_run, role_passwords):
+    """RDS's master user isn't a superuser: every migration still runs as it, and ends as a superuser's run does.
+
+    Changing an object's owner then needs SET ROLE on the new owner, which needs CREATE on the
+    object's schema; each migration that changes an owner lends both for the change and takes them
+    back, so the admin is left only the grants Postgres gave it, and the owners only their own.
+    """
+    admin_role, url = rds_like_admin
+    run = run_admin(url, role_passwords)
+    assert run.code == 0, run.stderr
+    assert "-> 0001_core" in run.logs
+    assert version(url) == head()
+    for role, password in role_passwords.items():
+        assert log_in(url, role, password) == role
+    with psycopg.connect(libpq_url(url_text(url))) as conn:
+        assert conn.execute("SELECT current_user, rolsuper, rolbypassrls FROM pg_roles"
+                            " WHERE rolname = current_user").fetchone() == (admin_role, False, False)
+    superuser_url, _ = first_run
+    assert privileges(url) == privileges(superuser_url)
 
 
 def test_migration_failure_exits_1_without_secrets(first_run, role_passwords, monkeypatch):
