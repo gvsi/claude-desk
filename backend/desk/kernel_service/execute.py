@@ -318,21 +318,21 @@ async def execute_allowed(ctx: KernelCtx, session_row: SessionRow, decision_id: 
     if not await _prepare_intent(ctx, target):
         raise await _refused_at_execution(ctx, target, "prepare")
     await ctx.db.commit()                                # T1: the intent row, before any side effect
-    return await _run(ctx, row.decision_id, target.action.action_id, path="allow")
+    return await _run(ctx, row.decision_id, target.action.action_id, row.session_id, path="allow")
 
 
 async def run_approved(ctx: KernelCtx, decision_row: DecisionRow) -> ExecResult:
     """T2 and T3 for an approved hold whose intent row the answer has committed, as the held
     session's principal; mode and generation aren't checked (step 6)."""
-    return await _run(ctx, decision_row.decision_id, decision_row.action_id, path="approved")
+    return await _run(ctx, decision_row.decision_id, decision_row.action_id, decision_row.session_id, path="approved")
 
 
 # ---- T2 and T3: the side effect and its outcome -----------------------------------------------------
 
-async def _run(ctx: KernelCtx, decision_id: str, action_id: str, *, path: ExecPath) -> ExecResult:
+async def _run(ctx: KernelCtx, decision_id: str, action_id: str, session_id: str, *, path: ExecPath) -> ExecResult:
     await _after_intent()
     try:
-        outcome = await _side_effect(ctx, decision_id, action_id, path)
+        outcome = await _side_effect(ctx, decision_id, action_id, session_id, path)
     except AdapterFailure as failure:
         await ctx.db.rollback()
         return await _settle_failed(ctx, decision_id, action_id, failure)
@@ -346,13 +346,14 @@ async def _run(ctx: KernelCtx, decision_id: str, action_id: str, *, path: ExecPa
     return outcome
 
 
-async def _side_effect(ctx: KernelCtx, decision_id: str, action_id: str, path: ExecPath) -> ExecResult | KernelFailure:
-    """T2: under the decision's and the intent row's locks (and, for an allow, the session's,
-    taken first), the adapter's `execute`, then `succeeded` and `executed`, committed. A failure
-    answer comes back as a `KernelFailure`, already committed, for `_run` to raise."""
+async def _side_effect(ctx: KernelCtx, decision_id: str, action_id: str, session_id: str,
+                       path: ExecPath) -> ExecResult | KernelFailure:
+    """T2: under the decision's and the intent row's locks (and, for an allow, the decision's
+    session's, `session_id`, taken first), the adapter's `execute`, then `succeeded` and
+    `executed`, committed. A failure answer comes back as a `KernelFailure`, already committed,
+    for `_run` to raise."""
     session = None
     if path == "allow":
-        session_id = await _one(ctx, select(DecisionRow.session_id).where(DecisionRow.decision_id == decision_id))
         session = await _share_session(ctx, session_id)
     decision = await _lock_decision(ctx, decision_id)
     execution = await _execution(ctx, action_id, lock=True)
@@ -402,12 +403,11 @@ async def _undo(ctx: KernelCtx, target: _Target) -> None:
 async def _finish(ctx: KernelCtx, target: _Target, execution: Execution, result: ExecResult, decision_state: str,
                   summary: dict[str, Any]) -> None:
     """The execution's final row and the decision's state, ledgered and signed, in the caller's
-    transaction."""
+    transaction, which holds the decision row (`target.decision`) and the execution row."""
     execution.state = {"executed": "succeeded", "failed": "failed", "expired": "failed"}[decision_state]
     execution.result = result
     execution.finished_at = ctx.clock.now()
-    decision = await _lock_decision(ctx, target.decision.decision_id)
-    await decide.set_state(ctx, decision, decision_state, kind="execute", summary=summary)
+    await decide.set_state(ctx, target.decision, decision_state, kind="execute", summary=summary)
 
 
 async def _settle_failed(ctx: KernelCtx, decision_id: str, action_id: str, failure: AdapterFailure) -> ExecResult:
