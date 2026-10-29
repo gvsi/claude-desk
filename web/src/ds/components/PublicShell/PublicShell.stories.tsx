@@ -361,3 +361,223 @@ export const WithAgentLinks: Story = {
     await expect(links[0]?.getBoundingClientRect().top).toBeGreaterThan(heading.getBoundingClientRect().bottom);
   },
 };
+
+// The open status in the header: the kernel's words (`PublicDesk.open_status`), shown as written.
+
+/** Each status as the kernel serves it: open until later today, closed until tomorrow, open all week. */
+const OPEN_EN = { text: 'Open now, until 6:00 pm', open: true };
+const CLOSED_EN = { text: 'Closed now. Opens tomorrow at 8:00 am', open: false };
+const OPEN_ALL_WEEK = { text: 'Open now', open: true };
+/** In Spanish: closed until a later day, and the longest line, open until midnight on a later day. */
+const CLOSED_ES = { text: 'Cerrado ahora. Abre el lunes a las 8:00', open: false };
+const OPEN_ES_LONGEST = { text: 'Abierto ahora, hasta el viernes a medianoche', open: true };
+/** The shell's own line under a closed status. */
+const STILL_HELPS = { en: 'Claude can still help.', es: 'Claude puede ayudarte igual.' };
+
+/** The header's element, or a thrown error naming what is missing. */
+function partOf(header: HTMLElement, selector: string): HTMLElement {
+  const el = header.querySelector<HTMLElement>(selector);
+  if (!el) throw new Error(`no ${selector} in the header`);
+  return el;
+}
+
+/**
+ * The header's open status reading `text`: the kernel's words as written, in meta type and the
+ * name's ink, with an `aria-hidden` dot on the middle of their first line.
+ */
+async function openStatusIn(header: HTMLElement, text: string): Promise<{ status: HTMLElement; line: HTMLElement; dot: HTMLElement }> {
+  const line = lineReading(header, text);
+  await expect(line).toHaveAttribute('data-copy', 'user');
+  const status = line.closest<HTMLElement>('.cd-public-shell__open-status');
+  const dot = status?.querySelector<HTMLElement>('.cd-status-dot');
+  if (!status || !dot) throw new Error(`no open status with a dot around "${text}"`);
+  await expect(dot).toHaveAttribute('aria-hidden', 'true');
+  expectComputed(line, {
+    fontSize: '13px',
+    lineHeight: '18px',
+    color: getComputedStyle(partOf(header, '.cd-public-shell__brand-name')).color,
+  });
+  // The words keep 4.5:1 over the field, the dot 3:1.
+  await expect(contrastRatio(getComputedStyle(line).color, groundOf(line))).toBeGreaterThanOrEqual(4.5);
+  const dotStyle = getComputedStyle(dot);
+  const dotColor = dotStyle.backgroundColor === 'rgba(0, 0, 0, 0)' ? dotStyle.borderTopColor : dotStyle.backgroundColor;
+  await expect(contrastRatio(dotColor, groundOf(status))).toBeGreaterThanOrEqual(3);
+  const dotBox = dot.getBoundingClientRect();
+  await expect(dotBox.top + dotBox.height / 2 - line.getBoundingClientRect().top).toBe(9);
+  return { status, line, dot };
+}
+
+/** Open: a filled dot, and the kernel's words are the status's only line. */
+async function expectOpen(status: HTMLElement, dot: HTMLElement): Promise<void> {
+  expectComputed(dot, { backgroundColor: 'rgb(111, 168, 89)' });
+  await expect(status.querySelectorAll('p')).toHaveLength(1);
+  await expect(status).not.toHaveTextContent('Claude');
+}
+
+/**
+ * Closed: a hollow dot, and under the kernel's words the shell's quieter line in the page's
+ * language, in meta type and the tagline's ink, lined up with the words.
+ */
+async function expectClosed(header: HTMLElement, status: HTMLElement, line: HTMLElement, dot: HTMLElement, help: string): Promise<void> {
+  expectComputed(dot, { backgroundColor: 'rgba(0, 0, 0, 0)', borderTopWidth: '1px', borderTopStyle: 'solid' });
+  await expect(dot).toHaveClass('cd-status-dot--info');
+  const helpLine = lineReading(status, help);
+  await expect(helpLine).not.toHaveAttribute('data-copy');
+  expectComputed(helpLine, {
+    fontSize: '13px',
+    lineHeight: '18px',
+    color: getComputedStyle(partOf(header, '.cd-public-shell__tagline')).color,
+  });
+  await expect(contrastRatio(getComputedStyle(helpLine).color, groundOf(helpLine))).toBeGreaterThanOrEqual(4.5);
+  const words = line.getBoundingClientRect();
+  const helpBox = helpLine.getBoundingClientRect();
+  await expect(helpBox.left).toBe(words.left);
+  await expect(helpBox.top).toBe(words.bottom + 2);
+  await expect(status.querySelectorAll('p')).toHaveLength(2);
+}
+
+/** On a wide page: at the right end of the header's one row, level with the monogram, the header no taller. */
+async function expectAtTheRight(header: HTMLElement, status: HTMLElement): Promise<void> {
+  const box = header.getBoundingClientRect();
+  const statusBox = status.getBoundingClientRect();
+  const monogram = partOf(header, '.cd-public-shell__monogram').getBoundingClientRect();
+  await expect(statusBox.right).toBe(box.right - parseFloat(getComputedStyle(header).paddingRight));
+  await expect(statusBox.top + statusBox.height / 2).toBeCloseTo(monogram.top + monogram.height / 2, 0);
+  await expect(box.height).toBe(76);
+}
+
+/**
+ * On a phone: the status on its own line under the monogram and the name, 8 px below them and from
+ * the left gutter, each of its lines on one line, and nothing reaching past the phone's width.
+ */
+async function expectOwnLineOnAPhone(phone: HTMLElement, header: HTMLElement, status: HTMLElement): Promise<void> {
+  await expect(phone.scrollWidth).toBeLessThanOrEqual(PHONE);
+  const edge = phone.getBoundingClientRect().right;
+  for (const el of header.querySelectorAll('*')) await expect(el.getBoundingClientRect().right).toBeLessThanOrEqual(edge + 0.5);
+  const monogram = partOf(header, '.cd-public-shell__monogram').getBoundingClientRect();
+  const brandText = partOf(header, '.cd-public-shell__brand-text').getBoundingClientRect();
+  const box = status.getBoundingClientRect();
+  await expect(box.top).toBeCloseTo(Math.max(monogram.bottom, brandText.bottom) + 8, 1);
+  await expect(box.left).toBe(monogram.left);
+  await expect(box.left).toBe(header.getBoundingClientRect().left + 16);
+  for (const line of status.querySelectorAll('p')) await expect(line.getBoundingClientRect().height).toBe(18);
+}
+
+const phone: Pick<Story, 'decorators'> = {
+  decorators: [
+    (Story) => (
+      <div data-testid="phone" style={{ width: PHONE }}>
+        <Story />
+      </div>
+    ),
+  ],
+};
+
+/** The Spanish page, as `RiveraEs` sets it up. */
+const spanish = {
+  brand: brandOf(desk.es),
+  language: 'es',
+  about: desk.es.charter,
+  composer: composer.es,
+  children: <Conversation language="es" />,
+} satisfies Story['args'];
+
+/** Below the board's header, the page is the board's. */
+const ABOUT_NOTE = "The about column shows the charter's cards, not the board's free text and quote.";
+
+export const OpenNow: Story = {
+  args: { openStatus: OPEN_EN },
+  parameters: {
+    canvasNote: `The board's header with the open status at its right, as the "Open now" sign-off board places it: a filled dot and the kernel's words. ${ABOUT_NOTE}`,
+  },
+  play: async ({ canvas }) => {
+    const header = canvas.getByRole('banner');
+    const { status, dot } = await openStatusIn(header, OPEN_EN.text);
+    await expectOpen(status, dot);
+    await expectAtTheRight(header, status);
+  },
+};
+
+export const ClosedNow: Story = {
+  args: { openStatus: CLOSED_EN },
+  parameters: {
+    canvasNote: `The board's header with the closed status at its right, as the "Open now" sign-off board places it: a hollow dot, the kernel's words and "Claude can still help." under them. ${ABOUT_NOTE}`,
+  },
+  play: async ({ canvas }) => {
+    const header = canvas.getByRole('banner');
+    const { status, line, dot } = await openStatusIn(header, CLOSED_EN.text);
+    await expectClosed(header, status, line, dot, STILL_HELPS.en);
+    await expectAtTheRight(header, status);
+  },
+};
+
+export const ClosedNowEsPhone: Story = {
+  ...phone,
+  args: { ...spanish, openStatus: CLOSED_ES },
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      'The "Open now" sign-off board\'s phone header in Spanish: N-Public-Rivera at 390 px, with the closed status and "Claude puede ayudarte igual." on their own lines under the name and tagline.',
+  },
+  play: async ({ canvas, canvasElement }) => {
+    await expect(canvasElement.querySelector('.cd-public-shell')).toHaveAttribute('lang', 'es');
+    const header = canvas.getByRole('banner');
+    const { status, line, dot } = await openStatusIn(header, CLOSED_ES.text);
+    await expectClosed(header, status, line, dot, STILL_HELPS.es);
+    await expect(header).not.toHaveTextContent(STILL_HELPS.en);
+    await expectOwnLineOnAPhone(canvas.getByTestId('phone'), header, status);
+  },
+};
+
+export const OpenNowEsLongestPhone: Story = {
+  ...phone,
+  args: { ...spanish, openStatus: OPEN_ES_LONGEST },
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      'The "Open now" sign-off board\'s phone header with the longest Spanish line: N-Public-Rivera at 390 px, the status on its own line under the name, still on one line.',
+  },
+  play: async ({ canvas }) => {
+    const header = canvas.getByRole('banner');
+    const { status, dot } = await openStatusIn(header, OPEN_ES_LONGEST.text);
+    await expectOpen(status, dot);
+    await expectOwnLineOnAPhone(canvas.getByTestId('phone'), header, status);
+  },
+};
+
+export const OpenAllWeekPhone: Story = {
+  ...phone,
+  args: { openStatus: OPEN_ALL_WEEK },
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      'The "Open now" sign-off board\'s phone header with the shortest line: N-Public-Rivera at 390 px, the status on its own line under the name even though it would fit beside it.',
+  },
+  play: async ({ canvas }) => {
+    const header = canvas.getByRole('banner');
+    const { status, dot } = await openStatusIn(header, OPEN_ALL_WEEK.text);
+    await expectOpen(status, dot);
+    await expectOwnLineOnAPhone(canvas.getByTestId('phone'), header, status);
+  },
+};
+
+export const NoOpenStatus: Story = {
+  args: { openStatus: undefined },
+  parameters: {
+    canvasNote: `A Desk without hours: the kernel sends no open status, so the header is the board's without the "Open now" line. ${ABOUT_NOTE}`,
+  },
+  play: async ({ canvas }) => {
+    // No line and no dot: the header holds the monogram and the name, as it does with no status at all.
+    const header = canvas.getByRole('banner');
+    await expect(header.querySelector('.cd-status-dot')).toBeNull();
+    await expect([...header.children].map((child) => child.className)).toEqual([
+      'cd-public-shell__monogram cd-type-page-title',
+      'cd-public-shell__brand-text',
+    ]);
+    expectComputed(header, { rowGap: '4px' });
+    // The name takes the row up to the right gutter, and the header stays one row tall.
+    const box = header.getBoundingClientRect();
+    await expect(partOf(header, '.cd-public-shell__brand-text').getBoundingClientRect().right).toBe(box.right - 40);
+    await expect(box.height).toBe(76);
+  },
+};

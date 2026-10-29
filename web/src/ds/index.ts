@@ -61,7 +61,7 @@ export {
 export { PageHeader, type PageHeaderProps } from './components/PageHeader/PageHeader.tsx';
 export { Greeting, type GreetingProps, type PresenceGlyph } from './components/Greeting/Greeting.tsx';
 export { ReviewerBar, type ReviewerBarProps } from './components/ReviewerBar/ReviewerBar.tsx';
-export { PublicShell, type PublicBrand, type PublicShellProps } from './components/PublicShell/PublicShell.tsx';
+export { PublicShell, type PublicBrand, type PublicOpenStatus, type PublicShellProps } from './components/PublicShell/PublicShell.tsx';
 export { Dialog, type DialogProps } from './components/Dialog/Dialog.tsx';
 
 // Navigation
