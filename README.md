@@ -46,7 +46,7 @@ This README was written during the build. The status column describes each part 
 
 Claude proposes every action and every reply; a separate kernel process decides whether each action runs and whether each reply can be shown, under rules compiled by code from the owner's rule cards and proved before they go live.
 
-A bug in the chat layer can't move money outside the owner's rules, change rules, approve anything, verify anyone or forge the ledger: each needs a credential or a check that only the kernel holds. This covers a buggy chat layer, not a compromised one.
+A bug in the chat layer's visitor and agent paths can't move money outside the owner's rules, change rules, approve anything, verify anyone or forge the ledger: those paths never hold the owner's token, and each of these needs it or a check that only the kernel holds. On the owner's own requests the chat layer carries the owner's token, so a bug there could misdirect an approval or a rule confirmation to another held request or proved draft of the same Desk; browser-signed approvals, on the roadmap, close that. This covers a buggy chat layer, not a compromised one.
 
 Talking Claude around can't make it act past the owner's rules. Within them, it can still be talked into actions the rules allow, and into text that is wrong or unflattering but carries no price, date or promise.
 
