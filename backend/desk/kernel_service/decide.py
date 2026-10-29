@@ -74,7 +74,7 @@ from desk.db.models import Fact as FactRow
 from desk.db.models import PolicyVersion as PolicyVersionRow
 from desk.kernel_api import DecideRequest
 from desk.kernel_service import activation, adapters, auth, compiler, demo_inbox, explain, ledger, render, repo
-from desk.kernel_service.adapters.base import Adapter, AdapterRefusal, NormalizeCtx
+from desk.kernel_service.adapters.base import Adapter, AdapterRefusal, NormalizeCtx, quoted
 from desk.kernel_service.auth import AuthError, Named, SessionRow
 from desk.kernel_service.decisions import CallUsage, ReviewAction, ReviewCard, ReviewFact, ReviewInput, Reviewed
 from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, new_id, route_template
@@ -579,12 +579,13 @@ def _asked(subject: str, tool: str, action: NormalizedAction | None) -> str:
 
 
 def _quoted(text: str, *, cut: bool = True) -> str:
-    """Text as the owner reads it: one line inside quotes it can't close. Untrusted free text is
-    cut to `QUOTED_CHARS`; a rule's text (`cut=False`), the owner's own words, is quoted whole."""
+    """Text as the owner reads it (`adapters.base.quoted`: one line, inside quotes it can't close).
+    Untrusted free text is cut to `QUOTED_CHARS`; a rule's text (`cut=False`), the owner's own
+    words, is quoted whole."""
     line = " ".join(text.split())
     if cut:
         line = line[:QUOTED_CHARS]
-    return "“" + line.replace("“", '"').replace("”", '"') + "”"
+    return quoted(line)
 
 
 @dataclass

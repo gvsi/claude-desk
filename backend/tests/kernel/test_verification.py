@@ -32,7 +32,7 @@ from desk.kernel_service.desks import mask_contact, normalize_contact
 
 from .helpers import kernel_ctx, rows_of
 from .test_adapters import Rivera, quote_args, rivera
-from .test_decide import Visitor, decided, set_session
+from .test_decide import Visitor, decided, open_visitor, set_session
 from .test_execute import executed
 
 DANA_PHONE = "+15105550177"               # Dana's contact on record in these tests
@@ -55,6 +55,10 @@ class Copy:
     def owner(self) -> dict[str, str]:
         return self.rivera.owner
 
+    @property
+    def slug(self) -> str:
+        return self.rivera.slug
+
 
 async def rivera_copy(app: FastAPI, client: httpx.AsyncClient) -> Copy:
     """A Rivera Plumbing copy in which Dana's contact on record is a phone number."""
@@ -66,20 +70,6 @@ async def rivera_copy(app: FastAPI, client: httpx.AsyncClient) -> Copy:
         dana.contact, dana.contact_norm, dana.masked_contact = (DANA_PHONE, normalize_contact(DANA_PHONE),
                                                                 mask_contact(DANA_PHONE))
         return Copy(rivera=copy, people={person.ref: person.person_id for person in people})
-
-
-async def open_session(client: httpx.AsyncClient, copy: Copy) -> Visitor:
-    response = await client.post("/sessions", json={"desk_slug": copy.rivera.slug, "kind": "visitor"})
-    assert response.status_code == 200, response.text
-    return Visitor(session_id=response.json()["state"]["session_id"], token=response.json()["session_token"])
-
-
-async def set_language(app: FastAPI, copy: Copy, visitor: Visitor, language: str) -> None:
-    async with kernel_ctx(app) as ctx:
-        repo = ctx.bind(copy.copy_id)
-        row = (await ctx.db.scalars(repo.scoped(
-            select(ActorSession).where(ActorSession.session_id == visitor.session_id)))).one()
-        row.last_language = language
 
 
 async def start(client: httpx.AsyncClient, visitor: Visitor, contact: str) -> httpx.Response:
@@ -122,7 +112,7 @@ async def challenges(app: FastAPI, copy: Copy) -> list[VerificationChallenge]:
 
 async def test_code_goes_only_to_the_contact_on_record(app, client):
     copy = await rivera_copy(app, client)
-    visitor = await open_session(client, copy)
+    visitor = await open_visitor(client, copy)
     answer = await started(client, visitor, "(510) 555 0177")
     assert answer.message == STARTED_EN
     [notice] = answer.inbox
@@ -141,8 +131,8 @@ async def test_code_goes_only_to_the_contact_on_record(app, client):
     keyed = desk_kernel.canonical_json(json.dumps({"challenge_id": challenge.challenge_id, "code": code}))
     assert challenge.code_hash == hashlib.sha256(keyed.encode()).hexdigest()
     # a Spanish-speaking session reads the message and its code in Spanish
-    spanish = await open_session(client, copy)
-    await set_language(app, copy, spanish, "es")
+    spanish = await open_visitor(client, copy)
+    await set_session(app, copy, spanish.session_id, last_language="es")
     answer = await started(client, spanish, DANA_PHONE)
     assert answer.message == STARTED_ES
     [notice] = answer.inbox
@@ -168,7 +158,7 @@ async def verify_entries(app: FastAPI, copy: Copy) -> list[dict]:
 
 async def test_unknown_contact_gets_the_same_reply(app, client):
     copy = await rivera_copy(app, client)
-    visitor = await open_session(client, copy)
+    visitor = await open_visitor(client, copy)
     padded = "+1" + " " * 110 + "5105550177"               # Dana's number, but longer than any contact on record
     for typed in ("stranger@example.com", "owner", padded):
         answer = await started(client, visitor, f"  {typed} ")
@@ -195,7 +185,7 @@ INVALID = (422, {"code": "invalid"})
 async def test_each_challenge_gets_a_fresh_code(app, client, monkeypatch):
     codes(monkeypatch, 111111, 222222)
     copy = await rivera_copy(app, client)
-    visitor = await open_session(client, copy)
+    visitor = await open_visitor(client, copy)
     for _ in range(2):
         await started(client, visitor, DANA_PHONE)
     assert sorted(code_in(entry) for entry in await session_inbox(client, visitor)) == ["111111", "222222"]
@@ -212,7 +202,7 @@ async def test_each_challenge_gets_a_fresh_code(app, client, monkeypatch):
 async def test_new_challenge_cancels_the_old_one_across_sessions(app, client, monkeypatch):
     codes(monkeypatch, 111111, 222222)
     copy = await rivera_copy(app, client)
-    first, second = await open_session(client, copy), await open_session(client, copy)
+    first, second = await open_visitor(client, copy), await open_visitor(client, copy)
     await started(client, first, DANA_PHONE)
     await started(client, second, "(510) 555-0177")
     response = await check(client, first, "111111")                   # Dana's code from another session replaced it
@@ -235,7 +225,7 @@ async def session_row(app: FastAPI, copy: Copy, visitor: Visitor) -> ActorSessio
 async def test_one_live_challenge_per_session(app, client, monkeypatch):
     codes(monkeypatch, 111111, 222222, 333333)
     copy = await rivera_copy(app, client)
-    visitor = await open_session(client, copy)
+    visitor = await open_visitor(client, copy)
     await started(client, visitor, DANA_PHONE)
     await started(client, visitor, "stranger@example.com")            # not on record, and still cancels Dana's
     response = await check(client, visitor, "111111")
@@ -254,7 +244,7 @@ async def test_one_live_challenge_per_session(app, client, monkeypatch):
 async def test_correct_code_verifies_once(app, client, monkeypatch):
     codes(monkeypatch, 111111)
     copy = await rivera_copy(app, client)
-    visitor, other = await open_session(client, copy), await open_session(client, copy)
+    visitor, other = await open_visitor(client, copy), await open_visitor(client, copy)
     await started(client, visitor, DANA_PHONE)
     response = await check(client, other, "111111")                   # a code works only in the session that asked
     assert (response.status_code, response.json()) == INVALID
@@ -278,7 +268,7 @@ async def test_correct_code_verifies_once(app, client, monkeypatch):
 async def test_wrong_codes_lock_the_challenge_after_five(app, client, frozen_clock, monkeypatch):
     codes(monkeypatch, 111111)
     copy = await rivera_copy(app, client)
-    visitor, stranger = await open_session(client, copy), await open_session(client, copy)
+    visitor, stranger = await open_visitor(client, copy), await open_visitor(client, copy)
     missing = await check(client, stranger, "111111")                # the answer a session with no challenge gets
     assert (missing.status_code, missing.json()) == INVALID
     await started(client, visitor, DANA_PHONE)
@@ -299,7 +289,7 @@ async def test_wrong_codes_lock_the_challenge_after_five(app, client, frozen_clo
 async def test_challenge_expires_after_ten_minutes(app, client, frozen_clock, monkeypatch):
     codes(monkeypatch, 111111, 222222)
     copy = await rivera_copy(app, client)
-    visitor = await open_session(client, copy)
+    visitor = await open_visitor(client, copy)
     await started(client, visitor, DANA_PHONE)
     frozen_clock.advance(600)                                         # ten minutes on, the code is gone
     response = await check(client, visitor, "111111")
@@ -336,7 +326,7 @@ async def test_sixth_challenge_in_an_hour_is_refused(app, client, frozen_clock):
         prefs.now = [kind for kind in prefs.now if kind != "lockout"]
     assert api_rows(copy.copy_id, "SELECT now FROM kernel_ro.notification_prefs") == [
         (["approval", "emergency", "breaker"],)]
-    visitor = await open_session(client, copy)
+    visitor = await open_visitor(client, copy)
     for _ in range(5):
         await started(client, visitor, DANA_PHONE)
         frozen_clock.advance(300)
@@ -367,7 +357,7 @@ async def wrong_codes(client: httpx.AsyncClient, visitor: Visitor, count: int) -
 async def test_ten_failures_lock_the_contact_for_a_rolling_hour(app, client, frozen_clock, monkeypatch):
     codes(monkeypatch, 111111, 222222, 333333, 444444)
     copy = await rivera_copy(app, client)
-    first, second, third, later = [await open_session(client, copy) for _ in range(4)]
+    first, second, third, later = [await open_visitor(client, copy) for _ in range(4)]
     began = frozen_clock.now()
 
     def minute(n: int) -> None:
@@ -405,7 +395,7 @@ async def test_ten_failures_lock_the_contact_for_a_rolling_hour(app, client, fro
 
 async def test_concurrent_requests_respect_the_limits(app, client):
     copy = await rivera_copy(app, client)
-    visitor = await open_session(client, copy)
+    visitor = await open_visitor(client, copy)
     await started(client, visitor, DANA_PHONE)
     answers = await asyncio.gather(*(check(client, visitor, "000000") for _ in range(20)))
     assert {(response.status_code, response.content) for response in answers} == {(422, b'{"code":"invalid"}')}
@@ -414,7 +404,7 @@ async def test_concurrent_requests_respect_the_limits(app, client):
     outcomes = [summary["outcome"] for summary in await verify_entries(app, copy)]
     assert outcomes == ["started", *["wrong_code"] * 5, *["no_challenge"] * 15]
     # five sessions ask for Bob's code at once: one code stays live
-    sessions = [await open_session(client, copy) for _ in range(5)]
+    sessions = [await open_visitor(client, copy) for _ in range(5)]
     answers = await asyncio.gather(*(started(client, session, "bob@example.com") for session in sessions))
     assert {answer.message for answer in answers} == {STARTED_EN}
     bob = [challenge for challenge in await challenges(app, copy) if challenge.person_id == copy.people["bob"]]
@@ -430,7 +420,7 @@ async def verified_as_dana(client: httpx.AsyncClient, visitor: Visitor) -> None:
 
 async def test_a_session_verifies_one_person(app, client):
     copy = await rivera_copy(app, client)
-    visitor = await open_session(client, copy)
+    visitor = await open_visitor(client, copy)
     await verified_as_dana(client, visitor)
     answer = await started(client, visitor, "bob@example.com")
     assert answer == VerifyStarted(message="You're already confirmed in this chat.", inbox=[])
@@ -441,7 +431,7 @@ async def test_a_session_verifies_one_person(app, client):
     assert (await session_row(app, copy, visitor)).person_id == copy.people["dana"]
     assert [summary["outcome"] for summary in await verify_entries(app, copy)] == [
         "started", "verified", "already_verified", "already_verified"]
-    await set_language(app, copy, visitor, "es")
+    await set_session(app, copy, visitor.session_id, last_language="es")
     assert (await started(client, visitor, "bob@example.com")).message == "Ya confirmaste quién eres en este chat."
 
 
@@ -450,7 +440,7 @@ async def test_a_session_bound_to_someone_else_is_refused_and_ledgered(app, clie
     verify) gets the one 422 for a right code, ledgered `already_bound`, and the challenge stays live."""
     codes(monkeypatch, 111111)
     copy = await rivera_copy(app, client)
-    visitor = await open_session(client, copy)
+    visitor = await open_visitor(client, copy)
     await started(client, visitor, DANA_PHONE)
     await set_session(app, copy, visitor.session_id, person_id=copy.people["bob"])
     response = await check(client, visitor, "111111")
@@ -463,14 +453,6 @@ async def test_a_session_bound_to_someone_else_is_refused_and_ledgered(app, clie
                                                {"outcome": "already_bound", "challenge_id": challenge.challenge_id}]
 
 
-async def update_rows(app: FastAPI, copy: Copy, model, key_column, key: str, **values) -> None:
-    async with kernel_ctx(app) as ctx:
-        repo = ctx.bind(copy.copy_id)
-        row = (await ctx.db.scalars(repo.scoped(select(model).where(key_column == key)))).one()
-        for name, value in values.items():
-            setattr(row, name, value)
-
-
 async def all_three(client: httpx.AsyncClient, visitor: Visitor, headers: dict[str, str]) -> list[httpx.Response]:
     """The three session routes, called for `visitor` with `headers`."""
     body = {"session_id": visitor.session_id}
@@ -481,7 +463,7 @@ async def all_three(client: httpx.AsyncClient, visitor: Visitor, headers: dict[s
 
 async def test_verify_routes_answer_session_states(app, client, frozen_clock):
     copy, other = await rivera_copy(app, client), await rivera_copy(app, client)
-    visitor, elsewhere = await open_session(client, copy), await open_session(client, other)
+    visitor, elsewhere = await open_visitor(client, copy), await open_visitor(client, other)
     for headers in ({auth.SESSION_HEADER: elsewhere.token},              # a session of another copy
                     {auth.SESSION_HEADER: visitor.token[:-1]},           # a guess
                     copy.owner, {}):                                     # the owner's token, or none
@@ -499,18 +481,21 @@ async def test_verify_routes_answer_session_states(app, client, frozen_clock):
     assert response.status_code == 200, response.text
     await verified_as_dana(client, visitor)
     # a paused session starts nothing, and a check finds no code
-    paused = await open_session(client, copy)
-    await update_rows(app, copy, ActorSession, ActorSession.session_id, paused.session_id, mode="paused")
+    paused = await open_visitor(client, copy)
+    await set_session(app, copy, paused.session_id, mode="paused")
     start_paused, check_paused, inbox_paused = await all_three(client, paused, paused.headers)
     assert (start_paused.status_code, start_paused.json()) == (409, {"code": "mode_paused"})
     assert (check_paused.status_code, check_paused.json()) == INVALID
     assert (inbox_paused.status_code, inbox_paused.json()) == (200, [])
     # a closed session, then a deleted Desk, answers 409 closed
-    closed, open_one = await open_session(client, copy), await open_session(client, copy)
-    await update_rows(app, copy, ActorSession, ActorSession.session_id, closed.session_id, closed_at=frozen_clock.now())
+    closed, open_one = await open_visitor(client, copy), await open_visitor(client, copy)
+    await set_session(app, copy, closed.session_id, closed_at=frozen_clock.now())
     for response in await all_three(client, closed, closed.headers):
         assert (response.status_code, response.json()) == (409, {"code": "closed"})
-    await update_rows(app, copy, Desk, Desk.desk_id, copy.rivera.desk_id, deleted_at=frozen_clock.now())
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        desk = (await ctx.db.scalars(ctx.repo.scoped(select(Desk).where(Desk.desk_id == copy.rivera.desk_id)))).one()
+        desk.deleted_at = frozen_clock.now()
     for response in await all_three(client, open_one, open_one.headers):
         assert (response.status_code, response.json()) == (409, {"code": "closed"})
     refusals = [entry.event.summary for entry in await rows_of(app, copy.copy_id, select(LedgerEntry).where(
@@ -523,7 +508,7 @@ async def test_verify_routes_answer_session_states(app, client, frozen_clock):
 
 async def test_demo_inbox_is_scoped_to_the_sessions_challenges(app, client):
     copy, other = await rivera_copy(app, client), await rivera_copy(app, client)
-    first, second = await open_session(client, copy), await open_session(client, copy)
+    first, second = await open_visitor(client, copy), await open_visitor(client, copy)
     [dana_first] = (await started(client, first, DANA_PHONE)).inbox
     assert [entry.entry_id for entry in await session_inbox(client, first)] == [dana_first.entry_id]
     assert await session_inbox(client, second) == []                  # nothing until it asks for a code itself
@@ -535,7 +520,7 @@ async def test_demo_inbox_is_scoped_to_the_sessions_challenges(app, client):
     assert {entry.entry_id for entry in await session_inbox(client, second)} == {dana_first.entry_id,
                                                                                 dana_second.entry_id, bob.entry_id}
     assert {entry.to for entry in await session_inbox(client, second)} == {"•••• 0177", "b•••@example.com"}
-    stranger = await open_session(client, other)                      # Dana in another copy is someone else
+    stranger = await open_visitor(client, other)                      # Dana in another copy is someone else
     await started(client, stranger, DANA_PHONE)
     assert len(await session_inbox(client, stranger)) == 1
     assert dana_first.entry_id not in {entry.entry_id for entry in await owner_inbox(client, other)}
@@ -545,7 +530,7 @@ async def test_demo_inbox_is_scoped_to_the_sessions_challenges(app, client):
 
 async def test_sessions_never_see_alerts_or_checkpoints(app, client):
     copy = await rivera_copy(app, client)
-    owner_typed, business_typed, dana = [await open_session(client, copy) for _ in range(3)]
+    owner_typed, business_typed, dana = [await open_visitor(client, copy) for _ in range(3)]
     for _ in range(6):                                                # five codes, then a lockout alert for Dana
         await started(client, dana, DANA_PHONE)
     await started(client, business_typed, "(510) 555-0142")           # the business's own number
@@ -573,7 +558,7 @@ async def test_codes_stay_in_the_kernel(app, client, monkeypatch, caplog):
     caplog.set_level(logging.DEBUG, logger="desk")
     codes(monkeypatch, 424242, 737373)
     copy = await rivera_copy(app, client)
-    first, second = await open_session(client, copy), await open_session(client, copy)
+    first, second = await open_visitor(client, copy), await open_visitor(client, copy)
     answers = [await start(client, first, DANA_PHONE), await start(client, second, DANA_PHONE)]
     for visitor, code in ((first, "424242"), (second, "000000"), (second, "737373"), (first, "737373")):
         await check(client, visitor, code)
@@ -595,7 +580,7 @@ async def test_a_failed_inbox_write_logs_no_code(app, client, monkeypatch, caplo
     caplog.set_level(logging.DEBUG)
     codes(monkeypatch, 424242, 737373)
     copy = await rivera_copy(app, client)
-    visitor = await open_session(client, copy)
+    visitor = await open_visitor(client, copy)
     [notice] = (await started(client, visitor, DANA_PHONE)).inbox
     monkeypatch.setattr(demo_inbox, "new_id", lambda prefix: notice.entry_id)   # the next entry's ID is taken
     response = await start(client, visitor, DANA_PHONE)
@@ -616,7 +601,7 @@ def test_every_kernel_engine_hides_bound_values(app):
 
 async def test_attempt_and_ledger_share_a_transaction(app, client, monkeypatch):
     copy = await rivera_copy(app, client)
-    visitor = await open_session(client, copy)
+    visitor = await open_visitor(client, copy)
     await started(client, visitor, DANA_PHONE)
     append = ledger.append
 
@@ -654,7 +639,7 @@ async def context_facts(client: httpx.AsyncClient, visitor: Visitor) -> dict[str
 
 async def test_verifying_adds_the_person_to_earlier_and_later_facts(app, client):
     copy = await rivera_copy(app, client)
-    visitor, neighbour = await open_session(client, copy), await open_session(client, copy)
+    visitor, neighbour = await open_visitor(client, copy), await open_visitor(client, copy)
     earlier, theirs = await quoted(client, visitor, "call-1"), await quoted(client, neighbour, "call-1")
     session_label = Label(readers=["owner", f"session:{visitor.session_id}"])
     assert earlier.label == session_label
@@ -674,7 +659,7 @@ async def test_verifying_adds_the_person_to_earlier_and_later_facts(app, client)
 
 async def test_a_verified_person_sees_their_facts_from_another_session(app, client):
     copy = await rivera_copy(app, client)
-    first, second, unverified = [await open_session(client, copy) for _ in range(3)]
+    first, second, unverified = [await open_visitor(client, copy) for _ in range(3)]
     await verified_as_dana(client, first)
     quote = await quoted(client, first, "call-1")
     assert quote.fact_id not in await context_facts(client, second)
