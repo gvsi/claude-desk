@@ -64,6 +64,9 @@ async def test_failures_answer_before_anything_changes(fake):
     state.fail("/decide", "422", times=1)
     assert await refused(decide(view, session_id, 0, "call-1", "native.quote", quote_args("drain"))) == (
         422, "invalid")
+    state.fail("/decide", "409", times=1)
+    assert await refused(decide(view, session_id, 0, "call-1", "native.quote", quote_args("drain"))) == (
+        409, "conflict")
     assert (await decide(view, session_id, 0, "call-1", "native.quote", quote_args("drain"))).state == "allowed"
 
     with pytest.raises(ValueError):

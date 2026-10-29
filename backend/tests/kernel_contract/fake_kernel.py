@@ -504,8 +504,9 @@ class FakeKernelState:
 
     def fail(self, route: str, kind: str | None, *, times: int | None = None) -> None:
         """Fail the route's next `times` calls (every call when None) with `"timeout"`, `"connect"` (no
-        answer), `"500"` or `"422"`, before anything changes; `kind=None` heals it."""
-        if kind not in (None, "timeout", "connect", "500", "422"):
+        answer), `"500"` (`internal`), `"422"` (`invalid`) or `"409"` (`conflict`), before anything changes;
+        `kind=None` heals it."""
+        if kind not in (None, "timeout", "connect", *FAILURE_CODES):
             raise ValueError(f"unknown failure {kind!r}")
         for key in route_keys(route):
             if kind is None:
@@ -1481,6 +1482,9 @@ def route_keys(name: str) -> set[str]:
     return keys
 
 
+# The answers `fail` can give in place of the route's, by status, with each one's KernelError code.
+FAILURE_CODES = {"500": "internal", "422": "invalid", "409": "conflict"}
+
 # The routes this fake answers, by KERNEL_ROUTES key, with the state method that answers each.
 FAKE_ROUTES: dict[str, str] = {
     "GET /health": "health",
@@ -1523,7 +1527,7 @@ def _endpoint(state: FakeKernelState, key: str, handler: Callable[[Request, Any]
         if failure == "connect":
             raise httpx.ConnectError("the fake kernel refused the connection")
         if failure is not None:
-            return _error(int(failure), "internal" if failure == "500" else "invalid")
+            return _error(int(failure), FAILURE_CODES[failure])
         try:
             body = _parse(request_model, raw)
             result = handler(request, body)
