@@ -15,7 +15,7 @@
 //! - `context` is never used whole (`context == {...}` would read review too).
 //!
 //! The rules are checked on Cedar's JSON form of each policy.
-use cedar_policy::{Effect, PolicySet};
+use cedar_policy::{Effect, Policy, PolicySet};
 use serde_json::{Value, json};
 use std::collections::HashSet;
 use std::str::FromStr;
@@ -163,6 +163,21 @@ fn context_attrs(e: &Value) -> Vec<String> {
 
 fn reads_review(e: &Value) -> bool {
     context_attrs(e).iter().any(|attr| attr == "review")
+}
+
+/// Does `policy` read `context.review` in any condition, directly or by using
+/// `context` whole? The baseline may do neither.
+pub(crate) fn reads_review_anywhere(policy: &Policy) -> Result<bool, String> {
+    let est = policy
+        .to_json()
+        .map_err(|e| format!("can't be read: {e}"))?;
+    Ok(est["conditions"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(|condition| {
+            reads_review(&condition["body"]) || uses_whole_context(&condition["body"])
+        }))
 }
 
 /// Is `context` used other than as the left side of an access or `has`?

@@ -396,7 +396,9 @@ pub struct PolicyEngine {
 }
 
 impl PolicyEngine {
-    /// `baseline` is the Cedar text of set `B`; it may hold only forbids.
+    /// `baseline` is the Cedar text of set `B`; it may hold only forbids, and
+    /// none of them may read `context.review` (reviewer scores gate only auto
+    /// permits).
     pub fn new(baseline: &str) -> Result<Self> {
         let baseline = parse_set("B", baseline)?;
         if let Some(p) = baseline.iter().find(|p| p.effect() != Effect::Forbid) {
@@ -404,6 +406,14 @@ impl PolicyEngine {
                 "the baseline may hold only forbids, but {} is a permit",
                 p.id()
             );
+        }
+        for p in &baseline {
+            if crate::lint::reads_review_anywhere(p).map_err(|e| anyhow!("{}: {e}", p.id()))? {
+                bail!(
+                    "the baseline never reads context.review, but {} does",
+                    p.id()
+                );
+            }
         }
         Ok(Self {
             baseline,

@@ -210,6 +210,21 @@ fn review_carries_the_contracts_recommendation() {
 }
 
 #[test]
+fn baseline_never_reads_review() {
+    // Reviewer scores appear only as AND gates on auto permits, never in the baseline.
+    for forbid in [
+        r#"@id("b_has_review") forbid(principal, action, resource) when { context has review };"#,
+        r#"@id("b_score") forbid(principal, action, resource) when { context.review.manipulation_bp >= 9000 };"#,
+        r#"@id("b_unless") forbid(principal, action, resource) unless { context.review.within_charter_bp >= 1 };"#,
+        r#"@id("b_whole") forbid(principal, action, resource) when { context == {} };"#,
+    ] {
+        let refused = PolicyEngine::new(&format!("{BASELINE}\n{forbid}"));
+        let error = refused.err().map(|e| format!("{e:#}")).unwrap_or_default();
+        assert!(error.contains("review"), "{forbid}: {error:?}");
+    }
+}
+
+#[test]
 fn erroring_baseline_refuses() {
     let engine = engine_with(&format!("{BASELINE}\n{ERRORING_FORBID}"), AUTO);
     let link = |amount_cents: i64| {
