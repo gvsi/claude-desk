@@ -13,7 +13,7 @@ import { Transcript } from './Transcript.tsx';
 const dana = rivera.conversations.danaLive;
 const firstName = rivera.people.dana.name.split(' ')[0] ?? '';
 
-/** One stored turn as the owner reads it. Status receipts go in the margin, beside the log. */
+/** One stored turn as the owner reads it. Status receipts are left out here; they attach under their message in a `TranscriptRow`. */
 function Turn({ turn }: { turn: TranscriptTurn }) {
   switch (turn.kind) {
     case 'visitor':

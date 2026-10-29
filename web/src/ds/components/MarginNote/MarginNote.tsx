@@ -8,7 +8,7 @@ export interface MarginNoteProps {
 }
 
 /**
- * An owner note in the margin that isn't a checkpoint result (a lead saved, a whisper applied):
+ * An owner note attached under a message that isn't a checkpoint result (a lead saved, a whisper applied):
  * the hollow info dot beside the line, laid out like a `MarginReceipt`.
  */
 export function MarginNote({ text, onOpen }: MarginNoteProps) {

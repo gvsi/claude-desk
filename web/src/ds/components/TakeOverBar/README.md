@@ -39,4 +39,4 @@ A mode this build doesn't know shows the `ai` bar, which offers only Take over. 
 | `pending` | `boolean` | Every control waits. |
 | `error` | `string` | The screen's line. |
 
-The lines take the reading column (`size-reading`) and the controls the margin column (`size-margin`), as in the transcript above them; below the two columns' width the controls wrap under the lines. The buttons are `size-control-main`. When the mode changes under a button that had focus, focus moves to the bar's first line, and a button never turns into the opposite one under focus.
+The lines take a `size-reading` column, in line with the transcript's rows above them, and the controls a `size-margin` column beside them; below the two columns' width the controls wrap under the lines. The buttons are `size-control-main`. When the mode changes under a button that had focus, focus moves to the bar's first line, and a button never turns into the opposite one under focus.

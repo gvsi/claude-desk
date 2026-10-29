@@ -5,7 +5,7 @@ import './Transcript.css';
 export interface TranscriptProps {
   /** The log's accessible name: "Conversation with Dana Whitfield". */
   label: string;
-  /** The rows: messages, system lines, the writing state, and their margin receipts. */
+  /** The rows: messages, system lines, the writing state, and the receipts attached under messages. */
   children: ReactNode;
 }
 

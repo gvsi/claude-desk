@@ -86,7 +86,7 @@ const meta = {
     layout: 'padded',
     canvas: 'N-Conv-Live',
     canvasNote:
-      'The board puts Take over beside the whisper composer with its lines beneath; the bar sits above the composer in the same reading and margin columns, and names are written in full, as the screen passes them.',
+      'The board puts Take over beside the whisper composer with its lines beneath; the bar sits above the composer with its lines in the reading column and its controls beside them, and names are written in full, as the screen passes them.',
   },
 } satisfies Meta<typeof TakeOverBar>;
 
@@ -168,7 +168,7 @@ export const Paused: Story = {
     await expect(canvas.getAllByRole('button')).toEqual([resume, takeOver]);
     expectComputed(resume, { backgroundColor: 'rgb(239, 236, 228)' });
     expectComputed(takeOver, { backgroundColor: 'rgba(250, 249, 245, 0.1)' });
-    // Both fill the margin column, one above the other.
+    // Both fill the controls column, one above the other.
     await expect(resume.getBoundingClientRect().width).toBe(takeOver.getBoundingClientRect().width);
     await expect(takeOver.getBoundingClientRect().top).toBeGreaterThan(resume.getBoundingClientRect().bottom);
     await expect(canvasElement).not.toHaveTextContent('sees');

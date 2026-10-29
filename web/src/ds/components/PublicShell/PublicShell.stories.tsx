@@ -41,7 +41,7 @@ function required<T>(value: T | undefined, what: string): T {
   return value;
 }
 
-/** The visitor's question and Claude's checked quote, with the receipts a visitor reads beside it. */
+/** The visitor's question and Claude's checked quote, with the receipts a visitor reads under it. */
 function Conversation({ language }: { language: 'en' | 'es' }) {
   const turns = language === 'en' ? rivera.conversations.danaLive.turns : rivera.conversations.lucia.turns;
   const question = required(
@@ -59,7 +59,7 @@ function Conversation({ language }: { language: 'en' | 'es' }) {
   );
   return (
     <Transcript label={language === 'en' ? 'Conversation with Rivera Plumbing' : 'Conversación con Rivera Plumbing'}>
-      <TranscriptRow align="bubble">
+      <TranscriptRow>
         <VisitorMessage text={question} />
       </TranscriptRow>
       <TranscriptRow

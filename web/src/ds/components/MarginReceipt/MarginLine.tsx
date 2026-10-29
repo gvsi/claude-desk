@@ -16,7 +16,7 @@ export interface MarginLineProps {
 }
 
 /**
- * One line in the margin beside a message: a 6 px status dot and a secondary caption. With
+ * One line attached under a message: a 6 px status dot and a secondary caption. With
  * `onOpen` (owner screens) it is a button named "{text} Open the full trace."; without it, plain
  * text. Shared by `MarginReceipt` and `MarginNote`.
  */

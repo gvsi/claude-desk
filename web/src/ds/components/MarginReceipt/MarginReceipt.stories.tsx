@@ -43,10 +43,10 @@ const meta = {
   title: 'Conversation/MarginReceipt',
   component: MarginReceipt,
   args: { ...executed, onOpenTrace: fn() },
-  // The conversation's margin column, as on the board.
+  // The conversation's reading column, where receipts sit under their message.
   decorators: [
     (Story) => (
-      <div style={{ width: 'var(--size-margin)', maxWidth: '100%' }}>
+      <div style={{ width: 'var(--size-reading)', maxWidth: '100%' }}>
         <Story />
       </div>
     ),

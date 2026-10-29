@@ -1,6 +1,6 @@
-/* TakeOverBar: who is answering, in the conversation's reading and margin columns, above the
-   composer: the lines in the reading column, the controls and what the visitor sees in the margin.
-   Below the two columns' width the margin wraps under the lines. */
+/* TakeOverBar: who is answering, above the composer: the lines in a size-reading column, and the
+   controls and what the visitor sees in a size-margin column beside them. Below the two columns'
+   width the controls wrap under the lines. */
 
 .cd-take-over {
   display: flex;

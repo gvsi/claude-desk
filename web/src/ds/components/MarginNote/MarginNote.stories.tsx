@@ -10,10 +10,10 @@ const meta = {
   title: 'Conversation/MarginNote',
   component: MarginNote,
   args: { text: LEAD_SAVED, onOpen: fn() },
-  // The conversation's margin column, as on the board.
+  // The conversation's reading column, where notes sit under their message.
   decorators: [
     (Story) => (
-      <div style={{ width: 'var(--size-margin)', maxWidth: '100%' }}>
+      <div style={{ width: 'var(--size-reading)', maxWidth: '100%' }}>
         <Story />
       </div>
     ),

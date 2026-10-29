@@ -1,5 +1,5 @@
-/* Transcript: the conversation's rows, one under the next, in a container the rows can query
-   (`@container cd-transcript (…)`), so a narrow column stacks its margin under the message. */
+/* Transcript: the conversation's rows, one under the next, in an inline-size container named
+   cd-transcript, so what is inside lays out by the log's width rather than the window's. */
 
 .cd-transcript {
   container: cd-transcript / inline-size;

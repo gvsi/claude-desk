@@ -1,4 +1,4 @@
-Claude Desk is a public, always-on Claude for a person or small business: strangers and their agents talk to it, and it answers, books, quotes and takes payments under the owner's rules. The interface is warm, dark and quiet, so that the one thing that stands out is what Claude did and why: the margin receipts. Build every surface (the owner app, the public page and setup) from these tokens and rules.
+Claude Desk is a public, always-on Claude for a person or small business: strangers and their agents talk to it, and it answers, books, quotes and takes payments under the owner's rules. The interface is warm, dark and quiet, so that the one thing that stands out is what Claude did and why: the receipts attached under each message. Build every surface (the owner app, the public page and setup) from these tokens and rules.
 
 ## Content
 
@@ -41,7 +41,7 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 ### Space, size and shape
 
 - Space with the steps `space-2` to `space-40`. Pad cards with `space-16` to `space-20`; pad content with `space-40` at the sides on desktop and `space-16` on a phone.
-- Lay out the owner app with a `size-sidebar` sidebar and content no wider than `size-content`. A conversation is a `size-reading` column with the `size-margin` receipts column beside it.
+- Lay out the owner app with a `size-sidebar` sidebar and content no wider than `size-content`. A conversation is a `size-reading` column, with each message's receipts attached under it.
 - Make controls `size-control` tall and a screen's main action `size-control-main`; nav rows are `size-nav-row`, icons `size-icon`, avatars `size-avatar`, and the public page's brand header `size-brand-header`.
 - Round controls with `radius-control`; cards, dialogs and bubbles with `radius-card`; the composer with `radius-composer`; pills, chips, switches and avatars with `radius-full`.
 - Use `shadow-composer` on the composer and nowhere else.
@@ -53,9 +53,9 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 - Allow at most one small moment per screen. Motion explains a change; it never decorates.
 - Under `prefers-reduced-motion: reduce` nothing animates or transitions; the base stylesheet enforces it on every element.
 
-## The signature: margin receipts
+## The signature: receipts under each message
 
-- Beside a conversation, put each checkpoint result in the `size-margin` column next to the message it explains, like an editor's note in the margin: a status dot and one line of `caption` in `text-secondary`.
+- Show checkpoint results as receipts attached under each message, at every width: each one (a `MarginReceipt`) sits right under the message it explains, like an editor's note, as a status dot and one line of `caption` in `text-secondary`.
 - On visitor surfaces, show exactly the signed event's `visitor_plain` line, never rewritten and never with a clock time. On owner screens a receipt opens the full trace.
 - Keep everything around the receipts quiet. They are the one bold element in the system.
 

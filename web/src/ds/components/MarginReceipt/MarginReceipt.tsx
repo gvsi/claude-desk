@@ -18,7 +18,7 @@ export interface MarginReceiptProps {
 }
 
 /**
- * A checkpoint result in the margin beside the message it explains: a status dot from
+ * A checkpoint result attached under the message it explains: a status dot from
  * `receiptTone` and the kernel's line. It never rewrites the line or adds a time.
  */
 export function MarginReceipt({ source, plain, ledgerSeq, onOpenTrace, drawCheck = false }: MarginReceiptProps) {

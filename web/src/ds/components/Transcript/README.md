@@ -16,7 +16,7 @@
 ## Layout
 
 - A flex column with a `space-14` gap between rows, as on the conversation board.
-- An inline-size container named `cd-transcript`, so a row can lay out by the log's width with `@container cd-transcript (…)` instead of by the window's. The log takes the width of its column.
+- An inline-size container named `cd-transcript`, so what is inside can lay out by the log's width with `@container cd-transcript (…)` instead of by the window's. The log takes the width of its column, and each `TranscriptRow` is its reading column, with receipts attached under each message.
 
 ## Props
 

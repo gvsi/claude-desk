@@ -1,5 +1,5 @@
-/* MarginReceipt and MarginNote: one quiet line in the margin column, a 6 px status dot beside a
-   secondary caption, like an editor's note beside the message it explains. */
+/* MarginReceipt and MarginNote: one quiet line, a 6 px status dot beside a
+   secondary caption, like an editor's note under the message it explains. */
 
 .cd-margin-line {
   display: flex;

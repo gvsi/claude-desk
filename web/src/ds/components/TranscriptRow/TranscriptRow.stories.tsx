@@ -45,11 +45,10 @@ function DanaOpening({ onOpenTrace }: { onOpenTrace: (ledgerSeq: number) => void
         left="Today at 12:04, web chat from the Rivera Plumbing page"
         right="Notes from the checks. Select one for the full trace."
       />
-      <TranscriptRow align="bubble">
+      <TranscriptRow>
         <VisitorMessage text={question} />
       </TranscriptRow>
       <TranscriptRow
-        align="reply"
         margin={receipts.map((receipt) => (
           <MarginReceipt key={receipt.ledgerSeq} {...receipt} onOpenTrace={onOpenTrace} />
         ))}
@@ -89,11 +88,28 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
+/**
+ * receipts_attach_under_message: the row is the reading column, and its receipts sit under the
+ * message, left-aligned with it, `space-8` below it, as wide as the column. Nothing overflows.
+ */
+async function expectAttachedUnder(root: HTMLElement, selector: string, readingWidth: number) {
+  const { row, main, margin } = rowParts(root, selector);
+  const rowBox = row.getBoundingClientRect();
+  const mainBox = main.getBoundingClientRect();
+  const marginBox = margin.getBoundingClientRect();
+  await expect(rowBox.width).toBe(readingWidth);
+  await expect(mainBox.width).toBe(rowBox.width);
+  await expect(marginBox.width).toBe(rowBox.width);
+  await expect(marginBox.left).toBe(rowBox.left);
+  await expect(marginBox.top - mainBox.bottom).toBe(8);
+  for (const el of [row, main, margin]) await expect(el.scrollWidth).toBeLessThanOrEqual(el.clientWidth);
+}
+
 export const ReplyWithReceipts: Story = {
   render: () => <DanaOpening onOpenTrace={fn()} />,
   parameters: {
     canvasNote:
-      "The board's quote is in Claude's prose and its notes are written for the board; here the quote is a card and the receipts are the kernel's lines for the quote and its reply check.",
+      "The board's quote is in Claude's prose and its notes sit in a margin column; here the quote is a card, and the kernel's lines for the quote and its reply check are attached under the reply, at every width.",
   },
   play: async ({ canvas, canvasElement }) => {
     const log = canvas.getByRole('log', { name: `Conversation with ${dana.name}` });
@@ -106,25 +122,22 @@ export const ReplyWithReceipts: Story = {
     // receipts_are_announced: every receipt is inside the transcript's live log.
     for (const receipt of shown) await expect(receipt.parentElement?.closest('[aria-live]')).toBe(log);
 
-    // margin_aligns_with_message: the first receipt starts within 4 px of the reply's first line.
-    const { inner: prose, main, margin } = rowParts(canvasElement, '.cd-claude-message__prose');
-    const first = shown[0] as HTMLElement;
-    const offset = first.getBoundingClientRect().top - prose.getBoundingClientRect().top;
-    await expect(Math.abs(offset)).toBeLessThanOrEqual(4);
+    // In the owner's 960 px content column, the row is still the 640 px reading column, and the
+    // receipts are under the reply, one above the other.
+    await expect(log.getBoundingClientRect().width).toBe(960);
+    await expectAttachedUnder(canvasElement, '.cd-claude-message__prose', 640);
+    const [first, second] = shown as [HTMLElement, HTMLElement];
+    await expect(second.getBoundingClientRect().top).toBeGreaterThan(first.getBoundingClientRect().bottom);
+    await expect(second.getBoundingClientRect().left).toBe(first.getBoundingClientRect().left);
 
-    // Side by side: the reading column, the gap and the margin column.
-    const mainBox = main.getBoundingClientRect();
-    const marginBox = margin.getBoundingClientRect();
-    await expect(mainBox.width).toBe(640);
-    await expect(marginBox.width).toBe(220);
-    await expect(marginBox.left - mainBox.right).toBeGreaterThanOrEqual(24);
-
-    // The header's two captions sit over the same columns.
+    // The header's two captions stack in the same column, the receipts' caption second.
     const header = canvasElement.querySelector<HTMLElement>('.cd-transcript-header');
     if (!header) throw new Error('no transcript header');
     const [left, right] = [...header.children] as HTMLElement[];
-    await expect(left?.getBoundingClientRect().left).toBe(mainBox.left);
-    await expect(right?.getBoundingClientRect().left).toBe(marginBox.left);
+    const reply = rowParts(canvasElement, '.cd-claude-message__prose').row.getBoundingClientRect();
+    await expect(left?.getBoundingClientRect().left).toBe(reply.left);
+    await expect(right?.getBoundingClientRect().left).toBe(reply.left);
+    await expect(right?.getBoundingClientRect().top).toBeGreaterThanOrEqual(left?.getBoundingClientRect().bottom ?? Number.POSITIVE_INFINITY);
     await expect(right).toHaveTextContent('Notes from the checks. Select one for the full trace.');
   },
 };
@@ -132,48 +145,40 @@ export const ReplyWithReceipts: Story = {
 export const BubbleWithNote: Story = {
   render: () => (
     <Transcript label={`Conversation with ${dana.name}`}>
-      <TranscriptRow align="bubble" margin={<MarginNote text={LEAD_SAVED} onOpen={fn()} />}>
+      <TranscriptRow margin={<MarginNote text={LEAD_SAVED} onOpen={fn()} />}>
         <VisitorMessage text={followUp} />
       </TranscriptRow>
     </Transcript>
   ),
   parameters: {
-    canvasNote: "Dana's second message is the fixture's; the board's message under this note also gave her name and phone.",
+    canvasNote: "Dana's second message is the fixture's; the board's message under this note also gave her name and phone, and its note sits in a margin column.",
   },
   play: async ({ canvasElement }) => {
-    // The note's line sits level with the bubble's first line of text: 8 px of padding, then the
-    // 21 px message line centred on the 17 px caption line.
-    const { inner: bubble } = rowParts(canvasElement, '.cd-visitor-message__bubble');
+    // The note is attached under the bubble, like a receipt.
+    await expectAttachedUnder(canvasElement, '.cd-visitor-message__bubble', 640);
+    const bubble = canvasElement.querySelector<HTMLElement>('.cd-visitor-message__bubble');
     const note = canvasElement.querySelector<HTMLElement>('.cd-margin-note');
-    if (!note) throw new Error('no margin note');
-    const offset = note.getBoundingClientRect().top - bubble.getBoundingClientRect().top;
-    await expect(Math.abs(offset - 10)).toBeLessThanOrEqual(1);
+    if (!bubble || !note) throw new Error('no bubble or note');
+    await expect(note.getBoundingClientRect().top).toBeGreaterThanOrEqual(bubble.getBoundingClientRect().bottom);
   },
 };
 
-export const Stacked: Story = {
+export const Narrow: Story = {
   render: () => <DanaOpening onOpenTrace={fn()} />,
   decorators: [
     (Story) => (
-      <div style={{ width: 600, maxWidth: '100%' }}>
+      <div style={{ width: 360, maxWidth: '100%' }}>
         <Story />
       </div>
     ),
   ],
   parameters: {
-    canvasNote: 'The board is wide enough for the margin; in a column under 884 px, as on a phone or the public page, it stacks under the message.',
+    canvasNote: 'The board is wide; on a phone the same rows take the full width, with the receipts attached under each message.',
   },
   play: async ({ canvas, canvasElement }) => {
-    // stacks_when_narrow: the margin goes under the message, full width, and nothing overflows.
-    const { row, main, margin } = rowParts(canvasElement, '.cd-claude-message__prose');
-    const rowBox = row.getBoundingClientRect();
-    const mainBox = main.getBoundingClientRect();
-    const marginBox = margin.getBoundingClientRect();
-    await expect(marginBox.top).toBeGreaterThanOrEqual(mainBox.bottom);
-    await expect(marginBox.left).toBe(rowBox.left);
-    await expect(marginBox.width).toBe(rowBox.width);
-    await expect(mainBox.width).toBe(rowBox.width);
+    // The same layout in a phone's column: the row takes its full width.
+    await expectAttachedUnder(canvasElement, '.cd-claude-message__prose', 360);
     const log = canvas.getByRole('log');
-    for (const el of [log, row, main, margin]) await expect(el.scrollWidth).toBeLessThanOrEqual(el.clientWidth);
+    await expect(log.scrollWidth).toBeLessThanOrEqual(log.clientWidth);
   },
 };

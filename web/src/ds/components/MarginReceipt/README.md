@@ -1,10 +1,10 @@
 # MarginReceipt
 
-`MarginReceipt` is a checkpoint result in the margin beside the message it explains: a 6 px status dot and one line in a secondary caption, like an editor's note.
+`MarginReceipt` is a checkpoint result attached under the message it explains: a 6 px status dot and one line in a secondary caption, like an editor's note.
 
 ## When to use
 
-- In a `TranscriptRow`'s margin, for every signed status event (`EvReceipt`, `EvHeld`, `EvResolved`) and for each delivered message's reply check (`EvMessage.visitor_plain`).
+- In a `TranscriptRow`'s `margin`, attached under its message at every width, for every signed status event (`EvReceipt`, `EvHeld`, `EvResolved`) and for each delivered message's reply check (`EvMessage.visitor_plain`).
 - On visitor surfaces it is plain text with no trace hint. On owner screens, give it `onOpenTrace` and it becomes a button that opens the `FullTrace` for its ledger entry.
 - Keep receipts inside the `Transcript`'s log, so a screen reader announces each one as it arrives.
 - Not for owner notes that aren't checkpoint results (a lead saved, a whisper applied): use `MarginNote`.
