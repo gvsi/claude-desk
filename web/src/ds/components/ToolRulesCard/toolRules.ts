@@ -25,15 +25,25 @@ function containsScope(outer: RuleCard, inner: RuleCard): boolean {
 }
 
 /**
+ * True when one principal can satisfy both cards at the same specificity, so they can cover a tool
+ * jointly: both for groups of people (anyone, verified people, record owners, which always share
+ * someone), or both for the same one person or agent.
+ */
+function jointScope(a: RuleCard, b: RuleCard): boolean {
+  if (!personScoped(a) && !personScoped(b)) return true;
+  return a.who === b.who && (a.person_id ?? null) === (b.person_id ?? null) && (a.agent_key_id ?? null) === (b.agent_key_id ?? null);
+}
+
+/**
  * An effect card covers the tool: it names one of the tool's effects, and an `auto` one only when
- * every effect of the tool is named by an `auto` effect card at the same specificity (one card per
- * effect, covering it jointly).
+ * every effect of the tool is named by an `auto` effect card at the same specificity and for the
+ * same person or agent, so one principal satisfies them all (one card per effect, jointly).
  */
 function effectCardCovers(card: RuleCard, tool: RulesTool, effectCards: readonly RuleCard[]): boolean {
   if (!tool.effects.some((effect) => card.applies_to === `effect:${effect}`)) return false;
   if (card.mode !== 'auto') return true;
   return tool.effects.every((effect) =>
-    effectCards.some((other) => other.mode === 'auto' && other.applies_to === `effect:${effect}` && personScoped(other) === personScoped(card)),
+    effectCards.some((other) => other.mode === 'auto' && other.applies_to === `effect:${effect}` && jointScope(card, other)),
   );
 }
 

@@ -75,6 +75,23 @@ describe('rulesForTool', () => {
     // With an auto card for private data at the same level, both cover it jointly.
     const privateData = card({ card_id: 'private', applies_to: 'effect:private_data', who: 'record_owner' });
     expect(ids(rulesForTool(documents, [send, privateData]))).toEqual(['send', 'private']);
+    // A joint combination needs one principal who satisfies every card: a private-data card for
+    // agent A and a send-message card for agent B cover nobody, so neither governs documents.
+    const agentPrivate = card({ card_id: 'a-private', applies_to: 'effect:private_data', who: 'agent', agent_key_id: 'agent-a' });
+    const otherAgentSend = card({ card_id: 'b-send', applies_to: 'effect:send_message', who: 'agent', agent_key_id: 'agent-b' });
+    expect(ids(rulesForTool(documents, [agentPrivate, otherAgentSend]))).toEqual([]);
+    // The same agent's two cards do cover it jointly.
+    const sameAgentSend = { ...otherAgentSend, card_id: 'a-send', agent_key_id: 'agent-a' };
+    expect(ids(rulesForTool(documents, [agentPrivate, sameAgentSend]))).toEqual(['a-private', 'a-send']);
+    // So do a person's two cards; another person's, or an agent's, don't combine with them.
+    const danaPrivate = card({ card_id: 'dana-private', applies_to: 'effect:private_data', who: 'person', person_id: 'per-dana' });
+    const danaSend = { ...danaPrivate, card_id: 'dana-send', applies_to: 'effect:send_message' };
+    const bobSend = { ...danaSend, card_id: 'bob-send', person_id: 'per-bob' };
+    expect(ids(rulesForTool(documents, [danaPrivate, danaSend]))).toEqual(['dana-private', 'dana-send']);
+    expect(ids(rulesForTool(documents, [danaPrivate, bobSend]))).toEqual([]);
+    expect(ids(rulesForTool(documents, [danaPrivate, sameAgentSend]))).toEqual([]);
+    // A scoped card and a card for a group of people sit at different specificity: no joint cover.
+    expect(ids(rulesForTool(documents, [agentPrivate, send]))).toEqual([]);
     // An ask or never group card covers it alone.
     const askSend = { ...send, card_id: 'ask-send', mode: 'ask' } as const;
     expect(ids(rulesForTool(documents, [askSend]))).toEqual(['ask-send']);
