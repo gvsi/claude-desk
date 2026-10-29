@@ -29,6 +29,7 @@ interface ButtonBaseProps {
 /** A button, which may open a menu. */
 interface ButtonAsButton extends ButtonBaseProps {
   href?: undefined;
+  external?: undefined;
   /**
    * Makes it a menu button: a chevron after the words, `aria-haspopup="menu"`, and `aria-expanded`
    * from this value. The screen draws the menu and moves focus into it. Leave it out for a plain button.
@@ -42,6 +43,8 @@ interface ButtonAsButton extends ButtonBaseProps {
 interface ButtonAsLink extends ButtonBaseProps {
   /** Renders a link with the same look, opened with `rel="noopener noreferrer"`. */
   href: string;
+  /** Opens the link in a new tab (`target="_blank"`), as `TextLink`'s `external` does. */
+  external?: boolean;
   menuOpen?: undefined;
   onKeyDown?: undefined;
 }
@@ -53,6 +56,7 @@ export function Button({
   size = 'inline',
   type = 'button',
   href,
+  external = false,
   disabled = false,
   busy = false,
   menuOpen,
@@ -80,6 +84,7 @@ export function Button({
         id={id}
         className={className}
         href={inert ? undefined : href}
+        target={external && !inert ? '_blank' : undefined}
         rel="noopener noreferrer"
         role={inert ? 'link' : undefined}
         aria-disabled={inert || undefined}

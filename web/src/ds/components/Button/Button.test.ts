@@ -20,4 +20,12 @@ describe('Button props', () => {
     expect(html).not.toContain('aria-haspopup');
     expect(html).not.toContain('<svg');
   });
+
+  it('only_a_link_opens_a_new_tab', () => {
+    // `external` needs a link, and like `href` it never goes with a menu.
+    expectTypeOf<{ variant: 'secondary'; href: string; external: true; children: string }>().toExtend<ButtonProps>();
+    expectTypeOf<{ variant: 'secondary'; external: true; children: string }>().not.toExtend<ButtonProps>();
+    expectTypeOf<{ variant: 'secondary'; external: true; menuOpen: false; children: string }>().not.toExtend<ButtonProps>();
+    expectTypeOf<{ variant: 'secondary'; href: string; external: true; menuOpen: false; children: string }>().not.toExtend<ButtonProps>();
+  });
 });

@@ -12,6 +12,7 @@
 - The red variants are only for refusing. They are never a status, a warning or decoration, and their words still say exactly what happens.
 - `size="main"` for a screen's main actions (`size-control-main`, 40 px); `inline` (`size-control`, 32 px) everywhere else.
 - With `href`, the same look as a link: the button a payment or document card ends with ("Open payment page").
+- With `href` and `external`, a link that opens in a new tab, as `TextLink`'s `external` does: `target="_blank"` with `rel="noopener noreferrer"`, and no change to its look. Today's "Open your public page" and "Chat as a customer" use it, so Today stays open.
 - With `menuOpen`, a menu button: its words, then a 16 px `chevron-down` icon, with `aria-haspopup="menu"` and `aria-expanded`. A held request's card uses it for a side of the answer that has two answers ("Allow", "Deny"). The screen draws the menu, opens it on a click, Enter, Space or Down, and moves focus into it.
 
 ## What the consumer provides
@@ -29,6 +30,7 @@
 | `size` | `'inline' \| 'main'` | `inline` by default. |
 | `type` | `'button' \| 'submit' \| 'reset'` | `button` by default, so it never submits a form by accident. |
 | `href` | `string` | Renders an `<a rel="noopener noreferrer">`. A disabled or busy link loses its `href` and says `aria-disabled`. Not with `menuOpen` or `onKeyDown`. |
+| `external` | `boolean` | Only with `href`: adds `target="_blank"` (dropped with the `href` while disabled or busy). Not with `menuOpen`. |
 | `disabled` | `boolean` | Native `disabled`. |
 | `busy` | `boolean` | `aria-busy` and `aria-disabled`; clicks are swallowed. |
 | `menuOpen` | `boolean` | Makes it a menu button: a chevron, `aria-haspopup="menu"`, `aria-expanded`. Leave it out for a plain button. Not on a link. |
