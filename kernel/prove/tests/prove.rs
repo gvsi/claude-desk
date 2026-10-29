@@ -65,12 +65,27 @@ fn run(name: &str, args: &[&str], env: &[(&str, &str)]) -> Run {
 
 /// Writes the sets and checks files for one case and runs desk-prove on them.
 fn prove(name: &str, sets: &Value, checks: &Value, timeout_ms: u64, env: &[(&str, &str)]) -> Run {
+    let schema = fixture("schema.cedarschema.json");
+    prove_with_schema(name, &schema, sets, checks, timeout_ms, env)
+}
+
+/// `prove` against a schema of the test's own.
+fn prove_with_schema(
+    name: &str,
+    schema: &str,
+    sets: &Value,
+    checks: &Value,
+    timeout_ms: u64,
+    env: &[(&str, &str)],
+) -> Run {
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name);
     std::fs::create_dir_all(&dir).unwrap();
     let (sets_path, checks_path) = (dir.join("sets.json"), dir.join("checks.json"));
     std::fs::write(&sets_path, sets.to_string()).unwrap();
     std::fs::write(&checks_path, checks.to_string()).unwrap();
-    let schema = format!("{FIXTURES}/schema.cedarschema.json");
+    let schema_path = dir.join("schema.cedarschema.json");
+    std::fs::write(&schema_path, schema).unwrap();
+    let schema = schema_path.to_str().unwrap().to_string();
     let timeout = timeout_ms.to_string();
     run(
         name,
@@ -384,4 +399,64 @@ fn bad_input_is_a_tool_error() {
         &[("CVC5", "/nonexistent/cvc5")],
     );
     assert_eq!(run.code, 2, "{}", run.report);
+}
+
+/// The MCP schema with the refund tool also given to agents: the baseline, not
+/// the schema, has to keep agents from paying out.
+fn agent_payout_schema() -> String {
+    let mut schema: Value =
+        serde_json::from_str(&fixture("schema_with_mcp.cedarschema.json")).unwrap();
+    schema[""]["actions"]["payments.create_refund"]["appliesTo"]["principalTypes"] =
+        json!(["Visitor", "Agent"]);
+    schema.to_string()
+}
+
+#[test]
+fn agent_payout_is_proved_impossible() {
+    // A refund card for anyone, and an ask for refunds, over a schema where
+    // agents could call the refund tool.
+    let refund_card = r#"
+        @id("refunds_small") @card("c-refund") @tier("auto") @applies_to("payments.create_refund")
+        permit (principal, action == Action::"payments.create_refund", resource)
+        when { context has amount_cents && context.amount_cents <= 5000 };"#;
+    let refund_ask = r#"
+        @id("default_create_refund") @card("default:payments.create_refund") @tier("hold")
+        @applies_to("payments.create_refund")
+        permit (principal, action == Action::"payments.create_refund", resource);"#;
+    let mut sets = fixture_sets();
+    sets["A"] = json!(format!("{}\n{refund_card}", fixture("auto.cedar")));
+    sets["H"] = json!(format!("{}\n{refund_ask}", fixture("hold.cedar")));
+    let checks = json!({"checks": ["baseline_auto", "baseline_approvable"], "money_uncovered": []});
+    let schema = agent_payout_schema();
+
+    let run = prove_with_schema(
+        "agent_payout_baseline",
+        &schema,
+        &sets,
+        &checks,
+        30_000,
+        &[],
+    );
+    assert_eq!(run.code, 0, "{}", run.report);
+
+    // Without the baseline's forbid, both evaluations would let an agent pay out.
+    let baseline = fixture("baseline.cedar");
+    let without = &baseline[..baseline
+        .find("@id(\"no_agent_pay_out\")")
+        .expect("the forbid")];
+    sets["B"] = json!(without);
+    let run = prove_with_schema(
+        "agent_payout_no_forbid",
+        &schema,
+        &sets,
+        &checks,
+        30_000,
+        &[],
+    );
+    assert_eq!(run.code, 1, "{}", run.report);
+    for name in ["baseline_auto", "baseline_approvable"] {
+        let cex = &check(&run.report, name)["counterexample_raw"];
+        assert_eq!(cex["principal"]["type"], "Agent", "{name}: {cex}");
+        assert_eq!(cex["action"], "payments.create_refund", "{name}: {cex}");
+    }
 }

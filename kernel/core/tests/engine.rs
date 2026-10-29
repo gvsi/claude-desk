@@ -844,3 +844,60 @@ fn money_without_a_card_holds_even_with_no_ask() {
         );
     }
 }
+
+/// The MCP schema with the refund tool also given to agents: the baseline, not
+/// the schema, has to keep agents from paying out.
+fn agent_payout_schema() -> String {
+    let mut schema: Value = serde_json::from_str(SCHEMA_WITH_MCP).unwrap();
+    schema[""]["actions"]["payments.create_refund"]["appliesTo"]["principalTypes"] =
+        json!(["Visitor", "Agent"]);
+    schema.to_string()
+}
+
+const REFUND_CARD: &str = r#"
+@id("refunds_small")
+@card("c-refund")
+@tier("auto")
+@applies_to("payments.create_refund")
+permit (principal, action == Action::"payments.create_refund", resource)
+when { context has amount_cents && context.amount_cents <= 5000 };
+"#;
+
+#[test]
+fn agents_never_pay_out() {
+    let engine = PolicyEngine::new(BASELINE).expect("baseline loads");
+    let errors = engine.load(
+        KEY,
+        &agent_payout_schema(),
+        &sets("", &format!("{AUTO}\n{REFUND_CARD}"), HOLD),
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+    let mut charge = resource("Charge", "charge-1");
+    charge["attrs"]["owner_person_id"] = json!("person-dana");
+    let context = json!({"amount_cents": 2_000, "record_owner_match": true});
+
+    // Even a verified agent acting for the record owner, under a refund card for anyone.
+    let mut agent = agent(Some(10_000));
+    agent["attrs"]["verified"] = json!(true);
+    agent["attrs"]["person_id"] = json!("person-dana");
+    let refund = request(
+        agent,
+        "payments.create_refund",
+        charge.clone(),
+        context.clone(),
+    );
+    for phase in ["pre", "final"] {
+        let verdict = decide(&engine, KEY, &refund, phase);
+        assert_eq!(verdict["outcome"], "refuse", "{phase}: {verdict}");
+        assert!(
+            ids(&verdict["policy_ids"]).contains(&"B.no_agent_pay_out"),
+            "{phase}: {verdict}"
+        );
+    }
+
+    // The record owner themself still gets the refund the card allows.
+    let mut dana = visitor(true);
+    dana["attrs"]["person_id"] = json!("person-dana");
+    let refund = request(dana, "payments.create_refund", charge, context);
+    assert_eq!(decide(&engine, KEY, &refund, "final")["outcome"], "allow");
+}

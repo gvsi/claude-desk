@@ -28,3 +28,9 @@ unless {
   context has amount_cents &&
   context.amount_cents <= principal.mandate_remaining_cents
 };
+
+@id("no_agent_pay_out")
+@card("baseline")
+@tier("baseline")
+@applies_to("effect:pay_out")
+forbid (principal is Agent, action in Action::"effect:pay_out", resource);
