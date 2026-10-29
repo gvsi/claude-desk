@@ -2,7 +2,7 @@
 
 import ast
 import asyncio
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -12,7 +12,7 @@ from sqlalchemy import text
 
 import desk.api
 from desk.api.deliver import Reply, Status, deliver, run_lock
-from desk.api.metrics import RevealMetric, TurnMetric, record_model_call
+from desk.api.metrics import RevealMetric, TurnMetric, record_model_call, spent_today_cents
 from desk.api.sse import append_metric
 from desk.contracts import Decision, ReplyDraft, ReplyVerdict, ToolCall
 from desk.events import EvHeld, EvMessage, EvReceipt, EvResolved, SseEvent
@@ -292,3 +292,26 @@ async def test_model_call_rows_carry_the_finish_time(api_conn, ids):
     await append_metric(api_conn, ids, turn)
     metrics = await api_conn.execute(text("SELECT type, payload FROM app.run_events WHERE kind = 'metric' ORDER BY id"))
     assert [tuple(row) for row in metrics] == [("reveal", reveal.model_dump()), ("turn", turn.model_dump())]
+
+
+async def test_spend_today_uses_list_prices(api_conn, ids):
+    today = datetime(2026, 10, 30, 23, 0, tzinfo=UTC)
+    midnight = today.replace(hour=0)
+    calls = [
+        model_response(finished_at=midnight),                                  # $0.0139, the master's first call
+        model_response(finished_at=today),                                     # $0.0139
+        model_response("claude-haiku-5-5", finished_at=today, input_tokens=900, cached=0, output_tokens=40),  # $0.00011
+        model_response("claude-sonnet-5-5", finished_at=today, input_tokens=0, cached=0, written=1000,
+                       output_tokens=0),                                       # $0.0025
+        model_response("claude-unlisted", finished_at=today, input_tokens=0, cached=0,
+                       output_tokens=10_000),                                  # at the top rate: $0.20
+        model_response(finished_at=midnight - timedelta(microseconds=1)),      # yesterday's
+        model_response(finished_at=midnight + timedelta(days=1)),              # tomorrow's
+    ]
+    for response in calls:
+        await record_model_call(api_conn, ids.copy_id, ids.session_id, "conversation", response)
+
+    # 1.39 + 1.39 + 0.011 + 0.25 + 20 = 23.041 cents, rounded up
+    assert await spent_today_cents(api_conn, lambda: today) == 24
+    assert await spent_today_cents(api_conn, lambda: today.astimezone(timezone(timedelta(hours=-7)))) == 24
+    assert await spent_today_cents(api_conn, lambda: today + timedelta(days=2)) == 0
