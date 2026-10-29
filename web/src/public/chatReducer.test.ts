@@ -163,6 +163,48 @@ describe('chatReducer', () => {
     const again = run([{ type: 'sent', id: 'local-1', text: 'Thanks' }, { type: 'history', transcript: transcript(12, items) }], state);
     expect(again.rows).toEqual(state.rows);
   });
+
+  it('later_statuses_attach_to_their_hold', () => {
+    const [held, , handoff] = rivera.events.heldTurn as [StatusEvent, SseEvent, EvMessage, SseEvent];
+    const cancelled: StatusEvent = { ...held, type: 'resolved', state: 'cancelled', visitor_plain: 'Cancelled', ledger_seq: 9 };
+    const r = receiptFromEvent;
+    const receiptsOf = (state: ChatState) => state.rows.map((row) => row.receipts);
+
+    // The hold's receipt sits under Claude's handoff (row 1); then the chat goes on with a quote (row 3).
+    const heldOnRow = run([{ type: 'sent', id: 'v1', text: 'Can I get 15% off if I pay cash?' }, ...events(rivera.events.heldTurn)]);
+    const goneOn = run([{ type: 'sent', id: 'v2', text: 'How much is drain clearing?' }, ...events(rivera.events.quoteTurn, 5)], heldOnRow);
+    expect(receiptsOf(goneOn)).toEqual([[], [r(handoff), r(held)], [], [r(quoteMessage), r(quoteReceipt)]]);
+
+    // The visitor cancels: the outcome goes under the message that holds the hold, and nothing new
+    // under the quote.
+    const resolved = run(events([cancelled], 9), goneOn);
+    expect(receiptsOf(resolved)).toEqual([[], [r(handoff), r(held), r(cancelled)], [], [r(quoteMessage), r(quoteReceipt)]]);
+    expect(resolved.openHolds).toEqual([]);
+
+    // A status for a decision never held on the page still goes under the last row.
+    const other: StatusEvent = { ...quoteReceipt, decision_id: 'dec-elsewhere', ledger_seq: 10 };
+    const elsewhere = run(events([other], 10), resolved);
+    expect(receiptsOf(elsewhere)).toEqual([[], [r(handoff), r(held), r(cancelled)], [], [r(quoteMessage), r(quoteReceipt), r(other)]]);
+
+    // While the hold's own turn waits for its reply, a later status waits with it.
+    const early = run([{ type: 'sent', id: 'v1', text: 'Can I get 15% off?' }, ...events([held, { type: 'writing' }, cancelled, handoff])]);
+    expect(receiptsOf(early)).toEqual([[], [r(handoff), r(held), r(cancelled)]]);
+
+    // Reloading the conversation puts every line back where it was.
+    const stored: TranscriptItem[] = [
+      visitorText(1, 'Can I get 15% off if I pay cash?'),
+      { ...item(2, 'status'), event: held },
+      { ...item(3, 'delivered'), event: handoff },
+      visitorText(4, 'How much is drain clearing?'),
+      { ...item(5, 'status'), event: quoteReceipt },
+      { ...item(6, 'delivered'), event: quoteMessage },
+      { ...item(7, 'status'), event: cancelled },
+      { ...item(8, 'status'), event: other },
+    ];
+    const reloaded = run([{ type: 'history', transcript: transcript(10, stored) }]);
+    expect(receiptsOf(reloaded)).toEqual(receiptsOf(elsewhere));
+    expect(reloaded.openHolds).toEqual([]);
+  });
 });
 
 function item(n: number, kind: TranscriptItem['kind']): TranscriptItem {

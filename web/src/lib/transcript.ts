@@ -7,7 +7,8 @@
  * ends with Claude's reply. The receipts of the actions Claude ran in that turn reach the stream
  * before the reply does, and they attach under the reply, after the reply's own check, because the
  * reply is the message they explain. Any receipt after a reply attaches to the last row; one before
- * any row is kept as `leading`.
+ * any row is kept as `leading`. A receipt that follows an earlier one (a held request's outcome
+ * after its hold) attaches wherever that one is, however far the conversation has gone on.
  */
 
 export interface GroupedRow<Row, R> {
@@ -34,8 +35,11 @@ export type RowPart<Row, R> =
   | { kind: 'reply'; row: Row; receipt: R | null }
   /** A line about the chat itself (someone joined or left): it ends the turn. */
   | { kind: 'line'; row: Row }
-  /** A checkpoint result. */
-  | { kind: 'receipt'; receipt: R };
+  /**
+   * A checkpoint result. With `beside`, a receipt already in the conversation that this one
+   * follows, it attaches in the same place; when that one isn't there, as any other receipt.
+   */
+  | { kind: 'receipt'; receipt: R; beside?: R | undefined };
 
 export function emptyGroups<Row, R>(): RowGroups<Row, R> {
   return { rows: [], leading: [], pending: [], awaitingReply: false };
@@ -58,6 +62,21 @@ export function settle<Row, R>(groups: RowGroups<Row, R>): RowGroups<Row, R> {
   return { ...attach({ ...groups, pending: [] }, groups.pending), awaitingReply: false };
 }
 
+/** `groups` with `receipt` added where `beside` is (a row, the turn's waiting receipts or `leading`), or null when it isn't there. */
+function placeBeside<Row, R>(groups: RowGroups<Row, R>, receipt: R, beside: R): RowGroups<Row, R> | null {
+  for (let i = groups.rows.length - 1; i >= 0; i -= 1) {
+    const row = groups.rows[i];
+    if (row?.receipts.includes(beside)) {
+      const rows = [...groups.rows];
+      rows[i] = { ...row, receipts: [...row.receipts, receipt] };
+      return { ...groups, rows };
+    }
+  }
+  if (groups.pending.includes(beside)) return { ...groups, pending: [...groups.pending, receipt] };
+  if (groups.leading.includes(beside)) return { ...groups, leading: [...groups.leading, receipt] };
+  return null;
+}
+
 /** The conversation with one more item. */
 export function addPart<Row, R>(groups: RowGroups<Row, R>, part: RowPart<Row, R>): RowGroups<Row, R> {
   switch (part.kind) {
@@ -74,9 +93,12 @@ export function addPart<Row, R>(groups: RowGroups<Row, R>, part: RowPart<Row, R>
       const settled = settle(groups);
       return { ...settled, rows: [...settled.rows, { item: part.row, receipts: [] }] };
     }
-    case 'receipt':
+    case 'receipt': {
+      const placed = part.beside === undefined ? null : placeBeside(groups, part.receipt, part.beside);
+      if (placed !== null) return placed;
       if (groups.awaitingReply) return { ...groups, pending: [...groups.pending, part.receipt] };
       return attach(groups, [part.receipt]);
+    }
   }
 }
 

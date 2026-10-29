@@ -226,6 +226,29 @@ describe('public chat page', () => {
       held.visitor_plain,
       line,
     ]);
+
+    // In a second chat the visitor goes on after the hold: the cancel stays under the held
+    // message, and so does what cancelling it says, never under the booking that followed.
+    const second = await renderRoute(PAGE, { seed: 'rivera' });
+    await ready(second.screen);
+    await say(second.screen, 'Can I get 15% off if I pay cash?');
+    await say(second.screen, 'Book the first one');
+    const heldLine = second.screen.getByText(held.visitor_plain, { exact: true }).element();
+    const heldRow = rowOf(heldLine);
+    const bookedRow = rowOf(second.screen.getByRole('article', { name: 'Booked' }).element());
+    const booked = receiptsOf(bookedRow);
+    expect(booked).toEqual(["Reply checked against Maria Rivera's rules", "Booked on Maria Rivera's calendar"]);
+    const cancel = second.screen.getByRole('button', { name: 'Cancel this request' });
+    await expect.element(cancel).toBeVisible();
+    const box = cancel.element().getBoundingClientRect();
+    expect(box.top).toBeGreaterThanOrEqual(heldLine.getBoundingClientRect().bottom);
+    expect(box.bottom).toBeLessThanOrEqual(heldRow.nextElementSibling?.getBoundingClientRect().top ?? 0);
+    expect(box.bottom).toBeLessThanOrEqual(bookedRow.getBoundingClientRect().top);
+
+    await cancel.click();
+    await expect.element(second.screen.getByRole('button', { name: 'Cancel this request' })).not.toBeInTheDocument();
+    await vi.waitFor(() => expect(receiptsOf(heldRow)).toEqual(['Passed to Maria Rivera to answer', held.visitor_plain, 'Cancelled']));
+    expect(receiptsOf(bookedRow)).toEqual(booked);
   });
 
   it('error_event_shows_static_copy', async () => {

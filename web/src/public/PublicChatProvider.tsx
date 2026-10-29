@@ -53,8 +53,8 @@ export interface VisitorChatSnapshot {
   status: ChatStatus;
   /** The held request being cancelled, until its outcome arrives. */
   cancelling: string | null;
-  /** The last cancel failed and wasn't applied. */
-  cancelFailed: boolean;
+  /** The held request whose last cancel failed and wasn't applied, or null. */
+  cancelFailed: string | null;
 }
 
 export interface VisitorChatActions {
@@ -105,7 +105,7 @@ class VisitorChat {
     session: null,
     status: 'loading',
     cancelling: null,
-    cancelFailed: false,
+    cancelFailed: null,
   };
   private readonly listeners = new Set<() => void>();
   /** Pages showing this chat; the stream is open only while there is one. */
@@ -308,7 +308,7 @@ class VisitorChat {
     this.clearCheckTimer();
     this.checkRetries = 0;
     this.dispatch({ type: 'reset' });
-    this.set({ session: null, status: 'loading', cancelling: null, cancelFailed: false });
+    this.set({ session: null, status: 'loading', cancelling: null, cancelFailed: null });
     this.loading = true;
     this.open(epoch)
       .catch((err: unknown) => {
@@ -419,7 +419,7 @@ class VisitorChat {
 
   readonly cancel = (decisionId: string): void => {
     if (this.snapshot.cancelling !== null) return;
-    this.set({ cancelling: decisionId, cancelFailed: false });
+    this.set({ cancelling: decisionId, cancelFailed: null });
     void this.cancelHold(decisionId);
   };
 
@@ -444,7 +444,7 @@ class VisitorChat {
       }
       const applied = isUncertain(err) && (await this.wasResolved(decisionId));
       if (generation !== this.generation) return;
-      this.set({ cancelling: null, cancelFailed: !applied });
+      this.set({ cancelling: null, cancelFailed: applied ? null : decisionId });
     }
   }
 

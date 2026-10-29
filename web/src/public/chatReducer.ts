@@ -6,6 +6,9 @@
  * Each message and receipt shows once. The stream resumes after `lastSeq`, and a replay of events
  * the chat already holds (a transcript read before their seqs were known) is matched by identity:
  * a message by its `message_id`, a status by its `(decision_id, ledger_seq)`.
+ *
+ * A held request's later lines ("Cancelled", "Maria Rivera approved this") stay under the message
+ * that holds it, as every receipt stays under its own message, however far the chat has gone on.
  */
 import type { EvDemoInbox, EvErrorCode, EvMessage, EvOwnerJoined, EvOwnerLeft, SseEvent, StatusEvent } from '../api/contracts.ts';
 import type { StreamState } from '../api/stream.ts';
@@ -35,6 +38,8 @@ export interface ChatState extends RowGroups<ChatItem, ReceiptView> {
   error: EvErrorCode | null;
   /** Held requests the visitor can still cancel, oldest first. */
   openHolds: string[];
+  /** Each decision held on the page, by `decision_id`: its held receipt, which its later statuses attach beside. */
+  holds: ReadonlyMap<string, ReceiptView>;
   /** Demo inbox notices for this chat (no code in them). */
   inbox: EvDemoInbox[];
   /** What the chat already shows: `m:{message_id}` and `s:{decision_id}:{ledger_seq}`. */
@@ -66,6 +71,7 @@ export function initialChatState(): ChatState {
     connection: 'open',
     error: null,
     openHolds: [],
+    holds: new Map(),
     inbox: [],
     seen: new Set(),
   };
@@ -85,37 +91,46 @@ function withHolds(openHolds: string[], ev: StatusEvent): string[] {
   return openHolds;
 }
 
-/** How a stored item joins the visitor's chat: their words, a delivered message, or a status. */
-function historyPart(item: TranscriptItem): RowPart<ChatItem, ReceiptView> | null {
-  if (item.kind === 'visitor_text') {
-    return { kind: 'turn', row: { kind: 'visitor', id: `n${item.n}`, text: item.text ?? '', status: 'sent' } };
-  }
-  if (item.kind === 'delivered' && item.event?.type === 'message') {
-    return { kind: 'reply', row: { kind: 'message', seq: null, ev: item.event }, receipt: receiptFromEvent(item.event) };
-  }
-  if (item.kind === 'status' && isStatus(item.event)) return { kind: 'receipt', receipt: receiptFromEvent(item.event) };
-  // Whispers and agents' text never reach a visitor's transcript; anything else is left out.
-  return null;
+/**
+ * A status as it joins the chat: its receipt, placed beside its hold's when the decision was held
+ * on the page, and the holds with this one added when it is the hold itself.
+ */
+function statusPart(
+  holds: ReadonlyMap<string, ReceiptView>,
+  ev: StatusEvent,
+): { part: RowPart<ChatItem, ReceiptView>; holds: ReadonlyMap<string, ReceiptView> } {
+  const receipt = receiptFromEvent(ev);
+  if (ev.type === 'held') return { part: { kind: 'receipt', receipt }, holds: new Map(holds).set(ev.decision_id, receipt) };
+  return { part: { kind: 'receipt', receipt, beside: holds.get(ev.decision_id) }, holds };
 }
 
 function fromHistory(transcript: VisitorTranscript): ChatState {
   const items = [...transcript.items].sort((a, b) => a.n - b.n);
   const seen = new Set<string>();
   let openHolds: string[] = [];
-  for (const { event } of items) {
-    if (event?.type === 'message') seen.add(messageKey(event));
-    else if (isStatus(event)) {
+  let holds: ReadonlyMap<string, ReceiptView> = new Map();
+  // How a stored item joins the chat: the visitor's words, a delivered message, or a status.
+  const partOf = (item: TranscriptItem): RowPart<ChatItem, ReceiptView> | null => {
+    const { event } = item;
+    if (item.kind === 'visitor_text') {
+      return { kind: 'turn', row: { kind: 'visitor', id: `n${item.n}`, text: item.text ?? '', status: 'sent' } };
+    }
+    if (item.kind === 'delivered' && event?.type === 'message') {
+      seen.add(messageKey(event));
+      return { kind: 'reply', row: { kind: 'message', seq: null, ev: event }, receipt: receiptFromEvent(event) };
+    }
+    if (item.kind === 'status' && isStatus(event)) {
       seen.add(statusKey(event));
       openHolds = withHolds(openHolds, event);
+      const status = statusPart(holds, event);
+      holds = status.holds;
+      return status.part;
     }
-  }
-  return {
-    ...initialChatState(),
-    ...groupRows(items, historyPart),
-    lastSeq: transcript.last_seq,
-    openHolds,
-    seen,
+    // Whispers and agents' text never reach a visitor's transcript; anything else is left out.
+    return null;
   };
+  const groups = groupRows(items, partOf);
+  return { ...initialChatState(), ...groups, lastSeq: transcript.last_seq, openHolds, holds, seen };
 }
 
 function onEvent(state: ChatState, seq: number, ev: SseEvent): ChatState {
@@ -139,10 +154,12 @@ function onEvent(state: ChatState, seq: number, ev: SseEvent): ChatState {
     case 'resolved': {
       const key = statusKey(ev);
       if (state.seen.has(key)) return state;
+      const { part, holds } = statusPart(state.holds, ev);
       return {
         ...state,
-        ...addPart(state, { kind: 'receipt', receipt: receiptFromEvent(ev) }),
+        ...addPart(state, part),
         openHolds: withHolds(state.openHolds, ev),
+        holds,
         seen: new Set(state.seen).add(key),
       };
     }

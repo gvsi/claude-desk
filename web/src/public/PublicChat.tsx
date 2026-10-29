@@ -75,22 +75,27 @@ interface RowProps {
   ownerName: string;
   language: CopyLanguage;
   onResend: (id: string) => void;
+  /** What goes under the row's receipts: "Cancel this request" for each open hold it holds. */
+  after?: ReactNode[];
 }
 
 /** One row: the message and, attached under it, its receipts exactly as the kernel wrote them. */
-function ChatRowView({ row, ownerName, language, onResend }: RowProps) {
+function ChatRowView({ row, ownerName, language, onResend, after = [] }: RowProps) {
   const { item } = row;
   const copy = PUBLIC_COPY[language];
   const done = item.kind === 'message' && item.ev.blocks.some((block) => block.kind === 'card' && DONE_CARDS.has(block.template ?? ''));
-  const receipts = row.receipts.map((receipt: ReceiptView, index) => (
-    <MarginReceipt
-      key={`${receipt.ledgerSeq}-${index}`}
-      source={receipt.source}
-      plain={receipt.plain}
-      ledgerSeq={receipt.ledgerSeq}
-      drawCheck={done && receipt.source.kind === 'decision' && receipt.source.state === 'executed'}
-    />
-  ));
+  const receipts = [
+    ...row.receipts.map((receipt: ReceiptView, index) => (
+      <MarginReceipt
+        key={`${receipt.ledgerSeq}-${index}`}
+        source={receipt.source}
+        plain={receipt.plain}
+        ledgerSeq={receipt.ledgerSeq}
+        drawCheck={done && receipt.source.kind === 'decision' && receipt.source.state === 'executed'}
+      />
+    )),
+    ...after,
+  ];
 
   if (item.kind === 'visitor') {
     // A message that ended the chat says nothing of its own: the chat's notice does.
@@ -254,9 +259,24 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
   const { state } = chat;
   const ended = state.error === 'session';
   const ready = chat.status === 'ready' && !ended;
-  const newestHold = state.openHolds.at(-1);
-  // Shown once the hold's receipt is under its message, and not while Claude writes.
-  const canCancel = ready && newestHold !== undefined && state.pending.length === 0 && !state.writing;
+  // "Cancel this request" under each message that holds an open hold's receipt, once it is there,
+  // so it stays with the request however far the chat goes on.
+  const cancelsUnder = (receipts: readonly ReceiptView[]): ReactNode[] => {
+    if (!ready) return [];
+    return state.openHolds
+      .filter((id) => {
+        const held = state.holds.get(id);
+        return held !== undefined && receipts.includes(held);
+      })
+      .map((id) => (
+        <div key={`cancel-${id}`} className="cd-public-chat__cancel">
+          <Button variant="ghost" busy={chat.cancelling === id} onClick={() => chat.cancel(id)}>
+            {copy.cancelRequest}
+          </Button>
+          {chat.cancelFailed === id ? <Notice tone="error">{UNREACHABLE_COPY[language]}</Notice> : null}
+        </div>
+      ));
+  };
 
   const tryAgain = (
     <Button variant="secondary" onClick={chat.retry}>
@@ -325,24 +345,26 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
       <Transcript label={copy.conversation(brand.name)}>
         {state.leading.length > 0 ? (
           <TranscriptRow
-            margin={state.leading.map((receipt, index) => (
-              <MarginReceipt key={`${receipt.ledgerSeq}-${index}`} source={receipt.source} plain={receipt.plain} ledgerSeq={receipt.ledgerSeq} />
-            ))}
+            margin={[
+              ...state.leading.map((receipt, index) => (
+                <MarginReceipt key={`${receipt.ledgerSeq}-${index}`} source={receipt.source} plain={receipt.plain} ledgerSeq={receipt.ledgerSeq} />
+              )),
+              ...cancelsUnder(state.leading),
+            ]}
           >
             {null}
           </TranscriptRow>
         ) : null}
         {state.rows.map((row) => (
-          <ChatRowView key={rowKey(row)} row={row} ownerName={ownerName} language={language} onResend={resend} />
+          <ChatRowView
+            key={rowKey(row)}
+            row={row}
+            ownerName={ownerName}
+            language={language}
+            onResend={resend}
+            after={cancelsUnder(row.receipts)}
+          />
         ))}
-        {canCancel ? (
-          <div className="cd-public-chat__cancel">
-            <Button variant="ghost" busy={chat.cancelling !== null} onClick={() => chat.cancel(newestHold)}>
-              {copy.cancelRequest}
-            </Button>
-            {chat.cancelFailed ? <Notice tone="error">{UNREACHABLE_COPY[language]}</Notice> : null}
-          </div>
-        ) : null}
         {state.writing ? <WritingIndicator language={language} /> : null}
       </Transcript>
       {connectionNotice || turnNotice ? (
