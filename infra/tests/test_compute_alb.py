@@ -133,8 +133,15 @@ def test_alb_group_admits_only_the_cloudfront_list(alb_stacks):
     assert (ingress["IpProtocol"], ingress["FromPort"], ingress["ToPort"]) == ("tcp", 80, 80)
     assert not {"CidrIp", "CidrIpv6", "SourceSecurityGroupId"} & set(ingress)
 
-    # Out: only to the app group's API port; the balancer opens no other connection.
-    assert "SecurityGroupEgress" not in group["Properties"]
+    # Out: only the API's port, inside the VPC. The rule must be inline: EC2 gives every new group
+    # an allow-all egress rule, and CloudFormation removes it only for a group that declares inline
+    # egress, never for one whose egress rules are all standalone resources.
+    [inline] = group["Properties"]["SecurityGroupEgress"]
+    assert alb_stacks.source(inline["CidrIp"]) == {"Fn::GetAtt": [alb_stacks.data_id(alb_stacks.data.vpc), "CidrBlock"]}
+    assert (inline["IpProtocol"], inline["FromPort"], inline["ToPort"]) == ("tcp", 8700, 8700)
+    assert not {"CidrIpv6", "DestinationPrefixListId", "DestinationSecurityGroupId"} & set(inline)
+    # The service's own rule, to the app group on the same port, opens nothing more: the app
+    # tasks run inside the VPC.
     [egress] = _rules_on(template, "AWS::EC2::SecurityGroupEgress", group_ref)
     assert alb_stacks.source(egress["DestinationSecurityGroupId"]) == {
         "Fn::GetAtt": [alb_stacks.data_id(alb_stacks.data.app_security_group), "GroupId"]

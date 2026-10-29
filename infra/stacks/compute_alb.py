@@ -20,7 +20,7 @@ from constructs import Construct
 
 from stacks.compute_express import HEALTH_CHECK_PATH, ORIGIN_READ_TIMEOUT
 from stacks.data_stack import DeskData
-from stacks.task import API_CONTAINER
+from stacks.task import API_CONTAINER, API_PORT
 
 LISTENER_PORT = 80
 # Above the 15 s heartbeat on an open event stream, below uvicorn's 310 s keep-alive.
@@ -34,7 +34,8 @@ class AlbCompute(Construct):
     def __init__(self, scope: Construct, data: DeskData, task: ecs.FargateTaskDefinition) -> None:
         super().__init__(scope, "Alb")
 
-        # Only CloudFront: HTTP on 80 from its origin-facing list, and out only to the task's API.
+        # Only CloudFront: HTTP on 80 from its origin-facing list, and out only to the API's port
+        # inside the VPC.
         self.security_group = ec2.SecurityGroup(
             self,
             "LoadBalancerSecurityGroup",
@@ -46,6 +47,14 @@ class AlbCompute(Construct):
             ec2.Peer.prefix_list(data.cloudfront_prefix_list_id),
             ec2.Port.tcp(LISTENER_PORT),
             "HTTP from CloudFront's origin-facing addresses, through the VPC origin",
+        )
+        # A CIDR rule is inline on the group, which is what makes CloudFormation remove EC2's
+        # default allow-all egress. The service's rule to the app group (same port, added below)
+        # is a separate resource, and a group with only those keeps the default.
+        self.security_group.add_egress_rule(
+            ec2.Peer.ipv4(data.vpc.vpc_cidr_block),
+            ec2.Port.tcp(API_PORT),
+            "The API in the task, for traffic and health checks",
         )
         self.load_balancer = elbv2.ApplicationLoadBalancer(
             self,
