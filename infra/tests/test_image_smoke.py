@@ -270,3 +270,24 @@ def test_missing_local_password_fails_before_docker_runs(smoke_run, tmp_path, mi
     result, calls, _ = smoke_run(DESK_ENV_FILE=str(dot_env))
     assert result.returncode != 0 and missing in result.stderr
     assert not [call for call in calls if call["argv"][0] == "run"]
+
+
+def _probes(calls: list[dict]) -> list[list[str]]:
+    """The address and port of each probe run from outside the kernel's namespace, in order."""
+    return [call["argv"][-2:] for call in calls if call["argv"][0] == "run" and call["argv"][-2] == KERNEL_IP]
+
+
+def test_8700_connects_before_8701_must_refuse(smoke_run):
+    """A refused 8701 means something only if the same address and path reach 8700, where the API
+    listens on every interface of the shared namespace: the positive control comes first."""
+    result, calls, _ = smoke_run()
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _probes(calls) == [[KERNEL_IP, "8700"], [KERNEL_IP, "8701"]]
+    assert f"{KERNEL_IP}:8700 takes connections from outside the namespace" in result.stdout
+
+
+def test_a_failed_positive_control_fails_before_the_8701_probe(smoke_run):
+    result, calls, _ = smoke_run(DOCKER_FAIL=f"{KERNEL_IP} 8700")
+    assert result.returncode != 0
+    assert f"{KERNEL_IP}:8700" in result.stderr and "8701" in result.stderr
+    assert _probes(calls) == [[KERNEL_IP, "8700"]]

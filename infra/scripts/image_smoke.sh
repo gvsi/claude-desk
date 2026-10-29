@@ -6,7 +6,8 @@
 #   - smoke.py's api_health through the API's published port (the kernel proves with SymCC, signs
 #     with the production key, every seed proved);
 #   - mock payments answers {ok: true} on 127.0.0.1:8702 inside the kernel's container;
-#   - the kernel's 8701 refuses a connection from outside its namespace.
+#   - from outside the namespace, the API's 8700 takes a connection (the positive control: the
+#     address and path work) and the kernel's 8701 refuses one.
 #
 #   docker compose up -d db && make image image-smoke
 #
@@ -41,6 +42,11 @@ HEALTH_CHECK='import sys, urllib.request; sys.exit(0 if urllib.request.urlopen(s
 MOCKPAY_CHECK='import json, os, sys, urllib.request
 request = urllib.request.Request("http://127.0.0.1:8702/provider/health", headers={"X-Mockpay-Key": os.environ["MOCKPAY_KEY"]})
 sys.exit(0 if json.load(urllib.request.urlopen(request, timeout=5)).get("ok") is True else 1)'
+# Exits 0 when a connection to the given address and port opens within 3 s.
+CONNECTS_CHECK='import socket, sys
+probe = socket.socket()
+probe.settimeout(3)
+sys.exit(0 if probe.connect_ex((sys.argv[1], int(sys.argv[2]))) == 0 else 1)'
 # Exits 0 when nothing accepts a connection on the given address and port within 3 s.
 REFUSED_CHECK='import socket, sys
 probe = socket.socket()
@@ -155,6 +161,11 @@ say "mock payments answers {ok: true} inside the kernel's container"
 
 kernel_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$KERNEL")
 [[ -n $kernel_ip ]] || die "the kernel's container has no address to probe"
+# The positive control: the API listens on every interface of the shared namespace, so 8700 must
+# connect from outside it. If it doesn't, a refused 8701 would prove nothing.
+docker run --rm "$IMAGE" python -c "$CONNECTS_CHECK" "$kernel_ip" 8700 ||
+  die "$kernel_ip:8700 took no connection from outside the namespace, so a refused 8701 would prove nothing"
+say "$kernel_ip:8700 takes connections from outside the namespace"
 docker run --rm "$IMAGE" python -c "$REFUSED_CHECK" "$kernel_ip" 8701 ||
   die "the kernel took a connection on $kernel_ip:8701 from outside its network namespace"
 say "8701 refuses connections from outside the kernel's namespace"

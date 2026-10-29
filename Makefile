@@ -88,7 +88,8 @@ image-check:
 # The app image run as the deploy runs it, against the compose Postgres (`docker compose up -d db`
 # first): the admin task, then the kernel and the API in production mode in one network namespace,
 # each with only its own environment and secrets. Passes when api_health passes, mock payments
-# answers inside the kernel's container and the kernel's 8701 refuses connections from outside it.
+# answers inside the kernel's container, and from outside the namespace the API's 8700 connects
+# (the positive control) while the kernel's 8701 refuses.
 # The admin task migrates DB_NAME when given, else the database .env's ADMIN_DATABASE_URL names.
 image-smoke:
 	APP_IMAGE="$(APP_IMAGE)" DB_NAME="$(DB_NAME)" infra/scripts/image_smoke.sh
