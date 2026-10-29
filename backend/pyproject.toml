@@ -11,8 +11,11 @@ dependencies = [
     "psycopg[binary]==3.3.6",
     "procrastinate==3.10.0",
     "fastapi>=0.162.0",
-    "uvicorn==0.54.0",
-    "anthropic==2.3.0",
+    "uvicorn[standard]>=0.54.0",
+    "httpx>=0.28.1",
+    "sse-starlette>=3.6.0",
+    "anthropic>=2.3.0",
+    "cryptography>=50.0.2",
 ]
 
 # The kernel's Rust module, built from source by maturin; `make kernel` rebuilds it.
@@ -55,5 +58,8 @@ pythonpath = ["."]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 markers = [
+    "real_kernel: runs against a kernel process at DESK_KERNEL_URL instead of the fake",
+    "live_model: calls the live Anthropic API; runs only with DESK_LIVE_MODEL=1 and ANTHROPIC_API_KEY",
+    "kernel_plan(plan): the kernel plan that serves the route; skipped unless DESK_KERNEL_PLANS lists it",
     "solver: needs the cvc5 solver (CVC5 or PATH); skipped without it",
 ]
