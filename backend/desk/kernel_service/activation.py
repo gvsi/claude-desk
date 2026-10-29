@@ -1,5 +1,19 @@
 """Activation: what has to hold before a compiled rule set may decide anything.
 
+Proof mode. At startup the kernel runs `desk-prove --selftest` once (`run_selftest`) and keeps the
+answer for the whole process (`proof_mode()`): `symcc` when the solver proves and refutes what it
+should, `bounded` on any other result. In `symcc` mode a rule set is proved with `desk-prove`
+(`prove`), which has to show all seven obligations of the master plan's "Proof obligations"; a
+timeout, a tool error or an answer the kernel can't read rejects, with no fallback.
+
+Shipped sets. The Rivera seed's cards and the starter presets are proved in CI and their reports
+ship in `kernel/cedar/proofs/`. They seed the in-memory `ProofCache`, keyed by what a proof covers
+(`VersionHashes`), and `activate_shipped` activates a set only on a hit with a passing report, in
+either mode; a miss is never proved inline (503 `seed_unproved`).
+
+Loaded versions. A stored version loads into the policy engine on its first use
+(`LoadedVersions`), bounded to `MAX_LOADED_VERSIONS` per engine, least recently used out first.
+
 The bounded check (`bounded_check`) stands in for the SymCC proofs when `desk-prove` can't run
 (the kernel's `bounded` proof mode). It evaluates requests generated on every card boundary with
 the real engine and compares the compiled sets with the reference generator's, check by check, as
@@ -10,21 +24,579 @@ The engine has no unload, so `drop_keys` drops a key with a load that is built t
 drops whatever it cached under a key whose load fails.
 """
 
+import asyncio
+import hashlib
 import itertools
 import json
 import logging
+import os
+import shutil
+import signal
+import tempfile
 import threading
+from collections import OrderedDict
 from collections.abc import Iterable, Iterator, Mapping, Sequence
-from datetime import time
-from typing import Any, NamedTuple
+from dataclasses import dataclass
+from datetime import datetime, time
+from pathlib import Path
+from typing import Any, Literal, NamedTuple
 
 import desk_kernel
+from pydantic import BaseModel, ConfigDict, StrictInt, ValidationError
+from sqlalchemy import select
 
-from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, MONEY_TOOLS, ProofCheck, ProofReport, RuleCard, ToolProfile
-from desk.kernel_service import compiler, review_thresholds
+from desk.contracts import (
+    AUTO_MONEY_HARD_CAP_CENTS,
+    MONEY_TOOLS,
+    LedgerEvent,
+    PolicyVersion,
+    ProofCheck,
+    ProofReport,
+    RuleCard,
+    ToolProfile,
+)
+from desk.db.models import PolicyVersion as PolicyVersionRow
+from desk.kernel_service import adapters, compiler, desks, ledger, reference, review_thresholds, seed
 from desk.kernel_service.reference import RefSets
+from desk.kernel_service.repo import KernelCtx, KernelFailure
+from desk.presets import PRESETS
 
 log = logging.getLogger(__name__)
+
+ProofMode = Literal["symcc", "bounded"]
+
+# The seven obligations every activation proves, in the master plan's order ("Proof obligations").
+PROOF_CHECKS = ("never_errors", "baseline_auto", "baseline_approvable", "auto_within_cards", "review_only_narrows",
+                "hold_within_cards", "money_needs_card")
+PROVE_TIMEOUT_MS = 45_000          # desk-prove's own budget for a whole run (--timeout-ms)
+PROVE_KILL_AFTER_S = 50.0          # the kernel's backstop: past this the process group is killed
+SELFTEST_TIMEOUT_S = 30.0          # the startup selftest's backstop; desk-prove's own selftest budget is 20 s
+_PROVER_PLAIN = "Your rules couldn't be checked, so nothing changed."
+
+_proof_mode: ProofMode = "bounded"   # until a selftest passes
+
+
+def proof_mode() -> ProofMode:
+    """The proof mode the startup selftest picked for this process (`bounded` before it runs)."""
+    return _proof_mode
+
+
+def prover_path() -> str:
+    """The `desk-prove` to run: `DESK_PROVE`, else `desk-prove` on `PATH`."""
+    return os.environ.get("DESK_PROVE") or shutil.which("desk-prove") or "desk-prove"
+
+
+async def run_selftest() -> ProofMode:
+    """Runs `desk-prove --selftest` and sets the process's proof mode: `symcc` only when it exits
+    0 with a report that is `ok`, by SymCC, with every check ok; `bounded` on anything else (a
+    missing binary or solver, a timeout, an unreadable report)."""
+    global _proof_mode
+    mode: ProofMode = "bounded"
+    try:
+        code, stdout = await _run([prover_path(), "--selftest"], kill_after=SELFTEST_TIMEOUT_S)
+        report = ProofReport.model_validate_json(stdout) if code == 0 else None
+        if (report is not None and report.ok and report.method == "symcc" and not report.timed_out
+                and report.checks and all(check.ok for check in report.checks)):
+            mode = "symcc"
+        else:
+            log.warning("proof_selftest_failed exit=%s", code)
+    except Exception:                    # a missing binary, an unreadable report, anything: bounded
+        log.warning("proof_selftest_failed", exc_info=True)
+    _proof_mode = mode
+    log.info("proof_mode mode=%s", mode)
+    return mode
+
+
+async def _run(argv: Sequence[str], *, kill_after: float) -> tuple[int | None, bytes]:
+    """Runs `argv` in its own process group and returns its exit code and output, or `None` for
+    the code when it is still running after `kill_after` seconds: then the whole group is killed
+    and awaited, so nothing it started (a solver, a child holding its output) outlives the call.
+    The group is killed the same way when the caller is cancelled. Raises OSError when `argv`
+    can't be started."""
+    process = await asyncio.create_subprocess_exec(
+        *argv, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        start_new_session=True)
+    finished = False
+    try:
+        stdout, stderr = await asyncio.wait_for(process.communicate(), kill_after)
+        finished = True
+    except TimeoutError:
+        log.warning("prover_killed after_s=%s", kill_after)
+        return None, b""
+    finally:
+        if not finished:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            await process.wait()
+    if stderr:
+        log.info("prover_stderr %s", stderr[-2000:].decode("utf-8", "replace"))
+    return process.returncode, stdout
+
+
+# ---- Proving with desk-prove ---------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class ProofInputs:
+    """What `desk-prove` proves a rule set with (the master's "Rust module surface"): the Desk's
+    schema, the sets each obligation reads, the invariant files, the money tools no owner card
+    covers and the checks to run."""
+
+    schema_json: str
+    sets: dict[str, str]                 # B, F, A, A0, H, R, R_hold
+    always: list[str]
+    auto: list[str]
+    money_uncovered: list[str]
+    checks: list[str]
+
+
+def build_proof_inputs(cards: Sequence[RuleCard], profiles: Sequence[ToolProfile],
+                       schema: Mapping[str, Any]) -> ProofInputs:
+    """The proof inputs for `cards` over the enabled `profiles`: the compiler's `F`, `A`, `H` and
+    `A0` (its own emission without review gates), and the reference generator's sets, each
+    preceded by its never forbids (`R = never + R`, `R_hold = never + R_hold`), as the bounded
+    check loads them. Raises ValueError for cards either generator can't express."""
+    compiled = compiler.compile_cards(cards, profiles)
+    a0 = compiler.compile_cards(cards, profiles, review=False).A
+    refs = reference.reference_sets(cards, schema)
+    return ProofInputs(
+        schema_json=json.dumps(schema),
+        sets={"B": compiler.BASELINE, "F": compiled.F, "A": compiled.A, "A0": a0, "H": compiled.H,
+              "R": refs.never + "\n" + refs.R, "R_hold": refs.never + "\n" + refs.R_hold},
+        always=list(compiler.INVARIANTS["always"].values()),
+        auto=list(compiler.INVARIANTS["auto"].values()),
+        money_uncovered=money_uncovered(cards, profiles),
+        checks=list(PROOF_CHECKS),
+    )
+
+
+def write_prove_files(inputs: ProofInputs, directory: Path) -> tuple[Path, Path, Path]:
+    """Writes `desk-prove`'s `--schema`, `--sets` and `--checks` files into `directory`."""
+    schema, sets, checks = directory / "schema.json", directory / "sets.json", directory / "checks.json"
+    schema.write_text(inputs.schema_json)
+    sets.write_text(json.dumps({**inputs.sets, "always": inputs.always, "auto": inputs.auto}))
+    checks.write_text(json.dumps({"checks": inputs.checks, "money_uncovered": inputs.money_uncovered}))
+    return schema, sets, checks
+
+
+async def prove(inputs: ProofInputs) -> ProofReport:
+    """Proves `inputs` with `desk-prove` (`prover_path()`), giving it `PROVE_TIMEOUT_MS` and
+    killing its process group at `PROVE_KILL_AFTER_S`. Never raises for a prover problem:
+
+    - exit 0 with every check ok: the report as printed (`ok`);
+    - exit 1: the report as printed, not `ok` (each failing check's counterexample is a request);
+    - exit 2, a timeout, or a prover that can't be started: `timed_out`, every check not ok and
+      no counterexample (the owner sees "Rules can't be checked right now");
+    - anything else (an unreadable report, a check missing or repeated, an exit 0 with a check
+      not ok, another exit code): not `ok`, one `prover` check saying nothing changed.
+
+    A report that comes back lists the seven checks in `PROOF_CHECKS` order."""
+    try:
+        with tempfile.TemporaryDirectory(prefix="desk-prove-") as directory:
+            schema, sets, checks = write_prove_files(inputs, Path(directory))
+            argv = [prover_path(), "--schema", str(schema), "--sets", str(sets), "--checks", str(checks),
+                    "--timeout-ms", str(PROVE_TIMEOUT_MS)]
+            code, stdout = await _run(argv, kill_after=PROVE_KILL_AFTER_S)
+        if code is None or code == 2:
+            return _timed_out()
+        return _read_report(code, stdout)
+    except OSError:                      # no prover to start, or no room for its inputs: try again later
+        log.warning("prover_unavailable", exc_info=True)
+        return _timed_out()
+    except Exception:
+        log.exception("prover_failed")
+        return _prover_failure()
+
+
+async def prove_or_check(engine: desk_kernel.PolicyEngine, cards: Sequence[RuleCard], profiles: Sequence[ToolProfile],
+                         *, key_prefix: str) -> ProofReport:
+    """What the process's proof mode can say about `cards` over the enabled `profiles`: in
+    `symcc` mode a `desk-prove` proof (`prove`), in `bounded` mode the bounded check (in a thread,
+    under `bounded:<key_prefix>` keys, so pass a prefix unique to the draft). Cards the compiler
+    or the reference generator can't express fail as a `prover` check: nothing is ever a pass by
+    error. Only a `symcc` report that holds may activate anything."""
+    mode = proof_mode()
+    try:
+        schema = compiler.desk_schema(profiles)
+        if mode == "symcc":
+            inputs = build_proof_inputs(cards, profiles, schema)
+        else:
+            compiled = compiler.compile_cards(cards, profiles)
+            a0 = compiler.compile_cards(cards, profiles, review=False).A
+            refs = reference.reference_sets(cards, schema)
+    except Exception:
+        log.warning("rules_uncompilable", exc_info=True)
+        return _prover_failure(mode)
+    if mode == "symcc":
+        return await prove(inputs)
+    return await asyncio.to_thread(bounded_check, engine, key_prefix=key_prefix, schema_json=json.dumps(schema),
+                                   compiled=compiled, a0=a0, refs=refs, cards=cards, profiles=profiles)
+
+
+def _timed_out() -> ProofReport:
+    return ProofReport(ok=False, method="symcc", timed_out=True,
+                       checks=[ProofCheck(name=name, ok=False) for name in PROOF_CHECKS])
+
+
+def _prover_failure(method: ProofMode = "symcc") -> ProofReport:
+    return ProofReport(ok=False, method=method, cases=0 if method == "bounded" else None,
+                       checks=[ProofCheck(name="prover", ok=False, counterexample_plain=_PROVER_PLAIN)])
+
+
+def _read_report(code: int, stdout: bytes) -> ProofReport:
+    """The report `desk-prove` printed with exit 0 or 1, if it is one the kernel can trust."""
+    if code not in (0, 1):
+        log.warning("prover_failed exit=%s", code)
+        return _prover_failure()
+    try:
+        printed = ProofReport.model_validate_json(stdout)
+    except ValidationError:
+        log.warning("prover_report_unreadable exit=%s", code)
+        return _prover_failure()
+    by_name = {check.name: check for check in printed.checks}
+    if printed.method != "symcc" or printed.timed_out or len(by_name) != len(printed.checks) \
+            or set(by_name) != set(PROOF_CHECKS):
+        log.warning("prover_report_incomplete exit=%s checks=%s", code, sorted(by_name))
+        return _prover_failure()
+    checks = [by_name[name] for name in PROOF_CHECKS]
+    held = all(check.ok for check in checks)
+    if (code == 0) != held or (code == 0) != printed.ok:   # exit 0 iff every check holds
+        log.warning("prover_report_inconsistent exit=%s", code)
+        return _prover_failure()
+    return ProofReport(ok=held, method="symcc", checks=checks)
+
+
+# ---- What a proof covers -------------------------------------------------------------------------
+
+class VersionHashes(NamedTuple):
+    """Everything a proof of a compiled version depends on. A report proved for other hashes is
+    never reused: the first five key the proof cache, and the thresholds version must match too."""
+
+    cedar_sha256: str
+    schema_sha256: str
+    baseline_sha256: str
+    profiles_sha256: str
+    invariants_sha256: str
+    review_thresholds_version: int
+
+    @property
+    def key(self) -> tuple[str, str, str, str, str]:
+        return (self.cedar_sha256, self.schema_sha256, self.baseline_sha256, self.profiles_sha256,
+                self.invariants_sha256)
+
+
+def profiles_sha256(profiles: Iterable[ToolProfile]) -> str:
+    """sha256 of `canonical_json({tool: profile})` over the enabled profiles, each without its
+    status and pending fields, so a pinned `definition_sha256` is covered and an enable or disable
+    alone isn't."""
+    by_tool: dict[str, Any] = {}
+    for profile in profiles:
+        if profile.tool in by_tool:
+            raise ValueError(f"{profile.tool} is enabled twice")
+        by_tool[profile.tool] = profile.model_dump(mode="json", exclude=set(adapters.UNHASHED_PROFILE_FIELDS))
+    return hashlib.sha256(desk_kernel.canonical_json(json.dumps(by_tool)).encode()).hexdigest()
+
+
+def version_hashes(compiled: compiler.CompiledSets, schema: Mapping[str, Any],
+                   profiles: Iterable[ToolProfile]) -> VersionHashes:
+    return VersionHashes(
+        cedar_sha256=compiler.cedar_sha256(compiled),
+        schema_sha256=compiler.schema_sha256(dict(schema)),
+        baseline_sha256=compiler.baseline_sha256(),
+        profiles_sha256=profiles_sha256(profiles),
+        invariants_sha256=compiler.invariants_sha256(PROOF_CHECKS),
+        review_thresholds_version=review_thresholds.REVIEW_THRESHOLDS_VERSION,
+    )
+
+
+# ---- Shipped rule sets ---------------------------------------------------------------------------
+#
+# The Rivera seed's cards and the starter presets are proved in CI (`make proofs` writes a report
+# per set into PROOFS_DIR, `make check-presets` re-proves and compares them). Their card IDs are
+# fixed and their scopes never name a person, so they compile to the same hashes in every copy.
+
+PROOFS_DIR = compiler.CEDAR_DIR / "proofs"
+SHIPPED_PRESETS: dict[str, list[RuleCard]] = {
+    "rivera": seed.RIVERA_CARDS,
+    "ask_first": PRESETS["ask_first"],
+    "auto": PRESETS["auto"],
+}
+
+
+def shipped_profiles() -> list[ToolProfile]:
+    """The profiles a new Desk enables (`desks.create_desk`): the registered native adapters'."""
+    return adapters.registered_profiles(source="native")
+
+
+class ShippedReport(BaseModel):
+    """A file in PROOFS_DIR: the proof of one shipped rule set and the hashes it covers."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    preset: str
+    cedar_sha256: str
+    schema_sha256: str
+    baseline_sha256: str
+    profiles_sha256: str
+    invariants_sha256: str
+    review_thresholds_version: StrictInt
+    proof: ProofReport
+
+    @property
+    def hashes(self) -> VersionHashes:
+        return VersionHashes(*(getattr(self, field) for field in VersionHashes._fields))
+
+
+def shipped_report(preset: str, hashes: VersionHashes, proof: ProofReport) -> ShippedReport:
+    return ShippedReport(preset=preset, **hashes._asdict(), proof=proof)
+
+
+def report_text(report: ShippedReport) -> str:
+    """A report file's exact text: sorted, indented JSON, so a regenerated report diffs cleanly."""
+    return json.dumps(report.model_dump(mode="json"), indent=2, sort_keys=True) + "\n"
+
+
+# ---- The proof cache -----------------------------------------------------------------------------
+
+def proved(report: ProofReport) -> bool:
+    """A SymCC report in which all seven obligations hold: the only kind that activates."""
+    return (report.ok and report.method == "symcc" and not report.timed_out
+            and [(c.name, c.ok) for c in report.checks] == [(name, True) for name in PROOF_CHECKS])
+
+
+def conclusive(report: ProofReport) -> bool:
+    """A SymCC report that answered every obligation, held or not (no timeout, no prover failure)."""
+    return (report.method == "symcc" and not report.timed_out
+            and [c.name for c in report.checks] == list(PROOF_CHECKS))
+
+
+@dataclass(frozen=True)
+class CachedProof:
+    report: ProofReport
+    review_thresholds_version: int
+
+
+class ProofCache:
+    """Proof reports in memory, by what they proved (`VersionHashes.key`), so every copy of a rule
+    set reuses one report: the shipped reports, loaded at startup, and every conclusive live SymCC
+    proof the kernel adds. A lookup also needs the thresholds version the report was proved with."""
+
+    def __init__(self) -> None:
+        self._entries: dict[tuple[str, str, str, str, str], CachedProof] = {}
+        self._lock = threading.Lock()
+
+    @classmethod
+    def shipped(cls) -> "ProofCache":
+        """A cache holding the shipped reports in PROOFS_DIR. A file that isn't a report is logged
+        and left out: what it would have activated answers `seed_unproved`."""
+        cache = cls()
+        for path in sorted(PROOFS_DIR.glob("*.json")):
+            try:
+                report = ShippedReport.model_validate_json(path.read_bytes())
+            except (OSError, ValidationError):
+                log.warning("proof_report_unreadable file=%s", path.name)
+                continue
+            if not cache.put(report.hashes, report.proof):
+                log.warning("proof_report_inconclusive file=%s", path.name)
+        return cache
+
+    def put(self, hashes: VersionHashes, report: ProofReport) -> bool:
+        """Keeps a conclusive SymCC report for `hashes`; anything else (a bounded check, a timeout,
+        a prover failure) is no answer and isn't kept. A failed proof is never replaced by a
+        passing one for the same hashes. Returns whether the report is kept."""
+        if not conclusive(report):
+            return False
+        with self._lock:
+            current = self._entries.get(hashes.key)
+            if current is not None and not current.report.ok and report.ok:
+                log.warning("proof_cache_conflict cedar_sha256=%s", hashes.cedar_sha256)
+                return False
+            self._entries[hashes.key] = CachedProof(report, hashes.review_thresholds_version)
+        return True
+
+    def get(self, hashes: VersionHashes) -> ProofReport | None:
+        with self._lock:
+            entry = self._entries.get(hashes.key)
+        if entry is None or entry.review_thresholds_version != hashes.review_thresholds_version:
+            return None
+        return entry.report
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._entries)
+
+
+# ---- Loaded versions -----------------------------------------------------------------------------
+#
+# The engine caches every key it loads and has no unload, and every copy has its own Desk, so the
+# loaded versions are bounded here: an LRU of versions (active or draft), each loaded under
+# `<desk_id>:<version>` (F, A, H) and `<desk_id>:<version>:approvable` (F, H). A version loads on
+# its first use; past the cap the least recently used is dropped and reloads on its next use. A
+# decide that races an eviction gets the engine's "not loaded" refusal, so it fails closed.
+
+MAX_LOADED_VERSIONS = 256
+
+
+def version_key(desk_id: str, version: int) -> str:
+    return f"{desk_id}:{version}"
+
+
+def load_version(engine: desk_kernel.PolicyEngine, row: PolicyVersionRow) -> list[str]:
+    """Loads a stored version into `engine` under its two keys and returns the errors; empty means
+    both loaded. The Cedar and schema must still match the hashes they were proved under. On any
+    error neither key stays loaded, so deciding on the version refuses."""
+    key = version_key(row.desk_id, row.version)
+    keys = [key, key + ":approvable"]
+    cedar = row.cedar or {}
+    if row.schema_json is None or any(not isinstance(cedar.get(name), str) for name in ("F", "A", "H")):
+        errors = ["the version has no compiled Cedar or schema"]
+    elif compiler.cedar_sha256(cedar) != row.cedar_sha256:
+        errors = ["the version's Cedar doesn't match its cedar_sha256"]
+    elif _schema_hash(row.schema_json) != row.schema_sha256:
+        errors = ["the version's schema doesn't match its schema_sha256"]
+    else:
+        errors = engine.load(key, row.schema_json, json.dumps({"F": cedar["F"], "A": cedar["A"], "H": cedar["H"]}))
+        if not errors:
+            errors = engine.load(keys[1], row.schema_json, json.dumps({"F": cedar["F"], "A": "", "H": cedar["H"]}))
+    if errors:
+        drop_keys(engine, keys)
+        log.warning("version_unloadable key=%s errors=%d", key, len(errors))
+    return list(errors)
+
+
+def _schema_hash(schema_json: str) -> str | None:
+    try:
+        return compiler.schema_sha256(json.loads(schema_json))
+    except ValueError:
+        return None
+
+
+class LoadedVersions:
+    """The versions loaded in one engine, least recently used first, at most `MAX_LOADED_VERSIONS`
+    (read at each use). Only this class loads or drops `<desk_id>:<version>` keys."""
+
+    def __init__(self, engine: desk_kernel.PolicyEngine):
+        self.engine = engine
+        self._recent: OrderedDict[str, None] = OrderedDict()
+        self._lock = threading.Lock()
+
+    def use(self, row: PolicyVersionRow) -> list[str]:
+        """Makes sure `row` is loaded and marks it most recent; returns the load errors (empty
+        means its keys decide). Loading past the cap drops the least recently used version."""
+        key = version_key(row.desk_id, row.version)
+        with self._lock:
+            if key in self._recent:
+                self._recent.move_to_end(key)
+                return []
+            errors = load_version(self.engine, row)
+            if errors:
+                return errors
+            self._recent[key] = None
+            while len(self._recent) > MAX_LOADED_VERSIONS:
+                evicted, _ = self._recent.popitem(last=False)
+                drop_keys(self.engine, [evicted, evicted + ":approvable"])
+            return []
+
+    def __contains__(self, key: object) -> bool:
+        with self._lock:
+            return key in self._recent
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._recent)
+
+
+@dataclass(frozen=True)
+class PolicyRuntime:
+    """What deciding and activating share for the kernel's lifetime: the policy engine (over the
+    always-on baseline), its loaded versions, the proof cache, and the shipped sets that failed to
+    activate for want of a report (`Health.unproved_seeds`)."""
+
+    engine: desk_kernel.PolicyEngine
+    versions: LoadedVersions
+    cache: ProofCache
+    unproved_seeds: set[str]
+
+    @classmethod
+    def start(cls, unproved_seeds: set[str] | None = None) -> "PolicyRuntime":
+        """A fresh engine over `compiler.BASELINE` (raises on a baseline it can't take) and the
+        shipped reports."""
+        engine = desk_kernel.PolicyEngine(compiler.BASELINE)
+        return cls(engine=engine, versions=LoadedVersions(engine), cache=ProofCache.shipped(),
+                   unproved_seeds=unproved_seeds if unproved_seeds is not None else set())
+
+
+# ---- Activating a shipped set --------------------------------------------------------------------
+
+class SeedUnproved(KernelFailure):
+    """A shipped rule set compiled to hashes no shipped report proved: 503 `seed_unproved`."""
+
+    def __init__(self, preset: str):
+        super().__init__(503, "seed_unproved", f"seed_unproved:{preset}")
+        self.preset = preset
+
+
+def cards_sha256(cards: Iterable[RuleCard]) -> str:
+    """sha256 of `canonical_json` of the owner's cards (defaults left out), sorted by `card_id`."""
+    owned = sorted((card for card in cards if not card.is_default), key=lambda card: card.card_id)
+    dumped = [card.model_dump(mode="json") for card in owned]
+    return hashlib.sha256(desk_kernel.canonical_json(json.dumps(dumped)).encode()).hexdigest()
+
+
+def version_row(*, copy_id: str, desk_id: str, version: int, parent_version: int | None, cards: Sequence[RuleCard],
+                compiled: compiler.CompiledSets, a0: str, schema: Mapping[str, Any], hashes: VersionHashes,
+                status: str, proof: ProofReport | None, created_at: datetime,
+                preset: str | None = None) -> PolicyVersionRow:
+    """A `policy_versions` row for a compiled version: its cards with defaults, its Cedar (`F`,
+    `A`, `H` and `A0`), its schema as loaded and the hashes its proof covers."""
+    return PolicyVersionRow(
+        desk_id=desk_id, version=version, copy_id=copy_id, parent_version=parent_version, cards=compiled.cards,
+        status=status, proof=proof, **hashes._asdict(), created_at=created_at, cards_sha256=cards_sha256(cards),
+        cedar={**compiled.sets(), "A0": a0}, schema_json=json.dumps(schema), preset=preset)
+
+
+def version_contract(row: PolicyVersionRow) -> PolicyVersion:
+    return PolicyVersion(desk_id=row.desk_id, version=row.version, parent_version=row.parent_version,
+                         cards=row.cards, cedar_sha256=row.cedar_sha256, schema_sha256=row.schema_sha256,
+                         baseline_sha256=row.baseline_sha256, profiles_sha256=row.profiles_sha256,
+                         invariants_sha256=row.invariants_sha256,
+                         review_thresholds_version=row.review_thresholds_version, status=row.status, proof=row.proof)
+
+
+async def activate_shipped(ctx: KernelCtx, desk_id: str, preset: str) -> PolicyVersion:
+    """Makes a shipped rule set (`SHIPPED_PRESETS`) version 1 of a new Desk, `active`, in the
+    caller's transaction, ledgered `policy` `{version, status: "active", preset}`. The set is
+    compiled over the Desk's enabled profiles and activates only on a cache hit with a passing
+    SymCC report, in either proof mode; nothing is proved here. A miss raises `SeedUnproved` (503,
+    so the caller's transaction and everything in it roll back), lists the preset in
+    `Health.unproved_seeds` and logs `seed_unproved` with the hashes, since there may be no Desk
+    left to ledger on."""
+    cards = SHIPPED_PRESETS[preset]
+    profiles = await desks.enabled_profiles(ctx, desk_id)
+    schema = compiler.desk_schema(profiles)
+    compiled = compiler.compile_cards(cards, profiles)
+    hashes = version_hashes(compiled, schema, profiles)
+    report = ctx.policies.cache.get(hashes)
+    if report is None or not proved(report):
+        ctx.policies.unproved_seeds.add(preset)
+        log.error("seed_unproved preset=%s %s", preset,
+                  " ".join(f"{field}={value}" for field, value in hashes._asdict().items()))
+        raise SeedUnproved(preset)
+    row = version_row(copy_id=ctx.copy_id, desk_id=desk_id, version=1, parent_version=None, cards=cards,
+                      compiled=compiled, a0=compiler.compile_cards(cards, profiles, review=False).A, schema=schema,
+                      hashes=hashes, status="active", proof=report, created_at=ctx.clock.now(), preset=preset)
+    ctx.db.add(row)
+    await ctx.db.flush()
+    await ledger.append(ctx, copy_id=ctx.copy_id, desk_id=desk_id, event=LedgerEvent(
+        kind="policy", origin="kernel", summary={"version": 1, "status": "active", "preset": preset}))
+    return version_contract(row)
+
+
+async def active_version(ctx: KernelCtx, desk_id: str) -> PolicyVersionRow | None:
+    """The Desk's active version, if it has one (the caller's copy must be bound)."""
+    return (await ctx.db.scalars(ctx.repo.scoped(select(PolicyVersionRow).where(
+        PolicyVersionRow.desk_id == desk_id, PolicyVersionRow.status == "active")))).one_or_none()
 
 # The bounded checks, in the order a report lists them. Each holds when, on every case:
 # - auto_within_cards: `:policy` auto-allows => `:R` auto-allows;
@@ -37,7 +609,6 @@ MAX_BOUNDED_CASES = 5000
 # What each bounded key loads, as (F, A, H) from the compiled sets, A0 and the reference sets.
 _BOUNDED_SETS = ("policy", "approvable", "a0", "R", "R_hold")
 _MONEY_EFFECTS = frozenset({"charge", "pay_out"})
-_PROVER_PLAIN = "Your rules couldn't be checked, so nothing changed."
 
 _in_use: set[str] = set()
 _in_use_lock = threading.Lock()
@@ -106,8 +677,7 @@ def bounded_check(engine: desk_kernel.PolicyEngine, *, key_prefix: str, schema_j
                                  set(money_uncovered(cards, profiles)))
         except Exception:
             log.exception("bounded check failed to run")
-            return ProofReport(ok=False, method="bounded", cases=0,
-                               checks=[ProofCheck(name="prover", ok=False, counterexample_plain=_PROVER_PLAIN)])
+            return _prover_failure("bounded")
         checks = [ProofCheck(name=name, ok=name not in failures, counterexample_raw=failures.get(name))
                   for name in BOUNDED_CHECKS]
         return ProofReport(ok=all(c.ok for c in checks), method="bounded", cases=len(cases), checks=checks)

@@ -1,4 +1,4 @@
-.PHONY: kernel test db-roles web-test web-e2e image image-check infra-check image-smoke evals-unit evals-tier1 evals-tier1-stub evals-tier1-kernel evals-tier1-api kernel-serve
+.PHONY: kernel test db-roles web-test web-e2e image image-check infra-check image-smoke evals-unit evals-tier1 evals-tier1-stub evals-tier1-kernel evals-tier1-api kernel-serve proofs check-presets
 
 # Rebuild the kernel's Python module into the backend environment, and the
 # proof binary the kernel runs. desk-prove and its tests find cvc5 through
@@ -14,6 +14,18 @@ kernel-serve:
 test:
 	cd kernel && cargo test --locked
 	cd backend && uv run pytest
+
+# Prove the Rivera seed's cards and the starter presets with desk-prove and write their reports to
+# kernel/cedar/proofs/, which the kernel activates them from (run it in any commit that changes
+# cards, adapter profiles, the schema, baseline, invariants, compiler output or thresholds).
+# check-presets proves them again and fails unless every shipped report matches; CI runs it.
+# Both need cvc5 (CVC5 or PATH) and desk-prove (DESK_PROVE, by default the release build).
+DESK_PROVE ?= $(CURDIR)/kernel/target/release/desk-prove
+proofs:
+	cd backend && DESK_PROVE="$(DESK_PROVE)" uv run python -m scripts.prove_presets
+
+check-presets:
+	cd backend && DESK_PROVE="$(DESK_PROVE)" uv run python -m scripts.prove_presets --check
 
 # Let the kernel, API and mock payments roles log in, with the passwords in .env (or the
 # environment). Passwords reach psql as environment variables and are never echoed or put on

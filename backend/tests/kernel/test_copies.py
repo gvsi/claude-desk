@@ -103,10 +103,11 @@ async def test_copy_seeds_rivera_plumbing(app, client, frozen_clock):
     assert windows.value == desk_kernel.canonical_json(json.dumps([w.model_dump(mode="json") for w in desk.hours]))
     assert [(w.days, w.start, w.end) for w in desk.hours] == [
         (["mon", "tue", "wed", "thu", "fri"], time(8), time(18)), (["sat"], time(9), time(13))]
-    # the Desk's creation is the first entry on its ledger
-    [entry] = await rows_of(app, copy_id, select(LedgerEntry))
-    assert (entry.desk_id, entry.seq, entry.event.kind, entry.event.summary) == (
-        desk_id, 1, "desk_data", {"part": "desk", "created": True})
+    # the Desk's creation is the first entry on its ledger, its rules' activation the second
+    entries = await rows_of(app, copy_id, select(LedgerEntry).order_by(LedgerEntry.seq))
+    assert [(e.desk_id, e.seq, e.event.kind, e.event.summary) for e in entries] == [
+        (desk_id, 1, "desk_data", {"part": "desk", "created": True}),
+        (desk_id, 2, "policy", {"version": 1, "status": "active", "preset": "rivera"})]
     # the seed's cards: the starter preset's utility cards plus Rivera's own
     ask_first = seed.PRESETS["ask_first"]
     assert all(card.card_id.startswith("preset-") and card.mode == "auto" for card in ask_first)
@@ -223,19 +224,22 @@ async def test_seed_rejects_an_hours_claim_and_a_bad_owner_name(app, frozen_cloc
         assert await rows_of(app, copy_id, select(table)) == [], table.__tablename__
 
 
-async def test_create_desk_enables_only_native_tools(app, client, registry):
+async def test_create_desk_enables_only_native_tools(app, frozen_clock, registry):
     native = adapters.register(FakeAdapter("native.find_slots", effects=["read"], status="disabled"))
     adapters.register(FakeAdapter("payments.list_charges", effects=["read"]))     # MCP: only a pinned connect adds it
-    created = await create_copy(client)
-    [desk_id] = created["desk_ids"]
-    [row] = await rows_of(app, created["copy_id"], select(Tool))
+    copy_id = new_id("copy")
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy_id)
+        ctx.db.add(Copy(copy_id=copy_id, created_at=frozen_clock.now()))
+        desk_id = (await desks.create_desk(ctx, copy_id, *seed.rivera_seed(frozen_clock.now()))).desk_id
+    [row] = await rows_of(app, copy_id, select(Tool))
     enabled = native.profile.model_copy(update={"status": "enabled"})
     assert (row.desk_id, row.tool, row.source, row.status, row.effects) == (
         desk_id, "native.find_slots", "native", "enabled", ["read"])
     assert (row.profile, row.definition_sha256) == (enabled, None)
     assert row.profile_sha256 == adapters.profile_sha256(native.profile)     # status isn't part of the pin
     async with kernel_ctx(app) as ctx:
-        ctx.bind(created["copy_id"])
+        ctx.bind(copy_id)
         assert await desks.enabled_profiles(ctx, desk_id) == [enabled]
 
 

@@ -3,8 +3,15 @@
 They run against the local Postgres (`docker compose up -d db`) named in `.env`, migrated to
 head once per run. Every test starts from empty kernel tables: the truncation runs as
 desk_admin, since the kernel role may neither truncate the ledger nor see other copies.
+
+The kernel picks its proof mode at startup from `desk-prove --selftest`. The `app` fixture points
+`DESK_PROVE` at nothing, so it starts in `bounded` mode whatever is installed; a test that asks for
+the `desk_prove` fixture gets the real prover (and `symcc` mode). Tests marked `solver` need cvc5
+and a built `desk-prove` (`make kernel`) and are skipped without them.
 """
 
+import os
+import shutil
 from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,13 +24,48 @@ from alembic.config import Config
 
 from desk.db.session import database_url, dispose_engines, libpq_url
 from desk.db.tables import KERNEL_TABLES
-from desk.kernel_service import adapters
+from desk.kernel_service import activation, adapters
 from desk.kernel_service.app import create_app
 
 from .fakes import FrozenClock
 
 BACKEND = Path(__file__).resolve().parents[2]
+REPO = BACKEND.parent
 START = datetime(2026, 10, 30, 17, 4, 5, 123456, tzinfo=UTC)   # a Friday, 10:04 in Oakland
+NO_PROVER = "/nonexistent/desk-prove"                          # the selftest fails, so the kernel runs bounded
+
+
+def _executable(path: str | None) -> str | None:
+    return path if path and os.path.isfile(path) and os.access(path, os.X_OK) else None
+
+
+# The desk-prove the solver tests prove with: DESK_PROVE, else one on PATH, else the release build.
+PROVER = (_executable(os.environ.get("DESK_PROVE")) or shutil.which("desk-prove")
+          or _executable(str(REPO / "kernel" / "target" / "release" / "desk-prove")))
+CVC5 = _executable(os.environ.get("CVC5")) or shutil.which("cvc5")
+SOLVER_MISSING = ("cvc5 isn't installed (set CVC5 or put it on PATH)" if CVC5 is None
+                  else "desk-prove isn't built (make kernel)" if PROVER is None else None)
+
+
+def pytest_runtest_setup(item: pytest.Item) -> None:
+    if item.get_closest_marker("solver") is not None and SOLVER_MISSING:
+        pytest.skip(SOLVER_MISSING)
+
+
+@pytest.fixture(autouse=True)
+def bounded_until_a_selftest(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The proof mode is the process's, so each test starts where a fresh kernel does: `bounded`."""
+    monkeypatch.setattr(activation, "_proof_mode", "bounded")
+
+
+@pytest.fixture
+def desk_prove(monkeypatch: pytest.MonkeyPatch) -> str:
+    """The real desk-prove and cvc5, through DESK_PROVE and CVC5; skipped without them."""
+    if SOLVER_MISSING:
+        pytest.skip(SOLVER_MISSING)
+    monkeypatch.setenv("DESK_PROVE", PROVER)
+    monkeypatch.setenv("CVC5", CVC5)
+    return PROVER
 
 
 @pytest.fixture(scope="session")
@@ -46,9 +88,15 @@ def frozen_clock() -> FrozenClock:
 
 
 @pytest.fixture
-async def app(frozen_clock: FrozenClock, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator:
-    """The kernel app with its lifespan entered, signing with the dev key."""
+async def app(frozen_clock: FrozenClock, monkeypatch: pytest.MonkeyPatch,
+              request: pytest.FixtureRequest) -> AsyncIterator:
+    """The kernel app with its lifespan entered, signing with the dev key, in `bounded` proof mode
+    (`symcc` when the test asks for `desk_prove`)."""
     monkeypatch.delenv("DESK_SIGNING_SEED", raising=False)
+    if "desk_prove" in request.fixturenames:
+        request.getfixturevalue("desk_prove")
+    else:
+        monkeypatch.setenv("DESK_PROVE", NO_PROVER)
     kernel = create_app(clock=frozen_clock)
     try:
         async with kernel.router.lifespan_context(kernel):

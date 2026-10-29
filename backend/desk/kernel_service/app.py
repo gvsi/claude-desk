@@ -3,8 +3,9 @@
 The kernel binds 127.0.0.1:8701 and nothing changes that: the API process in the same task is
 its only client. The lifespan builds the signer first, so a production kernel without
 `DESK_SIGNING_SEED` refuses to start, then the policy engine over the always-on baseline
-(`app.state.engine`; a baseline it can't take stops the start too), then the database engine
-(role desk_kernel).
+(`app.state.engine`; a baseline it can't take stops the start too) with the shipped proof reports
+in its cache, then runs `desk-prove --selftest` once to pick the proof mode for the whole process
+(`symcc` or `bounded`, which `/health` reports), then the database engine (role desk_kernel).
 
 Every non-2xx answer is a `KernelError{code}` ("Session state responses"): a `KernelFailure`
 answers its own code, request validation 422 `invalid`, the framework's own errors (an unknown
@@ -33,7 +34,7 @@ from desk.contracts import LedgerEntry, LedgerPage
 from desk.db.session import KernelSession, database_url
 from desk.env import is_development
 from desk.kernel_api import Health, KernelError, LedgerAppendRequest
-from desk.kernel_service import auth, compiler, copies, ledger, sessions
+from desk.kernel_service import activation, auth, copies, ledger, sessions
 from desk.kernel_service.auth import AuthError, Named
 from desk.kernel_service.clock import Clock, SystemClock
 from desk.kernel_service.repo import Ctx, KernelFailure, KernelRuntime, kernel_transaction, route_template
@@ -62,19 +63,21 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
             # the process environment and the settings each name the environment; either one
             # that isn't development refuses the public dev key
             raise RuntimeError(f"DESK_SIGNING_SEED is required: the kernel settings name DESK_ENV={settings.env!r}")
-        app.state.engine = desk_kernel.PolicyEngine(compiler.BASELINE)   # raises on a baseline it can't take
+        policies = activation.PolicyRuntime.start(app.state.unproved_seeds)   # raises on a baseline it can't take
+        app.state.engine, app.state.loaded_versions = policies.engine, policies.versions
+        app.state.proof_mode = await activation.run_selftest()               # symcc or bounded, for the whole process
         engine = create_async_engine(settings.database_url, pool_pre_ping=True)
         factory = async_sessionmaker(engine, expire_on_commit=False, sync_session_class=KernelSession)
         app.state.kernel = KernelRuntime(settings=settings, clock=clock, signer=signer, engine=engine,
-                                         sessions=factory)
+                                         sessions=factory, policies=policies)
         try:
             yield
         finally:
             await engine.dispose()
 
     app = FastAPI(title="Claude Desk kernel", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
-    app.state.proof_mode = "bounded"   # Task 8's startup selftest switches it to "symcc"
-    app.state.unproved_seeds = []
+    app.state.proof_mode = "bounded"   # until the startup selftest passes
+    app.state.unproved_seeds = set()   # shipped rule sets that couldn't activate for want of a report
     app.add_exception_handler(KernelFailure, _kernel_failure)
     app.add_exception_handler(RequestValidationError, _invalid_request)
     app.add_exception_handler(StarletteHTTPException, _framework_error)
@@ -88,7 +91,7 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
         signer = request.app.state.kernel.signer
         return Health(version=desk_kernel.version(), proof_mode=request.app.state.proof_mode,
                       dev_signing_key=signer.dev_key, public_key_hex=signer.public_key_hex(),
-                      key_id=signer.key_id(), unproved_seeds=list(request.app.state.unproved_seeds))
+                      key_id=signer.key_id(), unproved_seeds=sorted(request.app.state.unproved_seeds))
 
     return app
 
