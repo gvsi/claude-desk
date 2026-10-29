@@ -718,11 +718,15 @@ def test_origin_groups_locked_reads_the_kept_sources_from_express_edge(smoke):
         [*express_edge_kept(), {"IpProtocol": "tcp", "FromPort": 80, "ToPort": 80,
                                 "PrefixListIds": [{"PrefixListId": CLOUDFRONT_LIST}]}],
         [*express_edge_kept(), {"IpProtocol": "-1", "PrefixListIds": [{"PrefixListId": CLOUDFRONT_LIST}]}],
+        [*express_edge_kept(), {**cloudfront_443(), "IpProtocol": "udp"}],
+        [{**cloudfront_443(), "IpProtocol": "udp"}],
+        [*express_edge_kept(), {**cloudfront_443(), "ToPort": 444}],
     ],
     ids=["world_443", "world_v6_80", "world_all_traffic", "public_cidr_443", "public_beside_private_443",
          "wider_than_private_443", "public_v6_443", "cidr_range_over_443", "other_prefix_list", "no_ingress",
          "only_another_prefix_list", "only_kept_sources", "public_all_traffic", "public_22", "public_udp_53",
-         "world_halves_22", "world_v6_spelled_long_80", "cloudfront_on_80", "cloudfront_all_traffic"],
+         "world_halves_22", "world_v6_spelled_long_80", "cloudfront_on_80", "cloudfront_all_traffic",
+         "cloudfront_udp_443", "only_cloudfront_udp_443", "cloudfront_tcp_443_444"],
 )
 def test_origin_groups_locked_fails_on_any_other_ingress(smoke, aws, capsys, permissions):
     clients, stubs = aws
