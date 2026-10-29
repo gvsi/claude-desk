@@ -272,6 +272,22 @@ export const DangerBusy: Story = {
   },
 };
 
+export const DangerGhostBusy: Story = {
+  args: { variant: 'danger-ghost', size: 'main', busy: true, children: 'Deny always' },
+  parameters: {
+    canvasNote: `${ANSWERS_NOTE} No board shows it mid-request; it takes the hover ground under its red words, never dimmed, so they still read at 4.5:1.`,
+  },
+  play: async ({ args, canvas, userEvent }) => {
+    const button = canvas.getByRole('button', { name: 'Deny always' });
+    await expect(button).toHaveAttribute('aria-busy', 'true');
+    await expect(button).toHaveAttribute('aria-disabled', 'true');
+    // busy_label_keeps_contrast: its red words on the hover ground are a listed pair.
+    expectComputed(button, { backgroundColor: 'rgba(250, 249, 245, 0.06)', color: DANGER_TEXT, opacity: '1' });
+    await userEvent.click(button);
+    await expect(args.onClick).not.toHaveBeenCalled();
+  },
+};
+
 export const DangerDisabled: Story = {
   args: { variant: 'danger', size: 'main', disabled: true, children: 'Deny this time' },
   parameters: { canvasNote: `${ANSWERS_NOTE} No board shows it disabled; it dims like every disabled button and keeps its fill.` },
