@@ -1,27 +1,14 @@
 /**
- * The event stream in a real browser `EventSource`, served by an inline MSW `sse()` handler:
- * dispatch by payload type with the event's seq, what is dropped, and the states a screen sees.
+ * The event stream in a real browser `EventSource`, served by inline MSW `sse()` handlers on the
+ * screens' shared worker (the setup drops them after each test): dispatch by payload type with
+ * the event's seq, what is dropped, and the states a screen sees.
  */
 import { http, HttpResponse, sse } from 'msw';
-import { setupWorker } from 'msw/browser';
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { worker } from '../mocks/browser.ts';
 import type { SseEvent } from './contracts.ts';
 import { openStream, type StreamState } from './stream.ts';
-
-const worker = setupWorker();
-
-beforeAll(async () => {
-  await worker.start({ quiet: true, onUnhandledFrame: 'bypass' });
-});
-
-afterEach(() => {
-  worker.resetHandlers();
-});
-
-afterAll(() => {
-  worker.stop();
-});
 
 const EVENTS_URL = '/api/public/desks/rivera-plumbing/events';
 

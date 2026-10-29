@@ -14,8 +14,8 @@ import './ds/base.css';
  */
 async function startMockApi(): Promise<void> {
   if (import.meta.env.MODE !== 'mock') return;
-  const { setupWorker } = await import('msw/browser');
-  await setupWorker().start({ onUnhandledFrame: 'bypass' });
+  const { startMockApi: start } = await import('./mocks/browser.ts');
+  await start();
 }
 
 async function main(): Promise<void> {

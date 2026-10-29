@@ -1,7 +1,8 @@
 /**
  * Renders the whole app at `path`, as a screen test sees it: a memory router over the app's
  * routes, a fresh query client (the app makes one per mount), polling at a twentieth of real time,
- * and the desktop or phone viewport. One app at a time: a second call unmounts the first.
+ * the desktop or phone viewport, and the mock API (a fresh copy of `seed` when one is named). One
+ * app at a time: a second call unmounts the first.
  */
 import { createMemoryRouter, type DataRouter } from 'react-router';
 import { page } from 'vitest/browser';
@@ -10,6 +11,8 @@ import { cleanup, render, type RenderResult } from 'vitest-browser-react';
 import { App } from '../app/App.tsx';
 import { setPollScale } from '../app/poll.ts';
 import { routes } from '../app/routes.tsx';
+import type { MockSeed } from '../mocks/seed.ts';
+import { mockStore } from '../mocks/store.ts';
 
 export const VIEWPORTS = {
   desktop: { width: 1440, height: 900 },
@@ -22,6 +25,11 @@ export interface RenderRouteOptions {
   viewport?: Viewport;
   /** The browser's first language, as `navigator.languages[0]` reports it ("es-MX"). */
   language?: string;
+  /**
+   * Starts the mock API over from this seed before rendering. Without it the test keeps the copy
+   * it has (each test starts with `rivera`), so a second render sees what the first one changed.
+   */
+  seed?: MockSeed;
 }
 
 export interface RenderedRoute {
@@ -49,6 +57,7 @@ export async function renderRoute(path: string, opts: RenderRouteOptions = {}): 
   resetBrowserLanguage();
   if (opts.language !== undefined) setBrowserLanguage(opts.language);
   setPollScale(0.05);
+  if (opts.seed !== undefined) mockStore.reset(opts.seed);
   const router = createMemoryRouter(routes, { initialEntries: [path] });
   const screen = await render(<App router={router} />);
   return { screen, router };
