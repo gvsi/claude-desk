@@ -8,6 +8,7 @@ Optional attributes appear only when set, since the schema reads them behind `ha
 `decide_call` runs "Evaluation" for one call, after the route has answered the session-state
 rows ("Session state responses": token, copy, closed, generation, mode `owner`):
 
+0. A call ID the decisions table can't keep (`keepable_call_id`) is 422 `invalid`.
 1. Idempotency on `(session_id, generation, call_id)`: the same call returns its stored decision,
    another Desk, tool or args is 409 `conflict`.
 2. A paused session (the breaker) gets a stored `refuse`.
@@ -21,7 +22,9 @@ rows ("Session state responses": token, copy, closed, generation, mode `owner`):
 Everything a decision writes commits in the caller's transaction: the action, the decision, its
 ledger entries (`review`, `decide`, `breaker`) and the owner's alerts. A decision is signed over
 its state and status line (`sign_decision`), and every later state change ledgers and re-signs it
-(`set_state`). Expiry is lazy (`expire_if_due`).
+(`set_state`). Expiry is lazy (`expire_if_due`). A call refused before it has a decision (that
+call ID, or an internal error such as a `KernelRepo` refusal, 500 `internal`) still gets its
+`decide` entry, written after the transaction has rolled back.
 
 Visitor text reaches the decision only as data: the reviewer sees free-text arguments under
 `untrusted_args`, and the owner reads them quoted after "From the visitor".
@@ -34,6 +37,7 @@ import re
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from functools import partial
 from typing import Any, get_args
 from zoneinfo import ZoneInfo
 
@@ -386,6 +390,7 @@ async def _business(ctx: KernelCtx, desk_id: str) -> Business:
 
 DECIDE_ROUTE = "POST /decide"
 TOOL_NAME_CHARS = 64                      # a refused call's name is stored cut to this
+CALL_ID_CHARS = 128                       # a longer call ID is refused: a long one can overflow the decisions index
 QUOTED_CHARS = 200                        # free text quoted to the owner is cut to this
 MONEY_EFFECTS = frozenset({"charge", "pay_out"})
 BREAKER_STRIKES = 3
@@ -427,6 +432,11 @@ def _storable(text: str) -> bool:
     except UnicodeEncodeError:
         return False
     return "\0" not in text
+
+
+def keepable_call_id(call_id: str) -> bool:
+    """A call ID the decisions table can store and index: text Postgres can keep, at most 128 characters."""
+    return len(call_id) <= CALL_ID_CHARS and _storable(call_id)
 
 
 def _storable_json(value: Any) -> bool:
@@ -534,8 +544,8 @@ async def decide_call(ctx: KernelCtx, principal: Principal, session_row: Session
     """Decides one proposed tool call for an authenticated session, once the route has answered the
     session-state rows, and stores the decision in the caller's transaction (see the module
     docstring for the order). Never executes anything."""
-    if not _storable(req.call.call_id):
-        raise KernelFailure(422, "invalid", "unstorable_call_id")
+    if not keepable_call_id(req.call.call_id):
+        raise _refused_call(422, "invalid", "invalid_call_id", principal, req)
     try:
         sha = call_sha256(req)
     except ValueError:
@@ -588,6 +598,23 @@ async def decide_call(ctx: KernelCtx, principal: Principal, session_row: Session
     if evaluation.errored:
         return await _refuse(ctx, call, "evaluation_error", args_json=args_json, evaluation=evaluation)
     return await _store(ctx, call, evaluation.outcome, args_json=args_json, evaluation=evaluation)
+
+
+def _refused_call(status: int, code: str, reason: str, principal: Principal, req: DecideRequest) -> KernelFailure:
+    """A call refused before it has a decision row: answered `status` `code`, and ledgered `decide`
+    on the session's Desk once the request's transaction has rolled back (`KernelFailure.persist`),
+    from kernel-built values only."""
+    summary = {"outcome": "refuse", "tool": ledger.safe_ref(req.call.tool), "reason": reason}
+    return KernelFailure(status, code, reason, persist=partial(
+        _ledger_refused_call, copy_id=principal.copy_id, desk_id=principal.desk_id, session_id=principal.session_id,
+        summary=summary))
+
+
+async def _ledger_refused_call(ctx: KernelCtx, *, copy_id: str, desk_id: str, session_id: str,
+                               summary: dict[str, Any]) -> None:
+    ctx.bind(copy_id)
+    await ledger.append(ctx, copy_id=copy_id, desk_id=desk_id, event=LedgerEvent(
+        kind="decide", origin="kernel", session_id=session_id, summary=summary))
 
 
 async def _review(ctx: KernelCtx, call: _Call, pending: list[RuleCard]) -> Reviewed:
@@ -745,7 +772,12 @@ async def _decide_caller(ctx: KernelCtx, request: Request, body: DecideRequest) 
 @router.post("/decide", response_model=Decision)
 async def post_decide(body: DecideRequest, ctx: Ctx, request: Request) -> Decision:
     principal, row = await _decide_caller(ctx, request, body)
-    return await decide_call(ctx, principal, row, body)
+    try:
+        return await decide_call(ctx, principal, row, body)
+    except ValueError:
+        # an internal error, such as KernelRepo refusing a statement kernel code built: 500, still on record
+        log.exception("decide_internal_error")
+        raise _refused_call(500, "internal", "internal_error", principal, body) from None
 
 
 @router.get("/decisions/by_call", response_model=Decision)
@@ -759,7 +791,7 @@ async def get_by_call(session_id: str, generation: int, call_id: str, ctx: Ctx, 
                             named=Named(copy_id=owner.copy_id, session_id=session_id))
     else:
         await auth.require_session(ctx, request, session_id)
-    row = await find_call(ctx, session_id, generation, call_id) if _storable(call_id) else None
+    row = await find_call(ctx, session_id, generation, call_id) if keepable_call_id(call_id) else None
     if row is None:
         raise KernelFailure(404, "not_found", "unknown_call")
     return await decision_contract(ctx, await _read(ctx, row))

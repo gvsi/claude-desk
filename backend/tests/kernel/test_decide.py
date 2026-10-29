@@ -22,6 +22,7 @@ from fastapi import FastAPI
 from sqlalchemy import select
 
 from desk.contracts import Claim, Decision, Fact, Label, NotificationDefaults, ResourceRef, Review, RuleCard
+from desk.db import session as db_session
 from desk.db.models import Action, ActorSession, DemoInboxEntry, Desk
 from desk.db.models import Decision as DecisionRow
 from desk.kernel_service import activation, adapters, auth, compiler, desks, ledger, render
@@ -479,6 +480,73 @@ async def test_by_call_recovers_a_committed_decision(app, client, registry):
     assert (response.status_code, response.json()) == (404, {"code": "not_found"})
     response = await by_call(client, visitor.session_id, "call-1", {})
     assert (response.status_code, response.json()) == (401, {"code": "auth"})
+
+
+async def test_set_config_call_id_is_decided_and_ledgered(app, client, registry):
+    rows = await desk_with(app, [FakeAdapter("native.quote")], [card("quote", "native.quote")])
+    visitor = await open_visitor(client, rows)
+    decision = await decided(client, visitor, "native.quote", call_id="set_config")   # an ID like any other
+    assert (decision.call_id, decision.outcome) == ("set_config", "allow")
+    [entry] = [e.event for e in await ledger_rows(app, rows) if e.event.kind == "decide"]
+    assert (entry.ref_id, entry.session_id) == (decision.decision_id, visitor.session_id)
+    response = await by_call(client, visitor.session_id, "set_config", visitor.headers)
+    assert (response.status_code, response.json()["decision_id"]) == (200, decision.decision_id)
+
+
+# a call ID past the decisions index's row size (hex digits, which barely compress), and ones Postgres can't store
+OVERLONG_CALL_ID = "".join(hashlib.sha256(str(n).encode()).hexdigest() for n in range(79))[:5000]
+UNKEEPABLE_CALL_IDS = {"overlong": OVERLONG_CALL_ID, "unstorable": "call-\ud800", "nul": "call-\x00"}
+
+
+@pytest.mark.parametrize("call_id", UNKEEPABLE_CALL_IDS.values(), ids=UNKEEPABLE_CALL_IDS.keys())
+async def test_overlong_or_unstorable_call_id_is_refused_and_ledgered(app, client, registry, call_id):
+    rows = await desk_with(app, [FakeAdapter("native.quote")], [card("quote", "native.quote")])
+    visitor = await open_visitor(client, rows)
+    for tool in ("native.quote", "dana@example.com"):
+        before = len(await ledger_rows(app, rows))
+        body = {"session_id": visitor.session_id, "generation": 0,
+                "call": {"call_id": call_id, "tool": tool, "args": {}}}
+        response = await client.post("/decide", content=json.dumps(body).encode(),   # \ud800 escaped
+                                     headers={**visitor.headers, "content-type": "application/json"})
+        assert (response.status_code, response.json()) == (422, {"code": "invalid"})
+        added = [e.event for e in (await ledger_rows(app, rows))[before:]]
+        assert [(e.kind, e.session_id, e.ref_id, e.summary) for e in added] == [
+            ("decide", visitor.session_id, None,
+             {"outcome": "refuse", "tool": ledger.safe_ref(tool), "reason": "invalid_call_id"})]
+    assert await decisions_of(app, rows) == []
+    assert await rows_of(app, rows.copy_id, select(Action)) == []
+
+
+async def test_by_call_with_a_hostile_call_id_is_404(app, client, registry):
+    rows = await desk_with(app, [FakeAdapter("native.quote")], [card("quote", "native.quote")])
+    visitor = await open_visitor(client, rows)
+    await decided(client, visitor, "native.quote")                             # the session has a decision
+    hostile = ("set_config", "x'; select set_config('desk.copy_id','other',false); --",
+               "query_to_xml('select 1', true, true, '')", OVERLONG_CALL_ID, "call-\x00")
+    for call_id in hostile:
+        response = await by_call(client, visitor.session_id, call_id, visitor.headers)
+        assert (response.status_code, response.json()) == (404, {"code": "not_found"}), call_id[:40]
+
+
+async def test_a_guard_refusal_on_decide_is_ledgered(app, client, registry, monkeypatch):
+    rows = await desk_with(app, [FakeAdapter("native.quote")], [card("quote", "native.quote")])
+    visitor = await open_visitor(client, rows)
+    check = db_session._check_compiled
+
+    def refusing(stmt, scoped_tables):
+        if "decisions" in scoped_tables:          # decide_call's first query; authentication reads none
+            raise ValueError(db_session.SETS_THE_COPY)
+        check(stmt, scoped_tables)
+
+    before = len(await ledger_rows(app, rows))
+    monkeypatch.setattr(db_session, "_check_compiled", refusing)
+    response = await post_decide(client, visitor, "native.quote")
+    monkeypatch.setattr(db_session, "_check_compiled", check)
+    assert (response.status_code, response.json()) == (500, {"code": "internal"})
+    added = [e.event for e in (await ledger_rows(app, rows))[before:]]
+    assert [(e.kind, e.session_id, e.ref_id, e.summary) for e in added] == [
+        ("decide", visitor.session_id, None, {"outcome": "refuse", "tool": "native.quote", "reason": "internal_error"})]
+    assert await decisions_of(app, rows) == []
 
 
 async def test_tools_not_given_are_refused(app, client, registry):

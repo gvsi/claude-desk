@@ -24,6 +24,8 @@ from sqlalchemy.dialects.postgresql import REGCLASS
 from sqlalchemy.exc import DBAPIError, IntegrityError, StatementError
 from sqlalchemy.orm import DeclarativeBase, Session, aliased, column_property, defer, with_expression
 from sqlalchemy.pool import NullPool
+from sqlalchemy.sql.elements import quoted_name
+from sqlalchemy.sql.functions import Function
 
 import desk.db
 from desk.contracts import ActorKind, Assurance, Claim, DecisionState, Outcome, RenderedBlock, Review, SessionMode
@@ -405,6 +407,52 @@ def test_kernel_repo_refuses_what_it_cannot_scope():
             repo.scoped(unscopable)
 
 
+# The built-ins that would let a SELECT change desk.copy_id: set_config itself, and every function
+# that runs query text it is given (pg_proc on Postgres 16), since that text could call set_config.
+COPY_SWITCHERS = ("set_config", "query_to_xml", "query_to_xmlschema", "query_to_xml_and_xmlschema", "cursor_to_xml",
+                  "cursor_to_xmlschema", "ts_stat", "ts_rewrite")
+
+
+def calling(n: int, call) -> type:
+    """A Desk model whose mapped column makes `call`: the statement hides it, only its SQL shows it."""
+    return type(f"DeskCalling{n}", (LeakyBase,), {"__table__": Desk.__table__, "called": column_property(call)})
+
+
+def test_guard_refuses_set_config_calls():
+    repo = KernelRepo(f"copy-{uuid4().hex}")
+    calls = []
+    for name in COPY_SWITCHERS:
+        args = (COPY_SETTING, "copy-b", True) if name == "set_config" else ("select 1", True, False, "")
+        calls += [
+            getattr(func, name)(*args),                                       # plain
+            getattr(func.pg_catalog, name)(*args),                            # schema-qualified
+            Function(quoted_name(name, True), *args),                         # quoted, any case
+            Function(quoted_name(name.upper(), True), *args),
+            Function(quoted_name(name.title(), True), *args, packagenames=("pg_catalog",)),
+        ]
+    statements = [select(Desk.desk_id, call) for call in calls]
+    statements += [select(calling(n, call)) for n, call in enumerate(calls)]
+    admitted = []
+    for statement in statements:
+        try:
+            repo.scoped(statement)
+        except ValueError:
+            continue
+        admitted.append(str(statement).split(" FROM")[0])
+    assert admitted == []
+
+
+async def test_guard_treats_bound_text_as_data(kernel_db):
+    repo = KernelRepo(f"copy-{uuid4().hex}")
+    repo.bind(kernel_db)
+    hostile = ("set_config", "x SET_CONFIG y", "query_to_xml('select 1', true, true, '')",
+               "x'; select set_config('desk.copy_id','other',false); --")
+    for value in hostile:
+        found = await kernel_db.execute(repo.scoped(select(Desk.desk_id).where(Desk.desk_id == value)))
+        assert found.all() == [], value
+    assert (await kernel_db.execute(select(func.current_setting(COPY_SETTING)))).scalar_one() == repo.copy_id
+
+
 def test_kernel_role_cannot_rewrite_the_ledger():
     entry = ledger_entry("desk-a", 1)
     with connect("KERNEL") as kernel, kernel.transaction(force_rollback=True):
@@ -726,7 +774,8 @@ def test_kernel_ro_reads_need_no_role_that_bypasses_row_security(admin):
 
 
 async def test_sql_functions_read_only_the_copy(kernel_db):
-    # the reviewer's probe: query text inside a function call passes KernelRepo.scoped()'s statement checks
+    # the reviewer's probe: functions that read tables by themselves. KernelRepo.scoped() refuses one that runs
+    # query text, and row-level security alone keeps copy B out of it, run as it is, and out of table_to_xml
     copy_a, copy_b = f"copy-{uuid4().hex}", f"copy-{uuid4().hex}"
     repo = KernelRepo(copy_a)
     repo.bind(kernel_db)
@@ -738,13 +787,17 @@ async def test_sql_functions_read_only_the_copy(kernel_db):
     kernel_db.add(Desk(desk_id=f"desk-{copy_a}", copy_id=copy_a, business_id="biz", name="Main line",
                        slug=f"slug-{copy_a}"))
     await kernel_db.flush()
+    query_text = select(Desk.desk_id, func.query_to_xml(
+        f"select title, body from kernel.documents where copy_id = '{copy_b}'", True, False, ""))
+    with pytest.raises(ValueError):
+        repo.scoped(query_text)
     leaks = (
-        select(Desk.desk_id, func.query_to_xml(
-            f"select title, body from kernel.documents where copy_id = '{copy_b}'", True, False, "")),
-        select(Desk.desk_id, func.table_to_xml(cast(literal("kernel.documents"), REGCLASS), True, False, "")),
+        query_text,
+        repo.scoped(select(Desk.desk_id, func.table_to_xml(cast(literal("kernel.documents"), REGCLASS), True, False,
+                                                            ""))),
     )
     for leak in leaks:
-        rows = (await kernel_db.execute(repo.scoped(leak))).all()
+        rows = (await kernel_db.execute(leak)).all()
         assert [desk_id for desk_id, _ in rows] == [f"desk-{copy_a}"]
         assert "copy B private body" not in rows[0][1] and "Bob's warranty" not in rows[0][1]
 
