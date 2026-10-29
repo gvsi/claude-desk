@@ -28,7 +28,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from desk.db.session import KernelSession, database_url
 from desk.env import is_development
 from desk.kernel_api import Health, KernelError
-from desk.kernel_service import sessions
+from desk.kernel_service import copies, sessions
 from desk.kernel_service.auth import AuthError
 from desk.kernel_service.clock import Clock, SystemClock
 from desk.kernel_service.repo import KernelFailure, KernelRuntime, kernel_transaction, route_template
@@ -74,6 +74,7 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
     app.add_exception_handler(StarletteHTTPException, _framework_error)
     app.add_middleware(InternalErrors)
     app.include_router(sessions.router)
+    app.include_router(copies.router)
 
     @app.get("/health", response_model=Health)
     async def health(request: Request) -> Health:
