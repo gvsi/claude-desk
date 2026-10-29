@@ -1,8 +1,7 @@
 /* SwitcherMenu: a raised surface with the card border and radius, no shadow. Business rows carry a
-   monogram, the name and how many Desks it has; the current business's Desks sit indented under
-   it, the current one on the selected fill with a check; a hairline, then New business. Rows fill
-   on hover and focus at motion-instant; it appears in place, and nothing moves under reduced
-   motion. The screen positions it beside whatever opened it. */
+   monogram, the name and how many Desks it has, the current one a check; a hairline, then New
+   business. Rows fill on hover and focus at motion-instant; it appears in place, and nothing moves
+   under reduced motion. The screen positions it beside whatever opened it. */
 
 .cd-switcher-menu {
   display: flex;
@@ -85,33 +84,12 @@
   white-space: nowrap;
 }
 
-.cd-switcher-menu__caption,
-.cd-switcher-menu__group-label {
+.cd-switcher-menu__caption {
   color: var(--text-secondary);
 }
 
 .cd-switcher-menu__check {
   flex: none;
-}
-
-/* The current business's Desks, indented so their names line up with the business name. */
-.cd-switcher-menu__desks {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding-left: calc(var(--size-avatar) + var(--space-10));
-}
-
-.cd-switcher-menu__group-label {
-  display: block;
-  padding: var(--space-2) var(--space-8);
-}
-
-/* The current Desk: the selected fill, as in the sidebar's Desk list. */
-.cd-switcher-menu__desk[aria-checked='true'],
-.cd-switcher-menu__desk[aria-checked='true']:hover,
-.cd-switcher-menu__desk[aria-checked='true']:focus-visible {
-  background: var(--bg-selected);
 }
 
 .cd-switcher-menu__separator {

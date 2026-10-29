@@ -174,14 +174,28 @@ export const Charges: Story = {
 
 export const RefundIssued: Story = {
   args: { block: blocks.refund_issued.en },
-  parameters: { canvas: 'none', canvasNote: "No board shows a refund to a visitor; the card follows N-Public-Rivera's booking card." },
+  parameters: {
+    canvas: 'none',
+    canvasNote: "No board shows a refund to a visitor; the card follows N-Public-Rivera's booking card, with its test-payment note.",
+  },
+  play: async ({ canvas }) => {
+    await expect(canvas.getByRole('article', { name: 'Refund issued' })).toBeVisible();
+    // payment_card_says_test_payment
+    await expect(canvas.getByText(TEST_PAYMENT.en)).toBeVisible();
+  },
 };
 
 export const ChargeConfirmed: Story = {
   args: { block: blocks.charge_confirmed.en },
   parameters: {
     canvas: 'N-Conv-Agent',
-    canvasNote: "The board shows the agent's paid deposit as a receipt row in the owner's transcript; the visiting agent gets this card.",
+    canvasNote:
+      "The board shows the agent's paid deposit as a receipt row in the owner's transcript; the visiting agent gets this card, with its test-payment note.",
+  },
+  play: async ({ canvas }) => {
+    await expect(canvas.getByRole('article', { name: 'Charge confirmed' })).toBeVisible();
+    // payment_card_says_test_payment
+    await expect(canvas.getByText(TEST_PAYMENT.en)).toBeVisible();
   },
 };
 

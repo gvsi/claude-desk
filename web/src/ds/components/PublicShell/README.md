@@ -1,6 +1,6 @@
 # PublicShell
 
-`PublicShell` is the public page around a conversation: the business's brand header, the chat with the AI disclosure, the composer and the business's charter beside it.
+`PublicShell` is the public page around a conversation: the business's brand header with its open status, the chat with the AI disclosure, the composer and the business's charter beside it.
 
 ## When to use
 
@@ -12,7 +12,8 @@
 
 - **The brand header**, `size-brand-header` tall, in the business's colors:
   - The monogram (`aria-hidden`) in a square ringed in the secondary ink.
-  - The name and the tagline. The header holds no other line: everything a visitor reads is the kernel's or the shell's own copy.
+  - The name and the tagline.
+  - The open status, when the Desk has hours (see "Open status" below). The header holds no other line and no free text: everything a visitor reads is the kernel's or the shell's own copy.
   - The `accent` only as the 2 px rule under the header: never text, never a ground for text, never the only sign of a control.
   - Colors are set as `--brand-field`, `--brand-ink`, `--brand-ink-secondary` and `--brand-accent`. Only a plain `#rrggbb` or a token (`var(--token)`) is used; anything else falls back to `bg-panel`, `text-primary`, `text-secondary` and `line-hairline` (`guards.ts`).
 - **The chat** in a column at most 680 px wide:
@@ -28,9 +29,23 @@
 
 Names (the business's, the Desk's, the owner's) are shown as written. The page carries `lang` from `language`.
 
+## Open status
+
+The header says whether the business is open now, in the kernel's words.
+
+- **The kernel writes it.** The kernel works out `PublicDesk.open_status` from the business's hours, on its own clock and in the business's time zone, and writes `text` in English or Spanish ("Open now, until 6:00 pm", "Cerrado ahora. Abre el lunes a las 8:00").
+- **The page shows it verbatim.** The shell shows `text` exactly as given and reads nothing else of the status but `open`. It does no time formatting or arithmetic, and the browser's clock and time zone decide nothing. This is the one clock time a visitor surface shows outside a card.
+- **The dot follows `open`.** Open is a filled `handled` dot; closed is a hollow `info` dot. The dot is `aria-hidden`: the words carry the meaning.
+- **Closed adds one line of the shell's own**, under the kernel's words in the secondary ink. It follows `language` like the rest of the shell's copy, and isn't shown when open:
+  - "Claude can still help."
+  - "Claude puede ayudarte igual."
+- **Type and color.** The kernel's words are `meta`, in the brand's ink and marked `data-copy="user"`, as the name is. The closed line is `caption`, a step quieter, 2 px under them.
+- **Placement.** At the right end of the header's row, level with the monogram. Below 640 px of shell width it takes its own line under the monogram and name, from the left gutter, 8 px below them, however short it is. A long line wraps inside the header and never scrolls sideways.
+- **No status, no line.** Without `openStatus`, with `null` (a Desk without hours, or a computation the kernel dropped), or with anything that isn't a non-empty `text` and a boolean `open`, there is no line and no dot, and the header is exactly as it is without hours.
+
 ## Layout
 
-The shell is an inline-size container, so it lays out by its own width, not the window's. Below 900 px the about column moves under the chat, full width. Below 640 px (a phone, or the owner's 420 px panel) the gutters are 16 px instead of 40.
+The shell is an inline-size container, so it lays out by its own width, not the window's. Below 900 px the about column moves under the chat, full width. Below 640 px (a phone, or the owner's 420 px panel) the gutters are 16 px instead of 40, and the open status has its own line under the name.
 
 ## Standalone or embedded
 
@@ -45,6 +60,7 @@ The shell is an inline-size container, so it lays out by its own width, not the 
   - `ink` and `inkSecondary` are `var(--text-primary)` and `var(--text-secondary)`.
   - The mapping keeps both inks at 4.5:1 over the field, falling back to `bg-panel` when they can't.
 - `ownerName` (`owner_display_name`), `language`, `onAskForOwner`.
+- `openStatus`, `PublicDesk.open_status` passed through as served, `null` included. The screen keeps it current by refetching the Desk, once after the kernel's `refresh_at` minus its `as_of` and again when the tab becomes visible; the shell only draws what it's given.
 - `about`, the `PublicDesk.charter` blocks, and `aboutLinks` for people's agents.
 - `composer`, a visitor `Composer` in the page's language, and `children`, the conversation.
 
@@ -55,6 +71,7 @@ The shell is an inline-size container, so it lays out by its own width, not the 
 | `brand` | `PublicBrand` | Required. `{ name; tagline; monogram; field; ink; inkSecondary; accent }`. |
 | `ownerName` | `string` | Required. |
 | `language` | `'en' \| 'es'` | Required. |
+| `openStatus` | `PublicOpenStatus` | `PublicDesk['open_status']`, the kernel's object or `null`. Only `text` and `open` are read. |
 | `onAskForOwner` | `() => void` | Required. |
 | `about` | `RenderedBlock[]` | The charter blocks. |
 | `aboutLinks` | `{ label: string; href: string }[]` | Paths on this site only. |
@@ -62,4 +79,4 @@ The shell is an inline-size container, so it lays out by its own width, not the 
 | `composer` | `ReactNode` | Required. |
 | `children` | `ReactNode` | Required. |
 
-`PublicBrand` is exported with the component.
+`PublicBrand` and `PublicOpenStatus` are exported with the component. `PublicOpenStatus` is `PublicDesk['open_status']`, the generated `OpenStatus` or `null`.

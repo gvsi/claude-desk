@@ -1,22 +1,28 @@
 // Chen & Co. CPA: Linda Chen's practice, the second business in the switcher, and the board where
-// Raj Patel confirms it's him with a code before Claude releases his tax return.
+// Raj Patel confirms it's him with a code before Claude releases his tax return. Linda asks to see
+// every booking before it's made, so a visitor's first consultation waits for her answer.
 
 import type {
   CardBlock,
+  Decision,
   DecisionState,
   DemoInboxEntry,
   EvMessage,
   InboxNotice,
   PublicDesk,
+  RuleCard,
   SessionState,
   StatusEvent,
   VerifyStarted,
 } from '../../api/contracts';
 import type { Bilingual, ConversationFixture, DemoInboxFixture, ProseBlock } from './index';
+import { executedLine } from './receipts';
 import { cardBlock, placeholderHex, proseBlock } from './rivera';
 
 const OWNER = 'Linda Chen';
 const DESK_ID = 'desk-chen-main';
+/** The same demo copy as Rivera Plumbing's: one owner with two businesses. */
+const COPY_ID = 'copy-demo-7f3a';
 
 const business = {
   name: 'Chen & Co. CPA',
@@ -83,12 +89,73 @@ const blocks = { ...cards, prose: proseBlocks };
 const sessions = {
   /** Raj after confirming with a demo code (simulated verification). */
   raj: { session_id: 'ses-raj-web', kind: 'visitor', verified: true, assurance: 'demo_code', mode: 'ai', generation: 1 },
+  /** A visitor not on record, unverified, asking for a first consultation. */
+  public: { session_id: 'ses-chen-visitor', kind: 'visitor', verified: false, assurance: 'none', mode: 'ai', generation: 1 },
 } satisfies Record<string, SessionState>;
 
 const plain = {
-  executed: 'Done',
   reply_checked: "Reply checked against Linda Chen's rules",
+  held: 'Waiting for Linda Chen to approve',
 } as const satisfies Partial<Record<DecisionState | 'reply_checked', string>>;
+
+/** Linda's own card: every booking waits for her answer, whoever asks. */
+const ruleCards = {
+  'cc-consult': {
+    card_id: 'cc-consult',
+    applies_to: 'native.book',
+    mode: 'ask',
+    who: 'anyone',
+    person_id: null,
+    agent_key_id: null,
+    max_amount_cents: null,
+    max_discount_bp: 0,
+    hours: null,
+    review: false,
+    is_default: false,
+    reason: 'Bookings wait for your answer.',
+  },
+} satisfies Record<string, RuleCard>;
+
+/**
+ * A visitor not on record asks for a first consultation. Linda's ask card holds every booking, so
+ * the tool itself is held and Deny always is offered; an unverified visitor has no person to scope
+ * a rule to, so Allow only for this person isn't.
+ */
+const heldConsultation = {
+  decision_id: 'dec-chen-consultation',
+  session_id: sessions.public.session_id,
+  call_id: 'call-chen-consultation',
+  action: {
+    action_id: 'act-chen-consultation',
+    copy_id: COPY_ID,
+    desk_id: DESK_ID,
+    session_id: sessions.public.session_id,
+    generation: 1,
+    tool: 'native.book',
+    effects: ['change'],
+    args_sha256: placeholderHex('sha256:args:chen-consultation', 32),
+    profile_sha256: placeholderHex('sha256:profile:native.book', 32),
+    resource: { kind: 'slot', id: 'S-20261104-1100', owner_person_id: null },
+    list_cents: null,
+    discount_bp: null,
+    amount_cents: null,
+    recipient: null,
+    starts_at: '2026-11-04T11:00:00-08:00',
+  },
+  outcome: 'hold',
+  state: 'held',
+  policy_version: 1,
+  policy_ids: ['H.cc-consult'],
+  card_ids: ['cc-consult'],
+  review: null,
+  reason_plain: 'A visitor not on record asked to book a first consultation on Wednesday, November 4 at 11:00 am.',
+  visitor_plain: plain.held,
+  answers: ['allow_once', 'deny_once', 'deny_always'],
+  expires_at: '2026-10-31T18:12:09.774120Z',
+  inbox: [{ entry_id: 'inbox-hold-consultation', to: 'owner', preview: 'A request needs your answer' }],
+  ledger_seq: 81,
+  signature: placeholderHex('signature:dec-chen-consultation:held', 64),
+} satisfies Decision;
 
 function message(id: string, blocksOfMessage: EvMessage['blocks'], ledgerSeq: number): EvMessage {
   return {
@@ -109,7 +176,7 @@ const releaseReceipt = {
   type: 'receipt',
   decision_id: 'dec-raj-return',
   state: 'executed',
-  visitor_plain: plain.executed,
+  visitor_plain: executedLine('native.release_document', 'en', OWNER),
   ledger_seq: 74,
   signature: placeholderHex('signature:dec-raj-return:executed', 64),
 } satisfies StatusEvent;
@@ -220,6 +287,8 @@ export const chen = {
   publicDesk,
   sessions,
   conversations,
+  ruleCards,
+  heldConsultation,
   verifyStarted,
   demoInbox,
 };

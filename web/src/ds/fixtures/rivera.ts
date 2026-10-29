@@ -1,7 +1,8 @@
 // Rivera Plumbing, the demo business, as the master plan's Rivera seed describes it: Maria Rivera's
 // Desk "Main line", Dana and Bob on record, Alex Kim's assistant visiting as a signed agent, and
 // Lucía Herrera writing in Spanish. Card text follows the kernel's clause rendering; status lines
-// are the kernel's visitor templates, word for word.
+// are the kernel's visitor templates, word for word, except that an executed receipt has its tool's
+// own line (`executedLine` in receipts.ts).
 
 import type {
   CardBlock,
@@ -27,6 +28,7 @@ import type {
   VerifyStarted,
 } from '../../api/contracts';
 import type { Bilingual, ConversationFixture, ProseBlock } from './index';
+import { executedLine, type ExecutedTool } from './receipts';
 
 /**
  * Deterministic hex standing in for hashes, signatures and key material. Nothing in the web app
@@ -52,6 +54,13 @@ const COPY_ID = 'copy-demo-7f3a';
 const DESK_ID = 'desk-rivera-main';
 const OWNER = 'Maria Rivera';
 
+/**
+ * Rivera Plumbing's money cap, $500: the most its active rules version lets an auto card take or pay
+ * out in one action without asking (the master plan's "Money cap", at the Rivera seed's value). Allow
+ * only for this person on a money request needs an amount within it.
+ */
+export const RIVERA_MONEY_CAP_CENTS = 50_000;
+
 const business = {
   name: 'Rivera Plumbing',
   deskName: 'Main line',
@@ -65,7 +74,8 @@ const people = {
   bob: { personId: 'per-bob', name: 'Bob Okafor', maskedContact: 'b•••@example.com' },
 } as const;
 
-// Visitor status lines: the kernel's en/es templates for Maria Rivera's Desk.
+// Visitor status lines: the kernel's en/es templates for Maria Rivera's Desk. An action that ran has
+// no line here: its receipt says what ran (`executedLine`).
 const plain = {
   en: {
     allowed: "Checked against Maria Rivera's rules",
@@ -75,7 +85,6 @@ const plain = {
     denied: 'Maria Rivera decided not to go ahead',
     expired: 'This request timed out',
     cancelled: 'Cancelled',
-    executed: 'Done',
     failed: "That didn't go through",
     unknown: 'Still confirming this',
     refused_at_execution: "The rules changed, so this didn't go ahead",
@@ -91,7 +100,6 @@ const plain = {
     denied: 'Maria Rivera decidió no seguir adelante',
     expired: 'Esta solicitud venció',
     cancelled: 'Cancelado',
-    executed: 'Hecho',
     failed: 'No se pudo completar',
     unknown: 'Todavía lo estamos confirmando',
     refused_at_execution: 'Las reglas cambiaron, así que no se hizo',
@@ -99,7 +107,9 @@ const plain = {
     reply_handed_off: 'Pasado a Maria Rivera para responder',
     owner_said: 'Escrito por Maria Rivera',
   },
-} as const satisfies Bilingual<Record<DecisionState | 'reply_checked' | 'reply_handed_off' | 'owner_said', string>>;
+} as const satisfies Bilingual<
+  Record<Exclude<DecisionState, 'executed'> | 'reply_checked' | 'reply_handed_off' | 'owner_said', string>
+>;
 
 // ---------------------------------------------------------------------------------------------
 // Blocks
@@ -384,21 +394,43 @@ function message(
   };
 }
 
-function status<T extends StatusEvent['type']>(
+function statusEvent<T extends StatusEvent['type']>(
   type: T,
   decisionId: string,
   state: DecisionState,
-  language: 'en' | 'es',
+  visitorPlain: string,
   ledgerSeq: number,
 ): Extract<StatusEvent, { type: T }> {
   return {
     type,
     decision_id: decisionId,
     state,
-    visitor_plain: plain[language][state],
+    visitor_plain: visitorPlain,
     ledger_seq: ledgerSeq,
     signature: signature(`${decisionId}:${state}`),
   } as Extract<StatusEvent, { type: T }>;
+}
+
+/** A status event with the state's own line. */
+function status<T extends StatusEvent['type']>(
+  type: T,
+  decisionId: string,
+  state: Exclude<DecisionState, 'executed'>,
+  language: 'en' | 'es',
+  ledgerSeq: number,
+): Extract<StatusEvent, { type: T }> {
+  return statusEvent(type, decisionId, state, plain[language][state], ledgerSeq);
+}
+
+/** A status event for an action that ran, with the line that says what `tool` did. */
+function ran<T extends StatusEvent['type']>(
+  type: T,
+  decisionId: string,
+  tool: ExecutedTool,
+  language: 'en' | 'es',
+  ledgerSeq: number,
+): Extract<StatusEvent, { type: T }> {
+  return statusEvent(type, decisionId, 'executed', executedLine(tool, language, OWNER), ledgerSeq);
 }
 
 const writing = { type: 'writing' } satisfies SseEvent;
@@ -411,14 +443,14 @@ const discountedQuote = cardBlock('quote', {
 });
 
 // Events that appear both in a live stream and in a stored conversation.
-const danaQuoteReceipt = status('receipt', 'dec-dana-quote', 'executed', 'en', 12);
+const danaQuoteReceipt = ran('receipt', 'dec-dana-quote', 'native.quote', 'en', 12);
 const danaQuote = message('msg-dana-quote', {
   language: 'en',
   blocks: [proseBlocks.quoteIntro.en, cards.quote.en],
   visitor_plain: plain.en.reply_checked,
   ledger_seq: 13,
 });
-const luciaQuoteReceipt = status('receipt', 'dec-lucia-quote', 'executed', 'es', 31);
+const luciaQuoteReceipt = ran('receipt', 'dec-lucia-quote', 'native.quote', 'es', 31);
 const luciaQuote = message('msg-lucia-quote-es', {
   language: 'es',
   blocks: [proseBlocks.quoteIntro.es, cards.quote.es],
@@ -449,7 +481,7 @@ const events = {
   heldTurn: [heldReceipt, writing, handoffReply, turnEnd],
   /** Maria allowed the discount: the resolved receipt, then Claude's follow-up with the quote. */
   resolvedTurn: [
-    status('resolved', 'dec-held-quote', 'executed', 'en', 6),
+    ran('resolved', 'dec-held-quote', 'native.quote', 'en', 6),
     writing,
     message('msg-visitor-discount', {
       language: 'en',
@@ -502,7 +534,7 @@ const conversations = {
       { kind: 'event', event: danaQuote },
       { kind: 'visitor', text: "Yes please. Is anything sooner open? There's water on the floor." },
       { kind: 'whisper', text: 'offer Thursday morning too' },
-      { kind: 'event', event: status('receipt', 'dec-dana-slots', 'executed', 'en', 15) },
+      { kind: 'event', event: ran('receipt', 'dec-dana-slots', 'native.find_slots', 'en', 15) },
       {
         kind: 'event',
         event: message('msg-dana-slots', {
@@ -513,7 +545,7 @@ const conversations = {
         }),
       },
       { kind: 'visitor', text: 'Tuesday at 2 works.' },
-      { kind: 'event', event: status('receipt', 'dec-dana-book', 'executed', 'en', 18) },
+      { kind: 'event', event: ran('receipt', 'dec-dana-book', 'native.book', 'en', 18) },
       {
         kind: 'event',
         event: message('msg-dana-booked', {
@@ -535,7 +567,7 @@ const conversations = {
         signed: true,
         text: 'Service call for Alex Kim: a leaking water heater, ZIP 94610.\nPlease quote the service call deposit.',
       },
-      { kind: 'event', event: status('receipt', 'dec-alex-quote', 'executed', 'en', 22) },
+      { kind: 'event', event: ran('receipt', 'dec-alex-quote', 'native.quote', 'en', 22) },
       {
         kind: 'event',
         event: message('msg-alex-quote', {
@@ -553,7 +585,7 @@ const conversations = {
         }),
       },
       { kind: 'agent', signed: true, text: 'Charge the deposit to the signed limit.' },
-      { kind: 'event', event: status('receipt', 'dec-alex-charge', 'executed', 'en', 25) },
+      { kind: 'event', event: ran('receipt', 'dec-alex-charge', 'native.charge_mandate', 'en', 25) },
       {
         kind: 'event',
         event: message('msg-alex-charged', {
@@ -586,7 +618,7 @@ const conversations = {
       },
       { kind: 'visitor', text: 'Lucía Herrera, (510) 555-0187.' },
       // native.request_callback ran: the kernel wrote the handoff and its callback_confirmed fact.
-      { kind: 'event', event: status('receipt', 'dec-lucia-callback', 'executed', 'es', 34) },
+      { kind: 'event', event: ran('receipt', 'dec-lucia-callback', 'native.request_callback', 'es', 34) },
       {
         kind: 'event',
         event: message('msg-lucia-callback', {
@@ -645,7 +677,11 @@ const heldQuoteAction = {
   starts_at: null,
 } satisfies NormalizedAction;
 
-/** The seeded hold: a visitor not on record wants the drain clearing at 15% off. */
+/**
+ * The seeded hold: a visitor not on record wants the drain clearing at 15% off. The quote card's
+ * discount limit holds it, not the tool, so Deny always isn't offered, and an unverified visitor
+ * has no person to scope a rule to: the two one-time answers.
+ */
 const heldQuote = {
   decision_id: 'dec-held-quote',
   session_id: sessions.public.session_id,
@@ -659,7 +695,7 @@ const heldQuote = {
   review: null,
   reason_plain: 'A visitor not on record asked for a drain clearing quote at 15% off, $153.00 instead of $180.00.',
   visitor_plain: plain.en.held,
-  answers: ['allow_once', 'deny_once', 'deny_always'],
+  answers: ['allow_once', 'deny_once'],
   expires_at: '2026-10-31T17:04:05.123456Z',
   inbox: [{ entry_id: 'inbox-hold-quote', to: 'owner', preview: 'A request needs your answer' }],
   ledger_seq: 2,
@@ -668,13 +704,14 @@ const heldQuote = {
 
 /**
  * The held quote after each answer or event. Every one keeps the hold's `answers`, so a test
- * shows that `state`, not the list, decides whether answer buttons appear.
+ * shows that `state`, not the list, decides whether answer buttons appear. Once it ran, its line
+ * says the quote was made.
  */
 function afterHold(state: DecisionState, ledgerSeq: number): Decision {
   return {
     ...heldQuote,
     state,
-    visitor_plain: plain.en[state],
+    visitor_plain: state === 'executed' ? executedLine('native.quote', 'en', OWNER) : plain.en[state],
     inbox: [],
     ledger_seq: ledgerSeq,
     signature: signature(`dec-held-quote:${state}`),
@@ -759,27 +796,32 @@ const decisions = {
   refused_at_execution: afterHold('refused_at_execution', 5),
 } satisfies Record<DecisionState, Decision>;
 
-/** Verified Dana asks for a Sunday visit, outside both booking cards' hours: all four answers. */
+/**
+ * Verified Dana asks for a Saturday afternoon visit, after the Saturday card's morning hours. Both
+ * booking cards' hold twins match, since a hold twin drops its card's hours; the Saturday card, the
+ * one the reason names, comes first. Hours hold it, not the tool, so Deny always isn't offered;
+ * she is verified, so Allow only for this person is.
+ */
 const heldVerified = {
-  decision_id: 'dec-dana-sunday',
+  decision_id: 'dec-dana-saturday',
   session_id: sessions.demoCode.session_id,
-  call_id: 'call-dana-sunday',
+  call_id: 'call-dana-saturday',
   action: {
-    action_id: 'act-dana-sunday',
+    action_id: 'act-dana-saturday',
     copy_id: COPY_ID,
     desk_id: DESK_ID,
     session_id: sessions.demoCode.session_id,
     generation: 1,
     tool: 'native.book',
     effects: ['change'],
-    args_sha256: sha256('args:dana-sunday'),
+    args_sha256: sha256('args:dana-saturday'),
     profile_sha256: sha256('profile:native.book'),
-    resource: { kind: 'slot', id: 'S-20261108-1000', owner_person_id: null },
+    resource: { kind: 'slot', id: 'S-20261107-1400', owner_person_id: null },
     list_cents: null,
     discount_bp: null,
     amount_cents: null,
     recipient: null,
-    starts_at: '2026-11-08T10:00:00-08:00',
+    starts_at: '2026-11-07T14:00:00-08:00',
   },
   outcome: 'hold',
   state: 'held',
@@ -788,13 +830,54 @@ const heldVerified = {
   card_ids: ['rv-book-sat', 'rv-book-wk'],
   review: null,
   reason_plain:
-    'Dana Whitfield, verified with a code, asked to book Sunday, November 8 at 10:00 am. Your booking rules cover weekdays 8:00 am to 6:00 pm and Saturdays 9:00 am to 1:00 pm.',
+    'Dana Whitfield, verified with a code, asked to book Saturday, November 7 at 2:00 pm. Your Saturday bookings run 9:00 am to 1:00 pm.',
+  visitor_plain: plain.en.held,
+  answers: ['allow_once', 'deny_once', 'allow_person'],
+  expires_at: '2026-10-31T16:40:00.552013Z',
+  inbox: [{ entry_id: 'inbox-hold-saturday', to: 'owner', preview: 'A request needs your answer' }],
+  ledger_seq: 28,
+  signature: signature('dec-dana-saturday:held'),
+} satisfies Decision;
+
+/**
+ * Verified Dana asks for her drain clearing payment back. The refund card asks Maria about every
+ * refund, so the tool itself is held and Deny always is offered; she is verified and the amount is
+ * within the rules' money cap, so Allow only for this person is too: all four answers.
+ */
+const heldRefund = {
+  decision_id: 'dec-dana-refund',
+  session_id: sessions.demoCode.session_id,
+  call_id: 'call-dana-refund',
+  action: {
+    action_id: 'act-dana-refund',
+    copy_id: COPY_ID,
+    desk_id: DESK_ID,
+    session_id: sessions.demoCode.session_id,
+    generation: 1,
+    tool: 'payments.create_refund',
+    effects: ['pay_out', 'private_data'],
+    args_sha256: sha256('args:dana-refund'),
+    profile_sha256: sha256('profile:payments.create_refund'),
+    resource: { kind: 'charge', id: 'ch-dana-1', owner_person_id: people.dana.personId },
+    list_cents: null,
+    discount_bp: null,
+    amount_cents: 18000,
+    recipient: null,
+    starts_at: null,
+  },
+  outcome: 'hold',
+  state: 'held',
+  policy_version: 1,
+  policy_ids: ['H.rv-refund'],
+  card_ids: ['rv-refund'],
+  review: null,
+  reason_plain: 'Dana Whitfield, verified with a code, asked for a refund of her $180.00 payment from Monday, October 12.',
   visitor_plain: plain.en.held,
   answers: ['allow_once', 'deny_once', 'allow_person', 'deny_always'],
-  expires_at: '2026-10-31T16:40:00.552013Z',
-  inbox: [{ entry_id: 'inbox-hold-sunday', to: 'owner', preview: 'A request needs your answer' }],
-  ledger_seq: 28,
-  signature: signature('dec-dana-sunday:held'),
+  expires_at: '2026-10-31T17:20:14.302518Z',
+  inbox: [{ entry_id: 'inbox-hold-refund', to: 'owner', preview: 'A request needs your answer' }],
+  ledger_seq: 46,
+  signature: signature('dec-dana-refund:held'),
 } satisfies Decision;
 
 // ---------------------------------------------------------------------------------------------
@@ -1122,6 +1205,7 @@ export const rivera = {
   events,
   decisions,
   heldVerified,
+  heldRefund,
   ruleCards,
   toolProfiles,
   ledger,

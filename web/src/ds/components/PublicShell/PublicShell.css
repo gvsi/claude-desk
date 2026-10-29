@@ -1,10 +1,12 @@
 /* PublicShell: the public page. A brand header in the business's colors (--brand-* from the
-   props, the accent only as the 2 px rule under it); under it the chat column (at most 680 px,
-   centered) and the about column at the right on the panel, 300 px as on the board.
+   props, the accent only as the 2 px rule under it), with the kernel's open status at its right;
+   under it the chat column (at most 680 px, centered) and the about column at the right on the
+   panel, 300 px as on the board.
 
    The shell is an inline-size container: below 900 px wide the about column moves under the chat,
-   and below 640 px the gutters are 16 px. The composer and the footer stay at the bottom of the
-   window while the conversation scrolls above them. */
+   and below 640 px the gutters are 16 px and the open status has its own line under the name. The
+   composer and the footer stay at the bottom of the window while the conversation scrolls above
+   them. */
 
 .cd-public-shell {
   container: cd-public-shell / inline-size;
@@ -69,6 +71,48 @@
 }
 
 .cd-public-shell__tagline {
+  color: var(--brand-ink-secondary);
+}
+
+/* With an open status, a wrapped header leaves 8 px between the name and the status line. */
+.cd-public-shell__brand--open-status {
+  row-gap: var(--space-8);
+}
+
+/* The kernel's open status at the right end of the header's row: a dot beside the kernel's words
+   in the brand's ink and, when closed, the shell's quieter line under them in the secondary ink.
+   On a narrow header it takes its own line under the name. */
+.cd-public-shell__open-status {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: flex-start;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+/* The dot sits on the middle of the first line: (18 px line - 6 px dot) / 2. */
+.cd-public-shell__open-status > .cd-status-dot {
+  margin-top: var(--space-6);
+}
+
+.cd-public-shell__open-status-lines {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.cd-public-shell__open-status-text,
+.cd-public-shell__still-helps {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.cd-public-shell__open-status-text {
+  color: var(--brand-ink);
+}
+
+.cd-public-shell__still-helps {
   color: var(--brand-ink-secondary);
 }
 
@@ -224,6 +268,11 @@
   .cd-public-shell__brand {
     padding-right: var(--space-16);
     padding-left: var(--space-16);
+  }
+
+  /* The open status takes its own line under the name, from the left gutter, however short. */
+  .cd-public-shell__open-status {
+    flex-basis: 100%;
   }
 
   .cd-public-shell__chat {

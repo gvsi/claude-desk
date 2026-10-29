@@ -1,5 +1,6 @@
-/* Button: one of three weights, two heights. Hover fills change at motion-instant; a press
-   shrinks the button slightly at motion-fast. Nothing moves under reduced motion. */
+/* Button: one of three weights, two heights, plus the danger variants for answers that refuse.
+   Hover fills change at motion-instant; a press shrinks the button slightly at motion-fast.
+   Nothing moves under reduced motion. */
 
 .cd-button {
   display: inline-flex;
@@ -39,8 +40,33 @@
   padding: 0 var(--space-16);
 }
 
+/* A menu button: its words, then a 16 px chevron. The chevron's own margin sits inside the icon,
+   so the right edge is a little tighter than the left. */
+.cd-button--menu.cd-button--main {
+  padding-right: var(--space-10);
+}
+
+.cd-button--menu.cd-button--inline {
+  padding-right: var(--space-8);
+}
+
+.cd-button__chevron {
+  flex: none;
+}
+
 .cd-button--secondary {
   background: var(--fill-secondary);
+}
+
+/* Danger: the refused rose, soft, behind lighter rose words. Danger-ghost: the same words alone.
+   Two classes on the color, like primary, so it wins over .cd-type-control in any order. */
+.cd-button.cd-button--danger {
+  background: var(--button-danger-fill);
+  color: var(--button-danger-text);
+}
+
+.cd-button.cd-button--danger-ghost {
+  color: var(--button-danger-text);
 }
 
 .cd-button--primary:hover {
@@ -51,8 +77,31 @@
   background: var(--fill-secondary-hover);
 }
 
-.cd-button--ghost:hover {
+.cd-button--ghost:hover,
+.cd-button--danger-ghost:hover {
   background: var(--fill-hover);
+}
+
+.cd-button--danger:hover {
+  background: var(--button-danger-fill-hover);
+}
+
+/* A menu button keeps its hover fill while its menu is open, so the menu reads as its own. */
+.cd-button--primary.cd-button--menu[aria-expanded='true'] {
+  background: var(--button-primary-hover);
+}
+
+.cd-button--secondary.cd-button--menu[aria-expanded='true'] {
+  background: var(--fill-secondary-hover);
+}
+
+.cd-button--ghost.cd-button--menu[aria-expanded='true'],
+.cd-button--danger-ghost.cd-button--menu[aria-expanded='true'] {
+  background: var(--fill-hover);
+}
+
+.cd-button--danger.cd-button--menu[aria-expanded='true'] {
+  background: var(--button-danger-fill-hover);
 }
 
 .cd-button:active {
@@ -77,6 +126,13 @@ a.cd-button[aria-disabled='true']:not([aria-busy='true']) {
   opacity: 0.6;
 }
 
+/* Red words lose contrast faster as they fade, so the red variants fade less: at 80% their words
+   still read at 4.5:1 inside a card (contrast.ts). */
+.cd-button--danger[aria-busy='true'],
+.cd-button--danger-ghost[aria-busy='true'] {
+  opacity: 0.8;
+}
+
 .cd-button--primary:disabled,
 .cd-button--primary[aria-disabled='true'] {
   background: var(--button-primary);
@@ -87,8 +143,15 @@ a.cd-button[aria-disabled='true']:not([aria-busy='true']) {
   background: var(--fill-secondary);
 }
 
+.cd-button--danger:disabled,
+.cd-button--danger[aria-disabled='true'] {
+  background: var(--button-danger-fill);
+}
+
 .cd-button--ghost:disabled,
-.cd-button--ghost[aria-disabled='true'] {
+.cd-button--ghost[aria-disabled='true'],
+.cd-button--danger-ghost:disabled,
+.cd-button--danger-ghost[aria-disabled='true'] {
   background: transparent;
 }
 

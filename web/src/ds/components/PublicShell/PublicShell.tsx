@@ -1,12 +1,13 @@
 import { useId, type CSSProperties, type ReactNode } from 'react';
 
-import type { CardBlock, RenderedBlock } from '../../../api/contracts.ts';
+import type { CardBlock, PublicDesk, RenderedBlock } from '../../../api/contracts.ts';
 import { Button } from '../Button/Button.tsx';
 import { ConceptFooter } from '../ConceptFooter/ConceptFooter.tsx';
 import type { CopyLanguage } from '../Notice/errorCopy.ts';
 import { ReplyCard } from '../ReplyCard/ReplyCard.tsx';
+import { StatusDot } from '../StatusDot/StatusDot.tsx';
 import { TextLink } from '../TextLink/TextLink.tsx';
-import { aboutLinkHref, brandColor } from './guards.ts';
+import { aboutLinkHref, brandColor, openStatusLine } from './guards.ts';
 
 import './PublicShell.css';
 
@@ -28,12 +29,30 @@ export interface PublicBrand {
   accent: string;
 }
 
+/**
+ * Whether the business is open now: `PublicDesk['open_status']`, the kernel's own object, or null
+ * for a Desk without hours. The kernel works it out from the business's hours on its own clock and
+ * writes `text` in the page's language and the business's time zone ("Open now, until 6:00 pm",
+ * "Cerrado ahora. Abre el lunes a las 8:00"). The shell reads only `text` and `open`, shows `text`
+ * as written and works out no time.
+ *
+ * It is the kernel's own `OpenStatus`, as `PublicDesk` carries it, so a screen can only pass what
+ * the kernel served, never a time it made up.
+ */
+export type PublicOpenStatus = PublicDesk['open_status'];
+
 export interface PublicShellProps {
   brand: PublicBrand;
   /** `owner_display_name`: "Maria Rivera". */
   ownerName: string;
   /** The visitor's language: every line of the shell's own copy, and `lang` on the page. */
   language: CopyLanguage;
+  /**
+   * `PublicDesk.open_status` as served: the kernel's words in the header, with a filled dot when
+   * open, and a hollow one and "Claude can still help." under them when closed. Without it (null
+   * for a Desk without hours), or when it isn't whole, the header has no status line.
+   */
+  openStatus?: PublicOpenStatus;
   /** Asks for the owner in the chat. */
   onAskForOwner: () => void;
   /** `PublicDesk.charter`: cards as `ReplyCard`s, prose as text, in the about column. */
@@ -68,6 +87,7 @@ const COPY = {
     askFor: (owner: ReactNode) => <>Ask for {owner}</>,
     about: (name: ReactNode) => <>About {name}</>,
     forAgents: 'For AI agents',
+    stillHelps: 'Claude can still help.',
   },
   es: {
     chatWith: (name: ReactNode) => <>Chatea con {name}</>,
@@ -79,19 +99,21 @@ const COPY = {
     askFor: (owner: ReactNode) => <>Pedir hablar con {owner}</>,
     about: (name: ReactNode) => <>Sobre {name}</>,
     forAgents: 'Para agentes de IA',
+    stillHelps: 'Claude puede ayudarte igual.',
   },
 } satisfies Record<CopyLanguage, unknown>;
 
 /**
- * The public page around a conversation: the business's brand header, the chat with its title,
- * the AI disclosure and "Ask for {owner}", the conversation and the composer with the concept
- * footer under it, and the business's charter in an about column at the right (under the chat
- * when the page is narrow).
+ * The public page around a conversation: the business's brand header (with the kernel's open
+ * status when the Desk has hours), the chat with its title, the AI disclosure and "Ask for
+ * {owner}", the conversation and the composer with the concept footer under it, and the
+ * business's charter in an about column at the right (under the chat when the page is narrow).
  */
 export function PublicShell({
   brand,
   ownerName,
   language,
+  openStatus,
   onAskForOwner,
   about,
   aboutLinks,
@@ -125,10 +147,11 @@ export function PublicShell({
   });
   const blocks = about ?? [];
   const hasAbout = blocks.length > 0 || links.length > 0;
+  const status = openStatusLine(openStatus);
 
   return (
     <div className={`cd-public-shell${embedded ? ' cd-public-shell--embedded' : ''}`} lang={language} style={style}>
-      <Header className="cd-public-shell__brand">
+      <Header className={`cd-public-shell__brand${status ? ' cd-public-shell__brand--open-status' : ''}`}>
         <span className="cd-public-shell__monogram cd-type-page-title" aria-hidden="true">
           {brand.monogram}
         </span>
@@ -136,6 +159,18 @@ export function PublicShell({
           <BrandName className="cd-public-shell__brand-name cd-type-brand-name">{brand.name}</BrandName>
           <p className="cd-public-shell__tagline cd-type-meta">{brand.tagline}</p>
         </div>
+        {status ? (
+          <div className="cd-public-shell__open-status">
+            <StatusDot tone={status.open ? 'handled' : 'info'} />
+            <div className="cd-public-shell__open-status-lines">
+              {/* The kernel's words, as written. */}
+              <p className="cd-public-shell__open-status-text cd-type-meta" data-copy="user">
+                {status.text}
+              </p>
+              {status.open ? null : <p className="cd-public-shell__still-helps cd-type-caption">{copy.stillHelps}</p>}
+            </div>
+          </div>
+        ) : null}
       </Header>
       <div className="cd-public-shell__body">
         <Chat className="cd-public-shell__chat">

@@ -5,9 +5,20 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
 
 import { CLAUSE_TEMPLATES, DECISION_STATES, EV_ERROR_CODES } from '../../api/contracts';
-import type { CardOption, ClauseTemplate, Decision, DecisionState, EvMessage, RenderedBlock, SessionState, SseEvent } from '../../api/contracts';
-import { chen, rivera } from './index';
-import type { TranscriptTurn } from './index';
+import type {
+  CardOption,
+  ClauseTemplate,
+  Decision,
+  DecisionState,
+  EvMessage,
+  NormalizedAction,
+  RenderedBlock,
+  RuleCard,
+  SessionState,
+  SseEvent,
+} from '../../api/contracts';
+import { chen, rivera, RIVERA_MONEY_CAP_CENTS } from './index';
+import type { ConversationFixture, TranscriptTurn } from './index';
 
 const FIXTURES = { rivera, chen };
 
@@ -17,7 +28,10 @@ const SCHEMA = JSON.parse(readFileSync(path.join(BACKEND, 'contracts.schema.json
   $defs: { SseEvent: { discriminator: { mapping: Record<string, string> } } };
 };
 
-/** MONEY_TOOLS and AUTO_MONEY_HARD_CAP_CENTS as backend/desk/contracts.py defines them. */
+/**
+ * MONEY_TOOLS and AUTO_MONEY_HARD_CAP_CENTS, the platform ceiling, as backend/desk/contracts.py
+ * defines them. A Desk's own money cap is its active rules version's, at or under the ceiling.
+ */
 function backendMoneyRules(): { moneyTools: string[]; hardCapCents: number } {
   const source = readFileSync(CONTRACTS_PY, 'utf8');
   const tools = /^MONEY_TOOLS: frozenset\[str\] = frozenset\(\{([^}]*)\}\)/m.exec(source)?.[1];
@@ -29,8 +43,8 @@ function backendMoneyRules(): { moneyTools: string[]; hardCapCents: number } {
   };
 }
 
-/** Every object in the fixture trees that `match` accepts, each once. */
-function collect<T>(match: (node: Record<string, unknown>) => boolean): T[] {
+/** Every object under `root` (all the fixtures by default) that `match` accepts, each once. */
+function collect<T>(match: (node: Record<string, unknown>) => boolean, root: unknown = FIXTURES): T[] {
   const found: T[] = [];
   const seen = new Set<unknown>();
   const visit = (node: unknown) => {
@@ -44,7 +58,7 @@ function collect<T>(match: (node: Record<string, unknown>) => boolean): T[] {
     if (match(record)) found.push(record as T);
     Object.values(record).forEach(visit);
   };
-  visit(FIXTURES);
+  visit(root);
   return found;
 }
 
@@ -86,6 +100,65 @@ const LINK_PATHS: Partial<Record<ClauseTemplate, RegExp>> = {
 };
 
 const SLOT_ID = /^S-[0-9]{8}-[0-9]{4}$/;
+
+// The master plan's slot_id is S-<yyyymmdd>-<hhmm>, the start in the business's time zone: Rivera's
+// is America/Los_Angeles in its seed.
+const BUSINESS_TIME_ZONE = 'America/Los_Angeles';
+const SLOT_IDS_IN_TEXT = /\bS-[0-9]{8}-[0-9]{4}\b/g;
+const WEEKDAY_NAMES = {
+  en: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+  es: ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'],
+};
+const MONTH_NAMES = {
+  en: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
+  es: ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'],
+};
+
+/** The slot id for a start: its date and time as the business's clock reads them, whatever offset it's written in. */
+function slotIdAt(startsAt: string): string {
+  const clock = new Intl.DateTimeFormat('en-US', {
+    timeZone: BUSINESS_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  });
+  const part = Object.fromEntries(clock.formatToParts(new Date(startsAt)).map(({ type, value }) => [type, value]));
+  return `S-${part.year}${part.month}${part.day}-${part.hour}${part.minute}`;
+}
+
+/** The start a slot id names, as a booking option's label writes it: "Tuesday, November 3, 2:00 pm" or "martes 3 de noviembre, 14:00". */
+function slotLabels(slotId: string): { en: string; es: string } | null {
+  const match = /^S-([0-9]{4})([0-9]{2})([0-9]{2})-([0-9]{2})([0-9]{2})$/.exec(slotId);
+  if (!match) return null;
+  const [year, month, day, hour, minute] = match.slice(1).map(Number) as [number, number, number, number, number];
+  // The weekday of the id's own date, so a label on the wrong day or year doesn't match.
+  const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+  const mm = String(minute).padStart(2, '0');
+  return {
+    en: `${WEEKDAY_NAMES.en[weekday]}, ${MONTH_NAMES.en[month - 1]} ${day}, ${hour % 12 || 12}:${mm} ${hour < 12 ? 'am' : 'pm'}`,
+    es: `${WEEKDAY_NAMES.es[weekday]} ${day} de ${MONTH_NAMES.es[month - 1]}, ${hour}:${mm}`,
+  };
+}
+
+/** Every string under `root` (all the fixtures by default), each object visited once. */
+function allStrings(root: unknown = FIXTURES): string[] {
+  const found: string[] = [];
+  const seen = new Set<unknown>();
+  const visit = (node: unknown) => {
+    if (typeof node === 'string') {
+      found.push(node);
+      return;
+    }
+    if (node === null || typeof node !== 'object' || seen.has(node)) return;
+    seen.add(node);
+    Object.values(node).forEach(visit);
+  };
+  visit(root);
+  return found;
+}
 
 // What a reply check would block in prose, stricter than the kernel's lexicons: both languages
 // always, every Unicode digit, money and percent signs, weekday and month names, spelled-out
@@ -204,10 +277,58 @@ const STATEMENT_TEMPLATES: readonly ClauseTemplate[] = [
   'hours', 'contact', 'policy', 'handoff', 'verify_prompt', 'callback_confirmed', 'owner_said',
 ];
 
-// Cards that report an action the kernel carried out.
-const ACTION_TEMPLATES: readonly ClauseTemplate[] = [
-  'booking_confirmed', 'charge_confirmed', 'refund_issued', 'callback_confirmed', 'document_link',
-];
+// The signed line an executed receipt shows a visitor, per tool: what ran and whose records it
+// used, never a bare "Done". `{owner}` is the owner's display name.
+const EXECUTED_LINES = {
+  'native.quote': { en: "Quoted from {owner}'s price list", es: 'Cotizado con la lista de precios de {owner}' },
+  'native.find_slots': { en: "Times read from {owner}'s calendar", es: 'Horarios tomados del calendario de {owner}' },
+  'native.book': { en: "Booked on {owner}'s calendar", es: 'Reservado en el calendario de {owner}' },
+  'native.capture_lead': { en: 'Details saved for {owner}', es: 'Datos guardados para {owner}' },
+  'native.request_callback': { en: 'Callback request saved for {owner}', es: 'Solicitud de llamada guardada para {owner}' },
+  'native.start_verification': { en: 'Verification started', es: 'Verificación iniciada' },
+  'native.release_document': { en: "Document shared from {owner}'s records", es: 'Documento compartido desde los registros de {owner}' },
+  'native.payment_link': { en: 'Payment link made for this quote', es: 'Enlace de pago creado para esta cotización' },
+  'native.charge_mandate': { en: 'Charged within the limit of your mandate', es: 'Cobrado dentro del límite de tu mandato' },
+  'payments.list_charges': { en: "Charges read from {owner}'s payments", es: 'Cargos tomados de los pagos de {owner}' },
+  'payments.create_refund': { en: 'Refunded to the original payment', es: 'Reembolsado al pago original' },
+} as const;
+
+type Tool = keyof typeof EXECUTED_LINES;
+type Language = 'en' | 'es';
+
+/** The signed executed line for `tool`, with the owner's name in it. */
+function executedLine(tool: Tool, language: Language, owner: string): string {
+  return EXECUTED_LINES[tool][language].replaceAll('{owner}', owner);
+}
+
+/** Every signed executed line in `language` for this owner. */
+function executedLines(language: Language, owner: string): string[] {
+  return (Object.keys(EXECUTED_LINES) as Tool[]).map((tool) => executedLine(tool, language, owner));
+}
+
+// Cards that report an action the kernel carried out, and the tool whose executed receipt says so.
+const ACTION_TOOLS = {
+  booking_confirmed: 'native.book',
+  charge_confirmed: 'native.charge_mandate',
+  refund_issued: 'payments.create_refund',
+  callback_confirmed: 'native.request_callback',
+  document_link: 'native.release_document',
+} as const satisfies Partial<Record<ClauseTemplate, Tool>>;
+
+function isActionTemplate(template: RenderedBlock['template']): template is keyof typeof ACTION_TOOLS {
+  return template != null && Object.hasOwn(ACTION_TOOLS, template);
+}
+
+/** A conversation in the fixtures, with the name of the owner whose Desk it is. */
+interface OwnedConversation {
+  name: string;
+  conversation: ConversationFixture;
+  owner: string;
+}
+
+const allConversations: OwnedConversation[] = Object.values(FIXTURES).flatMap((fixture) =>
+  Object.entries(fixture.conversations).map(([name, conversation]) => ({ name, conversation, owner: fixture.business.ownerName })),
+);
 
 /** `text` as lower-case words joined by single spaces, so punctuation and case don't matter. */
 function wordsOf(text: string): string {
@@ -345,28 +466,79 @@ describe('fixtures', () => {
 
   test('action_cards_follow_an_executed_receipt', () => {
     // A card that reports an action as done (a booking, a charge, a refund, a callback, a released
-    // document) shows only after the kernel's executed receipt for it, since the previous message.
-    const conversations = Object.values(FIXTURES).flatMap((fixture) => Object.entries(fixture.conversations));
+    // document) shows only after the kernel's executed receipt for it, since the previous message,
+    // and that receipt is the tool's own line.
     let checked = 0;
-    for (const [name, conversation] of conversations) {
-      let executedSinceLastMessage = false;
+    for (const { name, conversation, owner } of allConversations) {
+      let executedSinceLastMessage: string[] = [];
       for (const turn of conversation.turns) {
         if (turn.kind !== 'event') continue;
         const { event } = turn;
         if (event.type === 'receipt' || event.type === 'resolved') {
-          if (event.state === 'executed') executedSinceLastMessage = true;
+          if (event.state === 'executed') executedSinceLastMessage.push(event.visitor_plain);
           continue;
         }
         if (event.type !== 'message') continue;
         for (const block of event.blocks) {
-          if (block.kind !== 'card' || !ACTION_TEMPLATES.includes(block.template as ClauseTemplate)) continue;
+          if (block.kind !== 'card' || !isActionTemplate(block.template)) continue;
           checked += 1;
-          expect(executedSinceLastMessage, `${name}: ${event.message_id} shows ${block.template}`).toBe(true);
+          const line = executedLine(ACTION_TOOLS[block.template], event.language, owner);
+          expect(executedSinceLastMessage, `${name}: ${event.message_id} shows ${block.template}`).toContain(line);
         }
-        executedSinceLastMessage = false;
+        executedSinceLastMessage = [];
       }
     }
     expect(checked).toBeGreaterThanOrEqual(4);
+  });
+
+  test('executed_receipts_say_what_ran', () => {
+    // Every executed receipt, resolved event and decision is a signed per-tool line with its
+    // owner's name, never "Done" or "Hecho".
+    let checked = 0;
+    for (const [name, fixture] of Object.entries(FIXTURES)) {
+      const owner = fixture.business.ownerName;
+      const signed = [...executedLines('en', owner), ...executedLines('es', owner)];
+      const executed = collect<{ visitor_plain: string }>(
+        (node) => node.state === 'executed' && typeof node.visitor_plain === 'string',
+        fixture,
+      );
+      for (const node of executed) {
+        expect(signed, `${name}: "${node.visitor_plain}"`).toContain(node.visitor_plain);
+        checked += 1;
+      }
+    }
+    expect(checked).toBeGreaterThanOrEqual(10);
+
+    // In a conversation or a live sequence, the line is in the language of its messages.
+    const sequences = [
+      ...allConversations.map(({ name, conversation, owner }) => ({
+        name,
+        owner,
+        language: conversation.language,
+        events: conversation.turns.flatMap((turn) => (turn.kind === 'event' ? [turn.event] : [])),
+      })),
+      ...Object.entries(rivera.events).flatMap(([name, events]) => {
+        const languages = [...new Set(events.flatMap((event) => (event.type === 'message' ? [event.language] : [])))];
+        return languages.length === 1 ? [{ name, owner: rivera.business.ownerName, language: languages[0] as Language, events }] : [];
+      }),
+    ];
+    let inLanguage = 0;
+    for (const { name, owner, language, events } of sequences) {
+      for (const event of events) {
+        if ((event.type !== 'receipt' && event.type !== 'resolved') || event.state !== 'executed') continue;
+        expect(executedLines(language, owner), `${name}: "${event.visitor_plain}"`).toContain(event.visitor_plain);
+        inLanguage += 1;
+      }
+    }
+    expect(inLanguage).toBeGreaterThanOrEqual(10);
+
+    // A decision that ran says its own tool's line.
+    const ran = [...Object.values(rivera.decisions), rivera.heldVerified].filter((decision) => decision.state === 'executed');
+    expect(ran.length).toBeGreaterThan(0);
+    for (const decision of ran) {
+      const tool = decision.action?.tool as Tool;
+      expect(decision.visitor_plain, decision.decision_id).toBe(executedLine(tool, 'en', rivera.business.ownerName));
+    }
   });
 
   test('callbacks_use_details_the_visitor_gave', () => {
@@ -438,16 +610,26 @@ describe('fixtures', () => {
     const { moneyTools, hardCapCents } = backendMoneyRules();
     expect(moneyTools).toContain('payments.create_refund');
 
+    // Rivera's money cap is its rules version's, at or under the platform ceiling, and every auto
+    // card that moves money stays within it.
+    expect(RIVERA_MONEY_CAP_CENTS).toBeLessThanOrEqual(hardCapCents);
+    for (const card of Object.values(rivera.ruleCards)) {
+      if (card.mode !== 'auto' || !moneyTools.includes(card.applies_to)) continue;
+      expect(card.max_amount_cents ?? Number.POSITIVE_INFINITY, card.card_id).toBeLessThanOrEqual(RIVERA_MONEY_CAP_CENTS);
+    }
+
     expect(Object.keys(rivera.decisions).sort()).toEqual([...DECISION_STATES].sort());
     for (const state of DECISION_STATES) {
       expect(rivera.decisions[state].state, state).toBe(state);
     }
 
-    // The seeded hold (unverified) offers three answers; verified Dana's offers all four.
+    // The seeded hold, an unverified visitor's discount over the quote card's limit, offers the two
+    // one-time answers; verified Dana's Saturday request, over the Saturday card's hours, adds
+    // Allow only for this person ("answers_follow_what_held_the_request" says why).
     const held = rivera.decisions.held;
-    expect(held.answers).toEqual(['allow_once', 'deny_once', 'deny_always']);
+    expect(held.answers).toEqual(['allow_once', 'deny_once']);
     expect(rivera.heldVerified.state).toBe('held');
-    expect(rivera.heldVerified.answers).toEqual(['allow_once', 'deny_once', 'allow_person', 'deny_always']);
+    expect(rivera.heldVerified.answers).toEqual(['allow_once', 'deny_once', 'allow_person']);
 
     // Every state the hold can move to keeps its answers, so only `state` can hide the buttons.
     const afterHold: DecisionState[] = ['approved', 'denied', 'expired', 'cancelled', 'executed', 'failed', 'unknown', 'refused_at_execution'];
@@ -456,13 +638,14 @@ describe('fixtures', () => {
       expect(rivera.decisions[state].answers, state).toEqual(held.answers);
     }
 
-    // allow_person only for a verified person or an agent, and never on money above the hard cap.
+    // allow_person only for a verified person or an agent, and on money only within the rules'
+    // money cap.
     const sessions = new Map(
       collect<SessionState>((node) => typeof node.session_id === 'string' && typeof node.verified === 'boolean' && 'assurance' in node).map(
         (session) => [session.session_id, session],
       ),
     );
-    const decisions: Decision[] = [...Object.values(rivera.decisions), rivera.heldVerified];
+    const decisions: Decision[] = [...Object.values(rivera.decisions), rivera.heldVerified, rivera.heldRefund];
     for (const decision of decisions) {
       const session = sessions.get(decision.session_id);
       expect(session, `${decision.decision_id} has a session fixture`).toBeDefined();
@@ -480,9 +663,110 @@ describe('fixtures', () => {
       expect(session?.verified === true || session?.kind === 'agent', `${decision.decision_id} allow_person`).toBe(true);
       const action = decision.action;
       if (action && moneyTools.includes(action.tool)) {
-        expect(action.amount_cents ?? Number.POSITIVE_INFINITY, `${decision.decision_id} amount`).toBeLessThanOrEqual(hardCapCents);
+        expect(action.amount_cents ?? Number.POSITIVE_INFINITY, `${decision.decision_id} amount`).toBeLessThanOrEqual(RIVERA_MONEY_CAP_CENTS);
       }
     }
+  });
+
+  test('answers_follow_what_held_the_request', () => {
+    const { moneyTools } = backendMoneyRules();
+    const sessions = new Map(
+      collect<SessionState>((node) => typeof node.session_id === 'string' && typeof node.verified === 'boolean' && 'assurance' in node).map(
+        (session) => [session.session_id, session],
+      ),
+    );
+    // Every held request in each business's fixtures, beside that business's rule cards and money
+    // cap. Chen & Co. has no money tools and no cap, so no money request of theirs could offer it.
+    const businesses: { name: string; fixture: unknown; cards: Record<string, RuleCard>; moneyCapCents: number | null }[] = [
+      { name: 'rivera', fixture: rivera, cards: rivera.ruleCards, moneyCapCents: RIVERA_MONEY_CAP_CENTS },
+      { name: 'chen', fixture: chen, cards: chen.ruleCards, moneyCapCents: null },
+    ];
+    const shapes = new Set<string>();
+    for (const { name, fixture, cards, moneyCapCents } of businesses) {
+      // A decision, not a status event about one: it carries its reason and its answers.
+      const held = collect<Decision>(
+        (node) => typeof node.decision_id === 'string' && typeof node.reason_plain === 'string' && Array.isArray(node.answers) && node.state === 'held',
+        fixture,
+      );
+      expect(held.length, `${name} has a held request`).toBeGreaterThan(0);
+      for (const decision of held) {
+        const where = `${name}: ${decision.decision_id}`;
+        const answers = decision.answers ?? [];
+        // The one-time answers are always offered.
+        expect(answers.slice(0, 2), where).toEqual(['allow_once', 'deny_once']);
+
+        // Each card that held it holds through its own permit: an ask card directly, an auto card
+        // through its hold twin, which drops the card's limits (amount, discount, hours, review).
+        const holding = decision.card_ids.map((id) => cards[id]);
+        expect(holding.every((card) => card !== undefined), `${where} names its business's cards`).toBe(true);
+        expect([...decision.policy_ids].sort(), where).toEqual(
+          holding.map((card) => (card?.mode === 'ask' ? `H.${card.card_id}` : `H.${card?.card_id}.hold`)).sort(),
+        );
+
+        // Deny always only when the tool itself is held, by an ask card or a default ask; a
+        // request over a limit leaves it out.
+        const askHeld = holding.some((card) => card?.mode === 'ask' || card?.is_default === true);
+        expect(answers.includes('deny_always'), `${where} deny_always`).toBe(askHeld);
+
+        // Allow only for this person exactly when there is a person or an agent key to scope it to,
+        // and a money action stays within the rules' money cap.
+        const session = sessions.get(decision.session_id);
+        const action = decision.action;
+        const underCap =
+          !action ||
+          !moneyTools.includes(action.tool) ||
+          (moneyCapCents !== null && (action.amount_cents ?? Number.POSITIVE_INFINITY) <= moneyCapCents);
+        const scoped = session?.verified === true || session?.kind === 'agent';
+        expect(answers.includes('allow_person'), `${where} allow_person`).toBe(scoped && underCap);
+
+        shapes.add(answers.join(' '));
+      }
+    }
+    // The fixtures show every shape the card lays out: two plain buttons, a Deny menu, an Allow
+    // menu, and both menus.
+    expect([...shapes].sort()).toEqual(
+      [
+        'allow_once deny_once',
+        'allow_once deny_once deny_always',
+        'allow_once deny_once allow_person',
+        'allow_once deny_once allow_person deny_always',
+      ].sort(),
+    );
+  });
+
+  test('slot_ids_name_their_start_in_business_time', () => {
+    // The same instant written with the business's offset or in UTC has one slot id, and the
+    // labels follow the id's own date.
+    expect(slotIdAt('2026-11-07T14:00:00-08:00')).toBe('S-20261107-1400');
+    expect(slotIdAt('2026-11-07T22:00:00Z')).toBe('S-20261107-1400');
+    expect(slotIdAt('2026-10-30T08:00:00-07:00')).toBe('S-20261030-0800');
+    expect(slotLabels('S-20261103-1400')).toEqual({ en: 'Tuesday, November 3, 2:00 pm', es: 'martes 3 de noviembre, 14:00' });
+    expect(slotLabels('S-20261105-0800')).toEqual({ en: 'Thursday, November 5, 8:00 am', es: 'jueves 5 de noviembre, 8:00' });
+    expect(slotLabels('Sat 2pm')).toBeNull();
+
+    const checked = new Set<string>();
+    // A booking names its slot as its resource and its start in starts_at.
+    const bookings = collect<NormalizedAction>(
+      (node) => typeof node.action_id === 'string' && (node.resource as { kind?: unknown } | undefined)?.kind === 'slot',
+    );
+    expect(bookings.length).toBeGreaterThan(0);
+    for (const action of bookings) {
+      expect(action.starts_at, `${action.action_id} has a start`).toEqual(expect.any(String));
+      expect(action.resource.id, `${action.action_id} starts at ${action.starts_at}`).toBe(slotIdAt(action.starts_at ?? ''));
+      checked.add(action.resource.id);
+    }
+    // A booking option's id is its slot, and its label writes that slot's start out.
+    const options = collect<CardOption>((node) => typeof node.option_id === 'string' && typeof node.label === 'string');
+    expect(options.length).toBeGreaterThan(0);
+    for (const option of options) {
+      const labels = slotLabels(option.option_id);
+      expect(labels, option.option_id).not.toBeNull();
+      expect([labels?.en, labels?.es], option.option_id).toContain(option.label);
+      checked.add(option.option_id);
+    }
+    // No slot id appears anywhere else in the fixtures, where its start would go unchecked.
+    const written = new Set(allStrings().flatMap((text) => text.match(SLOT_IDS_IN_TEXT) ?? []));
+    expect([...written].filter((slotId) => !checked.has(slotId))).toEqual([]);
   });
 
   test('event_fixtures_cover_every_type', () => {
