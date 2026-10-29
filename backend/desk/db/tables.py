@@ -2,7 +2,9 @@
 
 `kernel.*` belongs to the kernel process (role desk_kernel), `app.*` and `procrastinate.*` to
 the API process (desk_api), `mockpay.*` to the mock payments server (desk_mockpay). The API
-reads kernel data only through the `kernel_ro.*` views, which leave out every secret.
+reads kernel data only through the `kernel_ro.*` views, which leave out every secret. Every
+kernel table and view admits only the copy that the transaction set in `desk.copy_id`
+(migration 0002_copy_isolation).
 """
 
 KERNEL_TABLES: tuple[str, ...] = (

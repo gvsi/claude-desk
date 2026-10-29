@@ -2,7 +2,9 @@
 
 These tests run against the local Postgres (`docker compose up -d db`) after
 `cd backend && uv run alembic upgrade head && cd .. && make db-roles`. Introspection runs as
-desk_admin; privilege checks connect as the role under test. Every write is rolled back.
+desk_admin; privilege checks connect as the role under test. Every write is rolled back, except
+the rows `committed_copies` commits as desk_admin (another role sees only committed rows) and
+removes afterwards.
 """
 
 import warnings
@@ -14,8 +16,9 @@ import procrastinate
 import psycopg
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import create_engine, exists, literal_column, select, text
-from sqlalchemy.exc import IntegrityError, StatementError
+from sqlalchemy import cast, create_engine, exists, func, literal, literal_column, select, text, update
+from sqlalchemy.dialects.postgresql import REGCLASS
+from sqlalchemy.exc import DBAPIError, IntegrityError, StatementError
 from sqlalchemy.orm import DeclarativeBase, Session, aliased, column_property, defer, with_expression
 from sqlalchemy.pool import NullPool
 
@@ -29,6 +32,7 @@ from desk.db.models import (
     Business,
     CalendarSlot,
     A2ATurn,
+    Copy,
     Decision,
     Desk,
     Document,
@@ -41,8 +45,12 @@ from desk.db.models import (
     Tool,
 )
 from desk.db.session import (
+    COPY_SETTING,
+    CopySession,
     KernelRepo,
+    KernelSession,
     api_engine,
+    bind_copy,
     database_url,
     dispose_engines,
     get_kernel_session,
@@ -173,9 +181,9 @@ def test_kernel_ro_views_carry_copy_id(admin, api):
 
 @pytest.fixture
 def kernel_tx():
-    """An ORM session as desk_kernel whose writes are rolled back."""
+    """An ORM session as desk_kernel, in copy "copy-a", whose writes are rolled back."""
     engine = create_engine(database_url("KERNEL"), poolclass=NullPool)
-    with Session(engine) as session:
+    with KernelSession(engine, info={"copy_id": "copy-a"}) as session:
         yield session
         session.rollback()
     engine.dispose()
@@ -216,7 +224,7 @@ def test_ledger_seq_unique_per_desk(kernel_tx):
 
 @pytest.fixture
 async def kernel_db():
-    """An async session from get_kernel_session() whose writes are rolled back."""
+    """An async session from get_kernel_session(), bound to no copy yet, whose writes are rolled back."""
     sessions = get_kernel_session()
     session = await anext(sessions)
     try:
@@ -227,18 +235,27 @@ async def kernel_db():
         await dispose_engines()
 
 
+async def switch_copy(session, copy_id: str) -> None:
+    """Test setup only: point the open transaction at another copy, as another copy's request would."""
+    await session.execute(select(func.set_config(COPY_SETTING, copy_id, True)))
+
+
 async def test_kernel_repo_scopes_by_copy(kernel_db):
     copy_a, copy_b = f"copy-{uuid4().hex}", f"copy-{uuid4().hex}"
+    repo = KernelRepo(copy_a)
+    repo.bind(kernel_db)
+    await switch_copy(kernel_db, copy_b)
     kernel_db.add_all([
         Business(business_id=f"biz-{copy_b}", copy_id=copy_b, name="Rivera Plumbing",
                  owner_display_name="Maria Rivera", timezone="America/Los_Angeles"),
-        Desk(desk_id=f"desk-{copy_a}", copy_id=copy_a, business_id=f"biz-{copy_b}", name="Main line",
-             slug=f"slug-{copy_a}"),
         Desk(desk_id=f"desk-{copy_b}", copy_id=copy_b, business_id=f"biz-{copy_b}", name="Main line",
              slug=f"slug-{copy_b}"),
     ])
     await kernel_db.flush()
-    repo = KernelRepo(copy_a)
+    await switch_copy(kernel_db, copy_a)
+    kernel_db.add(Desk(desk_id=f"desk-{copy_a}", copy_id=copy_a, business_id=f"biz-{copy_b}", name="Main line",
+                       slug=f"slug-{copy_a}"))
+    await kernel_db.flush()
     desks = (await kernel_db.scalars(repo.scoped(select(Desk)))).all()
     assert [d.desk_id for d in desks] == [f"desk-{copy_a}"]
     # every kernel table in a join is scoped: copy A's Desk pointing at copy B's business finds nothing
@@ -287,16 +304,8 @@ class DeskWithDocumentTitle(LeakyBase):
     document_title = column_property(select(Document.title).limit(1).scalar_subquery())
 
 
-async def test_kernel_repo_refuses_what_it_cannot_scope(kernel_db):
-    copy_a, copy_b = f"copy-{uuid4().hex}", f"copy-{uuid4().hex}"
-    kernel_db.add_all([
-        Desk(desk_id=f"desk-{copy_a}", copy_id=copy_a, business_id="biz-missing", name="Main line",
-             slug=f"slug-{copy_a}"),
-        Document(document_id=f"doc-{copy_b}", copy_id=copy_b, desk_id=f"desk-{copy_b}", title="Bob's warranty",
-                 body="...", canary="canary"),
-    ])
-    await kernel_db.flush()
-    repo = KernelRepo(copy_a)
+def test_kernel_repo_refuses_what_it_cannot_scope():
+    repo = KernelRepo(f"copy-{uuid4().hex}")
     title = select(Document.title).scalar_subquery()
     businesses = select(Business).subquery()
     nested = (
@@ -336,6 +345,7 @@ async def test_kernel_repo_refuses_what_it_cannot_scope(kernel_db):
 def test_kernel_role_cannot_rewrite_the_ledger():
     entry = ledger_entry("desk-a", 1)
     with connect("KERNEL") as kernel, kernel.transaction(force_rollback=True):
+        kernel.execute("SELECT set_config('desk.copy_id', %s, true)", (entry.copy_id,))
         kernel.execute(
             "INSERT INTO kernel.ledger_entries (desk_id, seq, copy_id, prev_hash, created_at, event, hash, signature,"
             " key_id, envelope_jcs) VALUES (%s, %s, %s, %s, %s, '{}'::jsonb, %s, %s, %s, %s)",
@@ -520,3 +530,201 @@ def test_visitor_payloads_validate_against_contracts(api_tx):
     api_tx.expunge_all()
     assert api_tx.get(Message, sent.n).blocks == [block]
     assert api_tx.get(A2ATurn, ("agent-1", "session-1", stored.nonce)).response == answer
+
+
+# Copy isolation in Postgres: row-level security on every kernel table reads the copy that the
+# transaction set in desk.copy_id, and the kernel_ro views filter on the same setting. A
+# transaction that set no copy sees and writes nothing.
+
+
+def test_every_kernel_table_forces_copy_row_security(admin):
+    rows = admin.execute(
+        "SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class"
+        " WHERE relnamespace = 'kernel'::regnamespace AND relkind IN ('r', 'p')"
+    ).fetchall()
+    assert {name for name, _, _ in rows} == set(KERNEL_TABLES)   # every table, including ones a later revision adds
+    for name, enabled, forced in rows:
+        assert enabled and forced, name
+    policies = admin.execute(
+        "SELECT tablename, roles, cmd, permissive, qual, with_check FROM pg_policies WHERE schemaname = 'kernel'"
+    ).fetchall()
+    assert sorted(table for table, *_ in policies) == sorted(KERNEL_TABLES)   # one policy per table
+    for table, roles, cmd, permissive, qual, with_check in policies:
+        assert (roles, cmd, permissive) == (["desk_kernel"], "ALL", "PERMISSIVE"), table
+        assert qual == with_check == policies[0][4], table
+    assert "copy_id = NULLIF(current_setting('desk.copy_id'::text, true), ''::text)" in policies[0][4]
+
+
+def test_kernel_ro_views_filter_by_the_transaction_copy(admin):
+    for view in KERNEL_RO_VIEWS:
+        options, definition = admin.execute(
+            "SELECT reloptions, pg_get_viewdef(oid) FROM pg_class WHERE oid = %s::regclass", (f"kernel_ro.{view}",)
+        ).fetchone()
+        assert "security_barrier=true" in (options or []), view   # the API's own predicates run after the filter
+        assert "NULLIF(current_setting('desk.copy_id'::text, true), ''::text)" in definition, view
+
+
+async def test_sql_functions_read_only_the_copy(kernel_db):
+    # the reviewer's probe: query text inside a function call passes KernelRepo.scoped()'s statement checks
+    copy_a, copy_b = f"copy-{uuid4().hex}", f"copy-{uuid4().hex}"
+    repo = KernelRepo(copy_a)
+    repo.bind(kernel_db)
+    await switch_copy(kernel_db, copy_b)
+    kernel_db.add(Document(document_id=f"doc-{copy_b}", copy_id=copy_b, desk_id=f"desk-{copy_b}",
+                           title="Bob's warranty", body="copy B private body", canary="canary"))
+    await kernel_db.flush()
+    await switch_copy(kernel_db, copy_a)
+    kernel_db.add(Desk(desk_id=f"desk-{copy_a}", copy_id=copy_a, business_id="biz", name="Main line",
+                       slug=f"slug-{copy_a}"))
+    await kernel_db.flush()
+    leaks = (
+        select(Desk.desk_id, func.query_to_xml(
+            f"select title, body from kernel.documents where copy_id = '{copy_b}'", True, False, "")),
+        select(Desk.desk_id, func.table_to_xml(cast(literal("kernel.documents"), REGCLASS), True, False, "")),
+    )
+    for leak in leaks:
+        rows = (await kernel_db.execute(repo.scoped(leak))).all()
+        assert [desk_id for desk_id, _ in rows] == [f"desk-{copy_a}"]
+        assert "copy B private body" not in rows[0][1] and "Bob's warranty" not in rows[0][1]
+
+
+async def test_kernel_writes_stay_in_their_copy(kernel_db):
+    copy_a, copy_b = f"copy-{uuid4().hex}", f"copy-{uuid4().hex}"
+
+    def hours(copy_id: str) -> Fact:
+        return Fact(desk_id=f"desk-{copy_id}", fact_id="charter:hours", copy_id=copy_id, kind="charter",
+                    status="available", claims=[])
+
+    KernelRepo(copy_a).bind(kernel_db)
+    await switch_copy(kernel_db, copy_b)
+    kernel_db.add(hours(copy_b))
+    await kernel_db.flush()
+    await switch_copy(kernel_db, copy_a)
+    kernel_db.add(hours(copy_a))
+    await kernel_db.flush()
+
+    async def refused(write) -> None:
+        with pytest.raises(DBAPIError) as error:
+            async with kernel_db.begin_nested():
+                await write()
+        assert isinstance(error.value.orig, psycopg.errors.InsufficientPrivilege), error.value.orig
+
+    async def insert_into_b():
+        kernel_db.add(Document(document_id=f"doc-{uuid4().hex}", copy_id=copy_b, desk_id=f"desk-{copy_b}",
+                               title="Planted", body="...", canary="canary"))
+        await kernel_db.flush()
+
+    async def move_to_b():
+        await kernel_db.execute(update(Fact).where(Fact.copy_id == copy_a).values(copy_id=copy_b)
+                                .execution_options(synchronize_session=False))
+
+    async def create_copy_b():
+        kernel_db.add(Copy(copy_id=copy_b))
+        await kernel_db.flush()
+
+    for write in (insert_into_b, move_to_b, create_copy_b):
+        await refused(write)
+    # a write that forgets its copy filter reaches only this copy's rows
+    unfiltered = update(Fact).where(Fact.fact_id == "charter:hours").values(status="expired")
+    assert (await kernel_db.execute(unfiltered.execution_options(synchronize_session=False))).rowcount == 1
+    await switch_copy(kernel_db, copy_b)
+    statuses = (await kernel_db.execute(text("SELECT copy_id, status FROM kernel.facts WHERE fact_id = 'charter:hours'"
+                                             " AND copy_id IN (:a, :b)"), {"a": copy_a, "b": copy_b})).all()
+    assert statuses == [(copy_b, "available")]
+
+
+async def test_kernel_repo_opens_sessions_in_its_copy():
+    new_copy = f"copy-{uuid4().hex}"
+    repo = KernelRepo(new_copy)
+    try:
+        async with repo.session() as session:
+            # a new copy starts as its own first row: the kernel sets the new id, then inserts
+            session.add_all([Copy(copy_id=new_copy), Desk(desk_id=f"desk-{new_copy}", copy_id=new_copy,
+                                                         business_id="biz", name="Main line", slug=f"slug-{new_copy}")])
+            await session.flush()
+            assert (await session.scalars(repo.scoped(select(Desk.desk_id)))).all() == [f"desk-{new_copy}"]
+            setting = (await session.execute(select(func.current_setting(COPY_SETTING)))).scalar_one()
+            assert setting == new_copy
+            with pytest.raises(ValueError):
+                KernelRepo(f"copy-{uuid4().hex}").bind(session)   # one session, one copy
+            await session.rollback()
+            # every transaction the session opens sets the copy again
+            assert (await session.execute(select(func.current_setting(COPY_SETTING)))).scalar_one() == new_copy
+            await session.rollback()
+    finally:
+        await dispose_engines()
+
+
+async def test_kernel_sessions_refuse_to_run_without_a_copy(kernel_db):
+    with pytest.raises(RuntimeError):
+        await kernel_db.execute(select(Desk.desk_id))
+    engine = create_engine(database_url("KERNEL"), poolclass=NullPool)
+    try:
+        with KernelSession(engine) as session, pytest.raises(RuntimeError):
+            session.add(Copy(copy_id=f"copy-{uuid4().hex}"))
+            session.flush()
+    finally:
+        engine.dispose()
+    with pytest.raises(ValueError):
+        KernelRepo("")
+
+
+@pytest.fixture
+def committed_copies(admin):
+    """A Desk and a document committed in each of two new copies, removed afterwards.
+
+    desk_admin, the superuser that owns the tables, isn't subject to row security."""
+    copies = (f"copy-{uuid4().hex}", f"copy-{uuid4().hex}")
+    try:
+        for copy_id in copies:
+            admin.execute("INSERT INTO kernel.desks (desk_id, copy_id, business_id, name, slug)"
+                          " VALUES (%s, %s, 'biz', 'Main line', %s)", (f"desk-{copy_id}", copy_id, f"slug-{copy_id}"))
+            admin.execute("INSERT INTO kernel.documents (document_id, copy_id, desk_id, title, body, canary)"
+                          " VALUES (%s, %s, %s, 'Warranty', 'private body', 'canary')",
+                          (f"doc-{copy_id}", copy_id, f"desk-{copy_id}"))
+        yield copies
+    finally:
+        admin.execute("DELETE FROM kernel.documents WHERE copy_id = ANY(%s)", (list(copies),))
+        admin.execute("DELETE FROM kernel.desks WHERE copy_id = ANY(%s)", (list(copies),))
+
+
+def visible(conn: psycopg.Connection, relation: str, copies: tuple[str, ...]) -> set[str]:
+    rows = conn.execute(f"SELECT copy_id FROM {relation} WHERE copy_id = ANY(%s)", (list(copies),)).fetchall()
+    return {copy_id for (copy_id,) in rows}
+
+
+def test_kernel_sees_nothing_without_a_copy(committed_copies):
+    copy_a, _ = committed_copies
+    with connect("KERNEL") as kernel:
+        assert visible(kernel, "kernel.desks", committed_copies) == set()   # never set: current_setting is NULL
+        with kernel.transaction(force_rollback=True):
+            kernel.execute("SELECT set_config('desk.copy_id', %s, true)", (copy_a,))
+            assert visible(kernel, "kernel.desks", committed_copies) == {copy_a}
+            assert visible(kernel, "kernel.documents", committed_copies) == {copy_a}
+        # after a transaction that set it, the setting reads '' rather than NULL: still nothing
+        assert kernel.execute("SELECT current_setting('desk.copy_id', true)").fetchone()[0] == ""
+        assert visible(kernel, "kernel.desks", committed_copies) == set()
+        with pytest.raises(psycopg.errors.InsufficientPrivilege), kernel.transaction():
+            kernel.execute("INSERT INTO kernel.copies (copy_id) VALUES ('')")   # '' never matches a copy
+
+
+def test_api_reads_kernel_ro_for_its_copy_only(committed_copies, api):
+    copy_a, copy_b = committed_copies
+    assert visible(api, "kernel_ro.desks", committed_copies) == set()
+    for copy_id in (copy_a, copy_b):
+        with api.transaction(force_rollback=True):
+            api.execute("SELECT set_config('desk.copy_id', %s, true)", (copy_id,))
+            for view in ("desks", "documents"):
+                assert visible(api, f"kernel_ro.{view}", committed_copies) == {copy_id}, view
+    # the API's sessions set the copy they're bound to (taken from /whoami) at every transaction
+    engine = create_engine(database_url("API"), poolclass=NullPool)
+    try:
+        with CopySession(engine) as session:
+            query = text("SELECT copy_id FROM kernel_ro.desks WHERE copy_id = ANY(:copies)")
+            assert session.execute(query, {"copies": list(committed_copies)}).all() == []
+            session.rollback()
+            bind_copy(session, copy_b)
+            assert session.execute(query, {"copies": list(committed_copies)}).all() == [(copy_b,)]
+            session.rollback()
+    finally:
+        engine.dispose()

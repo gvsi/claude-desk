@@ -8,6 +8,7 @@ from the environment is read from the repository's `.env`, so local tools and te
 exported variables. Values are never logged.
 """
 
+import contextlib
 import functools
 import os
 import re
@@ -15,8 +16,9 @@ from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Alias, ColumnClause, FromClause, Join, Select, Table, TextClause
+from sqlalchemy import Alias, ColumnClause, Connection, FromClause, Join, Select, Table, TextClause, event, func, select
 from sqlalchemy.dialects.postgresql import psycopg as postgresql_psycopg
+from sqlalchemy.orm import Session, SessionTransaction
 from sqlalchemy.sql import visitors
 from sqlalchemy.sql.selectable import SelectBase
 from sqlalchemy.engine import make_url
@@ -59,6 +61,52 @@ def libpq_url(url: str) -> str:
     return make_url(url).set(drivername="postgresql").render_as_string(hide_password=False)
 
 
+# Copy isolation. Row-level security on every kernel table admits only rows whose copy_id equals
+# the transaction's desk.copy_id setting, and the kernel_ro views filter on the same setting
+# (migration 0002_copy_isolation). A transaction that set no copy reads and writes no rows.
+COPY_SETTING = "desk.copy_id"
+
+
+class CopySession(Session):
+    """A session whose every transaction runs as the copy bound to it (`bind_copy`).
+
+    The copy goes into `desk.copy_id` with `set_config(..., is_local => true)` as each
+    transaction begins, so it ends with the transaction and never outlives it on a pooled
+    connection. An unbound session sets nothing, and kernel_ro reads find no rows.
+    """
+
+    copy_required = False
+
+
+class KernelSession(CopySession):
+    """A kernel session: a transaction is refused until a copy is bound."""
+
+    copy_required = True
+
+
+@event.listens_for(CopySession, "after_begin")
+def _set_transaction_copy(session: Session, transaction: SessionTransaction, connection: Connection) -> None:
+    copy_id = session.info.get("copy_id")
+    if copy_id:
+        connection.execute(select(func.set_config(COPY_SETTING, copy_id, True)))
+    elif getattr(session, "copy_required", False):
+        raise RuntimeError("a kernel transaction needs a copy: bind one first (KernelRepo(copy_id).bind(session))")
+
+
+def bind_copy(session: Session | AsyncSession, copy_id: str) -> None:
+    """Run every transaction of `session` as `copy_id`. Bind before the first query; one copy per session."""
+    if not copy_id:
+        raise ValueError("bind_copy needs a copy_id")
+    bound = session.info.get("copy_id")
+    if bound == copy_id:
+        return
+    if bound is not None:
+        raise ValueError("this session is bound to another copy; open a new session for it")
+    if session.in_transaction():
+        raise ValueError("bind the copy before the session's first query")
+    session.info["copy_id"] = copy_id
+
+
 # One engine per process and role, created on first use. Call dispose_engines() at shutdown
 # (and between event loops in tests): pooled connections belong to the loop that opened them.
 
@@ -70,11 +118,15 @@ def kernel_engine() -> AsyncEngine:
 
 @functools.cache
 def _kernel_sessions() -> async_sessionmaker[AsyncSession]:
-    return async_sessionmaker(kernel_engine(), expire_on_commit=False)
+    return async_sessionmaker(kernel_engine(), expire_on_commit=False, sync_session_class=KernelSession)
 
 
 async def get_kernel_session() -> AsyncIterator[AsyncSession]:
-    """A kernel session (a FastAPI dependency); the caller owns its transactions."""
+    """A kernel session (a FastAPI dependency); the caller owns its transactions.
+
+    It is bound to no copy: bind one (`KernelRepo(copy_id).bind(session)`) before the first query,
+    or every transaction is refused.
+    """
     async with _kernel_sessions()() as session:
         yield session
 
@@ -95,11 +147,14 @@ def api_engine() -> AsyncEngine:
 
 @functools.cache
 def _api_sessions() -> async_sessionmaker[AsyncSession]:
-    return async_sessionmaker(api_engine(), expire_on_commit=False)
+    return async_sessionmaker(api_engine(), expire_on_commit=False, sync_session_class=CopySession)
 
 
 async def get_api_session() -> AsyncIterator[AsyncSession]:
-    """An API session (a FastAPI dependency); the caller owns its transactions."""
+    """An API session (a FastAPI dependency); the caller owns its transactions.
+
+    kernel_ro reads find rows only once the copy from `GET /whoami` is bound (`bind_copy`).
+    """
     async with _api_sessions()() as session:
         yield session
 
@@ -129,10 +184,18 @@ _POSTGRES = postgresql_psycopg.dialect()
 
 
 class KernelRepo:
-    """One copy's view of the kernel tables: every kernel query goes through `scoped()`.
+    """One copy's view of the kernel tables.
 
-    `scoped(stmt)` supports one shape: a SELECT over kernel tables, their aliases and inner joins
-    of them, and adds `copy_id = <copy>` for each of those tables. It fails closed in two layers:
+    Postgres enforces the copy: `session()` and `bind()` make every transaction of a kernel
+    session run as this copy, and row-level security then admits only this copy's rows to every
+    read and write, whatever the SQL (functions that run query text, UPDATE and DELETE included).
+    A lookup made before the copy is known (a session token, a public slug) must carry its copy or
+    go through a narrow SECURITY DEFINER resolver that returns only the copy_id; the plan that
+    needs one adds it.
+
+    `scoped(stmt)` is a second layer for SELECTs. It supports one shape: a SELECT over kernel
+    tables, their aliases and inner joins of them, and adds `copy_id = <copy>` for each of those
+    tables. It refuses what it can't scope in two checks:
 
     1. An allowlist on the statement. It refuses ORM options of any kind (loader options,
        `with_expression`), execution options other than `SAFE_EXECUTION_OPTIONS`, raw SQL
@@ -143,14 +206,26 @@ class KernelRepo:
        it holds exactly one SELECT and reads no kernel table it didn't filter, which catches what
        the statement hides, such as a mapped column that reads another table.
 
-    Execute the returned statement as it is: options added afterwards aren't checked. A later
-    plan can widen the supported shapes.
+    These checks can't see query text passed to a function (`query_to_xml`), which row-level
+    security covers. Execute the returned statement as it is: options added afterwards aren't
+    checked.
     """
 
     def __init__(self, copy_id: str):
         if not copy_id:
             raise ValueError("KernelRepo needs a copy_id")
         self.copy_id = copy_id
+
+    def bind(self, session: Session | AsyncSession) -> None:
+        """Run every transaction of a kernel session (from `get_kernel_session()`) as this copy."""
+        bind_copy(session, self.copy_id)
+
+    @contextlib.asynccontextmanager
+    async def session(self) -> AsyncIterator[AsyncSession]:
+        """A new kernel session bound to this copy; the caller owns its transactions."""
+        async with _kernel_sessions()() as session:
+            self.bind(session)
+            yield session
 
     def scoped(self, stmt: Select) -> Select:
         _check_allowed(stmt)
