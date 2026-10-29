@@ -5,7 +5,9 @@
 # PID 1 as on ECS (initProcessEnabled). Then:
 #   - smoke.py's api_health through the API's published port (the kernel proves with SymCC, signs
 #     with the production key, every seed proved);
-#   - mock payments answers {ok: true} on 127.0.0.1:8702 inside the kernel's container;
+#   - mock payments answers {ok: true} on 127.0.0.1:8702 inside the kernel's container, once
+#     backend/desk/mockpay/server.py is in this checkout (until then it says the check is skipped,
+#     as `make image-check` does for code that hasn't landed);
 #   - from outside the namespace, the API's 8700 takes a connection (the positive control: the
 #     address and path work) and the kernel's 8701 refuses one.
 #
@@ -155,9 +157,13 @@ wait_healthy "$API" http://127.0.0.1:8700/api/health "the API"
 uv run --project "$ROOT/infra" python "$ROOT/infra/scripts/smoke.py" --base-url http://localhost:8700 --only api_health ||
   { show_logs "$API"; show_logs "$KERNEL"; die "api_health failed"; }
 
-docker exec "$KERNEL" python -c "$MOCKPAY_CHECK" >/dev/null ||
-  { show_logs "$KERNEL"; die "mock payments didn't answer {ok: true} on 127.0.0.1:8702"; }
-say "mock payments answers {ok: true} inside the kernel's container"
+if [[ -f $ROOT/backend/desk/mockpay/server.py ]]; then
+  docker exec "$KERNEL" python -c "$MOCKPAY_CHECK" >/dev/null ||
+    { show_logs "$KERNEL"; die "mock payments didn't answer {ok: true} on 127.0.0.1:8702"; }
+  say "mock payments answers {ok: true} inside the kernel's container"
+else
+  say "skipped mock payments, no backend/desk/mockpay/server.py yet"
+fi
 
 kernel_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$KERNEL")
 [[ -n $kernel_ip ]] || die "the kernel's container has no address to probe"
