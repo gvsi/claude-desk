@@ -56,8 +56,11 @@ export interface ApprovalCardProps {
   context?: ReactNode;
   /** Where and when it was held: "Web chat, 2 min ago". */
   waiting: string;
-  /** Called once per click with the answer; the card waits for the result. */
-  onAnswer: (answer: ApprovalAnswer) => void;
+  /**
+   * Called once per click with the answer; the card waits for the result. Return the request's
+   * promise, and a rejection lets the owner answer again even if `pending` and `error` stay the same.
+   */
+  onAnswer: (answer: ApprovalAnswer) => void | Promise<unknown>;
   /** The answer is being sent: "Sending your answer", with every answer waiting. */
   pending?: boolean;
   /** The answer may not have gone through: `true` shows the card's line, a string the screen's own. */
@@ -66,6 +69,8 @@ export interface ApprovalCardProps {
 
 /** The click that is waiting for its result, and the screen's `pending` and `error` it last saw. */
 interface AnswerLock {
+  /** Which click this is, so a late rejection releases only its own lock. */
+  click: number;
   key: string;
   pending: boolean;
   error: boolean | string | undefined;
@@ -101,9 +106,11 @@ export function ApprovalCard({ decision, heldBy, context, waiting, onAnswer, pen
   const failed = error === true || (typeof error === 'string' && error !== '');
   const answerKey = `${decision.decision_id}\n${decision.state}`;
 
-  // One click waits until the decision or its state changes, or the screen says that answer ended
-  // in an error (`error` on and `pending` off, after either of them changed since the click).
+  // One click waits until the decision or its state changes, the screen says that answer ended in
+  // an error (`error` on and `pending` off, after either of them changed since the click), or the
+  // promise `onAnswer` returned rejects.
   const [lock, setLock] = useState<AnswerLock | null>(null);
+  const clicks = useRef(0);
   let locked = false;
   if (lock !== null) {
     if (lock.key !== answerKey) {
@@ -114,7 +121,7 @@ export function ApprovalCard({ decision, heldBy, context, waiting, onAnswer, pen
       setLock(null);
     } else {
       locked = true;
-      setLock({ key: lock.key, pending, error });
+      setLock({ ...lock, pending, error });
     }
   }
   const waitingForResult = pending || locked;
@@ -134,8 +141,13 @@ export function ApprovalCard({ decision, heldBy, context, waiting, onAnswer, pen
   const answer = (value: ApprovalAnswer) => {
     if (waitingForResult) return;
     answeredHere.current = true;
-    setLock({ key: answerKey, pending, error });
-    onAnswer(value);
+    clicks.current += 1;
+    const click = clicks.current;
+    setLock({ click, key: answerKey, pending, error });
+    const sent = onAnswer(value);
+    if (sent !== undefined && typeof sent.then === 'function') {
+      sent.then(undefined, () => setLock((current) => (current !== null && current.click === click ? null : current)));
+    }
   };
 
   const note = ruleLine(offered);

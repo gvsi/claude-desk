@@ -79,6 +79,28 @@ function RetryingScreen(props: ApprovalCardProps) {
   );
 }
 
+/**
+ * A screen that never sets `pending` and leaves `error` on between tries: every answer is sent as
+ * a promise that fails a moment later, and the screen says so with the same `error={true}`.
+ */
+function AlwaysFailingScreen(props: ApprovalCardProps) {
+  const [error, setError] = useState<boolean | undefined>(undefined);
+  return (
+    <ApprovalCard
+      {...props}
+      error={error}
+      onAnswer={(answer: ApprovalAnswer) => {
+        props.onAnswer(answer);
+        const sent = new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new globalThis.Error('the answer was lost')), 100);
+        });
+        sent.catch(() => setError(true));
+        return sent;
+      }}
+    />
+  );
+}
+
 const meta = {
   title: 'Owner decisions/ApprovalCard',
   component: ApprovalCard,
@@ -225,6 +247,43 @@ export const Error: Story = {
     await waitFor(() => expect(canvas.getByText('You denied this.')).toHaveFocus());
     await expect(canvas.queryByRole('group', { name: 'Your answer' })).toBeNull();
     await expect(canvas.queryByRole('alert')).toBeNull();
+  },
+};
+
+export const FailsTwice: Story = {
+  render: (args) => <AlwaysFailingScreen {...args} />,
+  parameters: {
+    canvasNote:
+      'No board shows a lost answer; here the screen keeps the same error on and never sets pending, and the answers come back after each failure.',
+  },
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
+    const enabled = async () => {
+      for (const button of answerButtons(canvasElement)) await expect(button).not.toHaveAttribute('aria-disabled');
+    };
+    const waiting = async () => {
+      for (const button of answerButtons(canvasElement)) await expect(button).toHaveAttribute('aria-disabled', 'true');
+    };
+
+    // The first answer fails: the card's line, and every answer can be tried again.
+    await userEvent.click(canvas.getByRole('button', { name: 'Allow this time' }));
+    await expect(args.onAnswer).toHaveBeenCalledTimes(1);
+    await waiting();
+    await waitFor(() => expect(canvas.getByRole('alert')).toHaveTextContent(ERROR_LINE));
+    await waitFor(enabled);
+
+    // answer_lock_releases_on_repeated_failure: the second fails with the same error, and the
+    // answers still come back, because the rejected promise releases them.
+    await userEvent.click(canvas.getByRole('button', { name: 'Deny this time' }));
+    await expect(args.onAnswer).toHaveBeenCalledTimes(2);
+    await waiting();
+    await waitFor(enabled);
+    await expect(canvas.getByRole('alert')).toHaveTextContent(ERROR_LINE);
+    await expect(canvas.queryByText('Sending your answer')).toBeNull();
+
+    // A third try goes out.
+    await userEvent.click(canvas.getByRole('button', { name: 'Allow this time' }));
+    await expect(args.onAnswer).toHaveBeenCalledTimes(3);
+    await expect(args.onAnswer).toHaveBeenLastCalledWith('allow_once');
   },
 };
 

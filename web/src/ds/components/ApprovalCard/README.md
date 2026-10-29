@@ -19,7 +19,7 @@
 
 ## Answering
 
-- One click calls `onAnswer` once and every answer waits (`aria-disabled`, `aria-busy`) until `decision_id` or `state` changes, or until the screen reports that the answer failed: `error` on and `pending` off, after either changed since the click.
+- One click calls `onAnswer` once and every answer waits (`aria-disabled`, `aria-busy`) until `decision_id` or `state` changes, until the screen reports that the answer failed (`error` on and `pending` off, after either changed since the click), or until the promise `onAnswer` returned rejects. Return the request's promise: a screen that keeps the same `error` on between tries and never sets `pending` still gets the answers back after each failure.
 - `pending` shows "Sending your answer" in a status line under the answers.
 - `error` shows "We couldn't confirm your answer. Try again, or reload to see where it stands." (`true`), or the screen's own line (a string), as an alert, and the answers can be tried again. A retry is safe: the kernel resolves a request once, and on `conflict` the screen re-reads the decision.
 - When the answers go while one of them has focus, focus moves to the status line.
@@ -48,7 +48,7 @@ After an answer or an event, the final line takes the place of "Waiting for your
 - `heldBy`: `NeedsYouItem.held_by`, the reason on the rule card that held it, shown as the owner's words.
 - `context`: "From the visitor: “{from_the_visitor}”", with the visitor's words in a `data-copy="user"` span.
 - `waiting`: where and when it was held, formatted by the screen.
-- `onAnswer`, then `pending` while it is sent and `error` if it fails. On success, pass the decision the kernel returned.
+- `onAnswer`, returning the request's promise, then `pending` while it is sent and `error` if it fails. On success, pass the decision the kernel returned.
 
 ## Props
 
@@ -58,7 +58,7 @@ After an answer or an event, the final line takes the place of "Waiting for your
 | `heldBy` | `string` | The rule that held it. |
 | `context` | `ReactNode` | One line of context. |
 | `waiting` | `string` | Required. |
-| `onAnswer` | `(answer: ApprovalAnswer) => void` | Required. |
+| `onAnswer` | `(answer: ApprovalAnswer) => void \| Promise<unknown>` | Required. A rejected promise lets the owner answer again. |
 | `pending` | `boolean` | "Sending your answer". |
 | `error` | `boolean \| string` | `true` for the card's line, or the screen's line. |
 
