@@ -57,6 +57,71 @@ const RAW_CSS_SECONDS = /(?<![\w.-])\d*\.?\d+s\b/;
 // Formatting money or dates: the visitor's page shows only what the kernel rendered.
 const FORMATS = /\blib\/format\b|\bIntl\.|\btoLocale\w*|\bnew\s+Date\b|\btoFixed\(/;
 
+// The open status: the kernel's object, passed on as it came, and its times read in one place.
+const SHELL_FILE = 'ds/components/PublicShell/PublicShell.tsx';
+const FALLBACK_NAME = /PlainOpenStatus/;
+const OPEN_STATUS_BINDING = /\bopenStatus=(\{(?:[^{}]|\{[^{}]*\})*\}|"[^"]*"|'[^']*')/g;
+const FROM_THE_HOOK = /\bconst\s*\{[^}]*\bopenStatus\b[^}]*\}\s*=\s*useOpenStatus\(|\bconst\s+openStatus\s*=\s*useOpenStatus\(/;
+const OTHER_DECLARATION = /\b(?:let|var)\s+openStatus\b|\bopenStatus\s*=(?![={>])|\bfunction\s+\w*\s*\([^)]*\bopenStatus\b/;
+const HOOK_ASSIGNMENT = /\bopenStatus\s*(?::\s*[^=;]+)?=(?![=>{])\s*([^;]+);/g;
+const FROM_AN_ANSWER = /^(?:null|[\w.]+\.open_status \?\? null)$/;
+const OPEN_AND_TEXT = /\{[^{}]*\}/g;
+const STATUS_TIME = /\.(?:until|opens_at|as_of|refresh_at)\b|\[\s*['"`](?:until|opens_at|as_of|refresh_at)['"`]\s*\]|\{[^{}]*\b(?:until|opens_at|as_of|refresh_at)\b[^{}]*\}\s*=/g;
+
+/** Whether PublicShell's props declare the `openStatus` slot. */
+function declaresOpenStatus(shell: string): boolean {
+  const props = /export interface PublicShellProps\s*\{([\s\S]*?)\n\}/.exec(shell)?.[1] ?? '';
+  return /^\s*openStatus\??\s*:/m.test(props);
+}
+
+/** The [start, end) of `name`'s body in `text`, or null when it isn't declared there. */
+function functionBody(text: string, name: string): [number, number] | null {
+  const head = new RegExp(`\\bfunction\\s+${name}\\s*\\(`).exec(text);
+  if (!head) return null;
+  const open = text.indexOf('{', text.indexOf(')', head.index));
+  let depth = 0;
+  for (let i = open; i < text.length; i += 1) {
+    if (text[i] === '{') depth += 1;
+    else if (text[i] === '}' && (depth -= 1) === 0) return [open, i + 1];
+  }
+  return null;
+}
+
+/** Reads of an open status's times outside `openStatusDelayMs`. */
+function timeReadsOutsideTheHelper(scanned: Source[]): string[] {
+  return scanned.flatMap(({ file, text }) => {
+    const body = functionBody(text, 'openStatusDelayMs');
+    return [...text.matchAll(STATUS_TIME)]
+      .filter((m) => body === null || m.index < body[0] || m.index >= body[1])
+      .map((m) => `${file}: ${m[0]}`);
+  });
+}
+
+/** Object literals (or types) that pair `open:` with `text:`: an open status the page made itself. */
+function madeUpStatuses(scanned: Source[]): string[] {
+  return scanned.flatMap(({ file, text }) =>
+    [...text.matchAll(OPEN_AND_TEXT)].filter((m) => /\bopen\s*:/.test(m[0]) && /\btext\s*:/.test(m[0])).map((m) => `${file}: ${m[0]}`),
+  );
+}
+
+/** `openStatus=` bindings whose value isn't the hook's `openStatus`, or files where that name comes from anywhere else. */
+function bindingsNotFromTheHook(scanned: Source[]): string[] {
+  return scanned.flatMap(({ file, text }) => {
+    const bindings = [...text.matchAll(OPEN_STATUS_BINDING)].map((m) => m[1] ?? '');
+    if (bindings.length === 0) return [];
+    const bad = bindings.filter((value) => value !== '{openStatus}').map((value) => `${file}: openStatus=${value}`);
+    if (!FROM_THE_HOOK.test(text)) bad.push(`${file}: openStatus doesn't come from useOpenStatus`);
+    if (OTHER_DECLARATION.test(text)) bad.push(`${file}: openStatus is declared or assigned elsewhere`);
+    return bad;
+  });
+}
+
+/** Assignments to `openStatus` in the hook whose value isn't an answer's `.open_status` or null. */
+function hookAssignments(text: string): { all: string[]; bad: string[] } {
+  const all = [...text.matchAll(HOOK_ASSIGNMENT)].map((m) => (m[1] ?? '').trim());
+  return { all, bad: all.filter((value) => !FROM_AN_ANSWER.test(value)) };
+}
+
 describe('app source guards', () => {
   beforeAll(() => {
     // The scan reaches the app and skips what it exempts, or every guard below fails.
@@ -105,5 +170,60 @@ describe('app source guards', () => {
     const bad = "import { formatCents } from '../lib/format.ts'; new Intl.NumberFormat(); d.toLocaleString(); new Date(); n.toFixed(2);";
     expect(hits(FORMATS, sample(bad))).toHaveLength(5);
     expect(hits(FORMATS, sources.filter(visitor))).toEqual([]);
+  });
+
+  it('open_status_comes_from_the_ds_once_it_has_the_slot', () => {
+    expect(declaresOpenStatus('export interface PublicShellProps {\n  brand: PublicBrand;\n  openStatus?: PublicOpenStatus;\n}')).toBe(true);
+    expect(declaresOpenStatus('export interface PublicShellProps {\n  brand: PublicBrand;\n}\nconst openStatus: X = y;')).toBe(false);
+
+    // The public file that draws the shell; it must show the kernel's open status one way or the other.
+    const page = sources.find((s) => s.file.startsWith('public/') && /<PublicShell\b/.test(s.text));
+    expect(page, 'a public page renders PublicShell').toBeDefined();
+    if (declaresOpenStatus(readFileSync(path.join(SRC, SHELL_FILE), 'utf8'))) {
+      // The design system's slot has landed: the plain fallback is gone, and the shell gets the status.
+      const everything = readdirSync(SRC, { recursive: true, encoding: 'utf8' })
+        .map((file) => file.split(path.sep).join('/'))
+        .filter((file) => file !== 'app/guards.test.ts');
+      expect(everything.filter((file) => FALLBACK_NAME.test(file))).toEqual([]);
+      const mentions = everything
+        .filter((file) => /\.(tsx?|css)$/.test(file))
+        .filter((file) => FALLBACK_NAME.test(readFileSync(path.join(SRC, file), 'utf8')));
+      expect(mentions).toEqual([]);
+      expect(page?.text).toMatch(/\bopenStatus=\{openStatus\}/);
+    } else {
+      // Until then the page shows the same line through the plain fallback.
+      expect(page?.text).toMatch(/<PlainOpenStatus\b[^>]*\bopenStatus=\{openStatus\}/);
+    }
+  });
+
+  it('open_status_comes_only_from_the_kernel', () => {
+    const visitor = sources.filter((s) => s.file.startsWith('public/') && /\.tsx?$/.test(s.file));
+    const hook = visitor.find((s) => s.file === 'public/useOpenStatus.ts');
+    expect(hook, 'public/useOpenStatus.ts').toBeDefined();
+
+    // Bindings: only the hook's value, by its own name.
+    expect(bindingsNotFromTheHook(sample('<PublicShell openStatus={{ open: true, text: "Open" }} />'))).toHaveLength(2);
+    expect(bindingsNotFromTheHook(sample('const { openStatus } = useOpenStatus(slug, desk);\n<X openStatus={status} />'))).toHaveLength(1);
+    expect(bindingsNotFromTheHook(sample('let openStatus = desk.open_status;\n<X openStatus={openStatus} />'))).toHaveLength(2);
+    expect(bindingsNotFromTheHook(sample('const { openStatus } = useOpenStatus(slug, desk);\n<X openStatus={openStatus} />'))).toEqual([]);
+    expect(bindingsNotFromTheHook(visitor)).toEqual([]);
+
+    // In the hook, the value is an answer's `open_status`, or nothing.
+    expect(hookAssignments('openStatus = { ...shown.desk.open_status, text: t };').bad).toHaveLength(1);
+    expect(hookAssignments('let openStatus: OpenStatus | null = null;\nopenStatus = shown.desk.open_status ?? null;').bad).toEqual([]);
+    const assigned = hookAssignments(hook?.text ?? '');
+    expect(assigned.all.length).toBeGreaterThan(0);
+    expect(assigned.bad).toEqual([]);
+
+    // No status made up on the page: no object with both `open:` and `text:`.
+    expect(madeUpStatuses(sample("const line = { open: true, text: 'Open now' };"))).toHaveLength(1);
+    expect(madeUpStatuses(visitor)).toEqual([]);
+
+    // The times are read only to schedule the next refetch.
+    const helper = 'export function openStatusDelayMs(status: OpenStatus): number {\n  return Date.parse(status.refresh_at) - Date.parse(status.as_of);\n}\n';
+    expect(timeReadsOutsideTheHelper(sample(helper))).toEqual([]);
+    expect(timeReadsOutsideTheHelper(sample(`${helper}const late = status['until'];\nconst { opens_at } = status;\nx.refresh_at;`))).toHaveLength(3);
+    expect(timeReadsOutsideTheHelper(visitor)).toEqual([]);
+    expect(functionBody(hook?.text ?? '', 'openStatusDelayMs'), 'openStatusDelayMs is in useOpenStatus.ts').not.toBeNull();
   });
 });

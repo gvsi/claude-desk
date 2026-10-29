@@ -4,12 +4,14 @@ import type { DataRouter } from 'react-router';
 
 import { ApiError, observeRequests } from '../api/http.ts';
 import { ROUTES, type RouteKey } from '../api/routes.ts';
+import { PublicChatProvider } from '../public/PublicChatProvider.tsx';
 
 /**
- * Owner routes whose 401 doesn't end a session: creating a copy (a wrong passcode) and asking
- * whether there is one.
+ * Owner routes whose 401 doesn't end a session: creating a copy (a wrong passcode), asking whether
+ * there is one, and the owner's preview of a public page, which anyone may follow a link to and
+ * which falls back to a visitor's chat, so its failure never leaves the public page.
  */
-const SESSION_PROBES: ReadonlySet<RouteKey> = new Set<RouteKey>(['copies', 'me']);
+const SESSION_PROBES: ReadonlySet<RouteKey> = new Set<RouteKey>(['copies', 'me', 'openPreview']);
 
 /** What the passcode screen receives in `location.state` when the demo session ended. */
 export interface SessionEndedState {
@@ -40,8 +42,9 @@ export interface ProvidersProps {
 }
 
 /**
- * The query client, and the end of an owner's demo session: an owner request answered 401 (other
- * than creating a copy or asking for one) sends the tab back to the passcode screen.
+ * The query client, the visitor's chats (kept per Desk while the app runs), and the end of an
+ * owner's demo session: an owner request answered 401 (other than the probes above) sends the tab
+ * back to the passcode screen.
  */
 export function Providers({ router, children }: ProvidersProps) {
   const [queryClient] = useState(createQueryClient);
@@ -64,5 +67,9 @@ export function Providers({ router, children }: ProvidersProps) {
     [router],
   );
 
-  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+  return (
+    <QueryClientProvider client={queryClient}>
+      <PublicChatProvider>{children}</PublicChatProvider>
+    </QueryClientProvider>
+  );
 }

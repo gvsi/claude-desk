@@ -1,0 +1,68 @@
+/**
+ * The public page's own words, in the visitor's language (the browser's, `browserLanguage()`).
+ * Everything else a visitor reads is the kernel's (messages, cards, receipts, the open status) or
+ * the design system's (the disclosure, error lines, card labels). Names are passed in as written.
+ */
+import type { CopyLanguage } from '../ds/index.ts';
+
+export interface PublicCopy {
+  /** The composer's name and placeholder. */
+  message: (business: string) => string;
+  /** The composer's send button. */
+  send: string;
+  /** The conversation's name for screen readers. */
+  conversation: (business: string) => string;
+  /** What "Ask for {owner}" sends as the visitor's message. */
+  askForOwner: (owner: string) => string;
+  joined: (name: string) => string;
+  /** The owner handed the chat back. */
+  claudeIsBack: string;
+  reconnecting: string;
+  notSent: string;
+  tooLong: string;
+  tryAgain: string;
+  cancelRequest: string;
+  /** While the Desk and the chat load. */
+  opening: string;
+  deskUnavailableTitle: string;
+  deskUnavailableBody: string;
+  /** After the open status when the business is closed. Goes when PublicShell's slot lands. */
+  stillHelps: string;
+}
+
+export const PUBLIC_COPY: Readonly<Record<CopyLanguage, PublicCopy>> = {
+  en: {
+    message: (business) => `Message ${business}`,
+    send: 'Send',
+    conversation: (business) => `Conversation with ${business}`,
+    askForOwner: (owner) => `I'd like to talk to ${owner}.`,
+    joined: (name) => `${name} joined the chat`,
+    claudeIsBack: 'Claude is helping again.',
+    reconnecting: 'Reconnecting to the chat',
+    notSent: "That didn't send. Your message is still here.",
+    tooLong: "That's too long. Shorten it and try again.",
+    tryAgain: 'Try again',
+    cancelRequest: 'Cancel this request',
+    opening: 'Opening the chat',
+    deskUnavailableTitle: "This Desk isn't available",
+    deskUnavailableBody: 'Check the link, or contact the business another way.',
+    stillHelps: 'Claude can still help.',
+  },
+  es: {
+    message: (business) => `Mensaje para ${business}`,
+    send: 'Enviar',
+    conversation: (business) => `Conversación con ${business}`,
+    askForOwner: (owner) => `Me gustaría hablar con ${owner}.`,
+    joined: (name) => `${name} se unió al chat`,
+    claudeIsBack: 'Claude vuelve a ayudarte.',
+    reconnecting: 'Reconectando con el chat',
+    notSent: 'No se envió. Tu mensaje sigue aquí.',
+    tooLong: 'Es demasiado largo. Acórtalo e inténtalo de nuevo.',
+    tryAgain: 'Intentar de nuevo',
+    cancelRequest: 'Cancelar esta solicitud',
+    opening: 'Abriendo el chat',
+    deskUnavailableTitle: 'Este Desk no está disponible',
+    deskUnavailableBody: 'Revisa el enlace o comunícate con el negocio de otra forma.',
+    stillHelps: 'Claude puede ayudarte igual.',
+  },
+};
