@@ -1,6 +1,6 @@
 /**
  * The app shell in a browser: an unknown path gets a kind page with a way back, and an ended owner
- * session goes back to the passcode.
+ * session goes back to the intro dialog's passcode.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -29,7 +29,8 @@ describe('App', () => {
   });
 
   it('owner_401_replaces_the_page_with_the_passcode', async () => {
-    const { router } = await renderRoute('/app/d1/today');
+    // Signed out, so whatever the owner page asks for on its way in is a 401 too, never a success.
+    const { router } = await renderRoute('/app/d1/today', { seed: { name: 'rivera', signedIn: false } });
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 401 }));
     await expect(request('today', { params: { desk_id: 'd1' } })).rejects.toMatchObject({ kind: 'unauthorized' });
     await vi.waitFor(() => expect(router.state.location.pathname).toBe('/'));

@@ -13,7 +13,7 @@ import { PublicChatProvider } from '../public/PublicChatProvider.tsx';
  */
 const SESSION_PROBES: ReadonlySet<RouteKey> = new Set<RouteKey>(['copies', 'me', 'openPreview']);
 
-/** What the passcode screen receives in `location.state` when the demo session ended. */
+/** What the first visit (`/`) receives in `location.state` when the demo session ended: its intro dialog says so. */
 export interface SessionEndedState {
   /** True once an owner request has succeeded in this tab: the session ended rather than never began. */
   ended: boolean;
@@ -44,7 +44,7 @@ export interface ProvidersProps {
 /**
  * The query client, the visitor's chats (kept per Desk while the app runs), and the end of an
  * owner's demo session: an owner request answered 401 (other than the probes above) sends the tab
- * back to the passcode screen.
+ * back to the first visit, where the intro dialog asks for the passcode.
  */
 export function Providers({ router, children }: ProvidersProps) {
   const [queryClient] = useState(createQueryClient);

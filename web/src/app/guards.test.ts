@@ -68,6 +68,27 @@ const FROM_AN_ANSWER = /^(?:null|[\w.]+\.open_status \?\? null)$/;
 const OPEN_AND_TEXT = /\{[^{}]*\}/g;
 const STATUS_TIME = /\.(?:until|opens_at|as_of|refresh_at)\b|\[\s*['"`](?:until|opens_at|as_of|refresh_at)['"`]\s*\]|\{[^{}]*\b(?:until|opens_at|as_of|refresh_at)\b[^{}]*\}\s*=/g;
 
+// The first visit's dialog: the design system's, once its index exports it, with no stand-in left.
+const DS_INDEX_FILE = 'ds/index.ts';
+const ARRIVAL_FILE = 'owner/Arrival.tsx';
+const INTRO_FALLBACK_NAME = /PlainIntroDialog/;
+const EXPORTS_INTRO_DIALOG = /\bexport\s*\{[^}]*\bIntroDialog\b[^}]*\}\s*from\b/;
+const IMPORTS_INTRO_FROM_THE_INDEX = /\bimport\s*\{[^}]*\bIntroDialog\b[^}]*\}\s*from\s*['"](?:\.\.\/)+ds\/index(?:\.ts)?['"]/;
+
+/** Every file under `src/` but this one, by path relative to `src/`. */
+function everyFileButThisOne(): string[] {
+  return readdirSync(SRC, { recursive: true, encoding: 'utf8' })
+    .map((file) => file.split(path.sep).join('/'))
+    .filter((file) => file !== 'app/guards.test.ts');
+}
+
+/** Files under `src/` named after the stand-in, or whose code mentions it. */
+function introFallbacks(files: string[], read: (file: string) => string): string[] {
+  const named = files.filter((file) => INTRO_FALLBACK_NAME.test(file));
+  const mentioned = files.filter((file) => /\.(tsx?|css)$/.test(file) && INTRO_FALLBACK_NAME.test(read(file)));
+  return [...new Set([...named, ...mentioned])];
+}
+
 /** Whether PublicShell's props declare the `openStatus` slot. */
 function declaresOpenStatus(shell: string): boolean {
   const props = /export interface PublicShellProps\s*\{([\s\S]*?)\n\}/.exec(shell)?.[1] ?? '';
@@ -193,6 +214,27 @@ describe('app source guards', () => {
     } else {
       // Until then the page shows the same line through the plain fallback.
       expect(page?.text).toMatch(/<PlainOpenStatus\b[^>]*\bopenStatus=\{openStatus\}/);
+    }
+  });
+
+  it('intro_dialog_comes_from_the_ds_once_it_exists', () => {
+    // The matchers, on known samples first.
+    expect(EXPORTS_INTRO_DIALOG.test("export {\n  IntroDialog,\n  type IntroDialogProps,\n} from './components/IntroDialog/IntroDialog.tsx';")).toBe(true);
+    expect(EXPORTS_INTRO_DIALOG.test("export { Dialog, type DialogProps } from './components/Dialog/Dialog.tsx';")).toBe(false);
+    expect(IMPORTS_INTRO_FROM_THE_INDEX.test("import { INTRO_ERROR_COPY, IntroDialog } from '../ds/index.ts';")).toBe(true);
+    expect(IMPORTS_INTRO_FROM_THE_INDEX.test("import { IntroDialog } from './arrival/PlainIntroDialog.tsx';")).toBe(false);
+    const planted: Record<string, string> = { 'owner/arrival/PlainIntroDialog.tsx': '', 'owner/Arrival.tsx': '<PlainIntroDialog />', 'owner/x.ts': '' };
+    expect(introFallbacks(Object.keys(planted), (file) => planted[file] ?? '')).toEqual(['owner/arrival/PlainIntroDialog.tsx', 'owner/Arrival.tsx']);
+
+    const arrival = sources.find((s) => s.file === ARRIVAL_FILE);
+    expect(arrival, ARRIVAL_FILE).toBeDefined();
+    if (EXPORTS_INTRO_DIALOG.test(readFileSync(path.join(SRC, DS_INDEX_FILE), 'utf8'))) {
+      // The design system's dialog has landed: no stand-in anywhere, and the arrival uses the real one.
+      expect(introFallbacks(everyFileButThisOne(), (file) => readFileSync(path.join(SRC, file), 'utf8'))).toEqual([]);
+      expect(arrival?.text).toMatch(IMPORTS_INTRO_FROM_THE_INDEX);
+    } else {
+      // Until then the arrival shows the plain stand-in.
+      expect(arrival?.text).toMatch(/<PlainIntroDialog\b/);
     }
   });
 

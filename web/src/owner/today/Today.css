@@ -1,0 +1,214 @@
+/* Today: the page's column (the greeting, "Things to try", and the sections Today adds) and the
+   right column beside it from 1280 px, 420 px wide; under that the right column stacks under the
+   page. "Things to try" is a heading with its caption and "Hide this list" at the right, then one
+   card of rows divided by hairlines: a 32 px icon tile, the title and its line, and the next step
+   at the right, which drops under the words on a phone. The preview behind the intro dialog uses
+   the same layout. */
+
+.cd-today {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-32);
+  align-items: start;
+}
+
+/* 420 px: the illustration column's 400 and 20 more. */
+@media (min-width: 1280px) {
+  .cd-today {
+    grid-template-columns: minmax(0, 1fr) calc(var(--size-intro-illustration) + var(--space-20));
+  }
+}
+
+.cd-today__main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-32);
+  min-width: 0;
+}
+
+.cd-today__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+}
+
+/* The preview fills the window behind the dialog, as the app does. */
+.cd-today-preview {
+  min-height: 100dvh;
+}
+
+/* Things to try */
+
+.cd-things {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+}
+
+/* The heading, its caption beside it (wrapping in its own column), and "Hide this list" at the right. */
+.cd-things__head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--space-8);
+  row-gap: var(--space-4);
+}
+
+.cd-things__title {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.cd-things__caption {
+  min-width: 0;
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cd-things__hide,
+.cd-things__show {
+  display: flex;
+  flex: none;
+}
+
+.cd-things__list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cd-things__item {
+  display: grid;
+  grid-template-columns: var(--size-control) minmax(0, 1fr) auto;
+  column-gap: var(--space-14);
+  row-gap: var(--space-12);
+  align-items: center;
+  padding-block: var(--space-16);
+  border-top: 1px solid var(--line-hairline);
+}
+
+.cd-things__item:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.cd-things__item:last-child {
+  padding-bottom: 0;
+}
+
+.cd-things__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: var(--size-control);
+  height: var(--size-control);
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-control);
+  color: var(--text-secondary);
+}
+
+.cd-things__text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.cd-things__item-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.cd-things__detail {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cd-things__action {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* The ideas and what a pick did, under the row's words. */
+.cd-things__below {
+  grid-column: 2 / -1;
+}
+
+.cd-things__ideas {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-12);
+}
+
+.cd-things__idea {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+/* The right column */
+
+.cd-today-aside {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20);
+  min-width: 0;
+}
+
+.cd-today-aside__public {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-8);
+}
+
+.cd-today-aside__title {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.cd-today-aside__link {
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.cd-today-aside__text {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cd-today-aside__action {
+  display: flex;
+  padding-top: var(--space-4);
+}
+
+/* On a phone the caption goes under the heading and "Hide this list" under it at the right; in each
+   row the icon tile sits level with the title, and the next step drops under the words, from the
+   row's left edge. */
+@media (max-width: 639.98px) {
+  .cd-things__head {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .cd-things__hide {
+    justify-self: end;
+  }
+
+  .cd-things__item {
+    grid-template-columns: var(--size-control) minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .cd-things__action,
+  .cd-things__below {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+}
