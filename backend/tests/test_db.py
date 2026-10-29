@@ -443,13 +443,15 @@ def test_guard_refuses_set_config_calls():
 
 
 def test_guard_refuses_unicode_escape_identifiers():
-    """`U&"\\0073et_config"` names set_config through a Unicode escape, which no name check reads.
-    SQLAlchemy never spells an identifier that way, so the guard refuses the spelling itself, in
-    any case, wherever it appears outside a string literal."""
+    """`U&"\\0073et_config"` names set_config through a Unicode escape, which no name check reads,
+    and `U&'...'` spells a string the same way. SQLAlchemy never spells either, so the guard refuses
+    the spelling itself, in any case, wherever it appears: inside a string literal too, since the
+    guard refuses what it would have to lex to tell apart."""
     repo = KernelRepo(f"copy-{uuid4().hex}")
     escaped = ('U&"\\0073et_config"', 'u&"\\0073et_config"', 'U&"\\0073ET_CONFIG"', 'u&"\\0073ET_CONFIG"',
                'pg_catalog.U&"\\0073et_config"')
     calls = [literal_column(f"{name}('{COPY_SETTING}', 'copy-b', true)") for name in escaped]
+    calls.append(literal_column("U&'\\0073et_config'"))                                  # a string spelled that way
     statements = [select(calling(n, call)) for n, call in enumerate(calls, start=1000)]   # hidden from layer 1
     admitted = []
     for statement in statements:
@@ -459,8 +461,44 @@ def test_guard_refuses_unicode_escape_identifiers():
             continue
         admitted.append(str(statement).split(" FROM")[0])
     assert admitted == []
-    # the spelling inside a string literal is text, not an identifier
-    repo.scoped(select(calling(2000, literal_column("'U&\"\\0073et_config\"'"))))
+    # the spelling inside a string literal is refused too: the guard doesn't read through quoting
+    with pytest.raises(ValueError):
+        repo.scoped(select(calling(2000, literal_column("'U&\"\\0073et_config\"'"))))
+
+
+# SQL text SQLAlchemy never compiles a kernel statement to. Each can hide a call, a nested SELECT or a
+# table from a check that reads the SQL as text: dollar quoting and escape strings swallow the text
+# after a quote they hold, a quoted identifier or a comment can hold a quote, and a separator starts
+# a second statement.
+UNREADABLE_SQL = (
+    "$$'$$ || U&\"\\0073et_config\"('desk.copy_id', 'copy-b', true) || $$'$$",
+    "$q$'$q$ || U&\"\\0073et_config\"('desk.copy_id', 'copy-b', true) || $q$'$q$",
+    "E'\\'' || U&\"\\0073et_config\"('desk.copy_id', 'copy-b', true) || E'\\''",
+    "e'\\'' || U&\"\\0073et_config\"('desk.copy_id', 'copy-b', true) || e'\\''",
+    "$$'$$ || (select coalesce(max(seq), 0) from kernel.ledger_entries)::text || $$'$$",
+    "E'\\'' || (select coalesce(max(seq), 0) from kernel.ledger_entries)::text || E'\\''",
+    "\"a'b\", U&\"\\0073et_config\"('desk.copy_id', 'copy-b', true)",
+    "\"a'b\", (select coalesce(max(seq), 0) from kernel.ledger_entries), \"c'd\"",
+    "1; set desk.copy_id = 'copy-b'",
+    "1 /* ' */, (select coalesce(max(seq), 0) from kernel.ledger_entries) /* ' */",
+    "1 -- '\n, (select coalesce(max(seq), 0) from kernel.ledger_entries) -- '\n",
+)
+
+
+def test_guard_refuses_quoting_it_cannot_read():
+    """The guard refuses the spellings in `UNREADABLE_SQL` themselves, before it reads anything
+    else, instead of trying to lex them: each would otherwise hide text from the checks that run on
+    the SQL with its string literals dropped."""
+    repo = KernelRepo(f"copy-{uuid4().hex}")
+    statements = [select(calling(n, literal_column(sql))) for n, sql in enumerate(UNREADABLE_SQL, start=3000)]
+    admitted = []
+    for statement in statements:
+        try:
+            repo.scoped(statement)
+        except ValueError:
+            continue
+        admitted.append(str(statement).split(" FROM")[0])
+    assert admitted == []
 
 
 async def test_guard_treats_bound_text_as_data(kernel_db):

@@ -117,10 +117,23 @@ async def caller(ctx: KernelCtx, request: Request, session_id: str | None) -> Li
 
 
 async def require_session(ctx: KernelCtx, request: Request, session_id: str, *, generation: int | None = None,
-                          desk_id: str | None = None, lock: bool = False) -> SessionRow:
+                          desk_id: str | None = None) -> SessionRow:
     """The visitor or agent session `session_id`, once `X-Session-Token` proves it ("Session state
-    responses", first four rows in order). Binds the request's transaction to the session's copy.
-    With `lock`, the closed and generation checks run on the row as `lock_session` reads it."""
+    responses", first four rows in order). Binds the request's transaction to the session's copy."""
+    row = await authenticate_session(ctx, request, session_id, desk_id=desk_id)
+    require_open(ctx, request, row, generation=generation)
+    row.last_seen_at = ctx.clock.now()
+    return row
+
+
+async def authenticate_session(ctx: KernelCtx, request: Request, session_id: str, *,
+                               desk_id: str | None = None) -> SessionRow:
+    """The first two session-state rows for the visitor or agent session `session_id`:
+    `X-Session-Token` proves it, and it belongs to `desk_id` when the call names one. Binds the
+    request's transaction to the session's copy and returns the row as read, unlocked and with its
+    state unchecked: `require_session` runs the open and generation checks on it, and
+    `check_caller` (for `/decide`, after `lock_session`) runs them itself, so that from here on a
+    failure can be ledgered on the session."""
     route = route_template(request)
     copy_id = await repo.copy_of_session_id(ctx, session_id)
     if copy_id is None:
@@ -134,10 +147,6 @@ async def require_session(ctx: KernelCtx, request: Request, session_id: str, *, 
         raise AuthError(401, "auth", "bad_token", route=route, named=named)
     if desk_id is not None and desk_id != row.desk_id:
         raise AuthError(404, "not_found", "wrong_copy", route=route, named=named)
-    if lock:
-        row = await lock_session(ctx, row.session_id)
-    require_open(ctx, request, row, generation=generation)
-    row.last_seen_at = ctx.clock.now()
     return row
 
 
@@ -214,14 +223,12 @@ async def require_owner(ctx: KernelCtx, request: Request, *, desk_id: str | None
     return OwnerCtx(copy_id=copy_id, session_id=row.session_id)
 
 
-async def caller_session(ctx: KernelCtx, request: Request, session_id: str, desk_id: str | None, *,
-                         generation: int | None = None, lock: bool = False) -> SessionRow:
-    """The session a call that takes either credential acts for, once its session-state rows pass
-    ("Session state responses"): a session's own token, on its own Desk; or the owner's token, for
-    the owner's own session and a Desk of its copy. Then open, at `generation` when the call
-    carries one. Binds the request's transaction to the caller's copy. With `lock`, the closed and
-    generation checks run on the session's row as `lock_session` reads it, held until the
-    transaction ends.
+async def authenticate_caller(ctx: KernelCtx, request: Request, session_id: str, desk_id: str | None) -> Named:
+    """The first session-state rows for a call that takes either credential ("Session state
+    responses"): a session's own token, on its own Desk; or the owner's token, for the owner's own
+    session and a Desk of its copy. Binds the request's transaction to the caller's copy and
+    returns the session and Desk the call acts for, with the session's state unchecked:
+    `check_caller` runs the rest, so that from here on a failure can be ledgered on the session.
 
     The owner must name its Desk, and a request that doesn't is 422 only once the caller is
     known, so a bad token is always 401 and acting as another session is always ledgered."""
@@ -233,19 +240,34 @@ async def caller_session(ctx: KernelCtx, request: Request, session_id: str, desk
                             named=Named(copy_id=owner.copy_id, session_id=session_id))
         if desk_id is None:
             raise KernelFailure(422, "invalid", "owner_names_no_desk")
-        row = await lock_session(ctx, owner.session_id) if lock else (await ctx.db.scalars(ctx.repo.scoped(
-            select(SessionRow).where(SessionRow.session_id == owner.session_id)))).one()
-        require_open(ctx, request, row, generation=generation)
-        return row
-    return await require_session(ctx, request, session_id, generation=generation, desk_id=desk_id, lock=lock)
+        return Named(copy_id=owner.copy_id, desk_id=desk_id, session_id=owner.session_id)
+    row = await authenticate_session(ctx, request, session_id, desk_id=desk_id)
+    return Named(copy_id=row.copy_id, desk_id=row.desk_id, session_id=row.session_id)
+
+
+async def check_caller(ctx: KernelCtx, request: Request, named: Named, *, generation: int | None = None,
+                       lock: bool = False) -> tuple[SessionRow, Desk]:
+    """The rest of the session-state rows for a caller `authenticate_caller` proved: its session
+    open, at `generation` when the call carries one, on a Desk not deleted (409 `closed`); a
+    visitor's or agent's session is seen now. With `lock`, the checks run on the session's row as
+    `lock_session` reads it, held until the transaction ends."""
+    if lock:
+        row = await lock_session(ctx, named.session_id)
+    else:
+        row = (await ctx.db.scalars(ctx.repo.scoped(
+            select(SessionRow).where(SessionRow.session_id == named.session_id)))).one()
+    require_open(ctx, request, row, generation=generation)
+    if row.kind != "owner":
+        row.last_seen_at = ctx.clock.now()        # visitor and agent sessions idle out (`is_closed`)
+    return row, await require_desk(ctx, request, row, named.desk_id)
 
 
 async def require_caller(ctx: KernelCtx, request: Request, session_id: str, desk_id: str | None, *,
                          generation: int | None = None) -> tuple[SessionRow, Desk]:
-    """The session a call that takes either credential acts for (`caller_session`), and the Desk it
-    acts on, not deleted (409 `closed`)."""
-    row = await caller_session(ctx, request, session_id, desk_id, generation=generation)
-    return row, await require_desk(ctx, request, row, desk_id or row.desk_id)
+    """The session a call that takes either credential acts for, and the Desk it acts on, once
+    every session-state row passes (`authenticate_caller`, then `check_caller`)."""
+    named = await authenticate_caller(ctx, request, session_id, desk_id)
+    return await check_caller(ctx, request, named, generation=generation)
 
 
 async def require_desk(ctx: KernelCtx, request: Request, row: SessionRow, desk_id: str) -> Desk:

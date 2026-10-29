@@ -9,6 +9,7 @@ review (the action holds) until a test gives it an answer.
 import asyncio
 import hashlib
 import json
+import logging
 import re
 from dataclasses import dataclass
 from datetime import timedelta
@@ -20,14 +21,14 @@ import pytest
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from fastapi import FastAPI
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from desk.contracts import Claim, Decision, Fact, Label, NotificationDefaults, ResourceRef, Review, RuleCard
 from desk.db import session as db_session
 from desk.db.session import database_url, libpq_url
 from desk.db.models import Action, ActorSession, DemoInboxEntry, Desk
 from desk.db.models import Decision as DecisionRow
-from desk.kernel_service import activation, adapters, auth, compiler, desks, ledger, render
+from desk.kernel_service import activation, adapters, auth, compiler, decide, desks, ledger, render
 from desk.kernel_service.adapters.base import Normalized, NormalizeCtx
 from desk.kernel_service.repo import new_id
 
@@ -668,6 +669,71 @@ async def test_a_guard_refusal_in_the_caller_is_ledgered(app, client, registry, 
         ("decide", rows.owner_session_id, None,
          {"outcome": "refuse", "tool": "native.fetch_website", "reason": "internal_error"})]
     assert await decisions_of(app, rows) == []
+
+
+QUOTED = "From the visitor: book me at 5pm"      # text an exception can carry, which must never reach the log
+
+
+def a_runtime_error(patch: pytest.MonkeyPatch) -> tuple[str, str]:
+    """`decide._business` raises mid-decision. Returns the kind the log names and the text it never holds."""
+    async def failing(ctx, desk_id):
+        raise RuntimeError(QUOTED)
+
+    patch.setattr(decide, "_business", failing)
+    return "RuntimeError", QUOTED
+
+
+def a_guard_refusal_on_the_lock(patch: pytest.MonkeyPatch) -> tuple[str, str]:
+    """`KernelRepo` refuses the session row lock, the first statement once the token is proved."""
+    check = db_session._check_compiled
+
+    def refusing(stmt, scoped_tables):
+        if "sessions" in scoped_tables and " FOR UPDATE" in str(stmt):
+            raise ValueError(db_session.SETS_THE_COPY)
+        check(stmt, scoped_tables)
+
+    patch.setattr(db_session, "_check_compiled", refusing)
+    return "ValueError", db_session.SETS_THE_COPY
+
+
+def a_database_error(patch: pytest.MonkeyPatch) -> tuple[str, str]:
+    """The server refuses a statement mid-decision, so the driver raises (quoting the statement and
+    its bound parameters) and the transaction is failed."""
+    async def failing(ctx, desk_id):
+        await ctx.db.execute(text("select :quoted, 1 / :zero"), {"quoted": QUOTED, "zero": 0})
+
+    patch.setattr(decide, "_business", failing)
+    return "DataError", QUOTED
+
+
+FAILURES = {"runtime_error": a_runtime_error, "guard_refusal_on_the_lock": a_guard_refusal_on_the_lock,
+            "database_error": a_database_error}
+
+
+@pytest.mark.parametrize("fail", FAILURES.values(), ids=FAILURES.keys())
+async def test_any_failure_once_the_session_is_known_is_ledgered(app, client, registry, caplog, fail):
+    """Once the token is proved, whatever fails answers 500 `internal` with the attempt on the
+    session's ledger, on the visitor's path and the owner's; the log names the failure's kind, never
+    its text, which can quote the visitor."""
+    website = FakeAdapter("native.fetch_website", effects=["read"])
+    rows = await desk_with(app, [FakeAdapter("native.quote"), website],
+                           [card("quote", "native.quote"), card("site", "native.fetch_website")])
+    visitor = await open_visitor(client, rows)
+    before = len(await ledger_rows(app, rows))
+    with pytest.MonkeyPatch.context() as patch, caplog.at_level(logging.ERROR, logger="desk.kernel_service"):
+        kind, quoted = fail(patch)
+        visitors = await post_decide(client, visitor, "native.quote")
+        owners = await owner_decide(client, rows, "native.fetch_website", desk_id=rows.desk_id)
+    for response in (visitors, owners):
+        assert (response.status_code, response.json()) == (500, {"code": "internal"})
+    added = [e.event for e in (await ledger_rows(app, rows))[before:]]
+    assert [(e.kind, e.session_id, e.ref_id, e.summary) for e in added] == [
+        ("decide", visitor.session_id, None, {"outcome": "refuse", "tool": "native.quote", "reason": "internal_error"}),
+        ("decide", rows.owner_session_id, None,
+         {"outcome": "refuse", "tool": "native.fetch_website", "reason": "internal_error"})]
+    assert await decisions_of(app, rows) == []
+    assert caplog.text.count(f"decide_internal_error kind={kind}") == 2
+    assert quoted not in caplog.text
 
 
 async def test_uncanonical_call_is_refused_and_ledgered(app, client, registry):
