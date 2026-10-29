@@ -1,0 +1,82 @@
+/* DemoInboxPanel: on the panel ground, the title and what the panel is, then the entries, each a
+   quiet box: who it went to (and, for the owner, when), what kind it is, and the kernel's words.
+   The screen places the panel (a column beside the chat, or a sheet) and draws any edge it needs. */
+
+.cd-demo-inbox {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+  box-sizing: border-box;
+  min-width: 0;
+  padding: var(--space-24) var(--space-16);
+  background: var(--bg-panel);
+  color: var(--text-primary);
+}
+
+.cd-demo-inbox__title,
+.cd-demo-inbox__subtitle {
+  margin: 0;
+}
+
+.cd-demo-inbox__subtitle,
+.cd-demo-inbox__empty {
+  color: var(--text-secondary);
+}
+
+.cd-demo-inbox__empty {
+  margin: 0;
+}
+
+.cd-demo-inbox__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cd-demo-inbox__item {
+  box-sizing: border-box;
+  min-width: 0;
+  padding: var(--space-12) var(--space-14);
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-card);
+  background: var(--fill-card);
+  overflow-wrap: anywhere;
+}
+
+/* Who it went to, and the owner's time at the right of the same line. */
+.cd-demo-inbox__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cd-demo-inbox__to {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.cd-demo-inbox__time {
+  flex: none;
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The kind once the entry is open, or the notice's preview until then. Two classes on the weight,
+   so it wins over .cd-type-meta whatever order the stylesheets load in. */
+.cd-demo-inbox__kind.cd-type-meta {
+  margin: var(--space-4) 0 0;
+  font-weight: 520;
+}
+
+.cd-demo-inbox__body {
+  margin: var(--space-2) 0 0;
+}
+
+.cd-demo-inbox__state {
+  margin-top: var(--space-6);
+}

@@ -1,0 +1,300 @@
+import type { Meta, StoryObj } from '@storybook/react-vite';
+import { useEffect, useState } from 'react';
+import { expect, fn, within } from 'storybook/test';
+
+import type { DemoInboxEntry, InboxNotice } from '../../../api/contracts.ts';
+import { chen } from '../../fixtures/index.ts';
+import { expectComputed } from '../../test/expectComputed.ts';
+import { DemoInboxPanel, type DemoInboxItem, type DemoInboxPanelProps } from './DemoInboxPanel.tsx';
+
+const BOARD = 'N-Public-Verify-Run1';
+
+const { notices, entries } = chen.demoInbox;
+/** The owner's display times, by `entry_id`. */
+const ownerTimes: Readonly<Record<string, string>> = chen.demoInbox.ownerTimes;
+
+function noticeOf(entryId: string): InboxNotice {
+  const notice = notices.find((n) => n.entry_id === entryId);
+  if (!notice) throw new Error(`no fixture notice ${entryId}`);
+  return notice;
+}
+
+function entryOf(entryId: string): DemoInboxEntry {
+  const entry = entries.find((e) => e.entry_id === entryId);
+  if (!entry) throw new Error(`no fixture entry ${entryId}`);
+  return entry;
+}
+
+const CODE_ID = 'inbox-code-raj';
+
+/** Raj's code, opened: the notice and the entry fetched for it. */
+const codeOpened: DemoInboxItem = { notice: noticeOf(CODE_ID), entry: entryOf(CODE_ID) };
+
+/**
+ * Linda's whole inbox as a screen holds it: every entry opened, with the owner's display times, in
+ * the order they arrived (the fixture lists them newest first).
+ */
+const everythingArrived: DemoInboxItem[] = [...notices].reverse().map((notice) => ({
+  notice,
+  entry: entryOf(notice.entry_id),
+  time: ownerTimes[notice.entry_id],
+}));
+
+/** The event a story sends the screen below, carrying the panel's items as they now stand. */
+const SCREEN_ITEMS = 'cd-story-inbox-items';
+
+/** The panel as a screen holds it, with whatever items the story sends: a notice, then its entry. */
+function UpdatingScreen(args: DemoInboxPanelProps) {
+  const [items, setItems] = useState(args.items);
+  useEffect(() => {
+    const onItems = (event: Event) => {
+      if (event instanceof CustomEvent) setItems(event.detail as DemoInboxItem[]);
+    };
+    window.addEventListener(SCREEN_ITEMS, onItems);
+    return () => window.removeEventListener(SCREEN_ITEMS, onItems);
+  }, []);
+  return <DemoInboxPanel {...args} items={items} />;
+}
+
+/** Sends the screen its items as they now stand, as a notice or a fetched entry would. */
+function updateScreen(root: HTMLElement, items: DemoInboxItem[]): void {
+  root.ownerDocument.defaultView?.dispatchEvent(new CustomEvent(SCREEN_ITEMS, { detail: items }));
+}
+
+const meta = {
+  title: 'Verification/DemoInboxPanel',
+  component: DemoInboxPanel,
+  args: { viewer: 'visitor', language: 'en', items: [codeOpened], onRetry: fn() },
+  // The board's column: 260 px wide and as tall as the page, between hairlines.
+  decorators: [
+    (Story) => (
+      <div
+        style={{
+          display: 'grid',
+          width: '260px',
+          maxWidth: '100%',
+          minHeight: '100vh',
+          borderLeft: '1px solid var(--line-hairline)',
+          borderRight: '1px solid var(--line-hairline)',
+        }}
+      >
+        <Story />
+      </div>
+    ),
+  ],
+  parameters: {
+    layout: 'fullscreen',
+    canvas: 'none',
+    canvasNote: `From the canvas board ${BOARD}, whose middle column draws this panel by hand; that board joins the reference boards later in this plan. The entry's body is the kernel's code message (inbox_code_body), longer than the board's shortened one.`,
+  },
+} satisfies Meta<typeof DemoInboxPanel>;
+
+export default meta;
+
+type Story = StoryObj<typeof meta>;
+
+/** The panel's entries, as list items, top to bottom. */
+function itemsOf(root: HTMLElement): HTMLElement[] {
+  return [...root.querySelectorAll<HTMLElement>('li')];
+}
+
+export const WithCode: Story = {
+  play: async ({ canvas, canvasElement }) => {
+    // A named region on the panel ground, titled and explained like the board.
+    const panel = canvas.getByRole('region', { name: 'Demo inbox' });
+    expectComputed(panel, { backgroundColor: 'rgb(34, 34, 32)', paddingTop: '24px', paddingLeft: '16px', paddingRight: '16px' });
+    const title = within(panel).getByRole('heading', { level: 2, name: 'Demo inbox' });
+    expectComputed(title, { fontSize: '15px', lineHeight: '20px', fontWeight: '520', color: 'rgba(250, 249, 245, 0.92)' });
+    const subtitle = within(panel).getByText('Stands in for a phone or email inbox. Nothing is really sent.');
+    expectComputed(subtitle, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
+    await expect(subtitle.getBoundingClientRect().top - title.getBoundingClientRect().bottom).toBe(10);
+
+    // One entry: who it went to, what kind it is, and the kernel's body word for word.
+    const items = itemsOf(panel);
+    await expect(items).toHaveLength(1);
+    const [item] = items as [HTMLElement];
+    await expect(item.getBoundingClientRect().top - subtitle.getBoundingClientRect().bottom).toBe(10);
+    expectComputed(item, {
+      paddingTop: '12px',
+      paddingLeft: '14px',
+      borderTopWidth: '1px',
+      borderTopColor: 'rgba(250, 249, 245, 0.14)',
+      borderTopLeftRadius: '12px',
+      backgroundColor: 'rgba(250, 249, 245, 0.03)',
+    });
+    const to = within(item).getByText('To •••• 0142');
+    expectComputed(to, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' });
+    const kind = within(item).getByText('Verification code');
+    expectComputed(kind, { fontSize: '13px', lineHeight: '18px', fontWeight: '520', color: 'rgba(250, 249, 245, 0.92)' });
+    await expect(kind.getBoundingClientRect().top - to.getBoundingClientRect().bottom).toBe(4);
+    const body = within(item).getByText(entryOf(CODE_ID).body);
+    expectComputed(body, { fontSize: '14px', lineHeight: '20px', color: 'rgba(250, 249, 245, 0.92)' });
+    await expect(body.getBoundingClientRect().top - kind.getBoundingClientRect().bottom).toBe(2);
+
+    // inbox_announces_new_entries: the entries sit in a polite live region inside the panel, so a
+    // new one is read out when it arrives. The title and subtitle are outside it, read once.
+    const live = item.closest('[aria-live]');
+    await expect(live).toHaveAttribute('aria-live', 'polite');
+    await expect(panel.contains(live)).toBe(true);
+    await expect(live?.contains(title)).toBe(false);
+    await expect(live?.contains(subtitle)).toBe(false);
+  },
+};
+
+/** Six digits in a row: a code, wherever it might show. */
+const SIX_DIGITS = /\d{6}/;
+
+export const Opening: Story = {
+  args: { items: [{ notice: noticeOf(CODE_ID), entry: null }] },
+  play: async ({ canvas, canvasElement }) => {
+    // code_only_from_entry: until its entry is fetched, an item shows the notice's code-free
+    // preview and that it is opening, never a body or anything like a code.
+    const [item] = itemsOf(canvasElement) as [HTMLElement];
+    await expect(within(item).getByText('To •••• 0142')).toBeVisible();
+    await expect(within(item).getByText('New verification code')).toBeVisible();
+    await expect(within(item).getByRole('status')).toHaveTextContent('Opening');
+    await expect(canvasElement.textContent).not.toContain(entryOf(CODE_ID).body);
+    await expect(canvasElement.textContent).not.toMatch(SIX_DIGITS);
+    // Its kind isn't known until the entry is.
+    await expect(canvas.queryByText('Verification code')).toBeNull();
+    await expect(canvas.queryByRole('button')).toBeNull();
+  },
+};
+
+export const OpenFailed: Story = {
+  args: { items: [{ notice: noticeOf(CODE_ID), entry: null, failed: true }] },
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
+    // retry_on_open_failure: the preview, a line that says the entry didn't open, and a way to
+    // fetch it again, which names the entry. Still nothing like a code.
+    const [item] = itemsOf(canvasElement) as [HTMLElement];
+    await expect(within(item).getByText('New verification code')).toBeVisible();
+    await expect(within(item).getByRole('alert')).toHaveTextContent('Couldn’t open this entry.');
+    await expect(within(item).queryByRole('status')).toBeNull();
+    await expect(canvasElement.textContent).not.toMatch(SIX_DIGITS);
+    const retry = within(item).getByRole('button', { name: 'Try again' });
+    await userEvent.click(retry);
+    await expect(args.onRetry).toHaveBeenCalledTimes(1);
+    await expect(args.onRetry).toHaveBeenCalledWith(CODE_ID);
+  },
+};
+
+export const OwnerAlerts: Story = {
+  args: { viewer: 'owner', items: everythingArrived },
+  parameters: {
+    canvasNote: `No board shows the owner's Demo inbox; this is ${BOARD}'s panel holding Linda's code, hold alert and ledger checkpoint, with the times her screen passes in.`,
+  },
+  play: async ({ canvasElement }) => {
+    // inbox_newest_first: the items came oldest first; the panel shows the newest at the top.
+    const items = itemsOf(canvasElement);
+    const newestFirst = [...everythingArrived].reverse();
+    await expect(items).toHaveLength(newestFirst.length);
+    for (const [index, item] of items.entries()) {
+      const { notice, entry, time } = newestFirst[index] as DemoInboxItem;
+      await expect(within(item).getByText(`To ${notice.to}`)).toBeVisible();
+      await expect(within(item).getByText(entry?.body ?? '')).toBeVisible();
+      // The owner sees when each arrived, on the line with who it went to.
+      const shownTime = within(item).getByText(time ?? '');
+      await expect(shownTime.getBoundingClientRect().top).toBe(within(item).getByText(`To ${notice.to}`).getBoundingClientRect().top);
+    }
+    await expect(items.map((item) => item.querySelector('.cd-demo-inbox__kind')?.textContent)).toEqual([
+      'Verification code',
+      'Alert',
+      'Ledger checkpoint',
+    ]);
+    await expect(items.map((item) => within(item).getByText(/\d:\d\d [ap]m/).textContent)).toEqual(['2:14 pm', '11:02 am', '9:30 am']);
+    // A ledger checkpoint is the kernel's signed record, word for word, so it reads in the trace's
+    // monospace; codes and alerts read in the interface's type.
+    const [code, alert, checkpoint] = items.map((item) => item.querySelector('.cd-demo-inbox__body') as HTMLElement);
+    expectComputed(checkpoint as HTMLElement, { fontFamily: /JetBrains Mono/, fontSize: '12.5px', lineHeight: '18px' });
+    for (const body of [code, alert]) expectComputed(body as HTMLElement, { fontFamily: /Hanken Grotesk/, fontSize: '14px' });
+  },
+};
+
+/** No clock time, in any form: visitor surfaces show none. */
+const CLOCK = /\d{1,2}:\d{2}|\b(?:am|pm)\b/i;
+
+export const VisitorGivenAlert: Story = {
+  args: { viewer: 'visitor', items: everythingArrived },
+  parameters: {
+    canvasNote: `${BOARD}'s visitor panel, handed the owner's alert and ledger checkpoint by mistake (the kernel never sends a visitor either); it shows only the code.`,
+  },
+  play: async ({ canvas, canvasElement }) => {
+    // visitor_sees_only_codes: a visitor's panel shows verification codes and nothing else, even
+    // when a screen passes it more, and no time.
+    const items = itemsOf(canvasElement);
+    await expect(items).toHaveLength(1);
+    await expect(within(items[0] as HTMLElement).getByText(entryOf(CODE_ID).body)).toBeVisible();
+    const text = canvasElement.textContent ?? '';
+    for (const hidden of entries.filter((entry) => entry.kind !== 'verification_code')) {
+      await expect(text).not.toContain(hidden.body);
+      await expect(text).not.toContain(noticeOf(hidden.entry_id).preview);
+    }
+    await expect(canvas.queryByText('Alert')).toBeNull();
+    await expect(canvas.queryByText('Ledger checkpoint')).toBeNull();
+    await expect(canvas.queryByText('To owner')).toBeNull();
+    await expect(text).not.toMatch(CLOCK);
+  },
+};
+
+/** Raj's code as the kernel writes it for a visitor chatting in Spanish (its `inbox_code_body`). */
+const codeEs: DemoInboxEntry = {
+  ...entryOf(CODE_ID),
+  body: 'Tu código de Chen & Co. CPA es 482913. Vence en diez minutos. Si no lo pediste, ignora este mensaje.',
+};
+
+export const SpanishVisitor: Story = {
+  args: { language: 'es', items: [{ notice: chen.verifyStarted.es.inbox[0] as InboxNotice, entry: codeEs }] },
+  parameters: {
+    canvasNote: `${BOARD}'s panel in Spanish, which no board shows: the panel's words from its copy, the entry's from the kernel's Spanish template.`,
+  },
+  play: async ({ canvas, canvasElement }) => {
+    // spanish_labels: the panel's own words in Spanish, and no English one.
+    const panel = canvas.getByRole('region', { name: 'Bandeja de demostración' });
+    await expect(panel).toHaveAttribute('lang', 'es');
+    await expect(within(panel).getByRole('heading', { level: 2 })).toHaveTextContent('Bandeja de demostración');
+    await expect(within(panel).getByText('Hace de bandeja de teléfono o correo. No se envía nada de verdad.')).toBeVisible();
+    const [item] = itemsOf(canvasElement) as [HTMLElement];
+    await expect(within(item).getByText('Para •••• 0142')).toBeVisible();
+    await expect(within(item).getByText('Código de verificación')).toBeVisible();
+    await expect(within(item).getByText(codeEs.body)).toBeVisible();
+    const text = panel.textContent ?? '';
+    for (const english of ['Demo inbox', 'Stands in for', 'Nothing is really sent', 'To ', 'Verification code']) {
+      await expect(text).not.toContain(english);
+    }
+  },
+};
+
+const EMPTY_LINE = 'Nothing here yet. Codes and alerts you’d get by text or email show up here.';
+
+export const Empty: Story = {
+  args: { items: [] },
+  render: (args) => <UpdatingScreen {...args} />,
+  parameters: {
+    canvasNote: `${BOARD}'s panel before anything has arrived, which no board shows.`,
+  },
+  play: async ({ canvas, canvasElement }) => {
+    // Nothing yet: one line that says what will show up here, and no list.
+    const panel = canvas.getByRole('region', { name: 'Demo inbox' });
+    const empty = within(panel).getByText(EMPTY_LINE);
+    expectComputed(empty, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
+    await expect(within(panel).queryByRole('list')).toBeNull();
+
+    // inbox_announces_new_entries: the polite region is there before anything arrives, and what
+    // arrives lands inside that same region, so a screen reader reads it out: first the notice,
+    // then its entry once fetched.
+    const live = empty.closest('[aria-live]');
+    await expect(live).toHaveAttribute('aria-live', 'polite');
+    updateScreen(canvasElement, [{ notice: noticeOf(CODE_ID), entry: null }]);
+    const arrived = await within(panel).findByRole('listitem');
+    await expect(arrived.closest('[aria-live]')).toBe(live);
+    await expect(within(arrived).getByRole('status')).toHaveTextContent('Opening');
+    await expect(within(panel).queryByText(EMPTY_LINE)).toBeNull();
+    updateScreen(canvasElement, [codeOpened]);
+    const body = await within(panel).findByText(entryOf(CODE_ID).body);
+    await expect(body.closest('[aria-live]')).toBe(live);
+
+    // The story ends as it is named.
+    updateScreen(canvasElement, []);
+    await within(panel).findByText(EMPTY_LINE);
+  },
+};

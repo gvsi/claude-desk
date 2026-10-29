@@ -92,6 +92,11 @@ export {
   type VerifyCodeState,
 } from './components/VerifyCodeForm/VerifyCodeForm.tsx';
 export { VerifiedLine, type VerifiedLineProps } from './components/VerifyCodeForm/VerifiedLine.tsx';
+export {
+  DemoInboxPanel,
+  type DemoInboxItem,
+  type DemoInboxPanelProps,
+} from './components/DemoInboxPanel/DemoInboxPanel.tsx';
 
 // Reply cards
 export { ReplyCard, type ReplyCardProps } from './components/ReplyCard/ReplyCard.tsx';
