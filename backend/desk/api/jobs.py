@@ -12,7 +12,8 @@ next message.
   Claude's follow-up with the visitor's credential. A decision whose outcome may still change (an `unknown`
   execution) also leaves a `decision_pending` row, so its final state is shown once it has one. Idempotent: a
   state already shown writes nothing, so a repeated or retried job, or a status another path showed first, adds
-  nothing.
+  nothing. Nor does a job that runs late, once a later state of its decision is shown (the visitor's next request
+  found the approval executed, or an `unknown` outcome reconciled): the visitor never sees a decision go back.
 - `surface_due_decisions`, each minute: every decision the visitor was shown as held, or that an unhandled
   `decision_pending` row names, whose final state isn't shown yet, and whose kernel_ro state is final or whose
   `expires_at` has passed (expiry is lazy: the kernel applies it on the next read) gets one `decision_due` control
@@ -38,7 +39,7 @@ from procrastinate.manager import JobManager
 from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
-from desk.api.deliver import NOT_FINAL, Status, deliver
+from desk.api.deliver import NOT_FINAL, Status, deliver, run_lock, status_shown
 from desk.api.ro import KERNEL_RO, due_decisions
 from desk.api.sse import RUN_EVENTS, append_control
 from desk.api.store import Ids, append_message
@@ -139,12 +140,14 @@ async def defer_resume_after_answer(app: procrastinate.App, ids: Ids, decision: 
 
 async def resume_after_answer(conn: AsyncConnection, ids: Ids, decision: Decision) -> bool:
     """Show the answered decision and resume the conversation, in one transaction on `conn` (module docstring); True
-    when this call showed it, False when that state was already shown."""
+    when this call showed it, False when that state, or a later one, was already shown."""
     if decision.session_id != ids.session_id:
         raise ValueError("a decision resumes only its own session")
     await conn.commit()                                    # a READ COMMITTED transaction of its own, for deliver()
     try:
-        if await deliver(conn, ids, Status(decision, "resolved")) is None:
+        await run_lock(conn, ids.session_id)               # what the session shows can't change until this commits
+        if (await status_shown(conn, decision, or_later=True)
+                or await deliver(conn, ids, Status(decision, "resolved")) is None):
             await conn.rollback()
             return False
         await append_message(conn, ids, "action_update", text=decision.visitor_plain, ref_id=decision.decision_id,

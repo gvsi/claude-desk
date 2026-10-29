@@ -139,6 +139,45 @@ async def test_resume_job_is_idempotent(copy, engine, db):
         ("run_resumable", unsure.decision_id, False), ("decision_pending", unsure.decision_id, False)]
 
 
+async def test_a_late_resume_job_never_shows_an_older_state(copy, engine, fake, monkeypatch):
+    """A resume job that runs late (retried after a deploy, or slow to start) can carry a state the kernel has since
+    moved past, which the visitor's next request already showed. It shows nothing: no older status, no action
+    update and no follow-up."""
+    signed: list[Decision] = []                                         # every record the kernel signs, in order
+    put = copy.fake._put_decision
+    monkeypatch.setattr(copy.fake, "_put_decision", lambda record: (signed.append(record.decision), put(record))[1])
+
+    async def everything(session_id: str) -> tuple:
+        async with engine.connect() as conn:
+            messages = (await conn.execute(text("SELECT count(*) FROM app.messages WHERE session_id = :s"),
+                                           {"s": session_id})).scalar_one()
+        return messages, await session_rows(engine, session_id)
+
+    # The job of an approval carries the `approved` record; `executed`, signed just after it, was shown first.
+    caller = await copy.visitor()
+    held = await copy.decide(caller, "call-1", discount_bp=1500)
+    await show(engine, caller, held, "held")
+    executed = await copy.answer(held)
+    (approved,) = [record for record in signed if record.decision_id == held.decision_id and record.state == "approved"]
+    assert approved.ledger_seq < executed.ledger_seq
+    await show(engine, caller, executed, "resolved")
+    before = await everything(caller.session_id)
+    async with engine.connect() as conn:
+        assert await resume_after_answer(conn, caller.ids, approved) is False
+    assert await everything(caller.session_id) == before
+
+    # The job of an `unknown` outcome, run after the kernel reconciled it and the visitor was shown `executed`.
+    fake.script("native.quote", exec_state="unknown")
+    other = await copy.visitor()
+    unsure = await copy.answer(await copy.decide(other, "call-2", discount_bp=1500))
+    assert unsure.state == "unknown"
+    await show(engine, other, fake.reconcile(unsure.decision_id), "resolved")
+    before = await everything(other.session_id)
+    async with engine.connect() as conn:
+        assert await resume_after_answer(conn, other.ids, unsure) is False
+    assert await everything(other.session_id) == before
+
+
 async def test_due_decisions_get_one_control_row(copy, engine, fake, ro_schema, monkeypatch):
     fake.script("native.find_slots", exec_state="unknown")
     expiring, answered, unsure, shown = [await copy.visitor() for _ in range(4)]

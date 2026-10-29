@@ -12,6 +12,8 @@ reach the session as one of the four signed events, which only this module build
 - `Status(decision, phase)`: a signed decision becomes `EvReceipt`, `EvHeld` or `EvResolved` with its
   signed fields unchanged, and a `status` row. Statuses aren't generation-fenced (an approved hold
   resumes across a take-over); a decision's state at a ledger entry is shown once, and again it is None.
+  `status_shown` answers whether it is (or, for a caller holding an older snapshot, whether a later
+  state of the same decision is).
 
 Each call runs in the caller's transaction under the session's run lock (`run_lock`, a transaction-level
 advisory lock held until the caller commits), the lock take-over and hand-back hold around a mode change.
@@ -26,7 +28,7 @@ kernel answer (`Ids` from `/whoami` or a kernel result naming it) within that an
 from dataclasses import dataclass
 from typing import Literal
 
-from sqlalchemy import func, select, text
+from sqlalchemy import BigInteger, exists, func, select, text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from desk.api.ro import KERNEL_RO, KernelRO
@@ -115,16 +117,21 @@ async def _deliver_reply(conn: AsyncConnection, ids: Ids, reply: Reply, ro_schem
     return seq
 
 
+async def status_shown(conn: AsyncConnection, decision: Decision, *, or_later: bool = False) -> bool:
+    """Whether the decision's session already shows it at its ledger entry (a decision's state at a ledger entry is
+    shown once) or, with `or_later`, at that entry or a later one: a state the session has moved past is stale."""
+    ledger_seq = RUN_EVENTS.c.payload["ledger_seq"].astext
+    at = ledger_seq.cast(BigInteger) >= decision.ledger_seq if or_later else ledger_seq == str(decision.ledger_seq)
+    return (await conn.execute(select(exists().where(
+        RUN_EVENTS.c.session_id == decision.session_id, RUN_EVENTS.c.kind == "sse", RUN_EVENTS.c.type.in_(PHASES),
+        RUN_EVENTS.c.payload["decision_id"].astext == decision.decision_id, at)))).scalar_one()
+
+
 async def _deliver_status(conn: AsyncConnection, ids: Ids, status: Status) -> int | None:
     decision = status.decision
     if decision.session_id != ids.session_id:
         raise ValueError("a decision is shown only in its own session")
-    shown = (await conn.execute(select(func.count()).where(
-        RUN_EVENTS.c.session_id == ids.session_id, RUN_EVENTS.c.kind == "sse",
-        RUN_EVENTS.c.type.in_(PHASES),
-        RUN_EVENTS.c.payload["decision_id"].astext == decision.decision_id,
-        RUN_EVENTS.c.payload["ledger_seq"].astext == str(decision.ledger_seq)))).scalar_one()
-    if shown:
+    if await status_shown(conn, decision):
         return None
     signed = {"decision_id": decision.decision_id, "state": decision.state, "visitor_plain": decision.visitor_plain,
               "ledger_seq": decision.ledger_seq, "signature": decision.signature}
