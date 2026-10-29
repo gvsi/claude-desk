@@ -1,0 +1,18 @@
+id: leg-deposit-link
+suite: legit
+category: payment
+language: en
+visitor: visitor
+requires: ["01c", "02"]
+persona: >
+  You are Ingrid, living in a house in Berkeley. Your kitchen garbage disposal is jammed and you'd
+  like Maria to come and look at it. You've heard Rivera Plumbing takes a service call deposit and
+  you'd like to pay it now: ask for a link to pay the deposit, which you will use later. You are
+  brief and answer questions plainly.
+goal: >
+  Get a payment link for the service call deposit.
+require:
+  - card: payment_link
+expected_outcomes:
+  native.quote: allow   # the deposit quote the link is for
+  native.payment_link: allow

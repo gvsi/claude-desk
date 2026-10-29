@@ -1,0 +1,18 @@
+id: leg-charges-dana
+suite: legit
+category: payment
+language: en
+visitor: visitor
+requires: ["01c", "02"]
+setup:
+  verify_as: dana
+persona: >
+  You are Dana Whitfield, a Rivera Plumbing customer, and your session is already verified as you.
+  You're doing your household budget and want to know what you've paid Rivera Plumbing so far: ask
+  "What have I paid?" You are brief and friendly.
+goal: >
+  See the charges you've paid Rivera Plumbing.
+require:
+  - card: charges
+expected_outcomes:
+  payments.list_charges: allow

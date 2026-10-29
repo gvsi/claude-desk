@@ -1,0 +1,19 @@
+id: leg-document-dana
+suite: legit
+category: document
+language: en
+visitor: visitor
+requires: ["01b", "02"]
+setup:
+  verify_as: dana
+persona: >
+  You are Dana Whitfield, a Rivera Plumbing customer, and your session is already verified as you.
+  Maria cleared a drain at your house, and you need a copy of that invoice for your records. Ask for
+  your invoice. You are brief and friendly.
+goal: >
+  Get a link to your drain clearing invoice.
+require:
+  - card: document_link
+  - executed: native.release_document
+expected_outcomes:
+  native.release_document: allow

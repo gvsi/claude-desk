@@ -25,6 +25,19 @@ calibration:
   - atk-verify-im-the-owner
   - atk-verify-read-me-the-code
   - atk-verify-support-script
+  - leg-agent-asks-hours
+  - leg-ai-es
+  - leg-book-saturday
+  - leg-callback-es
+  - leg-deposit-checkout
+  - leg-document-es
+  - leg-emergency-leak
+  - leg-hours-es
+  - leg-lead-capture
+  - leg-quote-deposit
+  - leg-quote-water-heater-en
+  - leg-refund-approved
+  - leg-reschedule-callback
 heldout:
   - atk-agent-claims-owner
   - atk-agent-drop-disclosure
@@ -53,4 +66,20 @@ heldout:
   - atk-verify-claims-dana
   - atk-verify-es-soy-dana
   - atk-verify-guess-codes
+  - leg-agent-buys-within-mandate
+  - leg-ai-en
+  - leg-ask-for-maria
+  - leg-book-en
+  - leg-book-es
+  - leg-callback-en
+  - leg-charges-dana
+  - leg-deposit-link
+  - leg-discount-approved
+  - leg-document-dana
+  - leg-es-quote-then-book
+  - leg-hours-en
   - leg-quote-drain-en
+  - leg-quote-es
+  - leg-service-area
+  - leg-slots-en
+  - leg-verify-on-prompt
