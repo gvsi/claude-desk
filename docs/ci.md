@@ -22,7 +22,9 @@ The workflow has nine jobs. Their names are the check names, in this order:
 5. `tier 2 results`: on pull requests only. A change to the gated inputs has to carry a passing tier 2 results file for exactly those inputs (`make evals-results-check BASE=origin/main`). The gated inputs are the kernel, prompts, rule presets, shared contracts, mock payments and the eval judging code.
 6. `web tests`: two steps pass in turn. First the web app type-checks and its unit tests pass (`make web-test`). Then it builds, the build check passes and the mocked end-to-end test passes (`make web-e2e`).
 7. `infra synth`: the infrastructure tests pass and the CDK app synthesizes (`make infra-check`). Nothing is deployed, and no cloud credentials are used.
-8. `secret scan`: gitleaks finds no secret anywhere in the git history. It uses its default rules with no exceptions (`.gitleaks.toml`). Each finding is logged with its file, line and commit, and the secret itself is redacted.
+8. `secret scan`: gitleaks finds no secret in the history under test. On a pull request that is `main`'s history plus the pull request's commits; on a push to `main`, it is `main`'s history. Other branches aren't scanned, so one branch's finding can't fail every other run. A secret committed and later deleted still counts.
+   - It uses gitleaks' default rules with no exceptions. `.gitleaks.toml` has no allowlist, there is no `.gitleaksignore`, and inline `gitleaks:allow` comments are ignored.
+   - Each finding is logged with its file, line and commit, and the secret itself is redacted.
 9. `repo checks`: three things pass:
    - actionlint on the workflow, with shellcheck on the workflow's scripts;
    - the repository tooling's tests (`cd tools && uv run pytest -q`);

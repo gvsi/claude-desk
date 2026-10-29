@@ -2,6 +2,7 @@
 
 import re
 import shlex
+import tomllib
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -250,7 +251,10 @@ CHECKS = {
         ],
     ],
     "infra synth": [["--name", "infra", "--run-if", "infra/cdk.json", "--", "make", "infra-check"]],
-    "secret scan": ["gitleaks git --redact --verbose --no-banner --exit-code 1 ."],
+    # The ref under test only (main's history plus the pull request's commits), never other branches.
+    "secret scan": [
+        'gitleaks git --redact --verbose --no-banner --exit-code 1 --ignore-gitleaks-allow --log-opts="--full-history HEAD" .'
+    ],
     "repo checks": [
         "actionlint",
         "cd tools && uv run pytest -q",
@@ -309,3 +313,17 @@ def test_gated_jobs_go_through_the_gate():
     assert node_setups
     for step in node_setups:
         assert step["with"] == {"node-version": "24.21.0", "package-manager-cache": False}, step
+
+
+def test_secret_scan_has_no_exceptions():
+    """gitleaks' default rules with nothing to exempt a finding: no allowlist, no ignore file, no inline allow."""
+    assert tomllib.loads((ROOT / ".gitleaks.toml").read_text()) == {
+        "minVersion": "v8.30.1",
+        "extend": {"useDefault": True},
+    }
+    assert not (ROOT / ".gitleaksignore").exists()
+    [scan] = checks(job_named("secret scan"))
+    assert "--ignore-gitleaks-allow" in shlex.split(scan)
+    # Nothing points gitleaks at another config.
+    for path in [WORKFLOW, *ACTIONS]:
+        assert "GITLEAKS_" not in path.read_text(), path
