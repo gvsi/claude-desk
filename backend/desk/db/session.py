@@ -63,7 +63,8 @@ def libpq_url(url: str) -> str:
 
 # Copy isolation. Row-level security on every kernel table admits only rows whose copy_id equals
 # the transaction's desk.copy_id setting, and the kernel_ro views filter on the same setting
-# (migration 0002_copy_isolation). A transaction that set no copy reads and writes no rows.
+# (migration 0002_copy_isolation) and run as desk_ro_owner, which the same rule binds
+# (0005_kernel_ro_owner). A transaction that set no copy reads and writes no rows.
 COPY_SETTING = "desk.copy_id"
 
 

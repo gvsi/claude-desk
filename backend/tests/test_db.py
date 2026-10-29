@@ -596,11 +596,17 @@ def test_every_kernel_table_forces_copy_row_security(admin):
         "SELECT tablename, policyname, roles, cmd, permissive, qual, with_check FROM pg_policies"
         " WHERE schemaname = 'kernel'"
     ).fetchall()
-    expected = {(table, "copy_scope") for table in KERNEL_TABLES} | {(table, "resolve_copy") for table in RESOLVER_READS}
+    expected = {
+        *((table, "copy_scope") for table in KERNEL_TABLES),
+        *((view, "copy_read") for view in KERNEL_RO_VIEWS),   # for the kernel_ro views' owner
+        *((table, "resolve_copy") for table in RESOLVER_READS),
+    }
     assert sorted((table, name) for table, name, *_ in policies) == sorted(expected)   # and no others
     for table, name, *policy in policies:
         if name == "copy_scope":
             assert policy == [["desk_kernel"], "ALL", "PERMISSIVE", COPY_POLICY, COPY_POLICY], table
+        elif name == "copy_read":
+            assert policy == [["desk_ro_owner"], "SELECT", "PERMISSIVE", COPY_POLICY, None], table
         else:   # every copy, but only the columns in RESOLVER_READS (test_copy_resolvers_are_narrow)
             assert policy == [["desk_resolver"], "SELECT", "PERMISSIVE", "true", None], table
 
@@ -612,6 +618,54 @@ def test_kernel_ro_views_filter_by_the_transaction_copy(admin):
         ).fetchone()
         assert "security_barrier=true" in (options or []), view   # the API's own predicates run after the filter
         assert "NULLIF(current_setting('desk.copy_id'::text, true), ''::text)" in definition, view
+
+
+def column_readers(admin: psycopg.Connection, role: str) -> dict[str, set[str]]:
+    """Kernel table -> the columns `role` may SELECT."""
+    readable: dict[str, set[str]] = {}
+    for table in KERNEL_TABLES:
+        for column in columns(admin, "kernel", table):
+            if admin.execute("SELECT has_column_privilege(%s, %s, %s, 'SELECT')",
+                             (role, f"kernel.{table}", column)).fetchone()[0]:
+                readable.setdefault(table, set()).add(column)
+        for privilege in ("INSERT", "UPDATE", "DELETE", "TRUNCATE"):
+            assert not has(admin, "has_table_privilege", role, f"kernel.{table}", privilege), (role, table)
+    return readable
+
+
+def test_kernel_ro_views_run_as_a_role_bound_by_row_security(admin):
+    # a view runs with its owner's rights; an owner that bypasses row security (a superuser, as the
+    # local migration role is) would hide whether the views work where the owner doesn't
+    owners = admin.execute(
+        "SELECT DISTINCT pg_get_userbyid(relowner) FROM pg_class WHERE relnamespace = 'kernel_ro'::regnamespace"
+    ).fetchall()
+    assert owners == [("desk_ro_owner",)]
+    attributes = admin.execute("SELECT rolsuper, rolbypassrls, rolcanlogin FROM pg_roles WHERE rolname = 'desk_ro_owner'")
+    assert attributes.fetchone() == (False, False, False)
+    # it reads exactly the columns the views show, in the copy set by its copy_read policy
+    assert column_readers(admin, "desk_ro_owner") == {view: set(KERNEL_RO_COLUMNS[view]) for view in KERNEL_RO_VIEWS}
+
+
+def test_kernel_ro_reads_need_no_role_that_bypasses_row_security(admin):
+    # as on a managed Postgres whose migration role is neither SUPERUSER nor BYPASSRLS: the table's
+    # owner and the view's owner are both bound by row security, and the API still reads its copy
+    copy_id = f"copy-{uuid4().hex}"
+    with admin.transaction(force_rollback=True):
+        admin.execute("INSERT INTO kernel.desks (desk_id, copy_id, business_id, name, slug)"
+                      " VALUES (%s, %s, 'biz', 'Main line', %s)", (f"desk-{copy_id}", copy_id, f"slug-{copy_id}"))
+        admin.execute("CREATE ROLE desk_test_owner NOLOGIN NOSUPERUSER NOBYPASSRLS")
+        admin.execute("ALTER TABLE kernel.desks OWNER TO desk_test_owner")
+        owners = admin.execute(
+            "SELECT c.relname, r.rolsuper OR r.rolbypassrls FROM pg_class c JOIN pg_roles r ON r.oid = c.relowner"
+            " WHERE c.oid IN ('kernel.desks'::regclass, 'kernel_ro.desks'::regclass)"
+        ).fetchall()
+        assert owners == [("desks", False), ("desks", False)]
+        admin.execute("SET LOCAL ROLE desk_api")
+        assert visible(admin, "kernel_ro.desks", (copy_id,)) == set()
+        admin.execute("SELECT set_config('desk.copy_id', %s, true)", (copy_id,))
+        assert visible(admin, "kernel_ro.desks", (copy_id,)) == {copy_id}
+        admin.execute("SELECT set_config('desk.copy_id', %s, true)", (f"copy-{uuid4().hex}",))
+        assert visible(admin, "kernel_ro.desks", (copy_id,)) == set()
 
 
 async def test_sql_functions_read_only_the_copy(kernel_db):
@@ -814,13 +868,7 @@ def test_copy_resolvers_are_narrow(admin):
     # their owner reads through row security, not around it, and only the columns a lookup needs
     attributes = admin.execute("SELECT rolsuper, rolbypassrls, rolcanlogin FROM pg_roles WHERE rolname = 'desk_resolver'")
     assert attributes.fetchone() == (False, False, False)
-    for table in KERNEL_TABLES:
-        for column in columns(admin, "kernel", table):
-            readable = admin.execute("SELECT has_column_privilege('desk_resolver', %s, %s, 'SELECT')",
-                                     (f"kernel.{table}", column)).fetchone()[0]
-            assert readable == (column in RESOLVER_READS.get(table, ())), (table, column)
-        for privilege in ("INSERT", "UPDATE", "DELETE", "TRUNCATE"):
-            assert not has(admin, "has_table_privilege", "desk_resolver", f"kernel.{table}", privilege), table
+    assert column_readers(admin, "desk_resolver") == RESOLVER_READS
 
 
 async def test_copy_resolvers_find_a_copy_before_it_is_bound(committed_copies):
