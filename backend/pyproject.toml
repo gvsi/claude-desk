@@ -1,0 +1,24 @@
+[project]
+name = "desk"
+version = "0.1.0"
+description = "Claude Desk backend: the kernel service, the API service and their shared contracts"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "pydantic>=2.9",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["desk"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

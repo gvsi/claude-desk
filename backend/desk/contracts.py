@@ -1,0 +1,447 @@
+"""Shared contracts v2 between the kernel and API processes.
+
+The models below are the master plan's "Shared contracts v2" block, verbatim and in its
+order (each class is defined before it is used). Field comments are part of the contract.
+"""
+
+from datetime import time
+from typing import Annotated, Literal, Self
+
+from pydantic import AwareDatetime, BaseModel, Field, StringConstraints, model_validator
+
+# Identity and sessions: built by the kernel from its own tables; never accepted over HTTP.
+ActorKind = Literal["visitor", "agent", "owner"]
+Assurance = Literal["none", "demo_code", "owner_session"]   # "demo_code" = simulated verification
+SessionMode = Literal["ai", "owner", "paused"]               # "owner": the owner took over; "paused": the breaker tripped
+
+class Principal(BaseModel):               # kernel-internal; never crosses HTTP
+    kind: ActorKind
+    session_id: str
+    copy_id: str
+    desk_id: str
+    person_id: str | None = None          # set only by /verify/check (one person per session)
+    agent_key_id: str | None = None       # agents, from a verified AgentAuth
+    assurance: Assurance = "none"
+    mandate_id: str | None = None         # agents with a verified mandate
+
+class SessionState(BaseModel):            # all the API may know about a session
+    session_id: str                       # 128-bit CSPRNG, URL-safe
+    kind: ActorKind
+    verified: bool
+    assurance: Assurance
+    mode: SessionMode
+    generation: int                       # bumped on take-over and hand-back; stale work is refused
+
+class SessionCreated(BaseModel):          # POST /sessions; the token is shown once
+    state: SessionState
+    session_token: str | None             # 256-bit CSPRNG, stored only as its hash (secret_hash); None for agent sessions
+
+class CopyCreated(BaseModel):             # POST /copies; the owner token is the copy credential
+    copy_id: str
+    desk_ids: list[str]
+    owner_session: SessionState
+    owner_token: str                      # 256-bit CSPRNG, stored hashed, sent as X-Owner-Session
+
+# A signed timestamp: RFC 3339 UTC with microseconds and "Z"; signatures cover the literal string
+SignedTime = Annotated[str, StringConstraints(pattern=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$")]
+
+class AgentAuth(BaseModel):               # headers X-Agent-Key-Id, X-Agent-Ts, X-Agent-Nonce, X-Agent-Sig; verified by the kernel
+    agent_key_id: str
+    ts: SignedTime                        # signed as the exact header text; parsed only to check it is within 5 minutes
+    nonce: str                            # stored; bound to one session and one body hash
+    sig: str                              # Ed25519 over canonical JSON {desk_slug, ts, nonce, body_sha256}
+                                          # body_sha256 = lowercase hex sha256 of the raw A2A request body bytes
+
+# Claims, labels and notices (used by seeds, decisions and facts)
+class Label(BaseModel):
+    readers: list[str] = ["owner"]        # "public" | "owner" | "person:<id>" | "session:<id>"; missing label = owner-only
+    record_owner: str | None = None
+
+class Claim(BaseModel):
+    key: str                              # "total", "starts_at", "title", "contact"; never "hours" (DeskSeed.hours)
+    kind: Literal["money", "percent_bp", "datetime", "text", "ref"]
+    value: int | str                      # money in USD cents; percent in bp; datetime ISO 8601 with offset
+
+class InboxNotice(BaseModel):             # code-free; safe for SSE and app.*, never for Claude's context
+    entry_id: str
+    to: str                               # masked contact on record, or "owner"
+    preview: str                          # kernel template, never a code
+
+# Desks and seeds: POST /copies seeds Rivera Plumbing through the same path as POST /desks.
+class SeedPerson(BaseModel):              # a contact on record; the kernel assigns ids
+    ref: str                              # seed-local handle, stable across PUTs ("dana")
+    display_name: str
+    contact: str                          # email or phone on record; verification codes go only here
+    notes: str = ""
+
+class SeedDocument(BaseModel):
+    ref: str
+    title: str
+    body: str                             # the kernel adds a fresh canary to every document
+    record_owner_ref: str | None = None   # a SeedPerson.ref; None = owner-only
+
+class PriceItem(BaseModel):
+    item_id: str
+    title: str
+    unit_cents: int = Field(ge=0, le=1_000_000)
+
+class CalendarSlot(BaseModel):
+    slot_id: str
+    starts_at: AwareDatetime
+    minutes: int
+
+class NotificationDefaults(BaseModel):    # alerts are delivered to the owner's Demo inbox
+    now: list[str]                        # event kinds that alert at once ("approval", "emergency", "breaker")
+    briefing: list[str]
+
+class BusinessSeed(BaseModel):
+    name: str
+    owner_display_name: str               # "Maria Rivera"; the handoff clause, visitor status lines and owner_joined render it
+    timezone: str                         # IANA; Cedar's local_dow and local_minute use it
+    brand: dict[str, str] = {}            # public-page colors
+    existing_business_id: str | None = None   # add a Desk to a business in this copy
+
+class HoursWindow(BaseModel):
+    days: list[Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]]
+    start: time
+    end: time                             # exclusive, after start, in the business's time zone; past midnight = two windows
+
+class DeskSeed(BaseModel):
+    name: str                             # "Main line"
+    charter: list[Claim]                  # service area, policies, contact: charter facts labelled ["public"], rendered only, never computed from
+    hours: list[HoursWindow]              # the kernel writes fact "charter:hours" from these (again on PUT hours); the hours clause formats
+                                          # the windows in the reply's language, and callback windows are computed from them
+    price_items: list[PriceItem]
+    calendar_slots: list[CalendarSlot]
+    people: list[SeedPerson]
+    documents: list[SeedDocument]
+    notifications: NotificationDefaults
+    connections: list[Literal["mock_payments"]] = []   # connected and confirmed with the seed's profiles at creation
+
+# Tools
+Effect = Literal["read", "private_data", "change", "charge", "pay_out", "send_message"]
+ToolName = Literal["native.quote", "native.find_slots", "native.book", "native.release_document",
+                   "native.payment_link", "native.charge_mandate", "native.capture_lead",
+                   "native.request_callback", "native.start_verification",
+                   "native.fetch_website", "native.read_memory",
+                   "payments.list_charges", "payments.create_refund"]
+MONEY_TOOLS: frozenset[str] = frozenset({"native.payment_link", "native.charge_mandate", "payments.create_refund"})
+AUTO_MONEY_HARD_CAP_CENTS = 50_000        # $500: the most any auto card may allow per action
+
+class ToolProfile(BaseModel):
+    tool: ToolName
+    source: Literal["native", "mcp"]
+    effects: list[Effect]
+    reversible: bool
+    adapter: str                          # trusted code that normalizes args and resolves resources; no adapter, no tool
+    resource_kind: Literal["quote", "slot", "booking", "document", "charge", "desk"]
+    description_confirmed: str            # the owner-confirmed text Claude sees, never the server's description
+    input_schema: dict                    # the adapter's JSON Schema of the args it accepts (additionalProperties: false), never the server's
+    definition_sha256: str | None = None  # MCP only: sha256 of canonical_json_any(the parsed tools/list entry, every field the server
+                                          # sent, client list cache off); re-listed before every execution
+    pending_definition_text: str | None = None   # a drifted tools/list entry, shown to the owner as quoted untrusted text
+    pending_sha256: str | None = None     # its hash; the owner's confirm must name it
+    status: Literal["enabled", "needs_review", "disabled"]
+
+class ToolCall(BaseModel):                # what Claude proposed (untrusted)
+    call_id: str
+    tool: str                             # unknown, or not given to this session → refuse
+    args: dict
+
+class ResourceRef(BaseModel):
+    kind: Literal["quote", "slot", "booking", "document", "charge", "desk"]
+    id: str
+    owner_person_id: str | None           # looked up by the kernel, never read from args
+
+class NormalizedAction(BaseModel):        # immutable; decisions, approvals and executions bind to it
+    action_id: str
+    copy_id: str
+    desk_id: str
+    session_id: str
+    generation: int
+    tool: ToolName
+    effects: list[Effect]
+    args_sha256: str                      # sha256 of canonical_json(adapter-normalized args)
+    profile_sha256: str
+    resource: ResourceRef                 # kind "desk" when the tool acts on no specific record
+    list_cents: int | None                # from the Desk's price list (quotes, links, charges); a refund's from the charge record
+    discount_bp: int | None               # requested_discount_bp from the args (untrusted), 0..10_000
+    amount_cents: int | None              # list_cents - list_cents * discount_bp // 10_000; a refund is the charge's full amount; 0..1_000_000
+    recipient: Literal["owner", "verified_contact"] | None
+    starts_at: AwareDatetime | None
+
+# Review (Decisions layer): reviewer scores in basis points, not calibrated probabilities; integers keep Cedar comparisons plain
+class ReviewThresholds(BaseModel):        # one row of review_thresholds.py (per effect, versioned)
+    min_within_charter_bp: int = Field(ge=0, le=10_000)
+    max_manipulation_bp: int = Field(ge=0, le=10_000)
+
+class Review(BaseModel):                  # Sonnet 5.5 structured output; a validation failure = absent
+    within_charter_bp: int = Field(ge=0, le=10_000)
+    manipulation_bp: int = Field(ge=0, le=10_000)
+    recommendation: Literal["allow", "hold", "block"]   # anything but "allow" turns an allow into a hold; "block" also adds a strike
+
+# Decisions
+Outcome = Literal["allow", "hold", "refuse"]
+DecisionState = Literal["allowed", "held", "refused", "approved", "denied", "expired", "cancelled",
+                        "executed", "failed", "unknown", "refused_at_execution"]
+ApprovalAnswer = Literal["allow_once", "deny_once", "allow_person", "deny_always"]
+
+class Decision(BaseModel):
+    decision_id: str
+    session_id: str
+    call_id: str
+    action: NormalizedAction | None       # None only for a step-1 refusal before normalization
+    outcome: Outcome
+    state: DecisionState
+    policy_version: int
+    policy_ids: list[str]
+    card_ids: list[str]
+    review: Review | None = None
+    reason_plain: str                     # owner-facing kernel template from the action and deciding cards; visitor free text quoted, labelled "from the visitor"
+    visitor_plain: str                    # visitor-facing kernel template (en/es); no amounts, dates or limits
+    answers: list[ApprovalAnswer] = []    # held only; allow_person only where "Decision lifecycle" allows it
+    expires_at: AwareDatetime             # allow: 60 s; hold: 24 h; evaluated lazily by the kernel
+    inbox: list[InboxNotice] = []         # owner alerts this decision created (holds, breaker pauses); code-free
+    ledger_seq: int                       # each state change writes a ledger entry and re-signs the decision
+    signature: str                        # Ed25519 over b"desk-decision-v1\0" + sha256(canonical_json {decision_id, session_id, state, visitor_plain, ledger_seq})
+
+# Rules
+class RuleCard(BaseModel):                # Claude drafts, code compiles, the owner reads
+    card_id: str
+    applies_to: str                       # a tool ("native.book") or an effect ("effect:charge")
+    mode: Literal["auto", "ask", "never"]
+    who: Literal["anyone", "verified", "record_owner", "person", "agent"]
+    person_id: str | None = None          # required iff who == "person"
+    agent_key_id: str | None = None       # required iff who == "agent"
+    max_amount_cents: int | None = None   # auto only; required and <= AUTO_MONEY_HARD_CAP_CENTS when applies_to is in MONEY_TOOLS or effect:charge|pay_out
+    max_discount_bp: int = 0              # auto only; a larger requested discount asks
+    hours: HoursWindow | None = None      # auto only
+    review: bool = False                  # auto only: gate on the reviewer, thresholds from review_thresholds.py
+    is_default: bool = False              # compiler-emitted "ask" (who="anyone") unless cards for anyone cover the tool; ranks below every card
+    reason: str                           # one owner-facing sentence
+
+    @model_validator(mode="after")
+    def _limits_only_on_auto(self) -> Self:
+        limited = self.max_amount_cents is not None or self.max_discount_bp != 0 or self.hours is not None
+        if self.mode != "auto" and (self.review or limited):
+            raise ValueError("review and limits apply only to auto cards")
+        moves_money = self.applies_to in MONEY_TOOLS or self.applies_to in ("effect:charge", "effect:pay_out")
+        if self.mode == "auto" and moves_money and (
+            self.max_amount_cents is None or self.max_amount_cents > AUTO_MONEY_HARD_CAP_CENTS
+        ):
+            raise ValueError(f"an auto money card needs max_amount_cents of at most {AUTO_MONEY_HARD_CAP_CENTS}")
+        if (self.who == "person") != (self.person_id is not None):
+            raise ValueError('person_id is required iff who == "person"')
+        if (self.who == "agent") != (self.agent_key_id is not None):
+            raise ValueError('agent_key_id is required iff who == "agent"')
+        if self.is_default and (self.mode != "ask" or self.who != "anyone"):
+            raise ValueError('a default card is the compiler\'s "ask" card for anyone')
+        return self
+
+class ProofCheck(BaseModel):
+    name: str                             # see "Proof obligations"
+    ok: bool
+    counterexample_plain: str | None = None   # in the owner's words
+    counterexample_raw: dict | None = None
+
+class ProofReport(BaseModel):
+    ok: bool
+    method: Literal["symcc", "bounded"]   # "bounded" is shown as "checked on N cases", never "proven", and never activates
+    cases: int | None = None
+    timed_out: bool = False               # exit 2 or timeout: the owner sees "Rules can't be checked right now", no counterexample
+    checks: list[ProofCheck]
+
+class PolicyVersion(BaseModel):
+    desk_id: str
+    version: int
+    parent_version: int | None
+    cards: list[RuleCard]                 # owner cards plus the compiler's default ask cards
+    cedar_sha256: str
+    schema_sha256: str
+    baseline_sha256: str
+    profiles_sha256: str                  # sha256(canonical_json) of the profiles this version enables (enabled ones plus its draft's), by tool,
+                                          # each with its definition_sha256, no status or pending fields
+    invariants_sha256: str                # the invariant files, the check list and the desk-prove version
+    review_thresholds_version: int
+    status: Literal["draft", "proved", "rejected", "active", "superseded"]
+    proof: ProofReport | None = None
+
+class Probe(BaseModel):                   # a setup safety probe: a hypothetical caller and resource; nothing is resolved or executed
+    actor: ActorKind
+    who: Literal["anyone", "verified", "record_owner", "person", "agent"]   # the caller's standing, as in RuleCard
+    subject_id: str | None = None         # the person_id or agent_key_id when who is "person" or "agent"
+    agent_mandate_remaining_cents: int | None = None   # agent probes only
+    call: ToolCall                        # args are normalized; the resource and price are the stand-ins below
+    resource_kind: Literal["quote", "slot", "booking", "document", "charge", "desk"]
+    resource_owner: Literal["caller", "other", "none"] = "none"
+    amount_cents: int | None = None       # stand-in price for money tools
+
+class ProbeResult(BaseModel):
+    probe: Probe
+    outcome: Outcome                      # with review absent
+    depends_on_review: bool               # the pre phase returned needs_review: auto if the reviewer agrees
+    card_ids: list[str]
+    reason_plain: str
+
+# Approvals
+class Approval(BaseModel):                # the kernel's record is the token; single use
+    approval_id: str
+    decision_id: str
+    answer: ApprovalAnswer
+    nonce: str                            # random per approval
+    binding_sha256: str                   # sha256(canonical_json {copy_id, desk_id, session_id, action_id, args_sha256, profile_sha256, nonce})
+    policy_version: int                   # recorded; execution re-decides against the current version
+    expires_at: AwareDatetime
+    consumed_at: AwareDatetime | None = None
+
+# Facts and knowledge
+class Fact(BaseModel):
+    fact_id: str                          # "quote:Q-1042", "booking:B-77", "charter:hours", "owner:S-3"
+    kind: Literal["quote", "booking", "payment_link", "document", "charter", "knowledge", "owner_statement",
+                  "charge", "refund", "handoff", "slots"]
+    status: Literal["available", "proposed", "committed", "expired"]
+    source: Literal["kernel", "owner"]    # only adapters and authenticated owner input create facts
+    claims: list[Claim]
+    label: Label
+    expires_at: AwareDatetime | None = None
+
+class KnowledgeItem(BaseModel):           # untrusted text; never policy
+    item_id: str
+    source: Literal["website", "upload", "setup", "memory_import"]
+    title: str
+    text: str
+    label: Label                          # owner-only until the owner marks it public
+
+class DemoInboxEntry(BaseModel):          # only from GET /demo_inbox; never stored in app.*
+    entry_id: str
+    to: str
+    kind: Literal["verification_code", "alert", "head_checkpoint"]
+    body: str                             # may contain a code
+    created_at: AwareDatetime
+
+class ExecResult(BaseModel):
+    action_id: str
+    state: Literal["succeeded", "failed", "unknown"]   # "unknown" is reconciled, never retried blindly
+    facts: list[Fact]
+    model_view: dict                      # adapter-validated, label-filtered summary for Claude; never raw tool output
+    inbox: list[InboxNotice] = []         # for the Demo inbox panel; never shown to Claude
+
+class ApprovalResult(BaseModel):
+    decision: Decision
+    execution: ExecResult | None          # allow_once / allow_person execute inside the answer call
+    card_diff: list[RuleCard] | None      # allow_person / deny_always: cards the owner proves (/policy/draft) and confirms
+
+# Replies: typed clauses plus guarded prose
+ClauseTemplate = Literal["quote", "booking_options", "booking_confirmed", "payment_link", "document_link",
+                         "hours", "policy", "contact", "handoff", "verify_prompt", "owner_said",
+                         "charges", "refund_issued", "charge_confirmed", "callback_confirmed", "payment_confirmed"]
+
+class Clause(BaseModel):                  # rendered by code from a fact, in the reply's language
+    template: ClauseTemplate
+    fact_id: str | None = None
+
+class ReplyDraft(BaseModel):              # send_reply input: Claude's schema has prose and clauses only (never owner_said or
+                                          # payment_confirmed, which only the kernel issues), the API fills the rest;
+                                          # end_turn text becomes prose with no clauses
+    session_id: str
+    generation: int
+    prose: str
+    clauses: list[Clause] = []
+
+class Violation(BaseModel):
+    kind: Literal["number_in_prose", "promise_word", "soft_promise", "unknown_fact", "unentitled_fact",
+                  "stale_fact", "canary", "unsupported_language", "session_paused"]
+    span: str
+    fact_ids: list[str] = []
+    rule_id: str
+
+class CardOption(BaseModel):              # a choice on a booking_options card
+    option_id: str                        # the slot_id
+    label: str
+
+class RenderedBlock(BaseModel):           # every field is kernel-rendered and covered by blocks_sha256
+    kind: Literal["prose", "card"]
+    template: ClauseTemplate | None = None
+    text: str                             # the whole block as plain text
+    fact_id: str | None = None
+    title: str | None = None              # card data, filled per template ("Clauses" row)
+    lines: list[str] = []
+    href: str | None = None               # payment_link, document_link: the proxied path (/pay/{token}, /api/d/{token}), the only
+                                          # place a link token reaches a visitor; tokens never go in fact claims
+    options: list[CardOption] = []
+
+class ReplyVerdict(BaseModel):
+    ok: bool
+    language: Literal["en", "es"]         # the blocks' language: detected, else the fallback ("Language" row)
+    blocks: list[RenderedBlock]           # exactly what may be shown; on a failed check, the handoff clause
+    violations: list[Violation]
+    message_id: str
+    generation: int                       # the session generation it was checked at; deliver() drops it once stale
+    visitor_plain: str                    # the reply receipt (kernel template)
+    ledger_seq: int
+    signature: str                        # Ed25519 over b"desk-verdict-v1\0" + sha256(canonical_json {session_id, generation, message_id, blocks_sha256, visitor_plain, ledger_seq})
+                                          # blocks_sha256 = sha256(canonical_json(blocks))
+
+class OwnerMessageResult(BaseModel):
+    message_id: str
+    verdict: ReplyVerdict | None          # say: one owner_said block, signed; whisper: None
+    ledger_seq: int
+
+# Payments (mocked) and visiting agents
+PaymentLinkState = Literal["issued", "paid", "expired", "cancelled", "unknown"]
+
+class Mandate(BaseModel):                 # signed delegation envelope
+    mandate_id: str
+    issuer: str                           # must be a trusted issuer key held by the kernel ("demo-wallet")
+    agent_key_id: str                     # must equal the session's AgentAuth key
+    desk_id: str                          # audience
+    on_behalf_of: str | None = None       # display only; grants nothing
+    allowed_effects: list[Literal["charge"]]   # a visitor's mandate never authorizes pay_out
+    per_charge_cents: int
+    total_cents: int                      # cumulative; the kernel reserves, commits and releases under FOR UPDATE
+    currency: Literal["usd"]
+    expires_at: SignedTime                # signed as the literal string
+    nonce: str
+    sig: str                              # issuer's Ed25519 signature over the canonical JSON of the fields above
+
+class A2ARequest(BaseModel):              # body of POST /api/a2a/{desk_slug}; AgentAuth travels in its headers
+    desk_slug: str
+    session_id: str | None = None         # None opens a session, bound by the kernel to the signing key
+    message: str                          # untrusted text
+    mandate: Mandate | None = None        # checked when the session opens
+    verify_code: str | None = None        # from the agent's human after start_verification; the API sends it to /verify/check,
+                                          # never into Claude's context
+
+class DemoAgentIssued(BaseModel):         # POST /agents/demo: a simulated third party
+    agent_key_id: str
+    agent_private_key_hex: str            # returned once to the agent's runner; the agent signs its own requests
+    mandate: Mandate                      # demo-wallet signed ("Rivera seed")
+
+# Ledger
+class LedgerEvent(BaseModel):
+    kind: Literal["session", "auth", "verify", "decide", "review", "breaker", "approval", "execute",
+                  "payment", "document_link", "reply", "policy", "tool_pin", "takeover", "whisper",
+                  "rate_limit", "agent_auth", "head_checkpoint", "desk_data"]
+    origin: Literal["kernel", "api"]      # "api" events are recorded as reported, not as verified
+    session_id: str | None = None
+    ref_id: str | None = None
+    summary: dict                         # never secrets, codes, contacts or document bodies
+
+class LedgerEntry(BaseModel):
+    copy_id: str
+    desk_id: str
+    seq: int
+    prev_hash: str                        # 64 hex; the genesis entry uses 64 zeros
+    created_at: str                       # RFC 3339 UTC with microseconds and "Z": "2026-10-30T17:04:05.123456Z"
+    event: LedgerEvent
+    hash: str                             # sha256 of canonical_json {copy_id, desk_id, seq, prev_hash, created_at, event}, nulls explicit
+    signature: str                        # Ed25519 over b"desk-ledger-v1\0" + the 32-byte hash
+    key_id: str
+
+class LedgerPage(BaseModel):
+    entries: list[LedgerEntry]
+    head: str
+    chain_ok: bool
+    first_bad_seq: int | None
+    public_key_hex: str
+    key_id: str
