@@ -59,7 +59,12 @@ Specific to this plan:
 - Contracts (through Plan 03a's `contracts.ts`, named as in "Shared contracts v2" and `events.py`): `RenderedBlock`, `ClauseTemplate`, `RuleCard`, `ToolProfile`, `ToolName`, `ToolStatus`, `Effect`, `Assurance` (`demo_code` is labelled simulated), `InboxNotice`, `DemoInboxEntry`, `PaymentLinkState`, `Decision`, `DecisionState`, `SessionMode`, `LedgerEntry`, `LedgerPage`.
 - Kernel API models (`kernel_api.py`): `VerifyStarted.message` (the verify card's uniform text, shown by the `verify_prompt` card, never repeated by the form), `PaymentLinkView` (the mock checkout), `PublicDesk` (board stories).
 - SSE (`SseEvent`): `EvDemoInbox` (a notice only; codes come from fetched entries), and in board stories `EvMessage`, `EvReceipt`, `EvHeld`, `EvResolved`, `EvOwnerJoined` through Plan 03a's components.
-- Components only raise callbacks. Plan 04 screens reach the kernel calls behind them (`GET /demo_inbox`, `GET /payment_links/{token}` with complete and cancel, `POST /verify/check`, `POST /tools/connect`, `POST /tools/confirm`, `POST /tools/simulate_change`, `POST /policy/confirm`) only through Plan 02's API routes (Plan 04's route table). No kernel endpoint, Rust function, table, prompt or policy is touched, so this plan has no evals gate.
+- Components only raise callbacks. Plan 04 screens reach the kernel calls behind them (`GET /demo_inbox`, `GET /payment_links/{token}` with complete and cancel, `POST /verify/check`, `POST /tools/connect`, `POST /tools/confirm`, `POST /tools/simulate_change`, `POST /policy/confirm`) only through Plan 02's API routes (Plan 04's route table).
+- `POST /tools/confirm` takes its batch form (answered 2026-10-29), so a connector is one action both ways: `{desk_id, tools: [{tool, definition_sha256}], enable}`.
+  - A native tool's `definition_sha256` is its adapter profile's `profile_sha256`.
+  - Enabling drafts one rules version for the whole group, proved live at confirm time for any subset of tools. In bounded mode the owner sees "Rules can't be checked right now".
+  - Disabling applies at once and unproved, since it only narrows, and each tool's change is ledgered. The kernel refuses `enable: false` for `native.start_verification`, because Verification is always on.
+- No kernel endpoint, Rust function, table, prompt or policy is touched, so this plan has no evals gate.
 
 **What the web app (plan 04) passes** to the rules and connectors pieces (Tasks 2–3). The web app owns the connector table: the six built-in connectors and their native tools, Stripe for the `payments.*` tools, and Google Calendar as catalog-only. It also owns each tool's name and line, and every word built from rules, money and dates.
 - **The Rules page** (`rules`, N-Conn-01-Rules, N-Conn-16-Phone-Rules):
@@ -71,21 +76,22 @@ Specific to this plan:
 - **A connector's page** (`rules/:connector`, N-Conn-02 to N-Conn-04):
   - `Breadcrumb` and `ConnectorHeader`.
   - A `ToolRulesCard` per tool, with `RuleRow`s (`words` from `ruleWords`; `shared` with the covered tools' names for an effect-group card; `onChangeOutcome` opens the drafted change in `ChangeReview`).
-  - `ConnectionPanel`: `consequence`, and for Stripe the connection details. "Turn off" or "Disconnect" shows a `ChangeReview` of the tools turned off, then `POST /tools/confirm` `enable: false` per tool (open questions 1 and 2).
+  - `ConnectionPanel`: `consequence`, the connection details for Stripe, and what stops: the connector's tools and the rules that stop applying, read from `RulesView`. "Turn off" or "Disconnect" opens the panel's plain confirm, which lists them, then sends one `POST /tools/confirm {tools, enable: false}`, which applies at once. Verification passes `alwaysOn` instead and has no "Turn off".
 - **A tool's page** (`rules/:connector/:tool`, N-Conn-05, N-Conn-06, N-Conn-14, N-Conn-15):
   - `ToolPageHeader`: `status` from the profile; `definitionNote` for a connected tool only; `onSimulateChange` → `POST /tools/simulate_change`.
-  - `ToolReviewCard` while `needs_review`.
+  - `ToolReviewCard` while `needs_review`. "Turn back on" sends `POST /tools/confirm {tools: [{tool, definition_sha256: pending_sha256}], enable: true}`, and the drafted version shows in `ChangeReview`.
   - `ToolRulesCard`, and the owner `Composer` with the tool's chips.
   - `RecentRequests`: rows from the tool's recent decisions (`reason_plain`, the deciding card's reason, the state in words, the time formatted by the web app), each linking to its Safety record.
 - **Adding a connector** (N-Conn-07b to N-Conn-12):
-  - `ConnectorPicker` items from the Desk's profiles and the catalog.
-  - Built in: `ConnectorReview`, with each tool at `ask` and `coveredBy` from the active cards that would cover it and the always-on lines. "Turn it on" → `POST /tools/confirm` `enable: true` per tool (open question 1) → the drafted version in `ChangeReview` → `POST /policy/confirm`.
+  - `ConnectorPicker` items from the Desk's profiles and the catalog. Verification is never among them, since it is always added.
+  - Built in: `ConnectorReview`, with each tool at `ask` and `coveredBy` from the active cards that would cover it and the always-on lines. "Turn it on" sends one `POST /tools/confirm {tools, enable: true}` for the connector's tools, which drafts one version for the group. That proved version shows in `ChangeReview`, then `POST /policy/confirm`.
   - External: `ConnectorSignIn` (a mock that asks for no account details) → `POST /tools/connect`, then the same review and confirm.
   - `Steps` across the pages.
 - **Today** (N-Conn-13): a `ToolChangedItem` per `needs_review` tool, first under "Needs you".
-- **Words**: `OUTCOME_WORDS` for every outcome, `PRESET_WORDS` for the mode switch, and `describeEffects` for a connected tool's line.
+- **Settings**: connectors live only under Rules, so Settings' `SubNav` drops its Integrations entry and gains no Connectors entry.
+- **Words**: `OUTCOME_WORDS` and `outcomePhrase` for every outcome, `PRESET_WORDS` for the mode switch, and `describeEffects` for a connected tool's line.
 
-**Produced** (for Plan 04 and the artifact): `IntroDialog`, `IntroThing`, `IntroErrorCode` and `INTRO_ERROR_COPY` with the tokens `scrim`, `shadow-dialog` and `intro-title` (Task 0, shipped early by its own design PR); the components of Tasks 1–3, exported with their `<Comp>Props` from `web/src/ds/index.ts`; `describeEffects`, `ruleDiff`, `RuleWord`, `RuleField`, `RuleMode`, `OUTCOME_WORDS`, `OUTCOME_TONE`, `RulesPreset`, `PRESET_WORDS` and the view types `ConnectorView`, `ToolSummaryView`, `ChangeSide` and `ChangeRowView` (Task 2); `RecentRequestView`, `PickerItem`, `ReviewToolView` and `ToolRowView` (Task 3); `Boards/*` stories as Plan 04's reference compositions and `web/src/ds/reference/README.md` (Tasks 4–6); `build-ds-artifact.mjs` and the published artifact (Task 7).
+**Produced** (for Plan 04 and the artifact): `IntroDialog`, `IntroThing`, `IntroErrorCode` and `INTRO_ERROR_COPY` with the tokens `scrim`, `shadow-dialog` and `intro-title` (Task 0, shipped early by its own design PR); the components of Tasks 1–3, exported with their `<Comp>Props` from `web/src/ds/index.ts`; `describeEffects`, `ruleDiff`, `RuleWord`, `RuleField`, `RuleMode`, `OUTCOME_WORDS`, `OUTCOME_TONE`, `outcomePhrase`, `RulesPreset`, `PRESET_WORDS` and the view types `ConnectorView`, `ToolSummaryView`, `ChangeSide` and `ChangeRowView` (Task 2); `RecentRequestView`, `PickerItem`, `ReviewToolView` and `ToolRowView` (Task 3); `Boards/*` stories as Plan 04's reference compositions and `web/src/ds/reference/README.md` (Tasks 4–6); `build-ds-artifact.mjs` and the published artifact (Task 7).
 
 Component folders are named for their main export; extra exports are documented in the folder's README and get no artifact card. Each task's Files line names the canvas boards its stories cite.
 
@@ -110,6 +116,7 @@ Supporting tests (the kernel stays the authority) and failure modes this plan ow
 | "Simulate a tool change" → literal quoted definition; re-enable names the reviewed hash | Task 3 `quoted_definition_is_text`, `confirm_names_the_reviewed_hash`, `no_hash_no_confirm` |
 | Adding a connector → each new tool at "Ask me first" with what already covers it; nothing turns on until the proved change is confirmed; the chat only leads into that review | Task 3 `review_starts_at_ask_me_first`, `offer_card_only_opens_the_review`; Task 2 `confirm_only_when_checked`, `confirm_once` |
 | A mock connector never named without "Mock"; a mock sign-in asks for no account details | Task 2 `mock_badge_always_beside_external_names`; Task 3 `sign_in_collects_nothing` |
+| Turning a connector off → a plain confirm lists the tools that stop and the rules that stop applying; Verification can't be turned off | Task 3 `turn_off_confirms_first`, `always_on_has_no_turn_off` |
 | Disclosure on every visitor surface (Plan 04) | Task 1 `checkout_discloses_ai`, `disclosure_line_en_es` (Plan 03a: the public shell) |
 | Long unbroken or Spanish text at 390 px → wraps, nothing clipped | Tasks 4–6 viewport checks |
 | Final-state link or double click on pay → no second payment | Task 1 `pays_once`, `final_states_have_no_pay_button` |
@@ -202,7 +209,9 @@ Owner decisions, 2026-10-29 (spec "First visit and hosting" and "Look and feel")
 Owner decisions, 2026-10-29 (the signed boards on the design canvas's "Claude Desk · Connectors and rules" page, which replace the Rules and Integrations boards):
 - Rules is one page under the Rules nav: the "Ask Claude to change a rule or a connector" composer, one section per connector the Desk has (built in first, then the ones it connected), "Add a connector" at the top and at the end, and the always-on list.
 - A connector is where tools come from. People read "Connectors", never "Integrations".
-- A built-in connector is a presentation group over native tools, optional per Desk: Quotes (`native.quote`), Bookings (`native.find_slots`, `native.book`), Leads and callbacks (`native.capture_lead`, `native.request_callback`), Verification (`native.start_verification`), Documents (`native.release_document`), Payments (`native.payment_link`, `native.charge_mandate`). No tool is added.
+- A built-in connector is a presentation group over native tools, optional per Desk except Verification: Quotes (`native.quote`), Bookings (`native.find_slots`, `native.book`), Leads and callbacks (`native.capture_lead`, `native.request_callback`), Verification (`native.start_verification`), Documents (`native.release_document`), Payments (`native.payment_link`, `native.charge_mandate`). No tool is added.
+- Verification is always on. It has no "Turn off", the kernel refuses to disable `native.start_verification`, and the picker never offers it. Its page says "Always on. It's how Claude confirms a customer before sharing anything private."
+- Connectors live only under Rules. No Settings menu names them.
 - External connectors: Stripe, the mock payments server's `payments.*` tools, with the Mock badge beside its name everywhere and its real brand icon; Google Calendar, catalog-only in the demo ("Coming soon in this demo"), free/busy only when it works.
 - Outcome words: "Automatic", "Ask me first", "Never" (replacing "Do it", "Ask me", "Never"). The mode switch reads "Ask me first", "Automatic", "Custom".
 - Rivera Plumbing's hub has all six built-in connectors and Stripe. The add-a-built-in example (the picker, the review and the chat) is Chen & Co. CPA adding Payments.
@@ -228,6 +237,7 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
   - **Outcome words.** `RuleMode = RuleCard['mode']`.
     - `OUTCOME_WORDS` (`satisfies Record<RuleMode, string>`): `auto` "Automatic", `ask` "Ask me first", `never` "Never".
     - `OUTCOME_TONE`: `auto` handled, `ask` held, `never` refused.
+    - `outcomePhrase(mode, limit?)`: `OUTCOME_WORDS[mode]`, except that an `auto` rule with a `limit` reads "Automatic up to {limit}; over {limit}, ask me first". `limit` is the screen's formatted amount ("$100"). An auto card with `max_amount_cents` holds anything above it for the owner through its hold twin. No mode asks with a limit.
     - `RulesPreset = 'ask_first' | 'auto' | 'custom'` (the master's presets) and `PRESET_WORDS`, in that order: "Ask me first", "Automatic", "Custom", for the screen's `SegmentedControl`.
   - **Rule words.** `RuleWord = { field: 'who' | 'limits' | 'hours' | 'review'; text: string }`: the consumer's code-rendered words for what a card enforces (Plan 04's `ruleWords(card, people)`: "Anyone", "Up to $300", "Checked by the reviewer"). The design system formats none.
   - **Connectors.** `ConnectorView = { id: string; name: string; icon: ConnectorIconName; description: string; source: { kind: 'built_in' } | { kind: 'external'; mock: true } }`, the screen's view of one connector. Plan 04 owns which tools each connector groups. Every external connector in the demo is a mock, and `mock: true` is required, so the badge can't be left out.
@@ -236,13 +246,13 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
     - External, on a light `--connector-tile-brand` tile: `stripe` and `google_calendar`, each brand's real mark as inline SVG.
     - Tokens: `connector-tile-brand` `#FFFFFF`, `connector-stripe` `#635BFF`, and one `connector-google-*` token per color the Google Calendar mark uses. Each is in `DECORATIVE_COLORS` ("a third-party brand mark beside its name; nothing is read on it"), so no raw color enters a component.
   - `ConnectorName({ connector; size: 'page' | 'section' | 'inline'; level?: 1 | 2 | 3 })`: the name, a heading at `level` or else a `span`, in serif `page-title` at `page` size. Beside it, "Built in" in quiet meta for a built-in connector, or a "Mock" `Pill` for an external one. Every component that names a connector uses it, so "Mock" sits beside every external connector's name.
-  - `OutcomeMenu({ label; value: RuleMode; onChange?: (mode: RuleMode) => void; disabled? })`:
-    - Without `onChange`, a `StatusLabel`: the tone's dot and `OUTCOME_WORDS[value]`.
-    - With it, a menu button (32 px high, a 1 px `--line-control` border, radius 8 px, transparent; the dot, the word and `chevron-down`), named "{word}. Change the outcome of: {label}", with `aria-haspopup="menu"` and `aria-expanded`. It opens a `menu` of three `menuitemradio`s, "Automatic", "Ask me first" and "Never", the current one checked.
+  - `OutcomeMenu({ label; value: RuleMode; limit?: string; onChange?: (mode: RuleMode) => void; disabled? })`:
+    - Without `onChange`, a `StatusLabel`: the tone's dot and `outcomePhrase(value, limit)`.
+    - With it, a menu button (32 px high, a 1 px `--line-control` border, radius 8 px, transparent; the dot, the phrase and `chevron-down`), named "{phrase}. Change the outcome of: {label}", with `aria-haspopup="menu"` and `aria-expanded`. It opens a `menu` of three `menuitemradio`s, "Automatic", "Ask me first" and "Never", the current one checked.
     - Keys as on `ApprovalCard`'s menus: Enter, Space and Down open it on the first item, Up on the last; the arrows move; Escape closes it and returns focus to the button.
     - Picking another word calls `onChange` once and closes the menu; picking the current word only closes it. The button keeps showing `value` until the screen passes a new one, since a change applies only after its review (`ChangeReview`).
-  - `RuleRow({ rule: Pick<RuleCard, 'card_id' | 'mode' | 'reason'>; words: RuleWord[]; shared?: { appliesTo: string }; onChangeOutcome?: (mode: RuleMode) => void })`:
-    - `rule.reason`, with the `words` beneath, joined by " · " in secondary meta, and `OutcomeMenu` at the right (`label` the reason).
+  - `RuleRow({ rule: Pick<RuleCard, 'card_id' | 'mode' | 'reason'>; words: RuleWord[]; limit?: string; shared?: { appliesTo: string }; onChangeOutcome?: (mode: RuleMode) => void })`:
+    - `rule.reason`, with the `words` beneath, joined by " · " in secondary meta, and `OutcomeMenu` at the right (`label` the reason; `limit` the screen's amount for an auto card with `max_amount_cents`).
     - `shared` marks a rule on an effect group, such as `effect:charge`: the `shared` icon (`aria-hidden`) and "Shared rule. {appliesTo}", the screen's words for what it covers ("Applies to every tool that charges money: Payment link and Charge within a signed limit."). The screen shows a shared rule under every tool it covers; changing it from any of them changes the one rule.
   - `ToolRulesCard({ label; tool?: { name; description; href }; rules: RuleRowProps[]; fallback?: boolean; onAddRule?: () => void; linkComponent? })`:
     - A `Card` (`section`, named `label`).
@@ -271,16 +281,16 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
     - Rows by `card_id`; `is_default` cards skipped; unchanged cards omitted.
     - `RuleDiffRow = { cardId; change: 'added' | 'removed' | 'changed'; before: RuleCard | null; after: RuleCard | null; fields: RuleField[] }`.
     - `RuleField = 'applies_to' | 'mode' | 'who' | 'limits' | 'hours' | 'review' | 'reason'`; `person_id` and `agent_key_id` count as `who`, `max_amount_cents` and `max_discount_bp` as `limits`.
-  - `ChangeSide = { mode: RuleMode | 'off'; reason: string; words: RuleWord[] }` and `ChangeRowView = { key: string; change: 'added' | 'removed' | 'changed' | 'turned_on' | 'turned_off'; title: string; connector?: ConnectorView; before: ChangeSide | null; after: ChangeSide | null; changed: RuleField[] }`.
-  - `ChangeReview({ rows: ChangeRowView[]; checks?: { status: 'checked' | 'failed' | 'unavailable'; lines: string[] }; confirmLabel?; cancelLabel?; onConfirm; onCancel; hasOtherChanges?; pending?; error?: string })`, renamed from `RuleChangeDiff` (N-Conn-10-GCal-Confirm). It shows any change before it applies: a rule draft, a connector turned on or off, a changed tool turned back on.
+  - `ChangeSide = { mode: RuleMode; limit?: string; reason: string; words: RuleWord[] }` and `ChangeRowView = { key: string; change: 'added' | 'removed' | 'changed' | 'turned_on'; title: string; connector?: ConnectorView; before: ChangeSide | null; after: ChangeSide | null; changed: RuleField[] }`.
+  - `ChangeReview({ rows: ChangeRowView[]; checks: { status: 'checked' | 'failed' | 'unavailable'; lines: string[] }; confirmLabel?; cancelLabel?; onConfirm; onCancel; hasOtherChanges?; pending?; error?: string })`, renamed from `RuleChangeDiff` (N-Conn-10-GCal-Confirm). It shows a proved change before it applies: a rule draft, a connector turned on, a changed tool turned back on. Turning a connector off needs no proof, so it has a plain confirm instead (`ConnectionPanel`, Task 3).
     - A "Changes" card with a row per change:
-      - A tag in words in an outlined pill: "Added", "Removed", "Changed", "Turned on" or "Turned off".
+      - A tag in words in an outlined pill: "Added", "Removed", "Changed" or "Turned on".
       - `title`, then a meta line: the `connector`'s name and badge, then the side's `words`, joined by " · ".
-      - The side's `reason`, and the outcome with its dot at the right (`off` reads info "Off").
+      - The side's `reason`, and the outcome with its dot at the right (`outcomePhrase(mode, limit)`).
       - A `changed` row shows "Before" and "After", and each line whose field is in `changed` is tagged "Changed" in text.
     - No rows → "No rules change." and no confirm button. With `hasOtherChanges` (the draft changes something the screen shows above it, such as the money limit), no rows reads "Your rules stay the same." instead, and the controls stay.
-    - A card for the checks, headed by `status`: "Checked before you confirm", "This change can't be applied" or "Rules can't be checked right now", with `lines` as a list (the screen's words from the proof report, Plan 04's `checkStatus`). A change that only narrows, such as turning tools off, which the kernel applies without a proof, passes no `checks`, and no checks card shows.
-    - The primary `confirmLabel` ("Confirm change" by default; "Confirm and turn on", "Turn off Payments") is enabled only when `status` is `checked`, or when there are no `checks`. After one click it waits until `pending` clears; `pending` reads "Confirming", with `aria-busy`.
+    - A card for the checks, headed by `status`: "Checked before you confirm", "This change can't be applied" or "Rules can't be checked right now", with `lines` as a list (the screen's words from the proof report, Plan 04's `checkStatus`).
+    - The primary `confirmLabel` ("Confirm change" by default; "Confirm and turn on") is enabled only when `status` is `checked`. After one click it waits until `pending` clears; `pending` reads "Confirming", with `aria-busy`.
     - The secondary `cancelLabel` ("Keep my rules" by default; "Back").
     - `error` shows the screen's message in an error `Notice` and enables confirm again.
   - `AskClaudePanel({ onClose; onSend: (text: string) => void; busy?: boolean; children })` (N-Conn-12-Chat):
@@ -292,29 +302,31 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
   - **Fixtures.**
     - `rivera.ts` gains `ruleWords`: each `rv-*` card's words as Plan 04's `ruleWords` renders them, in the boards' words. `rv-quote`: "Anyone", "No discounts". `rv-link`: "Anyone", "Up to $300", "Checked by the reviewer". `rv-mandate`: "Signed agents", "Up to $20". `rv-charges`: "The record's owner, verified". `rv-refund`: "The customer who paid, verified".
     - `rivera.ts` gains `connectors`: the hub on N-Conn-01-Rules, a `ConnectorView` and its `ToolSummaryView`s for Quotes, Bookings, Leads and callbacks, Verification, Documents ("Share a document", under `rv-docs`), Payments and Stripe.
-    - `rivera.ts` gains `sharedChargeCard`, for the shared-rule stories, outside `ruleCards`: `{card_id: 'rv-charge-verified', applies_to: 'effect:charge', mode: 'auto', who: 'verified', max_amount_cents: 10000, reason: 'Verified customers can pay up to $100 without asking.'}` with words "Verified customers", "Up to $100". The board's shared example, "Charges over $100 wait for your answer.", can't be a rule card, since an `ask` card carries no amount, and Rivera's seed has no shared card (the board's note says it is illustrative).
+    - `rivera.ts` gains `sharedChargeCard`, for the shared-rule stories, outside `ruleCards`, since Rivera's seed has no shared card and the board's note says the example is illustrative: `{card_id: 'rv-charge-limit', applies_to: 'effect:charge', mode: 'auto', who: 'anyone', max_amount_cents: 10000, reason: 'Charges over $100 wait for your answer.'}`. Its words are "Anyone", "Up to $100", and its `limit` "$100", so its outcome reads "Automatic up to $100; over $100, ask me first". Its hold twin holds anything above $100 for the owner.
     - `chen.ts` gains `connectors`: Chen & Co. CPA's hub without Payments: Quotes, Bookings (`cc-consult`, "Ask me first"), Leads and callbacks, Verification and Documents. It also gains `ruleWords`.
 
 - [ ] **Step 1: Write the failing tests.**
   - `describeEffects.test.ts`: `money_out_wins` (`['pay_out', 'private_data']`, not reversible → "Moves money out. Can't be undone."); `charge_reversible` ("Charges money. Can be undone."); `read_only_has_no_suffix` ("Changes nothing."); `private_data_alone_has_no_suffix` (reversible → "Touches private data."); `documents_line` (`['private_data', 'send_message']`, not reversible → "Touches private data. Can't be undone.").
+  - `outcomeWords.test.ts`: `outcome_phrase_with_limit` (`auto` with "$100" → "Automatic up to $100; over $100, ask me first"; `ask` with "$100" → "Ask me first"; `auto` alone → "Automatic").
   - `ruleDiff.test.ts`: `same_reason_new_limit_is_changed` (`max_discount_bp` 1000 → 5000 with `reason` unchanged → one `changed` row, `fields` `['limits']`); `defaults_and_unchanged_are_omitted`; `added_and_removed_rows`; `subject_change_is_who` (a new `person_id` → `['who']`).
   - `tokens.test.ts`: `connector_tokens_are_decorative` (every `connector-*` color is in `DECORATIVE_COLORS` with its reason; `size-side-panel` is 400px).
   - Stories:
     - `Connectors/ConnectorIcon`: `BuiltIn` (the six tiles), `Brands` (Stripe and Google Calendar).
     - `Connectors/ConnectorName`: `BuiltIn`, `Mock`.
-    - `Rules/OutcomeMenu`: `ReadOnly`, `Automatic`, `AskMeFirst`, `Never`.
+    - `Rules/OutcomeMenu`: `ReadOnly`, `Automatic`, `AutomaticWithLimit`, `AskMeFirst`, `Never`.
     - `Rules/RuleRow`: `PaymentLink` (`rv-link`), `Shared` (`sharedChargeCard`), `ReadOnly`.
     - `Rules/ToolRulesCard`: `PaymentLinkOnPayments` (the tool's header, `rv-link` and the shared card), `RefundOnItsPage` (no header; `rv-refund`), `NoFallback`.
     - `Connectors/ConnectorSection`: `Quotes`, `Payments`, `Stripe`, `NeedsReview` (Refund `needs_review`), `AddedJustNow`, `Phone`.
     - `Connectors/ConnectorList`: `RiveraHub` (seven sections), `Phone`.
     - `Rules/AlwaysOnList`: `Default`.
-    - `Rules/ChangeReview`: `TurnOnPayments` (Chen: two "Turned on" rows at "Ask me first"), `RaiseDiscount`, `AddAndRemove`, `TurnOffPayments`, `ChecksFailed`, `ChecksUnavailable`, `Confirming`, `LimitOnly` (no rows, with `hasOtherChanges`).
+    - `Rules/ChangeReview`: `TurnOnPayments` (Chen: two "Turned on" rows at "Ask me first"), `RaiseDiscount`, `AddAndRemove`, `TurnBackOnRefund` (one "Turned on" row for Stripe's Refund at "Ask me first"), `ChecksFailed`, `ChecksUnavailable`, `Confirming`, `LimitOnly` (no rows, with `hasOtherChanges`).
     - `Rules/AskClaudePanel`: `AddPayments` (Chen's owner: "Add Payments, so clients can pay their invoices"; Claude, in serif: "I can add Payments, so clients can pay with a test payment link. Have a look before anything turns on."), `Writing`, `Phone`.
   - Plays:
     - `mock_badge_always_beside_external_names`: `Mock`, `Brands`, `Stripe` and `RiveraHub` show "Mock" beside every "Stripe" and "Google Calendar".
     - `outcome_named_for_screen_readers`: `Automatic` has the button "Automatic. Change the outcome of: Payment links up to $300, checked by the reviewer.".
     - `outcome_menu_by_keyboard`: Tab to the button, then Enter → a menu with "Automatic" checked. Down twice, then Enter → `onChange('never')` once, and focus is back on the button, which still reads "Automatic". Open again, then Escape → closed, focus on the button, no call.
     - `outcome_read_only_without_on_change`: `ReadOnly` has no button.
+    - `limit_reads_automatic_up_to`: `AutomaticWithLimit` and `RuleRow`'s `Shared` read "Automatic up to $100; over $100, ask me first".
     - `shared_rule_says_what_it_covers`: `Shared` shows "Shared rule. Applies to every tool that charges money: Payment link and Charge within a signed limit.".
     - `fallback_and_add_a_rule`: in `PaymentLinkOnPayments`, "Anything else here: ask me." shows and "Add a rule" → `onAddRule` once; `NoFallback` has neither.
     - `section_header_and_rows_are_links`: in `Payments`, the header is a link to its `href` that names "Payments", "Built in" and "2 tools", and each tool row is a link named "{name}: {summary}, {outcome}. Open".
@@ -322,17 +334,17 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
     - `phone_hides_descriptions`: both `Phone` stories, at 390 px, hide the descriptions and counts, put `summary` under the name, and have no horizontal scroll.
     - `always_on_has_no_controls`: no buttons or inputs.
     - `diff_shows_enforced_values`: `RaiseDiscount` has the same reason on both sides, "Discounts up to 10%" before and "Discounts up to 50%" after, and the after line tagged "Changed".
-    - `rows_are_tagged_in_words`: `AddAndRemove`, `TurnOnPayments` and `TurnOffPayments` show each tag's word as text.
+    - `rows_are_tagged_in_words`: `AddAndRemove`, `TurnOnPayments` and `TurnBackOnRefund` show each tag's word as text.
     - `confirm_once`: two clicks → `onConfirm` once.
-    - `confirm_only_when_checked`: in `ChecksFailed` and `ChecksUnavailable`, confirm is disabled under their headings and lines. `TurnOffPayments` passes no checks, so it shows no checks card and its "Turn off Payments" is enabled.
+    - `confirm_only_when_checked`: in `ChecksFailed` and `ChecksUnavailable`, confirm is disabled under their headings and lines.
     - `limit_only_change_keeps_confirm`: `LimitOnly` shows "Your rules stay the same.", "Confirm change" and "Keep my rules", and no "No rules change.".
     - `ask_claude_panel_is_a_log`: in `AddPayments`, an `aside` named "Ask Claude" holds the replies inside a `role="log"` with `aria-live="polite"`. "Close" → `onClose`; Escape → `onClose`; sending "Turn off Payments" → `onSend('Turn off Payments')`.
-- [ ] **Step 2: Run** `cd web && npx vitest run --project unit src/ds/tokens.test.ts src/ds/components/{ConnectorSection,ChangeReview} && npx vitest run --project storybook src/ds/components/{ConnectorIcon,ConnectorName,OutcomeMenu,RuleRow,ToolRulesCard,ConnectorSection,ConnectorList,AlwaysOnList,ChangeReview,AskClaudePanel,Card,SegmentedControl}` → FAIL.
+- [ ] **Step 2: Run** `cd web && npx vitest run --project unit src/ds/tokens.test.ts src/ds/components/{ConnectorSection,ChangeReview,OutcomeMenu} && npx vitest run --project storybook src/ds/components/{ConnectorIcon,ConnectorName,OutcomeMenu,RuleRow,ToolRulesCard,ConnectorSection,ConnectorList,AlwaysOnList,ChangeReview,AskClaudePanel,Card,SegmentedControl}` → FAIL.
 - [ ] **Step 3: Implement** with READMEs, the tokens (`npm run tokens`), the icons, the fixtures and the two story updates. `canvasNote`s:
-  - `RuleRow`'s `Shared` and `ToolRulesCard`'s `PaymentLinkOnPayments`: the board's shared rule can't be a rule card, so the fixture's shared card is a representable one.
+  - `RuleRow`'s `Shared` and `ToolRulesCard`'s `PaymentLinkOnPayments`: the shared rule is an auto card up to $100, shown as "Automatic up to $100; over $100, ask me first", as the boards now draw it.
   - `ChangeReview`'s `RaiseDiscount`: the board shows only the after side of a changed row; a changed rule shows both, because the owner confirms what is enforced.
   - `ConnectorList`'s `RiveraHub`: Rivera keeps Documents, so the hub has six built-in connectors.
-- [ ] **Step 4: Run** the same commands plus `npm run check:ds` → PASS (10 unit tests; 34 story tests, with the Card and SegmentedControl stories still passing).
+- [ ] **Step 4: Run** the same commands plus `npm run check:ds` → PASS (11 unit tests; 35 story tests, with the Card and SegmentedControl stories still passing).
 - [ ] **Step 5: Commit** `git add web && git commit -m "feat(ds): add the rules hub pieces: connector sections, rule rows with outcome menus, the change review and the Ask Claude panel"`.
 
 ### Task 3: Connector and tool pages, adding a connector, and a changed tool
@@ -342,17 +354,23 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
 - Modify: `web/src/ds/index.ts`, `web/src/ds/fixtures/{rivera.ts,chen.ts}` (below)
 
 **Interfaces:**
-- Consumes: Task 2 (`ConnectorView`, `ConnectorIcon`, `ConnectorName`, `OutcomeMenu`, `OUTCOME_WORDS`, `RuleMode`, `ToolRulesCard`, `ChangeReview`, `describeEffects`); `ToolProfile` (Plan 03a Task 2), for the `ToolRowView` `Pick`; Task 0's `scrim` and `shadow-dialog` tokens; Plan 03a's `Card`, `Button`, `IconButton`, `StatusLabel`, `Notice`, `Icon`.
+- Consumes: Task 2 (`ConnectorView`, `ConnectorIcon`, `ConnectorName`, `OutcomeMenu`, `OUTCOME_WORDS`, `outcomePhrase`, `RuleMode`, `ToolRulesCard`, `ChangeReview`, `describeEffects`); `ToolProfile` (Plan 03a Task 2), for the `ToolRowView` `Pick`; Task 0's `scrim` and `shadow-dialog` tokens; Plan 03a's `Card`, `Button`, `IconButton`, `Dialog`, `StatusLabel`, `Notice`, `Icon`.
 - Produces:
   - `Breadcrumb({ items: { label: string; href?: string }[]; linkComponent? })`: a `nav` named "Breadcrumb" holding an ordered list. Every item but the last is a link; the last is plain text with `aria-current="page"`. Between items, "/", the separator the boards draw, `aria-hidden`: "Rules / Stripe / Refund".
-  - `ConnectorHeader({ connector; status: 'on' | 'connected' | 'off'; promise?: { title: string; detail?: string } })`, the top of a connector's page:
+  - `ConnectorHeader({ connector; status: 'on' | 'always_on' | 'connected' | 'off'; promise?: { title: string; detail?: string } })`, the top of a connector's page:
     - `ConnectorIcon` at `page` size and `ConnectorName` as the page's `h1` at `page` size, then `connector.description`.
-    - At the right, the status in words with its dot: handled "On" or "Connected", info "Off".
+    - At the right, the status in words with its dot: handled "On", "Always on" (Verification) or "Connected", info "Off".
     - `promise` shows under the header as `ConnectorPromise`: a card with the `lock` icon, `title` in weight 520 and `detail` in meta (Google Calendar: "Claude sees only when you're busy, never what the event is: no titles, guests or notes."). `ConnectorPromise({ title; detail? })` is also exported from the folder, for `ConnectorSignIn`.
-  - `ConnectionPanel({ connector; details?: { label: string; value: string }[]; consequence: string; onTurnOff: () => void; pending?: boolean })`, the end of a connector's page. `consequence` is the screen's sentence ("Claude stops offering payment links and charges.", "Disconnecting removes its tools from your Desk.").
+  - `ConnectionPanel({ connector; details?: { label: string; value: string }[]; off: { kind: 'turn_off'; consequence: string; stops: { tools: string[]; rules: string[] }; onTurnOff: () => void; pending?: boolean } | { kind: 'always_on'; reason: string } })`, the end of a connector's page. `consequence` is the screen's sentence ("Claude stops offering payment links and charges.", "Disconnecting removes its tools from your Desk."). `stops` holds the names of the connector's tools and the reasons of the rules that stop applying, read by the screen from `RulesView`.
     - Built in: "Turn off {name}", then "{consequence} You'll see the change before it applies. Your rules are kept, so you can add it back." and a secondary "Turn off {name}".
     - External: "Connection", then `details` as a description list (Account, Connected, Customers it can see, Tool definitions; the screen's words, any date already formatted). Then "{consequence} You'll see the change before it applies. Your rules for them are kept in case you connect again." and a secondary "Disconnect".
-    - The button calls `onTurnOff` once and waits (`aria-busy`) until `pending` clears. The screen shows the change in a `ChangeReview` before anything turns off.
+    - The button opens a plain confirm, Plan 03a's `Dialog`, not a proved diff, since turning off only narrows and applies at once:
+      - Title: "Turn off {name}?" or "Disconnect {name}?".
+      - Body: "These tools stop at once:" with `stops.tools` as a list, then "These rules stop applying:" with `stops.rules`, or "None of your rules stop applying." when there are none.
+      - Then "Your rules are kept, so you can add it back." or "Your rules for them are kept in case you connect again.".
+      - Confirm: "Turn off {name}" or "Disconnect". Cancel: "Keep it on" or "Keep it connected".
+      - Confirm calls `onTurnOff` once, and the dialog waits (`aria-busy`) until `pending` clears. Cancel and Escape close it with no call.
+    - `always_on` (Verification) shows "Always on. {reason}" ("It's how Claude confirms a customer before sharing anything private.") and no button.
   - `ToolPageHeader({ name; description; connector; status: ToolStatus; definitionNote?: string; onSimulateChange?: () => void; simulatePending?: boolean })`, the top of a tool's page:
     - `name` as the page's serif `h1`, then `description` (what the tool does and its effects).
     - The source line: `ConnectorIcon` at `inline` size, "From {name}" with its badge (`ConnectorName` at `inline` size), and the status in words with its dot. `enabled`: handled "On", followed by " · {definitionNote}" when given ("Definition unchanged", "Definition reviewed today"). `needs_review`: info "Off until you review a change". `disabled`: info "Off".
@@ -376,10 +394,10 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
     - A radio group named by `question` ("Which calendar shows when you're busy?"), one choice per `choices` (label and detail).
     - "Cancel" → `onCancel`; primary "Continue" → `onContinue(value)`.
     - It asks for no account details: no text field and no password.
-  - `ReviewToolView = { key: string; name: string; description: string; mode: RuleMode; coveredBy: { text: string; mode: RuleMode | 'always_on' }[] }` and `ConnectorReview({ connector; intro?: string; tools: ReviewToolView[]; onChangeOutcome?: (key: string, mode: RuleMode) => void; onTurnOn: () => void; onCancel: () => void; pending?: boolean; error?: string })` (N-Conn-09, N-Conn-11b), the review before anything turns on:
+  - `ReviewToolView = { key: string; name: string; description: string; mode: RuleMode; coveredBy: { text: string; mode: RuleMode | 'always_on'; limit?: string }[] }` and `ConnectorReview({ connector; intro?: string; tools: ReviewToolView[]; onChangeOutcome?: (key: string, mode: RuleMode) => void; onTurnOn: () => void; onCancel: () => void; pending?: boolean; error?: string })` (N-Conn-09, N-Conn-11b), the review before anything turns on:
     - `ConnectorIcon` and the page's `h1` "Review what Claude could do with {name}", with its badge.
     - Built in: "A built-in connector, so there's nothing to sign in to. Nothing runs until you turn it on." External: "Nothing runs until you turn it on." followed by `intro` (the connector's promise).
-    - A card with a row per tool: name and `description`; a line per `coveredBy`, "Covered by your rule: {text} · {Automatic | Ask me first | Never}", or for an always-on line "Covered by your always-on rule: {text}"; and `OutcomeMenu` at `mode`. The screen starts every new tool at "Ask me first"; `onChangeOutcome` makes each outcome a menu.
+    - A card with a row per tool: name and `description`; a line per `coveredBy`, "Covered by your rule: {text} · {outcomePhrase(mode, limit)}", or for an always-on line "Covered by your always-on rule: {text}"; and `OutcomeMenu` at `mode`. The screen starts every new tool at "Ask me first"; `onChangeOutcome` makes each outcome a menu.
     - Primary "Turn it on" → `onTurnOn()` once (`pending` → "Turning on", `aria-busy`), secondary "Cancel", and "You'll see the change to your rules before anything runs."
     - `error` shows the screen's message in an error `Notice`.
   - `ConnectorOfferCard({ connector; toolsLine: string; coverage?: string; action: 'add' | 'connect' | 'turn_off' | 'disconnect' | 'coming_soon'; onReview: () => void })` (N-Conn-12-Chat), Claude's card in the Ask Claude panel. It leads into the same review as the picker, and nothing turns on or off from it.
@@ -409,14 +427,14 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
     - `rivera.ts` gains `recentRequests`, the Refund and Quote rows on N-Conn-05-Refund and N-Conn-06-Quote, and `toolPages`, the `ToolPageHeader` strings for both.
     - `rivera.ts` gains `stripeConnection`, the details on N-Conn-03-Stripe.
     - `rivera.ts` gains `googleCalendar`: the catalog-only connector's `ConnectorView` and its flow on N-Conn-04 and N-Conn-07 to N-Conn-11, with its sign-in choices ("Rivera Plumbing jobs", "Personal"), its review row and its change rows.
-    - `chen.ts` gains `picker`: Payments to add; Quotes, Bookings and Documents added; Google Calendar coming soon; Stripe to connect.
+    - `chen.ts` gains `picker`: Payments to add; Quotes, Bookings, Leads and callbacks, and Documents added; Google Calendar coming soon; Stripe to connect. Verification is never listed, since it is always added.
     - `chen.ts` gains `paymentsReview`: Payment link and Charge within a signed limit, each at "Ask me first", each covered by the always-on "No money moves without your rule or a signed limit".
     - `chen.ts` gains `paymentsOffer`, the card in Chen's Ask Claude panel.
 
 - [ ] **Step 1: Write the stories:**
   - `Navigation/Breadcrumb`: `ToolPage` (Rules / Stripe / Refund).
-  - `Connectors/ConnectorHeader`: `Payments`, `Stripe`, `GoogleCalendar` (with its promise).
-  - `Connectors/ConnectionPanel`: `TurnOffPayments`, `DisconnectStripe`, `Pending`.
+  - `Connectors/ConnectorHeader`: `Payments`, `Verification`, `Stripe`, `GoogleCalendar` (with its promise).
+  - `Connectors/ConnectionPanel`: `TurnOffPayments`, `DisconnectStripe`, `Pending`, `VerificationAlwaysOn`.
   - `Connectors/ToolPageHeader`: `Refund`, `Quote`, `RefundNeedsReview`, `RefundReviewed`, `WithSimulate`.
   - `Connectors/RecentRequests`: `Refund`, `Empty`.
   - `Connectors/ConnectorPicker`: `ChenComingSoon`, `RiveraConnectable`.
@@ -426,12 +444,13 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
   - `Connectors/ToolChangedItem`: `StripeRefund`.
   - `Connectors/ToolReviewCard`: `CreateRefundChanged`, `Sending`, `ChangedAgain`, `NoHash`.
   - `Navigation/Steps`: `ReviewToolsOfFour`, `SetupThirdOfFive`.
-  - `Navigation/SubNav`: `Settings`.
+  - `Navigation/SubNav`: `Settings` (General, Knowledge, Notifications, Channels, Billing; connectors live only under Rules).
   - `Conversation/ToolLabel`: `Memory`, `Website`, `CouldNotRead`.
   - Plays:
     - `breadcrumb_marks_the_page`: two links, then "Refund" with `aria-current="page"`; the separators are hidden from screen readers.
-    - `connector_status_in_words`: `Payments` shows "On" and `Stripe` "Connected", each beside a dot.
-    - `turn_off_once`: in `TurnOffPayments`, two clicks on "Turn off Payments" → `onTurnOff` once, and the text says the change shows before it applies. `DisconnectStripe` has the details list and "Disconnect".
+    - `connector_status_in_words`: `Payments` shows "On", `Verification` "Always on" and `Stripe` "Connected", each beside a dot.
+    - `turn_off_confirms_first`: in `TurnOffPayments`, "Turn off Payments" opens a dialog named "Turn off Payments?" that lists "Payment link" and "Charge within a signed limit" and the rules that stop applying. "Keep it on" closes it with no call. Opening it again and pressing its "Turn off Payments" → `onTurnOff` once, over two clicks. `DisconnectStripe` has the details list, and its dialog reads "Disconnect Stripe?".
+    - `always_on_has_no_turn_off`: `VerificationAlwaysOn` shows "Always on. It's how Claude confirms a customer before sharing anything private." and no button.
     - `simulate_only_when_on`: `WithSimulate` has "Simulate a tool change"; `RefundNeedsReview` and `Quote` (built in) don't.
     - `recent_requests_show_outcomes_in_words`: each row's outcome word beside its dot; `Empty` shows its line.
     - `picker_by_keyboard`: the dialog named "Add a connector" opens with focus on "Add" (Payments). Tab stays inside it. Enter → `onChoose('payments')` once. Escape → `onClose`.
@@ -452,9 +471,10 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
   - `ToolPageHeader`'s `Quote`: a built-in tool has no pinned definition, so it gets no definition note, where the board shows "Definition unchanged".
   - `ConnectorReview`'s `GoogleCalendar`: the board starts the tool at "Automatic", "from your Bookings rule"; every new tool starts at "Ask me first", with the rules that cover it shown.
   - `ConnectorPicker`: a "Close" button, which the board doesn't draw, so the dialog closes by pointer as well as by Escape. The mock line also shows under the coming-soon note.
-  - `ConnectionPanel`'s `DisconnectStripe`: the line says the change shows first, as the owner's decision does.
+  - `ConnectionPanel`'s `DisconnectStripe`: the line says the change shows first, which the plain confirm does.
+  - `ConnectionPanel`'s `VerificationAlwaysOn` and `ConnectorHeader`'s `Verification`: no board draws Verification's page; the owner decided its words.
   - The Google Calendar stories: Google Calendar is catalog-only in the demo, so they show what the components support once it works.
-- [ ] **Step 4: Run** the same command plus `npm run check:ds` → PASS (34 story tests).
+- [ ] **Step 4: Run** the same command plus `npm run check:ds` → PASS (36 story tests).
 - [ ] **Step 5: Commit** `git add web && git commit -m "feat(ds): add connector and tool pages, the add-a-connector flow and the changed-tool review"`.
 
 ### Task 4: Visual check of the owner boards
@@ -623,14 +643,13 @@ Index rules: `--new-index` writes the staged `format.md`'s index shape with its 
 
 The old question 1, whether a tool's review needs the changed tool's new profile, is closed. The signed review (N-Conn-14-Changed-Review) shows no new effects and no "Turn back on with Ask me", so `ToolProfile` needs no new field.
 
-1. **Adding or turning off a built-in connector.** The owner's decision runs both through `POST /tools/confirm`. Three things stand in the way:
-   - Native profiles carry no `definition_sha256`, and the call requires one.
-   - `POST /desks` writes every native profile enabled (Plan 01c), so a Desk can't start without a built-in connector, such as Chen & Co. CPA without Payments.
-   - The starter presets are proved in CI over every native tool, so a Desk that starts with fewer tools has another profiles hash and no shipped report.
-
-   Proposal: `definition_sha256` is null for `source: "native"` and `/tools/confirm` accepts that; the Desk's seed names the built-in connectors it starts with; and the presets are proved for each starting set that setup can produce, or proved live.
-2. **Turning a connector off.** The owner's decision proves the change before it applies. The master turns a tool off at once with no draft, since turning off only narrows. A connector also has several tools, so turning it off is one call per tool and not one transaction. Proposal: keep turning off at once, since it needs no proof, and have the web app show the change first. `/tools/confirm` would then accept a list of tools, so a connector turns off in one transaction.
-3. **A shared rule with an ask limit.** The Payments board's shared example, "Charges over $100 wait for your answer.", is an `ask` card with an amount. `RuleCard` can't express it: limits are auto-only, and above an auto card's limit its hold twin asks. Proposal: no contract change. The boards' example changes, and the web app words an auto card's limit as what asks above it.
+None is open. Three questions raised when Tasks 2–3 were re-specified were answered on 2026-10-29, and the master plan carries the answers:
+1. **Built-in connectors through `/tools/confirm`.** A native tool's `definition_sha256` is its adapter profile's `profile_sha256`. Enabling goes through a proved draft, and any subset of tools proves live at confirm time. In bounded mode the owner sees "Rules can't be checked right now".
+2. **One action per connector.** `POST /tools/confirm {desk_id, tools: [{tool, definition_sha256}], enable}`.
+   - Adding drafts one rules version for the group and proves it, then the usual confirm.
+   - Turning off applies atomically and at once, unproved, with each tool's change ledgered. The web app shows a plain confirm first.
+   - `enable: false` for `native.start_verification` is refused, since Verification is always on.
+3. **The shared-rule example.** It is an `auto` card for `effect:charge` with `max_amount_cents` 10000, whose hold twin holds anything above $100 for the owner. It reads "Automatic up to $100; over $100, ask me first". No mode asks with a limit.
 
 ## Review Ledger
 
@@ -679,3 +698,11 @@ Tasks 2–3 re-specified from the owner-signed Connectors and rules boards (2026
 - **Fixtures and reference boards.** Rivera keeps Documents, since the verified-invoice scenario needs it, so its hub has all six built-in connectors and Stripe. Chen & Co. CPA, adding Payments, is the add-a-built-in example. `REFERENCE_BOARDS` swaps the four replaced boards for the eighteen new ones, re-pointing the two stories that cited N-Rules-Rivera. The new boards render at 1512×982, as AGENTS.md draws boards.
 - **Interfaces.** "Interfaces consumed / produced" now says what the web app (plan 04) passes for each screen.
 - **Open questions.** The old open question 1 is closed. Three new ones cover the master's contracts: native tools through `/tools/confirm`, turning a connector off, and a shared rule with an ask limit.
+
+Answers and owner decisions on the re-specified Tasks 2–3 (2026-10-29):
+- **Built-in connectors.** Native tools go through `POST /tools/confirm` with their adapter profile's `profile_sha256`, so a built-in connector turns on through a proved draft.
+- **One action per connector.** `/tools/confirm` takes a list of tools, so a connector is one action both ways. Adding proves one version for the group in `ChangeReview`. Turning off or disconnecting applies at once, unproved, after `ConnectionPanel`'s plain confirm, which lists the tools that stop and the rules that stop applying. `ChangeReview` loses its turned-off rows and its optional checks (`TurnBackOnRefund` replaces `TurnOffPayments`).
+- **The shared-rule example** is an auto `effect:charge` card up to $100. `outcomePhrase` reads it "Automatic up to $100; over $100, ask me first" (`AutomaticWithLimit`, `limit_reads_automatic_up_to`, `outcome_phrase_with_limit`).
+- **Verification is always on**: "Always on" in its header, `ConnectionPanel`'s `always_on` with the owner's line, and never in the picker (`always_on_has_no_turn_off`).
+- **Connectors live only under Rules**: the `SubNav` story lists no Connectors entry, and the web app's Settings drops its Integrations entry.
+- The three master-plan questions are closed. Task 2 now has 11 unit tests and 35 story tests; Task 3 has 36 story tests.
