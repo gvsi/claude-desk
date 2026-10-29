@@ -192,6 +192,12 @@ def head() -> str:
     return heads[0]
 
 
+def revisions() -> list[str]:
+    """Every revision, oldest first."""
+    script = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini")))
+    return [revision.revision for revision in reversed(list(script.walk_revisions()))]
+
+
 def version(url: URL) -> str:
     with psycopg.connect(libpq_url(url_text(url))) as conn:
         return conn.execute("SELECT version_num FROM alembic_version").fetchone()[0]
@@ -348,6 +354,27 @@ SCHEMAS = ("kernel", "kernel_ro", "app", "mockpay", "procrastinate")
 LENT = (("desk_resolver", "kernel"), ("desk_ro_owner", "kernel_ro"))
 
 
+def lends_left(conn: psycopg.Connection) -> list[str]:
+    """What a lend left behind, seen as the admin connected on `conn`: its SET or INHERIT membership
+    in a role the migrations create, whoever granted it, and CREATE held by a lent owner role on its
+    schema. Empty when every lend was taken back.
+
+    Roles and schemas not created yet are left out, so this runs without error inside a migration's
+    own transaction, after any revision.
+    """
+    memberships = conn.execute("SELECT r.rolname, a.inherit_option, a.set_option FROM pg_auth_members a"
+                               " JOIN pg_roles r ON r.oid = a.roleid"
+                               " WHERE a.member = (SELECT oid FROM pg_roles WHERE rolname = current_user)"
+                               " AND r.rolname = ANY(%s) AND (a.inherit_option OR a.set_option)",
+                               (list(CHAIN_ROLES),)).fetchall()
+    creates = conn.execute("SELECT r.rolname, n.nspname FROM unnest(%s::text[], %s::text[]) AS lent(role, schema)"
+                           " JOIN pg_roles r ON r.rolname = lent.role JOIN pg_namespace n ON n.nspname = lent.schema"
+                           " WHERE has_schema_privilege(r.oid, n.oid, 'CREATE')",
+                           ([role for role, _ in LENT], [schema for _, schema in LENT])).fetchall()
+    return ([f"the admin holds {role} with INHERIT {inherit}, SET {set_}" for role, inherit, set_ in memberships]
+            + [f"{role} has CREATE on {schema}" for role, schema in creates])
+
+
 @pytest.fixture(scope="module")
 def rds_like_admin(scratch) -> tuple[str, URL]:
     """An admin like RDS's master user (LOGIN CREATEROLE CREATEDB, not SUPERUSER) and the fresh
@@ -417,30 +444,37 @@ def test_migrations_reach_head_as_an_admin_without_superuser(rds_like_admin, rol
     object's schema; each migration that changes an owner lends both for the change and takes them
     back, so the admin is left only the grants Postgres gave it, and the owners only their own.
 
+    The admin's run upgrades one revision at a time, in its one transaction, and what the lends left
+    is checked after each: a later migration that lends and takes back the same pair would hide, at
+    head, an earlier one that kept its lend. A superuser's run lends the same way, so the comparison
+    at the end can't see a lend both runs keep.
+
     The superuser run is set up only after the admin's, so on a fresh cluster the admin creates
     every role itself, as on RDS, whatever order the tests run in.
     """
     admin_role, url = rds_like_admin
-    run = run_admin(url, role_passwords)
+    upgrade = desk.ops.admin.command.upgrade
+    left: dict[str, list[str]] = {}                    # revision: what its lends left
+
+    def one_revision_at_a_time(config: Config, revision: str) -> None:
+        for step in revisions():                       # the admin asks for head: every revision, in order
+            upgrade(config, step)
+            left[step] = lends_left(config.attributes["connection"].connection.driver_connection)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(desk.ops.admin.command, "upgrade", one_revision_at_a_time)
+        run = run_admin(url, role_passwords)
     assert run.code == 0, run.stderr
     assert "-> 0001_core" in run.logs
+    assert list(left) == revisions()
+    assert {step: found for step, found in left.items() if found} == {}, "a migration kept what it lent"
     assert version(url) == head()
     for role, password in role_passwords.items():
         assert log_in(url, role, password) == role
     with psycopg.connect(libpq_url(url_text(url))) as conn:
         assert conn.execute("SELECT current_user, rolsuper, rolbypassrls FROM pg_roles"
                             " WHERE rolname = current_user").fetchone() == (admin_role, False, False)
-        # Nothing lent outlives the run, checked directly: a superuser's run lends the same way, so
-        # the comparison below can't see a lend both runs keep.
-        kept = conn.execute("SELECT r.rolname, a.inherit_option, a.set_option FROM pg_auth_members a"
-                            " JOIN pg_roles r ON r.oid = a.roleid"
-                            " WHERE a.member = (SELECT oid FROM pg_roles WHERE rolname = current_user)"
-                            " AND r.rolname = ANY(%s) AND (a.inherit_option OR a.set_option)",
-                            (list(CHAIN_ROLES),)).fetchall()
-        assert kept == [], f"the admin still holds SET or INHERIT on {kept}"
-        for role, schema in LENT:
-            assert not conn.execute("SELECT has_schema_privilege(%s, %s, 'CREATE')",
-                                    (role, schema)).fetchone()[0], f"{role} still has CREATE on {schema}"
+        assert lends_left(conn) == []                  # and once the run has committed
     superuser_url, _ = request.getfixturevalue("first_run")
     assert privileges(url) == privileges(superuser_url)
 
