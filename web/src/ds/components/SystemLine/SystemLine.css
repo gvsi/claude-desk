@@ -1,0 +1,41 @@
+/* SystemLine: a quiet line about the chat, centered between two hairlines of equal length. */
+
+.cd-system-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  min-width: 0;
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+/* Each hairline takes half of the room left, and keeps at least a short stub on a phone. */
+.cd-system-line__rule {
+  flex: 1 1 0;
+  min-width: var(--space-16);
+  height: 1px;
+  background: var(--line-hairline);
+}
+
+/* The canvas's small avatar: initials on the selected fill, beside the person's name. */
+.cd-system-line__initials {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-full);
+  background: var(--bg-selected);
+  color: var(--text-primary);
+  font-size: 9px;
+  line-height: 1;
+  font-weight: 560;
+}
+
+.cd-system-line__text {
+  flex: 0 1 auto;
+  min-width: 0;
+  text-align: center;
+  overflow-wrap: anywhere;
+}

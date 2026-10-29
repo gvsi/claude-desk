@@ -1,0 +1,75 @@
+/* TakeOverBar: who is answering, above the composer: the lines in a size-reading column, and the
+   controls and what the visitor sees in a size-margin column beside them. Below the two columns'
+   width the controls wrap under the lines. */
+
+.cd-take-over {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  column-gap: var(--space-24);
+  row-gap: var(--space-12);
+  min-width: 0;
+}
+
+.cd-take-over__lead {
+  display: flex;
+  flex: 0 1 var(--size-reading);
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.cd-take-over__action {
+  display: flex;
+  flex: 0 1 var(--size-margin);
+  flex-direction: column;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+.cd-take-over__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+
+/* Paused offers two answers: full width, one above the other, as on Today's handoff card. */
+.cd-take-over__buttons--stacked {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+}
+
+.cd-take-over__first,
+.cd-take-over__line {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.cd-take-over__line {
+  color: var(--text-secondary);
+}
+
+/* The mode as a title: "You're in this chat", or the paused line beside its dot. */
+.cd-take-over__first--title {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-8);
+  color: var(--text-primary);
+  font-weight: 520;
+}
+
+/* Centers the 6 px dot on the caption's 17 px first line. */
+.cd-take-over__first--title > .cd-status-dot {
+  margin-top: 5px;
+}
+
+/* Focus lands here only when the button it replaced had it; it is not a control, so no ring. */
+.cd-take-over__first:focus {
+  outline: none;
+}
+
+.cd-take-over__error {
+  flex: 1 0 100%;
+}

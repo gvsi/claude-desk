@@ -1,0 +1,35 @@
+# ConversationListItem
+
+`ConversationListItem` is one conversation in a list: who it is with, when, and its status, as one link to the conversation.
+
+## When to use
+
+- In the Conversations list and in Today's "Live now", one per conversation, each in a list item (`ul` > `li`).
+- Not for a stopped attempt, which is an `AttemptRow`.
+
+## What it shows
+
+- A row link at `radius-control`, at least 48 px tall, padded 6 px by 10 px.
+- First line: the name in `control` type, shown as written (`data-copy="user"`, since a visitor may have given it), then the time at the right in `caption` type, `text-secondary`, with tabular figures.
+- Second line: the status as a `size-dot` dot beside the words that say the same ("Needs you", "Agent"), in `caption` type, `text-secondary`.
+- Each line stays on one line and ends in an ellipsis when it doesn't fit.
+- The conversation open beside the list is `aria-current="true"` on `bg-selected`. Other rows fill with `fill-hover` on hover.
+
+## What the consumer provides
+
+- `name` as the owner's screen names the visitor: their name, "Visitor", "Agent" or "Your preview".
+- `time` as the screen writes it ("12:04 pm"); the design system formats no times.
+- `status` from the screen's one status table: a `StatusTone` for the dot and the words.
+- `href`, the conversation's page, and `current` for the one that is open.
+
+## Props
+
+| Prop | Type | Notes |
+| --- | --- | --- |
+| `name` | `string` | Required. |
+| `time` | `string` | Required. Shown as given. |
+| `status` | `{ tone: StatusTone; text: string }` | Required. The dot is `aria-hidden`; the words carry the status. |
+| `href` | `string` | Required. |
+| `current` | `boolean` | `aria-current="true"` on the selected fill. |
+
+The hover fill changes at `motion-instant`. Nothing moves under reduced motion.

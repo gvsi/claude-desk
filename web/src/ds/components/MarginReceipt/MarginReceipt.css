@@ -1,0 +1,72 @@
+/* MarginReceipt and MarginNote: one quiet line, a 6 px status dot beside a
+   secondary caption, like an editor's note under the message it explains. */
+
+.cd-margin-line {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-8);
+  min-width: 0;
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* Centers the 6 px dot on the caption's 17 px first line. */
+.cd-margin-line__dot {
+  display: flex;
+  flex: none;
+  padding-top: 5px;
+}
+
+.cd-margin-line__text {
+  min-width: 0;
+}
+
+/* On owner screens a line is a button that opens the full trace: no chrome of its own, the line
+   brightens on hover, and the focus ring comes from the base styles. */
+.cd-margin-line--button {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--motion-instant) var(--motion-ease);
+}
+
+.cd-margin-line--button:hover {
+  color: var(--text-primary);
+}
+
+/* The outcome check after a handled line (an executed booking, a paid link), drawn once. */
+.cd-margin-line__check {
+  display: inline-block;
+  margin-left: var(--space-4);
+  vertical-align: -2px;
+  color: var(--status-handled);
+}
+
+.cd-margin-line__check path {
+  stroke-dasharray: 24;
+  stroke-dashoffset: 24;
+  animation: cd-margin-line-draw var(--motion-base) var(--motion-ease-emphasis) forwards;
+}
+
+@keyframes cd-margin-line-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* Reduced motion: no color fade, and the check is drawn from the start. */
+@media (prefers-reduced-motion: reduce) {
+  .cd-margin-line--button {
+    transition: none;
+  }
+
+  .cd-margin-line__check path {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+}

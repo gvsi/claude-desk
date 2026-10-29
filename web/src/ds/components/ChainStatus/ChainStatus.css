@@ -1,0 +1,28 @@
+/* ChainStatus: one line over the Safety ledger, a status dot beside the words, the entry count
+   beside them and the signing key at the end. It wraps on a narrow screen. */
+
+.cd-chain-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4) var(--space-8);
+  min-width: 0;
+}
+
+/* Zero specificity, so the key line's own margin wins. */
+:where(.cd-chain-status) :where(p) {
+  margin: 0;
+}
+
+.cd-chain-status__line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  min-width: 0;
+  color: var(--text-primary);
+}
+
+.cd-chain-status__key {
+  margin-left: auto;
+  color: var(--text-secondary);
+}

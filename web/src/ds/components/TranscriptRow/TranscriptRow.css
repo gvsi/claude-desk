@@ -1,0 +1,43 @@
+/* TranscriptRow and TranscriptHeader: a message in the reading column (at most size-reading wide,
+   the full width of a narrower log), with its receipts attached under it, space-8 below, on the
+   message's side, at every width. Receipts are space-8 apart.
+
+   --cd-row-max caps a row's width: size-reading by default, for the owner's wide content column.
+   A surface whose own column is already the reading width, such as the public page's chat, sets
+   it to 100% so the rows fill that column, edge to edge with its composer. */
+
+.cd-transcript-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--cd-row-max, var(--size-reading));
+  min-width: 0;
+}
+
+.cd-transcript-row__main {
+  min-width: 0;
+}
+
+.cd-transcript-row__margin {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+/* Under a message on the right (a visitor's or an agent's bubble), what is attached sits on the
+   right too: it ends where the bubble ends and is no wider than a bubble can be. Its lines still
+   start together, so their dots stay in one column. Under Claude's and the owner's words, on the
+   left, it starts where they start. */
+.cd-transcript-row:has(> .cd-transcript-row__main > :is(.cd-visitor-message, .cd-agent-message)) > .cd-transcript-row__margin {
+  align-self: flex-end;
+  max-width: 85%;
+}
+
+.cd-transcript-header__caption {
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}

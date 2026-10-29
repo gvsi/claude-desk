@@ -1,0 +1,27 @@
+/* EmptyState: two quiet lines, centered in the space a list will fill. No illustration, no
+   dashed box. */
+
+.cd-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  box-sizing: border-box;
+  padding: var(--space-40) var(--space-16);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.cd-empty-state__title {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.cd-empty-state__body {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cd-empty-state__action {
+  margin-top: var(--space-12);
+}

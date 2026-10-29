@@ -1,0 +1,137 @@
+/* SwitcherMenu: a raised surface with the card border and radius, no shadow. Business rows carry a
+   monogram, the name and how many Desks it has; the current business's Desks sit indented under
+   it, the current one on the selected fill with a check; a hairline, then New business. Rows fill
+   on hover and focus at motion-instant; it appears in place, and nothing moves under reduced
+   motion. The screen positions it beside whatever opened it. */
+
+.cd-switcher-menu {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  box-sizing: border-box;
+  width: calc(var(--size-sidebar) + var(--space-16));
+  max-width: calc(100vw - var(--space-32));
+  padding: var(--space-8);
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-card);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+.cd-switcher-menu__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: var(--size-nav-row);
+  margin: 0;
+  padding: var(--space-6) var(--space-8);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--motion-instant) var(--motion-ease);
+}
+
+.cd-switcher-menu__item:hover,
+.cd-switcher-menu__item:focus-visible {
+  background: var(--fill-hover);
+}
+
+.cd-switcher-menu__item[aria-disabled='true'] {
+  cursor: default;
+}
+
+/* A business row is as tall as its two lines and the monogram. */
+.cd-switcher-menu__business {
+  min-height: calc(var(--size-control) + var(--space-16));
+}
+
+/* The monogram: initials on the selected fill, a rounded square. */
+.cd-switcher-menu__monogram {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--size-avatar);
+  height: var(--size-avatar);
+  border-radius: var(--radius-control);
+  background: var(--bg-selected);
+  color: var(--text-primary);
+}
+
+/* Two classes, so the weight wins over .cd-type-count whatever order the stylesheets load in. */
+.cd-switcher-menu .cd-switcher-menu__monogram {
+  font-weight: 520;
+}
+
+.cd-switcher-menu__text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.cd-switcher-menu__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cd-switcher-menu__caption,
+.cd-switcher-menu__group-label {
+  color: var(--text-secondary);
+}
+
+.cd-switcher-menu__check {
+  flex: none;
+}
+
+/* The current business's Desks, indented so their names line up with the business name. */
+.cd-switcher-menu__desks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-left: calc(var(--size-avatar) + var(--space-10));
+}
+
+.cd-switcher-menu__group-label {
+  display: block;
+  padding: var(--space-2) var(--space-8);
+}
+
+/* The current Desk: the selected fill, as in the sidebar's Desk list. */
+.cd-switcher-menu__desk[aria-checked='true'],
+.cd-switcher-menu__desk[aria-checked='true']:hover,
+.cd-switcher-menu__desk[aria-checked='true']:focus-visible {
+  background: var(--bg-selected);
+}
+
+.cd-switcher-menu__separator {
+  margin: var(--space-4) 0;
+  border-top: 1px solid var(--line-hairline);
+}
+
+/* New business: a plus in the monogram's place, so its words line up with the names above. */
+.cd-switcher-menu__new-icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--size-avatar);
+  height: var(--size-avatar);
+  color: var(--text-secondary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cd-switcher-menu__item {
+    transition: none;
+  }
+}

@@ -1,0 +1,25 @@
+# Switch
+
+`Switch` turns one setting on or off, as a row with its label, a line saying what "on" means, and a neutral track.
+
+## When to use
+
+- A setting that takes effect at once and can be turned back: "Answering" in the sidebar, "Customers can see this" on a knowledge note.
+- Not for a choice between named options (use `SegmentedControl`), and not for an action that needs confirming (use a `Button`, then a `Dialog`).
+
+## What the consumer provides
+
+- `label`, the setting's name. It is the switch's accessible name.
+- `description`, one line saying what "on" means ("Claude answers under your rules"). It is the accessible description, so the name stays short.
+- `checked` and `onChange`. The switch is controlled: it calls `onChange` with the new value and shows the `checked` the screen passes back, so a screen that is still saving can keep the old value until the save lands.
+
+## Props
+
+| Prop | Type | Notes |
+| --- | --- | --- |
+| `label` | `string` | Required; `.cd-type-control`. |
+| `description` | `string` | `.cd-type-caption` in `text-secondary`; `aria-describedby`. |
+| `checked` | `boolean` | Required; `aria-checked`. |
+| `onChange` | `(checked: boolean) => void` | Required. Click, Enter and Space all call it. |
+
+The row is a `button` with `role="switch"` and fills its container's width. On: a `button-primary` track with a `bg-app` knob at the end. Off: a `fill-secondary` track with a `text-secondary` knob at the start, so the state reads from the knob's place and contrast, not from color alone. The row takes `fill-hover` on hover, and the knob slides at `motion-fast`; nothing moves under reduced motion.
