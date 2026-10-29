@@ -118,6 +118,10 @@ describe('design tokens', () => {
     add(marks, ['bg-app', 'bg-panel', 'bg-surface', 'bg-selected'], 3);
     add(marks, ['fill-card'], 3, 'bg-app');
     add(['clay'], ['bg-app', 'bg-panel'], 3);
+    // The switch: its track when on, its knob on the track, on or off.
+    add(['button-primary'], ['bg-app', 'bg-panel'], 3);
+    add(['bg-app'], ['button-primary'], 3);
+    add(['text-secondary'], ['fill-secondary'], 3, 'bg-panel');
 
     // Every required pair is listed, at no lower a minimum, so dropping one can't pass.
     for (const want of required) {

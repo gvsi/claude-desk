@@ -20,7 +20,30 @@ export {
   type StatusTone,
 } from './components/StatusDot/StatusDot.tsx';
 
+export { Notice, type NoticeProps, type NoticeTone } from './components/Notice/Notice.tsx';
+export {
+  CHAT_ENDED_COPY,
+  NEW_CHAT_LABEL,
+  RATE_LIMITED_COPY,
+  UNREACHABLE_COPY,
+  errorCopy,
+  evErrorCopy,
+  type CopyLanguage,
+  type CopyPair,
+} from './components/Notice/errorCopy.ts';
+export { EmptyState, type EmptyStateProps } from './components/EmptyState/EmptyState.tsx';
+
+// Controls
+export { Switch, type SwitchProps } from './components/Switch/Switch.tsx';
+export {
+  SegmentedControl,
+  type SegmentedControlProps,
+  type SegmentedOption,
+} from './components/SegmentedControl/SegmentedControl.tsx';
+
 // Layout
+export { Card, type CardProps } from './components/Card/Card.tsx';
+export { SectionHeader, type SectionHeaderProps } from './components/SectionHeader/SectionHeader.tsx';
 export { Mark, Wordmark, type MarkProps, type WordmarkProps } from './components/Mark/Mark.tsx';
 export { MARK_GEOMETRY } from './components/Mark/markGeometry.ts';
 export { ConceptFooter, type ConceptFooterProps } from './components/ConceptFooter/ConceptFooter.tsx';

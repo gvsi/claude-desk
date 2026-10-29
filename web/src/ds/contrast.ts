@@ -110,6 +110,9 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = Object.freeze([
   ...pairs(MARKS, SURFACES, 3, 'Focus rings and status dots on the app, panels, raised surfaces and the selected row.'),
   ...pairs(MARKS, ['fill-card'], 3, 'Focus rings and status dots inside cards.', 'bg-app'),
   ...pairs(['clay'], ['bg-app', 'bg-panel'], 3, 'The Claude Desk mark in the sidebar and on the public page.'),
+  ...pairs(['button-primary'], ['bg-app', 'bg-panel'], 3, 'The switch track when on, on a page and in the sidebar.'),
+  ...pairs(['bg-app'], ['button-primary'], 3, 'The switch knob when on, against its track.'),
+  ...pairs(['text-secondary'], ['fill-secondary'], 3, 'The switch knob when off, against its track in the sidebar.', 'bg-panel'),
 ]);
 
 export const DECORATIVE_COLORS: Readonly<Record<string, string>> = Object.freeze({

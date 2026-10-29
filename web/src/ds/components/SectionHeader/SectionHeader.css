@@ -1,0 +1,32 @@
+/* SectionHeader: a sans section title with an optional count, and a quiet caption at the right
+   that drops under the title, left-aligned, when the line is too narrow for both. */
+
+.cd-section-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--space-16);
+  row-gap: var(--space-4);
+  min-width: 0;
+}
+
+/* Grows to fill the line, which keeps the caption at the right while they share it. */
+.cd-section-header__title {
+  display: flex;
+  flex: 1 0 auto;
+  align-items: center;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+.cd-section-header__heading {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.cd-section-header__caption {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin: 0;
+  color: var(--text-secondary);
+}

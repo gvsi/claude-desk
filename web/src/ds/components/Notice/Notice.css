@@ -1,0 +1,39 @@
+/* Notice: a dot and one meta line, with the next step at the right. No fill, no border and no
+   colored text: the words say what happened, the dot only echoes them. */
+
+.cd-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--space-16);
+  row-gap: var(--space-8);
+  min-width: 0;
+}
+
+/* Grows to fill the line, which keeps the action at the right while they share it; when the line
+   is too narrow the action drops under the words. */
+.cd-notice__message {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: flex-start;
+  gap: var(--space-8);
+  min-width: 0;
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* The dot sits on the middle of the first line: (18 px line - 6 px dot) / 2. */
+.cd-notice__message > .cd-status-dot {
+  margin-top: var(--space-6);
+}
+
+/* An error asks for something, so its words are in the primary text color. */
+.cd-notice--error .cd-notice__message {
+  color: var(--text-primary);
+}
+
+/* A link in the action takes the line's meta size; a Button keeps its own control type. */
+.cd-notice__action {
+  flex: none;
+}
