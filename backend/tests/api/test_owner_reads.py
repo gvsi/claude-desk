@@ -7,8 +7,9 @@ dated, as desk_admin, to the moment they stand for. Times are the business's: Ri
 America/Los_Angeles.
 """
 
+import asyncio
 import itertools
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -17,6 +18,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from procrastinate.testing import InMemoryConnector
+from sqlalchemy import text as sql
 
 from desk.api.kernel_client import CredentialView, KernelFailed
 from desk.api.main import create_app
@@ -782,6 +784,50 @@ async def test_owner_transcript_adds_whispers_and_translations(app, browser, fak
     for reader, session_id in ((other, ids.session_id), (owner, "no-such-session")):
         missing = await reader.get(f"conversations/{session_id}")
         assert (missing.status_code, missing.json()) == (404, {"error": "not_found"})
+
+
+async def until(ready: Callable[[], bool], timeout: float = 5.0) -> None:
+    async def wait() -> None:
+        while not ready():
+            await asyncio.sleep(0.01)
+
+    await asyncio.wait_for(wait(), timeout)
+
+
+async def test_owner_transcript_cursor_never_skips_a_row(app, browser, fake, kernel_http, engine, db):
+    owner = await new_owner(app, browser, fake, kernel_http)
+    ids = (await guest(kernel_http, fake, owner)).ids
+    seen: list[int] = []
+
+    async def poll() -> None:
+        after = max(seen, default=0)
+        read = await owner.get(f"conversations/{ids.session_id}", after=after)
+        seen.extend(item["n"] for item in read.json()["items"])
+
+    async with engine.connect() as first, engine.connect() as second:
+        second_pid = (await second.execute(sql("SELECT pg_backend_pid()"))).scalar_one()
+        await second.commit()
+        numbered_first = await append_message(first, ids, "visitor_text", text="Is anyone there?")
+        appending = asyncio.create_task(append_message(second, ids, "visitor_text", text="Hello?"))
+
+        def blocked() -> bool:
+            return bool(db.execute("SELECT count(*) FROM pg_locks WHERE pid = %s AND NOT granted",
+                                   (second_pid,)).fetchone()[0])
+
+        # The second row either has its number already (nothing orders the two) or waits for the first to commit.
+        await until(lambda: appending.done() or blocked())
+        if appending.done():
+            await second.commit()                         # the second-numbered row commits first
+        await poll()
+        await first.commit()
+        numbered_second = await appending
+        await poll()
+        await second.commit()
+        await poll()
+
+    assert numbered_first < numbered_second
+    assert seen == [numbered_first, numbered_second]       # each row seen once, in order
+
 
 
 async def test_owner_reads_are_copy_scoped(app, browser, fake, kernel_http, engine, db, clock):

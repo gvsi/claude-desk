@@ -4,6 +4,13 @@ Rows are never edited or deleted. The only later writes are a pending row's plac
 (`model_context`, `model_seq`, set once), a pending row's `wake` cleared when a paused session hands off
 (`clear_wake`), and an owner translation. Every function runs in the caller's transaction and never commits.
 
+`n` is the transcript cursor the owner polls with (`?after=n`), so a session's rows must commit in the order of their
+`n`: `append_message` takes the session's events lock (`lock_events`, the one `sse.append_event` takes) before it
+inserts, and holds it until the caller's transaction ends. A later row of the session waits for an earlier one to
+commit, so a poll never sees a row while one numbered before it is still to come. The lock order is the run lock
+(`deliver.run_lock`), then the events lock: a transaction that appends a message and then delivers takes the run lock
+before its first append.
+
 What the model sees (Plan 02a, "Transcript contract"):
 
 - A model context is the session's rows with a `model_seq` in the current `model_context`, in order. It
@@ -128,6 +135,12 @@ def lock_key(name: str) -> int:
     return int.from_bytes(hashlib.sha256(name.encode()).digest()[:8], "big", signed=True)
 
 
+async def lock_events(conn: AsyncConnection, session_id: str) -> None:
+    """The session's events lock, held until the transaction ends: its SSE events take their `seq`, and its transcript
+    rows their `n`, one transaction at a time."""
+    await conn.execute(select(func.pg_advisory_xact_lock(lock_key("events:" + session_id))))
+
+
 async def _lock_transcript(conn: AsyncConnection, session_id: str) -> None:
     """Serialize the session's `model_seq` assignments until the transaction ends."""
     await conn.execute(select(func.pg_advisory_xact_lock(lock_key("transcript:" + session_id))))
@@ -163,10 +176,10 @@ async def _insert(conn: AsyncConnection, ids: Ids, **values: Any) -> int:
 
 async def append_message(conn: AsyncConnection, ids: Ids, kind: str, *, state: str | None = None,
                          **columns: Any) -> int:
-    """Append a transcript row and return its `n`. A row the model will see is written with its frozen block
-    and waits for the next model call. `state` (the decision's) is required for an `action_update`, whose
-    `ref_id` is the decision and `text` its `visitor_plain`. Context, tool-change and model rows have their
-    own functions."""
+    """Append a transcript row and return its `n`, under the session's events lock (module docstring). A row the
+    model will see is written with its frozen block and waits for the next model call. `state` (the decision's) is
+    required for an `action_update`, whose `ref_id` is the decision and `text` its `visitor_plain`. Context,
+    tool-change and model rows, which no reader polls, have their own functions."""
     spec = ROW_KINDS.get(kind)
     if spec is None:
         raise ValueError(f"append_message doesn't write {kind!r} rows")
@@ -183,6 +196,7 @@ async def append_message(conn: AsyncConnection, ids: Ids, kind: str, *, state: s
         raise ValueError("only an action_update has a state")
     if kind == "delivered" and (values["author"] not in DELIVERY_AUTHORS or values["blocks"] is None):
         raise ValueError("a delivered row has blocks and an author: claude, owner or desk")
+    await lock_events(conn, ids.session_id)
     return await _insert(conn, ids, kind=kind, visibility=spec.visibility,
                          model_content=_frozen_block(kind, values, state), **values)
 

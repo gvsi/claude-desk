@@ -2,9 +2,10 @@
 
 Each session's SSE events carry a `seq`, gapless per session, which is the SSE `id`: `append_event` takes
 the session's events lock, writes `max + 1` and notifies `desk_run_events` with the session ID, all in the
-caller's transaction, so a reader never sees a later event before an earlier one. The locks are taken in one
-order, the run lock (`deliver.run_lock`) before the events lock: `deliver()` takes both, so a transaction that
-emits and also delivers takes the run lock before its first `emit`. Only `deliver()` writes
+caller's transaction, so a reader never sees a later event before an earlier one. `store.append_message` takes the
+same lock, so the session's transcript rows commit in `n` order too. The locks are taken in one order, the run lock
+(`deliver.run_lock`) before the events lock: `deliver()` takes both, so a transaction that emits or appends a message
+and also delivers takes the run lock before its first `emit` or append. Only `deliver()` writes
 the four signed events (message, receipt, held, resolved); `emit` writes the other seven. Control rows
 (`run_resumable`, `decision_due`, `decision_pending`) are work for the next request that holds the
 session's credential, claimed once each; metric rows record reveal and turn timings.
@@ -34,7 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
 from desk.api.metrics import metric_row
-from desk.api.store import Ids, lock_key
+from desk.api.store import Ids, lock_events
 from desk.db.models import RunEvent
 from desk.db.session import libpq_url
 from desk.events import SseEvent
@@ -58,7 +59,7 @@ async def _notify(conn: AsyncConnection, session_id: str) -> None:
 async def append_event(conn: AsyncConnection, ids: Ids, event: BaseModel) -> int:
     """Publish an SSE event to the session; returns its `seq`. Only deliver() and emit() call this."""
     event = _EVENT.validate_python(event.model_dump())
-    await conn.execute(select(func.pg_advisory_xact_lock(lock_key("events:" + ids.session_id))))
+    await lock_events(conn, ids.session_id)
     last = (await conn.execute(select(func.max(RUN_EVENTS.c.seq)).where(
         RUN_EVENTS.c.session_id == ids.session_id, RUN_EVENTS.c.kind == "sse"))).scalar_one()
     seq = 1 if last is None else last + 1
