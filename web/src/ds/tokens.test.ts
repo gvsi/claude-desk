@@ -274,8 +274,32 @@ describe('design tokens', () => {
     expect(() => pairContrast({ fg: 'text-primary', ground: 'bg-app', over: 'bg-app', opacity: 0 })).toThrow(/opacity/);
   });
 
+  test('connector_tokens_are_decorative', () => {
+    // A connector's brand tile: the light tile, and each brand mark's own colors, with nothing read on them.
+    const expected = {
+      'connector-tile-brand': '#ffffff',
+      'connector-stripe': '#635bff',
+      'connector-google-blue': '#4285f4',
+      'size-side-panel': '400px',
+    };
+    const actual = Object.fromEntries(Object.keys(expected).map((name) => [name, tokenValue(name)]));
+    expect(actual).toEqual(expected);
+
+    const connectorColors = colorNames.filter((name) => name.startsWith('connector-'));
+    expect(connectorColors.sort()).toEqual(['connector-google-blue', 'connector-stripe', 'connector-tile-brand']);
+    for (const name of connectorColors) {
+      expect(DECORATIVE_COLORS[name], `${name} is decorative`).toBe("A third-party brand mark beside its name; nothing is read on it.");
+    }
+    // None of them is a ground or a color in a contrast pair: nothing is read on them.
+    const paired = new Set(CONTRAST_PAIRS.flatMap((p) => [p.fg, p.ground, p.over, p.under]));
+    expect(connectorColors.filter((name) => paired.has(name))).toEqual([]);
+  });
+
   test('every_color_token_is_classified', () => {
     expect(Object.keys(DECORATIVE_COLORS).sort()).toEqual([
+      'connector-google-blue',
+      'connector-stripe',
+      'connector-tile-brand',
       'illustration-arc',
       'illustration-line',
       'line-card',

@@ -25,7 +25,8 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 - Use `accent-blue` only for links, the focus ring and selection. Never put text on it and never use it as decoration.
 - Show status only as a `size-dot` dot or a thin bar in `status-handled` (handled or allowed), `status-held` (held, needs you), `status-refused` (refused or blocked) or `status-info` (a hollow dot), always beside words that say the same thing. Never a colored tile, a filled badge or colored text.
 - Use `clay` only inside the Claude Desk mark, and as the field behind the first-visit intro's illustration.
-- The intro illustration's cards (`illustration-card`, with `illustration-ink`, `illustration-ink-secondary`, `illustration-avatar`, `illustration-line` and `illustration-handled`) are the only light surface in the product. They are decorative and hidden from assistive tech, and nothing else uses these colors.
+- The intro illustration's cards (`illustration-card`, with `illustration-ink`, `illustration-ink-secondary`, `illustration-avatar`, `illustration-line` and `illustration-handled`) are one of the product's two light surfaces. They are decorative and hidden from assistive tech, and nothing else uses these colors.
+- A connector's brand tile is the one light surface besides the intro illustration's cards: a third-party connector (Stripe, Google Calendar) shows its own mark on `connector-tile-brand`, in its brand's colors (`connector-stripe`, `connector-google-blue`), always beside its name and its Mock badge. The tile is decorative and hidden from assistive tech, nothing is read on it, and nothing else uses these colors. Built-in connectors keep the line icons on `fill-secondary`.
 
 ### Brand colors on the public page
 
@@ -44,7 +45,7 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 
 - Space with the steps `space-2` to `space-40`. Pad cards with `space-16` to `space-20`; pad content with `space-40` at the sides on desktop and `space-16` on a phone.
 - Lay out the owner app with a `size-sidebar` sidebar and content no wider than `size-content`. A conversation is a `size-reading` column, with each message's receipts attached under it.
-- Make controls `size-control` tall and a screen's main action `size-control-main`; nav rows are `size-nav-row`, icons `size-icon`, avatars `size-avatar`, and the public page's brand header `size-brand-header`. The first-visit intro dialog is `size-intro` wide, its illustration half `size-intro-illustration`.
+- Make controls `size-control` tall and a screen's main action `size-control-main`; nav rows are `size-nav-row`, icons `size-icon`, avatars `size-avatar`, and the public page's brand header `size-brand-header`. The first-visit intro dialog is `size-intro` wide, its illustration half `size-intro-illustration`. The Ask Claude panel beside a page is `size-side-panel` wide.
 - Round controls with `radius-control`; cards, dialogs and bubbles with `radius-card`; the composer with `radius-composer`; pills, chips, switches and avatars with `radius-full`.
 - Use `shadow-composer` on the composer and nowhere else. The first-visit intro dialog sits over `scrim` and lifts with `shadow-dialog`.
 
@@ -131,7 +132,7 @@ The mark in `clay` reads 6.5 on `bg-app`, 6.0 on `bg-panel` and 5.5 on `bg-surfa
 On the intro illustration's light cards, `illustration-ink` reads 16.3 and `illustration-ink-secondary` 5.4 on `illustration-card`, and `illustration-ink` reads 13.1 on `illustration-avatar`. The check and the receipt dots in `illustration-handled` read 4.9 (3:1).
 
 - Don't put `text-tertiary` or a link on `fill-secondary-hover`: those pairs aren't listed.
-- `line-hairline`, `line-card`, `line-control`, `line-control-hover`, `scrim`, `illustration-line` and `illustration-arc` are decorative (`DECORATIVE_COLORS`): they separate, dim or outline things that are identified otherwise, or carry nothing. `line-control` is flagged: it is 2.0:1 on `bg-app`, under the 3:1 for control borders, which is acceptable only because a chip or pill is identified by its own text. Never make an outline the only cue that something is a control.
+- `line-hairline`, `line-card`, `line-control`, `line-control-hover`, `scrim`, `illustration-line`, `illustration-arc` and the connector brand colors (`connector-tile-brand`, `connector-stripe`, `connector-google-blue`) are decorative (`DECORATIVE_COLORS`): they separate, dim or outline things that are identified otherwise, or carry nothing. `line-control` is flagged: it is 2.0:1 on `bg-app`, under the 3:1 for control borders, which is acceptable only because a chip or pill is identified by its own text. Never make an outline the only cue that something is a control.
 - Show focus with a solid 2 px `accent-blue` outline at a 2 px offset on every focusable element; the base stylesheet sets it. The composer shows `ring-composer` while its text box has focus, solid too, because a translucent ring falls under 3:1; a button inside the composer shows its own ring instead, so only one ring ever shows.
 - Never show status by color alone: a dot always sits beside words that say the same thing, and the dot is `aria-hidden`.
 - Put replies and receipts inside the transcript's `role="log"` so screen readers announce them. Chat, approvals and take-over all work from the keyboard.
