@@ -2,7 +2,9 @@
  * Source guards for the design system. They scan only code that runs in a browser: component
  * sources, icons, the package index, base styles and the artifact's own files. Stories, tests,
  * fixtures, references, foundations, the token sources and contrast tables are exempt, because
- * they are where raw values and sample data are meant to live.
+ * they are where raw values and sample data are meant to live. Two guards read further:
+ * `no_invisible_characters_in_any_file` reads every text file, and `danger_only_for_refusing_answers`
+ * every file but the docs, so a story or fixture can't show the red look on anything but a refusal.
  *
  * Each guard first proves its matcher on a known-bad sample, so it can't pass by matching nothing.
  */
@@ -101,6 +103,46 @@ function mayUseClay(file: string): boolean {
   return CLAY_FOLDERS.some((folder) => file.startsWith(folder));
 }
 
+// The danger buttons' tokens, as custom properties or by name: "--button-danger-fill",
+// 'button-danger-text'. The red look is only for answers that refuse.
+const DANGER_TOKEN = /(?<![\w-])(?:--)?button-danger(?:-[a-z0-9]+)*(?!\w)/g;
+
+// The only files that may name them: Button's styles, the token sources, the contrast table and the token tests.
+const DANGER_TOKEN_FILES: readonly string[] = ['components/Button/Button.css', 'tokens.json', 'tokens.css', 'contrast.ts', 'tokens.test.ts'];
+
+// A danger button asked for as a `variant` prop or key, by the name only a Button variant has, or by its class.
+const DANGER_VARIANT = /\bvariant\s*[:=]\s*\{?\s*(['"`])danger(?:-ghost)?\1|(['"`])danger-ghost\2|\bcd-button--danger(?:-ghost)?\b/g;
+const DANGER_LITERAL = /(['"`])danger\1/g;
+
+// The only folders that may ask for one: Button itself, and ApprovalCard's "Deny this time" and "Deny always".
+const DANGER_VARIANT_FOLDERS = ['components/Button/', 'components/ApprovalCard/'] as const;
+
+function mayUseDangerTokens(file: string): boolean {
+  return DANGER_TOKEN_FILES.includes(file);
+}
+
+function mayUseDangerVariants(file: string): boolean {
+  return DANGER_VARIANT_FOLDERS.some((folder) => file.startsWith(folder));
+}
+
+/**
+ * Each place a source asks for a danger button. A file that types values as `ButtonVariant` can
+ * also pick one through a map or a variable, so there a bare 'danger' counts too; elsewhere it is
+ * another component's word, such as Dialog's danger tone, which keeps its buttons neutral.
+ */
+function dangerVariants(text: string): string[] {
+  const asked = [...text.matchAll(DANGER_VARIANT)];
+  const hits = asked.map((m) => m[0]);
+  if (/\bButtonVariant\b/.test(text)) {
+    const counted = (index: number) => asked.some((m) => index >= m.index && index < m.index + m[0].length);
+    for (const m of text.matchAll(DANGER_LITERAL)) if (!counted(m.index)) hits.push(m[0]);
+  }
+  return hits;
+}
+
+/** This file, as `everyTextFile` names it: its known-bad samples are not uses. */
+const THIS_FILE = path.relative(DS, fileURLToPath(import.meta.url)).split(path.sep).join('/');
+
 // A number with a time unit ("200ms", ".2s", "0s", "-200ms"), not part of a name like "space-2s".
 const RAW_DURATION = /(?<![\w.])(?<!\w-)\d*\.?\d+(?:ms|s)\b/g;
 
@@ -197,6 +239,42 @@ describe('design system source guards', () => {
     expect(mayUseClay('components/Sidebar/Sidebar.css')).toBe(false);
     const outsideTheAllowlist = sources.filter(({ file }) => !mayUseClay(file));
     expect(findAll(outsideTheAllowlist, matches(CLAY))).toEqual([]);
+  });
+
+  it('danger_only_for_refusing_answers', () => {
+    // The tokens by custom property or by name; Button's class and longer names that only contain the words aren't tokens.
+    expect(matches(DANGER_TOKEN)('background: var(--button-danger-fill); color: var(--button-danger-text);')).toEqual([
+      '--button-danger-fill',
+      '--button-danger-text',
+    ]);
+    expect(matches(DANGER_TOKEN)("tokenValue('button-danger-fill-hover')")).toEqual(['button-danger-fill-hover']);
+    expect(matches(DANGER_TOKEN)('.cd-button--danger {} --button-dangerous: 1; --my-button-danger: 1;')).toEqual([]);
+    // A danger button however a source asks for one.
+    expect(dangerVariants('<Button variant="danger">Delete</Button>')).toEqual(['variant="danger"']);
+    expect(dangerVariants("args: { variant: 'danger-ghost', size: 'main' }")).toEqual(["variant: 'danger-ghost'"]);
+    expect(dangerVariants("<Button variant={'danger'} />")).toEqual(["variant={'danger'"]);
+    expect(dangerVariants('<a className="cd-button cd-button--danger-ghost">')).toEqual(['cd-button--danger-ghost']);
+    expect(dangerVariants("const quiet = 'danger-ghost';")).toEqual(["'danger-ghost'"]);
+    expect(dangerVariants("const look: ButtonVariant = 'danger';")).toEqual(["'danger'"]);
+    expect(dangerVariants("const look: ButtonVariant = 'secondary'; <Button variant='danger' />")).toEqual(["variant='danger'"]);
+    // Dialog's danger tone adds a refused dot and keeps its buttons neutral: not a danger button.
+    expect(dangerVariants("tone?: 'default' | 'danger'; {tone === 'danger' ? <StatusDot tone=\"refused\" /> : null}")).toEqual([]);
+    // The allowlists: two whole folders for the buttons, five files for the tokens.
+    expect(mayUseDangerVariants('components/ApprovalCard/ApprovalCard.stories.tsx')).toBe(true);
+    expect(mayUseDangerVariants('components/ButtonGroup/ButtonGroup.tsx')).toBe(false);
+    expect(mayUseDangerVariants('components/Dialog/Dialog.tsx')).toBe(false);
+    expect(mayUseDangerTokens('components/Button/Button.css')).toBe(true);
+    expect(mayUseDangerTokens('components/Button/Button.tsx')).toBe(false);
+    expect(mayUseDangerTokens('components/ApprovalCard/ApprovalCard.css')).toBe(false);
+
+    // Every file but the docs, which name the tokens and variants to explain them, and this file's samples.
+    const code = everyTextFile().filter(({ file }) => !file.endsWith('.md') && file !== THIS_FILE);
+    expect(code.map(({ file }) => file)).not.toContain('guards.test.ts');
+    // The allowed files do use them, so the matchers read the code as it is written.
+    expect(findAll(code.filter(({ file }) => mayUseDangerTokens(file)), matches(DANGER_TOKEN)).length).toBeGreaterThan(0);
+    expect(findAll(code.filter(({ file }) => mayUseDangerVariants(file)), dangerVariants).length).toBeGreaterThan(0);
+    expect(findAll(code.filter(({ file }) => !mayUseDangerTokens(file)), matches(DANGER_TOKEN))).toEqual([]);
+    expect(findAll(code.filter(({ file }) => !mayUseDangerVariants(file)), dangerVariants)).toEqual([]);
   });
 
   it('no_raw_durations', () => {
