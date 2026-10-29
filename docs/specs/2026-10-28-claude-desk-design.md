@@ -156,7 +156,7 @@ Claude only proposes; code decides what runs and what gets said, and anything he
 
 **Direction:** a sibling app of claude.ai (same conventions as claude.ai and Claude Design, its own small identity, a concept label, no Claude logo); dark mode only; calm and roomy; a little delight in live presence, moments of trust and outcomes, none loud. Grounded in a read-only study of claude.ai's design conventions. It replaces an earlier glow-heavy look that read as generic AI styling.
 
-**Design system v2 (locked):** Claude Design's warm dark family (app #1C1B19, panel #222220, surface #2A2927); inverted-neutral primary buttons; color only for meaning (blue links/focus, sage handled, gold held, rose refused); clay only in the Claude Desk mark. Source Serif 4 for page titles, the greeting and everything Claude says; Hanken Grotesk at light weights for the interface. claude.ai's sidebar and spacing, 8/12/16 radii, hairlines instead of shadows, 60–200ms motion. Signature element: margin receipts, where every checkpoint result sits beside the transcript as a quiet annotation.
+**Design system v2 (locked):** Claude Design's warm dark family (app #1C1B19, panel #222220, surface #2A2927); inverted-neutral primary buttons; color only for meaning (blue links/focus, sage handled, gold held, rose refused); clay only in the Claude Desk mark, with one exception: clay may fill the right half of the first-visit intro dialog, whose illustration is light cards on clay (decorative, hidden from assistive tech, and the product's only light surface). Source Serif 4 for page titles, the greeting and everything Claude says; Hanken Grotesk at light weights for the interface. claude.ai's sidebar and spacing, 8/12/16 radii, hairlines instead of shadows, 60–200ms motion. Signature element: margin receipts, where every checkpoint result sits beside the transcript as a quiet annotation.
 
 - **Copy is literal.** Door metaphors in copy ("knock as a stranger") don't work.
 - **Concept label (Claude's call):** "Concept prototype by Giovanni Alcantara, not an Anthropic product". No Claude or Anthropic logos.
@@ -167,7 +167,8 @@ Claude only proposes; code decides what runs and what gets said, and anything he
 - Hosted at a public URL behind a shared passcode, with rate limits per visitor.
 - Each passcode session gets its own fresh copy of the Rivera Plumbing demo, tied to a browser cookie (no login accounts).
 - Visitors can create their own Desk, which gets a live link someone else can use; it is kept until deleted.
-- **Arrival:** after the passcode, the visitor lands in Rivera Plumbing's Today as Maria, with a slim "You're Maria today" bar and a short "Things to try" list: chat as a customer (Rivera's public page in a side panel), try to break it (attack ideas; watch Safety and the margin receipts), answer a held request (seeded on Today), and create your own Desk ("+ New business" in the top-left switcher, ending with a live link). No guided tour.
+- **Arrival:** an intro dialog over a static, non-interactive preview of Rivera Plumbing's Today. The dialog says what Claude Desk is, lists the four things to try and collects the shared passcode. It can't be dismissed without the passcode, and no demo data loads until the passcode is accepted. Returning visitors with a live copy skip it.
+- **Today:** once the passcode is accepted, the visitor is in Rivera Plumbing's Today as Maria, with a slim "You're Maria today" bar and Today's own "Things to try" list with action buttons: chat as a customer (Rivera's public page in a side panel), try to break it (attack ideas; watch Safety and the margin receipts), answer a held request (seeded on Today), and create your own Desk ("+ New business" in the top-left switcher, ending with a live link). No guided tour.
 
 ## Open questions
 
@@ -226,6 +227,11 @@ None open.
 - **Designs:** the v2 canvas pages are the source of truth ("Claude Desk · Today / Conversations / Rules / Setup / Vision", plus Settings, Safety, Customers, Desks, Knowledge, Notifications, visitor side and first-visit arrival as they land); "Archive ·" pages are superseded. Rules and blocked-attempt detail are no longer pending. The public page uses the v2 foundation with the owner's brand on top (dark).
 - **Connect your own Claude (Claude's call, from an earlier decision):** the prototype ships the Agent Card page, agent conversations in the inbox and the built-in "send an agent" panel; connecting your own Claude is instructions plus an endpoint, not a guaranteed working claude.ai connector.
 - **Phone (Claude's call):** the owner app is desktop-first and responsive enough not to break on a phone; phone-native owner screens are mocks for later. All alerts (push, text, email) are simulated through the Demo inbox.
+
+**Owner decisions (2026-10-29):**
+
+- **First visit: an intro dialog.** The arrival is an intro dialog over a static, non-interactive preview of Rivera Plumbing's Today. It collects the shared passcode, can't be dismissed without it, loads no demo data until the passcode is accepted, and lists the four things to try. Returning visitors with a live copy skip it. Today keeps its own "Things to try" list with action buttons. (Previously the passcode came first and the visitor then landed on Today.)
+- **Clay in the intro illustration.** Design system v2 stays locked with one exception: clay may fill the right half of the first-visit intro dialog, whose illustration is light cards on clay. It is decorative, hidden from assistive tech, and the product's only light surface. Everywhere else clay stays only in the Claude Desk mark.
 
 ## Left to the builder
 
