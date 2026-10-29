@@ -2,10 +2,13 @@ import type { MouseEvent, ReactNode } from 'react';
 
 import './Button.css';
 
-export type ButtonVariant = 'primary' | 'secondary' | 'ghost';
+export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'danger-ghost';
 
 export interface ButtonProps {
-  /** `primary` (inverted neutral, at most one per view), `secondary` or `ghost`. */
+  /**
+   * `primary` (inverted neutral, at most one per view), `secondary` or `ghost`; `danger` (a soft red
+   * fill) and `danger-ghost` (red words only) only for answers that refuse, such as "Deny this time".
+   */
   variant: ButtonVariant;
   /** `inline` is `size-control` tall (the default); `main` is `size-control-main`, a screen's main action. */
   size?: 'inline' | 'main';

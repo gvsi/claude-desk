@@ -162,6 +162,8 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = Object.freeze([
   ...pairs(['button-danger-text'], ['fill-hover'], 4.5, 'A danger-ghost button in a card while it is hovered.', 'fill-card', { under: 'bg-app' }),
   ...pairs(['button-danger-text'], ['bg-app'], 4.5, 'A danger-ghost button on the app background.'),
   ...pairs(['button-danger-text'], ['button-danger-fill', 'button-danger-fill-hover', 'fill-hover'], 4.5, 'Danger and danger-ghost buttons on the app background, at rest and on hover.', 'bg-app'),
+  ...pairs(['button-danger-text'], ['button-danger-fill', 'transparent'], 4.5, 'Danger and danger-ghost answers in a card while an answer is sent, faded to 80%.', 'fill-card', { under: 'bg-app', opacity: 0.8 }),
+  ...pairs(['text-primary'], ['fill-secondary', 'transparent'], 4.5, 'Secondary and ghost answers in a card while an answer is sent, faded to 60%.', 'fill-card', { under: 'bg-app', opacity: 0.6 }),
 ]);
 
 export const DECORATIVE_COLORS: Readonly<Record<string, string>> = Object.freeze({

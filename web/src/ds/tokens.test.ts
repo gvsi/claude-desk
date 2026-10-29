@@ -196,6 +196,10 @@ describe('design tokens', () => {
     // The same buttons straight on the app background.
     add(['button-danger-text'], ['bg-app'], 4.5);
     add(['button-danger-text'], ['button-danger-fill', 'button-danger-fill-hover', 'fill-hover'], 4.5, 'bg-app');
+    // Every answer while it is sent: each busy button, faded by its own opacity over the card,
+    // still reads at 4.5:1.
+    add(['button-danger-text'], ['button-danger-fill', 'transparent'], 4.5, 'fill-card', 'bg-app', 0.8);
+    add(['text-primary'], ['fill-secondary', 'transparent'], 4.5, 'fill-card', 'bg-app', 0.6);
 
     // Every required pair is listed, at no lower a minimum, so dropping one can't pass.
     for (const want of required) {

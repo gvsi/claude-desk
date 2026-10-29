@@ -21,6 +21,7 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 - Set body text and everything Claude says in `text-primary`; captions, meta lines, helper text and receipts in `text-secondary`. Use `text-tertiary` only for placeholders and labels at 13 px and up.
 - Separate regions by fill and a hairline, not by shadow. A card is `fill-card` with a 1 px `line-card` border. Chips, outlined pills and the whisper composer are outlined in `line-control`, `line-control-hover` on hover. The intro's passcode field is outlined in `line-field` (3:1).
 - Make the primary button `button-primary` with `button-primary-text`, `button-primary-hover` on hover: an inverted neutral, at most one per view. Secondary buttons are `fill-secondary` (`fill-secondary-hover` on hover) with `text-primary`; ghost buttons are transparent with `fill-hover` on hover. Visitor bubbles are `fill-bubble`; count pills and the segmented track are `fill-count`.
+- Give an answer that refuses the red look, and nothing else: `danger` buttons are `button-danger-fill` (`button-danger-fill-hover` on hover) with `button-danger-text`, and `danger-ghost` buttons are transparent with `button-danger-text`. They are the only red controls and the only red words in the system; their words say what is refused ("Deny this time", "Deny always"), and the red is never a status.
 - Use `accent-blue` only for links, the focus ring and selection. Never put text on it and never use it as decoration.
 - Show status only as a `size-dot` dot or a thin bar in `status-handled` (handled or allowed), `status-held` (held, needs you), `status-refused` (refused or blocked) or `status-info` (a hollow dot), always beside words that say the same thing. Never a colored tile, a filled badge or colored text.
 - Use `clay` only inside the Claude Desk mark, and as the field behind the first-visit intro's illustration.
@@ -75,7 +76,7 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 
 ## Accessibility
 
-- Every color pair a component uses is listed in `CONTRAST_PAIRS` (`contrast.ts`), and the token tests fail if any falls below its minimum: 4.5:1 for text (3:1 at 24 px and up), and 3:1 for focus rings, status dots and the mark. Translucent grounds are measured over what they sit on, down to an opaque color (a button's fill over a card's fill over the app).
+- Every color pair a component uses is listed in `CONTRAST_PAIRS` (`contrast.ts`), and the token tests fail if any falls below its minimum: 4.5:1 for text (3:1 at 24 px and up), and 3:1 for focus rings, status dots and the mark. Translucent grounds are measured over what they sit on, down to an opaque color (a button's fill over a card's fill over the app), and a faded control, such as a busy button, at its own opacity.
 
 Text and links, 4.5:1:
 
@@ -104,6 +105,8 @@ Text and links, 4.5:1:
 `button-primary-text` reads 14.6 on `button-primary` and 12.2 on `button-primary-hover`.
 
 `button-danger-text` reads 6.1 on `button-danger-fill` and 5.3 on `button-danger-fill-hover` over `fill-card` (6.6 and 5.7 straight on `bg-app`), 7.9 on `fill-card` and 6.7 on `fill-hover` over `fill-card` (8.5 and 7.3 on `bg-app`).
+
+Busy buttons are measured as drawn, faded by their own opacity, in the card where all four answers wait together: the danger and danger-ghost answers at 80% read 4.7 and 5.6, the secondary and ghost answers at 60% read 5.1 and 5.6. The red buttons fade less, because red text loses contrast faster.
 
 Focus rings and status dots, 3:1 (`ring-composer` is `accent-blue`):
 
