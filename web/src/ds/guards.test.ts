@@ -242,7 +242,9 @@ describe('design system source guards', () => {
     expect(problems.filter((problem) => problem !== null)).toEqual([]);
   });
 
-  it('index_exports_every_component', async () => {
+  // Importing the index transforms every component on first use. When the whole suite runs, the
+  // browser projects compete for the same CPU, so this import gets more than the default 5 s.
+  it('index_exports_every_component', { timeout: 60_000 }, async () => {
     expect(existsSync(path.join(DS, 'index.ts'))).toBe(true);
     const index: Record<string, unknown> = await import('./index.ts');
     const missing = componentNames().filter((name) => index[name] === undefined);
