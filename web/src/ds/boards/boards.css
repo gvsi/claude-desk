@@ -1082,7 +1082,7 @@
 /* Customers on a phone (N-Run2-People-Phone): 16 px under the top bar, sections 16 px apart, and the
    footer right under the list rather than at the window's foot. */
 @media (max-width: 767.98px) {
-  .board-page:has(> .board-people) {
+  .board-filled-page:has(> .board-people) {
     padding-top: var(--space-16);
   }
 
