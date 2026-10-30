@@ -42,8 +42,8 @@
 # written to infra/out/deploy-<UTC time>.log. A run without a terminal is refused unless
 # DESK_DEPLOY_ACCOUNT is set; nobody can approve there, so before each cdk deploy the log gets that
 # stack's security-relevant changes (a read-only cdk diff --security-only) and one line,
-# "deploy: security summary for <stack>: ...", saying whether its deploy broadens IAM permissions
-# or security group access, and the deploy runs with --require-approval never.
+# "deploy: security summary for <stack>: ...", saying whether cdk diff found a change that broadens
+# IAM permissions or security group access, and the deploy runs with --require-approval never.
 set -euo pipefail
 
 # Under xtrace (bash -x, or SHELLOPTS=xtrace handed down) bash writes each assignment with its value
@@ -115,7 +115,7 @@ for name in DESK_IMAGE_DIR DESK_IMAGE_FILE DESK_KERNEL_IMAGE; do
 done
 # A full deploy's passcode: DESK_PASSCODE when it was set, else the macOS Keychain's
 # claude-desk-passcode item.
-no_passcode() {  # no_passcode store|replace|export <why>: the Keychain commands that apply, if any
+no_passcode() {  # no_passcode store|replace|retry|export <why>: the Keychain commands that apply, if any
   local fix=$1
   shift
   echo "deploy: DESK_PASSCODE isn't set and $*; the smoke checks sign in with the passcode" >&2
@@ -130,8 +130,10 @@ no_passcode() {  # no_passcode store|replace|export <why>: the Keychain commands
       echo 'deploy: replace it in the Keychain with: security add-generic-password -U -s claude-desk-passcode -a "$USER" -w'
       echo "deploy: (it asks for the passcode twice, without echo), or export DESK_PASSCODE for this run"
       ;;
+    retry) echo "deploy: run deploy.sh again; if this repeats, export DESK_PASSCODE for this run" ;;
     *) echo "deploy: export DESK_PASSCODE for this run" ;;
   esac >&2
+  echo "deploy: to export it without echo or shell history, run: IFS= read -rs DESK_PASSCODE && export DESK_PASSCODE, then unset DESK_PASSCODE after the deploy" >&2
   exit 2
 }
 if [[ -z $data_only ]]; then
@@ -142,20 +144,21 @@ if [[ -z $data_only ]]; then
     passcode=$(security find-generic-password -s claude-desk-passcode -w) ||
       no_passcode store "the macOS Keychain item claude-desk-passcode couldn't be read (is it stored, and is the login Keychain unlocked?)"
     [[ -n $passcode ]] || no_passcode replace "the macOS Keychain item claude-desk-passcode is empty"
-    # Printable ASCII with no backslash: -w hands back any other passcode as hex, which wouldn't sign
-    # in and is itself printable, so the stored form is checked. -g writes the password to stderr as
-    # `password: 0x<HEX>...` when any byte is outside space to ~ or is a backslash, else as
-    # `password: "<value>"`. Only that stderr is kept (the attributes on stdout are dropped); it holds
-    # the passcode too, so it's never shown and is unset once checked. The one answer accepted is that
-    # last line alone, holding the value -w gave, and that value is itself checked byte by byte (a C
-    # locale, in a subshell); any other answer can't be checked, so it's refused.
+    # Printable ASCII with no backslash: -w gives a byte outside space to ~ as hex, printable but wrong,
+    # so -g's stderr, which shows how it's stored and shows a backslash as hex too, is checked (it holds
+    # the passcode too and is never shown). A `password: 0x...` line anywhere in it marks a byte outside
+    # space to ~ or a backslash; the one answer accepted is `password: "<what -w gave>"` alone, whose
+    # value is checked byte by byte too (a C locale, in a subshell). If -g fails, or answers in any other
+    # form, nothing is known against the item (-w has just read it), so the advice is to run again, then
+    # to export DESK_PASSCODE.
     probe=$(security find-generic-password -s claude-desk-passcode -g 2>&1 >/dev/null) ||
-      no_passcode replace "the macOS Keychain item claude-desk-passcode couldn't be read a second time, to check how it's stored (is the login Keychain unlocked?)"
-    if [[ $probe == 'password: 0x'* ]] || (LC_ALL=C; [[ $passcode == *[![:print:]]* || $passcode == *\\* ]]); then
+      no_passcode retry "the macOS Keychain item claude-desk-passcode couldn't be read a second time, to check how it's stored (is the login Keychain unlocked?)"
+    if [[ $probe == 'password: 0x'* || $probe == *$'\n''password: 0x'* ]] ||
+      (LC_ALL=C; [[ $passcode == *[![:print:]]* || $passcode == *\\* ]]); then
       no_passcode replace "the macOS Keychain item claude-desk-passcode has a character outside printable ASCII, or a backslash (it isn't shown)"
     fi
     [[ $probe == "password: \"$passcode\"" ]] ||
-      no_passcode replace "the macOS Keychain item claude-desk-passcode couldn't be checked: \`security -g\` showed it in a form deploy.sh doesn't accept (it isn't shown)"
+      no_passcode retry "the macOS Keychain item claude-desk-passcode couldn't be checked: \`security -g\` showed it in a form deploy.sh doesn't accept (it isn't shown)"
     unset probe
   fi
 fi
@@ -203,11 +206,12 @@ if [[ -z $data_only ]]; then
 fi
 
 # cdk_deploy <stack> [cdk options...]: the pinned CLI, its stack outputs on the terminal (fd 3). At a
-# terminal, cdk asks for approval there before any change that broadens IAM permissions or security
-# group access. Unattended, it first logs those changes with a read-only diff of the same stack and
-# context, then one summary line saying whether any broadens access, read from the diff's count of
-# stacks with differences, which --security-only counts only for a stack that broadens access
-# (stopping if the diff fails or gives no count), then deploys with --require-approval never.
+# terminal, cdk asks for approval there before a change that broadens access. Unattended, a read-only
+# diff of the same stack and context streams to the log, then a summary line, then the deploy runs
+# with --require-approval never; a failed diff, or one with no count, stops it. With --security-only,
+# aws-cdk 2.1145.0 (the pin) counts a stack in "Number of stacks with differences" only when it
+# broadens access, and warns "potentially sensitive changes" before its changes; either marks it as
+# broadening, so a CLI that drops one still fails safe. Recheck both when the pin moves.
 cdk_deploy() {
   local stack=$1
   shift
@@ -220,22 +224,23 @@ cdk_deploy() {
   fi
   echo "deploy: $stack's security-relevant changes (cdk diff --security-only); with no terminal to approve"
   echo "deploy: them on, $stack is deployed with --require-approval never"
+  # tee writes the diff to the output, and so to the log, as it runs, so a diff that hangs or is killed
+  # leaves what it wrote so far, and hands the same text to $diff for the summary; with pipefail the
+  # pipeline fails when cdk diff does.
   local diff counted='Number of stacks with differences: ([0-9]+)'
-  if ! diff=$(cd "$INFRA" && npx --no-install cdk diff "$stack" --security-only --method template --fail-on never \
-    "${options[@]}" 2>&1); then
-    printf '%s\n' "$diff"
+  if ! diff=$( (cd "$INFRA" && npx --no-install cdk diff "$stack" --security-only --method template --fail-on never \
+    "${options[@]}") 2>&1 | tee /dev/stderr); then
     echo "deploy: cdk diff $stack failed, so $stack wasn't deployed" >&2
     return 1
   fi
-  printf '%s\n' "$diff"
   if [[ ! $diff =~ $counted ]]; then
     echo "deploy: cdk diff $stack didn't say whether it broadens access, so $stack wasn't deployed" >&2
     return 1
   fi
-  if ((BASH_REMATCH[1] > 0)); then
-    echo "deploy: security summary for $stack: this deploy broadens IAM permissions or security group access; the changes are above"
+  if ((BASH_REMATCH[1] > 0)) || [[ $diff == *"potentially sensitive changes"* ]]; then
+    echo "deploy: security summary for $stack: cdk diff found a change that broadens IAM permissions or security group access; the changes are above"
   else
-    echo "deploy: security summary for $stack: nothing in this deploy broadens IAM permissions or security group access"
+    echo "deploy: security summary for $stack: cdk diff found no change that broadens IAM permissions or security group access"
   fi
   (cd "$INFRA" && npx --no-install cdk deploy "$stack" --require-approval never --progress events \
     "${options[@]}") >&3

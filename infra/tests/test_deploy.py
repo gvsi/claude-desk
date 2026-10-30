@@ -3,15 +3,19 @@
 that `cdk deploy` keeps a terminal for its approval prompt, and that the first failing step stops
 the deploy. Nothing reaches AWS or the real Keychain."""
 
+import contextlib
 import hashlib
 import json
 import os
 import pty
+import re
 import select
 import shutil
+import signal
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -29,6 +33,9 @@ KEYCHAIN_LOOKUP = ["find-generic-password", "-s", "claude-desk-passcode", "-w"]
 KEYCHAIN_PROBE = ["find-generic-password", "-s", "claude-desk-passcode", "-g"]
 STORE_IT = 'security add-generic-password -s claude-desk-passcode -a "$USER" -w'
 REPLACE_IT = 'security add-generic-password -U -s claude-desk-passcode -a "$USER" -w'
+RERUN_IT = "run deploy.sh again; if this repeats, export DESK_PASSCODE for this run"
+EXPORT_IT = ("to export it without echo or shell history, run: IFS= read -rs DESK_PASSCODE && export DESK_PASSCODE, "
+             "then unset DESK_PASSCODE after the deploy")
 
 # Each stub appends {"tool", "argv", "cwd", "tty", "passcode", "env"} to $STUB_LOG, "passcode" being
 # the SHA-256 of the DESK_PASSCODE it was given (None without one) and "env" each environment
@@ -42,17 +49,22 @@ REPLACE_IT = 'security add-generic-password -U -s claude-desk-passcode -a "$USER
 # "<value>" with those bytes as octal escapes when any byte is not; with KEYCHAIN_PROBE_WARNING, -g
 # writes a warning line to stderr before that one, and with KEYCHAIN_RAW both write the stored bytes
 # as they are (-g as `password: "<bytes>"`), as no `security` known does. `cdk diff --security-only`
-# writes what the pinned CDK CLI's (cdk-toolkit.js) does: a warning and the changes for a stack named
-# in STUB_BROADENS, then `✨  Number of stacks with differences: <n>`, which counts only stacks that
-# broaden access (STUB_DIFF_UNCOUNTED leaves that line out). A watched tool (WATCHED) writes the same
-# record, then runs the real tool.
+# writes what the pinned CLI, aws-cdk 2.1145.0, does (its cdk-toolkit.js): a warning and the changes
+# for a stack named in STUB_BROADENS, then `✨  Number of stacks with differences: <n>`, which counts
+# only stacks that broaden access (STUB_DIFF_UNCOUNTED leaves that line out, and with
+# STUB_DIFF_COUNTS_NOTHING it counts none, as a later CLI might; STUB_DIFF_WARNS_NOTHING keeps the count
+# and leaves the warning out, as a later CLI might too); with STUB_DIFF_WATCHES_LOG each diff
+# then waits for what it wrote to show up in the deploy log, and says whether it did before it ends.
+# Each record also holds the stub's process group ("group"); with STUB_HANGS, `aws` then writes
+# nothing for 30 s, as a hung call would. A watched tool (WATCHED) writes the same record, then runs
+# the real tool.
 RECORD = """import hashlib, json, os, re, sys
 tool, args = os.path.basename(sys.argv[0]), sys.argv[1:]
 passcode = os.environ.get("DESK_PASSCODE")
 sha256 = lambda text: hashlib.sha256(text.encode(errors="surrogateescape")).hexdigest()
 with open(os.environ["STUB_LOG"], "a") as log:
     log.write(json.dumps({"tool": tool, "argv": args, "cwd": os.getcwd(), "tty": os.isatty(1),
-                          "passcode": sha256(passcode) if passcode else None,
+                          "group": os.getpgrp(), "passcode": sha256(passcode) if passcode else None,
                           "env": {name: sha256(value) for name, value in os.environ.items()}}) + "\\n")
 """
 WATCHED = ("dirname", "date", "mkdir", "tee", "git", "tr")  # every other command deploy.sh runs
@@ -99,6 +111,9 @@ for name, needle in (("FAIL_PREFLIGHT", "preflight.py"), ("FAIL_ADMIN", "run_adm
         sys.exit(1)
 if tool == "uv" and "smoke.py" in joined:
     sys.exit(int(os.environ.get("SMOKE_STATUS", "0")))
+if tool == "aws" and os.environ.get("STUB_HANGS"):
+    import time
+    time.sleep(30)                          # bounded, so a stub nobody kills still ends on its own
 if tool == "aws" and args[:2] == ["sts", "get-caller-identity"]:
     print("{account}")
 elif tool == "aws" and args[:2] == ["cloudformation", "describe-stacks"]:
@@ -112,12 +127,25 @@ elif tool == "aws" and args[:2] == ["cloudformation", "describe-stacks"]:
 elif tool == "npx" and args[:3] == ["--no-install", "cdk", "diff"]:
     print(f"stub: cdk security diff for {{args[3]}}", file=sys.stderr)  # cdk diff writes to stderr
     broadens = args[3] in os.environ.get("STUB_BROADENS", "").split(",")
-    if broadens:
+    if broadens and not os.environ.get("STUB_DIFF_WARNS_NOTHING"):
         print("This deployment will make potentially sensitive changes according to your current security "
               "approval level.\\nPlease confirm you intend to make the following modifications:\\n", file=sys.stderr)
+    if broadens:
         print(f"stub: IAM statement changes for {{args[3]}}", file=sys.stderr)
     if not os.environ.get("STUB_DIFF_UNCOUNTED"):
-        print(f"\\n\\u2728  Number of stacks with differences: {{int(broadens)}}\\n", file=sys.stderr)
+        counted = 0 if os.environ.get("STUB_DIFF_COUNTS_NOTHING") else int(broadens)
+        print(f"\\n\\u2728  Number of stacks with differences: {{counted}}\\n", file=sys.stderr)
+    if os.environ.get("STUB_DIFF_WATCHES_LOG"):
+        import glob, time
+        marker = f"stub: cdk diff {{os.getpid()}} is still running"
+        print(marker, file=sys.stderr, flush=True)
+        logs = os.path.join(os.environ["DESK_DEPLOY_OUT"], "deploy-*.log")
+        logged = lambda: any(marker in open(path, errors="replace").read() for path in glob.glob(logs))
+        deadline = time.monotonic() + 10
+        while not logged() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        print(f"stub: cdk diff for {{args[3]}}: its output {{'reached' if logged() else 'had not reached'}} the log "
+              "while it ran", file=sys.stderr)
     sys.exit(1 if os.environ.get("FAIL_DIFF") else 0)
 elif tool == "npx" and args[:2] == ["--no-install", "cdk"] and args[2] == "deploy":
     stack = args[3]
@@ -203,12 +231,14 @@ def deploy(tmp_path):
 
     def run(*args: str, typed: str = ACCOUNT, terminal: bool = True, deployed: dict | None = None,
             keychain_item: str | None = None, security: bool = True, bash_options: tuple[str, ...] = (),
-            watch: bool = False, **extra_env: str) -> Run:
+            watch: bool = False, read_after_exit: bool = False, hang_after: float = 60, **extra_env: str) -> Run:
         """`keychain_item` is the passcode the stub Keychain holds (none by default); without
         `security`, PATH holds the stubs and only the shell and `dirname` besides; `bash_options` go
         to the bash that runs deploy.sh, before the script. With `watch`, PATH holds the stubs, the
         shell and the WATCHED tools alone, each recording its call before it runs the real one, so
-        every command deploy.sh runs is in the calls, or it stops at one it can't find."""
+        every command deploy.sh runs is in the calls, or it stops at one it can't find. With
+        `read_after_exit`, the terminal is read only once deploy.sh has exited. A run at the terminal
+        that writes nothing there for `hang_after` seconds is reported as hung."""
         if deployed is not None:
             stacks.write_text(json.dumps(deployed))
         if keychain_item is not None:
@@ -248,27 +278,65 @@ def deploy(tmp_path):
             result = subprocess.run(command, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True,
                                     timeout=60)
             return Run(result.returncode, result.stdout + result.stderr)
+        # deploy.sh runs in a process group of its own, and the terminal end it's given (secondary)
+        # stays open here too until every process in that group is gone and all they wrote has been
+        # read: macOS drops a pseudo-terminal's unread output once no process holds that end, and
+        # typing into it then fails. The log's tee, which deploy.sh starts, can outlive it by a moment.
+        # (Not a session of its own: macOS hangs up the terminal when a session's leader exits.)
         primary, secondary = pty.openpty()
-        process = subprocess.Popen(command, env=env, stdin=secondary, stdout=secondary, stderr=secondary)
-        os.close(secondary)
-        os.write(primary, f"{typed}\n".encode())
-        chunks = []
-        while True:
-            ready, _, _ = select.select([primary], [], [], 60)
-            if not ready:
-                process.kill()
-                raise AssertionError("deploy.sh hung: " + b"".join(chunks).decode(errors="replace"))
-            try:
-                chunk = os.read(primary, 4096)
-            except OSError:
-                break
-            if not chunk:
-                break
-            chunks.append(chunk)
-        os.close(primary)
+        process = None
+        try:
+            process = subprocess.Popen(command, env=env, stdin=secondary, stdout=secondary, stderr=secondary,
+                                       process_group=0)
+            os.write(primary, f"{typed}\n".encode())
+            if read_after_exit:
+                process.wait(timeout=60)
+            chunks, last_output = [], time.monotonic()
+            while True:
+                ready, _, _ = select.select([primary], [], [], 0.1)
+                if ready:
+                    chunk = os.read(primary, 4096)
+                    if not chunk:                                             # hung up: nothing more comes
+                        break
+                    chunks.append(chunk)
+                    last_output = time.monotonic()
+                elif process.poll() is not None and not _group_runs(process.pid):
+                    while select.select([primary], [], [], 0)[0] and (chunk := os.read(primary, 4096)):
+                        chunks.append(chunk)                                  # what they wrote last
+                    break
+                elif time.monotonic() - last_output > hang_after:
+                    raise AssertionError("deploy.sh hung: " + b"".join(chunks).decode(errors="replace"))
+        finally:
+            # However the reading stops (a hang, a failed read, or Ctrl-C, which the group doesn't get),
+            # nothing deploy.sh started outlives the test, and neither terminal end stays open. Killing
+            # the group may find it gone or holding only zombies (EPERM on macOS); once deploy.sh is
+            # reaped here, init reaps the rest.
+            if process is not None and _group_runs(process.pid):
+                with contextlib.suppress(ProcessLookupError, PermissionError):
+                    os.killpg(process.pid, signal.SIGKILL)
+                with contextlib.suppress(subprocess.TimeoutExpired):
+                    process.wait(timeout=10)
+            os.close(secondary)
+            os.close(primary)
         return Run(process.wait(timeout=60), b"".join(chunks).decode(errors="replace"))
 
     return run
+
+
+def _group_runs(group: int) -> bool:
+    """Whether any process is left in a process group, until the system says none is (ESRCH)."""
+    try:
+        os.killpg(group, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:  # macOS, while the only ones left are exiting and not yet reaped
+        pass
+    return True
+
+
+def _open_terminals() -> set[int]:
+    """This process's open file descriptors that are terminals, pseudo-terminal ends included."""
+    return {fd for fd in map(int, os.listdir("/dev/fd")) if os.isatty(fd)}
 
 
 def _context(call: dict) -> dict[str, str]:
@@ -326,6 +394,34 @@ def test_cdk_deploys_ask_for_approval_on_the_terminal(deploy, account):
         assert context["compute"] == "express"
         assert context["git_sha"] == _head()
         assert context["web_dist"] == str(REPO / "web" / "dist")
+
+
+def test_the_terminal_keeps_what_deploy_sh_wrote_when_it_exits_before_being_read(deploy):
+    """macOS drops a pseudo-terminal's unread output once no process holds its terminal end, so a
+    deploy.sh that stops at once could lose its message before these tests read it. The tests hold
+    that end open until they have read everything; here they read only after deploy.sh exited."""
+    run = deploy(DESK_IMAGE_DIR="/elsewhere", read_after_exit=True)
+    assert run.status == 2
+    assert "deploy: unset DESK_IMAGE_DIR" in run.output
+
+
+def test_a_hung_deploy_is_reported_and_leaves_no_process_or_terminal_behind(deploy, tmp_path):
+    """deploy.sh runs in a process group of its own, which pytest's Ctrl-C doesn't reach, so the
+    terminal harness cleans up however it stops reading: a deploy.sh that writes nothing for a while
+    is reported as hung, and then its process group is gone and both terminal ends are closed."""
+    terminals = _open_terminals()
+    with pytest.raises(AssertionError, match="deploy.sh hung"):
+        deploy(STUB_HANGS="1", hang_after=5)
+    assert _open_terminals() == terminals
+    stub_log = tmp_path / "stub.log"
+    records = [json.loads(line) for line in stub_log.read_text().splitlines()] if stub_log.exists() else []
+    assert len(records) == 1, "the hang was reported before the account step started"
+    [hung] = records
+    assert hung["tool"] == "aws"                                  # the account step, hung
+    deadline = time.monotonic() + 10                              # what deploy.sh started is reaped by init
+    while _group_runs(hung["group"]) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert not _group_runs(hung["group"])
 
 
 def test_the_image_is_built_from_this_checkout_at_head(deploy):
@@ -560,20 +656,25 @@ def test_an_exported_passcode_wins_over_the_keychain(deploy):
     assert "exported-test-passcode" not in run.text()
 
 
+@pytest.mark.parametrize("terminal", [True, False], ids=["terminal", "unattended"])
 @pytest.mark.parametrize("exported", [False, True], ids=["keychain", "exported"])
-def test_the_passcode_reaches_smoke_py_alone_from_either_source(deploy, exported):
+def test_the_passcode_reaches_smoke_py_alone_from_either_source(deploy, exported, terminal):
     """Every command deploy.sh runs is watched, the startup tools before any step included (with
     PATH holding only the stubs and the WATCHED tools, any other command would stop the deploy).
     Whether the passcode comes from the Keychain or from an exported DESK_PASSCODE, and with a
     caller's `passcode` and `probe` exported (the shell variables deploy.sh keeps it and the
     Keychain's -g answer in), it reaches smoke.py alone, as DESK_PASSCODE: no other command's
-    environment holds it under any name, nor the -g answer, which holds it too."""
+    environment holds it under any name, nor the -g answer, which holds it too. That holds at a
+    terminal and unattended, where each stack's security diff runs through cdk diff and tee first."""
     secret = "exported-test-passcode" if exported else "keychain-test-passcode"
     run = deploy(keychain_item="keychain-test-passcode", DESK_PASSCODE=secret if exported else None,
                  DESK_DEPLOY_ACCOUNT=ACCOUNT, DESK_DOMAIN_NAME=DOMAIN, DESK_CERTIFICATE_ARN=CERTIFICATE,
-                 passcode="caller-value", probe="caller-value", watch=True)
+                 passcode="caller-value", probe="caller-value", watch=True, terminal=terminal,
+                 STUB_BROADENS="DeskApp")
     assert run.status == 0, run.output
     assert set(WATCHED) <= {call["tool"] for call in run.calls} and _smoke_ran(run)
+    diffed = [call["argv"] for call in run.calls if call["tool"] == "tee" and call["argv"] == ["/dev/stderr"]]
+    assert len(diffed) == (0 if terminal else 2) == len(run.cdk("DeskData", "diff") + run.cdk("DeskApp", "diff"))
     forms = {_sha256(secret), _sha256(f'password: "{secret}"')}
     for call in run.calls:
         holding = sorted(name for name, value in call["env"].items() if value in forms)
@@ -622,6 +723,7 @@ def test_a_keychain_item_that_cant_be_read_says_so_before_any_step(deploy, locke
             "(is it stored, and is the login Keychain unlocked?)") in run.output
     assert STORE_IT in run.output and REPLACE_IT in run.output
     assert "DESK_PASSCODE" in run.output                                     # the other way to give it
+    assert EXPORT_IT in run.output                                           # without echo or history
     assert "keychain-test-passcode" not in run.text()
 
 
@@ -633,6 +735,7 @@ def test_an_empty_keychain_item_says_so_before_any_step(deploy):
     assert run.steps() == ["security find-generic-password"]
     assert "the macOS Keychain item claude-desk-passcode is empty" in run.output
     assert REPLACE_IT in run.output and STORE_IT not in run.output and "DESK_PASSCODE" in run.output
+    assert EXPORT_IT in run.output
 
 
 def test_the_stub_security_answers_as_apples_does(tmp_path):
@@ -679,18 +782,29 @@ def test_a_keychain_passcode_that_isnt_printable_ascii_is_refused_unshown_before
         assert form not in run.text()
 
 
-@pytest.mark.parametrize("item", ["café-keychain-passcode", "printable-keychain-passcode"])
-def test_a_stored_form_shown_any_other_way_is_refused_unshown_before_any_step(deploy, item):
-    """deploy.sh accepts only `password: "<the value -w gave>"` from -g, and refuses any other answer,
-    failing closed: here a warning line before the password line, which hid a `password: 0x…` from
-    a check on how the answer starts, and would hide it before a printable one just the same."""
+@pytest.mark.parametrize(("item", "refused", "advice"), [
+    ("café-keychain-passcode", "has a character outside printable ASCII, or a backslash (it isn't shown)",
+     REPLACE_IT),
+    ("printable-keychain-passcode",
+     "couldn't be checked: `security -g` showed it in a form deploy.sh doesn't accept (it isn't shown)", RERUN_IT),
+], ids=["not-printable", "printable"])
+def test_a_stored_form_behind_another_line_is_refused_unshown_with_advice_that_fits(deploy, item, refused, advice):
+    """deploy.sh accepts only the one line `password: "<the value -w gave>"` from -g, and refuses any
+    other answer, failing closed; here a warning line comes before the password line. A
+    `password: 0x…` line is found wherever it is, so a passcode outside printable ASCII is refused as
+    such, with the advice to replace the item. A printable passcode's answer says nothing against the
+    item, which may be fine, so the advice is to run deploy.sh again and, if it repeats, to export
+    DESK_PASSCODE for the run, never to replace the item."""
     run = deploy(keychain_item=item, DESK_PASSCODE=None, DESK_DEPLOY_ACCOUNT=ACCOUNT, KEYCHAIN_PROBE_WARNING="1",
                  LANG="en_US.UTF-8", LC_ALL="en_US.UTF-8")
     assert run.status == 2
     assert [call["argv"] for call in run.calls] == [KEYCHAIN_LOOKUP, KEYCHAIN_PROBE]
-    assert ("the macOS Keychain item claude-desk-passcode couldn't be checked: `security -g` showed it in a form "
-            "deploy.sh doesn't accept (it isn't shown)") in run.output
-    assert REPLACE_IT in run.output and STORE_IT not in run.output
+    assert f"the macOS Keychain item claude-desk-passcode {refused}" in run.output
+    assert advice in run.output
+    if advice == RERUN_IT:
+        assert "add-generic-password" not in run.output               # neither storing nor replacing it
+    else:
+        assert STORE_IT not in run.output and RERUN_IT not in run.output  # the item is there: replace it
     secret = "keychain-passcode"
     for form in (secret, secret.encode().hex(), secret.encode().hex().upper()):
         assert form not in run.text()
@@ -721,15 +835,17 @@ def test_every_printable_ascii_character_but_the_backslash_reaches_smoke_as_stor
 
 def test_a_keychain_item_whose_stored_form_cant_be_read_is_refused_before_any_step(deploy):
     """The second lookup (-g), which shows how the item is stored, can fail on its own, as when access
-    is denied the second time: deploy.sh then says so, before any step. The item is there, so only
-    the command that replaces it applies."""
+    is denied the second time: deploy.sh then says so, before any step. -w has just read the item, so
+    a locked or denied Keychain is the likely cause, not the item: the advice is to run deploy.sh
+    again and, if it repeats, to export DESK_PASSCODE for the run, never to replace a good item."""
     run = deploy(keychain_item="keychain-test-passcode", DESK_PASSCODE=None, DESK_DEPLOY_ACCOUNT=ACCOUNT,
                  KEYCHAIN_PROBE_DENIED="1")
     assert run.status == 2
     assert [call["argv"] for call in run.calls] == [KEYCHAIN_LOOKUP, KEYCHAIN_PROBE]
     assert ("the macOS Keychain item claude-desk-passcode couldn't be read a second time, to check how "
             "it's stored (is the login Keychain unlocked?)") in run.output
-    assert REPLACE_IT in run.output and STORE_IT not in run.output
+    assert RERUN_IT in run.output and EXPORT_IT in run.output
+    assert "add-generic-password" not in run.output                   # neither storing nor replacing it
     assert "keychain-test-passcode" not in run.text()
 
 
@@ -741,7 +857,7 @@ def test_no_security_command_says_to_export_the_passcode_before_any_step(deploy)
     assert run.calls == []
     assert "no `security` command" in run.output
     assert STORE_IT not in run.output and REPLACE_IT not in run.output
-    assert "export DESK_PASSCODE for this run" in run.output
+    assert "export DESK_PASSCODE for this run" in run.output and EXPORT_IT in run.output
 
 
 def test_unattended_without_the_deploy_account_is_refused(deploy):
@@ -784,8 +900,8 @@ def test_unattended_deploys_log_each_security_diff_then_deploy_without_a_prompt(
     assert "--require-approval never" in run.log                             # said where it applies
 
 
-BROADENS = "this deploy broadens IAM permissions or security group access; the changes are above"
-BROADENS_NOTHING = "nothing in this deploy broadens IAM permissions or security group access"
+BROADENS = "cdk diff found a change that broadens IAM permissions or security group access; the changes are above"
+BROADENS_NOTHING = "cdk diff found no change that broadens IAM permissions or security group access"
 
 
 def test_each_unattended_security_diff_ends_with_a_line_saying_whether_access_broadens(deploy):
@@ -803,6 +919,52 @@ def test_each_unattended_security_diff_ends_with_a_line_saying_whether_access_br
             < log.index(app) < log.index("stub: cdk events for DeskApp"))
 
 
+def test_each_unattended_security_diff_reaches_the_log_as_it_runs(deploy):
+    """A diff that hangs (on credentials or the network) or is killed still leaves in the log what it
+    wrote so far: deploy.sh streams each diff there as it runs and reads its summary from the copy
+    tee keeps. Each stub diff here waits for its own output to show up in the log before it ends,
+    and that output is logged once, not again after the diff."""
+    run = deploy(terminal=False, DESK_DEPLOY_ACCOUNT=ACCOUNT, STUB_BROADENS="DeskApp", STUB_DIFF_WATCHES_LOG="1")
+    assert run.status == 0, run.output
+    for stack, diffs in (("DeskData", 1), ("DeskApp", 2)):
+        assert run.log.count(f"stub: cdk diff for {stack}: its output reached the log while it ran") == diffs
+        assert run.log.count(f"stub: cdk security diff for {stack}") == diffs
+    assert "had not reached" not in run.log
+    assert run.log.count(f"deploy: security summary for DeskData: {BROADENS_NOTHING}") == 1
+    assert run.log.count(f"deploy: security summary for DeskApp: {BROADENS}") == 2
+
+
+def test_a_security_diff_that_warns_of_sensitive_changes_is_summed_up_as_broadening_whatever_its_count(deploy):
+    """Should a CDK upgrade stop counting a broadening stack, the warning cdk diff writes before that
+    stack's changes ("potentially sensitive changes") still marks it, so the summary fails safe."""
+    run = deploy(terminal=False, DESK_DEPLOY_ACCOUNT=ACCOUNT, STUB_BROADENS="DeskApp", STUB_DIFF_COUNTS_NOTHING="1")
+    assert run.status == 0, run.output
+    assert run.log.count(f"deploy: security summary for DeskData: {BROADENS_NOTHING}") == 1
+    assert run.log.count(f"deploy: security summary for DeskApp: {BROADENS}") == 2
+
+
+def test_a_security_diff_that_counts_a_broadening_stack_is_summed_up_as_broadening_without_the_warning(deploy):
+    """The other half: should a CDK upgrade drop the warning, the count of stacks that broaden access
+    still marks the stack, so the summary fails safe either way."""
+    run = deploy(terminal=False, DESK_DEPLOY_ACCOUNT=ACCOUNT, STUB_BROADENS="DeskApp", STUB_DIFF_WARNS_NOTHING="1")
+    assert run.status == 0, run.output
+    assert "potentially sensitive changes" not in run.log
+    assert run.log.count(f"deploy: security summary for DeskData: {BROADENS_NOTHING}") == 1
+    assert run.log.count(f"deploy: security summary for DeskApp: {BROADENS}") == 2
+
+
+def test_the_cdk_cli_whose_diff_deploy_sh_reads_is_the_pinned_one():
+    """deploy.sh reads cdk diff's count line and its "potentially sensitive changes" warning as the CDK
+    CLI version its comment names writes them, and the stub here writes them as that version does.
+    Upgrading the pin fails this test until both are checked against the new CLI's source again and
+    the comments name it."""
+    pinned = json.loads((INFRA / "package.json").read_text())["devDependencies"]["aws-cdk"]
+    locked = json.loads((INFRA / "package-lock.json").read_text())["packages"]["node_modules/aws-cdk"]["version"]
+    for path in (SCRIPT, Path(__file__)):
+        named = set(re.findall(r"aws-cdk (\d+\.\d+\.\d+)", path.read_text()))
+        assert named == {pinned} == {locked}, path.name
+
+
 def test_a_security_diff_that_doesnt_say_whether_access_broadens_stops_before_that_deploy(deploy):
     """Without the count, the summary line can't be written truthfully either way, so the deploy
     fails closed: that stack isn't deployed, and the log says why."""
@@ -818,6 +980,7 @@ def test_a_failed_security_diff_stops_before_that_deploy(deploy):
     assert run.status == 1
     assert run.cdk("DeskData", "diff") and not run.cdk("DeskData")
     assert "cdk diff DeskData failed" in run.log
+    assert run.log.count("stub: cdk security diff for DeskData") == 1        # what it wrote, logged once
 
 
 def test_data_only_deploys_desk_data_behind_the_account_check(deploy):

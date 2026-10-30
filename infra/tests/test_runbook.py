@@ -128,6 +128,19 @@ def test_a_redeploy_is_one_line_and_the_runbook_says_what_it_skips():
     assert REDEPLOY in " ".join((INFRA / "scripts" / "deploy.sh").read_text().replace("#", " ").split())
 
 
+def test_the_security_summary_is_described_as_what_cdk_diff_found():
+    """The unattended summary line reports what `cdk diff --security-only` found (test_deploy.py),
+    which is CDK's own check, not a fact about the deploy; the runbook and deploy.sh's header
+    describe the line that way."""
+    claim = "whether `cdk diff` found a change that broadens IAM permissions or security group access"
+    redeploys = section("Redeploys")
+    script = " ".join((INFRA / "scripts" / "deploy.sh").read_text().replace("#", " ").split())
+    assert claim in redeploys
+    assert claim.replace("`", "") in script
+    for text in (redeploys, script):
+        assert "saying whether its deploy broadens" not in text
+
+
 def test_the_passcode_is_asked_for_in_printable_ascii():
     """deploy.sh refuses a Keychain passcode that isn't printable ASCII, or has a backslash, from how
     `security find-generic-password -g` shows the stored item (test_deploy.py). The runbook says so
@@ -151,3 +164,13 @@ def test_the_runbook_says_who_can_read_the_keychain_item():
             "prompt, through `security` as `deploy.sh` does, agent sessions included.") in first
     assert ("Agents never read it themselves, but that is a rule they follow, not something this setup "
             "enforces.") in first
+
+
+def test_the_runbook_says_how_to_export_the_passcode_without_echo_or_shell_history():
+    """An exported DESK_PASSCODE wins over the Keychain, and deploy.sh's advice offers it for a run
+    (test_deploy.py). Typed on a command line, the passcode would be shown and kept in the shell's
+    history, so the runbook gives a way that does neither, where the passcode is stored."""
+    first = section("First deploy (owner's terminal)")
+    assert ("To export the passcode for one run instead, without echo or shell history, run "
+            "`IFS= read -rs DESK_PASSCODE && export DESK_PASSCODE` and type it (`IFS=` keeps any space at either "
+            "end), then `unset DESK_PASSCODE` after the deploy.") in first
