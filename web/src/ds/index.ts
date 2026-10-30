@@ -56,6 +56,8 @@ export {
   Sidebar,
   type NavCount,
   type NavKey,
+  type SidebarAbout,
+  type SidebarAboutLink,
   type SidebarLinkProps,
   type SidebarProps,
 } from './components/Sidebar/Sidebar.tsx';

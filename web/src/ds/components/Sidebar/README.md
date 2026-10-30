@@ -1,6 +1,6 @@
 # Sidebar
 
-`Sidebar` is the owner app's navigation: the Claude Desk mark, the business and Desk switchers, the seven pages in a fixed order, the Answering switch and the owner.
+`Sidebar` is the owner app's navigation: the Claude Desk mark, the business and Desk switchers, the seven pages in a fixed order, an optional "About this prototype" group, the Answering switch and the owner.
 
 ## When to use
 
@@ -14,6 +14,12 @@
 - The Desk picker, "Switch Desk, current: {name}", only when the business has two or more Desks. It is where the owner picks a Desk; `SwitcherMenu` lists none. It opens the business's Desks under it ("Desks in {business}"), the current one marked with a check and `aria-current`. Picking a Desk calls `onSwitchDesk(id)`; picking it, or Escape, closes the list and returns focus to the picker. Escape stops there, so a sheet the sidebar sits in stays open.
 - The pages, always in this order: Today, Conversations, {peopleLabel}, Rules, Safety, Share, Settings. Each row is `size-nav-row` tall with a 20 px line icon. The current page is on `bg-selected` with `aria-current="page"`; there are no accent bars.
 - Counts only on Conversations and Safety, as `CountPill`s read by their `label` ("2 need you", "2 blocked"). Safety's `attention` adds a held dot beside its count.
+- With `about`, the "About this prototype" group, just above the Answering block behind its own hairline (14 px above its title):
+  - the title in `caption` type and `text-secondary`, which also names the group's navigation ("About this prototype");
+  - one row per link, laid out like the nav's rows, with the 20 px `document` icon;
+  - the link marked `current` is `aria-current="page"` on `bg-selected`, and then the main nav marks no row, so one page is current;
+  - in the keyboard order, after the main nav and before Answering. On a narrow screen, `AppShell`'s sheet shows the same sidebar, so the same group.
+  Without `about`, nothing is drawn and nothing else moves: the foot stays at the bottom.
 - At the foot, above a hairline: the "Answering" `Switch` ("Claude answers under your rules"), then the owner: an initials avatar (`aria-hidden`, the first letters of the first and last words of the name, as written) beside the name and a status line. The owner row isn't a control.
 
 ## What the consumer provides
@@ -23,6 +29,7 @@
 - `peopleLabel`, the business's word for the people it serves ("Customers", "Clients").
 - `counts`, each `{ n, label }`, with the number in the label's words.
 - `answering` and `onAnsweringChange`. The switch shows whatever `answering` the screen passes back, so a failed change can revert it.
+- `about`, for the prototype's own documents: the group's `title` and its `links`, each `{ id, label, href, current? }`. The words are the screen's.
 
 ## Props
 
@@ -40,6 +47,7 @@
 | `answering` | `boolean` | Required. |
 | `onAnsweringChange` | `(answering: boolean) => void` | Required. |
 | `owner` | `{ name: string; status: string }` | Required. |
-| `linkComponent` | `ComponentType<SidebarLinkProps>` | A plain `<a>` by default. |
+| `linkComponent` | `ComponentType<SidebarLinkProps>` | A plain `<a>` by default. The about links use it too. |
+| `about` | `SidebarAbout` | `{ title: string; links: { id: string; label: string; href: string; current?: boolean }[] }`. Left out, no group. |
 
-`NavKey`, `NavCount` and `SidebarLinkProps` are exported with the component, and `initialsOf(name)`, the owner avatar's initials, which `SwitcherMenu`'s monograms share.
+`NavKey`, `NavCount`, `SidebarLinkProps`, `SidebarAbout` and `SidebarAboutLink` are exported with the component, and `initialsOf(name)`, the owner avatar's initials, which `SwitcherMenu`'s monograms share.

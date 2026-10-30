@@ -38,6 +38,15 @@ const hrefs = {
   settings: '/app/desk-rivera-main/settings',
 } satisfies Record<NavKey, string>;
 
+/** The documents behind the prototype, linked from the sidebar's "About this prototype" group. */
+const ABOUT = {
+  title: 'About this prototype',
+  links: [
+    { id: 'proposal', label: 'Product proposal', href: '/docs/product-proposal' },
+    { id: 'prediction', label: 'Capability prediction', href: '/docs/capability-prediction' },
+  ],
+};
+
 const sidebar = (
   <Sidebar
     business={rivera.business.name}
@@ -230,6 +239,57 @@ export const Compact: Story = {
     // Going to a page closes the sheet.
     await userEvent.click(within(reopened).getByRole('link', { name: 'Rules' }));
     await expect(navigate).toHaveBeenLastCalledWith(hrefs.rules);
+    await expect(canvas.queryByRole('dialog', { name: 'Menu' })).toBeNull();
+    await expect(menu).toHaveFocus();
+  },
+};
+
+export const CompactAbout: Story = {
+  args: {
+    layout: 'compact',
+    sidebar: (
+      <Sidebar
+        business={rivera.business.name}
+        onSwitchBusiness={fn()}
+        desks={[{ id: 'desk-rivera-main', name: rivera.business.deskName }]}
+        currentDeskId="desk-rivera-main"
+        onSwitchDesk={fn()}
+        current="today"
+        hrefs={hrefs}
+        peopleLabel="Customers"
+        answering
+        onAnsweringChange={fn()}
+        owner={{ name: rivera.business.ownerName, status: 'Available for chats' }}
+        about={ABOUT}
+        linkComponent={RouterLink}
+      />
+    ),
+  },
+  parameters: {
+    canvas: 'N-Docs-Sidebar',
+    canvasNote:
+      'The board draws the sidebar in its column; on a phone, Menu opens the same sidebar as a sheet, with the about group above the Answering block. The board’s Connectors row is another change’s.',
+  },
+  play: async ({ canvas, userEvent }) => {
+    // compact_sheet_shows_the_about_group: the sheet holds the same group, between the main nav
+    // and the Answering block, in that keyboard order.
+    const menu = canvas.getByRole('button', { name: 'Menu' });
+    await userEvent.click(menu);
+    const sheet = canvas.getByRole('dialog', { name: 'Menu' });
+    const about = within(sheet).getByRole('navigation', { name: 'About this prototype' });
+    const links = within(about).getAllByRole('link');
+    await expect(links.map((link) => link.textContent)).toEqual(['Product proposal', 'Capability prediction']);
+    const mainLinks = within(within(sheet).getByRole('navigation', { name: 'Main' })).getAllByRole('link');
+    mainLinks[mainLinks.length - 1]?.focus();
+    await userEvent.tab();
+    await expect(links[0]).toHaveFocus();
+    await userEvent.tab();
+    await userEvent.tab();
+    await expect(within(sheet).getByRole('switch', { name: 'Answering' })).toHaveFocus();
+
+    // Going to a document closes the sheet, like any page.
+    await userEvent.click(links[0] as HTMLElement);
+    await expect(navigate).toHaveBeenLastCalledWith('/docs/product-proposal');
     await expect(canvas.queryByRole('dialog', { name: 'Menu' })).toBeNull();
     await expect(menu).toHaveFocus();
   },

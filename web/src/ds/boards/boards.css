@@ -1005,3 +1005,14 @@
 .board-person__note {
   min-width: 0;
 }
+
+/* The sidebar on its own, as its board draws it: the column the AppShell gives it, the window's
+   height, on the panel with its seam. */
+.board-sidebar-column {
+  display: flex;
+  box-sizing: border-box;
+  width: var(--size-sidebar);
+  height: 100dvh;
+  border-right: 1px solid var(--line-hairline);
+  background: var(--bg-panel);
+}

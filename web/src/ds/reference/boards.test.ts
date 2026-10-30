@@ -72,7 +72,7 @@ describe('reference boards', () => {
       if (!existsSync(file)) return [`${board}: no ${board}.png`];
       const size = pngSize(readFileSync(file));
       if (!size) return [`${board}: ${board}.png is not a PNG`];
-      // Each board at the one size it is drawn at: 1280×820, or 1512×982 for the laptop boards.
+      // Each board at the one size it is drawn at: 1280×820, 1512×982 for the laptop boards, or the sidebar's 264×982.
       const want = BOARD_VIEWPORTS[boardViewport(board)];
       return size.width === want.width && size.height === want.height ? [] : [`${board}: ${size.width}×${size.height}, not ${want.width}×${want.height}`];
     });
