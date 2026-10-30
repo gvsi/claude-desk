@@ -11,6 +11,8 @@
     "dev:mock": "vite --mode mock",
     "build": "tsc --noEmit && vite build",
     "check:build": "node scripts/check-build.mjs",
+    "e2e:mock": "playwright test --project mock",
+    "e2e:live": "playwright test --project live",
     "preview": "vite preview",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build",
@@ -31,6 +33,8 @@
     "react-router": "7.18.4"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
+    "@playwright/test": "1.64.0",
     "@storybook/addon-a11y": "10.6.2",
     "@storybook/addon-docs": "10.6.2",
     "@storybook/addon-vitest": "10.6.2",
