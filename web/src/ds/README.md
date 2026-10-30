@@ -18,7 +18,7 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 ### Color
 
 - Set pages on `bg-app`. Put the sidebar and side panels on `bg-panel` with a `line-hairline` seam; the composer, menus and popovers on `bg-surface`; quiet fills on `bg-muted`; the active nav row, the segmented control thumb and the initials avatar on `bg-selected`.
-- Set body text and everything Claude says in `text-primary`; captions, meta lines, helper text and receipts in `text-secondary`. Use `text-tertiary` only for placeholders and labels at 13 px and up.
+- Set body text and everything Claude says in `text-primary`; captions, meta lines, helper text and receipts in `text-secondary`, except the state's words that lead an owner's decision receipt, in `text-primary`. Use `text-tertiary` only for placeholders and labels at 13 px and up.
 - Separate regions by fill and a hairline, not by shadow. A card is `fill-card` with a 1 px `line-card` border. Chips, outlined pills and the whisper composer are outlined in `line-control`, `line-control-hover` on hover; the recorded-history link is underlined in it. Outline a text field in `line-field`: its outline is its boundary, so it reaches 3:1 against the ground.
 - Make the primary button `button-primary` with `button-primary-text`, `button-primary-hover` on hover: an inverted neutral, at most one per view. Secondary buttons are `fill-secondary` (`fill-secondary-hover` on hover) with `text-primary`; ghost buttons are transparent with `fill-hover` on hover. Visitor bubbles are `fill-bubble`; count pills and the segmented track are `fill-count`.
 - Give an answer that refuses the red look, and nothing else: `danger` buttons are `button-danger-fill` (`button-danger-fill-hover` on hover) with `button-danger-text`, and `danger-ghost` buttons are transparent with `button-danger-text`. They are the only red controls and the only red words in the system, with the items of Deny's menu on a held request, which use `button-danger-text` on `bg-surface`. Their words say what is refused ("Deny this time", "Always" in Deny's menu), and the red is never a status.
@@ -60,7 +60,7 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 
 ## The signature: receipts under each message
 
-- Show checkpoint results as receipts attached under each message, at every width: each one (a `MarginReceipt`) sits right under the message it explains, like an editor's note, as a status dot and one line of `caption` in `text-secondary`.
+- Show checkpoint results as receipts attached under each message, at every width: each one (a `MarginReceipt`) sits right under the message it explains, like an editor's note, as a status dot and one line of `caption` in `text-secondary`. On owner screens, the receipt that reports what the kernel decided leads with its state's words in `text-primary`, then the decision's reason in `text-secondary` ("Stopped. Someone asked for another customer's invoice.").
 - On visitor surfaces, show exactly the signed event's `visitor_plain` line, never rewritten and never with a clock time. On owner screens a receipt opens the full trace.
 - Keep everything around the receipts quiet. They are the one bold element in the system.
 
