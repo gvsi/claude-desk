@@ -19,7 +19,7 @@ export function ConnectorPromise({ title, detail }: ConnectorPromiseProps) {
   return (
     <Card label={title} padding={16}>
       <div className="cd-connector-promise">
-        <Icon name="lock" size={16} className="cd-connector-promise__icon" />
+        <Icon name="lock" size={14} className="cd-connector-promise__icon" />
         <div className="cd-connector-promise__text">
           <p className="cd-connector-promise__title cd-type-body">{title}</p>
           {detail ? <p className="cd-connector-promise__detail cd-type-meta">{detail}</p> : null}

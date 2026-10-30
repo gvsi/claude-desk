@@ -10,7 +10,7 @@
 ## What it shows
 
 - **A built-in connector** (`off.kind: 'turn_off'`): the heading "Turn off {name}", then "{consequence} You'll see the change before it applies. Your rules are kept, so you can add it back." in secondary body type, and a secondary main-size "Turn off {name}" at the right.
-- **An app connected from outside**: the heading "Connection", then `details` as a description list: each row under a hairline, its term in a 216 px column of secondary meta and its value in body type (stacked under 480 px). Then "{consequence} You'll see the change before it applies. Your rules for them are kept in case you connect again." and a secondary "Disconnect".
+- **An app connected from outside**: the heading "Connection", then `details` as a description list: each row of 10 px under a hairline (none under the last), its term in a 200 px column of secondary meta and its value 16 px after it in body type (stacked under 480 px). Then "{consequence} You'll see the change before it applies. Your rules for them are kept in case you connect again." and a secondary "Disconnect".
 - **Verification** (`off.kind: 'always_on'`): "Always on. {reason}" and no button, since the kernel refuses to turn it off.
 - On a narrow line the button drops under the words.
 

@@ -169,7 +169,7 @@
 
   .cd-connector-section__tool-summary {
     max-width: none;
-    margin-top: var(--space-2);
+    margin-top: 1px;
     text-align: left;
     overflow-wrap: anywhere;
   }

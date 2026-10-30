@@ -33,11 +33,12 @@
   overflow-wrap: anywhere;
 }
 
+/* 8 px under the words, as the Payments board draws a shared rule. */
 .cd-rule-row__shared {
   display: flex;
   align-items: flex-start;
   gap: var(--space-6);
-  margin: var(--space-6) 0 0;
+  margin: var(--space-8) 0 0;
   color: var(--text-secondary);
 }
 

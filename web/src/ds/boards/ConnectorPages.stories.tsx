@@ -175,6 +175,13 @@ export const Stripe: Story = {
     // The connection's details as a description list, then Disconnect.
     const terms = [...main.querySelectorAll('dt')].map((term) => term.textContent);
     await expect(terms).toEqual(rivera.stripeConnection.details.map((detail) => detail.label));
+    // Rows of 10 px under hairlines, each value 216 px from the panel's edge, as the board draws them.
+    const panel = one(main, '.cd-connection-panel');
+    for (const row of panel.querySelectorAll<HTMLElement>('.cd-connection-panel__detail')) {
+      expectComputed(row, { paddingTop: '10px', paddingBottom: '10px', borderTopWidth: '1px' });
+      const value = one(row, 'dd');
+      await expect(Math.round(value.getBoundingClientRect().left - panel.getBoundingClientRect().left)).toBe(216);
+    }
     const disconnect = canvas.getByRole('button', { name: 'Disconnect' });
     expectComputed(disconnect, SPEC.secondaryMain);
     const crumbs = within(canvas.getByRole('navigation', { name: 'Breadcrumb' })).getAllByRole('link');
@@ -282,6 +289,10 @@ export const Refund: Story = {
     const rows = within(page.main).getAllByRole('link', { name: /asked/ });
     await expect(rows).toHaveLength(rivera.recentRequests.refund.length);
     for (const outcome of ['Waiting for your answer', 'Stopped', 'You allowed it']) await expect(within(page.main).getByText(outcome)).toBeVisible();
+    // As the board sets them: why in caption type, under what was asked.
+    for (const why of page.main.querySelectorAll<HTMLElement>('.cd-recent-requests__why')) {
+      expectComputed(why, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' });
+    }
     // focus_order_is_logical: the trail, the rule's outcome and Add a rule, the composer and its chips, then the requests.
     await expectTabOrder(
       userEvent,

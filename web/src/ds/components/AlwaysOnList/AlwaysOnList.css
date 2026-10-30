@@ -1,16 +1,24 @@
-/* AlwaysOnList: the section header, then each rule on its own line beside a quiet lock. */
+/* AlwaysOnList: the section header, then, 20 px under it, each rule on its own line beside a quiet
+   14 px lock, as the Rules board draws them. Under 640 px, where the caption drops under the title,
+   the rules start 14 px under it, as the phone board draws them. */
 
 .cd-always-on {
+  container: cd-always-on / inline-size;
   display: flex;
   flex-direction: column;
-  gap: var(--space-14);
   min-width: 0;
 }
 
 .cd-always-on__list {
-  margin: 0;
+  margin: var(--space-20) 0 0;
   padding: 0;
   list-style: none;
+}
+
+@container cd-always-on (max-width: 639.98px) {
+  .cd-always-on__list {
+    margin-top: var(--space-14);
+  }
 }
 
 .cd-always-on__item {
@@ -22,9 +30,9 @@
   overflow-wrap: anywhere;
 }
 
-/* The 16 px lock sits on the middle of the body's 20 px first line. */
+/* The 14 px lock sits on the middle of the body's 20 px first line. */
 .cd-always-on__lock {
   flex: none;
-  margin-top: var(--space-2);
+  margin-top: 3px;
   color: var(--text-secondary);
 }

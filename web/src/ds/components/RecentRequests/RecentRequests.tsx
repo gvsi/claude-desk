@@ -68,7 +68,7 @@ export function RecentRequests({ rows, linkComponent: Link = PlainLink }: Recent
                 ) : (
                   <span className="cd-recent-requests__what cd-type-body">{row.what}</span>
                 )}
-                <span id={whyId} className="cd-recent-requests__why cd-type-meta">
+                <span id={whyId} className="cd-recent-requests__why cd-type-caption">
                   {row.why}
                 </span>
                 <span id={outcomeId} className="cd-recent-requests__outcome cd-type-meta">
