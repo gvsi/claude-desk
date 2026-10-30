@@ -41,8 +41,9 @@
 # terminal for its own output; everything else, the CloudFormation events included, is also
 # written to infra/out/deploy-<UTC time>.log. A run without a terminal is refused unless
 # DESK_DEPLOY_ACCOUNT is set; nobody can approve there, so before each cdk deploy the log gets that
-# stack's security-relevant changes (a read-only cdk diff --security-only), and the deploy runs
-# with --require-approval never.
+# stack's security-relevant changes (a read-only cdk diff --security-only) and one line,
+# "deploy: security summary for <stack>: ...", saying whether its deploy broadens IAM permissions
+# or security group access, and the deploy runs with --require-approval never.
 set -euo pipefail
 
 # Under xtrace (bash -x, or SHELLOPTS=xtrace handed down) bash writes each assignment with its value
@@ -204,7 +205,9 @@ fi
 # cdk_deploy <stack> [cdk options...]: the pinned CLI, its stack outputs on the terminal (fd 3). At a
 # terminal, cdk asks for approval there before any change that broadens IAM permissions or security
 # group access. Unattended, it first logs those changes with a read-only diff of the same stack and
-# context (stopping if the diff fails), then deploys with --require-approval never.
+# context, then one summary line saying whether any broadens access, read from the diff's count of
+# stacks with differences, which --security-only counts only for a stack that broadens access
+# (stopping if the diff fails or gives no count), then deploys with --require-approval never.
 cdk_deploy() {
   local stack=$1
   shift
@@ -217,10 +220,22 @@ cdk_deploy() {
   fi
   echo "deploy: $stack's security-relevant changes (cdk diff --security-only); with no terminal to approve"
   echo "deploy: them on, $stack is deployed with --require-approval never"
-  if ! (cd "$INFRA" && npx --no-install cdk diff "$stack" --security-only --method template --fail-on never \
-    "${options[@]}"); then
+  local diff counted='Number of stacks with differences: ([0-9]+)'
+  if ! diff=$(cd "$INFRA" && npx --no-install cdk diff "$stack" --security-only --method template --fail-on never \
+    "${options[@]}" 2>&1); then
+    printf '%s\n' "$diff"
     echo "deploy: cdk diff $stack failed, so $stack wasn't deployed" >&2
     return 1
+  fi
+  printf '%s\n' "$diff"
+  if [[ ! $diff =~ $counted ]]; then
+    echo "deploy: cdk diff $stack didn't say whether it broadens access, so $stack wasn't deployed" >&2
+    return 1
+  fi
+  if ((BASH_REMATCH[1] > 0)); then
+    echo "deploy: security summary for $stack: this deploy broadens IAM permissions or security group access; the changes are above"
+  else
+    echo "deploy: security summary for $stack: nothing in this deploy broadens IAM permissions or security group access"
   fi
   (cd "$INFRA" && npx --no-install cdk deploy "$stack" --require-approval never --progress events \
     "${options[@]}") >&3

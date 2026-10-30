@@ -123,6 +123,8 @@ def test_a_redeploy_is_one_line_and_the_runbook_says_what_it_skips():
     redeploys = section("Redeploys")
     assert "refuses, deploying nothing" in redeploys
     assert "`cdk diff --security-only`" in redeploys and "`--require-approval never`" in redeploys
+    assert "`deploy: security summary for <stack>:`" in redeploys            # what to look for in the log
+    assert "a diff that doesn't say stops the deploy before that stack" in redeploys
     assert REDEPLOY in " ".join((INFRA / "scripts" / "deploy.sh").read_text().replace("#", " ").split())
 
 

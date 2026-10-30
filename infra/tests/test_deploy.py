@@ -41,8 +41,11 @@ REPLACE_IT = 'security add-generic-password -U -s claude-desk-passcode -a "$USER
 # `password: ` to stderr, then 0x<HEX> when any byte is outside space to ~ or is a backslash, then
 # "<value>" with those bytes as octal escapes when any byte is not; with KEYCHAIN_PROBE_WARNING, -g
 # writes a warning line to stderr before that one, and with KEYCHAIN_RAW both write the stored bytes
-# as they are (-g as `password: "<bytes>"`), as no `security` known does. A watched tool (WATCHED)
-# writes the same record, then runs the real tool.
+# as they are (-g as `password: "<bytes>"`), as no `security` known does. `cdk diff --security-only`
+# writes what the pinned CDK CLI's (cdk-toolkit.js) does: a warning and the changes for a stack named
+# in STUB_BROADENS, then `✨  Number of stacks with differences: <n>`, which counts only stacks that
+# broaden access (STUB_DIFF_UNCOUNTED leaves that line out). A watched tool (WATCHED) writes the same
+# record, then runs the real tool.
 RECORD = """import hashlib, json, os, re, sys
 tool, args = os.path.basename(sys.argv[0]), sys.argv[1:]
 passcode = os.environ.get("DESK_PASSCODE")
@@ -108,6 +111,13 @@ elif tool == "aws" and args[:2] == ["cloudformation", "describe-stacks"]:
     print(stacks[stack].get(key, "None"))
 elif tool == "npx" and args[:3] == ["--no-install", "cdk", "diff"]:
     print(f"stub: cdk security diff for {{args[3]}}", file=sys.stderr)  # cdk diff writes to stderr
+    broadens = args[3] in os.environ.get("STUB_BROADENS", "").split(",")
+    if broadens:
+        print("This deployment will make potentially sensitive changes according to your current security "
+              "approval level.\\nPlease confirm you intend to make the following modifications:\\n", file=sys.stderr)
+        print(f"stub: IAM statement changes for {{args[3]}}", file=sys.stderr)
+    if not os.environ.get("STUB_DIFF_UNCOUNTED"):
+        print(f"\\n\\u2728  Number of stacks with differences: {{int(broadens)}}\\n", file=sys.stderr)
     sys.exit(1 if os.environ.get("FAIL_DIFF") else 0)
 elif tool == "npx" and args[:2] == ["--no-install", "cdk"] and args[2] == "deploy":
     stack = args[3]
@@ -772,6 +782,35 @@ def test_unattended_deploys_log_each_security_diff_then_deploy_without_a_prompt(
     for stack in ("DeskData", "DeskApp"):
         assert f"stub: cdk security diff for {stack}" in run.log
     assert "--require-approval never" in run.log                             # said where it applies
+
+
+BROADENS = "this deploy broadens IAM permissions or security group access; the changes are above"
+BROADENS_NOTHING = "nothing in this deploy broadens IAM permissions or security group access"
+
+
+def test_each_unattended_security_diff_ends_with_a_line_saying_whether_access_broadens(deploy):
+    """So that it can't be missed in the log, each stack's security diff ends with one summary line,
+    read from the count cdk diff --security-only gives of stacks that broaden access, and that line
+    comes before that stack's deploy."""
+    run = deploy(terminal=False, DESK_DEPLOY_ACCOUNT=ACCOUNT, STUB_BROADENS="DeskApp")
+    assert run.status == 0, run.output
+    data = f"deploy: security summary for DeskData: {BROADENS_NOTHING}"
+    app = f"deploy: security summary for DeskApp: {BROADENS}"
+    assert run.log.count(data) == 1 and run.log.count(app) == 2       # DeskApp is deployed twice here
+    log = run.log
+    assert (log.index("stub: cdk security diff for DeskData") < log.index(data)
+            < log.index("stub: cdk events for DeskData") < log.index("stub: IAM statement changes for DeskApp")
+            < log.index(app) < log.index("stub: cdk events for DeskApp"))
+
+
+def test_a_security_diff_that_doesnt_say_whether_access_broadens_stops_before_that_deploy(deploy):
+    """Without the count, the summary line can't be written truthfully either way, so the deploy
+    fails closed: that stack isn't deployed, and the log says why."""
+    run = deploy(terminal=False, DESK_DEPLOY_ACCOUNT=ACCOUNT, STUB_DIFF_UNCOUNTED="1")
+    assert run.status == 1
+    assert run.cdk("DeskData", "diff") and not run.cdk("DeskData")
+    assert "cdk diff DeskData didn't say whether it broadens access, so DeskData wasn't deployed" in run.log
+    assert "security summary" not in run.log
 
 
 def test_a_failed_security_diff_stops_before_that_deploy(deploy):
