@@ -14,7 +14,7 @@ DEVELOPMENT_ENVS = frozenset({"", "dev", "development", "test", "ci", "local"})
 
 
 def is_development(value: str | None = None) -> bool:
-    """True when `value` (by default the process's `DESK_ENV`) names a development environment."""
+    """True when `value`, by default the process's `DESK_ENV`, names a development environment."""
     if value is None:
         value = os.environ.get("DESK_ENV", "")
     value = value.strip(" \t\n\f\r")   # the ASCII whitespace Rust's str::trim_ascii drops

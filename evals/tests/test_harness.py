@@ -15,7 +15,17 @@ from zoneinfo import ZoneInfo
 import pytest
 import rfc8785
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from pydantic import AwareDatetime, BaseModel, NaiveDatetime, TypeAdapter
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    FutureDate,
+    FutureDatetime,
+    NaiveDatetime,
+    PastDate,
+    PastDatetime,
+    TypeAdapter,
+    create_model,
+)
 
 from desk.contracts import CopyCreated, Decision, ExecResult, ProbeResult, SessionCreated
 from desk.kernel_api import KERNEL_RESPONSES, KERNEL_ROUTES, KernelError, VerifyStarted, WhoAmI
@@ -275,6 +285,22 @@ def test_stub_responses_never_read_the_wall_clock(wall_clock):
     assert [field for field in first if again[field] == first[field]] == []   # each was built again
 
 
+def test_stub_refuses_dates_relative_to_today():
+    """A past or a future date (`PastDate`, `FutureDate`, `PastDatetime`, `FutureDatetime`) is
+    one polyfactory fills from the wall clock and pydantic checks against today, so the stub has no
+    seeded value for it: building a stand-in model holding one fails at build time, naming the
+    type, and so does an expectation that needs a value where the default build left an optional
+    one empty."""
+    for tp in (PastDate, FutureDate, PastDatetime, FutureDatetime):
+        name = tp.__name__
+        holding = create_model(f"Holding{name}", when=(tp, ...))
+        with pytest.raises(NotImplementedError, match=rf"can't build a {name}:"):
+            build(holding)
+        maybe = create_model(f"Maybe{name}", when=(tp | None, None))
+        with pytest.raises(NotImplementedError, match=rf"can't build a {name}:"):
+            build(maybe, Expect(fields={"when": {"$not": None}}))
+
+
 async def test_stub_honours_the_expected_status():
     k = ContractStub()
     expect = Expect(status=409, fields={"code": "stale_generation"})
@@ -531,10 +557,12 @@ async def test_auth_headers_follow_the_kernel_contract():
 @pytest.fixture
 def tier1(pytester: pytest.Pytester):
     """A copy of the eval package holding only the given tier 1 cases, its landed plans and `.env`;
-    returns a runner taking the target."""
+    returns a runner taking the target. No plan's landing file comes with it: Plan 02a's
+    `api_impl.py` stays out as Plan 01a's `create_app` module does (it lives outside `evals/`), and
+    a case that needs one plants it."""
 
     def make(cases: dict[str, str], landed: tuple[str, ...] = ("master",), env: str = ""):
-        ignore = shutil.ignore_patterns("tests", "out", "__pycache__", ".pytest_cache", "test_*.py")
+        ignore = shutil.ignore_patterns("tests", "out", "__pycache__", ".pytest_cache", "test_*.py", "api_impl.py")
         shutil.copytree(EVALS, pytester.path / "evals", ignore=ignore)
         cases_dir = pytester.path / "evals" / "tier1"
         (cases_dir / "landed.toml").write_text(f"plans = {json.dumps(list(landed))}\n")

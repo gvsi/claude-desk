@@ -235,6 +235,7 @@ class Decision(BaseModel):
     visitor_plain: str                    # visitor-facing kernel template (en/es); no amounts, dates or limits
     answers: list[ApprovalAnswer] = []    # held only; allow_person only where "Decision lifecycle" allows it
     expires_at: AwareDatetime             # allow: 60 s; hold: 24 h; evaluated lazily by the kernel
+    # `inbox` is filled only on the `/decide` answer that created the alerts; every read returns `[]`
     inbox: list[InboxNotice] = []         # owner alerts this decision created (holds, breaker pauses); code-free
     ledger_seq: int                       # each state change writes a ledger entry and re-signs the decision
     signature: str                        # Ed25519 over b"desk-decision-v1\0" + sha256(canonical_json {decision_id, session_id, state, visitor_plain, ledger_seq})

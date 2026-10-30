@@ -246,6 +246,66 @@ export function documentText(blocks: Block[]): string[] {
   });
 }
 
+/** Each straight quote mark's curly pair: the one that opens a quotation, then the one for everywhere else. */
+const CURLY: Partial<Record<string, readonly [string, string]>> = { "'": ['‘', '’'], '"': ['“', '”'] };
+// A quote mark with nothing shown before it, or after a space, an opening bracket, an opening quote or a dash,
+// opens a quotation unless a space follows it.
+const OPENS_AFTER = /^$|[\s([{“‘—–]/;
+
+/** `text` with its straight quote marks curled, `before` being the character the page shows just ahead of it. */
+function curl(text: string, before: string): string {
+  let out = '';
+  for (let at = 0; at < text.length; at += 1) {
+    const char = text[at] ?? '';
+    const pair = CURLY[char];
+    if (!pair) {
+      out += char;
+      continue;
+    }
+    const next = text[at + 1] ?? '';
+    // A ' before a digit is an elision, as in ’90s.
+    const opens = OPENS_AFTER.test(out.at(-1) ?? before) && !/\s/.test(next) && !(char === "'" && /\d/.test(next));
+    out += opens ? pair[0] : pair[1];
+  }
+  return out;
+}
+
+/** A block's inlines with their quote marks curled, each piece read after what the page shows before it. */
+function curlRun(inlines: Inline[]): Inline[] {
+  let last = '';
+  const walk = (pieces: Inline[]): Inline[] =>
+    pieces.map((inline) => {
+      if ('children' in inline) return { ...inline, children: walk(inline.children) };
+      const shown = inline.kind === 'code' ? inline : { ...inline, text: curl(inline.text, last) };
+      last = shown.text.at(-1) ?? last;
+      return shown;
+    });
+  return walk(inlines);
+}
+
+/**
+ * The blocks as the page shows them, with typographic quote marks in place of the Markdown's straight `'` and
+ * `"`, as the page's own words write them: ‘ and “ where one opens a quotation, ’ and ” everywhere else, so an
+ * apostrophe or an elision such as ’90s is ’. Code keeps what was typed, and the Markdown on disk is unchanged.
+ */
+export function curlQuotes(blocks: Block[]): Block[] {
+  return blocks.map((block): Block => {
+    switch (block.kind) {
+      case 'heading':
+      case 'byline':
+        return { ...block, text: curl(block.text, '') };
+      case 'paragraph':
+        return { ...block, children: curlRun(block.children) };
+      case 'list':
+        return { ...block, items: block.items.map(curlRun) };
+      case 'table':
+        return { ...block, head: block.head.map(curlRun), rows: block.rows.map((row) => row.map(curlRun)) };
+      case 'figure':
+        return block;
+    }
+  });
+}
+
 /** Minutes to read the article: its words at 230 a minute, rounded, and at least one. */
 export function readingMinutes(blocks: Block[]): number {
   const words = documentText(blocks).join(' ').split(/\s+/).filter(Boolean).length;

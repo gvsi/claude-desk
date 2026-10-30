@@ -330,12 +330,12 @@ describe('ReadinessScale', () => {
       // Then its evidence, and what to watch for under the table's own heading.
       const first = figure?.querySelector('[data-axis]');
       expect(first?.querySelector('[data-evidence]')?.textContent).toBe(
-        "Claude's τ³-Banking pass^1 rose from 24.7% to 48.7% in eight months",
+        'Claude’s τ³-Banking pass^1 rose from 24.7% to 48.7% in eight months',
       );
       expect(first?.querySelector('[data-evidence] a')?.getAttribute('href')).toBe('https://taubench.com/leaderboard');
       expect(
         [...(first?.querySelectorAll('[data-watch] > *') ?? [])].map((part) => part.textContent),
-      ).toEqual(['Watch for', "Opus 5.5's score; a flat one would mean lagging"]);
+      ).toEqual(['Watch for', 'Opus 5.5’s score; a flat one would mean lagging']);
       await screen.unmount();
     }
   });

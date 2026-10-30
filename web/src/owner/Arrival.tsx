@@ -8,12 +8,14 @@ import type { SessionEndedState } from '../app/providers.tsx';
 import { IntroDialog, type IntroErrorCode } from '../ds/index.ts';
 import { THINGS_TO_TRY } from './arrival/ideas.ts';
 import { TodayPreview } from './arrival/TodayPreview.tsx';
-import { copyTodayPath, invalidateCopy, todayPath } from './useDesks.ts';
+import { copyTodayPath, invalidateCopy, readTodayAhead, todayPath } from './useDesks.ts';
 
 const TITLE = 'A Claude front desk for your business';
 const INTRO =
   'You’re Maria Rivera today, owner of Rivera Plumbing. Her Desk answers customers and their agents under her rules. Try it, then try to break it.';
 const SESSION_ENDED = 'Your demo session ended. Enter the passcode to start a fresh copy.';
+/** How long the dialog waits for the new copy's Today before it opens anyway, still loading. */
+const READ_AHEAD_MS = 3_000;
 
 /** What the dialog says when a try fails: a wrong passcode, too many tries, or anything else. */
 function introErrorFor(err: unknown): IntroErrorCode {
@@ -39,6 +41,14 @@ export function Arrival() {
   const [error, setError] = useState<IntroErrorCode | undefined>(undefined);
   // One `me` per visit, kept across a development remount, so the page asks once.
   const asked = useRef<Promise<CopyOut> | null>(null);
+  // Whether this page is still shown: the owner may leave it while Today is read ahead.
+  const shown = useRef(true);
+  useEffect(() => {
+    shown.current = true;
+    return () => {
+      shown.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     let live = true;
@@ -59,12 +69,17 @@ export function Arrival() {
     };
   }, [navigate]);
 
-  /** The new copy's first Today, which takes the dialog away. */
+  /**
+   * The new copy's first Today, which takes the dialog away. The dialog stays up, busy over the
+   * preview, until Today's first reads are in, so it closes onto the page already drawn rather than
+   * onto the owner's loading page and then an empty Today.
+   */
   const openCopy = async (copy: CopyOut): Promise<boolean> => {
     const first = copy.desks[0];
     if (!first) return false;
     await invalidateCopy(queryClient);
-    void navigate(todayPath(first.desk_id), { replace: true });
+    await readTodayAhead(queryClient, first.desk_id, READ_AHEAD_MS);
+    if (shown.current) void navigate(todayPath(first.desk_id), { replace: true });
     return true;
   };
 

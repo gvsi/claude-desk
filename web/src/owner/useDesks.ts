@@ -3,7 +3,7 @@
  * and a Desk's Today and its held requests, polled. Query keys start with the route key, so a
  * screen invalidates every Desk's read of a route by that key alone.
  */
-import { useQuery, type QueryClient } from '@tanstack/react-query';
+import { queryOptions, useQuery, type QueryClient } from '@tanstack/react-query';
 
 import { request } from '../api/http.ts';
 import type { BusinessOut, CopyOut, DeskSummary, NeedsYouItem } from '../api/views.ts';
@@ -15,27 +15,44 @@ export const ME_KEY = ['me'] as const;
 export const todayKey = (deskId: string) => ['today', deskId] as const;
 export const needsYouKey = (deskId: string) => ['needsYou', deskId] as const;
 
+const desksQuery = () => queryOptions({ queryKey: DESKS_KEY, queryFn: () => request('desks') });
+const todayQuery = (deskId: string) =>
+  queryOptions({ queryKey: todayKey(deskId), queryFn: () => request('today', { params: { desk_id: deskId } }) });
+const needsYouQuery = (deskId: string) =>
+  queryOptions({ queryKey: needsYouKey(deskId), queryFn: () => request('needsYou', { params: { desk_id: deskId } }) });
+
 /** The copy's businesses, each with its Desks. */
 export function useDesks() {
-  return useQuery({ queryKey: DESKS_KEY, queryFn: () => request('desks') });
+  return useQuery(desksQuery());
 }
 
 /** A Desk's Today, polled while the tab is shown. */
 export function useToday(deskId: string) {
-  return useQuery({
-    queryKey: todayKey(deskId),
-    queryFn: () => request('today', { params: { desk_id: deskId } }),
-    refetchInterval: pollMs('today'),
-  });
+  return useQuery({ ...todayQuery(deskId), refetchInterval: pollMs('today') });
 }
 
 /** What waits for the owner on a Desk: held requests and open callbacks, polled. */
 export function useNeedsYou(deskId: string) {
-  return useQuery({
-    queryKey: needsYouKey(deskId),
-    queryFn: () => request('needsYou', { params: { desk_id: deskId } }),
-    refetchInterval: pollMs('needsYou'),
+  return useQuery({ ...needsYouQuery(deskId), refetchInterval: pollMs('needsYou') });
+}
+
+/**
+ * Reads what a Desk's Today first shows (the copy's Desks, its Today and Needs you) at once, for up
+ * to `capMs`, so a page can open onto a Today that is already drawn. A read that fails or runs long
+ * is left to Today, which shows and retries it as it always does; this never throws.
+ */
+export async function readTodayAhead(queryClient: QueryClient, deskId: string, capMs: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const cap = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, capMs);
   });
+  const reads = Promise.all([
+    queryClient.prefetchQuery(desksQuery()),
+    queryClient.prefetchQuery(todayQuery(deskId)),
+    queryClient.prefetchQuery(needsYouQuery(deskId)),
+  ]);
+  await Promise.race([reads, cap]);
+  clearTimeout(timer);
 }
 
 /** The copy changed (a new copy, a Desk added or deleted): read the businesses and the copy again. */
