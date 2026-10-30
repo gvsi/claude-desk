@@ -656,14 +656,14 @@ class Scratch:
     """A database of the migration tests' own, next to the suite's, migrated from empty to head and
     dropped once they have run: a test migrates it down and back up, never the suite's database."""
 
-    url: str
+    url: URL                              # a `URL`, whose repr masks the password, as `scratch_database`'s
     conn: psycopg.Connection              # as desk_admin, autocommitted
 
     def migrate(self, step: Callable[[Config, str], None], revision: str) -> None:
         """Alembic's `step` (`command.upgrade`, `downgrade` or `stamp`) to `revision` on this
         database: env.py migrates the database ADMIN_DATABASE_URL names."""
         with pytest.MonkeyPatch.context() as patch:
-            patch.setenv("ADMIN_DATABASE_URL", self.url)
+            patch.setenv("ADMIN_DATABASE_URL", self.url.render_as_string(hide_password=False))
             step(alembic_config(), revision)
 
 
@@ -673,13 +673,20 @@ def scratch(admin) -> Iterator[Scratch]:
     name = f"{base.database}_migrations_{uuid4().hex[:8]}"
     admin.execute(SQL("CREATE DATABASE {}").format(Identifier(name)))
     try:
-        url = base.set(database=name).render_as_string(hide_password=False)
-        with psycopg.connect(libpq_url(url), autocommit=True) as conn:
+        url = base.set(database=name)
+        with psycopg.connect(libpq_url(url.render_as_string(hide_password=False)), autocommit=True) as conn:
             made = Scratch(url, conn)
             made.migrate(command.upgrade, "head")
             yield made
     finally:
         admin.execute(SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(Identifier(name)))
+
+
+def test_the_scratch_database_never_shows_its_password(scratch):
+    # as `scratch_database`'s URL: a failure under --showlocals may print the fixture, never the password
+    password = make_url(database_url("ADMIN")).password
+    shown = bool(password) and password in repr(scratch)     # a bool, so a failure can't print it either
+    assert password and not shown, "the scratch database's repr holds the admin password"
 
 
 def test_migration_keeps_existing_versions_at_five_hundred(scratch):
