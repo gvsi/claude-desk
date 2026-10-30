@@ -18,7 +18,7 @@
 
 ## Types and words
 
-- `ToolSummaryView = { key: string; name: string; description: string; summary: string; mode: RuleMode; limit?: string; status: ToolStatus; href: string }`, one tool on the hub. `mode` and `limit` are the outcome and formatted amount limit of the rule that governs it for anyone. `description` is what the tool does and its effects; `summary` its rule words ("Anyone · No discounts", "2 rules · 1 shared", "Always on").
+- `ToolSummaryView = { key: string; name: string; description: string; summary: string; mode: RuleMode; limit?: string; status: ToolStatus; href: string }`, one tool on the hub. `mode` and `limit` are the outcome and formatted amount limit of the most general non-default rule that governs it (the default `ask` only when there is none). `description` is what the tool does and its effects; `summary` its rule words ("Anyone · No discounts", "2 rules · 1 shared", "Always on").
 - `describeEffects(effects, reversible): string` (in `describeEffects.ts`, also exported) gives a connected tool's effects in the boards' words, for the screen to put after what the tool does. First match wins: `pay_out` "Moves money out."; `charge` "Charges money."; `private_data` "Touches private data."; `send_message` "Sends a message out."; `change` "Changes something."; `read` "Changes nothing.". Then " Can be undone." or " Can't be undone." only when an effect changes something (`change`, `charge`, `pay_out`, `send_message`): a tool that only reads, or reads private data, has no second sentence. A tool with no effect this build knows reads "Changes something.", never as harmless.
 
 ## Props

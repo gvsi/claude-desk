@@ -277,7 +277,7 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
     - `pay_out` "Moves money out."; `charge` "Charges money."; `private_data` "Touches private data."; `send_message` "Sends a message out."; `change` "Changes something."; `read` "Changes nothing.".
     - Then " Can be undone." or " Can't be undone.", only when an effect changes something (`change`, `charge`, `pay_out`, `send_message`). A tool that only reads, or reads private data, has no suffix.
     - The screen calls it for a connected tool's line; components take lines as strings (except `ToolReviewCard`, Task 3).
-  - `ToolSummaryView = { key: string; name: string; description: string; summary: string; mode: RuleMode; limit?: string; status: ToolStatus; href: string }`, one tool on the hub (`mode` and `limit` are the outcome and formatted amount limit of the rule that governs it for anyone):
+  - `ToolSummaryView = { key: string; name: string; description: string; summary: string; mode: RuleMode; limit?: string; status: ToolStatus; href: string }`, one tool on the hub (`mode` and `limit` are the outcome and formatted amount limit of the most general non-default rule that governs it, the default `ask` only when there is none):
     - `description`: the screen's line for what the tool does and its effects ("Prices a job from your price list. Changes something. Can be undone.").
     - `summary`: its rule words ("Anyone · No discounts", "2 rules · 1 shared", "Always on").
   - `ConnectorSection({ connector; href; tools: ToolSummaryView[]; addedNote?: string; linkComponent? })`, a `Card` section named by the connector:
