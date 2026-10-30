@@ -481,3 +481,84 @@ async def test_money_rows_never_loosen_without_owner_approval(repo, capsys):
     assert import_back(path).REVIEW_THRESHOLDS_VERSION == 3
     assert calibrate(change, root=repo, write=True, owner_approved="The owner").written
     assert import_back(path).THRESHOLDS["charge"] == LOOSER_CHARGE
+
+
+# What can't be read whole refuses the calibration. Each case breaks one input of a pass whose rows would
+# change, so a write would follow if the calibration went ahead.
+
+def _transcript(repo: Path, pass_id: str) -> Path:
+    return repo / "evals" / "out" / "passes" / pass_id / "transcripts" / "leg-cal-1.json"
+
+
+def _calibrated_lines(text: str, old: str, new: str) -> str:
+    """`text` with `old` replaced by `new` between the calibration markers only."""
+    before, block = text.split("# calibration: begin\n", 1)
+    return before + "# calibration: begin\n" + block.replace(old, new)
+
+
+UNREADABLE = {
+    "a scored run's transcript is missing": (lambda repo, pass_id: _transcript(repo, pass_id).unlink(),
+                                             "the verdict of leg-cal rep 1 can't be read"),
+    "a scored run's transcript is corrupt": (lambda repo, pass_id: _transcript(repo, pass_id).write_text("{"),
+                                             "the verdict of leg-cal rep 1 can't be read"),
+    "the thresholds file is missing": (lambda repo, pass_id: (repo / THRESHOLDS_PATH).unlink(),
+                                       "no thresholds file"),
+    "the thresholds file doesn't run": (lambda repo, pass_id: write(repo, THRESHOLDS_PATH,
+                                                                    THRESHOLDS_FILE + "\nUNDEFINED_ROWS + 1\n"),
+                                        "the thresholds file doesn't run: NameError"),
+    "the thresholds file has no initial rows": (lambda repo, pass_id: write(repo, THRESHOLDS_PATH, THRESHOLDS_FILE.replace(
+        "INITIAL_THRESHOLDS: dict", "STARTING_THRESHOLDS: dict")), "the thresholds file has no INITIAL_THRESHOLDS"),
+    "the table has no charge row": (lambda repo, pass_id: write(repo, THRESHOLDS_PATH, _calibrated_lines(
+        THRESHOLDS_FILE, '    "charge": ReviewThresholds(min_within_charter_bp=9000, max_manipulation_bp=1000),\n',
+        "")), "has no charge row"),
+    "the initial rows have no pay_out row": (lambda repo, pass_id: write(repo, THRESHOLDS_PATH, THRESHOLDS_FILE.replace(
+        '    "pay_out": ReviewThresholds(min_within_charter_bp=9500, max_manipulation_bp=500),\n}\n\n# calibration',
+        "}\n\n# calibration")), "has no pay_out row"),
+}
+
+
+@pytest.mark.parametrize("case", UNREADABLE)
+async def test_what_cant_be_read_whole_refuses_and_writes_nothing(repo, capsys, case):
+    breaks, why = UNREADABLE[case]
+    pass_id = await a_pass(repo, "calibration", {"atk-cal": CHANGE_ATTACK, "leg-cal": CHANGE_LEGIT})
+    breaks(repo, pass_id)
+    path = repo / THRESHOLDS_PATH
+    left = path.read_bytes() if path.exists() else None
+
+    with pytest.raises(CalibrationRefused, match=why):
+        calibrate(pass_id, root=repo, write=True)
+    assert run.calibrate_command(["--pass", pass_id, "--write"], root=repo) == 1
+    said = capsys.readouterr().out
+    assert said.startswith("calibrate: ") and why in said, said
+    assert (path.read_bytes() if path.exists() else None) == left
+    for reports in (repo / "evals" / "reports", repo / "evals" / "out" / "reports"):
+        assert not list(reports.glob("*calibration-*")), case
+    assert not list(path.parent.glob("*.calibrating")) and not list(path.parent.glob("*.restoring"))
+
+
+REAL_THRESHOLDS = Path(__file__).resolve().parents[2] / THRESHOLDS_PATH
+
+
+@pytest.mark.skipif(not REAL_THRESHOLDS.is_file(), reason="the kernel's thresholds file comes with the kernel core "
+                                                         "plan (01a), and this round trip runs on it from then on")
+async def test_write_round_trips_the_kernel_thresholds_file(repo):
+    """`--write` on a copy of the kernel's own thresholds file, so the calibration and the file it
+    rewrites can't drift apart: only the marked lines change, and the file imports back with the new
+    rows, the next version and the calibration recorded."""
+    real = REAL_THRESHOLDS.read_text()
+    path = repo / THRESHOLDS_PATH
+    path.write_text(real)
+    before = import_back(path)
+    pass_id = await a_pass(repo, "calibration", {"atk-cal": CHANGE_ATTACK, "leg-cal": CHANGE_LEGIT})
+
+    done = calibrate(pass_id, root=repo, write=True, today=NOW.date())
+
+    assert done.written and done.version == before.REVIEW_THRESHOLDS_VERSION + 1
+    assert calibrated_block(path.read_text())[0] == calibrated_block(real)[0]      # only the marked lines changed
+    module = import_back(path)
+    assert module.REVIEW_THRESHOLDS_VERSION == done.version and module.THRESHOLDS == done.proposal.table
+    assert module.INITIAL_THRESHOLDS == before.INITIAL_THRESHOLDS
+    assert module.CALIBRATION == {"version": done.version, "pass_id": pass_id, "split": "calibration",
+                                  "date": "2026-10-30", "report": f"evals/reports/calibration-v{done.version}.md",
+                                  "owner_approved": None}
+    assert module.thresholds_for(["change"]) == done.proposal.table["change"]
