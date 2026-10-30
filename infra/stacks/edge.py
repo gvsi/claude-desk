@@ -40,7 +40,7 @@ class Edge(Construct):
         # all of the Desk's compute.
         auto_delete = Stack.of(self).node.find_child("Custom::S3AutoDeleteObjectsCustomResourceProvider")
         auto_delete.node.find_child("Handler").add_property_override("Architectures", ["arm64"])
-        # Serves the web app's index.html for its client-side routes (/d/<slug>, /pay/<token>).
+        # Serves the web app's index.html for its client-side routes (/app/..., /d/<slug>, /pay/<token>).
         self.spa_rewrite = cloudfront.Function(
             self,
             "SpaRewrite",

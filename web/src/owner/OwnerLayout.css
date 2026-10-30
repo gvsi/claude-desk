@@ -1,0 +1,62 @@
+/* OwnerLayout: what the owner frame adds inside the design system's AppShell. The page, with a
+   notice above it when something didn't save, and the one concept footer under it. The business
+   switcher sits beside the sidebar's business row, placed by the screen, above the page. While the
+   copy's Desks load or can't be read, a plain page says so. Gutters are 40 px, 16 px on a phone. */
+
+.cd-owner-layout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-24);
+  min-width: 0;
+}
+
+.cd-owner-layout__footer {
+  padding-top: var(--space-16);
+}
+
+/* The sidebar fills the column (or the phone's sheet), as it does without this wrapper. */
+.cd-owner-layout__sidebar {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.cd-owner-layout__switcher {
+  position: fixed;
+  z-index: 1;
+}
+
+.cd-owner-state {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-24);
+  box-sizing: border-box;
+  min-height: 100dvh;
+  padding: var(--space-24) var(--space-40);
+  background: var(--bg-app);
+  color: var(--text-primary);
+}
+
+.cd-owner-state__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.cd-owner-state__main {
+  display: flex;
+  flex: 1 0 auto;
+  align-items: center;
+  justify-content: center;
+}
+
+.cd-owner-state__line {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+@media (max-width: 639.98px) {
+  .cd-owner-state {
+    padding: var(--space-16);
+  }
+}

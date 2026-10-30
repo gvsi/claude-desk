@@ -1,0 +1,90 @@
+/**
+ * Safety's words for the record: every kind of entry, where it came from and what an attempt was
+ * about, each table covering exactly the values the contracts name; and the one entry an attempt
+ * is shown with.
+ */
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { describe, expect, it } from 'vitest';
+
+import type { LedgerEntry, LedgerEvent, LedgerPage } from '../../api/contracts.ts';
+import type { Attempt } from '../../api/views.ts';
+import { CATEGORY_COPY, LEDGER_KIND_COPY, ORIGIN_COPY, entryFor } from './copy.ts';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const SCHEMA_PATH = path.join(here, '..', '..', '..', '..', 'backend', 'desk', 'contracts.schema.json');
+const schema = JSON.parse(readFileSync(SCHEMA_PATH, 'utf8')) as {
+  $defs: Record<string, { properties?: Record<string, { enum?: string[] }> }>;
+};
+
+/** The string enum of a model's field in the shared contracts. */
+function schemaEnum(model: string, field: string): string[] {
+  const values = schema.$defs[model]?.properties?.[field]?.enum;
+  if (!values) throw new Error(`contracts.schema.json has no enum at ${model}.${field}`);
+  return values;
+}
+
+/** The triage categories, as the API owner plan's triage task names them (plan 02b, Task 10). */
+const TRIAGE_CATEGORIES = ['impersonation', 'discount_push', 'private_data', 'code_redirect', 'injection', 'over_limit', 'other'];
+
+const sorted = (values: readonly string[]) => [...values].sort();
+
+function entry(seq: number, kind: LedgerEvent['kind'], ref: string): LedgerEntry {
+  return {
+    copy_id: 'copy-1',
+    desk_id: 'desk-1',
+    seq,
+    prev_hash: '0'.repeat(64),
+    created_at: `2026-10-30T16:5${seq}:00.000000Z`,
+    event: { kind, origin: 'kernel', session_id: 'ses-1', ref_id: ref, summary: {} },
+    hash: 'a'.repeat(64),
+    signature: 'b'.repeat(128),
+    key_id: 'key-1',
+  };
+}
+
+function attempt(ledgerSeq: number): Attempt {
+  return {
+    ref_id: 'dec-refund',
+    kind: 'refused',
+    reason_plain: 'Refunds go only to the customer who paid.',
+    card_ids: [],
+    origin: 'kernel',
+    created_at: '2026-10-30T16:52:00.000000Z',
+    triage: null,
+    ledger_seq: ledgerSeq,
+  };
+}
+
+function page(entries: LedgerEntry[]): LedgerPage {
+  return { entries, head: 'a'.repeat(64), chain_ok: true, first_bad_seq: null, public_key_hex: 'c'.repeat(64), key_id: 'key-1' };
+}
+
+describe('Safety copy', () => {
+  it('copy_tables_are_exhaustive', () => {
+    expect(sorted(Object.keys(LEDGER_KIND_COPY))).toEqual(sorted(schemaEnum('LedgerEvent', 'kind')));
+    expect(sorted(Object.keys(ORIGIN_COPY))).toEqual(sorted(schemaEnum('LedgerEvent', 'origin')));
+    expect(sorted(Object.keys(CATEGORY_COPY))).toEqual(sorted(TRIAGE_CATEGORIES));
+    // Every word is written: none is left empty.
+    for (const table of [LEDGER_KIND_COPY, ORIGIN_COPY, CATEGORY_COPY]) {
+      for (const [key, words] of Object.entries(table)) expect(words.trim(), key).not.toBe('');
+    }
+  });
+
+  it('entry_for_matches_ledger_seq', () => {
+    // One action's decide, approval and execute entries: the attempt is shown with the one its
+    // ledger_seq names, never another entry about the same action.
+    const decide = entry(1, 'decide', 'dec-refund');
+    const approval = entry(2, 'approval', 'dec-refund');
+    const execute = entry(3, 'execute', 'dec-refund');
+    const record = page([decide, approval, execute]);
+    expect(entryFor(attempt(1), record)).toBe(decide);
+    expect(entryFor(attempt(2), record)).toBe(approval);
+    expect(entryFor(attempt(3), record)).toBe(execute);
+    // A page without that entry, or no page yet: nothing to show.
+    expect(entryFor(attempt(4), record)).toBeNull();
+    expect(entryFor(attempt(1), undefined)).toBeNull();
+  });
+});
