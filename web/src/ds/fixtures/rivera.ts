@@ -1524,7 +1524,7 @@ function cardSide(id: keyof typeof ruleWords, card: RuleCard): NonNullable<Chang
 }
 
 /**
- * Choosing "Ask me first for everything" (N-Conn-18-Preset-Review): each of the owner's cards goes,
+ * Choosing "Ask me first" (N-Conn-18-Preset-Review): each of the owner's cards goes,
  * personal ones included (Dana Whitfield's booking rule), and its tool falls to the default ask. The after side replaces the whole rule, which the
  * row's "Changed" tag says; within it only a new outcome is tagged, as the board draws it, so
  * Refund, which already asks, has no tag beside its outcome.

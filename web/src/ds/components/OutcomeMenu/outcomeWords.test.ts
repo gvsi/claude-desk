@@ -79,13 +79,6 @@ function refuses(read: () => unknown): boolean {
   }
 }
 
-/**
- * Owner-session setup tools: Claude reads the owner's own website and notes. Visitors can't reach
- * them and the Rules page doesn't list them (the web app's `capabilities`), so "every tool" on the
- * Rules page doesn't include them.
- */
-const SETUP_TOOLS: ReadonlySet<string> = new Set(['native.fetch_website', 'native.read_memory']);
-
 /** Every target that takes or sends money: the money effects and the tools that have them. */
 const MONEY_TARGETS: readonly string[] = ['effect:charge', 'effect:pay_out', 'native.payment_link', 'native.charge_mandate', 'payments.create_refund'];
 
@@ -136,7 +129,13 @@ function asksFirst(words: string, covers: (target: string) => boolean): Claim {
 
 /** What each preset's description claims about its cards, and nothing it doesn't. */
 const CLAIMS: Record<PresetName, readonly Claim[]> = {
-  ask_first: [asksFirst('Every tool asks you first.', (target) => !SETUP_TOOLS.has(target))],
+  // It speaks only to these four; open times, leads, callbacks and identity checks are left to the preset.
+  ask_first: [
+    asksFirst('Quotes', (target) => target === 'native.quote'),
+    asksFirst('bookings', (target) => target === 'native.book'),
+    asksFirst('documents', (target) => target === 'native.release_document'),
+    asksFirst('payments', (target) => MONEY_TARGETS.includes(target)),
+  ],
   auto: [
     onItsOwn('Quotes at list price', 'native.quote', (card) =>
       (card.max_discount_bp ?? 0) === 0 ? null : `allows a ${card.max_discount_bp} bp discount`,
@@ -185,8 +184,14 @@ function handBuilt(): PresetCards {
     ...extra,
   });
   return {
-    // Every tool asks: an explicit ask, and an owner-session setup tool, which no visitor reaches.
-    ask_first: [card('native.quote', 'ask', 'anyone'), card('native.read_memory', 'auto', 'anyone')],
+    // Quotes ask by an explicit card, the rest by default; open times, leads and identity checks run
+    // on their own, which the description doesn't speak to.
+    ask_first: [
+      card('native.quote', 'ask', 'anyone'),
+      card('native.find_slots', 'auto', 'anyone'),
+      card('native.request_callback', 'auto', 'anyone'),
+      card('native.start_verification', 'auto', 'anyone'),
+    ],
     auto: [
       card('native.quote', 'auto', 'anyone', { max_discount_bp: 0 }),
       card('native.book', 'auto', 'anyone', { hours: { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '09:00:00', end: '17:00:00' } }),
@@ -248,11 +253,12 @@ describe('outcome words', () => {
       ['payments refused', changed(good, 'auto', { appliesTo: 'effect:charge', change: { mode: 'never' } })],
       ['payment links automatic', changed(good, 'auto', { add: extra('native.payment_link', 'auto') })],
       ['refunds refused', changed(good, 'auto', { add: extra('payments.create_refund', 'never') })],
-      // "Every tool asks you first": neither automatic nor refused
+      // "Quotes, bookings, documents and payments wait for your answer.": neither automatic nor refused
       ['Ask me first quotes on its own', changed(good, 'ask_first', { appliesTo: 'native.quote', change: { mode: 'auto' } })],
       ['Ask me first refuses quotes', changed(good, 'ask_first', { appliesTo: 'native.quote', change: { mode: 'never' } })],
-      ['Ask me first finds open times on its own', changed(good, 'ask_first', { add: extra('native.find_slots', 'auto') })],
-      ['Ask me first requests callbacks on its own', changed(good, 'ask_first', { add: extra('native.request_callback', 'auto') })],
+      ['Ask me first books on its own', changed(good, 'ask_first', { add: extra('native.book', 'auto') })],
+      ['Ask me first shares documents on its own', changed(good, 'ask_first', { add: extra('native.release_document', 'auto') })],
+      ['Ask me first makes payment links on its own', changed(good, 'ask_first', { add: extra('native.payment_link', 'auto') })],
       ['Ask me first refuses payments', changed(good, 'ask_first', { add: extra('effect:charge', 'never') })],
     ];
     for (const [what, cards] of broken) expect({ what, problems: descriptionProblems(cards).length > 0 }).toEqual({ what, problems: true });
@@ -292,7 +298,7 @@ describe('outcome words', () => {
     const notAPreset: RulesPreset = 'custom';
     expect(PRESET_ITEMS.map((item) => item.value)).not.toContain(notAPreset);
     expect(PRESET_ITEMS).toEqual([
-      { value: 'ask_first', title: 'Ask me first for everything', description: 'Every tool asks you first.' },
+      { value: 'ask_first', title: 'Ask me first', description: 'Quotes, bookings, documents and payments wait for your answer.' },
       {
         value: 'auto',
         title: 'Recommended rules',

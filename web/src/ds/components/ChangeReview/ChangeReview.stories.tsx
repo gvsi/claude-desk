@@ -568,7 +568,7 @@ function afterSide(rows: HTMLElement[], index: number): HTMLElement {
   return within(row).getByRole('group', { name: 'After' });
 }
 
-export const AskMeFirstForEverything: Story = {
+export const AskMeFirst: Story = {
   args: { rows: rivera.askFirstReview, checks: ASK_FIRST_CHECKS, confirmLabel: undefined, cancelLabel: undefined, cancelsLinks: true },
   parameters: {
     canvas: 'N-Conn-18-Preset-Review',

@@ -88,7 +88,7 @@ export const PickOnce: Story = {
     await expect(canvas.queryByRole('menu')).toBeNull();
     await waitFor(() => expect(button).toHaveFocus());
     await userEvent.click(button);
-    await userEvent.click(within(theMenu(canvasElement)).getByRole('menuitem', { name: 'Ask me first for everything' }));
+    await userEvent.click(within(theMenu(canvasElement)).getByRole('menuitem', { name: 'Ask me first' }));
     await expect(args.onPick).toHaveBeenCalledTimes(2);
     await expect(args.onPick).toHaveBeenLastCalledWith('ask_first');
   },
@@ -103,7 +103,7 @@ export const ByKeyboard: Story = {
     await userEvent.tab();
     await expect(button).toHaveFocus();
     await userEvent.keyboard('{Enter}');
-    const first = within(theMenu(canvasElement)).getByRole('menuitem', { name: 'Ask me first for everything' });
+    const first = within(theMenu(canvasElement)).getByRole('menuitem', { name: 'Ask me first' });
     await expect(first).toHaveFocus();
     await userEvent.keyboard('{ArrowDown}{ArrowDown}');
     await expect(first).toHaveFocus();

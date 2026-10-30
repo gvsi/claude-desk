@@ -39,7 +39,7 @@ export type RulesPreset = 'ask_first' | 'auto';
  * from their generated export (`web/src/api/presets.gen.json`).
  */
 export const PRESET_ITEMS = [
-  { value: 'ask_first', title: 'Ask me first for everything', description: 'Every tool asks you first.' },
+  { value: 'ask_first', title: 'Ask me first', description: 'Quotes, bookings, documents and payments wait for your answer.' },
   {
     value: 'auto',
     title: 'Recommended rules',

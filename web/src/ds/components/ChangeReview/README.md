@@ -5,7 +5,7 @@
 ## When to use
 
 - After the owner drafts a rule change (from an outcome menu, the composer or the Ask Claude panel), turns a connector on, or turns a changed tool back on (N-Conn-10-GCal-Confirm, N-Conn-11b-Payments-Review). The screen builds the rows from `ruleDiff` and the tools it turns on, and the checks from the proof report (Plan 04's `checkStatus`).
-- After the owner picks a preset from `PresetMenu` (N-Conn-18-Preset-Review), on its own page under `PageHeader` with the preset's name ("Ask me first for everything", "Recommended rules"), the same page shape as N-Conn-10. Each card the preset drops is a `changed` row to the default ask, and each card it adds an `added` row; the screen tags only a new outcome on those rows (`changed: ['mode']`), since the default replaces the whole rule.
+- After the owner picks a preset from `PresetMenu` (N-Conn-18-Preset-Review), on its own page under `PageHeader` with the preset's name ("Ask me first", "Recommended rules"), the same page shape as N-Conn-10. Each card the preset drops is a `changed` row to the default ask, and each card it adds an `added` row; the screen tags only a new outcome on those rows (`changed: ['mode']`), since the default replaces the whole rule.
 - After the owner changes the payment limit (N-Conn-20-Ceiling-Review), under `LimitChange`, with `hasOtherChanges`.
 - Not for turning a connector off: that only narrows and applies at once, so it has a plain confirm (`ConnectionPanel`, Task 3).
 - Renamed from `RuleChangeDiff`.

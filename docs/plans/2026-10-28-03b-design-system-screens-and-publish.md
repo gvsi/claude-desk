@@ -492,7 +492,7 @@ The project owner asked for these pieces to be built after Tasks 2–3, in a cha
 | Board | Screen |
 |---|---|
 | N-Conn-17-Presets | Rules with the "Start from a preset" menu open in the page header, and the payment limit at the top of the Payments and Stripe groups |
-| N-Conn-18-Preset-Review | "Ask me first for everything": the proved change, one Changed row per rule that goes away |
+| N-Conn-18-Preset-Review | "Ask me first": the proved change, one Changed row per rule that goes away |
 | N-Conn-19-Ceiling | The payment limit's line in the Payments group, $500 |
 | N-Conn-19b-Ceiling-Edit | The payment limit's field open in the Payments group (1000 typed) |
 | N-Conn-20-Ceiling-Review | "Change your payment limit" to $1,000: the "New limit" card, "Your rules stay the same.", Confirm change |
@@ -526,7 +526,7 @@ Every string here is owner-facing (no Spanish). Components display what the scre
 **Interfaces:**
 
 - **Words.** `RulesPreset = 'ask_first' | 'auto'`, the master's presets, and `PRESET_ITEMS`, in that order, each with a title and a one-line description:
-  - `ask_first`: "Ask me first for everything": "Every tool asks you first."
+  - `ask_first`: "Ask me first": "Quotes, bookings, documents and payments wait for your answer."
   - `auto`: "Recommended rules": "Quotes at list price, weekday bookings in your hours, documents to verified customers. Payments ask you first."
 
   The descriptions describe `desk.presets.PRESETS` (plan 01a Task 3). `preset_descriptions_match_the_presets` (below) checks every claim each description makes, and nothing it doesn't, against that module's cards, so changing a preset alone fails it. It reads them from the generated presets export, `web/src/api/presets.gen.json` (`{"ask_first": [RuleCard, …], "auto": [RuleCard, …]}`, each card as the kernel's `RuleCard` dumps it to JSON, in the module's order). The binding to those cards comes with plan 01a's presets export at that path: until the file exists, the test is skipped and says what it waits for. No hand-copied table stands in for it.
@@ -560,7 +560,7 @@ Every string here is owner-facing (no Spanish). Components display what the scre
 - **The preset review** (N-Conn-18-Preset-Review) is `ChangeReview` with `cancelsLinks`. The rows are the screen's (plan 04):
   - Each active owner card the preset drops, personal ones included, becomes a `changed` row. `before` is the card's side; `after` is the default side `{ mode: 'ask', reason: 'Not covered by a rule you set, so I ask you.', words: [{ field: 'who', text: 'Anyone' }] }`, the house-rules wording. The default replaces the whole rule, which the row's tag says, so `changed` lists only `mode`, and only when it changes: the "Changed" tag sits beside the outcome only then (Refund already asks, so its row has none). A personal rule's row names the person.
   - Cards the preset adds are `added` rows.
-  - The page is `PageHeader` with the preset's name ("Ask me first for everything", "Recommended rules") and "Here's exactly what changes on your Desk. Nothing changes until you confirm.", then `ChangeReview` with "Confirm change" and "Keep my rules", the same page shape as N-Conn-10.
+  - The page is `PageHeader` with the preset's name ("Ask me first", "Recommended rules") and "Here's exactly what changes on your Desk. Nothing changes until you confirm.", then `ChangeReview` with "Confirm change" and "Keep my rules", the same page shape as N-Conn-10.
 
 - **Fixtures** (`rivera.ts`):
   - `paymentLimit`: `{ line: 'No payment over $500 goes through without asking you, whatever the rules below say.', unset: 'Every payment asks you first.', hint: 'Whole dollars, from 0 to 10,000. Now $500.' }`.
@@ -572,7 +572,7 @@ Every string here is owner-facing (no Spanish). Components display what the scre
   - `Rules/PresetMenu`: `Closed`, `Open` (N-Conn-17), `PickOnce`, `ByKeyboard`, `Pending`, `Phone` (390 px, N-Conn-22).
   - `Rules/MoneyLimit`: `Reading` (N-Conn-19), `Editing` (N-Conn-19b), `TooHigh` (error "No single payment can be above $10,000."), `Unset` ("Every payment asks you first."), `Waiting` (`disabled`), `Phone` (N-Conn-22).
   - `Rules/LimitChange`: `Raise` (N-Conn-20).
-  - `Rules/ChangeReview`: `AskMeFirstForEverything` (`askFirstReview` with `cancelsLinks`, N-Conn-18).
+  - `Rules/ChangeReview`: `AskMeFirst` (`askFirstReview` with `cancelsLinks`, N-Conn-18).
   - `Connectors/ToolPageHeader`: `WithSimulate`, `Simulating`; `Quote`, `RefundNeedsReview` and `Off` pass `onSimulateChange` too.
   - `Controls/SegmentedControl`: `Views` (the Safety page's views).
   - Play tests:
@@ -588,19 +588,19 @@ Every string here is owner-facing (no Spanish). Components display what the scre
     - `limit_change_reads_both_amounts`.
     - `preset_review_tags_only_new_outcomes`: Refund's row has no "Changed" beside its outcome; Quote's does.
     - `personal_rules_are_listed`: Dana Whitfield's rule is a changed row that names her.
-    - `cancel_line_only_when_asked`: `AskMeFirstForEverything` shows the line between the checks and the buttons; `LimitOnly` and `RaiseDiscount` don't.
+    - `cancel_line_only_when_asked`: `AskMeFirst` shows the line between the checks and the buttons; `LimitOnly` and `RaiseDiscount` don't.
     - `simulate_only_when_on`: moved from Task 3. `WithSimulate` has the strip; `RefundNeedsReview`, `Off` and `Quote` (built in) don't, even with `onSimulateChange`, and `Refund` has none without it.
     - `simulate_calls_once`.
     - `simulate_busy_keeps_its_width`.
   - Unit, in `outcomeWords.test.ts`:
     - `preset_descriptions_match_the_presets`: reads the presets export and checks each claim against the cards it names, and nothing else:
-      - "Every tool asks you first.": no card for a Rules-page tool runs on its own or refuses. A tool with no card asks by default, and the owner-session setup tools (`native.fetch_website`, `native.read_memory`), which the Rules page doesn't list, are left out.
+      - "Quotes, bookings, documents and payments wait for your answer.": no card for a quote, a booking, a document or a target that takes or sends money runs on its own or refuses. A tool with no card asks by default. The description says nothing about open times, leads, callbacks or identity checks, so the check doesn't either.
       - "Quotes at list price": an automatic quote card with `max_discount_bp` 0.
       - "weekday bookings in your hours": every automatic booking card's whole window falls on weekdays between 09:00 and 17:00.
       - "documents to verified customers": the card is for the record's owner.
       - "Payments ask you first.": no card for a target that takes or sends money runs on its own or refuses.
       - Skipped, naming the export, until it is generated.
-    - `a_changed_preset_card_fails_the_descriptions`: a small hand-built cards object passes the checker, and changing one card fails it: the quote's `max_discount_bp` to 1000, a booking at night or at any hour, a refusal card for payments, Ask me first running or refusing a tool, among others.
+    - `a_changed_preset_card_fails_the_descriptions`: a small hand-built cards object passes the checker, and changing one card fails it: the quote's `max_discount_bp` to 1000, a booking at night or at any hour, a refusal card for payments, Ask me first quoting, booking, sharing a document or making a payment link on its own, among others.
     - `a_malformed_presets_export_is_refused`: cards are checked against the `RuleCard` contract in every field the check reads, so a null `max_discount_bp`, hours without a start or an end, or an unknown day is refused.
     - `preset_descriptions_are_the_owner_words`: the titles and descriptions, word for word, and `'custom'` is no `RulesPreset`.
   - Every story has `parameters.canvas` set to its board, or `'none'` naming the nearest board.
@@ -888,3 +888,5 @@ Task 3c rework and fix round 2 (2026-10-29): the project owner redrew and signed
 - The preset review lists a personal rule it removes and names the person. Its rows name a built-in connector alone.
 - The description check reads each claim from the presets' cards: the whole booking window must fall in working hours, a refusal card fails "asks you first" as an automatic one does, and the export's cards are checked against the `RuleCard` contract. With the presets as they stand, "Every tool asks you first." disagrees with the Ask me first preset, which still runs open times, leads, callbacks and identity checks on their own; the check fails on that once the export exists, until the description or the preset changes.
 - Task 3c has 3 unit tests and the skipped presets check, and 37 story tests across its six component folders.
+
+Owner decision after the rework (2026-10-29): the first preset's words change, the preset doesn't. It is "Ask me first", described as "Quotes, bookings, documents and payments wait for your answer.", which holds for its cards: it says nothing about open times, leads, callbacks or identity checks, which still run on their own. The description check holds those four kinds of tool to asking, and passes against the presets' cards as they stand. The preset review's title is "Ask me first".

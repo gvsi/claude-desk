@@ -11,7 +11,7 @@
 
 - A secondary `Button` at the main height (40 px), "Start from a preset", with the menu button's chevron, `aria-haspopup="menu"` and `aria-expanded`.
 - Its menu: a popover 6 px under it, 360 px wide, its right edge on the button's, on `bg-surface` with a `line-card` border, `radius-card` and `shadow-dialog`. It holds two `menuitem`s from `PRESET_ITEMS`, in order. Each has its title (`.cd-type-control`) over its line (`.cd-type-caption`, `text-secondary`); it is named by the title and described by the line.
-  - "Ask me first for everything": "Every tool asks you first."
+  - "Ask me first": "Quotes, bookings, documents and payments wait for your answer."
   - "Recommended rules": "Quotes at list price, weekday bookings in your hours, documents to verified customers. Payments ask you first."
 - No item is checked or current: the Desk's rules are its own, whichever preset they started from.
 - Under 640 px of the window (a phone) the button fills its line, its words at the left and the chevron at the right, and the menu opens under it at the same width. The consumer gives it the whole line.
