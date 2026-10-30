@@ -94,13 +94,14 @@ export function NeedsYou({ held, callbacks, answers, readAt, registerCard, readF
   // After a conflict, the card shows the request as Needs you read it again. Focus that fell to the
   // page as its answers changed (the one pressed may no longer be offered) goes to the request, once.
   const heldCards = useRef(new Map<string, HTMLElement>());
-  const conflictsSeen = useRef(new Set<number>());
+  const conflictsSeen = useRef(new Set<string>());
   useLayoutEffect(() => {
     for (const item of held) {
       const id = item.decision.decision_id;
       const conflict = answers.conflictFor(id);
-      if (conflict === undefined || answers.pending.has(id) || conflictsSeen.current.has(conflict.at)) continue;
-      conflictsSeen.current.add(conflict.at);
+      const seen = conflict === undefined ? '' : `${id} ${conflict.at}`;
+      if (conflict === undefined || answers.pending.has(id) || conflictsSeen.current.has(seen)) continue;
+      conflictsSeen.current.add(seen);
       const active = document.activeElement;
       if (active === null || active === document.body) heldCards.current.get(id)?.focus();
     }
