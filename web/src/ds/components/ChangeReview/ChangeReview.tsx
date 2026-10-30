@@ -38,7 +38,10 @@ export interface ChangeRowView {
 export interface ChangeReviewProps {
   rows: readonly ChangeRowView[];
   /** The proof report in the screen's words (Plan 04's `checkStatus`). Only `checked` can be confirmed. */
-  checks: { status: 'checked' | 'failed' | 'unavailable'; lines: readonly string[] };
+  checks: {
+    status: 'checked' | 'failed' | 'unavailable';
+    lines: readonly string[];
+  };
   /** The primary button's words: "Confirm change" by default; "Confirm and turn on". */
   confirmLabel?: string;
   /** The secondary button's words: "Keep my rules" by default; "Back". */
@@ -100,21 +103,25 @@ function MetaLine({
   appliesTo,
   words,
   tag,
+  strong,
 }: {
   connector?: ConnectorView;
   appliesTo?: string;
   words: readonly RuleWord[];
   tag?: boolean;
+  /** The line's value changed: in weight 520. */
+  strong?: boolean;
 }) {
   const text = joinWords(words);
   const target = appliesTo?.trim() ?? '';
   const parts: ReactNode[] = [];
-  if (connector) parts.push(<ConnectorName key="connector" connector={connector} size="inline" />);
+  // The review's rows name the connector without "Built in"; an app keeps its Mock badge.
+  if (connector) parts.push(<ConnectorName key="connector" connector={connector} size="inline" hideBuiltIn />);
   if (target !== '') parts.push(<span key="target">{target}</span>);
   if (text !== '') parts.push(<span key="words">{text}</span>);
   if (parts.length === 0) return null;
   return (
-    <p className="cd-change-review__meta cd-type-meta">
+    <p className={`cd-change-review__meta cd-type-meta${strong ? ' cd-change-review__strong' : ''}`}>
       {parts.flatMap((part, index) => (index === 0 ? [part] : [<span key={`sep-${index}`}> · </span>, part]))}
       {tag ? (
         <>
@@ -126,16 +133,21 @@ function MetaLine({
   );
 }
 
-/** A changed rule's side, Before or After; the after side tags each line whose field changed. */
+/**
+ * One side of a rule, Before or After, under its label beside a 2 px bar: the refused tone for what
+ * goes, the handled tone for what applies. The words stay neutral; on the after side of a changed
+ * rule, each line whose field changed is in weight 520 and tagged "Changed".
+ */
 function Side({ label, side, changed }: { label: 'Before' | 'After'; side: ChangeSide; changed: readonly RuleField[] | null }) {
   const has = (field: RuleField) => changed?.includes(field) === true;
+  const wordsChanged = WORD_FIELDS.some(has);
   return (
-    <div role="group" aria-label={label} className="cd-change-review__side">
+    <div role="group" aria-label={label} className={`cd-change-review__side cd-change-review__side--${label === 'Before' ? 'before' : 'after'}`}>
       <p className="cd-change-review__side-label cd-type-caption">{label}</p>
       <div className="cd-change-review__side-main">
         <div className="cd-change-review__side-text">
           {hasTarget(side) ? (
-            <p className="cd-change-review__meta cd-change-review__target cd-type-meta">
+            <p className={`cd-change-review__meta cd-change-review__target cd-type-meta${has('applies_to') ? ' cd-change-review__strong' : ''}`}>
               {side.appliesTo}
               {has('applies_to') ? (
                 <>
@@ -145,8 +157,8 @@ function Side({ label, side, changed }: { label: 'Before' | 'After'; side: Chang
               ) : null}
             </p>
           ) : null}
-          <MetaLine words={side.words} tag={WORD_FIELDS.some(has)} />
-          <p className="cd-change-review__reason cd-type-body">
+          <MetaLine words={side.words} tag={wordsChanged} strong={wordsChanged} />
+          <p className={`cd-change-review__reason cd-type-body${has('reason') ? ' cd-change-review__strong' : ''}`}>
             {side.reason}
             {has('reason') ? (
               <>
@@ -200,11 +212,13 @@ function Row({ row }: { row: ChangeRowView }) {
         ) : single ? (
           <>
             <MetaLine connector={row.connector} appliesTo={single.appliesTo} words={single.words} />
-            <p className="cd-change-review__reason cd-type-body">{single.reason}</p>
+            <div className="cd-change-review__sides">
+              {/* A removed rule is what goes; an added rule, or a tool turned on, is what applies. */}
+              <Side label={row.after ? 'After' : 'Before'} side={single} changed={null} />
+            </div>
           </>
         ) : null}
       </div>
-      {!showsBoth && single ? <Outcome side={single} /> : null}
     </li>
   );
 }

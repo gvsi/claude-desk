@@ -148,10 +148,15 @@ export const TurnOnPayments: Story = {
     const tag = canvasElement.querySelector('.cd-change-review__tag');
     if (tag === null) throw new Error('No tag');
     expectComputed(tag, { borderTopWidth: '1px', borderTopColor: 'rgba(250, 249, 245, 0.22)', fontSize: '12px' });
-    // The title, then the connector's name and badge and the side's words; the reason; the outcome.
+    // The title, then the connector's name (no "Built in") and the side's words; then what applies,
+    // under "After" beside the handled bar: the words, the reason and the outcome.
     const rows = within(changes).getAllByRole('listitem');
     await expect(rows[0]).toHaveTextContent('Payment link');
-    await expect(rows[0]).toHaveTextContent('Payments Built in · Anyone');
+    await expect(rows[0]).toHaveTextContent('Payments · Anyone');
+    await expect(rows[0]).not.toHaveTextContent('Built in');
+    const after = within(rows[0] as HTMLElement).getByRole('group', { name: 'After' });
+    expectComputed(after, { borderLeftWidth: '2px', borderLeftColor: 'rgb(111, 168, 89)', paddingLeft: '12px' });
+    await expect(within(after).getByText('After')).toBeVisible();
     await expect(rows[0]).toHaveTextContent(DEFAULT_REASON);
     await expect(within(rows[0] as HTMLElement).getByText('Ask me first')).toBeVisible();
     await expect((rows[0] as HTMLElement).querySelector('.cd-status-dot--held')).not.toBeNull();
@@ -182,10 +187,15 @@ export const RaiseDiscount: Story = {
     await expect(after).toHaveTextContent(QUOTE_REASON);
     await expect(before).toHaveTextContent('Anyone · Discounts up to 10%');
     await expect(after).toHaveTextContent('Anyone · Discounts up to 50%');
-    // Status never by color alone: the line that changed says so in words, on the after side only.
+    // Status never by color alone: the line that changed says so in words, on the after side only,
+    // in weight 520; the bars beside the sides are the refused and handled tones, the words neutral.
     const changedLine = within(after).getByText(/Discounts up to 50%/).closest('p');
     if (changedLine === null) throw new Error('No after line');
     await expect(within(changedLine).getByText('Changed')).toBeVisible();
+    expectComputed(changedLine, { fontWeight: '520', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(before, { borderLeftWidth: '2px', borderLeftColor: 'rgb(220, 130, 144)' });
+    expectComputed(after, { borderLeftWidth: '2px', borderLeftColor: 'rgb(111, 168, 89)' });
+    expectComputed(within(after).getByText(QUOTE_REASON, { exact: false }), { fontWeight: '380', color: 'rgba(250, 249, 245, 0.92)' });
     await expect(within(before).queryByText('Changed')).toBeNull();
     // The reason and the outcome didn't change, so they aren't tagged.
     await expect(within(after).getAllByText('Changed')).toHaveLength(1);
@@ -198,13 +208,17 @@ export const RaiseDiscount: Story = {
 
 export const AddAndRemove: Story = {
   args: { rows: addAndRemove, confirmLabel: undefined, cancelLabel: undefined },
-  parameters: { canvas: 'N-Conn-01-Rules', canvasNote: 'A rule added and one removed, drafted from the Rules page; no board draws this review.' },
+  parameters: { canvas: 'N-Conn-12-Chat', canvasNote: 'A rule added and one removed, drafted from the Rules page; no board draws this review.' },
   play: async ({ canvas, canvasElement }) => {
     // rows_are_tagged_in_words
     await expect(tags(canvasElement)).toEqual(['Added', 'Removed']);
     const [added, removed] = canvas.getAllByRole('listitem').slice(0, 2);
     await expect(added).toHaveTextContent('No bookings on Sundays.');
-    await expect(added).toHaveTextContent('Bookings Built in · Anyone · Sundays');
+    await expect(added).toHaveTextContent('Bookings · Anyone · Sundays');
+    // What applies is After, beside the handled bar; what goes is Before, beside the refused bar.
+    expectComputed(within(added as HTMLElement).getByRole('group', { name: 'After' }), { borderLeftColor: 'rgb(111, 168, 89)' });
+    expectComputed(within(removed as HTMLElement).getByRole('group', { name: 'Before' }), { borderLeftWidth: '2px', borderLeftColor: 'rgb(220, 130, 144)' });
+    await expect(within(removed as HTMLElement).queryByRole('group', { name: 'After' })).toBeNull();
     await expect((added as HTMLElement).querySelector('.cd-status-dot--refused')).not.toBeNull();
     // A removed row shows the rule it removes.
     await expect(removed).toHaveTextContent(saturday.reason);
@@ -339,7 +353,7 @@ export const ConfirmingFromTheScreen: Story = {
 
 export const LimitOnly: Story = {
   args: { rows: [], hasOtherChanges: true, checks: { status: 'checked', lines: ['Always-on rules still hold.'] }, confirmLabel: undefined, cancelLabel: undefined },
-  parameters: { canvas: 'N-Conn-01-Rules', canvasNote: 'A draft that changes only what the screen shows above it, such as the money limit; no board draws it.' },
+  parameters: { canvas: 'N-Conn-12-Chat', canvasNote: 'A draft that changes only what the screen shows above it, such as the payment limit on the Rules page; no board on this branch draws it.' },
   play: async ({ args, canvas }) => {
     // limit_only_change_keeps_confirm
     await expect(canvas.getByText('Your rules stay the same.')).toBeVisible();
@@ -526,8 +540,8 @@ export const NarrowMaxLimit: Story = {
   args: { rows: ceiling, confirmLabel: undefined, cancelLabel: undefined },
   globals: { viewport: { value: 'narrow', isRotated: false } },
   parameters: {
-    canvas: 'N-Conn-16-Phone-Rules',
-    canvasNote: 'The largest limit a rule can carry, at the narrowest phone width; no board draws this review on a phone.',
+    canvas: 'none',
+    canvasNote: 'The largest limit a rule can carry, at the narrowest phone width; no board draws this review on a phone. The nearest is N-Conn-10-GCal-Confirm.',
     viewport: { options: { narrow: { name: 'Narrow phone', styles: { width: '320px', height: '640px' }, type: 'mobile' } } },
   },
   play: async ({ canvas, canvasElement }) => {
@@ -539,5 +553,48 @@ export const NarrowMaxLimit: Story = {
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
     const tooWide = [...canvasElement.querySelectorAll('*')].filter((el) => el.getBoundingClientRect().right > width);
     await expect(tooWide).toEqual([]);
+  },
+};
+
+/** A rule for one person, which a preset replaces too: Dana's refunds up to $50 without asking. */
+const DANA_REASON = 'Dana Whitfield can get refunds up to $50 without asking.';
+const personalRule: ChangeRowView[] = [
+  {
+    key: 'rv-dana-refunds',
+    change: 'removed',
+    title: 'Refund',
+    connector: rivera.connectors.views.stripe,
+    before: {
+      mode: 'auto',
+      limit: '$50',
+      reason: DANA_REASON,
+      words: [
+        { field: 'who', text: 'Dana Whitfield, verified' },
+        { field: 'limits', text: 'Up to $50' },
+      ],
+    },
+    after: null,
+    changed: [],
+  },
+];
+
+export const PersonalRuleReplaced: Story = {
+  args: { rows: personalRule, confirmLabel: undefined, cancelLabel: undefined },
+  parameters: {
+    canvas: 'N-Conn-10-GCal-Confirm',
+    canvasNote: 'A rule for one person, as a preset’s review lists it when the preset replaces personal rules too; no board on this branch draws a preset’s review.',
+  },
+  play: async ({ canvas }) => {
+    // It reads as the person's rule: the tool, then the connector and who it is for first, and the
+    // rule that goes, beside the refused bar, naming her, with its limit phrase.
+    const [row] = canvas.getAllByRole('listitem');
+    await expect(within(row as HTMLElement).getByText('Refund')).toBeVisible();
+    await expect(row).toHaveTextContent('Stripe Mock · Dana Whitfield, verified · Up to $50');
+    const before = within(row as HTMLElement).getByRole('group', { name: 'Before' });
+    await expect(before).toHaveTextContent('Dana Whitfield, verified · Up to $50');
+    await expect(before).toHaveTextContent(DANA_REASON);
+    await expect(within(before).getByText('Automatic up to $50; over $50, ask me first')).toBeVisible();
+    expectComputed(before, { borderLeftColor: 'rgb(220, 130, 144)' });
+    await expect(tags(row?.parentElement as HTMLElement)).toEqual(['Removed']);
   },
 };
