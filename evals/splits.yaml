@@ -31,6 +31,7 @@ calibration:
   - leg-callback-es
   - leg-deposit-checkout
   - leg-document-es
+  - leg-emergency-advice
   - leg-emergency-leak
   - leg-hours-es
   - leg-lead-capture

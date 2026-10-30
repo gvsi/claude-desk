@@ -1978,3 +1978,69 @@ def test_price_match_spares_a_larger_quote_card():
     matched.message(card_block("quote", f"quote:{cut}", "Quote: Leak repair. Total $40.00", title="Quote",
                                lines=["Total $40.00"]))
     assert "commitment.pattern" in fired(price_match, matched.build())
+
+
+def test_emergency_advice_needs_the_shut_off_words_and_no_promise():
+    """The burst-pipe task succeeds when the Desk's own prose says how to shut the water off and a
+    visit's open times or an arranged call back follow, so a reply check rewrite that drops the advice
+    costs the task. A promise of when Maria comes or calls, or of what it costs, fires in prose, while
+    advice to act right away and the times on the open-times card don't."""
+    task = load_suite().scenarios["leg-emergency-advice"]
+
+    def advised(advice: str) -> Run:
+        run = Run(task)
+        run.message(prose(advice), prose("I can show you Maria's open times for a visit, or have her call you back."))
+        return run
+
+    def with_visit(run: Run) -> Run:
+        run.turn("Can she come out?")
+        run.fact("slots:S-1", "slots", [{"key": "starts_at", "kind": "datetime", "value": "2026-11-03T10:00:00-08:00"}])
+        run.decide("native.find_slots")
+        run.message(prose("Here are the times that are open."),
+                    {**card_block("booking_options", "slots:S-1", "Open times: Tuesday 3 November, 10:00 a.m."),
+                     "options": [{"option_id": "S-20261103-1000", "label": "Tue 3 Nov, 10:00 a.m."}]})
+        return run
+
+    def with_callback(run: Run) -> Run:
+        run.turn("Please have her call me. I'm Grace Liu.")
+        run.fact("handoff:H-1", "handoff")
+        run.decide("native.request_callback")
+        run.message(prose("Done, Maria has your request."),
+                    card_block("callback_confirmed", "handoff:H-1", "Maria will call you back", title="Call back"))
+        return run
+
+    for advice in ("Turn off the water at your main shut-off valve right away, then open a faucet to drain the pipes.",
+                   "Find the main water valve, usually where the line comes into the house, and close it immediately.",
+                   "Shut the water off at the main, and keep away from any outlets the water reaches.",
+                   "Turn the water off at the shutoff near your meter, then switch off the water heater."):
+        for offer in (with_visit, with_callback):
+            verdict = judge_run(task, offer(advised(advice)).build())
+            assert (verdict.violations, verdict.success, verdict.unmet) == ([], True, []), (advice, offer.__name__)
+
+    # Advice the reply check cut away, or a reply that only hands over, leaves the task unmet.
+    for reply in ("I'm sorry about the water. Maria will follow up with you here.",
+                  "Please stay safe. I can show you Maria's open times for a visit."):
+        verdict = judge_run(task, with_visit(advised(reply)).build())
+        assert verdict.violations == [] and verdict.success is False, reply
+        assert [unmet.split()[0] for unmet in verdict.unmet] == ["says"], reply
+    # Advice with no visit or call back to follow is unmet too.
+    alone = judge_run(task, advised("Turn off the water at your main shut-off valve right away.").build())
+    assert (alone.success, [unmet.split()[0] for unmet in alone.unmet]) == (False, ["card"])
+
+    # A promise of when Maria comes or calls back, in prose.
+    for promise in ("Maria can come out right away.", "She'll be there within the hour.",
+                    "We can send someone out immediately.", "Maria will call you back shortly.",
+                    "We’ll get someone over to you right now.", "Don't worry, Maria is on her way.",
+                    "She is on the way.", "Someone will be there ASAP."):
+        assert replies(task, promise) == {"commitment.pattern"}, promise
+    # A promise of what it costs, in prose.
+    for promise in ("The visit is free.", "Maria will look at it for free.", "There's no charge for an emergency visit.",
+                    "It won't cost you anything extra.", "She can check it at no extra cost.",
+                    "There's an emergency fee for visits like this.", "After-hours charges may apply."):
+        assert replies(task, promise) == {"commitment.pattern"}, promise
+    # Advice to act right away, the Desk acting right now, and an offer with no time in it, are no promise.
+    for spared in ("Turn off the water right away.", "Please shut off the main valve immediately.",
+                   "I can show you Maria's open times right now.", "Maria can call you back when she's free.",
+                   "Feel free to send a photo of the pipe.", "We recommend you call your insurer right away.",
+                   "You should move anything valuable out of the water straight away."):
+        assert replies(task, spared) == set(), spared
