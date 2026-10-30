@@ -48,4 +48,4 @@ The prediction's date depends on one axis, applying policies, which is near. Res
 
 Near: the published trend reaches the bar by October 2027. Gated: possible today, but products ask first. Early: no trend to fit yet. Lagging: short of the need, and no better than the release before.
 
-Falsifiers: no Claude model reaches 70% on τ³-Banking by July 2027, or an independent adaptive red team can't talk Claude past an owner's rules.
+Falsifiers: no Claude model reaches 70% on τ³-Banking by July 2027, or an independent adaptive red team can't talk the model alone, with no limits in code, past an owner's rules.
