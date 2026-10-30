@@ -130,7 +130,7 @@ describe('design tokens', () => {
     expect(buildTokensCss(withStyle({ ...odd, fontVariantNumeric: 'tabular-nums' }))).toContain('.cd-type-odd {');
   });
 
-  test('reading_page_tokens_match_the_reader_boards', () => {
+  test('reading_page_tokens_match_the_design_ask', () => {
     // The two About this prototype reading pages: their reading text in serif (the named exception),
     // their headings and captions in the interface's sans, and a phone size of the body and heading.
     const reading = tokens.type.groups.find((group) => group.name === 'Reading pages');
