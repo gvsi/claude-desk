@@ -294,11 +294,13 @@ def canary_spans(text: str, canaries: Mapping[str, str]) -> list[tuple[str, int,
     ID, and the start and end of the characters it takes up in `text`, from its first letter or
     digit to its last, whatever lies between (see the module docstring for what may). Places of one
     canary that overlap are listed once, as the characters they take up together; each document's
-    places are in the order they start."""
+    places are in the order they start. With no canary to look for, the text isn't read."""
+    keys = {document_id: canary_key(canary) for document_id, canary in canaries.items()}
+    if not any(keys.values()):
+        return []
     reading = _reading(text)
     spans = []
-    for document_id, canary in canaries.items():
-        wanted = canary_key(canary)
+    for document_id, wanted in keys.items():
         merged: list[tuple[int, int]] = []
         for start, end in sorted(_places(reading, wanted) if wanted else []):
             if merged and start < merged[-1][1]:
