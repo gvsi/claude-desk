@@ -208,7 +208,7 @@ def all_inputs(**changes: Any) -> dict[str, Any]:
     inputs: dict[str, Any] = {
         "pass_result": pass_result, "gate_result": gate(), "metrics": metrics(), "latency": latency(),
         "calibration": calibration(), "recorded": recorded_rate(),
-        "null_baseline": NullBaseline(pass_id="p-20261101-e5f6", successes=0, trials=2),
+        "null_baseline": NullBaseline(pass_id="p-20261101-e5f6", successes=0, trials=2, gating_refusal=None),
         "spend_month": [spend("p-20261031-9z8y", date(2026, 10, 31), runs=240, desk_usd=61.0, simulator_usd=38.5),
                         spend("p-20261031-c3d4", date(2026, 11, 1), runs=36, desk_usd=9.0, simulator_usd=5.4),
                         pass_result.spend],
@@ -328,7 +328,9 @@ def test_only_gating_evidence_becomes_the_latest_report(tmp_path: Path):
     that is gating evidence, by the check a results file, a recorded rate and the final gate use
     (`results.gating_refusal`): every part on the Claude API, the production 5.5 model ids and only
     production models serving. `write_report` runs the check itself, so no caller can skip it. Any
-    other pass explores: its report goes under the out directory, says why, and nothing else is written."""
+    other pass explores: its report goes under the out directory, says why, and nothing else is written.
+    The same holds for the null baseline beside it: a latest report refuses one that isn't gating
+    evidence, and an exploratory report says why it isn't."""
     reports, out, doc = tmp_path / "reports", tmp_path / "out", tmp_path / "evals.md"
     doc.write_text(f"# Evals\n\n## Latest results\n\n{BEGIN_MARKER}\n{PLACEHOLDER}\n{END_MARKER}\n")
     guide = doc.read_text()
@@ -353,6 +355,17 @@ def test_only_gating_evidence_becomes_the_latest_report(tmp_path: Path):
                 f"report: pass {PASS_ID} isn't gating evidence: {why}") in written.read_text(), why
         assert latest_json(**inputs)["report"] == f"evals/out/reports/2026-11-01-{PASS_ID}.md", why
         assert not reports.exists() and doc.read_text() == guide, why
+
+    unfit = NullBaseline(pass_id="p-20261101-e5f6", successes=0, trials=2,
+                         gating_refusal="pass p-20261101-e5f6 isn't gating evidence: it ran the API on bedrock")
+    with pytest.raises(ValueError, match="null-baseline pass p-20261101-e5f6 isn't gating evidence"):
+        write_report(**all_inputs(null_baseline=unfit), reports_dir=reports, evals_doc=doc, out_dir=out)
+    assert not reports.exists() and doc.read_text() == guide
+    explored = all_inputs(pass_result=a_pass(full_pass().runs, model_ids={**MODEL_IDS, "conversation": "x"}),
+                          null_baseline=unfit)
+    written = write_report(**explored, reports_dir=reports, evals_doc=doc, out_dir=out)
+    assert ("Null-baseline pass p-20261101-e5f6 isn't gating evidence: it ran the API on bedrock."
+            in written.read_text())
 
     written = write_report(**all_inputs(), reports_dir=reports, evals_doc=doc, out_dir=out)
     assert written == reports / f"2026-11-01-{PASS_ID}.md" and "explores" not in written.read_text()
@@ -967,7 +980,8 @@ async def test_report_command_quotes_only_a_gating_null_baseline_in_the_latest_r
     """A report that may become the latest quotes a null baseline only from gating evidence, by the check
     the pass itself is held to (`results.gating_refusal`): a null-baseline pass on Bedrock, or one a model
     other than the production ones served, is refused with the reason, and nothing is written. An
-    exploratory pass's report, which stays under `evals/out/reports/`, may still quote one."""
+    exploratory pass's report, which stays under `evals/out/reports/`, may still quote one, and its
+    null baseline line says why that pass isn't gating evidence."""
     root = report_repo
     reports, out = root / "evals" / "reports", root / "evals" / "out" / "reports"
     null = {"suite": "legit", "split": "heldout", "null_baseline": True}
@@ -988,14 +1002,26 @@ async def test_report_command_quotes_only_a_gating_null_baseline_in_the_latest_r
         assert not (reports / "latest.json").exists() and not list(reports.glob("2026-*.md")), why
         assert not out.exists(), why
 
+    def null_line(report: Path) -> str:
+        [line] = [line for line in report.read_text().splitlines() if line.startswith("Null baseline:")]
+        return line
+
     explored = await report_pass(root, provider="bedrock")
     assert evals_run.report_command(["--pass", explored, "--null-baseline", on_bedrock], root=root) == 0
-    assert f"on pass `{on_bedrock}`." in (out / f"2026-10-30-{explored}.md").read_text()
+    line = null_line(out / f"2026-10-30-{explored}.md")
+    assert f"on pass `{on_bedrock}`." in line, line
+    assert line.endswith(f" Null-baseline pass {on_bedrock} isn't gating evidence: it ran the API on bedrock, the "
+                         "simulator on bedrock; a results file, a recorded rate and the final gate come only from a "
+                         "pass on the Claude API with the production 5.5 models; a pass on Bedrock explores and is "
+                         "never exported."), line
     assert not (reports / "latest.json").exists()
 
     gating = await report_pass(root, answering_off, **null)
+    assert evals_run.report_command(["--pass", explored, "--null-baseline", gating], root=root) == 0
+    assert "gating evidence" not in null_line(out / f"2026-10-30-{explored}.md")
     assert evals_run.report_command(["--pass", pass_id, "--null-baseline", gating], root=root) == 0
     assert json.loads((reports / "latest.json").read_text())["null_baseline_point"] == 0.0
+    assert "gating evidence" not in null_line(reports / f"2026-10-30-{pass_id}.md")
 
 
 async def test_report_command_counts_errored_runs_by_kind(report_repo):

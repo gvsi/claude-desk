@@ -13,7 +13,7 @@ Each tier 2 pass that is gated and reported leaves three files here:
 - the latest local and hosted latency runs made for the pass (`make evals-latency PASS=<id>`), never a dry run's;
 - the calibration the reviewer's thresholds came from, at the pass's commit;
 - the current recorded rate;
-- with `NULL_BASELINE=<id>`, a null-baseline pass that judged exactly the held-out legitimate tasks the pass ran, with no `--only` and no stop at its budget, and that is gating evidence too when the report becomes the latest one.
+- with `NULL_BASELINE=<id>`, a null-baseline pass that judged exactly the held-out legitimate tasks the pass ran, with no `--only` and no stop at its budget, and that is gating evidence too when the report becomes the latest one. A report kept under `evals/out/reports/` may quote one that isn't, and says why.
 
 Only a pass of the whole suite on the Claude API with the 5.5 models becomes the latest report: `--suite all`, `--split heldout` or `all`, no `--only`, not stopped by its `--max-usd` budget, and gating evidence by the same check a results file must pass (every part on the Claude API, the production model ids, and only production models serving). Any other pass, such as a calibration pass or a pass on Bedrock, gets its report alone, under `evals/out/reports/`, which is never committed. That report says what the pass left out or why it isn't gating evidence, and the files here and the evals guide stay as they were.
 

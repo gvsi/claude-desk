@@ -583,7 +583,8 @@ def _null_baseline(root: Path, null_id: str, real: "PassResult", *, latest: bool
     tasks `real` ran, with no `--only` and no stop at its budget, since the report sets the two side by
     side. When `real`'s report would become the latest, it must also be gating evidence, by the check the
     pass itself is held to (`results.gating_refusal`), so the latest report never quotes a null baseline
-    run on another provider or served by a model other than the production ones."""
+    run on another provider or served by a model other than the production ones. Otherwise the reason it
+    isn't goes with it, and the report's null baseline line says it."""
     from evals.report import NullBaseline
     from evals.results import gating_refusal
     from evals.tier2.passes import load_pass
@@ -592,7 +593,8 @@ def _null_baseline(root: Path, null_id: str, real: "PassResult", *, latest: bool
     if not null.config.null_baseline or null.config.dry_run:
         raise ReportRefused(f"pass {null_id} isn't a null baseline: --null-baseline names a real pass run with "
                             "tier2 --null-baseline")
-    if latest and (refusal := gating_refusal(null)):
+    refusal = gating_refusal(null)
+    if latest and refusal:
         raise ReportRefused(f"null-baseline {refusal}; pass {real.pass_id}'s report would become the latest, which "
                             "quotes a null baseline only from such a pass")
     if null.heldout_sha256 != real.heldout_sha256:
@@ -614,7 +616,8 @@ def _null_baseline(root: Path, null_id: str, real: "PassResult", *, latest: bool
                             "didn't run, so the two can't be compared")
     if not rows:
         raise ReportRefused(f"null-baseline pass {null_id} judged no held-out legitimate run")
-    return NullBaseline(pass_id=null.pass_id, successes=sum(bool(r.success) for r in rows), trials=len(rows))
+    return NullBaseline(pass_id=null.pass_id, successes=sum(bool(r.success) for r in rows), trials=len(rows),
+                        gating_refusal=refusal)
 
 
 def report_command(argv: list[str], *, root: Path | None = None) -> int:

@@ -184,12 +184,14 @@ class Calibration(BaseModel):
 
 class NullBaseline(BaseModel):
     """The held-out legitimate tasks run with Answering off: what the legitimate oracles pass when
-    the Desk does nothing."""
+    the Desk does nothing. `gating_refusal` is why its pass isn't gating evidence
+    (`results.gating_refusal`), or None when it is; whoever builds one states it, so it is never assumed."""
 
     model_config = _STRICT
     pass_id: PassId
     successes: StrictInt = Field(ge=0)
     trials: StrictInt = Field(ge=1)
+    gating_refusal: Annotated[StrictStr, StringConstraints(min_length=1)] | None
 
     @model_validator(mode="after")
     def _bounded(self) -> Self:
@@ -778,6 +780,8 @@ def _legit(p: PassSummary, n: dict[str, Any], recorded: RecordedRate | None,
             half = n["legit_completion_point"] / 2
             line += (f" At most half the held-out point ({percent(half)}): "
                      f"{'yes' if null_point <= half else 'no, so the legitimate oracles are too lenient'}.")
+        if null_baseline.gating_refusal:
+            line += f" Null-baseline {null_baseline.gating_refusal}."
         out.append(line)
     else:
         out.append("Null baseline: not measured in this report.")
@@ -1083,10 +1087,14 @@ def write_report(pass_result: PassSummary, gate_result: Any, metrics: Metrics | 
     its `spend.csv`, and the evals guide's latest-results block; returns the report's path. A pass
     that ran part of the suite (`partial`) or isn't gating evidence (`exploratory`) writes only its
     report, under `out_dir`, and none of the rest. A dry run or a null-baseline pass is refused
-    before anything is written: neither measures a Desk."""
+    before anything is written: neither measures a Desk. So is a report that would become the latest
+    with a null baseline that isn't gating evidence; a report kept out says why it isn't."""
     p = PassSummary.model_validate(pass_result)
     if refusal := latest_refusal(p.pass_id, dry_run=p.dry_run, null_baseline=p.null_baseline):
         raise ValueError(refusal)
+    if null_baseline is not None and null_baseline.gating_refusal and not kept_out(p):
+        raise ValueError(f"null-baseline {null_baseline.gating_refusal}; pass {p.pass_id}'s report would become the "
+                         "latest, which quotes a null baseline only from such a pass")
     inputs = {"recorded": recorded, "null_baseline": null_baseline, "spend_month": spend_month}
     latest = latest_json(p, gate_result, metrics, latency, calibration, **inputs)
     text = render_report(p, gate_result, metrics, latency, calibration, **inputs, budget=budget)
