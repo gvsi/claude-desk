@@ -579,10 +579,16 @@ async def test_a_reply_naming_only_the_card_passes(app, client, reviewer):
     ("The appointment has been confirmed.", "lex.en.booking", "The appointment has been confirmed"),
     ("You've been booked.", "lex.en.booking", "You've been booked"),
     ("Your booking is aIready confirmed.", "lex.en.booking", "Your booking is aIready confirmed"),   # I for l
+    ("Your appointment's confirmed.", "lex.en.booking", "Your appointment's confirmed"),
+    ("Your booking’s confirmed.", "lex.en.booking", "Your booking’s confirmed"),
+    ("Your visit's been scheduled.", "lex.en.booking", "Your visit's been scheduled"),
+    ("Your next appointment is confirmed.", "lex.en.booking", "Your next appointment is confirmed"),
     ("Tu cita está confirmada.", "lex.es.booking", "Tu cita está confirmada"),
     ("Su visita queda agendada.", "lex.es.booking", "Su visita queda agendada"),
     ("Su reserva ya está confirmada.", "lex.es.booking", "Su reserva ya está confirmada"),
     ("La cita ha quedado reservada.", "lex.es.booking", "La cita ha quedado reservada"),
+    ("Su cita quedó confirmada.", "lex.es.booking", "Su cita quedó confirmada"),
+    ("Ya quedó agendada.", "lex.es.booking", "Ya quedó agendada"),
     ("Ya estás reservado.", "lex.es.booking", "Ya estás reservado"),
     ("Está confirmada.", "lex.es.booking", "Está confirmada"),
     ("Usted ya está agendado con Maria.", "lex.es.booking", "ya está agendado"),
@@ -621,6 +627,7 @@ def test_booking_claims_read_lookalike_letters():
     "As soon as you are scheduled, Maria will reach out.",
     "After we've booked you, Maria will reach out.",
     "Until your appointment is confirmed, the time isn't held.",
+    "When your next appointment's confirmed, Maria will text you.",
     "Cuando tu cita esté confirmada, te escribimos.",
     "Cuando tu cita está confirmada, Maria te escribe.",
     "Cuando su próxima cita está confirmada, le llega un mensaje.",   # a word between, a claim inside
@@ -740,8 +747,10 @@ async def test_policy_echoes_cover_the_rules_the_session_reads(app, client, revi
     assert_handed_off(verdict, "es")
 
     # the contact isn't a rule, and an owner-only policy is no policy this session reads
+    await change_fact(app, copy, "charter:contact", claims=[
+        {"key": "contact", "kind": "text", "value": "Text the shop line and Maria calls back."}])
     await change_fact(app, copy, "charter:policy:arrival", readers=["owner"])
-    for prose in ("Maria texts before she arrives.", "Maria will text you before she arrives."):
+    for prose in ("Maria texts before she arrives.", "Just text the shop line and Maria calls back."):
         assert (await checked(client, visitor, prose)).violations == [], prose
     assert not reply_check.states_rule("contact")
 

@@ -48,11 +48,12 @@ promise	libres?[\s-]+de[\s-]+(?:costos?|costes?|cargos?|pagos?|impuestos?)
 promise	libres?(?=[\s-]+(?:para|a)[\s-]+(?:tod[oa]s|todo[\s-]+el[\s-]+mundo|cualquiera)\b)
 promise	libres?(?=[\s-]+(?:(?:para|a)[\s-]+(?:(?:el|la|l[oa]s|nuestr[oa]s?|sus?|tus?)[\s-]+)?|al[\s-]+)(?:soci[oa]s?|miembros?|clientes?|publico|usted(?:es)?|ti|vos(?:otros|otras)?)\b)
 
-# Booking confirmations, which only a booking card makes ("está" and "estás" without the accent):
-# "tu cita está confirmada", "su próxima visita queda agendada", "ya estás reservado". The second
-# line holds "(ya) está confirmada" whatever comes before it ("la cita de Ana está confirmada") and
-# starts at "ya" when it is there. The first takes the determiner and one more word before the
-# noun, so a condition before the whole claim is seen ("cuando su próxima cita está confirmada");
-# a claim inside a longer one is that claim, so one claim is one violation.
-booking	(?:tu|su|la|una|mi|esta|esa|nuestra)[\s-]+(?:[^\W\d_]+[\s-]+)?(?:cita|reserva|visita)[\s-]+(?:ya[\s-]+)?(?:esta|queda|ha[\s-]+quedado|ha[\s-]+sido)[\s-]+(?:confirmad|reservad|agendad)a
-booking	(?<!ya[\s-])(?:ya[\s-]+)?(?:estas|esta)[\s-]+(?:reservad|confirmad|agendad)[oa]
+# Booking confirmations, which only a booking card makes ("está", "estás" and "quedó" without the
+# accent): "tu cita está confirmada", "su próxima visita queda agendada", "su cita quedó
+# confirmada", "ya estás reservado". The second line holds "(ya) está confirmada" or "quedó
+# confirmada" whatever comes before it ("la cita de Ana está confirmada") and starts at "ya" when
+# it is there. The first takes the determiner and one more word before the noun, so a condition
+# before the whole claim is seen ("cuando su próxima cita está confirmada"); a claim inside a
+# longer one is that claim, so one claim is one violation.
+booking	(?:tu|su|la|una|mi|esta|esa|nuestra)[\s-]+(?:[^\W\d_]+[\s-]+)?(?:cita|reserva|visita)[\s-]+(?:ya[\s-]+)?(?:esta|queda|quedo|ha[\s-]+quedado|ha[\s-]+sido)[\s-]+(?:confirmad|reservad|agendad)a
+booking	(?<!ya[\s-])(?:ya[\s-]+)?(?:estas|esta|quedo)[\s-]+(?:reservad|confirmad|agendad)[oa]

@@ -52,8 +52,8 @@ promise	no[\s-]+charge|on[\s-]+the[\s-]+house|warrant(?:y|ies)|money[\s-]+back
 promise	(?:at[\s-]+)?no[\s-]+(?:extra[\s-]+|additional[\s-]+)?cost
 
 # Booking confirmations, which only a booking card makes: "you're booked", "I've booked you",
-# "your visit is confirmed", "you've been booked".
+# "your visit is confirmed", "your next appointment's been set", "you've been booked".
 booking	you(?:['’]?re|[\s-]+are)[\s-]+(?:(?:all|now|already)[\s-]+)?(?:booked|confirmed|scheduled|set)
 booking	(?:i|we)(?:['’]ve|[\s-]+have)?[\s-]+(?:booked|scheduled|confirmed)[\s-]+(?:you|your[\s-]+(?:booking|appointment|visit))
-booking	(?:your|the)[\s-]+(?:booking|appointment|visit)[\s-]+(?:is|has[\s-]+been)[\s-]+(?:(?:all|now|already)[\s-]+)?(?:booked|confirmed|scheduled|set)
+booking	(?:your|the)[\s-]+(?:[^\W\d_]+[\s-]+)?(?:booking|appointment|visit)(?:[\s-]+(?:is|has[\s-]+been)|['’]s(?:[\s-]+been)?)[\s-]+(?:(?:all|now|already)[\s-]+)?(?:booked|confirmed|scheduled|set)
 booking	you(?:['’]ve|[\s-]+have)[\s-]+been[\s-]+(?:booked|confirmed|scheduled)
