@@ -619,9 +619,9 @@ function afterSide(rows: HTMLElement[], index: number): HTMLElement {
 export const AskMeFirst: Story = {
   args: { rows: rivera.askFirstReview, checks: ASK_FIRST_CHECKS, confirmLabel: undefined, cancelLabel: undefined, cancelsLinks: true },
   parameters: {
-    canvas: 'none',
+    canvas: 'N-Conn-18-Preset-Review',
     canvasNote:
-      "Drawn on N-Conn-18-Preset-Review, which joins the reference boards with its board story. Rivera's eight own rules and Dana Whitfield's personal booking rule, which the owner's \"Allow only for Dana Whitfield, always\" adds and the board doesn't draw; the board's shared rule for Alex Kim's assistant is the illustrative shared card, which isn't in Rivera's seed.",
+      "Rivera's eight own rules and Dana Whitfield's personal booking rule, which the owner's \"Allow only for Dana Whitfield, always\" adds and the board doesn't draw; the board's shared rule for Alex Kim's assistant is the illustrative shared card, which isn't in Rivera's seed.",
   },
   play: async ({ canvas, canvasElement }) => {
     // Each of the owner's rules goes, personal ones included, and its tool falls to the default ask.

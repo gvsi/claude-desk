@@ -50,7 +50,7 @@ const meta = {
       <ConnectorSection {...payments} aboveTools={<Controlled {...args} />} />
     </div>
   ),
-  parameters: { layout: 'padded', canvas: 'none', canvasNote: 'Drawn on N-Conn-19-Ceiling, which joins the reference boards with its board story.' },
+  parameters: { layout: 'padded', canvas: 'N-Conn-19-Ceiling' },
 } satisfies Meta<typeof MoneyLimit>;
 
 export default meta;
@@ -105,7 +105,7 @@ export const Reading: Story = {
 
 export const Editing: Story = {
   args: { editing: true, value: '1000' },
-  parameters: { canvas: 'none', canvasNote: 'Drawn on N-Conn-19b-Ceiling-Edit, which joins the reference boards with its board story.' },
+  parameters: { canvas: 'N-Conn-19b-Ceiling-Edit' },
   play: async ({ args, canvas, canvasElement, userEvent }) => {
     // The field, named by its default label, with the screen's hint, 360 px wide at most; 12 px
     // above it and 16 px under the buttons, 163 px under the hairline in all, as the board draws it.
@@ -140,7 +140,7 @@ const TOO_HIGH = 'No single payment can be above $10,000.';
 
 export const TooHigh: Story = {
   args: { editing: true, value: '20000', error: TOO_HIGH },
-  parameters: { canvas: 'none', canvasNote: "Drawn on N-Conn-19b-Ceiling-Edit, which joins the reference boards with its board story. The screen's check of an amount above the per-payment limit; the board draws the field without an error." },
+  parameters: { canvas: 'N-Conn-19b-Ceiling-Edit', canvasNote: "The screen's check of an amount above the per-payment limit; the board draws the field without an error." },
   play: async ({ canvas }) => {
     // limit_error_is_announced: the screen's error marks the field invalid, describes it, and sits
     // in a live region, so it is read out when it appears. The field keeps what was typed.
@@ -166,7 +166,7 @@ export const Unset: Story = {
 
 export const Waiting: Story = {
   args: { editing: true, value: '1000', disabled: true },
-  parameters: { canvas: 'none', canvasNote: 'Drawn on N-Conn-19b-Ceiling-Edit, which joins the reference boards with its board story. A draft in flight; the board draws the field at rest.' },
+  parameters: { canvas: 'N-Conn-19b-Ceiling-Edit', canvasNote: 'A draft in flight; the board draws the field at rest.' },
   play: async ({ args, canvas, userEvent }) => {
     // While a draft is in flight, the buttons wait and nothing is sent.
     const review = canvas.getByRole('button', { name: 'Review change' });
@@ -182,7 +182,7 @@ export const Waiting: Story = {
 
 export const Phone: Story = {
   globals: { viewport: { value: 'phone', isRotated: false } },
-  parameters: { canvas: 'none', canvasNote: 'Drawn on N-Conn-22-Phone-Presets, which joins the reference boards with its board story.' },
+  parameters: { canvas: 'N-Conn-22-Phone-Presets' },
   play: async ({ canvas, canvasElement }) => {
     await expect(window.innerWidth).toBe(390);
     // On a phone the row pads 12 px 14 px, and "Change" sits 10 px under the limit, at its left.

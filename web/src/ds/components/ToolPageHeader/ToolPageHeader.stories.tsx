@@ -119,7 +119,7 @@ const SIMULATE_CAPTION = "Demo only. Changes this tool's definition on the mock 
 
 export const WithSimulate: Story = {
   args: { ...refund, status: 'enabled', onSimulateChange: fn() },
-  parameters: { canvas: 'none', canvasNote: 'Drawn on N-Conn-21-Simulate, which joins the reference boards with its board story.' },
+  parameters: { canvas: 'N-Conn-21-Simulate' },
   play: async ({ args, canvas, canvasElement }) => {
     // simulate_only_when_on: a connected tool that is on gets the demo's strip under its source line.
     const strip = simulateStrip(canvasElement);
@@ -173,7 +173,7 @@ export const Simulating: Story = {
       <SimulatesSlowly {...args} />
     </div>
   ),
-  parameters: { canvas: 'none', canvasNote: 'Drawn on N-Conn-21-Simulate, which joins the reference boards with its board story. The simulated change in flight; the board draws the button at rest.' },
+  parameters: { canvas: 'N-Conn-21-Simulate', canvasNote: 'The simulated change in flight; the board draws the button at rest.' },
   play: async ({ args, canvas, userEvent }) => {
     // simulate_busy_keeps_its_width: pressed, the button keeps its name and width, its spinner in
     // place of the label, until the screen's pending clears.

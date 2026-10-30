@@ -15,7 +15,7 @@ const meta = {
       <PresetMenu {...args} />
     </div>
   ),
-  parameters: { layout: 'padded', canvas: 'none', canvasNote: 'Drawn on N-Conn-17-Presets, which joins the reference boards with its board story.' },
+  parameters: { layout: 'padded', canvas: 'N-Conn-17-Presets' },
 } satisfies Meta<typeof PresetMenu>;
 
 export default meta;
@@ -141,7 +141,7 @@ export const Phone: Story = {
       <PresetMenu {...args} />
     </div>
   ),
-  parameters: { canvas: 'none', canvasNote: 'Drawn on N-Conn-22-Phone-Presets, which joins the reference boards with its board story.' },
+  parameters: { canvas: 'N-Conn-22-Phone-Presets' },
   play: async ({ canvas, canvasElement, userEvent }) => {
     await expect(window.innerWidth).toBe(390);
     // On a phone the button fills its line, its words at the left and the chevron at the right,

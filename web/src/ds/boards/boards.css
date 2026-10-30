@@ -967,8 +967,10 @@
   min-width: 0;
 }
 
-/* The Connectors page's "Add a connector" sits 4 px under the top of the title's line. */
-.board-connectors__header .cd-page-header__actions {
+/* The Connectors page's "Add a connector" and the Rules page's preset menu sit 4 px under the top
+   of the title's line. */
+.board-connectors__header .cd-page-header__actions,
+.board-rules__header .cd-page-header__actions {
   padding-top: var(--space-4);
 }
 
