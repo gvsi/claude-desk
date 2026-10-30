@@ -1,10 +1,10 @@
 // @vitest-environment node
 /**
- * The thin slice's routes against the API's own OpenAPI document (`backend/desk/api/openapi.json`,
- * the API core plan's): every route the first visit, Today with its briefing, the public page and
- * Safety call has its method and path there, as `ROUTES` writes them. Skipped, with a message,
- * while the document is absent. The adoption of the generated client (Task 16) widens this to
- * every key.
+ * The web's route table against the API's own OpenAPI document (`backend/desk/api/openapi.json`,
+ * the API core plan's), never skipped:
+ * - `openapi.gen.ts` is what `npm run gen:api` makes of the document as it stands, so a change to
+ *   the document without regenerating fails here, in CI's web tests too.
+ * - The thin slice's routes (Tasks 1–6) have their method and path there, as `ROUTES` writes them.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -12,9 +12,13 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
+import { generateApi } from '../../scripts/gen-api.mjs';
 import { ROUTES, type RouteKey } from './routes.ts';
 
-const OPENAPI_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../backend/desk/api/openapi.json');
+const here = path.dirname(fileURLToPath(import.meta.url));
+const OPENAPI_PATH = path.resolve(here, '../../../backend/desk/api/openapi.json');
+const CONTRACTS_PATH = path.resolve(here, '../../../backend/desk/contracts.schema.json');
+const GENERATED_PATH = path.join(here, 'openapi.gen.ts');
 
 /** Every route the thin slice's screens call (Tasks 1–6), by key. */
 const THIN_SLICE_CALLS = [
@@ -70,11 +74,16 @@ function served(doc: unknown): Set<string> {
 }
 
 describe('routes against the API contract', () => {
-  it('thin_slice_routes_exist', (ctx) => {
-    ctx.skip(
-      !existsSync(OPENAPI_PATH),
-      'backend/desk/api/openapi.json is absent: the thin slice routes are checked once the API core (plan 02a) is on this branch',
+  it('api_types_are_current', async () => {
+    expect(existsSync(GENERATED_PATH), 'src/api/openapi.gen.ts exists: run `npm run gen:api`').toBe(true);
+    const openapi: unknown = JSON.parse(readFileSync(OPENAPI_PATH, 'utf8'));
+    const contracts: unknown = JSON.parse(readFileSync(CONTRACTS_PATH, 'utf8'));
+    expect(await generateApi(openapi, contracts), 'openapi.gen.ts is current: run `npm run gen:api`').toBe(
+      readFileSync(GENERATED_PATH, 'utf8'),
     );
+  });
+
+  it('thin_slice_routes_exist', () => {
     const api = served(JSON.parse(readFileSync(OPENAPI_PATH, 'utf8')));
     const route = (key: RouteKey) => `${ROUTES[key].method} ${ROUTES[key].path}`;
     const missing = THIN_SLICE_CALLS.filter((key) => !FROM_PLAN_02B.has(key) && !api.has(route(key))).map((key) => `${route(key)} (${key})`);
