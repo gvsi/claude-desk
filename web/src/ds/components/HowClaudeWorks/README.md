@@ -15,7 +15,7 @@
   - Automatic: "Claude quotes at list price, books weekdays in your hours and sends verified customers their own documents. Payments ask you first."
   - Custom: "Your own rules, tool by tool. Change any of them below."
 - At the right, level with the title, a `SegmentedControl` named "How Claude works" with `PRESET_WORDS` ("Ask me first", "Automatic", "Custom"), at `preset`.
-- `children` (the money limit) 16 px under a hairline, 16 px under the caption.
+- `children` (the money limit) 14 px under a hairline, which sits 14 px under the caption.
 - It lays out by its own width: under 640 px (a phone) the card pads 14 px, the switch sits 12 px under the caption at its own width, and the hairline has 12 px on each side. Nothing scrolls sideways at 390 px.
 
 ## Behavior

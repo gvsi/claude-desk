@@ -79,11 +79,11 @@ export const Custom: Story = {
     // The switch at the right, level with the title.
     await expect(box.right - group.getBoundingClientRect().right).toBe(17);
     await expect(group.getBoundingClientRect().top).toBe(title.getBoundingClientRect().top);
-    // The money limit follows a hairline, 16 px under the caption.
+    // The money limit follows a hairline 14 px under the caption, 14 px under it.
     const limitBlock = card.querySelector<HTMLElement>('.cd-how-claude-works__limit');
     if (limitBlock === null) throw new Error('No money limit');
-    expectComputed(limitBlock, { borderTopWidth: '1px', borderTopColor: 'rgba(250, 249, 245, 0.12)', paddingTop: '16px' });
-    await expect(limitBlock.getBoundingClientRect().top - caption.getBoundingClientRect().bottom).toBe(16);
+    expectComputed(limitBlock, { borderTopWidth: '1px', borderTopColor: 'rgba(250, 249, 245, 0.12)', paddingTop: '14px' });
+    await expect(limitBlock.getBoundingClientRect().top - caption.getBoundingClientRect().bottom).toBe(14);
     await expect(within(limitBlock).getByText(capLine)).toBeVisible();
     // preset_pick_calls_once: "Automatic" asks the screen once to draft it, even pressed twice, and
     // the switch keeps showing Custom until the screen passes a new preset.

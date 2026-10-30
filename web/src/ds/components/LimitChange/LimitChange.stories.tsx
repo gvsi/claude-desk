@@ -14,7 +14,12 @@ const meta = {
       <LimitChange {...args} />
     </div>
   ),
-  parameters: { layout: 'padded', canvas: 'N-Conn-20-Money-Cap-Review' },
+  parameters: {
+    layout: 'padded',
+    canvas: 'N-Conn-20-Money-Cap-Review',
+    canvasNote:
+      "The board sets the new limit at the serif's optical size 18; the summary style is optical size 20 on every summary line, so the line is 7 px narrower.",
+  },
 } satisfies Meta<typeof LimitChange>;
 
 export default meta;

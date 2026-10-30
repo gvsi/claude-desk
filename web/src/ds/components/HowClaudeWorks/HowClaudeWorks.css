@@ -1,7 +1,7 @@
 /* HowClaudeWorks: one card, padded 16 px. The title and the caption at the left, the switch at
-   the right, level with the title; then, 16 px under a hairline, the money limit. It lays out by
-   its own width: under 640 px (a phone) the card pads 14 px, the switch sits under the caption at
-   its own width, and the gaps are 12 px. */
+   the right, level with the title; then a hairline 14 px under the caption, and the money limit
+   14 px under it, as the board draws them. It lays out by its own width: under 640 px (a phone)
+   the card pads 14 px, the switch sits under the caption at its own width, and the gaps are 12 px. */
 
 .cd-how-claude-works {
   container: cd-how-claude-works / inline-size;
@@ -38,8 +38,8 @@
 }
 
 .cd-how-claude-works__limit {
-  margin-top: var(--space-16);
-  padding-top: var(--space-16);
+  margin-top: var(--space-14);
+  padding-top: var(--space-14);
   border-top: 1px solid var(--line-hairline);
 }
 

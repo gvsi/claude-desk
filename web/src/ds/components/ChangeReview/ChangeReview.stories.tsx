@@ -568,7 +568,11 @@ function afterSide(rows: HTMLElement[], index: number): HTMLElement {
 
 export const SwitchToAskMeFirst: Story = {
   args: { rows: rivera.askFirstReview, checks: ASK_FIRST_CHECKS, confirmLabel: undefined, cancelLabel: undefined, cancelsLinks: true },
-  parameters: { canvas: 'N-Conn-18-Mode-Review' },
+  parameters: {
+    canvas: 'N-Conn-18-Mode-Review',
+    canvasNote:
+      "Rivera's eight own rules; the board's ninth row, the shared rule for Alex Kim's assistant, is the illustrative shared card, which isn't in Rivera's seed. Each side keeps this component's layout (its label above, the words before the reason, a rule at its left, \"Changed\" after the outcome in an outline), where the board sets the label in a column, the reason before the words and \"Changed\" in plain words before the outcome. The connector reads \"Quotes Built in\" where the board writes \"Quotes · Built in\".",
+  },
   play: async ({ canvas, canvasElement }) => {
     // Each of Rivera's own rules goes, and its tool falls to the default ask.
     const rows = within(canvas.getByRole('region', { name: 'Changes' })).getAllByRole('listitem');
