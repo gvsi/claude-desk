@@ -44,13 +44,11 @@ export type OwnerTyping = Omit<EvOwnerTyping, 'type'>;
 export interface ChatState extends RowGroups<ChatItem, ReceiptView> {
   writing: boolean;
   /**
-   * The owner typing, from the owner's latest `owner_typing`, or null. The owner's own message,
-   * `owner_left`, the turn's end or the owner's next typing event replaces or clears it. Its `until`
-   * is kept as the API sent it, never compared with a clock here, so the page can drop the dots once
-   * that time passes.
-   *
-   * Nothing draws this yet. The public page's typing dots (WritingIndicator's person form) come
-   * with the web app's second run (plan 04, Task 8), which reads this state.
+   * The owner typing after a take-over, from the owner's latest `owner_typing`, or null: her name
+   * and until when, never her words. The owner's own message, `owner_left`, the turn's end or the
+   * owner's next typing event replaces or clears it. Its `until` is kept as the API sent it, never
+   * compared with a clock here: the public page shows it as WritingIndicator's person form only
+   * until that time.
    */
   ownerTyping: OwnerTyping | null;
   /** The highest seq the chat has seen; the stream resumes after it. */

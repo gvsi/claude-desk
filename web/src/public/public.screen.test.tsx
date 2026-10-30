@@ -5,7 +5,7 @@
  */
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { page } from 'vitest/browser';
+import { page, userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import type { EvMessage, OpenStatus, PublicDesk } from '../api/contracts.ts';
@@ -785,6 +785,57 @@ describe('public chat page', () => {
     await expect.element(second.screen.getByRole('article', { name: 'Handed to a person' })).toBeVisible();
     await say(second.screen, 'Can you call me back?');
     await expect.element(second.screen.getByRole('article', { name: 'Callback set' })).toBeVisible();
+  });
+
+  it('owner_typing_shows_her_name_and_dots', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('this browser has a chat');
+    const typing = () => screen.getByRole('status').filter({ hasText: 'Maria Rivera is typing' });
+    const dots = () => document.querySelectorAll('.cd-writing-indicator--person');
+
+    // An event whose time has passed shows nothing.
+    mockStore.world.takeOver(chat);
+    await expect.element(screen.getByRole('status').filter({ hasText: 'Maria Rivera joined the chat' })).toBeVisible();
+    const before = new Date(Date.now() - 1_000).toISOString();
+    mockStore.emit(RIVERA.slug, { type: 'owner_typing', name: 'Maria Rivera', until: before });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(dots()).toHaveLength(0);
+
+    // While she types: her initials, her name and three dots, where her words will start. No words.
+    mockStore.world.ownerTyping(chat);
+    await expect.element(typing()).toBeInTheDocument();
+    expect(dots()).toHaveLength(1);
+    const rows = document.querySelectorAll('.cd-transcript-row');
+    expect(rows[rows.length - 1]?.contains(dots()[0] ?? null)).toBe(true);
+    expect(dots()[0]?.textContent?.replace(/\s+/g, ' ').trim()).toBe('MRMaria Rivera is typing');
+    await expectScreenBasics(screen.container, { owner: false });
+
+    // Her message takes its place.
+    mockStore.world.say(chat, 'Hi, it is Maria. I can come at 4 today.');
+    await expect.element(screen.getByText('Hi, it is Maria. I can come at 4 today.', { exact: true })).toBeVisible();
+    expect(dots()).toHaveLength(0);
+
+    // Typing again shows only until its time.
+    chat.ownerTypedAt = null;
+    mockStore.emit(RIVERA.slug, { type: 'owner_typing', name: 'Maria Rivera', until: new Date(Date.now() + 400).toISOString() });
+    await expect.element(typing()).toBeInTheDocument();
+    await expect.poll(() => dots().length, { timeout: 1_500 }).toBe(0);
+  });
+
+  it('visitor_typing_pings_the_desk', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    const box = screen.getByRole('textbox', { name: 'Message Rivera Plumbing' });
+    // Typing tells the Desk someone is typing, never what: a ping with no body, about every 2 s.
+    await userEvent.type(box, 'Is Thursday');
+    await expect.poll(() => requests('visitorTyping').length).toBe(1);
+    expect(requests('visitorTyping').map((r) => r.body)).toEqual([undefined]);
+    await new Promise((resolve) => setTimeout(resolve, 2_100));
+    await userEvent.type(box, ' open?');
+    await expect.poll(() => requests('visitorTyping').length).toBe(2);
+    expect(mockStore.visitorSession(RIVERA.slug)?.typingUntil).toBeGreaterThan(Date.now());
   });
 
   it('about_column_shows_the_charter_cards', async () => {

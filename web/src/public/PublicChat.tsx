@@ -32,7 +32,9 @@ import {
   type CopyLanguage,
   type ReceiptView,
 } from '../ds/index.ts';
+import { fillComposer } from '../lib/composer.ts';
 import { browserLanguage } from '../lib/language.ts';
+import { useStillTyping } from '../lib/typing.ts';
 import { brandFrom } from './brand.ts';
 import type { ChatRow, SendFailure } from './chatReducer.ts';
 import { PUBLIC_COPY, type PublicCopy } from './copy.ts';
@@ -301,19 +303,6 @@ function useNewestInView(end: RefObject<HTMLElement | null>, composer: RefObject
   return { follow, beforeChange };
 }
 
-/**
- * Puts `text` in the composer's text box as if the visitor had typed it, so the design system's
- * Composer takes it as its own (it keeps its text itself and takes none from outside), then
- * focuses the box with the caret at the end.
- */
-function fillComposer(box: HTMLTextAreaElement, text: string): void {
-  // The prototype's setter, so React sees the change, then the input event it listens for.
-  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(box, text);
-  box.dispatchEvent(new Event('input', { bubbles: true }));
-  box.focus();
-  box.setSelectionRange(box.value.length, box.value.length);
-}
-
 /** The visitor's words that didn't send because the chat ended (a 401), in order. */
 function unsentWhenEnded(rows: readonly ChatRow[]): string[] {
   return rows.flatMap(({ item }) => (item.kind === 'visitor' && item.status === 'failed' && item.failure === 'session' ? [item.text] : []));
@@ -343,6 +332,8 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
   const endRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   const newest = useNewestInView(endRef, composerRef, desk !== null);
+  // The owner typing after a take-over, until the time the stream gave: a stale one shows nothing.
+  const ownerTyping = useStillTyping(chat.state.ownerTyping);
 
   useEffect(() => {
     if (chat.session !== null) onSession?.(chat.session);
@@ -499,7 +490,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
       about={desk.charter}
       footer={!embedded}
       composer={
-        <div ref={composerRef}>
+        <div ref={composerRef} onInput={chat.typing}>
           <Composer
             variant="visitor"
             label={copy.message(brand.name)}
@@ -536,6 +527,11 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
           />
         ))}
         {state.writing ? <WritingIndicator language={language} /> : null}
+        {ownerTyping && state.ownerTyping !== null ? (
+          <TranscriptRow>
+            <WritingIndicator language={language} variant="person" who={state.ownerTyping.name} />
+          </TranscriptRow>
+        ) : null}
       </Transcript>
       {connectionNotice || turnNotice ? (
         <div className="cd-public-chat__notices">

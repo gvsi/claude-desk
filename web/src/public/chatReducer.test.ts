@@ -238,6 +238,26 @@ describe('chatReducer', () => {
     expect(receiptsOf(reloaded)).toEqual(receiptsOf(elsewhere));
     expect(reloaded.openHolds).toEqual([]);
   });
+
+  it('owner_typing_until_her_message', () => {
+    const typing: EvOwnerTyping = { type: 'owner_typing', name: 'Maria Rivera', until: '2026-10-29T15:04:30Z' };
+    const joined = run(events([{ type: 'owner_joined', name: 'Maria Rivera' }, typing]));
+    // Her name and how long, kept as the event said it; nothing else of hers, and no row.
+    expect(joined.ownerTyping).toEqual({ name: 'Maria Rivera', until: '2026-10-29T15:04:30Z' });
+    expect(joined.rows).toHaveLength(1);
+    expect(joined.lastSeq).toBe(2);
+
+    // Her message takes its place.
+    const said: EvMessage = { ...quoteMessage, message_id: 'msg-owner', author: 'owner' };
+    expect(run(events([said], 3), joined).ownerTyping).toBeNull();
+    // Claude's doesn't: she may still be typing beside it.
+    expect(run(events([quoteMessage], 3), joined).ownerTyping).toEqual({ name: 'Maria Rivera', until: '2026-10-29T15:04:30Z' });
+    // Handing the chat back ends it, and so does a new chat.
+    expect(run(events([{ type: 'owner_left' }], 3), joined).ownerTyping).toBeNull();
+    expect(run([{ type: 'reset' }], joined).ownerTyping).toBeNull();
+    // A replayed event the chat has seen changes nothing.
+    expect(run(events([typing], 2), run(events([said], 3), joined)).ownerTyping).toBeNull();
+  });
 });
 
 function item(n: number, kind: TranscriptItem['kind']): TranscriptItem {

@@ -729,6 +729,18 @@ describe('the owner in the chat', () => {
     expect(events).toHaveLength(3);
   });
 
+  it('a_visitor_message_ends_their_typing', async () => {
+    const { session } = await openChat();
+    const typingUntil = async () => (await owner(session.session_id)).typing_until ?? null;
+    expect((await call('visitorTyping', { params: { slug } })).status).toBe(204);
+    expect(await typingUntil()).not.toBeNull();
+    // Her message takes the dots' place, and her next keystroke counts at once.
+    expect((await call('sendMessage', { params: { slug }, body: { text: 'Thursday works.' } })).status).toBe(202);
+    expect(await typingUntil()).toBeNull();
+    expect((await call('visitorTyping', { params: { slug } })).status).toBe(204);
+    expect(await typingUntil()).not.toBeNull();
+  });
+
   it('decision_reads_by_id_in_the_copy', async () => {
     const held = mockStore.world.addHeldRefund();
     expect(await call('decision', { params: { decision_id: held.decision_id } })).toEqual({ status: 200, body: held });

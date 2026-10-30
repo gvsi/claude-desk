@@ -276,11 +276,14 @@ export class MockWorld {
     session.items.push({ n: this.itemN, kind, created_at: isoTime(this.now()), text, event });
   }
 
+  /** The visitor's message: it takes the place of their typing, and their next keystroke counts at once. */
   visitorText(session: SessionRecord, text: string): void {
     this.addItem(session, 'visitor_text', text, null);
     session.lastVisitorText = text;
     session.language = turnLanguage(text);
     session.lastActivity = this.now();
+    session.typingUntil = null;
+    session.visitorTypedAt = null;
   }
 
   /** The owner's whisper: only Claude sees it, so it joins the owner's view and the record, never the visitor's stream. */

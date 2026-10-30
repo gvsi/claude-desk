@@ -24,6 +24,7 @@ import { apiPath } from '../api/routes.ts';
 import { openStream, type StreamState } from '../api/stream.ts';
 import type { VisitorSession, VisitorTranscript } from '../api/views.ts';
 import { browserLanguage, type BrowserLanguage } from '../lib/language.ts';
+import { TYPING_PING_EVERY } from '../lib/typing.ts';
 import { chatReducer, initialChatState, type ChatAction, type ChatState, type SendFailure } from './chatReducer.ts';
 
 export type ChatStatus = 'loading' | 'ready' | 'not_found' | 'unavailable';
@@ -70,6 +71,8 @@ export interface VisitorChatActions {
   /** Starts a new chat after this one ended. */
   newChat: () => void;
   cancel: (decisionId: string) => void;
+  /** The visitor is typing: tells the Desk, at most every 2 s, that someone is, never what. */
+  typing: () => void;
 }
 
 export type VisitorChatView = VisitorChatSnapshot & VisitorChatActions;
@@ -172,6 +175,8 @@ class VisitorChat {
   /** The highest `n` in the conversation as last read: a lost message is looked for after it. */
   private knownN = 0;
   private nextId = 0;
+  /** When the last typing ping went out. */
+  private typedAt: number | null = null;
 
   constructor(
     private readonly slug: string,
@@ -362,6 +367,16 @@ class VisitorChat {
     void this.post(id, text);
   };
 
+  readonly typing = (): void => {
+    const { status, state } = this.snapshot;
+    if (status !== 'ready' || state.error === 'session') return;
+    const now = Date.now();
+    if (this.typedAt !== null && now - this.typedAt < TYPING_PING_EVERY) return;
+    this.typedAt = now;
+    // Presence only: a lost ping means the owner sees no dots, so nothing is said or tried again.
+    request('visitorTyping', { params: { slug: this.slug } }).catch(() => undefined);
+  };
+
   readonly resend = (id: string): void => {
     const row = this.snapshot.state.rows.find((r) => r.item.kind === 'visitor' && r.item.id === id && r.item.status === 'failed');
     if (row?.item.kind !== 'visitor' || this.snapshot.state.error === 'session') return;
@@ -530,7 +545,15 @@ export function useVisitorChat(slug: string, previewDeskId?: string): VisitorCha
   }, [chat]);
 
   return useMemo(
-    () => ({ ...snapshot, send: chat.send, resend: chat.resend, retry: chat.retry, newChat: chat.newChat, cancel: chat.cancel }),
+    () => ({
+      ...snapshot,
+      send: chat.send,
+      resend: chat.resend,
+      retry: chat.retry,
+      newChat: chat.newChat,
+      cancel: chat.cancel,
+      typing: chat.typing,
+    }),
     [snapshot, chat],
   );
 }
