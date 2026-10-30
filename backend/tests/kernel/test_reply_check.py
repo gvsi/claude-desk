@@ -129,6 +129,9 @@ def assert_handed_off(verdict: ReplyVerdict, language: str = "en") -> None:
     ("Llego a la una.", {"lex.es.date"}, "la una"),                    # one o'clock
     ("The total is \u0417\u041e\u041e.", {"digit"}, "\u0417\u041e\u041e"),   # Cyrillic Ze and O, drawn as 300
     ("El total es \u0406\u041e\u041e.", {"digit"}, "\u0406\u041e\u041e"),    # Cyrillic I and O, drawn as 100
+    ("That is tweIve.", {"lex.en.number"}, "tweIve"),                  # a capital I for l
+    ("A few more doIIars.", {"lex.en.money"}, "doIIars"),
+    ("Puedo ir en abriI.", {"lex.es.date"}, "abriI"),
 ])
 async def test_numbers_and_dates_in_prose_are_blocked(app, client, prose, rule_ids, span):
     copy, visitor = await visitor_of(app, client)
@@ -138,7 +141,7 @@ async def test_numbers_and_dates_in_prose_are_blocked(app, client, prose, rule_i
     assert span in [violation.span for violation in numbers]
     assert all(len(violation.span) <= 40 for violation in verdict.violations)
     spanish = prose in ("nos vemos el martes", "Puedo ir a las once.", "Llego a la una.",
-                        "El total es \u0406\u041e\u041e.")
+                        "El total es \u0406\u041e\u041e.", "Puedo ir en abriI.")
     assert_handed_off(verdict, "es" if spanish else "en")
 
 

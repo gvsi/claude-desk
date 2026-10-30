@@ -121,6 +121,7 @@ def _load_lookalikes() -> tuple[dict[str, str], dict[str, str]]:
 
 LOOKALIKES, DIGIT_LOOKALIKES = _load_lookalikes()
 STROKES = frozenset(ch for ch, letter in LOOKALIKES.items() if letter == "l")   # drawn as a bare stroke: l or I
+STROKES_AND_I = STROKES | {"I"}                          # with the ASCII capital I, read as l ("tweIve")
 # Shaped like 0 or 1, the prototype of 0 being O and of 1 being l: read as digits next to a digit
 # ("ЗОО"), or in a word made only of them that isn't plain ASCII ("ІОО"; "I" and "OK" stay words).
 ZERO_OR_ONE = frozenset("OlI") | frozenset(ch for ch, letter in LOOKALIKES.items() if letter in ("O", "l"))
@@ -167,11 +168,11 @@ def _mixes_scripts(word: str) -> bool:
     return any(latin) and not all(latin)
 
 
-def _fold(text: str, stroke: str = "l") -> tuple[str, list[int]]:
+def _fold(text: str, stroke: str = "l", strokes: frozenset[str] = STROKES) -> tuple[str, list[int]]:
     """`text` for the lexicons: accents and other combining marks dropped, each letter that looks
-    like an ASCII one read as it ("Tuеsday" with a Cyrillic е is Tuesday), a bare stroke read as
-    `stroke`, and each run of whitespace one space; and the index in `text` each folded character
-    came from."""
+    like an ASCII one read as it ("Tuеsday" with a Cyrillic е is Tuesday), each of `strokes` (by
+    default the bare strokes) read as `stroke`, and each run of whitespace one space; and the
+    index in `text` each folded character came from."""
     chars: list[str] = []
     origin: list[int] = []
     for i, ch in enumerate(text):
@@ -182,7 +183,7 @@ def _fold(text: str, stroke: str = "l") -> tuple[str, list[int]]:
             continue
         for part in unicodedata.normalize("NFKD", ch):
             if unicodedata.category(part) not in ("Mn", "Me"):
-                chars.append(stroke if part in STROKES else LOOKALIKES.get(part, part))
+                chars.append(stroke if part in strokes else LOOKALIKES.get(part, part))
                 origin.append(i)
     return "".join(chars), origin
 
@@ -252,7 +253,8 @@ def scan_prose(text: str, canaries: Iterable[str] = ()) -> list[Violation]:
     hits += [(start, "mixed_script", Violation(kind="unsupported_language", span=_span(word), rule_id="mixed_script"))
              for start, word in _words(text) if _mixes_scripts(word)]
     folded, origin = _fold(text)
-    readings = dict.fromkeys((folded, _fold(text, stroke="i")[0]))     # a bare stroke as l, and as I
+    # three readings: a bare stroke as l, as I, and an ASCII capital I as l too ("doIIars")
+    readings = dict.fromkeys((folded, _fold(text, stroke="i")[0], _fold(text, strokes=STROKES_AND_I)[0]))
     seen: set[tuple[str, int, int]] = set()
     for language, entries in LEXICONS.items():
         for category, pattern in entries:
