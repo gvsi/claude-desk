@@ -601,7 +601,14 @@ Every string here is owner-facing (no Spanish). Components display what the scre
       - "Payments ask you first.": no card that governs a tool that takes or sends money runs on its own or refuses.
       - Skipped, naming the export, until it is generated.
     - `a_changed_preset_card_fails_the_descriptions`: a small hand-built cards object passes the checker, and changing one card fails it: the quote's `max_discount_bp` to 1000, a booking at night or at any hour, a refusal card for payments, Ask me first quoting, booking, sharing a document or making a payment link on its own, or an effect card that does so (an automatic rule for changes, a refusal for messages), among others. A card that a tool's own card outranks, or one for a tool no description speaks of, changes nothing.
-    - `a_malformed_presets_export_is_refused`: cards are checked against the `RuleCard` contract in every field the check reads, so an unknown target or effect, a null `max_discount_bp`, hours without a start or an end, an unknown day, or hours that end before they start (except at 00:00, midnight) is refused.
+    - `a_malformed_presets_export_is_refused`: cards are checked against the `RuleCard` contract in every field the check and `rulesForTool` read. Each of these is refused:
+      - an unknown target or effect;
+      - a null `max_discount_bp`;
+      - hours without a start or an end, on an unknown day, or ending before they start (except at 00:00, midnight);
+      - a non-boolean `is_default`, or a default that isn't an ask for anyone, so an automatic booking or a document refusal can't hide behind the flag;
+      - a `person_id` or `agent_key_id` that doesn't match who the card is for;
+      - a discount or hours on a card that isn't automatic.
+      The contract's well-formed cards are read: a window until midnight, the default ask for anyone, and a card for one person or one agent.
     - `preset_descriptions_are_the_owner_words`: the titles and descriptions, word for word, and `'custom'` is no `RulesPreset`.
   - Every story has `parameters.canvas` set to its board, or `'none'` naming the nearest board.
   - axe runs on every story.
@@ -892,3 +899,5 @@ Task 3c rework and fix round 2 (2026-10-29): the project owner redrew and signed
 Owner decision after the rework (2026-10-29): the first preset's words change, the preset doesn't. It is "Ask me first", described as "Quotes, bookings, documents and payments wait for your answer.", which holds for its cards: it says nothing about open times, leads, callbacks or identity checks, which still run on their own. The description check holds those four kinds of tool to asking, and passes against the presets' cards as they stand. The preset review's title is "Ask me first".
 
 Task 3c fix round 1, after the rework (2026-10-29), from the task review: the description check judges each claimed tool by the cards that govern it, its own and the effect cards that cover it, ranked by `rulesForTool`. An automatic rule for changes or a refusal for messages now fails it as a tool's own card would. The export's cards must also name a known tool or effect, and their hours must end after they start, or at 00:00 for midnight.
+
+Task 3c fix round 2, after the rework (2026-10-29), from the task review: the presets export's cards are checked against the rest of the `RuleCard` contract that `rulesForTool` relies on. `is_default` is a boolean, and a default is only ever the compiler's ask for anyone, so a card marked as one can't hide an automatic booking or a document refusal from the check. `person_id` and `agent_key_id` match who the card is for, and limits sit only on automatic cards.
