@@ -33,6 +33,7 @@ KEYCHAIN_LOOKUP = ["find-generic-password", "-s", "claude-desk-passcode", "-w"]
 KEYCHAIN_PROBE = ["find-generic-password", "-s", "claude-desk-passcode", "-g"]
 STORE_IT = 'security add-generic-password -s claude-desk-passcode -a "$USER" -w'
 REPLACE_IT = 'security add-generic-password -U -s claude-desk-passcode -a "$USER" -w'
+RERUN_IT = "run deploy.sh again; if this repeats, export DESK_PASSCODE for this run"
 
 # Each stub appends {"tool", "argv", "cwd", "tty", "passcode", "env"} to $STUB_LOG, "passcode" being
 # the SHA-256 of the DESK_PASSCODE it was given (None without one) and "env" each environment
@@ -406,9 +407,12 @@ def test_a_hung_deploy_is_reported_and_leaves_no_process_or_terminal_behind(depl
     is reported as hung, and then its process group is gone and both terminal ends are closed."""
     terminals = _open_terminals()
     with pytest.raises(AssertionError, match="deploy.sh hung"):
-        deploy(STUB_HANGS="1", hang_after=2)
+        deploy(STUB_HANGS="1", hang_after=5)
     assert _open_terminals() == terminals
-    [hung] = [json.loads(line) for line in (tmp_path / "stub.log").read_text().splitlines()]
+    stub_log = tmp_path / "stub.log"
+    records = [json.loads(line) for line in stub_log.read_text().splitlines()] if stub_log.exists() else []
+    assert len(records) == 1, "the hang was reported before the account step started"
+    [hung] = records
     assert hung["tool"] == "aws"                                  # the account step, hung
     deadline = time.monotonic() + 10                              # what deploy.sh started is reaped by init
     while _group_runs(hung["group"]) and time.monotonic() < deadline:
@@ -780,7 +784,7 @@ def test_a_stored_form_shown_any_other_way_is_refused_unshown_before_any_step(de
     assert [call["argv"] for call in run.calls] == [KEYCHAIN_LOOKUP, KEYCHAIN_PROBE]
     assert ("the macOS Keychain item claude-desk-passcode couldn't be checked: `security -g` showed it in a form "
             "deploy.sh doesn't accept (it isn't shown)") in run.output
-    assert "run deploy.sh again; if this repeats, export DESK_PASSCODE for this run" in run.output
+    assert RERUN_IT in run.output
     assert "add-generic-password" not in run.output                   # neither storing nor replacing it
     secret = "keychain-passcode"
     for form in (secret, secret.encode().hex(), secret.encode().hex().upper()):
@@ -821,7 +825,7 @@ def test_a_keychain_item_whose_stored_form_cant_be_read_is_refused_before_any_st
     assert [call["argv"] for call in run.calls] == [KEYCHAIN_LOOKUP, KEYCHAIN_PROBE]
     assert ("the macOS Keychain item claude-desk-passcode couldn't be read a second time, to check how "
             "it's stored (is the login Keychain unlocked?)") in run.output
-    assert "run deploy.sh again; if this repeats, export DESK_PASSCODE for this run" in run.output
+    assert RERUN_IT in run.output
     assert "add-generic-password" not in run.output                   # neither storing nor replacing it
     assert "keychain-test-passcode" not in run.text()
 
