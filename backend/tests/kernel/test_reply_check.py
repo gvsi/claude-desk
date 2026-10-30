@@ -259,7 +259,7 @@ def test_the_lookalike_table_is_what_its_script_makes():
 # Every Unicode dash and hyphen but "-" itself (category Pd: U+2010 to U+2015, U+FE58, U+FE63, U+FF0D
 # and the rest), and the minus sign
 DASHES = [ch for ch in map(chr, range(sys.maxunicode + 1)) if unicodedata.category(ch) == "Pd" and ch != "-"]
-DASHES.append("−")
+DASHES.append("\u2212")
 HYPHENATED = [                       # lexicon phrases whose words a dash may join, and the rule each breaks
     ("this-morning", "lex.en.date"), ("next-week", "lex.en.date"), ("no-charge", "lex.en.promise"),
     ("money-back", "lex.en.promise"), ("on-the-house", "lex.en.promise"), ("last-year", "lex.en.date"),
