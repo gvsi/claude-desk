@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Deploy Claude Desk to AWS (us-west-2) from the owner's own terminal. Every deploy runs the whole
-# sequence and stops at the first step that fails:
+# Deploy Claude Desk to AWS (us-west-2), with the owner's go. Every deploy runs the whole sequence
+# and stops at the first step that fails:
 #
-#   1. the owner retypes the AWS account ID it prints;
+#   1. the AWS account: with DESK_DEPLOY_ACCOUNT set, the account the credentials resolve to must
+#      be that one; without it, the owner retypes the account ID it prints;
 #   2. preflight.py: a clean tree, HEAD on origin/main, HEAD's passing tier 2 results file, both
 #      owner secrets set, the web app built and checked at HEAD;
 #   3. make image image-check, tagged with the commit (desk-kernel:<sha>, which the app image is
@@ -15,19 +16,54 @@
 #   7. smoke.py against the public URL, the task's security groups and public IP and, in Express
 #      mode, the origin and its load balancer's security groups.
 #
-#   read -rs DESK_PASSCODE; export DESK_PASSCODE
-#   infra/scripts/deploy.sh [--compute express|alb] [--allow-branch]
+#   infra/scripts/deploy.sh [--compute express|alb] [--allow-branch] [--data-only]
+#   DESK_DEPLOY_ACCOUNT=<account> infra/scripts/deploy.sh      a redeploy, with no account to retype
+#
+# The smoke checks sign in with the owner passcode: DESK_PASSCODE when it's exported, else the
+# macOS Keychain item claude-desk-passcode, read before any deploy step. Store it once with
+#
+#   security add-generic-password -s claude-desk-passcode -a "$USER" -w
+#
+# which asks for it twice without echo (-w goes last); it must be printable ASCII with no backslash.
+# `security` hands any other passcode back as hex, so deploy.sh checks how the item is stored, which
+# shows a backslash as it shows those, and refuses one that breaks the rule, or any answer but the
+# one line showing the plain value. Only smoke.py is given the passcode, in its environment; it never
+# reaches a command line, the output or the log. Under bash's xtrace or allexport, which would print
+# it or give it to every step, deploy.sh doesn't start.
 #
 # The first deploy creates DeskData alone first, so the owner can set the two secrets it creates:
 # `deploy.sh --data-only` runs steps 1 to 4 (preflight without the owner secrets or the web build)
-# and stops. It needs no DESK_PASSCODE.
+# and stops. It needs no passcode.
 #
 # A custom domain comes from DESK_DOMAIN_NAME and DESK_CERTIFICATE_ARN (an ACM certificate in
-# us-east-1) in the owner's shell, never from the repo. cdk deploy asks for approval before any
-# change that broadens IAM permissions or security group access, so it keeps the terminal for its
-# own output; everything else, the CloudFormation events included, is also written to
-# infra/out/deploy-<UTC time>.log.
+# us-east-1) in the owner's shell, never from the repo. At a terminal, cdk deploy asks for approval
+# before any change that broadens IAM permissions or security group access, so it keeps the
+# terminal for its own output; everything else, the CloudFormation events included, is also
+# written to infra/out/deploy-<UTC time>.log. A run without a terminal is refused unless
+# DESK_DEPLOY_ACCOUNT is set; nobody can approve there, so before each cdk deploy the log gets that
+# stack's security-relevant changes (a read-only cdk diff --security-only) and one line,
+# "deploy: security summary for <stack>: ...", saying whether its deploy broadens IAM permissions
+# or security group access, and the deploy runs with --require-approval never.
 set -euo pipefail
+
+# Under xtrace (bash -x, or SHELLOPTS=xtrace handed down) bash writes each assignment with its value
+# to the output, and so to the log, the passcode's included; under allexport (bash -a) it exports
+# every variable it sets, the passcode's included, to every step. Refuse before anything else runs.
+if [[ -o xtrace ]]; then
+  echo "deploy: run without xtrace; it would print the passcode" >&2
+  exit 2
+fi
+if [[ -o allexport ]]; then
+  echo "deploy: run without allexport (set -a); it would give every step the passcode" >&2
+  exit 2
+fi
+# The owner passcode the smoke checks sign in with stays in this shell, unexported, and only
+# smoke.py is given it, in its environment: never on a command line, in the output or in the log.
+# An exported DESK_PASSCODE is taken in and dropped from the environment before the first command
+# runs, and so are a caller's exported passcode and probe, which would carry it to every step.
+unset passcode probe
+passcode=${DESK_PASSCODE:-}
+unset DESK_PASSCODE
 
 usage() {
   echo "usage: infra/scripts/deploy.sh [--compute express|alb] [--allow-branch] [--data-only]"
@@ -60,9 +96,16 @@ INFRA=$ROOT/infra
 REGION=us-west-2
 OUT=${DESK_DEPLOY_OUT:-$INFRA/out}
 
+# Unattended: no terminal to retype the account ID or approve a change on, so DESK_DEPLOY_ACCOUNT
+# must name the account.
+unattended=
 if [[ ! -t 0 || ! -t 1 ]]; then
-  echo "deploy: run this in your own terminal: cdk deploy asks for approval there, and you retype the account ID" >&2
-  exit 2
+  if [[ -z ${DESK_DEPLOY_ACCOUNT:-} ]]; then
+    echo "deploy: run this in your own terminal: cdk deploy asks for approval there, and you retype the account ID" >&2
+    echo "deploy: or set DESK_DEPLOY_ACCOUNT=<account> to deploy unattended" >&2
+    exit 2
+  fi
+  unattended=1
 fi
 for name in DESK_IMAGE_DIR DESK_IMAGE_FILE DESK_KERNEL_IMAGE; do
   if [[ -n ${!name:-} ]]; then
@@ -70,14 +113,57 @@ for name in DESK_IMAGE_DIR DESK_IMAGE_FILE DESK_KERNEL_IMAGE; do
     exit 2
   fi
 done
-if [[ -z $data_only && -z ${DESK_PASSCODE:-} ]]; then
-  echo "deploy: export DESK_PASSCODE first (read -rs DESK_PASSCODE; export DESK_PASSCODE); the smoke checks sign in with it" >&2
+# A full deploy's passcode: DESK_PASSCODE when it was set, else the macOS Keychain's
+# claude-desk-passcode item.
+no_passcode() {  # no_passcode store|replace|export <why>: the Keychain commands that apply, if any
+  local fix=$1
+  shift
+  echo "deploy: DESK_PASSCODE isn't set and $*; the smoke checks sign in with the passcode" >&2
+  # shellcheck disable=SC2016  # the commands to paste, $USER and all
+  case $fix in
+    store)
+      echo 'deploy: store it once in the Keychain with: security add-generic-password -s claude-desk-passcode -a "$USER" -w'
+      echo 'deploy: or replace the item already there with: security add-generic-password -U -s claude-desk-passcode -a "$USER" -w'
+      echo "deploy: (each asks for the passcode twice, without echo), or export DESK_PASSCODE for this run"
+      ;;
+    replace)
+      echo 'deploy: replace it in the Keychain with: security add-generic-password -U -s claude-desk-passcode -a "$USER" -w'
+      echo "deploy: (it asks for the passcode twice, without echo), or export DESK_PASSCODE for this run"
+      ;;
+    *) echo "deploy: export DESK_PASSCODE for this run" ;;
+  esac >&2
   exit 2
+}
+if [[ -z $data_only ]]; then
+  if [[ -z $passcode ]]; then
+    command -v security >/dev/null ||
+      no_passcode export "there's no \`security\` command here to read the macOS Keychain with"
+    # `security` fails alike for a missing item, a locked login Keychain and denied access.
+    passcode=$(security find-generic-password -s claude-desk-passcode -w) ||
+      no_passcode store "the macOS Keychain item claude-desk-passcode couldn't be read (is it stored, and is the login Keychain unlocked?)"
+    [[ -n $passcode ]] || no_passcode replace "the macOS Keychain item claude-desk-passcode is empty"
+    # Printable ASCII with no backslash: -w hands back any other passcode as hex, which wouldn't sign
+    # in and is itself printable, so the stored form is checked. -g writes the password to stderr as
+    # `password: 0x<HEX>...` when any byte is outside space to ~ or is a backslash, else as
+    # `password: "<value>"`. Only that stderr is kept (the attributes on stdout are dropped); it holds
+    # the passcode too, so it's never shown and is unset once checked. The one answer accepted is that
+    # last line alone, holding the value -w gave, and that value is itself checked byte by byte (a C
+    # locale, in a subshell); any other answer can't be checked, so it's refused.
+    probe=$(security find-generic-password -s claude-desk-passcode -g 2>&1 >/dev/null) ||
+      no_passcode replace "the macOS Keychain item claude-desk-passcode couldn't be read a second time, to check how it's stored (is the login Keychain unlocked?)"
+    if [[ $probe == 'password: 0x'* ]] || (LC_ALL=C; [[ $passcode == *[![:print:]]* || $passcode == *\\* ]]); then
+      no_passcode replace "the macOS Keychain item claude-desk-passcode has a character outside printable ASCII, or a backslash (it isn't shown)"
+    fi
+    [[ $probe == "password: \"$passcode\"" ]] ||
+      no_passcode replace "the macOS Keychain item claude-desk-passcode couldn't be checked: \`security -g\` showed it in a form deploy.sh doesn't accept (it isn't shown)"
+    unset probe
+  fi
 fi
 
 mkdir -p "$OUT"
 log=$OUT/deploy-$(date -u +%Y%m%dT%H%M%SZ).log
-# fd 3 stays the terminal, for cdk deploy; everything else goes to the terminal and the log.
+# fd 3 stays the terminal (unattended, the original output), for cdk deploy; everything else goes
+# there and to the log.
 exec 3>&1
 exec > >(tee -a "$log") 2>&1
 on_exit() {
@@ -116,12 +202,43 @@ if [[ -z $data_only ]]; then
   web_dist=$ROOT/web/dist
 fi
 
-cdk_deploy() {  # cdk_deploy <stack> [cdk options...]: the pinned CLI, its output on the terminal
+# cdk_deploy <stack> [cdk options...]: the pinned CLI, its stack outputs on the terminal (fd 3). At a
+# terminal, cdk asks for approval there before any change that broadens IAM permissions or security
+# group access. Unattended, it first logs those changes with a read-only diff of the same stack and
+# context, then one summary line saying whether any broadens access, read from the diff's count of
+# stacks with differences, which --security-only counts only for a stack that broadens access
+# (stopping if the diff fails or gives no count), then deploys with --require-approval never.
+cdk_deploy() {
   local stack=$1
   shift
-  (cd "$INFRA" && npx --no-install cdk deploy "$stack" --exclusively --require-approval broadening \
-    --progress events -c "compute=$compute" -c "git_sha=$sha" ${web_dist:+-c} ${web_dist:+"web_dist=$web_dist"} \
-    -c "kernel_image=desk-kernel:$sha" -c "image_dir=$ROOT" -c "image_file=infra/app.Dockerfile" "$@") >&3
+  local options=(--exclusively -c "compute=$compute" -c "git_sha=$sha" ${web_dist:+-c} ${web_dist:+"web_dist=$web_dist"}
+    -c "kernel_image=desk-kernel:$sha" -c "image_dir=$ROOT" -c "image_file=infra/app.Dockerfile" "$@")
+  if [[ -z $unattended ]]; then
+    (cd "$INFRA" && npx --no-install cdk deploy "$stack" --require-approval broadening --progress events \
+      "${options[@]}") >&3
+    return
+  fi
+  echo "deploy: $stack's security-relevant changes (cdk diff --security-only); with no terminal to approve"
+  echo "deploy: them on, $stack is deployed with --require-approval never"
+  local diff counted='Number of stacks with differences: ([0-9]+)'
+  if ! diff=$(cd "$INFRA" && npx --no-install cdk diff "$stack" --security-only --method template --fail-on never \
+    "${options[@]}" 2>&1); then
+    printf '%s\n' "$diff"
+    echo "deploy: cdk diff $stack failed, so $stack wasn't deployed" >&2
+    return 1
+  fi
+  printf '%s\n' "$diff"
+  if [[ ! $diff =~ $counted ]]; then
+    echo "deploy: cdk diff $stack didn't say whether it broadens access, so $stack wasn't deployed" >&2
+    return 1
+  fi
+  if ((BASH_REMATCH[1] > 0)); then
+    echo "deploy: security summary for $stack: this deploy broadens IAM permissions or security group access; the changes are above"
+  else
+    echo "deploy: security summary for $stack: nothing in this deploy broadens IAM permissions or security group access"
+  fi
+  (cd "$INFRA" && npx --no-install cdk deploy "$stack" --require-approval never --progress events \
+    "${options[@]}") >&3
 }
 
 sha=$(git -C "$ROOT" rev-parse HEAD)
@@ -136,8 +253,14 @@ echo "deploy: log $log"
 step "AWS account"
 account=$(aws sts get-caller-identity --query Account --output text) || fail "no AWS credentials: set AWS_PROFILE"
 echo "deploy: AWS profile ${AWS_PROFILE:-default}, account $account"
-read -r -p "Type that account ID to deploy to it: " typed
-[[ $typed == "$account" ]] || fail "the typed account ID isn't $account; nothing was deployed"
+if [[ -n ${DESK_DEPLOY_ACCOUNT:-} ]]; then
+  [[ $DESK_DEPLOY_ACCOUNT == "$account" ]] ||
+    fail "DESK_DEPLOY_ACCOUNT is $DESK_DEPLOY_ACCOUNT, but the AWS credentials are for account $account; nothing was deployed"
+  echo "deploy: DESK_DEPLOY_ACCOUNT names that account"
+else
+  read -r -p "Type that account ID to deploy to it: " typed
+  [[ $typed == "$account" ]] || fail "the typed account ID isn't $account; nothing was deployed"
+fi
 
 step "Preflight"
 uv run --project "$INFRA" python "$INFRA/scripts/preflight.py" ${allow_branch:+"$allow_branch"} \
@@ -210,7 +333,7 @@ if [[ $compute == express ]]; then
   [[ -n $load_balancer ]] || fail "DeskApp has no LoadBalancerArn output whose security groups to check"
   smoke+=(--origin-host "$origin_host" --load-balancer-arn "$load_balancer")
 fi
-uv run --project "$INFRA" python "$INFRA/scripts/smoke.py" "${smoke[@]}" ||
+DESK_PASSCODE=$passcode uv run --project "$INFRA" python "$INFRA/scripts/smoke.py" "${smoke[@]}" ||
   fail "the smoke checks failed: the deploy isn't done, and the thin slice isn't announced"
 
 echo

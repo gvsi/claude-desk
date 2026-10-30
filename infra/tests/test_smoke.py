@@ -4,7 +4,10 @@ probes. Each bad stub breaks one property and the matching check must fail."""
 
 import contextlib
 import json
+import os
 import socket
+import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -583,6 +586,20 @@ def test_task_ports_refused_fails_closed_without_the_groups(smoke, aws, capsys, 
     with Stub(Behavior()) as stub:
         assert run(smoke, stub, "--cluster", CLUSTER, "--only", "task_ports_refused", clients=clients) == 1
     assert results(capsys.readouterr().out) == {"task_ports_refused": "FAIL"}
+
+
+def test_the_passcode_is_taken_out_of_the_environment_it_came_from(smoke, capsys, monkeypatch):
+    """Given DESK_PASSCODE in its own environment, as deploy.sh gives it, smoke.py signs in with it
+    and takes it out of that environment, so no child it starts, boto3's helpers included, is given it."""
+    monkeypatch.setenv("DESK_PASSCODE", PASSCODE)
+    with Stub(Behavior()) as stub:
+        assert smoke.main(["--base-url", stub.base_url, "--only", "cookies_first_party"]) == 0
+    assert results(capsys.readouterr().out) == {"cookies_first_party": "pass"}
+    left = os.environ.get("DESK_PASSCODE")      # a name, so a failure never shows the whole environment
+    assert left is None
+    child = subprocess.run([sys.executable, "-c", "import os; print('DESK_PASSCODE' in os.environ)"],
+                           capture_output=True, text=True, check=True)
+    assert child.stdout == "False\n"
 
 
 def test_without_a_passcode_the_signed_in_checks_are_not_run(smoke, capsys):

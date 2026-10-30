@@ -10,11 +10,16 @@ RUNBOOK = REPO / "docs" / "deploy.md"
 MIGRATIONS = "backend/alembic/versions/"
 
 
-def section(title: str) -> str:
-    """The runbook section under `## <title>`, its lines joined into one."""
+def raw_section(title: str) -> str:
+    """The runbook section under `## <title>`, as written."""
     match = re.search(rf"^## {re.escape(title)}\n(.*?)(?=^## |\Z)", RUNBOOK.read_text(), re.S | re.M)
     assert match, f"docs/deploy.md has no section {title!r}"
-    return " ".join(match.group(1).split())
+    return match.group(1)
+
+
+def section(title: str) -> str:
+    """The runbook section under `## <title>`, its lines joined into one."""
+    return " ".join(raw_section(title).split())
 
 
 def test_rollback_redeploys_an_earlier_commit_only_when_no_migration_shipped_since():
@@ -86,3 +91,63 @@ def test_the_first_deploy_creates_desk_data_behind_the_account_check():
     assert "infra/scripts/deploy.sh --data-only" in lines
     assert lines.index("infra/scripts/deploy.sh --data-only") < next(
         i for i, line in enumerate(lines) if "set_secret.py" in line) < lines.index("infra/scripts/deploy.sh")
+
+
+STORE_PASSCODE = 'security add-generic-password -s claude-desk-passcode -a "$USER" -w'
+REDEPLOY = "DESK_DEPLOY_ACCOUNT=<account> infra/scripts/deploy.sh"
+
+
+def sh_lines(title: str) -> list[str]:
+    """The commands in a section's sh blocks, comments dropped."""
+    blocks = re.findall(r"```sh\n(.*?)```", raw_section(title), re.S)
+    return [line.split("  #", 1)[0].strip() for block in blocks for line in block.splitlines()]
+
+
+def test_the_first_deploy_stores_the_passcode_where_deploy_sh_reads_it():
+    """Without DESK_PASSCODE, deploy.sh reads the Keychain item claude-desk-passcode and, when it's
+    missing, prints how to store it (test_deploy.py); the first deploy stores it with that command,
+    before the full deploy that needs it."""
+    script = (INFRA / "scripts" / "deploy.sh").read_text()
+    assert STORE_PASSCODE in script
+    assert "security find-generic-password -s claude-desk-passcode -w" in script
+    lines = sh_lines("First deploy (owner's terminal)")
+    assert STORE_PASSCODE in lines
+    assert lines.index(STORE_PASSCODE) < lines.index("infra/scripts/deploy.sh")
+    assert "read -rs DESK_PASSCODE; export DESK_PASSCODE" not in lines
+
+
+def test_a_redeploy_is_one_line_and_the_runbook_says_what_it_skips():
+    """With DESK_DEPLOY_ACCOUNT set deploy.sh asks nothing and runs without a terminal, logging each
+    stack's security diff and deploying with --require-approval never (test_deploy.py)."""
+    assert REDEPLOY in sh_lines("Redeploys")
+    redeploys = section("Redeploys")
+    assert "refuses, deploying nothing" in redeploys
+    assert "`cdk diff --security-only`" in redeploys and "`--require-approval never`" in redeploys
+    assert "`deploy: security summary for <stack>:`" in redeploys            # what to look for in the log
+    assert "a diff that doesn't say stops the deploy before that stack" in redeploys
+    assert REDEPLOY in " ".join((INFRA / "scripts" / "deploy.sh").read_text().replace("#", " ").split())
+
+
+def test_the_passcode_is_asked_for_in_printable_ascii():
+    """deploy.sh refuses a Keychain passcode that isn't printable ASCII, or has a backslash, from how
+    `security find-generic-password -g` shows the stored item (test_deploy.py). The runbook says so
+    where the passcode is stored, and why, and claims no more than that check does."""
+    first = section("First deploy (owner's terminal)")
+    assert "The passcode must be printable ASCII with no backslash" in first
+    assert "`security` hands any other back as hex" in first
+    assert "`security find-generic-password -g`" in first
+    assert "any other answer from `security -g` is refused too" in first      # it accepts one form alone
+    assert "can't catch" not in first and "hex is itself printable ASCII" not in first
+    script = " ".join((INFRA / "scripts" / "deploy.sh").read_text().replace("#", " ").split())
+    assert "it must be printable ASCII with no backslash" in script
+
+
+def test_the_runbook_says_who_can_read_the_keychain_item():
+    """The Keychain item keeps the passcode from other users, not from the owner's own processes:
+    `security`, which stored it, reads it back for any of them without a prompt. The runbook says so
+    plainly, agent sessions included, and claims no more for the rule that agents don't read it."""
+    first = section("First deploy (owner's terminal)")
+    assert ("While your login Keychain is unlocked, any process running as you can read the item without a "
+            "prompt, through `security` as `deploy.sh` does, agent sessions included.") in first
+    assert ("Agents never read it themselves, but that is a rule they follow, not something this setup "
+            "enforces.") in first

@@ -8,7 +8,8 @@
 deploy.sh runs every check after each deploy; `make image-smoke` runs `api_health` against a
 local container. One line per check: `pass`, `FAIL`, `not run` (the signed-in checks without
 `DESK_PASSCODE`) or `skipped` (a probe without its option). The passcode comes only from the
-environment, and neither it nor a cookie's token is ever printed.
+environment, which it's taken out of once read, so nothing smoke.py starts is given it; neither it
+nor a cookie's token is ever printed.
 
 Checks, in order:
 - index_served: `/` is the web app's HTML, not the labelled placeholder.
@@ -660,6 +661,9 @@ def _base_url(value: str) -> str:
 
 def main(argv: list[str] | None = None, *, clients: Mapping | None = None,
          environ: Mapping[str, str] | None = None) -> int:
+    # From this process's environment the passcode is taken out, so no child (boto3's credential
+    # helpers included) is given it.
+    passcode = os.environ.pop("DESK_PASSCODE", None) if environ is None else environ.get("DESK_PASSCODE")
     parser = argparse.ArgumentParser(description="Smoke-check a deployed Desk.")
     parser.add_argument("--base-url", required=True, type=_base_url, help="the Desk's PublicUrl")
     parser.add_argument("--origin-host", help="Express mode: the service endpoint's host, which must refuse us")
@@ -676,8 +680,7 @@ def main(argv: list[str] | None = None, *, clients: Mapping | None = None,
     if args.only and "origin_groups_locked" in args.only and not args.load_balancer_arn:
         parser.error("origin_groups_locked needs --load-balancer-arn")
 
-    environ = os.environ if environ is None else environ
-    smoke = Smoke(args.base_url, passcode=environ.get("DESK_PASSCODE") or None, origin_host=args.origin_host,
+    smoke = Smoke(args.base_url, passcode=passcode or None, origin_host=args.origin_host,
                   cluster=args.cluster, clients=clients, load_balancer_arn=args.load_balancer_arn)
     counts = {"pass": 0, "FAIL": 0, "not run": 0, "skipped": 0}
     for name, check in CHECKS.items():
