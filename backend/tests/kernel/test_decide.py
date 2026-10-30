@@ -1128,6 +1128,22 @@ async def test_the_owner_reads_how_the_deciding_rule_decided(app, client, regist
     assert decision.reason_plain == said
 
 
+LONG_RULE = ("Quotes from your price list, at list price, for drain clearing, leak repairs, water heater checks and "
+             "fixture installs in Oakland, Berkeley, Emeryville and Alameda, on weekdays and Saturday mornings, and "
+             "never for commercial buildings.")
+
+
+async def test_the_owners_rule_is_quoted_whole(app, client, registry):
+    """A rule's text is the owner's own words, and the owner reads it: it is quoted whole however
+    long, never cut short inside quotes where it would read as complete."""
+    assert len(LONG_RULE) > decide.QUOTED_CHARS                         # longer than free text is cut to
+    quote = FakeAdapter("native.quote")
+    quote.script["normalize"] = priced(list_cents=18_000)
+    rows = await desk_with(app, [quote], [rule("quote", "auto", LONG_RULE)])
+    decision = await decided(client, await open_visitor(client, rows), "native.quote", {"qty": 1})
+    assert decision.reason_plain == f"A stranger asked to get a quote for $180. Your rule allows it: “{LONG_RULE}”"
+
+
 async def test_a_refusal_no_rule_decided_keeps_its_words(app, client, registry):
     """The always-on baseline is no rule of the owner's, so its refusal has no lead-in: here money
     with no amount above zero, which the baseline refuses whatever the cards say."""

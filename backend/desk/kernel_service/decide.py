@@ -575,9 +575,12 @@ def _asked(subject: str, tool: str, action: NormalizedAction | None) -> str:
     return f"{subject} asked to {what}."
 
 
-def _quoted(text: str) -> str:
-    """Untrusted text as the owner reads it: one line, cut, inside quotes it can't close."""
-    line = " ".join(text.split())[:QUOTED_CHARS]
+def _quoted(text: str, *, cut: bool = True) -> str:
+    """Text as the owner reads it: one line inside quotes it can't close. Untrusted free text is
+    cut to `QUOTED_CHARS`; a rule's text (`cut=False`), the owner's own words, is quoted whole."""
+    line = " ".join(text.split())
+    if cut:
+        line = line[:QUOTED_CHARS]
     return "“" + line.replace("“", '"').replace("”", '"') + "”"
 
 
@@ -766,7 +769,7 @@ def _reason_plain(call: _Call, outcome: str, reason: str | None, evaluation: Eva
         lead_in, card_ids = _rules_decided(call, outcome, evaluation)
         reasons = [cards[card_id].reason for card_id in card_ids if card_id in cards]
         if reasons:
-            parts.append(f"{lead_in}: " + ", ".join(_quoted(text) for text in reasons))
+            parts.append(f"{lead_in}: " + ", ".join(_quoted(text, cut=False) for text in reasons))
         elif outcome == "refuse":
             parts.append(BASELINE_PLAIN)
     if evaluation is not None and evaluation.needed_review:
