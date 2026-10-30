@@ -36,7 +36,7 @@ from .fakes import FakeDecisions
 from .helpers import kernel_ctx, ledger_rows, rows_of
 from .test_adapters import Rivera, book, quote_args, visitor_of
 from .test_approvals import answered
-from .test_decide import PASS, Visitor, decided, open_visitor, set_mode, set_session
+from .test_decide import PASS, Visitor, decided, desk_with, open_visitor, set_mode, set_session
 from .test_execute import executed
 
 ROUTE = "POST /check_reply"
@@ -398,6 +398,24 @@ async def test_clause_checks(app, client, reviewer, frozen_clock, case, kind, ru
     if case == "a hostile fact_id":
         assert ref == {"invalid": True, "sha256": hashlib.sha256(fact_id.encode()).hexdigest()[:16]}
         assert fact_id not in entry.envelope_jcs
+
+
+async def test_a_card_citing_the_catalog_backs_nothing(app, client):
+    # the catalog is a fact every session reads (`/context`), checked like any other citation; no
+    # template renders it, so it backs no card and no price
+    copy, visitor = await visitor_of(app, client)
+    for template in ("quote", "policy", "hours", "contact", "booking_options", "booking_confirmed"):
+        verdict = await checked(client, visitor, "Here is what we do.", [clause(template, "catalog")])
+        assert [(v.kind, v.rule_id, v.fact_ids) for v in verdict.violations] == [
+            ("unknown_fact", "template_mismatch", ["catalog"])], template
+        assert_handed_off(verdict)
+    assert {entry.event.summary["rule_ids"][0] for entry in await reply_entries(app, copy)} == {"template_mismatch"}
+    # a Desk that sells nothing has no catalog to cite
+    rows = await desk_with(app, [], [])
+    stranger = await open_visitor(client, rows)
+    verdict = await checked(client, stranger, "Here is what we do.", [clause("quote", "catalog")])
+    assert [(v.kind, v.rule_id, v.fact_ids) for v in verdict.violations] == [
+        ("unknown_fact", "no_such_fact", ["catalog"])]
 
 
 async def test_a_canary_in_prose_is_blocked(app, client):

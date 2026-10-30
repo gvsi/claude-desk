@@ -16,7 +16,8 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    may read (`readable_policies`), and the Desk's document canaries. Bookings and policies reach
    a visitor only in their cards, so prose saying them is blocked even beside the card.
 4. Each clause renders from a fact this session may read, current, of the template's kind and ID,
-   with no canary in what it renders.
+   with no canary in what it renders. The Desk's catalog (`context.catalog_fact`) is cited like a
+   stored fact, and no template renders it, so it backs no card.
 5. The soft-promise check, only when steps 2 to 4 found nothing and there is prose: Haiku 5.5
    reads the prose and the cards' texts (never the visitor's words) and flags a promise the cards
    don't hold (`soft.promise`) or prose that says or suggests the writer is a human
@@ -52,7 +53,7 @@ from desk.contracts import Clause, Fact, LedgerEvent, RenderedBlock, ReplyDraft,
 from desk.db.models import Booking, Business, CalendarSlot, Desk, Document
 from desk.db.models import Fact as FactRow
 from desk.kernel_api import CheckReplyRequest
-from desk.kernel_service import auth, labels, lang, ledger, render
+from desk.kernel_service import auth, context, labels, lang, ledger, render
 from desk.kernel_service.auth import AuthError, Named, SessionRow
 from desk.kernel_service.decisions import CallUsage, SoftPromiseInput
 from desk.kernel_service.render.cards import DeskInfo, slot_claims
@@ -474,12 +475,15 @@ async def check_clauses(ctx: KernelCtx, session_row: SessionRow, desk_id: str, d
     verify prompt names no fact; any other names a fact of this copy and Desk (`unknown_fact`)
     that the session may read (`unentitled_fact`; a session learns nothing more about a fact it
     can't read), of the template's kind and ID (`template_mismatch`), current (`stale_fact`), and
-    with no canary in what it renders (`canary`)."""
+    with no canary in what it renders (`canary`). The catalog, which the kernel builds on each
+    read rather than stores, is looked up with the stored facts and checked the same way."""
     wanted = {clause.fact_id for clause in clauses if clause.fact_id is not None and _storable(clause.fact_id)}
-    rows = {}
+    rows: dict[str, FactRow | Fact] = {}
     if wanted:
         rows = {row.fact_id: row for row in await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
             FactRow.desk_id == desk_id, FactRow.fact_id.in_(sorted(wanted)))))}
+    if context.CATALOG in wanted and (catalog := await context.catalog_fact(ctx, desk_id)) is not None:
+        rows[context.CATALOG] = catalog
     readers = labels.session_readers(session_row)
     now = ctx.clock.now()
     blocks: list[RenderedBlock] = []
@@ -502,10 +506,10 @@ async def check_clauses(ctx: KernelCtx, session_row: SessionRow, desk_id: str, d
             if row is None:
                 violations.append(_clause_violation(clause, "unknown_fact", "no_such_fact"))
                 continue
-            if not labels.can_read(row.readers, readers):
+            if not labels.can_read(row.label if isinstance(row, Fact) else row.readers, readers):
                 violations.append(_clause_violation(clause, "unentitled_fact", "not_a_reader"))
                 continue
-            fact = labels.fact_of(row)
+            fact = row if isinstance(row, Fact) else labels.fact_of(row)
             if not template.reads(fact):
                 violations.append(_clause_violation(clause, "unknown_fact", "template_mismatch"))
                 continue
