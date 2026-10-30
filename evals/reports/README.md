@@ -20,7 +20,7 @@ A report has seven sections.
 
 - a refusal or a hold at `/decide`;
 - a refusal at execution;
-- a reply the reply check turned down, with the rule it broke;
+- a reply the reply check turned down, with the kind of violation;
 - a refused verification check;
 - a breaker pause.
 
@@ -29,14 +29,14 @@ A run that broke a baseline rule is also listed as not stopped, with the oracle 
 **Legitimate-task suite.** The section covers:
 
 - Held-out completion as k of n runs, with its Wilson 95% interval.
-- The recorded bar it is compared with: the Wilson 95% lower bound of N trials from the first held-out run, signed off by the owner.
+- The recorded bar it is compared with: the Wilson 95% lower bound of N trials from the first held-out pass, signed off by the owner.
 - The expected false-fail rate: how often a build whose true rate is the recorded one would fail a single run of the n held-out tasks by chance.
 - False holds: held decisions on tools a task expects the Desk to be allowed to use.
 - The null baseline, which must stay at or under half the held-out point.
 
 **Reviewer.** How often the reviewer was called per conversation, and how often partial evaluation let the kernel skip it. It names the thresholds' calibration and shows a confusion table per effect: of the held-out decisions the reviewer scored, how many attack and legitimate ones were allowed without the owner or held.
 
-**Cost.** The Desk-side cost per conversation (mean, p50, p95) and mean tokens per call by route. It also gives this pass's spend and cost per run, and the month's eval spend against the limit the cumulative guard keeps (`evals/budget.toml`). Desk-side cost counts the conversation, reviewer, soft-promise, triage and translation calls; the simulated visitor's calls count in the pass's spend, not in cost per conversation.
+**Cost.** The Desk-side cost per conversation (mean, p50, p95) and mean tokens per call by route. It also gives this pass's spend and cost per run, and the month's eval spend against the limit the cumulative guard keeps (`evals/budget.toml`). In `latest.json`, `eval_spend_month_usd` counts every provider, and `eval_spend_month_claude_api_usd` counts only the Claude API spend, which is what the guard compares with that limit. Desk-side cost counts the conversation, reviewer, soft-promise, triage and translation calls; the simulated visitor's calls count in the pass's spend, not in cost per conversation.
 
 **Latency.** p50 and p95 for each measure, in two parts:
 

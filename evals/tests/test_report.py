@@ -36,6 +36,7 @@ from evals.report import (
     chance_below,
     dollars,
     latest_json,
+    latest_results_block,
     load_budget,
     millis,
     percent,
@@ -184,13 +185,16 @@ def recorded_rate(successes: int = 4, trials: int = 5, *, heldout: str = HELDOUT
 
 
 def all_inputs(**changes: Any) -> dict[str, Any]:
+    """The report's inputs; the shared spend file holds another month's pass, an earlier pass this
+    month and the pass's own row."""
+    pass_result = changes.get("pass_result") or full_pass()
     inputs: dict[str, Any] = {
-        "pass_result": full_pass(), "gate_result": gate(), "metrics": metrics(), "latency": latency(),
+        "pass_result": pass_result, "gate_result": gate(), "metrics": metrics(), "latency": latency(),
         "calibration": calibration(), "recorded": recorded_rate(),
         "null_baseline": NullBaseline(pass_id="p-20261101-e5f6", successes=0, trials=2),
         "spend_month": [spend("p-20261031-9z8y", date(2026, 10, 31), runs=240, desk_usd=61.0, simulator_usd=38.5),
                         spend("p-20261031-c3d4", date(2026, 11, 1), runs=36, desk_usd=9.0, simulator_usd=5.4),
-                        spend()],
+                        pass_result.spend],
     }
     return {**inputs, **changes}
 
@@ -260,6 +264,12 @@ def test_latest_json_matches_the_report_numbers(tmp_path: Path):
     assert latest["recorded_trials"] == 5 and latest["recorded_lower_95"] == recorded_rate().completion_lower_95
     assert latest["simulator_fallbacks"] == {"turns": 0, "switches": 0}
     assert latest["eval_spend_month_usd"] == pytest.approx(14.4 + 7.2)   # October's pass is another month
+    assert latest["eval_spend_month_claude_api_usd"] == pytest.approx(14.4 + 7.2)
+    bedrock = SpendRow(pass_id="p-20261101-b7b7", date=PASS_DATE, provider="bedrock", runs=18, desk_usd=4.0,
+                       simulator_usd=2.0, claude_api_usd=0.0, total_usd=6.0)
+    mixed = latest_json(**{**inputs, "spend_month": [*inputs["spend_month"], bedrock]})
+    assert mixed["eval_spend_month_usd"] == pytest.approx(14.4 + 7.2 + 6.0)     # every provider
+    assert mixed["eval_spend_month_claude_api_usd"] == pytest.approx(14.4 + 7.2)   # what the guard counts
 
     shown = [
         percent(latest["violation_rate_upper_95"]), percent(latest["legit_completion_point"]),
@@ -294,6 +304,27 @@ def test_latest_json_matches_the_report_numbers(tmp_path: Path):
         refused = all_inputs(pass_result=a_pass(full_pass().runs, **rehearsal))
         with pytest.raises(ValueError, match="never becomes the latest report"):
             write_report(**refused, reports_dir=reports, evals_doc=doc)
+
+
+def test_the_month_spend_must_hold_the_pass_own_row(tmp_path: Path):
+    """The month's spend is read, never assumed: it must be given, and it must hold this pass's own
+    spend row as the pass recorded it, so a missing or stale read can't report this month at $0 or
+    overwrite spend.csv without the pass."""
+    inputs = all_inputs()
+    del inputs["spend_month"]
+    with pytest.raises(TypeError, match="spend_month"):
+        latest_json(**inputs)
+
+    other = spend("p-20261031-c3d4", date(2026, 11, 1), runs=36, desk_usd=9.0, simulator_usd=5.4)
+    stale = spend(runs=18, desk_usd=1.0)
+    reports, doc = tmp_path / "reports", tmp_path / "evals.md"
+    doc.write_text(f"# Evals\n\n## Latest results\n\n{BEGIN_MARKER}\n{PLACEHOLDER}\n{END_MARKER}\n")
+    for rows in ([], [other], [other, stale]):
+        with pytest.raises(ValueError, match="this pass's own spend row"):
+            latest_json(**all_inputs(spend_month=rows))
+        with pytest.raises(ValueError, match="this pass's own spend row"):
+            write_report(**all_inputs(spend_month=rows), reports_dir=reports, evals_doc=doc)
+    assert not reports.exists()
 
 
 # What a code, contact, key or link token looks like (the runner redacts the same things).
@@ -493,6 +524,16 @@ def test_latest_results_block_is_rewritten_from_latest_json(tmp_path: Path):
     rewritten = doc.read_text().splitlines()
     assert rewritten[:begin + 1] == before[:begin + 1] and rewritten[rewritten.index(END_MARKER):] == before[end:]
     assert "[measured: the recorded bar, after the owner's sign-off]" in doc.read_text()
+
+    # Measured as zero is not unmeasured: a pass whose tasks expected no allowed decision shows none,
+    # and one with no gated task says so instead of a missing n.
+    no_holds = "\n".join(latest_results_block(latest_json(**all_inputs(
+        pass_result=a_pass([run("leg-ai-en", rep=rep, category="disclosure") for rep in (1, 2, 3)])))))
+    assert "| False holds | none: no held-out decision was on a tool the tasks expect allowed |" in no_holds
+    assert "[measured: false holds]" not in no_holds
+    attacks_only = "\n".join(latest_results_block(latest_json(**all_inputs(pass_result=a_pass([run("atk-x")])))))
+    assert "None" not in attacks_only
+    assert "this pass ran no held-out legitimate task to compare" in attacks_only
 
     for marker in (BEGIN_MARKER, END_MARKER):
         broken = tmp_path / "broken.md"

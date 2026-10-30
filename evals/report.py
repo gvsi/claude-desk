@@ -414,9 +414,10 @@ def load_budget(path: Path = BUDGET_FILE) -> Budget:
 
 def latest_json(pass_result: PassSummary, gate_result: Any, metrics: Metrics | None, latency: Latency | None,
                 calibration: Calibration | None, *, recorded: RecordedRate | None = None,
-                null_baseline: NullBaseline | None = None, spend_month: Sequence[SpendRow] = ()) -> dict[str, Any]:
+                null_baseline: NullBaseline | None = None, spend_month: Sequence[SpendRow]) -> dict[str, Any]:
     """The report's numbers as data (`evals/reports/latest.json`). A number this report didn't
-    measure is null."""
+    measure is null. `spend_month` is the shared spend file's rows, which must hold this pass's own
+    row as the pass recorded it, so a missing or stale read can't leave the pass out of the month."""
     p = PassSummary.model_validate(pass_result)
     g = GateSummary.model_validate(gate_result)
     judged = [r for r in p.runs if r.judged]
@@ -440,6 +441,9 @@ def latest_json(pass_result: PassSummary, gate_result: Any, metrics: Metrics | N
         false_fail = chance_below(wilson_lower_95(successes, len(legit)), point, len(gated))
 
     month = _month_rows(spend_month, p.date)
+    if p.spend not in month:
+        raise ValueError(f"the spend rows for {p.date:%Y-%m} don't hold this pass's own spend row as the pass "
+                         "recorded it; read the shared spend file again after the pass")
     local = latency.local if latency else None
     hosted = latency.hosted if latency else None
     return {
@@ -453,6 +457,7 @@ def latest_json(pass_result: PassSummary, gate_result: Any, metrics: Metrics | N
         "recorded_trials": recorded.trials if recorded else None,
         "gated_trials": len(gated) or None,
         "false_hold_rate": _round(sum(r.false_holds for r in legit) / expected) if expected else None,
+        "expected_allow_decisions": expected if legit else None,
         "expected_false_fail_rate": _round(false_fail),
         "reviewer_calls_per_conversation": _round(metrics.reviewer_calls / metrics.conversations) if metrics else None,
         "reviewer_skip_rate": (_round(1 - metrics.reviewer_calls / metrics.decide_calls)
@@ -470,7 +475,8 @@ def latest_json(pass_result: PassSummary, gate_result: Any, metrics: Metrics | N
                         "hosted": _ms(hosted.reviewer) if hosted else None},
         "proving_ms": _ms(local.proving) if local else None,
         "measured_cost_per_run_usd": _round(p.spend.total_usd / p.spend.runs) if p.spend.runs else None,
-        "eval_spend_month_usd": _round(sum(row.total_usd for row in month)),
+        "eval_spend_month_usd": _round(sum(row.total_usd for row in month)),          # every provider
+        "eval_spend_month_claude_api_usd": _round(sum(row.claude_api_usd for row in month)),   # what the guard counts
         "simulator_fallbacks": {"turns": sum(r.fallback_turns for r in p.runs),
                                 "switches": sum(r.switches for r in p.runs)},
         "provider": p.providers.api,
@@ -550,7 +556,7 @@ def _tokens(value: float) -> str:
 
 def render_report(pass_result: PassSummary, gate_result: Any, metrics: Metrics | None, latency: Latency | None,
                   calibration: Calibration | None, *, recorded: RecordedRate | None = None,
-                  null_baseline: NullBaseline | None = None, spend_month: Sequence[SpendRow] = (),
+                  null_baseline: NullBaseline | None = None, spend_month: Sequence[SpendRow],
                   budget: Budget | None = None) -> str:
     """The report as Markdown, rendered from `latest_json`'s numbers and the pass's runs."""
     p = PassSummary.model_validate(pass_result)
@@ -798,7 +804,7 @@ def _cost(p: PassSummary, metrics: Metrics | None, spend_month: Sequence[SpendRo
     month = _month_rows(spend_month, p.date)
     headroom = budget.monthly_limit_usd - budget.demo_reserve_usd
     out.append(f"Eval spend this month: {dollars(n['eval_spend_month_usd'])} over "
-               f"{_plural(len(month), 'pass', 'passes')}, {dollars(sum(row.claude_api_usd for row in month))} of it "
+               f"{_plural(len(month), 'pass', 'passes')}, {dollars(n['eval_spend_month_claude_api_usd'])} of it "
                "on the Claude API, which the cumulative "
                f"guard holds under {dollars(headroom)}: the {dollars(budget.monthly_limit_usd)} monthly limit less "
                f"the demo's {dollars(budget.demo_reserve_usd)} reserve.")
@@ -916,9 +922,10 @@ def latest_results_block(latest: dict[str, Any]) -> list[str]:
         f"{percent(point)} ({latest['legit_successes']} of {latest['legit_trials']}), Wilson 95% interval "
         f"{percent(low)} to {percent(high)}"), "held-out legitimate completion")
     bar = shown(latest["recorded_lower_95"], lambda lower: (
-        f"{percent(lower)}, recorded from N = {latest['recorded_trials']} held-out runs; a gated pass compares "
-        f"n = {latest['gated_trials']}" + ("" if latest["recorded_heldout_matches"] else
-                                          ", but on another held-out set, so not compared")),
+        f"{percent(lower)}, recorded from N = {latest['recorded_trials']} held-out runs; "
+        + ("this pass ran no held-out legitimate task to compare" if latest["gated_trials"] is None else
+           f"a gated pass compares n = {latest['gated_trials']}")
+        + ("" if latest["recorded_heldout_matches"] else ", but on another held-out set, so not compared")),
         "the recorded bar, after the owner's sign-off")
     rows = [
         ("Gate", "passed" if latest["gate_passed"] else "failed"),
@@ -933,8 +940,10 @@ def latest_results_block(latest: dict[str, Any]) -> list[str]:
          shown(latest["expected_false_fail_rate"], lambda rate: percent(rate) + (
              "" if latest["recorded_lower_95"] is not None else ", if this pass's own bound were the bar"),
              "expected false-fail rate")),
-        ("False holds", shown(latest["false_hold_rate"], lambda rate: f"{percent(rate)} of decisions the tasks "
-                                                                      "expect allowed", "false holds")),
+        ("False holds", "none: no held-out decision was on a tool the tasks expect allowed"
+         if latest["expected_allow_decisions"] == 0 else
+         shown(latest["false_hold_rate"], lambda rate: f"{percent(rate)} of decisions the tasks expect allowed",
+               "false holds")),
         ("Measured cost", shown(latest["measured_cost_per_run_usd"], lambda per_run: (
             f"{dollars(per_run)} per run, {dollars(latest['pass_cost_usd'])} for the pass"), "cost per run")),
     ]
@@ -964,7 +973,7 @@ def _with_latest_results(text: str, latest: dict[str, Any], path: Path) -> str:
 
 def write_report(pass_result: PassSummary, gate_result: Any, metrics: Metrics | None, latency: Latency | None,
                  calibration: Calibration | None, *, recorded: RecordedRate | None = None,
-                 null_baseline: NullBaseline | None = None, spend_month: Sequence[SpendRow] = (),
+                 null_baseline: NullBaseline | None = None, spend_month: Sequence[SpendRow],
                  reports_dir: Path = REPORTS_DIR, evals_doc: Path = EVALS_DOC) -> Path:
     """Writes `<date>-<pass_id>.md` and `latest.json` under `reports_dir`, this month's spend rows as
     its `spend.csv`, and the evals guide's latest-results block; returns the report's path. A dry run
