@@ -603,6 +603,12 @@ async def test_a_reply_naming_only_the_card_passes(app, client, reviewer):
     ("Sí tu cita está confirmada.", "lex.es.booking", "tu cita está confirmada"),
     ("SÍ ESTÁ CONFIRMADA.", "lex.es.booking", "ESTÁ CONFIRMADA"),
     ("S\u0131\u0301 está confirmada.", "lex.es.booking", "está confirmada"),          # a dotless i and an acute
+    ("La suya está confirmada.", "lex.es.booking", "está confirmada"),                # a word ending in "ya"
+    ("Sí, la suya está confirmada.", "lex.es.booking", "está confirmada"),
+    ("La tuya ya está confirmada.", "lex.es.booking", "ya está confirmada"),
+    ("La cita suya está confirmada.", "lex.es.booking", "está confirmada"),
+    ("Bueno, la suya quedó agendada.", "lex.es.booking", "quedó agendada"),
+    ("Ya ya está confirmada.", "lex.es.booking", "ya está confirmada"),               # "ya" twice
 ])
 def test_booking_claims_in_prose_are_blocked(prose, rule_id, span):
     """Only a booking card says a visit is booked: the claim in prose is a promise word, in English
@@ -630,6 +636,7 @@ def test_booking_claims_read_lookalike_letters():
     "When your next appointment's confirmed, Maria will text you.",
     "Cuando tu cita esté confirmada, te escribimos.",
     "Cuando tu cita está confirmada, Maria te escribe.",
+    "Cuando tu cita ya está confirmada, Maria te escribe.",
     "Cuando su próxima cita está confirmada, le llega un mensaje.",   # a word between, a claim inside
     "Si tu nueva visita está agendada, Maria le avisa.",
     "Cuando una cita está confirmada, Maria lo anota.",
