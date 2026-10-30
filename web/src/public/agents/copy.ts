@@ -5,8 +5,9 @@
  * request), the design system's (the disclosure, error lines) or the public page's own (`PUBLIC_COPY`:
  * a Desk that isn't there, "Try again"). Names are passed in as written.
  *
- * The spending limit is static copy, never formatted from a number: it states the Rivera seed's
- * demo mandate ($20 a charge, $100 in total, for one hour), and `copy.test.ts` ties the amounts to it.
+ * The spending limit is static copy, never formatted from a number: `limitLine` states the Rivera
+ * seed's demo mandate ($20 a charge, $100 in total, for one hour), and `copy.test.ts` ties the
+ * amounts to it.
  */
 import type { CopyLanguage } from '../../ds/index.ts';
 
@@ -70,8 +71,10 @@ export interface AgentsCopy {
   shownOnce: string;
 
   sendTitle: string;
-  /** The panel's line: who the agent visits for, and its signed spending limit. Static. */
+  /** The panel's lead before a run: who the agent visits, and for whom. The chosen task replaces it. */
   sendLead: (business: string) => string;
+  /** The agent's signed spending limit. Static: the only line on the page with amounts. */
+  limitLine: string;
   tasksLabel: string;
   agentName: string;
   signedRequest: string;
@@ -128,8 +131,8 @@ export const AGENTS_COPY: Readonly<Record<CopyLanguage, AgentsCopy>> = {
     shownOnce: 'Shown once. It’s a demo key for this Desk, not a business credential.',
 
     sendTitle: 'Send an agent',
-    sendLead: (business) =>
-      `A built-in agent visits ${business} for Alex Kim, with a signed spending limit of $20 per charge and $100 in total, for one hour. It’s simulated.`,
+    sendLead: (business) => `A built-in agent visits ${business} for Alex Kim. It’s simulated.`,
+    limitLine: 'Its spending limit, signed by Alex Kim’s demo wallet: $20 per charge and $100 in total, for one hour.',
     tasksLabel: 'Tasks for the agent',
     agentName: 'Alex Kim’s assistant',
     signedRequest: 'Signed request',
@@ -184,8 +187,8 @@ export const AGENTS_COPY: Readonly<Record<CopyLanguage, AgentsCopy>> = {
     shownOnce: 'Se muestra una sola vez. Es una clave de demostración para este Desk, no una credencial del negocio.',
 
     sendTitle: 'Enviar un agente',
-    sendLead: (business) =>
-      `Un agente integrado visita ${business} en nombre de Alex Kim, con un límite de gasto firmado de $20 por cobro y $100 en total, durante una hora. Es simulado.`,
+    sendLead: (business) => `Un agente integrado visita ${business} en nombre de Alex Kim. Es simulado.`,
+    limitLine: 'Su límite de gasto, firmado por la billetera de demostración de Alex Kim: $20 por cobro y $100 en total, durante una hora.',
     tasksLabel: 'Tareas para el agente',
     agentName: 'Asistente de Alex Kim',
     signedRequest: 'Solicitud firmada',

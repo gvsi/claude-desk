@@ -28,6 +28,7 @@ import {
 import { browserLanguage } from '../../lib/language.ts';
 import { brandFrom } from '../brand.ts';
 import { PUBLIC_COPY } from '../copy.ts';
+import { useAgentSession } from './agentSession.ts';
 import { AgentsCard } from './AgentsCard.tsx';
 import { ConnectYourOwn } from './ConnectYourOwn.tsx';
 import { AGENTS_COPY } from './copy.ts';
@@ -87,6 +88,8 @@ function AgentsPage({ slug, desk, card, language }: AgentsPageProps) {
   const business = desk.business_name;
   const skills = desk.agent_card.filter((block) => block.text.trim() !== '');
   const { hash } = useLocation();
+  // One session for both actions, so a key and a run opened together belong to the same chat.
+  const session = useAgentSession(slug);
 
   // The public page's "Send an agent" link lands on the panel once the page has drawn it.
   useLayoutEffect(() => {
@@ -130,8 +133,8 @@ function AgentsPage({ slug, desk, card, language }: AgentsPageProps) {
               ))}
             </ul>
           </AgentsCard>
-          <ConnectYourOwn slug={slug} card={card} language={language} />
-          <SendAgentPanel slug={slug} business={business} ownerName={desk.owner_display_name} language={language} />
+          <ConnectYourOwn slug={slug} card={card} session={session} language={language} />
+          <SendAgentPanel slug={slug} business={business} ownerName={desk.owner_display_name} session={session} language={language} />
         </div>
         <ConceptFooter />
       </main>

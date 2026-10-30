@@ -2,10 +2,10 @@
  * One card on the agents page, as the agents boards draw them: the design system's compact `Card`
  * as a named region, its title, an optional quiet line under it, then what it holds.
  *
- * The send panel holds the Desk's replies, whose cards are `Card`s, and a `Card` can't hold another.
- * The boards draw the run inside the panel's card, so that card's frame is composed on the card's
- * own tokens instead (`holdsCards`), as the design system's boards compose the owner's signed-limit
- * card: the same look, with the reply cards inside it as drawn.
+ * Every card is the design system's `Card` but one: the send panel holds the Desk's replies, whose
+ * cards are `Card`s, and a `Card` can't hold another. The boards draw the run inside the panel's
+ * card, so until the design system's card-holding frame lands, that one card's frame is drawn on
+ * the card tokens (`holdsCards`).
  */
 import type { ReactNode } from 'react';
 
@@ -18,7 +18,7 @@ export interface AgentsCardProps {
   lead?: ReactNode;
   /** The title's id, for a link to the card (`#send`). */
   id?: string;
-  /** It holds reply cards: its frame is drawn on the card tokens rather than by `Card`. */
+  /** The send panel only: it holds reply cards, so its frame is drawn on the card tokens rather than by `Card`. */
   holdsCards?: boolean;
   children: ReactNode;
 }
@@ -34,6 +34,7 @@ export function AgentsCard({ title, lead, id, holdsCards = false, children }: Ag
     </>
   );
   if (holdsCards) {
+    // stopgap: swap for the design system's card-holding frame (design/knowledge-and-limit)
     return (
       <section className="cd-agents-card--frame" aria-label={title}>
         {inside}

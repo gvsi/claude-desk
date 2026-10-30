@@ -1,8 +1,9 @@
 /**
  * Connecting your own agent: where agents send their requests and how they sign them, from the
  * API's code-built Agent Card, shown as written; then a demo key to try it with. The key comes from
- * the API once (`agentKey`), is shown once in mono with "Copy key" and the warning that it is a demo
- * key, not a business credential, and is kept nowhere: the button is gone once it shows.
+ * the API once (`agentKey`, within the page's one visitor session), is shown once in mono with "Copy
+ * key" and the warning that it is a demo key, not a business credential, and is kept nowhere: the
+ * button is gone once it shows.
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
@@ -20,7 +21,7 @@ import {
   errorCopy,
   type CopyLanguage,
 } from '../../ds/index.ts';
-import { useAgentSession } from './agentSession.ts';
+import type { AgentSession } from './agentSession.ts';
 import { AgentsCard } from './AgentsCard.tsx';
 import { AGENTS_COPY, type AgentsCopy } from './copy.ts';
 
@@ -60,10 +61,12 @@ function keyFailure(err: unknown): KeyFailure {
 export interface ConnectYourOwnProps {
   slug: string;
   card: AgentCardOut;
+  /** The page's one visitor session, shared with sending the agent. */
+  session: AgentSession;
   language: CopyLanguage;
 }
 
-export function ConnectYourOwn({ slug, card, language }: ConnectYourOwnProps) {
+export function ConnectYourOwn({ slug, card, session, language }: ConnectYourOwnProps) {
   const copy = AGENTS_COPY[language];
   return (
     <>
@@ -77,14 +80,13 @@ export function ConnectYourOwn({ slug, card, language }: ConnectYourOwnProps) {
         <h3 className="cd-agents-page__label cd-type-control">{copy.exampleRequest}</h3>
         <CodeBlock code={card.example_request} />
       </AgentsCard>
-      <DemoKey slug={slug} language={language} />
+      <DemoKey slug={slug} session={session} language={language} />
     </>
   );
 }
 
-function DemoKey({ slug, language }: { slug: string; language: CopyLanguage }) {
+function DemoKey({ slug, session, language }: { slug: string; session: AgentSession; language: CopyLanguage }) {
   const copy = AGENTS_COPY[language];
-  const session = useAgentSession(slug);
   const [issued, setIssued] = useState<DemoAgentIssued | null>(null);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<KeyFailure | null>(null);
@@ -144,8 +146,9 @@ function DemoKey({ slug, language }: { slug: string; language: CopyLanguage }) {
     );
   }
 
+  // The simulated line goes once the key shows: the card then holds the key alone (board 02).
   return (
-    <AgentsCard title={copy.demoKeyTitle} lead={copy.simulated}>
+    <AgentsCard title={copy.demoKeyTitle} lead={issued === null ? copy.simulated : undefined}>
       {issued !== null ? (
         <>
           <CopyField label={copy.keyId} value={issued.agent_key_id} layout="block" language={language} />
