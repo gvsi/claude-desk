@@ -128,6 +128,7 @@ export {
 } from './components/TranscriptRow/TranscriptRow.tsx';
 export { MarginReceipt, type MarginReceiptProps } from './components/MarginReceipt/MarginReceipt.tsx';
 export {
+  OWNER_STATE_WORDS,
   receiptFromEvent,
   receiptTone,
   type ReceiptSource,

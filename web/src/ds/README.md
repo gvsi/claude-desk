@@ -59,7 +59,7 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 ## The signature: receipts under each message
 
 - Show checkpoint results as receipts attached under each message, at every width: each one (a `MarginReceipt`) sits right under the message it explains, like an editor's note, as a status dot and one line of `caption` in `text-secondary`.
-- On visitor surfaces, show exactly the signed event's `visitor_plain` line, never rewritten and never with a clock time. On owner screens a receipt opens the full trace.
+- On visitor surfaces, show exactly the signed event's `visitor_plain` line, never rewritten and never with a clock time. On owner screens a receipt opens the full trace, and a decision's receipt can lead with the owner's words for its state, then the decision's reason ("Stopped. Someone asked for another customer's invoice.").
 - Keep everything around the receipts quiet. They are the one bold element in the system.
 
 ## Typed cards
