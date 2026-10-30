@@ -1,15 +1,20 @@
 """The fake model server, driven by the Anthropic SDK as the kernel and the API drive the real one."""
 
 import asyncio
+import errno
+import gc
 import json
 import re
+import socket
 import time
+import warnings
 
 import anthropic
 import pytest
 from anthropic import AsyncAnthropic
+from starlette.applications import Starlette
 
-from evals.fakes import FakeAnthropic, HttpError, Json, Refusal, Sleep, Text, ToolUse, Turn, Usage
+from evals.fakes import FakeAnthropic, HttpError, Json, LoopbackServer, Refusal, Sleep, Text, ToolUse, Turn, Usage
 
 
 @pytest.fixture
@@ -295,3 +300,49 @@ async def test_scripts_are_matched_by_schema(fake: FakeAnthropic, client: AsyncA
     assert len(fake.calls("claude-haiku-5-5", schema="SoftPromiseVerdict")) == 2
     assert len(fake.calls(schema="Review")) == 3 and len(fake.calls("claude-haiku-5-5")) == 3
     assert [body["output_config"]["format"]["schema"]["title"] for body in fake.unscripted()] == ["Other"]
+
+
+def test_a_failed_bind_leaves_no_socket_open():
+    """A start on a taken port raises and closes its socket, so a caller that retries on a fresh
+    port leaves nothing unclosed."""
+    taken = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        taken.bind(("127.0.0.1", 0))
+        taken.listen()
+        gc.collect()   # what earlier tests left unclosed warns now, outside the check
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            with pytest.raises(OSError) as raised:
+                LoopbackServer(Starlette(), port=taken.getsockname()[1], name="second server").start()
+            assert raised.value.errno == errno.EADDRINUSE
+            del raised   # its traceback holds the failed start's frame, and so its socket
+            gc.collect()
+    finally:
+        taken.close()
+
+    assert [str(warning.message) for warning in caught if issubclass(warning.category, ResourceWarning)] == []
+
+
+@pytest.mark.parametrize("step", ["uvicorn.Config", "threading.Thread.start"])
+def test_a_failed_setup_after_the_bind_leaves_no_socket_open(monkeypatch: pytest.MonkeyPatch, step: str):
+    """A start that fails after its bind, from the server's setup up to starting the thread that
+    would own the socket, raises and closes the socket: that thread never ran to close it. It keeps
+    no server or thread either, so a later `stop()` (a fixture's teardown, say) does nothing rather
+    than raise over the real error."""
+
+    def fail(*args: object, **kwargs: object) -> None:
+        raise RuntimeError(f"{step} failed")
+
+    monkeypatch.setattr(step, fail)
+    server = LoopbackServer(Starlette(), name="server")
+    gc.collect()   # what earlier tests left unclosed warns now, outside the check
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        with pytest.raises(RuntimeError, match=f"^{re.escape(step)} failed$") as raised:
+            server.start()
+        del raised   # its traceback holds the failed start's frame, and so its socket
+        gc.collect()
+
+    assert [str(warning.message) for warning in caught if issubclass(warning.category, ResourceWarning)] == []
+    server.stop()   # nothing started, so nothing to stop
+    assert (server._server, server._thread) == (None, None)
