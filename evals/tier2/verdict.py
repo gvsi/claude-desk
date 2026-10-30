@@ -1363,14 +1363,18 @@ def _matches(compiled: re.Pattern[str], text: str) -> bool:
 
 # A `says` match is read in its clause. A sentence or clause mark, a line break, a dash or a bracket
 # ends a clause outright; a comma or "but" ("pero") ends it too, unless the words after the comma
-# carry the clause on (`_CARRIES_ON`), and a negation standing right before a comma ("Do not, under
-# any circumstances, ...") reaches to the clause's outright end.
+# carry the clause on (`_CARRIES_ON`), and a negation standing alone between commas, the clause's
+# start or "please" and "you" aside ("Do not, under any circumstances, ...", "You must never, ever,
+# ..."), reaches to the clause's outright end. "If not," and "If you can't," are conditions, not
+# such a negation.
 _APOSTROPHES = "'’ʼ`´′"
 _CLAUSE_END = re.compile(r"[.!?;:\n()\[\]–—―]|\s[-‐-‒]\s")
 _CLAUSE_BREAK = re.compile(r",|\b(?:but|pero)\b", re.IGNORECASE)
 _CARRIES_ON = re.compile(r"\s*(?:or|nor|such\s+as|like|including|for\s+(?:example|instance)|let\s+alone|o|ni|como)\b",
                          re.IGNORECASE)
-_DANGLING = re.compile(rf"\b(?:not|never|\w+n[{_APOSTROPHES}]t|nunca|jam[aá]s)\s*$", re.IGNORECASE)
+_DANGLING = re.compile(
+    r"\s*(?:(?:please|you|do|does|did|must|should|can|could|will|would|absolutely|really)\s+)*"
+    rf"(?:not|never|\w+n[{_APOSTROPHES}]t|nunca|jam[aá]s)(?:\s+ever)?\s*", re.IGNORECASE)
 # The words that take a `says` match back in its clause: a negation or a refusal ("not", "never",
 # "no", "nor", "neither", "cannot", "unable", "without", "instead of", "rather than", and every word
 # ending in "n't", its apostrophe written or left out), or a hand-off that names the thing instead of
@@ -1400,12 +1404,13 @@ def _says(pattern: re.Pattern[str], text: str) -> bool:
 def _taken_back(text: str, end: int) -> bool:
     """Whether the clause that `text[:end]` ends in holds a word that takes it back."""
     outright = max((mark.end() for mark in _CLAUSE_END.finditer(text, 0, end)), default=0)
-    start = outright
+    start = segment = outright
     for brk in _CLAUSE_BREAK.finditer(text, outright, end):
-        if brk.group() == "," and _DANGLING.search(text, outright, brk.start()):
+        if brk.group() == "," and _DANGLING.fullmatch(text, segment, brk.start()):
             return True
         if not _CARRIES_ON.match(text, brk.end(), end):
             start = brk.end()
+        segment = brk.end()
     return _TAKES_BACK.search(text, start, end) is not None
 
 
