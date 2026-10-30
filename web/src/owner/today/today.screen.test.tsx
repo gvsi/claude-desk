@@ -897,6 +897,9 @@ describe("Today's Demo inbox", () => {
     return { held: () => waiting, release };
   }
 
+  /** Two animation frames: long enough for a navigation's transition to be drawn. */
+  const nextFrames = () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+
   /** The main Desk's Needs you, as the app reads it. */
   const needsYouPath = ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId);
 
@@ -1064,6 +1067,35 @@ describe("Today's Demo inbox", () => {
     failing.stop();
     const card = heldCard(screen, REFUND_REASON);
     await expect.element(card, { timeout: 4_000 }).toBeInTheDocument();
+    await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
+  });
+
+  it('request_link_lands_again_after_back_and_forward', async () => {
+    // Each arrival at a request's address lands once, Back and Forward included.
+    const held = seededHold();
+    const { screen, router } = await renderRoute(TODAY);
+    const card = heldCard(screen, SEEDED_REASON);
+    await expect.element(card).toBeVisible();
+    await router.navigate(requestLink(held.decision_id));
+    await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
+
+    // Today from the sidebar, then Back.
+    const todayLink = screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Today' });
+    await todayLink.click();
+    await vi.waitFor(() => expect(router.state.location.hash).toBe(''));
+    expect(focusIsOn(card.element())).toBe(false);
+    await router.navigate(-1);
+    await vi.waitFor(() => expect(router.state.location.hash).toBe(`#request-${held.decision_id}`));
+    await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
+
+    // Back to plain Today, shown before Forward: the router's state changes at once, but the page
+    // draws it in a transition, a frame or two later.
+    await router.navigate(-1);
+    await vi.waitFor(() => expect(router.state.location.hash).toBe(''));
+    await nextFrames();
+    (todayLink.element() as HTMLElement).focus();
+    await router.navigate(1);
+    await vi.waitFor(() => expect(router.state.location.hash).toBe(`#request-${held.decision_id}`));
     await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
   });
 

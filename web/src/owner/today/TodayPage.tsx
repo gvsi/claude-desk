@@ -93,12 +93,14 @@ export function TodayPage() {
   // latest read of Needs you has worked (a list kept from before a failed read may be missing the
   // request), and once the Demo inbox's sheet, whose link it may be, has closed and handed focus
   // back to its button. A request that isn't here (answered, or another Desk's) leaves focus as it is.
-  const requested = requestInHash(location.hash);
+  // Every change of address starts a new visit, Back and Forward included, each with one landing.
+  const [visit, setVisit] = useState({ key: location.key, spent: false });
+  if (visit.key !== location.key) setVisit({ key: location.key, spent: false });
+  const requested = visit.key === location.key && !visit.spent ? requestInHash(location.hash) : null;
   const readWorked = needsYou.data !== undefined && needsYou.errorUpdatedAt <= needsYou.dataUpdatedAt;
-  const landed = useRef<string | null>(null);
   useEffect(() => {
-    if (requested === null || inboxOpen || !readWorked || landed.current === location.key) return;
-    landed.current = location.key;
+    if (requested === null || inboxOpen || !readWorked) return;
+    setVisit((now) => (now.key === location.key ? { ...now, spent: true } : now));
     focusCard(requested);
   }, [requested, inboxOpen, readWorked, location.key, focusCard]);
 
