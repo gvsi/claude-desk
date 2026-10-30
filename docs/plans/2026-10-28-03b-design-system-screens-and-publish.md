@@ -373,11 +373,11 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
     - Built in: "Turn off {name}", then "{consequence} You'll see the change before it applies. Your rules are kept, so you can add it back." and a secondary "Turn off {name}".
     - External: "Connection", then `details` as a description list (Account, Connected, Customers it can see, Tool definitions; the screen's words, any date already formatted). Then "{consequence} You'll see the change before it applies. Your rules for them are kept in case you connect again." and a secondary "Disconnect".
     - The button opens a plain confirm, Plan 03a's `Dialog`, not a proved diff, since turning off only narrows and applies at once:
-      - Title: "Turn off {name}?" or "Disconnect {name}?".
+      - Title: "Turn off {name}?" or "Disconnect {name}?", the latter with the Mock badge after it, so a mock is never named without saying so.
       - Body: "These tools stop at once:" with `stops.tools` as a list, then "These rules stop applying:" with `stops.rules`, or "None of your rules stop applying." when there are none.
       - Then "Your rules are kept, so you can add it back." or "Your rules for them are kept in case you connect again.".
       - Confirm: "Turn off {name}" or "Disconnect". Cancel: "Keep it on" or "Keep it connected".
-      - Confirm calls `onTurnOff` once, and the dialog waits (`aria-busy`) until `pending` clears. Cancel and Escape close it with no call.
+      - Confirm calls `onTurnOff` once, and the dialog waits (`aria-busy`) until `pending` clears, then closes; the screen says how it went. Cancel and Escape close it with no call.
     - `always_on` (Verification) shows "Always on. {reason}" ("It's how Claude confirms a customer before sharing anything private.") and no button.
   - `ToolPageHeader({ name; description; connector; status: ToolStatus; definitionNote?: string })`, the top of a tool's page:
     - `name` as the page's serif `h1`, then `description` (what the tool does and its effects).
@@ -392,7 +392,7 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
     - A modal `<dialog>` (`showModal()`, over `scrim`, with `shadow-dialog`), named by its serif title "Add a connector".
     - "Add what fits {business}. Each tool you add starts at Ask me first unless one of your rules already covers it, and you review them before anything turns on."
     - Two lists, "Claude Desk" (built in) and "Other apps" (external). Each item shows `ConnectorIcon`, `ConnectorName` and the description, and at the right, by `state`:
-      - `available`: a button "Add" (built in) or "Connect" (external) → `onChoose(id)`.
+      - `available`: a button "Add" (built in) or "Connect" (external), named "Add {name}" or "Connect {name}" → `onChoose(id)`.
       - `added`: "Added". `connected`: "Connected". `coming_soon`: "Coming soon in this demo".
     - Under the lists: `note` when given ("Google Calendar is coming soon in this demo. Until then, Claude offers the open times you set on Bookings."), and, whenever an external connector is listed, "Mock connectors stand in for the real apps. No account is used and nothing is sent to them."
     - Escape and an `IconButton` "Close" call `onClose`. Focus starts on the first button, and Tab stays inside.
@@ -405,8 +405,8 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
   - `ReviewToolView = { key: string; name: string; description: string; mode: RuleMode; coveredBy: { text: string; mode: RuleMode | 'always_on'; limit?: string }[] }` and `ConnectorReview({ connector; intro?: string; tools: ReviewToolView[]; onChangeOutcome?: (key: string, mode: RuleMode) => void; onTurnOn: () => void; onCancel: () => void; pending?: boolean; error?: string })` (N-Conn-09, N-Conn-11b), the review before anything turns on:
     - `ConnectorIcon` and the page's `h1` "Review what Claude could do with {name}", with its badge.
     - Built in: "A built-in connector, so there's nothing to sign in to. Nothing runs until you turn it on." External: "Nothing runs until you turn it on." followed by `intro` (the connector's promise).
-    - A card with a row per tool: name and `description`; a line per `coveredBy`, "Covered by your rule: {text} · {outcomePhrase(mode, limit)}", or for an always-on line "Covered by your always-on rule: {text}"; and `OutcomeMenu` at `mode`. The screen starts every new tool at "Ask me first"; `onChangeOutcome` makes each outcome a menu.
-    - Primary "Turn it on" → `onTurnOn()` once (`pending` → "Turning on", `aria-busy`), secondary "Cancel", and "You'll see the change to your rules before anything runs."
+    - A card with a row per tool: name and `description`; a line per `coveredBy`, "Covered by your rule: {text} · {outcomePhrase(mode, limit)}", or for an always-on line "Covered by your always-on rule: {text}", or with none, the board's "No rule of yours covers this yet, so it starts at Ask me first."; and `OutcomeMenu` at `mode`. The screen starts every new tool at "Ask me first"; `onChangeOutcome` makes each outcome a menu.
+    - Primary "Turn it on" → `onTurnOn()` once, secondary "Cancel", and "You'll see the change to your rules before anything runs." Pressed, or while `pending`, the button keeps its label under the busy spinner (`aria-busy`), as busy buttons do, until `pending` has come and gone or an error is delivered.
     - `error` shows the screen's message in an error `Notice`.
   - `ConnectorOfferCard({ connector; toolsLine: string; coverage?: string; action: 'add' | 'connect' | 'turn_off' | 'disconnect' | 'coming_soon'; onReview: () => void })` (N-Conn-12-Chat), Claude's card in the Ask Claude panel. It leads into the same review as the picker, and nothing turns on or off from it.
     - `ConnectorIcon`, `ConnectorName`, `toolsLine` ("2 tools · Payment link, Charge within a signed limit") and `coverage` ("Covered by your always-on rule: no money moves without your rule or a signed limit.").
@@ -422,10 +422,10 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
     - "What you confirmed before", with `description_confirmed` and `describeEffects(profile.effects, profile.reversible)`.
     - "What the connector says now": a `blockquote` (padding 10px 12px, a hairline border, `--bg-app`), labelled "Quoted from the connector. Claude never sees this text; it sees only the description you confirmed.". It holds `pending_definition_text` as literal text (mono 12/18 `.cd-type-trace`, `pre-wrap`, `overflow-wrap: anywhere`, `data-copy="user"`), never parsed as markup.
     - "Turning it back on trusts the new definition and checks your rules again before it runs.", then primary "Turn back on" and secondary "Keep off", each called with `profile.pending_sha256`. Kernel `POST /tools/confirm` drafts a version to prove, which the screen shows in a `ChangeReview`; the tool stays `needs_review` until that version is confirmed.
-    - Without `pending_sha256`, both buttons are disabled under "This change can't be reviewed right now. Reload the page."
+    - Without `pending_sha256`, or without `pending_definition_text` to review, both buttons are disabled under "This change can't be reviewed right now. Reload the page."
     - `pending` disables both, with `aria-busy`. `error` shows the screen's message (for `conflict`: "The tool changed again while you were reviewing. Review the newest version.").
     - The after-state (N-Conn-15) is the screen's: `ToolPageHeader` with "Definition reviewed today", and an info `Notice` ("Refund is back on. Your rules were checked against its new definition, and refunds still wait for your answer.").
-  - `Steps({ label: string; steps: readonly string[]; current: number })` (N-Conn-08 to N-Conn-11b; setup): an ordered list in a row, joined by hairlines.
+  - `Steps({ label: string; steps: readonly string[]; current: number })` (N-Conn-08 to N-Conn-11b; setup): an ordered list in a row, joined by hairlines. `current` counts from 0, as Plan 04's setup steps do.
     - Steps before `current` show `check` and read "{name}, done".
     - The current step is a filled 22 px circle with its number, with `aria-current="step"`; later steps are quiet numbered circles.
     - The add flow passes "Choose", "Sign in", "Review tools", "Confirm" for an external connector, or "Choose", "Review tools", "Confirm" for a built-in one; setup passes its five steps.
@@ -433,26 +433,26 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
   - `ToolLabel({ text })`, kept for setup: an inline tool label (icon, `.cd-type-meta`) for setup's `tool_label` messages ("Searched your Claude memory").
   - **Fixtures.**
     - `rivera.ts` gains `recentRequests`, the Refund and Quote rows on N-Conn-05-Refund and N-Conn-06-Quote, and `toolPages`, the `ToolPageHeader` strings for both.
-    - `rivera.ts` gains `stripeConnection`, the details on N-Conn-03-Stripe.
+    - `rivera.ts` gains `stripeConnection`, the details on N-Conn-03-Stripe with its consequence and what stops, `paymentsConnection` and `verificationConnection` for the other two panels, and `changedRefund`, the changed tool's words on N-Conn-13 to N-Conn-15.
     - `rivera.ts` gains `googleCalendar`: the catalog-only connector's `ConnectorView` and its flow on N-Conn-04 and N-Conn-07 to N-Conn-11, with its sign-in choices ("Rivera Plumbing jobs", "Personal"), its review row and its change rows.
     - `chen.ts` gains `picker`: Payments to add; Quotes, Bookings, Leads and callbacks, and Documents added; Google Calendar coming soon; Stripe to connect. Verification is never listed, since it is always added.
     - `chen.ts` gains `paymentsReview`: Payment link and Charge within a signed limit, each at "Ask me first", each covered by the always-on "No money moves without your rule or a signed limit".
-    - `chen.ts` gains `paymentsOffer`, the card in Chen's Ask Claude panel.
+    - `chen.ts` gains `paymentsOffer`, the card in Chen's Ask Claude panel, and `calendarOffer`, the coming-soon card.
 
 - [ ] **Step 1: Write the stories:**
   - `Navigation/Breadcrumb`: `ToolPage` (Rules / Stripe / Refund).
-  - `Connectors/ConnectorHeader`: `Payments`, `Verification`, `Stripe`, `GoogleCalendar` (with its promise).
-  - `Connectors/ConnectionPanel`: `TurnOffPayments`, `DisconnectStripe`, `Pending`, `VerificationAlwaysOn`.
-  - `Connectors/ToolPageHeader`: `Refund`, `Quote`, `RefundNeedsReview`, `RefundReviewed`.
-  - `Connectors/RecentRequests`: `Refund`, `Empty`.
-  - `Connectors/ConnectorPicker`: `ChenComingSoon`, `RiveraConnectable`.
-  - `Connectors/ConnectorSignIn`: `GoogleCalendar`.
-  - `Connectors/ConnectorReview`: `ChenPayments`, `GoogleCalendar`, `TurningOn`, `Error`.
-  - `Connectors/ConnectorOfferCard`: `AddPayments`, `ComingSoon`.
-  - `Connectors/ToolChangedItem`: `StripeRefund`.
-  - `Connectors/ToolReviewCard`: `CreateRefundChanged`, `Sending`, `ChangedAgain`, `NoHash`.
-  - `Navigation/Steps`: `ReviewToolsOfFour`, `SetupThirdOfFive`.
-  - `Navigation/SubNav`: `Settings` (General, Knowledge, Notifications, Channels, Billing; connectors live only under Rules).
+  - `Connectors/ConnectorHeader`: `Payments`, `Verification`, `Stripe`, `GoogleCalendar` (with its promise), `Off`.
+  - `Connectors/ConnectionPanel`: `TurnOffPayments`, `DisconnectStripe`, `DisconnectGoogleCalendar`, `Pending`, `VerificationAlwaysOn`.
+  - `Connectors/ToolPageHeader`: `Refund`, `Quote`, `RefundNeedsReview`, `RefundReviewed`, `Off`.
+  - `Connectors/RecentRequests`: `Refund`, `Quote`, `WithoutRecords`, `Empty`, `Phone`.
+  - `Connectors/ConnectorPicker`: `ChenComingSoon`, `RiveraConnectable`, `Phone`.
+  - `Connectors/ConnectorSignIn`: `GoogleCalendar`, `NothingChosen`, `Phone`.
+  - `Connectors/ConnectorReview`: `ChenPayments`, `CancelFirst`, `GoogleCalendar`, `CoveredByARule`, `TurningOn`, `Error`, `Phone`.
+  - `Connectors/ConnectorOfferCard`: `AddPayments`, `Disconnect`, `ComingSoon`.
+  - `Connectors/ToolChangedItem`: `StripeRefund`, `Phone`.
+  - `Connectors/ToolReviewCard`: `CreateRefundChanged`, `KeepOff`, `Sending`, `ChangedAgain`, `NoHash`, `NoDefinitionText`, `Phone`.
+  - `Navigation/Steps`: `ReviewToolsOfFour`, `SetupThirdOfFive`, `Phone`.
+  - `Navigation/SubNav`: `Settings` (General, Knowledge, Notifications, Channels, Billing; connectors live only under Rules), `Phone`.
   - `Conversation/ToolLabel`: `Memory`, `Website`, `CouldNotRead`.
   - Plays:
     - `breadcrumb_marks_the_page`: two links, then "Refund" with `aria-current="page"`; the separators are hidden from screen readers.
@@ -481,7 +481,7 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
   - `ConnectionPanel`'s `DisconnectStripe`: the line says the change shows first, which the plain confirm does.
   - `ConnectionPanel`'s `VerificationAlwaysOn` and `ConnectorHeader`'s `Verification`: no board draws Verification's page; the owner decided its words.
   - The Google Calendar stories: Google Calendar is catalog-only in the demo, so they show what the components support once it works.
-- [ ] **Step 4: Run** the same command plus `npm run check:ds` → PASS (35 story tests).
+- [ ] **Step 4: Run** the same command plus `npm run check:ds` → PASS (54 story tests).
 - [ ] **Step 5: Commit** `git add web && git commit -m "feat(ds): add connector and tool pages, the add-a-connector flow and the changed-tool review"`.
 
 ### Task 4: Visual check of the owner boards
@@ -730,3 +730,10 @@ Before Task 3 (2026-10-29): the project owner asked for "Simulate a tool change"
 - `ToolPageHeader` takes no simulate props, and the `WithSimulate` story and `simulate_only_when_on` are dropped.
 - The changed-tool review keeps its checks, since they belong to `ToolReviewCard`: `quoted_definition_is_text`, `confirm_names_the_reviewed_hash` and `no_hash_no_confirm`.
 - Task 3 has 35 story tests.
+
+During Task 3 (2026-10-29):
+- "Turn it on" keeps its label under the busy spinner while it waits, as every busy button does, rather than reading "Turning on".
+- The changed-tool review also fails closed without the new definition's text, since there is nothing to review (`NoDefinitionText`).
+- A new tool that nothing covers reads the board's "No rule of yours covers this yet, so it starts at Ask me first."
+- The picker names its buttons by connector ("Add Payments"), the disconnect confirm carries the Mock badge, and the turn-off confirm closes once the screen is done.
+- Nineteen more stories cover phone widths, the off states, a tool already covered by a rule, and the answers and states the boards don't draw. Task 3 has 54 story tests.
