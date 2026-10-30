@@ -4,7 +4,9 @@ import { expect, fn, waitFor, within } from 'storybook/test';
 
 import type { DemoInboxEntry } from '../../../api/contracts.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { Button } from '../Button/Button.tsx';
 import type { DemoInboxItem } from '../DemoInboxPanel/DemoInboxPanel.tsx';
+import { Notice } from '../Notice/Notice.tsx';
 import { DemoInboxSheet, type DemoInboxSheetProps } from './DemoInboxSheet.tsx';
 
 /** Dana's code, as the kernel sends it to her number on record. */
@@ -64,7 +66,7 @@ function send(root: HTMLElement, items: DemoInboxItem[]): void {
 const meta = {
   title: 'Verification/DemoInboxSheet',
   component: DemoInboxSheet,
-  args: { viewer: 'visitor', language: 'en', items: [], onRetry: fn() },
+  args: { viewer: 'visitor', language: 'en', items: [], onRetry: fn(), onOpenChange: fn() },
   render: (args) => <Screen {...args} />,
   globals: { viewport: { value: 'phone', isRotated: false } },
   parameters: { layout: 'fullscreen', canvas: 'N-R2-Inbox-Sheet-Public' },
@@ -177,11 +179,14 @@ export const Owner: Story = {
   args: { viewer: 'owner', items: [ALERT] },
   globals: { viewport: { value: 'laptop', isRotated: false } },
   parameters: { canvas: 'N-R2-Inbox-Sheet-Owner', canvasNote: 'The owner’s Demo inbox on Today: a side sheet at the right, 400 px, opened from its button.' },
-  play: async ({ canvas, userEvent }) => {
+  play: async ({ args, canvas, userEvent }) => {
     // The owner's sheet doesn't open itself: the owner opens it.
     await expect(canvas.queryByRole('dialog')).toBeNull();
+    await expect(args.onOpenChange).not.toHaveBeenCalled();
     const button = canvas.getByRole('button', { name: 'Demo inbox 1 entry' });
     await userEvent.click(button);
+    // sheet_says_when_it_opens_and_closes: the screen hears each change, and only changes.
+    await expect(args.onOpenChange).toHaveBeenLastCalledWith(true);
     const sheet = canvas.getByRole('dialog', { name: 'Demo inbox' });
     const box = sheet.getBoundingClientRect();
     await expect([Math.round(box.width), Math.round(box.right), Math.round(box.top), Math.round(box.bottom)]).toEqual([400, 1512, 0, 982]);
@@ -190,6 +195,8 @@ export const Owner: Story = {
     await expect(within(sheet).getByText(ALERT.entry!.body)).toBeVisible();
     await userEvent.keyboard('{Escape}');
     await expect(button).toHaveFocus();
+    await expect(args.onOpenChange).toHaveBeenLastCalledWith(false);
+    await expect(args.onOpenChange).toHaveBeenCalledTimes(2);
   },
 };
 
@@ -231,5 +238,37 @@ export const OwnerOpensTheRequest: Story = {
     await expect(canvas.queryByRole('dialog')).toBeNull();
     // Closing returns focus to the sheet's button; the screen then moves it to the request.
     await expect(canvas.getByRole('button', { name: 'Demo inbox 1 entry' })).toHaveFocus();
+  },
+};
+
+
+export const OwnerReadFailed: Story = {
+  args: {
+    viewer: 'owner',
+    items: [ALERT],
+    notice: (
+      <Notice tone="error" action={<Button variant="secondary">Try again</Button>}>
+        Couldn’t open your Demo inbox. Something went wrong on our side. Try again in a moment.
+      </Notice>
+    ),
+  },
+  globals: { viewport: { value: 'laptop', isRotated: false } },
+  parameters: {
+    canvas: 'none',
+    canvasNote: 'Built against N-R2-Inbox-Sheet-Owner-ReadFailed, in review: the owner’s sheet when the latest read failed, with the screen’s error Notice under the subtitle and above the entries as last read.',
+  },
+  play: async ({ canvas, userEvent }) => {
+    await userEvent.click(canvas.getByRole('button', { name: 'Demo inbox 1 entry' }));
+    const sheet = canvas.getByRole('dialog', { name: 'Demo inbox' });
+    // read_failure_shows_in_the_sheet: the line the screen passes sits inside the sheet, under its
+    // subtitle and above the entries, so the owner doesn't take the last read for the current one.
+    const line = within(sheet).getByRole('alert');
+    await expect(line).toHaveTextContent('Couldn’t open your Demo inbox.');
+    const subtitle = within(sheet).getByText('What Claude would have sent you by text or email. Nothing is really sent.');
+    const [entry] = within(sheet).getAllByRole('listitem') as [HTMLElement];
+    await expect(line.getBoundingClientRect().top).toBeGreaterThanOrEqual(subtitle.getBoundingClientRect().bottom);
+    await expect(line.getBoundingClientRect().bottom).toBeLessThanOrEqual(entry.getBoundingClientRect().top);
+    await expect(within(sheet).getByRole('button', { name: 'Try again' })).toBeVisible();
+    await expect(within(entry).getByText(ALERT.entry!.body)).toBeVisible();
   },
 };

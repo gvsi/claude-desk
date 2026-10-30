@@ -12,6 +12,8 @@
 
 - What `DemoInboxPanel` takes: `viewer`, `items` in the order they arrived, `language` and `onRetry`. The sheet passes them on unchanged, so its rules hold here too: codes come only from fetched `DemoInboxEntry` bodies, and a visitor never sees the owner's alerts or checkpoints, nor counts them.
 - Where the button goes. The sheet opens over the page wherever the button is.
+- `notice`, when the screen has something to say about the inbox itself, such as that the latest read failed: an error `Notice` with its own Try again. It sits inside the sheet under the subtitle and above the entries, so the owner doesn't take the entries for the current ones while the page behind is inert. The screen keeps drawing it outside the sheet too when the sheet is closed.
+- `onOpenChange`, to hear the sheet open and close, whatever did it (the button, the sheet opening itself, Escape, Close or a link inside), instead of watching the page for an open dialog. It is called on each change only, not when the sheet first draws closed.
 
 ## What it shows
 
@@ -45,3 +47,5 @@ The button and the sheet's name use the panel's title. Everything else is the pa
 | `items` | `DemoInboxItem[]` | Required. Oldest first. |
 | `language` | `'en' \| 'es'` | Required. |
 | `onRetry` | `(entryId: string) => void` | Required. |
+| `notice` | `ReactNode` | A line inside the sheet, under the subtitle and above the entries. |
+| `onOpenChange` | `(open: boolean) => void` | Called when the sheet opens (`true`) or closes (`false`). |

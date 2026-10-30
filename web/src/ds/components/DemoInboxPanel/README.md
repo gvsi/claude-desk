@@ -75,6 +75,7 @@
 | `onRetry` | `(entryId: string) => void` | Required. |
 | `action` | `ReactNode` | A control at the right of the title's line. |
 | `titleFocusable` | `boolean` | The title takes focus from a script (`tabIndex={-1}`), as `DemoInboxSheet` moves it there when it opens itself. |
+| `notice` | `ReactNode` | A line under the subtitle and above the entries, such as a `Notice` that the latest read failed. |
 
 `shownItems(viewer, items)`, exported beside the panel, gives the items the panel would show, newest first and one per entry; `DemoInboxSheet` counts them.
 

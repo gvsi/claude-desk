@@ -8,7 +8,10 @@ import { useModalDialog } from '../Dialog/useModalDialog.ts';
 
 import './DemoInboxSheet.css';
 
-export type DemoInboxSheetProps = Omit<DemoInboxPanelProps, 'action'>;
+export interface DemoInboxSheetProps extends Omit<DemoInboxPanelProps, 'action' | 'titleFocusable'> {
+  /** Hears the sheet open (`true`) and close (`false`), whatever opened or closed it. */
+  onOpenChange?: (open: boolean) => void;
+}
 
 /**
  * The Demo inbox as a sheet, where there is no room for it beside the page: a "Demo inbox" button
@@ -17,11 +20,22 @@ export type DemoInboxSheetProps = Omit<DemoInboxPanelProps, 'action'>;
  * sheet opens itself on the first entry they may see. Focus moves in, stays in, Escape or Close
  * closes it, and focus goes back to whatever had it; the page behind is inert.
  */
-export function DemoInboxSheet({ viewer, items, language, onRetry }: DemoInboxSheetProps) {
+export function DemoInboxSheet({ viewer, items, language, onRetry, notice, onOpenChange }: DemoInboxSheetProps) {
   const copy = INBOX_COPY[language] ?? INBOX_COPY.en;
   // Closed, or open and how: from the button, or by itself on the first entry.
   const [open, setOpen] = useState<false | 'button' | 'itself'>(false);
   const count = shownItems(viewer, items).length;
+
+  // The screen hears each time the sheet opens or closes, and nothing while it stays as it is.
+  const isOpen = open !== false;
+  const told = useRef(false);
+  const tell = useRef(onOpenChange);
+  tell.current = onOpenChange;
+  useEffect(() => {
+    if (told.current === isOpen) return;
+    told.current = isOpen;
+    tell.current?.(isOpen);
+  }, [isOpen]);
 
   // A visitor's sheet opens itself once, when the first entry they may see arrives.
   const seen = useRef(count);
@@ -49,6 +63,7 @@ export function DemoInboxSheet({ viewer, items, language, onRetry }: DemoInboxSh
           items={items}
           language={language}
           onRetry={onRetry}
+          notice={notice}
           onClose={() => {
             // Closing a sheet that showed something uses up its one opening by itself; closing an
             // empty one, opened to look before anything arrived, doesn't.
@@ -67,7 +82,7 @@ interface SheetProps extends DemoInboxSheetProps {
   onClose: () => void;
 }
 
-function Sheet({ openedBy, viewer, items, language, onRetry, onClose }: SheetProps) {
+function Sheet({ openedBy, viewer, items, language, onRetry, notice, onClose }: SheetProps) {
   const copy = INBOX_COPY[language] ?? INBOX_COPY.en;
   const modal = useModalDialog(onClose, (dialog) =>
     dialog.querySelector<HTMLElement>(openedBy === 'itself' ? '.cd-demo-inbox__title' : '.cd-demo-inbox-sheet__close button'),
@@ -93,6 +108,7 @@ function Sheet({ openedBy, viewer, items, language, onRetry, onClose }: SheetPro
         items={items}
         language={language}
         onRetry={onRetry}
+        notice={notice}
         titleFocusable
         action={
           <span className="cd-demo-inbox-sheet__close">
