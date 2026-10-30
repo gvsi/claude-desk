@@ -251,13 +251,12 @@ const SERVED: ServedRoutes = {
     return ok({ desk_id: desk.summary.desk_id, updated_at: isoTime(sv.world.now()) } satisfies DeskUpdated);
   },
   openPreview(sv, req) {
+    // Always a new preview chat, as the API's is (plan 02b): its owner-path request never carries
+    // the visitor cookie, which is scoped to the Desk's public path, so the page reads the chat it
+    // has (`visitorSession`) before it asks for one.
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
     if (isFailure(desk)) return desk;
     const slug = desk.summary.slug;
-    const current = sv.visitor(slug, req.cookies);
-    if (!isFailure(current) && current.session.ownerPreview) {
-      return ok({ state: current.session.state, resumed: true } satisfies VisitorSession);
-    }
     const session = sv.world.addSession(desk, { ownerPreview: true });
     req.cookies.setVisitor(slug, session.state.session_id);
     return ok({ state: session.state, resumed: false } satisfies VisitorSession);

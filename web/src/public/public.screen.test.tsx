@@ -808,6 +808,32 @@ describe('public chat page', () => {
     await expect.element(stranger.screen.getByRole('main')).toBeVisible();
   });
 
+  it('preview_reload_resumes_its_chat', async () => {
+    // The owner's chat as a customer, from Today's link: one exchange, then a new page load.
+    const preview = `${PAGE}?preview=${RIVERA.deskId}`;
+    const first = await renderRoute(preview);
+    await ready(first.screen);
+    await say(first.screen, 'How much is drain clearing?');
+    const conversation = () => document.querySelector('[role="log"]')?.textContent ?? '';
+    const before = conversation();
+    const session = mockStore.visitorSession(RIVERA.slug)?.state.session_id;
+    expect(mockStore.visitorSession(RIVERA.slug)?.ownerPreview).toBe(true);
+    expect(document.querySelectorAll('.cd-transcript-row')).toHaveLength(2);
+
+    // The browser's visitor cookie still names that chat, so the page reads it and resumes it,
+    // rather than asking for a new preview, which would start an empty chat.
+    const second = await renderRoute(preview);
+    await ready(second.screen);
+    await vi.waitFor(() => expect(conversation()).toBe(before));
+    expect(document.querySelectorAll('.cd-transcript-row')).toHaveLength(2);
+    expect(mockStore.visitorSession(RIVERA.slug)?.state.session_id).toBe(session);
+    expect(requests('openPreview')).toHaveLength(1);
+    expect(requests('openSession')).toEqual([]);
+    // Each load reads the chat first; only the first, which had none, asked for a preview.
+    const opening = mockStore.requests.filter((r) => ['visitorSession', 'openPreview', 'openSession'].includes(r.key)).map((r) => r.key);
+    expect(opening).toEqual(['visitorSession', 'openPreview', 'visitorSession', 'visitorSession']);
+  });
+
   it('open_status_shows_the_kernel_text', async () => {
     // Open, as the kernel serves Rivera now: its words and a filled dot, nothing more.
     const open = await renderRoute(PAGE);

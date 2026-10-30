@@ -8,11 +8,12 @@
 import { fileURLToPath } from 'node:url';
 
 import { resolveConfig, type Plugin } from 'vite';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { SseEvent } from '../api/contracts.ts';
 import { apiPath } from '../api/routes.ts';
 import type { ApprovalAnswerOut, CopyOut, NeedsYouItem, VisitorSession, VisitorTranscript } from '../api/views.ts';
+import { openChat } from '../public/PublicChatProvider.tsx';
 import { createMockApi, mockApiPlugin, type MockApi } from './devServer.ts';
 
 const ORIGIN = 'http://localhost:5373';
@@ -151,6 +152,26 @@ function browserOf(api: MockApi): { jar: CookieJar; tab: () => Tab } {
   return { jar, tab: () => new Tab(api, jar) };
 }
 
+/**
+ * Runs the app's own code in `tab`: every request it makes (`request`, through `fetch`) goes out
+ * from that tab, with its browser's cookies. Returns what `load` resolved to and the requests it
+ * made, as "METHOD path", in order.
+ */
+async function inTab<T>(tab: Tab, load: () => Promise<T>): Promise<{ result: T; requests: string[] }> {
+  const requests: string[] = [];
+  vi.stubGlobal('fetch', async (input: string | URL, init: RequestInit = {}) => {
+    const method = init.method ?? 'GET';
+    requests.push(`${method} ${String(input)}`);
+    const body = typeof init.body === 'string' ? (JSON.parse(init.body) as unknown) : undefined;
+    return tab.send(method, String(input), body);
+  });
+  try {
+    return { result: await load(), requests };
+  } finally {
+    vi.unstubAllGlobals();
+  }
+}
+
 describe('the dev server mock', () => {
   it('two_tabs_share_one_mock', { timeout: 15_000 }, async () => {
     const api = createMockApi();
@@ -193,6 +214,41 @@ describe('the dev server mock', () => {
       expect(followUp[0]).toMatchObject({ type: 'resolved', decision_id: decisionId, state: 'executed' });
     } finally {
       await stream.close();
+    }
+  });
+
+  it('two_tabs_open_one_preview_chat', { timeout: 15_000 }, async () => {
+    const api = createMockApi();
+    const browser = browserOf(api);
+    const tabA = browser.tab();
+    const tabB = browser.tab();
+    const copy = await tabA.json<CopyOut>('POST', apiPath('copies', {}), { passcode: 'demo' }, 201);
+    const desk = copy.desks[0];
+    if (!desk) throw new Error('the copy has a Desk');
+    const slug = { slug: desk.slug };
+
+    // Today's "Chat as a customer" opens the public page in a tab, then in another tab of the same
+    // browser. Each page loads its chat as the public page does: it reads the chat its visitor
+    // cookie names, and asks for a preview only when there is none.
+    const read = `GET ${apiPath('visitorSession', slug)}`;
+    const a = await inTab(tabA, () => openChat(desk.slug, desk.desk_id));
+    expect(a.requests).toEqual([read, `POST ${apiPath('openPreview', { desk_id: desk.desk_id })}`, read]);
+    const b = await inTab(tabB, () => openChat(desk.slug, desk.desk_id));
+    expect(b.requests).toEqual([read]);
+    expect(b.result.session.session_id).toBe(a.result.session.session_id);
+
+    // One chat, so a message from either tab is answered on both tabs' streams.
+    const streamA = await tabA.stream(apiPath('events', slug, { after: a.result.transcript?.last_seq ?? 0 }));
+    const streamB = await tabB.stream(apiPath('events', slug, { after: b.result.transcript?.last_seq ?? 0 }));
+    try {
+      await tabB.json('POST', apiPath('sendMessage', slug), { text: 'How much is drain clearing?' }, 202);
+      const [toA, toB] = await Promise.all([streamA.until('message'), streamB.until('message')]);
+      const reply = (events: SseEvent[]) => events.find((ev) => ev.type === 'message');
+      expect(reply(toA)).toMatchObject({ type: 'message', author: 'claude' });
+      expect(reply(toB)).toEqual(reply(toA));
+    } finally {
+      await streamA.close();
+      await streamB.close();
     }
   });
 

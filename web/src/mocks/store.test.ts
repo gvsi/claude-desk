@@ -489,14 +489,21 @@ describe('the scripted Desk', () => {
     const danaOwner = (await call('conversation', { params: { session_id: 'ses-dana-web' } })).body as OwnerTranscript;
     expect(danaOwner.items.filter((item) => item.kind === 'whisper').map((item) => item.text)).toEqual(['offer Thursday morning too']);
 
-    // The owner's preview of her Desk is a chat of its own, flagged as hers, and opening it again
-    // resumes it rather than starting another.
+    // The owner's preview of her Desk is a chat of its own, flagged as hers, and the browser's
+    // visitor cookie names it. Asking for a preview again starts another, as the API's preview
+    // route does (the page reads the chat it has first, so it doesn't ask twice).
     const preview = (await call('openPreview', { params: { desk_id: deskId } })).body as VisitorSession;
     expect(preview.resumed).toBe(false);
     expect(preview.state.session_id).not.toBe(session.session_id);
-    expect((await call('openPreview', { params: { desk_id: deskId } })).body).toEqual({ state: preview.state, resumed: true });
+    expect(((await call('visitorSession', { params: { slug } })).body as VisitorTranscript).state.session_id).toBe(preview.state.session_id);
+    const again = (await call('openPreview', { params: { desk_id: deskId } })).body as VisitorSession;
+    expect(again.resumed).toBe(false);
+    expect(again.state.session_id).not.toBe(preview.state.session_id);
+    expect(mockStore.visitorSession(slug)?.state.session_id).toBe(again.state.session_id);
     const listed = (await call('conversations', { params: { desk_id: deskId } })).body as ConversationSummary[];
-    expect(listed.filter((c) => c.owner_preview).map((c) => c.session_id)).toEqual([preview.state.session_id]);
+    expect(listed.filter((c) => c.owner_preview).map((c) => c.session_id).sort()).toEqual(
+      [preview.state.session_id, again.state.session_id].sort(),
+    );
   });
 });
 
