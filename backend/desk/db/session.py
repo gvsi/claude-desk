@@ -138,19 +138,22 @@ async def get_kernel_session() -> AsyncIterator[AsyncSession]:
 
 
 # Lookups made before the copy is known. Each resolver is a SECURITY DEFINER function in schema
-# kernel that returns only a copy id (migration 0004_copy_resolvers); only desk_kernel may call
+# kernel that returns only a copy id (migrations 0004_copy_resolvers, 0009, 0010); only desk_kernel may call
 # them. They run on their own kernel connection, outside every KernelSession, so nothing else
 # runs with them.
-CopyResolver = Literal["copy_of_session", "copy_of_desk_slug"]
+CopyResolver = Literal["copy_of_session", "copy_of_session_id", "copy_of_desk_slug", "copy_of_decision_id"]
 
 
-async def resolve_copy(resolver: CopyResolver, key: str) -> str | None:
-    """The copy a credential belongs to: a session token's hash (`copy_of_session`) or a Desk's
-    public slug (`copy_of_desk_slug`); None when nothing matches. Bind the answer to a kernel
-    session, then authenticate the credential in that copy as usual."""
+async def resolve_copy(resolver: CopyResolver, key: str, *, engine: AsyncEngine | None = None) -> str | None:
+    """The copy a credential belongs to: a session token's hash (`copy_of_session`), a session's
+    ID (`copy_of_session_id`, migration 0009), a Desk's public slug (`copy_of_desk_slug`) or a
+    decision's ID (`copy_of_decision_id`, migration 0010, which names its session); None when
+    nothing matches. Bind the answer to a kernel session, then authenticate the credential
+    in that copy as usual. `engine` is the kernel engine to ask on (the kernel app passes its
+    own), else `kernel_engine()`."""
     if resolver not in get_args(CopyResolver):
         raise ValueError(f"no copy resolver named {resolver!r}")
-    async with kernel_engine().connect() as conn:
+    async with (engine or kernel_engine()).connect() as conn:
         return (await conn.execute(select(getattr(func.kernel, resolver)(key)))).scalar_one()
 
 
@@ -208,9 +211,34 @@ async def dispose_engines() -> None:
     _api_sessions.cache_clear()
 
 
-# set_config changes a setting mid-transaction; on desk.copy_id it would switch the copy.
-SET_CONFIG = "set_config"
-SETS_THE_COPY = "KernelRepo refused a statement that calls set_config; only a session's copy binding sets desk.copy_id"
+# set_config changes a setting mid-transaction; on desk.copy_id it would switch the copy. The other
+# built-ins here run query text they are given (found in pg_proc on Postgres 16), and that text could
+# call set_config. A bound value reaches SQL only through one of them, so refusing them keeps every
+# bound value data.
+REFUSED_FUNCTIONS = frozenset({
+    "set_config",
+    "query_to_xml", "query_to_xmlschema", "query_to_xml_and_xmlschema", "cursor_to_xml", "cursor_to_xmlschema",
+    "ts_stat", "ts_rewrite",
+})
+# One of them named as a whole identifier: Postgres identifiers run on letters, digits, _ and $.
+_CALLS_REFUSED = re.compile(r"(?<![\w$])(?:" + "|".join(sorted(REFUSED_FUNCTIONS)) + r")(?![\w$])")
+SETS_THE_COPY = ("KernelRepo refused a statement that calls set_config or runs query text; only a session's copy"
+                 " binding sets desk.copy_id")
+# SQL spellings no SQLAlchemy statement over the kernel tables compiles to. Each could hide a call, a
+# SELECT or a table from a check that reads the SQL as text, so the spelling itself is refused, on the
+# raw SQL, before anything is read: Unicode escapes (U&"\0073et_config" is set_config, and U&'...' a
+# string spelled by code point), dollar quoting ($$...$$ or $tag$...$tag$; no kernel identifier holds a
+# $), escape strings (E'...', where \' doesn't end the string), comments and statement separators.
+# The escape-string test refuses any e or E followed by a quote at a token start (after anything but
+# a letter, digit, _ or $), so a one-letter literal 'e' is refused too: kernel statements bind their
+# values and never inline a literal, so that only refuses more.
+_UNICODE_ESCAPES = re.compile(r"u&[\"']", flags=re.IGNORECASE)
+_UNREADABLE_SQL = re.compile(r"\$|(?<![\w$])[eE]'|--|/\*|;")
+SPELLING_REFUSED = ("KernelRepo refused a statement whose SQL is spelled in a way it doesn't read: Unicode escapes,"
+                    " dollar quoting, an escape string, a comment or a statement separator")
+# A string literal ('...', a quote inside doubled) or a quoted identifier ("...", likewise), read left to
+# right, so a quote inside one kind of token is part of that token and never starts the other kind.
+_LITERAL_OR_IDENTIFIER = re.compile(r"'(?:[^']|'')*'|(\"(?:[^\"]|\"\")*\")")
 # Execution options that never change the SQL a statement compiles to.
 SAFE_EXECUTION_OPTIONS = frozenset({"populate_existing", "autoflush", "yield_per", "stream_results", "max_row_buffer"})
 _POSTGRES = postgresql_psycopg.dialect()
@@ -228,24 +256,30 @@ class KernelRepo:
     A lookup made before the copy is known (a session token, a public slug) goes through
     `resolve_copy`, and work across copies visits each id from `copy_ids()` with its own session.
 
-    `scoped(stmt)` is a second layer for SELECTs. It supports one shape: a SELECT over kernel
-    tables, their aliases and inner joins of them, and adds `copy_id = <copy>` for each of those
-    tables. It refuses what it can't scope in two checks:
+    `scoped(stmt)` is a second layer for SELECTs, which catches mistakes in the statements kernel
+    code builds. It supports one shape: a SELECT over kernel tables, their aliases and inner joins
+    of them, and adds `copy_id = <copy>` for each of those tables. It refuses what it can't scope
+    in two checks:
 
     1. An allowlist on the statement. It refuses ORM options of any kind (loader options,
        `with_expression`), execution options other than `SAFE_EXECUTION_OPTIONS`, raw SQL
        (`text()`, `literal_column()`, prefixes, suffixes, hints), a nested SELECT anywhere (scalar,
        IN and EXISTS subqueries, derived tables, CTEs), outer joins (a copy filter on the missing
-       side would drop the row), FROM items that aren't kernel tables, and calls to `set_config`.
-    2. A check on the SQL itself. The scoped statement is compiled for Postgres and refused unless
-       it holds exactly one SELECT, reads no kernel table it didn't filter and names `set_config`
-       neither in its SQL nor in a bound value (query text for a function to run), which catches
-       what the statement hides, such as a mapped column that reads another table.
+       side would drop the row), FROM items that aren't kernel tables, and calls to
+       `REFUSED_FUNCTIONS` (`set_config` and the built-ins that run query text they are given).
+    2. A check on the SQL itself, for what the statement hides from the first, such as a mapped
+       column that reads another table. The scoped statement is compiled for Postgres and refused
+       unless it is spelled the way SQLAlchemy spells a statement over the kernel tables (no
+       Unicode escapes, dollar quoting, escape strings, comments or statement separators, each of
+       which could hide text from a check that reads SQL), holds exactly one SELECT, reads no kernel
+       table it didn't filter and calls none of `REFUSED_FUNCTIONS` (its string literals and quoted
+       identifiers included).
 
-    These checks see query text passed to a function only as a bound value: row-level security
-    covers what it reads, and text assembled at run time that calls `set_config` is beyond both
-    layers, which is why kernel code never passes such text. Execute the returned statement as
-    it is: options added afterwards aren't checked.
+    The isolation that holds against hostile input is row-level security, not these checks. A
+    bound value is data: it could reach SQL only as query text for one of `REFUSED_FUNCTIONS`,
+    which both layers refuse, so a hostile value (a call ID that reads "set_config") is looked up
+    like any other. Execute the returned statement as it is: options added afterwards aren't
+    checked.
     """
 
     def __init__(self, copy_id: str):
@@ -295,35 +329,29 @@ def _check_allowed(stmt: Select) -> None:
             raise ValueError("KernelRepo can't scope a nested SELECT; query each table through scoped()")
         if isinstance(element, TextClause) or (isinstance(element, ColumnClause) and element.is_literal):
             raise ValueError("KernelRepo can't scope raw SQL text")
-        if isinstance(element, FunctionElement) and getattr(element, "name", "").lower() == SET_CONFIG:
+        if isinstance(element, FunctionElement) and getattr(element, "name", "").lower() in REFUSED_FUNCTIONS:
             raise ValueError(SETS_THE_COPY)
 
 
 def _check_compiled(stmt: Select, scoped_tables: set[str]) -> None:
-    """Layer 2: the compiled SQL holds one SELECT, reads only kernel tables it filters and sets nothing."""
-    compiled = stmt.compile(dialect=_POSTGRES)
-    sql = re.sub(r"'(?:[^']|'')*'", "''", str(compiled))   # drop string literals
-    keywords = re.sub(r'"(?:[^"]|"")*"', '""', sql)        # and quoted identifiers
+    """Layer 2: the compiled SQL is spelled the way SQLAlchemy spells it (no `_UNICODE_ESCAPES` or
+    `_UNREADABLE_SQL`), holds one SELECT, reads only kernel tables it filters and calls none of
+    `REFUSED_FUNCTIONS`."""
+    raw = str(stmt.compile(dialect=_POSTGRES))
+    # Spellings are refused on the raw text, before string literals are told apart: each could hide what follows.
+    if _UNICODE_ESCAPES.search(raw) or _UNREADABLE_SQL.search(raw):
+        raise ValueError(SPELLING_REFUSED)
+    sql = _LITERAL_OR_IDENTIFIER.sub(lambda m: m.group(1) or "''", raw)   # drop string literals, keep identifiers
+    keywords = re.sub(r'"(?:[^"]|"")*"', '""', sql)                        # and drop quoted identifiers
     if len(re.findall(r"\bselect\b", keywords, flags=re.IGNORECASE)) != 1:
         raise ValueError("KernelRepo refused a statement whose SQL holds a nested SELECT")
     read = set(re.findall(r"\bkernel\.(\w+)", sql.replace('"', "")))
     if unscoped := read - scoped_tables:
         raise ValueError(f"KernelRepo refused a statement that reads kernel tables it can't scope: {sorted(unscoped)}")
-    if SET_CONFIG in sql.replace('"', "").lower() or any(SET_CONFIG in text.lower()
-                                                          for text in _bound_text(compiled.params)):
+    # string literals and quoted identifiers included; a quote ends an identifier as a space would.
+    # Bound values aren't in this text: they are data.
+    if _CALLS_REFUSED.search(raw.replace('"', " ").lower()):
         raise ValueError(SETS_THE_COPY)
-
-
-def _bound_text(value: object) -> Iterator[str]:
-    """Every string in a statement's bound values, lists and mappings included."""
-    if isinstance(value, str):
-        yield value
-    elif isinstance(value, dict):
-        for item in value.values():
-            yield from _bound_text(item)
-    elif isinstance(value, (list, tuple, set, frozenset)):
-        for item in value:
-            yield from _bound_text(item)
 
 
 def _kernel_tables(clause: FromClause) -> Iterator[FromClause]:

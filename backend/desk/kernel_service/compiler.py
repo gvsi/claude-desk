@@ -1,0 +1,465 @@
+"""The Cedar inputs every Desk shares, and the rule-card compiler.
+
+Everything here loads from `CEDAR_DIR`, found from this file's path and never from the working
+directory, so the kernel reads the same files from a test, the repo root or the image
+(`/app/kernel/cedar`):
+
+- `BASE_SCHEMA`: the master plan's "Cedar request shape" with one action per native tool, each a
+  member of its effect groups (`effect:*`), which every Desk's schema starts from.
+- `BASELINE`: set `B`, the always-on forbids, which `PolicyEngine(BASELINE)` adds to every
+  evaluation.
+- `INVARIANTS`: the proof spec sets `desk-prove` checks every activation against
+  (`invariants/always/` for `baseline_auto` and `baseline_approvable`, `invariants/auto/` for
+  `baseline_auto`), by kind and file name.
+
+The compiler (`compile_cards`) turns the owner's rule cards into Cedar sets `F` (never cards), `A`
+(auto cards) and `H` (ask cards and hold twins) by code, never freehand: every string it writes is
+checked, and the text is deterministic, so a card set has one `cedar_sha256` in every copy.
+
+The hashes name what a proof covered, so a report proved for other inputs is never reused.
+"""
+
+import copy
+import hashlib
+import itertools
+import json
+import re
+from collections.abc import Collection, Iterable, Mapping, Sequence
+from dataclasses import dataclass
+from datetime import time
+from pathlib import Path
+from typing import Any, Literal
+
+import desk_kernel
+
+from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, MONEY_TOOLS, RuleCard, ToolProfile
+from desk.kernel_service import review_thresholds
+
+CEDAR_DIR = Path(__file__).resolve().parents[3] / "kernel" / "cedar"
+
+BASE_SCHEMA: dict[str, Any] = json.loads((CEDAR_DIR / "schema.cedarschema.json").read_bytes())
+_BASELINE_BYTES = (CEDAR_DIR / "baseline.cedar").read_bytes()
+BASELINE: str = _BASELINE_BYTES.decode("utf-8")
+
+
+def _invariant_files(kind: str) -> dict[str, bytes]:
+    files = {path.stem: path.read_bytes() for path in sorted((CEDAR_DIR / "invariants" / kind).glob("*.cedar"))}
+    if not files:
+        # desk-prove would refuse an empty list anyway; a kernel without invariants doesn't start
+        raise RuntimeError(f"no invariants in {CEDAR_DIR / 'invariants' / kind}")
+    return files
+
+
+_INVARIANT_BYTES: dict[Literal["always", "auto"], dict[str, bytes]] = {
+    "always": _invariant_files("always"),
+    "auto": _invariant_files("auto"),
+}
+INVARIANTS: dict[Literal["always", "auto"], dict[str, str]] = {
+    kind: {name: data.decode("utf-8") for name, data in files.items()} for kind, files in _INVARIANT_BYTES.items()
+}
+
+
+def _sha256_canonical(value: Any) -> str:
+    return hashlib.sha256(desk_kernel.canonical_json(json.dumps(value)).encode()).hexdigest()
+
+
+def desk_schema(profiles: Iterable[ToolProfile]) -> dict[str, Any]:
+    """The Cedar schema for a Desk with these tool profiles: a fresh copy of the base schema,
+    which declares every native tool. MCP actions are appended by Plan 01c; until then an MCP
+    profile is refused rather than left out of the schema without a word."""
+    for profile in profiles:
+        if profile.source != "native":
+            raise ValueError(f"{profile.tool}: MCP actions aren't in the schema yet")
+    return copy.deepcopy(BASE_SCHEMA)
+
+
+def schema_sha256(schema: dict[str, Any]) -> str:
+    """sha256 of `canonical_json(schema)`."""
+    return _sha256_canonical(schema)
+
+
+def baseline_sha256() -> str:
+    """sha256 of the baseline file's bytes, the text `BASELINE` holds."""
+    return hashlib.sha256(_BASELINE_BYTES).hexdigest()
+
+
+def invariants_sha256(checks: Iterable[str]) -> str:
+    """sha256 of `canonical_json({files: {"<kind>/<name>.cedar": sha256 of its bytes}, checks,
+    prove_version: desk_kernel.version()})`, the check names sorted. A changed invariant file,
+    check list or prover makes every earlier report stale."""
+    names = list(checks)
+    if len(set(names)) != len(names):
+        raise ValueError("each check is named once")
+    files = {f"{kind}/{name}.cedar": hashlib.sha256(data).hexdigest()
+             for kind, by_name in _INVARIANT_BYTES.items() for name, data in by_name.items()}
+    return _sha256_canonical({"files": files, "checks": sorted(names), "prove_version": desk_kernel.version()})
+
+
+# ---- The rule-card compiler -------------------------------------------------------------------
+#
+# The master plan's "Policy sets" and "Coverage and overlap (most specific wins)". In short:
+#
+# - A card covers a tool when `applies_to` names it, or `effect:<e>` for one of its effects; an
+#   auto effect card covers a tool only when every effect of the tool is named by an auto effect
+#   card at its specificity. Such a set of cards, one per effect, is a joint combination: it gets
+#   one permit of its own over the tools it covers, conjoining every card's who, hours and review
+#   gate with the tightest amount and discount limits, and its cards emit nothing else for them.
+# - Specificity: person-scoped (`person`, `agent`) beats the rest, then a tool card beats an effect
+#   card; a default ask ranks below every card. A never card always wins (a forbid in `F`). An
+#   auto permit carries `unless` exclusions for every non-default ask card at the same or higher
+#   specificity and every auto card or combination at higher specificity that covers one of its
+#   tools, each as its scope on the shared tools and its who: a card "matches" a request when it
+#   covers the tool and its who holds, a combination when all its cards' who hold. Autos at the
+#   same specificity add up. `A` is evaluated before `H`, so a broader ask needs no exclusion.
+# - Every enabled tool that cards for anyone don't cover (alone or jointly, any mode) gets a
+#   default ask, so a card for some visitors never leaves the others refused.
+
+DEFAULT_REASON = "Not covered by a rule yet, so it asks you."
+CARD_ID = re.compile(r"[a-z0-9][a-z0-9._:-]{0,63}")
+# Every string the compiler writes into Cedar (card IDs, tool and effect names, person IDs, agent
+# key IDs) matches this, so none can end a string literal or carry Cedar syntax.
+CEDAR_STRING = re.compile(r"[A-Za-z0-9._:-]{1,80}")
+_DAY_NUMBERS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}   # local_dow, Monday 0
+_MONEY_EFFECTS = frozenset({"charge", "pay_out"})
+
+
+@dataclass(frozen=True)
+class CompiledSets:
+    """A compiled card set: the Cedar texts of `F` (never cards), `A` (auto cards) and `H` (ask
+    cards, defaults included, and hold twins), and the cards with defaults, sorted by `card_id`."""
+
+    F: str
+    A: str
+    H: str
+    cards: list[RuleCard]
+
+    def sets(self) -> dict[str, str]:
+        """`{"F", "A", "H"}`, as `PolicyEngine.load` and `cedar_sha256` take them."""
+        return {"F": self.F, "A": self.A, "H": self.H}
+
+
+def cedar_sha256(sets: CompiledSets | Mapping[str, str]) -> str:
+    """sha256 of `canonical_json({"F", "A", "H"})`."""
+    texts = sets.sets() if isinstance(sets, CompiledSets) else sets
+    return _sha256_canonical({name: texts[name] for name in ("F", "A", "H")})
+
+
+# -- Coverage
+
+def _effect_of(card: RuleCard) -> str | None:
+    return card.applies_to.removeprefix("effect:") if card.applies_to.startswith("effect:") else None
+
+
+def _tool_effects(profiles: Iterable[ToolProfile]) -> dict[str, frozenset[str]]:
+    return {profile.tool: frozenset(profile.effects) for profile in profiles}
+
+
+def specificity(card: RuleCard) -> tuple[int, int]:
+    """`(who is "person" or "agent", applies_to is a tool)`, compared in that order; `(-1, -1)`
+    for a default card, which ranks below every card and never excludes or beats one."""
+    if card.is_default:
+        return (-1, -1)
+    return (int(card.who in ("person", "agent")), int(_effect_of(card) is None))
+
+
+def _combinations(effects: frozenset[str], cards: Iterable[RuleCard]) -> list[tuple[RuleCard, ...]]:
+    """Every way to name each of a tool's effects with one auto effect card, all the cards at one
+    specificity, each sorted by `card_id`. For a one-effect tool these are the auto cards for that
+    effect, each alone."""
+    if not effects:
+        return []
+    autos = [c for c in cards if c.mode == "auto" and not c.is_default and _effect_of(c) is not None]
+    per_effect = [[c for c in autos if _effect_of(c) == effect] for effect in sorted(effects)]
+    return [tuple(sorted(combination, key=lambda c: c.card_id))
+            for combination in itertools.product(*per_effect)
+            if len({specificity(c) for c in combination}) == 1]
+
+
+def covers(card: RuleCard, tool: str, profiles: Iterable[ToolProfile], cards: Iterable[RuleCard]) -> bool:
+    """Does `card` cover `tool` among the enabled `profiles`, given all the Desk's `cards`? A tool
+    that isn't enabled is covered by nothing."""
+    effects = _tool_effects(profiles).get(tool)
+    if effects is None:
+        return False
+    if card.applies_to == tool:
+        return True
+    if _effect_of(card) not in effects:
+        return False
+    if card.mode != "auto":
+        return True
+    pool = list(cards)
+    if card not in pool:
+        pool.append(card)
+    return any(card in combination for combination in _combinations(effects, pool))
+
+
+def _anyone_covers(tool: str, effects: frozenset[str], cards: Sequence[RuleCard]) -> bool:
+    anyone = [c for c in cards if c.who == "anyone" and not c.is_default]
+    if any(c.applies_to == tool or (c.mode != "auto" and _effect_of(c) in effects) for c in anyone):
+        return True
+    return bool(_combinations(effects, anyone))       # auto effect cards for anyone, alone or jointly
+
+
+def with_defaults(cards: Iterable[RuleCard], profiles: Iterable[ToolProfile]) -> list[RuleCard]:
+    """The owner's cards plus a default ask for every enabled tool that cards for anyone don't
+    cover (alone or jointly, in any mode), sorted by `card_id`. Defaults in `cards` are dropped and
+    derived again, so a stale one never survives a change of cards or tools."""
+    owned = [c for c in cards if not c.is_default]
+    effects = _tool_effects(profiles)
+    defaults = [RuleCard(card_id=f"default:{tool}", applies_to=tool, mode="ask", who="anyone", is_default=True,
+                         reason=DEFAULT_REASON)
+                for tool in sorted(effects) if not _anyone_covers(tool, effects[tool], owned)]
+    return sorted([*owned, *defaults], key=lambda c: c.card_id)
+
+
+# -- Checks before compiling
+
+def validate_cards(cards: Iterable[RuleCard], *, people: Collection[str], agent_keys: Collection[str]) -> list[str]:
+    """Plain reasons a set of owner cards can't be compiled; empty means it can. Defaults are
+    left out (`with_defaults` drops and derives them again). A reason names a card by its
+    `card_id` only when that is safe to show, and never repeats the offending value."""
+    errors: list[str] = []
+    seen: set[str] = set()
+    for number, c in enumerate(cards, start=1):
+        if c.is_default:
+            continue
+        label = c.card_id if CEDAR_STRING.fullmatch(c.card_id) else f"card {number}"
+        if not CARD_ID.fullmatch(c.card_id):
+            errors.append(f"{label}: a card ID is 1 to 64 lower-case letters, digits and . _ : -, starting with a "
+                          "letter or digit")
+        elif c.card_id in seen:
+            errors.append(f"{label}: another card has the same ID")
+        seen.add(c.card_id)
+        if c.card_id.startswith("default:"):
+            errors.append(f"{label}: IDs starting with default: are kept for the cards that ask by default")
+        try:
+            RuleCard.model_validate(c.model_dump())   # a card built without its checks gets them here
+        except ValueError:
+            errors.append(f"{label}: the card doesn't meet the rule card checks")
+            continue
+        for field in ("applies_to", "person_id", "agent_key_id"):
+            value = getattr(c, field)
+            if value is not None and not CEDAR_STRING.fullmatch(value):
+                errors.append(f"{label}: {field} may hold only letters, digits and . _ : -, 80 at most")
+        if c.who == "person" and c.person_id not in people:
+            errors.append(f"{label}: the person isn't one of this Desk's people")
+        if c.who == "agent" and c.agent_key_id not in agent_keys:
+            errors.append(f"{label}: the agent key isn't one this Desk knows")
+        if c.hours is not None:
+            try:
+                _hours(c)
+            except ValueError as e:
+                errors.append(f"{label}: {e}")
+    return errors
+
+
+# -- Emission: every piece of text comes from these helpers, and every string through _cedar_string
+
+def _cedar_string(value: str) -> str:
+    if not CEDAR_STRING.fullmatch(value):
+        raise ValueError("a string written into Cedar may hold only letters, digits and . _ : -, 80 at most")
+    return f'"{value}"'
+
+
+def _conj(parts: Iterable[str]) -> str:
+    """`a && b && ...` without trivially true parts or repeats; `true` when nothing is left."""
+    kept = list(dict.fromkeys(part for part in parts if part != "true"))
+    return " && ".join(kept) or "true"
+
+
+def _who(card: RuleCard) -> str:
+    match card.who:
+        case "anyone":
+            return "true"
+        case "verified":
+            return "principal.verified"
+        case "record_owner":
+            return "principal.verified && context.record_owner_match"
+        case "person":
+            return f"principal has person_id && principal.person_id == {_cedar_string(card.person_id or '')}"
+        case "agent":
+            return f"principal is Agent && principal.agent_key_id == {_cedar_string(card.agent_key_id or '')}"
+    raise ValueError("unknown who")
+
+
+def _scope(tools: Sequence[str], *, as_list: bool = False) -> str:
+    if len(tools) == 1 and not as_list:
+        return f"action == Action::{_cedar_string(tools[0])}"
+    return "action in [" + ", ".join(f"Action::{_cedar_string(tool)}" for tool in tools) + "]"
+
+
+def _minute(value: time, *, end: bool = False) -> int:
+    if value.second or value.microsecond:
+        raise ValueError("hours are whole minutes")
+    minute = value.hour * 60 + value.minute
+    return 1440 if end and minute == 0 else minute     # an end of 00:00 is midnight, the end of the day
+
+
+def _hours(card: RuleCard) -> str:
+    if card.hours is None:
+        return "true"
+    start, end = _minute(card.hours.start), _minute(card.hours.end, end=True)
+    if end <= start:
+        raise ValueError("hours end after they start")
+    if not card.hours.days or not set(card.hours.days) <= _DAY_NUMBERS.keys():
+        raise ValueError("hours name days from mon to sun")
+    days = ", ".join(str(day) for day in sorted({_DAY_NUMBERS[day] for day in card.hours.days}))
+    return f"[{days}].contains(context.local_dow) && context.local_minute >= {start} && context.local_minute < {end}"
+
+
+def _policy(policy_id: str, cards: Sequence[RuleCard], tier: str, scope: str,
+            conditions: Sequence[tuple[str, str]]) -> str:
+    for c in cards:
+        _cedar_string(c.card_id)
+        _cedar_string(c.applies_to)
+    effect = "forbid" if tier == "refuse" else "permit"
+    lines = [f'@id("{policy_id}") @card("{",".join(c.card_id for c in cards)}") @tier("{tier}") '
+             f'@applies_to("{",".join(c.applies_to for c in cards)}")',
+             f"{effect} (principal, {scope}, resource)"]
+    # `when { true }` says nothing and an empty body is no clause; `unless { true }` is never dropped
+    lines += [f"{kind} {{ {body} }}" for kind, body in conditions if body and (kind, body) != ("when", "true")]
+    return "\n".join(lines) + ";"
+
+
+@dataclass(frozen=True)
+class _Auto:
+    """An auto permit to emit: one card, or a joint combination, over the tools it covers."""
+
+    cards: tuple[RuleCard, ...]
+    tools: tuple[str, ...]
+
+    @property
+    def name(self) -> str:
+        return "+".join(c.card_id for c in self.cards)
+
+    @property
+    def who(self) -> str:
+        return _conj(_who(c) for c in self.cards)
+
+    @property
+    def specificity(self) -> tuple[int, int]:
+        return specificity(self.cards[0])          # a combination's cards share one
+
+    @property
+    def scope(self) -> str:
+        return _scope(self.tools, as_list=len(self.cards) == 1 and _effect_of(self.cards[0]) is not None)
+
+
+def _carried(card: RuleCard, effects: dict[str, frozenset[str]]) -> tuple[str, ...]:
+    """The enabled tools an ask or never card covers: its tool, or every tool with its effect."""
+    effect = _effect_of(card)
+    if effect is None:
+        return (card.applies_to,) if card.applies_to in effects else ()
+    return tuple(sorted(tool for tool, tool_effects in effects.items() if effect in tool_effects))
+
+
+def _autos(cards: Sequence[RuleCard], effects: dict[str, frozenset[str]]) -> list[_Auto]:
+    """Each auto card over the enabled tools it covers alone (its tool, or the tools whose only
+    effect is its effect), then each joint combination over the tools with several effects it
+    covers (one combination covers only tools with the same effects)."""
+    units = []
+    for c in cards:
+        if c.mode != "auto":
+            continue
+        effect = _effect_of(c)
+        if effect is None:
+            tools = (c.applies_to,) if c.applies_to in effects else ()
+        else:
+            tools = tuple(sorted(tool for tool, tool_effects in effects.items() if tool_effects == {effect}))
+        if tools:
+            units.append(_Auto((c,), tools))
+    joint: dict[tuple[str, ...], tuple[tuple[RuleCard, ...], list[str]]] = {}   # by card IDs, which are unique
+    for tool in sorted(effects):
+        if len(effects[tool]) > 1:
+            for combination in _combinations(effects[tool], cards):
+                joint.setdefault(tuple(c.card_id for c in combination), (combination, []))[1].append(tool)
+    units += [_Auto(combination, tuple(tools)) for _, (combination, tools) in sorted(joint.items())]
+    return units
+
+
+def _limits(unit: _Auto, effects: dict[str, frozenset[str]]) -> str:
+    """The tightest discount and amount limits and every card's hours. On money tools the amount
+    is required and capped at AUTO_MONEY_HARD_CAP_CENTS whatever the cards say; elsewhere a limit
+    reads an optional attribute in the `if ... then ... else true` form strict validation takes."""
+    money = {tool in MONEY_TOOLS or bool(effects[tool] & _MONEY_EFFECTS) for tool in unit.tools}
+    if len(money) != 1:
+        raise ValueError("an auto permit covers money tools or other tools, never both")
+    discount = min(c.max_discount_bp for c in unit.cards)
+    parts = [f"(if context has discount_bp then context.discount_bp <= {discount} else true)"]
+    amounts = [c.max_amount_cents for c in unit.cards if c.max_amount_cents is not None]
+    if money == {True}:
+        cap = min([*amounts, AUTO_MONEY_HARD_CAP_CENTS])
+        parts.append(f"context has amount_cents && context.amount_cents <= {cap}")
+    elif amounts:
+        parts.append(f"(if context has amount_cents then context.amount_cents <= {min(amounts)} else true)")
+    parts += [_hours(c) for c in unit.cards]
+    return _conj(parts)
+
+
+def _review_gate(unit: _Auto, effects: dict[str, frozenset[str]]) -> str:
+    """The monotone gate, with the strictest thresholds across the tools' effects, when any of
+    the unit's cards asks for the reviewer."""
+    if not any(c.review for c in unit.cards):
+        return "true"
+    row = review_thresholds.thresholds_for(sorted(set().union(*(effects[tool] for tool in unit.tools))))
+    return (f"context has review && context.review.within_charter_bp >= {row.min_within_charter_bp}"
+            f" && context.review.manipulation_bp <= {row.max_manipulation_bp}")
+
+
+def _exclusions(unit: _Auto, asks: Sequence[tuple[RuleCard, tuple[str, ...]]], autos: Sequence[_Auto]) -> str:
+    """The cards that decide instead of `unit` where they overlap it, each as its scope on the
+    shared tools and its who: non-default ask cards at the same or higher specificity, and auto
+    cards or combinations at higher specificity."""
+    beaters = [(f"ask.{c.card_id}", tools, _who(c)) for c, tools in asks
+               if not c.is_default and specificity(c) >= unit.specificity]
+    beaters += [(f"auto.{other.name}", other.tools, other.who) for other in autos
+                if other.specificity > unit.specificity]
+    found: dict[str, str] = {}
+    for name, tools, who in beaters:
+        shared = [tool for tool in unit.tools if tool in tools]
+        if shared:
+            found.setdefault(f"({_conj([_scope(shared), who])})", name)
+    return " || ".join(sorted(found, key=lambda text: (found[text], text)))
+
+
+def compile_cards(cards: Iterable[RuleCard], profiles: Iterable[ToolProfile], *, review: bool = True) -> CompiledSets:
+    """Compiles rule cards over the enabled `profiles` into `F`, `A` and `H`. A card for a tool
+    that isn't enabled emits nothing. Cards are sorted by `card_id` and the text is deterministic,
+    so the same cards compile to the same hash in every copy. `review=False` leaves out every
+    review gate (`A0` for the `review_only_narrows` proof). Raises ValueError rather than emit a
+    card it can't compile exactly (run `validate_cards` first for the owner's reasons)."""
+    profiles = list(profiles)
+    effects = _tool_effects(profiles)
+    for tool in effects:
+        _cedar_string(tool)
+    owned = [c for c in cards if not c.is_default]
+    if any(c.card_id.startswith("default:") for c in owned):
+        raise ValueError("IDs starting with default: are the compiler's")
+    if any(c.mode not in ("auto", "ask", "never") for c in owned):
+        raise ValueError("a card's mode is auto, ask or never")
+    all_cards = with_defaults(owned, profiles)
+    if len({c.card_id for c in all_cards}) != len(all_cards):
+        raise ValueError("each card has its own card_id")
+
+    forbids, permits, holds = [], [], []
+    asks: list[tuple[RuleCard, tuple[str, ...]]] = []
+    for c in all_cards:
+        tools = _carried(c, effects)
+        if not tools or c.mode == "auto":
+            continue
+        scope = _scope(tools, as_list=_effect_of(c) is not None)
+        if c.mode == "never":
+            forbids.append(_policy(f"never.{c.card_id}", [c], "refuse", scope, [("when", _who(c))]))
+        else:
+            asks.append((c, tools))
+            holds.append(_policy(f"ask.{c.card_id}", [c], "hold", scope, [("when", _who(c))]))
+    autos = _autos(all_cards, effects)
+    for unit in autos:
+        conditions = [("when", _conj([unit.who, _limits(unit, effects)]))]
+        if review:
+            conditions.append(("when", _review_gate(unit, effects)))
+        conditions.append(("unless", _exclusions(unit, asks, autos)))
+        permits.append(_policy(f"auto.{unit.name}", unit.cards, "auto", unit.scope, conditions))
+        holds.append(_policy(f"twin.{unit.name}", unit.cards, "hold", unit.scope, [("when", unit.who)]))
+    return CompiledSets(F="\n\n".join(sorted(forbids)), A="\n\n".join(sorted(permits)),
+                        H="\n\n".join(sorted(holds)), cards=all_cards)
