@@ -12,6 +12,8 @@ instead, and the owner is alerted in the Demo inbox. Tests run on Rivera Plumbin
 them (Friday 10:04 in Oakland).
 """
 
+import secrets
+
 import httpx
 from fastapi import FastAPI
 from sqlalchemy import select
@@ -184,6 +186,39 @@ async def test_a_canary_the_public_address_would_carry_is_refused(app, client):
     assert set(await desks_of(app, copy)) == {copy.desk_id}
     assert [row.slug for row in (await desks_of(app, copy)).values()] == [copy.slug]
     await assert_no_canary_on_record(app, copy, dana.canary)
+
+
+async def test_a_canary_split_after_a_new_desks_business_name_is_refused(app, client, monkeypatch):
+    """The business's name is read beside the field after it, as `PUT business` reads it: checking
+    the slug with the name (its random suffix is never passed over) doesn't come between them, so a
+    canary split between the name and the next field is refused on a new Desk too."""
+    # canaries ending in two letters, so an owner's display name (letters only) can hold the end of one
+    monkeypatch.setattr(desks, "new_canary", lambda: f"cdk-{secrets.token_hex(7)}fd")
+    copy = await rivera(app, client)
+    dana = (await documents(app, copy))["dana-invoice"]
+    head, tail = dana.canary[:-2], dana.canary[-2:]
+    [rivera_business] = await rows_of(app, copy.copy_id, select(Business))
+    before = len(await entries_of(app, copy))
+    # a new business: its name, then its owner's display name, which passes the display name's own check
+    response = await post_desk(client, copy, new_desk(name=f"Lopez Electric {head}",
+                                                      owner_display_name=f"{tail.capitalize()} Lopez"))
+    assert (response.status_code, response.json()) == (422, {"code": "invalid"})
+    # an existing business whose stored name holds the start, then the new Desk's name
+    await store_business(app, copy, name=f"Rivera Plumbing {head}")
+    response = await post_desk(client, copy, new_desk(existing_business_id=rivera_business.business_id,
+                                                      desk=LOPEZ_DESK.model_copy(update={"name": f"{tail} Line 2"})))
+    assert (response.status_code, response.json()) == (422, {"code": "invalid"})
+    # a split names every field the request's check read
+    fact_ids = [f"document:{dana.document_id}"]
+    assert [entry.event.summary for entry in (await entries_of(app, copy))[before:]] == [
+        {"part": "desk", "refused": "canary", "fields": ["business.name", "business.owner_display_name",
+                                                         "business.brand", "desk.name", "desk.charter",
+                                                         "desk.price_items"], "fact_ids": fact_ids},
+        {"part": "desk", "refused": "canary", "fields": ["business.name", "desk.name", "desk.charter",
+                                                         "desk.price_items"], "fact_ids": fact_ids}]
+    assert set(await desks_of(app, copy)) == {copy.desk_id}
+    assert [row.name for row in await rows_of(app, copy.copy_id, select(Business))] == [f"Rivera Plumbing {head}"]
+    await assert_no_canary_on_record(app, copy, dana.canary, head)
 
 
 RIVERA_CONTACT = {"key": "contact", "kind": "text", "value": "(510) 555-0142"}

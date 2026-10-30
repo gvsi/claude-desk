@@ -264,7 +264,8 @@ async def create_desk(ctx: KernelCtx, copy_id: str, business: BusinessSeed, desk
     name, and the Desk's name, charter and price list. The name is checked as typed and as the
     slug that will be written, suffix and all, since making it a slug drops what isn't ASCII (a
     sharp s inside a canary leaves the canary); either holding a canary refuses field
-    `business.name`.
+    `business.name`. The slug is read before the name, so the name is still read beside the field
+    after it and a canary split between them is refused, as `put_business` refuses it.
     """
     copy = ctx.bind(copy_id)
     now = ctx.clock.now()
@@ -276,8 +277,9 @@ async def create_desk(ctx: KernelCtx, copy_id: str, business: BusinessSeed, desk
             raise KernelFailure(404, "not_found", "unknown_business")
     business_name = existing.name if existing is not None else business.name
     slug = new_slug(business_name)
-    # the name as the page shows it and as the slug writes it, which drops what isn't ASCII
-    shown: dict[str, object] = {"business.name": [business_name, slug]}
+    # the name as the slug writes it, which drops what isn't ASCII, and as the page shows it; the
+    # slug first, so its suffix doesn't come between the name and the field after it
+    shown: dict[str, object] = {"business.name": [slug, business_name]}
     if existing is None:
         shown |= {"business.owner_display_name": business.owner_display_name, "business.brand": business.brand}
     shown |= {"desk.name": desk.name, "desk.charter": charter_shown(desk.charter),
