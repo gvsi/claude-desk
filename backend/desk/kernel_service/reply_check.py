@@ -70,11 +70,13 @@ CATEGORIES = {"number": "number_in_prose", "money": "number_in_prose", "percent"
               "date": "number_in_prose", "promise": "promise_word", "booking": "promise_word"}
 # A condition straight before a booking claim, on folded text in either language: "once you're
 # booked", "cuando tu cita está confirmada" say what happens once a booking exists and claim none.
-# Each i may be an l, as the capital-I reading writes it ("IF" is read as "lF" too).
+# Each i may be an l, as the capital-I reading writes it ("IF" is read as "lF" too). The folded
+# text has no accents, so "si" (if) counts only where the prose writes no mark on it (`_conditioned`).
 BOOKING_CONDITION = re.compile(
     r"(?<!\w)(?:once|whenever|when|[il]f|after|before|unt[il]l|t[il]ll|unless|as soon as"
-    r"|cuando|s[il]|una vez que|en cuanto|apenas|tan pronto como|despues de que|antes de que|hasta que) \Z",
+    r"|cuando|(?P<si>s[il])|una vez que|en cuanto|apenas|tan pronto como|despues de que|antes de que|hasta que) \Z",
     re.IGNORECASE)
+CONDITION_REACH = 32               # more characters than the longest condition and its space ("tan pronto como ")
 ECHO_WORDS = 5                     # this many words in a row shared with a policy's text: the policy in prose
 WORD = re.compile(r"[^\W_]+")      # a word, for the policy-echo scan: a run of letters and digits
 RULE_KEYS = frozenset({"service_area", "deposit", "cancellation"})   # charter claims stating a rule, beside policy:*
@@ -241,6 +243,8 @@ def _load_lexicon(language: str) -> list[tuple[str, re.Pattern[str]]]:
 
 LEXICONS: dict[str, list[tuple[str, re.Pattern[str]]]] = {
     language: _load_lexicon(language) for language in ("en", "es")}
+BOOKING_LINES = [(f"lex.{language}.booking", pattern) for language, entries in LEXICONS.items()
+                 for category, pattern in entries if category == "booking"]
 
 
 def _named_reach(text: str, names: Iterable[str]) -> list[int]:
@@ -316,6 +320,47 @@ def _policy_echoes(text: str, readings: dict[str, list[int]],
     return hits
 
 
+def _marked(text: str) -> bool:
+    """Whether any character of `text` carries an accent or another combining mark."""
+    return any(unicodedata.category(part) in ("Mn", "Me") for ch in text for part in unicodedata.normalize("NFKD", ch))
+
+
+def _conditioned(text: str, reading: str, origin: Sequence[int], start: int) -> bool:
+    """Whether a condition (`BOOKING_CONDITION`) stands straight before the booking claim at `start`
+    of `reading`, a reading of `text` (`origin` maps it back). The reading drops accents, so "si"
+    counts only when `text` writes no mark from its "s" to the claim: "sí" (yes) is no condition
+    ("Sí está confirmada" claims the booking)."""
+    condition = BOOKING_CONDITION.search(reading, max(0, start - CONDITION_REACH), start)
+    if condition is None:
+        return False
+    return condition.group("si") is None or not _marked(text[origin[condition.start("si")]:origin[start]])
+
+
+def _booking_claims(text: str, readings: dict[str, list[int]]) -> list[tuple[int, str, Violation]]:
+    """A `promise_word` (`lex.<lang>.booking`) for each booking claim in `text`, in any reading, but
+    for one with a condition straight before it (`_conditioned`: "once you're booked") or inside
+    such a claim in the same reading ("cuando tu cita está confirmada" holds "está confirmada"). A
+    claim inside a longer one found is that claim, so one claim is one violation."""
+    found: set[tuple[int, int, str]] = set()
+    for reading, origin in readings.items():
+        reach = -1       # the furthest end of a conditioned claim starting at or before this one
+        for start, end, rule_id in sorted((match.start(), match.end(), rule_id) for rule_id, pattern in BOOKING_LINES
+                                          for match in pattern.finditer(reading) if match.end() > match.start()):
+            if _conditioned(text, reading, origin, start):     # the same for every claim starting here
+                reach = max(reach, end)
+            if reach < end:
+                found.add((origin[start], origin[end - 1] + 1, rule_id))
+    hits: list[tuple[int, str, Violation]] = []
+    reach, previous = -1, None       # the furthest end of the claims found before this one, and the last one
+    for start, end, rule_id in sorted(found, key=lambda claim: (claim[0], -claim[1], claim[2])):
+        if previous is not None and previous != (start, end):
+            reach = max(reach, previous[1])
+        previous = (start, end)
+        if reach < end:
+            hits.append((start, rule_id, Violation(kind="promise_word", span=_span(text[start:end]), rule_id=rule_id)))
+    return hits
+
+
 def scan_prose(text: str, canaries: Iterable[str] = (), names: Iterable[str] = (),
                policies: Iterable[tuple[str, str]] = ()) -> list[Violation]:
     """Every number, currency sign, lexicon word, policy echo and canary in `text`, after `shown`:
@@ -324,9 +369,10 @@ def scan_prose(text: str, canaries: Iterable[str] = (), names: Iterable[str] = (
     such letters unless it is plain ASCII), currency sign (`currency`) or percent sign
     (`percent_sign`) and every match of both lexicons (`lex.<lang>.<category>`) is
     `number_in_prose`, or `promise_word` for the promise and booking categories, but for a booking
-    claim with a condition straight before it (`BOOKING_CONDITION`: "once you're booked"); a run of
-    `ECHO_WORDS` or more words shared with the text of one of `policies` (`(fact_id, text)` pairs)
-    is `promise_word` (`policy_echo`, naming the fact); a word mixing Latin letters with another
+    claim with a condition straight before it (`BOOKING_CONDITION`: "once you're booked", "si" but
+    not "sí") or inside such a claim, a claim inside another being one (`_booking_claims`); a run
+    of `ECHO_WORDS` or more words shared with the text of one of `policies` (`(fact_id, text)`
+    pairs) is `promise_word` (`policy_echo`, naming the fact); a word mixing Latin letters with another
     script is `unsupported_language` (`mixed_script`), unless it lies inside one of `names` (the
     Desk's own names) as it is written there; a canary verbatim is `canary`. The lexicons and the
     policy-echo scan read lookalike letters as the Latin ones, a bare stroke both as l and as I, an
@@ -357,15 +403,16 @@ def scan_prose(text: str, canaries: Iterable[str] = (), names: Iterable[str] = (
              for start, word in _words(text) if _mixes_scripts(word) and reach[start] < start + len(word)]
     readings = _readings(text)
     hits += _policy_echoes(text, readings, policies)
+    hits += _booking_claims(text, readings)
     seen: set[tuple[str, int, int]] = set()
     for language, entries in LEXICONS.items():
         for category, pattern in entries:
             rule_id = f"lex.{language}.{category}"
+            if category == "booking":
+                continue
             for reading, origin, match in ((reading, origin, match) for reading, origin in readings.items()
                                            for match in pattern.finditer(reading)):
                 if match.end() == match.start():
-                    continue
-                if category == "booking" and BOOKING_CONDITION.search(reading, 0, match.start()):
                     continue
                 start, end = origin[match.start()], origin[match.end() - 1] + 1
                 if (rule_id, start, end) in seen:

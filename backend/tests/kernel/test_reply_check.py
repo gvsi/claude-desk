@@ -586,6 +586,17 @@ async def test_a_reply_naming_only_the_card_passes(app, client, reviewer):
     ("Ya estás reservado.", "lex.es.booking", "Ya estás reservado"),
     ("Está confirmada.", "lex.es.booking", "Está confirmada"),
     ("Usted ya está agendado con Maria.", "lex.es.booking", "ya está agendado"),
+    ("Su próxima cita está confirmada.", "lex.es.booking", "Su próxima cita está confirmada"),   # a word between
+    ("Tu nueva visita está agendada.", "lex.es.booking", "Tu nueva visita está agendada"),
+    ("Su primera reserva está confirmada.", "lex.es.booking", "Su primera reserva está confirmada"),
+    ("Esta cita está confirmada.", "lex.es.booking", "Esta cita está confirmada"),     # another determiner
+    ("Mi cita está confirmada.", "lex.es.booking", "Mi cita está confirmada"),
+    ("La cita de Ana está confirmada.", "lex.es.booking", "está confirmada"),         # any words before "está"
+    ("Sí está confirmada.", "lex.es.booking", "está confirmada"),                     # "sí" (yes) is no "si" (if)
+    ("Sí ya está confirmada.", "lex.es.booking", "ya está confirmada"),
+    ("Sí tu cita está confirmada.", "lex.es.booking", "tu cita está confirmada"),
+    ("SÍ ESTÁ CONFIRMADA.", "lex.es.booking", "ESTÁ CONFIRMADA"),
+    ("S\u0131\u0301 está confirmada.", "lex.es.booking", "está confirmada"),          # a dotless i and an acute
 ])
 def test_booking_claims_in_prose_are_blocked(prose, rule_id, span):
     """Only a booking card says a visit is booked: the claim in prose is a promise word, in English
@@ -612,6 +623,9 @@ def test_booking_claims_read_lookalike_letters():
     "Until your appointment is confirmed, the time isn't held.",
     "Cuando tu cita esté confirmada, te escribimos.",
     "Cuando tu cita está confirmada, Maria te escribe.",
+    "Cuando su próxima cita está confirmada, le llega un mensaje.",   # a word between, a claim inside
+    "Si tu nueva visita está agendada, Maria le avisa.",
+    "Cuando una cita está confirmada, Maria lo anota.",
     "Si ya está confirmada, Maria le avisa.",
     "SI YA ESTÁ CONFIRMADA, MARIA LE AVISA.",
     "Una vez que su reserva queda confirmada, le llega un mensaje.",
@@ -620,6 +634,17 @@ def test_a_condition_before_a_booking_claim_passes(prose):
     """A condition straight before the claim says what happens once a booking exists, which claims
     none: "once you're booked", "cuando tu cita esté confirmada"."""
     assert reply_check.scan_prose(prose) == []
+
+
+def test_a_long_draft_of_booking_claims_is_scanned_in_one_pass():
+    """Thousands of booking claims, conditioned or not and each holding a shorter one, are read in
+    one pass: a condition is looked for just before each claim, and claims inside others drop out
+    in one sweep."""
+    started = time.perf_counter()
+    found = reply_check.scan_prose("si ya está confirmada " * 4_000 + "tu cita está confirmada " * 4_000)
+    assert time.perf_counter() - started < 2
+    assert {(v.rule_id, v.span) for v in found} == {("lex.es.booking", "tu cita está confirmada")}
+    assert len(found) == 4_000
 
 
 SERVICE_AREA = "We work in Oakland, Berkeley, Alameda and Emeryville."        # Rivera's seeded policy
