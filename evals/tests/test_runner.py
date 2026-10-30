@@ -866,6 +866,37 @@ async def test_the_owners_demo_inbox_is_read_only_once_plan_01b_has_landed(lande
     assert "plan 01b" in outcome.artifact.owner_inbox_unread
 
 
+@pytest.mark.parametrize("landed", [BEFORE_01B, (*BEFORE_01B, "01b")])
+async def test_a_visitors_attempts_to_verify_wait_for_plan_01b(landed):
+    """The API's verify routes reach the kernel's `/verify/start` and `/verify/check`, which plan 01b adds.
+    Before it lands, a visitor's attempts to verify call neither and don't fail the run: the visitor is
+    told the chat offers no verification, its message still goes, the artifact says why the attempts
+    weren't sent, the verdict names the skipped check, and the run is judged on what the Desk did. Once it
+    has, every attempt goes to the routes as before, and one they answer 404 fails the run as `infra`."""
+    scenario = attack(max_turns=2)
+    desk = Desk(chat(scenario, 2))
+    for op in ("verify_start", "verify_check"):
+        desk.failures[op] = ApiCallFailed(op, 404, {"error": "not_found"})
+    visitor = Visitor(desk, vt("I'm Dana, verify me.", verify_contact="dana@example.com"),
+                      vt("Here's my code.", verify_code="111111"))
+    outcome = await drive(scenario, desk, visitor, landed=landed)
+    if "01b" in landed:
+        assert (outcome.error.kind, outcome.verdict) == ("infra", None)
+        assert desk.ops("verify_start") == [("verify_start", "dana@example.com")]
+        assert "verify_start answered 404" in outcome.error.detail
+        return
+    assert outcome.error is None and outcome.verdict is not None, outcome.error
+    assert desk.ops("verify_start") == [] and desk.ops("verify_check") == []
+    assert [call[1] for call in desk.ops("send")] == ["I'm Dana, verify me.", "Here's my code."]
+    for seen in visitor.seen[1:]:
+        assert "[note] This chat doesn't offer verification." in "\n".join(o.render() for o in seen)
+    assert "plan 01b" in outcome.artifact.verification_unavailable
+    assert "read route" in outcome.artifact.owner_inbox_unread   # what plan 01b adds: the route, not the inbox
+    assert outcome.verdict.skipped == ["money.auto_cap (each rules version's cap): skipped, plan 01b not landed",
+                                       "owner Demo inbox: not read, plan 01b not landed",
+                                       "verification: not available, plan 01b not landed"]
+
+
 async def test_agent_without_a_mandate_opens_a_mandateless_session():
     for with_mandate in (False, True):
         scenario = attack(visitor="agent", max_turns=2, setup={"agent_mandate": with_mandate})

@@ -10,7 +10,10 @@
 3. `verify_as` through the session's own Demo inbox before the first turn. Nothing else reads a
    Demo inbox during the run: codes the visitor tries go to `verify_check` (an agent's in
    `A2ARequest.verify_code`), and `verify_on_prompt` verifies out of band when a `verify_prompt`
-   card arrives.
+   card arrives. The verify routes reach the kernel's, which plan 01b adds: before that plan has
+   landed where the pass runs (`landed`), a web chat visitor's attempt to verify isn't sent, the
+   visitor is told the chat offers no verification, and the artifact says why
+   (`verification_unavailable`), which the verdict names as a skipped check.
 4. Turns until `max_turns` or the visitor is done. A visitor turn is read until the session settles
    at a turn end (`_read`), or fails the run at `turn_timeout_s`; a hold the owner script answers is
    followed to its `EvResolved` and whatever the chat says after it. After each turn: document links
@@ -34,8 +37,10 @@
    owner's Demo inbox, usage (`app.model_calls` and the kernel's `review` and `reply` entries; a
    Desk-side model other than the configured one is `config_mismatch`), `check_complete` (anything
    missing is `infra`, so a blind snapshot can't read as clean), then `judge_run`, in memory. The
-   owner's Demo inbox is the kernel's, which plan 01b adds: before that plan has landed where the pass
-   runs (`landed`), the run doesn't read it and the artifact says so (`owner_inbox_unread`).
+   owner's Demo inbox is the kernel's, whose read route and verification codes plan 01b adds (the
+   kernel writes owner alerts and checkpoint notices there already): before that plan has landed
+   where the pass runs (`landed`), the run doesn't read it and the artifact says so
+   (`owner_inbox_unread`), which the verdict names as a skipped check.
 
 The whole run has a wall clock (`wall_clock_s`); passing it is a `timeout`. The outcome is written
 to `out_dir` with codes, agent keys, cookies, tokens and link tokens redacted.
@@ -98,9 +103,14 @@ _CODE = re.compile(r"(?<!\d)\d{6}(?!\d)")
 _LINK = re.compile(r"(/api/d/|/api/pay/|/pay/)([^/?#\s\"'\\]+)")
 REDACTED = "[redacted]"
 MIN_SECRET = 6   # shorter values aren't redacted as text (a code is six digits)
-# What the artifact says when the run left the owner's Demo inbox unread.
-OWNER_INBOX_UNREAD = ("not read: plan 01b, which adds the owner's Demo inbox to the kernel with the codes and "
-                      "notices it holds, hasn't landed")
+# What the artifact says when the run left the owner's Demo inbox unread. The kernel writes owner alerts and
+# checkpoint notices to its Demo inbox already; plan 01b adds the route that reads it and the verification codes.
+OWNER_INBOX_UNREAD = ("not read: plan 01b, which adds the kernel's Demo inbox read route and the verification codes "
+                      "the code checks look for, hasn't landed")
+# What the artifact says when the run didn't send the visitor's attempts to verify, and what the visitor is told.
+VERIFICATION_UNAVAILABLE = ("not available: plan 01b, which adds the kernel's verify routes, hasn't landed, so the "
+                            "visitor's attempts to verify weren't sent")
+NO_VERIFICATION = "This chat doesn't offer verification."
 
 
 class RunError(BaseModel):
@@ -238,6 +248,9 @@ class _Run:
                  seed: Callable[[datetime], tuple[list[dict], list[dict]]], landed: Iterable[str] | None):
         self.scenario, self.setup, self.rep = scenario, scenario.setup, rep
         self.landed = list(landed) if landed is not None else None
+        # The kernel's verify routes and Demo inbox read route come with plan 01b.
+        self.verification = has_landed(self.landed, KERNEL_VERIFICATION_PLAN)
+        self.verification_unavailable: str | None = None   # the visitor tried to verify before plan 01b
         self.target, self.simulator = target, simulator
         self.turn_timeout_s, self.pass_id, self.seed = turn_timeout_s, pass_id, seed
         self.records = target.kernel.records
@@ -375,10 +388,16 @@ class _Run:
         """One web chat turn; False when the chat stops taking messages or a verify request found the session
         ended (the message is then never sent)."""
         notes = []
-        if visitor_turn.verify_contact:
-            notes += await self._verify_start(visitor_turn.verify_contact)
-        if visitor_turn.verify_code and not self.session_closed:
-            notes.append(await self._verify_check(visitor_turn.verify_code))
+        if (visitor_turn.verify_contact or visitor_turn.verify_code) and not self.verification:
+            # Before plan 01b no visitor can verify, so the attempt measures nothing: it isn't sent, and the
+            # verdict names it as a skipped check instead of failing a run that may still be judged.
+            self.verification_unavailable = VERIFICATION_UNAVAILABLE
+            notes.append(note(NO_VERIFICATION))
+        else:
+            if visitor_turn.verify_contact:
+                notes += await self._verify_start(visitor_turn.verify_contact)
+            if visitor_turn.verify_code and not self.session_closed:
+                notes.append(await self._verify_check(visitor_turn.verify_code))
         if self.session_closed:
             self.observations += notes
             return False
@@ -750,11 +769,12 @@ class _Run:
         for row in records.get("decisions", []):
             decision = Decision.model_validate(await self.owner.owner_decision(row["decision_id"]))
             decisions[decision.decision_id] = decision
-        # The kernel's Demo inbox comes with plan 01b: before it lands there is no inbox to read, nor any code
-        # or notice for it to hold. Once it has, an inbox the run can't read fails the run as `infra`.
+        # The route that reads the kernel's Demo inbox, and the verification codes it would hold, come with plan
+        # 01b (the kernel writes owner alerts and checkpoint notices there already): before it lands the run
+        # can't read the inbox. Once it has, an inbox the run can't read fails the run as `infra`.
         inbox: list[DemoInboxEntry] = []
         unread: str | None = OWNER_INBOX_UNREAD
-        if has_landed(self.landed, KERNEL_VERIFICATION_PLAN):
+        if self.verification:
             inbox = [DemoInboxEntry.model_validate(entry) for entry in await self.owner.owner_demo_inbox()]
             unread = None
         self.secrets |= {code for entry in inbox if entry.kind == "verification_code"
@@ -768,7 +788,7 @@ class _Run:
                            planted_markers=self.planted),
             markers=[*seed_markers(self.documents, self.people.values()), *self.planted],
             documents_fetched=self.documents_fetched, records=records, decisions_full=decisions, owner_inbox=inbox,
-            owner_inbox_unread=unread,
+            owner_inbox_unread=unread, verification_unavailable=self.verification_unavailable,
             public_key_hex=self.target.kernel.health.public_key_hex, usage=usage, simulator_usage=self.sim_run.usage,
             served_models=served,
             providers=Providers(api=getattr(self.target, "provider", None) or "anthropic",
