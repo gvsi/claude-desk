@@ -11,6 +11,7 @@
     python -m evals.run results-check --base <ref>
     python -m evals.run calibrate --pass <id> [--write] [--owner-approved "<name>"]
     python -m evals.run latency --max-usd X [--turns 20] [--base-url URL] [--dry-run] [--pass <id>]
+    python -m evals.run report --pass <id> [--null-baseline <id>]
 
 With no test paths among the pytest args, `tier1` runs all of `evals/tier1`. It exits non-zero
 when pytest does, when no case was collected, or when the run left no summary or a summary with a
@@ -49,12 +50,22 @@ booking, each kind in its own copy, on the in-process stack built from this tree
 `MODEL_PROVIDER`; every model scripted with `--dry-run`) or on the deployment at `--base-url`, and
 writes `evals/out/latency/<id>.json`, its numbers labelled `local` or `hosted` and `--pass` naming the
 pass they are for. It exits 1 when the run is refused or measured nothing it can report.
+
+`report` (`evals/report.py`) writes the report of a finished pass with no model call: under
+`evals/reports/`, `<date>-<pass_id>.md`, `latest.json` and this month's rows of the shared spend file as
+`spend.csv`, and the latest results in `docs/evals.md`. It reads the pass's runs and transcripts, the
+gate over its rows, the current recorded rate, the usage of its judged legitimate runs, the latest local
+and hosted latency runs whose `--pass` named it (never a dry run's; without one the report says latency
+wasn't measured), the thresholds' calibration at the pass's commit and, with `--null-baseline`, a
+null-baseline pass of the same held-out set. A dry run, a null-baseline pass, a pass with no run, or
+anything it can't read whole is refused: exit 1, the reason on stdout, nothing written.
 """
 
 import argparse
 import asyncio
 import json
 import sys
+from datetime import UTC, date
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -64,7 +75,10 @@ from evals.tier1.harness import SUMMARY_FILE, TARGETS, TIER1_DIR
 
 if TYPE_CHECKING:
     from evals.latency import LatencyConfig, LatencyDeps
-    from evals.tier2.passes import PassConfig
+    from evals.report import Calibration, Latency, NullBaseline, ReportRun, SpendRow
+    from evals.tier2.artifact import RunArtifact
+    from evals.tier2.passes import PassConfig, PassResult
+    from evals.tier2.suite import Suite
 
 EVALS_DIR = Path(__file__).resolve().parent
 
@@ -330,9 +344,264 @@ def latency(argv: list[str]) -> int:
     return asyncio.run(latency_command(argv))
 
 
+class ReportRefused(RuntimeError):
+    """A report can't be written from what the pass left; the message says why. Nothing was written."""
+
+
+# The parts of a run's artifact the report never reads: what the visitor saw, what the simulated owner did
+# and read, and each decision's full form. They are left out before a transcript is read, since the runner
+# redacts every code a run saw wherever it appears, and a code that matches a timestamp's microseconds
+# leaves that timestamp unreadable. The report reads the records, usage and verdict, which are read whole.
+UNREAD_ARTIFACT_FIELDS: dict[str, Any] = {"turns": [], "owner_actions": [], "documents_fetched": [],
+                                          "decisions_full": {}, "owner_inbox": []}
+
+
+def report_inputs(pass_id: str, *, root: Path, null_baseline_id: str | None = None) -> dict[str, Any]:
+    """`write_report`'s inputs for the finished pass `pass_id` in the repository at `root`, read from what
+    the pass left: `pass.json`, `runs.jsonl` and each run's transcript, the gate over its rows and the
+    current recorded rate, this month's rows of the shared spend file (its own among them), the usage of
+    its judged legitimate runs, the latency runs that name it, the thresholds' calibration at its commit
+    and, with `null_baseline_id`, a null-baseline pass of the same held-out set. Anything missing or
+    inconsistent refuses, so no run or number is left out unseen."""
+    from pydantic import ValidationError
+
+    from evals.gate import gate
+    from evals.report import PassSummary, latest_refusal, load_budget
+    from evals.tier2.passes import load_pass
+    from evals.tier2.suite import load_recorded_rates, load_splits, load_suite, suite_sha256
+    from evals.usage import conversation_metrics
+
+    result = load_pass(pass_id, root)
+    config = result.config
+    if refusal := latest_refusal(result.pass_id, dry_run=config.dry_run, null_baseline=config.null_baseline):
+        raise ReportRefused(refusal)
+    if not result.runs:
+        raise ReportRefused(f"pass {pass_id} made no run ({len(result.pending)} scenarios pending), so there is "
+                            "nothing to report")
+    evals = root / "evals"
+    try:
+        suite = load_suite(evals / "tier2" / "scenarios")
+        same_suite = suite_sha256(suite, load_splits(evals / "splits.yaml")) == result.suite_sha256
+        rates = load_recorded_rates(evals / "recorded_rates.json")
+        budget = load_budget(evals / "budget.toml")
+    except (OSError, ValueError) as error:
+        raise ReportRefused(f"the suite, the recorded rates or the budget can't be read: {error}") from None
+    if not same_suite:
+        raise ReportRefused(f"the scenarios or splits changed since pass {pass_id} ran, so its runs can't be read "
+                            "against them; report a pass of this tree's suite")
+    runs, legit = _report_runs(root, result, suite)
+    try:
+        metrics = conversation_metrics(legit)
+    except (LookupError, ValueError) as error:   # no list price for a model, or a call that can't be read
+        raise ReportRefused(f"the legitimate runs' usage can't be priced: {error}") from None
+    day = result.created_at.astimezone(UTC).date()
+    spend_month = _month_spend(root, day)
+    own = [row for row in spend_month if row.pass_id == result.pass_id]
+    if len(own) != 1:
+        raise ReportRefused(f"the shared spend file holds {len(own)} rows for pass {pass_id}, not one; the report "
+                            "reads the pass's spend from the row the pass appended")
+    try:
+        summary = PassSummary(
+            pass_id=result.pass_id, date=day, git_sha=result.git_sha, providers=result.providers.model_dump(),
+            model_ids=result.model_ids, runs_per_scenario=config.runs, external=config.base_url is not None,
+            dry_run=config.dry_run, null_baseline=config.null_baseline, stopped_by_budget=result.stopped_by_budget,
+            pending=result.pending, heldout_sha256=result.heldout_sha256, spend=own[0], runs=runs)
+    except ValidationError as error:
+        raise ReportRefused(f"pass {pass_id} doesn't read as a report's pass ({error.error_count()} problems: "
+                            f"{error.errors()[0]['msg']})") from None
+    return {
+        "pass_result": summary, "gate_result": gate(result, rates), "metrics": metrics,
+        "latency": _pass_latency(root, result.pass_id), "calibration": _calibration_at(root, result.git_sha),
+        "recorded": rates.current,
+        "null_baseline": _null_baseline(root, null_baseline_id, result) if null_baseline_id else None,
+        "spend_month": spend_month, "budget": budget,
+    }
+
+
+def _report_runs(root: Path, result: "PassResult", suite: "Suite") -> tuple[list["ReportRun"], list["RunArtifact"]]:
+    """Each run of the pass as the report reads it, from its row and its transcript, and the artifacts of
+    its judged legitimate runs. A transcript that is missing, unreadable, another run's, or holds another
+    verdict than its row refuses."""
+    from evals.report import ReportRun
+    from evals.tier2.passes import pass_dir
+    from evals.tier2.runner import RunOutcome
+
+    transcripts = pass_dir(root, result.pass_id) / "transcripts"
+    runs, legit = [], []
+    for row in result.runs:
+        name = f"{row.scenario_id} rep {row.rep}"
+        try:
+            data = json.loads((transcripts / f"{row.scenario_id}-{row.rep}.json").read_bytes())
+            if isinstance(data, dict) and isinstance(data.get("artifact"), dict):
+                data["artifact"] = {**data["artifact"], **UNREAD_ARTIFACT_FIELDS}
+            outcome = RunOutcome.model_validate(data)
+        except (OSError, ValueError) as error:   # ValueError: JSON that doesn't parse, or a ValidationError
+            raise ReportRefused(f"the transcript of {name} can't be read ({type(error).__name__}), so the run can't "
+                                "be reported") from None
+        scenario = suite.scenarios.get(row.scenario_id)
+        artifact, verdict = outcome.artifact, outcome.verdict
+        if (outcome.scenario_id, outcome.rep, outcome.pass_id) != (row.scenario_id, row.rep, result.pass_id) or (
+                artifact is not None and (artifact.scenario_id, artifact.rep) != (row.scenario_id, row.rep)):
+            raise ReportRefused(f"the transcript of {name} is another run's")
+        if scenario is None:
+            raise ReportRefused(f"{name} names a scenario the suite doesn't hold")
+        common: dict[str, Any] = {"rep": row.rep, "fallback_turns": outcome.simulator.fallback_turns,
+                                  "switches": outcome.simulator.switches}
+        try:
+            if row.status == "incomplete":
+                # An incomplete run keeps its error's kind; one with no error had a verdict that didn't fit a
+                # row, which the pass recorded as a harness (infra) error.
+                kind = outcome.error.kind if outcome.error is not None else "infra"
+                runs.append(ReportRun.from_run(scenario, row.split, error=kind, **common))
+                continue
+            if verdict is None or artifact is None or outcome.error is not None or (
+                    row.violations, row.success, row.false_holds, row.expected_allow) != (
+                    [v.oracle for v in verdict.violations], verdict.success, verdict.false_holds,
+                    verdict.expected_allow):
+                raise ReportRefused(f"the transcript of {name} doesn't hold the verdict its row records")
+            runs.append(ReportRun.from_run(scenario, row.split, artifact=artifact, verdict=verdict, **common))
+        except ValueError as error:
+            raise ReportRefused(f"{name} can't be reported: {error}") from None
+        if row.suite == "legit":
+            legit.append(artifact)
+    return runs, legit
+
+
+def _month_spend(root: Path, day: date) -> list["SpendRow"]:
+    """The shared spend file's rows of `day`'s month; a row of that month that can't be read refuses, so
+    the month's spend is never reported short."""
+    from evals.report import SPEND_COLUMNS, SpendRow
+    from evals.tier2.passes import read_spend, shared_spend_file
+
+    month, rows = f"{day:%Y-%m}", []
+    for row in read_spend(shared_spend_file(root)):
+        if not (row.get("date") or "").startswith(month):
+            continue
+        try:
+            rows.append(SpendRow.model_validate({**{column: row.get(column) for column in SPEND_COLUMNS},
+                                                 "runs": int(row.get("runs") or "")}))
+        except (TypeError, ValueError) as error:
+            raise ReportRefused(f"a {month} row of the shared spend file can't be read ({type(error).__name__}), so "
+                                "the month's spend can't be reported") from None
+    return rows
+
+
+def _pass_latency(root: Path, pass_id: str) -> "Latency | None":
+    """The latency measured for the pass: of the latency runs whose file names it (`latency --pass`), the
+    latest local one and the latest hosted one. A dry run's scripted numbers are never read; None when no
+    run was measured for the pass, which the report shows as not measured. A file that can't be read, or
+    names the pass but isn't a latency run, refuses."""
+    from pydantic import ValidationError
+
+    from evals.latency import LatencyRun
+    from evals.report import Latency
+
+    directory = root / "evals" / "out" / "latency"
+    latest: dict[str, LatencyRun] = {}
+    for path in sorted(directory.glob("*.json")) if directory.is_dir() else []:
+        try:
+            data = json.loads(path.read_text())
+        except (OSError, ValueError) as error:
+            raise ReportRefused(f"latency file {path.name} can't be read ({type(error).__name__})") from None
+        if not isinstance(data, dict):
+            raise ReportRefused(f"latency file {path.name} isn't a latency run")
+        if data.get("pass_id") != pass_id:
+            continue
+        try:
+            measured = LatencyRun.model_validate(data)
+        except ValidationError:
+            raise ReportRefused(f"latency file {path.name} names pass {pass_id} but isn't a latency run") from None
+        if measured.provider == "fake":
+            continue
+        if measured.where not in latest or measured.created_at > latest[measured.where].created_at:
+            latest[measured.where] = measured
+    if not latest:
+        return None
+    return Latency(local=latest["local"].latency.local if "local" in latest else None,
+                   hosted=latest["hosted"].latency.hosted if "hosted" in latest else None)
+
+
+def _calibration_at(root: Path, git_sha: str) -> "Calibration | None":
+    """The calibration the pass's reviewer thresholds came from: the `CALIBRATION` record of the kernel's
+    thresholds file at the pass's commit. None when the file there records none (the kernel's initial
+    thresholds) or doesn't exist yet."""
+    import tempfile
+
+    from pydantic import ValidationError
+
+    from evals import results
+    from evals.calibrate import THRESHOLDS_PATH, CalibrationRefused, load_thresholds
+    from evals.report import Calibration
+
+    try:
+        source = results.show(root, git_sha, THRESHOLDS_PATH)
+    except results.GitError as error:
+        raise ReportRefused(f"the pass's commit can't be read here: {error}") from None
+    if source is None:
+        return None
+    with tempfile.TemporaryDirectory() as staging:
+        staged = Path(staging) / Path(THRESHOLDS_PATH).name
+        staged.write_bytes(source)
+        try:
+            record = load_thresholds(staged).calibration
+        except CalibrationRefused as refused:
+            raise ReportRefused(f"the thresholds file at the pass's commit can't be read: {refused}") from None
+    if record is None:
+        return None
+    if not isinstance(record, dict) or record.get("split") != "calibration":
+        raise ReportRefused("the thresholds file's CALIBRATION at the pass's commit names no calibration-split pass")
+    try:
+        return Calibration.model_validate({key: value for key, value in record.items() if key != "split"})
+    except ValidationError as error:
+        raise ReportRefused(f"the thresholds file's CALIBRATION at the pass's commit doesn't read as a calibration "
+                            f"({error.errors()[0]['msg']})") from None
+
+
+def _null_baseline(root: Path, null_id: str, real: "PassResult") -> "NullBaseline":
+    """The held-out legitimate runs of `null_id`, a real pass run with Answering off on the same held-out
+    set as `real`, as the report's null baseline."""
+    from evals.report import NullBaseline
+    from evals.tier2.passes import load_pass
+
+    null = load_pass(null_id, root)
+    if not null.config.null_baseline or null.config.dry_run:
+        raise ReportRefused(f"pass {null_id} isn't a null baseline: --null-baseline names a real pass run with "
+                            "tier2 --null-baseline")
+    if null.heldout_sha256 != real.heldout_sha256:
+        raise ReportRefused(f"null-baseline pass {null_id} ran on another held-out set than pass {real.pass_id}, so "
+                            "the two can't be compared")
+    rows = [r for r in null.runs if r.status == "scored" and r.suite == "legit" and r.split == "heldout"]
+    if not rows:
+        raise ReportRefused(f"null-baseline pass {null_id} judged no held-out legitimate run")
+    return NullBaseline(pass_id=null.pass_id, successes=sum(bool(r.success) for r in rows), trials=len(rows))
+
+
+def report_command(argv: list[str], *, root: Path | None = None) -> int:
+    from evals.report import write_report
+    from evals.tier2.passes import REPO_ROOT, PassRefused
+
+    parser = _pass_parser("report")
+    parser.add_argument("--null-baseline", metavar="PASS",
+                        help="a null-baseline pass (tier2 --null-baseline) of the same held-out set")
+    options = parser.parse_args(argv)
+    root = root or REPO_ROOT
+    try:
+        inputs = report_inputs(options.pass_id, root=root, null_baseline_id=options.null_baseline)
+        written = write_report(**inputs, reports_dir=root / "evals" / "reports", evals_doc=root / "docs" / "evals.md")
+    except (ReportRefused, PassRefused, OSError, ValueError) as refused:   # ValueError: the guide's markers
+        print(f"report: {refused}")
+        return 1
+    judged = inputs["gate_result"]
+    print(f"report: pass {options.pass_id}: the gate {'passed' if judged.passed else 'failed'}; latency "
+          f"{'measured' if inputs['latency'] is not None else 'not measured'}")
+    print(f"report: wrote {written.relative_to(root)}, evals/reports/latest.json and evals/reports/spend.csv, and "
+          "the latest results in docs/evals.md")
+    return 0
+
+
 COMMANDS = {"tier1": tier1, "simulator-check": simulator_check, "tier2": tier2, "gate": gate_command,
             "results": results_command, "record-rate": record_rate_command, "key": key, "results-check": results_check,
-            "calibrate": calibrate_command, "latency": latency}
+            "calibrate": calibrate_command, "latency": latency, "report": report_command}
 
 
 def main(argv: list[str]) -> int:

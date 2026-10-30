@@ -971,20 +971,28 @@ def _with_latest_results(text: str, latest: dict[str, Any], path: Path) -> str:
     return "".join(lines[:begins[0] + 1] + block + lines[ends[0]:])
 
 
+def latest_refusal(pass_id: str, *, dry_run: bool, null_baseline: bool) -> str | None:
+    """Why a pass can't become the latest report, or None when it can: a dry run or a null-baseline
+    pass measures no Desk."""
+    if dry_run or null_baseline:
+        return (f"pass {pass_id} is a {'dry run' if dry_run else 'null-baseline pass'}, which never becomes the "
+                "latest report")
+    return None
+
+
 def write_report(pass_result: PassSummary, gate_result: Any, metrics: Metrics | None, latency: Latency | None,
                  calibration: Calibration | None, *, recorded: RecordedRate | None = None,
                  null_baseline: NullBaseline | None = None, spend_month: Sequence[SpendRow],
-                 reports_dir: Path = REPORTS_DIR, evals_doc: Path = EVALS_DOC) -> Path:
+                 budget: Budget | None = None, reports_dir: Path = REPORTS_DIR, evals_doc: Path = EVALS_DOC) -> Path:
     """Writes `<date>-<pass_id>.md` and `latest.json` under `reports_dir`, this month's spend rows as
     its `spend.csv`, and the evals guide's latest-results block; returns the report's path. A dry run
     or a null-baseline pass is refused before anything is written: neither measures a Desk."""
     p = PassSummary.model_validate(pass_result)
-    if p.dry_run or p.null_baseline:
-        raise ValueError(f"pass {p.pass_id} is a {'dry run' if p.dry_run else 'null-baseline pass'}, "
-                         "which never becomes the latest report")
+    if refusal := latest_refusal(p.pass_id, dry_run=p.dry_run, null_baseline=p.null_baseline):
+        raise ValueError(refusal)
     inputs = {"recorded": recorded, "null_baseline": null_baseline, "spend_month": spend_month}
     latest = latest_json(p, gate_result, metrics, latency, calibration, **inputs)
-    text = render_report(p, gate_result, metrics, latency, calibration, **inputs)
+    text = render_report(p, gate_result, metrics, latency, calibration, **inputs, budget=budget)
     doc = _with_latest_results(evals_doc.read_text(), latest, evals_doc)
     reports_dir.mkdir(parents=True, exist_ok=True)
     report = reports_dir / report_name(p)
