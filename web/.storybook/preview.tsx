@@ -26,6 +26,8 @@ const preview: Preview = {
           ]),
         ),
         desktop: { name: 'Desktop', styles: { width: '1440px', height: '900px' }, type: 'desktop' },
+        // A short laptop window, 1366 × 657 once the browser's own bars are drawn.
+        short: { name: 'Short laptop', styles: { width: '1366px', height: '657px' }, type: 'desktop' },
         tablet: { name: 'Tablet', styles: { width: '768px', height: '1024px' }, type: 'tablet' },
         phone: { name: 'Phone', styles: { width: '390px', height: '844px' }, type: 'mobile' },
       },

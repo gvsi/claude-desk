@@ -1,6 +1,7 @@
 /* Sidebar: the owner app's column contents, top to bottom: the mark and wordmark, the business
-   row, the Desk picker, the seven nav rows, then at the foot the optional "About this prototype"
-   group, the Answering switch and the owner.
+   row and the Desk picker, pinned at the top; the seven nav rows and the optional "About this
+   prototype" group, which scroll between them when the window is short; and the Answering switch
+   and the owner, pinned at the foot.
    The AppShell gives it the column (size-sidebar on bg-panel, with the seam); rows are
    size-nav-row tall, the current one on bg-selected with no accent bar. Hover fills change at
    motion-instant; nothing moves under reduced motion. */
@@ -104,6 +105,28 @@
   padding: 0 var(--space-8) 0 var(--space-10);
 }
 
+.cd-sidebar__brand,
+.cd-sidebar__business,
+.cd-sidebar__desks,
+.cd-sidebar__footer {
+  flex: none;
+}
+
+/* The middle, the nav and the about group, takes the room between the top and the foot, and
+   scrolls inside the column when the window is too short for it, so the foot always shows. It
+   reaches 4 px past the rows at the sides and into the gap under it, so a focused row's ring is
+   never clipped by the scroll, and every row sits where it would without it. */
+.cd-sidebar__middle {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-height: 0;
+  margin: 0 calc(-1 * var(--space-4)) calc(-1 * var(--space-4));
+  padding: 0 var(--space-4) var(--space-4);
+  overflow-y: auto;
+}
+
 .cd-sidebar__nav {
   display: flex;
   flex-direction: column;
@@ -140,9 +163,9 @@
   background: var(--bg-selected);
 }
 
-/* The "About this prototype" group: at the foot, just above the Answering block, behind its own
-   hairline; its caption title, then rows like the nav's. With it, the foot follows it directly,
-   so the foot stays where it is and nothing above moves. */
+/* The "About this prototype" group: at the middle's foot, just above the Answering block, behind
+   its own hairline; its caption title, then rows like the nav's. The foot stays where it is and
+   nothing above moves. */
 .cd-sidebar__about {
   display: flex;
   flex-direction: column;
@@ -162,14 +185,10 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  margin-top: auto;
   padding-top: var(--space-8);
   border-top: 1px solid var(--line-hairline);
 }
 
-.cd-sidebar__about + .cd-sidebar__footer {
-  margin-top: 0;
-}
 
 /* The Answering row is the board's 52 px: the switch's two lines and its padding. */
 .cd-sidebar__footer > .cd-switch {

@@ -137,43 +137,45 @@ export function Sidebar({
       {desks.length >= 2 ? (
         <DeskPicker business={business} desks={desks} currentDeskId={currentDeskId} onSwitchDesk={onSwitchDesk} />
       ) : null}
-      <nav className="cd-sidebar__nav" aria-label="Main">
-        {NAV_ROWS.map((row) => {
-          const count = row.key === 'conversations' ? counts?.conversations : row.key === 'safety' ? counts?.safety : undefined;
-          const attention = row.key === 'safety' && counts?.safety?.attention === true;
-          return (
-            <Link
-              key={row.key}
-              href={hrefs[row.key]}
-              className="cd-sidebar__row cd-type-control"
-              {...(row.key === mainCurrent ? { 'aria-current': 'page' as const } : {})}
-            >
-              <Icon name={row.icon} />
-              <span className="cd-sidebar__label">{row.label ?? peopleLabel}</span>
-              {attention ? <StatusDot tone="held" /> : null}
-              {count ? <CountPill count={count.n} label={count.label} /> : null}
-            </Link>
-          );
-        })}
-      </nav>
-      {about ? (
-        <nav className="cd-sidebar__about" aria-labelledby={aboutId}>
-          <p id={aboutId} className="cd-sidebar__about-title cd-type-caption">
-            {about.title}
-          </p>
-          {about.links.map((link) => (
-            <Link
-              key={link.id}
-              href={link.href}
-              className="cd-sidebar__row cd-type-control"
-              {...(link.current === true ? { 'aria-current': 'page' as const } : {})}
-            >
-              <Icon name="document" />
-              <span className="cd-sidebar__label">{link.label}</span>
-            </Link>
-          ))}
+      <div className="cd-sidebar__middle">
+        <nav className="cd-sidebar__nav" aria-label="Main">
+          {NAV_ROWS.map((row) => {
+            const count = row.key === 'conversations' ? counts?.conversations : row.key === 'safety' ? counts?.safety : undefined;
+            const attention = row.key === 'safety' && counts?.safety?.attention === true;
+            return (
+              <Link
+                key={row.key}
+                href={hrefs[row.key]}
+                className="cd-sidebar__row cd-type-control"
+                {...(row.key === mainCurrent ? { 'aria-current': 'page' as const } : {})}
+              >
+                <Icon name={row.icon} />
+                <span className="cd-sidebar__label">{row.label ?? peopleLabel}</span>
+                {attention ? <StatusDot tone="held" /> : null}
+                {count ? <CountPill count={count.n} label={count.label} /> : null}
+              </Link>
+            );
+          })}
         </nav>
-      ) : null}
+        {about ? (
+          <nav className="cd-sidebar__about" aria-labelledby={aboutId}>
+            <p id={aboutId} className="cd-sidebar__about-title cd-type-caption">
+              {about.title}
+            </p>
+            {about.links.map((link) => (
+              <Link
+                key={link.id}
+                href={link.href}
+                className="cd-sidebar__row cd-type-control"
+                {...(link.current === true ? { 'aria-current': 'page' as const } : {})}
+              >
+                <Icon name="document" />
+                <span className="cd-sidebar__label">{link.label}</span>
+              </Link>
+            ))}
+          </nav>
+        ) : null}
+      </div>
       <div className="cd-sidebar__footer">
         <Switch label="Answering" description="Claude answers under your rules" checked={answering} onChange={onAnsweringChange} />
         <div className="cd-sidebar__owner">

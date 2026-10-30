@@ -294,3 +294,80 @@ export const CompactAbout: Story = {
     await expect(menu).toHaveFocus();
   },
 };
+
+export const ShortWindow: Story = {
+  args: {
+    sidebar: (
+      <Sidebar
+        business={rivera.business.name}
+        onSwitchBusiness={fn()}
+        desks={[
+          { id: 'desk-rivera-main', name: rivera.business.deskName },
+          { id: 'desk-rivera-emergencies', name: 'Emergencies' },
+        ]}
+        currentDeskId="desk-rivera-main"
+        onSwitchDesk={fn()}
+        current="today"
+        hrefs={hrefs}
+        peopleLabel="Customers"
+        counts={{ conversations: { n: 1, label: '1 needs you' }, safety: { n: 2, label: '2 blocked' } }}
+        answering
+        onAnsweringChange={fn()}
+        owner={{ name: rivera.business.ownerName, status: 'Available for chats' }}
+        about={ABOUT}
+        linkComponent={RouterLink}
+      />
+    ),
+  },
+  // A short laptop window: the reviewer bar, two Desks and the about group are more than its height.
+  globals: { viewport: { value: 'short', isRotated: false } },
+  parameters: {
+    canvas: 'N-Docs-Sidebar',
+    canvasNote:
+      'The board draws the sidebar at 982 px; in a window 657 px tall, under the reviewer bar and with two Desks, the nav and the about group scroll between the pinned top and the pinned foot. The board’s Connectors row is another change’s.',
+  },
+  play: async ({ canvas, userEvent }) => {
+    await expect([window.innerWidth, window.innerHeight]).toEqual([1366, 657]);
+    const column = canvas.getByRole('complementary', { name: 'Claude Desk' });
+    const sidebar = column.querySelector('.cd-sidebar') as HTMLElement;
+    const foot = sidebar.querySelector('.cd-sidebar__footer') as HTMLElement;
+    const middle = sidebar.querySelector('.cd-sidebar__middle') as HTMLElement | null;
+
+    // sidebar_foot_stays_in_view: the column itself never scrolls; the foot sits 12 px over its
+    // bottom, wholly in the window.
+    await expect(column.scrollHeight).toBeLessThanOrEqual(column.clientHeight);
+    await expect(Math.round(column.getBoundingClientRect().bottom - foot.getBoundingClientRect().bottom)).toBe(12);
+    await expect(foot.getBoundingClientRect().top).toBeGreaterThanOrEqual(0);
+    await expect(foot.getBoundingClientRect().bottom).toBeLessThanOrEqual(window.innerHeight);
+
+    // The middle, the nav and the about group, scrolls between the pinned top and the foot.
+    await expect(middle).not.toBeNull();
+    const scroller = middle as HTMLElement;
+    expectComputed(scroller, { overflowY: 'auto' });
+    await expect(scroller.scrollHeight).toBeGreaterThan(scroller.clientHeight);
+    const business = within(column).getByRole('button', { name: `Switch business, current: ${rivera.business.name}` });
+    const businessTop = business.getBoundingClientRect().top;
+    const footTop = foot.getBoundingClientRect().top;
+
+    // Tab reaches the about links through the scroll: each comes into view with its whole ring,
+    // and the top and the foot stay where they are.
+    const about = within(scroller).getByRole('navigation', { name: 'About this prototype' });
+    const links = within(about).getAllByRole('link');
+    const settings = within(within(scroller).getByRole('navigation', { name: 'Main' })).getByRole('link', { name: 'Settings' });
+    settings.focus();
+    await userEvent.tab();
+    await userEvent.tab();
+    await expect(links[1]).toHaveFocus();
+    const box = scroller.getBoundingClientRect();
+    const ring = (links[1] as HTMLElement).getBoundingClientRect();
+    await expect(scroller.scrollTop).toBeGreaterThan(0);
+    await expect(ring.top - 4).toBeGreaterThanOrEqual(box.top);
+    await expect(ring.bottom + 4).toBeLessThanOrEqual(box.bottom);
+    await expect(ring.left - 4).toBeGreaterThanOrEqual(box.left);
+    await expect(ring.right + 4).toBeLessThanOrEqual(box.right);
+    await expect(business.getBoundingClientRect().top).toBe(businessTop);
+    await expect(foot.getBoundingClientRect().top).toBe(footTop);
+    await userEvent.tab();
+    await expect(canvas.getByRole('switch', { name: 'Answering' })).toHaveFocus();
+  },
+};

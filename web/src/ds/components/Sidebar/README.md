@@ -20,6 +20,7 @@
   - the link marked `current` is `aria-current="page"` on `bg-selected`, and then the main nav marks no row, so one page is current;
   - in the keyboard order, after the main nav and before Answering. On a narrow screen, `AppShell`'s sheet shows the same sidebar, so the same group.
   Without `about`, nothing is drawn and nothing else moves: the foot stays at the bottom.
+- When the window is too short for it all, the nav and the about group scroll inside the column, between the pinned top (the mark, the business row and the Desk picker) and the pinned foot, so the Answering switch and the owner always show. The scrolling part reaches 4 px past its rows, so a focused row's ring is never clipped, and at normal heights every row sits where it would without it.
 - At the foot, above a hairline: the "Answering" `Switch` ("Claude answers under your rules"), then the owner: an initials avatar (`aria-hidden`, the first letters of the first and last words of the name, as written) beside the name and a status line. The owner row isn't a control.
 
 ## What the consumer provides
