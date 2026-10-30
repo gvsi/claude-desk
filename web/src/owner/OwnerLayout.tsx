@@ -86,7 +86,7 @@ export function OwnerLayout() {
  * say the Desk isn't the owner's.
  */
 function DeskGate({ deskId }: { deskId: string }) {
-  const desks = useDesks();
+  const desks = useDesks(deskId);
   const found = desks.data ? findDesk(desks.data, deskId) : null;
 
   if (found) return <DeskFrame businesses={desks.data ?? []} business={found.business} desk={found.desk} />;

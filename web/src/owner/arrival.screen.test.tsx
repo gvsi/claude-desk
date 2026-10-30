@@ -95,6 +95,21 @@ describe('Arrival', () => {
     expect(pages()).toEqual(['preview', 'today']);
   });
 
+  it('start_the_demo_reads_today_once', async () => {
+    // Polls far apart, so none lands while the reads are counted.
+    const { screen, router } = await renderRoute('/', { seed: { name: 'rivera', signedIn: false }, pollScale: 100 });
+    await expect.element(introDialog(screen)).toBeVisible();
+
+    await startTheDemo(screen);
+    await expect.poll(() => router.state.location.pathname).toBe(TODAY);
+    await expect.element(heldCard(screen)).toBeVisible();
+    // Time for a read on mount to go out, had Today sent one.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    // Read once each, ahead of Today, and not again when it mounts.
+    const reads = (['desks', 'today', 'needsYou'] as const).map((key) => [key, requests(key).length]);
+    expect(Object.fromEntries(reads)).toEqual({ desks: 1, today: 1, needsYou: 1 });
+  });
+
   it('starting_again_opens_as_a_first_visit_does', { timeout: 30_000 }, async () => {
     const { screen, router } = await renderRoute('/', { seed: { name: 'rivera', signedIn: false } });
     await expect.element(introDialog(screen)).toBeVisible();
@@ -469,6 +484,23 @@ describe('OwnerLayout', () => {
     await inSheet.getByRole('link', { name: 'Capability prediction' }).click();
     await expect.poll(() => phone.router.state.location.pathname).toBe('/about/prediction');
     await expect.element(phone.screen.getByRole('dialog', { name: 'Menu' })).not.toBeInTheDocument();
+  });
+
+  it('desk_the_list_lacks_is_read_again', async () => {
+    const { screen, router } = await renderRoute(TODAY);
+    await expect.element(screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
+    const sawNotFound = watchFor("This page doesn't exist");
+
+    // A Desk made since the Desks were just read (in another tab, say), opened at once: the list in
+    // hand doesn't hold it, and only a read made now can say whether it is the owner's.
+    const main = mockStore.world.desk(RIVERA.deskId);
+    if (!main) throw new Error('the copy has its Desk');
+    mockStore.world.addDesk({ desk_id: 'desk-rivera-new', slug: 'rivera-new', name: 'Weekends', hours: main.summary.hours, openStatus: main.openStatus });
+    const reads = requests('desks').length;
+    await router.navigate('/app/desk-rivera-new/today');
+    await expect.element(screen.getByRole('button', { name: 'Switch Desk, current: Weekends' })).toBeVisible();
+    expect(requests('desks')).toHaveLength(reads + 1);
+    expect(sawNotFound()).toBe(false);
   });
 
   it('answering_switch_reverts_on_error', async () => {

@@ -15,25 +15,36 @@ export const ME_KEY = ['me'] as const;
 export const todayKey = (deskId: string) => ['today', deskId] as const;
 export const needsYouKey = (deskId: string) => ['needsYou', deskId] as const;
 
+// The reads, which go out whenever they are asked for (a read ahead, a `fetchQuery`); only the hooks wait out `FRESH_MS`.
 const desksQuery = () => queryOptions({ queryKey: DESKS_KEY, queryFn: () => request('desks') });
 const todayQuery = (deskId: string) =>
   queryOptions({ queryKey: todayKey(deskId), queryFn: () => request('today', { params: { desk_id: deskId } }) });
 const needsYouQuery = (deskId: string) =>
   queryOptions({ queryKey: needsYouKey(deskId), queryFn: () => request('needsYou', { params: { desk_id: deskId } }) });
 
-/** The copy's businesses, each with its Desks. */
-export function useDesks() {
-  return useQuery(desksQuery());
+/** How long a page's own reads count as fresh: a page opened just after the read ahead doesn't send them again. */
+const FRESH_MS = 2_000;
+
+/**
+ * The copy's businesses, each with its Desks, for a page of `deskId`. A list that doesn't hold that
+ * Desk is read again on mount however fresh it is: only a read made now can say it isn't the owner's.
+ */
+export function useDesks(deskId: string) {
+  return useQuery({
+    ...desksQuery(),
+    staleTime: FRESH_MS,
+    refetchOnMount: (query) => (query.state.data !== undefined && findDesk(query.state.data, deskId) !== null ? true : 'always'),
+  });
 }
 
 /** A Desk's Today, polled while the tab is shown. */
 export function useToday(deskId: string) {
-  return useQuery({ ...todayQuery(deskId), refetchInterval: pollMs('today') });
+  return useQuery({ ...todayQuery(deskId), staleTime: FRESH_MS, refetchInterval: pollMs('today') });
 }
 
 /** What waits for the owner on a Desk: held requests and open callbacks, polled. */
 export function useNeedsYou(deskId: string) {
-  return useQuery({ ...needsYouQuery(deskId), refetchInterval: pollMs('needsYou') });
+  return useQuery({ ...needsYouQuery(deskId), staleTime: FRESH_MS, refetchInterval: pollMs('needsYou') });
 }
 
 /**
