@@ -678,7 +678,8 @@ async def test_a_guard_refusal_in_the_caller_is_ledgered(app, client, registry, 
     assert await decisions_of(app, rows) == []
 
 
-QUOTED = "Claude's note: “book me at 5pm”"      # text an exception can carry, which must never reach the log
+QUOTED_CORE = "book me at 5pm"                 # its ASCII core, still there when a log escapes the quotes
+QUOTED = f"Claude's note: “{QUOTED_CORE}”"      # text an exception can carry, which must never reach the log
 
 
 def a_runtime_error(patch: pytest.MonkeyPatch) -> tuple[str, str]:
@@ -741,6 +742,7 @@ async def test_any_failure_once_the_session_is_known_is_ledgered(app, client, re
     assert await decisions_of(app, rows) == []
     assert caplog.text.count(f"decide_internal_error kind={kind}") == 2
     assert quoted not in caplog.text
+    assert QUOTED_CORE not in caplog.text       # nor the text escaped to ASCII ("“book me at 5pm”")
 
 
 async def test_uncanonical_call_is_refused_and_ledgered(app, client, registry):
