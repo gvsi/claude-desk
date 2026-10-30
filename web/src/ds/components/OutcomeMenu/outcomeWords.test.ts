@@ -15,10 +15,15 @@ describe('outcome words', () => {
 
     expect(OUTCOME_WORDS).toEqual({ auto: 'Automatic', ask: 'Ask me first', never: 'Never' });
     expect(OUTCOME_TONE).toEqual({ auto: 'handled', ask: 'held', never: 'refused' });
-    // A preset is where the owner starts from; there is no "Custom" preset to pick.
-    expect(PRESET_WORDS.map(({ value, label }) => [value, label])).toEqual([
-      ['ask_first', 'Ask me first'],
-      ['auto', 'Automatic'],
+    // A preset is where the owner starts from; there is no "Custom" preset to pick. Each says what
+    // it sets, in the signed presets board's words.
+    expect(PRESET_WORDS).toEqual([
+      { value: 'ask_first', label: 'Ask me first', description: 'Quotes, bookings, documents and payments wait for your answer.' },
+      {
+        value: 'auto',
+        label: 'Recommended rules',
+        description: 'Quotes at list price, weekday bookings in your hours, documents to verified customers. Payments ask you first.',
+      },
     ]);
   });
 });

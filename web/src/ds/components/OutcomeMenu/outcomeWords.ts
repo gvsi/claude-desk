@@ -36,8 +36,12 @@ export function outcomePhrase(mode: RuleMode, limit?: string): string {
  */
 export type RulesPreset = 'ask_first' | 'auto';
 
-/** The presets' short words, in order. */
+/** The presets' names and what each sets, in order, in the signed presets board's words. */
 export const PRESET_WORDS = [
-  { value: 'ask_first', label: 'Ask me first' },
-  { value: 'auto', label: 'Automatic' },
-] as const satisfies readonly { value: RulesPreset; label: string }[];
+  { value: 'ask_first', label: 'Ask me first', description: 'Quotes, bookings, documents and payments wait for your answer.' },
+  {
+    value: 'auto',
+    label: 'Recommended rules',
+    description: 'Quotes at list price, weekday bookings in your hours, documents to verified customers. Payments ask you first.',
+  },
+] as const satisfies readonly { value: RulesPreset; label: string; description: string }[];

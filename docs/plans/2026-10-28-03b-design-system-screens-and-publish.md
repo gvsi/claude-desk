@@ -248,7 +248,7 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
     - `OUTCOME_WORDS` (`satisfies Record<RuleMode, string>`): `auto` "Automatic", `ask` "Ask me first", `never` "Never".
     - `OUTCOME_TONE`: `auto` handled, `ask` held, `never` refused.
     - `outcomePhrase(mode, limit?)`: `OUTCOME_WORDS[mode]`, except that an `auto` rule with a `limit` reads "Automatic up to {limit}; over {limit}, ask me first". `limit` is the screen's formatted amount ("$100"). An auto card with `max_amount_cents` holds anything above it for the owner through its hold twin. No mode asks with a limit.
-    - `RulesPreset = 'ask_first' | 'auto'` and `PRESET_WORDS`, in that order: "Ask me first", "Automatic", for the Rules page's "Start from a preset" menu. A preset is a bulk edit of the rules, not a mode, so there is no "Custom".
+    - `RulesPreset = 'ask_first' | 'auto'` and `PRESET_WORDS`, in that order, each a `label` and a `description` from the signed presets board: "Ask me first" ("Quotes, bookings, documents and payments wait for your answer.") and "Recommended rules" ("Quotes at list price, weekday bookings in your hours, documents to verified customers. Payments ask you first."), for the Rules page's "Start from a preset" menu. A preset is a bulk edit of the rules, not a mode, so there is no "Custom".
   - **Rule words.** `RuleWord = { field: 'who' | 'limits' | 'hours' | 'review'; text: string }`: the consumer's code-rendered words for what a card enforces (Plan 04's `ruleWords(card, people)`: "Anyone", "Up to $300", "Checked by the reviewer"). The design system formats none.
   - **Connectors.** `ConnectorView = { id: string; name: string; icon: ConnectorIconName; description: string; source: { kind: 'built_in' } | { kind: 'external'; mock: true } }`, the screen's view of one connector. Plan 04 owns which tools each connector groups. Every external connector in the demo is a mock, and `mock: true` is required, so the badge can't be left out.
   - `ConnectorIcon({ icon: ConnectorIconName; size: 'page' | 'section' | 'inline' })`: a 48, 36 or 24 px tile with an 8 px radius, `aria-hidden`.
@@ -659,7 +659,7 @@ Owner decisions, 2026-10-29 (the signed Connectors tab boards):
 - `ConnectorSection` `aboveTools?: ReactNode`: a line between the header and the tool rows, padded 12 px 16 px (12 px 14 px on a phone) under a hairline, for the payment ceiling. The section uses `hideBuiltIn`.
 - `ConnectorList` `onAddConnector?`: without it, no "Add a connector" at the end.
 - `PageHeader` under 640 px: the actions stay on the title's line, at its right, and the subtitle runs under both, 8 px under the title.
-- `RulesPreset = 'ask_first' | 'auto'`, `PRESET_WORDS` two entries.
+- `RulesPreset = 'ask_first' | 'auto'`, `PRESET_WORDS` two entries, "Ask me first" and "Recommended rules", each with its board description.
 - `ChangeReview`: the bars and words above; the connector line under a title carries no "Built in".
 
 **Stories** (the rest keep Task 6b's, with their trails starting at Connectors):
