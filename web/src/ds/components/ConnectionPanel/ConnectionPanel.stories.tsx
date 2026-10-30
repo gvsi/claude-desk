@@ -224,7 +224,10 @@ export const VerificationAlwaysOn: Story = {
   },
   play: async ({ canvas }) => {
     // always_on_has_no_turn_off
-    await expect(canvas.getByText("Always on. It's how Claude confirms a customer before sharing anything private.")).toBeVisible();
+    const line = canvas.getByText("Always on. It's how Claude confirms a customer before sharing anything private.");
+    await expect(line).toBeVisible();
     await expect(canvas.queryByRole('button')).toBeNull();
+    // The line is as tall as its words, one line here: no room is kept for a button beside it.
+    await expect(line.getBoundingClientRect().height).toBe(parseFloat(getComputedStyle(line).lineHeight));
   },
 };

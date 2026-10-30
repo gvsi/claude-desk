@@ -46,11 +46,16 @@
 }
 
 .cd-connection-panel__line {
-  flex: 1 1 320px;
   min-width: 0;
   margin: 0;
   color: var(--text-secondary);
   overflow-wrap: anywhere;
+}
+
+/* Beside its button the line takes the room left, at least 320 px before the button wraps under
+   it. Alone (Verification's always-on line, in the panel's column) it is just as tall as its words. */
+.cd-connection-panel__off > .cd-connection-panel__line {
+  flex: 1 1 320px;
 }
 
 /* The confirm's body: its lines and lists, 8 px apart. */
