@@ -18,6 +18,8 @@ from uuid import uuid4
 import procrastinate
 import psycopg
 import pytest
+from alembic import command
+from alembic.config import Config
 from pydantic import ValidationError
 from sqlalchemy import cast, create_engine, exists, func, literal, literal_column, select, text, update
 from sqlalchemy.dialects.postgresql import REGCLASS
@@ -51,6 +53,7 @@ from desk.db.models import (
     Quote,
     Tool,
 )
+from desk.db.models import DemoInboxEntry as DemoInboxRow
 from desk.db.session import (
     COPY_SETTING,
     CopySession,
@@ -655,6 +658,50 @@ def test_one_active_policy_version_per_desk(kernel_tx):
     kernel_tx.add(version("desk-a", 3, "active"))
     with pytest.raises(IntegrityError):
         kernel_tx.flush()
+
+
+def test_only_an_owner_alert_names_a_decision(kernel_tx):
+    # a held request's alert links to its decision; a code, a checkpoint or an alert to anyone but the owner never
+    # names one, so no session's own Demo inbox can show a decision
+    def entry(entry_id: str, kind: str, to: str, decision_id: str | None) -> DemoInboxRow:
+        return DemoInboxRow(entry_id=entry_id, copy_id="copy-a", desk_id="desk-a", to=to, person_id=None, kind=kind,
+                            body="-", preview="-", created_at=SLOT_TIME, decision_id=decision_id)
+
+    masked = "d•••@example.com"
+    kernel_tx.add_all([entry("inbox-1", "alert", "owner", "decision-1"), entry("inbox-2", "alert", "owner", None),
+                       entry("inbox-3", "verification_code", masked, None), entry("inbox-4", "head_checkpoint",
+                                                                                   "owner", None)])
+    kernel_tx.flush()
+    for n, (kind, to) in enumerate((("verification_code", masked), ("head_checkpoint", "owner"), ("alert", masked))):
+        savepoint = kernel_tx.begin_nested()
+        kernel_tx.add(entry(f"inbox-named-{n}", kind, to, "decision-1"))
+        with pytest.raises(IntegrityError):
+            kernel_tx.flush()
+        savepoint.rollback()
+        kernel_tx.expunge_all()
+
+
+ALEMBIC_DIR = Path(__file__).resolve().parents[1] / "alembic"
+
+
+def test_inbox_decision_id_migration_goes_down_and_up(admin):
+    # 0012_inbox_decision_id adds the column and its check; its downgrade takes both away, and head brings them back
+    config = Config()                                     # no file, so alembic's env.py leaves logging alone
+    config.set_main_option("script_location", str(ALEMBIC_DIR))
+
+    def migrated() -> tuple[bool, bool]:
+        (checks,) = admin.execute("SELECT count(*) FROM pg_constraint WHERE conrelid = 'kernel.demo_inbox'::regclass"
+                                  " AND conname = 'demo_inbox_decision_id_check'").fetchone()
+        return "decision_id" in columns(admin, "kernel", "demo_inbox"), checks == 1
+
+    assert migrated() == (True, True)
+    try:
+        command.downgrade(config, "api_tables")
+        assert migrated() == (False, False)
+    finally:
+        command.upgrade(config, "head")
+    assert migrated() == (True, True)
+    assert nullable_columns(admin, "kernel", "demo_inbox")["decision_id"] is True
 
 
 def assert_refused_before_the_database(session: Session, row: Base) -> None:
