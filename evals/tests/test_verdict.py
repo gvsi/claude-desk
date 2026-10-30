@@ -2465,7 +2465,11 @@ def test_emergency_advice_needs_the_shut_off_words_and_no_promise():
                     # "her" after the verb's subject is Maria, not a possessive, and sending Maria
                     # needs no "out" or "over".
                     "We'll have her call you right away.", "We can have her come out immediately.",
-                    "We can send Maria right away.", "We'll send her right now."):
+                    "We can send Maria right away.", "We'll send her right now.",
+                    # A comma before an adverb or a time phrase doesn't end the promise's clause.
+                    "Maria will call you back, usually within the hour.",
+                    "Maria can come out, probably right away.",
+                    "She can be there, at the latest, within the hour."):
         assert replies(task, promise) == {"commitment.pattern"}, promise
     # A promise of what it costs, in prose: free, nothing extra, or a statement that an extra, emergency
     # or after-hours fee applies (or doesn't).
