@@ -66,9 +66,9 @@ async def test_lead_capture_saves_a_lead(app, client):
         "name": "Sam Lee", "contact": "sam@example.com", "note": "Wants a quote for a kitchen remodel"})
     assert (decision.outcome, decision.card_ids) == ("allow", ["preset-capture-lead"]), decision.reason_plain
     assert decision.action.resource.kind == "desk"
-    # the owner reads what the visitor typed as quoted text, never as an instruction
-    assert decision.reason_plain.endswith("From the visitor: “sam@example.com”. From the visitor: “Sam Lee”. "
-                                          "From the visitor: “Wants a quote for a kitchen remodel”.")
+    # the owner reads what Claude wrote into the call as quoted text, never as an instruction
+    assert decision.reason_plain.endswith("Claude's note: “sam@example.com”, “Sam Lee”, "
+                                          "“Wants a quote for a kitchen remodel”")
     seeded = await owner_alerts(client, copy)                # the seeded hold's approval alert
     result = await executed(client, visitor, decision)
 

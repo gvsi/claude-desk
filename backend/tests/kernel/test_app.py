@@ -297,12 +297,7 @@ def test_kernel_logs_never_print_an_errors_text():
 
 # The KERNEL_ROUTES rows the later kernel plans serve, as each plan's "Produced" list names them. A
 # plan takes its rows out of here in the commit that serves them, since the test below fails until then.
-DESK_PARTS = ("business", "charter", "hours", "prices", "calendar", "people", "notifications", "answering")
 LATER_ROUTES = {
-    "01b": {"POST /desks", *(f"PUT /desks/{{id}}/{part}" for part in DESK_PARTS), "DELETE /desks/{id}",
-            "POST /documents", "GET /document_links/{token}", "POST /verify/start", "POST /verify/check",
-            "GET /demo_inbox?session_id=", "GET /demo_inbox", "POST /knowledge", "POST /owner/messages",
-            "POST /handoffs/{id}/done"},
     "01c": {"POST /tools/connect", "POST /tools/confirm", "POST /tools/simulate_change", "GET /payment_links/{token}",
             "POST /payment_links/{token}/complete", "POST /payment_links/{token}/cancel", "POST /agents/demo",
             "POST /policy/{version}/probe"},
