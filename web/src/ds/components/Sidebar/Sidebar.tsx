@@ -11,6 +11,12 @@ import './Sidebar.css';
 /** The owner app's pages, in the sidebar's fixed order. */
 export type NavKey = 'today' | 'conversations' | 'people' | 'rules' | 'connectors' | 'safety' | 'share' | 'settings';
 
+/**
+ * Where each row goes. Every page needs its href but Connectors: an app without a Connectors page
+ * leaves `connectors` out, and the sidebar draws no row for it.
+ */
+export type SidebarHrefs = Record<Exclude<NavKey, 'connectors'>, string> & { connectors?: string };
+
 /** What a nav row's link receives: a router's link component takes the same props as `<a>`. */
 export interface SidebarLinkProps {
   href: string;
@@ -53,8 +59,8 @@ export interface SidebarProps {
   onSwitchDesk: (deskId: string) => void;
   /** The page the owner is on; its row is marked `aria-current="page"`. */
   current: NavKey;
-  /** Where each row goes. */
-  hrefs: Record<NavKey, string>;
+  /** Where each row goes. Without `connectors`, there is no Connectors row and the rows close up. */
+  hrefs: SidebarHrefs;
   /** The business's word for the people it serves, the third row: "Customers", "Clients". */
   peopleLabel: string;
   /** Counts on Conversations and Safety only; `attention` adds a held dot beside Safety's. */
@@ -94,9 +100,9 @@ export function initialsOf(name: string): string {
 }
 
 /**
- * The owner app's sidebar: the Claude Desk mark, the business and Desk switchers, the eight pages
- * in a fixed order, an optional "About this prototype" group, and at the bottom the Answering switch
- * and the owner. It fills the column the `AppShell` gives it.
+ * The owner app's sidebar: the Claude Desk mark, the business and Desk switchers, the pages in a
+ * fixed order (Connectors only when it has an href), an optional "About this prototype" group, and
+ * at the bottom the Answering switch and the owner. It fills the column the `AppShell` gives it.
  */
 export function Sidebar({
   business,
@@ -141,12 +147,15 @@ export function Sidebar({
       <div className="cd-sidebar__middle">
         <nav className="cd-sidebar__nav" aria-label="Main">
           {NAV_ROWS.map((row) => {
+            const href = hrefs[row.key];
+            // Only Connectors' href may be left out, and then its row isn't drawn.
+            if (href === undefined) return null;
             const count = row.key === 'conversations' ? counts?.conversations : row.key === 'safety' ? counts?.safety : undefined;
             const attention = row.key === 'safety' && counts?.safety?.attention === true;
             return (
               <Link
                 key={row.key}
-                href={hrefs[row.key]}
+                href={href}
                 className="cd-sidebar__row cd-type-control"
                 {...(row.key === mainCurrent ? { 'aria-current': 'page' as const } : {})}
               >

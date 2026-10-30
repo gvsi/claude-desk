@@ -27,7 +27,7 @@ function DocsSidebar() {
         currentDeskId={MAIN_LINE.id}
         onSwitchDesk={fn()}
         current="today"
-        hrefs={OWNER_HREFS}
+        hrefs={{ ...OWNER_HREFS, connectors: '#connectors' }}
         peopleLabel="Customers"
         counts={{ conversations: { n: 2, label: '2 need you' }, safety: { n: 2, label: '2 blocked' } }}
         answering

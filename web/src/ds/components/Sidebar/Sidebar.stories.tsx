@@ -229,6 +229,32 @@ export const OnConnectors: Story = {
   },
 };
 
+/** Where the rows go in an app with no Connectors page yet: every page but Connectors. */
+const { connectors: _noConnectorsPage, ...hrefsWithoutConnectors } = hrefs;
+
+export const WithoutConnectors: Story = {
+  args: { hrefs: hrefsWithoutConnectors },
+  parameters: {
+    canvasNote:
+      'An app with no Connectors page passes no Connectors href, so the row isn’t drawn: the seven pages the board draws, one row apart, with no gap after Rules.',
+  },
+  play: async ({ canvasElement }) => {
+    // connectors_row_only_with_its_href: seven rows, each with somewhere to go.
+    const rows = navRows(canvasElement);
+    await expect(rows.map((row) => row.text)).toEqual(['Today', 'Conversations', 'Customers', 'Rules', 'Safety', 'Share', 'Settings']);
+    await expect(rows.map((row) => row.link.getAttribute('href'))).toEqual(Object.values(hrefsWithoutConnectors));
+    await expect(within(canvasElement).queryByRole('link', { name: 'Connectors' })).toBeNull();
+
+    // The rows close up: Safety follows Rules one 38 px row down, as every row follows the one before.
+    const tops = rows.map((row) => row.link.getBoundingClientRect().top);
+    await expect(tops.slice(1).map((top, index) => Math.round(top - (tops[index] ?? 0)))).toEqual([38, 38, 38, 38, 38, 38]);
+    // Safety keeps its count and its held dot, and Today stays the current page.
+    const safety = rows[4]?.link as HTMLElement;
+    await expect(within(safety).getByRole('img', { name: '2 blocked' })).toBeVisible();
+    await expect(rows.filter((row) => row.link.hasAttribute('aria-current')).map((row) => row.text)).toEqual(['Today']);
+  },
+};
+
 /** The two documents behind the prototype, as the docs pages link them. */
 const ABOUT = {
   title: 'About this prototype',

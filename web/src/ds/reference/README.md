@@ -56,7 +56,7 @@ The sidebar is one look on every page, the panel with its seam and the Answering
 
 ### The sidebar's eighth page
 
-The project owner signed Connectors as its own page on 2026-10-29, after the Run 1 owner boards. Those boards draw seven pages in the sidebar; every story draws eight, Connectors after Rules with its plug icon, as the Connectors boards (N-Conn-23-Connectors, N-Conn-17-Presets) and N-Docs-Sidebar draw it. The rows keep the boards' 36px height and 2px gap, and the Answering switch stays pinned at the column's foot. This applies to every owner board, so the board stories' notes don't repeat it.
+The project owner signed Connectors as its own page on 2026-10-29, after the Run 1 owner boards. The sidebar draws the Connectors row only when the app passes its href. The Run 1 and recorded-history boards draw seven pages, and their stories pass no Connectors href, so they draw the same seven, as the web app's first run will. N-Docs-Sidebar draws eight, Connectors after Rules with its plug icon, as the Connectors boards (N-Conn-23-Connectors, N-Conn-17-Presets) do, and its story passes the href. Either way the rows keep the boards' 36px height and 2px gap, and the Answering switch stays pinned at the column's foot.
 
 ### Where a story keeps a value the signed render doesn't draw
 
