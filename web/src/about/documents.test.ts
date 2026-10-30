@@ -54,6 +54,11 @@ function links(blocks: Block[]): Extract<Inline, { kind: 'link' }>[] {
 const PROTOTYPE_SENTENCE = /The prototype, v1['’]s enforced core, is at .+?, with the code at (.+?)\./g;
 const ON_THE_PAGE = 'You’re in it. The code is at $1.';
 
+/** Quote marks as the Markdown types them, so the page's curly ones compare equal to the document's words. */
+function straight(value: string): string {
+  return value.replace(/[‘’]/g, "'").replace(/[“”]/g, '"');
+}
+
 /** A line's words with the Markdown taken off: link text without its target, placeholders' words, no ** or `. */
 function words(line: string): string {
   return line
@@ -115,9 +120,10 @@ describe('the About documents', () => {
       // Every section, in the order the Markdown has them.
       const sections = lines.filter((line) => line.startsWith('## ')).map((line) => line.slice(3));
       expect(sections.length, file).toBeGreaterThan(3);
-      expect(blocks.flatMap((block) => (block.kind === 'heading' && block.depth === 2 ? [block.text] : [])), file).toEqual(
-        sections,
-      );
+      expect(
+        blocks.flatMap((block) => (block.kind === 'heading' && block.depth === 2 ? [straight(block.text)] : [])),
+        file,
+      ).toEqual(sections.map(straight));
       expect(blocks.flatMap((block) => (block.kind === 'figure' ? [block.name] : [])), file).toEqual(figures);
       // The proposal's one link to the prediction goes to its page; every other link is an https:// address.
       const found = links(blocks);
@@ -136,7 +142,7 @@ describe('the About documents', () => {
       const expected = articleText(markdown);
       expect(expected.length, file).toBeGreaterThan(30);
 
-      expect(documentText(ABOUT_DOCUMENTS[id].blocks), file).toEqual(expected);
+      expect(documentText(ABOUT_DOCUMENTS[id].blocks).map(straight), file).toEqual(expected.map(straight));
     }
 
     // A parse that dropped, repeated or reordered a block would fail the comparison above.
@@ -147,7 +153,9 @@ describe('the About documents', () => {
     const dropped = blocks.filter((_, index) => index !== a);
     const repeated = [...blocks.slice(0, a + 1), ...blocks.slice(a)];
     const swapped = blocks.map((block, index) => (index === a ? blocks[b] : index === b ? blocks[a] : block)) as Block[];
-    for (const changed of [dropped, repeated, swapped]) expect(documentText(changed)).not.toEqual(expected);
+    for (const changed of [dropped, repeated, swapped]) {
+      expect(documentText(changed).map(straight)).not.toEqual(expected.map(straight));
+    }
   });
 
   it('the_registry_and_the_links_name_each_page', () => {
@@ -184,8 +192,7 @@ describe('the About documents', () => {
   });
 
   it('pull_quotes_are_sentences_of_their_documents', () => {
-    // The page writes curly apostrophes and the documents straight ones; the words must be the same.
-    const straight = (value: string) => value.replace(/[‘’]/g, "'");
+    // The page writes curly quote marks and the documents straight ones; the words must be the same.
     const sentences = (paragraph: string) => paragraph.split(/(?<=[.!?])\s+/);
     for (const { id, file } of DOCUMENTS) {
       const { pullQuote, blocks } = ABOUT_DOCUMENTS[id];
@@ -198,6 +205,42 @@ describe('the About documents', () => {
     expect(ABOUT_DOCUMENTS.prediction.pullQuote).toBe(
       'It will still be talked around often enough that its limits must sit in code.',
     );
+  });
+
+  it('the_pages_show_curly_quote_marks', () => {
+    /** Every piece of words the page shows from the blocks, code left out. */
+    const shown = (blocks: Block[]): string[] => {
+      const walk = (inlines: Inline[]): string[] =>
+        inlines.flatMap((inline) =>
+          'children' in inline ? walk(inline.children) : inline.kind === 'code' ? [] : [inline.text],
+        );
+      return blocks.flatMap((block) => {
+        switch (block.kind) {
+          case 'heading':
+          case 'byline':
+            return [block.text];
+          case 'paragraph':
+            return walk(block.children);
+          case 'list':
+            return block.items.flatMap(walk);
+          case 'table':
+            return [...block.head, ...block.rows.flat()].flatMap(walk);
+          case 'figure':
+            return [];
+        }
+      });
+    };
+    for (const { id, file } of DOCUMENTS) {
+      // The Markdown keeps its straight ones; the page shows none.
+      expect(raw(file), file).toMatch(/'[^]*"|"[^]*'/);
+      expect(shown(ABOUT_DOCUMENTS[id].blocks).filter((piece) => /['"]/.test(piece)), file).toEqual([]);
+    }
+    const prediction = documentText(ABOUT_DOCUMENTS.prediction.blocks);
+    expect(prediction).toContain('Why it’s coming');
+    expect(prediction.join('\n')).toContain('“the gap between ‘capable’ and ‘completely robust’ remains wide”');
+    expect(prediction.join('\n')).toContain('such as a visitor saying “I’m the owner”.');
+    // After a link, the quote mark closes the link's last word.
+    expect(documentText(ABOUT_DOCUMENTS.proposal.blocks).join('\n')).toContain('’s $20 monthly');
   });
 
   const HOSTED = '[owner: hosted URL; the passcode comes with the link]';

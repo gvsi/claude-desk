@@ -4,7 +4,14 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { documentText, MarkdownError, parseDocument, readingMinutes, type Inline } from './markdown.ts';
+import {
+  curlQuotes,
+  documentText,
+  MarkdownError,
+  parseDocument,
+  readingMinutes,
+  type Inline,
+} from './markdown.ts';
 
 /** The proposal's resolver: the other document's file name is the only relative link, and it maps to its page. */
 const resolve = (target: string) => (target === 'capability-prediction.md' ? '/about/prediction' : undefined);
@@ -419,5 +426,71 @@ describe('the About Markdown reader', () => {
       { kind: 'heading', depth: 1, text: 'A document', id: 'a-document' },
       { kind: 'byline', text: 'Giovanni Alcantara · October 29, 2026' },
     ]);
+  });
+
+  it('quote_marks_show_curly_on_the_page', () => {
+    const markdown = [
+      "# The owner's document",
+      '',
+      "Giovanni O'Brien · October 29, 2026",
+      '',
+      "## Who it's for",
+      '',
+      `The owner's rules and owners' changes; "the gap between 'capable' and 'completely robust'" in the '90s.`,
+      '',
+      `He wrote "'Hi,' she said" and a "[quoted link](https://example.com/q)".`,
+      '',
+      "**Who's asking.** A [visitor's page](https://example.com/pricing)'s $20, `it's \"code\"` and [owner: the owner's word].",
+      '',
+      "- It's listed",
+      '',
+      '| Axis | Note |',
+      '| --- | --- |',
+      "| 'Quoted' | (the 'aside') |",
+      '',
+    ].join('\n');
+    const blocks = parseDocument(markdown, resolve);
+    expect(curlQuotes(blocks)).toEqual([
+      { kind: 'heading', depth: 1, text: 'The owner’s document', id: 'the-owners-document' },
+      { kind: 'byline', text: 'Giovanni O’Brien · October 29, 2026' },
+      { kind: 'heading', depth: 2, text: 'Who it’s for', id: 'who-its-for' },
+      {
+        kind: 'paragraph',
+        children: [
+          text('The owner’s rules and owners’ changes; “the gap between ‘capable’ and ‘completely robust’” in the ’90s.'),
+        ],
+      },
+      {
+        kind: 'paragraph',
+        children: [
+          text('He wrote “‘Hi,’ she said” and a “'),
+          { kind: 'link', href: 'https://example.com/q', children: [text('quoted link')], internal: false },
+          text('”.'),
+        ],
+      },
+      {
+        kind: 'paragraph',
+        children: [
+          { kind: 'strong', children: [text('Who’s asking.')] },
+          text(' A '),
+          { kind: 'link', href: 'https://example.com/pricing', children: [text('visitor’s page')], internal: false },
+          // After a link, a quote mark closes the link's last word.
+          text('’s $20, '),
+          // Code keeps what was typed.
+          { kind: 'code', text: `it's "code"` },
+          text(' and '),
+          { kind: 'placeholder', text: 'owner: the owner’s word' },
+          text('.'),
+        ],
+      },
+      { kind: 'list', items: [[text('It’s listed')]] },
+      {
+        kind: 'table',
+        head: [[text('Axis')], [text('Note')]],
+        rows: [[[text('‘Quoted’')], [text('(the ‘aside’)')]]],
+      },
+    ]);
+    // The parse itself is left as the Markdown has it.
+    expect(blocks[2]).toEqual({ kind: 'heading', depth: 2, text: "Who it's for", id: 'who-its-for' });
   });
 });
