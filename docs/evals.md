@@ -117,15 +117,22 @@ make setup
 make evals-tier1
 ```
 
-Tier 2 needs `ANTHROPIC_API_KEY` in `.env` on either provider, because the kernel's reviewer and soft-promise checks always use it. For `MODEL_PROVIDER=bedrock`, also set `BEDROCK_BEARER_TOKEN`, the Bedrock-only credential. Then run every scenario once (at most $40), gate the pass and write its report:
+Tier 2 needs `ANTHROPIC_API_KEY` in `.env` on either provider, because the kernel's reviewer and soft-promise checks always use it. For `MODEL_PROVIDER=bedrock`, also set `BEDROCK_BEARER_TOKEN`, the Bedrock-only credential. Then run every scenario once (at most $40), gate the pass, measure latency for it (20 turns each of a plain question, a quote and a booking, at most $3) and write its report:
 
 ```sh
 make evals-tier2
-uv run --project backend --group evals python -m evals.run gate --pass <id>
-uv run --project backend --group evals python -m evals.run report --pass <id>
+make evals-gate PASS=<id>
+make evals-latency PASS=<id>
+make evals-report PASS=<id>
 ```
 
-`<id>` is the pass's folder under `evals/out/passes/`.
+`<id>` is the pass's folder under `evals/out/passes/`. Each target runs the matching `python -m evals.run` subcommand: `gate`, `latency` or `report`.
+
+- `FINAL=1` makes `evals-gate` the final gate, which also needs three runs of every scenario, no pending scenario and a recorded rate.
+- `BASE_URL=<url>` makes `evals-latency` measure the hosted deployment instead, entering it with the owner's passcode as `DESK_PASSCODE` in `.env`.
+- `NULL_BASELINE=<id>` adds a null-baseline pass of the same held-out set to the report.
+
+The report includes the latest local and hosted latency runs made for the pass. Without one, it says latency wasn't measured.
 
 For a $0 rehearsal with every model scripted, add `--dry-run`:
 
@@ -133,7 +140,7 @@ For a $0 rehearsal with every model scripted, add `--dry-run`:
 uv run --project backend --group evals python -m evals.run tier2 --dry-run --suite all --split all --runs 1 --max-usd 0
 ```
 
-A dry run's numbers come from scripted models, so its report is never written over the latest one.
+A dry run's numbers come from scripted models, so `report` refuses a dry run, and the latest report stays as it was.
 
 ## Latest results
 

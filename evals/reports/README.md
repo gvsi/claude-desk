@@ -6,7 +6,16 @@ Each tier 2 pass that is gated and reported leaves three files here:
 - `latest.json`: the latest report's numbers, which the README, the path to MVP and the latest results in [the evals guide](../../docs/evals.md) read.
 - `spend.csv`: this month's eval spend, one row per pass.
 
-`python -m evals.run report --pass <id>` writes all three and rewrites the evals guide's latest results. It refuses a dry run or a null-baseline pass, since neither measures a Desk. The pass's runs and transcripts stay in `evals/out/passes/<pass_id>/`, which is never committed, because transcripts quote what visitors saw.
+`make evals-report PASS=<id>` (`python -m evals.run report --pass <id>`) writes all three and rewrites the evals guide's latest results. It reads:
+
+- the pass's runs and transcripts, in `evals/out/passes/<pass_id>/`, which is never committed, because transcripts quote what visitors saw;
+- the pass's spend row and this month's other rows, from the spend file every worktree shares;
+- the latest local and hosted latency runs made for the pass (`make evals-latency PASS=<id>`), never a dry run's;
+- the calibration the reviewer's thresholds came from, at the pass's commit;
+- the current recorded rate;
+- with `NULL_BASELINE=<id>`, a null-baseline pass of the same held-out set.
+
+It refuses a dry run, a null-baseline pass or a pass with no run, since none of them measures a Desk. It also refuses a pass whose files it can't read whole, such as a missing transcript or a scenario changed since the pass. A refused report writes nothing.
 
 ## Reading a report
 
