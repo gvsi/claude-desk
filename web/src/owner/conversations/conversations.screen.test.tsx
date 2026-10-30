@@ -365,16 +365,25 @@ describe('Conversations', () => {
 
   it('say_needs_take_over', async () => {
     const chat = named(DANA_LIVE, DANA);
+    // No poll lands while the test counts reads, and typing pings at most once in the test.
     const { screen } = await renderRoute(conversation(DANA_LIVE), { pollScale: 100 });
-    await screen.getByRole('button', { name: 'Take over' }).click();
+    const takeOver = screen.getByRole('button', { name: 'Take over' });
+    await expect.element(takeOver).toBeVisible();
+    const reads = requests('conversation').length;
+    await takeOver.click();
     const box = screen.getByRole('textbox', { name: 'Write to them' });
     await expect.element(box).toBeVisible();
+    // The take-over reads the chat again, and it is hers in that read.
+    await expect.poll(() => requests('conversation').length).toBeGreaterThan(reads);
+
+    // She writes while the chat is hers: one typing ping, which the API takes.
+    const words = 'I can come at 4 today.';
+    await box.fill(words);
+    await expect.poll(() => requests('ownerTyping').length).toBe(1);
 
     // The chat goes back to Claude from another tab before she sends.
     mockStore.world.handBack(chat);
     const streamed = chat.events.length;
-    const words = 'I can come at 4 today.';
-    await box.fill(words);
     await userEvent.keyboard('{Enter}');
 
     // The API turns her words back, nothing reaches Dana, and the screen says what to do.
@@ -387,9 +396,11 @@ describe('Conversations', () => {
     await expect.element(screen.getByRole('button', { name: 'Take over' })).toBeVisible();
     await expect.element(screen.getByRole('textbox', { name: 'Whisper to Claude' })).toHaveValue('');
 
-    // Her words wait for the box they were written in: taking over again gives them back.
+    // Her words wait for the box they were written in: taking over again gives them back, and
+    // words the page puts back are not her typing.
     await screen.getByRole('button', { name: 'Take over' }).click();
     await expect.element(screen.getByRole('textbox', { name: 'Write to them' })).toHaveValue(words);
+    expect(requests('ownerTyping')).toHaveLength(1);
     await expectScreenBasics(screen.container, { owner: true });
   });
 
