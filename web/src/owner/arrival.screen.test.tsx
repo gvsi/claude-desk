@@ -183,8 +183,8 @@ describe('Arrival', () => {
     const heading = screen.getByRole('heading', { level: 1, name: /, Maria$/ });
     const tryAgain = screen.getByRole('button', { name: 'Try again' });
 
-    // The Desks reads since the demo last started. Start over's own reads can still reach the mock
-    // after its reset, so a count from the reset would depend on how fast that copy opened.
+    // The Desks reads since the demo last started. A count from the mock's reset would also hold
+    // Start over's own reads, which can reach the mock after it.
     let desksBefore = 0;
     const desksReadSinceStart = () => requests('desks').length - desksBefore;
     /** Starts the demo with the copy's Desks lost on the network `lost` times, and watches the way to Today. */
@@ -201,7 +201,26 @@ describe('Arrival', () => {
       await screen.getByRole('button', { name: 'Start over' }).click();
       await screen.getByRole('dialog', { name: 'Start over with a fresh copy?' }).getByRole('button', { name: 'Start over' }).click();
       await expect.poll(() => router.state.location.pathname).not.toBe(TODAY);
+      // The new copy's own Today drawn (the greeting alone could be the old Today's), and its Desks
+      // reads over: a read still on its way would otherwise land after the reset, in the next
+      // start's count or on a failure that start plants.
       await expect.element(heading).toBeVisible();
+      await expect.element(screen.getByRole('link', { name: 'Chat as a customer' })).toHaveAttribute(
+        'href',
+        `/d/${mockStore.world.ids.slug}?preview=${mockStore.world.ids.deskId}`,
+      );
+      let seen = -1;
+      await expect
+        .poll(
+          () => {
+            const now = requests('desks').length;
+            const settled = now === seen;
+            seen = now;
+            return settled;
+          },
+          { interval: 300, timeout: 5_000 },
+        )
+        .toBe(true);
       mockStore.reset('rivera', { signedIn: false });
       await expect.poll(() => router.state.location.pathname).toBe('/');
       await expect.element(introDialog(screen)).toBeVisible();
