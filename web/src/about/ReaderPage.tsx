@@ -7,7 +7,7 @@
  *
  * The page is static: it reads its document from `documents.ts`, which only it loads, and makes no request.
  */
-import { Fragment, useContext, useEffect, useLayoutEffect, useSyncExternalStore } from 'react';
+import { Fragment, useContext, useEffect, useLayoutEffect, useRef, useSyncExternalStore } from 'react';
 import { Link, UNSAFE_NavigationContext, useLocation, useNavigationType } from 'react-router';
 
 import { Card, ConceptFooter, Icon, Mark, Wordmark } from '../ds/index.ts';
@@ -87,6 +87,13 @@ function useReadingPlace(id: AboutId, hash: string) {
   // The router's navigator: one object for as long as the router lives.
   const { navigator } = useContext(UNSAFE_NavigationContext);
   const navigationType = useNavigationType();
+  const { pathname } = useLocation();
+  // The window's address while the router shows this page, taken again when the same document's address
+  // changes, as when the page's own link drops a trailing slash.
+  const own = useRef('');
+  useLayoutEffect(() => {
+    own.current = window.location.pathname;
+  }, [pathname]);
   useLayoutEffect(() => {
     const reading = READING.get(navigator) ?? { drawn: false, places: {} };
     READING.set(navigator, reading);
@@ -101,9 +108,8 @@ function useReadingPlace(id: AboutId, hash: string) {
     reading.drawn = true;
     // Back changes the window's address, and the browser restores the next page's place, before the router
     // draws that page; a scroll heard after the address moved on is the next page's, not the reader's.
-    const own = window.location.pathname;
     const remember = () => {
-      if (window.location.pathname === own) reading.places[id] = window.scrollY;
+      if (window.location.pathname === own.current) reading.places[id] = window.scrollY;
     };
     remember();
     window.addEventListener('scroll', remember, { passive: true });

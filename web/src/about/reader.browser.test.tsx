@@ -538,6 +538,44 @@ describe('ReaderPage', () => {
     await screen.unmount();
   });
 
+  it('a_new_address_for_the_same_document_keeps_the_readers_place', async () => {
+    // Opened at `/about/proposal/`, the page's own link in the documents list moves the window to
+    // `/about/proposal` and the same page stays drawn; the reader's place still counts from there.
+    await page.viewport(DESKTOP.width, DESKTOP.height);
+    document.documentElement.style.overflowAnchor = 'none';
+    const own = window.location.href;
+    onTestFinished(() => {
+      document.documentElement.style.overflowAnchor = '';
+      window.history.replaceState(window.history.state, '', own);
+    });
+    window.history.replaceState(window.history.state, '', '/about/proposal/');
+    const screen = await render(
+      <MemoryRouter initialEntries={['/about/proposal/']}>
+        <Routes>
+          <Route path="/about/proposal" element={<ReaderPage id="proposal" />} />
+          <Route path="/desk" element={<div style={{ height: '20000px' }} />} />
+        </Routes>
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+    const title = () => flat(document.querySelector('h1')?.textContent);
+    await expect.poll(title).toBe('Product proposal');
+
+    window.history.replaceState(window.history.state, '', '/about/proposal');
+    at.navigate?.('/about/proposal');
+    await expect.poll(() => at.path).toBe('/about/proposal');
+    const scrolled = new Promise((resolve) => window.addEventListener('scroll', resolve, { once: true }));
+    window.scrollTo(0, 2500);
+    await scrolled;
+
+    at.navigate?.('/desk');
+    await expect.poll(title).toBe('');
+    at.navigate?.(-1);
+    await expect.poll(title).toBe('Product proposal');
+    expect(window.scrollY, 'back at the reader’s place').toBe(2500);
+    await screen.unmount();
+  });
+
   it('external_links_open_in_a_new_tab', async () => {
     for (const id of IDS) {
       for (const size of [DESKTOP, PHONE]) {
