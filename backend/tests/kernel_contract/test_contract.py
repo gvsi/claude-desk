@@ -778,7 +778,8 @@ async def test_handoff_done_closes_it_once(kernel, ro_read):
 @pytest.mark.kernel_plan("01b")
 async def test_owner_demo_inbox_is_the_copys(kernel, ro_read):
     """The owner's Demo inbox holds the copy's entries: a hold alerts the owner there, under the entry its notice
-    names. Another copy's owner never reads them, and a visitor's token isn't the owner's."""
+    names, and the alert names the held decision. Another copy's owner never reads them, and a visitor's token
+    isn't the owner's."""
     http, ro_schema, _ = kernel
     copy, other = await new_copy(http), await new_copy(http)
     visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
@@ -793,5 +794,6 @@ async def test_owner_demo_inbox_is_the_copys(kernel, ro_read):
     entries = {entry.entry_id: entry for entry in mine}
     for notice in held.inbox:
         assert (entries[notice.entry_id].to, entries[notice.entry_id].kind) == ("owner", "alert")
+        assert entries[notice.entry_id].decision_id == held.decision_id
     assert not {entry.entry_id for entry in theirs} & set(entries)
     assert await refused(view.call("GET /demo_inbox")) == (401, "auth")

@@ -919,5 +919,6 @@ async def test_owner_reads_are_copy_scoped(app, browser, fake, kernel_http, engi
     assert inbox.status_code == 200 and inbox.headers["cache-control"] == "no-store"
     expected = [entry.model_dump(mode="json") for copy_id, entry in fake.inbox if copy_id == owner.copy_id]
     assert inbox.json() == expected and len(expected) == 1
+    assert [entry["decision_id"] for entry in inbox.json()] == [seeded_hold(fake, owner)]   # the held request's alert
     (sent,) = fake.called("GET /demo_inbox")
     assert sent.headers[OWNER] == owner.token
