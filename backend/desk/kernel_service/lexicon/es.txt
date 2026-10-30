@@ -1,9 +1,10 @@
 # Spanish words free prose may not use: amounts, percentages, dates and promises reach a visitor
 # only in cards rendered from the business's records. One `<category>\t<regex>` per line, matched
 # case-insensitively as whole words on the prose with accents and other marks dropped ("dólares"
-# is matched as "dolares") and each run of whitespace read as one space. Categories: number,
-# money, percent and date (number_in_prose), and promise (promise_word). Both lexicons run on
-# every draft, whatever its language.
+# is matched as "dolares"), each run of whitespace read as one space and every dash and hyphen as
+# "-" ("fin‐de‐semana" with U+2010 is "fin-de-semana"). Categories: number, money, percent and
+# date (number_in_prose), and promise (promise_word). Both lexicons run on every draft, whatever
+# its language.
 
 # Spelled-out numbers. A bare "uno", "una", "once" or "medio" counts only next to a unit or another
 # number word, so "una pregunta" passes; "las once" and "la una" are clock times (below).

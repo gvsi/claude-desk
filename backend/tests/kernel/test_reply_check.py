@@ -12,7 +12,9 @@ executed through `/decide` and `/execute`.
 
 import hashlib
 import json
+import sys
 import time
+import unicodedata
 
 import desk_kernel
 import httpx
@@ -133,6 +135,9 @@ def assert_handed_off(verdict: ReplyVerdict, language: str = "en") -> None:
     ("That is tweIve.", {"lex.en.number"}, "tweIve"),                  # a capital I for l
     ("A few more doIIars.", {"lex.en.money"}, "doIIars"),
     ("Puedo ir en abriI.", {"lex.es.date"}, "abriI"),
+    ("See you this\u2010morning.", {"lex.en.date"}, "this\u2010morning"),          # a Unicode hyphen
+    ("Nos vemos el fin\u2013de\u2013semana.", {"lex.es.date"}, "fin\u2013de\u2013semana"),   # en dashes
+    ("Come by at one o\u2018clock.", {"lex.en.date"}, "o\u2018clock"),             # a left single quote
 ])
 async def test_numbers_and_dates_in_prose_are_blocked(app, client, prose, rule_ids, span):
     copy, visitor = await visitor_of(app, client)
@@ -142,7 +147,8 @@ async def test_numbers_and_dates_in_prose_are_blocked(app, client, prose, rule_i
     assert span in [violation.span for violation in numbers]
     assert all(len(violation.span) <= 40 for violation in verdict.violations)
     spanish = prose in ("nos vemos el martes", "Puedo ir a las once.", "Llego a la una.",
-                        "El total es \u0406\u041e\u041e.", "Puedo ir en abriI.")
+                        "El total es \u0406\u041e\u041e.", "Puedo ir en abriI.",
+                        "Nos vemos el fin\u2013de\u2013semana.")
     assert_handed_off(verdict, "es" if spanish else "en")
 
 
@@ -161,6 +167,8 @@ async def test_numbers_and_dates_in_prose_are_blocked(app, client, prose, rule_i
     ("La primera clase es libre de costo.", "lex.es.promise", "libre de costo", "es"),   # free of charge
     ("Eso es gratis.", "lex.es.promise", "gratis", "es"),
     ("Le prometo.", "lex.es.promise", "prometo", "en"),      # too few words to tell: English
+    ("There is no\u2014charge for that.", "lex.en.promise", "no\u2014charge", "en"),   # an em dash
+    ("Es sin\u2212costo.", "lex.es.promise", "sin\u2212costo", "es"),                 # a minus sign
 ])
 async def test_promise_words_are_blocked(app, client, prose, rule_id, span, language):
     copy, visitor = await visitor_of(app, client)
@@ -234,6 +242,56 @@ def test_the_lookalike_table_is_what_its_script_makes():
     assert committed == lookalikes.table()
 
 
+# Every Unicode dash and hyphen but "-" itself (category Pd: U+2010 to U+2015, U+FE58, U+FE63, U+FF0D
+# and the rest), and the minus sign
+DASHES = [ch for ch in map(chr, range(sys.maxunicode + 1)) if unicodedata.category(ch) == "Pd" and ch != "-"]
+DASHES.append("−")
+HYPHENATED = [                       # lexicon phrases whose words a dash may join, and the rule each breaks
+    ("this-morning", "lex.en.date"), ("next-week", "lex.en.date"), ("no-charge", "lex.en.promise"),
+    ("money-back", "lex.en.promise"), ("on-the-house", "lex.en.promise"), ("last-year", "lex.en.date"),
+    ("fin-de-semana", "lex.es.date"), ("la-próxima-semana", "lex.es.date"), ("sin-costo", "lex.es.promise"),
+    ("de-regalo", "lex.es.promise"),
+]
+
+
+@pytest.mark.parametrize("dash", DASHES, ids=lambda dash: f"U+{ord(dash):04X}")
+def test_every_dash_reads_as_a_hyphen(dash):
+    """NFKC keeps most dashes as they are ("this‐morning" with U+2010), so the lexicons read every
+    dash and hyphen, and the minus sign, as the "-" their separators take, and the span quotes the
+    prose as it is shown."""
+    for phrase, rule_id in HYPHENATED:
+        prose = phrase.replace("-", dash)
+        assert [(v.rule_id, v.span) for v in reply_check.scan_prose(prose)] == [
+            (rule_id, reply_check.shown(prose))], prose
+
+
+APOSTROPHES = ["\u2018", "\u201b", "\u02bc", "\u02bb", "\u2032", "\u2035", "\uff07", "`", "\u00b4"]  # ‘‛ʼʻ′‵＇`´
+
+
+@pytest.mark.parametrize("apostrophe", APOSTROPHES, ids=lambda apostrophe: f"U+{ord(apostrophe):04X}")
+def test_every_apostrophe_reads_as_the_plain_one(apostrophe):
+    """Each apostrophe variant reads as "’": "o‘clock" is a time, and "you‘re free to" keeps the
+    exemption "you’re free to" has, while "free to" before an audience is still a promise. An acute
+    accent reads as the space NFKC puts before it too (below), so its "free to" fails closed."""
+    o_clock = f"o{apostrophe}clock"
+    found = reply_check.scan_prose(f"Come by at one {o_clock}.")
+    assert [(v.rule_id, v.span) for v in found] == [("lex.en.date", reply_check.shown(o_clock))]
+    exempt = [("lex.en.promise", "free")] if apostrophe == "\u00b4" else []
+    for prose in (f"You{apostrophe}re free to ask me anything.", f"You{apostrophe}ll be free to call me anytime."):
+        assert [(v.rule_id, v.span) for v in reply_check.scan_prose(prose)] == exempt, prose
+    found = reply_check.scan_prose(f"As a member you{apostrophe}re free to all classes.")
+    assert [(v.rule_id, v.span) for v in found] == [("lex.en.promise", "free")]
+
+
+@pytest.mark.parametrize(("prose", "rule_id"), [
+    ("no\u00b4charge", "lex.en.promise"), ("next\u00b4week", "lex.en.date"), ("sin\u00b4costo", "lex.es.promise"),
+])
+def test_an_acute_accent_between_words_still_reads_as_a_space(prose, rule_id):
+    """NFKC writes an acute accent (´) as a space and a combining acute ("no ́charge"). Read as "’"
+    for "o´clock", the pair still reads as the space it is drawn on too, so a phrase it joins is found."""
+    assert [(v.rule_id, v.span) for v in reply_check.scan_prose(prose)] == [(rule_id, reply_check.shown(prose))]
+
+
 @pytest.mark.parametrize(("prose", "language"), [
     ("I can help with that. Which day works for you?", "en"),
     ("Con gusto le ayudo. ¿Qué día le viene bien?", "es"),
@@ -242,6 +300,8 @@ def test_the_lookalike_table_is_what_its_script_makes():
     ("You're free to ask me anything.", "en"),
     ("You're free to choose any day.", "en"),               # a verb after "free to", then a quantifier
     ("You are free to call me anytime.", "en"),
+    ("You\u02bcre free to ask me anything.", "en"),          # a modifier letter apostrophe
+    ("You\u2018re free to call me anytime.", "en"),          # a left single quote
     ("Usted es libre de preguntarme lo que quiera.", "es"),   # free to ask, not a price
     ("¿Tiene un horario libre para usted?", "es"),           # a time that is open, not a price
     ("¿Está libre para la cita?", "es"),

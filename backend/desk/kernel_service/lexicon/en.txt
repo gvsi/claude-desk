@@ -1,8 +1,10 @@
 # English words free prose may not use: amounts, percentages, dates and promises reach a visitor
 # only in cards rendered from the business's records. One `<category>\t<regex>` per line, matched
-# case-insensitively as whole words on the prose with accents and other marks dropped and each run
-# of whitespace read as one space. Categories: number, money, percent and date (number_in_prose),
-# and promise (promise_word). Both lexicons run on every draft, whatever its language.
+# case-insensitively as whole words on the prose with accents and other marks dropped, each run of
+# whitespace read as one space, every dash and hyphen as "-" ("next‐week" with U+2010 is
+# "next-week") and every apostrophe as "’" ("oʼclock" is "o’clock"). Categories: number, money,
+# percent and date (number_in_prose), and promise (promise_word). Both lexicons run on every
+# draft, whatever its language.
 
 # Spelled-out numbers. A bare "one" counts only next to a unit or another number word, so "one
 # moment" passes.

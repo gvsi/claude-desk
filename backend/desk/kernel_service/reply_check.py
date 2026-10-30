@@ -11,7 +11,8 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    mixing Latin letters with another script (but for the Desk's own name and its business's
    name, as the owner set them), both lexicons (`lexicon/en.txt` and `lexicon/es.txt`, whatever
    the language, with each letter that looks like a Latin one read as it, from
-   `lexicon/lookalikes.txt`) and the Desk's document canaries.
+   `lexicon/lookalikes.txt`, every dash as "-" and every apostrophe as "’") and the Desk's
+   document canaries.
 4. Each clause renders from a fact this session may read, current, of the template's kind and ID,
    with no canary in what it renders.
 5. The soft-promise check, only when steps 2 to 4 found nothing and there is prose: Haiku 5.5
@@ -127,6 +128,9 @@ STROKES_AND_I = STROKES | {"I"}                          # with the ASCII capita
 # ("ЗОО"), or in a word made only of them that isn't plain ASCII ("ІОО"; "I" and "OK" stay words).
 ZERO_OR_ONE = frozenset("OlI") | frozenset(ch for ch, letter in LOOKALIKES.items() if letter in ("O", "l"))
 SCRIPT_LETTERS = frozenset(("Lu", "Ll", "Lt", "Lo"))     # modifier letters (Lm), such as ʼ, belong to no script
+MINUS_SIGN = "\u2212"                                   # a math symbol (Sm), drawn as a dash
+APOSTROPHES = frozenset("\u2018\u201b\u02bc\u02bb\u2032\u2035\uff07`\u00b4")   # ‘ ‛ ʼ ʻ ′ ‵ ＇ ` ´, read as ’
+SPACED_ACUTE = re.compile(r"\s\u0301")   # NFKC writes an acute accent (´) as a space and a combining acute
 
 
 def _numeral(ch: str) -> bool:
@@ -169,21 +173,38 @@ def _mixes_scripts(word: str) -> bool:
     return any(latin) and not all(latin)
 
 
-def _fold(text: str, stroke: str = "l", strokes: frozenset[str] = STROKES) -> tuple[str, list[int]]:
+def _plain(ch: str) -> str:
+    """A dash or hyphen of any kind (category Pd, which NFKC mostly keeps: "this‐morning" with
+    U+2010) and the minus sign read as "-", the one the lexicons' separators take, and an
+    apostrophe variant as "’"."""
+    if unicodedata.category(ch) == "Pd" or ch == MINUS_SIGN:
+        return "-"
+    return "’" if ch in APOSTROPHES else ch
+
+
+def _fold(text: str, stroke: str = "l", strokes: frozenset[str] = STROKES,
+          acute: bool = False) -> tuple[str, list[int]]:
     """`text` for the lexicons: accents and other combining marks dropped, each letter that looks
     like an ASCII one read as it ("Tuеsday" with a Cyrillic е is Tuesday), each of `strokes` (by
-    default the bare strokes) read as `stroke`, and each run of whitespace one space; and the
-    index in `text` each folded character came from."""
+    default the bare strokes) read as `stroke`, each dash and hyphen as "-", each apostrophe as
+    "’", and each run of whitespace one space, but with `acute`, a whitespace character before a
+    combining acute (how NFKC writes ´) as "’"; and the index in `text` each folded character
+    came from."""
     chars: list[str] = []
     origin: list[int] = []
     for i, ch in enumerate(text):
+        if acute and SPACED_ACUTE.match(text, i):
+            chars.append("’")
+            origin.append(i)
+            continue
         if ch.isspace():
             if not chars or chars[-1] != " ":
                 chars.append(" ")
                 origin.append(i)
             continue
-        for part in unicodedata.normalize("NFKD", ch):
+        for part in unicodedata.normalize("NFKD", _plain(ch)):
             if unicodedata.category(part) not in ("Mn", "Me"):
+                part = _plain(part)
                 chars.append(stroke if part in strokes else LOOKALIKES.get(part, part))
                 origin.append(i)
     return "".join(chars), origin
@@ -248,8 +269,10 @@ def scan_prose(text: str, canaries: Iterable[str] = (), names: Iterable[str] = (
     for the promise category; a word mixing Latin letters with another script is
     `unsupported_language` (`mixed_script`), unless it lies inside one of `names` (the Desk's own
     names) as it is written there; a canary verbatim is `canary`. The lexicons read lookalike
-    letters as the Latin ones, a bare stroke both as l and as I, and an ASCII capital I as l too.
-    Canaries come first, then the rest in the order they appear."""
+    letters as the Latin ones, a bare stroke both as l and as I, an ASCII capital I as l too, every
+    dash and hyphen as "-" and every apostrophe as "’", an acute accent (a space and a combining
+    acute after NFKC) both as that space and as "’". Canaries come first, then the rest in the
+    order they appear."""
     text, found = _blank_canaries(shown(text), canaries)
     hits: list[tuple[int, str, Violation]] = [
         (-1, "canary", Violation(kind="canary", span="", rule_id="canary")) for _ in found]
@@ -272,14 +295,19 @@ def scan_prose(text: str, canaries: Iterable[str] = (), names: Iterable[str] = (
     reach = _named_reach(text, names)
     hits += [(start, "mixed_script", Violation(kind="unsupported_language", span=_span(word), rule_id="mixed_script"))
              for start, word in _words(text) if _mixes_scripts(word) and reach[start] < start + len(word)]
-    folded, origin = _fold(text)
-    # three readings: a bare stroke as l, as I, and an ASCII capital I as l too ("doIIars")
-    readings = dict.fromkeys((folded, _fold(text, stroke="i")[0], _fold(text, strokes=STROKES_AND_I)[0]))
+    # three readings: a bare stroke as l, as I, and an ASCII capital I as l too ("doIIars"); where
+    # NFKC wrote an acute accent as a space and a combining acute, each also with that pair read as
+    # "’" ("o´clock") besides the space it is drawn on ("no´charge"). Each maps back to `text`.
+    variants: list[dict] = [{}, {"stroke": "i"}, {"strokes": STROKES_AND_I}]
+    if SPACED_ACUTE.search(text):
+        variants += [variant | {"acute": True} for variant in variants]
+    readings = dict(_fold(text, **variant) for variant in variants)
     seen: set[tuple[str, int, int]] = set()
     for language, entries in LEXICONS.items():
         for category, pattern in entries:
             rule_id = f"lex.{language}.{category}"
-            for match in (match for reading in readings for match in pattern.finditer(reading)):
+            for origin, match in ((origin, match) for reading, origin in readings.items()
+                                  for match in pattern.finditer(reading)):
                 if match.end() == match.start():
                     continue
                 start, end = origin[match.start()], origin[match.end() - 1] + 1
