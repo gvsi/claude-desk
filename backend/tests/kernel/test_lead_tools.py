@@ -488,9 +488,9 @@ async def test_a_start_whose_desk_is_deleted_after_its_intent_sends_no_code(app,
     entries = [entry.event for entry in await ledger_rows(app, copy)]
     assert [event.summary for event in entries if event.kind == "verify"] == []
     [refused] = [event.summary for event in entries if event.kind == "execute"]
-    assert {key: refused[key] for key in ("decision_id", "action_id", "state", "reason", "check")} == {
+    assert refused == {
         "decision_id": allowed.decision_id, "action_id": allowed.action.action_id, "state": "refused_at_execution",
-        "reason": "rules_changed", "check": "desk"}
+        "reason": "rules_changed", "check": "desk", "policy_version": 1, "auto_money_cap_cents": TEST_CAP}
 
 
 async def test_a_start_is_decided_without_the_reviewer(app, client, reviewer):

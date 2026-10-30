@@ -316,7 +316,9 @@ async def _route_session(ctx: KernelCtx, request: Request, session_id: str) -> S
     """The visitor session a verify route names, once its token, state and Desk pass, locked. The
     session's state and its Desk are checked again on the held row, read afresh, so a Desk deleted
     or a session closed while the route waited for the row answers 409 `closed`, ledgered, as it
-    would had it come first: a start makes no challenge and sends no code, a check verifies no one."""
+    would had it come first: a start makes no challenge and sends no code, a check verifies no one.
+    A Desk's deletion closes its visitor sessions too, so `require_open` refuses first; the Desk's
+    own recheck is defence in depth behind it."""
     row = await auth.require_session(ctx, request, session_id)
     await auth.require_desk(ctx, request, row, row.desk_id)
     locked = await locked_session(ctx, row.session_id)
