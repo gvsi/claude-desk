@@ -123,7 +123,7 @@ export { SafetyCheckRow, type SafetyCheckRowProps } from './components/SafetyChe
 // Agents
 export { CodeBlock, type CodeBlockProps } from './components/CodeBlock/CodeBlock.tsx';
 export { CopyField, type CopyFieldProps } from './components/CopyField/CopyField.tsx';
-export { COPY_RESULT_COPY, useCopyText, type CopyState } from './components/CopyField/useCopyText.ts';
+export { COPY_RESULT_COPY, copyResultLine, useCopyText, type CopyState, type CopyWhat } from './components/CopyField/useCopyText.ts';
 
 // Share
 export { ShareCard, type ShareCardProps } from './components/ShareCard/ShareCard.tsx';

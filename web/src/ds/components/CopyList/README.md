@@ -17,7 +17,7 @@
 
 - One card (`fill-card`, a `line-card` border at `radius-card`), ruled in `line-hairline` between its rows.
 - Each row padded 14 px by 16 px: the block's name in `control` type at weight 520, its words 4 px under it in `meta`, `text-secondary`, and a secondary "Copy" button at the top right, 16 px from the edge.
-- After a press, a line under the words: "Copied.", or, when the copy fails, the block's words are selected and "Couldn’t copy. The text is selected, so you can copy it yourself." It takes no room until it has words. The words and the hook that runs the copy are `CopyField`'s (`COPY_RESULT_COPY`, `useCopyText`).
+- After a press, a line under the words: "Copied.", or, when the copy fails, the block's words are selected and "Copy didn’t work. The text is selected, so copy it yourself." It takes no room until it has words. The words, the line and the hook that runs the copy are `CopyField`'s (`COPY_RESULT_COPY`, `copyResultLine`, `useCopyText`).
 
 ## Accessibility
 

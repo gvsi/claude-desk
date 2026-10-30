@@ -93,7 +93,7 @@ export const CopyFailed: Story = {
       throw new Error('The clipboard is blocked');
     }),
   },
-  parameters: { canvas: 'none', canvasNote: 'No board draws a failed copy; it keeps N-R2-Agents-02-Demo-Key’s field and says what to do under it.' },
+  parameters: { canvas: 'none', canvasNote: 'No board draws a failed copy of a key; it keeps N-R2-Agents-02-Demo-Key’s field and says what to do under it, in the words N-R2-Setup-15-Copy-Failed uses for the link, naming the text.' },
   play: async ({ args, canvas, canvasElement, userEvent }) => {
     await userEvent.click(canvas.getByRole('button', { name: 'Copy key' }));
     await expect(args.onCopy).toHaveBeenCalledOnce();
@@ -101,7 +101,7 @@ export const CopyFailed: Story = {
     const value = canvasElement.querySelector<HTMLElement>('code')!;
     await waitFor(() => expect(window.getSelection()?.toString()).toBe(KEY));
     await expect(window.getSelection()?.containsNode(value, true)).toBe(true);
-    await expect(canvas.getByRole('status')).toHaveTextContent(/^Couldn’t copy\. The text is selected, so you can copy it yourself\.$/);
+    await expect(canvas.getByRole('status')).toHaveTextContent(/^Copy didn’t work\. The text is selected, so copy it yourself\.$/);
   },
 };
 

@@ -1,7 +1,7 @@
 import { useRef } from 'react';
 
 import { Button } from '../Button/Button.tsx';
-import { COPY_RESULT_COPY, useCopyText } from '../CopyField/useCopyText.ts';
+import { copyResultLine, useCopyText } from '../CopyField/useCopyText.ts';
 
 import './CopyList.css';
 
@@ -46,7 +46,7 @@ function CopyRow({ item, onCopy }: { item: CopyListItem; onCopy: CopyListProps['
           {item.text}
         </p>
         <p role="status" className="cd-copy-list__result cd-type-meta">
-          {state === 'idle' ? '' : COPY_RESULT_COPY.en[state]}
+          {copyResultLine(state)}
         </p>
       </div>
       <span className="cd-copy-list__copy">

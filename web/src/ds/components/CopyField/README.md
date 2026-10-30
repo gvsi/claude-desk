@@ -29,10 +29,11 @@
 | Result | Shows |
 | --- | --- |
 | `onCopy` resolves | "Copied." / "Copiado." under the field |
-| `onCopy` throws or rejects | The value's text is selected, ready to copy with the keyboard or the menu, and "Couldn’t copy. The text is selected, so you can copy it yourself." / "No se pudo copiar. El texto está seleccionado para que lo copies tú." |
+| `onCopy` throws or rejects | The value's text is selected, ready to copy with the keyboard or the menu, and "Copy didn’t work. The text is selected, so copy it yourself." / "No se pudo copiar. El texto está seleccionado para que lo copies tú." |
 
 - The line is a `status`, in the page from the start so it is read out when its words come, and it takes no room until then. The button keeps its words and isn't busy: a copy is immediate.
-- The words are in `COPY_RESULT_COPY` (`useCopyText.ts`), with the `useCopyText` hook that runs a copy and selects the text when it fails. `CopyList` uses the same hook.
+- The words are in `COPY_RESULT_COPY` (`useCopyText.ts`), with the `useCopyText` hook that runs a copy and selects the text when it fails, and `copyResultLine(state, { language, what })`, which picks the line. `CopyList` uses the same hook and line.
+- A failed copy names what is selected. `what` is `'text'` by default, as here and in `CopyList`; a control that copies the Desk's public link (the web app's `CopyLink`, on Today, Share and setup's live step) passes `what: 'link'`, for "Copy didn’t work. The link is selected, so copy it yourself." / "No se pudo copiar. El enlace está seleccionado para que lo copies tú.", as N-R2-Setup-15-Copy-Failed writes it. The agents page's address stays `'text'`, since its button calls it an address.
 
 ## Props
 
