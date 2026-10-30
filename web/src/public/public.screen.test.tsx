@@ -714,13 +714,13 @@ describe('public chat page', () => {
 
   it('open_status_refetches_once_at_refresh_at', async () => {
     useTimers();
-    const chatRequests = () => ['openSession', 'visitorSession', 'events'].map((key) => requests(key).length);
+    const streams = countStreams();
 
     // Rivera's status: `refresh_at` 90 s after `as_of`. One read then, none before.
     const { screen } = await renderRoute(PAGE);
     await readyNow(screen);
-    await until(() => expect(requests('events')).toHaveLength(1));
-    const chat = chatRequests();
+    await until(() => expect(streams.opened).toBe(1));
+    const chat = chatOpened(streams);
     expect(requests('publicDesk')).toHaveLength(1);
     await settle();
     await vi.advanceTimersByTimeAsync(90_000 - MARGIN_MS);
@@ -730,7 +730,7 @@ describe('public chat page', () => {
     await until(() => expect(requests('publicDesk')).toHaveLength(2));
     // Only the header follows it: the chat opens no new session, read or stream.
     await settle();
-    expect(chatRequests()).toEqual(chat);
+    expect(chatOpened(streams)).toEqual(chat);
     await expectOpenStatus(screen, 'Open now, until 6:00 pm', 'open');
 
     // A `refresh_at` 5 s after `as_of`, or one that can't be read, waits the 30 s floor.
@@ -795,12 +795,12 @@ describe('public chat page', () => {
 
   it('stale_open_status_is_dropped_on_refetch_failure', async () => {
     useTimers();
-    const chatRequests = () => ['openSession', 'visitorSession', 'events'].map((key) => requests(key).length);
+    const streams = countStreams();
     const { screen } = await renderRoute(PAGE);
     await readyNow(screen);
-    await until(() => expect(requests('events')).toHaveLength(1));
+    await until(() => expect(streams.opened).toBe(1));
     await until(() => expect(statusText().textContent).toBe('Open now, until 6:00 pm'));
-    const chat = chatRequests();
+    const chat = chatOpened(streams);
 
     // The read at `refresh_at` fails: the kernel no longer vouches for the line, so it goes, and
     // everything else stays as it was.
@@ -813,7 +813,7 @@ describe('public chat page', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing' }).query()).not.toBeNull();
     expect(screen.getByRole('complementary', { name: 'About Rivera Plumbing' }).query()).not.toBeNull();
     expect(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' }).element()).toBeEnabled();
-    expect(chatRequests()).toEqual(chat);
+    expect(chatOpened(streams)).toEqual(chat);
 
     // One retry 30 s later; its answer brings the line back.
     await settle();
@@ -829,7 +829,7 @@ describe('public chat page', () => {
     window.dispatchEvent(new Event('focus'));
     await until(() => expect(requests('publicDesk')).toHaveLength(4));
     await until(() => expect(document.querySelector(OPEN_STATUS)).toBeNull());
-    expect(chatRequests()).toEqual(chat);
+    expect(chatOpened(streams)).toEqual(chat);
   });
 
   it('no_open_status_line_when_null', async () => {
@@ -1032,6 +1032,37 @@ function useTimers(): void {
   onTestFinished(() => {
     vi.useRealTimers();
   });
+}
+
+/** The event streams the page opens from here to the end of the test. */
+interface StreamCount {
+  readonly opened: number;
+}
+
+/**
+ * Counts each `EventSource` the page constructs from here to the end of the test: the streams it
+ * opens. The mock's log of stream requests can't be counted instead, because it also gets the
+ * browser reconnecting a stream the page already has, and a stream that a page from the test
+ * before was still opening when it closed.
+ */
+function countStreams(): StreamCount {
+  const native = window.EventSource;
+  const count = { opened: 0 };
+  window.EventSource = class extends native {
+    constructor(url: string | URL, init?: EventSourceInit) {
+      super(url, init);
+      count.opened += 1;
+    }
+  };
+  onTestFinished(() => {
+    window.EventSource = native;
+  });
+  return count;
+}
+
+/** What the chat has opened so far: sessions, reads of its conversation and streams. */
+function chatOpened(streams: StreamCount): { sessions: number; reads: number; streams: number } {
+  return { sessions: requests('openSession').length, reads: requests('visitorSession').length, streams: streams.opened };
 }
 
 /**
