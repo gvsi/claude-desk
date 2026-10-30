@@ -115,7 +115,7 @@ for name in DESK_IMAGE_DIR DESK_IMAGE_FILE DESK_KERNEL_IMAGE; do
 done
 # A full deploy's passcode: DESK_PASSCODE when it was set, else the macOS Keychain's
 # claude-desk-passcode item.
-no_passcode() {  # no_passcode store|replace|export <why>: the Keychain commands that apply, if any
+no_passcode() {  # no_passcode store|replace|retry|export <why>: the Keychain commands that apply, if any
   local fix=$1
   shift
   echo "deploy: DESK_PASSCODE isn't set and $*; the smoke checks sign in with the passcode" >&2
@@ -130,6 +130,7 @@ no_passcode() {  # no_passcode store|replace|export <why>: the Keychain commands
       echo 'deploy: replace it in the Keychain with: security add-generic-password -U -s claude-desk-passcode -a "$USER" -w'
       echo "deploy: (it asks for the passcode twice, without echo), or export DESK_PASSCODE for this run"
       ;;
+    retry) echo "deploy: run deploy.sh again; if this repeats, export DESK_PASSCODE for this run" ;;
     *) echo "deploy: export DESK_PASSCODE for this run" ;;
   esac >&2
   exit 2
@@ -148,14 +149,15 @@ if [[ -z $data_only ]]; then
     # `password: "<value>"`. Only that stderr is kept (the attributes on stdout are dropped); it holds
     # the passcode too, so it's never shown and is unset once checked. The one answer accepted is that
     # last line alone, holding the value -w gave, and that value is itself checked byte by byte (a C
-    # locale, in a subshell); any other answer can't be checked, so it's refused.
+    # locale, in a subshell); any other answer can't be checked, so it's refused, though it says
+    # nothing against the item: the advice is to run again, then to export DESK_PASSCODE.
     probe=$(security find-generic-password -s claude-desk-passcode -g 2>&1 >/dev/null) ||
       no_passcode replace "the macOS Keychain item claude-desk-passcode couldn't be read a second time, to check how it's stored (is the login Keychain unlocked?)"
     if [[ $probe == 'password: 0x'* ]] || (LC_ALL=C; [[ $passcode == *[![:print:]]* || $passcode == *\\* ]]); then
       no_passcode replace "the macOS Keychain item claude-desk-passcode has a character outside printable ASCII, or a backslash (it isn't shown)"
     fi
     [[ $probe == "password: \"$passcode\"" ]] ||
-      no_passcode replace "the macOS Keychain item claude-desk-passcode couldn't be checked: \`security -g\` showed it in a form deploy.sh doesn't accept (it isn't shown)"
+      no_passcode retry "the macOS Keychain item claude-desk-passcode couldn't be checked: \`security -g\` showed it in a form deploy.sh doesn't accept (it isn't shown)"
     unset probe
   fi
 fi

@@ -691,14 +691,17 @@ def test_a_keychain_passcode_that_isnt_printable_ascii_is_refused_unshown_before
 def test_a_stored_form_shown_any_other_way_is_refused_unshown_before_any_step(deploy, item):
     """deploy.sh accepts only `password: "<the value -w gave>"` from -g, and refuses any other answer,
     failing closed: here a warning line before the password line, which hid a `password: 0x…` from
-    a check on how the answer starts, and would hide it before a printable one just the same."""
+    a check on how the answer starts, and would hide it before a printable one just the same. Such
+    an answer says nothing against the item, which may be fine, so the advice is to run deploy.sh
+    again and, if it repeats, to export DESK_PASSCODE for the run, never to replace the item."""
     run = deploy(keychain_item=item, DESK_PASSCODE=None, DESK_DEPLOY_ACCOUNT=ACCOUNT, KEYCHAIN_PROBE_WARNING="1",
                  LANG="en_US.UTF-8", LC_ALL="en_US.UTF-8")
     assert run.status == 2
     assert [call["argv"] for call in run.calls] == [KEYCHAIN_LOOKUP, KEYCHAIN_PROBE]
     assert ("the macOS Keychain item claude-desk-passcode couldn't be checked: `security -g` showed it in a form "
             "deploy.sh doesn't accept (it isn't shown)") in run.output
-    assert REPLACE_IT in run.output and STORE_IT not in run.output
+    assert "run deploy.sh again; if this repeats, export DESK_PASSCODE for this run" in run.output
+    assert "add-generic-password" not in run.output                   # neither storing nor replacing it
     secret = "keychain-passcode"
     for form in (secret, secret.encode().hex(), secret.encode().hex().upper()):
         assert form not in run.text()
