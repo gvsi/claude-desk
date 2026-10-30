@@ -285,8 +285,10 @@ Content (about two pages): **Architecture** now and for an MVP; **Infrastructure
 - [ ] **Step 2: Run** `cd tools && uv run pytest tests/test_docs.py -q` → FAIL (`docs/path-to-mvp.md` doesn't exist).
 - [ ] **Step 3: Write** the doc and the README's "Evidence" from Plan 05b's held-out report, each measured number naming its `pass_id` and date. If Plan 05b hasn't reported, stop and report BLOCKED on it; never present an unmeasured number as measured.
 - [ ] **Step 4: Fill** the product proposal's `[measured: …]` cells from the same numbers, in the "Doc drafts" tab of the owner's alignment document, where the product docs are written, and in `docs/product-proposal.md`, which the About readers (plan 07) ship and show; the two must say the same thing.
-- [ ] **Step 5: Run** `cd tools && uv run pytest -q && uv run python -m desk_tools.check_docs --final` → PASS (33 passed); the final check passes once the owner has filled the two `[owner: …]` links and otherwise lists exactly those two. Quote the output.
-- [ ] **Step 6: Commit** `git add docs/path-to-mvp.md README.md tools && git commit -m "docs: add the path to MVP with measured latency and cost per conversation"`.
+- [ ] **Step 5: Run** `cd tools && uv run pytest -q && uv run python -m desk_tools.check_docs --final` → PASS; the final check passes once the owner has filled the `[owner: …]` links and otherwise lists exactly those still open, by file: `README.md` (the hosted URL) and `docs/product-proposal.md` (the hosted URL and the repo link). Quote the output.
+- [ ] **Step 6: Commit** `git add docs/path-to-mvp.md docs/product-proposal.md README.md tools && git commit -m "docs: add the path to MVP with measured latency and cost per conversation"`.
+
+**3. Redeploy with the final documents (owner's go-ahead).** After operation 2 and the owner's link fills are on `main`: the About pages (plan 07) embed `docs/product-proposal.md` and `docs/capability-prediction.md` at build time, so operation 1's deploy shows the old text. Preflight at `main` HEAD, then the same deploy as operation 1 at that commit (only docs and web changed since, so the evals inputs are the same), every smoke check, and a look at `/about/proposal` and `/about/prediction` in the QA browser: no pending pill, the filled numbers and links shown. The run ledger records the commit; Monday's final gate runs at this commit instead of operation 1's. If plan 07's design PR didn't land, this operation is skipped and operation 1's commit stands.
 
 ## Open questions for the master plan
 
