@@ -44,9 +44,14 @@
 set -euo pipefail
 
 # Under xtrace (bash -x, or SHELLOPTS=xtrace handed down) bash writes each assignment with its value
-# to the output, and so to the log, the passcode's included: refuse before anything else runs.
+# to the output, and so to the log, the passcode's included; under allexport (bash -a) it exports
+# every variable it sets, the passcode's included, to every step. Refuse before anything else runs.
 if [[ -o xtrace ]]; then
   echo "deploy: run without xtrace; it would print the passcode" >&2
+  exit 2
+fi
+if [[ -o allexport ]]; then
+  echo "deploy: run without allexport (set -a); it would give every step the passcode" >&2
   exit 2
 fi
 # The owner passcode the smoke checks sign in with stays in this shell, unexported, and only

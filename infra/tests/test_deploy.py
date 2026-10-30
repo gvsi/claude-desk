@@ -579,6 +579,18 @@ def test_a_traced_run_is_refused_before_any_passcode_is_read(deploy, trace, expo
         assert secret not in run.text()
 
 
+@pytest.mark.parametrize("allexport", [{"SHELLOPTS": "allexport"}, {"bash_options": ("-a",)}],
+                         ids=["SHELLOPTS", "bash-a"])
+def test_a_run_that_exports_every_variable_is_refused_before_any_passcode_is_read(deploy, allexport):
+    """Under allexport (bash -a, or SHELLOPTS=allexport handed down) every variable deploy.sh sets
+    is exported, the one holding the passcode included, so every step would be given it."""
+    run = deploy(terminal=False, keychain_item="keychain-test-passcode", DESK_PASSCODE=None,
+                 DESK_DEPLOY_ACCOUNT=ACCOUNT, **allexport)
+    assert run.status == 2
+    assert "deploy: run without allexport (set -a); it would give every step the passcode" in run.output
+    assert run.calls == []
+
+
 @pytest.mark.parametrize("locked", [False, True])
 def test_a_keychain_item_that_cant_be_read_says_so_before_any_step(deploy, locked):
     """`security` fails alike when the item is missing, when the login Keychain is locked (an SSH or
