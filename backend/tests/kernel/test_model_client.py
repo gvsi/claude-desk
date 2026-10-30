@@ -61,8 +61,8 @@ def environ(monkeypatch, config_dir):
     return set_all
 
 
-def settings(env: str = "dev") -> KernelSettings:
-    return KernelSettings(database_url=DATABASE_URL, env=env)
+def settings(env: str = "dev", decisions: str = "anthropic") -> KernelSettings:
+    return KernelSettings(database_url=DATABASE_URL, env=env, decisions=decisions)
 
 
 def answer() -> httpx2.Response:
@@ -152,6 +152,8 @@ async def test_custom_headers_are_refused_before_any_client(environ, monkeypatch
         raise AssertionError("no SDK client is built")
 
     monkeypatch.setattr(anthropic, "AsyncAnthropic", spy)
+    # an offline development kernel builds no client, and is refused all the same
+    backends = ("anthropic", "offline")
     for headers in ("Authorization: Bearer ambient", "X-Api-Key: ambient"):
         for key in (None, TEST_KEY):
             environ({"ANTHROPIC_CUSTOM_HEADERS": headers})
@@ -159,16 +161,18 @@ async def test_custom_headers_are_refused_before_any_client(environ, monkeypatch
                 monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
             else:
                 monkeypatch.setenv("ANTHROPIC_API_KEY", key)
-            with pytest.raises(RuntimeError, match="ANTHROPIC_CUSTOM_HEADERS") as refused:
-                make_decisions(settings())
-            assert "ambient" not in str(refused.value)
+            for backend in backends:
+                with pytest.raises(RuntimeError, match="ANTHROPIC_CUSTOM_HEADERS") as refused:
+                    make_decisions(settings(decisions=backend))
+                assert "ambient" not in str(refused.value)
 
     # and the kernel doesn't start
-    kernel = create_app(settings(), clock=SystemClock())
-    with pytest.raises(RuntimeError, match="ANTHROPIC_CUSTOM_HEADERS") as refused:
-        async with kernel.router.lifespan_context(kernel):
-            pass
-    assert "ambient" not in str(refused.value)
+    for backend in backends:
+        kernel = create_app(settings(decisions=backend), clock=SystemClock())
+        with pytest.raises(RuntimeError, match="ANTHROPIC_CUSTOM_HEADERS") as refused:
+            async with kernel.router.lifespan_context(kernel):
+                pass
+        assert "ambient" not in str(refused.value)
     assert built == []
 
 

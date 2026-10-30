@@ -222,7 +222,10 @@ class DecisionsBackend(Protocol):
 
 
 def make_decisions(settings: "KernelSettings") -> DecisionsBackend:
-    """The backend `DESK_DECISIONS` names. `create_app` refuses `offline` outside development."""
+    """The backend `DESK_DECISIONS` names. `create_app` refuses `offline` outside development.
+    `ANTHROPIC_CUSTOM_HEADERS` is refused first, whichever backend is named, so no kernel starts
+    with it set (`refuse_custom_headers`)."""
+    refuse_custom_headers()
     if settings.decisions == "anthropic":
         return AnthropicDecisions(make_client(settings))
     if settings.decisions == "offline":
@@ -244,9 +247,7 @@ def make_client(settings: "KernelSettings") -> anthropic.AsyncAnthropic:
     Development is the settings' and the process's `DESK_ENV` both naming it, as for the other test
     hooks. Each refusal is a `RuntimeError` naming the variable, never its value, raised before any
     client exists, so the kernel doesn't start."""
-    if os.environ.get("ANTHROPIC_CUSTOM_HEADERS"):
-        raise RuntimeError("ANTHROPIC_CUSTOM_HEADERS is set; the kernel sends no custom headers, which could "
-                           "replace or join its key")
+    refuse_custom_headers()
     development = is_development(settings.env) and is_development()
     api_key = os.environ.get("ANTHROPIC_API_KEY") or None
     if api_key is None and not development:
@@ -256,6 +257,15 @@ def make_client(settings: "KernelSettings") -> anthropic.AsyncAnthropic:
         raise RuntimeError("ANTHROPIC_API_KEY must be one API key: printable ASCII with no spaces")
     base_url = (os.environ.get("ANTHROPIC_BASE_URL") if development else None) or ANTHROPIC_API_URL
     return anthropic.AsyncAnthropic(api_key=api_key, base_url=base_url)
+
+
+def refuse_custom_headers() -> None:
+    """A `RuntimeError` naming only the variable when `ANTHROPIC_CUSTOM_HEADERS` is set to anything
+    but empty: the SDK sends its lines with every request, where an `Authorization` or `X-Api-Key`
+    line replaces or joins the key."""
+    if os.environ.get("ANTHROPIC_CUSTOM_HEADERS"):
+        raise RuntimeError("ANTHROPIC_CUSTOM_HEADERS is set; the kernel sends no custom headers, which could "
+                           "replace or join its key")
 
 
 class OfflineDecisions:
