@@ -8,7 +8,7 @@
  */
 import type { ApprovalAnswer, Decision, DeskUpdated, PaymentLinkState, PaymentLinkStateResult, RuleCard } from '../api/contracts.ts';
 import { ROUTES, type RouteKey, type RouteResponse, type RouteSpec } from '../api/routes.ts';
-import type { ApprovalAnswerOut, CancelAccepted, CancelReason, MessageAccepted, VisitorSession } from '../api/views.ts';
+import type { ApprovalAnswerOut, CancelAccepted, CancelReason, MessageAccepted, VerifyChecked, VisitorSession } from '../api/views.ts';
 import { RIVERA_MONEY_CAP_CENTS } from '../ds/fixtures/index.ts';
 import {
   attempts,
@@ -26,7 +26,7 @@ import {
   today,
   visitorTranscript,
 } from './readModels.ts';
-import { EVENT_GAP_MS, afterAnswer, allows, cardDiffFor, matchRule, turnEnd, type Language, type Step } from './script.ts';
+import { AFTER_VERIFY, EVENT_GAP_MS, afterAnswer, allows, cardDiffFor, matchRule, turnEnd, type Language, type Step } from './script.ts';
 import { seedWorld, type MockSeed } from './seed.ts';
 import { MockWorld, isoTime, type DeskRecord, type LinkRecord, type SessionRecord } from './world.ts';
 
@@ -34,6 +34,9 @@ import { MockWorld, isoTime, type DeskRecord, type LinkRecord, type SessionRecor
 const MESSAGE_MAX = 2000;
 
 const OWNER_KINDS: ReadonlySet<unknown> = new Set(['say', 'whisper']);
+
+/** A demo code as the API takes one: six digits. */
+const DEMO_CODE_SHAPE = /^\d{6}$/;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -400,6 +403,10 @@ const SERVED: ServedRoutes = {
     const record = sv.world.decisions.get(req.params.decision_id ?? '');
     return record ? ok(record.decision) : NOT_FOUND;
   },
+  ownerInbox(sv, req) {
+    // Everything the copy's Demo inbox holds, as the kernel's owner form answers.
+    return req.cookies.owner ? ok(sv.world.inbox.map((record) => record.entry)) : NO_OWNER;
+  },
   safety(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
     return isFailure(desk) ? desk : ok(attempts(sv.world, desk));
@@ -464,6 +471,25 @@ const SERVED: ServedRoutes = {
     // The kernel cancels it; the outcome reaches the chat as the resolved receipt.
     sv.world.cancel(record);
     return ok({ decision_id: record.decision.decision_id } satisfies CancelAccepted, 202);
+  },
+  verifyCheck(sv, req) {
+    const visitor = sv.visitor(req.params.slug, req.cookies);
+    if (isFailure(visitor)) return visitor;
+    const code = isRecord(req.body) ? req.body.code : undefined;
+    if (req.malformed || typeof code !== 'string' || !DEMO_CODE_SHAPE.test(code)) return INVALID;
+    const { session } = visitor;
+    // One answer for a wrong, expired or used-up code, so a refusal never says which.
+    if (!sv.world.checkCode(session, code)) return failWith(422, 'kernel', { code: 'invalid' });
+    // The API wakes Claude, which goes on with what the visitor asked for.
+    sv.runTurn(session, AFTER_VERIFY, session.language, '');
+    return ok({ state: session.state } satisfies VerifyChecked);
+  },
+  visitorInbox(sv, req) {
+    const visitor = sv.visitor(req.params.slug, req.cookies);
+    if (isFailure(visitor)) return visitor;
+    // Only the codes this chat started, as the kernel's session form answers: never the owner's alerts.
+    const sessionId = visitor.session.state.session_id;
+    return ok(sv.world.inbox.filter((record) => record.sessionId === sessionId && record.entry.kind === 'verification_code').map((record) => record.entry));
   },
   events(sv, req) {
     // A 200 opens the stream (handlers.ts); `listen` replays and follows it.

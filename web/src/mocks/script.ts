@@ -300,6 +300,16 @@ export const DECISIONS = {
     reasonPlain: 'A visitor asked for a link to pay the $20.00 service call deposit.',
     amountCents: 2000,
   },
+  /** Verified Dana's invoice, released to her once she confirmed it's her. */
+  releaseInvoice: {
+    tool: 'native.release_document',
+    effects: ['private_data', 'send_message'],
+    outcome: 'allow',
+    executed: true,
+    cardIds: ['rv-docs'],
+    reasonPlain: "Dana Whitfield confirmed it's her with a code, so she got her drain clearing invoice.",
+    resource: { kind: 'document', id: 'doc-dana-invoice', owner_person_id: rivera.people.dana.personId },
+  },
   callback: {
     tool: 'native.request_callback',
     effects: ['send_message'],
@@ -346,8 +356,12 @@ export interface TurnContext {
   status(type: StatusEvent['type'], decision: Decision): StatusEvent;
   /** A checked reply with its ledger entry; `blocked` when Claude's draft failed the check and the visitor gets the handoff. */
   reply(blocks: RenderedBlock[], opts?: { blocked?: boolean }): EvMessage;
-  /** A Demo inbox entry for this session, and the notice the visitor sees (no code in it). */
-  inbox(fields: { to: string; body: string; preview: string }): EvDemoInbox;
+  /**
+   * Sends a demo code to `person`'s contact on record, as the kernel's `/verify/start` does: the
+   * challenge the code answers, a Demo inbox entry for this session with the code in its body, and
+   * the notice the visitor sees, which carries no code.
+   */
+  startVerification(fields: { person: VerifyPerson; code: string; body: string; preview: string }): EvDemoInbox;
   /** An open callback request in Needs you; the visitor becomes a lead under `lead`. */
   openHandoff(fields: { reason: string; callbackWindow: string | null; lead: string }): void;
   /** A payment link for this session, `issued`, with a token of its own. */
@@ -416,8 +430,9 @@ export const SCRIPT: readonly ScriptRule[] = [
       writing,
       (ctx) => ctx.reply([blocks.verify_prompt[ctx.language]]),
       (ctx) =>
-        ctx.inbox({
-          to: rivera.people.dana.maskedContact,
+        ctx.startVerification({
+          person: rivera.people.dana,
+          code: DEMO_CODE,
           body: `Your Rivera Plumbing verification code is ${DEMO_CODE}.`,
           preview: inboxPreview[ctx.language],
         }),
@@ -497,6 +512,29 @@ export const SCRIPT: readonly ScriptRule[] = [
     words: [],
     steps: [writing, (ctx) => ctx.reply([helpProse[ctx.language]])],
   },
+];
+
+/** Who a demo code is for: a person on record, with the masked contact the code goes to. */
+export interface VerifyPerson {
+  personId: string;
+  name: string;
+  maskedContact: string;
+}
+
+/** Claude's checked words with the invoice: no digits, amounts or dates. */
+const invoiceProse: Record<Language, RenderedBlock> = {
+  en: proseBlock("Thanks, Dana. Here's your invoice."),
+  es: proseBlock('Gracias, Dana. Aquí tienes tu factura.'),
+};
+
+/**
+ * Claude's turn once the visitor confirmed it's them, which the API wakes it for: the invoice they
+ * asked for, released to them as its verified owner.
+ */
+export const AFTER_VERIFY: readonly Step[] = [
+  (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.releaseInvoice)),
+  writing,
+  (ctx) => ctx.reply([invoiceProse[ctx.language], blocks.document_link[ctx.language]]),
 ];
 
 /**

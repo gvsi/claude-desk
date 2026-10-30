@@ -40,6 +40,7 @@ import { PUBLIC_COPY, type PublicCopy } from './copy.ts';
 import { useVisitorChat } from './PublicChatProvider.tsx';
 import { useOpenStatus } from './useOpenStatus.ts';
 import { useVisitorTyping } from './useVisitorTyping.ts';
+import { VerifyInline } from './verify/VerifyInline.tsx';
 
 import './PublicChat.css';
 
@@ -303,6 +304,14 @@ function useNewestInView(end: RefObject<HTMLElement | null>, composer: RefObject
   return { follow, beforeChange };
 }
 
+/** The latest row whose message carries the kernel's verify card, by its key, or null. */
+function latestVerifyRow(rows: readonly ChatRow[]): string | null {
+  const row = rows.findLast(
+    ({ item }) => item.kind === 'message' && item.ev.blocks.some((block) => block.kind === 'card' && block.template === 'verify_prompt'),
+  );
+  return row === undefined ? null : rowKey(row);
+}
+
 /** The visitor's words that didn't send because the chat ended (a 401), in order. */
 function unsentWhenEnded(rows: readonly ChatRow[]): string[] {
   return rows.flatMap(({ item }) => (item.kind === 'visitor' && item.status === 'failed' && item.failure === 'session' ? [item.text] : []));
@@ -434,6 +443,26 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
       ));
   };
 
+  const askForOwner = () => send(copy.askForOwner(ownerName));
+  // Under the latest message with the kernel's verify card: the code form while the chat can be
+  // written in and the visitor hasn't confirmed it's them, then the verified line.
+  const verified = chat.session?.verified === true;
+  const verifyRow = latestVerifyRow(state.rows);
+  const verifyUnder = (row: ChatRow): ReactNode[] =>
+    verifyRow !== null && rowKey(row) === verifyRow && (verified || ready)
+      ? [
+          <VerifyInline
+            key="verify"
+            status={chat.verifyStatus}
+            verified={verified}
+            assurance={chat.session?.assurance ?? 'none'}
+            language={language}
+            onSubmit={chat.verify}
+            onAskForOwner={askForOwner}
+          />,
+        ]
+      : [];
+
   const startNewChat = () => {
     const unsent = unsentWhenEnded(state.rows);
     carried.current = unsent.length > 0 ? unsent.join('\n') : null;
@@ -487,7 +516,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
       ownerName={ownerName}
       language={language}
       openStatus={openStatus}
-      onAskForOwner={() => send(copy.askForOwner(ownerName))}
+      onAskForOwner={askForOwner}
       about={desk.charter}
       footer={!embedded}
       composer={
@@ -524,7 +553,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
             ownerName={ownerName}
             language={language}
             onResend={resend}
-            after={cancelsUnder(row.receipts)}
+            after={[...cancelsUnder(row.receipts), ...verifyUnder(row)]}
           />
         ))}
         {state.writing ? <WritingIndicator language={language} /> : null}

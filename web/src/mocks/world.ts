@@ -160,6 +160,8 @@ export class MockWorld {
   readonly leads: LeadRecord[] = [];
   readonly inbox: InboxRecord[] = [];
   readonly links = new Map<string, LinkRecord>();
+  /** Each session's open demo code, by session id: the code and who it confirms. Spent once it works. */
+  readonly challenges = new Map<string, { code: string; person: { personId: string; name: string } }>();
   private counter = 0;
   private itemN = 0;
   private fixedNow: number | null = null;
@@ -476,6 +478,18 @@ export class MockWorld {
   }
 
   /**
+   * Checks a demo code as the kernel's `/verify/check` does: the session's open code confirms its
+   * person, once. A wrong code, or one already used, verifies nothing.
+   */
+  checkCode(session: SessionRecord, code: string): boolean {
+    const challenge = this.challenges.get(session.state.session_id);
+    if (!challenge || challenge.code !== code) return false;
+    this.challenges.delete(session.state.session_id);
+    this.verify(session, challenge.person);
+    return true;
+  }
+
+  /**
    * Verified Dana asks for her $180.00 drain clearing payment back, a minute ago, and the refund
    * card holds it for Maria: the design system's `rivera.heldRefund`, in this copy. Tests add it;
    * no seed has it. Her verified chat with the Desk is made the first time and kept after.
@@ -618,7 +632,10 @@ export class MockWorld {
       decide: (spec) => this.decide(session, spec, language),
       status: (type, decision) => statusEvent(type, decision),
       reply: (blocks, opts) => this.reply(session, blocks, language, opts),
-      inbox: (fields) => this.addVisitorInbox(session, fields),
+      startVerification: (fields) => {
+        this.challenges.set(session.state.session_id, { code: fields.code, person: { personId: fields.person.personId, name: fields.person.name } });
+        return this.addVisitorInbox(session, { to: fields.person.maskedContact, body: fields.body, preview: fields.preview });
+      },
       openHandoff: (fields) => this.openHandoff(session, fields),
       issueLink: (fields) => {
         this.issueLink(session, { ...fields, language });

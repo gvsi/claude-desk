@@ -28,6 +28,13 @@ import { chatReducer, initialChatState, ownerTypingDelayMs, type ChatAction, typ
 
 export type ChatStatus = 'loading' | 'ready' | 'not_found' | 'unavailable';
 
+/**
+ * Where the visitor's demo code stands: `checking` while the verify route has it, `failed` when it
+ * didn't work (one state for a wrong, expired or used-up code, or any refusal but a 401), and
+ * `unreachable` when no answer came and the session isn't verified.
+ */
+export type VerifyStatus = 'idle' | 'checking' | 'failed' | 'unreachable';
+
 /** How long the chat waits before each reopen of a stream the server closed; after the last, it gives up. */
 export const REOPEN_DELAYS_MS = [2_000, 5_000, 10_000] as const;
 
@@ -59,6 +66,8 @@ export interface VisitorChatSnapshot {
   cancelling: string | null;
   /** The held request whose last cancel failed and wasn't applied, or null. */
   cancelFailed: string | null;
+  /** Where the last demo code the visitor sent stands. */
+  verifyStatus: VerifyStatus;
 }
 
 export interface VisitorChatActions {
@@ -70,6 +79,8 @@ export interface VisitorChatActions {
   /** Starts a new chat after this one ended. */
   newChat: () => void;
   cancel: (decisionId: string) => void;
+  /** Sends a demo code to the verify route: the kernel checks it, and Claude never sees it. */
+  verify: (code: string) => void;
 }
 
 export type VisitorChatView = VisitorChatSnapshot & VisitorChatActions;
@@ -145,6 +156,7 @@ class VisitorChat {
     status: 'loading',
     cancelling: null,
     cancelFailed: null,
+    verifyStatus: 'idle',
   };
   private readonly listeners = new Set<() => void>();
   /** Pages showing this chat; the stream is open only while there is one. */
@@ -374,7 +386,7 @@ class VisitorChat {
     this.checkRetries = 0;
     this.clearOwnerTypingTimer();
     this.dispatch({ type: 'reset' });
-    this.set({ session: null, status: 'loading', cancelling: null, cancelFailed: null });
+    this.set({ session: null, status: 'loading', cancelling: null, cancelFailed: null, verifyStatus: 'idle' });
     this.loading = true;
     this.open(epoch)
       .catch((err: unknown) => {
@@ -514,6 +526,51 @@ class VisitorChat {
     }
   }
 
+  readonly verify = (code: string): void => {
+    const { status, state, verifyStatus } = this.snapshot;
+    if (status !== 'ready' || state.error === 'session' || verifyStatus === 'checking') return;
+    this.set({ verifyStatus: 'checking' });
+    void this.checkCode(code);
+  };
+
+  /**
+   * The code goes to the verify route and nowhere else. Verified, the chat's session is the one the
+   * kernel answered with. Every refusal but a 401 is the same failed code, as the kernel answers a
+   * wrong, expired or used-up code alike; a 401 ends the chat. A lost answer may have verified the
+   * session, so the chat reads it before saying the code couldn't be checked.
+   */
+  private async checkCode(code: string): Promise<void> {
+    const generation = this.generation;
+    try {
+      const { state } = await request('verifyCheck', { params: { slug: this.slug }, body: { code } });
+      if (generation !== this.generation) return;
+      this.set(state.verified ? { verifyStatus: 'idle', session: state } : { verifyStatus: 'failed' });
+    } catch (err) {
+      if (generation !== this.generation) return;
+      if (sessionGone(err)) {
+        this.set({ verifyStatus: 'idle' });
+        this.dispatch({ type: 'ended' });
+        return;
+      }
+      if (err instanceof ApiError && err.status !== null && err.status >= 400 && err.status < 500) {
+        this.set({ verifyStatus: 'failed' });
+        return;
+      }
+      const session = isUncertain(err) ? await this.currentSession() : null;
+      if (generation !== this.generation) return;
+      this.set(session?.verified ? { verifyStatus: 'idle', session } : { verifyStatus: 'unreachable' });
+    }
+  }
+
+  /** The chat's session as the API holds it now, or null when it can't be read. */
+  private async currentSession(): Promise<SessionState | null> {
+    try {
+      return (await request('visitorSession', { params: { slug: this.slug } })).state;
+    } catch {
+      return null;
+    }
+  }
+
   /** Whether the conversation holds an outcome for `decisionId`: a lost cancel that went through. */
   private async wasResolved(decisionId: string): Promise<boolean> {
     try {
@@ -569,6 +626,7 @@ export function useVisitorChat(slug: string, previewDeskId?: string): VisitorCha
       retry: chat.retry,
       newChat: chat.newChat,
       cancel: chat.cancel,
+      verify: chat.verify,
     }),
     [snapshot, chat],
   );
