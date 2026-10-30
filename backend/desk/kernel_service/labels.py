@@ -18,8 +18,8 @@ Every document's body ends with its canary, a random marker (`cdk-` and 16 hex d
 other text holds. Text that carries one is carrying the document out, so canaries are looked for
 (`find_canaries`) wherever text could leave for someone the document isn't for: Claude's replies,
 the owner's say, what a tool shows Claude and knowledge the owner adds (`store_knowledge`). They
-are matched on `canary_key`, which keeps only ASCII letters and digits after NFKC and case
-folding, so spaces, punctuation, capitals and full-width forms don't hide one.
+are matched on `canary_key`, which keeps only ASCII letters and digits after NFKD and case
+folding, so spaces, punctuation, capitals, full-width forms and accents don't hide one.
 """
 
 import unicodedata
@@ -142,7 +142,7 @@ def _keyed(text: str) -> tuple[str, list[int]]:
     chars: list[str] = []
     origin: list[int] = []
     for i, ch in enumerate(text):
-        for part in unicodedata.normalize("NFKC", ch).casefold():
+        for part in unicodedata.normalize("NFKD", ch).casefold():
             if part.isascii() and part.isalnum():
                 chars.append(part)
                 origin.append(i)
@@ -150,9 +150,10 @@ def _keyed(text: str) -> tuple[str, list[int]]:
 
 
 def canary_key(text: str) -> str:
-    """`text` as canaries are matched in it: each character in NFKC and case-folded, keeping only
-    ASCII letters and digits, so spaces, punctuation, capitals and full-width forms can't hide one
-    ("Ｃdk-0123 4567" reads as "cdk01234567")."""
+    """`text` as canaries are matched in it: each character in NFKD and case-folded, keeping only
+    ASCII letters and digits, so spaces, punctuation, capitals, full-width forms and accents can't
+    hide one: an accented letter keeps its base letter, whether it came precomposed or with a
+    combining mark ("Ｃdk-0123 4567" reads as "cdk01234567", and so does "çďķ-0123 4567")."""
     return _keyed(text)[0]
 
 

@@ -3,8 +3,8 @@
 Data put together from several sources is readable only by the readers they all have
 (`labels.combine`). Every document carries a canary, a random marker in its body; wherever text
 could carry a private document out (Claude's prose and every field of the cards it cites, the
-owner's say, what a tool shows Claude), a canary blocks it, even split by spaces or written in
-another case or character width. Knowledge the owner adds is untrusted text: it is the owner's
+owner's say, what a tool shows Claude), a canary blocks it, even split by spaces, written in
+another case or character width, or with accents on its letters. Knowledge the owner adds is untrusted text: it is the owner's
 alone unless marked public, it stays the owner's when it carries a canary, and it never changes
 what a session may do.
 
@@ -148,12 +148,18 @@ def full_width(text: str) -> str:
     return "".join(chr(ord(ch) + 0xFEE0) if "!" <= ch <= "~" else ch for ch in text)
 
 
+ACCENTED = str.maketrans("abcdef", "áḃćďéḟ")      # each hex letter with an accent, precomposed
+
+
 def disguises(canary: str) -> list[str]:
-    """A canary split by spaces and other separators, in capitals, in full width, and all at once."""
+    """A canary split by spaces and other separators, in capitals, in full width, all at once, with
+    an accent on each letter (precomposed, "Çďķ-…"), and with a combining accent after each
+    character."""
     body = canary.removeprefix("cdk-")
     spaced = f"cdk {body[:4]} {body[4:8]} {body[8:12]} {body[12:]}"
     return [spaced, canary.upper(), full_width(canary),
-            f"C.D.K – {full_width(body[:6].upper())}\u00a0{body[6:11]}-{body[11:].upper()}"]
+            f"C.D.K – {full_width(body[:6].upper())}\u00a0{body[6:11]}-{body[11:].upper()}",
+            f"Çďķ-{body.translate(ACCENTED)}", "".join(f"{ch}\u0301" for ch in canary)]
 
 
 async def test_canary_split_with_spaces_case_or_width_is_caught(app, client):
@@ -162,7 +168,14 @@ async def test_canary_split_with_spaces_case_or_width_is_caught(app, client):
     canaries = {dana.document_id: dana.canary}
     assert labels.canary_key("Ｃdk-0123 4567\u00a0ab.Cd") == "cdk01234567abcd"
     for disguised in disguises(dana.canary):
-        assert labels.find_canaries(f"Reference: {disguised}.", canaries) == [dana.document_id], disguised
+        text = f"Reference: {disguised}."
+        assert labels.find_canaries(text, canaries) == [dana.document_id], disguised
+        # what a tool shows Claude and every field of a card are matched alike
+        assert labels.find_canaries_in({"ok": True, "ref": disguised}, canaries) == [dana.document_id], disguised
+        # the match maps back onto the text as written, from the canary's first character to its last
+        [(document_id, start, end)] = labels.canary_spans(text, canaries)
+        assert (document_id, text[:start], labels.canary_key(text[start:end])) == (
+            dana.document_id, "Reference: ", labels.canary_key(dana.canary)), disguised
         verdict = await checked(client, visitor, f"Your invoice reference is {disguised}.")
         # only the canary: none of its digits is read as an amount, so no span quotes a piece of it
         assert violations(verdict) == blocked_by(dana), disguised
@@ -313,7 +326,7 @@ async def test_knowledge_marked_public_is_served_to_visitors(app, client, frozen
 async def test_knowledge_carrying_a_canary_stays_owner_only(app, client):
     copy, visitor = await visitor_of(app, client)
     dana = (await documents(app, copy))["dana-invoice"]
-    spaced, _, wide, _ = disguises(dana.canary)
+    spaced, _, wide, *_ = disguises(dana.canary)
     # Dana's invoice pasted into knowledge marked public, its canary split by spaces; another with it
     # in the title, in full width
     pasted = knowledge("kb-invoice", "Last invoice", f"Drain clearing, paid in full. Reference {spaced}", ["public"])

@@ -13,7 +13,7 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    the language, with each letter that looks like a Latin one read as it, from
    `lexicon/lookalikes.txt`, every dash as "-" and every apostrophe as "’"; booking claims such
    as "you're booked" among them, unless the reply carries a booking card that step 4 passed),
-   and the copy's document canaries, even split by spaces or in another case or width
+   and the copy's document canaries, even split by spaces, in another case or width, or accented
    (`labels.canary_key`). Since the owner's decisions of 2026-10-30, a booking claim passes
    beside the booking's card, which says the same, a policy's words are left to the
    soft-promise check, which reads the prose with the cards, and Claude may write links and
