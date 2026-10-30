@@ -45,7 +45,7 @@ async function injectToday(patch: (today: Today) => Today): Promise<void> {
 async function heldItems(): Promise<NeedsYouItem[]> {
   const answer = await mockStore.dispatch('needsYou', { params: { desk_id: RIVERA.deskId } });
   if ('network' in answer || answer.status !== 200) throw new Error('the mock reads Needs you');
-  return (answer.body as NeedsYouItem[]).filter((item) => item.decision !== undefined);
+  return (answer.body as NeedsYouItem[]).filter((item) => item.decision != null);
 }
 
 /** The seeded hold as the kernel has it now. */
@@ -561,6 +561,33 @@ describe('Today', () => {
     await visitorSays('50% off if I pay cash');
     await expect.element(screen.getByRole('article', { name: /^Held for you: / }), { timeout: 2_000 }).toBeVisible();
     await expect.element(region(screen, 'Needs you').getByRole('button', { name: 'Allow this time' })).toBeVisible();
+  });
+
+  it('needs_you_reads_the_api_shape', async () => {
+    // The API sends every NeedsYouItem field, the other alternative's as null (openapi.json): a
+    // held request has `handoff: null`, a callback `decision: null, held_by: null, held_at: null`.
+    await visitorSays('Can you call me back?');
+    const read = async () => {
+      const answer = await mockStore.dispatch('needsYou', { params: { desk_id: RIVERA.deskId } });
+      if ('network' in answer || answer.status !== 200) throw new Error('the mock reads Needs you');
+      return answer.body as Record<string, unknown>[];
+    };
+    // The scripted turn files the callback a moment after the message.
+    await expect.poll(async () => (await read()).some((item) => item.handoff != null), { timeout: 2_000 }).toBe(true);
+    const asTheApiSendsIt: Record<string, unknown>[] = (await read()).map((item) =>
+      'decision' in item && item.decision ? { ...item, handoff: null } : { ...item, decision: null, held_by: null, held_at: null },
+    );
+    expect(asTheApiSendsIt.some((item) => item.handoff === null)).toBe(true);
+    expect(asTheApiSendsIt.some((item) => item.decision === null)).toBe(true);
+    mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: asTheApiSendsIt });
+
+    const { screen } = await renderRoute(TODAY);
+    const needsYou = region(screen, 'Needs you');
+    await expect.element(needsYou.getByText(SEEDED_REASON, { exact: false }).first()).toBeVisible();
+    await expect.element(screen.getByRole('article', { name: 'Wants you' }).first()).toBeVisible();
+    await expect.element(screen.getByRole('article', { name: 'Wants you' }).first().getByText(CALLBACK_REASON, { exact: true })).toBeVisible();
+    expect(screen.container.textContent).not.toContain('handoff_id');
+    await expectScreenBasics(screen.container, { owner: true });
   });
 
   it('handoff_offers_to_join', async () => {

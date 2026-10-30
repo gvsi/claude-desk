@@ -101,6 +101,7 @@ export function needsYou(world: MockWorld, desk: DeskRecord): NeedsYouItem[] {
       at: d.createdAt,
       item: {
         decision: d.decision,
+        handoff: null,
         held_by: desk.policy.cards.find((card) => card.card_id === d.decision.card_ids[0])?.reason ?? null,
         held_at: isoTime(d.createdAt),
         session: needsYouSession(world.sessions.get(d.decision.session_id), d.decision.session_id),
@@ -113,6 +114,9 @@ export function needsYou(world: MockWorld, desk: DeskRecord): NeedsYouItem[] {
       at: h.createdAt,
       item: {
         handoff: h.handoff,
+        decision: null,
+        held_by: null,
+        held_at: null,
         session: needsYouSession(world.sessions.get(h.handoff.session_id), h.handoff.session_id),
         from_the_visitor: h.fromTheVisitor,
       } satisfies NeedsYouItem,
