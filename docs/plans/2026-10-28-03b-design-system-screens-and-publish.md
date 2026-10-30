@@ -527,7 +527,7 @@ Every string here is owner-facing (no Spanish). Components display what the scre
   - `auto`: "Claude quotes at list price, books weekdays in your hours and sends verified customers their own documents. Payments ask you first."
   - `custom`: "Your own rules, tool by tool. Change any of them below."
 
-  The two preset captions describe `desk.presets.PRESETS` (plan 01a Task 3). A test pins them to that table's cards (`preset_captions_match_the_presets`, below), so a preset change fails it.
+  The two preset captions describe `desk.presets.PRESETS` (plan 01a Task 3). `preset_captions_match_the_presets` (below) checks every claim each caption makes against that module's cards, so changing a preset alone fails it. It reads them from the generated presets export, `web/src/api/presets.gen.json` (`{"ask_first": [RuleCard, …], "auto": [RuleCard, …]}`, each card as the kernel's `RuleCard` dumps it to JSON, in the module's order). The binding to those cards comes with plan 01a's presets export at that path: until the file exists, the test is skipped and says what it waits for. No hand-copied table stands in for it.
 
 - **`HowClaudeWorks({ preset: RulesPreset; onPreset: (preset: 'ask_first' | 'auto') => void; disabled?: boolean; children?: ReactNode })`** (N-Conn-17-Mode, N-Conn-22-Phone-Mode). A `Card` at the top of Rules, under the page header:
   - "How Claude works" as the section's `h2`, the caption `PRESET_CAPTIONS[preset]` in secondary meta, and at the right a `SegmentedControl` labelled "How Claude works" with `PRESET_WORDS`, its value `preset`.
@@ -584,12 +584,15 @@ Every string here is owner-facing (no Spanish). Components display what the scre
     - `simulate_only_when_on`: moved from Task 3. `WithSimulate` has the strip; `RefundNeedsReview`, `Off` and `Quote` (built in) don't, even with `onSimulateChange`, and `Refund` has none without it.
     - `simulate_calls_once`.
     - `simulate_busy_keeps_its_width`.
-  - Unit: `outcomeWords.test.ts` `preset_captions_match_the_presets`: each caption's claims agree with a copied table of the plan 01a presets, and the Automatic caption names exactly the tools that preset makes automatic beyond Ask me first.
+  - Unit, in `outcomeWords.test.ts`:
+    - `preset_captions_match_the_presets`: reads the presets export and checks each claim against the cards it names. "Quotes at list price": the quote card's `max_discount_bp` is 0. "Books weekdays in your hours": the booking card's hours are on weekdays. "Sends verified customers their own documents": the card is for the record's owner. "Takes a payment" and "Payments ask you first": no automatic card for any target that takes or sends money. Ask me first, and Automatic beyond it, run on their own only what their captions say. "Saves leads" covers both tools of Leads and callbacks, and the owner-session setup tools (`native.fetch_website`, `native.read_memory`), which the Rules page doesn't list, are left out. Skipped, naming the export, until it is generated.
+    - `a_changed_preset_card_fails_the_captions`: a small hand-built cards object passes the checker, and changing one card (the quote's `max_discount_bp` to 1000, a booking at any hour, an automatic payment link, among others) fails it. An export of the wrong shape is refused.
+    - `preset_captions_are_the_owner_words`: the captions, word for word.
   - Every story has `parameters.canvas` set to its board, or `'none'` naming the nearest board.
   - axe runs on every story.
 - [ ] **Step 2: Run** `cd web && npx vitest run --project unit src/ds/components/OutcomeMenu && npx vitest run --project storybook src/ds/components/{HowClaudeWorks,MoneyLimit,LimitChange,ChangeReview,ToolPageHeader}` → FAIL.
 - [ ] **Step 3: Build** until they pass. Use tokens only, no raw colors. The strip uses existing tokens (`line-card`, `radius-card`).
-- [ ] **Step 4: Run** the same commands plus `npm run check:ds` → PASS (2 unit tests; 36 story tests).
+- [ ] **Step 4: Run** the same commands plus `npm run check:ds` → PASS (3 unit tests, with the presets check skipped until the export exists; 36 story tests).
 - [ ] **Step 5: Board check:** the six boards against their renders at 1512×982 (the phone board at 390×844), as Task 6 does for N-Conn-01 to 16, one line each in `web/src/ds/reference/README.md`. Task 6's render check treats N-Conn-22-Phone-Mode as a phone board, as it does N-Conn-16-Phone-Rules.
 - [ ] **Step 6: Commit** `feat(ds): add the rules mode card, the money limit and the simulate strip`, then `test(ds): check the mode, money limit and simulate boards against the design canvas`.
 
@@ -861,3 +864,5 @@ Task 3 fix round 1 (2026-10-29), from the task review:
 - `ChangeReview`'s confirm keeps "Confirm change" under the busy spinner rather than reading "Confirming", as every busy button does (`ConfirmingFromTheScreen`). Task 2 has 46 story tests and Task 3 57.
 
 Task 3c (2026-10-29): the project owner asked for the mode switch, the money limit and the demo's "Simulate a tool change" to be built after Tasks 2–3, in a change of their own that merges once he signs boards N-Conn-17 to N-Conn-22, and answered its open questions: a change that can cancel open payment links says so in one static line (`ChangeReview` `cancelsLinks`, with no contract field); tool rows stay editable under a preset; a preset's review opens on its own page. Task 3c adds `HowClaudeWorks`, `MoneyLimit`, `LimitChange` and `PRESET_CAPTIONS`, moves the simulate strip from Task 3 into `ToolPageHeader`, and gives `SegmentedControl` a `disabled` state. A preset pick and "Simulate a tool change" each send once; "Review change" passes no value. The board check fixed the mode card's hairline spacing; the preset review keeps `ChangeReview`'s own layout for each side, where the board draws them differently. Task 3c has 2 unit tests and 36 story tests across its five component folders.
+
+Task 3c fix round 1 (2026-10-29), from the task review: the caption check is bound to the presets themselves. It reads the cards from plan 01a's generated presets export, `web/src/api/presets.gen.json`, and is skipped until that export exists, rather than checking a copy kept in the test. A hand-built cards object proves that changing one card fails it. Task 3c has 3 unit tests and the skipped presets check.
