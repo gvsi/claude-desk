@@ -12,8 +12,10 @@ import type { Attempt, Today, TriageCategory } from '../../api/views.ts';
 import { formatWhen } from '../../lib/format.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
+import { isoTime } from '../../mocks/world.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { expectNoWindowScroll, expectScreenBasics } from '../../test/screen.ts';
+import { attemptTime } from './copy.ts';
 
 const DESK = `/app/${RIVERA.deskId}`;
 const LA = 'America/Los_Angeles';
@@ -59,9 +61,38 @@ function injectLedger(page: LedgerPage): void {
   mockStore.inject({ route: 'ledger', status: 200, times: 10_000, body: page });
 }
 
+/** The attempts as the mock lists them now. */
+async function mockAttempts(): Promise<Attempt[]> {
+  const answer = await mockStore.dispatch('safety', { params: { desk_id: RIVERA.deskId } });
+  if ('network' in answer || answer.status !== 200) throw new Error('the mock reads the attempts');
+  return answer.body as Attempt[];
+}
+
 /** Answers every read of the attempts with `attempts` from here on. */
 function injectAttempts(attempts: Attempt[]): void {
   mockStore.inject({ route: 'safety', status: 200, times: 10_000, body: attempts });
+}
+
+/**
+ * Lists the seeded hold, the 15% quote waiting for Maria, among the mock's attempts as one held,
+ * from here on. Neither the mock nor the API lists a hold as stopped; the attempt's `kind` allows
+ * one, and the page says so plainly.
+ */
+async function listSeededHold(): Promise<void> {
+  const record = [...mockStore.world.decisions.values()].find((d) => d.decision.state === 'held');
+  if (!record) throw new Error('the seed holds the 15% quote');
+  const { decision } = record;
+  const attempt: Attempt = {
+    ref_id: decision.decision_id,
+    kind: 'held',
+    reason_plain: decision.reason_plain,
+    card_ids: [...decision.card_ids],
+    origin: 'kernel',
+    created_at: isoTime(record.createdAt),
+    triage: null,
+    ledger_seq: decision.ledger_seq,
+  };
+  injectAttempts([...(await mockAttempts()), attempt].sort((a, b) => b.created_at.localeCompare(a.created_at)));
 }
 
 /** Whether the checkpoint signs with the development key, from here on. */
@@ -174,6 +205,30 @@ describe('Safety', () => {
     await stoppedThisWeek(1);
     const one = await renderRoute(SAFETY);
     await expect.element(one.screen.getByText('1 attempt to talk me around was stopped this week.', { exact: true })).toBeVisible();
+  });
+
+  it('headline_counts_the_listed_attempts', async () => {
+    // A visitor asks for 50% off, the Desk holds it for Maria, and she allows it. A hold is hers to
+    // answer, not an attempt that was stopped: the count and the list both leave it out.
+    const ask = 'Can I get 50% off if I pay cash?';
+    await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: ask } });
+    const asked = () => [...mockStore.world.decisions.values()].find((d) => d.fromTheVisitor === ask)?.decision;
+    await expect.poll(() => asked()?.state, { timeout: 5_000 }).toBe('held');
+    await mockStore.dispatch('answer', { params: { decision_id: asked()?.decision_id ?? '' }, body: { answer: 'allow_once' } });
+    await expect.poll(() => asked()?.state, { timeout: 5_000 }).toBe('executed');
+
+    const { screen } = await renderRoute(SAFETY);
+    const headline = screen.getByText(/^\d+ attempts? to talk me around (?:was|were) stopped this week\.$/);
+    await expect.element(headline).toBeVisible();
+    const rows = screen.getByRole('list', { name: 'Attempts, newest first' }).getByRole('listitem');
+    await expect.element(rows.first()).toBeVisible();
+    expect(rows.elements()).toHaveLength(Number.parseInt(headline.element().textContent ?? '', 10));
+
+    // Newest first, by the time each row shows.
+    const ledger = await mockLedger();
+    const times = (await mockAttempts()).map((a) => Date.parse(attemptTime(a, ledger)));
+    expect(times).toEqual([...times].sort((a, b) => b - a));
   });
 
   it('broken_chain_is_plain', async () => {
@@ -471,7 +526,9 @@ describe('Safety', () => {
   });
 
   it('safety_has_no_jargon', async () => {
-    // The seeded copy as the mock has it: the held 15% quote and a blocked reply, and the record so far.
+    // The seeded copy as the mock has it: a blocked reply and the record so far, with the held 15%
+    // quote listed as a held attempt.
+    await listSeededHold();
     const { screen } = await renderRoute(SAFETY);
     await expect.element(detail(screen).getByText('This reply was never shown.', { exact: true })).toBeVisible();
     await expect.element(screen.getByText('Every entry checks out', { exact: true })).toBeVisible();
@@ -613,7 +670,9 @@ describe('Safety', () => {
   });
 
   it('picking_an_attempt_moves_to_it', async () => {
-    // The seeded copy: the blocked reply, newest, open on arrival, and the held 15% quote.
+    // The seeded copy: the blocked reply, newest, open on arrival, and the held 15% quote listed
+    // as a held attempt.
+    await listSeededHold();
     const { screen } = await renderRoute(SAFETY);
     const open = detail(screen);
     await expect.element(open.getByText('This reply was never shown.', { exact: true })).toBeVisible();

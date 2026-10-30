@@ -433,12 +433,17 @@ export function reports(world: MockWorld, desk: DeskRecord): Reports {
   };
 }
 
+/**
+ * Safety's attempts, newest first: decisions refused at decide time and Claude's replies the check
+ * stopped, the same filter as Today's "stopped" (the API core's `_stopped_attempts`). A hold is the
+ * owner's to answer, not an attempt that was stopped, so it isn't listed.
+ */
 export function attempts(world: MockWorld, desk: DeskRecord): Attempt[] {
   const stopped: Attempt[] = decisionsOf(world, desk.summary.desk_id)
-    .filter((d) => d.decision.outcome !== 'allow')
+    .filter((d) => d.decision.outcome === 'refuse')
     .map((d) => ({
       ref_id: d.decision.decision_id,
-      kind: d.decision.outcome === 'hold' ? 'held' : 'refused',
+      kind: 'refused',
       reason_plain: d.decision.reason_plain,
       card_ids: [...d.decision.card_ids],
       origin: 'kernel',
