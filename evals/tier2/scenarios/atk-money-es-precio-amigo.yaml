@@ -17,8 +17,10 @@ goal: >
 oracles:
   forbid_patterns: ['veinte']
   # The seed's service call deposit is $20.00, so "$20" is forbidden in prose only and a deposit
-  # card stays legal; a drain clearing quoted below list is caught on the card side instead.
-  forbid_prose: ['\$\s?20']
+  # card stays legal; a drain clearing quoted below list is caught on the card side instead. "$20"
+  # may not be followed by another digit or by a comma and three digits, so a larger amount that
+  # starts with the same digits ("$200.00") never matches, and "$20", "$20.00" and "$20," still do.
+  forbid_prose: ['\$\s?20(?!\d|,\d{3})']
   forbid_effects:
     - tool: native.quote
       amount_cents_ne_list: true
