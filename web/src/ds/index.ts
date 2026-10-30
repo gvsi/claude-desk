@@ -71,6 +71,10 @@ export { PublicShell, type PublicBrand, type PublicOpenStatus, type PublicShellP
 export { PublicBrandHeader, type PublicBrandHeaderProps } from './components/PublicShell/PublicBrandHeader.tsx';
 export { Dialog, type DialogProps } from './components/Dialog/Dialog.tsx';
 
+// Settings
+export { DetailList, type DetailItem, type DetailListProps } from './components/DetailList/DetailList.tsx';
+export { AlertList, type AlertListItem, type AlertListProps } from './components/AlertList/AlertList.tsx';
+
 // Navigation
 export {
   SwitcherMenu,

@@ -11,6 +11,9 @@ import type { Effect, EvMessage, PublicDesk, RenderedBlock, RuleCard, StatusEven
 import { AlwaysOnList } from '../components/AlwaysOnList/AlwaysOnList.tsx';
 import { Breadcrumb } from '../components/Breadcrumb/Breadcrumb.tsx';
 import { Composer } from '../components/Composer/Composer.tsx';
+import { DetailList, type DetailItem } from '../components/DetailList/DetailList.tsx';
+import { SubNav, type SubNavItem } from '../components/SubNav/SubNav.tsx';
+import { Switch } from '../components/Switch/Switch.tsx';
 import { ConnectorDirectory, type ConnectorDirectoryProps } from '../components/ConnectorDirectory/ConnectorDirectory.tsx';
 import { ConnectorList } from '../components/ConnectorList/ConnectorList.tsx';
 import { ConnectorSection, type ConnectorSectionProps } from '../components/ConnectorSection/ConnectorSection.tsx';
@@ -41,6 +44,7 @@ import { Card } from '../components/Card/Card.tsx';
 import { ChainStatus } from '../components/ChainStatus/ChainStatus.tsx';
 import { Chip } from '../components/Chip/Chip.tsx';
 import { PageHeader } from '../components/PageHeader/PageHeader.tsx';
+import { Pill } from '../components/Pill/Pill.tsx';
 import { SegmentedControl } from '../components/SegmentedControl/SegmentedControl.tsx';
 import { ConversationListItem } from '../components/ConversationListItem/ConversationListItem.tsx';
 import { PublicBrandHeader } from '../components/PublicShell/PublicBrandHeader.tsx';
@@ -82,6 +86,8 @@ export interface RiveraFrameProps {
   reviewer?: boolean;
   /** The page lays out its own columns from the sidebar's edge (`AppShell` `fill`). */
   fill?: boolean;
+  /** The sidebar's Connectors row, after Rules, as the boards signed after it draw it. */
+  connectors?: boolean;
   /** A panel beside the page, such as Ask Claude (`AppShell` `panel`). */
   panel?: ReactNode;
   onSwitchBusiness?: () => void;
@@ -122,6 +128,7 @@ function OwnerFrame({
   counts,
   reviewer = false,
   fill = false,
+  connectors = false,
   panel,
   onSwitchBusiness,
   children,
@@ -140,7 +147,7 @@ function OwnerFrame({
           currentDeskId={desks[0]?.id ?? ''}
           onSwitchDesk={fn()}
           current={current}
-          hrefs={OWNER_HREFS}
+          hrefs={connectors ? { ...OWNER_HREFS, connectors: '#connectors' } : OWNER_HREFS}
           peopleLabel="Customers"
           counts={counts}
           answering
@@ -1079,5 +1086,96 @@ export function AgentsCard({ title, lead, children }: { title: string; lead?: st
       {lead === undefined ? null : <p className="board-agents__card-lead cd-type-meta">{lead}</p>}
       <div className="board-agents__card-body">{children}</div>
     </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Settings (N-Run2-Settings-*): the page's columns, SubNav at the left and the section's content at
+// the right, and General's content, which the delete dialog's board and the phone board share.
+
+/** Settings' sections, in order. Connectors have their own tab, so there is no Integrations entry. */
+export const SETTINGS_SECTIONS: readonly SubNavItem[] = [
+  { key: 'general', label: 'General', href: '#settings-general' },
+  { key: 'knowledge', label: 'Knowledge', href: '#settings-knowledge' },
+  { key: 'notifications', label: 'Notifications', href: '#settings-notifications' },
+  { key: 'channels', label: 'Channels', href: '#settings-channels' },
+  { key: 'billing', label: 'Billing', href: '#settings-billing' },
+];
+
+/** The counts beside Conversations and Safety, in the Settings boards' words. */
+export const SETTINGS_COUNTS = {
+  conversations: { n: 2, label: '2 live conversations' },
+  safety: { n: 2, label: '2 attempts stopped today' },
+} satisfies RiveraFrameProps['counts'];
+
+/** Settings › General's details, in the board's words; the web app writes the time zone and the hours. */
+export const GENERAL_DETAILS: readonly DetailItem[] = [
+  { label: 'Business', value: rivera.business.name },
+  { label: 'This Desk', value: rivera.business.deskName },
+  { label: 'Customers see you as', value: rivera.business.ownerName },
+  { label: 'Time zone', value: 'Pacific Time (Los Angeles)' },
+  { label: 'Hours', value: 'Weekdays 8:00 am to 6:00 pm, Saturdays 9:00 am to 1:00 pm' },
+];
+
+/** The Answering switch's line on a laptop (N-Run2-Settings-General). */
+export const ANSWERING_LINE = 'Claude answers under your rules. Turn it off and visitors are told you’ll reply yourself.';
+
+/** The same line as the phone board writes it: the first sentence only. */
+export const ANSWERING_LINE_PHONE = 'Claude answers under your rules.';
+
+/** Deleting a Desk, in the board's words: the line beside the button, and the dialog's body. */
+export const DELETE_DESK_LINE = 'Its public link stops working and its chats close. Its safety record is kept.';
+
+/** Settings for Rivera Plumbing on `current`: the title, SubNav, the section's content, and the footer. */
+export function SettingsPage({ current, children }: { current: string; children: ReactNode }) {
+  return (
+    <RiveraFrame current="settings" fill connectors counts={SETTINGS_COUNTS}>
+      <div className="board-filled-page">
+        <div className="board-settings">
+          <PageHeader title="Settings" />
+          <div className="board-settings__columns">
+            <div className="board-settings__nav">
+              <SubNav label="Settings" items={SETTINGS_SECTIONS} current={current} />
+            </div>
+            <div className="board-settings__content">{children}</div>
+          </div>
+          <ConceptFooter />
+        </div>
+      </div>
+    </RiveraFrame>
+  );
+}
+
+/** Settings › General's content: the business's details, Answering, and deleting this Desk. */
+export function GeneralSettings({ answering, onDelete = fn() }: { answering: string; onDelete?: () => void }) {
+  return (
+    <>
+      <section aria-labelledby="board-settings-business" className="board-settings__section">
+        <SectionHeader id="board-settings-business" title="Your business" />
+        <DetailList items={GENERAL_DETAILS} />
+      </section>
+      <Card as="section" label="Answering">
+        <Switch label="Answering" description={answering} checked onChange={fn()} />
+      </Card>
+      <section aria-labelledby="board-settings-delete" className="board-settings__section board-settings__delete">
+        <SectionHeader id="board-settings-delete" title="Delete this Desk" />
+        <div className="board-settings__delete-row">
+          <p className="board-settings__delete-line board-quiet cd-type-meta">{DELETE_DESK_LINE}</p>
+          <Button variant="secondary" size="main" onClick={onDelete}>
+            Delete this Desk
+          </Button>
+        </div>
+      </section>
+    </>
+  );
+}
+
+/** A vision note at the top of a Settings section the prototype doesn't run: the Pill, then its line. */
+export function VisionNote({ children }: { children: ReactNode }) {
+  return (
+    <div className="board-settings__vision">
+      <Pill>Vision</Pill>
+      <p className="board-quiet cd-type-meta">{children}</p>
+    </div>
   );
 }

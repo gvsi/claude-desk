@@ -1,7 +1,8 @@
 /* SubNav: the sidebar's nav rows for one section's pages. Each row is size-nav-row tall at the
-   control radius, the current one on bg-selected with no accent bar, hovered rows on fill-hover.
-   Under 768 px, where the app shell drops its sidebar, the rows become one line that scrolls
-   sideways inside itself. */
+   control radius, in secondary text; the current one in primary text on bg-selected with no accent
+   bar, hovered rows on fill-hover. Under 768 px, where the app shell drops its sidebar, the rows
+   become one line that scrolls sideways inside itself, across the page's 16 px gutters and over a
+   hairline, as N-Run2-Settings-Phone draws it. */
 
 .cd-sub-nav__list {
   display: flex;
@@ -19,7 +20,7 @@
   height: var(--size-nav-row);
   padding: 0 var(--space-10);
   border-radius: var(--radius-control);
-  color: var(--text-primary);
+  color: var(--text-secondary);
   text-decoration: none;
   white-space: nowrap;
   transition: background-color var(--motion-instant) var(--motion-ease);
@@ -32,16 +33,26 @@
 .cd-sub-nav__link[aria-current='page'],
 .cd-sub-nav__link[aria-current='page']:hover {
   background: var(--bg-selected);
+  color: var(--text-primary);
 }
 
 @media (max-width: 767.98px) {
+  /* Its own formatting context, so the list's negative margin never pulls the nav up with it. */
+  .cd-sub-nav {
+    display: flow-root;
+    margin: 0 calc(-1 * var(--space-16));
+    border-bottom: 1px solid var(--line-hairline);
+  }
+
   .cd-sub-nav__list {
     flex-direction: row;
     gap: var(--space-4);
     overflow-x: auto;
     overscroll-behavior-x: contain;
-    /* Room for the focus ring inside the scroller. */
-    padding: var(--space-4);
+    /* The links start at the page's gutter and at the nav's top, 4 px over the hairline. The
+       scroller reaches 4 px above the nav, so a focused link's ring is drawn inside it. */
+    margin-top: calc(-1 * var(--space-4));
+    padding: var(--space-4) var(--space-16);
     scrollbar-width: none;
   }
 

@@ -1367,8 +1367,10 @@
   }
 }
 
-/* Settings › General behind the Delete Desk dialog: the section links at the left, the details at
-   the right, then Answering and Delete this Desk; the footer at the window's foot. */
+/* Settings (N-Run2-Settings-*): the title, then SubNav 200 px wide at the left, 24 px under it,
+   and the section's content 40 px to its right, up to 720 px, its parts 20 px apart; the footer at
+   the window's foot. On a phone (N-Run2-Settings-Phone), one column 16 px under the top bar: the
+   title, SubNav, the content's parts and the footer, 16 px apart. */
 .board-settings {
   display: flex;
   flex: 1 0 auto;
@@ -1380,90 +1382,93 @@
 
 .board-settings__columns {
   display: grid;
-  grid-template-columns: 200px minmax(0, 1fr);
+  grid-template-columns: 200px minmax(0, 720px);
   gap: var(--space-40);
-  margin-top: var(--space-16);
+  align-items: start;
+  margin-top: var(--space-24);
 }
 
-.board-settings__nav ul,
-.board-settings__rows {
-  display: grid;
-  gap: var(--space-2);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.board-settings__nav-link {
-  display: flex;
-  align-items: center;
-  height: var(--size-nav-row);
-  padding: 0 var(--space-10);
-  border-radius: var(--radius-control);
-  color: var(--text-secondary);
-  text-decoration: none;
-}
-
-.board-settings__nav-link[aria-current='page'] {
-  background: var(--fill-hover);
-  color: var(--text-primary);
+.board-settings__nav {
+  min-width: 0;
 }
 
 .board-settings__content {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: var(--space-20);
   min-width: 0;
 }
 
-.board-settings__heading {
-  margin: 0 0 var(--space-8);
+.board-settings__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
 }
 
-.board-settings__rows {
-  gap: 0;
-  border: 1px solid var(--line-card);
-  border-radius: var(--radius-card);
-  background: var(--fill-card);
-}
-
-.board-settings__row {
+/* A vision note: the Pill, then its line 12 px after it. */
+.board-settings__vision {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-16);
-  padding: var(--space-12) var(--space-16);
+  gap: var(--space-12);
 }
 
-.board-settings__row + .board-settings__row {
-  border-top: 1px solid var(--line-hairline);
+.board-settings__content p,
+.board-settings__content h2 {
+  margin: 0;
 }
 
-.board-settings__detail {
-  display: grid;
-  min-width: 0;
-}
-
-.board-settings__answering {
-  padding: var(--space-16);
-  border: 1px solid var(--line-card);
-  border-radius: var(--radius-card);
-  background: var(--fill-card);
+/* Billing's plan: each line 8 px under the one before it. */
+.board-settings__content .board-settings__plan-line {
+  margin-top: var(--space-8);
 }
 
 .board-settings__delete {
+  padding-top: var(--space-8);
+}
+
+.board-settings__delete-row {
   display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
+  align-items: center;
   gap: var(--space-16);
 }
 
-.board-settings__delete p {
-  margin: 0;
+.board-settings__delete-line {
+  flex: 1;
 }
 
 .board-settings > .cd-concept-footer {
   margin-top: auto;
   padding-top: var(--space-16);
+}
+
+@media (max-width: 767.98px) {
+  .board-filled-page:has(> .board-settings) {
+    padding-top: var(--space-16);
+  }
+
+  .board-settings__columns {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-16);
+    margin-top: var(--space-16);
+  }
+
+  .board-settings__content {
+    gap: var(--space-16);
+  }
+
+  .board-settings__delete {
+    padding-top: 0;
+  }
+
+  .board-settings__delete-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-8);
+  }
+
+  .board-settings > .cd-concept-footer {
+    margin-top: 0;
+  }
 }
 
 /* The setup interview on a phone: 16 px gutters, and the bar's brand and business on one line each. */

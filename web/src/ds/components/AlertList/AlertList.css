@@ -1,0 +1,49 @@
+/* AlertList: a card of read-only rows, each padded 12 px by 16 px with a hairline over every row
+   but the first. When in body type at weight 520, what 2 px under it in meta, secondary; how at the
+   right in meta, secondary, centered on the row. When the two don't fit on a line, how goes under
+   what, from its left edge. */
+
+.cd-alert-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cd-alert-list__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-16);
+  box-sizing: border-box;
+  min-width: 0;
+  padding: var(--space-12) var(--space-16);
+}
+
+.cd-alert-list__row + .cd-alert-list__row {
+  border-top: 1px solid var(--line-hairline);
+}
+
+.cd-alert-list__text {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.cd-alert-list p {
+  margin: 0;
+}
+
+/* Two classes, so the weight wins over .cd-type-body whatever order the stylesheets load in. */
+.cd-alert-list .cd-alert-list__when {
+  color: var(--text-primary);
+  font-weight: 520;
+}
+
+.cd-alert-list .cd-alert-list__what {
+  margin-top: var(--space-2);
+  color: var(--text-secondary);
+}
+
+.cd-alert-list__how {
+  flex: none;
+  color: var(--text-secondary);
+}
