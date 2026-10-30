@@ -1,6 +1,6 @@
 """Smoke-check a deployed Desk through its public address, as a visitor's browser reaches it.
 
-    read -rs DESK_PASSCODE; export DESK_PASSCODE
+    IFS= read -rs DESK_PASSCODE; export DESK_PASSCODE
     uv run --project infra python infra/scripts/smoke.py --base-url https://<PublicUrl host> \\
       [--origin-host <ServiceEndpoint host>] [--load-balancer-arn <LoadBalancerArn>] [--cluster desk] \\
       [--only <check>]...

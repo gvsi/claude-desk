@@ -172,5 +172,5 @@ def test_the_runbook_says_how_to_export_the_passcode_without_echo_or_shell_histo
     history, so the runbook gives a way that does neither, where the passcode is stored."""
     first = section("First deploy (owner's terminal)")
     assert ("To export the passcode for one run instead, without echo or shell history, run "
-            "`read -rs DESK_PASSCODE && export DESK_PASSCODE` and type it, then `unset DESK_PASSCODE` "
-            "after the deploy.") in first
+            "`IFS= read -rs DESK_PASSCODE && export DESK_PASSCODE` and type it (`IFS=` keeps any space at either "
+            "end), then `unset DESK_PASSCODE` after the deploy.") in first

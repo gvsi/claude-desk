@@ -133,7 +133,7 @@ no_passcode() {  # no_passcode store|replace|retry|export <why>: the Keychain co
     retry) echo "deploy: run deploy.sh again; if this repeats, export DESK_PASSCODE for this run" ;;
     *) echo "deploy: export DESK_PASSCODE for this run" ;;
   esac >&2
-  echo "deploy: to export it without echo or shell history, run: read -rs DESK_PASSCODE && export DESK_PASSCODE" >&2
+  echo "deploy: to export it without echo or shell history, run: IFS= read -rs DESK_PASSCODE && export DESK_PASSCODE, then unset DESK_PASSCODE after the deploy" >&2
   exit 2
 }
 if [[ -z $data_only ]]; then
@@ -144,12 +144,13 @@ if [[ -z $data_only ]]; then
     passcode=$(security find-generic-password -s claude-desk-passcode -w) ||
       no_passcode store "the macOS Keychain item claude-desk-passcode couldn't be read (is it stored, and is the login Keychain unlocked?)"
     [[ -n $passcode ]] || no_passcode replace "the macOS Keychain item claude-desk-passcode is empty"
-    # Printable ASCII with no backslash: -w gives any other passcode as hex, printable but wrong, so -g's
-    # stderr, which shows how it's stored, is checked (it holds the passcode too and is never shown). A
-    # `password: 0x...` line anywhere in it marks a byte outside space to ~ or a backslash; the one
-    # answer accepted is `password: "<what -w gave>"` alone, whose value is checked byte by byte too (a
-    # C locale, in a subshell). If -g fails, or answers in any other form, nothing is known against the
-    # item (-w has just read it), so the advice is to run again, then to export DESK_PASSCODE.
+    # Printable ASCII with no backslash: -w gives a byte outside space to ~ as hex, printable but wrong,
+    # so -g's stderr, which shows how it's stored and shows a backslash as hex too, is checked (it holds
+    # the passcode too and is never shown). A `password: 0x...` line anywhere in it marks a byte outside
+    # space to ~ or a backslash; the one answer accepted is `password: "<what -w gave>"` alone, whose
+    # value is checked byte by byte too (a C locale, in a subshell). If -g fails, or answers in any other
+    # form, nothing is known against the item (-w has just read it), so the advice is to run again, then
+    # to export DESK_PASSCODE.
     probe=$(security find-generic-password -s claude-desk-passcode -g 2>&1 >/dev/null) ||
       no_passcode retry "the macOS Keychain item claude-desk-passcode couldn't be read a second time, to check how it's stored (is the login Keychain unlocked?)"
     if [[ $probe == 'password: 0x'* || $probe == *$'\n''password: 0x'* ]] ||

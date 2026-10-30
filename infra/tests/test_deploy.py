@@ -34,7 +34,8 @@ KEYCHAIN_PROBE = ["find-generic-password", "-s", "claude-desk-passcode", "-g"]
 STORE_IT = 'security add-generic-password -s claude-desk-passcode -a "$USER" -w'
 REPLACE_IT = 'security add-generic-password -U -s claude-desk-passcode -a "$USER" -w'
 RERUN_IT = "run deploy.sh again; if this repeats, export DESK_PASSCODE for this run"
-EXPORT_IT = "to export it without echo or shell history, run: read -rs DESK_PASSCODE && export DESK_PASSCODE"
+EXPORT_IT = ("to export it without echo or shell history, run: IFS= read -rs DESK_PASSCODE && export DESK_PASSCODE, "
+             "then unset DESK_PASSCODE after the deploy")
 
 # Each stub appends {"tool", "argv", "cwd", "tty", "passcode", "env"} to $STUB_LOG, "passcode" being
 # the SHA-256 of the DESK_PASSCODE it was given (None without one) and "env" each environment
@@ -129,6 +130,7 @@ elif tool == "npx" and args[:3] == ["--no-install", "cdk", "diff"]:
     if broadens and not os.environ.get("STUB_DIFF_WARNS_NOTHING"):
         print("This deployment will make potentially sensitive changes according to your current security "
               "approval level.\\nPlease confirm you intend to make the following modifications:\\n", file=sys.stderr)
+    if broadens:
         print(f"stub: IAM statement changes for {{args[3]}}", file=sys.stderr)
     if not os.environ.get("STUB_DIFF_UNCOUNTED"):
         counted = 0 if os.environ.get("STUB_DIFF_COUNTS_NOTHING") else int(broadens)
