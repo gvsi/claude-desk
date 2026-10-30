@@ -800,8 +800,10 @@ def _internal_error(named: Named, req: DecideRequest, exc: BaseException) -> Ker
 async def _review(ctx: KernelCtx, call: _Call, pending: list[RuleCard]) -> Reviewed:
     """Asks the reviewer about the call's action: the action as the adapter resolved it, the
     pending cards, the Desk's public charter facts and the free-text arguments, never the
-    conversation."""
-    assert call.action is not None
+    conversation. Only a normalized action is reviewed: without one this raises, and the call ends
+    with nothing stored."""
+    if call.action is None:
+        raise RuntimeError("review_without_action")
     facts = await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
         FactRow.desk_id == call.action.desk_id, FactRow.kind == "charter").order_by(FactRow.fact_id)))
     data = ReviewInput(action=ReviewAction.of(call.action, tz=call.business.timezone),
@@ -848,12 +850,15 @@ def _reason_plain(call: _Call, outcome: str, reason: str | None, evaluation: Eva
     or why it was refused with no card deciding), then the call's free-text arguments, each
     quoted, under one "Claude's note" label: Claude wrote them into the call, the visitor didn't.
     A hold only the compiler's default ask decided quotes no rule: the lead-ins say "your rule",
-    and no rule of the owner's decided it (`DEFAULT_ASK_PLAIN`)."""
+    and no rule of the owner's decided it (`DEFAULT_ASK_PLAIN`). A decision not refused early
+    takes its reasons from its evaluation and version: without them this raises, and the call ends
+    with nothing stored."""
     parts = [_asked(call.subject, call.req.call.tool, call.action)]
     if reason is not None:
         parts.append(REFUSED_PLAIN[reason])
     else:
-        assert evaluation is not None and call.version_row is not None
+        if evaluation is None or call.version_row is None:
+            raise RuntimeError("reason_without_evaluation")
         cards = {card.card_id: card for card in call.version_row.cards}
         lead_in, card_ids = _rules_decided(call, outcome, evaluation)
         deciding = [cards[card_id] for card_id in card_ids if card_id in cards]

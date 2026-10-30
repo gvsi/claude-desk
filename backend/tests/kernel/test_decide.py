@@ -13,6 +13,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import timedelta
+from types import SimpleNamespace
 
 import desk_kernel
 import httpx
@@ -1189,3 +1190,21 @@ def test_status_lines_are_digit_free():
     assert (render.language("es"), render.language("fr"), render.language(None)) == ("es", "en", "en")
     with pytest.raises(KeyError):
         render.status("held", "fr", owner="Maria Rivera")                 # no free-text fallback
+
+
+async def test_deciding_checks_what_it_relies_on_and_fails_closed():
+    """The reviewer is asked only about a normalized action, and a decision's reasons come from
+    its evaluation and version unless it was refused early. Each is checked with code that raises,
+    which survives `python -O` and ends the call with nothing stored (the request's transaction
+    rolls back), never with an `assert`."""
+    with pytest.raises(RuntimeError, match="^review_without_action$"):
+        await decide._review(None, SimpleNamespace(action=None), [])
+    call = SimpleNamespace(subject="A visitor", req=SimpleNamespace(call=SimpleNamespace(tool="native.book")),
+                           action=None, version_row=None, quotes={})
+    with pytest.raises(RuntimeError, match="^reason_without_evaluation$"):
+        decide._reason_plain(call, "allow", None, None)
+    evaluation = decide.Evaluation("allow", [], [], None, None, strike=False, needed_review=False)
+    with pytest.raises(RuntimeError, match="^reason_without_evaluation$"):
+        decide._reason_plain(call, "allow", None, evaluation)        # an evaluation, but no version
+    # refused early, a decision's reason needs neither
+    assert decide._reason_plain(call, "refuse", "unknown_tool", None).endswith(decide.REFUSED_PLAIN["unknown_tool"])

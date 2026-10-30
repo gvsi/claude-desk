@@ -1,5 +1,6 @@
 """The kernel-internals seam Plans 01b and 01c build on: adapters, the Cedar request, the writers."""
 
+import ast
 import json
 import re
 from datetime import UTC, datetime
@@ -259,3 +260,18 @@ def test_one_check_says_what_text_the_database_holds():
     assert desks.REF is repo.REF and labels.KNOWLEDGE_ID is repo.REF
     assert repo.REF.fullmatch("kb-parking_2") and not repo.REF.fullmatch("kb parking")
     assert not repo.REF.fullmatch("k" * 65)
+
+
+KERNEL_SERVICE = Path(decide.__file__).resolve().parent
+
+
+def test_the_kernel_states_its_checks_without_assert():
+    """`python -O` drops every `assert`, so a check written as one would pass whatever it holds:
+    the kernel states each check it relies on as code that raises (and so fails closed), never as
+    an `assert`, in every module of the kernel service."""
+    found = []
+    for path in sorted(KERNEL_SERVICE.rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"), filename=str(path))):
+            if isinstance(node, ast.Assert):
+                found.append(f"{path.relative_to(KERNEL_SERVICE)}:{node.lineno}")
+    assert found == []
