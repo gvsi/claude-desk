@@ -8,6 +8,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 
+import { AskClaudePanel } from '../AskClaudePanel/AskClaudePanel.tsx';
 import { Composer } from '../Composer/Composer.tsx';
 import { AppShell } from './AppShell.tsx';
 
@@ -128,4 +129,49 @@ it('long_pages_scroll_inside_the_shell', async () => {
       expect([width, fill, document.documentElement.scrollHeight]).toEqual([width, fill, height]);
     }
   }
+});
+
+it('long_sidebars_and_panels_scroll_inside_the_shell', async () => {
+  // The shell's other scroll regions hold their own long content the same way: a sidebar taller
+  // than a short window, and the Ask Claude panel's conversation beside the page.
+  const longList = (
+    <div>
+      {Array.from({ length: 80 }, (_, index) => (
+        <p key={index}>
+          Line {index + 1}
+          <span className="cd-sr-only">Checked before it was shown.</span>
+        </p>
+      ))}
+    </div>
+  );
+  const noop = () => {};
+  await page.viewport(1440, 400);
+  act(() =>
+    root.render(
+      <AppShell sidebar={longList} business="Rivera Plumbing">
+        <p>Page</p>
+      </AppShell>,
+    ),
+  );
+  await vi.waitFor(() => expect(container.querySelector('.cd-app-shell__column')!.scrollHeight).toBeGreaterThan(400));
+  expect(['sidebar', document.documentElement.scrollHeight]).toEqual(['sidebar', 400]);
+
+  await page.viewport(1440, 900);
+  act(() =>
+    root.render(
+      <AppShell
+        sidebar={<nav aria-label="Main">Today</nav>}
+        business="Rivera Plumbing"
+        panel={
+          <AskClaudePanel onClose={noop} onSend={noop}>
+            {longList}
+          </AskClaudePanel>
+        }
+      >
+        <p>Page</p>
+      </AppShell>,
+    ),
+  );
+  await vi.waitFor(() => expect(container.querySelector('.cd-ask-claude__log')!.scrollHeight).toBeGreaterThan(900));
+  expect(['panel', document.documentElement.scrollHeight]).toEqual(['panel', 900]);
 });
