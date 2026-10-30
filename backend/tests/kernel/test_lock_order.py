@@ -1,19 +1,19 @@
 """The kernel's lock order (`repo.py`): the session row, then the decision row, then the execution
 row, then the policy row, people and their verification codes, payment links, document links,
-documents, the rows an adapter's hooks lock and facts, then the ledger head, so two kernel
-transactions never deadlock.
+documents, the rows an adapter's hooks lock (a handoff) and facts, then the ledger head, so two
+kernel transactions never deadlock.
 
 Two tests race requests that once took a pair of rows in opposite orders: the session and the
 decision rows, and an adapter's row and the ledger head. The others record the row locks each
 transaction of a path takes (`LockLog`) and check that they come in that order: executions and
 their reconciliation, answers, cancels and reads, a verification start allowed or approved, a
-right code checked, a document link opened, a person removed or given another contact, and a Desk
-deleted.
+right code checked, a document link opened, a person removed or given another contact, a Desk
+deleted, and a handoff closed, after the Desk row an owner's write holds first.
 """
 
 import asyncio
 import re
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator, Sequence
 from contextlib import contextmanager
 from typing import Any
 
@@ -37,13 +37,15 @@ from .test_compiler import card
 from .test_decide import decided, desk_with, open_visitor, owner_decide, set_mode
 from .test_desk_writes import updated
 from .test_execute import executed, fake_quote_desk, post_execute, read, store_intent
+from .test_lead_tools import callback, handoff_done
 from .test_release_document import DANA, confirmed, documents, links, open_link, released
 from .test_reply_check import checked
 from .test_verification import check, code_in, entry_of, started
 
-# The tables whose rows the kernel locks, in the order it locks them (repo.py).
+# The tables whose rows the kernel locks, in the order it locks them (repo.py); `handoffs` stands
+# for an adapter's own rows.
 LOCK_ORDER = ("sessions", "decisions", "executions", "policy_versions", "people", "verification_challenges",
-              "payment_links", "document_links", "documents", "facts", "ledger_heads")
+              "payment_links", "document_links", "documents", "handoffs", "facts", "ledger_heads")
 _LOCKING = re.compile(
     r"^\s*(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+kernel\.(?P<written>\w+)"
     r"|^\s*SELECT\b.*?\bFROM\s+kernel\.(?P<read>\w+)\b.*\bFOR\s+(?:NO\s+KEY\s+UPDATE|UPDATE|KEY\s+SHARE|SHARE)\b",
@@ -52,13 +54,14 @@ _LOCKING = re.compile(
 
 class LockLog:
     """The row locks each kernel transaction takes while the log is open, as the tables of
-    `LOCK_ORDER` in the order the transaction first locks a row of each: a `SELECT ... FOR UPDATE`
-    or `FOR SHARE` on the table, or an `INSERT`, `UPDATE` or `DELETE` on it. It goes by table, not
-    row, so a second lock on a table counts as one the transaction holds already; each path here
-    works on one session, one decision and one execution, and a removal on one person; a Desk's
-    deletion takes all its open sessions in one statement, in ID order."""
+    `tables` (`LOCK_ORDER` unless given) in the order the transaction first locks a row of each: a
+    `SELECT ... FOR UPDATE` or `FOR SHARE` on the table, or an `INSERT`, `UPDATE` or `DELETE` on it.
+    It goes by table, not row, so a second lock on a table counts as one the transaction holds
+    already; each path here works on one session, one decision and one execution, and a removal on
+    one person; a Desk's deletion takes all its open sessions in one statement, in ID order."""
 
-    def __init__(self) -> None:
+    def __init__(self, tables: Sequence[str] = LOCK_ORDER) -> None:
+        self.tables = tables
         self.transactions: list[list[str]] = []
         self._open: dict[Connection, list[str]] = {}
 
@@ -68,7 +71,7 @@ class LockLog:
     def statement(self, conn: Connection, cursor, statement: str, parameters, context, executemany) -> None:
         found = _LOCKING.match(statement)
         table = found and (found["written"] or found["read"])
-        if table in LOCK_ORDER and table not in self._open.setdefault(conn, []):
+        if table in self.tables and table not in self._open.setdefault(conn, []):
             self._open[conn].append(table)
 
     def end(self, conn: Connection) -> None:
@@ -82,9 +85,9 @@ def in_lock_order(tables: list[str]) -> bool:
 
 
 @contextmanager
-def lock_log(app: FastAPI) -> Iterator[LockLog]:
-    """A `LockLog` of the kernel app's transactions until the block ends."""
-    log, engine = LockLog(), app.state.kernel.engine.sync_engine
+def lock_log(app: FastAPI, tables: Sequence[str] = LOCK_ORDER) -> Iterator[LockLog]:
+    """A `LockLog` of the kernel app's transactions, over `tables`, until the block ends."""
+    log, engine = LockLog(tables), app.state.kernel.engine.sync_engine
     listeners = [("begin", log.begin), ("before_cursor_execute", log.statement), ("commit", log.end),
                  ("rollback", log.end)]
     for name, listener in listeners:
@@ -429,3 +432,14 @@ async def test_deleting_a_desk_runs_in_the_lock_order(app, client):
     # ledgered
     assert log.transactions == [["sessions", "verification_challenges", "document_links", "facts", "ledger_heads"]]
     assert all(map(in_lock_order, log.transactions))
+
+
+async def test_closing_a_handoff_runs_in_the_lock_order(app, client):
+    copy, visitor = await visitor_of(app, client)
+    handoff_id = (await callback(client, visitor)).model_view["handoff_id"]
+    with lock_log(app, ("desks", *LOCK_ORDER)) as log:
+        assert (await handoff_done(client, handoff_id, copy.owner)).status_code == 200
+    # an owner's write to the Desk's data: the Desk row first, before any table of the order, then
+    # the handoff (an adapter's own row), its fact, and the close, ledgered
+    assert log.transactions == [["desks", "handoffs", "facts", "ledger_heads"]]
+    assert all(in_lock_order(tables[1:]) for tables in log.transactions)
