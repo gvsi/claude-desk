@@ -15,9 +15,18 @@ export function followInAppLinks(navigate: NavigateFunction) {
     if (!(link instanceof HTMLAnchorElement) || !event.currentTarget.contains(link)) return;
     if (link.target !== '' || link.hasAttribute('download')) return;
     const href = link.getAttribute('href') ?? '';
-    // Only a path on this origin: never another site, nor a protocol-relative one.
-    if (!href.startsWith('/') || href.startsWith('//')) return;
+    // Only a path on this origin. A browser reads `\` as `/` here, so `/\host` leaves the site as
+    // `//host` does: the href is read as the browser would, against this page, and its origin
+    // compared. One that can't be read is left to the browser.
+    if (!href.startsWith('/')) return;
+    let url: URL;
+    try {
+      url = new URL(href, window.location.href);
+    } catch {
+      return;
+    }
+    if (url.origin !== window.location.origin) return;
     event.preventDefault();
-    void navigate(href);
+    void navigate(`${url.pathname}${url.search}${url.hash}`);
   };
 }
