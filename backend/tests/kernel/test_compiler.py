@@ -545,7 +545,10 @@ def test_the_shipped_verification_card_stays_as_it_is():
         return compiler.validate_cards(list(cards), people=(), agent_keys=(), auto_money_cap_cents=TEST_CAP)
 
     [shipped] = [c for c in PRESETS["ask_first"] if c.applies_to == "native.start_verification"]
-    assert (shipped.card_id, shipped.mode, shipped.who) == ("preset-start-verification", "auto", "anyone")
+    # every field pinned (no review, hours or limits), so a preset edit can't tighten it unseen
+    assert shipped == RuleCard(card_id="preset-start-verification", applies_to="native.start_verification",
+                               mode="auto", who="anyone", reason=shipped.reason)
+    others = [c for c in PRESETS["ask_first"] if c != shipped]
     for cards in (PRESETS["ask_first"], PRESETS["auto"], RIVERA_CARDS):
         assert shipped in cards and errors(*cards) == []
     reworded = shipped.model_copy(update={"reason": "Anyone can get a code sent to the contact on record."})
@@ -555,7 +558,7 @@ def test_the_shipped_verification_card_stays_as_it_is():
     for change in changes:
         changed = RuleCard.model_validate({**shipped.model_dump(), **change})
         assert errors(changed) == [f"{changed.card_id}: {ALWAYS_ON}"], change
-        assert errors(*PRESETS["ask_first"], changed) != [], change
+        assert errors(*others, changed) == [f"{changed.card_id}: {ALWAYS_ON}"], change   # in place of the shipped one
 
 
 AGENT = {"agent_key_id": "agent-key-1"}
