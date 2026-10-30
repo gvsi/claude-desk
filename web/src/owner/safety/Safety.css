@@ -1,8 +1,9 @@
 /* Safety: the title with what is held for the owner at its right, this week's count in serif, then
-   a bar between hairlines with the record's check at the left and the view at the right. Under it,
-   the list (the attempts with their filters, or every entry of the record) and, from 1280 px, the
-   open attempt or entry in a 360 px column beside it; under that width the column stacks under
-   the list. */
+   a bar between hairlines with the record's check filling it from the left, its signing key at
+   the end, and the view at the right. Under it, the list (the attempts with their filters, or
+   every entry of the record) and, from 1280 px, the open attempt or entry in a 360 px column
+   beside it; under that width the column stacks under the list. A failed read's line sits first,
+   over what was read before. */
 
 .cd-safety {
   display: flex;
@@ -27,7 +28,13 @@
   border-bottom: 1px solid var(--line-hairline);
 }
 
+/* Grows to fill the bar beside the view, so the check's signing key reaches the end of it. A failed
+   read's line sits over the check. */
 .cd-safety__chain {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--space-8);
   min-width: 0;
 }
 
@@ -57,6 +64,17 @@
   min-width: 0;
 }
 
+/* The open attempt takes focus when the owner picks a row: its outline follows the card, and it
+   scrolls into view with a little room above it. */
+.cd-safety__opened {
+  border-radius: var(--radius-card);
+  scroll-margin-top: var(--space-16);
+}
+
+.cd-safety__opened:focus:not(:focus-visible) {
+  outline: none;
+}
+
 .cd-safety__hint {
   margin: 0;
   color: var(--text-secondary);
@@ -64,19 +82,28 @@
 
 /* Every entry: a quiet column head, then one row button per entry in four columns: the number,
    what it records (with the replayed label under it), who wrote it and when, at the right. The
-   open entry is on the selected fill. On a phone the origin and time go under the words. */
+   head and every row share the record's columns as subgrids, so each head sits over its column
+   and the time column fits the widest time. The open entry is on the selected fill. On a phone
+   the origin and time go under the words. */
 
 .cd-record {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: var(--space-40) minmax(0, 1fr) minmax(0, 1fr) auto;
+  column-gap: var(--space-12);
   min-width: 0;
 }
 
 .cd-record__head,
+.cd-record__list,
+.cd-record__list > li,
 .cd-record__row {
   display: grid;
-  grid-template-columns: var(--space-40) minmax(0, 1fr) minmax(0, 1fr) auto;
-  column-gap: var(--space-12);
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+}
+
+.cd-record__head,
+.cd-record__row {
   align-items: center;
   padding: var(--space-8) var(--space-10);
 }
@@ -141,12 +168,15 @@
 }
 
 @media (max-width: 639.98px) {
+  .cd-record {
+    grid-template-columns: var(--space-40) minmax(0, 1fr);
+  }
+
   .cd-record__head {
     display: none;
   }
 
   .cd-record__row {
-    grid-template-columns: var(--space-40) minmax(0, 1fr);
     row-gap: var(--space-2);
   }
 

@@ -17,6 +17,22 @@ import { expectScreenBasics } from '../../test/screen.ts';
 const DESK = `/app/${RIVERA.deskId}`;
 const LA = 'America/Los_Angeles';
 const SAFETY = `${DESK}/safety`;
+const UNAVAILABLE = 'Something went wrong on our side. Try again in a moment.';
+
+/** The requests a route got, by key. */
+const requests = (key: string) => mockStore.requests.filter((r) => r.key === key);
+
+/** Waits until `key` has been read `n` more times. */
+async function readsMore(key: string, n: number): Promise<void> {
+  const from = requests(key).length;
+  await expect.poll(() => requests(key).length, { timeout: 5_000 }).toBeGreaterThanOrEqual(from + n);
+}
+
+/** An element's box on screen. */
+function box(el: Element | null | undefined): DOMRect {
+  if (!el) throw new Error('no element to measure');
+  return el.getBoundingClientRect();
+}
 
 /** Today as the mock reads it now, changed by `patch`, answering every read of it from here on. */
 async function injectToday(patch: (today: Today) => Today): Promise<void> {
@@ -491,5 +507,189 @@ describe('Safety', () => {
     await viewOption(quiet.screen, 'Every entry').click();
     await expect.element(quiet.screen.getByText('Nothing in the record yet', { exact: true })).toBeVisible();
     await expectScreenBasics(quiet.screen.container, { owner: true });
+  });
+
+  it('ledger_read_failure_says_so', async () => {
+    // The record was read and checked; then a later read fails. The check says so, first, beside
+    // what it last found, and stays until a read works, so an old check never reads as current.
+    const { screen } = await renderRoute(`${SAFETY}?view=entries`);
+    const checked = screen.getByText('Every entry checks out', { exact: true });
+    const record = screen.getByRole('list', { name: 'Every entry, newest first' });
+    await expect.element(checked).toBeVisible();
+    await expect.element(record).toBeVisible();
+    mockStore.inject({ route: 'ledger', status: 503, times: 10_000 });
+    const alert = screen.getByRole('alert');
+    const line = alert.getByText(UNAVAILABLE, { exact: true });
+    await expect.element(line, { timeout: 5_000 }).toBeVisible();
+    expect(line.element().closest('.cd-safety__chain')).toBe(checked.element().closest('.cd-safety__chain'));
+    expect(line.element().compareDocumentPosition(checked.element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await expect.element(checked).toBeVisible();
+    await expect.element(record).toBeVisible();
+    const retry = alert.getByRole('button', { name: 'Try again' });
+    await expect.element(retry).toBeVisible();
+    await expectScreenBasics(screen.container, { owner: true });
+
+    // It stays while the polls read again, and while "Try again" reads, busy until that read settles.
+    await readsMore('ledger', 2);
+    expect(line.elements()).toHaveLength(1);
+    await retry.click();
+    await expect.element(retry).toHaveAttribute('aria-busy', 'true');
+    await expect.element(retry, { timeout: 5_000 }).not.toHaveAttribute('aria-busy');
+    expect(line.elements()).toHaveLength(1);
+
+    // Once a read works, the line is gone and the check is current again.
+    mockStore.reset('rivera');
+    await expect.element(line, { timeout: 5_000 }).not.toBeInTheDocument();
+    await expect.element(checked).toBeVisible();
+
+    // With nothing read yet, the line stays through the polls rather than going back to
+    // "Checking the record" each time a read starts.
+    mockStore.inject({ route: 'ledger', status: 503, times: 10_000 });
+    const fresh = await renderRoute(SAFETY);
+    const first = fresh.screen.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
+    await expect.element(first, { timeout: 5_000 }).toBeVisible();
+    await readsMore('ledger', 2);
+    expect(first.elements()).toHaveLength(1);
+    expect(fresh.screen.getByText('Checking the record').elements()).toHaveLength(0);
+  });
+
+  it('attempts_read_failure_says_so', async () => {
+    // The attempts were read; then a later read fails. The line says so over the attempts already
+    // read, which stay with the one open beside them, until a read works.
+    const { screen } = await renderRoute(SAFETY);
+    const list = screen.getByRole('list', { name: 'Attempts, newest first' });
+    await expect.element(list).toBeVisible();
+    await expect.element(detail(screen)).toBeVisible();
+    mockStore.inject({ route: 'safety', status: 503, times: 10_000 });
+    const alert = screen.getByRole('alert');
+    const line = alert.getByText(UNAVAILABLE, { exact: true });
+    await expect.element(line, { timeout: 5_000 }).toBeVisible();
+    expect(line.element().compareDocumentPosition(list.element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await expect.element(list).toBeVisible();
+    await expect.element(detail(screen)).toBeVisible();
+    const retry = alert.getByRole('button', { name: 'Try again' });
+    await expect.element(retry).toBeVisible();
+    await expectScreenBasics(screen.container, { owner: true });
+
+    await readsMore('safety', 2);
+    expect(line.elements()).toHaveLength(1);
+    await retry.click();
+    await expect.element(retry).toHaveAttribute('aria-busy', 'true');
+    await expect.element(retry, { timeout: 5_000 }).not.toHaveAttribute('aria-busy');
+    expect(line.elements()).toHaveLength(1);
+
+    mockStore.reset('rivera');
+    await expect.element(line, { timeout: 5_000 }).not.toBeInTheDocument();
+    await expect.element(list).toBeVisible();
+
+    // With nothing read yet, the line stays through the polls rather than going back to
+    // "Reading the attempts".
+    mockStore.inject({ route: 'safety', status: 503, times: 10_000 });
+    const fresh = await renderRoute(SAFETY);
+    const first = fresh.screen.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
+    await expect.element(first, { timeout: 5_000 }).toBeVisible();
+    await readsMore('safety', 2);
+    expect(first.elements()).toHaveLength(1);
+    expect(fresh.screen.getByText('Reading the attempts').elements()).toHaveLength(0);
+  });
+
+  it('headline_read_failure_says_so', async () => {
+    // This week's count was read; then a later read fails. The line says so over the count, which
+    // stays, until a read works.
+    const { screen } = await renderRoute(SAFETY);
+    const headline = screen.getByText(/stopped this week\.$/);
+    await expect.element(headline).toBeVisible();
+    mockStore.inject({ route: 'today', status: 503, times: 10_000 });
+    const line = screen.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
+    await expect.element(line, { timeout: 5_000 }).toBeVisible();
+    expect(line.element().compareDocumentPosition(headline.element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await expect.element(headline).toBeVisible();
+    await readsMore('today', 2);
+    expect(line.elements()).toHaveLength(1);
+    mockStore.reset('rivera');
+    await expect.element(line, { timeout: 5_000 }).not.toBeInTheDocument();
+    await expect.element(headline).toBeVisible();
+  });
+
+  it('picking_an_attempt_moves_to_it', async () => {
+    // The seeded copy: the blocked reply, newest, open on arrival, and the held 15% quote.
+    const { screen } = await renderRoute(SAFETY);
+    const open = detail(screen);
+    await expect.element(open.getByText('This reply was never shown.', { exact: true })).toBeVisible();
+    // The attempt open on arrival, or after a filter, leaves the focus where it is.
+    expect(document.activeElement).toBe(document.body);
+    const filters = screen.getByRole('group', { name: 'Show attempts' });
+    await filters.getByRole('button', { name: 'Codes', exact: true }).click();
+    const all = filters.getByRole('button', { name: 'All', exact: true });
+    await all.click();
+    await expect.element(open.getByText('This reply was never shown.', { exact: true })).toBeVisible();
+    expect(document.activeElement).toBe(all.element());
+
+    // A picked row moves the focus to the attempt it opens, so a keyboard or screen reader user
+    // lands on it.
+    const held = /^Today, \d{1,2}:\d{2} [ap]m A visitor not on record/;
+    await screen.getByRole('link', { name: held }).click();
+    await expect.element(open.getByText('Held for you', { exact: true })).toBeVisible();
+    await expect.poll(() => document.activeElement?.contains(open.element()) ?? false).toBe(true);
+
+    // On a phone the attempt opens under the list, mostly past the window's edge: picking a row
+    // also scrolls it into view, all of it, or from its top when it is taller than the window.
+    const phone = await renderRoute(SAFETY, { viewport: 'phone' });
+    const under = detail(phone.screen);
+    await expect.element(under.getByText('This reply was never shown.', { exact: true })).toBeInTheDocument();
+    const main = document.querySelector('.cd-app-shell__main');
+    if (!main) throw new Error('the page area');
+    expect(box(under.element()).bottom).toBeGreaterThan(box(main).bottom);
+    await phone.screen.getByRole('link', { name: held }).click();
+    await expect.element(under.getByText('Held for you', { exact: true })).toBeInTheDocument();
+    await expect.poll(() => document.activeElement?.contains(under.element()) ?? false).toBe(true);
+    const margin = Number.parseFloat(getComputedStyle(under.element().parentElement ?? under.element()).scrollMarginTop);
+    await expect
+      .poll(() => {
+        const opened = box(under.element());
+        const area = box(main);
+        return main.scrollTop > 0 && opened.top >= area.top && (opened.bottom <= area.bottom || opened.top <= area.top + margin + 1);
+      })
+      .toBe(true);
+  });
+
+  it('chain_key_sits_at_the_end', async () => {
+    // The check's line and count at the start of the bar, the signing key at its end, just before
+    // the switch between the views.
+    injectDevKey(true);
+    const { screen } = await renderRoute(SAFETY);
+    const key = screen.getByText('Signed with a development key', { exact: true });
+    await expect.element(key).toBeVisible();
+    const bar = key.element().closest('.cd-safety__bar');
+    const view = bar?.lastElementChild;
+    if (!bar || !view) throw new Error('the bar with the view switch at its end');
+    const gap = Number.parseFloat(getComputedStyle(bar).columnGap);
+    expect(box(view).left - box(key.element()).right).toBeCloseTo(gap, 0);
+  });
+
+  it('record_columns_line_up', async () => {
+    // Times wider than the head's "Time": late in the evening, on a day that isn't today.
+    injectLedger(
+      ledgerPage([
+        entry(1, '2026-10-27T06:30:00.000000Z', { kind: 'session', session_id: 'ses-1', summary: { kind: 'visitor' } }),
+        entry(2, '2026-10-27T06:31:00.000000Z', {
+          kind: 'decide',
+          session_id: 'ses-1',
+          ref_id: 'dec-refund',
+          summary: { tool: 'payments.create_refund', outcome: 'refuse', state: 'refused', card_ids: [] },
+        }),
+      ]),
+    );
+    const { screen } = await renderRoute(`${SAFETY}?view=entries`);
+    await expect.element(recordRow(screen, 1).getByText('Oct 26, 11:30 pm', { exact: true })).toBeVisible();
+    const [, what, who, when] = [...document.querySelectorAll('.cd-record__head > span')].map((el) => box(el));
+    if (!what || !who || !when) throw new Error('the four column heads');
+    // Each column's words start under its head, and the times end under "Time".
+    for (const seq of [1, 2]) {
+      const row = recordRow(screen, seq).element();
+      expect(box(row.querySelector('.cd-record__what')).left).toBeCloseTo(what.left, 0);
+      expect(box(row.querySelector('.cd-record__who')).left).toBeCloseTo(who.left, 0);
+      expect(box(row.querySelector('.cd-record__when')).right).toBeCloseTo(when.right, 0);
+    }
   });
 });
