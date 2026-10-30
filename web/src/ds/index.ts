@@ -129,6 +129,7 @@ export {
   OUTCOME_TONE,
   OUTCOME_WORDS,
   PRESET_CAPTIONS,
+  PRESET_ITEMS,
   PRESET_WORDS,
   outcomePhrase,
   type RuleMode,
@@ -161,6 +162,7 @@ export { AskClaudePanel, type AskClaudePanelProps } from './components/AskClaude
 export { HowClaudeWorks, type HowClaudeWorksProps } from './components/HowClaudeWorks/HowClaudeWorks.tsx';
 export { MoneyLimit, type MoneyLimitProps } from './components/MoneyLimit/MoneyLimit.tsx';
 export { LimitChange, type LimitChangeProps } from './components/LimitChange/LimitChange.tsx';
+export { PresetMenu, type PresetMenuProps, type PresetPick } from './components/PresetMenu/PresetMenu.tsx';
 
 // Connector and tool pages, adding a connector, and a changed tool
 export {

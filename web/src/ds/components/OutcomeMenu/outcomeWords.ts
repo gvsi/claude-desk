@@ -53,3 +53,18 @@ export const PRESET_CAPTIONS = {
   auto: 'Claude quotes at list price, books weekdays in your hours and sends verified customers their own documents. Payments ask you first.',
   custom: 'Your own rules, tool by tool. Change any of them below.',
 } as const satisfies Record<RulesPreset, string>;
+
+/**
+ * The two presets the Rules page's "Start from a preset" menu offers, in order: each with its title
+ * and a one-line description of what it does. The descriptions describe the master plan's preset
+ * cards (`desk.presets.PRESETS`); `outcomeWords.test.ts` checks each claim against those cards, read
+ * from their generated export (`web/src/api/presets.gen.json`).
+ */
+export const PRESET_ITEMS = [
+  { value: 'ask_first', title: 'Ask me first for everything', description: 'Every tool asks you first.' },
+  {
+    value: 'auto',
+    title: 'Recommended rules',
+    description: 'Quotes at list price, weekday bookings in your hours, documents to verified customers. Payments ask you first.',
+  },
+] as const satisfies readonly { value: Exclude<RulesPreset, 'custom'>; title: string; description: string }[];

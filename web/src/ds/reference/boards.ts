@@ -40,6 +40,13 @@ export const REFERENCE_BOARDS = [
   'N-Conn-20-Money-Cap-Review',
   'N-Conn-21-Simulate',
   'N-Conn-22-Phone-Mode',
+  // Their signed redraw: the preset menu, the payment limit in the payment groups and its review.
+  'N-Conn-17-Presets',
+  'N-Conn-18-Preset-Review',
+  'N-Conn-19-Ceiling',
+  'N-Conn-19b-Ceiling-Edit',
+  'N-Conn-20-Ceiling-Review',
+  'N-Conn-22-Phone-Presets',
 ] as const;
 
 export type ReferenceBoard = (typeof REFERENCE_BOARDS)[number];
