@@ -25,6 +25,8 @@ from desk import contracts as c
 from desk.events import A2AResponse
 
 NOW = text("now()")
+FALSE = text("false")
+EMPTY_OBJECT = text("'{}'::jsonb")
 EMPTY_LIST = text("'[]'::jsonb")
 OWNER_ONLY = text("""'["owner"]'::jsonb""")   # a missing label is owner-only
 
@@ -529,10 +531,21 @@ class Message(Base):
     copy_id: Mapped[str] = mapped_column(Text)
     desk_id: Mapped[str | None] = mapped_column(Text)
     session_id: Mapped[str | None] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(Text)
+    author: Mapped[str] = mapped_column(Text)
+    text: Mapped[str | None] = mapped_column(Text)                 # untrusted
     blocks: Mapped[list[c.RenderedBlock] | None] = mapped_column(ContractJSON(list[c.RenderedBlock]))
     language: Mapped[str | None] = mapped_column(Text)
     owner_translation: Mapped[str | None] = mapped_column(Text)
-    visibility: Mapped[str | None] = mapped_column(Text)
+    visibility: Mapped[str] = mapped_column(Text)
+    wake: Mapped[bool] = mapped_column(Boolean, server_default=FALSE)
+    model_context: Mapped[int | None] = mapped_column(Integer)
+    model_seq: Mapped[int | None] = mapped_column(Integer)         # unique per session
+    model_content: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))   # frozen
+    ref_id: Mapped[str | None] = mapped_column(Text)               # the kernel's message_id or decision_id
+    call_id: Mapped[str | None] = mapped_column(Text)              # the tool_use id of Claude's delivered reply
+    event_seq: Mapped[int | None] = mapped_column(BigInteger)      # the run_events.seq a delivered or status row published
+    generation: Mapped[int | None] = mapped_column(Integer)        # an assistant row's calls' session generation
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
 
 
@@ -543,6 +556,11 @@ class RunEvent(Base):
     copy_id: Mapped[str] = mapped_column(Text)
     desk_id: Mapped[str | None] = mapped_column(Text)
     session_id: Mapped[str | None] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(Text)                        # sse, control, metric
+    seq: Mapped[int | None] = mapped_column(BigInteger)            # sse only: the SSE id, gapless per session
+    type: Mapped[str] = mapped_column(Text)
+    payload: Mapped[Any] = mapped_column(JSONB)
+    handled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))   # control only
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
 
 
@@ -552,7 +570,15 @@ class SetupInterview(Base):
     interview_id: Mapped[str] = mapped_column(Text, primary_key=True)
     copy_id: Mapped[str] = mapped_column(Text)
     desk_id: Mapped[str | None] = mapped_column(Text)
+    business_type: Mapped[str | None] = mapped_column(Text)
+    step: Mapped[str] = mapped_column(Text, server_default=text("'questions'"))
+    consent: Mapped[bool | None] = mapped_column(Boolean)          # null until asked
+    answers: Mapped[Any] = mapped_column(JSONB, server_default=EMPTY_OBJECT)
+    transcript: Mapped[Any] = mapped_column(JSONB, server_default=EMPTY_LIST)
+    draft_cards: Mapped[Any] = mapped_column(JSONB, server_default=EMPTY_LIST)
+    draft_version: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
 
 
 class A2ATurn(Base):
@@ -566,9 +592,12 @@ class A2ATurn(Base):
     copy_id: Mapped[str] = mapped_column(Text)
     desk_id: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(Text, server_default=text("'running'"))
+    http_status: Mapped[int | None] = mapped_column(Integer)
     # the stored answer, replayed to a resent request; it always carries the AI disclosure
     response: Mapped[A2AResponse | None] = mapped_column(ContractJSON(A2AResponse))
+    through_seq: Mapped[int | None] = mapped_column(BigInteger)    # the last run_events.seq the answer covers
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
 
 
 class ModelCall(Base):
@@ -582,9 +611,11 @@ class ModelCall(Base):
     route: Mapped[str] = mapped_column(Text)
     model: Mapped[str] = mapped_column(Text)
     input_tokens: Mapped[int] = mapped_column(Integer)
-    cached_tokens: Mapped[int] = mapped_column(Integer)
+    cached_tokens: Mapped[int] = mapped_column(Integer)            # cache reads
+    cache_write_tokens: Mapped[int] = mapped_column(Integer)
     output_tokens: Mapped[int] = mapped_column(Integer)
     latency_ms: Mapped[int] = mapped_column(Integer)
+    stop_reason: Mapped[str] = mapped_column(Text)                 # "error" for a failed call
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))   # the call's finish; no default stands in
 
 

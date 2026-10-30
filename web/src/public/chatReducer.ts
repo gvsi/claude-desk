@@ -10,7 +10,16 @@
  * A held request's later lines ("Cancelled", "Maria Rivera approved this") stay under the message
  * that holds it, as every receipt stays under its own message, however far the chat has gone on.
  */
-import type { EvDemoInbox, EvErrorCode, EvMessage, EvOwnerJoined, EvOwnerLeft, SseEvent, StatusEvent } from '../api/contracts.ts';
+import type {
+  EvDemoInbox,
+  EvErrorCode,
+  EvMessage,
+  EvOwnerJoined,
+  EvOwnerLeft,
+  EvOwnerTyping,
+  SseEvent,
+  StatusEvent,
+} from '../api/contracts.ts';
 import type { StreamState } from '../api/stream.ts';
 import type { TranscriptItem, VisitorTranscript } from '../api/views.ts';
 import { receiptFromEvent, type ReceiptView } from '../ds/index.ts';
@@ -29,8 +38,21 @@ export type ChatItem =
 
 export type ChatRow = GroupedRow<ChatItem, ReceiptView>;
 
+/** The owner typing after a take-over: the owner's name, and the time the API said the dots last until. */
+export type OwnerTyping = Omit<EvOwnerTyping, 'type'>;
+
 export interface ChatState extends RowGroups<ChatItem, ReceiptView> {
   writing: boolean;
+  /**
+   * The owner typing, from the owner's latest `owner_typing`, or null. The owner's own message,
+   * `owner_left`, the turn's end or the owner's next typing event replaces or clears it. Its `until`
+   * is kept as the API sent it, never compared with a clock here, so the page can drop the dots once
+   * that time passes.
+   *
+   * Nothing draws this yet. The public page's typing dots (WritingIndicator's person form) come
+   * with the web app's second run (plan 04, Task 8), which reads this state.
+   */
+  ownerTyping: OwnerTyping | null;
   /** The highest seq the chat has seen; the stream resumes after it. */
   lastSeq: number;
   connection: StreamState;
@@ -67,6 +89,7 @@ export function initialChatState(): ChatState {
   return {
     ...emptyGroups<ChatItem, ReceiptView>(),
     writing: false,
+    ownerTyping: null,
     lastSeq: 0,
     connection: 'open',
     error: null,
@@ -138,14 +161,17 @@ function onEvent(state: ChatState, seq: number, ev: SseEvent): ChatState {
     case 'writing':
       return { ...state, writing: true, error: null };
     case 'turn_end':
-      return { ...state, ...settle(state), writing: false };
+      return { ...state, ...settle(state), writing: false, ownerTyping: null };
     case 'message': {
       const key = messageKey(ev);
-      if (state.seen.has(key)) return state;
+      // The owner's own words replace the owner's typing dots, even when the chat already shows them.
+      const ownerTyping = ev.author === 'owner' ? null : state.ownerTyping;
+      if (state.seen.has(key)) return { ...state, ownerTyping };
       return {
         ...state,
         ...addPart(state, { kind: 'reply', row: { kind: 'message', seq, ev }, receipt: receiptFromEvent(ev) }),
         writing: false,
+        ownerTyping,
         seen: new Set(state.seen).add(key),
       };
     }
@@ -164,8 +190,14 @@ function onEvent(state: ChatState, seq: number, ev: SseEvent): ChatState {
       };
     }
     case 'owner_joined':
-    case 'owner_left':
       return { ...state, ...addPart(state, { kind: 'line', row: { kind: 'system', seq, ev } }), writing: false };
+    case 'owner_left':
+      return { ...state, ...addPart(state, { kind: 'line', row: { kind: 'system', seq, ev } }), writing: false, ownerTyping: null };
+    case 'owner_typing': {
+      // Kept whole, without its type: a later typing event replaces it.
+      const { type: _type, ...ownerTyping } = ev;
+      return { ...state, ownerTyping };
+    }
     case 'demo_inbox':
       return { ...state, inbox: [...state.inbox, ev] };
     case 'error':

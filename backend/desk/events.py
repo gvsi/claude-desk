@@ -7,7 +7,7 @@ stream), so it verifies from its own payload.
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, Field
 
 from desk.contracts import DecisionState, RenderedBlock
 
@@ -58,6 +58,11 @@ class EvOwnerJoined(BaseModel):
     type: Literal["owner_joined"]
     name: str                             # the business's owner_display_name
 
+class EvOwnerTyping(BaseModel):           # presence after a take-over; carries no free text
+    type: Literal["owner_typing"]
+    name: str                             # the business's owner_display_name, as in EvOwnerJoined
+    until: AwareDatetime                  # the dots show until then, or until the owner's say replaces them
+
 class EvOwnerLeft(BaseModel):
     type: Literal["owner_left"]
 
@@ -72,8 +77,8 @@ class EvError(BaseModel):                 # the client shows a static build-time
     code: Literal["kernel_unavailable", "session", "rate_limited", "internal"]
 
 SseEvent = Annotated[
-    EvWriting | EvMessage | EvTurnEnd | EvReceipt | EvHeld | EvResolved | EvOwnerJoined | EvOwnerLeft
-    | EvDemoInbox | EvError,
+    EvWriting | EvMessage | EvTurnEnd | EvReceipt | EvHeld | EvResolved | EvOwnerJoined | EvOwnerTyping
+    | EvOwnerLeft | EvDemoInbox | EvError,
     Field(discriminator="type"),
 ]
 

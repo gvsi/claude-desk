@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import type { EvMessage, SseEvent, StatusEvent } from '../api/contracts.ts';
+import type { EvMessage, EvOwnerJoined, EvOwnerTyping, SseEvent, StatusEvent } from '../api/contracts.ts';
 import type { TranscriptItem, VisitorTranscript } from '../api/views.ts';
 import { receiptFromEvent } from '../ds/index.ts';
 import { rivera } from '../ds/fixtures/index.ts';
@@ -12,6 +12,12 @@ import { chatReducer, initialChatState, type ChatAction, type ChatState } from '
 
 /** The fixtures' quote turn: the action's receipt, writing, the checked reply, the turn's end. */
 const [quoteReceipt, , quoteMessage] = rivera.events.quoteTurn as [StatusEvent, SseEvent, EvMessage, SseEvent];
+
+/** The fixtures' take-over, each event found by what it is rather than where it sits. */
+const takeOver: readonly SseEvent[] = rivera.events.takeOver;
+const ownerJoined = takeOver.find((ev): ev is EvOwnerJoined => ev.type === 'owner_joined') as EvOwnerJoined;
+const ownerTyping = takeOver.find((ev): ev is EvOwnerTyping => ev.type === 'owner_typing') as EvOwnerTyping;
+const ownerSaid = takeOver.find((ev): ev is EvMessage => ev.type === 'message' && ev.author === 'owner') as EvMessage;
 
 function run(actions: ChatAction[], from: ChatState = initialChatState()): ChatState {
   return actions.reduce(chatReducer, from);
@@ -100,6 +106,34 @@ describe('chatReducer', () => {
     expect(left.rows.map((row) => row.item.kind)).toEqual(['system', 'system']);
   });
 
+  it('owner_typing_shows_until_her_words', () => {
+    // Maria takes over and types: the chat keeps her name and the API's end time, and adds no row.
+    const typing = run(events([ownerJoined, ownerTyping]));
+    expect(typing.ownerTyping).toEqual({ name: 'Maria Rivera', until: '2026-10-30T17:21:10Z' });
+    expect(typing.rows.map((row) => row.item.kind)).toEqual(['system']);
+
+    // Her next typing event replaces the first; her own words then clear it.
+    const longer = run(events([{ ...ownerTyping, until: '2026-10-30T17:21:20Z' }], 3), typing);
+    expect(longer.ownerTyping).toEqual({ name: 'Maria Rivera', until: '2026-10-30T17:21:20Z' });
+    const said = run(events([ownerSaid], 4), longer);
+    expect(said.ownerTyping).toBeNull();
+    expect(said.rows.at(-1)?.item).toEqual({ kind: 'message', seq: 4, ev: ownerSaid });
+
+    // The stream reconnects and replays from seq 1: the typing it already passed stays gone.
+    expect(run(events(takeOver.slice(0, 3)), said)).toEqual(said);
+
+    // Handing back to Claude, or the turn's end, clears it too.
+    expect(run(events([{ type: 'owner_left' }], 3), typing).ownerTyping).toBeNull();
+    expect(run(events([{ type: 'turn_end' }], 3), typing).ownerTyping).toBeNull();
+
+    // A transcript read before the seqs were known already shows her words; the replayed typing
+    // event comes first and her message, matched by its id, still clears it.
+    const loaded = run([{ type: 'history', transcript: transcript(0, [{ ...item(1, 'delivered'), event: ownerSaid }]) }]);
+    const replayed = run(events(takeOver.slice(0, 3)), loaded);
+    expect(replayed.ownerTyping).toBeNull();
+    expect(replayed.rows.filter((row) => row.item.kind === 'message')).toEqual(loaded.rows);
+  });
+
   it('replay_dedupes_by_seq', () => {
     const turn = rivera.events.quoteTurn;
     const first = run([{ type: 'sent', id: 'v1', text: 'How much is drain clearing?' }, ...events(turn.slice(0, 3))]);
@@ -135,7 +169,6 @@ describe('chatReducer', () => {
 
   it('history_rebuilds_rows_in_order', () => {
     const [held, , handoff] = rivera.events.heldTurn as [StatusEvent, SseEvent, EvMessage, SseEvent];
-    const [, ownerSaid] = rivera.events.takeOver as [SseEvent, EvMessage];
     const items: TranscriptItem[] = [
       { ...item(1, 'visitor_text'), text: 'How much is drain clearing?' },
       { ...item(2, 'status'), event: quoteReceipt },

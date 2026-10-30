@@ -36,7 +36,7 @@ from desk.contracts import (
     SessionState,
     ToolName,
 )
-from desk.events import EvDemoInbox, EvError, EvHeld, SseEvent
+from desk.events import EvDemoInbox, EvError, EvHeld, EvOwnerJoined, EvOwnerTyping, SseEvent
 from desk.kernel_api import (
     KERNEL_REQUESTS,
     KERNEL_RESPONSES,
@@ -343,6 +343,21 @@ def test_ledger_entries_carry_their_hash_inputs():
 
 def test_demo_inbox_event_is_code_free():
     assert set(EvDemoInbox.model_fields) == {"type", "entry_id", "to", "preview"}
+
+
+def test_owner_typing_carries_no_free_text():
+    # Presence after a take-over: the owner's display name and how long the dots show, never what they type.
+    assert set(EvOwnerTyping.model_fields) == {"type", "name", "until"}
+    assert EvOwnerTyping.model_config.get("extra") == EvOwnerJoined.model_config.get("extra")   # as its siblings
+    assert EvOwnerTyping in get_args(get_args(SseEvent)[0])
+    events = TypeAdapter(SseEvent)
+    until = datetime(2026, 10, 29, 15, 4, 30, tzinfo=UTC)
+    event = events.validate_python(
+        {"type": "owner_typing", "name": "Maria Rivera", "until": "2026-10-29T08:04:30-07:00", "text": "On my way"})
+    assert isinstance(event, EvOwnerTyping)
+    assert event.model_dump() == {"type": "owner_typing", "name": "Maria Rivera", "until": until}   # no text travels
+    with pytest.raises(ValidationError):
+        events.validate_python({"type": "owner_typing", "name": "Maria Rivera", "until": "2026-10-29T15:04:30"})
 
 
 def test_sse_union_discriminates():

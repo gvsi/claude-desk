@@ -1,4 +1,4 @@
-.PHONY: kernel test db-roles web-test web-e2e image image-check infra-check image-smoke evals-unit evals-tier1 evals-tier1-stub evals-tier1-kernel evals-tier1-api kernel-serve proofs check-presets
+.PHONY: kernel test db-roles web-test web-e2e image image-check infra-check image-smoke evals-unit evals-tier1 evals-tier1-stub evals-tier1-kernel evals-tier1-api kernel-contract api-serve kernel-serve proofs check-presets
 
 # Rebuild the kernel's Python module into the backend environment, and the
 # proof binary the kernel runs. desk-prove and its tests find cvc5 through
@@ -14,6 +14,21 @@ kernel-serve:
 test:
 	cd kernel && cargo test --locked
 	cd backend && uv run pytest
+
+# The API's kernel contract tests against the real kernel, not only FakeKernel, for the kernel plans
+# listed in evals/tier1/landed.toml: starts `make kernel-serve` with the kernel's development test hooks
+# (its offline reviewer, and the release desk-prove when built), waits up to 30 s for its health check,
+# prints its proof mode, runs the real_kernel variants and stops it. With no kernel plan landed it says
+# so and exits 0.
+kernel-contract:
+	cd backend && uv run python -m tests.kernel_contract.real_kernel
+
+# The API process on 127.0.0.1:8700, with the settings in .env, as the deploy runs it but bound to loopback.
+# It reaches the kernel at KERNEL_URL (default http://127.0.0.1:8701): run `make kernel-serve` beside it.
+# No access log, as in the deploy: a request path can carry a single-use token (/api/d/..., /api/pay/...).
+api-serve:
+	cd backend && uv run --env-file ../.env uvicorn --factory desk.api.main:app_factory \
+		--host 127.0.0.1 --port 8700 --timeout-keep-alive 310 --no-access-log
 
 # Prove the Rivera seed's cards and the starter presets with desk-prove and write their reports to
 # kernel/cedar/proofs/, which the kernel activates them from (run it in any commit that changes
