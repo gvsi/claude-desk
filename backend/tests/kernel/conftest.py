@@ -25,6 +25,7 @@ from alembic.config import Config
 from desk.db.session import database_url, dispose_engines, libpq_url
 from desk.db.tables import KERNEL_TABLES
 from desk.kernel_service import activation, adapters
+from desk.kernel_service import app as kernel_app
 from desk.kernel_service.app import create_app
 
 from .fakes import FakeDecisions, FrozenClock
@@ -94,16 +95,27 @@ def reviewer() -> FakeDecisions:
 
 
 @pytest.fixture
-async def app(frozen_clock: FrozenClock, reviewer: FakeDecisions, monkeypatch: pytest.MonkeyPatch,
+def kernel_pool() -> dict:
+    """Pool options (`pool_size`, `max_overflow`, `pool_timeout`) for the kernel app's database
+    engine: none, so it keeps SQLAlchemy's defaults, unless a test parametrizes this fixture."""
+    return {}
+
+
+@pytest.fixture
+async def app(frozen_clock: FrozenClock, reviewer: FakeDecisions, kernel_pool: dict, monkeypatch: pytest.MonkeyPatch,
               request: pytest.FixtureRequest) -> AsyncIterator:
     """The kernel app with its lifespan entered, signing with the dev key, in `bounded` proof mode
     (`symcc` when the test asks for `desk_prove`), with the scripted `reviewer`, so no test calls
-    a model."""
+    a model, and its engine built with `kernel_pool`'s options."""
     monkeypatch.delenv("DESK_SIGNING_SEED", raising=False)
     if "desk_prove" in request.fixturenames:
         request.getfixturevalue("desk_prove")
     else:
         monkeypatch.setenv("DESK_PROVE", NO_PROVER)
+    if kernel_pool:
+        make_engine = kernel_app.create_async_engine
+        monkeypatch.setattr(kernel_app, "create_async_engine",
+                            lambda url, **options: make_engine(url, **options, **kernel_pool))
     kernel = create_app(clock=frozen_clock, decisions=reviewer)
     try:
         async with kernel.router.lifespan_context(kernel):

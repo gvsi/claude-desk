@@ -966,6 +966,35 @@ async def test_an_owners_refused_read_is_ledgered_on_the_decisions_session(app, 
     assert Decision.model_validate(response.json()) == allowed
 
 
+# Two connections, none over, and a short wait for one: a request that held its transaction's
+# connection while it waited for another (a credential lookup's) would starve a pool this small
+# with a few reads at once, each holding one and waiting for a second until checkout timed out.
+SMALL_POOL = {"pool_size": 2, "max_overflow": 0, "pool_timeout": 3}
+
+
+@pytest.mark.parametrize("kernel_pool", [SMALL_POOL], ids=["small_pool"])
+async def test_more_concurrent_decision_reads_than_the_pool_holds_all_answer(app, client, registry):
+    quote = FakeAdapter("native.quote")
+    rows = await desk_with(app, [quote], [card("quote", "native.quote")])
+    visitor, neighbour = await open_visitor(client, rows), await open_visitor(client, rows)
+    allowed = await decided(client, visitor, "native.quote", {"qty": 1})
+    # twelve reads at once, six for each connection: the decision's own session and the owner
+    # read it, another session's token and no credential are refused
+    asks = [(visitor.headers, 200), (rows.owner, 200), (neighbour.headers, 401), ({}, 401)] * 3
+    responses = await asyncio.wait_for(asyncio.gather(*(
+        client.get(f"/decisions/{allowed.decision_id}", headers=headers) for headers, _ in asks)), timeout=30)
+    assert [response.status_code for response in responses] == [status for _, status in asks]
+    for response in responses:
+        if response.status_code == 200:
+            assert Decision.model_validate(response.json()) == allowed
+        else:
+            assert response.json() == {"code": "auth"}
+    # and each refusal is ledgered on the decision's session, as one read alone is
+    route = "GET /decisions/{decision_id}"
+    refusals = [(e.event.session_id, e.event.summary) for e in await ledger_rows(app, rows) if e.event.kind == "auth"]
+    assert refusals == [(visitor.session_id, {"route": route, "reason": "bad_token"})] * 6
+
+
 async def test_holds_alert_the_owner_per_notification_defaults(app, client, registry):
     quote = FakeAdapter("native.quote")
     quote.script["normalize"] = priced(list_cents=18_000, discount_bp=1500)

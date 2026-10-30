@@ -287,3 +287,12 @@ async def test_a_cancel_keeps_the_lock_order(app, client, registry, frozen_clock
         response = await post_cancel(client, visitor, held.decision_id)
     assert (response.status_code, response.json()["state"]) == (200, "cancelled")
     assert log.transactions == [["sessions", "decisions", "ledger_heads"]]
+
+
+async def test_a_sessions_decision_read_keeps_the_lock_order(app, client, registry, frozen_clock):
+    _, _, visitor, allowed = await fake_quote_desk(app, client)
+    frozen_clock.advance(61)                        # past the allow's minute, and the visitor's last_seen_at moves
+    with lock_log(app) as log:
+        assert (await read(client, visitor.headers, allowed)).state == "expired"
+    # the session is proved, and seen, in the transaction that read the decision, before it expires it
+    assert log.transactions == [["sessions", "decisions", "ledger_heads"]]

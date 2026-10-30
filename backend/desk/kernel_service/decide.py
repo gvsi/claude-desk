@@ -885,7 +885,12 @@ async def get_decision(decision_id: str, ctx: Ctx, request: Request) -> Decision
     decision no copy holds is 404, ledgered on the session whose token asked. The owner's
     credential is held to the same naming: a bad owner token is 401 and another copy's owner finds
     nothing (404), each ledgered on the decision's session; an owner asking for a decision no copy
-    holds is 404, logged, since an owner session has no Desk ledger of its own."""
+    holds is 404, logged, since an owner session has no Desk ledger of its own.
+
+    Each credential is resolved before the transaction takes its connection, except the decision's
+    session, which only the decision names: that session is proved in the copy the transaction
+    has already read the decision in (`auth.authenticate_session`'s `copy_id`), so a read never
+    holds one connection while it waits for another."""
     copy_id = await repo.copy_of_decision_id(ctx, decision_id) if _storable(decision_id) else None
     if auth.OWNER_HEADER in request.headers and auth.SESSION_HEADER not in request.headers:
         named = Named(copy_id=copy_id, decision_id=decision_id) if copy_id is not None else None
@@ -901,8 +906,8 @@ async def get_decision(decision_id: str, ctx: Ctx, request: Request) -> Decision
         session = await auth.require_session_token(ctx, request)
         raise AuthError(404, "not_found", "unknown_decision", route=route_template(request),
                         named=Named(copy_id=session.copy_id, desk_id=session.desk_id, session_id=session.session_id))
-    await auth.caller(ctx, request, row.session_id)
-    await auth.require_session(ctx, request, row.session_id)
+    await auth.caller(ctx, request, row.session_id, copy_id=row.copy_id)
+    await auth.require_session(ctx, request, row.session_id, copy_id=row.copy_id)
     return await decision_contract(ctx, await _read(ctx, row))
 
 

@@ -107,47 +107,63 @@ async def _ledger_refusal(ctx: KernelCtx, *, named: Named, route: str, reason: s
                                           summary={"route": route, "reason": reason}))
 
 
-async def named_session(ctx: KernelCtx, session_id: str | None) -> Named | None:
+async def named_session(ctx: KernelCtx, session_id: str | None, *, copy_id: str | None = None) -> Named | None:
     """The existing session a request names by ID, whose Desk's ledger records its refusal; None
-    when no session has that ID."""
-    copy_id = await repo.copy_of_session_id(ctx, session_id) if session_id is not None else None
+    when no session has that ID. `copy_id` is the session's copy when the request's transaction has
+    already read it there (see `authenticate_session`), and then no resolver is asked."""
+    if copy_id is None and session_id is not None:
+        copy_id = await repo.copy_of_session_id(ctx, session_id)
     return Named(copy_id=copy_id, session_id=session_id) if copy_id is not None else None
 
 
-async def caller(ctx: KernelCtx, request: Request, session_id: str | None) -> Literal["owner", "session"]:
+async def caller(ctx: KernelCtx, request: Request, session_id: str | None, *,
+                 copy_id: str | None = None) -> Literal["owner", "session"]:
     """Which credential a call that takes either carries: the owner's or a session's. Neither, or
-    both, is 401, ledgered on the session the call names (`session_id`), as any refusal is."""
+    both, is 401, ledgered on the session the call names (`session_id`, of the copy `copy_id` when
+    the request's transaction has already read it there), as any refusal is."""
     owner, session = OWNER_HEADER in request.headers, SESSION_HEADER in request.headers
     if owner != session:
         return "owner" if owner else "session"
     raise AuthError(401, "auth", "bad_token", route=route_template(request),
-                    named=await named_session(ctx, session_id))
+                    named=await named_session(ctx, session_id, copy_id=copy_id))
 
 
 async def require_session(ctx: KernelCtx, request: Request, session_id: str, *, generation: int | None = None,
-                          desk_id: str | None = None) -> SessionRow:
+                          desk_id: str | None = None, copy_id: str | None = None) -> SessionRow:
     """The visitor or agent session `session_id`, once `X-Session-Token` proves it ("Session state
-    responses", first four rows in order). Binds the request's transaction to the session's copy."""
-    row = await authenticate_session(ctx, request, session_id, desk_id=desk_id)
+    responses", first four rows in order). Binds the request's transaction to the session's copy
+    (`copy_id`: see `authenticate_session`)."""
+    row = await authenticate_session(ctx, request, session_id, desk_id=desk_id, copy_id=copy_id)
     require_open(ctx, request, row, generation=generation)
     row.last_seen_at = ctx.clock.now()
     return row
 
 
 async def authenticate_session(ctx: KernelCtx, request: Request, session_id: str, *,
-                               desk_id: str | None = None) -> SessionRow:
+                               desk_id: str | None = None, copy_id: str | None = None) -> SessionRow:
     """The first two session-state rows for the visitor or agent session `session_id`:
     `X-Session-Token` proves it, and it belongs to `desk_id` when the call names one. Binds the
     request's transaction to the session's copy and returns the row as read, unlocked and with its
     state unchecked: `require_session` runs the open and generation checks on it, and
     `check_caller` (for `/decide`, after `lock_session`) runs them itself, so that from here on a
-    failure can be ledgered on the session."""
+    failure can be ledgered on the session.
+
+    The session's copy comes from its resolver, which runs on a connection of its own and so only
+    before the request's transaction has taken one (`repo.py`). A route whose transaction has
+    already read the session's copy (`GET /decisions/{id}`, which finds the session through its
+    decision) passes that copy as `copy_id`, a value from the row it read and never from the
+    request: the session is looked up there, and no request holds one connection while it waits
+    for another. A session that copy doesn't hold is unknown, as for the resolver."""
     route = route_template(request)
-    copy_id = await repo.copy_of_session_id(ctx, session_id)
+    if copy_id is None:
+        copy_id = await repo.copy_of_session_id(ctx, session_id)
     if copy_id is None:
         raise AuthError(401, "auth", "unknown_session", route=route)
     copy = ctx.bind(copy_id)
-    row = (await ctx.db.scalars(copy.scoped(select(SessionRow).where(SessionRow.session_id == session_id)))).one()
+    row = (await ctx.db.scalars(copy.scoped(select(SessionRow).where(
+        SessionRow.session_id == session_id)))).one_or_none()
+    if row is None:
+        raise AuthError(401, "auth", "unknown_session", route=route)
     named = Named(copy_id=copy_id, desk_id=row.desk_id, session_id=row.session_id) if row.desk_id else None
     token = request.headers.get(SESSION_HEADER)
     # owner sessions authenticate only with X-Owner-Session (require_owner)
