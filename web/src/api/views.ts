@@ -247,6 +247,22 @@ export interface OwnerTranscript {
 
 // Safety
 
+/** What a stopped attempt was about, as the API owner plan's triage task sorts it (plan 02b, Task 10). */
+export type TriageCategory =
+  | 'impersonation'
+  | 'discount_push'
+  | 'private_data'
+  | 'code_redirect'
+  | 'injection'
+  | 'over_limit'
+  | 'other';
+
+/** An attempt's AI-written summary and category: owner-facing only, and labelled as written by Claude. */
+export interface Triage {
+  summary: string;
+  category: TriageCategory;
+}
+
 export interface Attempt {
   ref_id: string;
   kind: 'refused' | 'held' | 'reply_blocked';
@@ -254,7 +270,8 @@ export interface Attempt {
   card_ids: string[];
   origin: string;
   created_at: string;
-  triage: string | null;
+  /** Null until the API owner plan's triage task (plan 02b) writes one; screens check its shape before using it. */
+  triage: Triage | null;
   ledger_seq: number;
 }
 
