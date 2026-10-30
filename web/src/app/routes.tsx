@@ -2,6 +2,7 @@ import { Navigate, type RouteObject } from 'react-router';
 
 import { Arrival } from '../owner/Arrival.tsx';
 import { OwnerLayout } from '../owner/OwnerLayout.tsx';
+import { BriefingPage } from '../owner/today/BriefingPage.tsx';
 import { TodayPage } from '../owner/today/TodayPage.tsx';
 import { PublicPage } from '../public/PublicPage.tsx';
 import { NotFound } from './NotFound.tsx';
@@ -19,6 +20,7 @@ export const routes: RouteObject[] = [
     children: [
       { index: true, element: <Navigate to="today" replace /> },
       { path: 'today', element: <TodayPage /> },
+      { path: 'today/briefing', element: <BriefingPage /> },
     ],
   },
   { path: '/d/:slug', element: <PublicPage /> },

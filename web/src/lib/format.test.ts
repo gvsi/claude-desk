@@ -69,6 +69,8 @@ describe('format', () => {
     expect(formatClock('2026-10-30T10:46:00-07:00', LA)).toBe('10:46 am');
     // The same instant on Madrid's clock.
     expect(formatClock('2026-10-30T17:46:00Z', 'Europe/Madrid')).toBe('6:46 pm');
+    // A time that can't be read shows as nothing rather than failing the screen.
+    expect(formatClock('soon', LA)).toBe('');
   });
 
   it('when_says_today_or_the_date_with_the_time', () => {
@@ -79,6 +81,7 @@ describe('format', () => {
     expect(formatWhen('2026-10-30T06:30:00Z', LA, now)).toBe('Oct 29, 11:30 pm');
     // And the business's next day is not today, though it is the same UTC date as now.
     expect(formatWhen('2026-10-30T18:00:00Z', 'Pacific/Kiritimati', new Date('2026-10-30T09:00:00Z'))).toBe('Oct 31, 8:00 am');
+    expect(formatWhen('soon', LA, now)).toBe('');
   });
 
   it('week_day_names', () => {

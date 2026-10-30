@@ -47,6 +47,7 @@ interface ApiErrorInit {
   decision?: Decision | null;
   state?: PaymentLinkState | null;
   draft?: RulesDraft | null;
+  capCents?: number | null;
 }
 
 /** A request that didn't come back as a clear answer. Its message is its kind, never server text. */
@@ -66,6 +67,8 @@ export class ApiError extends Error {
   readonly state: PaymentLinkState | null;
   /** A 409's fresh rules draft (the rules changed since the draft). */
   readonly draft: RulesDraft | null;
+  /** A 422's `cap_cents`: the limit for taking money without asking that a draft went over. */
+  readonly capCents: number | null;
 
   constructor(kind: ApiErrorKind, init: ApiErrorInit) {
     super(kind);
@@ -79,6 +82,7 @@ export class ApiError extends Error {
     this.decision = init.decision ?? null;
     this.state = init.state ?? null;
     this.draft = init.draft ?? null;
+    this.capCents = init.capCents ?? null;
   }
 }
 
@@ -202,6 +206,10 @@ function draftOf(value: unknown): RulesDraft | null {
   return isRecord(value) && typeof value.version === 'number' && Array.isArray(value.cards) ? (value as unknown as RulesDraft) : null;
 }
 
+function capCentsOf(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
 function kindOf(status: number): ApiErrorKind {
   if (status === 401) return 'unauthorized';
   if (status === 404) return 'not_found';
@@ -224,6 +232,7 @@ function errorFrom(key: RouteKey, method: HttpMethod, answer: Answer): ApiError 
     decision: conflict ? decisionOf(body.decision) : null,
     state: conflict ? stateOf(body.state) : null,
     draft: conflict ? draftOf(body.draft) : null,
+    capCents: answer.status === 422 ? capCentsOf(body.cap_cents) : null,
   });
 }
 

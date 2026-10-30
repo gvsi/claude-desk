@@ -1,5 +1,6 @@
 import { Button, Card } from '../../ds/index.ts';
 import { customerLink, publicLink } from '../customerLink.ts';
+import { ThisWeek } from './ThisWeek.tsx';
 
 export interface TodayAsideProps {
   deskId: string;
@@ -8,7 +9,7 @@ export interface TodayAsideProps {
 
 /**
  * Today's right column: the Desk's public page, which "Chat as a customer" opens in a new tab as
- * this Desk's owner sees it. Nothing here opens a chat on Today.
+ * this Desk's owner sees it, and under it the last 7 days. Nothing here opens a chat on Today.
  */
 export function TodayAside({ deskId, slug }: TodayAsideProps) {
   return (
@@ -27,6 +28,7 @@ export function TodayAside({ deskId, slug }: TodayAsideProps) {
           </div>
         </div>
       </Card>
+      <ThisWeek deskId={deskId} />
     </div>
   );
 }

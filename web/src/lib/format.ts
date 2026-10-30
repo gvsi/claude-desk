@@ -72,9 +72,16 @@ function clock({ hour, minute }: Pick<LocalTime, 'hour' | 'minute'>): string {
   return `${h}:${String(minute).padStart(2, '0')} ${hour < 12 ? 'am' : 'pm'}`;
 }
 
-/** The time of `iso` on the business's clock: "10:46 am". */
+/** `iso` as a date, or null when it isn't one (the clock can't read it, and nothing is made up). */
+function readDate(iso: string): Date | null {
+  const at = new Date(iso);
+  return Number.isNaN(at.getTime()) ? null : at;
+}
+
+/** The time of `iso` on the business's clock: "10:46 am". A time that can't be read shows as nothing. */
 export function formatClock(iso: string, timeZone: string): string {
-  return clock(localTime(new Date(iso), timeZone));
+  const at = readDate(iso);
+  return at === null ? '' : clock(localTime(at, timeZone));
 }
 
 /**
@@ -82,7 +89,9 @@ export function formatClock(iso: string, timeZone: string): string {
  * date, else the date and the time, "Oct 26, 9:52 am". Never a bare date or a bare time.
  */
 export function formatWhen(iso: string, timeZone: string, now: Date): string {
-  const at = localTime(new Date(iso), timeZone);
+  const date = readDate(iso);
+  if (date === null) return '';
+  const at = localTime(date, timeZone);
   const today = localTime(now, timeZone);
   const sameDay = at.year === today.year && at.month === today.month && at.day === today.day;
   const day = sameDay ? 'Today' : `${MONTHS[at.month - 1] ?? ''} ${at.day}`;
@@ -145,9 +154,9 @@ export function callbackLine(window: string | null, timeZone: string): string {
   if (window === null) return NO_CALLBACK_TIME;
   const [start, end, ...rest] = window.split('/');
   if (start === undefined || end === undefined || rest.length > 0) return NO_CALLBACK_TIME;
-  const from = new Date(start);
-  const to = new Date(end);
-  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return NO_CALLBACK_TIME;
+  const from = readDate(start);
+  const to = readDate(end);
+  if (from === null || to === null) return NO_CALLBACK_TIME;
   const local = localTime(from, timeZone);
   return `You'll call back on ${local.weekday}, between ${clock(local)} and ${clock(localTime(to, timeZone))}.`;
 }
