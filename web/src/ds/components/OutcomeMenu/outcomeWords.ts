@@ -43,7 +43,9 @@ export const PRESET_WORDS = [
  * What each mode means, under the mode switch. The two presets' captions describe the master
  * plan's preset cards (`desk.presets.PRESETS`): Automatic adds quotes at list price, weekday
  * bookings in opening hours and customers' own documents to what Ask me first already runs on its
- * own, and both ask before any payment. Custom is the owner's own rules.
+ * own, and both ask before any payment. Custom is the owner's own rules. `outcomeWords.test.ts`
+ * checks each caption against those cards, read from their generated export
+ * (`web/src/api/presets.gen.json`).
  */
 export const PRESET_CAPTIONS = {
   ask_first:

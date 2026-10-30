@@ -44,4 +44,4 @@
 
 ## Words
 
-`PRESET_CAPTIONS` (in `OutcomeMenu/outcomeWords.ts`, beside `PRESET_WORDS`) describe the master plan's presets (`desk.presets.PRESETS`). `preset_captions_match_the_presets` pins each caption to a copy of those presets' cards, so changing a preset fails it until the caption follows.
+`PRESET_CAPTIONS` (in `OutcomeMenu/outcomeWords.ts`, beside `PRESET_WORDS`) describe the master plan's presets (`desk.presets.PRESETS`). `preset_captions_match_the_presets` checks each caption against those presets' cards, read from their generated export (`web/src/api/presets.gen.json`), so changing a preset fails it until the caption follows. Until the export exists the check is skipped and says what it waits for; `a_changed_preset_card_fails_the_captions` proves the checker catches one changed card.

@@ -1,107 +1,244 @@
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { describe, expect, test } from 'vitest';
 
-import { OUTCOME_TONE, OUTCOME_WORDS, PRESET_CAPTIONS, PRESET_WORDS, outcomePhrase, type RuleMode } from './outcomeWords.ts';
-
-/** A preset's card, as far as its caption can describe it. */
-interface PresetCard {
-  applies_to: string;
-  mode: RuleMode;
-  who: 'anyone' | 'record_owner';
-  /** What else the card limits, in the table's words. */
-  limits?: 'no discount' | 'weekday hours';
-}
-
-const anyoneAuto = (applies_to: string): PresetCard => ({ applies_to, mode: 'auto', who: 'anyone' });
+import type { RuleCard } from '../../../api/contracts.ts';
+import { OUTCOME_TONE, OUTCOME_WORDS, PRESET_CAPTIONS, PRESET_WORDS, outcomePhrase } from './outcomeWords.ts';
 
 /**
- * `desk.presets.PRESETS`, copied from plan 01a Task 3: each preset's cards. A tool without a card
- * falls to the default ask. When the presets change there, this copy and the captions change too.
+ * The presets export: `desk.presets.PRESETS` (plan 01a Task 3) as JSON, generated into
+ * `web/src/api/presets.gen.json` as `{"ask_first": [RuleCard, ...], "auto": [RuleCard, ...]}`.
+ * Until it is generated, the check against it is skipped.
  */
-const PRESETS: Record<'ask_first' | 'auto', readonly PresetCard[]> = (() => {
+const PRESETS_EXPORT = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../api/presets.gen.json');
+
+type PresetName = 'ask_first' | 'auto';
+
+/** Each preset's rule cards, as the export lists them. */
+type PresetCards = Record<PresetName, readonly RuleCard[]>;
+
+const MODES: ReadonlySet<string> = new Set(['auto', 'ask', 'never']);
+const WHO: ReadonlySet<string> = new Set(['anyone', 'verified', 'record_owner', 'person', 'agent']);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** The export, read: both presets, each a list of cards with a target, a mode and who they are for. Anything else throws. */
+function parsePresetCards(value: unknown): PresetCards {
+  if (!isRecord(value)) throw new Error('The presets export is not an object');
+  const read = (name: PresetName): RuleCard[] => {
+    const list = value[name];
+    if (!Array.isArray(list)) throw new Error(`The presets export has no "${name}" list`);
+    return list.map((card: unknown, i) => {
+      const ok =
+        isRecord(card) &&
+        typeof card.applies_to === 'string' &&
+        typeof card.mode === 'string' &&
+        MODES.has(card.mode) &&
+        typeof card.who === 'string' &&
+        WHO.has(card.who);
+      if (!ok) throw new Error(`Card ${i} of "${name}" is not a rule card`);
+      return card as unknown as RuleCard;
+    });
+  };
+  return { ask_first: read('ask_first'), auto: read('auto') };
+}
+
+/**
+ * Owner-session setup tools: Claude reads the owner's own website and notes. Visitors can't reach
+ * them and the Rules page doesn't list them (the web app's `capabilities`), so no caption names them.
+ */
+const SETUP_TOOLS: ReadonlySet<string> = new Set(['native.fetch_website', 'native.read_memory']);
+
+/** Every target that takes or sends money: the money effects and the tools that have them. */
+const MONEY_TARGETS = ['effect:charge', 'effect:pay_out', 'native.payment_link', 'native.charge_mandate', 'payments.create_refund'];
+
+const WEEKDAYS: ReadonlySet<string> = new Set(['mon', 'tue', 'wed', 'thu', 'fri']);
+
+/** A preset's automatic cards for one target. */
+function autoCards(cards: readonly RuleCard[], target: string): RuleCard[] {
+  return cards.filter((card) => card.applies_to === target && card.mode === 'auto');
+}
+
+/** One thing a caption says: its words, whether they say Claude runs the targets on its own, and what must hold. */
+interface Claim {
+  words: string;
+  runsOnItsOwn: boolean;
+  targets: readonly string[];
+  /** Further targets the words account for, such as the other tool of the same connector. */
+  covers?: readonly string[];
+  /** What's wrong with the preset's cards, or null when the claim holds. */
+  problem: (cards: readonly RuleCard[]) => string | null;
+}
+
+/** Claude asks before any of the targets: no automatic card for them. */
+function asks(words: string, targets: readonly string[]): Claim {
+  return {
+    words,
+    runsOnItsOwn: false,
+    targets,
+    problem: (cards) => {
+      const automatic = targets.filter((target) => autoCards(cards, target).length > 0);
+      return automatic.length === 0 ? null : `runs ${automatic.join(', ')} on its own`;
+    },
+  };
+}
+
+/** Claude runs each target on its own for anyone, and every automatic card for it passes `each`. */
+function runs(words: string, targets: readonly string[], each: (card: RuleCard) => string | null = () => null, covers?: readonly string[]): Claim {
+  return {
+    words,
+    runsOnItsOwn: true,
+    targets,
+    covers,
+    problem: (cards) => {
+      for (const target of targets) {
+        const found = autoCards(cards, target);
+        if (found.length === 0) return `has no automatic card for ${target}`;
+        for (const card of found) {
+          const wrong = each(card);
+          if (wrong !== null) return `${card.card_id}: ${wrong}`;
+        }
+      }
+      return null;
+    },
+  };
+}
+
+const forAnyone = (card: RuleCard) => (card.who === 'anyone' ? null : `is for ${card.who}, not anyone`);
+
+/** What each preset's caption says about its cards, phrase by phrase. */
+const CLAIMS: Record<PresetName, readonly Claim[]> = {
+  ask_first: [
+    asks('asks you before it quotes', ['native.quote']),
+    asks('books', ['native.book']),
+    asks('shares a document', ['native.release_document']),
+    asks('takes a payment', MONEY_TARGETS),
+    runs('still finds open times', ['native.find_slots'], forAnyone),
+    // Leads and callbacks: saving a lead and asking the owner to call back both keep who to get back to.
+    runs('saves leads', ['native.capture_lead'], forAnyone, ['native.request_callback']),
+    runs('confirms who people are', ['native.start_verification'], forAnyone),
+  ],
+  auto: [
+    runs('quotes at list price', ['native.quote'], (card) =>
+      forAnyone(card) ?? ((card.max_discount_bp ?? 0) === 0 ? null : `allows a ${card.max_discount_bp} bp discount`),
+    ),
+    runs('books weekdays in your hours', ['native.book'], (card) => {
+      const days = card.hours?.days ?? [];
+      if (days.length === 0) return 'books at any hour';
+      return days.every((day) => WEEKDAYS.has(day)) ? null : `books on ${days.join(', ')}`;
+    }),
+    runs('sends verified customers their own documents', ['native.release_document'], (card) =>
+      card.who === 'record_owner' ? null : `is for ${card.who}, not the record's owner`,
+    ),
+    asks('Payments ask you first', MONEY_TARGETS),
+  ],
+};
+
+/** Everything the captions say that the presets' cards don't do; empty when they agree. */
+function captionProblems(cards: PresetCards): string[] {
+  const problems: string[] = [];
+  for (const preset of ['ask_first', 'auto'] as const) {
+    for (const claim of CLAIMS[preset]) {
+      if (!PRESET_CAPTIONS[preset].includes(claim.words)) problems.push(`${preset}: the caption doesn't say "${claim.words}"`);
+      const wrong = claim.problem(cards[preset]);
+      if (wrong !== null) problems.push(`${preset}, "${claim.words}": ${wrong}`);
+    }
+  }
+  // Ask me first runs on its own only what its caption says it still does; Automatic only that and
+  // what its own caption adds.
+  const said = (preset: PresetName) =>
+    CLAIMS[preset].filter((claim) => claim.runsOnItsOwn).flatMap((claim) => [...claim.targets, ...(claim.covers ?? [])]);
+  const allowed: Record<PresetName, ReadonlySet<string>> = {
+    ask_first: new Set(said('ask_first')),
+    auto: new Set([...said('ask_first'), ...said('auto')]),
+  };
+  for (const preset of ['ask_first', 'auto'] as const) {
+    for (const card of cards[preset]) {
+      if (card.mode === 'auto' && !allowed[preset].has(card.applies_to) && !SETUP_TOOLS.has(card.applies_to)) {
+        problems.push(`${preset}: ${card.card_id} runs ${card.applies_to} on its own, which the caption doesn't say`);
+      }
+    }
+  }
+  return problems;
+}
+
+/** A hand-built pair of presets that does what the captions say, for the checker's own test. */
+function handBuilt(): PresetCards {
+  let n = 0;
+  const card = (applies_to: string, mode: RuleCard['mode'], who: RuleCard['who'], extra: Partial<RuleCard> = {}): RuleCard => ({
+    card_id: `hand-${(n += 1)}`,
+    applies_to,
+    mode,
+    who,
+    reason: 'Hand-built for the caption check.',
+    ...extra,
+  });
   const askFirst = [
-    'native.find_slots',
-    'native.capture_lead',
-    'native.request_callback',
-    'native.start_verification',
-    'native.fetch_website',
-    'native.read_memory',
-  ].map(anyoneAuto);
+    card('native.find_slots', 'auto', 'anyone'),
+    card('native.capture_lead', 'auto', 'anyone'),
+    card('native.start_verification', 'auto', 'anyone'),
+  ];
   return {
     ask_first: askFirst,
     auto: [
       ...askFirst,
-      { ...anyoneAuto('native.quote'), limits: 'no discount' },
-      { ...anyoneAuto('native.book'), limits: 'weekday hours' },
-      { applies_to: 'native.release_document', mode: 'auto', who: 'record_owner' },
-      { applies_to: 'effect:charge', mode: 'ask', who: 'anyone' },
-      { applies_to: 'effect:pay_out', mode: 'ask', who: 'anyone' },
+      card('native.quote', 'auto', 'anyone', { max_discount_bp: 0 }),
+      card('native.book', 'auto', 'anyone', { hours: { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '09:00:00', end: '17:00:00' } }),
+      card('native.release_document', 'auto', 'record_owner'),
+      card('effect:charge', 'ask', 'anyone'),
     ],
   };
-})();
-
-/** What a caption says about one tool: its words in the caption, and the card they describe. */
-interface Claim {
-  words: string;
-  applies_to: string;
-  mode: RuleMode;
-  who?: PresetCard['who'];
-  limits?: PresetCard['limits'];
 }
 
-/** Each preset caption's claims, phrase by phrase. */
-const CLAIMS: Record<'ask_first' | 'auto', readonly Claim[]> = {
-  ask_first: [
-    { words: 'asks you before it quotes', applies_to: 'native.quote', mode: 'ask' },
-    { words: 'books', applies_to: 'native.book', mode: 'ask' },
-    { words: 'shares a document', applies_to: 'native.release_document', mode: 'ask' },
-    { words: 'takes a payment', applies_to: 'effect:charge', mode: 'ask' },
-    { words: 'still finds open times', applies_to: 'native.find_slots', mode: 'auto', who: 'anyone' },
-    { words: 'saves leads', applies_to: 'native.capture_lead', mode: 'auto', who: 'anyone' },
-    { words: 'confirms who people are', applies_to: 'native.start_verification', mode: 'auto', who: 'anyone' },
-  ],
-  auto: [
-    { words: 'quotes at list price', applies_to: 'native.quote', mode: 'auto', who: 'anyone', limits: 'no discount' },
-    { words: 'books weekdays in your hours', applies_to: 'native.book', mode: 'auto', who: 'anyone', limits: 'weekday hours' },
-    {
-      words: 'sends verified customers their own documents',
-      applies_to: 'native.release_document',
-      mode: 'auto',
-      who: 'record_owner',
-    },
-    { words: 'Payments ask you first', applies_to: 'effect:charge', mode: 'ask' },
-  ],
-};
-
-/** A tool's outcome under a preset: its card's, or the default ask. */
-function outcomeIn(preset: 'ask_first' | 'auto', appliesTo: string): PresetCard {
-  return PRESETS[preset].find((card) => card.applies_to === appliesTo) ?? { applies_to: appliesTo, mode: 'ask', who: 'anyone' };
-}
-
-/** The tools a preset makes automatic. */
-function automatic(preset: 'ask_first' | 'auto'): string[] {
-  return PRESETS[preset].filter((card) => card.mode === 'auto').map((card) => card.applies_to);
+/** One preset's cards with `change` applied to the card for `appliesTo`, or with `add` appended. */
+function changed(cards: PresetCards, preset: PresetName, edit: { appliesTo?: string; change?: Partial<RuleCard> | null; add?: RuleCard }): PresetCards {
+  const list = cards[preset].flatMap((card) => {
+    if (card.applies_to !== edit.appliesTo) return [card];
+    return edit.change === null ? [] : [{ ...card, ...edit.change }];
+  });
+  return { ...cards, [preset]: edit.add ? [...list, edit.add] : list };
 }
 
 describe('outcome words', () => {
-  test('preset_captions_match_the_presets', () => {
-    for (const preset of ['ask_first', 'auto'] as const) {
-      for (const claim of CLAIMS[preset]) {
-        // The caption says it, and the preset's card does what it says.
-        expect(PRESET_CAPTIONS[preset]).toContain(claim.words);
-        const card = outcomeIn(preset, claim.applies_to);
-        expect({ words: claim.words, mode: card.mode }).toEqual({ words: claim.words, mode: claim.mode });
-        if (claim.who !== undefined) expect(card.who).toBe(claim.who);
-        expect(card.limits).toBe(claim.limits);
-      }
-    }
-    // Automatic names exactly what it turns automatic beyond the starter preset, Ask me first,
-    // and Ask me first says it asks for each of them.
-    const added = automatic('auto').filter((tool) => !automatic('ask_first').includes(tool));
-    const claimedAuto = CLAIMS.auto.filter((claim) => claim.mode === 'auto').map((claim) => claim.applies_to);
-    expect(claimedAuto.sort()).toEqual([...added].sort());
-    const askedFirst = CLAIMS.ask_first.filter((claim) => claim.mode === 'ask').map((claim) => claim.applies_to);
-    for (const tool of added) expect(askedFirst).toContain(tool);
-    // Custom describes no preset: it is the owner's own rules. The captions, word for word.
+  test('preset_captions_match_the_presets', ({ skip }) => {
+    skip(!existsSync(PRESETS_EXPORT), 'waits for the generated presets export, web/src/api/presets.gen.json');
+    // Every claim each caption makes holds for the presets' own cards, and Ask me first runs on its
+    // own only what its caption says it still does.
+    const cards = parsePresetCards(JSON.parse(readFileSync(PRESETS_EXPORT, 'utf8')));
+    expect(captionProblems(cards)).toEqual([]);
+  });
+
+  test('a_changed_preset_card_fails_the_captions', () => {
+    const good = handBuilt();
+    // The checker passes presets that do what the captions say, read the way the export is read.
+    expect(captionProblems(parsePresetCards(JSON.parse(JSON.stringify(good))))).toEqual([]);
+    // Changing one card alone fails it.
+    const anyone = (applies_to: string): RuleCard => ({ card_id: 'hand-added', applies_to, mode: 'auto', who: 'anyone', reason: 'Added.' });
+    const broken: [string, PresetCards][] = [
+      ['quotes with a discount', changed(good, 'auto', { appliesTo: 'native.quote', change: { max_discount_bp: 1000 } })],
+      ['quotes no longer automatic', changed(good, 'auto', { appliesTo: 'native.quote', change: { mode: 'ask' } })],
+      ['no quote card', changed(good, 'auto', { appliesTo: 'native.quote', change: null })],
+      ['bookings at any hour', changed(good, 'auto', { appliesTo: 'native.book', change: { hours: null } })],
+      ['bookings on Saturdays', changed(good, 'auto', { appliesTo: 'native.book', change: { hours: { days: ['mon', 'sat'], start: '09:00:00', end: '17:00:00' } } })],
+      ['documents for anyone', changed(good, 'auto', { appliesTo: 'native.release_document', change: { who: 'anyone' } })],
+      ['payments automatic', changed(good, 'auto', { appliesTo: 'effect:charge', change: { mode: 'auto' } })],
+      ['payment links automatic', changed(good, 'auto', { add: anyone('native.payment_link') })],
+      ['Automatic adds a tool its caption leaves out', changed(good, 'auto', { add: anyone('payments.list_charges') })],
+      ['Ask me first quotes on its own', changed(good, 'ask_first', { add: anyone('native.quote') })],
+      ['Ask me first refunds on its own', changed(good, 'ask_first', { add: anyone('payments.create_refund') })],
+      ['Ask me first stops finding open times', changed(good, 'ask_first', { appliesTo: 'native.find_slots', change: null })],
+    ];
+    for (const [what, cards] of broken) expect({ what, problems: captionProblems(cards).length > 0 }).toEqual({ what, problems: true });
+    // An export of the wrong shape is refused, never read as no cards.
+    expect(() => parsePresetCards({ ask_first: [] })).toThrow();
+    expect(() => parsePresetCards({ ask_first: [{ applies_to: 'native.quote' }], auto: [] })).toThrow();
+  });
+
+  test('preset_captions_are_the_owner_words', () => {
     expect(Object.keys(PRESET_CAPTIONS)).toEqual(PRESET_WORDS.map((option) => option.value));
     expect(PRESET_CAPTIONS).toEqual({
       ask_first:
