@@ -214,6 +214,21 @@ describe('Conversations', () => {
     await expectScreenBasics(quiet.screen.container, { owner: true });
   });
 
+  it('agent_name_reads_as_its_own_words', async () => {
+    // An agent's chat: the name it gave is its own words wherever the page shows it, the caption
+    // over the transcript included.
+    const name = 'Trip planner for Sam Ortiz';
+    const chat = named(DANA_LIVE, name);
+    chat.state = { ...chat.state, kind: 'agent' };
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    await expect.element(screen.getByRole('heading', { level: 2, name })).toBeVisible();
+    const caption = screen.getByText(/, signed requests from /);
+    await expect.element(caption).toBeVisible();
+    expect(caption.element().textContent).toMatch(new RegExp(`, signed requests from ${name}$`));
+    expect(caption.element().querySelector('[data-copy="user"]')?.textContent).toBe(name);
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
   it('receipt_opens_the_trace', async () => {
     const { screen } = await renderRoute(conversation(DANA_LIVE));
     const chat = log(screen);

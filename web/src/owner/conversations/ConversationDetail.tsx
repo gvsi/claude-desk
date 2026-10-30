@@ -5,7 +5,7 @@
  * back or resume, whisper to Claude, or write to the visitor in their own words. Polled while open.
  */
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 
 import type { SessionState } from '../../api/contracts.ts';
 import { ApiError, request } from '../../api/http.ts';
@@ -107,12 +107,21 @@ function FailedRead({ failure }: { failure: ReadFailure }) {
   );
 }
 
-/** What the page says about where the chat came from: "Today at 12:04 pm, web chat from …". */
-function startedLine(read: OwnerTranscriptRead, slug: string, who: string, timezone: string): string | null {
+/**
+ * What the page says about where the chat came from: "Today at 12:04 pm, web chat from …". An
+ * agent's name is the name it gave, so it reads as its own words.
+ */
+function startedLine(read: OwnerTranscriptRead, slug: string, who: string, timezone: string): ReactNode {
   const first = [...read.items].sort((a, b) => a.n - b.n)[0];
   if (first === undefined) return null;
   const when = formatStarted(first.created_at, timezone, new Date());
-  if (read.state.kind === 'agent') return `${when}, signed requests from ${who}`;
+  if (read.state.kind === 'agent') {
+    return (
+      <>
+        {when}, signed requests from <span data-copy="user">{who}</span>
+      </>
+    );
+  }
   return `${when}, web chat from ${publicLink(slug).replace(/^https?:\/\//, '')}`;
 }
 

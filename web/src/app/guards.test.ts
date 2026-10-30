@@ -72,6 +72,20 @@ const SIDEBAR_LOOK = /\bsidebarLook\b/;
 // Formatting money or dates: the visitor's page shows only what the kernel rendered.
 const FORMATS = /\blib\/format\b|\bIntl\.|\btoLocale\w*|\bnew\s+Date\b|\btoFixed\(/;
 
+// The checkout's one exception: `formatMoneyExact`, imported alone, for the amount with its cents.
+const CHECKOUT_MONEY_IMPORT = /\bimport\s*\{\s*formatMoneyExact\s*\}\s*from\s*['"](?:\.\.\/)+lib\/format(?:\.ts)?['"]/g;
+
+/**
+ * The visitor's sources as the format guard reads them: every file under `public/`, with the
+ * checkout's one allowed import taken out of the checkout's files, so anything else there still
+ * shows.
+ */
+function visitorFormatSources(scanned: Source[]): Source[] {
+  return scanned
+    .filter((s) => s.file.startsWith('public/'))
+    .map((s) => (s.file.startsWith('public/checkout/') ? { ...s, text: s.text.replace(CHECKOUT_MONEY_IMPORT, '') } : s));
+}
+
 // An owner's reason on a receipt: the decision's `reason_plain` and the receipt props that show it
 // to the owner. The visitor's page shows each receipt's `visitor_plain` and nothing else.
 const OWNER_REASON = /\breason_plain\b|\breason=|\bcardBelow\b/;
@@ -140,8 +154,8 @@ function timeReadsOutsideTheHelper(scanned: Source[]): string[] {
   });
 }
 
-/** `lib/` modules the visitor's code imports: they run on the visitor's page too. */
-const LIB_IMPORT = /\bfrom\s+['"]\.\.\/lib\/([\w.-]+)['"]/g;
+/** `lib/` modules the visitor's code imports, from any folder under `public/`: they run on the visitor's page too. */
+const LIB_IMPORT = /\bfrom\s+['"](?:\.\.\/)+lib\/([\w.-]+)['"]/g;
 function libModulesOf(visitor: Source[], all: Source[] = sources): Source[] {
   const files = new Set(visitor.flatMap(({ text }) => [...text.matchAll(LIB_IMPORT)].map((m) => `lib/${m[1]}`)));
   return all.filter((s) => files.has(s.file));
@@ -259,10 +273,22 @@ describe('app source guards', () => {
   });
 
   it('visitor_code_never_formats_money_or_dates', () => {
-    const visitor = (s: Source) => s.file.startsWith('public/') && !s.file.startsWith('public/checkout/');
     const bad = "import { formatCents } from '../lib/format.ts'; new Intl.NumberFormat(); d.toLocaleString(); new Date(); n.toFixed(2);";
     expect(hits(FORMATS, sample(bad))).toHaveLength(5);
-    expect(hits(FORMATS, sources.filter(visitor))).toEqual([]);
+
+    // The checkout may import `formatMoneyExact` for the amount with its cents, and nothing else:
+    // no other part of `lib/format`, no dates and no Intl.
+    const checkout = (text: string) => visitorFormatSources([{ file: 'public/checkout/CheckoutPage.tsx', text }]);
+    expect(hits(FORMATS, checkout("import { formatMoneyExact } from '../../lib/format.ts';"))).toEqual([]);
+    expect(hits(FORMATS, checkout("import { formatMoneyExact, formatClock } from '../../lib/format.ts';"))).toHaveLength(1);
+    expect(hits(FORMATS, checkout("import * as format from '../../lib/format.ts';"))).toHaveLength(1);
+    expect(hits(FORMATS, checkout("import { formatMoneyExact } from '../../lib/format.ts';\nconst at = new Date(); new Intl.DateTimeFormat('en');"))).toHaveLength(2);
+    // Anywhere else on the visitor's page, that import is a hit too.
+    expect(hits(FORMATS, visitorFormatSources([{ file: 'public/PublicChat.tsx', text: "import { formatMoneyExact } from '../lib/format.ts';" }]))).toHaveLength(1);
+
+    const visitor = visitorFormatSources(sources);
+    expect(visitor.map((s) => s.file)).toContain('public/checkout/CheckoutPage.tsx');
+    expect(hits(FORMATS, visitor)).toEqual([]);
   });
 
   it('visitor_code_never_shows_owner_reasons', () => {
@@ -349,6 +375,9 @@ describe('app source guards', () => {
     expect(timeReadsOutsideTheHelper(sample(`${helper}${typing}const late = status['until'];\nconst { opens_at } = status;\nx.refresh_at;\nsignal.until;`))).toHaveLength(4);
     const planted: Source[] = [{ file: 'lib/clock.ts', text: 'const left = Date.parse(signal.until);' }, { file: 'lib/other.ts', text: '' }];
     expect(libModulesOf(sample("import { left } from '../lib/clock.ts';"), planted).map((s) => s.file)).toEqual(['lib/clock.ts']);
+    // From the page's own folders, such as the inbox, verification and the checkout, too.
+    expect(libModulesOf(sample("import { left } from '../../lib/clock.ts';"), planted).map((s) => s.file)).toEqual(['lib/clock.ts']);
+    expect(libModulesOf(visitor).map((s) => s.file)).toContain('lib/format.ts');
     expect(timeReadsOutsideTheHelper(libModulesOf(sample("import { left } from '../lib/clock.ts';"), planted))).toHaveLength(1);
     expect(timeReadsOutsideTheHelper([...visitor, ...libModulesOf(visitor)])).toEqual([]);
     expect(functionBody(hook?.text ?? '', 'openStatusDelayMs'), 'openStatusDelayMs is in useOpenStatus.ts').not.toBeNull();
