@@ -22,7 +22,7 @@ from fastapi import FastAPI
 from sqlalchemy import select
 
 from desk.contracts import CardOption, Claim, Fact, RenderedBlock, ReplyVerdict
-from desk.db.models import ActorSession, Desk, Document
+from desk.db.models import ActorSession, Business, Desk, Document
 from desk.db.models import Fact as FactRow
 from desk.kernel_api import PublicDesk
 from desk.kernel_service import lang, ledger, reply_check
@@ -171,6 +171,41 @@ async def test_a_word_mixing_scripts_is_blocked(app, client, prose, span):
     copy, visitor = await visitor_of(app, client)
     verdict = await checked(client, visitor, prose)
     assert [(v.kind, v.rule_id, v.span) for v in verdict.violations] == [("unsupported_language", "mixed_script", span)]
+    assert_handed_off(verdict)
+
+
+async def rename(app: FastAPI, copy: Rivera, *, business: str, desk: str) -> None:
+    """Gives the copy's business and Desk these names, as the owner's setup would."""
+    async with kernel_ctx(app) as ctx:
+        repo = ctx.bind(copy.copy_id)
+        desk_row = (await ctx.db.scalars(repo.scoped(select(Desk).where(Desk.desk_id == copy.desk_id)))).one()
+        business_row = (await ctx.db.scalars(repo.scoped(select(Business).where(
+            Business.business_id == desk_row.business_id)))).one()
+        desk_row.name, business_row.name = desk, business
+
+
+SIGMA = "\u03a3igma Plumbing"          # a Greek capital sigma
+MAIN_LINE = "\u039cain line"           # a Greek capital mu
+
+
+@pytest.mark.parametrize(("prose", "language"), [
+    (f"Welcome to {SIGMA}. How can I help?", "en"),
+    (f"Hola, soy el asistente de {MAIN_LINE}. ¿En qué le puedo ayudar?", "es"),
+])
+async def test_the_desks_own_names_may_mix_scripts(app, client, prose, language):
+    """A business or Desk the owner named with letters of two scripts can be named in a reply."""
+    copy, visitor = await visitor_of(app, client)
+    await rename(app, copy, business=SIGMA, desk=MAIN_LINE)
+    verdict = await checked(client, visitor, prose)
+    assert (verdict.ok, verdict.violations, verdict.language) == (True, [], language)
+
+
+async def test_only_the_desks_own_names_may_mix_scripts(app, client):
+    copy, visitor = await visitor_of(app, client)
+    await rename(app, copy, business=SIGMA, desk=MAIN_LINE)
+    verdict = await checked(client, visitor, f"\u03a3igma can help. {SIGMA} says h\u0435llo.")   # a Cyrillic e
+    assert [(v.kind, v.rule_id, v.span) for v in verdict.violations] == [
+        ("unsupported_language", "mixed_script", "\u03a3igma"), ("unsupported_language", "mixed_script", "h\u0435llo")]
     assert_handed_off(verdict)
 
 

@@ -7,10 +7,11 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    nothing is scanned.
 2. Language: `lang.detect` on the prose. Another language is `unsupported_language`; too little to
    tell falls back to the session's last language, else English. Cards render in this language.
-3. `scan_prose`: numerals, currency and percent signs, words mixing Latin letters with another
-   script, both lexicons (`lexicon/en.txt` and `lexicon/es.txt`, whatever the language, with
-   each letter that looks like a Latin one read as it, from `lexicon/lookalikes.txt`) and the
-   Desk's document canaries.
+3. `scan_prose`: numerals and the letters drawn as digits, currency and percent signs, words
+   mixing Latin letters with another script (but for the Desk's own name and its business's
+   name, as the owner set them), both lexicons (`lexicon/en.txt` and `lexicon/es.txt`, whatever
+   the language, with each letter that looks like a Latin one read as it, from
+   `lexicon/lookalikes.txt`) and the Desk's document canaries.
 4. Each clause renders from a fact this session may read, current, of the template's kind and ID,
    with no canary in what it renders.
 5. The soft-promise check, only when steps 2 to 4 found nothing and there is prose: Haiku 5.5
@@ -209,6 +210,17 @@ LEXICONS: dict[str, list[tuple[str, re.Pattern[str]]]] = {
     language: _load_lexicon(language) for language in ("en", "es")}
 
 
+def _occurrences(text: str, names: Iterable[str]) -> list[tuple[int, int]]:
+    """Where each of `names`, as `shown` reads it, appears in `text`: `(start, end)` pairs."""
+    found = []
+    for name in (shown(name).strip() for name in names):
+        start = text.find(name) if name else -1
+        while start != -1:
+            found.append((start, start + len(name)))
+            start = text.find(name, start + 1)
+    return found
+
+
 def _span(text: str) -> str:
     return text[:SPAN_CHARS]
 
@@ -223,14 +235,17 @@ def _blank_canaries(text: str, canaries: Iterable[str]) -> tuple[str, list[str]]
     return text, found
 
 
-def scan_prose(text: str, canaries: Iterable[str] = ()) -> list[Violation]:
+def scan_prose(text: str, canaries: Iterable[str] = (), names: Iterable[str] = ()) -> list[Violation]:
     """Every number, currency sign, lexicon word and canary in `text`, after `shown`: any Unicode
-    numeral (`digit`, with the separators inside one number in the same span), currency sign
-    (`currency`) or percent sign (`percent_sign`) and every match of both lexicons
-    (`lex.<lang>.<category>`) is `number_in_prose`, or `promise_word` for the promise category; a
-    word mixing Latin letters with another script is `unsupported_language` (`mixed_script`); a
-    canary verbatim is `canary`. The lexicons read lookalike letters as the Latin ones, and a
-    bare stroke both as l and as I. Canaries come first, then the rest in the order they appear."""
+    numeral or character drawn as a digit (`digit`, with the separators inside one number and the
+    letters shaped like 0 or 1 next to it in the same span, and a word made only of such letters
+    unless it is plain ASCII), currency sign (`currency`) or percent sign (`percent_sign`) and
+    every match of both lexicons (`lex.<lang>.<category>`) is `number_in_prose`, or `promise_word`
+    for the promise category; a word mixing Latin letters with another script is
+    `unsupported_language` (`mixed_script`), unless it lies inside one of `names` (the Desk's own
+    names) as it is written there; a canary verbatim is `canary`. The lexicons read lookalike
+    letters as the Latin ones, a bare stroke both as l and as I, and an ASCII capital I as l too.
+    Canaries come first, then the rest in the order they appear."""
     text, found = _blank_canaries(shown(text), canaries)
     hits: list[tuple[int, str, Violation]] = [
         (-1, "canary", Violation(kind="canary", span="", rule_id="canary")) for _ in found]
@@ -250,8 +265,10 @@ def scan_prose(text: str, canaries: Iterable[str] = ()) -> list[Violation]:
         if category == "Sc":
             hits.append((i, "currency", Violation(kind="number_in_prose", span=text[i], rule_id="currency")))
         i += 1
+    named = _occurrences(text, names)
     hits += [(start, "mixed_script", Violation(kind="unsupported_language", span=_span(word), rule_id="mixed_script"))
-             for start, word in _words(text) if _mixes_scripts(word)]
+             for start, word in _words(text) if _mixes_scripts(word)
+             and not any(low <= start and start + len(word) <= high for low, high in named)]
     folded, origin = _fold(text)
     # three readings: a bare stroke as l, as I, and an ASCII capital I as l too ("doIIars")
     readings = dict.fromkeys((folded, _fold(text, stroke="i")[0], _fold(text, strokes=STROKES_AND_I)[0]))
@@ -384,6 +401,14 @@ async def _desk_info(ctx: KernelCtx, desk_id: str) -> DeskInfo:
     return DeskInfo(owner_display_name=business.owner_display_name, timezone=business.timezone)
 
 
+async def desk_names(ctx: KernelCtx, desk_id: str) -> list[str]:
+    """The Desk's own name and its business's name, which a reply may name whatever scripts they
+    mix: the owner chose them, and the lexicons and the digit scan still read them."""
+    names = (await ctx.db.execute(ctx.repo.scoped(select(Desk.name, Business.name).join(
+        Business, Business.business_id == Desk.business_id).where(Desk.desk_id == desk_id)))).one()
+    return list(names)
+
+
 async def desk_canaries(ctx: KernelCtx, desk_id: str) -> list[str]:
     """The canaries of the Desk's documents."""
     return list(await ctx.db.scalars(ctx.repo.scoped(
@@ -413,7 +438,7 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
     if detected == "other":
         excerpt, _ = _blank_canaries(prose, canaries)
         violations.append(Violation(kind="unsupported_language", span=_span(excerpt), rule_id="language"))
-    violations += scan_prose(draft.prose, canaries)
+    violations += scan_prose(draft.prose, canaries, await desk_names(ctx, desk_id))
     cards, refused = await check_clauses(ctx, session_row, desk_id, desk, draft.clauses, language, canaries)
     violations += refused
     usage = None
