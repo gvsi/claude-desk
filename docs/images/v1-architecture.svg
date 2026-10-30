@@ -51,7 +51,7 @@
 
   <rect class="box" x="436" y="170" width="184" height="96" rx="12"/>
   <text class="name" x="452" y="196">Check reply</text>
-  <text class="line" x="452" y="216">Prices, dates and promises</text>
+  <text class="line" x="452" y="216">Prices, dates and discounts</text>
   <text class="line" x="452" y="232">only in typed cards</text>
   <path class="arrow" d="M630 218h28M653 213l5 5-5 5"/>
   <rect class="pillbox" x="668" y="202" width="88" height="32" rx="16"/>
