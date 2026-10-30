@@ -626,7 +626,7 @@ Every string here is owner-facing (no Spanish). Components display what the scre
       - a `person_id` or `agent_key_id` that doesn't match who the card is for;
       - a discount or hours on a card that isn't automatic.
       The contract's well-formed cards are read: a window until midnight, the default ask for anyone, and a card for one person or one agent.
-    - `preset_descriptions_are_the_owner_words`: the titles and descriptions, word for word, and `'custom'` is no `RulesPreset`.
+    - `preset_descriptions_are_the_owner_words`: the labels and descriptions, word for word, and `'custom'` is no `RulesPreset`.
   - Every story has `parameters.canvas` set to its board, or `'none'` naming the nearest board.
   - axe runs on every story.
 - [ ] **Step 2: Run** `cd web && npx vitest run --project unit src/ds/components/OutcomeMenu && npx vitest run --project storybook src/ds/components/{PresetMenu,MoneyLimit,LimitChange,ChangeReview,ToolPageHeader,SegmentedControl}` → FAIL.
@@ -635,12 +635,25 @@ Every string here is owner-facing (no Spanish). Components display what the scre
 - [ ] **Step 5: Board check:** the seven boards against their renders at 1512×982 (the phone board at 390×844), as Task 6 does for N-Conn-01 to 16, one line each in `web/src/ds/reference/README.md`. Task 6's render check treats N-Conn-22-Phone-Presets as a phone board, as it does N-Conn-16-Phone-Rules.
 - [ ] **Step 6: Commit** in small steps: the preset menu, the description check, the payment limit, the review's rows, the board check.
 
+**Addendum (2026-10-30), after the Connectors tab and rules change merged into this one:**
+
+- **The limit's slot.** `MoneyLimit` is the `aboveTools` line of the Payments and Stripe `ConnectorSection`s, which pads it 12 px 16 px under a hairline; it adds no padding or line of its own but for 4 px under the editing buttons. Its stories render it in Rivera's Payments group.
+- **Board stories.** `Boards/Rules presets and payment limit` draws N-Conn-17-Presets, N-Conn-18-Preset-Review, N-Conn-19-Ceiling, N-Conn-19b-Ceiling-Edit, N-Conn-20-Ceiling-Review, N-Conn-21-Simulate and N-Conn-22-Phone-Presets as Rivera's pages, each in `REFERENCE_BOARDS` with its window (the phone board at 390×844) and a line in the reference README. The sidebar draws seven rows until its Connectors row lands, and says so. On a phone the Rules page puts the preset menu on its own line under the title, with no subtitle, as N-Conn-22 draws it.
+- **Built against boards in review, sign-off pending.** Each story cites `'none'` and names its board in its note until the board is signed and joins the reference set:
+  - `OutcomeGroups({ rows: Partial<Record<RuleMode, OutcomeGroupRow[]>>; moneyLimit?: ReactNode })` (N-R2-Setup-08-Rules): the setup interview's rules in cards headed "Does on its own", "Asks you" and "Never does" (`OUTCOME_GROUP_WORDS`, beside each outcome's `OUTCOME_TONE` dot), a row per rule with what Claude does and who it's for, and the payment limit in a card of its own above them, its line at weight 520. A group with no rules is left out. Stories `Rules/OutcomeGroups`: `SetupRules`, `NothingItNeverDoes`, `Phone`.
+  - `Steps` under 480 px of its own width (N-R2-Setup-16-Phone-Questions): one line, "Step 1 of 5 · Questions", its count in secondary ink and the current step's name in primary, `aria-hidden`, while the list stays for screen readers. Stories `Navigation/Steps`: `Phone`, `SetupPhone`, `LaptopHasNoLine`.
+  - `PersonRules({ name; rules: PersonRuleView[]; rulesHref; linkComponent? })` (N-Run2-People-Person): "Rules for {name}" with "Change them on Rules", a read-only row per rule (what it's on over its reason, what it enforces via `ruleWordsLine`, its outcome), or "No rules just for {name}." Stories `People/PersonRules`: `DanaWhitfield`, `NoRulesJustForThem`, `Phone`.
+- **`ConnectorDirectory` `justAdded`** (above) and the Recommended rules review (`recommendedReview`, above).
+- Play tests: `phone_steps_one_line`, `outcome_groups_in_order`, `outcome_groups_geometry`, `money_line_leads`, `person_rules_named`, `person_rules_read_only`, `no_rules_says_so`, `just_added_is_quiet`, `just_added_built_in`, `just_added_never_on_available`. The outcome groups and a person's rules match their renders to the pixel, but for one curly apostrophe in the person page's sample words.
+
 **For plan 04** (consumers, not built here):
 - `RulesPage` puts `PresetMenu` in its `PageHeader` actions in place of a mode switch, and a `MoneyLimit` line at the top of the Payments and Stripe groups.
 - `draftPreset` opens the review page (N-Conn-18), titled with the preset's name, with `cancelsLinks`. A lowered limit's review sets it too.
 - `RuleDraftReview` uses `LimitChange` when `moneyCap` is set, on "Change your payment limit".
 - The tool page passes `onSimulateChange` → `simulateToolChange`, `simulatePending` while it runs.
 - The preset rows come from the dropped cards, personal ones included, as above.
+- The Connectors page passes `justAdded` with the connector's id right after the add flow confirms.
+- Setup's rules step shows its draft in `OutcomeGroups`, and a person's page their rules in `PersonRules`, once their boards are signed.
 
 ### Task 4: Visual check of the owner boards
 
@@ -1016,3 +1029,5 @@ Owner decision after the rework (2026-10-29): the first preset's words change, t
 Task 3c fix round 1, after the rework (2026-10-29), from the task review: the description check judges each claimed tool by the cards that govern it, its own and the effect cards that cover it, ranked by `rulesForTool`. An automatic rule for changes or a refusal for messages now fails it as a tool's own card would. The export's cards must also name a known tool or effect, and their hours must end after they start, or at 00:00 for midnight.
 
 Task 3c fix round 2, after the rework (2026-10-29), from the task review: the presets export's cards are checked against the rest of the `RuleCard` contract that `rulesForTool` relies on. `is_default` is a boolean, and a default is only ever the compiler's ask for anyone, so a card marked as one can't hide an automatic booking or a document refusal from the check. `person_id` and `agent_key_id` match who the card is for, and limits sit only on automatic cards.
+
+Task 3c follow-up (2026-10-30): with the Connectors tab and rules change merged in, the payment limit sits in its group's line above the tools, and the seven signed boards have board stories in the reference set. The preset words have one source, `PRESET_WORDS`, which the menu reads. A preset's review sends a dropped rule to the preset's own rule for its tool where there is one, and to the default ask only where nothing governs it; a rule the preset keeps as it is has no row. `ConnectorDirectory` marks the connector just added (`justAdded`). `OutcomeGroups`, the one-line `Steps` on a phone and `PersonRules` are built against boards in review, sign-off pending (the addendum in Task 3c).
