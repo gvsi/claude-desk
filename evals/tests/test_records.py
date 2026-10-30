@@ -8,10 +8,13 @@ copies once Plan 01a lands. They need the database (`docker compose up -d db`, t
 import secrets
 
 import pytest
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.pool import NullPool
 
+from desk.api.loop import turn_lock
 from desk.db.session import database_url
 from desk.db.tables import KERNEL_RO_VIEWS
-from evals.records import NoRecords, Records
+from evals.records import NoRecords, Records, SessionWork
 
 
 @pytest.fixture
@@ -30,6 +33,7 @@ async def test_every_reader_runs_as_its_role(records: Records):
     assert await records.ledger_entries(copy_id, "no-desk") == []
     assert await records.run_events(session_id) == []
     assert await records.model_calls(session_id) == []
+    assert await records.session_work(session_id, after_seq=0) == SessionWork(0, False, 0)
     assert await records.app_rows(session_id) == ""
     assert await records.document_canaries(copy_id) == []
     with pytest.raises(LookupError, match="no-document"):
@@ -38,6 +42,19 @@ async def test_every_reader_runs_as_its_role(records: Records):
         await records.session_person(session_id, copy_id=copy_id)
     with pytest.raises(AttributeError, match="no reader 'canaries'"):
         records.canaries
+
+
+async def test_session_work_sees_the_turn_lock_a_turn_holds(records: Records):
+    session_id = f"no-session-{secrets.token_hex(4)}"
+    engine = create_async_engine(database_url("API"), poolclass=NullPool)
+    try:
+        async with turn_lock(engine, session_id) as taken:   # the lock the API's turns run under
+            assert taken
+            assert await records.session_work(session_id, after_seq=0) == SessionWork(0, True, 0)
+            assert (await records.session_work(f"{session_id}-other", after_seq=0)).turn_running is False
+        assert await records.session_work(session_id, after_seq=0) == SessionWork(0, False, 0)
+    finally:
+        await engine.dispose()
 
 
 async def test_white_box_readers_need_the_kernel_url():

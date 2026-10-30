@@ -250,3 +250,25 @@ evals-tier1:
 	else \
 		$(MAKE) evals-tier1-kernel; \
 	fi
+
+# Tier 2 evals: a simulated visitor drives the API and kernel in this process, built from this tree.
+# evals-tier2 runs every scenario RUNS times for at most MAX_USD dollars and writes the results file
+# evals/results/<inputs>.json, which is committed with the change; scenarios whose plans aren't in
+# landed.toml are pending, and with none left to run it writes a run-free file with no model calls.
+# evals-key prints <inputs>, the hash of the gated inputs. evals-results-check is the one tier 2 check
+# CI and the deploy preflight run, with no database, network or key: exit 0 when no gated path, recorded
+# rate or results file changed since BASE (renames count both paths), else when the committed file for
+# the head's inputs is complete and its gate passes.
+.PHONY: evals-tier2 evals-key evals-results-check
+RUNS ?= 1
+MAX_USD ?= 40
+BASE ?= origin/main
+
+evals-tier2:
+	$(EVALS) python -m evals.run tier2 --suite all --split all --runs $(RUNS) --max-usd $(MAX_USD) --results
+
+evals-key:
+	@$(EVALS) python -m evals.run key
+
+evals-results-check:
+	@$(EVALS) python -m evals.run results-check --base $(BASE)

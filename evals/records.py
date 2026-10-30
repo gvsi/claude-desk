@@ -2,7 +2,8 @@
 
 `Records` reads as the API's role (desk_api), the way the API sees kernel data: one reader per
 `kernel_ro` view, each scoped to one copy (`await records.people(copy_id)`), a whole copy at once
-(`snapshot`), the ledger as `LedgerEntry`s, and the API's own `app.*` rows for a session.
+(`snapshot`), the ledger as `LedgerEntry`s, the API's own `app.*` rows for a session, and where a
+session's turns stand (`session_work`).
 White-box readers use the kernel's role (desk_kernel) for the two things no view shows: document
 canaries and the person a session verified as. Records are evidence a case checks, never a
 verdict, and nothing here imports kernel code.
@@ -12,17 +13,29 @@ import functools
 import json
 import re
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from desk.api.store import lock_key
 from desk.contracts import LedgerEntry
 from desk.db.session import COPY_SETTING
 from desk.db.tables import KERNEL_RO_COLUMNS, KERNEL_RO_VIEWS
 
 _IDENTIFIER = re.compile(r"^[a-z_][a-z0-9_]*$")
+
+
+@dataclass(frozen=True)
+class SessionWork:
+    """Where a session's turns stand (`Records.session_work`), read in this order: rows waiting to
+    start a turn, whether a turn holds the session now, then the stream events stored after a seq."""
+
+    waiting: int          # rows that wake a turn and no model call has been sent yet
+    turn_running: bool    # a turn holds the session's turn lock
+    events_after: int     # the session's stream events stored after the given seq
 
 
 class Records:
@@ -76,9 +89,40 @@ class Records:
         """The session's `app.run_events` rows, oldest first."""
         return await self._app_rows("run_events", session_id)
 
+    async def a2a_turns(self, session_id: str) -> list[dict]:
+        """The session's `app.a2a_turns` rows (each agent turn's stored answer and the last stream seq it
+        covers), oldest first."""
+        return await self._app_rows("a2a_turns", session_id)
+
     async def model_calls(self, session_id: str) -> list[dict]:
         """The session's `app.model_calls` rows (usage only, never content), oldest first."""
         return await self._app_rows("model_calls", session_id)
+
+    async def session_work(self, session_id: str, *, after_seq: int) -> SessionWork:
+        """Where the session's turns stand, each read in its own snapshot, in this order: the rows that
+        will start a turn (`app.messages` with `wake`, model content and no `model_seq` yet, as the
+        API's `latest_pending` reads them), whether a turn holds the session's turn lock (the advisory
+        lock `desk.api.loop.turn_lock` takes for every turn), then the stream events (`app.run_events`
+        of kind `sse`) stored after `after_seq`. A turn takes waiting rows only while it holds the lock
+        and stores its events before letting go, so a read that finds none of the three left knows
+        every turn for the work it saw has ended and been stored."""
+        key = lock_key("turn:" + session_id)
+        async with self._api.connect() as conn:
+            waiting = (await conn.execute(text(
+                "SELECT count(*) FROM app.messages WHERE session_id = :session_id AND wake "
+                "AND model_seq IS NULL AND model_content IS NOT NULL"), {"session_id": session_id})).scalar_one()
+            await conn.commit()
+            running = (await conn.execute(text(
+                "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND granted AND objsubid = 1 "
+                "AND database = (SELECT oid FROM pg_database WHERE datname = current_database()) "
+                "AND classid::bigint = :high AND objid::bigint = :low)"),
+                {"high": (key >> 32) & 0xFFFFFFFF, "low": key & 0xFFFFFFFF})).scalar_one()
+            await conn.commit()
+            after = (await conn.execute(text(
+                "SELECT count(*) FROM app.run_events WHERE session_id = :session_id AND kind = 'sse' "
+                "AND seq > :after"), {"session_id": session_id, "after": after_seq})).scalar_one()
+            await conn.commit()
+        return SessionWork(waiting=waiting, turn_running=bool(running), events_after=after)
 
     async def app_rows(self, session_id: str) -> str:
         """Every `app.*` row naming the session, as text (one line per row), for leak scans."""
@@ -172,4 +216,4 @@ async def _view_rows(conn: AsyncConnection, view: str, copy_id: str) -> list[dic
     return [dict(row) for row in result.mappings()]
 
 
-__all__ = ["NoRecords", "Records"]
+__all__ = ["NoRecords", "Records", "SessionWork"]
