@@ -654,3 +654,46 @@ def test_an_effect_card_a_draft_may_hold_leaves_every_start_allowed():
             request = req("native.start_verification", recipient="verified_contact", **who, **when, **review)
             assert decide_with([*presets, send], NATIVE, request) == "allow", (send, who, when, review)
     assert accepted == 9      # auto for anyone, verified people or record owners, each plain, reviewed or in hours
+
+
+def test_no_review_can_hold_a_start():
+    """Deciding asks the reviewer only when the pre phase, with the review unknown, says the score
+    could change the outcome (`needs_review`), and a review that isn't an allow turns an auto
+    allow into a hold. So for no reviewer's answer to hold a verification start, every card set a
+    draft may hold allows a start in the pre phase, where no reviewer is asked, and in the final
+    phase whatever a review says. The sets: each shipped set, with and without its verification
+    card, alone and with every `effect:send_message` card, or two of them, that `validate_cards`
+    accepts beside it; the starts: an anonymous or verified visitor, Dana or an agent, in and out
+    of hours."""
+    [shipped] = compiler.ALWAYS_ON_CARDS
+    bases = [cards for preset in (PRESETS["ask_first"], PRESETS["auto"], RIVERA_CARDS)
+             for cards in (list(preset), [c for c in preset if c != shipped])]
+    scopes = ({"who": "anyone"}, {"who": "verified"}, {"who": "record_owner"}, {"who": "person", **DANA},
+              {"who": "agent", **AGENT})
+    gates = ({}, {"review": True}, {"hours": WEEKDAYS})
+    sends = [card(f"send-{n}", "effect:send_message", mode="auto", **scope, **gate)
+             for n, (scope, gate) in enumerate(itertools.product(scopes, gates))]
+    sends += [card(f"send-{mode}-{n}", "effect:send_message", mode=mode, **scope)
+              for mode in ("ask", "never") for n, scope in enumerate(scopes)]
+    extras = [[], *([send] for send in sends), *(list(pair) for pair in itertools.combinations(sends, 2))]
+    principals = ({}, {"verified": True}, DANA, {"kind": "Agent", **AGENT})
+    times = ({"dow": 1, "minute": 600}, {"dow": 6, "minute": 1320})
+    reviews = ({"within_charter_bp": 10_000, "manipulation_bp": 0}, {"within_charter_bp": 0, "manipulation_bp": 10_000})
+    accepted = 0
+    for base, extra in itertools.product(bases, extras):
+        cards = [*base, *extra]
+        if compiler.validate_cards(cards, people={"dana"}, agent_keys={AGENT["agent_key_id"]},
+                                   auto_money_cap_cents=TEST_CAP):
+            continue
+        accepted += 1
+        engine = load_compiled(cards, NATIVE)
+        for who, when in itertools.product(principals, times):
+            start = req("native.start_verification", recipient="verified_contact", **who, **when)
+            outcomes = [json.loads(engine.decide(KEY, json.dumps(start), "pre"))["outcome"]]
+            for review in ({}, *({"review": review} for review in reviews)):
+                verdict = engine.decide(KEY, json.dumps({**start, "context": {**start["context"], **review}}), "final")
+                outcomes.append(json.loads(verdict)["outcome"])
+            assert outcomes == ["allow"] * 4, ([c.card_id for c in extra], who, when, outcomes)
+    # the 9 auto cards for anyone, verified people or record owners (plain, reviewed or in hours),
+    # alone or two at once, beside each of the six bases
+    assert accepted == 6 * (1 + 9 + 36)

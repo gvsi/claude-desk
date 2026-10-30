@@ -26,8 +26,9 @@ from desk.db.session import database_url, libpq_url
 from desk.kernel_api import DeskUpdated
 from desk.kernel_service import adapters, compiler, desks, ledger, verification
 from desk.kernel_service.desks import mask_contact
+from desk.kernel_service.seed import RIVERA_CARDS
 
-from .helpers import (activate_cards, connections_of, kernel_ctx, ledger_rows, lock_waiters, make_copy_rows,
+from .helpers import (TEST_CAP, activate_cards, connections_of, kernel_ctx, ledger_rows, lock_waiters, make_copy_rows,
                       rows_of, until_waiting, verify_session)
 from .test_adapters import Rivera, objects, rivera, run, visitor_of
 from .test_approvals import post_answer
@@ -462,6 +463,22 @@ async def test_a_second_answer_waits_for_an_approved_start(app, client, monkeypa
     assert [event.summary["outcome"] for event in entries if event.kind == "verify"] == ["started"]
     assert [event.summary for event in entries if event.kind == "approval" and "refused" in event.summary] == [
         {"decision_id": held.decision_id, "answer": "deny_once", "refused": "executed"}]
+
+
+async def test_a_start_is_decided_without_the_reviewer(app, client, reviewer):
+    """A start never asks the reviewer, so no answer of its can hold one: not beside a card on its
+    effect that runs the reviewer, which a draft may hold, nor in a set that leaves the
+    verification card out. Here every review fails, and the start is still allowed."""
+    copy, visitor = await visitor_of(app, client)
+    [shipped] = compiler.ALWAYS_ON_CARDS
+    cards = [*(c for c in RIVERA_CARDS if c != shipped), card("send-reviewed", "effect:send_message", review=True)]
+    assert compiler.validate_cards(cards, people=(), agent_keys=(), auto_money_cap_cents=TEST_CAP) == []
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        await activate_cards(ctx, copy.desk_id, cards)
+    allowed = await decided(client, visitor, "native.start_verification", {"contact": "dana@example.com"})
+    assert (allowed.outcome, allowed.card_ids, allowed.review) == ("allow", [shipped.card_id], None)
+    assert reviewer.inputs == []
 
 
 async def test_start_verification_is_for_unverified_sessions(app, client):
