@@ -158,6 +158,7 @@ async def test_numbers_and_dates_in_prose_are_blocked(app, client, prose, rule_i
     ("You are free to first-time visitors.", "lex.en.promise", "free", "en"),       # an audience with a modifier
     ("Como socio, usted tiene acceso libre a todas las clases.", "lex.es.promise", "libre", "es"),
     ("La entrada es libre al público.", "lex.es.promise", "libre", "es"),            # "a" + "el" is "al"
+    ("La primera clase es libre de costo.", "lex.es.promise", "libre de costo", "es"),   # free of charge
     ("Eso es gratis.", "lex.es.promise", "gratis", "es"),
     ("Le prometo.", "lex.es.promise", "prometo", "en"),      # too few words to tell: English
 ])

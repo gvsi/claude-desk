@@ -32,9 +32,10 @@ date	las[\s-]+once|la[\s-]+una
 # states a price before "para", "a" or "al" and everyone or an audience: "acceso libre a todas las
 # clases", "libre para los socios", "la entrada es libre al público". It passes elsewhere, where it
 # is a time that is open or a freedom: "un horario libre para usted", "libre para la cita", "usted
-# es libre de preguntar".
+# es libre de preguntar". "libre de costo", "de cargo" or "de pago" is a price wherever it stands.
 promise	garantias?|garantiz[a-z]*|promet[a-z]*|promesas?
 promise	gratis|gratuit[oa]s?|descuentos?|descont[a-z]*|reembols[a-z]*
 promise	sin[\s-]+(?:ningun[\s-]+)?(?:costo|coste|cargo)|de[\s-]+regalo
+promise	libres?[\s-]+de[\s-]+(?:costos?|costes?|cargos?|pagos?)
 promise	libres?(?=[\s-]+(?:para|a)[\s-]+(?:tod[oa]s|todo[\s-]+el[\s-]+mundo|cualquiera)\b)
 promise	libres?(?=[\s-]+(?:(?:para|a)[\s-]+(?:(?:el|la|l[oa]s|nuestr[oa]s?|sus?|tus?)[\s-]+)?|al[\s-]+)(?:soci[oa]s?|miembros?|clientes?|publico)\b)
