@@ -43,6 +43,7 @@ test("routes_every_owner_path_to_index", () => {
   for (const uri of [
     "/app/desk_abc123/connectors/stripe/payments.create_refund",
     "/app/desk_abc123/connectors/mcp_xyz/calendar.list_events",
+    "/App/desk_abc123/connectors/stripe/payments.create_refund",
     "/app/setup/v1.2",
     "/app/",
   ]) {
@@ -51,7 +52,8 @@ test("routes_every_owner_path_to_index", () => {
 });
 
 test("keeps_files", () => {
-  for (const uri of ["/assets/app-1a2b.js", "/favicon.svg", "/index.html"]) {
+  // Root files whose names start with "app" are not under /app/.
+  for (const uri of ["/assets/app-1a2b.js", "/favicon.svg", "/index.html", "/apple-touch-icon.png", "/app.webmanifest"]) {
     assert.deepEqual(handle(viewerRequest(uri)), viewerRequest(uri), uri);
   }
 });
