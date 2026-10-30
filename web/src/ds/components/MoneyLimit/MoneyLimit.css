@@ -1,0 +1,67 @@
+/* MoneyLimit: the limit at body weight 520 with its help under it, and "Change" at the right,
+   centered on them. Editing, the field (at most 360 px wide) with its hint, then "Review change"
+   and "Cancel" 12 px under it. It lays out by its own width: under 640 px (a phone) "Change" sits
+   under the help, at its own width. */
+
+.cd-money-limit {
+  container: cd-money-limit / inline-size;
+  min-width: 0;
+}
+
+.cd-money-limit__reading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-16);
+  min-width: 0;
+}
+
+.cd-money-limit__text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Two classes, so the weight wins over .cd-type-body whatever order the stylesheets load in. */
+.cd-money-limit .cd-money-limit__line {
+  margin: 0;
+  color: var(--text-primary);
+  font-weight: 520;
+  overflow-wrap: anywhere;
+}
+
+.cd-money-limit__help {
+  margin: var(--space-2) 0 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.cd-money-limit__reading > .cd-button {
+  flex: none;
+}
+
+.cd-money-limit__form {
+  margin: 0;
+}
+
+.cd-money-limit__field {
+  max-width: 360px;
+}
+
+.cd-money-limit__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  margin-top: var(--space-12);
+}
+
+@container cd-money-limit (max-width: 639.98px) {
+  .cd-money-limit__reading {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-10);
+  }
+
+  .cd-money-limit__text {
+    flex: none;
+    width: 100%;
+  }
+}

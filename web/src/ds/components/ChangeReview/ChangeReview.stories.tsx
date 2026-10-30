@@ -189,6 +189,8 @@ export const RaiseDiscount: Story = {
     await expect(within(before).queryByText('Changed')).toBeNull();
     // The reason and the outcome didn't change, so they aren't tagged.
     await expect(within(after).getAllByText('Changed')).toHaveLength(1);
+    // cancel_line_only_when_asked: without cancelsLinks there is no line.
+    await expectNoCancelLine(canvasElement);
     // The default words.
     await expect(canvas.getByRole('button', { name: 'Confirm change' })).toBeEnabled();
     await canvas.getByRole('button', { name: 'Keep my rules' }).click();
@@ -340,13 +342,15 @@ export const ConfirmingFromTheScreen: Story = {
 export const LimitOnly: Story = {
   args: { rows: [], hasOtherChanges: true, checks: { status: 'checked', lines: ['Always-on rules still hold.'] }, confirmLabel: undefined, cancelLabel: undefined },
   parameters: { canvas: 'N-Conn-01-Rules', canvasNote: 'A draft that changes only what the screen shows above it, such as the money limit; no board draws it.' },
-  play: async ({ args, canvas }) => {
+  play: async ({ args, canvas, canvasElement }) => {
     // limit_only_change_keeps_confirm
     await expect(canvas.getByText('Your rules stay the same.')).toBeVisible();
     await expect(canvas.queryByText('No rules change.')).toBeNull();
     const confirm = canvas.getByRole('button', { name: 'Confirm change' });
     await expect(confirm).toBeEnabled();
     await expect(canvas.getByRole('button', { name: 'Keep my rules' })).toBeVisible();
+    // cancel_line_only_when_asked: a raised limit cancels no link, so the screen doesn't ask for the line.
+    await expectNoCancelLine(canvasElement);
     await confirm.click();
     await expect(args.onConfirm).toHaveBeenCalledTimes(1);
   },
@@ -439,6 +443,14 @@ export const ScopeChangedWithoutTargets: Story = {
 };
 
 const FAILED = "We couldn't confirm your change. Nothing changed, so you can try again.";
+
+/** The fixed line a change that can cancel open payment links shows above its buttons. */
+const CANCELS_LINKS = "Open payment links I made on my own that the new rules don't allow will be cancelled.";
+
+/** cancel_line_only_when_asked: no line about cancelled links unless the screen says the change can cancel them. */
+async function expectNoCancelLine(root: HTMLElement) {
+  await expect(root).not.toHaveTextContent('payment links I made on my own');
+}
 
 /**
  * A screen whose confirm fails every time with the same words: it clears its error when a confirm
@@ -539,5 +551,66 @@ export const NarrowMaxLimit: Story = {
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
     const tooWide = [...canvasElement.querySelectorAll('*')].filter((el) => el.getBoundingClientRect().right > width);
     await expect(tooWide).toEqual([]);
+  },
+};
+
+const ASK_FIRST_CHECKS = {
+  status: 'checked',
+  lines: ['Checked against the always-on rules and your other rules.', 'Open times, leads, callbacks and identity checks still run on their own.'],
+} as const satisfies ChangeReviewProps['checks'];
+
+/** A row's After side, found by its title among the rows. */
+function afterSide(rows: HTMLElement[], index: number): HTMLElement {
+  const row = rows[index];
+  if (row === undefined) throw new Error(`No row ${index}`);
+  return within(row).getByRole('group', { name: 'After' });
+}
+
+export const SwitchToAskMeFirst: Story = {
+  args: { rows: rivera.askFirstReview, checks: ASK_FIRST_CHECKS, confirmLabel: undefined, cancelLabel: undefined, cancelsLinks: true },
+  parameters: { canvas: 'N-Conn-18-Mode-Review' },
+  play: async ({ canvas, canvasElement }) => {
+    // Each of Rivera's own rules goes, and its tool falls to the default ask.
+    const rows = within(canvas.getByRole('region', { name: 'Changes' })).getAllByRole('listitem');
+    await expect(rows.map((row) => row.querySelector('.cd-change-review__title')?.textContent)).toEqual([
+      'Quote',
+      'Book a visit',
+      'Book a visit',
+      'Share a document',
+      'Payment link',
+      'Charge within a signed limit',
+      'See charges',
+      'Refund',
+    ]);
+    await expect(tags(canvasElement)).toEqual(Array(8).fill('Changed'));
+    for (const row of rows) {
+      await expect(within(row).getByRole('group', { name: 'After' })).toHaveTextContent('Not covered by a rule you set, so I ask you.');
+    }
+    // preset_review_tags_only_new_outcomes: Quote's outcome turns from Automatic to Ask me first,
+    // so "Changed" sits beside it; Refund already asks, so its outcome has none.
+    const quote = afterSide(rows, 0);
+    const quoteOutcome = quote.querySelector<HTMLElement>('.cd-change-review__side-outcome');
+    if (quoteOutcome === null) throw new Error('No outcome on Quote');
+    await expect(quoteOutcome).toHaveTextContent('Ask me first');
+    await expect(within(quoteOutcome).getByText('Changed')).toBeVisible();
+    await expect(within(quote).getAllByText('Changed')).toHaveLength(1);
+    const refund = afterSide(rows, 7);
+    await expect(refund).toHaveTextContent('Ask me first');
+    await expect(within(refund).queryByText('Changed')).toBeNull();
+    // An auto rule with an amount limit reads its limit before it goes.
+    await expect(within(rows[4] as HTMLElement).getByRole('group', { name: 'Before' })).toHaveTextContent(
+      'Automatic up to $300; over $300, ask me first',
+    );
+    // A mock connector is never named without "Mock".
+    await expect(rows[7]).toHaveTextContent('Stripe Mock');
+    // cancel_line_only_when_asked: a preset can cancel open payment links, so the screen asks for
+    // the fixed line. It sits above the buttons, under the checks, in secondary body text.
+    const line = canvas.getByText(CANCELS_LINKS);
+    expectComputed(line, { fontSize: '14px', lineHeight: '20px', color: 'rgba(250, 249, 245, 0.64)' });
+    const checks = canvas.getByRole('region', { name: 'Checked before you confirm' });
+    const confirm = canvas.getByRole('button', { name: 'Confirm change' });
+    await expect(line.getBoundingClientRect().top - checks.getBoundingClientRect().bottom).toBe(20);
+    await expect(confirm.getBoundingClientRect().top - line.getBoundingClientRect().bottom).toBe(20);
+    await expect(canvas.getAllByText(CANCELS_LINKS)).toHaveLength(1);
   },
 };

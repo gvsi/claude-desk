@@ -33,6 +33,13 @@ export const REFERENCE_BOARDS = [
   'N-Conn-14-Changed-Review',
   'N-Conn-15-Changed-After',
   'N-Conn-16-Phone-Rules',
+  // How Claude works, the money limit and the demo's simulate strip, on the same page.
+  'N-Conn-17-Mode',
+  'N-Conn-18-Mode-Review',
+  'N-Conn-19-Money-Cap',
+  'N-Conn-20-Money-Cap-Review',
+  'N-Conn-21-Simulate',
+  'N-Conn-22-Phone-Mode',
 ] as const;
 
 export type ReferenceBoard = (typeof REFERENCE_BOARDS)[number];

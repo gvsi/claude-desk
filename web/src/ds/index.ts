@@ -128,6 +128,7 @@ export { TakeOverBar, type TakeOverBarProps } from './components/TakeOverBar/Tak
 export {
   OUTCOME_TONE,
   OUTCOME_WORDS,
+  PRESET_CAPTIONS,
   PRESET_WORDS,
   outcomePhrase,
   type RuleMode,
@@ -155,6 +156,11 @@ export {
 } from './components/ChangeReview/ChangeReview.tsx';
 export { ruleDiff, type RuleDiffRow, type RuleField } from './components/ChangeReview/ruleDiff.ts';
 export { AskClaudePanel, type AskClaudePanelProps } from './components/AskClaudePanel/AskClaudePanel.tsx';
+
+// How Claude works and the money limit
+export { HowClaudeWorks, type HowClaudeWorksProps } from './components/HowClaudeWorks/HowClaudeWorks.tsx';
+export { MoneyLimit, type MoneyLimitProps } from './components/MoneyLimit/MoneyLimit.tsx';
+export { LimitChange, type LimitChangeProps } from './components/LimitChange/LimitChange.tsx';
 
 // Connector and tool pages, adding a connector, and a changed tool
 export {

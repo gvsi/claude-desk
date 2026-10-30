@@ -33,6 +33,7 @@ import type { ChangeReviewProps, ChangeRowView } from '../components/ChangeRevie
 import type { ConnectorPickerProps } from '../components/ConnectorPicker/ConnectorPicker';
 import type { ReviewToolView } from '../components/ConnectorReview/ConnectorReview';
 import type { ConnectorSectionProps } from '../components/ConnectorSection/ConnectorSection';
+import type { RulesPreset } from '../components/OutcomeMenu/outcomeWords';
 import type { RecentRequestView } from '../components/RecentRequests/RecentRequests';
 import type { RuleWord } from '../components/RuleRow/RuleRow';
 import { executedLine, type ExecutedTool } from './receipts';
@@ -1482,6 +1483,70 @@ const googleCalendar = {
   } satisfies Pick<ConnectorPickerProps, 'business' | 'builtIn' | 'external'>,
 };
 
+// ---------------------------------------------------------------------------------------------
+// How Claude works and the money limit (N-Conn-17 to N-Conn-20), as the Rules page words them.
+
+/**
+ * The mode card on Rivera's Rules page: the Desk's own rules (Custom), and its money limit
+ * (`RIVERA_MONEY_CAP_CENTS`, $500) in the screen's words. The screen formats the amounts.
+ */
+const rulesMode = {
+  preset: 'custom',
+  capLine: 'Most I take without asking: $500',
+  capHelp: 'The most Claude takes or pays out in one payment without asking you. Above it, Claude always asks.',
+  capHint: 'Whole dollars, from 0 to 10,000. Now $500.',
+} satisfies { preset: RulesPreset; capLine: string; capHelp: string; capHint: string };
+
+/** The default side a rule falls to when a preset drops it: the house rules' words for a default ask. */
+const defaultAsk = {
+  mode: 'ask',
+  reason: 'Not covered by a rule you set, so I ask you.',
+  words: [word('who', 'Anyone')],
+} satisfies ChangeRowView['after'];
+
+/** A card of Rivera's on one side of a change: its outcome, limit, reason and words. */
+function cardSide(id: keyof typeof ruleCards): NonNullable<ChangeRowView['before']> {
+  const card = ruleCards[id];
+  const limits: Partial<Record<keyof typeof ruleWords, string>> = ruleLimits;
+  return { mode: card.mode, limit: limits[id], reason: card.reason, words: ruleWords[id] };
+}
+
+/**
+ * Switching to Ask me first (N-Conn-18-Mode-Review): each of Rivera's own cards goes, and its tool
+ * falls to the default ask. The after side replaces the whole rule, which the row's "Changed" tag
+ * says; within it only a new outcome is tagged, as the board draws it, so Refund, which already
+ * asks, has no tag beside its outcome.
+ */
+const askFirstReview = (
+  [
+    ['rv-quote', 'Quote', connectorViews.quotes],
+    ['rv-book-wk', 'Book a visit', connectorViews.bookings],
+    ['rv-book-sat', 'Book a visit', connectorViews.bookings],
+    ['rv-docs', 'Share a document', connectorViews.documents],
+    ['rv-link', 'Payment link', connectorViews.payments],
+    ['rv-mandate', 'Charge within a signed limit', connectorViews.payments],
+    ['rv-charges', 'See charges', connectorViews.stripe],
+    ['rv-refund', 'Refund', connectorViews.stripe],
+  ] as const
+).map(([id, title, connector]): ChangeRowView => {
+  const before = cardSide(id);
+  return {
+    key: id,
+    change: 'changed',
+    title,
+    connector,
+    before,
+    after: defaultAsk,
+    changed: before.mode === defaultAsk.mode ? [] : ['mode'],
+  };
+});
+
+/** Raising the money limit to $1,000 (N-Conn-20-Money-Cap-Review), in the web app's `moneyCapWords`. */
+const limitRaise = {
+  now: 'New limit: up to $1,000 without asking you.',
+  was: 'Was $500',
+};
+
 const listChargesProfile = {
   tool: 'payments.list_charges',
   source: 'mcp',
@@ -1733,6 +1798,9 @@ export const rivera = {
   stripeConnection,
   verificationConnection,
   googleCalendar,
+  rulesMode,
+  askFirstReview,
+  limitRaise,
   toolProfiles,
   ledger,
   verifyStarted,

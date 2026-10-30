@@ -45,6 +45,19 @@
   color: var(--text-primary);
 }
 
+/* Disabled: dimmed as a disabled Button is, with no hover. */
+.cd-segmented[aria-disabled='true'] {
+  opacity: 0.4;
+}
+
+.cd-segmented__option[aria-disabled='true'] {
+  cursor: default;
+}
+
+.cd-segmented__option[aria-disabled='true']:not([aria-checked='true']):hover {
+  background: transparent;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .cd-segmented__option {
     transition: none;

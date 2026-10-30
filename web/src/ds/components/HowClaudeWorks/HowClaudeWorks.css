@@ -1,0 +1,65 @@
+/* HowClaudeWorks: one card, padded 16 px. The title and the caption at the left, the switch at
+   the right, level with the title; then, 16 px under a hairline, the money limit. It lays out by
+   its own width: under 640 px (a phone) the card pads 14 px, the switch sits under the caption at
+   its own width, and the gaps are 12 px. */
+
+.cd-how-claude-works {
+  container: cd-how-claude-works / inline-size;
+  min-width: 0;
+}
+
+.cd-how-claude-works__inner {
+  padding: var(--space-16);
+}
+
+.cd-how-claude-works__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-16);
+  min-width: 0;
+}
+
+.cd-how-claude-works__text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.cd-how-claude-works__title {
+  margin: 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.cd-how-claude-works__caption {
+  margin: var(--space-2) 0 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.cd-how-claude-works__limit {
+  margin-top: var(--space-16);
+  padding-top: var(--space-16);
+  border-top: 1px solid var(--line-hairline);
+}
+
+@container cd-how-claude-works (max-width: 639.98px) {
+  .cd-how-claude-works__inner {
+    padding: var(--space-14);
+  }
+
+  .cd-how-claude-works__head {
+    flex-direction: column;
+    gap: var(--space-12);
+  }
+
+  .cd-how-claude-works__text {
+    flex: none;
+    width: 100%;
+  }
+
+  .cd-how-claude-works__limit {
+    margin-top: var(--space-12);
+    padding-top: var(--space-12);
+  }
+}
