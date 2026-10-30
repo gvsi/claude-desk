@@ -328,7 +328,7 @@ export class MockWorld {
       state = 'executed';
       ledgerSeq = ran.seq;
     }
-    const inbox = hold ? [this.ownerAlert(desk, spec.reasonPlain)] : [];
+    const inbox = hold ? [this.ownerAlert(desk, decisionId, spec.reasonPlain)] : [];
     const decision: Decision = {
       decision_id: decisionId,
       session_id: sessionId,
@@ -422,14 +422,15 @@ export class MockWorld {
     return held;
   }
 
-  /** The owner's Demo inbox alert for a hold; the decision carries its notice. */
-  private ownerAlert(desk: DeskRecord, reason: string) {
+  /** The owner's Demo inbox alert for a hold, naming the held decision; the decision carries its notice. */
+  private ownerAlert(desk: DeskRecord, decisionId: string, reason: string) {
     const entry: DemoInboxEntry = {
       entry_id: this.id('inbox'),
       to: 'owner',
       kind: 'alert',
       body: reason,
       created_at: isoTime(this.now()),
+      decision_id: decisionId,
     };
     this.inbox.push({ entry, deskId: desk.summary.desk_id, sessionId: null });
     return { entry_id: entry.entry_id, to: 'owner', preview: 'A request needs your answer' };
@@ -554,6 +555,7 @@ export class MockWorld {
       kind: 'verification_code',
       body: fields.body,
       created_at: isoTime(this.now()),
+      decision_id: null,
     };
     this.inbox.push({ entry, deskId: session.deskId, sessionId: session.state.session_id });
     return { type: 'demo_inbox', entry_id: entry.entry_id, to: entry.to, preview: fields.preview };
