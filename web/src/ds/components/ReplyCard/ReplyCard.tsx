@@ -75,7 +75,7 @@ export function ReplyCard({ block, language, ownerName }: ReplyCardProps) {
             </p>
           ))}
           {options.length === 0 ? null : (
-            <ul className="cd-reply-card__options cd-type-body">
+            <ul role="list" className="cd-reply-card__options cd-type-body">
               {options.map((option, index) => (
                 <li key={index}>{option.label}</li>
               ))}

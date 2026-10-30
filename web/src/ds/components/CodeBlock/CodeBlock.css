@@ -1,0 +1,18 @@
+/* CodeBlock: mono code on a quiet box, padded 12 px by 14 px at the control radius. Long lines wrap
+   inside it; the page never scrolls sideways. */
+
+.cd-code-block {
+  box-sizing: border-box;
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-12) var(--space-14);
+  border-radius: var(--radius-control);
+  background: var(--fill-secondary);
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.cd-code-block > code {
+  font: inherit;
+}

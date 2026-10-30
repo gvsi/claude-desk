@@ -60,6 +60,10 @@ async function boardStories(): Promise<BoardStory[]> {
   });
 }
 
+// Importing the board stories transforms every component they use. When the whole suite runs, the
+// browser projects compete for the same CPU, so these imports get more than the default 5 s.
+const IMPORTS_STORIES = { timeout: 60_000 };
+
 describe('reference boards', () => {
   it('every_reference_board_has_a_render', (context) => {
     const dir = process.env.DS_REFERENCE_DIR;
@@ -79,14 +83,14 @@ describe('reference boards', () => {
     expect(problems).toEqual([]);
   });
 
-  it('board_stories_name_reference_boards', async () => {
+  it('board_stories_name_reference_boards', IMPORTS_STORIES, async () => {
     const stories = await boardStories();
     expect(stories.length).toBeGreaterThan(0);
     const unnamed = stories.filter(({ canvas }) => !(REFERENCE_BOARDS as readonly unknown[]).includes(canvas));
     expect(unnamed.map(({ id, canvas }) => `${id}: ${JSON.stringify(canvas)}`)).toEqual([]);
   });
 
-  it('every_reference_board_has_a_board_story', async () => {
+  it('every_reference_board_has_a_board_story', IMPORTS_STORIES, async () => {
     const stories = await boardStories();
     // Exactly one: a board rebuilt twice would be checked against itself twice, and differ.
     const counts = REFERENCE_BOARDS.map((board) => {
@@ -96,7 +100,7 @@ describe('reference boards', () => {
     expect(counts).toEqual(REFERENCE_BOARDS.map((board) => `${board}: one story`));
   });
 
-  it('board_stories_run_at_their_boards_window', async () => {
+  it('board_stories_run_at_their_boards_window', IMPORTS_STORIES, async () => {
     // The plays measure the board as drawn, so each runs in the window its board was rendered at.
     const stories = await boardStories();
     const wrong = stories.flatMap(({ id, canvas, viewport }) =>

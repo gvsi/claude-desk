@@ -1,0 +1,57 @@
+/* CopyList: one card of rows, ruled between them. Each row is padded 14 px by 16 px: the block's
+   name in control type at weight 520, its words 4 px under it in secondary meta, and Copy at the
+   top right, 16 px from the edge. */
+
+.cd-copy-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-card);
+  background: var(--fill-card);
+}
+
+.cd-copy-list__row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-16);
+  padding: var(--space-14) var(--space-16);
+}
+
+.cd-copy-list__row + .cd-copy-list__row {
+  border-top: 1px solid var(--line-hairline);
+}
+
+.cd-copy-list__text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.cd-copy-list__text p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.cd-copy-list .cd-copy-list__title {
+  color: var(--text-primary);
+  font-weight: 520;
+}
+
+.cd-copy-list .cd-copy-list__words {
+  margin-top: var(--space-4);
+  color: var(--text-secondary);
+}
+
+/* The line after a copy: in the page from the start, taking no room until it has words. */
+.cd-copy-list .cd-copy-list__result {
+  margin-top: var(--space-6);
+  color: var(--text-secondary);
+}
+
+.cd-copy-list .cd-copy-list__result:empty {
+  margin-top: 0;
+}
+
+.cd-copy-list__copy {
+  flex: none;
+}

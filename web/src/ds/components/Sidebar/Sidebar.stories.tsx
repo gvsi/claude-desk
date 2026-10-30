@@ -123,6 +123,8 @@ export const TwoDesks: Story = {
     await userEvent.click(picker);
     await expect(picker).toHaveAttribute('aria-expanded', 'true');
     const list = canvas.getByRole('list', { name: 'Desks in Rivera Plumbing' });
+    // list_role_survives_unstyled_markers: Safari announces the Desks only with role="list".
+    await expect(list).toHaveAttribute('role', 'list');
     const choices = within(list).getAllByRole('button');
     await expect(choices.map((choice) => choice.textContent)).toEqual(['Main line', 'Emergencies']);
     await expect(choices[0]).toHaveAttribute('aria-current', 'true');

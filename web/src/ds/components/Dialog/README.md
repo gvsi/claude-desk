@@ -10,10 +10,10 @@
 
 ## What it shows
 
-- A native modal dialog centered over the page, which is dimmed and inert behind it. It is `bg-surface` with a `line-card` border at `radius-card`, 440 px wide at most, and has no shadow.
+- A native modal dialog centered over the page, which is dimmed and inert behind it. It is `bg-surface` with a `line-card` border at `radius-card`, 440 px wide at most, padded 24 px, and has no shadow.
 - The title in `section` type. `danger` adds a refused dot beside it; the words still say what will happen, and the buttons stay neutral.
-- The body in `body` type, `text-secondary`.
-- At the right, a secondary button that leaves things as they are (`cancelLabel`), then the primary button that does it (`confirmLabel`). Both say what happens: "Keep it", "Delete Desk".
+- The body in `body` type, `text-secondary`, 12 px under the title.
+- At the right, 20 px under the body, a secondary button that leaves things as they are (`cancelLabel`), then the primary button that does it (`confirmLabel`), both at a screen's main size (`size-control-main`). Both say what happens: "Keep it", "Delete Desk".
 - It appears in place; nothing slides or fades.
 
 ## Keyboard and focus

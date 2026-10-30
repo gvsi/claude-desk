@@ -182,7 +182,7 @@ export function IntroDialog({ title, intro, thingsToTry, submitLabel, onSubmit, 
 
           <div className="cd-intro__things">
             <h3 className="cd-intro__heading cd-type-meta">Things to try</h3>
-            <ul className="cd-intro__list">
+            <ul role="list" className="cd-intro__list">
               {thingsToTry.map((thing, index) => (
                 <li key={`${index}-${thing.title}`} className="cd-intro__thing">
                   {thing.icon ? <Icon name={thing.icon} className="cd-intro__thing-icon" /> : null}

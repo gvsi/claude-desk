@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { EV_ERROR_CODES, KERNEL_ERROR_CODES, type EvError, type KernelErrorCode } from '../../../api/contracts';
 import { rivera } from '../../fixtures';
 import {
+  CHANGED_REFRESHED,
   CHAT_ENDED_COPY,
   NEW_CHAT_LABEL,
   RATE_LIMITED_COPY,
@@ -124,6 +125,20 @@ describe('static error copy', () => {
     });
   });
 
+  it('changed_refreshed_says_where_it_stands_now', () => {
+    // The screen has already read the item again after a conflict, so the line says so instead of
+    // asking for a reload; it opens like the reload line, so the two read as a pair.
+    expect(CHANGED_REFRESHED).toEqual({
+      en: "This changed while you were looking. Here's where it stands now.",
+      es: 'Esto cambió mientras mirabas. Así está ahora.',
+    });
+    for (const language of LANGUAGES) {
+      const reload = errorCopy('conflict', language);
+      expect(CHANGED_REFRESHED[language].split('. ')[0]).toBe(reload.split('. ')[0]);
+      expect(CHANGED_REFRESHED[language]).not.toMatch(/reload|recarga/i);
+    }
+  });
+
   it('error_copy_never_shows_a_code', () => {
     // The matcher finds a code however it is written, so the check below can't pass by matching nothing.
     expect(shownCodes('Error: kernel_unavailable')).toEqual(['kernel_unavailable']);
@@ -134,7 +149,7 @@ describe('static error copy', () => {
     const lines = [
       ...KERNEL_ERROR_CODES.flatMap((code) => LANGUAGES.map((language) => errorCopy(code, language))),
       ...EV_ERROR_CODES.flatMap((code) => LANGUAGES.map((language) => evErrorCopy(errorEvent(code), language))),
-      ...[UNREACHABLE_COPY, CHAT_ENDED_COPY, NEW_CHAT_LABEL, RATE_LIMITED_COPY].flatMap((pair) => [pair.en, pair.es]),
+      ...[UNREACHABLE_COPY, CHAT_ENDED_COPY, NEW_CHAT_LABEL, RATE_LIMITED_COPY, CHANGED_REFRESHED].flatMap((pair) => [pair.en, pair.es]),
     ];
     expect(lines.length).toBeGreaterThan(0);
     expect(lines.filter((line) => shownCodes(line).length > 0)).toEqual([]);

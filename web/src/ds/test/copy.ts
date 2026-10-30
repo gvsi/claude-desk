@@ -6,7 +6,8 @@
  * tooltip reads. Subtrees marked `aria-hidden="true"` are skipped, so an initials monogram beside
  * the name written out passes. Text a person wrote (a visitor's message, an owner's whisper)
  * carries `data-copy="user"`; the voice rules (all caps, exclamation marks) don't apply to it, the
- * design rules (arrows, uppercase styling) still do.
+ * design rules (arrows, uppercase styling) still do. Machine text shown as written (an address, a
+ * request, a key) carries `data-copy="code"` and is read the same way.
  */
 
 /** The footer on every surface, word for word (`[data-ds="concept-footer"]`). */
@@ -19,11 +20,11 @@ export const ARROW_CHARACTERS = /[\u2190-\u21FF\u27F0-\u27FF\u2794-\u27BF\u2900-
 const ARROW = new RegExp(`${ARROW_CHARACTERS.source}|->`, 'u');
 
 /**
- * Words written in capitals that stay in capitals. Plurals of these ("PDFs") pass too, because only
- * the run of two or more capitals is looked up. "IA" is AI in Spanish, as the public page's
- * disclosure says it ("una IA que responde por …").
+ * Words written in capitals that stay in capitals, among them the agents page's "RFC 8785 JSON".
+ * Plurals of these ("PDFs") pass too, because only the run of two or more capitals is looked up.
+ * "IA" is AI in Spanish, as the public page's disclosure says it ("una IA que responde por …").
  */
-export const COPY_ACRONYMS: ReadonlySet<string> = new Set(['I', 'AI', 'IA', 'PDF', 'QR', 'CPA', 'ZIP', 'SMS', 'USD']);
+export const COPY_ACRONYMS: ReadonlySet<string> = new Set(['I', 'AI', 'IA', 'PDF', 'QR', 'CPA', 'ZIP', 'SMS', 'USD', 'RFC', 'JSON']);
 
 /** Two or more capitals in a row: "SEND", the "DONALD" in "McDONALD", the "PDF" in "PDFs". */
 const CAPS_RUN = /\p{Lu}{2,}/gu;
@@ -42,7 +43,7 @@ const UNSHOWN = new Set(['script', 'style', 'template', 'noscript']);
 
 interface Context {
   problems: string[];
-  /** Inside `[data-copy="user"]`: someone's own words, exempt from the voice rules. */
+  /** Inside `[data-copy="user"]` or `[data-copy="code"]`: someone's own words or machine text, exempt from the voice rules. */
   user: boolean;
 }
 
@@ -90,7 +91,8 @@ function checkStyle(el: Element, ctx: Context): void {
 
 function visit(el: Element, parent: Context): void {
   if (el.getAttribute('aria-hidden') === 'true' || UNSHOWN.has(el.localName)) return;
-  const ctx: Context = { problems: parent.problems, user: parent.user || el.getAttribute('data-copy') === 'user' };
+  const marked = el.getAttribute('data-copy');
+  const ctx: Context = { problems: parent.problems, user: parent.user || marked === 'user' || marked === 'code' };
 
   for (const name of READ_ATTRIBUTES) {
     const value = el.getAttribute(name);
@@ -137,7 +139,7 @@ function checkConceptFooters(root: HTMLElement, ctx: Context): void {
  * Throws one `Error` listing every copy problem under `root`, each with the text it was found in.
  */
 export function assertCleanCopy(root: HTMLElement): void {
-  const ctx: Context = { problems: [], user: root.parentElement?.closest('[data-copy="user"]') != null };
+  const ctx: Context = { problems: [], user: root.parentElement?.closest('[data-copy="user"], [data-copy="code"]') != null };
   visit(root, ctx);
   checkConceptFooters(root, ctx);
   if (ctx.problems.length > 0) {

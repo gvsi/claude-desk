@@ -36,8 +36,8 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 
 ### Type
 
-- Use `serif` (Source Serif 4) for Claude's voice and page identity, `sans` (Hanken Grotesk) for the whole interface, and `mono` (JetBrains Mono) only inside an expanded full trace. All three load from Google Fonts.
-- Apply a style with its class, `.cd-type-<style>`. Claude's voice: `greeting`, `page-title`, `intro-title`, `wordmark`, `summary`, `reply`, `illustration-reply`. Interface: `body` (already set on the page body), `control`, `section`, `message`, `meta`, `caption`, `pill`, `count`, `beta`, `brand-name`, `amount`, `figure`, `figure-small`. Trace: `trace`.
+- Use `serif` (Source Serif 4) for Claude's voice and page identity, `sans` (Hanken Grotesk) for the whole interface, and `mono` (JetBrains Mono) only inside an expanded full trace and for code a developer copies on the agents page (`CodeBlock`, `CopyField`). All three load from Google Fonts.
+- Apply a style with its class, `.cd-type-<style>`. Claude's voice: `greeting`, `page-title`, `intro-title`, `wordmark`, `summary`, `reply`, `illustration-reply`. Interface: `body` (already set on the page body), `control`, `section`, `message`, `meta`, `caption`, `pill`, `count`, `beta`, `brand-name`, `amount`, `figure`, `figure-small`. Trace and code: `trace`, `code`.
 - Set a summary's headline figure, such as Today's booked total, in `figure`, and a secondary one, such as Today's stopped count, in `figure-small`; both use tabular figures. `amount` stays the checkout's amount to pay.
 - Set page titles in `page-title`, left-aligned. Claude's replies are `reply` paragraphs with no bubble and no avatar, like a document; a visitor's message is `message` in a `fill-bubble` bubble at `radius-card`, aligned right.
 
@@ -136,6 +136,7 @@ On the intro illustration's light cards, `illustration-ink` reads 16.3 and `illu
 - Show focus with a solid 2 px `accent-blue` outline at a 2 px offset on every focusable element; the base stylesheet sets it. The composer shows `ring-composer` while its text box has focus, solid too, because a translucent ring falls under 3:1; a button inside the composer shows its own ring instead, so only one ring ever shows.
 - Never show status by color alone: a dot always sits beside words that say the same thing, and the dot is `aria-hidden`.
 - Put replies and receipts inside the transcript's `role="log"` so screen readers announce them. Chat, approvals and take-over all work from the keyboard.
+- A list whose markers are removed keeps `role="list"` so Safari still announces it as a list.
 
 ## Empty, waiting, error and refusal states
 
@@ -152,5 +153,5 @@ On the intro illustration's light cards, `illustration-ink` reads 16.3 and `illu
 - No large areas of status color: dots and thin bars only.
 - No staggered page-entrance cascades.
 - No emoji, sparkles or "AI" icons, and no Claude or Anthropic logos.
-- No mono outside the full trace.
+- No mono outside the full trace and the agents page's code.
 - No raw colors or durations in components: use the custom properties named after these tokens.
