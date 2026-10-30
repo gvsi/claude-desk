@@ -26,6 +26,7 @@ LOAD_BALANCER = "arn:aws:elasticloadbalancing:us-west-2:123456789012:loadbalance
 DOMAIN = "desk.example.com"
 CERTIFICATE = f"arn:aws:acm:us-east-1:{ACCOUNT}:certificate/0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9"
 KEYCHAIN_LOOKUP = ["find-generic-password", "-s", "claude-desk-passcode", "-w"]
+KEYCHAIN_PROBE = ["find-generic-password", "-s", "claude-desk-passcode", "-g"]
 STORE_IT = 'security add-generic-password -s claude-desk-passcode -a "$USER" -w'
 REPLACE_IT = 'security add-generic-password -U -s claude-desk-passcode -a "$USER" -w'
 
@@ -33,7 +34,12 @@ REPLACE_IT = 'security add-generic-password -U -s claude-desk-passcode -a "$USER
 # the SHA-256 of the DESK_PASSCODE it was given (None without one) and "env" each environment
 # variable's name with the SHA-256 of its value, so no passcode is ever written; aws and cdk read and
 # write the deployed stacks' outputs in $STACKS (JSON), as CloudFormation would hold them; `security`
-# answers the one Keychain lookup deploy.sh makes from the file $KEYCHAIN.
+# answers deploy.sh's two Keychain lookups from the file $KEYCHAIN, the stored bytes, as Apple's
+# SecurityTool does (keychain_find.c's do_password_item_printing and keychain_utilities.c's
+# print_buffer, which never set a locale): -w writes the password alone, as lowercase hex when any
+# byte fails isprint() in the C locale (space to ~); -g writes the attributes to stdout and
+# `password: ` to stderr, then 0x<HEX> when any byte is outside space to ~ or is a backslash, then
+# "<value>" with those bytes as octal escapes when any byte is not.
 STUB = """#!{python}
 import hashlib, json, os, re, sys
 tool, args = os.path.basename(sys.argv[0]), sys.argv[1:]
@@ -44,14 +50,28 @@ with open(os.environ["STUB_LOG"], "a") as log:
                           "passcode": sha256(passcode) if passcode else None,
                           "env": {{name: sha256(value) for name, value in os.environ.items()}}}}) + "\\n")
 if tool == "security":
-    if os.environ.get("KEYCHAIN_LOCKED"):         # a locked login Keychain, as over SSH or from launchd
+    if os.environ.get("KEYCHAIN_LOCKED") or (args == {probe} and os.environ.get("KEYCHAIN_PROBE_DENIED")):
         print("security: SecKeychainSearchCopyNext: User interaction is not allowed.", file=sys.stderr)
-        sys.exit(36)
-    if args != {lookup} or not os.path.exists(os.environ["KEYCHAIN"]):
+        sys.exit(36)                              # a locked login Keychain, as over SSH or from launchd
+    if args not in ({lookup}, {probe}) or not os.path.exists(os.environ["KEYCHAIN"]):
         print("security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.",
               file=sys.stderr)
         sys.exit(44)
-    print(open(os.environ["KEYCHAIN"]).read())
+    stored = open(os.environ["KEYCHAIN"], "rb").read()
+    if args == {lookup}:
+        printable = all(0x20 <= byte <= 0x7E for byte in stored)
+        sys.stdout.buffer.write((stored if printable else stored.hex().encode()) + b"\\n")
+        sys.exit(0)
+    print('keychain: "/Users/owner/Library/Keychains/login.keychain-db"\\nclass: "genp"\\nattributes:\\n'
+          '    "svce"<blob>="claude-desk-passcode"')
+    quoted = [0x20 <= byte <= 0x7E and byte != 0x5C for byte in stored]
+    shown = b""
+    if not all(quoted):
+        shown += b"0x" + stored.hex().upper().encode() + (b"  " if any(quoted) else b" ")
+    if any(quoted):
+        shown += b'"' + b"".join(bytes([byte]) if ok else b"\\\\%03o" % byte for byte, ok in zip(stored, quoted)) + b'"'
+    sys.stdout.flush()
+    sys.stderr.buffer.write(b"password: " + shown + b"\\n")
     sys.exit(0)
 stacks_path = os.environ["STACKS"]
 stacks = json.load(open(stacks_path)) if os.path.exists(stacks_path) else {{}}
@@ -98,14 +118,18 @@ elif tool == "npx" and args[:2] == ["--no-install", "cdk"] and args[2] == "deplo
 """
 
 
+def _stub_body() -> str:
+    return STUB.format(python=sys.executable, account=ACCOUNT, distribution=DISTRIBUTION_URL, endpoint=ENDPOINT,
+                       load_balancer=LOAD_BALANCER, lookup=repr(KEYCHAIN_LOOKUP), probe=repr(KEYCHAIN_PROBE))
+
+
 @pytest.fixture
 def deploy(tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     keychain_bin = tmp_path / "keychain-bin"  # the stub `security`, ahead of the real one on PATH
     keychain_bin.mkdir()
-    body = STUB.format(python=sys.executable, account=ACCOUNT, distribution=DISTRIBUTION_URL, endpoint=ENDPOINT,
-                       load_balancer=LOAD_BALANCER, lookup=repr(KEYCHAIN_LOOKUP))
+    body = _stub_body()
     for tool in ("aws", "npx", "npm", "make", "uv"):
         (bin_dir / tool).write_text(body)
         (bin_dir / tool).chmod(stat.S_IRWXU)
@@ -469,14 +493,15 @@ def _sha256(text: str) -> str:
 
 @pytest.mark.parametrize("terminal", [True, False])
 def test_without_an_exported_passcode_it_comes_from_the_keychain(deploy, terminal):
-    """The smoke checks sign in with the passcode the Keychain holds; deploy.sh reads it once, before
-    any deploy step, and gives it to smoke.py alone, never on a command line, the log or the output."""
+    """The smoke checks sign in with the passcode the Keychain holds; deploy.sh reads it, then checks
+    how it's stored, before any deploy step, and gives it to smoke.py alone, never on a command line,
+    the log or the output."""
     run = deploy(terminal=terminal, keychain_item="keychain-test-passcode", DESK_PASSCODE=None,
                  DESK_DEPLOY_ACCOUNT=ACCOUNT)
     assert run.status == 0, run.output
-    assert run.steps()[0] == "security find-generic-password"
-    [lookup] = [call for call in run.calls if call["tool"] == "security"]
-    assert lookup["argv"] == KEYCHAIN_LOOKUP
+    assert run.steps()[:2] == ["security find-generic-password"] * 2
+    lookups = [call["argv"] for call in run.calls if call["tool"] == "security"]
+    assert lookups == [KEYCHAIN_LOOKUP, KEYCHAIN_PROBE]
     given = {call["passcode"] for call in run.calls if call["tool"] != "security" and not _is_smoke(call)}
     assert given == {None}
     [smoke] = [call for call in run.calls if _is_smoke(call)]
@@ -537,28 +562,68 @@ def test_an_empty_keychain_item_says_so_before_any_step(deploy):
     assert REPLACE_IT in run.output and "DESK_PASSCODE" in run.output
 
 
+def test_the_stub_security_answers_as_apples_does(tmp_path):
+    """The stub writes what Apple's SecurityTool source writes for each lookup (see STUB), so the
+    printable ASCII check is tested against the output the real `security` gives, never raw bytes
+    -w can't return. The expected bytes are worked out by hand from that source."""
+    stub = tmp_path / "security"
+    stub.write_text(_stub_body())
+    stub.chmod(stat.S_IRWXU)
+    keychain = tmp_path / "keychain"
+    env = {"STUB_LOG": str(tmp_path / "stub.log"), "KEYCHAIN": str(keychain), "STACKS": str(tmp_path / "stacks")}
+
+    def lookup(stored: str, flag: str) -> tuple[bytes, bytes]:
+        keychain.write_bytes(stored.encode())
+        result = subprocess.run([str(stub), *KEYCHAIN_LOOKUP[:-1], flag], env=env, capture_output=True, check=True)
+        return result.stdout, result.stderr
+
+    assert lookup("café-pass", "-w") == (b"636166c3a92d70617373\n", b"")
+    assert lookup("café-pass", "-g")[1] == b'password: 0x636166C3A92D70617373  "caf\\303\\251-pass"\n'
+    assert lookup('a"b c~', "-w") == (b'a"b c~\n', b"")
+    assert lookup('a"b c~', "-g")[1] == b'password: "a"b c~"\n'
+    assert lookup("a\\b", "-w") == (b"a\\b\n", b"")                 # a backslash is printable: -w gives it as is
+    assert lookup("a\\b", "-g")[1] == b'password: 0x615C62  "a\\134b"\n'
+    assert lookup("\t\n", "-g")[1] == b"password: 0x090A \n"
+    assert b'"svce"<blob>="claude-desk-passcode"' in lookup("a", "-g")[0]
+
+
 @pytest.mark.parametrize("item", ["café-keychain-passcode", "tab\tkeychain-passcode", "line\nkeychain-passcode",
-                                  "del\x7fkeychain-passcode"])
+                                  "del\x7fkeychain-passcode", "back\\slash-keychain-passcode"])
 def test_a_keychain_passcode_that_isnt_printable_ascii_is_refused_unshown_before_any_step(deploy, item):
-    """docs/deploy.md asks for a printable ASCII passcode: `security` hands any other back as hex,
-    which wouldn't sign in. A value that reaches deploy.sh with other characters is refused before
-    any step, without being shown, whatever the caller's locale."""
+    """docs/deploy.md asks for a printable ASCII passcode with no backslash: `security -w` hands any
+    other character back as hex, which wouldn't sign in, and -g, which shows how the item is stored,
+    marks a backslash the same way. Such an item is refused before any step, without being shown in
+    any form, whatever the caller's locale."""
     run = deploy(keychain_item=item, DESK_PASSCODE=None, DESK_DEPLOY_ACCOUNT=ACCOUNT,
                  LANG="en_US.UTF-8", LC_ALL="en_US.UTF-8")
     assert run.status == 2
-    assert run.steps() == ["security find-generic-password"]
-    assert "the macOS Keychain item claude-desk-passcode isn't printable ASCII" in run.output
+    assert [call["argv"] for call in run.calls] == [KEYCHAIN_LOOKUP, KEYCHAIN_PROBE]
+    assert ("the macOS Keychain item claude-desk-passcode has a character outside printable ASCII, "
+            "or a backslash (it isn't shown)") in run.output
     assert REPLACE_IT in run.output
-    assert "keychain-passcode" not in run.text()
+    secret = "keychain-passcode"
+    for form in (secret, secret.encode().hex(), secret.encode().hex().upper()):
+        assert form not in run.text()
 
 
-def test_every_printable_ascii_character_reaches_smoke_as_stored(deploy):
-    stored = "".join(map(chr, range(0x20, 0x7F)))                            # space to ~
+def test_every_printable_ascii_character_but_the_backslash_reaches_smoke_as_stored(deploy):
+    stored = "".join(chr(code) for code in range(0x20, 0x7F) if chr(code) != "\\")      # space to ~
     run = deploy(keychain_item=stored, DESK_PASSCODE=None, DESK_DEPLOY_ACCOUNT=ACCOUNT,
                  LANG="en_US.UTF-8", LC_ALL="en_US.UTF-8")
     assert run.status == 0, run.output
     [smoke] = [call for call in run.calls if _is_smoke(call)]
     assert smoke["passcode"] == _sha256(stored)
+
+
+def test_a_keychain_item_whose_stored_form_cant_be_read_is_refused_before_any_step(deploy):
+    """The second lookup (-g), which shows how the item is stored, can fail on its own, as when access
+    is denied the second time: deploy.sh then says the item couldn't be read, before any step."""
+    run = deploy(keychain_item="keychain-test-passcode", DESK_PASSCODE=None, DESK_DEPLOY_ACCOUNT=ACCOUNT,
+                 KEYCHAIN_PROBE_DENIED="1")
+    assert run.status == 2
+    assert [call["argv"] for call in run.calls] == [KEYCHAIN_LOOKUP, KEYCHAIN_PROBE]
+    assert "the macOS Keychain item claude-desk-passcode couldn't be read" in run.output
+    assert "keychain-test-passcode" not in run.text()
 
 
 def test_no_security_command_says_how_to_store_the_passcode_before_any_step(deploy):

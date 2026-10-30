@@ -127,11 +127,13 @@ def test_a_redeploy_is_one_line_and_the_runbook_says_what_it_skips():
 
 
 def test_the_passcode_is_asked_for_in_printable_ascii():
-    """deploy.sh refuses a Keychain passcode that isn't printable ASCII (test_deploy.py). The runbook
-    says so where the passcode is stored, and why, and says plainly what the check can't catch."""
+    """deploy.sh refuses a Keychain passcode that isn't printable ASCII, or has a backslash, from how
+    `security find-generic-password -g` shows the stored item (test_deploy.py). The runbook says so
+    where the passcode is stored, and why, and claims no more than that check does."""
     first = section("First deploy (owner's terminal)")
-    assert "The passcode must be printable ASCII" in first
+    assert "The passcode must be printable ASCII with no backslash" in first
     assert "`security` hands any other back as hex" in first
-    assert "hex is itself printable ASCII" in first
+    assert "`security find-generic-password -g`" in first
+    assert "can't catch" not in first and "hex is itself printable ASCII" not in first
     script = " ".join((INFRA / "scripts" / "deploy.sh").read_text().replace("#", " ").split())
-    assert "it must be printable ASCII" in script
+    assert "it must be printable ASCII with no backslash" in script
