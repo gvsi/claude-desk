@@ -12,6 +12,7 @@ Tests run on Rivera Plumbing copies as `POST /copies` seeds them (Friday 10:04 i
 from their Demo inbox, as the verify card does.
 """
 
+import asyncio
 import logging
 import re
 import secrets
@@ -34,8 +35,9 @@ from .helpers import kernel_ctx, ledger_rows, rows_of
 from .test_adapters import Rivera, objects, rivera, run
 from .test_context import context_of, fact_ids, tools
 from .test_decide import Visitor, decided, open_visitor
-from .test_desk_writes import updated
+from .test_desk_writes import put_part, updated
 from .test_execute import executed
+from .test_lead_tools import connections_of, until_waiting
 from .test_reply_check import assert_handed_off, checked, clause, keep_alive_until
 from .test_verification import api_rows, check, code_in, entry_of, session_inbox, started
 
@@ -280,6 +282,54 @@ async def test_link_dies_with_its_desk_or_person(app, client, frozen_clock):
     # each refused open is on the Desk's ledger, which outlives it
     refused = [summary for _, summary in await link_entries(app, copy) if summary.get("refused")]
     assert refused == [{"link_id": dana_link.link_id, "refused": True}, {"link_id": bob_link.link_id, "refused": True}]
+
+
+async def test_removing_two_people_while_a_link_opens(app, client, frozen_clock, monkeypatch):
+    """Removing several people in one write locks all their sessions and voids all their links
+    before it ledgers a session it closes. A link of the second person opening meanwhile holds its
+    row and then takes the ledger head; were the first person's sessions ledgered before the second
+    person's links were voided, each would wait on the other until Postgres ended one."""
+    copy = await rivera(app, client)
+    docs = await documents(app, copy)
+    dana, bob = await confirmed(client, copy, DANA), await confirmed(client, copy, BOB)
+    await released(client, dana, docs["dana-invoice"])
+    await released(client, bob, docs["bob-warranty"], call_id="call-2")
+    by_person = {link.person_id: link for link in await links(app, copy)}
+    dana_link, bob_link = (by_person[docs[ref].record_owner_person_id] for ref in ("dana-invoice", "bob-warranty"))
+    ledger_link, opening, go_on = release_document._ledger_link, asyncio.Event(), asyncio.Event()
+
+    async def open_when_told(ctx, **entry):
+        if entry.get("opened"):
+            opening.set()                          # the link is marked opened, its row held
+            await go_on.wait()
+        await ledger_link(ctx, **entry)
+
+    monkeypatch.setattr(release_document, "_ledger_link", open_when_told)
+    frozen_clock.advance(60)
+    opened = asyncio.create_task(open_link(client, bob_link.token))
+    await asyncio.wait_for(opening.wait(), timeout=5)
+    with connections_of(app) as pids:
+        removed = asyncio.create_task(put_part(client, copy, "people", {"remove": ["dana", "bob"]}))
+        await until_waiting(app, removed, pids, "kernel.document_links")
+    go_on.set()
+    opened, removed = await asyncio.gather(opened, removed)
+
+    assert (opened.status_code, removed.status_code) == (200, 200), (opened.text, removed.text)
+    assert opened.content == docs["bob-warranty"].body.encode()
+    # Bob's link opened first, so only Dana's was voided; both of them are off the record
+    after = {link.link_id: link for link in await links(app, copy)}
+    now = frozen_clock.now()
+    assert (after[dana_link.link_id].voided_at, after[dana_link.link_id].consumed_at) == (now, None)
+    assert (after[bob_link.link_id].voided_at, after[bob_link.link_id].consumed_at) == (None, now)
+    closed = await rows_of(app, copy.copy_id, select(ActorSession).where(
+        ActorSession.session_id.in_([dana.session_id, bob.session_id])))
+    assert sorted((row.session_id, row.closed_at) for row in closed) == sorted(
+        [(dana.session_id, now), (bob.session_id, now)])
+    opening, *closes, write = [entry.event for entry in await ledger_rows(app, copy)][-4:]
+    assert (opening.kind, opening.summary) == ("document_link", {"link_id": bob_link.link_id, "opened": True})
+    assert sorted((event.kind, event.session_id, event.summary["reason"]) for event in closes) == sorted(
+        ("session", session_id, "person_removed") for session_id in (dana.session_id, bob.session_id))
+    assert (write.kind, write.summary) == ("desk_data", {"part": "people", "refs": ["bob", "dana"]})
 
 
 async def test_wrong_person_gets_nothing(app, client):
