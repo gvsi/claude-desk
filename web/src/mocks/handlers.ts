@@ -18,8 +18,8 @@ import {
   type ServerSentEventMessage,
 } from 'msw';
 
-import type { SseEvent } from '../api/contracts.ts';
 import { ROUTES, type RouteKey } from '../api/routes.ts';
+import type { VisitorEvent } from '../api/views.ts';
 import { SERVED_KEYS } from './served.ts';
 import { streamAfter, type MockAnswer, type MockStore } from './store.ts';
 
@@ -102,11 +102,11 @@ function whenClosed(client: object, request: Request, onClose: () => void): void
   }
 }
 
-type EventMap = Record<SseEvent['type'], SseEvent>;
+type EventMap = Record<VisitorEvent['type'], VisitorEvent>;
 
 /** One event as the API frames it: named by its type (an `EvError` as `error`), its seq as the id. */
-function frame(seq: number, ev: SseEvent): ServerSentEventMessage<EventMap> {
-  // MSW types the name and data per event map key; every key here maps to `SseEvent`.
+function frame(seq: number, ev: VisitorEvent): ServerSentEventMessage<EventMap> {
+  // MSW types the name and data per event map key; every key here maps to a `VisitorEvent`.
   return { id: String(seq), event: ev.type, data: ev } as ServerSentEventMessage<EventMap>;
 }
 
@@ -153,7 +153,7 @@ export function createHandlers(store: MockStore): HttpHandler[] {
       const slug = stringParams(params).slug ?? '';
       const after = streamAfter(url.searchParams, request.headers.get('last-event-id'));
       let open = true;
-      const send = (seq: number, ev: SseEvent) => {
+      const send = (seq: number, ev: VisitorEvent) => {
         if (open) client.send(frame(seq, ev));
       };
       const stop = store.listen(slug, after, send, cookies);

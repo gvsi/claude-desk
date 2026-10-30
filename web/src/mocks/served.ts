@@ -29,8 +29,10 @@ import { EVENT_GAP_MS, afterAnswer, allows, cardDiffFor, matchRule, turnEnd, typ
 import { seedWorld, type MockSeed } from './seed.ts';
 import { MockWorld, isoTime, type DeskRecord, type SessionRecord } from './world.ts';
 
-/** Plan 02's limit on a visitor's message. */
+/** Plan 02's limit on a visitor's message and on the owner's words. */
 const MESSAGE_MAX = 2000;
+
+const OWNER_KINDS: ReadonlySet<unknown> = new Set(['say', 'whisper']);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -66,8 +68,8 @@ export interface Req {
   cookies: Cookies;
 }
 
-/** The statuses a route answers its model with. */
-type OkStatus = 200 | 201 | 202;
+/** The statuses a route answers its model with; a 204 has no body. */
+type OkStatus = 200 | 201 | 202 | 204;
 /** The statuses a route refuses with. */
 type FailStatus = 401 | 403 | 404 | 409 | 422 | 429 | 501 | 503;
 
@@ -102,6 +104,8 @@ type ServedRoutes = { [K in RouteKey]?: (sv: Server, req: Req) => Served<RouteRe
 type UnscopedRoutes = { [K in RouteKey]?: (req: Req) => Served<RouteResponse<K>> };
 
 const ok = <T>(body: T, status: OkStatus = 200): { status: OkStatus; body: T } => ({ status, body });
+/** A 204: done, nothing to say. */
+const NO_CONTENT = { status: 204, body: undefined } as const;
 export const failWith = (status: FailStatus, error: string, extra: Omit<ErrorBody, 'error'> = {}): Failure => ({
   status,
   body: { error, ...extra },
@@ -227,6 +231,20 @@ export class Server {
 
 export const isFailure = (value: Failure | object): value is Failure => 'status' in value;
 
+/**
+ * The chat an owner's take-over, hand-back or resume names, at the generation the owner last read,
+ * or why it can't be acted on: a chat that has moved on since then is a stale generation.
+ */
+function ownerSession(sv: Server, req: Req): SessionRecord | Failure {
+  if (!req.cookies.owner) return NO_OWNER;
+  const session = sv.world.sessions.get(req.params.session_id ?? '');
+  if (!session) return NOT_FOUND;
+  const generation = isRecord(req.body) ? req.body.generation : undefined;
+  if (req.malformed || !Number.isSafeInteger(generation)) return INVALID;
+  if (generation !== session.state.generation) return failWith(409, 'kernel', { code: 'stale_generation' });
+  return session;
+}
+
 /** Every route the mock answers from a copy. Unserved ones fall through to the catch-all, which records them. */
 const SERVED: ServedRoutes = {
   copies(sv, req) {
@@ -321,18 +339,53 @@ const SERVED: ServedRoutes = {
     const session = sv.world.sessions.get(req.params.session_id ?? '');
     if (!session) return NOT_FOUND;
     const after = Number(req.query.get('after') ?? '0');
-    return ok(ownerTranscript(session, Number.isSafeInteger(after) ? after : 0));
+    return ok(ownerTranscript(session, Number.isSafeInteger(after) ? after : 0, sv.world.now()));
   },
   takeover(sv, req) {
+    const session = ownerSession(sv, req);
+    if (isFailure(session)) return session;
+    if (session.state.mode === 'owner') return failWith(409, 'kernel', { code: 'mode_owner' });
+    return ok(sv.world.takeOver(session));
+  },
+  handback(sv, req) {
+    const session = ownerSession(sv, req);
+    if (isFailure(session)) return session;
+    if (session.state.mode !== 'owner') return failWith(409, 'kernel', { code: 'conflict' });
+    return ok(sv.world.handBack(session));
+  },
+  resume(sv, req) {
+    const session = ownerSession(sv, req);
+    if (isFailure(session)) return session;
+    if (session.state.mode !== 'paused') return failWith(409, 'kernel', { code: 'conflict' });
+    return ok(sv.world.resume(session));
+  },
+  ownerMessage(sv, req) {
+    if (!req.cookies.owner) return NO_OWNER;
+    const session = sv.world.sessions.get(req.params.session_id ?? '');
+    if (!session) return NOT_FOUND;
+    const text = isRecord(req.body) ? req.body.text : undefined;
+    const kind = isRecord(req.body) ? req.body.kind : undefined;
+    if (req.malformed || typeof text !== 'string' || text.trim() === '' || text.length > MESSAGE_MAX || !OWNER_KINDS.has(kind)) return INVALID;
+    if (kind === 'whisper') return ok(sv.world.whisper(session, text));
+    // Her own words reach the visitor only once she is in the chat.
+    if (session.state.mode !== 'owner') return failWith(409, 'take_over_first');
+    return ok(sv.world.say(session, text));
+  },
+  ownerTyping(sv, req) {
     if (!req.cookies.owner) return NO_OWNER;
     const session = sv.world.sessions.get(req.params.session_id ?? '');
     if (!session) return NOT_FOUND;
     const generation = isRecord(req.body) ? req.body.generation : undefined;
     if (req.malformed || !Number.isSafeInteger(generation)) return INVALID;
-    // The owner acted on a chat that has moved on since they last read it.
+    if (session.state.mode !== 'owner') return failWith(409, 'take_over_first');
     if (generation !== session.state.generation) return failWith(409, 'kernel', { code: 'stale_generation' });
-    if (session.state.mode === 'owner') return failWith(409, 'kernel', { code: 'mode_owner' });
-    return ok(sv.world.takeOver(session));
+    sv.world.ownerTyping(session);
+    return NO_CONTENT;
+  },
+  decision(sv, req) {
+    if (!req.cookies.owner) return NO_OWNER;
+    const record = sv.world.decisions.get(req.params.decision_id ?? '');
+    return record ? ok(record.decision) : NOT_FOUND;
   },
   safety(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
@@ -381,6 +434,12 @@ const SERVED: ServedRoutes = {
     sv.world.visitorText(session, text);
     if (session.state.mode === 'ai') sv.runTurn(session, matchRule(text).steps, session.language, text);
     return ok({ message_id: sv.world.id('vmsg') } satisfies MessageAccepted, 202);
+  },
+  visitorTyping(sv, req) {
+    const visitor = sv.visitor(req.params.slug, req.cookies);
+    if (isFailure(visitor)) return visitor;
+    sv.world.visitorTyping(visitor.session);
+    return NO_CONTENT;
   },
   cancelRequest(sv, req) {
     const visitor = sv.visitor(req.params.slug, req.cookies);

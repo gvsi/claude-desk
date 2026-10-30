@@ -60,6 +60,7 @@ export const VISITOR_PLAIN = {
     refused_at_execution: "The rules changed, so this didn't go ahead",
     reply_checked: "Reply checked against Maria Rivera's rules",
     reply_handed_off: 'Passed to Maria Rivera to answer',
+    owner_said: 'Written by Maria Rivera',
   },
   es: {
     allowed: 'Revisado con las reglas de Maria Rivera',
@@ -74,8 +75,12 @@ export const VISITOR_PLAIN = {
     refused_at_execution: 'Las reglas cambiaron, así que no se hizo',
     reply_checked: 'Respuesta revisada con las reglas de Maria Rivera',
     reply_handed_off: 'Pasado a Maria Rivera para responder',
+    owner_said: 'Escrito por Maria Rivera',
   },
-} as const satisfies Record<Language, Record<Exclude<DecisionState, 'executed'> | 'reply_checked' | 'reply_handed_off', string>>;
+} as const satisfies Record<
+  Language,
+  Record<Exclude<DecisionState, 'executed'> | 'reply_checked' | 'reply_handed_off' | 'owner_said', string>
+>;
 
 /**
  * Tools that only read for Claude and so have no executed line of their own. Every other tool has

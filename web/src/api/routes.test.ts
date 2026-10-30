@@ -29,6 +29,8 @@ const PLAN_02: Record<RouteKey, string> = {
   handback: 'POST /api/owner/conversations/{session_id}/handback',
   resume: 'POST /api/owner/conversations/{session_id}/resume',
   ownerMessage: 'POST /api/owner/conversations/{session_id}/messages',
+  ownerTyping: 'POST /api/owner/conversations/{session_id}/typing',
+  decision: 'GET /api/owner/decisions/{decision_id}',
   // Safety
   safety: 'GET /api/owner/desks/{desk_id}/safety',
   ledger: 'GET /api/owner/desks/{desk_id}/ledger',
@@ -65,6 +67,7 @@ const PLAN_02: Record<RouteKey, string> = {
   openSession: 'POST /api/public/desks/{slug}/sessions',
   visitorSession: 'GET /api/public/desks/{slug}/session',
   sendMessage: 'POST /api/public/desks/{slug}/messages',
+  visitorTyping: 'POST /api/public/desks/{slug}/typing',
   events: 'GET /api/public/desks/{slug}/events',
   cancelRequest: 'POST /api/public/desks/{slug}/decisions/{decision_id}/cancel',
   verifyCheck: 'POST /api/public/desks/{slug}/verify/check',

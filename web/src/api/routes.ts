@@ -8,6 +8,7 @@
  * - `model`: waits on a Claude turn, so it gets a longer timeout.
  */
 import type {
+  Decision,
   DeskUpdated,
   DemoAgentIssued,
   DemoInboxEntry,
@@ -107,6 +108,8 @@ export const ROUTES = {
   handback: { method: 'POST', path: '/api/owner/conversations/{session_id}/handback', owner: true },
   resume: { method: 'POST', path: '/api/owner/conversations/{session_id}/resume', owner: true },
   ownerMessage: { method: 'POST', path: '/api/owner/conversations/{session_id}/messages', owner: true },
+  ownerTyping: { method: 'POST', path: '/api/owner/conversations/{session_id}/typing', owner: true },
+  decision: { method: 'GET', path: '/api/owner/decisions/{decision_id}', owner: true },
 
   // Safety
   safety: { method: 'GET', path: '/api/owner/desks/{desk_id}/safety', owner: true },
@@ -148,6 +151,7 @@ export const ROUTES = {
   openSession: { method: 'POST', path: '/api/public/desks/{slug}/sessions', owner: false },
   visitorSession: { method: 'GET', path: '/api/public/desks/{slug}/session', owner: false },
   sendMessage: { method: 'POST', path: '/api/public/desks/{slug}/messages', owner: false },
+  visitorTyping: { method: 'POST', path: '/api/public/desks/{slug}/typing', owner: false },
   events: { method: 'GET', path: '/api/public/desks/{slug}/events', owner: false },
   cancelRequest: { method: 'POST', path: '/api/public/desks/{slug}/decisions/{decision_id}/cancel', owner: false },
   verifyCheck: { method: 'POST', path: '/api/public/desks/{slug}/verify/check', owner: false },
@@ -188,6 +192,8 @@ interface RouteShapes {
   handback: { body: GenerationBody; response: SessionState };
   resume: { body: GenerationBody; response: SessionState };
   ownerMessage: { body: OwnerMessageBody; response: OwnerMessageResult };
+  ownerTyping: { body: GenerationBody; response: undefined };
+  decision: { body: undefined; response: Decision };
 
   safety: { body: undefined; response: Attempt[] };
   ledger: { body: undefined; response: LedgerPage };
@@ -224,6 +230,7 @@ interface RouteShapes {
   openSession: { body: undefined; response: VisitorSession };
   visitorSession: { body: undefined; response: VisitorTranscript };
   sendMessage: { body: TextBody; response: MessageAccepted };
+  visitorTyping: { body: undefined; response: undefined };
   /** Read with `openStream`, never with `request`. */
   events: { body: undefined; response: never };
   cancelRequest: { body: undefined; response: CancelAccepted };

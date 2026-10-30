@@ -17,12 +17,12 @@ import type {
   PolicyVersion,
   RenderedBlock,
   RuleCard,
+  OwnerMessageResult,
   SessionState,
-  SseEvent,
   StatusEvent,
 } from '../api/contracts.ts';
-import type { DeskSummary, Handoff, RulesDraft, TranscriptItem, TranscriptKind } from '../api/views.ts';
-import { placeholderHex, rivera } from '../ds/fixtures/index.ts';
+import type { DeskSummary, Handoff, RulesDraft, TranscriptItem, TranscriptKind, VisitorEvent } from '../api/views.ts';
+import { cardBlock, placeholderHex, rivera } from '../ds/fixtures/index.ts';
 import { BUSINESS, activePolicy, copyIds, type CopyIds, type MockSeed } from './seed.ts';
 import {
   DECISIONS,
@@ -53,7 +53,11 @@ const sign = (label: string) => placeholderHex(`signature:${label}`, 64);
 const sha256 = (label: string) => placeholderHex(`sha256:${label}`, 32);
 export const LEDGER_KEY = { key_id: rivera.ledger.verified.key_id, public_key_hex: rivera.ledger.verified.public_key_hex };
 
-type Listener = (seq: number, ev: SseEvent) => void;
+type Listener = (seq: number, ev: VisitorEvent) => void;
+
+/** How long a typing signal shows, and how often one counts (plan 02b Task 1). */
+export const TYPING_SHOWS_MS = 5_000;
+export const TYPING_EVERY_MS = 2_000;
 
 export interface SessionRecord {
   state: SessionState;
@@ -70,8 +74,14 @@ export interface SessionRecord {
   /** The owner's view: the visitor's view leaves out whispers. */
   items: TranscriptItem[];
   /** Every event the session's stream has carried, `seq` from 1 with no gaps. */
-  events: { seq: number; ev: SseEvent }[];
+  events: { seq: number; ev: VisitorEvent }[];
   listeners: Set<Listener>;
+  /** Until when the visitor is typing, as the owner's view shows it; null when they haven't been. */
+  typingUntil: number | null;
+  /** When the visitor's last typing signal that counted came. */
+  visitorTypedAt: number | null;
+  /** When the owner's last typing event went to the visitor. */
+  ownerTypedAt: number | null;
 }
 
 export interface DeskRecord {
@@ -227,6 +237,9 @@ export class MockWorld {
       items: [],
       events: [],
       listeners: new Set(),
+      typingUntil: null,
+      visitorTypedAt: null,
+      ownerTypedAt: null,
     };
     this.sessions.set(sessionId, session);
     this.appendLedger(desk, {
@@ -270,19 +283,84 @@ export class MockWorld {
     session.lastActivity = this.now();
   }
 
-  whisper(session: SessionRecord, text: string): void {
+  /** The owner's whisper: only Claude sees it, so it joins the owner's view and the record, never the visitor's stream. */
+  whisper(session: SessionRecord, text: string): OwnerMessageResult {
+    const messageId = this.id('whisper');
     this.addItem(session, 'whisper', text, null);
-    this.appendLedger(this.deskOf(session), {
+    const entry = this.appendLedger(this.deskOf(session), {
       kind: 'whisper',
       origin: 'kernel',
       session_id: session.state.session_id,
-      ref_id: null,
+      ref_id: messageId,
       summary: { characters: text.length },
     });
+    return { message_id: messageId, verdict: null, ledger_seq: entry.seq };
+  }
+
+  /**
+   * The owner's own words in the chat she took over, as the kernel delivers a say: checked, then
+   * one `owner_said` card with her words verbatim, author `owner`, at the session's generation now.
+   */
+  say(session: SessionRecord, text: string): OwnerMessageResult {
+    const messageId = this.id('msg');
+    const { language } = session;
+    const checked = this.appendLedger(this.deskOf(session), {
+      kind: 'reply',
+      origin: 'kernel',
+      session_id: session.state.session_id,
+      ref_id: messageId,
+      summary: { author: 'owner', ok: true, language, violations: [] },
+    });
+    const blocks = [cardBlock('owner_said', { fact_id: `owner:${messageId}`, title: text })];
+    const signature = sign(messageId);
+    const visitorPlain = VISITOR_PLAIN[language].owner_said;
+    this.emit(session, {
+      type: 'message',
+      message_id: messageId,
+      generation: session.state.generation,
+      author: 'owner',
+      language,
+      handoff: false,
+      blocks,
+      visitor_plain: visitorPlain,
+      ledger_seq: checked.seq,
+      signature,
+    });
+    return {
+      message_id: messageId,
+      verdict: {
+        ok: true,
+        language,
+        blocks,
+        violations: [],
+        message_id: messageId,
+        generation: session.state.generation,
+        visitor_plain: visitorPlain,
+        ledger_seq: checked.seq,
+        signature,
+      },
+      ledger_seq: checked.seq,
+    };
+  }
+
+  /** The visitor is typing: the owner's view shows it for five seconds. A signal within 2 s of the last that counted changes nothing. */
+  visitorTyping(session: SessionRecord): void {
+    const now = this.now();
+    if (session.visitorTypedAt !== null && now - session.visitorTypedAt < TYPING_EVERY_MS) return;
+    session.visitorTypedAt = now;
+    session.typingUntil = now + TYPING_SHOWS_MS;
+  }
+
+  /** The owner is typing in the chat she took over: the visitor's stream is told, at most once every 2 s. */
+  ownerTyping(session: SessionRecord): void {
+    const now = this.now();
+    if (session.ownerTypedAt !== null && now - session.ownerTypedAt < TYPING_EVERY_MS) return;
+    session.ownerTypedAt = now;
+    this.emit(session, { type: 'owner_typing', name: BUSINESS.owner_display_name, until: isoTime(now + TYPING_SHOWS_MS) });
   }
 
   /** Adds `ev` to the session's stream with the next seq, keeps what the transcript keeps, and tells listeners. */
-  emit(session: SessionRecord, ev: SseEvent): number {
+  emit(session: SessionRecord, ev: VisitorEvent): number {
     const seq = session.events.length + 1;
     session.events.push({ seq, ev });
     session.lastActivity = this.now();
@@ -617,6 +695,48 @@ export class MockWorld {
       summary: { mode: 'owner', generation: session.state.generation },
     });
     this.emit(session, { type: 'owner_joined', name: BUSINESS.owner_display_name });
+    return session.state;
+  }
+
+  /** The owner hands the chat back to Claude, at the next generation, and the visitor is told. */
+  handBack(session: SessionRecord): SessionState {
+    session.state = { ...session.state, mode: 'ai', generation: session.state.generation + 1 };
+    this.appendLedger(this.deskOf(session), {
+      kind: 'takeover',
+      origin: 'kernel',
+      session_id: session.state.session_id,
+      ref_id: null,
+      summary: { mode: 'ai', generation: session.state.generation },
+    });
+    this.emit(session, { type: 'owner_left' });
+    return session.state;
+  }
+
+  /**
+   * The breaker pauses the chat after repeated blocked attempts, as the kernel records it: nobody
+   * answers until the owner resumes Claude or takes over. Tests add it; no seed has it.
+   */
+  pause(session: SessionRecord): void {
+    session.state = { ...session.state, mode: 'paused' };
+    this.appendLedger(this.deskOf(session), {
+      kind: 'breaker',
+      origin: 'kernel',
+      session_id: session.state.session_id,
+      ref_id: null,
+      summary: { paused: true },
+    });
+  }
+
+  /** The owner resumes Claude in a paused chat, at the next generation. */
+  resume(session: SessionRecord): SessionState {
+    session.state = { ...session.state, mode: 'ai', generation: session.state.generation + 1 };
+    this.appendLedger(this.deskOf(session), {
+      kind: 'breaker',
+      origin: 'kernel',
+      session_id: session.state.session_id,
+      ref_id: null,
+      summary: { resumed: true, generation: session.state.generation },
+    });
     return session.state;
   }
 
