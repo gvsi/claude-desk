@@ -731,6 +731,11 @@ describe('Today', () => {
     await expect.element(screen.getByRole('article', { name: 'Wants you' }).first().getByText(CALLBACK_REASON, { exact: true })).toBeVisible();
     expect(screen.container.textContent).not.toContain('handoff_id');
     await expectScreenBasics(screen.container, { owner: true });
+
+    // A conversation reads it the same way: its held request, answerable in place.
+    const { screen: chat } = await renderRoute(`${DESK}/conversations/ses-visitor-web`);
+    await expect.element(heldCard(chat, SEEDED_REASON)).toBeVisible();
+    await expect.element(heldCard(chat, SEEDED_REASON).getByRole('button', { name: 'Allow this time' })).toBeVisible();
   });
 
   it('handoff_offers_to_join', async () => {
