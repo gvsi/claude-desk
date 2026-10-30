@@ -9,6 +9,7 @@ Nothing here calls the network or a live model.
 import asyncio
 import re
 import secrets
+import socket
 import sys
 import types
 from contextlib import asynccontextmanager
@@ -280,3 +281,62 @@ async def test_target_serves_health_and_a_copy_over_the_kernel_target(
     finally:
         await k.stop()   # fails on any model call the fake didn't script: the API made none
     assert stand_in.lifespan == ["startup", "shutdown"]
+
+
+# A port taken between choosing it and binding it
+
+def taken_port() -> socket.socket:
+    """A loopback socket listening on a port, as another process would hold it."""
+    held = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    held.bind(("127.0.0.1", 0))
+    held.listen()
+    return held
+
+
+def built_apps(monkeypatch: pytest.MonkeyPatch) -> list:
+    """Every app the target builds, in order."""
+    apps, build = [], api_impl.create_app
+
+    def recording(*args, **kwargs):
+        apps.append(build(*args, **kwargs))
+        return apps[-1]
+
+    monkeypatch.setattr(api_impl, "create_app", recording)
+    return apps
+
+
+def model_closed(app) -> bool:
+    return app.state.runtime.model._client.is_closed()
+
+
+async def test_start_tries_a_fresh_port_when_its_port_was_taken(monkeypatch: pytest.MonkeyPatch):
+    """A port another process takes after `_free_port` freed it fails that try's bind: the target
+    closes the model client of the app it built for it (whose lifespan never ran) and tries again on
+    a fresh port, three tries in all; a start whose every try was taken raises and leaves nothing
+    running."""
+    with taken_port() as held:
+        taken = held.getsockname()[1]
+        fresh = api_impl._free_port
+        ports = iter([taken, taken])
+        monkeypatch.setattr(api_impl, "_free_port", lambda: next(ports, None) or fresh())
+        apps = built_apps(monkeypatch)
+        api = api_impl.make_api_target(KERNEL, models="fake")
+        await api.start()
+        try:
+            assert len(apps) == 3 and api.app is apps[-1]
+            assert api.base_url != f"http://127.0.0.1:{taken}" and api.settings.a2a_loopback == api.base_url
+            assert [model_closed(app) for app in apps] == [True, True, False]
+            async with httpx.AsyncClient(trust_env=False) as plain:
+                assert (await plain.get(api.base_url + "/openapi.json")).status_code == 200
+        finally:
+            await api.stop()
+
+        monkeypatch.setattr(api_impl, "_free_port", lambda: taken)
+        apps.clear()
+        refused = api_impl.make_api_target(KERNEL, models="fake")
+        with pytest.raises(OSError) as raised:
+            await refused.start()
+        assert not isinstance(raised.value, TimeoutError)
+        assert len(apps) == 3 and all(model_closed(app) for app in apps)
+        assert (refused.app, refused.settings, refused.base_url) == (None, None, "")
+        await refused.stop()                                     # nothing to stop

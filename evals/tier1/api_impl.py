@@ -29,6 +29,7 @@ the app production runs (`create_app`, `app_factory`) serves no OpenAPI document
 """
 
 import asyncio
+import errno
 import os
 import secrets
 import socket
@@ -50,6 +51,7 @@ __all__ = ["DeskApiTarget", "make_api_target", "serve_openapi", "target_settings
 
 ENV_FILE = REPO_ROOT / ".env"
 MODELS = ("fake", "real")
+START_TRIES = 3   # tries at a free port, for one another process took after `_free_port` freed it
 
 
 def make_api_target(
@@ -123,19 +125,30 @@ class DeskApiTarget:
 
     async def start(self) -> "DeskApiTarget":
         """Serve the app on a free loopback port, its lifespan started; a start that fails leaves
-        nothing running."""
+        nothing running. The port is free when chosen but bound only once the app is built, so a
+        port another process took meanwhile is tried again on a fresh one (`START_TRIES` in all)."""
         if self._server is not None:
             raise TargetError("the API target is already running")
-        port = _free_port()
-        base_url = f"http://127.0.0.1:{port}"
-        settings = target_settings(self.kernel, models=self.models, provider=self.provider,
-                                   passcode_hash=self._passcode_hash, base_url=base_url, api_dsn=self.api_dsn,
-                                   env_file=self._env_file)
-        app = serve_openapi(create_app(settings, clock=self.kernel.clock.now))
-        server = LoopbackServer(app, port=port, name="API")
-        await asyncio.to_thread(server.start)
-        self._server, self.settings, self.app, self.base_url = server, settings, app, base_url
-        return self
+        for tried in range(1, START_TRIES + 1):
+            port = _free_port()
+            base_url = f"http://127.0.0.1:{port}"
+            settings = target_settings(self.kernel, models=self.models, provider=self.provider,
+                                       passcode_hash=self._passcode_hash, base_url=base_url, api_dsn=self.api_dsn,
+                                       env_file=self._env_file)
+            app = serve_openapi(create_app(settings, clock=self.kernel.clock.now))
+            server = LoopbackServer(app, port=port, name="API")
+            try:
+                await asyncio.to_thread(server.start)
+            except OSError as error:
+                # The server didn't start, so its lifespan, which closes the model client create_app
+                # built, didn't run (or already closed it, after a startup timeout): close it here.
+                await app.state.runtime.model.aclose()
+                if error.errno != errno.EADDRINUSE or tried == START_TRIES:
+                    raise
+                continue
+            self._server, self.settings, self.app, self.base_url = server, settings, app, base_url
+            return self
+        raise AssertionError("unreachable: the last try returns or raises")
 
     async def stop(self) -> None:
         """Stop the app: its lifespan stops the job worker first, then closes the pools and its
@@ -171,7 +184,8 @@ def _credential(name: str, env_file: Path) -> str | None:
 
 def _free_port() -> int:
     """A free loopback port, taken before the app is built so that its `a2a_loopback` names it; the
-    server binds it again at once."""
+    server binds it again once the app is built, and `start` tries again if another process took it
+    in between."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
         return sock.getsockname()[1]
