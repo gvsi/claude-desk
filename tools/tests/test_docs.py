@@ -351,12 +351,24 @@ FIGURE_IMAGE = re.compile(r"!\[[^\[\]\n]+\]\(images/v1-architecture\.svg\)")
 
 
 def reader_subset_problems(text: str, other: str) -> list[str]:
-    """What in `text` the About pages' Markdown reader would refuse, by line: HTML other than a figure marker on
-    a line of its own, an image other than the architecture figure's line right after its marker, a heading
-    below `##`, a nested list, or a link that is neither `https://` nor `other`, the other document's file name.
-    The reader's own tests run the full parse; this catches the common breaks without the web toolchain."""
-    lines = check_docs._prose(text).split("\n")   # code spans and fenced code blanked: what they hold is text
+    """What in `text` the About pages' Markdown reader would refuse, by line: a fenced code block, HTML other than
+    a figure marker on a line of its own, an image other than the architecture figure's line right after its
+    marker, a heading below `##`, a nested list, or a link that is neither `https://` nor `other`, the other
+    document's file name. The reader's own tests run the full parse; this catches the common breaks without the
+    web toolchain."""
     problems: list[str] = []
+    # The reader has no code blocks, and the blanking below would hide what one holds, so each is refused first.
+    # The checker's own fence lines are the ones it skips, opener then closer, so every other one opens a block.
+    inside = {number for number, _, _ in check_docs._lines(text)}
+    delimiters = [number for number in range(1, text.count("\n") + 2) if number not in inside]
+    problems += [f"line {number}: a fenced code block" for number in delimiters[::2]]
+    # A code span that crosses a line break would hide the next line's start the same way; the documents
+    # never wrap one, so each is refused, and the code spans left are each inside one line.
+    unfenced = check_docs._split_fences(text)[0]
+    line_of = check_docs._line_of(unfenced)
+    problems += [f"line {line_of(span.start())}: a code span across lines"
+                 for span in check_docs._CODE_SPAN.finditer(unfenced) if "\n" in span.group(0)]
+    lines = check_docs._prose(text).split("\n")   # code spans and fenced code blanked: what they hold is text
     figure_images: set[int] = set()
     for number, line in enumerate(lines, start=1):
         marker = FIGURE_MARKER.fullmatch(line.rstrip())
@@ -433,6 +445,12 @@ IN_SUBSET = "\n".join([
     ("See [a page](http://example.com).", "a link to http://example.com"),
     ("Write [to us](mailto:desk@example.com).", "a link to mailto:desk@example.com"),
     ("See [the model].\n\n[the model]: threat-model.md", "a link to threat-model.md"),
+    # The reader has no code blocks, so nothing can hide in one.
+    ("```html\n<script>alert(1)</script>\n```", "a fenced code block"),
+    ("~~~\n### A subsection\n~~~", "a fenced code block"),
+    ("- In a list:\n\n  ```\n  ![A chart](images/chart.png)\n  ```", "a fenced code block"),
+    ("Code such as `a\n<script>alert(1)</script>` is not text.", "a code span across lines"),
+    ("Code such as `a\n### A subsection` is not text.", "a code span across lines"),
 ])
 def test_the_reader_subset_check_catches_each_break(added, problem):
     assert reader_subset_problems(IN_SUBSET, "capability-prediction.md") == []
