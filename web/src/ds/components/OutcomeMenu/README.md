@@ -36,7 +36,7 @@ As on `ApprovalCard`'s menus:
 - `OUTCOME_WORDS` (`satisfies Record<RuleMode, string>`): `auto` "Automatic", `ask` "Ask me first", `never` "Never". Used wherever a rule's outcome shows.
 - `OUTCOME_TONE`: `auto` handled, `ask` held, `never` refused.
 - `outcomePhrase(mode, limit?)`.
-- `RulesPreset = 'ask_first' | 'auto' | 'custom'` and `PRESET_WORDS`, in that order "Ask me first", "Automatic", "Custom", the options of the Desk's mode switch (a `SegmentedControl`).
+- `RulesPreset = 'ask_first' | 'auto'` and `PRESET_WORDS`, in that order "Ask me first", "Automatic": the presets the owner can start from, which the Rules page's "Start from a preset" menu offers. There is no "Custom" preset.
 
 ## Props
 

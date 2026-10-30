@@ -29,12 +29,15 @@ export function outcomePhrase(mode: RuleMode, limit?: string): string {
   return OUTCOME_WORDS[mode];
 }
 
-/** The master plan's rule presets, the Desk's mode: Ask me first, Automatic or Custom. */
-export type RulesPreset = 'ask_first' | 'auto' | 'custom';
+/**
+ * The rule presets the owner can start from: every tool asking first, or the recommended automatic
+ * rules. There is no "Custom" preset: rules the owner changes are simply the Desk's rules. The
+ * Rules page's "Start from a preset" menu offers them (built with the payment limit).
+ */
+export type RulesPreset = 'ask_first' | 'auto';
 
-/** The mode switch's options, in order, for the screen's `SegmentedControl`. */
+/** The presets' short words, in order. */
 export const PRESET_WORDS = [
   { value: 'ask_first', label: 'Ask me first' },
   { value: 'auto', label: 'Automatic' },
-  { value: 'custom', label: 'Custom' },
 ] as const satisfies readonly { value: RulesPreset; label: string }[];
