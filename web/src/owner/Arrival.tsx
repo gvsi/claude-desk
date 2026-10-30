@@ -8,7 +8,7 @@ import type { SessionEndedState } from '../app/providers.tsx';
 import { IntroDialog, type IntroErrorCode } from '../ds/index.ts';
 import { THINGS_TO_TRY } from './arrival/ideas.ts';
 import { TodayPreview } from './arrival/TodayPreview.tsx';
-import { copyTodayPath, invalidateCopy, readTodayAhead, todayPath } from './useDesks.ts';
+import { copyTodayPath, DESKS_KEY, invalidateCopy, readTodayAhead, todayPath } from './useDesks.ts';
 
 const TITLE = 'A Claude front desk for your business';
 const INTRO =
@@ -77,6 +77,9 @@ export function Arrival() {
   const openCopy = async (copy: CopyOut): Promise<boolean> => {
     const first = copy.desks[0];
     if (!first) return false;
+    // Never the last copy's Desks: a read ahead that failed would keep them, in error, and Today
+    // would show that error until its own read came in, where a first visit shows its loading page.
+    queryClient.removeQueries({ queryKey: DESKS_KEY });
     await invalidateCopy(queryClient);
     await readTodayAhead(queryClient, first.desk_id, READ_AHEAD_MS);
     if (shown.current) void navigate(todayPath(first.desk_id), { replace: true });

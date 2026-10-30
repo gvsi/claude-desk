@@ -86,26 +86,64 @@ describe('Arrival', () => {
 
     // Every page the browser draws on the way to Today: never the owner's loading page, and once the
     // preview has gone, Today already holds its held request.
-    const held = `article[aria-label="Held for you: ${rivera.decisions.held.reason_plain}"]`;
-    const seen: string[] = [];
-    const look = () => {
-      const preview = document.querySelector('.cd-today-preview') !== null;
-      if (document.querySelector('.cd-owner-state') !== null) seen.push('loading');
-      else if (!preview && document.querySelector('.cd-today') !== null) {
-        if (document.querySelector(held) === null) seen.push('today without its held request');
-        else if (document.querySelector('.cd-today__loading') !== null) seen.push('today still reading its briefing');
-        else seen.push('today');
-      } else if (preview) seen.push('preview');
-    };
-    const watch = new MutationObserver(look);
-    watch.observe(document.body, { childList: true, subtree: true });
-    onTestFinished(() => watch.disconnect());
+    const pages = watchPages();
 
     await startTheDemo(screen);
     await expect.poll(() => router.state.location.pathname).toBe(TODAY);
     await expect.element(screen.getByRole('dialog', { name: TITLE })).not.toBeInTheDocument();
-    await expect.element(screen.getByRole('article', { name: `Held for you: ${rivera.decisions.held.reason_plain}`, exact: true })).toBeVisible();
-    expect([...new Set(seen)]).toEqual(['preview', 'today']);
+    await expect.element(heldCard(screen)).toBeVisible();
+    expect(pages()).toEqual(['preview', 'today']);
+  });
+
+  it('starting_again_opens_as_a_first_visit_does', { timeout: 30_000 }, async () => {
+    const { screen, router } = await renderRoute('/', { seed: { name: 'rivera', signedIn: false } });
+    await expect.element(introDialog(screen)).toBeVisible();
+    const heading = screen.getByRole('heading', { level: 1, name: /, Maria$/ });
+    const tryAgain = screen.getByRole('button', { name: 'Try again' });
+
+    /** Starts the demo with the copy's Desks lost on the network `lost` times, and watches the way to Today. */
+    const startWithDesksLost = async (lost: number) => {
+      mockStore.inject({ route: 'desks', status: 'network', times: lost });
+      const pages = watchPages();
+      await startTheDemo(screen);
+      await expect.poll(() => router.state.location.pathname, { timeout: 5_000 }).toBe(TODAY);
+      return pages;
+    };
+    /** Start over, then the session ends: the app holds copy 2's Desks, and the passcode opens copy 1, which they don't list. */
+    const startOverThenEnd = async () => {
+      await screen.getByRole('button', { name: 'Start over' }).click();
+      await screen.getByRole('dialog', { name: 'Start over with a fresh copy?' }).getByRole('button', { name: 'Start over' }).click();
+      await expect.poll(() => router.state.location.pathname).not.toBe(TODAY);
+      await expect.element(heading).toBeVisible();
+      mockStore.reset('rivera', { signedIn: false });
+      await expect.poll(() => router.state.location.pathname).toBe('/');
+      await expect.element(introDialog(screen)).toBeVisible();
+    };
+
+    // A first visit whose Desks can't be read, ahead or on Today (two tries each): the owner's
+    // loading page, then its error, and Try again opens Today.
+    let pages = await startWithDesksLost(4);
+    await expect.element(tryAgain, { timeout: 5_000 }).toBeVisible();
+    await tryAgain.click();
+    await expect.element(heldCard(screen)).toBeVisible();
+    const firstVisit = pages();
+    expect(firstVisit).toEqual(['preview', 'loading', 'error', 'loading', 'today']);
+
+    // Starting again after the session ends, with the read ahead lost: the loading page, never the
+    // error the old copy's Desks were left in, and Today once its own read is in.
+    await startOverThenEnd();
+    pages = await startWithDesksLost(2);
+    await expect.element(heldCard(screen)).toBeVisible();
+    expect(pages()).toEqual(['preview', 'loading', 'today']);
+    expect(requests('desks')).toHaveLength(3);
+
+    // And with every read lost, just what the first visit showed.
+    await startOverThenEnd();
+    pages = await startWithDesksLost(4);
+    await expect.element(tryAgain, { timeout: 5_000 }).toBeVisible();
+    await tryAgain.click();
+    await expect.element(heldCard(screen)).toBeVisible();
+    expect(pages()).toEqual(firstVisit);
   });
 
   it('leaving_while_today_is_read_stays_where_you_went', async () => {
@@ -689,6 +727,41 @@ describe('Today', () => {
     await expectScreenBasics(arrival.screen.container, { owner: true });
   });
 });
+
+/** Rivera's held request on Today. */
+function heldCard(screen: RenderResult) {
+  return screen.getByRole('article', { name: `Held for you: ${rivera.decisions.held.reason_plain}`, exact: true });
+}
+
+/**
+ * Every page the browser draws from now until the test ends, in order, a page drawn many times in a
+ * row named once: the preview behind the intro dialog, the owner's loading page or its error, and
+ * Today, which is named for what it lacks until it holds its held request and its briefing.
+ */
+function watchPages(): () => string[] {
+  const held = `article[aria-label="Held for you: ${rivera.decisions.held.reason_plain}"]`;
+  const seen: string[] = [];
+  const pageNow = (): string | null => {
+    const state = document.querySelector('.cd-owner-state');
+    const preview = document.querySelector('.cd-today-preview') !== null;
+    if (state !== null) return state.querySelector('[role="alert"]') === null ? 'loading' : 'error';
+    if (!preview && document.querySelector('.cd-today') !== null) {
+      if (document.querySelector(held) === null) return 'today without its held request';
+      if (document.querySelector('.cd-today__loading') !== null) return 'today still reading its briefing';
+      return 'today';
+    }
+    return preview ? 'preview' : null;
+  };
+  const look = () => {
+    const page = pageNow();
+    if (page !== null && seen.at(-1) !== page) seen.push(page);
+  };
+  look();
+  const watch = new MutationObserver(look);
+  watch.observe(document.body, { childList: true, subtree: true });
+  onTestFinished(() => watch.disconnect());
+  return () => [...seen];
+}
 
 /** Whether `text` showed anywhere on the page, even for a moment, from now until the test ends. */
 function watchFor(text: string): () => boolean {
