@@ -75,10 +75,11 @@ promise	libres?(?=[\s-]+(?:(?:para|a)[\s-]+(?:(?:el|la|l[oa]s|nuestr[oa]s?|sus?|
 # condition before the whole claim is seen ("cuando su próxima cita está confirmada"). The second
 # holds the verb and the participle whatever comes before it ("la cita de Ana está confirmada",
 # "la suya está confirmada", "listo, quedó apartado") and starts at a whole-word "ya" when it is
-# there, but not with "hecho", which says what something is made of there ("el tubo está hecho de
-# cobre"). A claim inside a longer one is that claim, so one claim is one violation.
+# there, but with "hecho" only before a booking noun ("quedó hecha la reserva"), since otherwise it
+# says what something is made of ("el tubo está hecho de cobre"). A claim inside a longer one is
+# that claim, so one claim is one violation.
 booking	(?:tus?|sus?|el|la|los|las|una?|mis?|est[ea]s?|es[ea]s?|nuestr[oa]s?)[\s-]+(?:[^\W\d_]+[\s-]+)?(?:cita|reserva|visita|turno|hora)s?[\s-]+(?:ya[\s-]+)?(?:estan?|quedan?|quedo|quedaron|fu(?:e|eron)|ha[ns]?[\s-]+(?:quedado|sido))[\s-]+(?:confirmad|reservad|agendad|apartad|hech)[oa]s?
-booking	(?:ya[\s-]+)?(?:estas|estan?|quedas|quedan?|quedo|quedaste|quedaron|fu(?:e|iste|eron)|ha[ns]?[\s-]+(?:quedado|sido))[\s-]+(?:confirmad|reservad|agendad|apartad)[oa]s?
+booking	(?:ya[\s-]+)?(?:estas|estan?|quedas|quedan?|quedo|quedaste|quedaron|fu(?:e|iste|eron)|ha[ns]?[\s-]+(?:quedado|sido))[\s-]+(?:(?:confirmad|reservad|agendad|apartad)[oa]s?|hech[oa]s?(?=[\s-]+(?:(?:tus?|sus?|el|la|los|las)[\s-]+)?(?:cita|reserva|visita|turno|hora)s?(?!\w)))
 # The headline, with the noun first and a blank or a colon before the participle ("Reserva
 # confirmada.", "Visita: confirmada."), where no word comes straight before the noun: after a
 # determiner the participle only describes it ("para dejar una cita confirmada, necesito su

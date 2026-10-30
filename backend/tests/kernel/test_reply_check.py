@@ -942,6 +942,37 @@ async def test_a_reply_naming_only_the_card_passes(app, client, reviewer):
     ("Visit: scheduled.", "lex.en.booking", "Visit: scheduled"),
     ("All booked.", "lex.en.booking", "All booked"),
     ("Done, all confirmed.", "lex.en.booking", "all confirmed"),
+    # up to three words before the noun, after a determiner or in the object
+    ("Your water heater visit is booked.", "lex.en.booking", "Your water heater visit is booked"),
+    ("Your drain cleaning appointment is confirmed.", "lex.en.booking", "Your drain cleaning appointment is confi"),
+    ("The leak repair visit is confirmed.", "lex.en.booking", "The leak repair visit is confirmed"),
+    ("Our first follow-up visit is scheduled.", "lex.en.booking", "Our first follow-up visit is scheduled"),
+    ("Your drop-in visit is confirmed.", "lex.en.booking", "Your drop-in visit is confirmed"),
+    ("I've scheduled your drain cleaning visit.", "lex.en.booking", "I've scheduled your drain cleaning visit"),
+    ("Your appointment with Maria is booked.", "lex.en.booking", "Your appointment with Maria is booked"),
+    ("Your booking: confirmed.", "lex.en.booking", "Your booking: confirmed"),     # the headline after "your"
+    ("Your appointment — confirmed.", "lex.en.booking", "Your appointment — confirmed"),
+    ("Your appointment—confirmed.", "lex.en.booking", "Your appointment—confirmed"),
+    ("Your visit: all set.", "lex.en.booking", "Your visit: all set"),
+    ("Maria booked your appointment.", "lex.en.booking", "booked your appointment"),   # the object, no subject
+    ("Maria reserved a slot for you.", "lex.en.booking", "reserved a slot"),
+    # an adverb before "been" or the participle
+    ("Your appointment has already been booked.", "lex.en.booking", "Your appointment has already been booked"),
+    ("Your appointment has now been confirmed.", "lex.en.booking", "Your appointment has now been confirmed"),
+    ("Your visit has just been confirmed.", "lex.en.booking", "Your visit has just been confirmed"),
+    ("The visit's already been booked.", "lex.en.booking", "The visit's already been booked"),
+    ("Your visits have all been booked.", "lex.en.booking", "Your visits have all been booked"),
+    ("Your service call has also been scheduled.", "lex.en.booking", "Your service call has also been schedule"),
+    ("You've now been booked.", "lex.en.booking", "You've now been booked"),
+    ("It has now been booked.", "lex.en.booking", "It has now been booked"),
+    ("Everything's just been confirmed.", "lex.en.booking", "Everything's just been confirmed"),
+    ("Your appointment is officially confirmed.", "lex.en.booking", "Your appointment is officially confirmed"),
+    ("Your appointment has been successfully booked.", "lex.en.booking", "Your appointment has been successfully b"),
+    ("You're also booked with Maria.", "lex.en.booking", "You're also booked"),
+    ("It's finally booked.", "lex.en.booking", "It's finally booked"),
+    ("Booking successfully confirmed.", "lex.en.booking", "Booking successfully confirmed"),
+    ("I've got you officially booked.", "lex.en.booking", "I've got you officially booked"),
+    ("I've already booked your appointment.", "lex.en.booking", "I've already booked your appointment"),
     ("Tu cita está confirmada.", "lex.es.booking", "Tu cita está confirmada"),
     ("Su visita queda agendada.", "lex.es.booking", "Su visita queda agendada"),
     ("Su reserva ya está confirmada.", "lex.es.booking", "Su reserva ya está confirmada"),
@@ -984,6 +1015,9 @@ async def test_a_reply_naming_only_the_card_passes(app, client, reviewer):
     ("¡Listo! Turno reservado.", "lex.es.booking", "Turno reservado"),
     ("Visita: confirmada.", "lex.es.booking", "Visita: confirmada"),
     ("Perfecto, reserva hecha.", "lex.es.booking", "reserva hecha"),
+    ("Quedó hecha la reserva.", "lex.es.booking", "Quedó hecha"),                    # "hecho" before the noun
+    ("Ya quedó hecha tu reserva.", "lex.es.booking", "Ya quedó hecha"),
+    ("Ya está hecha tu reserva.", "lex.es.booking", "Ya está hecha"),
 ])
 def test_booking_claims_in_prose_are_blocked(prose, rule_id, span):
     """Only a booking card says a visit is booked: the claim in prose is a promise word, in English
@@ -1033,6 +1067,15 @@ def test_booking_claims_read_lookalike_letters():
     "Cuando las citas están confirmadas, Maria las anota.",
     "Si quedó apartado, Maria le avisa.",
     "Una vez que la reserva está hecha, le llega un mensaje.",
+    "Once your water heater visit is booked, Maria will call.",     # words before the noun
+    "We'll text you as soon as your drain cleaning visit is confirmed.",
+    "The day after your visit is booked, Maria sends a reminder.",   # a condition among the words
+    "We'll send your reminder after it is booked.",
+    "I'll call your phone when it's booked.",
+    "Once your appointment has already been confirmed, Maria will call.",   # an adverb
+    "Once we've already booked your visit, Maria will call.",
+    "Once I've just booked you, Maria will call.",
+    "Cuando quedó hecha la reserva, Maria le avisó.",
 ])
 def test_a_condition_before_a_booking_claim_passes(prose):
     """A condition straight before the claim says what happens once a booking exists, which claims
@@ -1051,6 +1094,13 @@ def test_a_condition_before_a_booking_claim_passes(prose):
     "Para dejar una cita confirmada, necesito su dirección.",   # the participle describes the noun
     "El tubo está hecho de cobre.",                     # "hecho" counts only after a booking noun
     "La reparación ya está hecha.",
+    "The cost of visits is set by the hour.",           # a phrase, not a word, before the noun
+    "I confirmed the address for your visit.",
+    "Have you booked your appointment yet?",            # the visitor's own booking, or none
+    "If you've confirmed the appointment, Maria will call.",
+    "Customers who booked a visit got a reminder.",
+    "We haven't booked your visit yet.",
+    "Have you ever booked a visit with us?",
 ])
 def test_replies_using_the_booking_words_otherwise_pass(prose):
     """The booking lines are written from a claim's parts, so the same words in another order or
