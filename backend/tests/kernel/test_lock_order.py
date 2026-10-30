@@ -7,7 +7,8 @@ Two tests race requests that once took a pair of rows in opposite orders: the se
 decision rows, and an adapter's row and the ledger head. The others record the row locks each
 transaction of a path takes (`LockLog`) and check that they come in that order: executions and
 their reconciliation, answers, cancels and reads, a verification start allowed or approved, a
-right code checked, a document link opened, a person removed, and a Desk deleted.
+right code checked, a document link opened, a person removed or given another contact, and a Desk
+deleted.
 """
 
 import asyncio
@@ -380,6 +381,20 @@ async def test_removing_a_person_runs_in_the_lock_order(app, client):
     # session's close and the write, ledgered
     assert log.transactions == [["sessions", "people", "verification_challenges", "document_links", "documents",
                                  "facts", "ledger_heads"]]
+    assert all(map(in_lock_order, log.transactions))
+
+
+async def test_changing_a_contact_runs_in_the_lock_order(app, client):
+    # Dana is verified in one session, and a code is on its way to her in another
+    copy, _ = await visitor_of(app, client)
+    await confirmed(client, copy, DANA)
+    await started(client, await open_visitor(client, copy), DANA)
+    with lock_log(app) as log:
+        await updated(client, copy, "people", {"upsert": [{"ref": "dana", "display_name": "Dana Whitfield",
+                                                           "contact": "dana.w@example.net"}]})
+    # after the Desk row: the session verified as her, her row and her live code, then the
+    # session's close and the write, ledgered
+    assert log.transactions == [["sessions", "people", "verification_challenges", "ledger_heads"]]
     assert all(map(in_lock_order, log.transactions))
 
 

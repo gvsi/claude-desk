@@ -4,9 +4,9 @@ The owner creates a Desk in its copy (`POST /desks`, the starter preset active f
 report), replaces its parts (`PUT /desks/{id}/{part}`), adds and removes people, uploads
 documents (`POST /documents`) and deletes it (`DELETE /desks/{id}`); every write goes on the
 Desk's ledger as a `desk_data` entry that names what changed and never a contact or a body. A
-removed person is no longer on record, and a deleted Desk's sessions close while its ledger
-stays. Tests run on Rivera Plumbing copies as `POST /copies` seeds them (Friday 10:04 in
-Oakland).
+removed person is no longer on record, a person given another contact keeps none of the
+sessions verified at the old one, and a deleted Desk's sessions close while its ledger stays.
+Tests run on Rivera Plumbing copies as `POST /copies` seeds them (Friday 10:04 in Oakland).
 """
 
 import json
@@ -419,10 +419,15 @@ async def test_removed_person_loses_entitlement(app, client):
     assert (await people_of(app, copy))["eve"].person_id != dana.person_id
 
 
-async def test_a_session_verified_as_a_removal_begins_is_closed_too(app, client, monkeypatch):
-    """Removing a person locks the sessions verified as them before their row, in the kernel's
-    lock order. A check that verifies another session as them in between, before the write holds
-    their row, commits; the write still closes that session, and ledgers it, like the others."""
+@pytest.mark.parametrize("change", ["remove", "recontact"])
+async def test_a_session_verified_as_a_people_write_begins_is_closed_too(app, client, monkeypatch, change):
+    """Removing a person, or giving them another contact, locks the sessions verified as them
+    before their row, in the kernel's lock order. A check that verifies another session as them in
+    between, before the write holds their row, commits; the write still closes that session, and
+    ledgers it, like the others."""
+    write, reason = (({"remove": ["dana"]}, "person_removed") if change == "remove" else (
+        {"upsert": [{"ref": "dana", "display_name": "Dana Whitfield", "contact": "dana.w@example.net"}]},
+        "contact_changed"))
     copy = await rivera(app, client)
     waiting = await open_visitor(client, copy)
     [notice] = (await started(client, waiting, "dana@example.com")).inbox
@@ -437,7 +442,7 @@ async def test_a_session_verified_as_a_removal_begins_is_closed_too(app, client,
 
     monkeypatch.setattr(desks, "verified_sessions", a_check_verifies_meanwhile)
     before = len(await entries_of(app, copy))
-    await updated(client, copy, "people", {"remove": ["dana"]})
+    await updated(client, copy, "people", write)
     [response] = raced
     assert (response.status_code, response.json()["verified"]) == (200, True), response.text
 
@@ -446,10 +451,47 @@ async def test_a_session_verified_as_a_removal_begins_is_closed_too(app, client,
     assert session.closed_at is not None
     assert [(e.event.kind, e.event.session_id, e.event.summary) for e in (await entries_of(app, copy))[before:]
             if e.event.kind == "session"] == [
-        ("session", waiting.session_id, {"session_id": waiting.session_id, "closed": True,
-                                         "reason": "person_removed"})]
+        ("session", waiting.session_id, {"session_id": waiting.session_id, "closed": True, "reason": reason})]
     response = await get_context(client, waiting.session_id, waiting.headers)
     assert (response.status_code, response.json()) == (409, {"code": "closed"})
+
+
+async def test_a_changed_contact_closes_the_sessions_verified_as_them(app, client):
+    """A session verified as Dana proved only that it read a code sent to her old contact. When
+    the owner gives her another, those sessions close (ledgered `session`, reason
+    `contact_changed`) and the code on its way to the old one stops working; she stays on record
+    at the new one. A write that keeps her contact closes nothing."""
+    copy = await rivera(app, client)
+    verified, waiting, bob = [await open_visitor(client, copy) for _ in range(3)]
+    await verified_as(client, verified, "dana@example.com")
+    await verified_as(client, bob, "bob@example.com")
+    [notice] = (await started(client, waiting, "dana@example.com")).inbox
+    before = len(await entries_of(app, copy))
+
+    await updated(client, copy, "people", {"upsert": [{"ref": "dana", "display_name": "Dana Whitfield",
+                                                       "contact": "dana.w@example.net"}]})
+    assert [(e.event.kind, e.event.session_id, e.event.summary) for e in (await entries_of(app, copy))[before:]] == [
+        ("session", verified.session_id, {"session_id": verified.session_id, "closed": True,
+                                          "reason": "contact_changed"}),
+        ("desk_data", None, {"part": "people", "refs": ["dana"]})]
+    response = await get_context(client, verified.session_id, verified.headers)
+    assert (response.status_code, response.json()) == (409, {"code": "closed"})
+    statuses = {c.session_id: c.status for c in await rows_of(app, copy.copy_id, select(VerificationChallenge))}
+    assert statuses == {verified.session_id: "consumed", bob.session_id: "consumed", waiting.session_id: "cancelled"}
+    assert (await check(client, waiting, code_in(await entry_of(client, waiting, notice)))).status_code == 422
+    # Bob's session, and the one still waiting, stay open; Dana verifies at her new contact
+    for session in (bob, waiting):
+        assert (await get_context(client, session.session_id, session.headers)).status_code == 200
+    again = await open_visitor(client, copy)
+    await verified_as(client, again, "dana.w@example.net")
+
+    # the same contact written another way, or none, keeps her contact, and her sessions stay open
+    before = len(await entries_of(app, copy))
+    for contact in (" Dana.W@Example.NET ", None):
+        await updated(client, copy, "people", {"upsert": [{"ref": "dana", "display_name": "Dana Whitfield",
+                                                           "contact": contact}]})
+    assert [e.event.kind for e in (await entries_of(app, copy))[before:]] == ["desk_data", "desk_data"]
+    assert (await get_context(client, again.session_id, again.headers)).status_code == 200
 
 
 async def answered(client: httpx.AsyncClient, copy: Rivera, decision_id: str, answer: str) -> ApprovalResult:

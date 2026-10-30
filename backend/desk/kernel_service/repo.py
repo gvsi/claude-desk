@@ -12,12 +12,12 @@ Row locks are taken in one order, so no two kernel transactions wait on each oth
    breaker's strike writes it under that lock), by a take-over or hand-back, by a verification
    route, in T2 by the execution of an adapter that writes the session's own rows
    (`locks_session`, a verification start) on either path, and by the owner's writes that close
-   sessions (`desks.verified_sessions` when a person is removed, a Desk's deletion); `FOR SHARE`
-   by an allow's execution in T1, and in T2 by the execution of any other adapter, on either
-   path, so a Desk's deletion, which closes the session `FOR UPDATE`, commits before T2 takes the
-   row or waits until T2 commits; written by a visitor's or agent's own requests
-   (`last_seen_at`, `last_language`), the reply check's only at its end, just before its ledger
-   entry, so it holds no lock on the row while the soft-promise check runs;
+   sessions (`desks.verified_sessions` when a person is removed or given another contact, a
+   Desk's deletion); `FOR SHARE` by an allow's execution in T1, and in T2 by the execution of any
+   other adapter, on either path, so a Desk's deletion, which closes the session `FOR UPDATE`,
+   commits before T2 takes the row or waits until T2 commits; written by a visitor's or agent's
+   own requests (`last_seen_at`, `last_language`), the reply check's only at its end, just before
+   its ledger entry, so it holds no lock on the row while the soft-promise check runs;
 2. the decision row, `FOR UPDATE`: lazy expiry, an answer, a cancel, each step of an execution,
    reconciliation;
 3. the execution row: inserted with the intent, `FOR UPDATE` in T2, T3 and reconciliation;
@@ -66,11 +66,12 @@ the decision to commit, up to the review's timeout (`decisions.REVIEW_TIMEOUT_S`
 bumps the generation, and an allow from the old generation expires at `/execute`. No other
 kernel call holds the row across a model call.
 
-A person's removal (`desks.put_people`) is the one step that may ask for an earlier row, and only
-for a session a check verified as the person after the write's session step and before it held
-their row: it takes that session too once it holds the people, so the session closes with the
-rest. That waits on nothing that waits on the write, since the check has committed and nothing
-that holds a verified session's row asks for a Desk row, another session, a person or a challenge.
+A person's removal or new contact (`desks.put_people`) is the one step that may ask for an
+earlier row, and only for a session a check verified as the person after the write's session
+step and before it held their row: it takes that session too once it holds the people, so the
+session closes with the rest. That waits on nothing that waits on the write, since the check has
+committed and nothing that holds a verified session's row asks for a Desk row, another session, a
+person or a challenge.
 
 Activation (`activation.confirm`) holds no session, decision or execution row and starts at step
 4: the Desk's `versions` advisory lock, then its `policy_versions` rows `FOR UPDATE`, then the

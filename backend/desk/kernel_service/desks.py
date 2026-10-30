@@ -521,22 +521,24 @@ async def _spoken_for(ctx: KernelCtx, desk_id: str) -> set[str]:
 
 async def put_people(ctx: KernelCtx, desk_row: Desk, body: DeskPeopleRequest) -> list[str]:
     """People upserted by `ref` and removed. A new person needs a contact, and `contact: None` keeps
-    the one on record; a changed contact cancels the person's live verification code, which went
-    to the old one. A removed person (`removed_at`) is never on record again, and their ref isn't
-    reused (409): their live code is cancelled, the sessions verified as them close (ledgered
-    `session`), their documents become the owner's alone, and the links that released documents to
-    them and haven't opened are void. Removing them again changes nothing; an unknown ref is 422.
+    the one on record. A changed contact cancels the person's live verification code, which went
+    to the old one, and closes the sessions verified as them (ledgered `session`, reason
+    `contact_changed`), which proved only that they could read the old one. A removed person
+    (`removed_at`) is never on record again, and their ref isn't reused (409): their live code is
+    cancelled, the sessions verified as them close (ledgered `session`, reason `person_removed`),
+    their documents become the owner's alone, and the links that released documents to them and
+    haven't opened are void. Removing them again changes nothing; an unknown ref is 422.
 
     Its locks come in the kernel's order (`repo.py`), after the Desk row the caller holds: the open
-    sessions verified as the people it removes (`verified_sessions`), then the Desk's people `FOR
-    UPDATE` in ID order, as verification locks them, then their challenges, so a code can't be sent
-    to a contact as it changes or its person goes; then what removed people leave
-    (`_off_the_record`)."""
+    sessions verified as the people it removes or gives another contact (`verified_sessions`), then
+    the Desk's people `FOR UPDATE` in ID order, as verification locks them, then their challenges,
+    so a code can't be sent to a contact as it changes or its person goes; then what the write
+    takes off the record (`_off_the_record`)."""
     check_refs([*(upsert.ref for upsert in body.upsert), *body.remove])
     if any(upsert.contact is not None and not valid_contact(upsert.contact) for upsert in body.upsert):
         raise InvalidSeed("contact")
     now = ctx.clock.now()
-    await verified_sessions(ctx, desk_row, await _on_record(ctx, desk_row, body.remove))
+    await verified_sessions(ctx, desk_row, await _leaving(ctx, desk_row, body))
     people = {row.ref: row for row in await ctx.db.scalars(ctx.repo.scoped(select(Person).where(
         Person.desk_id == desk_row.desk_id).order_by(Person.person_id).with_for_update()))}
     recontacted: list[str] = []           # people whose code went to a contact no longer on record
@@ -573,19 +575,23 @@ async def put_people(ctx: KernelCtx, desk_row: Desk, body: DeskPeopleRequest) ->
     except IntegrityError:                # contacts swapped in one write meet each other's first
         raise KernelFailure(409, "conflict", "contact_on_record") from None
     await cancel_challenges(ctx, [*recontacted, *(row.person_id for row in removed)], now)
-    await _off_the_record(ctx, desk_row, [row.person_id for row in removed], now)
+    await _off_the_record(ctx, desk_row, now, removed=[row.person_id for row in removed], recontacted=recontacted)
     return sorted([*(upsert.ref for upsert in body.upsert), *(row.ref for row in removed)])
 
 
-async def _on_record(ctx: KernelCtx, desk_row: Desk, refs: Sequence[str]) -> list[str]:
-    """The IDs of the Desk's people on record under `refs`, read without a lock. Only an owner's
-    write to people changes who is on record, and it holds the Desk row, as the caller does, so
-    what this reads holds until the caller commits."""
+async def _leaving(ctx: KernelCtx, desk_row: Desk, body: DeskPeopleRequest) -> list[str]:
+    """The IDs of the Desk's people on record whom `body` removes or gives another contact, in ID
+    order, read without a lock. Only an owner's write to people changes who is on record and at
+    what contact, and it holds the Desk row, as the caller does, so what this reads holds until the
+    caller commits."""
+    contacts = {upsert.ref: normalize_contact(upsert.contact) for upsert in body.upsert if upsert.contact is not None}
+    refs = [*body.remove, *contacts]
     if not refs:
         return []
-    return list((await ctx.db.scalars(ctx.repo.scoped(select(Person.person_id).where(
-        Person.desk_id == desk_row.desk_id, Person.ref.in_(refs), Person.removed_at.is_(None))
-        .order_by(Person.person_id)))).all())
+    rows = (await ctx.db.execute(ctx.repo.scoped(select(Person.person_id, Person.ref, Person.contact_norm).where(
+        Person.desk_id == desk_row.desk_id, Person.ref.in_(refs), Person.removed_at.is_(None))))).all()
+    return sorted(person_id for person_id, ref, contact_norm in rows
+                  if ref in body.remove or contacts[ref] != contact_norm)
 
 
 async def verified_sessions(ctx: KernelCtx, desk_row: Desk, person_ids: Sequence[str]) -> list[ActorSession]:
@@ -599,10 +605,11 @@ async def verified_sessions(ctx: KernelCtx, desk_row: Desk, person_ids: Sequence
         .execution_options(populate_existing=True)))).all())
 
 
-async def _off_the_record(ctx: KernelCtx, desk_row: Desk, person_ids: Sequence[str], now: datetime) -> None:
-    """What removed people leave: the sessions verified as them closed, each ledgered `session`,
-    their unopened document links void, with their facts expired, and their documents the owner's
-    alone (no record owner; `document:*` facts relabelled `["owner"]`).
+async def _off_the_record(ctx: KernelCtx, desk_row: Desk, now: datetime, *, removed: Sequence[str],
+                          recontacted: Sequence[str]) -> None:
+    """What a people write takes off the record: the sessions verified as the people it removes or
+    gives another contact closed, each ledgered `session` with its reason (`person_removed`,
+    `contact_changed`); and what removed people leave (`_owner_only`).
 
     Every row is locked before the ledger head, which is taken last, for all the people at once.
     Their sessions come first: `put_people` locked them before the people, and they are taken again
@@ -611,12 +618,28 @@ async def _off_the_record(ctx: KernelCtx, desk_row: Desk, person_ids: Sequence[s
     waits on this write: its check has committed, and nothing that holds a verified session's row
     asks for a Desk row, another session, a person or a challenge, all this write holds by then.
     Holding the sessions, a release running in one has committed its link before the links are
-    voided. Then every one's links, as an open of one holds its link and then its fact and the
-    ledger head; then their documents; then the links' facts and the documents'; then the closes
-    are ledgered."""
-    if not person_ids:
+    voided. Then the removed people's links, documents and facts; then the closes are ledgered."""
+    if not removed and not recontacted:
         return
-    sessions = await verified_sessions(ctx, desk_row, person_ids)
+    sessions = await verified_sessions(ctx, desk_row, [*removed, *recontacted])
+    if removed:
+        await _owner_only(ctx, desk_row, removed)
+    for session in sessions:
+        session.closed_at = now
+    await ctx.db.flush()
+    for session in sessions:
+        reason = "person_removed" if session.person_id in removed else "contact_changed"
+        await ledger.append(ctx, copy_id=desk_row.copy_id, desk_id=desk_row.desk_id, event=LedgerEvent(
+            kind="session", origin="kernel", session_id=session.session_id,
+            summary={"session_id": session.session_id, "closed": True, "reason": reason}))
+
+
+async def _owner_only(ctx: KernelCtx, desk_row: Desk, person_ids: Sequence[str]) -> None:
+    """What removed people leave, once their sessions are held: their unopened document links void,
+    with their facts expired, and their documents the owner's alone (no record owner; `document:*`
+    facts relabelled `["owner"]`). Every one's links first, as an open of one holds its link and
+    then its fact and the ledger head; then their documents; then the links' facts and the
+    documents'."""
     voided = await adapters.release_document.void_links(ctx, desk_row.desk_id, person_ids=person_ids)
     documents = (await ctx.db.scalars(ctx.repo.scoped(select(Document).where(
         Document.desk_id == desk_row.desk_id, Document.record_owner_person_id.in_(person_ids))
@@ -632,13 +655,6 @@ async def _off_the_record(ctx: KernelCtx, desk_row: Desk, person_ids: Sequence[s
         raise RuntimeError("document_fact_missing")
     for fact in facts:
         fact.readers, fact.record_owner = ["owner"], None
-    for session in sessions:
-        session.closed_at = now
-    await ctx.db.flush()
-    for session in sessions:
-        await ledger.append(ctx, copy_id=desk_row.copy_id, desk_id=desk_row.desk_id, event=LedgerEvent(
-            kind="session", origin="kernel", session_id=session.session_id,
-            summary={"session_id": session.session_id, "closed": True, "reason": "person_removed"}))
 
 
 async def cancel_challenges(ctx: KernelCtx, person_ids: Sequence[str], now: datetime) -> None:
