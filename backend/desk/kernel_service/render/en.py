@@ -63,6 +63,7 @@ OWNER_PREVIEWS: dict[str, str] = {
     "lead": "New lead",
     "callback": "Callback requested",
     "rules": "Your rules need checking",
+    "public_page": "Hidden from your public page",
 }
 
 

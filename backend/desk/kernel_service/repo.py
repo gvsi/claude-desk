@@ -54,7 +54,9 @@ ledger head: its own `policy` entry first, then the hooks' `payment` events. A d
 key's advisory lock before the `versions` lock. The startup rebuild of a version an earlier kernel
 stored (`activation.rebuild_version`) takes the same `versions` lock and active row `FOR UPDATE`,
 then the ledger head; the owner alert it writes when it can't rebuild is an insert under a fresh
-key.
+key. An owner write refused for a document canary (`desks.refuse_public_canaries`) appends in its
+`persist` alone, holding nothing else, to each Desk it names in ID order; the public page's owner
+alert when it withholds a field is an insert under a fresh key, in a read that locks nothing.
 
 A route refuses with `KernelFailure`. Its answer is always a `KernelError{code}`; when the refusal
 must be on record (a ledgered auth failure, an allow that expired), `persist` writes that record

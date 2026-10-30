@@ -29,9 +29,10 @@ import math
 import re
 import secrets
 import unicodedata
-from collections.abc import Awaitable, Callable, Collection, Iterable, Sequence
+from collections.abc import Awaitable, Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta, tzinfo
+from functools import partial
 from typing import Any
 from zoneinfo import available_timezones
 
@@ -50,7 +51,7 @@ from desk.db.models import Fact as FactRow
 from desk.kernel_api import (DeskAnsweringRequest, DeskBusinessRequest, DeskCalendarRequest, DeskCharterRequest,
                              DeskCreated, DeskHoursRequest, DeskNotificationsRequest, DeskPeopleRequest,
                              DeskPricesRequest, DeskUpdated, DocumentCreated, KernelRequest)
-from desk.kernel_service import adapters, auth, clock, ledger
+from desk.kernel_service import adapters, auth, clock, labels, ledger
 from desk.kernel_service.auth import AuthError, Named
 from desk.kernel_service.labels import fact_row
 from desk.kernel_service.repo import REF, KernelCtx, KernelFailure, new_id, route_template, storable
@@ -251,16 +252,27 @@ async def create_desk(ctx: KernelCtx, copy_id: str, business: BusinessSeed, desk
     native profile, a public `charter:<key>` fact per charter claim plus `charter:hours`, and a
     `desk_data` ledger entry. A new Desk starts with Answering off unless `answering` is set (the
     Rivera seed is live at once). MCP tools come only through a pinned connect (Plan 01c).
+
+    What the public page and the Desk's public address (its slug, made from the business's name)
+    would show is checked for the copy's document canaries first (`refuse_public_canaries`, part
+    `desk`): the new business's name, display name and brand, or an existing business's stored
+    name, and the Desk's name.
     """
-    validate_business(business)
-    validate_desk(desk)
     copy = ctx.bind(copy_id)
     now = ctx.clock.now()
+    existing = None
     if business.existing_business_id is not None:
         existing = (await ctx.db.execute(copy.scoped(select(Business.business_id, Business.name).where(
             Business.business_id == business.existing_business_id)))).one_or_none()
         if existing is None:   # row-level security hides every other copy's businesses
             raise KernelFailure(404, "not_found", "unknown_business")
+    shown: dict[str, object] = {"business.name": existing.name} if existing is not None else {
+        "business.name": business.name, "business.owner_display_name": business.owner_display_name,
+        "business.brand": business.brand}
+    await refuse_public_canaries(ctx, "desk", shown | {"desk.name": desk.name})
+    validate_business(business)
+    validate_desk(desk)
+    if existing is not None:
         business_id, business_name = existing
     else:
         business_id, business_name = new_id("biz"), business.name
@@ -331,8 +343,42 @@ async def ledger_desk_data(ctx: KernelCtx, desk_row: Desk, summary: dict[str, An
                         event=LedgerEvent(kind="desk_data", origin="kernel", summary=summary))
 
 
+async def refuse_public_canaries(ctx: KernelCtx, part: str, values: Mapping[str, object],
+                                 desk_id: str | None = None) -> None:
+    """Refuses owner input that the public page shows to anyone (`values`, by the request's field
+    names) when it holds the canary of any of the copy's documents, even split or disguised
+    (`labels.canary_fields`): 422 `invalid`, ledgered `desk_data` `{part, refused: "canary",
+    fields, fact_ids}` (the fields and the documents' `document:<id>` facts, never the text) after
+    the request's transaction has rolled back, on Desk `desk_id`, or, for a Desk not yet created,
+    on the Desks whose documents it held. Runs before the write it checks."""
+    canaries = await labels.copy_canaries(ctx)
+    fields = labels.canary_fields(values, canaries)
+    if not fields:
+        return
+    found = labels.find_canaries_in(list(values.values()), canaries)
+    desk_ids = [desk_id] if desk_id is not None else sorted(set(await ctx.db.scalars(ctx.repo.scoped(
+        select(Document.desk_id).where(Document.document_id.in_(found))))))
+    summary = {"part": part, "refused": "canary", "fields": fields,
+               "fact_ids": [f"document:{document_id}" for document_id in found]}
+    raise KernelFailure(422, "invalid", "public_canary", persist=partial(
+        _ledger_refusal, copy_id=ctx.copy_id, desk_ids=desk_ids, summary=summary))
+
+
+async def _ledger_refusal(ctx: KernelCtx, *, copy_id: str, desk_ids: Sequence[str], summary: dict[str, Any]) -> None:
+    """A refused owner write's `desk_data` entry on each of `desk_ids`, in ID order, in the fresh
+    transaction `KernelFailure.persist` runs in."""
+    ctx.bind(copy_id)
+    for desk_id in desk_ids:
+        await ledger.append(ctx, copy_id=copy_id, desk_id=desk_id,
+                            event=LedgerEvent(kind="desk_data", origin="kernel", summary=summary))
+
+
 async def put_business(ctx: KernelCtx, desk_row: Desk, body: DeskBusinessRequest) -> list[str]:
-    """The Desk's business, replaced: its name, the owner's display name, time zone and brand."""
+    """The Desk's business, replaced: its name, the owner's display name, time zone and brand. The
+    public page shows all but the time zone, so a document's canary in them is refused first
+    (`refuse_public_canaries`)."""
+    await refuse_public_canaries(ctx, "business", {"name": body.name, "owner_display_name": body.owner_display_name,
+                                                   "brand": body.brand}, desk_row.desk_id)
     validate_business(BusinessSeed(**body.model_dump()))
     business = (await ctx.db.scalars(ctx.repo.scoped(select(Business).where(
         Business.business_id == desk_row.business_id).with_for_update()))).one()

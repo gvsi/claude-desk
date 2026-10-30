@@ -331,6 +331,18 @@ def find_canaries_in(value: object, canaries: Mapping[str, str]) -> list[str]:
     return [document_id for document_id in canaries if document_id in found]
 
 
+def canary_fields(values: Mapping[str, object], canaries: Mapping[str, str]) -> list[str]:
+    """The fields of `values` (field name → value) that hold a canary of `canaries`, each read on
+    its own (`find_canaries_in`), in the order `values` lists them; or every field, when the
+    others hold one only read together, one after another (a canary split between neighbouring
+    fields)."""
+    if not canaries:
+        return []
+    held = [field for field, value in values.items() if find_canaries_in(value, canaries)]
+    rest = [value for field, value in values.items() if field not in held]
+    return list(values) if find_canaries_in(rest, canaries) else held
+
+
 def fact_row(copy_id: str, desk_id: str, fact: Fact, created_at: datetime, *, session_id: str | None = None,
              action_id: str | None = None) -> FactRow:
     """The `facts` row for `fact`; an adapter's fact also names the session and action behind it."""
