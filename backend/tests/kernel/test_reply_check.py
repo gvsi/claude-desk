@@ -972,6 +972,11 @@ async def test_a_reply_naming_only_the_card_passes(app, client, reviewer):
     ("It's finally booked.", "lex.en.booking", "It's finally booked"),
     ("Booking successfully confirmed.", "lex.en.booking", "Booking successfully confirmed"),
     ("I've got you officially booked.", "lex.en.booking", "I've got you officially booked"),
+    ("We've already got you booked.", "lex.en.booking", "We've already got you booked"),   # before "got" or "have"
+    ("We already have you booked.", "lex.en.booking", "We already have you booked"),
+    ("We now have you booked.", "lex.en.booking", "We now have you booked"),
+    ("I have already got you booked.", "lex.en.booking", "I have already got you booked"),
+    ("We've also got you down.", "lex.en.booking", "We've also got you down"),
     ("I've already booked your appointment.", "lex.en.booking", "I've already booked your appointment"),
     ("Tu cita está confirmada.", "lex.es.booking", "Tu cita está confirmada"),
     ("Su visita queda agendada.", "lex.es.booking", "Su visita queda agendada"),
@@ -1075,6 +1080,8 @@ def test_booking_claims_read_lookalike_letters():
     "Once your appointment has already been confirmed, Maria will call.",   # an adverb
     "Once we've already booked your visit, Maria will call.",
     "Once I've just booked you, Maria will call.",
+    "Once we've already got you booked, Maria will call.",
+    "If we already have you booked, I can look it up.",
     "Cuando quedó hecha la reserva, Maria le avisó.",
 ])
 def test_a_condition_before_a_booking_claim_passes(prose):
