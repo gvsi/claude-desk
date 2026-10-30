@@ -55,6 +55,14 @@ describe('assertCleanCopy', () => {
     expect(check('<p data-copy="user">PLEASE CALL ME</p>')).not.toThrow();
   });
 
+  it('allows_a_file_size_in_kilobytes', () => {
+    // Settings › Knowledge says how big a file can be, as the board writes it.
+    expect(check('<p>Text or Markdown files, up to 100 KB.</p>')).not.toThrow();
+    expect(check('<p>That file is too big. Add files up to 100 KB.</p>')).not.toThrow();
+    // Only the unit: a longer run of capitals around it still fails.
+    expect(check('<p>Up to 100 KBS</p>')).toThrow(/all caps "KBS"/);
+  });
+
   it('allows_the_reading_pages_acronyms', () => {
     // The acronyms the About this prototype documents use, each as they write it.
     for (const word of ['AP2', 'API', 'SymCC', 'CEO', 'CI', 'MCP', 'URL', 'US']) {

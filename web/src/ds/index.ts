@@ -129,6 +129,10 @@ export { CodeBlock, type CodeBlockProps } from './components/CodeBlock/CodeBlock
 export { CopyField, type CopyFieldProps } from './components/CopyField/CopyField.tsx';
 export { COPY_RESULT_COPY, copyResultLine, useCopyText, type CopyState, type CopyWhat } from './components/CopyField/useCopyText.ts';
 
+// Knowledge
+export { KnowledgeList, type KnowledgeListProps, type KnowledgeRowView } from './components/KnowledgeList/KnowledgeList.tsx';
+export { KnowledgeAdd, type KnowledgeAddProps, type KnowledgeAddedView } from './components/KnowledgeAdd/KnowledgeAdd.tsx';
+
 // Share
 export { ShareCard, type ShareCardProps } from './components/ShareCard/ShareCard.tsx';
 export { CopyList, type CopyListItem, type CopyListProps } from './components/CopyList/CopyList.tsx';

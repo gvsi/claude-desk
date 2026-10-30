@@ -79,10 +79,11 @@ export const REFERENCE_BOARDS = [
   'N-R2-Inbox-Sheet-Owner',
   // Share: the link, the printable card and the ready-made words.
   'N-Run2-Share',
-  // Settings, signed on 2026-10-30: General, deleting a Desk over it, Notifications, Billing, and
-  // General on a phone, as a page taller than the phone's window.
+  // Settings, signed on 2026-10-30: General, deleting a Desk over it, Knowledge, Notifications,
+  // Billing, and General on a phone, as a page taller than the phone's window.
   'N-Run2-Settings-General',
   'N-Run2-Settings-DeleteDesk',
+  'N-Run2-Settings-Knowledge',
   'N-Run2-Settings-Notifications',
   'N-Run2-Settings-Billing',
   'N-Run2-Settings-Phone',
@@ -133,6 +134,7 @@ const BOARD_WINDOWS: Readonly<Partial<Record<ReferenceBoard, Exclude<BoardViewpo
   'N-Run2-Share': 'laptop',
   'N-Run2-Settings-General': 'laptop',
   'N-Run2-Settings-DeleteDesk': 'laptop',
+  'N-Run2-Settings-Knowledge': 'laptop',
   'N-Run2-Settings-Notifications': 'laptop',
   'N-Run2-Settings-Billing': 'laptop',
   'N-Run2-Settings-Phone': 'phone-900',

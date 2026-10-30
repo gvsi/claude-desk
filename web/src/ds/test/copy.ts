@@ -23,6 +23,7 @@ const ARROW = new RegExp(`${ARROW_CHARACTERS.source}|->`, 'u');
  * Words written in capitals that stay in capitals, among them the agents page's "RFC 8785 JSON".
  * Plurals of these ("PDFs", "APIs") pass too, because only the run of two or more capitals is looked
  * up. "IA" is AI in Spanish, as the public page's disclosure says it ("una IA que responde por …").
+ * "KB" is the unit of a file's size, as Settings › Knowledge writes it ("up to 100 KB").
  */
 export const COPY_ACRONYMS: ReadonlySet<string> = new Set([
   'I',
@@ -42,6 +43,7 @@ export const COPY_ACRONYMS: ReadonlySet<string> = new Set([
   'US',
   'RFC',
   'JSON',
+  'KB',
 ]);
 
 /**

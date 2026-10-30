@@ -1,0 +1,201 @@
+import type { Meta, StoryObj } from '@storybook/react-vite';
+import { expect, fn, within } from 'storybook/test';
+
+import { expectComputed } from '../../test/expectComputed.ts';
+import { KnowledgeAdd } from './KnowledgeAdd.tsx';
+
+/** The note as N-Run2-Settings-Knowledge writes it. */
+const NOTE = 'We don’t service tankless water heaters older than 15 years. Suggest a replacement quote instead.';
+
+const HINT = 'Up to a few paragraphs. Only you can see it until you make it public.';
+const FILES_LINE = 'Text or Markdown files, up to 100 KB.';
+const ADDED_LINE = 'Added. Only you can see it until you make it public.';
+const TOO_BIG = 'That file is too big. Add files up to 100 KB.';
+
+const PRIMARY = 'rgba(250, 249, 245, 0.92)';
+const SECONDARY = 'rgba(250, 249, 245, 0.64)';
+
+const meta = {
+  title: 'Settings/KnowledgeAdd',
+  component: KnowledgeAdd,
+  args: { note: NOTE, onNoteChange: fn(), onAddNote: fn(), onAddFile: fn() },
+  render: (args) => (
+    <div style={{ maxWidth: 720 }}>
+      <KnowledgeAdd {...args} />
+    </div>
+  ),
+  parameters: { layout: 'padded', canvas: 'N-Run2-Settings-Knowledge' },
+} satisfies Meta<typeof KnowledgeAdd>;
+
+export default meta;
+
+type Story = StoryObj<typeof meta>;
+
+/** The hidden file input "Add a file" opens. */
+function fileInput(root: HTMLElement): HTMLInputElement {
+  const input = root.querySelector<HTMLInputElement>('input[type="file"]');
+  if (input === null) throw new Error('no file input');
+  return input;
+}
+
+export const AddSomething: Story = {
+  name: 'Add something',
+  parameters: { canvasNote: 'The form at the Knowledge column’s 720 px, the note typed as the board writes it, before anything is added.' },
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
+    // knowledge_form_is_a_named_section: its heading names it; nothing was added yet.
+    const heading = canvas.getByRole('heading', { level: 2, name: 'Add something' });
+    canvas.getByRole('region', { name: 'Add something' });
+    await expect(canvas.queryByRole('region', { name: 'Added' })).toBeNull();
+
+    // The note: a text area named "A note", holding what was typed, described by its hint.
+    const note = canvas.getByRole('textbox', { name: 'A note' });
+    await expect(note.tagName).toBe('TEXTAREA');
+    await expect(note).toHaveValue(NOTE);
+    await expect(note).toHaveAccessibleDescription(HINT);
+    await expect(Math.round(note.getBoundingClientRect().top - heading.getBoundingClientRect().bottom)).toBe(12 + 20 + 6);
+
+    // The two adds, 12 px under the hint, at a screen's main size and 8 px apart: "Add a note" the
+    // view's one primary, "Add a file" secondary and described by the line about files under them.
+    const addNote = canvas.getByRole('button', { name: 'Add a note' });
+    const addFile = canvas.getByRole('button', { name: 'Add a file' });
+    const hint = canvas.getByText(HINT);
+    await expect(Math.round(addNote.getBoundingClientRect().top - hint.getBoundingClientRect().bottom)).toBe(12);
+    expectComputed(addNote, { height: '40px', backgroundColor: 'rgb(239, 236, 228)', color: 'rgb(28, 27, 25)' });
+    expectComputed(addFile, { height: '40px', backgroundColor: 'rgba(250, 249, 245, 0.1)', color: PRIMARY });
+    await expect(Math.round(addFile.getBoundingClientRect().left - addNote.getBoundingClientRect().right)).toBe(8);
+    await expect(addFile).toHaveAccessibleDescription(FILES_LINE);
+    const filesLine = canvas.getByText(FILES_LINE);
+    expectComputed(filesLine, { fontSize: '12px', lineHeight: '17px', color: SECONDARY });
+    await expect(Math.round(filesLine.getBoundingClientRect().top - addNote.getBoundingClientRect().bottom)).toBe(12);
+
+    // knowledge_note_is_the_screens: typing passes the raw text up; "Add a note" asks the screen to add it.
+    await userEvent.type(note, 'x');
+    await expect(args.onNoteChange).toHaveBeenLastCalledWith(`${NOTE}x`);
+    await userEvent.click(addNote);
+    await expect(args.onAddNote).toHaveBeenCalledTimes(1);
+
+    // knowledge_file_goes_to_the_screen: "Add a file" opens the picker for text and Markdown files,
+    // and the file picked goes to the screen as it is, unread.
+    const input = fileInput(canvasElement);
+    await expect(input).toHaveAttribute('accept', '.txt,.md,text/plain,text/markdown');
+    let opened = 0;
+    input.addEventListener(
+      'click',
+      (event) => {
+        // The test only counts the click: a real picker would open here.
+        event.preventDefault();
+        opened += 1;
+      },
+      { once: true },
+    );
+    await userEvent.click(addFile);
+    await expect(opened).toBe(1);
+    const file = new File(['# Water heaters\n\nWe service tank and tankless models.'], 'water-heaters.md', { type: 'text/markdown' });
+    await userEvent.upload(input, file);
+    await expect(args.onAddFile).toHaveBeenCalledTimes(1);
+    await expect(args.onAddFile).toHaveBeenCalledWith(file);
+    // The input is emptied, so picking the same file again adds it again.
+    await expect(input.files?.length ?? 0).toBe(0);
+  },
+};
+
+export const Added: Story = {
+  args: { note: '', added: { readers: ['owner'], onPublicChange: fn() } },
+  parameters: { canvasNote: 'The board’s “Added” card under the form, its switch off: the kernel stored the note for the owner only.' },
+  play: async ({ args, canvas, userEvent }) => {
+    const card = canvas.getByRole('region', { name: 'Added' });
+    // 20 px under the form's last line, as the board draws it: 121 px, its words 20 px in.
+    const filesLine = canvas.getByText(FILES_LINE);
+    await expect(Math.round(card.getBoundingClientRect().top - filesLine.getBoundingClientRect().bottom)).toBe(20);
+    await expect(Math.round(card.getBoundingClientRect().height)).toBe(121);
+    expectComputed(card, { backgroundColor: 'rgba(250, 249, 245, 0.03)', paddingTop: '20px', paddingLeft: '20px' });
+    await expect(within(card).getByRole('status')).toHaveTextContent(ADDED_LINE);
+
+    // knowledge_switch_follows_the_returned_label: off while the returned readers are the owner's.
+    const toggle = within(card).getByRole('switch', { name: 'Customers can see this' });
+    await expect(toggle).toHaveAccessibleDescription('Claude can quote it to visitors when it answers.');
+    await expect(toggle).toHaveAttribute('aria-checked', 'false');
+    // The switch's row starts 12 px under the line.
+    const line = within(card).getByRole('status');
+    await expect(Math.round(toggle.getBoundingClientRect().top - line.getBoundingClientRect().bottom)).toBe(12);
+    // Turning it asks the screen to make the item public, and the switch stays as the readers say
+    // until the screen passes back what the kernel returned.
+    await userEvent.click(toggle);
+    await expect(args.added?.onPublicChange).toHaveBeenCalledWith(true);
+    await expect(toggle).toHaveAttribute('aria-checked', 'false');
+  },
+};
+
+export const AddedPublic: Story = {
+  name: 'Added, customers can see it',
+  args: { note: '', added: { readers: ['public'], onPublicChange: fn() } },
+  parameters: {
+    canvas: 'none',
+    canvasNote: 'N-Run2-Settings-Knowledge’s “Added” card once the kernel returned the item with public readers: the switch on, and the line says only “Added.”, since only the owner seeing it is no longer true. The board draws only the off state.',
+  },
+  play: async ({ args, canvas, userEvent }) => {
+    // added_line_stays_true: once customers can see it, the line no longer says only the owner can.
+    await expect(canvas.getByRole('status')).toHaveTextContent(/^Added\.$/);
+    const toggle = canvas.getByRole('switch', { name: 'Customers can see this' });
+    await expect(toggle).toHaveAttribute('aria-checked', 'true');
+    await userEvent.click(toggle);
+    await expect(args.added?.onPublicChange).toHaveBeenCalledWith(false);
+  },
+};
+
+export const AddingAFile: Story = {
+  name: 'Adding a file',
+  args: { note: '', busy: 'file' },
+  parameters: { canvas: 'none', canvasNote: 'N-Run2-Settings-Knowledge’s form while a file is being added: “Add a file” spins and “Add a note” waits.' },
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
+    const addFile = canvas.getByRole('button', { name: 'Add a file' });
+    const addNote = canvas.getByRole('button', { name: 'Add a note' });
+    await expect(addFile).toHaveAttribute('aria-busy', 'true');
+    await expect(addNote).toHaveAttribute('aria-disabled', 'true');
+    await expect(addNote).not.toHaveAttribute('aria-busy');
+    // Neither does anything while it waits, and no picker opens.
+    let opened = 0;
+    fileInput(canvasElement).addEventListener('click', (event) => {
+      event.preventDefault();
+      opened += 1;
+    });
+    await userEvent.click(addFile);
+    await userEvent.click(addNote);
+    await expect(opened).toBe(0);
+    await expect(args.onAddNote).not.toHaveBeenCalled();
+  },
+};
+
+export const FileTooBig: Story = {
+  name: 'File too big',
+  args: { note: '', error: TOO_BIG },
+  parameters: { canvas: 'none', canvasNote: 'N-Run2-Settings-Knowledge’s form after a file over 100 KB: the screen’s line under the line about files.' },
+  play: async ({ canvas }) => {
+    // The screen's words, read out at once, 12 px under the line about files.
+    const alert = canvas.getByRole('alert');
+    await expect(alert).toHaveTextContent(TOO_BIG);
+    const filesLine = canvas.getByText(FILES_LINE);
+    await expect(Math.round(alert.getBoundingClientRect().top - filesLine.getBoundingClientRect().bottom)).toBe(12);
+  },
+};
+
+export const Phone: Story = {
+  args: { added: { readers: ['owner'], onPublicChange: fn() } },
+  render: (args) => (
+    <div style={{ maxWidth: 358 }}>
+      <KnowledgeAdd {...args} />
+    </div>
+  ),
+  globals: { viewport: { value: 'phone', isRotated: false } },
+  parameters: { canvas: 'none', canvasNote: 'No phone board for Knowledge yet; N-Run2-Settings-Knowledge’s form and “Added” card in the phone column, 358 px between the gutters.' },
+  play: async ({ canvas }) => {
+    // Both adds on one line, the switch across the card, and nothing scrolls sideways.
+    const addNote = canvas.getByRole('button', { name: 'Add a note' });
+    const addFile = canvas.getByRole('button', { name: 'Add a file' });
+    await expect(Math.round(addFile.getBoundingClientRect().top)).toBe(Math.round(addNote.getBoundingClientRect().top));
+    const toggle = canvas.getByRole('switch', { name: 'Customers can see this' });
+    const card = canvas.getByRole('region', { name: 'Added' });
+    await expect(Math.round(card.getBoundingClientRect().right - toggle.getBoundingClientRect().right)).toBe(21);
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+  },
+};
