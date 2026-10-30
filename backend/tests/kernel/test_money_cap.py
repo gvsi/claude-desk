@@ -36,8 +36,8 @@ from desk.kernel_service.seed import RIVERA_CARDS
 from desk.money_cap import lower_to_cap
 
 from .fakes import FakeAdapter
-from .helpers import (CopyRows, activate_cards, compile_at, context, draft_and_confirm, kernel_ctx, rows_of,
-                      verify_session)
+from .helpers import (CopyRows, activate_cards, compile_at, context, draft_and_confirm, draft_refusals, kernel_ctx,
+                      rows_of, verify_session)
 from .test_adapters import Rivera, quote_args, rivera
 from .test_approvals import add_person
 from .test_decide import Visitor, activate_sets, decided, desk_with, open_visitor, payment_link, verify_signature
@@ -113,13 +113,6 @@ async def test_unset_cap_holds_every_money_action(app, client, registry):
     response = await post_draft(client, desk, [charge_card("links", 2_000)], parent)
     assert (response.status_code, response.json()) == (422, {"code": "invalid"})
     assert sorted(await versions_of(app, desk)) == [1, parent]
-
-
-def draft_refusals(caplog: pytest.LogCaptureFixture) -> list[str]:
-    """The reasons the kernel logged for the drafts it refused, in order."""
-    return [match.group(1) for record in caplog.records
-            if (match := re.fullmatch(r"kernel_failure route=POST /policy/draft status=422 code=invalid reason=(\S+)",
-                                      record.getMessage()))]
 
 
 async def test_a_draft_refused_for_the_cap_is_named_by_its_cards(app, client, registry, monkeypatch, caplog):

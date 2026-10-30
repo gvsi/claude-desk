@@ -1,9 +1,11 @@
 """Test helpers: kernel rows and contexts outside a request."""
 
+import re
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 
 import httpx
+import pytest
 from fastapi import FastAPI
 from sqlalchemy import func, select
 
@@ -28,6 +30,13 @@ def compile_at(cards: list[RuleCard], profiles: list[ToolProfile], *, cap: int =
 def context(**attrs) -> dict:
     """A Cedar request context: `attrs`, with `auto_money_cap_cents` at $500 unless given."""
     return {"auto_money_cap_cents": TEST_CAP, **attrs}
+
+
+def draft_refusals(caplog: pytest.LogCaptureFixture) -> list[str]:
+    """The reasons the kernel logged for the drafts it refused, in order."""
+    return [match.group(1) for record in caplog.records
+            if (match := re.fullmatch(r"kernel_failure route=POST /policy/draft status=422 code=invalid reason=(\S+)",
+                                      record.getMessage()))]
 
 
 @dataclass(frozen=True)

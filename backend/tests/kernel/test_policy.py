@@ -26,9 +26,9 @@ from desk.db.models import PolicyVersion as PolicyVersionRow
 from desk.kernel_service import activation, compiler, desks, ledger
 from desk.kernel_service.repo import new_id
 
-from .helpers import TEST_CAP, CopyRows, compile_at, draft_and_confirm, kernel_ctx, make_copy_rows, rows_of
+from .helpers import (TEST_CAP, CopyRows, compile_at, draft_and_confirm, draft_refusals, kernel_ctx, make_copy_rows,
+                      rows_of)
 from .test_compiler import NATIVE, card, req
-from .test_money_cap import draft_refusals
 
 STUBS = Path(__file__).parent / "stubs"
 
