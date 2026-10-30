@@ -1078,7 +1078,7 @@ type HubSection = Pick<ConnectorSectionProps, 'connector' | 'href' | 'tools'>;
 const hubSections = [
   {
     connector: connectorViews.quotes,
-    href: '/rules/quotes',
+    href: '/connectors/quotes',
     tools: [
       {
         key: 'native.quote',
@@ -1087,13 +1087,13 @@ const hubSections = [
         summary: 'Anyone · No discounts',
         mode: 'auto',
         status: 'enabled',
-        href: '/rules/quotes/quote',
+        href: '/connectors/quotes/quote',
       },
     ],
   },
   {
     connector: connectorViews.bookings,
-    href: '/rules/bookings',
+    href: '/connectors/bookings',
     tools: [
       {
         key: 'native.find_slots',
@@ -1102,7 +1102,7 @@ const hubSections = [
         summary: 'Anyone',
         mode: 'auto',
         status: 'enabled',
-        href: '/rules/bookings/find-open-times',
+        href: '/connectors/bookings/find-open-times',
       },
       {
         key: 'native.book',
@@ -1111,13 +1111,13 @@ const hubSections = [
         summary: '2 rules',
         mode: 'auto',
         status: 'enabled',
-        href: '/rules/bookings/book-a-visit',
+        href: '/connectors/bookings/book-a-visit',
       },
     ],
   },
   {
     connector: connectorViews.leads,
-    href: '/rules/leads',
+    href: '/connectors/leads',
     tools: [
       {
         key: 'native.capture_lead',
@@ -1126,7 +1126,7 @@ const hubSections = [
         summary: 'Anyone',
         mode: 'auto',
         status: 'enabled',
-        href: '/rules/leads/save-a-lead',
+        href: '/connectors/leads/save-a-lead',
       },
       {
         key: 'native.request_callback',
@@ -1135,13 +1135,13 @@ const hubSections = [
         summary: 'Anyone',
         mode: 'auto',
         status: 'enabled',
-        href: '/rules/leads/request-a-callback',
+        href: '/connectors/leads/request-a-callback',
       },
     ],
   },
   {
     connector: connectorViews.verification,
-    href: '/rules/verification',
+    href: '/connectors/verification',
     tools: [
       {
         key: 'native.start_verification',
@@ -1150,13 +1150,13 @@ const hubSections = [
         summary: 'Always on',
         mode: 'auto',
         status: 'enabled',
-        href: '/rules/verification/confirm-its-them',
+        href: '/connectors/verification/confirm-its-them',
       },
     ],
   },
   {
     connector: connectorViews.documents,
-    href: '/rules/documents',
+    href: '/connectors/documents',
     tools: [
       {
         key: 'native.release_document',
@@ -1165,13 +1165,13 @@ const hubSections = [
         summary: "The record's owner, verified",
         mode: 'auto',
         status: 'enabled',
-        href: '/rules/documents/share-a-document',
+        href: '/connectors/documents/share-a-document',
       },
     ],
   },
   {
     connector: connectorViews.payments,
-    href: '/rules/payments',
+    href: '/connectors/payments',
     tools: [
       {
         key: 'native.payment_link',
@@ -1181,7 +1181,7 @@ const hubSections = [
         mode: 'auto',
         limit: '$300',
         status: 'enabled',
-        href: '/rules/payments/payment-link',
+        href: '/connectors/payments/payment-link',
       },
       {
         key: 'native.charge_mandate',
@@ -1191,13 +1191,13 @@ const hubSections = [
         mode: 'auto',
         limit: '$20',
         status: 'enabled',
-        href: '/rules/payments/charge-within-a-signed-limit',
+        href: '/connectors/payments/charge-within-a-signed-limit',
       },
     ],
   },
   {
     connector: connectorViews.stripe,
-    href: '/rules/stripe',
+    href: '/connectors/stripe',
     tools: [
       {
         key: 'payments.list_charges',
@@ -1206,7 +1206,7 @@ const hubSections = [
         summary: "The record's owner, verified",
         mode: 'auto',
         status: 'enabled',
-        href: '/rules/stripe/see-charges',
+        href: '/connectors/stripe/see-charges',
       },
       {
         key: 'payments.create_refund',
@@ -1215,7 +1215,7 @@ const hubSections = [
         summary: 'The customer who paid, verified',
         mode: 'ask',
         status: 'enabled',
-        href: '/rules/stripe/refund',
+        href: '/connectors/stripe/refund',
       },
     ],
   },

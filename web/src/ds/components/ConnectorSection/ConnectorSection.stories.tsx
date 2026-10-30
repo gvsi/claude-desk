@@ -62,9 +62,12 @@ export const Quotes: Story = {
 
 export const Payments: Story = {
   play: async ({ args, canvas }) => {
-    // section_header_and_rows_are_links: the header is one link to the connector's page, naming it.
-    const header = canvas.getByRole('link', { name: /^Payments Built in .* 2 tools$/ });
+    // section_header_and_rows_are_links: the header is one link to the connector's page under
+    // Connectors, naming it with no "Built in" (the Rules page groups outcomes, not where tools come from).
+    const header = canvas.getByRole('link', { name: /^Payments Payment links .* 2 tools$/ });
     await expect(header).toHaveAttribute('href', args.href);
+    await expect(args.href).toMatch(/^\/connectors\//);
+    await expect(header).not.toHaveTextContent('Built in');
     // Each tool row is a link to its page, named by its name, summary and outcome; an automatic
     // rule with an amount limit reads its limit phrase.
     await expect(args.tools.map((tool) => outcomePhrase(tool.mode, tool.limit))).toEqual([
@@ -119,7 +122,7 @@ export const NeedsReview: Story = {
 
 const addedPayments: ConnectorSectionProps = {
   connector: chen.connectors.views.payments,
-  href: '/rules/payments',
+  href: '/connectors/payments',
   addedNote: 'Added just now',
   tools: [
     {
@@ -129,7 +132,7 @@ const addedPayments: ConnectorSectionProps = {
       summary: 'No rule yet',
       mode: 'ask',
       status: 'enabled',
-      href: '/rules/payments/payment-link',
+      href: '/connectors/payments/payment-link',
     },
     {
       key: 'native.charge_mandate',
@@ -138,7 +141,7 @@ const addedPayments: ConnectorSectionProps = {
       summary: 'No rule yet',
       mode: 'ask',
       status: 'disabled',
-      href: '/rules/payments/charge-within-a-signed-limit',
+      href: '/connectors/payments/charge-within-a-signed-limit',
     },
   ],
 };
@@ -152,7 +155,7 @@ export const AddedJustNow: Story = {
   play: async ({ canvas }) => {
     const note = canvas.getByText('Added just now');
     expectComputed(note, { fontSize: '12px', color: 'rgba(250, 249, 245, 0.64)' });
-    await expect(canvas.getByRole('link', { name: /^Payments Built in .* Added just now 2 tools$/ })).toBeVisible();
+    await expect(canvas.getByRole('link', { name: /^Payments Lets clients .* Added just now 2 tools$/ })).toBeVisible();
     const [link, mandate] = addedPayments.tools;
     if (!link || !mandate) throw new Error('Expected two tools');
     await expect(canvas.getByRole('link', { name: rowName(link, 'Ask me first') })).toBeVisible();

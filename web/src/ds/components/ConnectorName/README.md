@@ -10,7 +10,7 @@
 ## What it shows
 
 - The name, then, separated by a real space (drawn as the flex gap):
-  - a built-in connector (`source.kind: 'built_in'`): "Built in" in `.cd-type-caption`, `text-secondary`;
+  - a built-in connector (`source.kind: 'built_in'`): "Built in" in `.cd-type-caption`, `text-secondary`, unless `hideBuiltIn` (the Rules page's sections and the Connectors page's rows, which already group connectors);
   - an external one: an outlined `Pill` "Mock". Every external connector in the demo is a mock, and `ConnectorView.source` requires `mock: true` for it, so the badge can't be left out.
 - `size="page"`: the name in serif `.cd-type-page-title`, the badge 10 px off. `section`: `.cd-type-section`, 8 px off. `inline`: the surrounding line's type.
 - `level` makes it a heading (`h1` on a connector's page); without it, a `span`.
@@ -27,3 +27,4 @@
 | `connector` | `ConnectorView` | Required. |
 | `size` | `'page' \| 'section' \| 'inline'` | Required. |
 | `level` | `1 \| 2 \| 3` | A heading at this level; a `span` when left out. |
+| `hideBuiltIn` | `boolean` | Leaves out "Built in". The "Mock" badge always shows. |

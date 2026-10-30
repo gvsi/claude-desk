@@ -68,7 +68,7 @@ export function ConnectorSection({ connector, href, tools, addedNote, linkCompon
         <Link href={href} className="cd-connector-section__header">
           <ConnectorIcon icon={connector.icon} size="section" />
           <span className="cd-connector-section__identity">
-            <ConnectorName connector={connector} size="section" />{' '}
+            <ConnectorName connector={connector} size="section" hideBuiltIn />{' '}
             <span className="cd-connector-section__description cd-type-meta">{connector.description}</span>
           </span>
           {addedNote ? (

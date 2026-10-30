@@ -64,3 +64,22 @@ export const Mock: Story = {
     await expect(canvas.queryByText('Built in')).toBeNull();
   },
 };
+
+export const WithoutBuiltIn: Story = {
+  args: { hideBuiltIn: true },
+  render: (args) => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-16)' }}>
+      <ConnectorName {...args} />
+      <ConnectorName {...args} connector={rivera.connectors.views.stripe} />
+    </div>
+  ),
+  parameters: {
+    canvas: 'N-Conn-12-Chat',
+    canvasNote: 'Where the page already groups connectors (the Rules page here, and the Connectors page), a built-in name stands alone; an app keeps its Mock badge.',
+  },
+  play: async ({ canvas, canvasElement }) => {
+    await expect(canvas.queryByText('Built in')).toBeNull();
+    await expect(canvas.getByText('Payments')).toBeVisible();
+    await expect(expectMockBesideExternalNames(canvasElement)).toBe(1);
+  },
+};
