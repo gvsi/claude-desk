@@ -21,8 +21,8 @@ from evals.tier1.test_reply_golden import ReplyRow, load_rows
 
 def test_rows_load_with_the_plans_counts():
     rows = load_rows()
-    assert len(rows) == len({row.id for row in rows}) == 48
-    assert Counter(tuple(row.requires) for row in rows) == {("01a",): 47, ("01b",): 1}
+    assert len(rows) == len({row.id for row in rows}) == 54
+    assert Counter(tuple(row.requires) for row in rows) == {("01a",): 53, ("01b",): 1}
     assert [row.id for row in rows if row.requires == ["01b"]] == ["c-owner-only-fact"]
 
 
@@ -50,6 +50,32 @@ def test_rows_hold_the_amended_table_expectations():
     for row_id in ("r-mixed", "r-es-with-en-number"):
         assert rows[row_id].expect.violations == ["number_in_prose"], row_id
         assert rows[row_id].expect.violations_any is None, row_id
+
+
+def test_rows_pin_the_owners_decision_on_restating_a_card():
+    """The owner's decision of 2026-10-30 at the boundaries it moved: a booking claim, in English or
+    Spanish, is shown beside this session's booking card and blocked with no card, and beside
+    another session's booking the card checks refuse the card and the claim is blocked with it;
+    the bare "right away" is no time word."""
+    rows = {row.id: row for row in load_rows()}
+    shown = {"c-booking-claim-beside-its-card": ("You're booked.", "en"),
+             "c-booking-claim-beside-its-card-es": ("Tu cita está confirmada.", "es")}
+    for row_id, (prose, language) in shown.items():
+        row = rows[row_id]
+        assert (row.prose, row.expect.ok, row.expect.language) == (prose, True, language), row_id
+        assert [(clause.template, clause.fact) for clause in row.clauses] == [("booking_confirmed", "own-booking")]
+        assert row.blocks == ["prose", "booking_confirmed"], row_id
+    for row_id, prose in {"r-booking-claim-without-a-card": "You're booked.",
+                          "r-booking-claim-without-a-card-es": "Tu cita está confirmada."}.items():
+        row = rows[row_id]
+        assert (row.prose, row.clauses, row.expect.violations) == (prose, [], ["promise_word"]), row_id
+    other = rows["c-booking-claim-beside-another-sessions-card"]
+    assert other.prose == "You're booked."
+    assert [(clause.template, clause.fact) for clause in other.clauses] == [("booking_confirmed",
+                                                                              "other-session-booking")]
+    assert other.expect.violations == ["promise_word", "unentitled_fact"] and other.blocks == ["handoff"]
+    adverb = rows["r-en-right-away"]
+    assert (adverb.prose, adverb.expect.ok, adverb.blocks) == ("Turn off the water main right away.", True, ["prose"])
 
 
 def test_rows_agree_with_the_scanner():

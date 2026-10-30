@@ -3,7 +3,7 @@
 Each row of `golden/replies.yaml` is one draft on its own golden Desk (`golden_desk.py`): a fresh
 visitor session checks the row's prose and clauses with `POST /check_reply`, after any setup the
 row names, and the verdict must be the row's. Clauses cite facts by id, or by role: this session's
-quote, another session's quote, or an owner statement made in another session.
+quote or booking, another session's quote or booking, or an owner statement made in another session.
 
 On the real kernel each verdict is also judged from outside the reply check: its signature
 verifies with `/health`'s key (`verify_verdict_sig`), its visible free text holds nothing the
@@ -26,7 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, 
 from desk.contracts import ClauseTemplate, LedgerEntry, OwnerMessageResult, ReplyVerdict, RuleCard, Violation
 from evals.fakes import FakeAnthropic, HttpError, Json, Reply, Sleep, Text
 from evals.oracles import card_amount_problems, denies_ai, scan_visible, verify_verdict_sig, visible_texts
-from evals.tier1.args import quote_args
+from evals.tier1.args import book_args, quote_args
 from evals.tier1.golden_desk import (
     GOLDEN_DIR,
     P,
@@ -61,7 +61,8 @@ HANDED_OFF = ["handoff"]
 
 _ROW = ConfigDict(extra="forbid")
 ViolationKind = Violation.model_fields["kind"].annotation
-FactRole = Literal["own-quote", "other-session-quote", "other-session-owner-statement"]
+FactRole = Literal["own-quote", "other-session-quote", "own-booking", "other-session-booking",
+                   "other-session-owner-statement"]
 QUOTE_ROLES = ("own-quote", "other-session-quote")
 BLOCK_NAMES = ("prose", *get_args(ClauseTemplate))
 LINED_CARDS = ("quote", "charges")   # cards that fill lines as well as a title (the master's "Clauses" row)
@@ -293,9 +294,33 @@ async def owner_statement(k: KernelHarness, records: Any, desk: GoldenDesk, sess
     return found[0]
 
 
-async def cite_facts(k: KernelHarness, records: Any, desk: GoldenDesk, caller: Caller, row: ReplyRow) -> dict[str, str]:
-    """The fact id for each role the row's clauses name: the caller's own drain quote, another
-    visitor's, or an owner statement in another visitor's session."""
+async def booking_fact(k: KernelHarness, fake: FakeAnthropic, desk: GoldenDesk, session: Caller) -> str:
+    """The session's booking of the seed's weekday slot, which the seed's reviewed `rv-book-wk` card
+    allows once the reviewer passes it, executed: the id of the `booking` fact it wrote, the id a
+    `booking_confirmed` clause cites (on the stub, a stand-in shaped like the kernel's)."""
+    fake.default(REVIEWER_MODEL, Json(REVIEW_PASS))
+    session.turn()
+    decision = await decide(k, session, "native.book", book_args(desk.slots["wk"].slot_id),
+                            expect=Expect(fields={"outcome": "allow", "state": "allowed"}))
+    result = await k.call(
+        "POST /execute",
+        body={"decision_id": decision.decision_id, "session_id": session.state.session_id,
+              "generation": session.state.generation},
+        auth=session.auth,
+        expect=Expect(fields={"state": "succeeded"}),
+    )
+    if not k.is_real:
+        return "booking:stub-booking"
+    found = [fact.fact_id for fact in result.facts if fact.kind == "booking"]
+    assert len(found) == 1, f"the booking wrote {len(found)} booking facts: {[f.fact_id for f in result.facts]}"
+    return found[0]
+
+
+async def cite_facts(
+    k: KernelHarness, fake: FakeAnthropic, records: Any, desk: GoldenDesk, caller: Caller, row: ReplyRow
+) -> dict[str, str]:
+    """The fact id for each role the row's clauses name: the caller's own drain quote or booking,
+    another visitor's, or an owner statement in another visitor's session."""
     roles = {clause.fact for clause in row.clauses if clause.fact is not None}
     facts = {}
     if "own-quote" in roles:
@@ -303,6 +328,11 @@ async def cite_facts(k: KernelHarness, records: Any, desk: GoldenDesk, caller: C
     if "other-session-quote" in roles:
         other = await open_caller(k, desk, "visitor")
         facts["other-session-quote"] = await make_quote_fact(k, desk, other, "drain")
+    if "own-booking" in roles:
+        facts["own-booking"] = await booking_fact(k, fake, desk, caller)
+    if "other-session-booking" in roles:
+        other = await open_caller(k, desk, "visitor")
+        facts["other-session-booking"] = await booking_fact(k, fake, desk, other)
     if "other-session-owner-statement" in roles:
         other = await open_caller(k, desk, "visitor")
         facts["other-session-owner-statement"] = await owner_statement(k, records, desk, other)
@@ -375,7 +405,7 @@ async def test_reply_row(k: KernelHarness, fake: FakeAnthropic, records, row: Re
     if row.soft_promise == "denies_ai":   # the fixture only tests the flag if its prose really denies being an AI
         assert denies_ai(row.prose), f"{row.id}'s prose must deny being an AI: {row.prose!r}"
     made_from = k.clock.now()
-    facts = await cite_facts(k, records, desk, caller, row)
+    facts = await cite_facts(k, fake, records, desk, caller, row)
     made_until = k.clock.now()   # a quote the row cites was made in between, which pins its expiry
     if row.setup == "session_language_es":   # the session's last language becomes Spanish
         await check_reply(k, caller, CLEAN_ES, expect=passes(caller, ["prose"], language="es"))

@@ -10,8 +10,10 @@
 #   prose          the draft's prose (quoted, so YAML keeps it as written)
 #   clauses        each {template, fact | fact_id}: fact names a role, made before the draft (own-quote,
 #                  this session's drain clearing quote at list price; other-session-quote, another
-#                  visitor's; other-session-owner-statement, an owner say in another visitor's session,
-#                  Plan 01b); fact_id is sent as written
+#                  visitor's; own-booking, this session's booking of the seed's weekday slot, which
+#                  the reviewed rv-book-wk card allows; other-session-booking, another visitor's;
+#                  other-session-owner-statement, an owner say in another visitor's session, Plan
+#                  01b); fact_id is sent as written
 #   soft_promise   the soft-promise check's reply (claude-haiku-5-5): pass, the default; flag
 #                  (promises_beyond_cards true); error (HTTP 500); timeout (3 s, past the check's 2 s);
 #                  unparsable (the text "maybe")
@@ -306,3 +308,41 @@
   prose: "Here are our hours."
   clauses: [{template: hours, fact: own-quote}]
   expect: {ok: false, violations: [unknown_fact]}
+
+# The owner's decision of 2026-10-30 on restating a card, at the boundaries it moved: a booking
+# claim is shown beside this session's booking card and blocked with none (the booking lines are
+# promise_word); beside another session's booking the card checks refuse the card, so the claim
+# is blocked with it; and the bare "right away" is no time word.
+
+- id: c-booking-claim-beside-its-card
+  requires: [01a]
+  prose: "You're booked."
+  clauses: [{template: booking_confirmed, fact: own-booking}]
+  expect: {ok: true, language: en, blocks: [prose, booking_confirmed]}
+
+- id: r-booking-claim-without-a-card
+  requires: [01a]
+  prose: "You're booked."
+  expect: {ok: false, violations: [promise_word]}
+
+- id: c-booking-claim-beside-its-card-es
+  requires: [01a]
+  prose: "Tu cita está confirmada."
+  clauses: [{template: booking_confirmed, fact: own-booking}]
+  expect: {ok: true, language: es, blocks: [prose, booking_confirmed]}
+
+- id: r-booking-claim-without-a-card-es
+  requires: [01a]
+  prose: "Tu cita está confirmada."
+  expect: {ok: false, violations: [promise_word]}
+
+- id: c-booking-claim-beside-another-sessions-card
+  requires: [01a]
+  prose: "You're booked."
+  clauses: [{template: booking_confirmed, fact: other-session-booking}]
+  expect: {ok: false, violations: [promise_word, unentitled_fact]}
+
+- id: r-en-right-away
+  requires: [01a]
+  prose: "Turn off the water main right away."
+  expect: {ok: true, language: en, blocks: [prose]}
