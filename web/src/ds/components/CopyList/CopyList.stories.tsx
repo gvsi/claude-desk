@@ -73,6 +73,6 @@ export const CopyFailed: Story = {
     const voicemail = rows[2] as HTMLElement;
     await userEvent.click(within(voicemail).getByRole('button', { name: 'Copy Voicemail' }));
     await waitFor(() => expect(window.getSelection()?.toString()).toBe(WORDS[2]!.text));
-    await expect(within(voicemail).getByRole('status')).toHaveTextContent(/^Couldn’t copy\. The text is selected, so you can copy it yourself\.$/);
+    await expect(within(voicemail).getByRole('status')).toHaveTextContent(/^Copy didn’t work\. The text is selected, so copy it yourself\.$/);
   },
 };

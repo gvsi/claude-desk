@@ -352,3 +352,41 @@ export async function expectRulesPage(root: HTMLElement, chips: readonly string[
   await expect(alwaysOn.querySelectorAll('button, input, select, textarea')).toHaveLength(0);
   return ask;
 }
+
+/** Settings' sections, in SubNav's order. */
+export const SETTINGS_SECTION_NAMES = ['General', 'Knowledge', 'Notifications', 'Channels', 'Billing'] as const;
+
+/**
+ * A Settings board on a laptop: the owner frame with the sidebar's Connectors row after Rules and
+ * Settings current; the serif title at the top of the page; SubNav, 200 px wide, 24 px under it,
+ * with `current` marked; and the content column 40 px to its right, 720 px wide, level with SubNav.
+ * Returns the content column.
+ */
+export async function expectSettingsPage(root: HTMLElement, current: (typeof SETTINGS_SECTION_NAMES)[number]): Promise<HTMLElement> {
+  await expectOwnerFrame(root, 'Settings', { fill: true });
+  const sidebar = within(root).getByRole('complementary', { name: 'Claude Desk' });
+  const rows = within(sidebar)
+    .getAllByRole('link')
+    .map((link) => link.textContent?.replace(/\d+$/, '').trim());
+  await expect(rows.indexOf('Connectors'), 'the Connectors row after Rules').toBe(rows.indexOf('Rules') + 1);
+
+  const main = within(root).getByRole('main');
+  const title = within(main).getByRole('heading', { level: 1, name: 'Settings' });
+  expectComputed(title, SPEC.pageTitle);
+  const nav = within(main).getByRole('navigation', { name: 'Settings' });
+  const links = within(nav).getAllByRole('link');
+  await expect(links.map((link) => link.textContent)).toEqual([...SETTINGS_SECTION_NAMES]);
+  await expect(links.filter((link) => link.getAttribute('aria-current') === 'page').map((link) => link.textContent)).toEqual([current]);
+
+  const content = one(main, '.board-settings__content');
+  const titleBox = title.getBoundingClientRect();
+  const navBox = nav.getBoundingClientRect();
+  const contentBox = content.getBoundingClientRect();
+  await expect(Math.round(titleBox.top), 'the title at the top of the page').toBe(24);
+  await expect(Math.round(navBox.top - titleBox.bottom), 'SubNav under the title').toBe(24);
+  await expect(Math.round(navBox.width)).toBe(200);
+  await expect(Math.round(contentBox.left - navBox.right), 'the content beside SubNav').toBe(40);
+  await expect(Math.round(contentBox.width)).toBe(720);
+  await expect(Math.round(contentBox.top)).toBe(Math.round(navBox.top));
+  return content;
+}

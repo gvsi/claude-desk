@@ -404,6 +404,11 @@ describe('design tokens', () => {
     expect(mono?.styles.find((style) => style.name === 'quote')).toMatchObject({ fontSize: '12px', lineHeight: '18px', fontWeight: 400 });
   });
 
+  test('settings_measures_are_tokens', () => {
+    // Settings' section links, 200 px wide beside the content, as the signed Settings boards draw them.
+    expect(tokenValue('size-sub-nav')).toBe('200px');
+  });
+
   test('every_color_token_is_classified', () => {
     expect(Object.keys(DECORATIVE_COLORS).sort()).toEqual([
       'connector-google-blue',

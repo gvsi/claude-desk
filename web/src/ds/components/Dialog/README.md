@@ -4,13 +4,14 @@
 
 ## When to use
 
-- Before something the owner can't easily undo: "Start over with a fresh copy?", "Delete Emergencies?".
-- With `tone="danger"` when it can't be undone at all, such as deleting a Desk.
+- Before something the owner can't easily undo: "Start over with a fresh copy?", "Delete Main line?".
+- Deleting a Desk from Settings › General uses the default tone, a neutral question with neutral buttons, as Boards/Settings, delete this Desk shows (owner decision, 2026-10-30).
+- `tone="danger"` adds a refused dot beside the title; no signed screen uses it now.
 - Not for errors or news, which are a `Notice`, and not for anything a visitor sees.
 
 ## What it shows
 
-- A native modal dialog centered over the page, which is inert behind it and dimmed by `scrim`, as N-Run2-Settings-DeleteDesk draws it. It is `bg-surface` with a `line-card` border at `radius-card`, 440 px wide at most, padded 24 px, and has no shadow.
+- A native modal dialog centered over the page, which is inert behind it and dimmed by `scrim`. N-Run2-Settings-DeleteDesk dims the page a little more, with rgba(20, 20, 19, 0.64); the dialog keeps the token. It is `bg-surface` with a `line-card` border at `radius-card`, 440 px wide at most, padded 24 px, and has no shadow.
 - The title in `section` type. `danger` adds a refused dot beside it; the words still say what will happen, and the buttons stay neutral.
 - The body in `body` type, `text-secondary`, 12 px under the title.
 - At the right, 20 px under the body, a secondary button that leaves things as they are (`cancelLabel`), then the primary button that does it (`confirmLabel`), both at a screen's main size (`size-control-main`). Both say what happens: "Keep it", "Delete Desk".

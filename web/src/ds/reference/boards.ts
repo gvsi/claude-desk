@@ -79,8 +79,13 @@ export const REFERENCE_BOARDS = [
   'N-R2-Inbox-Sheet-Owner',
   // Share: the link, the printable card and the ready-made words.
   'N-Run2-Share',
-  // Settings: the danger dialog over General.
+  // Settings, signed on 2026-10-30: General, deleting a Desk over it, Notifications, Billing, and
+  // General on a phone, as a page taller than the phone's window.
+  'N-Run2-Settings-General',
   'N-Run2-Settings-DeleteDesk',
+  'N-Run2-Settings-Notifications',
+  'N-Run2-Settings-Billing',
+  'N-Run2-Settings-Phone',
 ] as const;
 
 export type ReferenceBoard = (typeof REFERENCE_BOARDS)[number];
@@ -89,14 +94,15 @@ export type ReferenceBoard = (typeof REFERENCE_BOARDS)[number];
  * The windows the boards are drawn and rendered at, as Storybook viewports (`.storybook/preview.tsx`
  * builds its options from these): most at the canvas's 1280×820, some at a 14-inch laptop's
  * 1512×982, the sidebar alone at its own 264 px, the laptop's height, and the phone boards at
- * 390×844. A run 2 board whose page runs longer than the window is drawn at the laptop's width and
- * the page's own height. A board story runs at its board's window.
+ * 390×844. A run 2 board whose page runs longer than the window is drawn at the laptop's (or the
+ * phone's) width and the page's own height. A board story runs at its board's window.
  */
 export const BOARD_VIEWPORTS = {
   canvas: { name: 'Canvas', width: 1280, height: 820 },
   laptop: { name: '14-inch laptop', width: 1512, height: 982 },
   sidebar: { name: 'Sidebar alone', width: 264, height: 982 },
   phone: { name: 'Phone', width: 390, height: 844 },
+  'phone-900': { name: 'Phone, a 900 px page', width: 390, height: 900 },
   'laptop-1100': { name: '14-inch laptop, a 1100 px page', width: 1512, height: 1100 },
   'laptop-1150': { name: '14-inch laptop, a 1150 px page', width: 1512, height: 1150 },
   'laptop-1500': { name: '14-inch laptop, a 1500 px page', width: 1512, height: 1500 },
@@ -125,7 +131,11 @@ const BOARD_WINDOWS: Readonly<Partial<Record<ReferenceBoard, Exclude<BoardViewpo
   'N-R2-Inbox-Sheet-Public': 'phone',
   'N-R2-Inbox-Sheet-Owner': 'laptop',
   'N-Run2-Share': 'laptop',
+  'N-Run2-Settings-General': 'laptop',
   'N-Run2-Settings-DeleteDesk': 'laptop',
+  'N-Run2-Settings-Notifications': 'laptop',
+  'N-Run2-Settings-Billing': 'laptop',
+  'N-Run2-Settings-Phone': 'phone-900',
 };
 
 /** The window `board` is drawn at, so its render's size and its story's viewport. */

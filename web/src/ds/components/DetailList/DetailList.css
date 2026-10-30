@@ -1,0 +1,26 @@
+/* DetailList: a card of read-only rows. Each row is padded 12 px by 16 px, a hairline over every
+   row but the first; its label in meta type, secondary, and its value 2 px under it in body type. */
+
+.cd-detail-list {
+  margin: 0;
+}
+
+.cd-detail-list__row {
+  box-sizing: border-box;
+  min-width: 0;
+  padding: var(--space-12) var(--space-16);
+}
+
+.cd-detail-list__row + .cd-detail-list__row {
+  border-top: 1px solid var(--line-hairline);
+}
+
+.cd-detail-list__label {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cd-detail-list__value {
+  margin: var(--space-2) 0 0;
+  color: var(--text-primary);
+}

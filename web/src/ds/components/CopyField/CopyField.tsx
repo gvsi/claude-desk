@@ -2,7 +2,7 @@ import { useId, useRef } from 'react';
 
 import { Button } from '../Button/Button.tsx';
 import type { CopyLanguage } from '../Notice/errorCopy.ts';
-import { COPY_RESULT_COPY, useCopyText } from './useCopyText.ts';
+import { copyResultLine, useCopyText } from './useCopyText.ts';
 
 import './CopyField.css';
 
@@ -33,7 +33,7 @@ export function CopyField({ label, value, copyLabel, onCopy, note, layout = 'inl
   const labelId = `${useId()}-label`;
   const { state, copy } = useCopyText(onCopy ?? (() => {}));
   const copies = copyLabel !== undefined && onCopy !== undefined;
-  const result = state === 'idle' ? '' : COPY_RESULT_COPY[language][state];
+  const result = copyResultLine(state, { language });
 
   const button = copies ? (
     <Button variant="secondary" size="main" onClick={() => void copy(value, valueRef.current)}>

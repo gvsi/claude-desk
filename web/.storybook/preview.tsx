@@ -22,7 +22,7 @@ const preview: Preview = {
         ...Object.fromEntries(
           Object.entries(BOARD_VIEWPORTS).map(([key, { name, width, height }]) => [
             key,
-            { name, styles: { width: `${width}px`, height: `${height}px` }, type: key === 'phone' ? 'mobile' : 'desktop' },
+            { name, styles: { width: `${width}px`, height: `${height}px` }, type: key.startsWith('phone') ? 'mobile' : 'desktop' },
           ]),
         ),
         desktop: { name: 'Desktop', styles: { width: '1440px', height: '900px' }, type: 'desktop' },

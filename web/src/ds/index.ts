@@ -71,6 +71,10 @@ export { PublicShell, type PublicBrand, type PublicOpenStatus, type PublicShellP
 export { PublicBrandHeader, type PublicBrandHeaderProps } from './components/PublicShell/PublicBrandHeader.tsx';
 export { Dialog, type DialogProps } from './components/Dialog/Dialog.tsx';
 
+// Settings
+export { DetailList, type DetailItem, type DetailListProps } from './components/DetailList/DetailList.tsx';
+export { AlertList, type AlertListItem, type AlertListProps } from './components/AlertList/AlertList.tsx';
+
 // Navigation
 export {
   SwitcherMenu,
@@ -123,7 +127,7 @@ export { SafetyCheckRow, type SafetyCheckRowProps } from './components/SafetyChe
 // Agents
 export { CodeBlock, type CodeBlockProps } from './components/CodeBlock/CodeBlock.tsx';
 export { CopyField, type CopyFieldProps } from './components/CopyField/CopyField.tsx';
-export { COPY_RESULT_COPY, useCopyText, type CopyState } from './components/CopyField/useCopyText.ts';
+export { COPY_RESULT_COPY, copyResultLine, useCopyText, type CopyState, type CopyWhat } from './components/CopyField/useCopyText.ts';
 
 // Share
 export { ShareCard, type ShareCardProps } from './components/ShareCard/ShareCard.tsx';
