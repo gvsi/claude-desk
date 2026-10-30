@@ -88,3 +88,8 @@
 .cd-demo-inbox__state {
   margin-top: var(--space-6);
 }
+
+/* Under an owner's alert, the link to the held request it is about, 8 px under the kernel's words. */
+.cd-demo-inbox__request {
+  margin: var(--space-8) 0 0;
+}

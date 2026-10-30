@@ -101,7 +101,7 @@ Text and links, 4.5:1:
 | `fill-secondary` over `bg-surface` | 8.9 | 5.3 | 4.8 | 4.6 |
 | `fill-secondary-hover` over `bg-surface` | 7.6 | 4.7 | not used | not used |
 | `fill-card` over `bg-panel` | 12.0 | 6.6 | 6.0 | 6.3 |
-| `fill-card` over `bg-surface` | 11.0 | not used | not used | not used |
+| `fill-card` over `bg-surface` | 11.0 | not used | not used | 5.7 |
 | `fill-count` over `bg-panel` | not used | 6.3 | not used | not used |
 | `fill-count` over `bg-selected` | not used | 5.0 | not used | not used |
 | `fill-hover` over `bg-muted` | 9.7 | not used | not used | not used |

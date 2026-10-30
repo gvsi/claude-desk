@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type MouseEvent } from 'react';
 
 import { Button } from '../Button/Button.tsx';
 import { CountPill } from '../CountPill/CountPill.tsx';
@@ -72,8 +72,22 @@ function Sheet({ openedBy, viewer, items, language, onRetry, onClose }: SheetPro
   const modal = useModalDialog(onClose, (dialog) =>
     dialog.querySelector<HTMLElement>(openedBy === 'itself' ? '.cd-demo-inbox__title' : '.cd-demo-inbox-sheet__close button'),
   );
+  // Following a link inside, such as an alert's "Open the request", closes the sheet, so it isn't
+  // left over the page the link opens. A click that opens a new tab or window leaves this page, and
+  // the sheet, as they are.
+  const onLinkClick = (event: MouseEvent<HTMLDialogElement>) => {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const link = event.target instanceof Element ? event.target.closest('a[href]') : null;
+    if (link && link.getAttribute('target') === null) onClose();
+  };
   return (
-    <dialog {...modal} aria-label={copy.title} lang={language} className={`cd-demo-inbox-sheet cd-demo-inbox-sheet--${viewer === 'owner' ? 'side' : 'bottom'}`}>
+    <dialog
+      {...modal}
+      onClick={onLinkClick}
+      aria-label={copy.title}
+      lang={language}
+      className={`cd-demo-inbox-sheet cd-demo-inbox-sheet--${viewer === 'owner' ? 'side' : 'bottom'}`}
+    >
       <DemoInboxPanel
         viewer={viewer}
         items={items}

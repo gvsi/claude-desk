@@ -173,7 +173,7 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = Object.freeze([
   // where a busy secondary label would read 4.45 and a busy danger one 3.98; the guard
   // no_button_on_the_selected_ground (guards.test.ts) keeps Buttons off that ground.
   ...pairs(['text-secondary'], ['fill-secondary'], 4.5, "A busy secondary answer in a card: its text-secondary label on the button's fill.", 'fill-card', { under: 'bg-app' }),
-  ...pairs(['text-secondary'], ['fill-card'], 4.5, "Who an entry went to, and an owner's time, in the Demo inbox's entries inside its sheet.", 'bg-surface'),
+  ...pairs(['text-secondary', 'accent-blue'], ['fill-card'], 4.5, "Who an entry went to, an owner's time, and the link under an owner's alert, in the Demo inbox's entries inside its sheet.", 'bg-surface'),
   ...pairs(MARKS, ['fill-card'], 3, "Focus rings and status dots in the Demo inbox's entries inside its sheet.", 'bg-surface'),
   ...pairs(['text-primary'], ['fill-secondary'], 4.5, "Try again on an entry that failed to open, inside the Demo inbox's sheet.", 'fill-card', { under: 'bg-surface' }),
   ...pairs(['text-secondary'], ['fill-count'], 4.5, "The count on the Demo inbox's button.", 'fill-secondary', { under: 'bg-app' }),

@@ -4,6 +4,7 @@ import type { DemoInboxEntry, InboxNotice } from '../../../api/contracts.ts';
 import { Button } from '../Button/Button.tsx';
 import type { CopyLanguage } from '../Notice/errorCopy.ts';
 import { Notice } from '../Notice/Notice.tsx';
+import { TextLink } from '../TextLink/TextLink.tsx';
 import { INBOX_COPY, type InboxCopy } from './inboxCopy.ts';
 
 import './DemoInboxPanel.css';
@@ -18,6 +19,11 @@ export interface DemoInboxItem {
   entry: DemoInboxEntry | null;
   /** Fetching the entry failed. */
   failed?: boolean;
+  /**
+   * Where the owner app opens the held request an alert is about. Only an owner's opened alert shows
+   * it, as "Open the request"; a code, a checkpoint and every row a visitor sees never do.
+   */
+  requestHref?: string;
 }
 
 export interface DemoInboxPanelProps {
@@ -45,6 +51,15 @@ type ItemView = { kind: 'open'; entry: DemoInboxEntry } | { kind: 'opening' } | 
 function viewOf({ notice, entry, failed }: DemoInboxItem): ItemView {
   if (entry && entry.entry_id === notice.entry_id) return { kind: 'open', entry };
   return entry || failed ? { kind: 'failed' } : { kind: 'opening' };
+}
+
+/**
+ * A request link stays in the owner app: a path in it ("/app/…") or a place on this page ("#…").
+ * Anything else, another site or a script URL, draws no link.
+ */
+function inAppHref(href: string | undefined): string | undefined {
+  if (href === undefined) return undefined;
+  return (href.startsWith('/') && !href.startsWith('//')) || href.startsWith('#') ? href : undefined;
 }
 
 /** The recipient the kernel writes for the owner; anything else is a masked contact on record. */
@@ -138,6 +153,7 @@ export function DemoInboxPanel({ viewer, items, language, onRetry, action, title
                 key={item.notice.entry_id}
                 notice={item.notice}
                 time={viewer === 'owner' ? item.time : undefined}
+                requestHref={viewer === 'owner' ? inAppHref(item.requestHref) : undefined}
                 view={viewOf(item)}
                 copy={copy}
                 onRetry={onRetry}
@@ -154,12 +170,14 @@ interface InboxItemProps {
   notice: InboxNotice;
   /** The owner's display time, or nothing for a visitor. */
   time: string | undefined;
+  /** The owner's link to the held request, or nothing for a visitor. */
+  requestHref: string | undefined;
   view: ItemView;
   copy: InboxCopy;
   onRetry: (entryId: string) => void;
 }
 
-function InboxItem({ notice, time, view, copy, onRetry }: InboxItemProps) {
+function InboxItem({ notice, time, requestHref, view, copy, onRetry }: InboxItemProps) {
   return (
     <li className="cd-demo-inbox__item">
       <p className="cd-demo-inbox__head cd-type-caption">
@@ -173,6 +191,11 @@ function InboxItem({ notice, time, view, copy, onRetry }: InboxItemProps) {
           <p className={`cd-demo-inbox__body ${view.entry.kind === 'head_checkpoint' ? 'cd-type-trace' : 'cd-type-body'}`}>
             {view.entry.body}
           </p>
+          {requestHref && view.entry.kind === 'alert' ? (
+            <p className="cd-demo-inbox__request cd-type-meta">
+              <TextLink href={requestHref}>{copy.openRequest}</TextLink>
+            </p>
+          ) : null}
         </>
       ) : (
         <>

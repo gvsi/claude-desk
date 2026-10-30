@@ -214,6 +214,31 @@ export const OwnerAlerts: Story = {
   },
 };
 
+/** Where the screen opens the held request Linda's alert is about, in the owner app. */
+const REQUEST_HREF = '/app/main/today#request-dec-chen-consultation';
+
+/** Linda's inbox with a request link on every item, as a careless screen might pass it. */
+const everythingWithLinks: DemoInboxItem[] = everythingArrived.map((item) => ({ ...item, requestHref: REQUEST_HREF }));
+
+export const OwnerAlertOpensItsRequest: Story = {
+  args: { viewer: 'owner', items: everythingWithLinks },
+  parameters: {
+    canvas: 'N-R2-Inbox-Sheet-Owner',
+    canvasNote: `${BOARD}'s panel holding Linda's code, hold alert and ledger checkpoint, each passed a request link: only the alert shows "Open the request", under its body, as N-R2-Inbox-Sheet-Owner draws it.`,
+  },
+  play: async ({ canvasElement }) => {
+    // alert_opens_its_request: an owner's alert links to the held request it is about, 8 px under
+    // the kernel's words. A code or a ledger checkpoint never does, whatever the screen passes in.
+    const [code, alert, checkpoint] = itemsOf(canvasElement) as [HTMLElement, HTMLElement, HTMLElement];
+    const link = within(alert).getByRole('link', { name: 'Open the request' });
+    await expect(link).toHaveAttribute('href', REQUEST_HREF);
+    const body = alert.querySelector('.cd-demo-inbox__body') as HTMLElement;
+    const line = link.closest('.cd-demo-inbox__request') as HTMLElement;
+    await expect(Math.round(line.getBoundingClientRect().top - body.getBoundingClientRect().bottom)).toBe(8);
+    for (const item of [code, checkpoint]) await expect(within(item).queryByRole('link')).toBeNull();
+  },
+};
+
 export const ReplayedNotice: Story = {
   args: {
     viewer: 'owner',
@@ -258,7 +283,10 @@ const ownerFailedToOpen: DemoInboxItem = {
 };
 
 export const VisitorGivenAlert: Story = {
-  args: { viewer: 'visitor', items: [...everythingArrived, ownerStillOpening, ownerFailedToOpen] },
+  args: {
+    viewer: 'visitor',
+    items: [...everythingArrived, ownerStillOpening, ownerFailedToOpen].map((item) => ({ ...item, requestHref: '/app/main/today' })),
+  },
   parameters: {
     canvasNote: `${BOARD}'s visitor panel, handed the owner's alerts and ledger checkpoint by mistake, opened, still opening and failed to open (the kernel never sends a visitor any of them); it shows only the code.`,
   },
@@ -281,7 +309,48 @@ export const VisitorGivenAlert: Story = {
     await expect(canvas.queryByText('Alert')).toBeNull();
     await expect(canvas.queryByText('Ledger checkpoint')).toBeNull();
     await expect(canvas.queryByText('To owner')).toBeNull();
+    // A request link is the owner's: a visitor's panel shows none, even on their own code.
+    await expect(canvas.queryByRole('link')).toBeNull();
     await expect(text).not.toMatch(CLOCK);
+  },
+};
+
+export const OwnerAlertNotOpenYet: Story = {
+  args: { viewer: 'owner', items: [ownerStillOpening, ownerFailedToOpen].map((item) => ({ ...item, requestHref: REQUEST_HREF })) },
+  parameters: {
+    canvasNote: `${BOARD}'s owner panel with two alerts whose entries haven't opened, each passed a request link, which no board shows: a link waits for its alert's words.`,
+  },
+  play: async ({ canvas, canvasElement }) => {
+    // request_link_waits_for_the_entry: an alert still opening, or one that failed to open, shows
+    // no link, only its preview and its state.
+    await expect(itemsOf(canvasElement)).toHaveLength(2);
+    await expect(canvas.queryByRole('link')).toBeNull();
+  },
+};
+
+/** Linda's hold alert, opened, as her screen holds it. */
+const holdAlert = everythingArrived.find((item) => item.entry?.kind === 'alert') as DemoInboxItem;
+
+export const OwnerAlertLinkLeavesTheApp: Story = {
+  args: { viewer: 'owner', items: [{ ...holdAlert, requestHref: '//elsewhere.example/request' }] },
+  parameters: {
+    canvasNote: `${BOARD}'s owner panel with a request link that leaves the owner app, which no screen builds: the alert shows no link.`,
+  },
+  play: async ({ canvas, canvasElement }) => {
+    // request_link_stays_in_the_app: only a path in the app or a place on the page draws a link.
+    await expect(within(itemsOf(canvasElement)[0] as HTMLElement).getByText(holdAlert.entry?.body ?? '')).toBeVisible();
+    await expect(canvas.queryByRole('link')).toBeNull();
+  },
+};
+
+export const OwnerAlertInSpanish: Story = {
+  args: { viewer: 'owner', language: 'es', items: [{ ...holdAlert, requestHref: REQUEST_HREF }] },
+  parameters: {
+    canvasNote: `${BOARD}'s owner panel in Spanish, which no board shows: the request link in Spanish.`,
+  },
+  play: async ({ canvas }) => {
+    await expect(canvas.getByRole('link', { name: 'Abrir la solicitud' })).toHaveAttribute('href', REQUEST_HREF);
+    await expect(canvas.queryByRole('link', { name: 'Open the request' })).toBeNull();
   },
 };
 
