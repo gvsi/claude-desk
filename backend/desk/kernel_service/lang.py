@@ -6,16 +6,15 @@ counts for none. The three marker sets are disjoint and leave out the words the 
 ("de", "que", "le", "no", "me"), except "la" and "un" and the short words a Spanish reply leans
 on ("tu", "te", "ti", "lo", "del", "al", "está", "claro"), which Spanish keeps although French,
 Portuguese or Italian write them too: frequent words of those languages that neither English nor
-Spanish writes ("à", "quand", "já", "vou", "certo", "subito") outweigh them there. "para" and
-"por" count for none, since Portuguese writes them as often as Spanish does.
+Spanish writes ("à", "quand", "já", "vou", "certo", "subito") outweigh them there, and a tie
+with English or Spanish goes to the other language. "para" and "por" count for none, since
+Portuguese writes them as often as Spanish does.
 
 Prose in any language but English or Spanish hands off to the owner (`unsupported_language`), so
 a misreading in that direction costs a handoff, never an unchecked reply: both lexicons run on
-every draft whatever its language. Words with no marker at all are too little to tell while the
-session has no last language (until a reply reads as English or Spanish), so a first reply in
-Spanish words no list holds falls back as an empty reply does rather than handing off in English;
-once the session has a language, four or more of them are another language. An unmarked reply in
-another language before that is shown only if both lexicons and the soft-promise check pass it.
+every draft whatever its language. Four or more words with no marker of any language are
+another language on every reply, the session's first included, so prose in a language no list
+covers, and a time or a price in its words, hands off rather than resting on the model check.
 """
 
 import re
@@ -25,7 +24,7 @@ from typing import Literal
 Detected = Literal["en", "es", "other", "none"]
 
 NON_LATIN_SHARE = 0.3                     # more of the letters than this outside the Latin script: other
-MIN_UNMARKED_WORDS = 4                    # this many words with no marker, once the session has a language: other
+MIN_UNMARKED_WORDS = 4                    # this many words with no marker of any language: other
 SPANISH_MARKS = ("ñ", "¿", "¡")
 SPANISH_MARK_BONUS = 2
 
@@ -61,11 +60,11 @@ if EN_MARKERS & ES_MARKERS or (EN_MARKERS | ES_MARKERS) & OTHER_MARKERS:
 WORD = re.compile(r"[^\W\d_]+")
 
 
-def detect(text: str, last_language: str | None) -> Detected:
-    """`en` or `es` when that language's markers lead; `other` for another script, more markers
-    of another language, or four or more words with no marker once the session has a
-    `last_language`; `none` for no words, a tie, a few unmarked words ("OK"), or unmarked words
-    while the session has no last language, which then read as an empty reply does."""
+def detect(text: str) -> Detected:
+    """`en` or `es` when that language's markers lead; `other` for another script, at least as
+    many markers of another language as of each of them, or four or more words with no marker of
+    any language; `none` for no words, a tie between English and Spanish, or a few unmarked words
+    ("OK")."""
     lowered = unicodedata.normalize("NFKC", text).lower()
     words = WORD.findall(lowered)
     if not words:
@@ -79,10 +78,10 @@ def detect(text: str, last_language: str | None) -> Detected:
     if any(mark in lowered for mark in SPANISH_MARKS):
         es += SPANISH_MARK_BONUS
     other = sum(word in OTHER_MARKERS for word in words)
-    if other > en and other > es:
+    if other and other >= en and other >= es:
         return "other"
     if en == es == 0:
-        return "other" if last_language is not None and len(words) >= MIN_UNMARKED_WORDS else "none"
+        return "other" if len(words) >= MIN_UNMARKED_WORDS else "none"
     if en == es:
         return "none"
     return "en" if en > es else "es"
