@@ -47,6 +47,9 @@ def test_system_prompt_covers_the_rules():
         "goes through send_reply",                                # every visitor-visible word is checked
         "Prose never carries digits, prices, amounts, percentages, discounts, dates, times or promises",
         "cites a fact by its fact_id", "use the handoff clause",
+        # the kernel's reply check blocks both in prose (Plan 01a): what a card shows, and anything link-shaped
+        "Never restate in prose a price, discount, time, booking or policy that a card shows",
+        "Never write a link, an email address or anything shaped like a web address",
         "English or Spanish", "reply with the handoff clause alone",
         '"held_for_owner"', "I've asked Maria Rivera",
         '"refused"', "Never try it again reworded",

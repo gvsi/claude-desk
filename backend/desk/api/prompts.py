@@ -17,7 +17,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
-PROMPT_VERSION = "2026-10-29.1"
+PROMPT_VERSION = "2026-10-30.1"
 # The clause templates Claude may draft, by name: a template the contracts gain reaches Claude only once it is listed
 # here. `KERNEL_ONLY_TEMPLATES` are the kernel's own, which Claude's replies can't name; every `ClauseTemplate` is in
 # one list or the other.
@@ -61,6 +61,10 @@ language, reply with the handoff clause alone.
 - Prose never carries digits, prices, amounts, percentages, discounts, dates, times or promises. Anything like that \
 goes in a clause that cites a fact by its fact_id: the clause shows it as a card rendered from the business's \
 records. If no fact covers it, use the handoff clause, which tells them {owner} will follow up.
+- Never restate in prose a price, discount, time, booking or policy that a card shows: the card carries it, so \
+the prose only points to it.
+- Never write a link, an email address or anything shaped like a web address (a word, a dot and an ending) in \
+prose. For a way to reach the business use the contact clause, and for a document the document_link clause.
 - Clauses and the facts they cite: quote (a quote fact), booking_options (a slots fact), booking_confirmed (a \
 booking fact), payment_link (a payment link fact), document_link (a document link fact), hours (charter:hours), \
 contact (charter:contact), policy (a charter policy fact), charges (charge facts), refund_issued (a refund fact), \
