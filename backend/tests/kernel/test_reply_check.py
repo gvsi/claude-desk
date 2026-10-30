@@ -25,7 +25,8 @@ from desk.contracts import CardOption, Claim, Fact, RenderedBlock, ReplyVerdict
 from desk.db.models import ActorSession, Desk, Document
 from desk.db.models import Fact as FactRow
 from desk.kernel_api import PublicDesk
-from desk.kernel_service import lang, ledger
+from desk.kernel_service import lang, ledger, reply_check
+from scripts import lookalikes
 
 from .fakes import FakeDecisions
 from .helpers import kernel_ctx, ledger_rows, rows_of
@@ -163,6 +164,13 @@ async def test_a_word_mixing_scripts_is_blocked(app, client, prose, span):
     verdict = await checked(client, visitor, prose)
     assert [(v.kind, v.rule_id, v.span) for v in verdict.violations] == [("unsupported_language", "mixed_script", span)]
     assert_handed_off(verdict)
+
+
+def test_the_lookalike_table_is_what_its_script_makes():
+    """`lexicon/lookalikes.txt` is exactly what `scripts/lookalikes.py` makes from the lines of
+    Unicode's confusables.txt it keeps, so anyone can check the table and remake it."""
+    committed = (reply_check.LEXICON_DIR / "lookalikes.txt").read_text(encoding="utf-8")
+    assert committed == lookalikes.table()
 
 
 @pytest.mark.parametrize(("prose", "language"), [

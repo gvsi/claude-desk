@@ -1,8 +1,10 @@
-# Letters that look like one Latin letter, from Unicode's confusables.txt (version 18.0.0,
-# 2026-08-06): every letter outside ASCII whose prototype there is a single ASCII letter and that NFKD
-# leaves as it is. The prose scan reads each as that letter before the lexicons run, so "Tuеsday"
-# with a Cyrillic е is read as Tuesday. Letters drawn as a bare stroke have the prototype l, and
-# the scan also reads them as i, since they stand for I as readily as for l ("ΝΙΝΕ").
+# Letters that look like one Latin letter, made by backend/scripts/lookalikes.py from Unicode's
+# confusables.txt (version 18.0.0, 2026-08-06): every character outside ASCII whose prototype there
+# is a single ASCII letter, that NFKD leaves as it is, and that is a letter: general category L in
+# Python's Unicode database (15.1.0) or, for a code point newer than that, a name that says LETTER.
+# The prose scan reads each as that letter before the lexicons run, so "Tuеsday" with a Cyrillic е
+# is read as Tuesday. Letters drawn as a bare stroke have the prototype l, and the scan also reads
+# them as i, since they stand for I as readily as for l ("ΝΙΝΕ").
 # One `<code point>\t<letter>` per line, the letter's name after a `#`.
 
 00FE	p	# LATIN SMALL LETTER THORN
