@@ -8,9 +8,11 @@ session; a masked or shared contact on `PUT /desks/{id}/people`; a removed perso
 deleted Desk's held request answered; a document's canary split by spaces, case or width, in a
 rendered card and in a tool's `model_view`; a document link opened twice, after a day, or cited by
 another session; a handoff marked done, and by another copy's owner; and a preview session opened
-without the owner. The money cap on each rules version (Plan 01b's Task 3b) is judged through
-payment links, Plan 01c's tool, so its rows run once that plan lands: links below, at and above a
-cap, at a cap of 0, under a lowered cap before and after it is confirmed, and a cap past the
+without the owner. The money cap on each rules version (Plan 01b's Task 3b) is drafted through
+this plan's routes, so the drafts it refuses run now: an auto money card above its draft's cap, one
+at a cap of 0, and a cap past the platform's ceiling. What the cap does to money is judged through
+payment links, Plan 01c's tool, so those rows run once that plan lands: links below, at and above
+a cap, at a cap of 0, under a lowered cap before and after it is confirmed, and a cap past the
 platform's ceiling.
 
 Every case goes through the kernel's HTTP contract alone; on the real kernel it also reads what the
@@ -626,7 +628,7 @@ async def test_a_preview_session_needs_the_owner_of_its_copy(k: KernelHarness, r
         assert opened == [], "a preview session opened in the other copy"
 
 
-# The money cap on each rules version, with Plan 01c's payment links
+# The money cap on each rules version
 
 LINK = "native.payment_link"
 SEED_CAP = 50_000   # the Rivera seed's money cap: $500
@@ -683,6 +685,65 @@ async def version_numbers(k: KernelHarness, records: Any, desk: GoldenDesk) -> l
     return sorted(row["version"] for row in await records.policy_versions(desk.copy.copy_id)
                   if row["desk_id"] == desk.desk_id)
 
+
+async def assert_no_new_version(
+    k: KernelHarness, records: Any, desk: GoldenDesk, versions: list[int], active: int, what: str
+) -> None:
+    """The Desk still has exactly `versions`, and `active` is still the active one (real kernel only)."""
+    if k.is_real:
+        assert await version_numbers(k, records, desk) == versions, f"{what} made a version"
+        assert await active_version(k, desk) == active, f"{what} changed the active version"
+
+
+# Drafts the money cap refuses: drafting and the cap are this plan's, so these need no money tool
+
+@pytest.mark.requires("01b")
+async def test_a_draft_holding_an_auto_charge_above_its_cap_is_refused(k: KernelHarness, records):
+    """A draft's auto money cards fit its own cap. With an auto `effect:charge` card for $100
+    active at the copy's $500 cap, a draft at a $20 cap that keeps the $100 card is 422 `invalid`,
+    makes no version and leaves the active one in force; the same draft with the card lowered to
+    $20 is proved."""
+    desk = await golden_desk(k)
+    active = await confirm_at(k, desk, await draft_at(k, desk, [charge_card("m-auto-charge", 10_000)], None), SEED_CAP)
+    versions = await version_numbers(k, records, desk)
+    await draft_at(k, desk, [charge_card("m-auto-charge", 10_000)], CAP_20, expect=INVALID)
+    await assert_no_new_version(k, records, desk, versions, active.version, "a draft above its cap")
+    await draft_at(k, desk, [charge_card("m-auto-charge", CAP_20)], CAP_20)
+
+
+@pytest.mark.requires("01b")
+async def test_a_draft_holding_an_auto_charge_at_a_cap_of_zero_is_refused(k: KernelHarness, records):
+    """At a cap of 0 no auto money card can be drafted. A draft adding an auto `effect:charge` card
+    for $20 is 422 `invalid` whether it names a cap of 0 over the copy's $500 version or keeps the
+    cap of 0 of a confirmed version holding no money card, and neither makes a version."""
+    desk = await golden_desk(k)
+    with_charge = [FIND_SLOTS_CARD, charge_card("m-auto-charge-20", CAP_20)]
+    seeded = await active_version(k, desk)
+    versions = await version_numbers(k, records, desk)
+    await draft_at(k, desk, with_charge, 0, expect=INVALID)
+    await assert_no_new_version(k, records, desk, versions, seeded, "a draft at a cap of 0 named outright")
+    active = await confirm_at(k, desk, await draft_at(k, desk, [FIND_SLOTS_CARD], 0), 0)
+    versions = await version_numbers(k, records, desk)
+    await draft_at(k, desk, with_charge, None, expect=INVALID)
+    await assert_no_new_version(k, records, desk, versions, active.version, "a draft keeping a cap of 0")
+
+
+@pytest.mark.requires("01b")
+async def test_a_draft_past_the_platform_ceiling_is_refused(k: KernelHarness, records):
+    """No version's cap goes past the platform's $10,000 ceiling: a draft at $10,000 and a cent,
+    sent as it is since the contract refuses it too, is 422 `invalid` and makes no version, while
+    the same draft at the ceiling itself is proved."""
+    desk = await golden_desk(k)
+    versions = await version_numbers(k, records, desk)
+    parent = await active_version(k, desk)
+    cards = [charge_card("m-auto-charge", 10_000)]
+    body = draft_body(desk, cards, parent, AUTO_MONEY_HARD_CAP_CENTS + 1)
+    await k.call("POST /policy/draft", raw_body=body, auth=desk.owner, expect=INVALID)
+    await assert_no_new_version(k, records, desk, versions, parent, "a draft above the ceiling")
+    await draft_at(k, desk, cards, AUTO_MONEY_HARD_CAP_CENTS)
+
+
+# The money cap with Plan 01c's payment links
 
 @pytest.mark.requires("01c")
 async def test_the_money_cap_bounds_auto_links_below_at_and_above(k: KernelHarness, records):
