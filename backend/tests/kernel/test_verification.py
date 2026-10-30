@@ -17,6 +17,7 @@ from datetime import timedelta
 import desk_kernel
 import httpx
 import psycopg
+import pytest
 from fastapi import FastAPI
 from sqlalchemy import insert, select
 
@@ -504,6 +505,46 @@ async def test_verify_routes_answer_session_states(app, client, frozen_clock):
                         *({"route": route, "reason": "closed"} for route in routes)] + [
                            {"route": route, "reason": "closed"} for route in routes]
     assert [challenge.person_id for challenge in await challenges(app, copy)] == [copy.people["dana"]]
+
+
+@pytest.mark.parametrize("route", ["start", "check"])
+async def test_a_desk_deleted_while_a_verify_route_waits_answers_closed(app, client, frozen_clock, monkeypatch,
+                                                                         route):
+    """Maria deletes the Desk after a verify route has checked the session and its Desk and before
+    it holds the session row. The route checks both again on the row it holds, so it answers 409
+    `closed`, ledgered, as it would had the deletion come first: a start makes no challenge and
+    sends no code, and a check verifies no one. (The clock stands still, so the route writes no
+    `last_seen_at` that would hold the row before the deletion could close it.)"""
+    copy = await rivera_copy(app, client)
+    visitor = await open_visitor(client, copy)
+    code = ""
+    if route == "check":
+        [notice] = (await started(client, visitor, DANA_PHONE)).inbox
+        code = code_in(await entry_of(client, visitor, notice))
+    locked_session, deleted = verification.locked_session, asyncio.Event()
+
+    async def deleted_first(ctx, session_id):
+        if not deleted.is_set():
+            deleted.set()
+            response = await asyncio.wait_for(client.delete(f"/desks/{copy.rivera.desk_id}", headers=copy.owner), 10)
+            assert response.status_code == 204, response.text
+        return await locked_session(ctx, session_id)
+
+    monkeypatch.setattr(verification, "locked_session", deleted_first)
+    response = await (start(client, visitor, DANA_PHONE) if route == "start" else check(client, visitor, code))
+    assert (response.status_code, response.json()) == (409, {"code": "closed"})
+    made = await challenges(app, copy)
+    assert [challenge.status for challenge in made] == ([] if route == "start" else ["cancelled"])
+    assert await verify_entries(app, copy) == [
+        {"outcome": "started", "challenge_id": challenge.challenge_id} for challenge in made]
+    entries = [entry.event for entry in await rows_of(app, copy.copy_id, select(LedgerEntry).where(
+        LedgerEntry.desk_id == copy.rivera.desk_id).order_by(LedgerEntry.seq))]
+    [deletion] = [n for n, event in enumerate(entries) if event.summary == {"part": "desk", "deleted": True}]
+    assert [(event.kind, event.session_id, event.summary) for event in entries[deletion + 1:]] == [
+        ("auth", visitor.session_id, {"route": f"POST /verify/{route}", "reason": "closed"})]
+    [session] = await rows_of(app, copy.copy_id, select(ActorSession).where(
+        ActorSession.session_id == visitor.session_id))
+    assert (session.person_id, session.verified, session.closed_at) == (None, False, frozen_clock.now())
 
 
 async def test_demo_inbox_is_scoped_to_the_sessions_challenges(app, client):

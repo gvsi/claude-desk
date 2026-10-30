@@ -317,9 +317,10 @@ async def require_caller(ctx: KernelCtx, request: Request, session_id: str, desk
 
 
 async def require_desk(ctx: KernelCtx, request: Request, row: SessionRow, desk_id: str) -> Desk:
-    """The Desk an authenticated session's call acts on, of the session's copy; a deleted Desk
-    closes its sessions and the owner's work on it (409 `closed`)."""
-    desk_row = (await ctx.db.scalars(ctx.repo.scoped(select(Desk).where(Desk.desk_id == desk_id)))).one()
+    """The Desk an authenticated session's call acts on, of the session's copy, read afresh; a
+    deleted Desk closes its sessions and the owner's work on it (409 `closed`)."""
+    desk_row = (await ctx.db.scalars(ctx.repo.scoped(select(Desk).where(Desk.desk_id == desk_id)
+                                                     .execution_options(populate_existing=True)))).one()
     if desk_row.deleted_at is not None:
         raise AuthError(409, "closed", "closed", route=route_template(request),
                         named=Named(copy_id=row.copy_id, desk_id=desk_row.desk_id, session_id=row.session_id))
