@@ -575,10 +575,10 @@ async def _visible(ctx: KernelCtx, target: _Target, result: AdapterResult) -> tu
     """The adapter's result as the session may see it, and what its `execute` entry adds: the facts
     its readers can read, and a `model_view` kept to the adapter's `model_view_keys`, or `{}` when a
     fact was dropped or the kept view holds one of the copy's document canaries, even split by
-    spaces or in another case or width (`labels.find_canaries_in`); a canary adds
-    `{violation: "canary"}` to the entry. The execution's state is the same either way. Its `inbox`
-    holds no notice addressed to the owner, whose alerts are read only from the Demo inbox: one an
-    adapter returns is dropped and logged by its kind alone."""
+    spaces, in another case or width, accented or in lookalike letters (`labels.find_canaries_in`);
+    a canary adds `{violation: "canary"}` to the entry. The execution's state is the same either
+    way. Its `inbox` holds no notice addressed to the owner, whose alerts are read only from the
+    Demo inbox: one an adapter returns is dropped and logged by its kind alone."""
     readers = labels.session_readers(target.session_row)
     facts = [fact for fact in result.facts if labels.can_read(fact.label, readers)]
     keys = target.adapter.model_view_keys if target.adapter is not None else frozenset()

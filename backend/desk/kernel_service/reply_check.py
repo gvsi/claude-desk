@@ -14,8 +14,9 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    `lexicon/lookalikes.txt`, every dash as "-" and every apostrophe as "’"; booking claims such
    as "you're booked" among them, unless the reply carries a booking card that step 4 passed), and
    the copy's document canaries, even split by spaces or accented letters, in another case or
-   width, or accented, or all of these at once (`labels.canary_spans`). Since the owner's decisions
-   of 2026-10-30, a booking claim passes beside the booking's card, which says the same, a policy's
+   width, accented, or with letters of other scripts drawn like its own, or all of these at once
+   (`labels.canary_spans`, which reads the same lookalike table). Since the owner's decisions of
+   2026-10-30, a booking claim passes beside the booking's card, which says the same, a policy's
    words are left to the soft-promise check, which reads the prose with the cards, and Claude may
    write links and email addresses, which its prompt keeps to the business's own.
 4. Each clause renders from a fact this session may read, current, of the template's kind and ID,
@@ -126,27 +127,8 @@ def shown(text: str) -> str:
     return _drawn(unicodedata.normalize("NFKC", _drawn(text)))
 
 
-def _load_lookalikes() -> tuple[dict[str, str], dict[str, str]]:
-    """`lexicon/lookalikes.txt` (made by `scripts/lookalikes.py` from Unicode's confusables.txt):
-    the letters of other scripts, and the rarer Latin ones, that look like one ASCII letter, and
-    the characters drawn as one ASCII digit, one `<code point>\\t<letter or digit>` per line: the
-    letters and the digit lookalikes apart, each with what it looks like. A malformed line stops
-    the kernel from starting."""
-    path = LEXICON_DIR / "lookalikes.txt"
-    letters, digits = {}, {}
-    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-        if not line.strip() or line.startswith("#"):
-            continue
-        code, tab, rest = line.partition("\t")
-        looks_like = rest.split("#", 1)[0].strip()
-        if (not tab or not re.fullmatch(r"[0-9A-F]{4,6}", code) or int(code, 16) < 0x80
-                or not re.fullmatch(r"[A-Za-z0-9]", looks_like)):
-            raise ValueError(f"{path.name}:{number} is not a <code point>\\t<letter or digit> line")
-        (digits if looks_like.isdigit() else letters)[chr(int(code, 16))] = looks_like
-    return letters, digits
-
-
-LOOKALIKES, DIGIT_LOOKALIKES = _load_lookalikes()
+LOOKALIKES = labels.LOOKALIKES              # `lexicon/lookalikes.txt`, which the canary reading reads too
+DIGIT_LOOKALIKES = labels.DIGIT_LOOKALIKES  # the same table's characters drawn as a digit
 STROKES = frozenset(ch for ch, letter in LOOKALIKES.items() if letter == "l")   # drawn as a bare stroke: l or I
 STROKES_AND_I = STROKES | {"I"}                          # with the ASCII capital I, read as l ("tweIve")
 # Shaped like 0 or 1, the prototype of 0 being O and of 1 being l: read as digits next to a digit
@@ -675,10 +657,11 @@ async def owner_message(ctx: KernelCtx, owner: OwnerCtx, session_row: SessionRow
     Clean, the words become the `owner_statement` fact `owner:<message_id>` (one text claim, read by the
     owner and this session; only the kernel's `owner_said` card renders it, so it backs no
     price), and `finalize` ledgers and signs the verdict with the `owner_said` receipt, in the
-    session's last language. With a canary, even split by spaces, in another case or width, or
-    accented (`labels.find_canaries`, on the text as checked and as shown), there is no fact and
-    no card: `ok: false`, one `canary` violation naming the documents, and the
-    `owner_say_blocked` receipt, which the API shows the owner and never delivers.
+    session's last language. With a canary, even split by spaces, in another case or width,
+    accented or in lookalike letters (`labels.find_canaries`, on the text as checked and as
+    shown), there is no fact and no card: `ok: false`, one `canary` violation naming the
+    documents, and the `owner_say_blocked` receipt, which the API shows the owner and never
+    delivers.
 
     A `whisper` is a note for Claude, which the API adds to its context as untrusted text. The
     kernel ledgers it (`whisper` `{message_id, chars}`, never the text) and keeps nothing else."""

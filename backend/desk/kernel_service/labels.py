@@ -20,20 +20,27 @@ other text holds. Text that carries one is carrying the document out, so canarie
 the owner's say, what a tool shows Claude and knowledge the owner adds (`store_knowledge`).
 
 A canary is matched on the text's letters and digits (`canary_key`): each character in NFKD and
-case-folded, keeping only ASCII letters and digits, so an accented letter gives its base letter.
-It is found where its own letters and digits occur in order with nothing between them but what
-that drops (spaces, punctuation, symbols, other scripts' letters, combining marks) and accented
-letters, precomposed or with a combining mark. In the same reading an accented letter may be one of
-the canary's own or a separator between them, so capitals, full-width forms, accents on its letters
-and accented letters between its characters hide it neither alone nor all together
-("Çdk-0123é4567 89áb cdef" holds "cdk-0123456789abcdef"). A plain ASCII letter or digit between its
-characters does hide it, as does a letter of another script drawn like one of its own.
+case-folded, each letter drawn like an ASCII one read as it (`LOOKALIKES`, from
+`lexicon/lookalikes.txt`, the table the reply check's lexicons read too), keeping only ASCII
+letters and digits, so an accented letter gives its base letter and a Cyrillic а gives a. It is
+found where its own letters and digits occur in order with nothing between them but what that
+drops (spaces, punctuation, symbols, other scripts' letters, combining marks), accented letters,
+precomposed or with a combining mark, and letters the table reads. In the same reading an accented
+or lookalike letter may be one of the canary's own or a separator between them, so capitals,
+full-width forms, accents on its letters, lookalikes in place of its letters and accented or
+lookalike letters between its characters hide it neither alone nor all together
+("Çdk-0123é4567 89áb cdef", and "сdk-0123456789аbсdеf" with a Cyrillic с, а and е, hold
+"cdk-0123456789abcdef"). A plain ASCII letter or digit between its characters does hide it, as do a
+letter the table holds no row for in place of one of its own (a Cyrillic к) and a letter in place
+of one of its digits (an O for a 0).
 """
 
 import functools
+import re
 import unicodedata
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from datetime import datetime
+from pathlib import Path
 from types import MappingProxyType
 from typing import NamedTuple
 
@@ -140,6 +147,37 @@ def can_read(label: Label | Sequence[str] | None, readers: Iterable[str]) -> boo
 
 # ---- Canaries -------------------------------------------------------------------------------------
 
+LOOKALIKES_TXT = Path(__file__).resolve().parent / "lexicon" / "lookalikes.txt"
+
+
+def _load_lookalikes() -> tuple[dict[str, str], dict[str, str]]:
+    """`lexicon/lookalikes.txt` (made by `scripts/lookalikes.py` from Unicode's confusables.txt):
+    the letters of other scripts, and the rarer Latin ones, that look like one ASCII letter, and
+    the characters drawn as one ASCII digit, one `<code point>\\t<letter or digit>` per line: the
+    letters and the digit lookalikes apart, each with what it looks like. A malformed line stops
+    the kernel from starting."""
+    letters, digits = {}, {}
+    for number, line in enumerate(LOOKALIKES_TXT.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip() or line.startswith("#"):
+            continue
+        code, tab, rest = line.partition("\t")
+        looks_like = rest.split("#", 1)[0].strip()
+        if (not tab or not re.fullmatch(r"[0-9A-F]{4,6}", code) or int(code, 16) < 0x80
+                or not re.fullmatch(r"[A-Za-z0-9]", looks_like)):
+            raise ValueError(f"{LOOKALIKES_TXT.name}:{number} is not a <code point>\\t<letter or digit> line")
+        (digits if looks_like.isdigit() else letters)[chr(int(code, 16))] = looks_like
+    return letters, digits
+
+
+_LETTERS, _DIGITS = _load_lookalikes()
+# Each letter drawn like one ASCII letter, read as it: by the canary reading here, and by the reply
+# check's lexicons (`reply_check.LOOKALIKES`).
+LOOKALIKES: Mapping[str, str] = MappingProxyType(_LETTERS)
+# Each character drawn as one ASCII digit, which the reply check reads as a numeral
+# (`reply_check.DIGIT_LOOKALIKES`).
+DIGIT_LOOKALIKES: Mapping[str, str] = MappingProxyType(_DIGITS)
+
+
 async def copy_canaries(ctx: KernelCtx) -> dict[str, str]:
     """The canary of each of the copy's documents, by document ID, in ID order."""
     rows = await ctx.db.execute(ctx.repo.scoped(
@@ -151,7 +189,7 @@ class _Reading(NamedTuple):
     """Text as canaries are matched in it (`_reading`)."""
 
     key: str                              # its letters and digits (`canary_key`)
-    accented: list[bool]                  # for each, whether it came from an accented letter
+    skippable: list[bool]                 # for each, whether it came from an accented or lookalike letter
     origin: list[int]                     # for each, the index in the text of the character it came from
 
 
@@ -166,53 +204,57 @@ def _is_mark(ch: str) -> bool:
 
 @functools.lru_cache(maxsize=4096)        # bounded: text may hold any of Unicode's characters
 def _read(ch: str) -> tuple[str, bool, bool]:
-    """One character as `_reading` takes it: its letters (`_letters` of its NFKD form, so an
-    accented letter gives its base letter); whether it is an accented letter (its NFKD form holds a
-    combining mark, or its NFKC form keeps fewer of those letters); and whether it is a combining
-    mark itself, which accents the character before it."""
+    """One character as `_reading` takes it: its letters (`_letters` of its NFKD form, each part of
+    it drawn like an ASCII letter read as it through `LOOKALIKES`, so an accented letter gives its
+    base letter and a Cyrillic а gives a); whether those letters may also be passed over between a
+    canary's own, as an accented or lookalike letter's may (its NFKD form holds a combining mark,
+    its NFKC form keeps fewer of those letters, or a part was read through `LOOKALIKES`); and
+    whether it is a combining mark itself, which accents the character before it."""
     if _is_mark(ch):
         return "", False, True
     decomposed = unicodedata.normalize("NFKD", ch)
-    letters = _letters(decomposed)
-    accented = bool(letters) and (any(_is_mark(part) for part in decomposed)
-                                  or letters != _letters(unicodedata.normalize("NFKC", ch)))
-    return letters, accented, False
+    plain = _letters(decomposed)
+    letters = _letters("".join(LOOKALIKES.get(part, part) for part in decomposed))
+    skippable = bool(letters) and (letters != plain or any(_is_mark(part) for part in decomposed)
+                                   or plain != _letters(unicodedata.normalize("NFKC", ch)))
+    return letters, skippable, False
 
 
 def _reading(text: str) -> _Reading:
     """`text` as canaries are matched in it: each character's letters (`_read`) in order, each
-    marked accented when its character is an accented letter or is followed by a combining mark,
-    and the index of the character it came from."""
+    marked skippable when its character is an accented or lookalike letter or is followed by a
+    combining mark, and the index of the character it came from."""
     letters: list[str] = []
-    accented: list[bool] = []
+    skippable: list[bool] = []
     origin: list[int] = []
     base = 0                              # where the letters of the last character that isn't a mark start
     for i, ch in enumerate(text):
-        read, is_accented, is_mark = _read(ch)
+        read, is_skippable, is_mark = _read(ch)
         if is_mark:
-            accented[base:] = [True] * (len(accented) - base)
+            skippable[base:] = [True] * (len(skippable) - base)
             continue
         base = len(letters)
         letters.extend(read)
-        accented.extend([is_accented] * len(read))
+        skippable.extend([is_skippable] * len(read))
         origin.extend([i] * len(read))
-    return _Reading("".join(letters), accented, origin)
+    return _Reading("".join(letters), skippable, origin)
 
 
 def canary_key(text: str) -> str:
     """The letters and digits of `text` as canaries are matched on: each character in NFKD and
-    case-folded, keeping only ASCII letters and digits, so "Ｃdk-0123 4567" reads as
-    "cdk01234567", and so does "çďķ-0123 4567"."""
+    case-folded, each letter drawn like an ASCII one read as it (`LOOKALIKES`), keeping only ASCII
+    letters and digits, so "Ｃdk-0123 4567" reads as "cdk01234567", and so do "çďķ-0123 4567" and
+    "сdk-0123 4567" with a Cyrillic с."""
     return _reading(text).key
 
 
 def _places(reading: _Reading, wanted: str) -> list[tuple[int, int]]:
     """Where `wanted` (a canary's `canary_key`) occurs in `reading`, each as the start and end of
-    the characters it takes up in the text: its letters in order, with only accented ones passed
-    over between them. One pass over the letters, keeping for each count of letters matched so far
-    the earliest start that reached it: a place that starts later and ends at the same letter lies
-    inside it."""
-    key, accented, origin = reading
+    the characters it takes up in the text: its letters in order, with only skippable ones (from
+    accented or lookalike letters) passed over between them. One pass over the letters, keeping
+    for each count of letters matched so far the earliest start that reached it: a place that
+    starts later and ends at the same letter lies inside it."""
+    key, skippable, origin = reading
     places: list[tuple[int, int]] = []
     matched: dict[int, int] = {}          # letters of `wanted` matched -> the earliest start that did
     i = 0
@@ -225,8 +267,8 @@ def _places(reading: _Reading, wanted: str) -> list[tuple[int, int]]:
         for count, start in matched.items():
             if letter == wanted[count] and moved.get(count + 1, start) >= start:
                 moved[count + 1] = start  # the letter is the canary's next one
-            if accented[i] and moved.get(count, start) >= start:
-                moved[count] = start      # or an accented letter between two of its own
+            if skippable[i] and moved.get(count, start) >= start:
+                moved[count] = start      # or an accented or lookalike letter between two of its own
         if letter == wanted[0] and 1 not in moved:
             moved[1] = origin[i]
         if len(wanted) in moved:

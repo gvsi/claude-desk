@@ -4,7 +4,8 @@ Data put together from several sources is readable only by the readers they all 
 (`labels.combine`). Every document carries a canary, a random marker in its body; wherever text
 could carry a private document out (Claude's prose and every field of the cards it cites, the
 owner's say, what a tool shows Claude), a canary blocks it, even split by spaces or accented
-letters, written in another case or character width, or with accents on its letters. Knowledge
+letters, written in another case or character width, with accents on its letters, or with letters
+of other scripts drawn like its own. Knowledge
 the owner adds is untrusted text: it is the owner's alone unless marked public, it stays the
 owner's when it carries a canary, and it never changes what a session may do.
 
@@ -176,20 +177,26 @@ def full_width(text: str) -> str:
 
 
 ACCENTED = str.maketrans("abcdef", "áḃćďéḟ")      # each hex letter with an accent, precomposed
+CYRILLIC = str.maketrans("ace", "\u0430\u0441\u0435")                        # Cyrillic а, с and е
+CAPITAL_LOOKALIKES = str.maketrans("ABCEK", "\u0391\u0412\u0421\u0395\u041a")   # Greek Α, Ε; Cyrillic В, С, К
 
 
 def disguises(canary: str) -> list[str]:
     """A canary split by spaces and other separators, in capitals, in full width, all at once, with
     an accent on each letter (precomposed, "Çďķ-…"), with a combining accent after each character,
     split by accented letters ("cdk-0123é4567ñ…"), and with accented letters on it and between its
-    characters at once ("çdk-0123é4567…", "cdk-0123é4567 89áb cdef")."""
+    characters at once ("çdk-0123é4567…", "cdk-0123é4567 89áb cdef"); with letters of other scripts
+    drawn like its own in their place, Cyrillic а, с and е ("сdk-…") or capitals of Greek and
+    Cyrillic, and with one between its characters too."""
     body = canary.removeprefix("cdk-")
     spaced = f"cdk {body[:4]} {body[4:8]} {body[8:12]} {body[12:]}"
     return [spaced, canary.upper(), full_width(canary),
             f"C.D.K – {full_width(body[:6].upper())}\u00a0{body[6:11]}-{body[11:].upper()}",
             f"Çďķ-{body.translate(ACCENTED)}", "".join(f"{ch}\u0301" for ch in canary),
             f"cdk-{body[:4]}é{body[4:8]}ñ{body[8:12]}Ç{body[12:]}", f"çdk-{body[:4]}é{body[4:]}",
-            f"cdk-{body[:4]}é{body[4:8]} {body[8:12].translate(ACCENTED)} {body[12:]}"]
+            f"cdk-{body[:4]}é{body[4:8]} {body[8:12].translate(ACCENTED)} {body[12:]}",
+            canary.translate(CYRILLIC), canary.upper().translate(CAPITAL_LOOKALIKES),
+            f"{canary[:8].translate(CYRILLIC)}\u0430{canary[8:].translate(CYRILLIC)}"]
 
 
 def test_one_reading_folds_accents_on_a_canary_and_between_its_characters():
@@ -204,11 +211,26 @@ def test_one_reading_folds_accents_on_a_canary_and_between_its_characters():
     assert labels.find_canaries("cdk-0123x456789abcdef cdk-01237456789abcdef", canaries) == []
 
 
+def test_lookalike_letters_on_a_canary_and_between_its_characters_are_read_as_latin():
+    """A letter drawn like a Latin one is read as it, through the lookalike table the reply check's
+    lexicons read too, and may also be passed over between the canary's characters, like an
+    accented letter: Cyrillic or Greek letters in place of its own, or between them, hide it
+    neither alone nor together, and the match maps onto the text as written."""
+    canaries = {"doc-1": "cdk-0123456789abcdef"}
+    for disguised in ("\u0441dk-0123456789\u0430b\u0441d\u0435f", "CDK-0123456789\u0391\u0412\u0421D\u0395F",
+                      "cdk-0123\u0430456789abcdef", "\u0441dk-0123\u0430456789\u0430bcd\u0435f"):
+        text = f"Reference: {disguised}."
+        assert labels.canary_spans(text, canaries) == [("doc-1", len("Reference: "), len(text) - 1)], disguised
+    assert labels.canary_key("\u0441dk-01 \u0430\u0412") == "cdk01ab"
+
+
 def test_the_one_reading_keeps_whatever_either_form_kept():
-    """For every character up to the third plane, the reading keeps what NFKD and NFKC each kept:
-    a character that isn't accented gives the same letters in both forms, an accented one gives
-    its NFKC letters in order among its NFKD ones (so passing over the rest leaves them), and a
-    combining mark gives none. A canary either form found, the one reading finds."""
+    """For every character up to the third plane, the reading keeps what NFKD and NFKC each kept,
+    and reads each part of its NFKD form the lookalike table holds as that letter: a character
+    that is neither accented nor a lookalike gives the same letters in both forms; an accented or
+    lookalike one is skippable, and gives its NFKD and its NFKC letters each in order among its
+    own (so passing over the rest leaves either); a combining mark gives none. A canary either
+    form found, the one reading finds."""
     def letters(text: str) -> str:
         return "".join(part for part in text.casefold() if part.isascii() and part.isalnum())
 
@@ -220,10 +242,12 @@ def test_the_one_reading_keeps_whatever_either_form_kept():
         ch = chr(point)
         if 0xD800 <= point <= 0xDFFF:
             continue
-        read, accented, mark = labels._read(ch)
-        full, bare = letters(unicodedata.normalize("NFKD", ch)), letters(unicodedata.normalize("NFKC", ch))
-        assert read == full and (not mark or read == ""), hex(point)
-        assert within(bare, full) if accented else bare == full, hex(point)
+        read, skippable, mark = labels._read(ch)
+        decomposed = unicodedata.normalize("NFKD", ch)
+        full, bare = letters(decomposed), letters(unicodedata.normalize("NFKC", ch))
+        looked = letters("".join(labels.LOOKALIKES.get(part, part) for part in decomposed))
+        assert read == looked and (not mark or read == ""), hex(point)
+        assert within(full, read) and within(bare, read) if skippable else bare == full == read, hex(point)
 
 
 async def test_canary_split_with_spaces_case_or_width_is_caught(app, client):
