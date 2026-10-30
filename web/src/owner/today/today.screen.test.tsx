@@ -668,6 +668,33 @@ describe('Today', () => {
     expect(again.router.state.location.state).toEqual({ notice: 'Something went wrong on our side. Try again in a moment.' });
   });
 
+  it('callback_card_busies_only_the_pressed_button', async () => {
+    const { screen } = await renderRoute(TODAY, { seed: 'rivera_quiet' });
+    await visitorSays('Can you call me back?');
+    const wants = screen.getByRole('article', { name: 'Wants you' });
+    await expect.element(wants, { timeout: 2_000 }).toBeVisible();
+    const join = wants.getByRole('button', { name: 'Join the chat' });
+    const done = wants.getByRole('button', { name: 'Mark done' });
+
+    // While "Mark done" is out, it spins with its words kept, and "Join the chat" can't be pressed.
+    mockStore.inject({ route: 'handoffDone', status: 503, delayMs: 1_000 });
+    await done.click();
+    await expect.element(done).toHaveAttribute('aria-busy', 'true');
+    await expect.element(join).toBeDisabled();
+    expect(join.element().getAttribute('aria-busy')).toBeNull();
+    expect(wants.element().querySelectorAll('[aria-busy="true"]')).toHaveLength(1);
+    await expect.element(done, { timeout: 3_000 }).not.toHaveAttribute('aria-busy');
+    await expect.element(join).toBeEnabled();
+
+    // And the other way round, while joining reads the chat.
+    mockStore.inject({ route: 'conversation', status: 503, delayMs: 1_000 });
+    await join.click();
+    await expect.element(join).toHaveAttribute('aria-busy', 'true');
+    await expect.element(done).toBeDisabled();
+    expect(done.element().getAttribute('aria-busy')).toBeNull();
+    expect(wants.element().querySelectorAll('[aria-busy="true"]')).toHaveLength(1);
+  });
+
   it('handoff_done_clears_the_card', async () => {
     const { screen } = await renderRoute(TODAY, { seed: 'rivera_quiet' });
     await visitorSays('Can you call me back?');

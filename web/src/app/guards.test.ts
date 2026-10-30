@@ -54,6 +54,9 @@ const RAW_COLOR = /#(?:[0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{3,4})\b|\b(?:rgba?|hsla?
 const RAW_MS = /\b\d+(?:\.\d+)?ms\b/;
 const RAW_CSS_SECONDS = /(?<![\w.-])\d*\.?\d+s\b/;
 
+// A label swapped for a waiting one ("Starting…", "Sending your answer..."): a busy button keeps its words and spins.
+const BUSY_LABEL = /['"`>]\s*[A-Z][a-z]+ing\b[^'"`<>{}\n]*(?:…|\.{3})\s*(?=['"`<])/;
+
 // Formatting money or dates: the visitor's page shows only what the kernel rendered.
 const FORMATS = /\blib\/format\b|\bIntl\.|\btoLocale\w*|\bnew\s+Date\b|\btoFixed\(/;
 
@@ -188,6 +191,18 @@ describe('app source guards', () => {
     expect(hits(RAW_COLOR)).toEqual([]);
     expect(hits(RAW_MS)).toEqual([]);
     expect(hits(RAW_CSS_SECONDS, sources.filter((s) => s.file.endsWith('.css')))).toEqual([]);
+  });
+
+  it('busy_buttons_keep_their_words', () => {
+    const bad = [
+      "<Button busy={busy}>{busy ? 'Starting…' : 'Start the demo'}</Button>",
+      '<Button variant="primary">Sending...</Button>',
+      'const label = pending ? `Sending your answer…` : `Allow this time`;',
+    ];
+    for (const text of bad) expect(hits(BUSY_LABEL, sample(text)), text).toHaveLength(1);
+    const fine = "<Button {...props} busy={busy}>Start the demo</Button>; const rows = [...all]; // GET …/briefing\n<TextField placeholder='Type a message…' />";
+    expect(hits(BUSY_LABEL, sample(fine))).toEqual([]);
+    expect(hits(BUSY_LABEL)).toEqual([]);
   });
 
   it('visitor_code_never_formats_money_or_dates', () => {

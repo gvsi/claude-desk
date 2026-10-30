@@ -282,11 +282,12 @@ function CallbackCard({ item }: { item: CallbackItem }) {
           {handoff.reason}
         </p>
         <p className="cd-callback__when cd-type-meta">{callbackLine(handoff.callback_window, business.timezone)}</p>
+        {/* Only the pressed button spins; the other can't be pressed until its request settles. */}
         <div className="cd-callback__actions">
-          <Button variant="secondary" busy={joining} onClick={() => void join()}>
+          <Button variant="secondary" busy={joining} disabled={closing} onClick={() => void join()}>
             Join the chat
           </Button>
-          <Button variant="ghost" busy={closing} onClick={() => void markDone()}>
+          <Button variant="ghost" busy={closing} disabled={joining} onClick={() => void markDone()}>
             Mark done
           </Button>
         </div>
