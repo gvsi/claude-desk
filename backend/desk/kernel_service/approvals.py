@@ -48,7 +48,7 @@ from desk.db.models import Decision as DecisionRow
 from desk.kernel_api import AnswerRequest, CancelRequest
 from desk.kernel_service import activation, auth, compiler, decide, execute, ledger
 from desk.kernel_service.auth import AuthError, Named, OwnerCtx, SessionRow
-from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, new_id
+from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, new_id, storable
 from desk.kernel_service.sessions import principal_for, verified
 
 PERSON_REASON = "Allowed for {name} after you approved a request like this."
@@ -105,7 +105,7 @@ def never_card(decision: Decision, principal: Principal) -> RuleCard:
 async def _locked(ctx: KernelCtx, decision_id: str) -> DecisionRow | None:
     """The copy's decision `decision_id`, locked `FOR UPDATE` until the transaction ends; None when
     the copy has none (text Postgres can't hold names none)."""
-    if not decide._storable(decision_id):
+    if not storable(decision_id):
         return None
     return (await ctx.db.scalars(ctx.repo.scoped(
         select(DecisionRow).where(DecisionRow.decision_id == decision_id).with_for_update()

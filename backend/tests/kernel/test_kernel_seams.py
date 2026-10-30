@@ -13,7 +13,7 @@ from sqlalchemy import select
 
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, LedgerEvent, NormalizedAction, Principal, ResourceRef, Review
 from desk.db.models import DemoInboxEntry, LedgerHead
-from desk.kernel_service import adapters, compiler, decide, demo_inbox, ledger
+from desk.kernel_service import adapters, compiler, decide, demo_inbox, desks, labels, ledger, repo
 from desk.kernel_service.adapters.base import Adapter
 from desk.kernel_service.repo import new_id
 
@@ -248,3 +248,14 @@ async def test_only_an_approval_alert_names_a_decision(app):
                                             decision_id=decision_id)
     [entry] = await rows_of(app, rows.copy_id, select(DemoInboxEntry))   # only the approval alert was written
     assert (entry.entry_id, entry.decision_id) == (held.entry_id, decision_id)
+
+
+def test_one_check_says_what_text_the_database_holds():
+    # valid UTF-8 without NUL; the same check wherever an ID, a contact or a body is taken in
+    assert repo.storable("Dana Whitfield, café ☕") and repo.storable("")
+    assert not repo.storable("nul\x00inside") and not repo.storable("lone \ud800 surrogate")
+    assert desks.storable is repo.storable
+    # one pattern for the refs `desk_data` entries carry, knowledge IDs included
+    assert desks.REF is repo.REF and labels.KNOWLEDGE_ID is repo.REF
+    assert repo.REF.fullmatch("kb-parking_2") and not repo.REF.fullmatch("kb parking")
+    assert not repo.REF.fullmatch("k" * 65)

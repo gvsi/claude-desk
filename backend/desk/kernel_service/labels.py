@@ -22,7 +22,6 @@ are matched on `canary_key`, which keeps only ASCII letters and digits after NFK
 folding, so spaces, punctuation, capitals and full-width forms don't hide one.
 """
 
-import re
 import unicodedata
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from datetime import datetime
@@ -36,7 +35,7 @@ from desk.db.models import ActorSession, Document
 from desk.db.models import Fact as FactRow
 from desk.db.models import KnowledgeItem as KnowledgeRow
 from desk.kernel_service import ledger
-from desk.kernel_service.repo import KernelCtx, KernelFailure
+from desk.kernel_service.repo import REF, KernelCtx, KernelFailure, storable
 from desk.kernel_service.sessions import verified
 
 OWNER_ONLY = ("owner",)
@@ -227,22 +226,13 @@ def fact_of(row: FactRow) -> Fact:
 KNOWLEDGE_READERS = (["owner"], ["public"])
 MAX_KNOWLEDGE_BYTES = 100 * 1024
 MAX_KNOWLEDGE_TITLE = 200
-KNOWLEDGE_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")      # as `desk_data` entries carry refs
-
-
-def _holdable(text: str) -> bool:
-    """Text Postgres can store: valid UTF-8, without NUL."""
-    try:
-        text.encode("utf-8")
-    except UnicodeEncodeError:
-        return False
-    return "\0" not in text
+KNOWLEDGE_ID = REF                                     # as `desk_data` entries carry refs
 
 
 def _check_knowledge(item: KnowledgeItem) -> None:
     if item.label.readers not in KNOWLEDGE_READERS or item.label.record_owner is not None:
         raise KernelFailure(422, "invalid", "knowledge_label")
-    if not (_holdable(item.text) and _holdable(item.title)) or len(item.text.encode()) > MAX_KNOWLEDGE_BYTES \
+    if not (storable(item.text) and storable(item.title)) or len(item.text.encode()) > MAX_KNOWLEDGE_BYTES \
             or len(item.title) > MAX_KNOWLEDGE_TITLE:
         raise KernelFailure(422, "invalid", "knowledge_text")
     if not KNOWLEDGE_ID.fullmatch(item.item_id):

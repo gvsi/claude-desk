@@ -98,6 +98,19 @@ def new_id(prefix: str) -> str:
     return f"{prefix}-{base64.b32encode(secrets.token_bytes(10)).decode().lower()}"
 
 
+REF = re.compile(r"[A-Za-z0-9_-]{1,64}")   # an owner's ref or knowledge ID, as `desk_data` entries carry it
+
+
+def storable(text: str) -> bool:
+    """Text Postgres can hold: valid UTF-8, without NUL. Text that isn't names no row, so a lookup
+    by it finds nothing and a write of it is refused before the database sees it."""
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return "\0" not in text
+
+
 @dataclass(frozen=True)
 class KernelRuntime:
     """What the app holds for its lifetime (`app.state.kernel`), built by the lifespan."""

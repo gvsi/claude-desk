@@ -130,7 +130,7 @@ async def _target(ctx: KernelCtx, decision: DecisionRow) -> _Target:
 
 
 async def _find_decision(ctx: KernelCtx, decision_id: str) -> DecisionRow | None:
-    if not decide._storable(decision_id):                # text Postgres can't hold names no decision
+    if not repo.storable(decision_id):                # text Postgres can't hold names no decision
         return None
     return (await ctx.db.scalars(ctx.repo.scoped(
         select(DecisionRow).where(DecisionRow.decision_id == decision_id)))).one_or_none()
@@ -702,7 +702,7 @@ async def reconcile_approved(ctx: KernelCtx, session_row: SessionRow, decision_i
                         route=EXECUTE_ROUTE, named=named)
     row = await _lock_decision(ctx, found.decision_id)
     approval = (await ctx.db.scalars(ctx.repo.scoped(select(Approval).where(
-        Approval.approval_id == approval_id)))).one_or_none() if decide._storable(approval_id) else None
+        Approval.approval_id == approval_id)))).one_or_none() if repo.storable(approval_id) else None
     if approval is None or approval.decision_id != row.decision_id or row.state != "unknown" or row.action_id is None:
         raise await _not_runnable(ctx, row, row.state)
     action = decide.normalized_action(await _one(ctx, select(ActionRow).where(ActionRow.action_id == row.action_id)))

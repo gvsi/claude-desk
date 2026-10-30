@@ -53,7 +53,7 @@ from desk.kernel_api import (DeskAnsweringRequest, DeskBusinessRequest, DeskCale
 from desk.kernel_service import adapters, auth, clock, ledger
 from desk.kernel_service.auth import AuthError, Named
 from desk.kernel_service.labels import fact_row
-from desk.kernel_service.repo import KernelCtx, KernelFailure, new_id, route_template
+from desk.kernel_service.repo import REF, KernelCtx, KernelFailure, new_id, route_template, storable
 
 log = logging.getLogger("desk.kernel_service")
 
@@ -67,7 +67,6 @@ WINDOW_SEARCH = timedelta(days=14)        # how far ahead a callback window is l
 DAY_END = 24 * 60                         # an hours window ending at 00:00 ends at midnight
 HOURS_FACT = "charter:hours"
 TIMEZONES = frozenset(available_timezones())   # the IANA names the time zone database lists
-REF = re.compile(r"[A-Za-z0-9_-]{1,64}")   # an owner's ref, as `desk_data` entries carry it
 MAX_DOCUMENT_BYTES = 200 * 1024
 MAX_CONTACT = 120                         # characters of a contact on record
 MASKING = frozenset("•*")                 # what a masked contact holds and a real one never does
@@ -142,15 +141,6 @@ def unique(ids: Iterable[str]) -> None:
     ids = list(ids)
     if len(set(ids)) != len(ids):
         raise InvalidSeed("duplicate")
-
-
-def storable(text: str) -> bool:
-    """Text Postgres can keep: valid UTF-8 without NUL."""
-    try:
-        text.encode("utf-8")
-    except UnicodeEncodeError:
-        return False
-    return "\0" not in text
 
 
 def valid_contact(contact: str) -> bool:

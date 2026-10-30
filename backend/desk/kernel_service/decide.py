@@ -522,26 +522,18 @@ def call_sha256(req: DecideRequest) -> str:
     return hashlib.sha256(desk_kernel.canonical_json_any(text).encode()).hexdigest()
 
 
-def _storable(text: str) -> bool:
-    """Text Postgres can keep: valid UTF-8 without NUL."""
-    try:
-        text.encode("utf-8")
-    except UnicodeEncodeError:
-        return False
-    return "\0" not in text
-
-
 def keepable_call_id(call_id: str) -> bool:
-    """A call ID the decisions table can store and index: text Postgres can keep, at most 128 characters."""
-    return len(call_id) <= CALL_ID_CHARS and _storable(call_id)
+    """A call ID the decisions table can store and index: text Postgres can keep (`repo.storable`),
+    at most 128 characters."""
+    return len(call_id) <= CALL_ID_CHARS and repo.storable(call_id)
 
 
 def _storable_json(value: Any) -> bool:
     """Every key and string in a JSON value is text Postgres can keep."""
     if isinstance(value, str):
-        return _storable(value)
+        return repo.storable(value)
     if isinstance(value, dict):
-        return all(_storable(key) and _storable_json(item) for key, item in value.items())
+        return all(repo.storable(key) and _storable_json(item) for key, item in value.items())
     if isinstance(value, list):
         return all(_storable_json(item) for item in value)
     return True
@@ -1026,7 +1018,7 @@ async def get_decision(decision_id: str, ctx: Ctx, request: Request) -> Decision
     session, which only the decision names: that session is proved in the copy the transaction
     has already read the decision in (`auth.authenticate_session`'s `copy_id`), so a read never
     holds one connection while it waits for another."""
-    copy_id = await repo.copy_of_decision_id(ctx, decision_id) if _storable(decision_id) else None
+    copy_id = await repo.copy_of_decision_id(ctx, decision_id) if repo.storable(decision_id) else None
     if auth.OWNER_HEADER in request.headers and auth.SESSION_HEADER not in request.headers:
         named = Named(copy_id=copy_id, decision_id=decision_id) if copy_id is not None else None
         owner = await auth.require_owner(ctx, request, named=named)

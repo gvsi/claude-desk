@@ -62,18 +62,9 @@ PROFILE = ToolProfile(
     input_schema=ReleaseDocumentArgs.model_json_schema(), status="enabled")
 
 
-def _storable(text: str) -> bool:
-    """Text Postgres can hold: valid UTF-8, without NUL. Any other names no row."""
-    try:
-        text.encode("utf-8")
-    except UnicodeEncodeError:
-        return False
-    return "\0" not in text
-
-
 async def find_document(ctx: KernelCtx, desk_id: str, document_id: str) -> Document | None:
     """The Desk's document `document_id`, in the bound copy."""
-    if not _storable(document_id):
+    if not repo.storable(document_id):
         return None
     return (await ctx.db.scalars(ctx.repo.scoped(select(Document).where(
         Document.desk_id == desk_id, Document.document_id == document_id)))).one_or_none()

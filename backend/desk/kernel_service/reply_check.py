@@ -69,7 +69,7 @@ from desk.kernel_service import auth, context, labels, lang, ledger, render
 from desk.kernel_service.auth import AuthError, Named, OwnerCtx, SessionRow
 from desk.kernel_service.decisions import CallUsage, SoftPromiseInput
 from desk.kernel_service.render.cards import DeskInfo, slot_claims
-from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, new_id, route_template
+from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, new_id, route_template, storable
 
 VERDICT_DOMAIN = b"desk-verdict-v1\0"
 SPAN_CHARS = 40
@@ -414,19 +414,10 @@ def scan_prose(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Iter
 
 # ---- Clauses --------------------------------------------------------------------------------------
 
-def _storable(text: str) -> bool:
-    """A fact ID the database could hold: valid UTF-8 without NUL. Any other can't name a fact."""
-    try:
-        text.encode("utf-8")
-    except UnicodeEncodeError:
-        return False
-    return "\0" not in text
-
-
 def _clause_violation(clause: Clause, kind: str, rule_id: str) -> Violation:
     """A refused clause, naming its template and the fact ID it cited; an ID no text could hold
     (a NUL, a lone surrogate) names no fact, so the verdict can always be sent."""
-    cited = clause.fact_id is not None and _storable(clause.fact_id)
+    cited = clause.fact_id is not None and storable(clause.fact_id)
     return Violation(kind=kind, span=clause.template, rule_id=rule_id, fact_ids=[clause.fact_id] if cited else [])
 
 
@@ -472,7 +463,7 @@ async def check_clauses(ctx: KernelCtx, session_row: SessionRow, desk_id: str, d
     field it renders (`canary`, naming the documents, as is a canary given as the fact ID). The
     catalog, which the kernel builds on each read rather than stores, is looked up with the stored
     facts and checked the same way."""
-    wanted = {clause.fact_id for clause in clauses if clause.fact_id is not None and _storable(clause.fact_id)}
+    wanted = {clause.fact_id for clause in clauses if clause.fact_id is not None and storable(clause.fact_id)}
     rows: dict[str, FactRow | Fact] = {}
     if wanted:
         rows = {row.fact_id: row for row in await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(

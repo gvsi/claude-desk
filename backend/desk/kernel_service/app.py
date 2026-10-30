@@ -53,7 +53,7 @@ from desk.kernel_service.auth import AuthError, Named, SessionRow
 from desk.kernel_service.clock import Clock, SystemClock
 from desk.kernel_service.decisions import DecisionsBackend, make_decisions
 from desk.kernel_service.repo import (Ctx, KernelCtx, KernelFailure, KernelRuntime, kernel_transaction, log_error,
-                                      route_template)
+                                      route_template, storable)
 
 log = logging.getLogger("desk.kernel_service")
 
@@ -286,7 +286,7 @@ async def close_handoff(handoff_id: str, ctx: Ctx, request: Request) -> DeskUpda
         raise AuthError(401, "auth", "bad_token", route=route)
     await auth.require_owner(ctx, request)
     handoff = None
-    if decide._storable(handoff_id):                     # text Postgres can't hold names no handoff
+    if storable(handoff_id):                          # text Postgres can't hold names no handoff
         handoff = (await ctx.db.scalars(ctx.repo.scoped(select(Handoff).where(Handoff.handoff_id == handoff_id)
                                                         .with_for_update()))).one_or_none()
     if handoff is None:
