@@ -91,3 +91,31 @@ export const Phone: Story = {
     await expect(tooWide).toEqual([]);
   },
 };
+
+export const NarrowPhoneWithALimit: Story = {
+  args: {
+    rules: [
+      {
+        key: 'rv-dana-links',
+        title: 'Payment link',
+        rule: { card_id: 'rv-dana-links', mode: 'auto', reason: 'Dana can pay by link without asking you.' },
+        words: [{ field: 'who', text: 'Dana Whitfield' }],
+        limit: '$10,000',
+      },
+    ],
+  },
+  globals: { viewport: { value: 'narrow', isRotated: false } },
+  parameters: {
+    canvasNote: `${NOTE} The largest limit a rule can carry, at the narrowest phone width.`,
+    viewport: { options: { narrow: { name: 'Narrow phone', styles: { width: '320px', height: '844px' }, type: 'mobile' } } },
+  },
+  play: async ({ canvas, canvasElement }) => {
+    const width = window.innerWidth;
+    await expect(width).toBe(320);
+    // narrow_phone_limit_fits: the outcome's long phrase wraps inside the row, and nothing scrolls sideways.
+    await expect(canvas.getByText('Automatic up to $10,000; over $10,000, ask me first')).toBeVisible();
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+    const tooWide = [...canvasElement.querySelectorAll('*')].filter((el) => el.getBoundingClientRect().right > width + 0.5);
+    await expect(tooWide).toEqual([]);
+  },
+};

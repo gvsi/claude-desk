@@ -67,8 +67,11 @@
   overflow-wrap: anywhere;
 }
 
+/* The outcome keeps its words on one line where it can, and wraps them inside the row where it
+   can't: "Automatic up to $10,000; over $10,000, ask me first" on a narrow phone. */
 .cd-person-rules__row > .cd-outcome {
-  flex: none;
+  flex: 0 1 auto;
+  max-width: 100%;
 }
 
 .cd-person-rules__none {
