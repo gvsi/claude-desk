@@ -92,6 +92,7 @@ const meta = {
       'The play types the code from the Demo inbox, as the board shows it; the inbox entry’s body is the kernel’s code message, longer than the board’s.',
       'Each page is embedded, since one document can’t hold two pages’ landmarks, and as tall as the window, with its concept footer under its composer, as the page draws it.',
       'The receipts are the fixture’s: the reply check under the verify card, and the release and reply check under the return, where the board adds “Verification started”.',
+      'The code field’s outline is line-field, rgba(250, 249, 245, 0.36), 3.2:1 against the page, where the board draws rgba(250, 249, 245, 0.22), 2.0:1: an empty field has no words of its own to say what it is, so its boundary needs 3:1 (WCAG 1.4.11), as every other text field has.',
     ].join(' '),
   },
 } satisfies Meta;
@@ -121,6 +122,8 @@ export const Board: Story = {
     // While the code is on its way: the form under the verify card, its Confirm the primary button.
     const field = within(waiting).getByLabelText('6-digit code');
     await expect(field).toHaveAttribute('autocomplete', 'one-time-code');
+    // Its outline is the text field's, 3:1 against the page, where the board draws it fainter.
+    expectComputed(field, { borderTopWidth: '1px', borderTopColor: 'rgba(250, 249, 245, 0.36)' });
     const verifyCard = some(waiting, '.cd-reply-card').find((card) => card.textContent?.includes(chen.blocks.verify_prompt.en.title ?? ''));
     await expect(field.getBoundingClientRect().top).toBeGreaterThan(verifyCard?.getBoundingClientRect().bottom ?? Infinity);
     expectComputed(within(waiting).getByRole('button', { name: 'Confirm' }), SPEC.primary);

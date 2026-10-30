@@ -28,11 +28,17 @@ export interface AppShellProps {
   layout?: 'auto' | 'compact';
   /**
    * The page fills the main area edge to edge, with no padding and no content width, for a page
-   * that lays out its own columns, such as Conversations' list beside the open conversation. The
-   * sidebar then sits on the app ground with no seam, at its own height, as the signed
-   * conversation boards draw it; the page draws its own dividers.
+   * that lays out its own columns, such as Conversations' list beside the open conversation; the
+   * page draws its own dividers. It changes only the main area, never the sidebar.
    */
   fill?: boolean;
+  /**
+   * The sidebar column's look: `panel` (the default) on the panel ground with a seam at its right,
+   * as tall as the window; `ground` on the app ground with no seam, at its own height, as the
+   * signed conversation boards draw it. The sidebar stays on every page, so the app passes the
+   * same look on all of them.
+   */
+  sidebarLook?: 'panel' | 'ground';
   /**
    * A panel beside the page, such as `AskClaudePanel`: at the right of the main area, the main
    * area's height, the page narrowing to make room. A panel that becomes a modal sheet (on a phone)
@@ -78,7 +84,7 @@ function isNarrow(): boolean {
  * Menu opens the sidebar as a modal sheet, and Escape, "Close menu" or going to a page closes it
  * and returns focus to Menu.
  */
-export function AppShell({ sidebar, business, banner, layout = 'auto', fill = false, panel, children }: AppShellProps) {
+export function AppShell({ sidebar, business, banner, layout = 'auto', fill = false, sidebarLook = 'panel', panel, children }: AppShellProps) {
   const narrow = useSyncExternalStore(subscribeNarrow, isNarrow, () => false);
   const compact = layout === 'compact' || narrow;
 
@@ -103,7 +109,7 @@ export function AppShell({ sidebar, business, banner, layout = 'auto', fill = fa
   // Only the navigation changes with the layout. The page stays in the same place in the tree, so
   // crossing the breakpoint (a resized window, a turned phone) keeps its drafts and other state.
   return (
-    <div className={`cd-app-shell${compact ? ' cd-app-shell--compact' : ''}${fill ? ' cd-app-shell--fill' : ''}`}>
+    <div className={`cd-app-shell${compact ? ' cd-app-shell--compact' : ''}`}>
       {banner ? (
         <div className="cd-app-shell__banner" {...inertWhen(inert)}>
           {banner}
@@ -112,7 +118,11 @@ export function AppShell({ sidebar, business, banner, layout = 'auto', fill = fa
       {compact ? <CompactNav sidebar={sidebar} business={business} inert={inert} /> : null}
       <div className="cd-app-shell__body">
         {compact ? null : (
-          <aside className="cd-app-shell__column" aria-label="Claude Desk" {...inertWhen(inert)}>
+          <aside
+            className={`cd-app-shell__column${sidebarLook === 'ground' ? ' cd-app-shell__column--ground' : ''}`}
+            aria-label="Claude Desk"
+            {...inertWhen(inert)}
+          >
             {sidebar}
           </aside>
         )}

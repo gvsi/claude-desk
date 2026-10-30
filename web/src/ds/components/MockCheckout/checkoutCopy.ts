@@ -27,8 +27,10 @@ export interface CheckoutCopy {
   securityCode: string;
   /** The name's label, over the customer's name or the field to type one in. */
   nameOnCard: string;
-  /** Under the name: why the card needs nothing typed. */
+  /** With a lock, under the shown card: why the card needs nothing typed. */
   filledIn: string;
+  /** Under the name to type, when the link carries none: any name will do, and it goes nowhere. */
+  anyName: string;
   /** The primary button, with the page's amount string. */
   pay: (amount: string) => string;
   /** The secondary button. */
@@ -59,6 +61,7 @@ export const CHECKOUT_COPY = {
     securityCode: 'Security code',
     nameOnCard: 'Name on card',
     filledIn: 'Test card, filled in for you',
+    anyName: 'Any name works. It stays on this page.',
     pay: (amount) => `Pay ${amount}`,
     cancel: 'Cancel payment',
     error: 'That didn’t go through. Reload this page to see where the payment stands.',
@@ -81,6 +84,7 @@ export const CHECKOUT_COPY = {
     securityCode: 'Código de seguridad',
     nameOnCard: 'Nombre en la tarjeta',
     filledIn: 'Tarjeta de prueba, ya rellenada',
+    anyName: 'Cualquier nombre sirve. Se queda en esta página.',
     pay: (amount) => `Pagar ${amount}`,
     cancel: 'Cancelar pago',
     error: 'No se pudo completar. Recarga esta página para ver el estado del pago.',

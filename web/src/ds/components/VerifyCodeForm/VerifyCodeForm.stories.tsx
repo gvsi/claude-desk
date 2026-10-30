@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { useEffect, useState } from 'react';
 import { expect, fn, waitFor, within } from 'storybook/test';
 
+import { contrastRatio } from '../../contrast.ts';
 import { chen } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { ReplyCard } from '../ReplyCard/ReplyCard.tsx';
@@ -53,13 +54,28 @@ const meta = {
     layout: 'padded',
     canvas: BOARD,
     canvasNote:
-      "The board's left column (Chen & Co. CPA, while the code is on its way) draws this form from TextField and Button under the verify card, in a dashed box from before the form was built.",
+      "The board's left column (Chen & Co. CPA, while the code is on its way) draws this form from TextField and Button under the verify card, in a dashed box from before the form was built. The field's outline is line-field (rgba(250, 249, 245, 0.36), 3.2:1 against the page), where the board draws rgba(250, 249, 245, 0.22) (2.0:1): an empty field's boundary needs 3:1, as every text field's does.",
   },
 } satisfies Meta<typeof VerifyCodeForm>;
 
 export default meta;
 
 type Story = StoryObj<typeof meta>;
+
+/** The first ground under an element: the color its own transparent box shows. */
+function groundOf(el: HTMLElement): string {
+  for (let node: HTMLElement | null = el; node; node = node.parentElement) {
+    const ground = getComputedStyle(node).backgroundColor;
+    if (ground !== 'rgba(0, 0, 0, 0)' && ground !== 'transparent') return ground;
+  }
+  throw new Error('no ground under the element');
+}
+
+/** The field's outline: line-field, 3:1 against the ground it sits on, and no fill of its own. */
+async function expectFieldBoundary(field: HTMLElement): Promise<void> {
+  expectComputed(field, { borderTopColor: 'rgba(250, 249, 245, 0.36)', backgroundColor: 'rgba(0, 0, 0, 0)' });
+  await expect(contrastRatio(getComputedStyle(field).borderTopColor, groundOf(field))).toBeGreaterThanOrEqual(3);
+}
 
 /** The form itself, without the card above it. */
 function formOf(root: HTMLElement): HTMLFormElement {
@@ -78,14 +94,20 @@ export const Idle: Story = {
     await expect(field).toHaveAttribute('maxlength', '6');
     await expect(field).toHaveValue('');
 
-    // The board's parts: the label above a main-height field in the control outline, and Confirm
-    // beside it on the same line, as tall as the field. "I can't get the code" is a ghost button
-    // under them, and the whole form is no wider than the reply card above it.
+    // The board's parts: the label above a main-height field, and Confirm beside it on the same
+    // line, as tall as the field. "I can't get the code" is a ghost button under them, and the
+    // whole form is no wider than the reply card above it.
     const label = canvasElement.querySelector(`label[for="${field.id}"]`) as HTMLElement;
     expectComputed(label, { fontSize: '14px', lineHeight: '20px', fontWeight: '420', color: 'rgba(250, 249, 245, 0.92)' });
     await expect(field.getBoundingClientRect().top - label.getBoundingClientRect().bottom).toBe(6);
     expectComputed(field, { height: '40px', borderTopWidth: '1px', borderTopLeftRadius: '8px', fontSize: '14px' });
-    expectComputed(field, { borderTopColor: 'rgba(250, 249, 245, 0.22)', backgroundColor: 'rgba(0, 0, 0, 0)' });
+    // field_boundary_meets_contrast: an empty field has no words of its own to say what it is, so
+    // its outline is its boundary, line-field at 3:1 against the page, at rest and on hover, as
+    // every text field's is. The signed board draws it fainter; see the canvas note.
+    await expectFieldBoundary(field);
+    await userEvent.hover(field);
+    await expectFieldBoundary(field);
+    await userEvent.unhover(field);
     const fieldBox = field.getBoundingClientRect();
     const confirmBox = confirm.getBoundingClientRect();
     await expect(confirm).toHaveClass('cd-button--primary', 'cd-button--main');

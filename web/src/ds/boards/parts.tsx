@@ -71,8 +71,10 @@ export interface RiveraFrameProps {
   twoDesks?: boolean;
   /** The reviewer bar across the top, as on the arrival boards. */
   reviewer?: boolean;
-  /** The page lays out its own columns from the sidebar's seam (`AppShell` `fill`). */
+  /** The page lays out its own columns from the sidebar's edge (`AppShell` `fill`). */
   fill?: boolean;
+  /** The sidebar's look (`AppShell` `sidebarLook`): the panel, or the app ground the Run 1 conversation boards draw. */
+  sidebarLook?: 'panel' | 'ground';
   /** A panel beside the page, such as Ask Claude (`AppShell` `panel`). */
   panel?: ReactNode;
   onSwitchBusiness?: () => void;
@@ -105,11 +107,24 @@ interface OwnerFrameProps extends Omit<RiveraFrameProps, 'twoDesks'> {
   desks: { id: string; name: string }[];
 }
 
-function OwnerFrame({ business, ownerName, desks, current, counts, reviewer = false, fill = false, panel, onSwitchBusiness, children }: OwnerFrameProps) {
+function OwnerFrame({
+  business,
+  ownerName,
+  desks,
+  current,
+  counts,
+  reviewer = false,
+  fill = false,
+  sidebarLook = 'panel',
+  panel,
+  onSwitchBusiness,
+  children,
+}: OwnerFrameProps) {
   return (
     <AppShell
       business={business}
       fill={fill}
+      sidebarLook={sidebarLook}
       panel={panel}
       banner={reviewer ? <ReviewerBar ownerName={ownerName} onStartOver={fn()} /> : undefined}
       sidebar={
@@ -278,7 +293,7 @@ export function LastSevenDays({ bars }: LastSevenDaysProps) {
       ) : (
         <div className="board-week__block">
           <p className="board-week__total">
-            <span className="cd-type-amount">$1,860</span> <span className="board-quiet cd-type-message">booked</span>
+            <span className="cd-type-figure">$1,860</span> <span className="board-quiet cd-type-message">booked</span>
           </p>
           <p className="board-quiet cd-type-meta">11 bookings, 2 so far today</p>
         </div>
@@ -322,7 +337,7 @@ export function LastSevenDays({ bars }: LastSevenDaysProps) {
         ) : (
           <>
             <p className="board-week__total">
-              <span className="board-week__count">14</span> <span className="board-quiet cd-type-message">stopped</span>
+              <span className="cd-type-figure-small">14</span> <span className="board-quiet cd-type-message">stopped</span>
             </p>
             <p className="board-quiet cd-type-meta">Nothing was shared and no money moved.</p>
           </>

@@ -1,4 +1,4 @@
-.PHONY: kernel test db-roles web-test web-e2e image image-check infra-check image-smoke
+.PHONY: kernel test db-roles web-test web-e2e image image-check infra-check image-smoke evals-unit evals-tier1 evals-tier1-stub evals-tier1-kernel evals-tier1-api
 
 # Rebuild the kernel's Python module into the backend environment, and the
 # proof binary the kernel runs. desk-prove and its tests find cvc5 through
@@ -180,3 +180,30 @@ dev:
 		done; \
 		sleep 1; \
 	done
+
+# Tier 1 evals: the kernel's boundary cases, with no model calls, no network and no key.
+# evals-tier1 is the one tier 1 target CI runs: the harness's own tests, every case against the
+# contract stub, then the real kernel in-process (the API over it once landed.toml lists 02a or
+# 02). The kernel and API runs need the database, `make kernel` and cvc5.
+EVALS = uv run --project backend --group evals
+
+evals-unit:
+	$(EVALS) pytest evals/tests -q
+
+evals-tier1-stub:
+	$(EVALS) python -m evals.run tier1 --target stub
+
+evals-tier1-kernel:
+	$(EVALS) python -m evals.run tier1 --target kernel
+
+evals-tier1-api:
+	$(EVALS) python -m evals.run tier1 --target api
+
+evals-tier1:
+	$(MAKE) evals-unit
+	$(MAKE) evals-tier1-stub
+	@if $(EVALS) python -c 'import sys; from evals.tier1.harness import API_PLANS, load_landed; sys.exit(not set(API_PLANS) & set(load_landed()))'; then \
+		$(MAKE) evals-tier1-api; \
+	else \
+		$(MAKE) evals-tier1-kernel; \
+	fi

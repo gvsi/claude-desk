@@ -152,14 +152,16 @@ const columns = (
 );
 
 export const FillsTheMain: Story = {
-  args: { banner: undefined, fill: true, children: columns },
+  args: { banner: undefined, fill: true, sidebarLook: 'ground', children: columns },
   parameters: {
     canvas: 'N-Conv-Run1',
-    canvasNote: 'Only the page’s frame: the board’s conversation list starts where the sidebar ends and runs the window’s height, with the conversation beside it.',
+    canvasNote:
+      'Only the page’s frame: the board’s conversation list starts where the sidebar ends and runs the window’s height, with the conversation beside it (fill), and the sidebar on the app ground at its own height (sidebarLook ground), as the board draws it.',
   },
   play: async ({ canvas }) => {
     // The signed conversation boards draw the sidebar on the app ground with no seam, at its own
-    // height: its Answering switch and owner sit under the pages, not at the window's foot.
+    // height (sidebarLook ground): its Answering switch and owner sit under the pages, not at the
+    // window's foot.
     const sidebarColumn = canvas.getByRole('complementary', { name: 'Claude Desk' });
     expectComputed(sidebarColumn, { backgroundColor: 'rgb(28, 27, 25)', borderRightWidth: '0px' });
     const nav = within(sidebarColumn).getByRole('navigation', { name: 'Main' });

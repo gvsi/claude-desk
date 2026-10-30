@@ -1,0 +1,526 @@
+# The golden /decide table. Each row is one case on its own golden Desk (evals/tier1/golden_desk.py):
+# a fresh Rivera copy made on Tuesday 2026-11-03 at 10:00 business time (America/Los_Angeles).
+#
+# Keys:
+#   id, requires   the case and the plans it needs: the last kernel plan it waits on, whose PR it gates
+#   cards | seed   cards the owner drafts and confirms as the whole rule set (the compiler adds its
+#                  default asks), or the seed's active cards: `active`, or `answering-off`, which also
+#                  turns the Desk's Answering switch off (rv-quote allows no discount)
+#   caller         visitor (unverified; the default); dana or bob, verified through their own Demo
+#                  inbox entries; agent, with POST /agents/demo's key and mandate; agent-no-mandate,
+#                  the key alone
+#   call           the tool and what its args point at: item (with requested_discount_bp), slot (a
+#                  role: wk, sat, tue-0800, tue-1659, tue-1700, sun22), document, quote (an item the
+#                  caller first gets a list-price quote for, under the seed's cards), charge; args only
+#                  for a tool no adapter has
+#   raw_args       written over the built args as given, for args no builder would make
+#   reviewer       the reviewer's one reply, so the case makes exactly one reviewer call: pass (scores
+#                  10000 and 0, allow), refusal, {json: fields written over pass, types as given},
+#                  {sleep: seconds} (then pass), {http_error: status}, {text: ...}; {if_called: pass}
+#                  answers any number of calls. Without a reviewer, any reviewer call fails the case.
+#   expect         dotted paths into the Decision, matched as harness.Expect does (state follows the
+#                  outcome); on the real kernel also reviewer_calls, strikes (the caller's session)
+#                  and default_ask (a tool the confirmed version holds a default ask card for)
+#
+# Cards are for anyone unless stated. Money is in cents and discounts in basis points. P, the seed's
+# drain clearing price, is 18000: <P is 17999 and 2P is 36000. Custom items cost what they're named
+# (v80 is 8000) and custom slots are on the calendar only in rows that use them.
+
+# Overlap and coverage
+
+- id: change-auto-book-ask
+  requires: [01a]
+  cards:
+    - {card_id: g-auto-change, mode: auto, applies_to: "effect:change"}
+    - {card_id: g-ask-book, mode: ask, applies_to: native.book}
+  call: {tool: native.book, slot: wk}
+  expect: {outcome: hold, card_ids: {$has: g-ask-book}, answers: {$has: deny_always}}
+
+- id: change-auto-quote
+  requires: [01a]
+  cards:
+    - {card_id: g-auto-change, mode: auto, applies_to: "effect:change"}
+    - {card_id: g-ask-book, mode: ask, applies_to: native.book}
+  call: {tool: native.quote, item: drain}
+  expect: {outcome: allow}
+
+- id: never-beats-auto
+  requires: [01a]
+  cards:
+    - {card_id: g-never-book, mode: never, applies_to: native.book}
+    - {card_id: g-auto-change, mode: auto, applies_to: "effect:change"}
+  call: {tool: native.book, slot: wk}
+  expect: {outcome: refuse, action: {$not: null}}   # refused by the rule, not before it
+
+- id: tie-auto-ask
+  requires: [01a]
+  cards:
+    - {card_id: g-auto-book, mode: auto, applies_to: native.book}
+    - {card_id: g-ask-book, mode: ask, applies_to: native.book}
+  call: {tool: native.book, slot: wk}
+  expect: {outcome: hold, answers: {$has: deny_always}}
+
+- id: autos-add-up
+  requires: [01a]
+  cards:
+    - {card_id: g-auto-quote-below, mode: auto, applies_to: native.quote, max_amount_cents: 17999}   # <P
+    - {card_id: g-auto-quote-at, mode: auto, applies_to: native.quote, max_amount_cents: 18000}      # P
+  call: {tool: native.quote, item: drain}
+  expect: {outcome: allow}
+
+- id: specific-auto-over
+  requires: [01a]
+  cards:
+    - {card_id: g-auto-change-wide, mode: auto, applies_to: "effect:change", max_amount_cents: 36000}   # 2P
+    - {card_id: g-auto-quote-below, mode: auto, applies_to: native.quote, max_amount_cents: 17999}      # <P
+  call: {tool: native.quote, item: drain}
+  expect: {outcome: hold, answers: {$not: {$has: deny_always}}}
+
+- id: specific-auto-under
+  requires: [01a]
+  cards:
+    - {card_id: g-auto-change-narrow, mode: auto, applies_to: "effect:change", max_amount_cents: 17999}   # <P
+    - {card_id: g-auto-quote-at, mode: auto, applies_to: native.quote, max_amount_cents: 18000}          # P
+  call: {tool: native.quote, item: drain}
+  expect: {outcome: allow}
+
+# Discounts
+
+- id: discount-0
+  requires: [01a]
+  cards: [{card_id: g-auto-quote-10, mode: auto, applies_to: native.quote, max_discount_bp: 1000}]
+  call: {tool: native.quote, item: drain, requested_discount_bp: 0}
+  expect: {outcome: allow}
+
+- id: discount-1000
+  requires: [01a]
+  cards: [{card_id: g-auto-quote-10, mode: auto, applies_to: native.quote, max_discount_bp: 1000}]
+  call: {tool: native.quote, item: drain, requested_discount_bp: 1000}
+  expect: {outcome: allow}
+
+- id: discount-1001
+  requires: [01a]
+  cards: [{card_id: g-auto-quote-10, mode: auto, applies_to: native.quote, max_discount_bp: 1000}]
+  call: {tool: native.quote, item: drain, requested_discount_bp: 1001}
+  expect: {outcome: hold, answers: {$not: {$has: deny_always}}}
+
+- id: discount-8000
+  requires: [01a]
+  cards: [{card_id: g-auto-quote-10, mode: auto, applies_to: native.quote, max_discount_bp: 1000}]
+  call: {tool: native.quote, item: drain, requested_discount_bp: 8000}
+  expect: {outcome: hold, answers: {$not: {$has: deny_always}}}
+
+- id: discount-limit-on-booking
+  requires: [01a]
+  cards: [{card_id: g-auto-change-10, mode: auto, applies_to: "effect:change", max_discount_bp: 1000}]
+  call: {tool: native.book, slot: wk}
+  expect: {outcome: allow}   # a booking has no discount, so it is within any discount limit
+
+- id: amount-cap-on-booking
+  requires: [01a]
+  cards: [{card_id: g-auto-change-narrow, mode: auto, applies_to: "effect:change", max_amount_cents: 17999}]
+  call: {tool: native.book, slot: wk}
+  expect: {outcome: allow}   # nor an amount
+
+# Hours (HoursWindow.end is exclusive; a booking is timed by its slot's start)
+
+- id: hours-sat
+  requires: [01a]
+  cards:
+    - {card_id: g-auto-book-weekdays, mode: auto, applies_to: native.book,
+       hours: {days: [mon, tue, wed, thu, fri], start: "08:00", end: "17:00"}}
+  call: {tool: native.book, slot: sat}
+  expect: {outcome: hold, answers: {$not: {$has: deny_always}}}
+
+- id: hours-weekday
+  requires: [01a]
+  cards:
+    - {card_id: g-auto-book-weekdays, mode: auto, applies_to: native.book,
+       hours: {days: [mon, tue, wed, thu, fri], start: "08:00", end: "17:00"}}
+  call: {tool: native.book, slot: wk}
+  expect: {outcome: allow}
+
+- id: hours-sun-2200
+  requires: [01b]
+  cards:
+    - {card_id: g-auto-book-weekdays, mode: auto, applies_to: native.book,
+       hours: {days: [mon, tue, wed, thu, fri], start: "08:00", end: "17:00"}}
+  call: {tool: native.book, slot: sun22}
+  expect: {outcome: hold, answers: {$not: {$has: deny_always}}}
+
+- id: hours-tue-0800
+  requires: [01b]
+  cards:
+    - {card_id: g-auto-book-weekdays, mode: auto, applies_to: native.book,
+       hours: {days: [mon, tue, wed, thu, fri], start: "08:00", end: "17:00"}}
+  call: {tool: native.book, slot: tue-0800}
+  expect: {outcome: allow}
+
+- id: hours-tue-1659
+  requires: [01b]
+  cards:
+    - {card_id: g-auto-book-weekdays, mode: auto, applies_to: native.book,
+       hours: {days: [mon, tue, wed, thu, fri], start: "08:00", end: "17:00"}}
+  call: {tool: native.book, slot: tue-1659}
+  expect: {outcome: allow}
+
+- id: hours-tue-1700
+  requires: [01b]
+  cards:
+    - {card_id: g-auto-book-weekdays, mode: auto, applies_to: native.book,
+       hours: {days: [mon, tue, wed, thu, fri], start: "08:00", end: "17:00"}}
+  call: {tool: native.book, slot: tue-1700}
+  expect: {outcome: hold, answers: {$not: {$has: deny_always}}}
+
+# Default asks and narrow cards
+
+- id: default-ask-uncovered
+  requires: [01a]
+  cards: [{card_id: g-auto-quote, mode: auto, applies_to: native.quote}]
+  call: {tool: native.find_slots}
+  expect: {outcome: hold, default_ask: native.find_slots, answers: {$has: deny_always}}
+
+- id: verified-card-stranger
+  requires: [01a]
+  cards: [{card_id: g-auto-book-verified, mode: auto, applies_to: native.book, who: verified}]
+  call: {tool: native.book, slot: wk}
+  expect: {outcome: hold, answers: {$has: deny_always}}   # the default ask stays for everyone the card doesn't cover
+
+- id: person-auto-stranger
+  requires: [01a]
+  cards: [{card_id: g-auto-book-dana, mode: auto, applies_to: native.book, who: person, person: dana}]
+  call: {tool: native.book, slot: wk}
+  expect: {outcome: hold, answers: {$has: deny_always}}
+
+- id: person-never-stranger
+  requires: [01a]
+  cards: [{card_id: g-never-book-dana, mode: never, applies_to: native.book, who: person, person: dana}]
+  call: {tool: native.book, slot: wk}
+  expect: {outcome: hold, answers: {$has: deny_always}}
+
+# The reviewer (an auto quote card gated on it)
+
+- id: review-pass
+  requires: [01a]
+  cards: [{card_id: g-auto-quote-reviewed, mode: auto, applies_to: native.quote, review: true}]
+  call: {tool: native.quote, item: drain}
+  reviewer: pass
+  expect: {outcome: allow, reviewer_calls: 1}
+
+- id: review-timeout
+  requires: [01a]
+  cards: [{card_id: g-auto-quote-reviewed, mode: auto, applies_to: native.quote, review: true}]
+  call: {tool: native.quote, item: drain}
+  reviewer: {sleep: 5}
+  expect: {outcome: hold, answers: {$not: {$has: deny_always}}}
+
+- id: review-error
+  requires: [01a]
+  cards: [{card_id: g-auto-quote-reviewed, mode: auto, applies_to: native.quote, review: true}]
+  call: {tool: native.quote, item: drain}
+  reviewer: {http_error: 500}
+  expect: {outcome: hold, answers: {$not: {$has: deny_always}}}
+
+- id: review-refusal
+  requires: [01a]
+  cards: [{card_id: g-auto-quote-reviewed, mode: auto, applies_to: native.quote, review: true}]
+  call: {tool: native.quote, item: drain}
+  reviewer: refusal
+  expect: {outcome: hold, answers: {$not: {$has: deny_always}}}
+
+- id: review-unparsable
+  requires: [01a]
+  cards: [{card_id: g-auto-quote-reviewed, mode: auto, applies_to: native.quote, review: true}]
+  call: {tool: native.quote, item: drain}
+  reviewer: {text: Looks fine to me}
+  expect: {outcome: hold, answers: {$not: {$has: deny_always}}}
+
+- id: review-high
+  requires: [01a]
+  cards: [{card_id: g-auto-quote-reviewed, mode: auto, applies_to: native.quote, review: true}]
+  call: {tool: native.quote, item: drain}
+  reviewer: {json: {within_charter_bp: 10001}}
+  expect: {outcome: hold, answers: {$not: {$has: deny_always}}}
+
+- id: review-negative
+  requires: [01a]
+  cards: [{card_id: g-auto-quote-reviewed, mode: auto, applies_to: native.quote, review: true}]
+  call: {tool: native.quote, item: drain}
+  reviewer: {json: {manipulation_bp: -1}}
+  expect: {outcome: hold, answers: {$not: {$has: deny_always}}}
+
+- id: review-low-charter
+  requires: [01a]
+  cards: [{card_id: g-auto-quote-reviewed, mode: auto, applies_to: native.quote, review: true}]
+  call: {tool: native.quote, item: drain}
+  reviewer: {json: {within_charter_bp: 0, manipulation_bp: 0, recommendation: allow}}
+  expect: {outcome: hold, answers: {$not: {$has: deny_always}}}
+
+- id: review-float-score
+  requires: [01a]
+  cards: [{card_id: g-auto-quote-reviewed, mode: auto, applies_to: native.quote, review: true}]
+  call: {tool: native.quote, item: drain}
+  reviewer: {json: {within_charter_bp: 10000.0}}
+  expect: {outcome: hold, strikes: 0, answers: {$not: {$has: deny_always}}}   # strict integers: never coerced
+
+- id: review-string-score
+  requires: [01a]
+  cards: [{card_id: g-auto-quote-reviewed, mode: auto, applies_to: native.quote, review: true}]
+  call: {tool: native.quote, item: drain}
+  reviewer: {json: {within_charter_bp: "10000"}}
+  expect: {outcome: hold, strikes: 0, answers: {$not: {$has: deny_always}}}
+
+- id: review-bool-score
+  requires: [01a]
+  cards: [{card_id: g-auto-quote-reviewed, mode: auto, applies_to: native.quote, review: true}]
+  call: {tool: native.quote, item: drain}
+  reviewer: {json: {manipulation_bp: false}}
+  expect: {outcome: hold, strikes: 0, answers: {$not: {$has: deny_always}}}
+
+- id: review-rec-hold
+  requires: [01a]
+  cards: [{card_id: g-auto-quote-reviewed, mode: auto, applies_to: native.quote, review: true}]
+  call: {tool: native.quote, item: drain}
+  reviewer: {json: {within_charter_bp: 10000, manipulation_bp: 0, recommendation: hold}}
+  expect: {outcome: hold, strikes: 0, answers: {$not: {$has: deny_always}}}
+
+- id: review-rec-block
+  requires: [01a]
+  cards: [{card_id: g-auto-quote-reviewed, mode: auto, applies_to: native.quote, review: true}]
+  call: {tool: native.quote, item: drain}
+  reviewer: {json: {within_charter_bp: 10000, manipulation_bp: 0, recommendation: block}}
+  expect: {outcome: hold, strikes: 1, answers: {$not: {$has: deny_always}}}
+
+# The seed's cards
+
+- id: s-find-slots
+  requires: [01a]
+  seed: active
+  call: {tool: native.find_slots}
+  expect: {outcome: allow, reviewer_calls: 0}
+
+- id: s-discount-8000
+  requires: [01a]
+  seed: active
+  call: {tool: native.quote, item: drain, requested_discount_bp: 8000}
+  reviewer: {if_called: pass}
+  expect: {outcome: hold, answers: {$not: {$has: deny_always}}}   # rv-quote's hold twin: a limit hold
+
+- id: s-extra-amount-arg
+  requires: [01a]
+  seed: active
+  call: {tool: native.quote, item: drain}
+  raw_args: {amount_cents: 100}
+  expect: {outcome: refuse, action: null}   # step 1: the args don't fit the adapter
+
+- id: s-unknown-tool
+  requires: [01a]
+  seed: active
+  call: {tool: native.transfer_funds, args: {to: "acct-9", amount_cents: 50000}}
+  expect: {outcome: refuse, action: null}
+
+- id: s-tool-not-given
+  requires: [01a]
+  seed: active
+  call: {tool: native.release_document, document: dana-invoice}
+  expect: {outcome: refuse, action: null}   # an unverified visitor isn't given the tool
+
+- id: s-discount-float
+  requires: [01a]
+  seed: active
+  call: {tool: native.quote, item: drain}
+  raw_args: {requested_discount_bp: 1000.0}
+  expect: {outcome: refuse, action: null}   # strict args: never coerced into a hold
+
+- id: s-discount-string
+  requires: [01a]
+  seed: active
+  call: {tool: native.quote, item: drain}
+  raw_args: {requested_discount_bp: "1000"}
+  expect: {outcome: refuse, action: null}
+
+- id: s-answering-off
+  requires: [01b]
+  seed: answering-off
+  call: {tool: native.quote, item: drain}
+  expect: {outcome: refuse, action: null}   # with Answering off, a visitor is given lead capture and callbacks only
+
+# People (Plan 01b verifies them)
+
+- id: record-owner-own
+  requires: [01b]
+  cards: [{card_id: g-auto-docs-owner, mode: auto, applies_to: native.release_document, who: record_owner}]
+  caller: dana
+  call: {tool: native.release_document, document: dana-invoice}
+  expect: {outcome: allow}
+
+- id: record-owner-other
+  requires: [01b]
+  cards: [{card_id: g-auto-docs-owner, mode: auto, applies_to: native.release_document, who: record_owner}]
+  caller: bob
+  call: {tool: native.release_document, document: dana-invoice}
+  expect: {outcome: refuse, action: {$not: null}}   # the baseline: private data only to its record owner
+
+- id: send-message-alone
+  requires: [01b]
+  cards: [{card_id: g-auto-send, mode: auto, applies_to: "effect:send_message"}]
+  caller: dana
+  call: {tool: native.release_document, document: dana-invoice}
+  expect: {outcome: hold}   # one effect card doesn't cover a two-effect tool
+
+- id: send-message-review
+  requires: [01b]
+  cards:
+    - {card_id: g-auto-send-reviewed, mode: auto, applies_to: "effect:send_message", review: true}
+    - {card_id: g-auto-private, mode: auto, applies_to: "effect:private_data"}
+  caller: dana
+  call: {tool: native.release_document, document: dana-invoice}
+  reviewer: pass
+  expect: {outcome: allow, reviewer_calls: 1}
+
+- id: send-message-reviewer-down
+  requires: [01b]
+  cards:
+    - {card_id: g-auto-send-reviewed, mode: auto, applies_to: "effect:send_message", review: true}
+    - {card_id: g-auto-private, mode: auto, applies_to: "effect:private_data"}
+  caller: dana
+  call: {tool: native.release_document, document: dana-invoice}
+  reviewer: {http_error: 500}
+  expect: {outcome: hold}
+
+- id: never-beats-person-auto
+  requires: [01b]
+  cards:
+    - {card_id: g-never-book, mode: never, applies_to: native.book}
+    - {card_id: g-auto-book-dana, mode: auto, applies_to: native.book, who: person, person: dana}
+  caller: dana
+  call: {tool: native.book, slot: wk}
+  expect: {outcome: refuse, action: {$not: null}}
+
+- id: person-beats-tool-dana
+  requires: [01b]
+  cards:
+    - {card_id: g-ask-book, mode: ask, applies_to: native.book}
+    - {card_id: g-auto-change-dana, mode: auto, applies_to: "effect:change", who: person, person: dana}
+  caller: dana
+  call: {tool: native.book, slot: wk}
+  expect: {outcome: allow}
+
+- id: person-beats-tool-stranger
+  requires: [01b]
+  cards:
+    - {card_id: g-ask-book, mode: ask, applies_to: native.book}
+    - {card_id: g-auto-change-dana, mode: auto, applies_to: "effect:change", who: person, person: dana}
+  call: {tool: native.book, slot: wk}
+  expect: {outcome: hold, answers: {$has: deny_always}}
+
+# Money (Plan 01c): payment links for a quote the caller gets first
+
+- id: money-no-card
+  requires: [01c]
+  cards: [{card_id: g-auto-change, mode: auto, applies_to: "effect:change"}]
+  call: {tool: native.payment_link, quote: v80}
+  expect: {outcome: hold}   # money needs an owner card that covers it
+
+- id: money-card-80
+  requires: [01c]
+  cards: [{card_id: g-auto-charge-100, mode: auto, applies_to: "effect:charge", max_amount_cents: 10000}]
+  call: {tool: native.payment_link, quote: v80}
+  expect: {outcome: allow}
+
+- id: money-card-120
+  requires: [01c]
+  cards: [{card_id: g-auto-charge-100, mode: auto, applies_to: "effect:charge", max_amount_cents: 10000}]
+  call: {tool: native.payment_link, quote: v120}
+  expect: {outcome: hold, answers: {$not: {$has: deny_always}}}
+
+- id: money-person-auto-dana
+  requires: [01c]
+  cards:
+    - {card_id: g-ask-charge, mode: ask, applies_to: "effect:charge"}
+    - {card_id: g-auto-link-dana-100, mode: auto, applies_to: native.payment_link, who: person, person: dana,
+       max_amount_cents: 10000}
+  caller: dana
+  call: {tool: native.payment_link, quote: v80}
+  expect: {outcome: allow}
+
+- id: money-person-auto-stranger
+  requires: [01c]
+  cards:
+    - {card_id: g-ask-charge, mode: ask, applies_to: "effect:charge"}
+    - {card_id: g-auto-link-dana-100, mode: auto, applies_to: native.payment_link, who: person, person: dana,
+       max_amount_cents: 10000}
+  call: {tool: native.payment_link, quote: v80}
+  expect: {outcome: hold, answers: {$has: deny_always}}   # g-ask-charge decides: Dana's card doesn't cover a visitor
+
+- id: person-cap-dana
+  requires: [01c]
+  cards:
+    - {card_id: g-auto-charge-100, mode: auto, applies_to: "effect:charge", max_amount_cents: 10000}
+    - {card_id: g-auto-link-dana-20, mode: auto, applies_to: native.payment_link, who: person, person: dana,
+       max_amount_cents: 2000}
+  caller: dana
+  call: {tool: native.payment_link, quote: v80}
+  expect: {outcome: hold, answers: {$not: {$has: deny_always}}}   # Dana's own, narrower card decides for her
+
+- id: person-cap-stranger
+  requires: [01c]
+  cards:
+    - {card_id: g-auto-charge-100, mode: auto, applies_to: "effect:charge", max_amount_cents: 10000}
+    - {card_id: g-auto-link-dana-20, mode: auto, applies_to: native.payment_link, who: person, person: dana,
+       max_amount_cents: 2000}
+  call: {tool: native.payment_link, quote: v80}
+  expect: {outcome: allow}
+
+- id: above-cap-no-allow-person
+  requires: [01c]
+  cards: [{card_id: g-auto-charge-100, mode: auto, applies_to: "effect:charge", max_amount_cents: 10000}]
+  caller: dana
+  call: {tool: native.payment_link, quote: v800}
+  expect: {outcome: hold, answers: {$not: {$has: allow_person}}}   # above the $500 hard cap
+
+- id: pay-out-private-dana
+  requires: [01c]
+  cards:
+    - {card_id: g-auto-pay-out-50, mode: auto, applies_to: "effect:pay_out", max_amount_cents: 5000}
+    - {card_id: g-auto-private-verified, mode: auto, applies_to: "effect:private_data", who: verified}
+  caller: dana
+  call: {tool: payments.create_refund, charge: dana-250}
+  expect: {outcome: hold}
+
+# Visiting agents (Plan 01c)
+
+- id: agent-pay-out
+  requires: [01c]
+  cards: [{card_id: g-auto-pay-out-100, mode: auto, applies_to: "effect:pay_out", max_amount_cents: 10000}]
+  caller: agent
+  call: {tool: payments.create_refund, charge: dana-250}
+  expect: {outcome: refuse}   # never a refund for an agent
+
+- id: agent-mandate-20
+  requires: [01c]
+  cards: [{card_id: g-auto-mandate-50, mode: auto, applies_to: native.charge_mandate, max_amount_cents: 5000}]
+  caller: agent
+  call: {tool: native.charge_mandate, quote: v20}
+  expect: {outcome: allow}
+
+- id: agent-mandate-25
+  requires: [01c]
+  cards: [{card_id: g-auto-mandate-50, mode: auto, applies_to: native.charge_mandate, max_amount_cents: 5000}]
+  caller: agent
+  call: {tool: native.charge_mandate, quote: v25}
+  expect: {outcome: refuse, action: {$not: null}}   # above the mandate's $20 per charge
+
+- id: agent-no-mandate-link
+  requires: [01c]
+  cards: [{card_id: g-auto-charge-100, mode: auto, applies_to: "effect:charge", max_amount_cents: 10000}]
+  caller: agent-no-mandate
+  call: {tool: native.payment_link, quote: v20}
+  expect: {outcome: refuse}
+
+- id: agent-no-mandate-charge
+  requires: [01c]
+  cards: [{card_id: g-auto-charge-100, mode: auto, applies_to: "effect:charge", max_amount_cents: 10000}]
+  caller: agent-no-mandate
+  call: {tool: native.charge_mandate, quote: v20}
+  expect: {outcome: refuse}

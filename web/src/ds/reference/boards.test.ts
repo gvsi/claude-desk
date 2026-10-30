@@ -46,6 +46,12 @@ function pngSize(bytes: Uint8Array): { width: number; height: number } | null {
 }
 
 /**
+ * The tests that import every board story get more than the default 5 s: the first import
+ * transforms each story and its components, and the browser projects run beside them.
+ */
+const STORY_IMPORT_TIMEOUT = 30_000;
+
+/**
  * The board stories' folder, read when the test runs. (An `import.meta.glob` here would be expanded
  * when the test file is transformed, and a cached transform can miss a story added since.)
  */
@@ -97,7 +103,7 @@ describe('reference boards', () => {
     expect(stories.length).toBeGreaterThan(0);
     const unnamed = stories.filter(({ canvas }) => !(REFERENCE_BOARDS as readonly unknown[]).includes(canvas));
     expect(unnamed.map(({ id, canvas }) => `${id}: ${JSON.stringify(canvas)}`)).toEqual([]);
-  });
+  }, STORY_IMPORT_TIMEOUT);
 
   it('every_reference_board_has_a_board_story', async () => {
     const stories = await boardStories();
@@ -107,5 +113,5 @@ describe('reference boards', () => {
       return `${board}: ${naming.length === 1 ? 'one story' : `${naming.length} stories${naming.length > 1 ? ` (${naming.join('; ')})` : ''}`}`;
     });
     expect(counts).toEqual(REFERENCE_BOARDS.map((board) => `${board}: one story`));
-  });
+  }, STORY_IMPORT_TIMEOUT);
 });

@@ -46,6 +46,14 @@ export const Board: Story = {
     const since = canvas.getByRole('region', { name: 'Since last night' });
     await expect(within(since).getByRole('link', { name: 'Includes recorded history' })).toBeVisible();
     await expect(week.getBoundingClientRect().left).toBeGreaterThan(canvas.getByRole('heading', { level: 1 }).getBoundingClientRect().right);
+    // Its figures, at the two sizes the board draws: the booked total in the figure style, the
+    // stopped count in the smaller one, both with tabular figures.
+    const booked = within(week).getByText('$1,860');
+    await expect(booked).toHaveClass('cd-type-figure');
+    expectComputed(booked, SPEC.figure);
+    const stopped = within(week).getByText('14');
+    await expect(stopped).toHaveClass('cd-type-figure-small');
+    expectComputed(stopped, SPEC.figureSmall);
 
     // The held request: a card, its answers the signed plain buttons for a limit hold.
     const card = one(canvasElement, '.cd-approval-card__top').closest<HTMLElement>('.cd-card') as HTMLElement;

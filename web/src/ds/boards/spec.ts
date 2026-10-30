@@ -8,6 +8,7 @@ import { expect, within } from 'storybook/test';
 import { expectComputed, type ComputedExpectation } from '../test/expectComputed.ts';
 
 const SERIF = /^"Source Serif 4"/;
+const SANS = /^"Hanken Grotesk"/;
 
 /** Each spec row, as computed styles. Rows that differ by board say which boards they are for. */
 export const SPEC = {
@@ -19,7 +20,7 @@ export const SPEC = {
     borderRightColor: 'rgba(250, 249, 245, 0.12)',
   },
   /** The signed conversation boards (N-Conv-Run1, N-Conv-Agent-Run1): the sidebar on the app ground, no seam. */
-  sidebarFilled: {
+  sidebarGround: {
     width: '264px',
     backgroundColor: 'rgb(28, 27, 25)',
     borderRightWidth: '0px',
@@ -34,6 +35,9 @@ export const SPEC = {
   },
   pageTitle: { fontFamily: SERIF, fontSize: '24px', lineHeight: '32px', fontWeight: '460' },
   greeting: { fontFamily: SERIF, fontSize: '36px', lineHeight: '44px', fontWeight: '300' },
+  /** Today's "Last 7 days" (N-Today-Run1): the booked total, then the smaller stopped count, with tabular figures. */
+  figure: { fontFamily: SANS, fontSize: '32px', lineHeight: '40px', fontWeight: '500', letterSpacing: '-0.3px', fontVariantNumeric: 'tabular-nums' },
+  figureSmall: { fontFamily: SANS, fontSize: '24px', lineHeight: '32px', fontWeight: '420', letterSpacing: 'normal', fontVariantNumeric: 'tabular-nums' },
   main: { paddingTop: '24px', paddingRight: '40px', paddingBottom: '20px', paddingLeft: '40px' },
   content: { maxWidth: '960px' },
   /** The conversation boards: the page fills the main area, so its list starts at the sidebar's seam. */
@@ -91,14 +95,18 @@ export function some<T extends Element = HTMLElement>(root: ParentNode, selector
 }
 
 /**
- * The owner app's frame: the sidebar column, its current row, and the padded page; or, with
- * `fill`, as the signed conversation boards draw it: the page filling the main area, and the
- * sidebar on the app ground at its own height, its Answering switch 4 px under the pages.
+ * The owner app's frame: the sidebar column, its current row, and the padded page. As the signed
+ * conversation boards draw it, `fill` has the page fill the main area, and `sidebarLook: 'ground'`
+ * puts the sidebar on the app ground at its own height, its Answering switch 4 px under the pages.
  */
-export async function expectOwnerFrame(root: HTMLElement, current: string, { fill = false } = {}): Promise<void> {
+export async function expectOwnerFrame(
+  root: HTMLElement,
+  current: string,
+  { fill = false, sidebarLook = 'panel' }: { fill?: boolean; sidebarLook?: 'panel' | 'ground' } = {},
+): Promise<void> {
   const column = within(root).getByRole('complementary', { name: 'Claude Desk' });
-  expectComputed(column, fill ? SPEC.sidebarFilled : SPEC.sidebar);
-  if (fill) {
+  expectComputed(column, sidebarLook === 'ground' ? SPEC.sidebarGround : SPEC.sidebar);
+  if (sidebarLook === 'ground') {
     const nav = within(column).getByRole('navigation', { name: 'Main' });
     const foot = one(column, '.cd-sidebar__footer');
     await expect(foot.getBoundingClientRect().top - nav.getBoundingClientRect().bottom, 'the sidebar foot under the pages').toBe(4);

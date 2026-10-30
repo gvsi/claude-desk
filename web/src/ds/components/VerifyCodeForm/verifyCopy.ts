@@ -14,7 +14,7 @@ export interface VerifyCopy {
   failed: string;
   /** The way out for someone the code doesn't reach: it asks for the owner. */
   cantGetCode: string;
-  /** Added to the verified line when the code came from the Demo inbox. */
+  /** Added to the verified line unless the session is the owner's own: the code came from the Demo inbox. */
   simulated: string;
 }
 

@@ -38,8 +38,9 @@
 ## Layout
 
 - At most 520 px wide, like the reply card above it.
-- The label above the field in `control` type, 6 px over it. The field is `size-control-main` tall at `radius-control`, on the page's own ground in a 1 px `line-control` outline (`line-control-hover` on hover), with the digits in `body` type and tabular figures. Confirm is a primary main button beside it, 8 px away, on the same line and as tall. The failed line and the ghost button "I can’t get the code" follow 10 px apart.
-- The outline's color changes at `motion-instant`. Nothing moves under reduced motion.
+- The label above the field in `control` type, 6 px over it. The field is `size-control-main` tall at `radius-control`, on the page's own ground in a 1 px `line-field` outline, the same on hover, as `TextField`'s, with the digits in `body` type and tabular figures. Confirm is a primary main button beside it, 8 px away, on the same line and as tall. The failed line and the ghost button "I can’t get the code" follow 10 px apart.
+- The outline is the field's boundary: an empty field has no words of its own to say what it is, so the outline keeps 3:1 against the page (WCAG 1.4.11). The signed board N-Public-Verify-Run1 draws it in the fainter `line-control` (2.0:1), which the tokens keep for controls whose own words name them; the field follows every other text field instead (see the reference README).
+- Nothing in the form moves; the buttons follow `Button`.
 
 ## Props
 
@@ -52,10 +53,10 @@
 
 ## VerifiedLine
 
-`VerifiedLine` is the chat line once the code works: a `SystemLine` in the visitor's language, with "Simulated verification" / "Verificación simulada" after the screen's words when the session's assurance is `demo_code`. A code from the Demo inbox shows that the code went to the contact on record, not that the visitor holds that contact, so the line says the verification was simulated. Any other assurance shows the words alone.
+`VerifiedLine` is the chat line once the code works: a `SystemLine` in the visitor's language, with "Simulated verification" / "Verificación simulada" after the screen's words. A code from the Demo inbox shows that the code went to the contact on record, not that the visitor holds that contact, so the line says the verification was simulated. It fails toward the label: every assurance but `owner_session` carries it, `demo_code`, `none` and any value this build doesn't know alike, and only the owner's own session shows the words alone.
 
 | Prop | Type | Notes |
 | --- | --- | --- |
 | `text` | `string` | Required. The screen's words: "Verified with a code sent to •••• 0142". |
-| `assurance` | `Assurance` | Required. `demo_code` adds the label, after a full stop. |
+| `assurance` | `Assurance` | Required. Anything but `owner_session` adds the label, after a full stop. |
 | `language` | `'en' \| 'es'` | Required. The label's language and the line's `lang`. |

@@ -16,6 +16,8 @@ const LENGTH = /^-?\d+(?:\.\d+)?px$/;
 // Plain CSS values for the list families: no var(), url() or declarations.
 const PLAIN_VALUE = /^[A-Za-z0-9 #%(),./+_-]{1,200}$/;
 const LIST_FAMILIES = ['spacing', 'radius', 'size', 'motion'];
+// The numeral forms a type style may ask for: tabular figures, for numbers that line up.
+const NUMERIC = new Set(['tabular-nums']);
 
 function fail(message) {
   throw new Error(`tokens.json: ${message}`);
@@ -80,6 +82,10 @@ function typeStyleRule(style, groupFamily, families) {
   if (style.letterSpacing !== undefined) {
     if (!LENGTH.test(style.letterSpacing)) fail(`type style ${style.name} has an unsupported letterSpacing`);
     lines.push(`  letter-spacing: ${style.letterSpacing};`);
+  }
+  if (style.fontVariantNumeric !== undefined) {
+    if (!NUMERIC.has(style.fontVariantNumeric)) fail(`type style ${style.name} has an unsupported fontVariantNumeric`);
+    lines.push(`  font-variant-numeric: ${style.fontVariantNumeric};`);
   }
   if (style.opticalSize !== undefined) {
     if (typeof style.opticalSize !== 'number' || !(style.opticalSize > 0)) {

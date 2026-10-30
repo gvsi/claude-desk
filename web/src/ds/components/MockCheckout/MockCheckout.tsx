@@ -26,11 +26,14 @@ function isFinal(state: string): state is FinalPaymentState {
   return Object.hasOwn(FINAL_DOT, state);
 }
 
-/** The line under the name: the test card needs nothing typed but the name, if that. */
-function Hint({ text }: { text: string }) {
+/**
+ * A line under a value or a field. With the lock, it says the test card is filled in: under the
+ * customer's name, or under the card when the name is the field to fill.
+ */
+function Hint({ text, id, lock = false }: { text: string; id?: string; lock?: boolean }) {
   return (
-    <p className="cd-checkout__hint cd-type-caption">
-      <Icon name="lock" size={14} />
+    <p id={id} className="cd-checkout__hint cd-type-caption">
+      {lock ? <Icon name="lock" size={14} /> : null}
       {text}
     </p>
   );
@@ -92,6 +95,7 @@ export function MockCheckout({
   const cardLabelId = `${id}-card`;
   const nameLabelId = `${id}-name`;
   const nameFieldId = `${id}-name-field`;
+  const nameHintId = `${id}-name-hint`;
 
   // The button pressed here, until the request ends: the link's state changes, or a new error
   // shows. Clearing an old error, as a screen does when a retry starts, ends nothing. The ref is
@@ -132,11 +136,44 @@ export function MockCheckout({
   const nameOnCard = customerName?.trim();
   const finalLine = final === 'cancelled' && cancelReason === 'rules_changed' ? copy.cancelledRulesChanged : copy.final[final];
 
-  // When the link closes while the page is open, the buttons go with it. If focus was in the
-  // card, it would fall to the page, so the card's title takes it instead; the result region
-  // reads the new line out, so focus doesn't read it a second time. Focus anywhere else on the
-  // page stays where it is.
+  // Whether focus is in the checkout, kept from its own focus events. Focus that leaves for
+  // another element is out, and so is focus that leaves for nothing while the element it left stays
+  // on the page. A focused button that the closing link takes away leaves for nothing too, but it
+  // is off the page by the time that is checked, so focus still counts as in; so does focus whose
+  // window went to the background, as the element keeps it.
   const rootRef = useRef<HTMLDivElement>(null);
+  const focusInside = useRef(false);
+  useEffect(() => {
+    const page = rootRef.current;
+    if (!page) return;
+    const onFocusIn = () => {
+      focusInside.current = true;
+    };
+    const onFocusOut = (event: FocusEvent) => {
+      const next = event.relatedTarget;
+      if (next instanceof Node) {
+        focusInside.current = page.contains(next);
+        return;
+      }
+      const left = event.target;
+      queueMicrotask(() => {
+        if (left instanceof Node && left.isConnected && !page.contains(page.ownerDocument.activeElement)) {
+          focusInside.current = false;
+        }
+      });
+    };
+    page.addEventListener('focusin', onFocusIn);
+    page.addEventListener('focusout', onFocusOut);
+    return () => {
+      page.removeEventListener('focusin', onFocusIn);
+      page.removeEventListener('focusout', onFocusOut);
+    };
+  }, []);
+
+  // When the link closes while the page is open, the buttons go with it. If focus was in the
+  // checkout, it would fall to the page, so the card's title takes it instead; the result region
+  // reads the new line out, so focus doesn't read it a second time. Focus anywhere else, or on
+  // nothing when it wasn't in the checkout, stays where it is.
   const titleRef = useRef<HTMLHeadingElement>(null);
   const wasOpen = useRef(open);
   useEffect(() => {
@@ -145,7 +182,8 @@ export function MockCheckout({
     const page = rootRef.current;
     if (!closedHere || !page) return;
     const active = page.ownerDocument.activeElement;
-    if (active === null || active === page.ownerDocument.body || page.contains(active)) titleRef.current?.focus();
+    const fellToThePage = active === null || active === page.ownerDocument.body;
+    if (page.contains(active) || (fellToThePage && focusInside.current)) titleRef.current?.focus();
   }, [open]);
 
   return (
@@ -177,8 +215,11 @@ export function MockCheckout({
               <dl className="cd-checkout__card-fields cd-type-body">
                 <div className="cd-checkout__field cd-checkout__field--number">
                   <dt className="cd-sr-only">{copy.cardNumber}</dt>
-                  <dd className="cd-checkout__value">{TEST_CARD.number}</dd>
-                  <Icon name="lock" size={14} className="cd-checkout__lock" />
+                  {/* The lock sits in the number's value, so the list holds only terms and values. */}
+                  <dd className="cd-checkout__value cd-checkout__value--number">
+                    <span className="cd-checkout__number">{TEST_CARD.number}</span>
+                    <Icon name="lock" size={14} className="cd-checkout__lock" />
+                  </dd>
                 </div>
                 <div className="cd-checkout__field">
                   <dt className="cd-sr-only">{copy.expiry}</dt>
@@ -189,6 +230,8 @@ export function MockCheckout({
                   <dd className="cd-checkout__value">{TEST_CARD.securityCode}</dd>
                 </div>
               </dl>
+              {/* With the name to fill, the lock's line moves here, off the one field that isn't filled in. */}
+              {nameOnCard ? null : <Hint text={copy.filledIn} lock />}
             </div>
             {nameOnCard ? (
               <div className="cd-checkout__group" role="group" aria-labelledby={nameLabelId}>
@@ -201,7 +244,7 @@ export function MockCheckout({
                     {nameOnCard}
                   </span>
                 </p>
-                <Hint text={copy.filledIn} />
+                <Hint text={copy.filledIn} lock />
               </div>
             ) : (
               <div className="cd-checkout__group">
@@ -216,9 +259,10 @@ export function MockCheckout({
                   autoComplete="off"
                   spellCheck={false}
                   value={typedName}
+                  aria-describedby={nameHintId}
                   onChange={(event) => setTypedName(event.target.value)}
                 />
-                <Hint text={copy.filledIn} />
+                <Hint id={nameHintId} text={copy.anyName} />
               </div>
             )}
             <div className="cd-checkout__actions">
