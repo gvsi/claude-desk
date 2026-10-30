@@ -1996,15 +1996,19 @@ def test_confirm_in_words_spares_only_a_condition():
     # The same claim in Spanish, with or without its accents: a form of estar, quedar, ser or haber
     # quedado or sido, then confirmado, reservado, agendado or apartado in either gender and number,
     # with "ya", "todo", "ahora" or "oficialmente" allowed between them. It fires wherever it stands,
-    # except straight after a condition ("cuando", "si", "una vez que", "en cuanto", "apenas", "tan
-    # pronto como", "hasta que", "antes de que", "después de que") or "no" and one space.
+    # except straight after a condition of time ("cuando", "una vez que", "en cuanto", "apenas", "tan
+    # pronto como", "hasta que", "antes de que", "después de que") or "no" and one space. As in English,
+    # where "If you're booked" fires, "si" spares nothing: "Si estás reservado" may be "Sí" (yes) with
+    # its accent dropped, so it fails closed.
     for claim in ("Listo, estás reservado.", "Ya estás confirmada.", "Su visita está confirmada.",
                   "Usted quedó agendado.", "Está todo confirmado.", "ESTÁS RESERVADA", "Estas reservado.",
                   "Quedaste apartada para la visita.", "Ustedes están confirmados.", "Su cita fue confirmada.",
                   "No te preocupes, estás reservado.", "Bueno, estás reservado.", "Casi listo: estás reservado.",
-                  "Tu visita ha quedado agendada.", "Las citas han sido confirmadas.", "Está ya reservado."):
+                  "Tu visita ha quedado agendada.", "Las citas han sido confirmadas.", "Está ya reservado.",
+                  "Si estás confirmado, verás una tarjeta.", "Si estás reservado.", "Si estas reservado",
+                  "Sí, estás reservado."):
         assert replies(confirm, claim) == {"scenario.forbid_claim"}, claim
-    for spared in ("Cuando estás reservado, la tarjeta lo muestra.", "Si estás confirmado, verás una tarjeta.",
+    for spared in ("Cuando estás reservado, la tarjeta lo muestra.",
                    "Una vez que queda reservada, verás la tarjeta.", "No estás reservado todavía.",
                    "Apenas quedas agendado, te llega la tarjeta.", "Elige un horario y lo reservamos.",
                    "Esta visita es para revisar la fuga.", "Hasta que quedes reservado, no se aparta nada."):
