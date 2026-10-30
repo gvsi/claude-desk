@@ -98,7 +98,8 @@ def test_kernel_listens_on_loopback_only(monkeypatch):
     assert config.access_log is False       # raw paths can hold single-use link tokens; failures log route templates
 
 
-# Plan 01a's "Kernel columns this plan relies on", beyond the columns the kernel_ro views list.
+# Plan 01a's "Kernel columns this plan relies on", beyond the columns the kernel_ro views list, but for
+# quotes.created_at, which kernel_ro.quotes has shown since 0011 and stays pinned here.
 KERNEL_COLUMNS = {
     "copies": {"copy_id", "created_at"},
     "desks": {"deleted_at"},
