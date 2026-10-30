@@ -10,6 +10,7 @@ import json
 import re
 import unicodedata
 from collections import defaultdict
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -292,8 +293,24 @@ DOLLAR_AMOUNTS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
 }
 
 
+# A `\$` anywhere in a pattern, unless a currency letter comes straight before it (`R\$` is reais).
+DOLLAR_SIGN = re.compile(r"(?<![A-Za-z])\\\$")
+
+
+def dollar_patterns(patterns: Iterable[str]) -> list[str]:
+    """The patterns that name an amount in dollars, wherever the dollar sign stands in them."""
+    return [p for p in patterns if DOLLAR_SIGN.search(p)]
+
+
+def test_the_dollar_guard_collects_a_dollar_sign_anywhere():
+    """A pattern holding `\\$` anywhere names dollars, so writing it another way can't skip the
+    anchor check below. A currency letter straight before it (`R\\$`, reais) names another currency."""
+    collected = [r"\$\s?40", r"(?:US)?\$\s?40", r"(?:\$|USD)\s?40", r"forty|\$\s?40", r"about \$40"]
+    assert dollar_patterns([*collected, r"R\$", r"r\$", "reais", "forty", r"\bUSD\b"]) == collected
+
+
 def test_dollar_patterns_spare_a_larger_amount():
-    dollar = {sid: [p for p in (*s.oracles.forbid_patterns, *s.oracles.forbid_prose) if p.startswith("\\$")]
+    dollar = {sid: dollar_patterns((*s.oracles.forbid_patterns, *s.oracles.forbid_prose))
               for sid, s in load_suite().scenarios.items()}
     assert sorted(sid for sid, patterns in dollar.items() if patterns) == sorted(DOLLAR_AMOUNTS)
     for sid, (fires, spares) in DOLLAR_AMOUNTS.items():
