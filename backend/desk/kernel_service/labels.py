@@ -259,31 +259,62 @@ def canary_key(text: str) -> str:
     return _reading(text).key
 
 
-def _places(reading: _Reading, wanted: str) -> list[tuple[int, int]]:
-    """Where `wanted` (a canary's `canary_key`) occurs in `reading`, each as the start and end of
-    the characters it takes up in the text: its letters in order, with only skippable ones (from
-    accented or lookalike characters) passed over between them. One pass over the letters, keeping
-    for each count of letters matched so far the earliest start that reached it: a place that
-    starts later and ends at the same letter lies inside it."""
+class _Keys(NamedTuple):
+    """The canaries of one scan, as one pass over a reading looks for all of them (`_keys`)."""
+
+    ends: Mapping[str, tuple[str, ...]]   # each canary's `canary_key` -> the documents whose canary reads as it
+    going_on: frozenset[str]              # the first letters, one to all but the last, of every key
+    first: re.Pattern[str]                # a letter some key starts with
+
+
+@functools.lru_cache(maxsize=256)         # bounded: one entry per set of canaries scanned for
+def _keys(canaries: tuple[tuple[str, str], ...]) -> _Keys:
+    """`canaries` (document ID, canary pairs) as `_places` looks for them: each canary's
+    `canary_key` once, with every document whose canary reads as it, and every key's beginnings. A
+    canary with no letters or digits has no key and is never found."""
+    ends: dict[str, list[str]] = {}
+    for document_id, canary in canaries:
+        if wanted := canary_key(canary):
+            ends.setdefault(wanted, []).append(document_id)
+    going_on = frozenset(key[:count] for key in ends for count in range(1, len(key)))
+    first = re.compile(f"[{''.join(sorted({key[0] for key in ends}))}]" if ends else "(?!)")   # (?!): none
+    return _Keys(MappingProxyType({key: tuple(ids) for key, ids in ends.items()}), going_on, first)
+
+
+def _places(reading: _Reading, keys: _Keys) -> dict[str, list[tuple[int, int]]]:
+    """Where each key of `keys` occurs in `reading`, each place as the start and end of the
+    characters it takes up in the text: the key's letters in order, with only skippable ones (from
+    accented or lookalike characters) passed over between them. One pass over the letters for every
+    key at once, keeping for each beginning of a key matched so far the earliest start that reached
+    it (a place that starts later and ends at the same letter lies inside it). Keys that begin alike
+    share those beginnings, so a hundred canaries, which all begin "cdk", cost about what one does;
+    each key is still matched as it would be alone, ending only on one of its own letters."""
     key, skippable, origin = reading
-    places: list[tuple[int, int]] = []
-    matched: dict[int, int] = {}          # letters of `wanted` matched -> the earliest start that did
+    ends, going_on, first = keys
+    places: dict[str, list[tuple[int, int]]] = {}
+    matched: dict[str, int] = {}          # a key's beginning matched so far -> the earliest start that did
     i = 0
     while i < len(key):
-        if not matched:                   # nothing under way: on to where one could start
-            i = key.find(wanted[0], i)
-            if i < 0:
+        if not matched:                   # nothing under way: on to where a key could start
+            found = first.search(key, i)
+            if found is None:
                 break
-        letter, moved = key[i], {}
-        for count, start in matched.items():
-            if letter == wanted[count] and moved.get(count + 1, start) >= start:
-                moved[count + 1] = start  # the letter is the canary's next one
-            if skippable[i] and moved.get(count, start) >= start:
-                moved[count] = start      # or an accented or lookalike character between two of its own
-        if letter == wanted[0] and 1 not in moved:
-            moved[1] = origin[i]
-        if len(wanted) in moved:
-            places.append((moved.pop(len(wanted)), origin[i] + 1))
+            i = found.start()
+        letter, moved, ended = key[i], {}, {}
+        for begun, start in matched.items():
+            then = begun + letter         # the letter is the next of a key that begins so
+            if then in ends and ended.get(then, start) >= start:
+                ended[then] = start
+            if then in going_on and moved.get(then, start) >= start:
+                moved[then] = start
+            if skippable[i] and moved.get(begun, start) >= start:
+                moved[begun] = start      # or an accented or lookalike character between two of its own
+        if letter in ends and letter not in ended:
+            ended[letter] = origin[i]
+        if letter in going_on and letter not in moved:
+            moved[letter] = origin[i]
+        for whole, start in ended.items():
+            places.setdefault(whole, []).append((start, origin[i] + 1))
         matched = moved
         i += 1
     return places
@@ -294,15 +325,21 @@ def canary_spans(text: str, canaries: Mapping[str, str]) -> list[tuple[str, int,
     ID, and the start and end of the characters it takes up in `text`, from its first letter or
     digit to its last, whatever lies between (see the module docstring for what may). Places of one
     canary that overlap are listed once, as the characters they take up together; each document's
-    places are in the order they start. With no canary to look for, the text isn't read."""
-    keys = {document_id: canary_key(canary) for document_id, canary in canaries.items()}
-    if not any(keys.values()):
+    places are in the order they start, and the documents in the order `canaries` lists them. The
+    text is read once for all the canaries (`_places`), and not at all with none to look for."""
+    if not canaries:
         return []
-    reading = _reading(text)
+    keys = _keys(tuple(canaries.items()))
+    if not keys.ends:
+        return []
+    found: dict[str, list[tuple[int, int]]] = {}
+    for whole, places in _places(_reading(text), keys).items():
+        for document_id in keys.ends[whole]:
+            found[document_id] = places
     spans = []
-    for document_id, wanted in keys.items():
+    for document_id in canaries:
         merged: list[tuple[int, int]] = []
-        for start, end in sorted(_places(reading, wanted) if wanted else []):
+        for start, end in sorted(found.get(document_id, [])):
             if merged and start < merged[-1][1]:
                 merged[-1] = (merged[-1][0], max(end, merged[-1][1]))
             else:
