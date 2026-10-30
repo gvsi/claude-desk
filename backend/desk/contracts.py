@@ -364,6 +364,7 @@ class DemoInboxEntry(BaseModel):          # only from GET /demo_inbox; never sto
     kind: Literal["verification_code", "alert", "head_checkpoint"]
     body: str                             # may contain a code
     created_at: AwareDatetime
+    decision_id: str | None = None        # only on the owner's alert for a held request: that decision's own id
 
 class ExecResult(BaseModel):
     action_id: str

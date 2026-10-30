@@ -2493,6 +2493,17 @@
             "type": "string",
             "format": "date-time",
             "title": "Created At"
+          },
+          "decision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Id"
           }
         },
         "type": "object",
