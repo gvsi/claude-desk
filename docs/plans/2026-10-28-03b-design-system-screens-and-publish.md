@@ -78,7 +78,7 @@ Specific to this plan:
   - A `ToolRulesCard` per tool, with `RuleRow`s (`words` from `ruleWords`; `shared` with the covered tools' names for an effect-group card; `onChangeOutcome` opens the drafted change in `ChangeReview`).
   - `ConnectionPanel`: `consequence`, the connection details for Stripe, and what stops: the connector's tools and the rules that stop applying, read from `RulesView`. "Turn off" or "Disconnect" opens the panel's plain confirm, which lists them, then sends one `POST /tools/confirm {tools, enable: false}`, which applies at once. Verification passes `alwaysOn` instead and has no "Turn off".
 - **A tool's page** (`rules/:connector/:tool`, N-Conn-05, N-Conn-06, N-Conn-14, N-Conn-15):
-  - `ToolPageHeader`: `status` from the profile; `definitionNote` for a connected tool only; `onSimulateChange` → `POST /tools/simulate_change`.
+  - `ToolPageHeader`: `status` from the profile; `definitionNote` for a connected tool only. The demo's "Simulate a tool change" (`POST /tools/simulate_change`) is built later, with the mode switch and the money-limit line.
   - `ToolReviewCard` while `needs_review`. "Turn back on" sends `POST /tools/confirm {tools: [{tool, definition_sha256: pending_sha256}], enable: true}`, and the drafted version shows in `ChangeReview`.
   - `ToolRulesCard`, and the owner `Composer` with the tool's chips.
   - `RecentRequests`: rows from the tool's recent decisions (`reason_plain`, the deciding card's reason, the state in words, the time formatted by the web app), each linking to its Safety record.
@@ -113,7 +113,7 @@ Supporting tests (the kernel stays the authority) and failure modes this plan ow
 |---|---|
 | Owner confirms a rule change → sees the enforced who, limits, hours and review, before and after | Task 2 `same_reason_new_limit_is_changed`, `diff_shows_enforced_values`, `confirm_once` |
 | Demo inbox → no code from a notice; no owner alerts or checkpoints on a visitor panel | Task 1 `code_only_from_entry`, `visitor_sees_only_codes` |
-| "Simulate a tool change" → literal quoted definition; re-enable names the reviewed hash | Task 3 `quoted_definition_is_text`, `confirm_names_the_reviewed_hash`, `no_hash_no_confirm` |
+| A connected tool's definition changes → literal quoted definition; re-enable names the reviewed hash | Task 3 `quoted_definition_is_text`, `confirm_names_the_reviewed_hash`, `no_hash_no_confirm` |
 | Adding a connector → each new tool at "Ask me first" with what already covers it; nothing turns on until the proved change is confirmed; the chat only leads into that review | Task 3 `review_starts_at_ask_me_first`, `offer_card_only_opens_the_review`; Task 2 `confirm_only_when_checked`, `confirm_once` |
 | A mock connector never named without "Mock"; a mock sign-in asks for no account details | Task 2 `mock_badge_always_beside_external_names`; Task 3 `sign_in_collects_nothing` |
 | Turning a connector off → a plain confirm lists the tools that stop and the rules that stop applying; Verification can't be turned off | Task 3 `turn_off_confirms_first`, `always_on_has_no_turn_off` |
@@ -379,10 +379,10 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
       - Confirm: "Turn off {name}" or "Disconnect". Cancel: "Keep it on" or "Keep it connected".
       - Confirm calls `onTurnOff` once, and the dialog waits (`aria-busy`) until `pending` clears. Cancel and Escape close it with no call.
     - `always_on` (Verification) shows "Always on. {reason}" ("It's how Claude confirms a customer before sharing anything private.") and no button.
-  - `ToolPageHeader({ name; description; connector; status: ToolStatus; definitionNote?: string; onSimulateChange?: () => void; simulatePending?: boolean })`, the top of a tool's page:
+  - `ToolPageHeader({ name; description; connector; status: ToolStatus; definitionNote?: string })`, the top of a tool's page:
     - `name` as the page's serif `h1`, then `description` (what the tool does and its effects).
     - The source line: `ConnectorIcon` at `inline` size, "From {name}" with its badge (`ConnectorName` at `inline` size), and the status in words with its dot. `enabled`: handled "On", followed by " · {definitionNote}" when given ("Definition unchanged", "Definition reviewed today"). `needs_review`: info "Off until you review a change". `disabled`: info "Off".
-    - For an external connector's tool while `enabled`, `onSimulateChange` adds a ghost "Simulate a tool change", captioned "Demo only. Changes this tool's definition on the mock {connector name} server, so you can see what happens." This is the master's owner-side demo action ("Connected integration"). No board draws it, so it sits on the tool's page, where its result shows.
+    - The master's owner-side demo action ("Connected integration"), "Simulate a tool change", which changes a connected tool's definition on its mock server, is built later, with the mode switch and the money-limit line. The header has no control for it.
   - `RecentRequestView = { key: string; when: string; what: string; why: string; tone: StatusTone; outcome: string; href?: string }` and `RecentRequests({ rows: RecentRequestView[]; linkComponent? })`:
     - "Recent requests under these rules", then a row per request: `when` in meta; `what` (the decision's `reason_plain`); `why` in meta (the rule that decided it, or what happened); and at the right the outcome in words with its dot ("Automatic", "Waiting for your answer", "Stopped", "You allowed it").
     - Each row is a link to its record when `href` is given.
@@ -443,7 +443,7 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
   - `Navigation/Breadcrumb`: `ToolPage` (Rules / Stripe / Refund).
   - `Connectors/ConnectorHeader`: `Payments`, `Verification`, `Stripe`, `GoogleCalendar` (with its promise).
   - `Connectors/ConnectionPanel`: `TurnOffPayments`, `DisconnectStripe`, `Pending`, `VerificationAlwaysOn`.
-  - `Connectors/ToolPageHeader`: `Refund`, `Quote`, `RefundNeedsReview`, `RefundReviewed`, `WithSimulate`.
+  - `Connectors/ToolPageHeader`: `Refund`, `Quote`, `RefundNeedsReview`, `RefundReviewed`.
   - `Connectors/RecentRequests`: `Refund`, `Empty`.
   - `Connectors/ConnectorPicker`: `ChenComingSoon`, `RiveraConnectable`.
   - `Connectors/ConnectorSignIn`: `GoogleCalendar`.
@@ -459,7 +459,6 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
     - `connector_status_in_words`: `Payments` shows "On", `Verification` "Always on" and `Stripe` "Connected", each beside a dot.
     - `turn_off_confirms_first`: in `TurnOffPayments`, "Turn off Payments" opens a dialog named "Turn off Payments?" that lists "Payment link" and "Charge within a signed limit" and the rules that stop applying. "Keep it on" closes it with no call. Opening it again and pressing its "Turn off Payments" → `onTurnOff` once, over two clicks. `DisconnectStripe` has the details list, and its dialog reads "Disconnect Stripe?".
     - `always_on_has_no_turn_off`: `VerificationAlwaysOn` shows "Always on. It's how Claude confirms a customer before sharing anything private." and no button.
-    - `simulate_only_when_on`: `WithSimulate` has "Simulate a tool change"; `RefundNeedsReview` and `Quote` (built in) don't.
     - `recent_requests_show_outcomes_in_words`: each row's outcome word beside its dot; `Empty` shows its line.
     - `picker_by_keyboard`: the dialog named "Add a connector" opens with focus on "Add" (Payments). Tab stays inside it. Enter → `onChoose('payments')` once. Escape → `onClose`.
     - `picker_states_in_words`: in `ChenComingSoon`, the added built-ins read "Added", Google Calendar reads "Coming soon in this demo" with no button, Stripe has "Connect", and the mock line shows.
@@ -482,7 +481,7 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
   - `ConnectionPanel`'s `DisconnectStripe`: the line says the change shows first, which the plain confirm does.
   - `ConnectionPanel`'s `VerificationAlwaysOn` and `ConnectorHeader`'s `Verification`: no board draws Verification's page; the owner decided its words.
   - The Google Calendar stories: Google Calendar is catalog-only in the demo, so they show what the components support once it works.
-- [ ] **Step 4: Run** the same command plus `npm run check:ds` → PASS (36 story tests).
+- [ ] **Step 4: Run** the same command plus `npm run check:ds` → PASS (35 story tests).
 - [ ] **Step 5: Commit** `git add web && git commit -m "feat(ds): add connector and tool pages, the add-a-connector flow and the changed-tool review"`.
 
 ### Task 4: Visual check of the owner boards
@@ -726,3 +725,8 @@ Task 2 fix round 1 (2026-10-29), from the task review:
 - Joint coverage needs one principal to satisfy every card: a person's or agent's cards combine only with the same person's or agent's.
 - Limit phrases reflow: nothing keeps its width, and under 640 px a rule row's and a hub tool row's outcome sits on its own line, following the updated phone board (N-Conn-16-Phone-Rules), which awaits the owner's sign-off. Hub tool rows show the governing rule's limit phrase (`ToolSummaryView.limit`).
 - Task 2 has 16 unit tests and 45 story tests.
+
+Before Task 3 (2026-10-29): the project owner asked for "Simulate a tool change" to be built later, together with the mode switch and the money-limit line, so this task stays on time.
+- `ToolPageHeader` takes no simulate props, and the `WithSimulate` story and `simulate_only_when_on` are dropped.
+- The changed-tool review keeps its checks, since they belong to `ToolReviewCard`: `quoted_definition_is_text`, `confirm_names_the_reviewed_hash` and `no_hash_no_confirm`.
+- Task 3 has 35 story tests.
