@@ -576,6 +576,42 @@ describe('public chat page', () => {
     }
   }, 30_000);
 
+  it('moving_back_up_holds_as_the_chat_goes_on', async () => {
+    const { screen } = await renderRoute(PAGE, { viewport: 'phone', seed: 'rivera' });
+    await ready(screen);
+    for (const text of ['How much is drain clearing?', 'Can someone come Tuesday afternoon?', 'Book the first one', 'Can I get 15% off if I pay cash?']) {
+      await say(screen, text);
+      await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
+    }
+    const ask = screen.getByRole('button', { name: 'Ask for Maria Rivera' }).element();
+    const askInView = () => {
+      const { top, bottom } = ask.getBoundingClientRect();
+      return top >= 0 && bottom <= innerHeight;
+    };
+    expect(askInView(), 'the chat has scrolled past "Ask for Maria Rivera"').toBe(false);
+
+    // A visitor at the end moves back up with the keyboard, and Maria joins in that same moment:
+    // the page scrolls at once, but its scroll event comes only with the browser's next frame (here
+    // a whole frame away, from inside this one's callbacks), after the chat has already gone on.
+    // They stay where they moved to.
+    const atTheEnd = document.scrollingElement?.scrollTop ?? 0;
+    let movedTo = atTheEnd;
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => {
+        ask.focus();
+        movedTo = document.scrollingElement?.scrollTop ?? 0;
+        mockStore.emit(RIVERA.slug, { type: 'owner_joined', name: 'Maria Rivera' });
+        resolve();
+      });
+    });
+    expect(movedTo, 'focus moved the page up').toBeLessThan(atTheEnd);
+    await expect.element(screen.getByText('Maria Rivera joined the chat', { exact: true })).toBeInTheDocument();
+    await sleep(100);
+    expect(document.activeElement).toBe(ask);
+    expect(document.scrollingElement?.scrollTop).toBe(movedTo);
+    expect(askInView(), '"Ask for Maria Rivera", where the visitor moved to, stays in view').toBe(true);
+  });
+
   it('reload_restores_the_conversation', async () => {
     const first = await renderRoute(PAGE);
     await ready(first.screen);

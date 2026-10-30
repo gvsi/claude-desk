@@ -6,7 +6,7 @@
  *
  * Reused by setup's preview (`embedded`), which sits inside an owner screen.
  */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { Component, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 
 import type { SessionState } from '../api/contracts.ts';
 import {
@@ -168,14 +168,47 @@ function hiddenUnderComposer(end: HTMLElement, composer: HTMLElement): number {
 }
 
 /**
+ * Renders nothing, and calls `before` each time the component that renders it renders again, as
+ * React is about to change the page and while the page is still as the visitor sees it. Only a
+ * class has that moment (React's getSnapshotBeforeUpdate); function components have no equivalent.
+ */
+class BeforeEachChange extends Component<{ before: () => void }> {
+  override getSnapshotBeforeUpdate(): null {
+    this.props.before();
+    return null;
+  }
+
+  // React calls getSnapshotBeforeUpdate only on a class that has componentDidUpdate too.
+  override componentDidUpdate(): void {}
+
+  override render(): null {
+    return null;
+  }
+}
+
+interface NewestInView {
+  /** Call when the visitor sends: the end of the conversation comes back into view. */
+  follow: () => void;
+  /** For a BeforeEachChange rendered with the conversation. */
+  beforeChange: () => void;
+}
+
+/**
  * Keeps the newest message in view, as a chat does: while the visitor is at the end of the
  * conversation, whatever arrives (a reply, its receipts, "Claude is writing", a notice) scrolls up
  * to sit just above the composer, and so does the end when the page changes size (the window
  * narrows and the rows rewrap, the composer grows). A visitor who has scrolled back to read stays
- * where they are until they send. Returns the function to call when they send.
+ * where they are until they send.
+ *
+ * Where the visitor is comes from the page's scroll events, and again just before each change the
+ * page makes (`beforeChange`): a scroll the page makes at once, such as focus moving up with the
+ * keyboard, sends its event only with the next frame, and a reply arriving in between would
+ * otherwise take the visitor back down to the end.
  */
-function useNewestInView(end: RefObject<HTMLElement | null>, composer: RefObject<HTMLElement | null>, shown: boolean): () => void {
+function useNewestInView(end: RefObject<HTMLElement | null>, composer: RefObject<HTMLElement | null>, shown: boolean): NewestInView {
   const atTheEnd = useRef(true);
+  /** The visitor has just sent, and the change that shows their message brings the end back. */
+  const sent = useRef(false);
 
   // Brings the end of the conversation up to the composer, at once and never animated, while the
   // visitor is at the end.
@@ -188,14 +221,16 @@ function useNewestInView(end: RefObject<HTMLElement | null>, composer: RefObject
     else scroller.scrollBy({ top: hidden, behavior: 'instant' });
   }, [end, composer]);
 
-  useEffect(() => {
-    const onScroll = () => {
-      if (end.current && composer.current) atTheEnd.current = hiddenUnderComposer(end.current, composer.current) <= AT_THE_END_PX;
-    };
-    // Captured on the document, so the page's scrolling and an embedding panel's both count.
-    document.addEventListener('scroll', onScroll, { capture: true, passive: true });
-    return () => document.removeEventListener('scroll', onScroll, { capture: true });
+  // Whether the visitor is at the end, as the page stands now.
+  const notePlace = useCallback(() => {
+    if (end.current && composer.current) atTheEnd.current = hiddenUnderComposer(end.current, composer.current) <= AT_THE_END_PX;
   }, [end, composer]);
+
+  useEffect(() => {
+    // Captured on the document, so the page's scrolling and an embedding panel's both count.
+    document.addEventListener('scroll', notePlace, { capture: true, passive: true });
+    return () => document.removeEventListener('scroll', notePlace, { capture: true });
+  }, [notePlace]);
 
   // The page changing size moves the end without a render: the shell rewraps when the window or
   // the panel around it resizes, and the composer area grows with what is typed. Watched while the
@@ -210,12 +245,23 @@ function useNewestInView(end: RefObject<HTMLElement | null>, composer: RefObject
     return () => observer.disconnect();
   }, [shown, end, composer, pin]);
 
-  // After every render: the conversation may have grown under the composer.
-  useLayoutEffect(pin);
+  // Just before each change, unless it shows what the visitor has just sent.
+  const beforeChange = useCallback(() => {
+    if (!sent.current) notePlace();
+  }, [notePlace]);
 
-  return () => {
+  // After every render: the conversation may have grown under the composer.
+  useLayoutEffect(() => {
+    pin();
+    sent.current = false;
+  });
+
+  const follow = useCallback(() => {
     atTheEnd.current = true;
-  };
+    sent.current = true;
+  }, []);
+
+  return { follow, beforeChange };
 }
 
 /**
@@ -259,7 +305,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
   const { openStatus, desk } = useOpenStatus(slug, chat.desk);
   const endRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
-  const followTheEnd = useNewestInView(endRef, composerRef, desk !== null);
+  const newest = useNewestInView(endRef, composerRef, desk !== null);
 
   useEffect(() => {
     if (chat.session !== null) onSession?.(chat.session);
@@ -397,11 +443,11 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
     state.error !== null && !ended ? <Notice tone="error">{evErrorCopy({ code: state.error }, language)}</Notice> : null;
   // What the visitor sends brings the end of the conversation back into view.
   const send = (text: string) => {
-    followTheEnd();
+    newest.follow();
     chat.send(text);
   };
   const resend = (id: string) => {
-    followTheEnd();
+    newest.follow();
     chat.resend(id);
   };
 
@@ -461,6 +507,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
       ) : null}
       {/* The end of the conversation, which useNewestInView keeps above the composer. */}
       <div ref={endRef} />
+      <BeforeEachChange before={newest.beforeChange} />
     </PublicShell>
   );
 }
