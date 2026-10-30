@@ -10,12 +10,16 @@ import hashlib
 import itertools
 import json
 import re
+import subprocess
+import sys
 from datetime import time
+from pathlib import Path
 from typing import get_args
 
 import desk_kernel
 import pytest
 
+from desk import always_on
 from desk.contracts import HoursWindow, ReviewThresholds, RuleCard, ToolName, ToolProfile
 from desk.kernel_service import compiler, reference, review_thresholds
 from desk.kernel_service.seed import RIVERA_CARDS
@@ -697,3 +701,76 @@ def test_no_review_can_hold_a_start():
     # the 9 auto cards for anyone, verified people or record owners (plain, reviewed or in hours),
     # alone or two at once, beside each of the six bases
     assert accepted == 6 * (1 + 9 + 36)
+
+
+def test_the_always_on_effects_are_the_schemas():
+    """`desk.always_on` states each always-on tool's effects as data, so the API can check a card
+    without the kernel's schema. They are the effect groups the Cedar base schema puts each tool
+    in, so the data can't drift from the schema."""
+    actions = compiler.BASE_SCHEMA[""]["actions"]
+    assert set(always_on.ALWAYS_ON_EFFECTS) == always_on.ALWAYS_ON_TOOLS == {"native.start_verification"}
+    assert all(group["id"].startswith("effect:") for tool in always_on.ALWAYS_ON_TOOLS
+               for group in actions[tool]["memberOf"])
+    assert always_on.ALWAYS_ON_EFFECTS == {
+        tool: frozenset(group["id"].removeprefix("effect:") for group in actions[tool]["memberOf"])
+        for tool in always_on.ALWAYS_ON_TOOLS}
+
+
+def test_the_shared_check_names_each_card_that_could_change_verification(monkeypatch):
+    """`desk.always_on.changes_always_on` names the always-on tool a card could change, or returns
+    None: a card on the tool other than the presets' own (its `reason` may be reworded); an `ask`
+    or `never` card on one of its effects; an `auto` effect card whose specificity is at least the
+    presets' card's (one for a person or an agent). An `auto` effect card for anyone, verified
+    people or record owners ranks below it and passes, as every other card does. With no preset
+    card for the tool, every card on one of its effects is refused."""
+    tool = "native.start_verification"
+    [shipped] = always_on.ALWAYS_ON_CARDS
+    assert always_on.ALWAYS_ON_CARDS == tuple(c for c in PRESETS["ask_first"] if c.applies_to == tool)
+    reworded = shipped.model_copy(update={"reason": "Anyone can get a code sent to the contact on record."})
+    assert always_on.changes_always_on(shipped) is None and always_on.changes_always_on(reworded) is None
+    changes = ({"who": "verified"}, {"mode": "ask"}, {"mode": "never"}, {"review": True}, {"hours": WEEKDAYS},
+               {"card_id": "verify"})
+    refused = [*(RuleCard.model_validate({**shipped.model_dump(), **change}) for change in changes),
+               card("send", "effect:send_message", mode="ask"),
+               card("send", "effect:send_message", mode="never", who="verified"),
+               card("send", "effect:send_message", who="person", **DANA),
+               card("send", "effect:send_message", who="agent", **AGENT)]
+    kept = [card("send", "effect:send_message"),
+            card("send", "effect:send_message", who="verified", review=True),
+            card("send", "effect:send_message", who="record_owner", hours=WEEKDAYS),
+            card("dana-book", "native.book", who="person", **DANA),
+            card("private", "effect:private_data", mode="never"),
+            *(c for c in PRESETS["auto"] if c != shipped), *RIVERA_CARDS]
+    for c in refused:
+        assert always_on.changes_always_on(c) == tool, c
+    for c in kept:
+        assert always_on.changes_always_on(c) is None, c
+    monkeypatch.setattr(always_on, "ALWAYS_ON_CARDS", ())
+    assert always_on.changes_always_on(card("send", "effect:send_message")) == tool
+
+
+def test_the_compiler_refuses_cards_with_the_shared_check(monkeypatch):
+    """The compiler checks cards with `desk.always_on`'s own check, cards and ranking, never a copy
+    of them, so the API's pre-check and the compiler can't disagree on a card."""
+    assert compiler.changes_always_on is always_on.changes_always_on
+    assert compiler.ALWAYS_ON_TOOLS is always_on.ALWAYS_ON_TOOLS
+    assert compiler.ALWAYS_ON_CARDS is always_on.ALWAYS_ON_CARDS
+    assert compiler.specificity is always_on.specificity
+    # validate_cards reads it when it runs: whatever the shared check names is refused with that tool
+    send = card("send", "effect:send_message")
+    assert compiler.validate_cards([send], people=(), agent_keys=(), auto_money_cap_cents=TEST_CAP) == []
+    monkeypatch.setattr(always_on, "ALWAYS_ON_CARDS", ())
+    assert compiler.validate_cards([send], people=(), agent_keys=(), auto_money_cap_cents=TEST_CAP) == [
+        f"send: {ALWAYS_ON}"]
+
+
+def test_the_api_can_import_the_always_on_check_without_kernel_code():
+    """Both processes import `desk.always_on`, so importing it loads no kernel code: nothing from
+    `desk` but the contracts and the presets, and neither `desk_kernel` nor the kernel service's
+    database and web libraries."""
+    script = "import sys, desk.always_on; print(*sorted(sys.modules))"
+    loaded = subprocess.run([sys.executable, "-c", script], cwd=Path(__file__).resolve().parents[2], check=True,
+                            capture_output=True, text=True).stdout.split()
+    assert {name for name in loaded if name.split(".")[0] == "desk"} == {
+        "desk", "desk.always_on", "desk.contracts", "desk.presets"}
+    assert not {name for name in loaded if name.split(".")[0] in ("desk_kernel", "sqlalchemy", "fastapi")}
