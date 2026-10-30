@@ -36,7 +36,7 @@ As on `ApprovalCard`'s menus:
 - `OUTCOME_WORDS` (`satisfies Record<RuleMode, string>`): `auto` "Automatic", `ask` "Ask me first", `never` "Never". Used wherever a rule's outcome shows.
 - `OUTCOME_TONE`: `auto` handled, `ask` held, `never` refused.
 - `outcomePhrase(mode, limit?)`.
-- `RulesPreset = 'ask_first' | 'auto' | 'custom'` and `PRESET_WORDS`, in that order "Ask me first", "Automatic", "Custom", the options of the Desk's mode switch (a `SegmentedControl`).
+- `RulesPreset = 'ask_first' | 'auto'`, the master plan's two presets. There is no Custom mode: the Desk's rules are its own, whichever preset they started from.
 - `PRESET_ITEMS`, the two presets the Rules page's "Start from a preset" menu offers (`PresetMenu`), each with its title and a one-line description. The descriptions describe the master plan's preset cards (`desk.presets.PRESETS`); `preset_descriptions_match_the_presets` checks each claim against those cards, read from the generated presets export, `web/src/api/presets.gen.json`, and is skipped until that export exists.
 
 ## Props

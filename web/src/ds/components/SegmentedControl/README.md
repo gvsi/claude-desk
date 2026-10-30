@@ -4,12 +4,13 @@
 
 ## When to use
 
-- Two to four short options that are all worth seeing at once: the Desk's mode ("Ask me first", "Automatic", "Custom", from `PRESET_WORDS`), or a view of the Safety page ("Attempts", "Every entry").
+- Two to four short options that are all worth seeing at once, such as a view of the Safety page ("Attempts", "Every entry").
+- Not for the Rules page's presets: a preset is a starting point the owner reviews, so it is a menu (`PresetMenu`), with nothing selected.
 - Not for an on/off setting (use `Switch`), and not for long lists (use a menu).
 
 ## What the consumer provides
 
-- `label`, what is being chosen. It is the radio group's accessible name ("Mode for this Desk"); put a visible label beside the control when the page doesn't already say it.
+- `label`, what is being chosen. It is the radio group's accessible name ("What to show"); put a visible label beside the control when the page doesn't already say it.
 - `options` as `{ value, label }`, in the order shown, with short sentence-case labels.
 - `value` and `onChange`. The control is controlled: a click or an arrow key calls `onChange` with the new value, and the control shows the `value` the screen passes back. Choosing the option that is already chosen calls nothing.
 

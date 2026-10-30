@@ -1,16 +1,13 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent } from 'react';
 
 import { Button } from '../Button/Button.tsx';
-import { PRESET_ITEMS } from '../OutcomeMenu/outcomeWords.ts';
+import { PRESET_ITEMS, type RulesPreset } from '../OutcomeMenu/outcomeWords.ts';
 
 import './PresetMenu.css';
 
-/** A preset the menu offers. */
-export type PresetPick = (typeof PRESET_ITEMS)[number]['value'];
-
 export interface PresetMenuProps {
   /** The owner picked a preset: the screen drafts it and opens its review. Called once per pick. */
-  onPick: (preset: PresetPick) => void;
+  onPick: (preset: RulesPreset) => void;
   /** The picked preset's draft is in flight: the button keeps its label under the busy spinner, and the menu stays shut. */
   pending?: boolean;
 }
@@ -43,7 +40,7 @@ export function PresetMenu({ onPick, pending = false }: PresetMenuProps) {
     setOpen({ focus, at: openings.current, heldKey });
   };
   const closeMenu = () => setOpen(null);
-  const choose = (preset: PresetPick) => {
+  const choose = (preset: RulesPreset) => {
     if (open === null || pending) return;
     closeMenu();
     onPick(preset);
@@ -100,7 +97,7 @@ interface PresetItemsProps {
   id: string;
   labelledBy: string;
   opening: Opening;
-  onChoose: (preset: PresetPick) => void;
+  onChoose: (preset: RulesPreset) => void;
   onClose: () => void;
 }
 

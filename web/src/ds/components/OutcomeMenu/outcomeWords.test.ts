@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
 
 import type { RuleCard } from '../../../api/contracts.ts';
-import { OUTCOME_TONE, OUTCOME_WORDS, PRESET_ITEMS, PRESET_WORDS, outcomePhrase } from './outcomeWords.ts';
+import { OUTCOME_TONE, OUTCOME_WORDS, PRESET_ITEMS, outcomePhrase, type RulesPreset } from './outcomeWords.ts';
 
 /**
  * The presets export: `desk.presets.PRESETS` (plan 01a Task 3) as JSON, generated into
@@ -287,6 +287,10 @@ describe('outcome words', () => {
   });
 
   test('preset_descriptions_are_the_owner_words', () => {
+    // The two presets are the only ones: there is no Custom mode to pick.
+    // @ts-expect-error 'custom' is no preset
+    const notAPreset: RulesPreset = 'custom';
+    expect(PRESET_ITEMS.map((item) => item.value)).not.toContain(notAPreset);
     expect(PRESET_ITEMS).toEqual([
       { value: 'ask_first', title: 'Ask me first for everything', description: 'Every tool asks you first.' },
       {
@@ -309,10 +313,5 @@ describe('outcome words', () => {
 
     expect(OUTCOME_WORDS).toEqual({ auto: 'Automatic', ask: 'Ask me first', never: 'Never' });
     expect(OUTCOME_TONE).toEqual({ auto: 'handled', ask: 'held', never: 'refused' });
-    expect(PRESET_WORDS.map(({ value, label }) => [value, label])).toEqual([
-      ['ask_first', 'Ask me first'],
-      ['auto', 'Automatic'],
-      ['custom', 'Custom'],
-    ]);
   });
 });
