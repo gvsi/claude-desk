@@ -5,8 +5,10 @@ the session-state rows ("Session state responses": token, copy, closed, generati
 
 1. A paused session (the breaker) gets only the handoff clause and a `session_paused` violation;
    nothing is scanned.
-2. Language: `lang.detect` on the prose. Another language is `unsupported_language`; too little to
-   tell falls back to the session's last language, else English. Cards render in this language.
+2. Language: `lang.detect` on the prose and the session's last language. Another language is
+   `unsupported_language`; too little to tell (unmarked words too, while the session has no last
+   language) falls back to the session's last language, else English. Cards render in this
+   language.
 3. `scan_prose`: numerals and the letters drawn as digits, currency and percent signs, words
    mixing Latin letters with another script (but for the Desk's own name and its business's
    name, as the owner set them), both lexicons (`lexicon/en.txt` and `lexicon/es.txt`, whatever
@@ -590,7 +592,7 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
                               fact_ids=fact_ids)
     canaries = await desk_canaries(ctx, desk_id)
     prose = shown(draft.prose)
-    detected = lang.detect(prose)
+    detected = lang.detect(prose, session_row.last_language)
     language: render.Language = detected if detected in ("en", "es") else fallback
     violations: list[Violation] = []
     if detected == "other":

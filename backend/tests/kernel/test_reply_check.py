@@ -562,7 +562,7 @@ async def test_a_canary_in_prose_is_blocked(app, client):
 ])
 async def test_language_detection(app, client, prose, detected):
     copy, visitor = await visitor_of(app, client)
-    assert lang.detect(prose) == detected
+    assert lang.detect(prose, None) == detected                        # a first reply: no last language
     if detected == "none":
         assert (await checked(client, visitor, "Con gusto le ayudo.")).language == "es"
     verdict = await checked(client, visitor, prose)
@@ -575,6 +575,71 @@ async def test_language_detection(app, client, prose, detected):
         assert (verdict.ok, verdict.language, verdict.blocks) == (True, language, [RenderedBlock(kind="prose",
                                                                                                 text=prose)])
         assert (await session_of(app, copy, visitor)).last_language == language
+
+
+@pytest.mark.parametrize(("prose", "rule_ids"), [
+    ("Perfecto, ya lo reviso.", []),
+    ("Claro, enseguida lo reviso.", ["lex.es.date"]),                  # "enseguida" is a time: in Spanish now
+    ("Tu cita está confirmada.", ["lex.es.booking"]),                  # a booking claim: in Spanish now
+    ("Maria te escribe antes de llegar.", []),
+    ("Listo, quedó apartado para ti.", []),
+    ("Perfecto, lo anoto.", []),
+    ("Listo, ya quedó anotado.", []),
+    ("Claro, lo vemos juntos.", []),
+    ("Estás en buenas manos.", []),
+    ("Te escribo al terminar.", []),
+])
+async def test_short_spanish_replies_read_as_spanish(app, client, prose, rule_ids):
+    # a first reply, so there is no last language to fall back on: words that only Spanish
+    # writes this way ("ya", "lo", "te", "está", "quedó") keep it Spanish, never another language
+    copy, visitor = await visitor_of(app, client)
+    assert lang.detect(prose, None) == "es"
+    verdict = await checked(client, visitor, prose)
+    assert [v.rule_id for v in verdict.violations] == rule_ids
+    if rule_ids:
+        assert_handed_off(verdict, "es")                                # the handoff speaks Spanish too
+    else:
+        assert (verdict.ok, verdict.language, verdict.blocks) == (True, "es", [RenderedBlock(kind="prose", text=prose)])
+    assert (await session_of(app, copy, visitor)).last_language == "es"
+
+
+@pytest.mark.parametrize("prose", [
+    "Je te rappelle demain.",                       # French "te" and "tu" are Spanish markers now
+    "Tu peux me dire quand?",
+    "Merci, je vérifie pour toi.",
+    "Je te dis ça tout à l'heure.",
+    "Está tudo certo, já vou ver.",                 # Portuguese shares "está", "te", "ti" and "claro"
+    "Perfeito, já está anotado.",
+    "Vou verificar isso para você.",                # "para" and "por" stay unmarked: Portuguese writes them too
+    "Obrigada por esperar.",
+    "Certo, lo controllo subito.",                  # Italian shares "lo", "ti", "del" and "al"
+    "Perfetto, ti scrivo dopo.",
+    "Va bene, ci penso io.",
+])
+def test_other_languages_outweigh_the_words_spanish_shares(prose):
+    # their own markers decide, so they hand off on a first reply too
+    assert [lang.detect(prose, last) for last in (None, "en", "es")] == ["other"] * 3
+
+
+async def test_an_unmarked_reply_falls_back_until_the_session_has_a_language(app, client):
+    # four or more words and no marker of any language: on a session with no last language that is
+    # too little to tell, so the reply reads in the fallback, English, as an empty one would; once
+    # the session has a language, the same reply is another language and hands off in that one
+    prose = "Entendido, revisamos ambos grifos."
+    copy, visitor = await visitor_of(app, client)
+    verdict = await checked(client, visitor, prose)
+    assert (verdict.ok, verdict.language, verdict.blocks) == (True, "en", [RenderedBlock(kind="prose", text=prose)])
+    assert (await session_of(app, copy, visitor)).last_language is None
+    # both lexicons still read it, whatever its language
+    verdict = await checked(client, visitor, "Entendido, revisamos cincuenta grifos.")
+    assert [(v.kind, v.rule_id) for v in verdict.violations] == [("number_in_prose", "lex.es.number")]
+    assert_handed_off(verdict, "en")
+    assert (await checked(client, visitor, "Con gusto le ayudo.")).language == "es"
+    verdict = await checked(client, visitor, prose)
+    assert [(v.kind, v.rule_id) for v in verdict.violations] == [("unsupported_language", "language")]
+    assert_handed_off(verdict, "es")
+    assert (await session_of(app, copy, visitor)).last_language == "es"
+    assert [lang.detect(prose, last) for last in (None, "en", "es")] == ["none", "other", "other"]
 
 
 async def own_slots(client: httpx.AsyncClient, visitor: Visitor, call_id: str = "call-slots") -> Fact:
