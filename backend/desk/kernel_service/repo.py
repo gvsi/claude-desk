@@ -65,7 +65,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from desk.db.models import Execution
-from desk.db.session import KernelRepo, resolve_copy
+from desk.db.session import CopyResolver, KernelRepo, resolve_copy
 from desk.kernel_api import KernelError
 from desk.kernel_service.clock import Clock
 
@@ -186,23 +186,31 @@ def route_template(request: Request) -> str:
 # their own connection, so the caller can bind the request's transaction to that copy and read the
 # rows through KernelRepo as usual. Only auth.py, GET /whoami, GET /decisions/{id}, POST /sessions
 # and GET /public/{desk_slug} use them, and they run before the request's transaction has run
-# anything.
+# anything: a request that held its transaction's connection while it waited for a resolver's
+# would, with as many such requests at once as the pool has connections, wait until checkout timed
+# out. Asked later, a resolver raises (500 `internal`) instead.
+
+async def _resolve(ctx: KernelCtx, resolver: CopyResolver, key: str) -> str | None:
+    if ctx.db.in_transaction():
+        raise RuntimeError("a copy resolver runs only before the request's transaction takes its connection")
+    return await resolve_copy(resolver, key, engine=ctx.engine)
+
 
 async def copy_of_desk_slug(ctx: KernelCtx, slug: str) -> str | None:
-    return await resolve_copy("copy_of_desk_slug", slug, engine=ctx.engine)
+    return await _resolve(ctx, "copy_of_desk_slug", slug)
 
 
 async def copy_of_session_id(ctx: KernelCtx, session_id: str) -> str | None:
-    return await resolve_copy("copy_of_session_id", session_id, engine=ctx.engine)
+    return await _resolve(ctx, "copy_of_session_id", session_id)
 
 
 async def copy_of_session_token(ctx: KernelCtx, token_hash: str) -> str | None:
-    return await resolve_copy("copy_of_session", token_hash, engine=ctx.engine)
+    return await _resolve(ctx, "copy_of_session", token_hash)
 
 
 async def copy_of_decision_id(ctx: KernelCtx, decision_id: str) -> str | None:
     """The copy of a decision, whose session is the one `GET /decisions/{id}` names."""
-    return await resolve_copy("copy_of_decision_id", decision_id, engine=ctx.engine)
+    return await _resolve(ctx, "copy_of_decision_id", decision_id)
 
 
 # Startup reconciliation's one lookup across copies: which copies hold an execution to settle.

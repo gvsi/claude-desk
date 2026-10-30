@@ -12,7 +12,7 @@ from sqlalchemy import select
 from desk.contracts import Principal
 from desk.db.models import ActorSession, Desk
 from desk.db.session import database_url, libpq_url
-from desk.kernel_service import auth, sessions
+from desk.kernel_service import auth, repo, sessions
 from desk.kernel_service.repo import Ctx
 
 from .helpers import kernel_ctx, ledger_rows, make_copy_rows, rows_of
@@ -320,6 +320,23 @@ async def test_require_owner_takes_one_session_to_ledger_a_refusal_on():
     named = auth.Named(copy_id="copy-1", session_id="s-1")
     with pytest.raises(ValueError, match="session_id or named"):
         await auth.require_owner(None, None, session_id="s-1", named=named)
+
+
+async def test_a_copy_resolver_runs_only_before_the_transaction_takes_its_connection(app):
+    # A resolver takes a connection of its own. Asked once the request's transaction holds one, it
+    # refuses (500 `internal`) rather than hold one connection while it waits for another, which
+    # enough requests at once would turn into a starved pool.
+    rows = await make_copy_rows(app)
+    resolvers = (repo.copy_of_session_id, repo.copy_of_session_token, repo.copy_of_desk_slug,
+                 repo.copy_of_decision_id)
+    async with kernel_ctx(app) as ctx:
+        assert await repo.copy_of_session_id(ctx, rows.owner_session_id) == rows.copy_id
+        ctx.bind(rows.copy_id)                       # bound, with nothing run: still before
+        assert await repo.copy_of_desk_slug(ctx, rows.slug) == rows.copy_id
+        await ctx.db.scalars(ctx.repo.scoped(select(ActorSession.session_id)))
+        for resolver in resolvers:
+            with pytest.raises(RuntimeError, match="before the request's transaction"):
+                await resolver(ctx, rows.owner_session_id)
 
 
 async def test_unattributed_failures_are_logged_not_ledgered(app, client, caplog):
