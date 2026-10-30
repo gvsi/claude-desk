@@ -7,6 +7,7 @@ orphaned intent as a read does.
 """
 
 import asyncio
+import inspect
 import logging
 
 import httpx
@@ -129,8 +130,10 @@ async def test_a_repeat_returns_the_stored_result(app, client, reviewer):
     assert again == first and len(await rows_of(app, copy.copy_id, select(Quote))) == 1
     assert await read(client, visitor.headers, allowed) == settled              # the decision didn't change
     [repeat] = [e.event for e in await ledger_rows(app, copy) if e.seq > settled.ledger_seq]
-    assert (repeat.kind, repeat.summary) == ("execute", {"decision_id": allowed.decision_id,
-                                                         "action_id": allowed.action.action_id, "repeat": True})
+    # the repeat names the version and money cap the execution was checked under, as its row has them
+    assert (repeat.kind, repeat.summary) == ("execute", {
+        "decision_id": allowed.decision_id, "action_id": allowed.action.action_id, "repeat": True,
+        "policy_version": 1, "auto_money_cap_cents": 50_000})
 
     # a failed execution repeats its failure: two visitors were allowed one slot, the second lost it
     reviewer.answer = PASS
@@ -299,11 +302,11 @@ async def test_an_orphaned_intent_reconciles_to_failed(app, client, registry, fr
     entries = [e.event.summary for e in await ledger_rows(app, rows)
                if e.event.kind == "execute"]
     base = {"decision_id": allowed.decision_id, "action_id": allowed.action.action_id}
-    # an intent T1 wrote names the version its re-check ran under; one written without it (as before
-    # the executions row recorded it) names none
+    # an intent T1 wrote names the version its re-check ran under, and so does a repeat of it; one
+    # written without it (as before the executions row recorded it) names none
     checked = {"policy_version": 1, "auto_money_cap_cents": 50_000} if how == "crash" else {}
     assert entries == [{**base, **checked, "state": "unknown", "orphaned": True},
-                       {**base, **checked, "state": "failed", "reconciled": True}, {**base, "repeat": True}]
+                       {**base, **checked, "state": "failed", "reconciled": True}, {**base, **checked, "repeat": True}]
 
 
 async def test_an_orphan_with_its_side_effect_reconciles_to_executed(app, client, registry, frozen_clock):
@@ -373,6 +376,36 @@ async def test_reconciled_entries_name_the_version_their_check_ran_under(app, cl
     lost = {**base, "state": "unknown", "orphaned": True} if how == "crash" else {**base, "state": "unknown"}
     settled = [] if outcome == "unknown" else [{**base, "state": outcome, "reconciled": True}]
     assert [e.event.summary for e in await ledger_rows(app, rows) if e.event.kind == "execute"] == [lost, *settled]
+
+
+def test_an_intent_is_never_written_without_the_check_it_passed():
+    """`prepare_intent` takes the version and money cap its re-check passed under as a required
+    keyword, so a caller can't write an intent row that names none by leaving them out."""
+    checked = inspect.signature(execute.prepare_intent).parameters["checked"]
+    assert (checked.kind, checked.default) == (inspect.Parameter.KEYWORD_ONLY, inspect.Parameter.empty)
+
+
+@pytest.mark.parametrize("outcome", ["executed", "failed", "unknown"])
+async def test_an_approved_run_given_no_check_names_its_rows(app, client, registry, monkeypatch, outcome):
+    """T2 and T3 name the version and money cap the execution row recorded at T1 when the caller
+    passes none, so no entry goes without them while its row holds them."""
+    quote = FakeAdapter("native.quote")
+    rows = await desk_with(app, [quote], [card("quote", "native.quote", mode="ask")])
+    visitor = await open_visitor(client, rows)
+    held = await decided(client, visitor, "native.quote", {"qty": 1})            # under version 1, at $500
+    quote.script["execute"] = {"executed": AdapterResult(model_view={"ok": True}), "failed": AdapterFailure("declined"),
+                               "unknown": RuntimeError("the provider's answer was lost")}[outcome]
+    run_approved = execute.run_approved
+
+    async def given_no_check(ctx, decision_row, *, checked=None) -> ExecResult:
+        return await run_approved(ctx, decision_row)
+
+    monkeypatch.setattr(execute, "run_approved", given_no_check)
+    response = await client.post(f"/approvals/{held.decision_id}/answer", headers=rows.owner,
+                                 json={"answer": "allow_once"})
+    assert response.status_code == 200, response.text
+    [entry] = [e.event.summary for e in await ledger_rows(app, rows) if e.event.kind == "execute"]
+    assert (entry["state"], entry["policy_version"], entry["auto_money_cap_cents"]) == (outcome, 1, 50_000), entry
 
 
 async def test_a_fresh_intent_is_left_alone(app, client, registry, frozen_clock, monkeypatch):

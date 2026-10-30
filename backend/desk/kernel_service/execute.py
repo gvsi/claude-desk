@@ -284,12 +284,12 @@ async def _recheck(ctx: KernelCtx, target: _Target, path: ExecPath) -> str | Non
 
 # ---- T1: the intent --------------------------------------------------------------------------------
 
-async def prepare_intent(ctx: KernelCtx, decision_row: DecisionRow, *, checked: Checked | None = None) -> bool:
+async def prepare_intent(ctx: KernelCtx, decision_row: DecisionRow, *, checked: Checked) -> bool:
     """The adapter's `prepare`, then the intent row, in the caller's transaction, which commits them
     together. False, with nothing written, when `prepare` refuses. Either path that runs an action
     comes through here, so a tool whose receipt can't be written fails first (`_receipt_ready`).
-    `checked` is the version and money cap the re-check passed under (`recheck_under`), which the
-    intent row records for every entry after it, reconciliation's included."""
+    `checked`, required, is the version and money cap the re-check passed under (`recheck_under`),
+    which the intent row records for every entry after it, reconciliation's included."""
     target = await _target(ctx, decision_row)
     target.checked = checked
     return await _prepare_intent(ctx, target)
@@ -353,11 +353,14 @@ async def _not_runnable(ctx: KernelCtx, row: DecisionRow, refused: str) -> Kerne
 
 
 async def _repeat(ctx: KernelCtx, row: DecisionRow, execution: Execution) -> ExecResult:
-    """A decision that already ran: its stored result, ledgered as a repeat; 409 while it runs or
-    is unknown."""
+    """A decision that already ran: its stored result, ledgered as a repeat naming the version and
+    money cap the execution was checked under (`_checked`), when its row records them; 409 while it
+    runs or is unknown."""
     if execution.state not in ("succeeded", "failed") or execution.result is None:
         raise await _not_runnable(ctx, row, execution.state)
-    await _note(ctx, row, {"decision_id": row.decision_id, "action_id": execution.action_id, "repeat": True})
+    checked = _checked(execution)
+    await _note(ctx, row, {"decision_id": row.decision_id, "action_id": execution.action_id, "repeat": True,
+                           **(checked._asdict() if checked is not None else {})})
     await ctx.db.commit()
     return execution.result
 
@@ -416,7 +419,8 @@ async def execute_allowed(ctx: KernelCtx, session_row: SessionRow, decision_id: 
 async def run_approved(ctx: KernelCtx, decision_row: DecisionRow, *, checked: Checked | None = None) -> ExecResult:
     """T2 and T3 for an approved hold whose intent row the answer has committed, as the held
     session's principal; mode and generation aren't checked (step 6). `checked` is the version and
-    money cap the answer's re-check passed under (`recheck_under`), which its entries record."""
+    money cap the answer's re-check passed under (`recheck_under`), which its entries record; given
+    none, they record the ones the intent row did (`_checked`)."""
     return await _run(ctx, decision_row.decision_id, decision_row.action_id, decision_row.session_id, path="approved",
                       checked=checked)
 
@@ -448,7 +452,8 @@ async def _side_effect(ctx: KernelCtx, decision_id: str, action_id: str, session
     `executed`, committed. The decision is locked before anything here takes the ledger head (an
     adapter's own entry, such as a verification start's `verify`), as an answer or a read that
     locks it and then ledgers does. A failure answer comes back as a `KernelFailure`, already
-    committed, for `_run` to raise."""
+    committed, for `_run` to raise. Its entry names `checked`, or, given none, the version and cap
+    the intent row recorded, as T3's do."""
     session = await _hold_session(ctx, session_id, action_id, path)
     decision = await _lock_decision(ctx, decision_id)
     execution = await _execution(ctx, action_id, lock=True)
@@ -458,7 +463,7 @@ async def _side_effect(ctx: KernelCtx, decision_id: str, action_id: str, session
             return execution.result
         return KernelFailure(409, "conflict", "not_an_intent")
     target = await _target(ctx, decision)
-    target.checked = checked
+    target.checked = checked if checked is not None else _checked(execution)
     if path == "allow":
         if session is None:             # never: an allow's session row is always held; `_run` ends it unknown
             raise RuntimeError("allow_without_session")
@@ -518,7 +523,7 @@ async def _settle_failed(ctx: KernelCtx, decision_id: str, action_id: str, failu
     if execution is None or execution.state != "intent":
         return await _settled_elsewhere(execution, action_id)
     target = await _target(ctx, decision)
-    target.checked = checked
+    target.checked = checked if checked is not None else _checked(execution)
     try:
         async with ctx.db.begin_nested():
             await _undo(ctx, target)
@@ -542,7 +547,7 @@ async def _settle_unknown(ctx: KernelCtx, decision_id: str, action_id: str,
     if execution is None or execution.state != "intent":
         return await _settled_elsewhere(execution, action_id)
     target = await _target(ctx, decision)
-    target.checked = checked
+    target.checked = checked if checked is not None else _checked(execution)
     result = _no_result(action_id, "unknown")
     await _mark_unknown(ctx, target, execution, result)
     await ctx.db.commit()
