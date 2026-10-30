@@ -44,14 +44,15 @@ class Scripted:
 
 
 def outcome(scenario: Any, rep: int, pass_id: str = "p", *, error: str | None = None,
-            violations: tuple[str, ...] = (), success: bool | None = None) -> RunOutcome:
+            violations: tuple[str, ...] = (), success: bool | None = None,
+            skipped: tuple[str, ...] = ()) -> RunOutcome:
     verdict = None
     if error is None:
         legit = scenario.suite == "legit"
         verdict = RunVerdict(
             violations=[RunViolation(category="money", oracle=o, detail="d", evidence="e") for o in violations],
             success=(not violations if success is None else success) if legit else None, unmet=[],
-            false_holds=0, expected_allow=1 if legit else 0, reviewed=[])
+            false_holds=0, expected_allow=1 if legit else 0, reviewed=[], skipped=list(skipped))
     return RunOutcome(
         scenario_id=scenario.id, suite=scenario.suite, rep=rep, pass_id=pass_id, verdict=verdict,
         error=RunError(kind=error, detail=f"{error} in {scenario.id}") if error else None,
@@ -392,6 +393,29 @@ async def test_each_run_gets_the_plans_landed_where_the_pass_runs(tmp_path):
     result = await run_pass(config(runs=1), deps(repo, run_one))
     assert result.landed == list(landed) and len(result.runs) == 4
     assert given == [list(landed)] * 4
+
+
+async def test_runs_jsonl_names_each_runs_skipped_checks(repo):
+    """A run's record in `runs.jsonl` lists the checks its verdict skipped because a plan hasn't landed,
+    by the verdict's fixed names, so a row with no violation is never read as every check passed. A run
+    that skipped none lists none, and an errored run, with no verdict, none either."""
+    from evals.tier2.passes import load_pass
+    from evals.tier2.verdict import SKIPPED_CHECKS
+
+    before_01b = list(SKIPPED_CHECKS)[:2]   # the version caps and the owner's Demo inbox
+
+    async def run_one(scenario: Any, rep: int, target: Any, simulator: Any, **kwargs: Any) -> RunOutcome:
+        if scenario.id == "atk-cal":
+            return outcome(scenario, rep, kwargs["pass_id"], error="timeout")
+        return outcome(scenario, rep, kwargs["pass_id"], skipped=() if scenario.id == "leg-cal" else before_01b)
+
+    result = await run_pass(config(runs=1), deps(repo, run_one))
+    rows = {row["scenario_id"]: row for row in map(json.loads, (repo / "evals" / "out" / "passes" / result.pass_id
+                                                                  / "runs.jsonl").read_text().splitlines())}
+    assert {sid: row["skipped"] for sid, row in rows.items()} == {
+        "atk-cal": [], "atk-held": before_01b, "leg-cal": [], "leg-held": before_01b}
+    assert rows["atk-cal"]["status"] == "incomplete"
+    assert load_pass(result.pass_id, repo) == result
 
 
 async def test_pass_json_lists_the_gated_map_as_pairs_each_ending_in_its_path(tmp_path):

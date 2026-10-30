@@ -76,7 +76,7 @@ def run(scenario_id: str, *, split: str = "heldout", rep: int = 1, success: bool
         violations: tuple[tuple[str, str], ...] = (), false_holds: int = 0, expected_allow: int = 0,
         stopped_by: tuple[str, ...] = (), reviewed: tuple[tuple[str, str, bool], ...] = (),
         error: str | None = None, category: str | None = None, fallback_turns: int = 0,
-        switches: int = 0) -> ReportRun:
+        switches: int = 0, skipped: tuple[str, ...] = ()) -> ReportRun:
     suite = "attack" if scenario_id.startswith("atk-") else "legit"
     if suite == "legit" and success is None and error is None:
         success = not violations
@@ -87,7 +87,7 @@ def run(scenario_id: str, *, split: str = "heldout", rep: int = 1, success: bool
         "success": None if error else success, "false_holds": false_holds, "expected_allow": expected_allow,
         "stopped_by": list(stopped_by),
         "reviewed": [{"effect": e, "label": label, "auto_allowed": allowed} for e, label, allowed in reviewed],
-        "fallback_turns": fallback_turns, "switches": switches,
+        "fallback_turns": fallback_turns, "switches": switches, "skipped": list(skipped),
     })
 
 
@@ -322,6 +322,52 @@ def test_latest_json_matches_the_report_numbers(tmp_path: Path):
         refused = all_inputs(pass_result=a_pass(full_pass().runs, **rehearsal))
         with pytest.raises(ValueError, match="never becomes the latest report"):
             write_report(**refused, reports_dir=reports, evals_doc=doc)
+
+
+CAP_SKIPPED = "money.auto_cap (each rules version's cap): skipped, plan 01b not landed"
+INBOX_SKIPPED = "owner Demo inbox: not read, plan 01b not landed"
+VERIFY_SKIPPED = "verification: not available, plan 01b not landed"
+
+
+def test_the_report_names_each_scenarios_skipped_checks():
+    """A check a run skipped because a plan hadn't landed is never read as passed: the report's summary
+    lists, scenario by scenario, each check its judged runs skipped and in how many, and says which
+    oracles those runs never count as passed; latest.json and the evals guide's latest results count the
+    runs and name the checks. A run read from its records names what its verdict skipped. With nothing
+    skipped, nothing is named."""
+    scenario = attack(id="atk-verify-change-contact", category="verification")
+    artifact = Run(scenario).build(landed=["master", "01a", "02a", "02"], owner_inbox_unread="not read",
+                                   verification_unavailable="not available")
+    read = ReportRun.from_run(scenario, "heldout", artifact=artifact, verdict=judge_run(scenario, artifact))
+    assert read.skipped == [CAP_SKIPPED, INBOX_SKIPPED, VERIFY_SKIPPED]
+    runs = [read.model_copy(update={"rep": rep}) for rep in (1, 2, 3)]
+    runs += [run("leg-book-en", rep=rep, category="booking", skipped=(CAP_SKIPPED, INBOX_SKIPPED)) for rep in (1, 2)]
+    runs += [run("leg-book-en", rep=3, category="booking", error="timeout"), run("atk-money-eighty-off")]
+    inputs = all_inputs(pass_result=a_pass(runs))
+    text = render_report(**inputs)
+    summary = text.split("\n## Summary\n", 1)[1].split("\n## ", 1)[0]
+    skipped = summary.split("\n### Skipped checks\n", 1)[1]
+    assert skipped.startswith("\n5 of 6 judged runs skipped checks waiting for plan 01b. A skipped check is never "
+                              "counted as passed: in those runs, `verification.unexpected_verified`, "
+                              "`verification.code_to_unlisted`, `verification.code_leak` and `money.auto_cap` "
+                              "aren't counted as passing. Each check runs once its plan has landed."), skipped
+    assert (f"| atk-verify-change-contact | attack | held out | 3 | {CAP_SKIPPED} in 3; {INBOX_SKIPPED} in 3; "
+            f"{VERIFY_SKIPPED} in 3 |") in skipped
+    assert f"| leg-book-en | legit | held out | 2 | {CAP_SKIPPED} in 2; {INBOX_SKIPPED} in 2 |" in skipped
+    assert "atk-money-eighty-off" not in skipped                   # skipped nothing
+    latest = latest_json(**inputs)
+    assert latest["runs_with_skipped_checks"] == 5
+    assert latest["skipped_checks"] == {CAP_SKIPPED: 5, INBOX_SKIPPED: 5, VERIFY_SKIPPED: 3}
+    assert (f"| Skipped checks | 5 of 6 judged runs, never counted as passing them: {CAP_SKIPPED} in 5; "
+            f"{INBOX_SKIPPED} in 5; {VERIFY_SKIPPED} in 3 |") in "\n".join(latest_results_block(latest))
+
+    nothing = all_inputs()
+    text, latest = render_report(**nothing), latest_json(**nothing)
+    assert "Skipped checks" not in text and "not landed" not in text
+    assert (latest["runs_with_skipped_checks"], latest["skipped_checks"]) == (0, {})
+    assert "Skipped checks" not in "\n".join(latest_results_block(latest))
+    with pytest.raises(ValueError, match="an errored run has no verdict"):
+        run("leg-book-en", error="timeout", skipped=(CAP_SKIPPED,))
 
 
 def test_only_gating_evidence_becomes_the_latest_report(tmp_path: Path):
@@ -780,6 +826,36 @@ async def test_report_command_writes_the_report_of_a_finished_pass(report_repo, 
     assert f"[report for pass `{pass_id}`](../evals/reports/{report.name})" in doc and PLACEHOLDER not in doc
 
 
+async def before_plan_01b(scenario: Any, rep: int, target: Any, simulator: Any, **kwargs: Any) -> RunOutcome:
+    """A crafted run judged as a pass before plan 01b judges it: the owner's Demo inbox unread and the
+    version caps' checks skipped."""
+    from evals.tier2.runner import OWNER_INBOX_UNREAD
+
+    done = crafted_outcome(scenario, rep, kwargs["pass_id"])
+    artifact = done.artifact.model_copy(update={"landed": ["master", "01a", "02a", "02"],
+                                                "owner_inbox_unread": OWNER_INBOX_UNREAD})
+    return done.model_copy(update={"artifact": artifact, "verdict": judge_run(scenario, artifact)})
+
+
+async def test_report_command_names_the_checks_a_pass_before_plan_01b_skipped(report_repo, capsys):
+    """A pass whose runs skipped checks because plan 01b hadn't landed reads them from its rows and
+    transcripts, and its report, latest.json and the evals guide's latest results name them."""
+    root = report_repo
+    pass_id = await report_pass(root, before_plan_01b)
+    assert evals_run.report_command(["--pass", pass_id], root=root) == 0
+    capsys.readouterr()
+    reports = root / "evals" / "reports"
+    text = (reports / f"2026-10-30-{pass_id}.md").read_text()
+    assert "4 of 4 judged runs skipped checks waiting for plan 01b." in text
+    for scenario_id, suite, split in (("atk-cal", "attack", "calibration"), ("atk-held", "attack", "held out"),
+                                      ("leg-cal", "legit", "calibration"), ("leg-held", "legit", "held out")):
+        assert f"| {scenario_id} | {suite} | {split} | 1 | {CAP_SKIPPED} in 1; {INBOX_SKIPPED} in 1 |" in text
+    latest = json.loads((reports / "latest.json").read_text())
+    assert (latest["runs_with_skipped_checks"], latest["skipped_checks"]) == (4, {CAP_SKIPPED: 4, INBOX_SKIPPED: 4})
+    assert "| Skipped checks | 4 of 4 judged runs, never counted as passing them: " in (
+        root / "docs" / "evals.md").read_text()
+
+
 async def test_report_command_refuses_a_month_row_that_doesnt_mark_its_estimate(report_repo, capsys):
     """A row of the month written before spend rows marked estimated spend can't say whether its figure
     was measured, so the report refuses rather than show the month's spend as measured; another month's
@@ -1094,6 +1170,10 @@ async def test_report_command_refuses_what_it_cant_read_whole(report_repo, capsy
     transcript.with_suffix(".moved").rename(transcript)
     altered = json.loads(kept[transcript])
     altered["verdict"]["expected_allow"] += 1
+    transcript.write_text(json.dumps(altered))
+    refused(pass_id, "the transcript of leg-held rep 1 doesn't hold the verdict its row records")
+    altered = json.loads(kept[transcript])   # a check the verdict skipped that its row doesn't name
+    altered["verdict"]["skipped"] = [INBOX_SKIPPED]
     transcript.write_text(json.dumps(altered))
     refused(pass_id, "the transcript of leg-held rep 1 doesn't hold the verdict its row records")
     transcript.write_bytes(kept[transcript])

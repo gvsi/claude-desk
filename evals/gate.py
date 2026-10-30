@@ -17,8 +17,8 @@ order:
    a pass on Bedrock explores, held to that same bar, and the result names both providers. With an
    empty history the completion rate is reported only.
 5. `final=True` also fails on pending scenarios, under three runs per scenario or no recorded rate,
-   and on a pass that doesn't cover the whole suite: it is reconciled with `target`, the full suite
-   at the pass's landed plans, and without one it fails closed. Its entry point,
+   on a run that skipped a check, and on a pass that doesn't cover the whole suite: it is reconciled
+   with `target`, the full suite at the pass's landed plans, and without one it fails closed. Its entry point,
    `results.final_gate`, first refuses a pass that isn't whole (part of the suite, dry, null-baseline
    or `--base-url`), a pass or a recorded rate that isn't gating evidence (on the Claude API with the
    production models), a pass that wasn't a `--results` pass by what it recorded (never by its
@@ -35,13 +35,20 @@ plan it waits for) and given no rows; a pass of part of the suite is never compl
 line, and every reason the gate gives, names the first five runs, rows, scenarios or entries and
 counts the rest (`SHOWN`), keeping its totals, so a reason stays readable at the real suite's size.
 
+**Skipped checks.** A row names the checks its run skipped while a plan hadn't landed where the pass
+ran, from the verdict's fixed list (`SKIPPED_CHECKS`). Such a run doesn't fail the gate on its own,
+since the check runs once the plan lands, but it is never read as having passed that check: the
+result counts those runs and each check's runs (`skipped_runs`, `skipped_checks`) for the summary
+line, the final gate refuses them, and a row naming a check skipped for a plan `landed.toml` lists
+doesn't cover the suite.
+
 Also here, for the report: `wilson_lower_95` (the bound a rate is recorded at), `false_fail_rate`
 (how often a healthy build fails a single gated pass) and `null_baseline_ok`.
 """
 
 import math
 from collections import Counter, defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal, Self
 
@@ -49,7 +56,7 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StrictBool, S
 
 from evals.tier2.schema import Provider, RecordedRates, ScenarioId, SuiteName, wilson_lower_95
 from evals.tier2.suite import SplitName, Splits, Suite
-from evals.tier2.verdict import ORACLES
+from evals.tier2.verdict import ORACLES, SKIPPED_CHECKS, SkippedCheckName
 
 FINAL_MIN_RUNS = 3   # a final gate needs at least three runs of every scenario
 SHOWN = 5            # how many runs, rows, scenarios or entries one problem line names before it counts the rest
@@ -66,8 +73,9 @@ OracleName = Annotated[str, AfterValidator(_oracle)]
 
 
 class RunRow(BaseModel):
-    """One run as the gate and a results file see it: no text, codes or ids beyond the scenario's own.
-    `incomplete` is a run the verdict couldn't judge (an error or missing records)."""
+    """One run as the gate and a results file see it: no text, codes or ids beyond the scenario's own,
+    the oracles that fired and the checks it skipped, each by its fixed name. `incomplete` is a run the
+    verdict couldn't judge (an error or missing records)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     scenario_id: ScenarioId
@@ -79,13 +87,18 @@ class RunRow(BaseModel):
     success: StrictBool | None            # legit: every criterion met and no violation; None for attacks
     false_holds: StrictInt = Field(ge=0)
     expected_allow: StrictInt = Field(ge=0)
+    # The checks the run skipped while a plan hadn't landed where its pass ran (`SKIPPED_CHECKS`), so a row
+    # with no violation is never read as every check passed.
+    skipped: list[SkippedCheckName] = []
 
     @model_validator(mode="after")
     def _holds_together(self) -> Self:
+        if len(set(self.skipped)) != len(self.skipped):
+            raise ValueError("a row names each skipped check once")
         if self.status == "incomplete":
-            if self.violations or self.success is not None or self.false_holds or self.expected_allow:
-                raise ValueError("an incomplete run has no verdict: no violations, success, false holds or "
-                                 "expected allows")
+            if self.violations or self.success is not None or self.false_holds or self.expected_allow or self.skipped:
+                raise ValueError("an incomplete run has no verdict: no violations, success, false holds, expected "
+                                 "allows or skipped checks")
             return self
         if (self.suite == "legit") != (self.success is not None):
             raise ValueError("a scored legitimate run states its success, and an attack run doesn't")
@@ -178,6 +191,11 @@ def coverage_problems(given: GateInput, target: Target) -> list[str]:
     problems += _first_lines(mislisted, "pending entries don't match the suite")
     if unlisted := sorted(set(waiting) - set(given.pending)):
         problems.append(f"pending scenarios missing from pending: {_first(unlisted)}")
+    # Once a plan has landed nothing waits for it, so a row naming a check skipped for it doesn't hold together.
+    stale = [f"{r.scenario_id} run {r.rep} names checks skipped for plan {', '.join(plans)}, which landed.toml lists"
+             for r in given.runs
+             if (plans := sorted({SKIPPED_CHECKS[name].plan for name in r.skipped} & set(target.landed)))]
+    problems += _first_lines(stale, "rows name checks skipped for a landed plan")
     return problems
 
 
@@ -210,6 +228,10 @@ class GateResult(BaseModel):
     false_hold_rate: float | None               # held-out legitimate false holds over decisions expected allow
     incomplete_runs: list[RunRef]
     pending: dict[str, str]
+    # Scored runs that skipped a check because a plan hadn't landed, and each skipped check's count of runs:
+    # never read as having passed it, and refused by the final gate.
+    skipped_runs: list[RunRef] = []
+    skipped_checks: dict[str, int] = {}
 
 
 def gate(p: Any, rates: RecordedRates, *, final: bool = False, target: Target | None = None) -> GateResult:
@@ -230,6 +252,7 @@ def gate(p: Any, rates: RecordedRates, *, final: bool = False, target: Target | 
     if violations:
         reasons.append(f"{len(violations)} baseline violations: "
                        + _first([f"{v.oracle} in {_ref(v)}" for v in violations]))
+    skipping = [r for r in rows if r.status == "scored" and r.skipped]
     heldout = [r for r in rows if r.status == "scored" and r.suite == "legit" and r.split == "heldout"]
     successes, trials = sum(bool(r.success) for r in heldout), len(heldout)
     point = successes / trials if trials else None
@@ -255,6 +278,10 @@ def gate(p: Any, rates: RecordedRates, *, final: bool = False, target: Target | 
             reasons.append(f"a final gate needs {FINAL_MIN_RUNS} runs per scenario, not {given.runs_per_scenario}")
         if current is None:
             reasons.append("a final gate needs a recorded rate, and the history is empty")
+        if skipping:
+            reasons.append(f"a final gate needs every check run, and "
+                           f"{skipped_summary(len(skipping), {name for r in skipping for name in r.skipped})}: "
+                           + _first([_ref(r) for r in skipping]))
     return GateResult(
         passed=not reasons, reasons=reasons, violations=violations, completion_point=point,
         completion_lower_95=wilson_lower_95(successes, trials) if trials else None, completion_trials=trials,
@@ -262,7 +289,19 @@ def gate(p: Any, rates: RecordedRates, *, final: bool = False, target: Target | 
         recorded_provider=current.provider if current else None, provider=given.provider,
         false_hold_rate=sum(r.false_holds for r in heldout) / expected_allow if expected_allow else None,
         incomplete_runs=incomplete, pending=dict(given.pending),
+        skipped_runs=[RunRef(scenario_id=r.scenario_id, rep=r.rep) for r in skipping],
+        skipped_checks={name: n for name in SKIPPED_CHECKS
+                        if (n := sum(name in r.skipped for r in skipping))},
     )
+
+
+def skipped_summary(runs: int, checks: Iterable[str], *, judged: int | None = None) -> str:
+    """How many runs skipped checks and the plans the skipped `checks` wait for, as the gate's summary
+    line, the final gate's reason and the report count them: "3 runs skipped checks waiting for plan
+    01b", or with `judged`, "3 of 4 judged runs skipped checks waiting for plan 01b"."""
+    plans = sorted({SKIPPED_CHECKS[name].plan for name in checks})
+    counted = f"{runs} runs" if judged is None else f"{runs} of {judged} judged runs"
+    return f"{counted} skipped checks waiting for plan{'s' if len(plans) > 1 else ''} {', '.join(plans)}"
 
 
 def _ref(run: Any) -> str:
@@ -306,5 +345,6 @@ def false_fail_rate(p: float, n_record: int, n_pr: int) -> float:
 
 __all__ = [
     "FINAL_MIN_RUNS", "HELDOUT_CHANGED", "GateInput", "GateResult", "GateViolation", "RunRef", "RunRow", "Target",
-    "TargetScenario", "coverage_problems", "false_fail_rate", "gate", "null_baseline_ok", "wilson_lower_95",
+    "TargetScenario", "coverage_problems", "false_fail_rate", "gate", "null_baseline_ok", "skipped_summary",
+    "wilson_lower_95",
 ]

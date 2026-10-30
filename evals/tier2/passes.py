@@ -802,7 +802,7 @@ class _Pass:
         try:
             return RunRow(**base, status="scored", violations=[v.oracle for v in verdict.violations],
                           success=verdict.success, false_holds=verdict.false_holds,
-                          expected_allow=verdict.expected_allow)
+                          expected_allow=verdict.expected_allow, skipped=list(verdict.skipped))
         except ValidationError as error:   # a verdict that doesn't fit a row is never counted as clean
             self.errors += 1
             with (self.out / "errors.jsonl").open("a") as handle:

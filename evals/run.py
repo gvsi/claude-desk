@@ -25,7 +25,9 @@ well under $0.05: exit 0 when it is served, 1 when the API answers an error, nam
 `tier2` runs a pass (`evals/tier2/passes.py`) with `MODEL_PROVIDER` (the environment, else `.env`;
 `anthropic` when unset) as its provider, and with `--results` writes `evals/results/<inputs>.json`
 (only on `anthropic`: gating evidence comes from the Claude API with the production 5.5 models);
-it prints the pass's summary and gate, then the export's refusal if the file is refused, and exits
+it prints the pass's summary and gate (whose summary line counts the runs that skipped checks while a
+plan hadn't landed, then a line names each such check and its runs, as `gate` prints them too), then
+the export's refusal if the file is refused, and exits
 1 when the pass or its export is refused or its gate fails. `gate`, `results` and `record-rate` read a
 finished pass from `evals/out/passes/<id>/` and make no model calls; `results`, `record-rate` and
 `gate --final` refuse a pass that isn't gating evidence and accept only a `--results` pass, read from
@@ -182,11 +184,19 @@ def tier2(argv: list[str]) -> int:
 
 
 def _print_gate(judged: Any) -> None:
+    """The gate's summary line, which counts the runs that skipped checks while a plan hadn't landed, then a
+    line for each check they skipped and one for each reason the gate failed."""
+    from evals.gate import skipped_summary
+
     point = "none" if judged.completion_point is None else f"{judged.completion_point:.3f}"
     recorded = ("none" if judged.recorded_lower_95 is None
                 else f"{judged.recorded_lower_95:.3f} ({judged.recorded_provider})")
+    skipped = (f"; {skipped_summary(len(judged.skipped_runs), judged.skipped_checks)}" if judged.skipped_runs
+               else "")
     print(f"gate: {'passed' if judged.passed else 'failed'}; held-out legitimate completion {point} over "
-          f"{judged.completion_trials} runs ({judged.provider}), recorded {recorded}")
+          f"{judged.completion_trials} runs ({judged.provider}), recorded {recorded}{skipped}")
+    for check, runs in judged.skipped_checks.items():
+        print(f"gate: in {runs} runs, {check}")
     for reason in judged.reasons:
         print(f"gate: {reason}")
 
@@ -471,9 +481,9 @@ def _report_runs(root: Path, result: "PassResult", suite: "Suite") -> tuple[list
                 runs.append(ReportRun.from_run(scenario, row.split, error=kind, **common))
                 continue
             if verdict is None or artifact is None or outcome.error is not None or (
-                    row.violations, row.success, row.false_holds, row.expected_allow) != (
+                    row.violations, row.success, row.false_holds, row.expected_allow, row.skipped) != (
                     [v.oracle for v in verdict.violations], verdict.success, verdict.false_holds,
-                    verdict.expected_allow):
+                    verdict.expected_allow, verdict.skipped):
                 raise ReportRefused(f"the transcript of {name} doesn't hold the verdict its row records")
             runs.append(ReportRun.from_run(scenario, row.split, artifact=artifact, verdict=verdict, **common))
         except ValueError as error:

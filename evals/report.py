@@ -10,8 +10,10 @@ models, by `results.gating_refusal`); any other pass's report stays under `evals
 The inputs are the report's own models, built from what the pass runner, the usage and latency
 measurements and the calibration leave. The report judges nothing: whether the pass passed comes
 from the gate's result (any object with its `passed` and `reasons`), and the counts, intervals and
-bounds here only describe the runs. Only ids, categories, oracle names, kernel enums and numbers
-reach the report, never what a visitor saw or typed, so no code, contact, key or link token can.
+bounds here only describe the runs. Only ids, categories, oracle names, the fixed names of skipped
+checks, kernel enums and numbers reach the report, never what a visitor saw or typed, so no code,
+contact, key or link token can. A check a run skipped while a plan hadn't landed is named, scenario
+by scenario, and never counted as passed.
 """
 
 import csv
@@ -29,6 +31,7 @@ from typing import Annotated, Any, Literal, Self, get_args
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, StringConstraints, model_validator
 
 from desk.contracts import Effect, Violation
+from evals.gate import skipped_summary
 from evals.results import gating_refusal
 from evals.tier2.artifact import RunArtifact
 from evals.tier2.schema import (
@@ -39,7 +42,7 @@ from evals.tier2.schema import (
     ScenarioId,
     wilson_lower_95,
 )
-from evals.tier2.verdict import RunVerdict
+from evals.tier2.verdict import ORACLES, SKIPPED_CHECKS, RunVerdict, SkippedCheckName
 
 EVALS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = EVALS_DIR.parent
@@ -264,10 +267,11 @@ class ReportRun(BaseModel):
     assumptions: list[Assumption] = []
     fallback_turns: StrictInt = Field(default=0, ge=0)
     switches: StrictInt = Field(default=0, ge=0)
+    skipped: list[SkippedCheckName] = []   # the checks its verdict skipped while a plan hadn't landed
 
     @model_validator(mode="after")
     def _judged_or_errored(self) -> Self:
-        if self.error is not None and (self.violations or self.success is not None or self.reviewed):
+        if self.error is not None and (self.violations or self.success is not None or self.reviewed or self.skipped):
             raise ValueError(f"{self.scenario_id} rep {self.rep}: an errored run has no verdict")
         if self.error is None and (self.success is None) != (self.suite == "attack"):
             raise ValueError(f"{self.scenario_id} rep {self.rep}: a judged legitimate run has a success, "
@@ -309,6 +313,7 @@ class ReportRun(BaseModel):
             "reviewed": [{"effect": r.effect, "label": r.label, "auto_allowed": outcomes.get(r.decision_id) == "allow"}
                          for r in verdict.reviewed if r.label is not None],
             "stopped_by": stops(artifact) if scenario.suite == "attack" else [],
+            "skipped": list(verdict.skipped),
         })
 
 
@@ -542,6 +547,10 @@ def latest_json(pass_result: PassSummary, gate_result: Any, metrics: Metrics | N
         "calibration_version": calibration.version if calibration else None,
         "null_baseline_point": (_round(null_baseline.successes / null_baseline.trials)
                                 if null_baseline else None),
+        # Judged runs that skipped checks while a plan hadn't landed, and each skipped check's count of runs:
+        # never counted as passing those checks.
+        "runs_with_skipped_checks": sum(bool(r.skipped) for r in judged),
+        "skipped_checks": {name: k for name in SKIPPED_CHECKS if (k := sum(name in r.skipped for r in judged))},
     }
 
 
@@ -668,7 +677,31 @@ def _summary(p: PassSummary, g: GateSummary, n: dict[str, Any]) -> list[str]:
         ("Kernel checks", p.providers.kernel_checks),
     ]))
     out.append(_table(("Route", "Model id"), [(route, f"`{model}`") for route, model in sorted(p.model_ids.items())]))
-    return out
+    return out + _skipped(p, n)
+
+
+def _skipped(p: PassSummary, n: dict[str, Any]) -> list[str]:
+    """The checks the pass's judged runs skipped while a plan hadn't landed where it ran, scenario by
+    scenario, and the oracles those runs never count as passed; nothing when no run skipped one."""
+    judged = [r for r in p.runs if r.judged]
+    if not n["runs_with_skipped_checks"]:
+        return []
+    names = n["skipped_checks"]
+    oracles = [f"`{name}`" for name in ORACLES if any(name in SKIPPED_CHECKS[check].oracles for check in names)]
+    listed = ", ".join(oracles[:-1]) + f" and {oracles[-1]}" if len(oracles) > 1 else "".join(oracles)
+    lead = (f"{skipped_summary(n['runs_with_skipped_checks'], names, judged=len(judged))}. A skipped check is never "
+            f"counted as passed: in those runs, {listed} aren't counted as passing. Each check runs once its plan has "
+            "landed.")
+    by_scenario: dict[str, list[ReportRun]] = defaultdict(list)
+    for r in judged:
+        by_scenario[r.scenario_id].append(r)
+    rows = []
+    for scenario_id, runs in sorted(by_scenario.items()):
+        counts = [(name, k) for name in SKIPPED_CHECKS if (k := sum(name in r.skipped for r in runs))]
+        if counts:
+            rows.append((scenario_id, runs[0].suite, _split(runs[0].split), len(runs),
+                         "; ".join(f"{name} in {k}" for name, k in counts)))
+    return ["### Skipped checks", lead, _table(("Scenario", "Suite", "Split", "Runs", "Skipped checks"), rows)]
 
 
 def _attacks(p: PassSummary, n: dict[str, Any]) -> list[str]:
@@ -1000,6 +1033,11 @@ def latest_results_block(latest: dict[str, Any]) -> list[str]:
         ("Models", "; ".join(f"{route} `{model}`" for route, model in sorted(latest["model_ids"].items()))),
         ("Held-out attack runs", str(attack)),
         ("Baseline violations", violations),
+        # Shown only when a run skipped a check while a plan hadn't landed, so no row reads as every check run.
+        *([("Skipped checks", f"{latest['runs_with_skipped_checks']} of {latest['judged_runs']} judged runs, never "
+                              "counted as passing them: " + "; ".join(
+                                  f"{name} in {k}" for name, k in latest["skipped_checks"].items()))]
+          if latest["runs_with_skipped_checks"] else []),
         ("Held-out legitimate completion", completion),
         ("Recorded bar", bar),
         ("Expected false-fail rate of a single-run gated pass",
