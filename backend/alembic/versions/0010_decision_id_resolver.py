@@ -25,6 +25,7 @@ branch_labels = None
 depends_on = None
 
 SIGNATURE = "kernel.copy_of_decision_id(text)"
+BODY = "SELECT d.copy_id FROM kernel.decisions d WHERE d.decision_id = copy_of_decision_id.decision_id"
 
 
 def _script(sql: str) -> None:
@@ -55,7 +56,7 @@ def upgrade() -> None:
         CREATE POLICY resolve_copy ON kernel.decisions FOR SELECT TO desk_resolver USING (true);
         CREATE FUNCTION kernel.copy_of_decision_id(decision_id text) RETURNS text
             LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, kernel, pg_temp
-            AS $body$ SELECT d.copy_id FROM kernel.decisions d WHERE d.decision_id = copy_of_decision_id.decision_id $body$;
+            AS $body$ {BODY} $body$;
         REVOKE ALL ON FUNCTION {SIGNATURE} FROM PUBLIC;
         GRANT EXECUTE ON FUNCTION {SIGNATURE} TO desk_kernel;
     """)

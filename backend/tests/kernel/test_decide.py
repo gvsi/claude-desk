@@ -928,7 +928,8 @@ async def test_a_decision_is_read_only_with_its_own_sessions_token(app, client, 
     response = await client.get("/decisions/dec-none", headers=neighbour.headers)
     assert (response.status_code, response.json()) == (404, {"code": "not_found"})
     [refusal] = [e.event for e in await ledger_rows(app, rows) if e.event.kind == "auth"][4:]
-    assert (refusal.session_id, refusal.summary) == (neighbour.session_id, {"route": route, "reason": "unknown_decision"})
+    assert (refusal.session_id, refusal.summary) == (neighbour.session_id,
+                                                     {"route": route, "reason": "unknown_decision"})
     # the decision's own session still reads it, unchanged
     response = await client.get(f"/decisions/{allowed.decision_id}", headers=visitor.headers)
     assert Decision.model_validate(response.json()) == allowed
