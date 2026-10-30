@@ -119,7 +119,22 @@ async def test_ambient_credentials_never_reach_a_request(environ, sent):
     verdict, usage = await backend.soft_promise(REPLY)
     assert verdict == SoftPromiseVerdict(promises_beyond_cards=False, denies_being_ai=False)
     (request,) = sent
+    assert str(request.url) == "https://api.anthropic.com/v1/messages"      # no test hook: the Claude API
     assert credential(request.headers) == "the placeholder"
+    leaked = carries(request, "ambient")
+    assert not leaked
+
+
+async def test_a_development_key_is_sent_as_given(environ, sent):
+    # A developer's own key, given as ANTHROPIC_API_KEY, is the key the kernel sends, and nothing
+    # ambient joins it.
+    environ({"ANTHROPIC_API_KEY": TEST_KEY, "ANTHROPIC_AUTH_TOKEN": "ambient"})
+    backend = make_decisions(settings())
+    assert (backend._client.api_key, backend._client.auth_token) == (TEST_KEY, None)
+    await backend.soft_promise(REPLY)
+    (request,) = sent
+    assert str(request.url) == "https://api.anthropic.com/v1/messages"
+    assert credential(request.headers) == "the test key"
     leaked = carries(request, "ambient")
     assert not leaked
 
