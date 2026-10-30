@@ -585,7 +585,7 @@ def _null_baseline(root: Path, null_id: str, real: "PassResult", *, latest: bool
     pass itself is held to (`results.gating_refusal`), so the latest report never quotes a null baseline
     run on another provider or served by a model other than the production ones. Otherwise the reason it
     isn't goes with it, and the report's null baseline line says it."""
-    from evals.report import NullBaseline
+    from evals.report import NullBaseline, null_baseline_refusal
     from evals.results import gating_refusal
     from evals.tier2.passes import load_pass
 
@@ -595,8 +595,7 @@ def _null_baseline(root: Path, null_id: str, real: "PassResult", *, latest: bool
                             "tier2 --null-baseline")
     refusal = gating_refusal(null)
     if latest and refusal:
-        raise ReportRefused(f"null-baseline {refusal}; pass {real.pass_id}'s report would become the latest, which "
-                            "quotes a null baseline only from such a pass")
+        raise ReportRefused(null_baseline_refusal(real.pass_id, refusal))
     if null.heldout_sha256 != real.heldout_sha256:
         raise ReportRefused(f"null-baseline pass {null_id} ran on another held-out set than pass {real.pass_id}, so "
                             "the two can't be compared")

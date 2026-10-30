@@ -1048,6 +1048,14 @@ def latest_refusal(pass_id: str, *, dry_run: bool, null_baseline: bool) -> str |
     return None
 
 
+def null_baseline_refusal(pass_id: str, reason: str) -> str:
+    """Why pass `pass_id`'s report, which would become the latest, can't quote a null baseline that
+    isn't gating evidence, given the null pass's `reason` (`results.gating_refusal`). Both `write_report`
+    and the `report` command refuse with it."""
+    return (f"null-baseline {reason}; pass {pass_id}'s report would become the latest, which quotes a null "
+            "baseline only from such a pass")
+
+
 def partial(p: PassSummary) -> list[str]:
     """What kept the pass to part of the suite: `--suite` short of all, the calibration split alone,
     `--only`, or a stop at its budget before every run started. Empty for a pass of the whole suite,
@@ -1093,8 +1101,7 @@ def write_report(pass_result: PassSummary, gate_result: Any, metrics: Metrics | 
     if refusal := latest_refusal(p.pass_id, dry_run=p.dry_run, null_baseline=p.null_baseline):
         raise ValueError(refusal)
     if null_baseline is not None and null_baseline.gating_refusal and not kept_out(p):
-        raise ValueError(f"null-baseline {null_baseline.gating_refusal}; pass {p.pass_id}'s report would become the "
-                         "latest, which quotes a null baseline only from such a pass")
+        raise ValueError(null_baseline_refusal(p.pass_id, null_baseline.gating_refusal))
     inputs = {"recorded": recorded, "null_baseline": null_baseline, "spend_month": spend_month}
     latest = latest_json(p, gate_result, metrics, latency, calibration, **inputs)
     text = render_report(p, gate_result, metrics, latency, calibration, **inputs, budget=budget)

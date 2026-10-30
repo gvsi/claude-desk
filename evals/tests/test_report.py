@@ -43,6 +43,7 @@ from evals.report import (
     latest_results_block,
     load_budget,
     millis,
+    null_baseline_refusal,
     percent,
     render_report,
     write_latest_results,
@@ -358,8 +359,12 @@ def test_only_gating_evidence_becomes_the_latest_report(tmp_path: Path):
 
     unfit = NullBaseline(pass_id="p-20261101-e5f6", successes=0, trials=2,
                          gating_refusal="pass p-20261101-e5f6 isn't gating evidence: it ran the API on bedrock")
-    with pytest.raises(ValueError, match="null-baseline pass p-20261101-e5f6 isn't gating evidence"):
+    refusal = null_baseline_refusal(PASS_ID, unfit.gating_refusal)
+    assert refusal == ("null-baseline pass p-20261101-e5f6 isn't gating evidence: it ran the API on bedrock; pass "
+                       f"{PASS_ID}'s report would become the latest, which quotes a null baseline only from such a pass")
+    with pytest.raises(ValueError) as refused:
         write_report(**all_inputs(null_baseline=unfit), reports_dir=reports, evals_doc=doc, out_dir=out)
+    assert str(refused.value) == refusal
     assert not reports.exists() and doc.read_text() == guide
     explored = all_inputs(pass_result=a_pass(full_pass().runs, model_ids={**MODEL_IDS, "conversation": "x"}),
                           null_baseline=unfit)
@@ -998,7 +1003,8 @@ async def test_report_command_quotes_only_a_gating_null_baseline_in_the_latest_r
         assert evals_run.report_command(["--pass", pass_id, "--null-baseline", null_id], root=root) == 1
         said = capsys.readouterr().out
         assert f"report: null-baseline pass {null_id} isn't gating evidence: {why}" in said, said
-        assert f"pass {pass_id}'s report would become the latest" in said, said
+        reason = said.split("report: null-baseline ", 1)[1].split(f"; pass {pass_id}'s", 1)[0]
+        assert f"report: {null_baseline_refusal(pass_id, reason)}\n" in said, said
         assert not (reports / "latest.json").exists() and not list(reports.glob("2026-*.md")), why
         assert not out.exists(), why
 
