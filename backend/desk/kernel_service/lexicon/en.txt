@@ -17,6 +17,10 @@ number	zeros?|zeroes
 # A quarter is an amount, a fraction and a time ("a quarter past"), blocked whichever it is.
 number	quarters?
 number	thirds?
+# Ordinals from the fourth on, which are fractions ("a fifth off") and days ("on the twelfth").
+# "first" and "second" pass ("first, let me check", "one second").
+number	(?:four|fif|six|seven|eigh|nin|ten|eleven|twelf)ths?
+number	(?:thir|four|fif|six|seven|eigh|nine)teenths?|(?:twen|thir)tieths?
 number	one(?:[\s-]+and)?[\s-]+(?:hundreds?|thousands?|millions?|billions?|dozens?|half|dollars?|bucks?|cents?|euros?|pesos?|usd|per[\s-]?cent|percent)
 
 # Money. "grand" is a thousand dollars ("a couple grand"), and is blocked in every sense ("Grand

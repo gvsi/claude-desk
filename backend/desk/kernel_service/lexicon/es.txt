@@ -20,6 +20,9 @@ number	ceros?
 # it is: a reply naming a room needs another word for it ("habitación").
 number	cuart[oa]s?
 number	tercios?|terceras?[\s-]+partes?
+# Fractions from a fifth to a tenth ("un quinto", "una décima parte"); "séptimo" and
+# "décimo" without the accent
+number	quint[oa]s?|sext[oa]s?|sep?tim[oa]s?|octav[oa]s?|noven[oa]s?|decim[oa]s?
 number	(?:uno|una|once|medio)[\s-]+(?:y[\s-]+)?(?:cien|cientos?|mil|miles|millon(?:es)?|docenas?|dolar(?:es)?|pesos?|euros?|centavos?|por[\s-]?ciento)
 
 # Money ("dólar" and "dólares" are matched without the accent)
@@ -37,6 +40,7 @@ date	fin(?:es)?[\s-]+de[\s-]+semana|(?:la[\s-]+)?(?:proxima|siguiente)[\s-]+sema
 date	esta[\s-]+(?:noche|tarde|semana)|(?:este|el[\s-]+proximo)[\s-]+mes
 date	las[\s-]+once|la[\s-]+una
 date	(?:el[\s-]+)?mismo[\s-]+dia
+date	(?:el[\s-]+)?mes[\s-]+que[\s-]+viene
 # A time soon: "en" or "dentro de" and up to three words before minutes or hours ("en una
 # hora", "dentro de un par de horas", "en media hora").
 date	(?:en|dentro[\s-]+de)[\s-]+(?:[^\W\d_]+[\s-]+){0,3}(?:minutos?|mins?|horas?|hrs?)

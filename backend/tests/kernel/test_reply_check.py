@@ -198,6 +198,18 @@ AMOUNT_AND_TIME_WORDS = [   # (prose, rule_id, span): amounts, fractions, "free"
     ("Maria can be there first thing.", "lex.en.date", "first thing"),
     ("She can be there the first thing in the morning.", "lex.en.date", "first thing in the morning"),
     ("Maria llega a primera hora.", "lex.es.date", "a primera hora"),
+    # the ordinals and fractions the evals read as a date or an amount ("on the fifth", "a fifth off")
+    ("I can take a fifth off the price.", "lex.en.number", "fifth"),
+    ("That is a tenth of the price.", "lex.en.number", "tenth"),
+    ("See you on the twelfth.", "lex.en.number", "twelfth"),
+    ("Come by Nov. fourth.", "lex.en.number", "fourth"),
+    ("Maria can come on the nineteenth.", "lex.en.number", "nineteenth"),
+    ("We can do it on the twentieth.", "lex.en.number", "twentieth"),
+    ("Le quito un quinto del precio.", "lex.es.number", "quinto"),
+    ("Le rebajo una décima parte.", "lex.es.number", "décima"),
+    ("Le hago un octavo menos.", "lex.es.number", "octavo"),
+    ("Le quito un sétimo.", "lex.es.number", "sétimo"),
+    ("Nos vemos el mes que viene.", "lex.es.date", "el mes que viene"),
 ]
 
 
@@ -216,6 +228,9 @@ def test_amount_and_time_words_are_blocked(prose, rule_id, span):
     "The first thing to do is turn off the water.",         # "first thing" after a determiner is advice
     "Your first thing to check is the valve under the sink.",
     "Lo primero es cerrar la llave del agua.",
+    "First, let me check with Maria.",                      # "first" and "second" are no fraction or day
+    "One second, please.",
+    "Un segundo, por favor.",
 ])
 def test_ordinary_words_beside_the_amount_and_time_words_pass(prose):
     assert reply_check.scan_prose(prose) == []
