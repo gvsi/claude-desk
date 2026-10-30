@@ -6,13 +6,16 @@ model call is scripted on the kernel target's fake model server. API code is imp
 a case, so collecting tier 1 never needs it.
 """
 
+import json
+
+import httpx
 import pytest
 
 from desk.kernel_api import Health
 from evals.client import DeskClient
 from evals.fakes import FakeAnthropic
-from evals.tier1.targets import ApiTarget, KernelTarget, load_api_target
-from evals.tier1.test_api_payloads import GREETING, OPUS, chat_turn, send_reply
+from evals.tier1.targets import DUMMY_KEY, ApiTarget, KernelTarget, load_api_target
+from evals.tier1.test_api_payloads import GREETING, OPENAPI, OPUS, chat_turn, send_reply
 
 pytestmark = pytest.mark.requires("01a", "02a")
 
@@ -57,3 +60,40 @@ async def test_fake_target_ignores_model_provider(
         await api.stop()
     assert [event.type for event in turn].count("message") == 1, [event.type for event in turn]
     assert len(fake.calls(OPUS)) == 1, "the visitor's message made no model call on the kernel target's fake"
+
+
+async def openapi_status(app) -> int:
+    """What `app` answers to `GET /openapi.json`, asked in process with no lifespan (so nothing connects)."""
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://desk.test") as client:
+        return (await client.get("/openapi.json")).status_code
+
+
+async def test_only_the_evals_target_serves_an_openapi_document(api: ApiTarget, monkeypatch: pytest.MonkeyPatch):
+    """The target's app serves its own OpenAPI document at `/openapi.json`, the committed export,
+    for Plan 05a's conformance case; an app built as production builds it, by `create_app` or by
+    uvicorn's `app_factory()`, answers 404 there, so the evals-only route can't reach production."""
+    from desk.api.main import app_factory, create_app
+
+    async with httpx.AsyncClient(base_url=api.base_url, trust_env=False) as client:
+        served = await client.get("/openapi.json")
+    assert served.status_code == 200, served.status_code
+    assert served.json() == json.loads(OPENAPI.read_text())
+
+    built = create_app(api.settings)
+    try:
+        assert await openapi_status(built) == 404
+    finally:
+        await built.state.runtime.model.aclose()
+    for name in ("ANTHROPIC_BASE_URL", "MODEL_PROVIDER", "BEDROCK_BEARER_TOKEN", "AWS_BEARER_TOKEN_BEDROCK",
+                 "ANTHROPIC_AWS_API_KEY", "ANTHROPIC_CUSTOM_HEADERS", "TRUSTED_PROXY_HOPS", "KERNEL_URL"):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in (("DESK_ENV", "production"), ("API_DATABASE_URL", api.api_dsn),
+                        ("ANTHROPIC_API_KEY", DUMMY_KEY), ("PASSCODE_HASH", api.settings.passcode_hash),
+                        ("PUBLIC_ORIGIN", "https://desk.example")):
+        monkeypatch.setenv(name, value)
+    production = app_factory()
+    try:
+        assert production.state.runtime.settings.production
+        assert await openapi_status(production) == 404
+    finally:
+        await production.state.runtime.model.aclose()

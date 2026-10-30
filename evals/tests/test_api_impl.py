@@ -235,8 +235,8 @@ async def test_target_serves_health_and_a_copy_over_the_kernel_target(
     """`make_api_target(k, models="fake")` over a started `KernelTarget`: the app serves on its own
     loopback port, on the kernel target's clock, with a model client at the kernel target's fake
     model server though the shell names Bedrock; `/api/health` carries the kernel's `Health`; only
-    the target's passcode gives a copy and its owner cookie; the job worker runs until `stop()`,
-    and then nothing is left serving."""
+    the target's passcode gives a copy and its owner cookie; it serves its own OpenAPI document; the
+    job worker runs until `stop()`, and then nothing is left serving."""
     for name in ("MODEL_PROVIDER", "BEDROCK_BEARER_TOKEN", "AWS_REGION"):
         monkeypatch.setenv(name, SHELL[name])
     k = await KernelTarget(models="fake").start()
@@ -260,6 +260,9 @@ async def test_target_serves_health_and_a_copy_over_the_kernel_target(
             async with DeskClient(api.base_url, api.passcode) as client:
                 health = await client.health()
                 assert health["ok"] is True and Health.model_validate(health["kernel"]) == k.health
+                served = await client.http.get("/openapi.json")   # the target's own route, never production's
+                assert served.status_code == 200 and served.json() == api.app.openapi()
+                assert "/openapi.json" not in served.json()["paths"]
                 wrong = await client.request("enter", json={"passcode": "not the passcode"})
                 assert (wrong.status_code, wrong.json()) == (401, {"error": "wrong_passcode"})
                 assert client.cookies() == []

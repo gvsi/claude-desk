@@ -22,6 +22,10 @@ shell exports changes nothing:
 Either way `KERNEL_URL` is the kernel target's, `PASSCODE_HASH` the hash of a fresh passcode the
 target keeps in `passcode` (the app holds only the hash), and `a2a_loopback` the target's own base
 URL, so the built-in agent's A2A calls reach this app. Errors name a variable, never its value.
+
+The served app also answers `GET /openapi.json` with its own OpenAPI document (`serve_openapi`),
+which Plan 05a's conformance case compares with the committed export. Only this target adds it:
+the app production runs (`create_app`, `app_factory`) serves no OpenAPI document.
 """
 
 import asyncio
@@ -32,6 +36,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 
 from desk.api.main import create_app
 from desk.api.passcode import hash_passcode
@@ -41,7 +46,7 @@ from evals.fakes import LoopbackServer
 from evals.tier1 import targets
 from evals.tier1.targets import DUMMY_KEY, REPO_ROOT, KernelTarget, TargetError
 
-__all__ = ["DeskApiTarget", "make_api_target", "target_settings"]
+__all__ = ["DeskApiTarget", "make_api_target", "serve_openapi", "target_settings"]
 
 ENV_FILE = REPO_ROOT / ".env"
 MODELS = ("fake", "real")
@@ -126,7 +131,7 @@ class DeskApiTarget:
         settings = target_settings(self.kernel, models=self.models, provider=self.provider,
                                    passcode_hash=self._passcode_hash, base_url=base_url, api_dsn=self.api_dsn,
                                    env_file=self._env_file)
-        app = create_app(settings, clock=self.kernel.clock.now)
+        app = serve_openapi(create_app(settings, clock=self.kernel.clock.now))
         server = LoopbackServer(app, port=port, name="API")
         await asyncio.to_thread(server.start)
         self._server, self.settings, self.app, self.base_url = server, settings, app, base_url
@@ -138,6 +143,17 @@ class DeskApiTarget:
         server, self._server = self._server, None
         if server is not None:
             await asyncio.to_thread(server.stop)
+
+
+def serve_openapi(app: FastAPI) -> FastAPI:
+    """`app`, also answering `GET /openapi.json` with its own OpenAPI document (left out of the
+    document itself), for the evals' conformance case: `create_app` serves none."""
+
+    async def openapi() -> JSONResponse:
+        return JSONResponse(app.openapi())
+
+    app.add_api_route("/openapi.json", openapi, methods=["GET"], include_in_schema=False)
+    return app
 
 
 def _check(models: str, provider: str) -> None:
