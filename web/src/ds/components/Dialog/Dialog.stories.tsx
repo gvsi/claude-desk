@@ -10,8 +10,10 @@ const TITLE = 'Delete Emergencies?';
 const BODY = 'Its public link stops working and its chats close. Its safety record is kept.';
 
 /**
- * The dialog as Settings opens it: "Delete this Desk" opens it, "Keep it" or Escape closes it, and
- * "Delete Desk" waits for the screen's answer. It starts open, so the story shows the dialog.
+ * The dialog as Settings › General opens it, in the default tone: a neutral question with neutral
+ * buttons, as deleting a Desk asks (owner decision, 2026-10-30). "Delete this Desk" opens it,
+ * "Keep it" or Escape closes it, and "Delete Desk" waits for the screen's answer. It starts open,
+ * so the story shows the dialog.
  */
 function Settings(props: DialogProps) {
   const [open, setOpen] = useState(true);
@@ -55,7 +57,7 @@ const meta = {
     layout: 'fullscreen',
     canvas: 'N-Run2-Settings-DeleteDesk',
     canvasNote:
-      'N-Run2-Settings-DeleteDesk draws this dialog over Settings › General (Boards/Settings, delete this Desk); here a lone "Delete this Desk" button opens it. "Start over" in the reviewer bar on N-Today-Run1 opens one too.',
+      'N-Run2-Settings-DeleteDesk draws this dialog over Settings › General (Boards/Settings, delete this Desk); here a lone "Delete this Desk" button opens it. "Start over" in the reviewer bar on N-Today-Run1 opens one too. The board draws a refused dot and red buttons; deleting a Desk uses the default tone with neutral buttons (owner decision, 2026-10-30). The board dims the page with rgba(20, 20, 19, 0.64); the dialog keeps the scrim token, rgba(0, 0, 0, 0.5), as every dialog does.',
   },
 } satisfies Meta<typeof Dialog>;
 
@@ -63,8 +65,7 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-export const Danger: Story = {
-  args: { tone: 'danger' },
+export const Default: Story = {
   play: async ({ args, canvas, userEvent }) => {
     // A modal dialog named by its title and described by its body.
     const dialog = canvas.getByRole('dialog', { name: TITLE });
@@ -80,8 +81,8 @@ export const Danger: Story = {
       paddingTop: '24px',
       paddingLeft: '24px',
     });
-    // dialog_backdrop_is_the_scrim: the page behind is dimmed by the scrim at full strength, as
-    // N-Run2-Settings-DeleteDesk draws it.
+    // dialog_backdrop_is_the_scrim: the page behind is dimmed by the scrim token at full strength.
+    // N-Run2-Settings-DeleteDesk dims it a little more, with rgba(20, 20, 19, 0.64); the token stays.
     const backdrop = getComputedStyle(dialog, '::backdrop');
     await expect(backdrop.backgroundColor).toBe('rgba(0, 0, 0, 0.5)');
     await expect(backdrop.opacity).toBe('1');
@@ -92,11 +93,8 @@ export const Danger: Story = {
     await expect(Math.round(body.getBoundingClientRect().top - heading.getBoundingClientRect().bottom)).toBe(12);
     for (const button of within(dialog).getAllByRole('button')) expectComputed(button, { height: '40px' });
 
-    // Danger adds a refused dot beside the title; the buttons stay neutral.
-    const title = within(dialog).getByRole('heading', { name: TITLE });
-    const dot = title.querySelector('.cd-status-dot--refused');
-    await expect(dot).not.toBeNull();
-    await expect(dot).toHaveAttribute('aria-hidden', 'true');
+    // The default tone: no dot beside the title, and neutral buttons.
+    await expect(dialog.querySelector('.cd-status-dot')).toBeNull();
     const keep = within(dialog).getByRole('button', { name: 'Keep it' });
     const remove = within(dialog).getByRole('button', { name: 'Delete Desk' });
     expectComputed(remove, { backgroundColor: 'rgb(239, 236, 228)' });
@@ -152,6 +150,24 @@ export const Danger: Story = {
     await expect(args.onConfirm).toHaveBeenCalledTimes(1);
     await expect(args.onCancel).toHaveBeenCalledTimes(2);
     await expect(canvas.getByRole('dialog', { name: TITLE })).toBeVisible();
+  },
+};
+
+export const Danger: Story = {
+  args: { tone: 'danger' },
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      'No signed screen uses the danger tone: deleting a Desk asks in the default tone (owner decision, 2026-10-30). Nearest is N-Run2-Settings-DeleteDesk, which drew the dot before that decision.',
+  },
+  play: async ({ canvas }) => {
+    // Danger adds a refused dot beside the title, hidden from screen readers; the buttons stay neutral.
+    const dialog = canvas.getByRole('dialog', { name: TITLE });
+    const dot = within(dialog).getByRole('heading', { name: TITLE }).querySelector('.cd-status-dot--refused');
+    await expect(dot).not.toBeNull();
+    await expect(dot).toHaveAttribute('aria-hidden', 'true');
+    expectComputed(within(dialog).getByRole('button', { name: 'Delete Desk' }), { backgroundColor: 'rgb(239, 236, 228)' });
+    expectComputed(within(dialog).getByRole('button', { name: 'Keep it' }), { backgroundColor: 'rgba(250, 249, 245, 0.1)' });
   },
 };
 

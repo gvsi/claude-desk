@@ -32,6 +32,7 @@ export const COPY_RESULT_COPY = {
 /**
  * The line a copy control shows for `state`: no words before a press, so it takes no room; then
  * "Copied." or the failure line for `what` (`'text'` by default), in `language` (`'en'` by default).
+ * The failure line says the link or the text "is selected": use it with `useCopyText` and a target.
  */
 export function copyResultLine(state: CopyState, { language = 'en', what = 'text' }: { language?: CopyLanguage; what?: CopyWhat } = {}): string {
   if (state === 'idle') return '';
@@ -39,9 +40,18 @@ export function copyResultLine(state: CopyState, { language = 'en', what = 'text
   return state === 'copied' ? words.copied : words.failed[what];
 }
 
-/** Selects all of `el`'s text, so a person can copy it with the keyboard or the menu. */
-function selectText(el: HTMLElement): void {
-  const selection = el.ownerDocument.defaultView?.getSelection();
+/**
+ * Selects all of `el`'s text, so a person can copy it with the keyboard or the menu: a field's
+ * value inside the field (an input or a text area), or any other element's text through the
+ * document's selection.
+ */
+export function selectText(el: HTMLElement): void {
+  const view = el.ownerDocument.defaultView;
+  if (view && (el instanceof view.HTMLInputElement || el instanceof view.HTMLTextAreaElement)) {
+    el.select();
+    return;
+  }
+  const selection = view?.getSelection();
   if (!selection) return;
   selection.removeAllRanges();
   selection.selectAllChildren(el);
@@ -49,8 +59,9 @@ function selectText(el: HTMLElement): void {
 
 /**
  * Copies through the screen's callback, which owns the clipboard, and remembers how it went. When
- * the callback fails (it throws or rejects), the text in `target` is selected instead, so it can
- * still be copied by hand.
+ * the callback fails (it throws or rejects), the text in `target` is selected instead (a field's
+ * value, or an element's text), so it can still be copied by hand. Pass the target: the failure
+ * line says the link or the text "is selected", which is only true when there is one.
  */
 export function useCopyText(onCopy: (value: string) => Promise<void> | void): {
   state: CopyState;

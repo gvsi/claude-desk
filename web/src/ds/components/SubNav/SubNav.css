@@ -1,8 +1,9 @@
 /* SubNav: the sidebar's nav rows for one section's pages. Each row is size-nav-row tall at the
    control radius, in secondary text; the current one in primary text on bg-selected with no accent
    bar, hovered rows on fill-hover. Under 768 px, where the app shell drops its sidebar, the rows
-   become one line that scrolls sideways inside itself, across the page's 16 px gutters and over a
-   hairline, as N-Run2-Settings-Phone draws it. */
+   become one line that scrolls sideways inside itself, across the page's gutters and over a
+   hairline, as N-Run2-Settings-Phone draws it. The gutter is --cd-sub-nav-bleed, space-16 unless
+   the page sets it. */
 
 .cd-sub-nav__list {
   display: flex;
@@ -40,7 +41,7 @@
   /* Its own formatting context, so the list's negative margin never pulls the nav up with it. */
   .cd-sub-nav {
     display: flow-root;
-    margin: 0 calc(-1 * var(--space-16));
+    margin-inline: calc(-1 * var(--cd-sub-nav-bleed, var(--space-16)));
     border-bottom: 1px solid var(--line-hairline);
   }
 
@@ -52,7 +53,7 @@
     /* The links start at the page's gutter and at the nav's top, 4 px over the hairline. The
        scroller reaches 4 px above the nav, so a focused link's ring is drawn inside it. */
     margin-top: calc(-1 * var(--space-4));
-    padding: var(--space-4) var(--space-16);
+    padding: var(--space-4) var(--cd-sub-nav-bleed, var(--space-16));
     scrollbar-width: none;
   }
 

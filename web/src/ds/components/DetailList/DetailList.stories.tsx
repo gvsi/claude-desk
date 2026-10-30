@@ -30,7 +30,7 @@ const meta = {
     layout: 'padded',
     canvas: 'N-Run2-Settings-General',
     canvasNote:
-      'Settings › General’s “Your business” card at the content column’s 720 px. The board draws a ghost Change at the right of each row; whether General has one is an open question for the owner, so the rows are read-only.',
+      'Settings › General’s “Your business” card at the content column’s 720 px. The board draws a ghost Change at the right of each row; the rows are read-only, with no Change (owner decision, 2026-10-30).',
   },
 } satisfies Meta<typeof DetailList>;
 
@@ -87,7 +87,7 @@ export const Phone: Story = {
   parameters: {
     layout: 'fullscreen',
     canvas: 'N-Run2-Settings-Phone',
-    canvasNote: 'N-Run2-Settings-Phone’s card at 358 px: a long value wraps inside its row, and nothing scrolls sideways. The board’s Change buttons are left out, as on a laptop.',
+    canvasNote: 'N-Run2-Settings-Phone’s card at 358 px: a long value wraps inside its row, and nothing scrolls sideways. No Change, as on a laptop (owner decision, 2026-10-30).',
   },
   play: async ({ canvas }) => {
     await expect(window.innerWidth).toBe(390);

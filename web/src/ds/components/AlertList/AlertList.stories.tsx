@@ -73,7 +73,11 @@ export const Plumber: Story = {
   },
 };
 
+/** A "how" longer than a phone's row (60 characters), which must wrap rather than push the page sideways. */
+const LONG_HOW = 'Every Monday at 8:00 am, by email to the address on your Desk';
+
 export const Phone: Story = {
+  args: { items: [...PLUMBER, { when: 'In a weekly summary', what: 'Quotes sent and payments taken', how: LONG_HOW }] },
   render: (args) => (
     <div style={{ padding: '0 var(--space-16)' }}>
       <AlertList {...args} />
@@ -94,6 +98,12 @@ export const Phone: Story = {
     // Under the words, from their left edge, and nothing scrolls sideways.
     await expect(how.getBoundingClientRect().top).toBeGreaterThanOrEqual(what.getBoundingClientRect().bottom);
     await expect(Math.round(how.getBoundingClientRect().left)).toBe(Math.round(what.getBoundingClientRect().left));
+    // alert_how_wraps_inside_its_row: a long how wraps within the row's padding, and nothing scrolls sideways.
+    const weekly = rows[3] as HTMLElement;
+    const long = weekly.querySelector<HTMLElement>('.cd-alert-list__how')!;
+    await expect(long).toHaveTextContent(LONG_HOW);
+    await expect(Math.round(long.getBoundingClientRect().right)).toBeLessThanOrEqual(Math.round(weekly.getBoundingClientRect().right) - 16);
+    await expect(long.getBoundingClientRect().height).toBeGreaterThan(18);
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
   },
 };

@@ -100,3 +100,26 @@ export const Phone: Story = {
     await expect(within(nav).getByRole('link', { name: 'Channels' })).toHaveAttribute('aria-current', 'page');
   },
 };
+
+export const PhoneWiderGutters: Story = {
+  args: { current: 'general' },
+  // A page with 24 px gutters says so through --cd-sub-nav-bleed.
+  render: (args) => (
+    <div style={{ padding: 'var(--space-24)', ['--cd-sub-nav-bleed' as string]: 'var(--space-24)' }}>
+      <SubNav {...args} />
+    </div>
+  ),
+  globals: { viewport: { value: 'phone', isRotated: false } },
+  parameters: {
+    layout: 'fullscreen',
+    canvas: 'none',
+    canvasNote: 'No board draws a phone page with 24 px gutters; N-Run2-Settings-Phone draws 16. The bleed follows --cd-sub-nav-bleed, so the line still runs edge to edge.',
+  },
+  play: async ({ canvas }) => {
+    const nav = canvas.getByRole('navigation', { name: 'Settings' });
+    // sub_nav_bleed_follows_the_gutter: edge to edge across 24 px gutters, the first link at the gutter.
+    await expect([Math.round(nav.getBoundingClientRect().left), Math.round(nav.getBoundingClientRect().width)]).toEqual([0, window.innerWidth]);
+    await expect(Math.round(within(nav).getAllByRole('link')[0]!.getBoundingClientRect().left)).toBe(24);
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+  },
+};

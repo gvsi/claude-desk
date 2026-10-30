@@ -25,9 +25,10 @@ const meta = {
     canvasNote: [
       'Signed on 2026-10-30.',
       'Settings › General: SubNav at the left, the business’s details as a DetailList, Answering as a Switch in a Card, and Delete this Desk.',
-      'The board draws a ghost Change at the right of each detail; whether General has one is an open question for the owner, so the rows are read-only.',
+      'The board draws a ghost Change at the right of each detail; the details are read-only, with no Change (owner decision, 2026-10-30).',
+      'Answering’s line is the short one, “Claude answers under your rules.”, the same as on a phone, where this board adds a second sentence (owner decision, 2026-10-30).',
       'Delete this Desk is a neutral secondary button where the board draws it red (owner decision, 2026-10-30).',
-      'The board centers a 1000 px column; the page keeps the app’s 960 px content width, as every other owner page does, so it sits 20 px right of the render.',
+      'The board centers a 1000 px column; Settings keeps the app’s 960 px content width, like every other owner page (owner decision, 2026-10-30), so it sits 20 px right of the render.',
     ].join(' '),
   },
 } satisfies Meta;
@@ -58,7 +59,8 @@ export const Board: Story = {
     // Answering, on, in its own card 20 px under the details.
     const answering = page.getByRole('switch', { name: 'Answering' });
     await expect(answering).toHaveAttribute('aria-checked', 'true');
-    await expect(answering).toHaveAccessibleDescription(ANSWERING_LINE);
+    // The short line everywhere, as the phone board writes it (owner decision, 2026-10-30).
+    await expect(answering).toHaveAccessibleDescription('Claude answers under your rules.');
     const answeringCard = page.getByRole('region', { name: 'Answering' });
     expectComputed(answeringCard, SPEC.card);
     await expect(Math.round(answeringCard.getBoundingClientRect().top - card.getBoundingClientRect().bottom)).toBe(20);

@@ -1117,11 +1117,11 @@ export const GENERAL_DETAILS: readonly DetailItem[] = [
   { label: 'Hours', value: 'Weekdays 8:00 am to 6:00 pm, Saturdays 9:00 am to 1:00 pm' },
 ];
 
-/** The Answering switch's line on a laptop (N-Run2-Settings-General). */
-export const ANSWERING_LINE = 'Claude answers under your rules. Turn it off and visitors are told you’ll reply yourself.';
-
-/** The same line as the phone board writes it: the first sentence only. */
-export const ANSWERING_LINE_PHONE = 'Claude answers under your rules.';
+/**
+ * The Answering switch's line, the same on a laptop and a phone: the short line N-Run2-Settings-Phone
+ * writes (owner decision, 2026-10-30), where N-Run2-Settings-General adds a second sentence.
+ */
+export const ANSWERING_LINE = 'Claude answers under your rules.';
 
 /** Deleting a Desk, in the board's words: the line beside the button, and the dialog's body. */
 export const DELETE_DESK_LINE = 'Its public link stops working and its chats close. Its safety record is kept.';

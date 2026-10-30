@@ -16,7 +16,7 @@
 
 - One card (`Card` with no padding: `fill-card`, a `line-card` border at `radius-card`), ruled in `line-hairline` between its rows.
 - Each row padded 12 px by 16 px: the label in `meta`, `text-secondary`, and 2 px under it the value in `body`, `text-primary`. A one-line row is 64 px, 65 with its hairline. A long value wraps inside its row; nothing scrolls sideways.
-- No buttons, links or fields. The boards draw a ghost "Change" at the right of each row; whether General offers one is an open question for the owner, so there is none until it is decided.
+- Read-only: no buttons, links or fields, and no "Change" control. The boards draw a ghost "Change" at the right of each row; the details stay read-only, with no Change (owner decision, 2026-10-30).
 
 ## Accessibility
 

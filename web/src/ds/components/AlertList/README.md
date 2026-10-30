@@ -16,7 +16,7 @@
 
 - One card (`Card` with no padding: `fill-card`, a `line-card` border at `radius-card`), ruled in `line-hairline` between its rows.
 - Each row padded 12 px by 16 px: `when` in `body` at weight 520, `text-primary`, with `what` 2 px under it in `meta`, `text-secondary`; `how` at the right in `meta`, `text-secondary`, centered on the row. A row is 64 px, 65 with its hairline.
-- When `what` and `how` don't fit on a line (a phone), `how` goes under `what`, from its left edge, 2 px under it. A row with no `how` shows nothing there.
+- When `what` and `how` don't fit on a line (a phone), `how` goes under `what`, from its left edge, 2 px under it, and a `how` longer than the row wraps inside it, so the page never scrolls sideways. A row with no `how` shows nothing there.
 - No buttons, links or fields.
 
 ## Accessibility

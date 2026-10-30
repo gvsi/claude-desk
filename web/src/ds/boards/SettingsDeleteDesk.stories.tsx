@@ -38,6 +38,7 @@ const meta = {
       'Signed on 2026-10-30.',
       'The general Dialog over Settings › General: “Delete Main line?”, the body, and “Keep it” focused beside “Delete Desk”, fitted to this board (24 px padding, the body 12 px under the title, the answers at a screen’s main size).',
       'The board draws a refused dot beside the title and both delete buttons red; deleting a Desk is a neutral button over the general Dialog, not a danger dialog (owner decision, 2026-10-30), so there is no dot and the buttons are neutral.',
+      'The board dims the page with rgba(20, 20, 19, 0.64); the dialog keeps the scrim token, rgba(0, 0, 0, 0.5), as every dialog does.',
       'The page behind is Boards/Settings, general.',
     ].join(' '),
   },

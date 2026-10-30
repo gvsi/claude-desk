@@ -1367,8 +1367,9 @@
   }
 }
 
-/* Settings (N-Run2-Settings-*): the title, then SubNav 200 px wide at the left, 24 px under it,
-   and the section's content 40 px to its right, up to 720 px, its parts 20 px apart; the footer at
+/* Settings (N-Run2-Settings-*): the title, then SubNav size-sub-nav (200 px) wide at the left, 24 px
+   under it, and the section's content 40 px to its right, 720 px in the 960 px column (owner
+   decision, 2026-10-30: the column every owner page has), its parts 20 px apart; the footer at
    the window's foot. On a phone (N-Run2-Settings-Phone), one column 16 px under the top bar: the
    title, SubNav, the content's parts and the footer, 16 px apart. */
 .board-settings {
@@ -1382,7 +1383,7 @@
 
 .board-settings__columns {
   display: grid;
-  grid-template-columns: 200px minmax(0, 720px);
+  grid-template-columns: var(--size-sub-nav) minmax(0, 1fr);
   gap: var(--space-40);
   align-items: start;
   margin-top: var(--space-24);

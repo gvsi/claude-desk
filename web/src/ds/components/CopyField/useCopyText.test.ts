@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { copyResultLine } from './useCopyText.ts';
+import { copyResultLine, selectText } from './useCopyText.ts';
 
 describe('copyResultLine', () => {
   it('failed_line_names_what_is_selected', () => {
@@ -18,5 +18,29 @@ describe('copyResultLine', () => {
     expect(copyResultLine('idle', { what: 'link' })).toBe('');
     expect(copyResultLine('copied', { what: 'link' })).toBe('Copied.');
     expect(copyResultLine('copied', { language: 'es' })).toBe('Copiado.');
+  });
+});
+
+describe('selectText', () => {
+  it('selects_a_fields_value_or_an_elements_text', () => {
+    // A field's value is selected inside the field, so "…is selected…" is true for an input or a text area too.
+    const input = document.createElement('input');
+    input.value = 'desk.example/rivera';
+    const area = document.createElement('textarea');
+    area.value = 'Ask Rivera Plumbing’s Desk at desk.example/rivera';
+    const words = document.createElement('p');
+    words.textContent = 'Chat with Rivera Plumbing’s Desk anytime.';
+    document.body.append(input, area, words);
+
+    selectText(input);
+    expect([input.selectionStart, input.selectionEnd]).toEqual([0, input.value.length]);
+    selectText(area);
+    expect([area.selectionStart, area.selectionEnd]).toEqual([0, area.value.length]);
+    // Any other element: its text, through the document's selection.
+    selectText(words);
+    expect(document.getSelection()?.toString()).toBe('Chat with Rivera Plumbing’s Desk anytime.');
+    words.remove();
+    input.remove();
+    area.remove();
   });
 });

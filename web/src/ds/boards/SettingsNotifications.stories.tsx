@@ -41,7 +41,7 @@ const meta = {
     canvasNote: [
       'Signed on 2026-10-30.',
       'Settings › Notifications: a Pill marks it as vision, then the alerts set for a plumber as an AlertList, read-only.',
-      'The page keeps the app’s 960 px content width where the board centers a 1000 px column, so it sits 20 px right of the render.',
+      'The board centers a 1000 px column; Settings keeps the app’s 960 px content width, like every other owner page (owner decision, 2026-10-30), so it sits 20 px right of the render.',
     ].join(' '),
   },
 } satisfies Meta;
