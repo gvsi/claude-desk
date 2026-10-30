@@ -11,8 +11,10 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    mixing Latin letters with another script (but for the Desk's own name and its business's
    name, as the owner set them), both lexicons (`lexicon/en.txt` and `lexicon/es.txt`, whatever
    the language, with each letter that looks like a Latin one read as it, from
-   `lexicon/lookalikes.txt`, every dash as "-" and every apostrophe as "’") and the Desk's
-   document canaries.
+   `lexicon/lookalikes.txt`, every dash as "-" and every apostrophe as "’"; booking claims such
+   as "you're booked" among them), five or more words in a row repeated from a rule the session
+   may read (`readable_policies`), and the Desk's document canaries. Bookings and policies reach
+   a visitor only in their cards, so prose saying them is blocked even beside the card.
 4. Each clause renders from a fact this session may read, current, of the template's kind and ID,
    with no canary in what it renders.
 5. The soft-promise check, only when steps 2 to 4 found nothing and there is prose: Haiku 5.5
@@ -73,6 +75,9 @@ BOOKING_CONDITION = re.compile(
     r"(?<!\w)(?:once|whenever|when|[il]f|after|before|unt[il]l|t[il]ll|unless|as soon as"
     r"|cuando|s[il]|una vez que|en cuanto|apenas|tan pronto como|despues de que|antes de que|hasta que) \Z",
     re.IGNORECASE)
+ECHO_WORDS = 5                     # this many words in a row shared with a policy's text: the policy in prose
+WORD = re.compile(r"[^\W_]+")      # a word, for the policy-echo scan: a run of letters and digits
+RULE_KEYS = frozenset({"service_area", "deposit", "cancellation"})   # charter claims stating a rule, beside policy:*
 
 
 # Default-ignorable code points beyond category Cf (Unicode's DerivedCoreProperties): the combining
@@ -267,20 +272,67 @@ def _blank_canaries(text: str, canaries: Iterable[str]) -> tuple[str, list[str]]
     return text, found
 
 
-def scan_prose(text: str, canaries: Iterable[str] = (), names: Iterable[str] = ()) -> list[Violation]:
-    """Every number, currency sign, lexicon word and canary in `text`, after `shown`: any Unicode
-    numeral or character drawn as a digit (`digit`, with the separators inside one number and the
-    letters shaped like 0 or 1 next to it in the same span, and a word made only of such letters
-    unless it is plain ASCII), currency sign (`currency`) or percent sign (`percent_sign`) and
-    every match of both lexicons (`lex.<lang>.<category>`) is `number_in_prose`, or `promise_word`
-    for the promise and booking categories, but for a booking claim with a condition straight
-    before it (`BOOKING_CONDITION`: "once you're booked"); a word mixing Latin letters with another
+def _readings(text: str) -> dict[str, list[int]]:
+    """The readings of `text` the lexicons and the policy-echo scan take (`_fold`), each with the
+    index in `text` each of its characters came from: a bare stroke as l, as I, and an ASCII
+    capital I as l too ("doIIars"); where NFKC wrote an acute accent as a space and a combining
+    acute, each also with that pair read as "’" ("o´clock") besides the space it is drawn on
+    ("no´charge")."""
+    variants: list[dict] = [{}, {"stroke": "i"}, {"strokes": STROKES_AND_I}]
+    if SPACED_ACUTE.search(text):
+        variants += [variant | {"acute": True} for variant in variants]
+    return dict(_fold(text, **variant) for variant in variants)
+
+
+def _word_runs(words: Sequence[str]) -> set[tuple[str, ...]]:
+    """Every `ECHO_WORDS` consecutive words of `words`."""
+    return {tuple(words[i:i + ECHO_WORDS]) for i in range(len(words) - ECHO_WORDS + 1)}
+
+
+def _policy_echoes(text: str, readings: dict[str, list[int]],
+                   policies: Iterable[tuple[str, str]]) -> list[tuple[int, str, Violation]]:
+    """A `policy_echo` for each `(fact_id, policy text)` sharing `ECHO_WORDS` or more words in a
+    row with `text`, in any reading of either (words are runs of letters and digits, case-folded,
+    so punctuation and case don't count), spanning the first such stretch of `text` as far as it
+    goes on."""
+    prose = [(origin, list(WORD.finditer(reading))) for reading, origin in readings.items()]
+    hits = []
+    for fact_id, policy in policies:
+        runs = set().union(*(_word_runs([word.group().casefold() for word in WORD.finditer(reading)])
+                             for reading in _readings(shown(policy))))
+        stretches = []
+        for origin, words in prose:
+            folded = [word.group().casefold() for word in words]
+            starts = [i for i in range(len(folded) - ECHO_WORDS + 1) if tuple(folded[i:i + ECHO_WORDS]) in runs]
+            if starts:
+                last, started = starts[0], set(starts)
+                while last + 1 in started:
+                    last += 1
+                stretches.append((origin[words[starts[0]].start()], origin[words[last + ECHO_WORDS - 1].end() - 1] + 1))
+        if stretches:
+            start, end = min(stretches, key=lambda stretch: (stretch[0], -stretch[1]))
+            hits.append((start, "policy_echo", Violation(kind="promise_word", span=_span(text[start:end]),
+                                                         rule_id="policy_echo", fact_ids=[fact_id])))
+    return hits
+
+
+def scan_prose(text: str, canaries: Iterable[str] = (), names: Iterable[str] = (),
+               policies: Iterable[tuple[str, str]] = ()) -> list[Violation]:
+    """Every number, currency sign, lexicon word, policy echo and canary in `text`, after `shown`:
+    any Unicode numeral or character drawn as a digit (`digit`, with the separators inside one
+    number and the letters shaped like 0 or 1 next to it in the same span, and a word made only of
+    such letters unless it is plain ASCII), currency sign (`currency`) or percent sign
+    (`percent_sign`) and every match of both lexicons (`lex.<lang>.<category>`) is
+    `number_in_prose`, or `promise_word` for the promise and booking categories, but for a booking
+    claim with a condition straight before it (`BOOKING_CONDITION`: "once you're booked"); a run of
+    `ECHO_WORDS` or more words shared with the text of one of `policies` (`(fact_id, text)` pairs)
+    is `promise_word` (`policy_echo`, naming the fact); a word mixing Latin letters with another
     script is `unsupported_language` (`mixed_script`), unless it lies inside one of `names` (the
-    Desk's own names) as it is written there; a canary verbatim is `canary`. The lexicons read lookalike
-    letters as the Latin ones, a bare stroke both as l and as I, an ASCII capital I as l too, every
-    dash and hyphen as "-" and every apostrophe as "’", an acute accent (a space and a combining
-    acute after NFKC) both as that space and as "’". Canaries come first, then the rest in the
-    order they appear."""
+    Desk's own names) as it is written there; a canary verbatim is `canary`. The lexicons and the
+    policy-echo scan read lookalike letters as the Latin ones, a bare stroke both as l and as I, an
+    ASCII capital I as l too, every dash and hyphen as "-" and every apostrophe as "’", an acute
+    accent (a space and a combining acute after NFKC) both as that space and as "’". Canaries come
+    first, then the rest in the order they appear."""
     text, found = _blank_canaries(shown(text), canaries)
     hits: list[tuple[int, str, Violation]] = [
         (-1, "canary", Violation(kind="canary", span="", rule_id="canary")) for _ in found]
@@ -303,13 +355,8 @@ def scan_prose(text: str, canaries: Iterable[str] = (), names: Iterable[str] = (
     reach = _named_reach(text, names)
     hits += [(start, "mixed_script", Violation(kind="unsupported_language", span=_span(word), rule_id="mixed_script"))
              for start, word in _words(text) if _mixes_scripts(word) and reach[start] < start + len(word)]
-    # three readings: a bare stroke as l, as I, and an ASCII capital I as l too ("doIIars"); where
-    # NFKC wrote an acute accent as a space and a combining acute, each also with that pair read as
-    # "’" ("o´clock") besides the space it is drawn on ("no´charge"). Each maps back to `text`.
-    variants: list[dict] = [{}, {"stroke": "i"}, {"strokes": STROKES_AND_I}]
-    if SPACED_ACUTE.search(text):
-        variants += [variant | {"acute": True} for variant in variants]
-    readings = dict(_fold(text, **variant) for variant in variants)
+    readings = _readings(text)
+    hits += _policy_echoes(text, readings, policies)
     seen: set[tuple[str, int, int]] = set()
     for language, entries in LEXICONS.items():
         for category, pattern in entries:
@@ -450,6 +497,23 @@ async def desk_names(ctx: KernelCtx, desk_id: str) -> list[str]:
     return list(names)
 
 
+def states_rule(key: str) -> bool:
+    """Whether a charter claim with this key states one of the Desk's rules: a `policy:*` claim,
+    the service area, the deposit or cancellation (not the contact, nor the hours)."""
+    return key.startswith("policy:") or key in RULE_KEYS
+
+
+async def readable_policies(ctx: KernelCtx, session_row: SessionRow, desk_id: str) -> list[tuple[str, str]]:
+    """`(fact_id, text)` for each charter claim stating a rule (`states_rule`) in a fact the session
+    may read: the texts its prose may not repeat (`scan_prose`'s policy echo)."""
+    rows = await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
+        FactRow.desk_id == desk_id, FactRow.kind == "charter").order_by(FactRow.fact_id)))
+    readers = labels.session_readers(session_row)
+    return [(row.fact_id, claim.value) for row in rows if labels.can_read(row.readers, readers)
+            for claim in labels.fact_of(row).claims
+            if claim.kind == "text" and isinstance(claim.value, str) and states_rule(claim.key)]
+
+
 async def desk_canaries(ctx: KernelCtx, desk_id: str) -> list[str]:
     """The canaries of the Desk's documents."""
     return list(await ctx.db.scalars(ctx.repo.scoped(
@@ -479,7 +543,8 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
     if detected == "other":
         excerpt, _ = _blank_canaries(prose, canaries)
         violations.append(Violation(kind="unsupported_language", span=_span(excerpt), rule_id="language"))
-    violations += scan_prose(draft.prose, canaries, await desk_names(ctx, desk_id))
+    violations += scan_prose(draft.prose, canaries, await desk_names(ctx, desk_id),
+                             await readable_policies(ctx, session_row, desk_id))
     cards, refused = await check_clauses(ctx, session_row, desk_id, desk, draft.clauses, language, canaries)
     violations += refused
     usage = None
