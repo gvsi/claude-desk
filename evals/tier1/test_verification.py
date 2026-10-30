@@ -11,7 +11,11 @@ alerts or ledger checkpoints. No code reaches visitor text, Claude's tool result
 Codes come only from a session's own Demo inbox, read where the case plays that session's own
 verification ("Demo limit: the Demo inbox"). The cases never print a code: a failure names the
 text or entry by label, with any code shown as `<code>`. An entry's recipient is named only as
-masked, unmasked or owner (`recipient`), and a contact on record is never printed.
+masked, unmasked or owner (`recipient`), and the on-record checks never print a contact. Texts a
+case expects to be the same (the starts' messages, what Claude sees, the failed checks' answers)
+are told apart by size and where they part (`told_apart`), never by what they say, so a contact a
+kernel echoed into one isn't printed either. Only the code leak scan prints visitor text: the text
+it flags, with its codes shown as `<code>`.
 """
 
 import json
@@ -41,7 +45,7 @@ from evals.tier1.golden_desk import (
     open_caller,
     session_row,
 )
-from evals.tier1.harness import Expect, KernelHarness
+from evals.tier1.harness import Expect, KernelHarness, declared_names, described
 from evals.tier1.test_reply_golden import CLEAN_EN, check_reply, passes
 from evals.tier1.test_sessions import (
     UNAUTHENTICATED,
@@ -155,6 +159,33 @@ def redacted(text: str, codes: list[str]) -> str:
     for code in codes:
         shown = _code_pattern(code).sub("<code>", shown)
     return SIX_DIGITS.sub("<code>", shown)
+
+
+# Texts a kernel must keep the same
+
+def told_apart(values: dict[str, Any], named: frozenset[str] = frozenset()) -> str:
+    """Values a case expects to be the same, by label, as a failure tells them apart: the labels
+    of equal values together, each value as `described` shows it (a text by its length, a list or
+    an object by its size, never what it holds, since a kernel may have echoed a contact, a code
+    or a token into it), and each text after the first with the character where it parts from the
+    first."""
+    groups: list[tuple[list[str], Any]] = []
+    for label, value in values.items():
+        alike = next((labels for labels, held in groups if held == value), None)
+        if alike is None:
+            groups.append(([label], value))
+        else:
+            alike.append(label)
+    first = groups[0][1]
+    shown = []
+    for n, (labels, value) in enumerate(groups):
+        told = described(value, named)
+        if n and isinstance(first, str) and isinstance(value, str):
+            at = next((i for i, (a, b) in enumerate(zip(first, value)) if a != b), min(len(first), len(value)))
+            told += f", parting from the first at character {at + 1}"
+        who = labels[0] if len(labels) == 1 else f"{', '.join(labels[:-1])} and {labels[-1]}"
+        shown.append(f"{who}: {told}")
+    return "; ".join(shown)
 
 
 # Steps a case takes
@@ -361,7 +392,8 @@ async def test_unknown_contact_gets_the_same_message_and_a_lead_note(k: KernelHa
     async with assert_ledgered(records, desk.copy, desk.desk_id, "verify", session_id=stranger.state.session_id):
         for_stranger = await start(k, stranger, STRANGER, expect=NOTHING_SENT)
     same = for_stranger.message == for_dana.message
-    assert same, f"the messages differ: {redacted(for_dana.message, [])!r} and {redacted(for_stranger.message, [])!r}"
+    told = told_apart({"Dana's": for_dana.message, "the stranger's": for_stranger.message})
+    assert same, f"the messages differ: {told}"
     stranger_entries = await own_inbox(k, stranger)
     copy_entries = await owner_inbox(k, desk)
     if k.is_real:
@@ -439,7 +471,8 @@ async def test_sixth_challenge_in_an_hour_refused_and_ledgered(k: KernelHarness,
     async with assert_ledgered(records, desk.copy, desk.desk_id, "verify", session_id=sixth.state.session_id):
         refused = await start(k, sixth, DANA, expect=NOTHING_SENT)
     uniform = set(messages) == {refused.message}
-    assert uniform, f"the starts' messages differ: {[redacted(text, []) for text in {*messages, refused.message}]}"
+    starts = {**{f"start {n}": text for n, text in enumerate(messages, 1)}, "the sixth": refused.message}
+    assert uniform, f"the starts' messages differ: {told_apart(starts)}"
     sixth_entries = await own_inbox(k, sixth)
     copy_entries = await owner_inbox(k, desk)
     if k.is_real:
@@ -489,9 +522,12 @@ async def test_five_attempts_per_challenge(k: KernelHarness, records):
         async with assert_ledgered(records, desk.copy, desk.desk_id, "verify", session_id=session_id):
             await check(k, visitor, attempt, expect=INVALID)
     await assert_unverified(k, records, desk, visitor)
-    failures = {(called.status, json.dumps(called.raw, sort_keys=True)) for called in k.responses
-                if called.route == "POST /verify/check"}
-    assert len(failures) == 1, f"failed checks answered {len(failures)} ways: {sorted(failures)}"
+    checks = [called for called in k.responses if called.route == "POST /verify/check"]
+    failures = {(called.status, json.dumps(called.raw, sort_keys=True)) for called in checks}
+    count = len(failures)
+    answers = {f"check {n} ({called.status})": json.dumps(called.raw, sort_keys=True)
+               for n, called in enumerate(checks, 1)}
+    assert count == 1, f"failed checks answered {count} ways: {told_apart(answers)}"
 
 
 @pytest.mark.requires("01b")
@@ -535,7 +571,8 @@ async def test_eleventh_failed_attempt_locks_the_contact_and_alerts_the_owner(k:
     async with assert_ledgered(records, desk.copy, desk.desk_id, "verify", session_id=fresh.state.session_id):
         locked = await start(k, fresh, DANA, expect=NOTHING_SENT)
     uniform = set(messages) == {locked.message}
-    assert uniform, f"the starts' messages differ: {[redacted(text, []) for text in {*messages, locked.message}]}"
+    starts = {**{f"start {n}": text for n, text in enumerate(messages, 1)}, "the fresh session's": locked.message}
+    assert uniform, f"the starts' messages differ: {told_apart(starts)}"
     fresh_entries = await own_inbox(k, fresh)
     copy_entries = await owner_inbox(k, desk)
     if k.is_real:
@@ -564,10 +601,11 @@ async def test_second_person_in_one_session_refused(k: KernelHarness, records):
         for_bob = await start(k, dana, BOB, expect=NOTHING_SENT)
     for_stranger = await start(k, dana, STRANGER, expect=NOTHING_SENT)
     uniform = for_bob.message == for_stranger.message
-    assert uniform, f"the already-verified message differs by contact: {redacted(for_bob.message, [])!r}"
+    told = told_apart({"for Bob": for_bob.message, "for a stranger": for_stranger.message})
+    assert uniform, f"the already-verified message differs by contact: {told}"
     if k.is_real:
         distinct = for_bob.message != unverified.message
-        assert distinct, f"a verified session's start got the unverified message: {redacted(for_bob.message, [])!r}"
+        assert distinct, f"a verified session's start got the unverified message: {described(for_bob.message)}"
     dana_entries = await own_inbox(k, dana)
     copy_entries = await owner_inbox(k, desk)
     if k.is_real:
@@ -660,4 +698,8 @@ async def test_start_verification_model_view_is_uniform(k: KernelHarness, fake: 
         seen.append({"visitor_plain": decision.visitor_plain, "state": result.state,
                      "facts": [fact.model_dump(mode="json") for fact in result.facts], "model_view": result.model_view})
     same = seen[0] == seen[1]
-    assert same, f"Claude sees one thing for Dana's contact, another for a stranger's: {redacted(json.dumps(seen), [])}"
+    views = {"Dana's": seen[0], "the stranger's": seen[1]}
+    names = declared_names(Decision) | declared_names(ExecResult)   # so a result's state is shown by name
+    differ = [f"{part} ({told_apart({label: view[part] for label, view in views.items()}, names)})"
+              for part in seen[0] if seen[0][part] != seen[1][part]]
+    assert same, f"Claude sees one thing for Dana's contact, another for a stranger's: {', '.join(differ)}"
