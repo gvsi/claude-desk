@@ -9,6 +9,7 @@
     python -m evals.run record-rate --pass <id> --signed-off-by "<name>" --reason "<text>" [--lower-bar]
     python -m evals.run key
     python -m evals.run results-check --base <ref>
+    python -m evals.run calibrate --pass <id> [--write] [--owner-approved "<name>"]
     python -m evals.run latency --max-usd X [--turns 20] [--base-url URL] [--dry-run] [--pass <id>]
 
 With no test paths among the pytest args, `tier1` runs all of `evals/tier1`. It exits non-zero
@@ -35,6 +36,13 @@ held-out set unless `--lower-bar` is given, and then marks the entry `lowered` a
 fixed in the Desk, not by lowering its bar. `key` prints the inputs key
 (`make evals-key`), and `results-check` is the check CI runs (`make evals-results-check`), with no
 database, network or key: exit 0 or 1, the reason on stdout.
+
+`calibrate` (`evals/calibrate.py`) proposes each effect's reviewer thresholds from a finished
+calibration pass and writes `evals/reports/calibration-v<N>.md`, with no model call; it refuses a
+pass of any other split. `--write` also rewrites the calibrated block of
+`backend/desk/kernel_service/review_thresholds.py` when a row changes (never from a dry run or a
+null baseline), and a `charge` or `pay_out` row looser than the kernel's initial one needs
+`--owner-approved`. It exits 1 when refused, with the reason on stdout.
 
 `latency` (`evals/latency.py`) makes `--turns` visitor turns each of a plain question, a quote and a
 booking, each kind in its own copy, on the in-process stack built from this tree (its API on
@@ -240,6 +248,33 @@ def results_check(argv: list[str]) -> int:
     return 0 if passed else 1
 
 
+def calibrate_command(argv: list[str], *, root: Path | None = None) -> int:
+    from evals.calibrate import CalibrationRefused, calibrate
+    from evals.tier2.passes import REPO_ROOT
+
+    parser = _pass_parser("calibrate")
+    parser.add_argument("--write", action="store_true", help="rewrite the calibrated block of the thresholds file")
+    parser.add_argument("--owner-approved", metavar="NAME",
+                        help="the owner who approved writing a charge or pay_out row looser than its initial values")
+    options = parser.parse_args(argv)
+    if options.owner_approved is not None and not options.write:
+        parser.error("--owner-approved goes with --write")
+    root = root or REPO_ROOT
+    try:
+        done = calibrate(options.pass_id, root=root, write=options.write, owner_approved=options.owner_approved)
+    except CalibrationRefused as refused:
+        print(f"calibrate: {refused}")
+        return 1
+    for effect, row in done.proposal.table.items():
+        print(f"calibrate: {effect} {row.min_within_charter_bp} / {row.max_manipulation_bp} "
+              f"({done.proposal.notes[effect]})")
+    if done.written:
+        print(f"calibrate: wrote the thresholds as version {done.version}; run make proofs and make evals-tier1 "
+              "before committing them")
+    print(f"calibrate: wrote {done.report.relative_to(root)}")
+    return 0
+
+
 def latency_config(argv: list[str]) -> "LatencyConfig":
     """The latency run asked for; the in-process stack's provider is `MODEL_PROVIDER`."""
     from evals.latency import LatencyConfig
@@ -297,7 +332,7 @@ def latency(argv: list[str]) -> int:
 
 COMMANDS = {"tier1": tier1, "simulator-check": simulator_check, "tier2": tier2, "gate": gate_command,
             "results": results_command, "record-rate": record_rate_command, "key": key, "results-check": results_check,
-            "latency": latency}
+            "calibrate": calibrate_command, "latency": latency}
 
 
 def main(argv: list[str]) -> int:
