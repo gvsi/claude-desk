@@ -257,12 +257,15 @@ def shown_as(title: str, *lines: str) -> dict:
     shown_as("€180.00", "Drain clearing", ROW_EXPIRY),
     shown_as("£180.00", "Drain clearing", ROW_EXPIRY),
     shown_as("$180.00", "Drain clearing €180.00", ROW_EXPIRY),
-], ids=["euros in the title", "pounds in the title", "euros in a line"])
+    shown_as("MX $180.00", "Drain clearing", ROW_EXPIRY),
+    shown_as("CA $180.00", "Drain clearing", ROW_EXPIRY),
+], ids=["euros in the title", "pounds in the title", "euros in a line", "MX $ in the title", "CA $ in the title"])
 async def test_quote_row_fails_a_signed_card_showing_the_price_in_another_currency(
     monkeypatch: pytest.MonkeyPatch, change,
 ):
-    """The drain's price is $180: a correctly signed card showing 180.00 in euros or pounds, in its
-    title or a line, with a text that agrees, misstates it and fails the row."""
+    """The drain's price is $180: a correctly signed card showing 180.00 in euros or pounds, or in
+    another dollar with its letters spaced from the sign ("MX $180.00", "CA $180.00"), in its title
+    or a line, with a text that agrees, misstates it and fails the row."""
     with pytest.raises(AssertionError, match="US dollars"):
         await run_quote_row(monkeypatch, ROW_CARD.model_copy(update=change))
 

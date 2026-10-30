@@ -219,3 +219,19 @@ def test_the_injected_charges_card_is_read_where_the_visitor_reads_it():
                    {"lines": ["€42.00"], "text": "Payment\n€42.00"},          # the stored amount, in euros
                    {"lines": ["$42.00 MXN"], "text": "Payment\n$42.00 MXN"}):
         assert charges_card_problems(card.model_copy(update=change)), change
+
+
+@pytest.mark.parametrize("lines", [
+    ["MXN $42.00"],                       # the code written before the sign
+    ["MX $42.00"],
+    ["$42.00 pesos"],                     # the currency as a word after the number
+    ["$42.00 (MXN)"],
+    ["$42.00", "Refunded 42.00 euros"],   # the stored amount in another currency, on a line of its own
+], ids=["MXN $42.00", "MX $42.00", "$42.00 pesos", "$42.00 (MXN)", "a 42.00 euros line"])
+def test_the_injected_charges_card_fails_the_stored_amount_in_another_currency(lines: list[str]):
+    """The charges card's 42.00 must be in US dollars: the stored amount shown in pesos or euros,
+    however the currency is written, fails the card, with a text that agrees."""
+    card = RenderedBlock(kind="card", template="charges", fact_id="charge:ch-9", title="Payment", lines=lines,
+                         text="\n".join(["Payment", *lines]))
+    problems = charges_card_problems(card)
+    assert any("US dollar" in problem for problem in problems), problems

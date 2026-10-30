@@ -426,7 +426,8 @@ def test_card_amounts_parse_en_and_es():
 def test_card_amounts_keep_their_currency():
     """Each amount keeps the currency it is shown in: only the US dollar spellings ("$", "US$",
     "USD") read as US dollars. Any other sign or code, letters joined to a dollar sign ("MX$",
-    "CA$") and a second mark after the number ("$180.00 MXN") keep the amount out of US dollars."""
+    "CA$") or spaced from it ("MXN $", "MX $"), and a second mark or currency word after the
+    number ("$180.00 MXN", "$42.00 pesos", "$42.00 (MXN)") keep the amount out of US dollars."""
     cases = {
         "€180.00": [("€", 18000)],
         "£180.00": [("£", 18000)],
@@ -444,6 +445,23 @@ def test_card_amounts_keep_their_currency():
         "$180.00 €": [("$ €", 18000)],
         "Includes 80% off €180.00": [("€", 18000)],
         "$36.00 $180.00": [("USD", 3600), ("USD", 18000)],
+        # a code or capital letters joined to the sign by one space belong to its mark
+        "MXN $42.00": [("MXN $", 4200)],
+        "MX $180.00": [("MX $", 18000)],
+        "CA $180.00": [("CA $", 18000)],
+        "R $180,00": [("R $", 18000)],
+        "USD $42.00": [("USD", 4200)],
+        "US $42.00": [("USD", 4200)],
+        "A $20.00 deposit": [("USD", 2000)],   # the article, not a mark
+        "Pay $42.00": [("USD", 4200)],
+        # a currency word directly after the number is a mark too
+        "$42.00 pesos": [("$ pesos", 4200)],
+        "$42.00 dólares canadienses": [("$ dólares", 4200)],
+        "Refunded 42.00 euros": [("euros", 4200)],
+        "$42.00 (MXN)": [("$ MXN", 4200)],      # a trailing mark in brackets
+        "42.00 [EUR]": [("EUR", 4200)],
+        "42 MXN": [("MXN", 4200)],
+        "$36.00 USD $180.00": [("USD", 3600), ("USD", 18000)],
     }
     assert {text: card_amounts(text) for text in cases} == cases
 
@@ -511,6 +529,35 @@ def test_card_amount_problems_require_us_dollars():
     assert card_amount_problems(discounted, {3600, 18000}, headline=3600) == []
     charges = {**card, "template": "charges", "text": "Payment\n€42.00", "title": "Payment", "lines": ["€42.00"]}
     assert any("US dollars" in problem for problem in card_amount_problems(charges, {4200}))
+
+
+def test_card_amount_problems_find_a_currency_outside_a_us_dollar_amount():
+    """Every card, not only a quote, is read for currency signs and words (`scan_visible`) outside
+    a US dollar amount: written before the sign ("MXN $42.00", "MX $42.00"), as a word after the
+    number ("$42.00 pesos") or apart from it ("$42.00 (MXN)", "Pesos: $42.00"), or on a line of
+    its own ("Refunded 42.00 euros"), each in the title, a line, an option or the text."""
+    charges = {"kind": "card", "template": "charges", "fact_id": "charge:ch-9", "text": "Payment\n$42.00",
+               "title": "Payment", "lines": ["$42.00"]}
+    assert card_amount_problems(charges, {4200}) == []
+    assert card_amount_problems({**charges, "lines": ["A $42.00 payment"], "text": "Payment\nA $42.00 payment"},
+                                {4200}) == []
+
+    def shown(title: str, *lines: str) -> dict:
+        return {**charges, "title": title, "lines": list(lines), "text": "\n".join([title, *lines])}
+
+    wrong = {
+        "a code before the sign": (shown("Payment", "MXN $42.00"), "line 1"),
+        "capitals before the sign": (shown("Payment", "MX $42.00"), "line 1"),
+        "a word after the number": (shown("Payment", "$42.00 pesos"), "line 1"),
+        "a code in brackets": (shown("Payment", "$42.00 (MXN)"), "line 1"),
+        "a word before the amount": (shown("Pesos: $42.00"), "the title"),
+        "a line of its own": (shown("Payment", "$42.00", "Refunded 42.00 euros"), "line 2"),
+        "in an option": ({**charges, "options": [{"option_id": "o-1", "label": "Refund in euros"}]}, "option 1"),
+        "in the text alone": ({**charges, "text": "Payment\n$42.00 (MXN)"}, "text"),
+    }
+    for name, (block, where) in wrong.items():
+        problems = card_amount_problems(block, {4200})
+        assert any(where in problem for problem in problems), (name, problems)
 
 
 EXPIRY_EN = "Good until Tuesday, November 3, 2:00 pm"
