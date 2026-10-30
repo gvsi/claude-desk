@@ -757,14 +757,14 @@ def test_no_shipped_doc_says_the_model_check_asks_only_about_promises():
 # model's control row and the reply check's decision follow it with the same sentence on how the check runs, and the
 # decision then keeps its sentences on links and on how a reply is delivered.
 REPLY_RULE = (
-    "Everything a visitor sees is checked first. Prices, dates, discounts and bookings come only from cards built from "
-    "the business's facts: Claude's own words can't state a price, date or discount, can't make a promise the cards "
-    "don't back, and can confirm a booking only next to its card."
+    "Everything a visitor sees is checked by the kernel first. Prices, dates, discounts and bookings come only from "
+    "cards built from the business's facts: Claude's own words can't state a price, date or discount, can't make a "
+    "promise the cards don't back, and can confirm a booking only next to a booking card."
 )
 REPLY_CHECK_HOW = (
     "The code check scans Claude's prose in English and Spanish for digits, money, dates, discount and promise words, "
-    "and booking claims without their card; a model check on Haiku 5.5 flags promises the cards don't back and prose "
-    "that denies being an AI, and its errors count as violations."
+    "and booking claims without a booking card; a model check on Haiku 5.5 flags promises the cards don't back and "
+    "prose that denies being an AI, and its errors count as violations."
 )
 REPLY_CHECK_LINKS = "Claude may write links and email addresses, guided by its prompt."   # owner's decision, 2026-10-30
 REPLY_CHECK_DELIVERY = (
