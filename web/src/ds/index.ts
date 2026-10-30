@@ -163,6 +163,11 @@ export {
 } from './components/ConnectorSection/ConnectorSection.tsx';
 export { describeEffects } from './components/ConnectorSection/describeEffects.ts';
 export { ConnectorList, type ConnectorListProps } from './components/ConnectorList/ConnectorList.tsx';
+export {
+  ConnectorDirectory,
+  type ConnectorDirectoryProps,
+  type DirectoryRowView,
+} from './components/ConnectorDirectory/ConnectorDirectory.tsx';
 export { AlwaysOnList, type AlwaysOnListProps } from './components/AlwaysOnList/AlwaysOnList.tsx';
 export {
   ChangeReview,

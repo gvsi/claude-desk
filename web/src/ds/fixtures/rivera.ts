@@ -33,6 +33,7 @@ import type { ChangeReviewProps, ChangeRowView } from '../components/ChangeRevie
 import type { ConnectorPickerProps } from '../components/ConnectorPicker/ConnectorPicker';
 import type { ReviewToolView } from '../components/ConnectorReview/ConnectorReview';
 import type { ConnectorSectionProps } from '../components/ConnectorSection/ConnectorSection';
+import type { DirectoryRowView } from '../components/ConnectorDirectory/ConnectorDirectory';
 import type { RecentRequestView } from '../components/RecentRequests/RecentRequests';
 import type { RuleWord } from '../components/RuleRow/RuleRow';
 import { executedLine, type ExecutedTool } from './receipts';
@@ -1018,7 +1019,7 @@ const ruleLimits = {
 } satisfies Partial<Record<keyof typeof ruleWords, string>>;
 
 // ---------------------------------------------------------------------------------------------
-// Connectors on the Rules page (N-Conn-01-Rules)
+// Connectors on the Rules page (N-Conn-12-Chat) and the Connectors page (N-Conn-23-Connectors)
 
 const connectorViews = {
   quotes: {
@@ -1482,6 +1483,26 @@ const googleCalendar = {
   } satisfies Pick<ConnectorPickerProps, 'business' | 'builtIn' | 'external'>,
 };
 
+/** A hub section as a row on the Connectors page: the connector, its tool count and its page. */
+function directoryRow(section: HubSection): DirectoryRowView {
+  return { connector: section.connector, tools: section.tools.length, href: section.href };
+}
+
+/**
+ * Rivera Plumbing's Connectors page (N-Conn-23-Connectors): the six built-in connectors, Stripe
+ * connected with its test account, and Google Calendar to connect (catalog-only in the demo).
+ */
+const directory = {
+  builtInCaption: 'Part of Claude Desk. Remove one from this Desk on its own page; Verification is always on.',
+  builtIn: hubSections
+    .filter((section) => section.connector.source.kind === 'built_in')
+    .map((section) => (section.connector.id === 'verification' ? { ...directoryRow(section), note: 'Always on' } : directoryRow(section))),
+  connected: hubSections
+    .filter((section) => section.connector.source.kind === 'external')
+    .map((section) => ({ ...directoryRow(section), connection: 'Rivera Plumbing, test mode (mock)' })),
+  available: [{ connector: googleCalendarView, tools: 1 }] as DirectoryRowView[],
+};
+
 const listChargesProfile = {
   tool: 'payments.list_charges',
   source: 'mcp',
@@ -1726,6 +1747,7 @@ export const rivera = {
   ruleWords,
   ruleLimits,
   connectors,
+  directory,
   toolPages,
   recentRequests,
   changedRefund,
