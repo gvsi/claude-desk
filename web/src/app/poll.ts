@@ -1,7 +1,8 @@
 /**
  * How often owner screens poll, in milliseconds, through React Query's `refetchInterval` (which
- * pauses while the tab is hidden), and how often typing pings go out on either side of a chat.
- * Tests speed every interval up with `setPollScale`.
+ * pauses while the tab is hidden), how often typing pings go out on either side of a chat, and how
+ * often the agents page reads the built-in agent's run. Tests speed every interval up with
+ * `setPollScale`.
  */
 export const POLL_MS = {
   needsYou: 3_000,
@@ -28,6 +29,14 @@ export const TYPING_PING_MS = 2_000;
 /** The typing ping interval, scaled like the polls. */
 export function typingPingMs(): number {
   return Math.max(1, Math.round(TYPING_PING_MS * scale));
+}
+
+/** How often the agents page reads the built-in agent's run while it works (plan 02b: each second), in ms. */
+export const AGENT_RUN_POLL_MS = 1_000;
+
+/** The agent run's read interval, scaled like the polls. */
+export function agentRunPollMs(): number {
+  return Math.max(1, Math.round(AGENT_RUN_POLL_MS * scale));
 }
 
 /** Scales every interval by `factor` (1 is real time); tests use 0.05. */
