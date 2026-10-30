@@ -103,6 +103,21 @@ export function TodayPage() {
     setVisit((now) => (now.key === location.key ? { ...now, spent: true } : now));
     focusCard(requested);
   }, [requested, inboxOpen, readWorked, location.key, focusCard]);
+  // While it waits because Needs you can't be read, the owner's first pointer or key press spends
+  // it: a read that works later doesn't pull focus from what they're doing by then.
+  const readFailing = needsYou.errorUpdatedAt > needsYou.dataUpdatedAt;
+  const waitsOnFailure = requested !== null && readFailing;
+  useEffect(() => {
+    if (!waitsOnFailure) return undefined;
+    const key = location.key;
+    const spend = () => setVisit((now) => (now.key === key ? { ...now, spent: true } : now));
+    document.addEventListener('pointerdown', spend, true);
+    document.addEventListener('keydown', spend, true);
+    return () => {
+      document.removeEventListener('pointerdown', spend, true);
+      document.removeEventListener('keydown', spend, true);
+    };
+  }, [waitsOnFailure, location.key]);
 
   const copyLink = () => {
     setLinkCopy('idle');

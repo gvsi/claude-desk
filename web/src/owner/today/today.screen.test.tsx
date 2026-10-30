@@ -1118,6 +1118,42 @@ describe("Today's Demo inbox", () => {
     await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
   });
 
+  it('request_link_spent_by_the_owner_while_reads_fail', async () => {
+    // Needs you can't be read as the owner arrives at a request's address. Their first pointer or
+    // key press spends it, so a read that works later doesn't pull focus from what they're doing.
+    const { screen, router } = await renderRoute(TODAY);
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    const failing = failReads(needsYouPath);
+    const refund = mockStore.world.addHeldRefund();
+    await expect.element(region(screen, 'Needs you').getByRole('button', { name: 'Try again' }), { timeout: 4_000 }).toBeVisible();
+
+    // A pointer press.
+    await router.navigate(requestLink(refund.decision_id));
+    const ideas = region(screen, 'Things to try').getByRole('button', { name: 'Show me ideas' });
+    await ideas.click();
+    const hide = region(screen, 'Things to try').getByRole('button', { name: 'Hide ideas' });
+    await expect.element(hide).toHaveFocus();
+    failing.stop();
+    const card = heldCard(screen, REFUND_REASON);
+    await expect.element(card, { timeout: 4_000 }).toBeInTheDocument();
+    await readsMore('needsYou', 2);
+    await expect.element(hide).toHaveFocus();
+
+    // A key press, on another arrival while reads fail.
+    const again = failReads(needsYouPath);
+    await expect.element(region(screen, 'Needs you').getByRole('button', { name: 'Try again' }), { timeout: 4_000 }).toBeVisible();
+    await router.navigate(TODAY);
+    await nextFrames();
+    await router.navigate(requestLink(refund.decision_id));
+    await nextFrames();
+    await userEvent.keyboard('{Shift>}{Tab}{/Shift}');
+    const focused = document.activeElement;
+    again.stop();
+    await readsMore('needsYou', 2);
+    expect(document.activeElement).toBe(focused);
+    expect(focusIsOn(card.element())).toBe(false);
+  });
+
   it('request_link_without_its_card_leaves_focus_alone', async () => {
     // A request with no card here (answered, or another Desk's): Today opens as it would without
     // the address, with no error, and focus stays where it was.
