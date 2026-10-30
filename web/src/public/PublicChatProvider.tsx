@@ -31,19 +31,23 @@ export type ChatStatus = 'loading' | 'ready' | 'not_found' | 'unavailable';
 /** How long the chat waits before each reopen of a stream the server closed; after the last, it gives up. */
 export const REOPEN_DELAYS_MS = [2_000, 5_000, 10_000] as const;
 
-/** Every event a visitor's stream carries. */
-const EVENT_TYPES: readonly SseEvent['type'][] = [
-  'writing',
-  'message',
-  'turn_end',
-  'receipt',
-  'held',
-  'resolved',
-  'owner_joined',
-  'owner_left',
-  'demo_inbox',
-  'error',
-];
+/**
+ * Every event a visitor's stream carries. The stream drops a type it isn't given, so the list is
+ * keyed by the contract's types and the compiler names any it leaves out.
+ */
+const EVENT_TYPES = Object.keys({
+  writing: true,
+  message: true,
+  turn_end: true,
+  receipt: true,
+  held: true,
+  resolved: true,
+  owner_joined: true,
+  owner_typing: true,
+  owner_left: true,
+  demo_inbox: true,
+  error: true,
+} satisfies Record<SseEvent['type'], true>) as SseEvent['type'][];
 
 export interface VisitorChatSnapshot {
   /** The public Desk the chat loaded, or null until it has. */
