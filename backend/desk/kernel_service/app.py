@@ -149,8 +149,8 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
                 # active versions an earlier kernel stored under another baseline, rebuilt and
                 # proved before anything is decided under them; one that isn't decides nothing
                 await activation.rebuild_at_startup(app.state.kernel)
-            except Exception:
-                log.exception("startup_rebuild_failed")
+            except Exception as exc:
+                log_error(log, exc, "startup_rebuild_failed")
             try:
                 # executions a stopped kernel left behind; a read settles them too, so a failure
                 # here is logged and the kernel starts

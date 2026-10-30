@@ -719,7 +719,9 @@ async def test_an_allow_holding_no_session_row_ends_unknown_before_its_side_effe
     assert entries == [("execute", {"decision_id": allowed.decision_id, "action_id": allowed.action.action_id,
                                     "state": "unknown", "policy_version": 1, "auto_money_cap_cents": 50_000})]
     [logged] = [record for record in caplog.records if record.getMessage().startswith("execution_unknown")]
-    assert repr(logged.exc_info[1]) == "RuntimeError('allow_without_session')"
+    # logged by its kind and frames (`repo.log_error`), never its text: the frames end at the explicit check
+    message = logged.getMessage()
+    assert "kind=RuntimeError\n" in message and 'raise RuntimeError(f"{path}_without_session")' in message
 
 
 class OddError(Exception):
@@ -749,7 +751,7 @@ async def test_a_log_line_that_cannot_be_redacted_still_ends_unknown(app, client
     unknown = [record for record in caplog.records if record.getMessage().startswith("execution_unknown")]
     if how == "odd_error":
         [logged] = unknown
-        assert type(logged.exc_info[1]) is OddError                # it holds no database error: shown as raised
+        assert "kind=OddError\n" in logged.getMessage()            # it holds no database error: logged by its class
     else:
         # nothing of the line is kept, and nothing of the error: a fixed message alone
         failed = [record for record in caplog.records if record.getMessage() == "log_redaction_failed"]

@@ -59,7 +59,7 @@ from desk.kernel_api import (DeskAnsweringRequest, DeskBusinessRequest, DeskCale
 from desk.kernel_service import adapters, auth, clock, labels, ledger
 from desk.kernel_service.auth import AuthError, Named
 from desk.kernel_service.labels import fact_row
-from desk.kernel_service.repo import REF, KernelCtx, KernelFailure, new_id, route_template, storable
+from desk.kernel_service.repo import REF, KernelCtx, KernelFailure, log_error, new_id, route_template, storable
 
 log = logging.getLogger("desk.kernel_service")
 
@@ -744,9 +744,9 @@ async def delete_desk(ctx: KernelCtx, desk_row: Desk) -> None:
     for hook in ON_DELETE:
         try:
             await hook(ctx, desk_row.desk_id)
-        except Exception:
-            log.exception("desk_delete_hook_failed desk_id=%s hook=%s", desk_row.desk_id,
-                          getattr(hook, "__qualname__", repr(hook)))
+        except Exception as exc:
+            log_error(log, exc, "desk_delete_hook_failed desk_id=%s hook=%s", desk_row.desk_id,
+                      getattr(hook, "__qualname__", repr(hook)))
             raise KernelFailure(500, "internal", "desk_delete_hook_failed") from None
     await ledger_desk_data(ctx, desk_row, {"part": "desk", "deleted": True})
 

@@ -110,6 +110,7 @@ from fastapi import Depends, Request
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from desk.db import logs as db_logs
 from desk.db.models import Execution, PolicyVersion
 from desk.db.session import CopyResolver, KernelRepo, resolve_copy
 from desk.kernel_api import KernelError
@@ -237,9 +238,11 @@ def log_error(logger: logging.Logger, exc: BaseException, message: str, *args: o
     """Logs `exc` at ERROR as `message` (a fixed event name and kernel-built values, %-formatted
     with `args`), then `kind=<its class>` and the frames it rose through, never its text: an
     error's message can quote what a visitor typed (an adapter's error its arguments, a validation
-    error the input it refused, a driver error a statement's parameters). Used in place of
-    `logger.exception` wherever a request or an execution can fail."""
-    logger.error(f"{message} kind=%s\n%s", *args, type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
+    error the input it refused, a driver error a statement's parameters). A database error's kind
+    adds its SQLSTATE and constraint name (`db_logs.describe`), which hold no value. Used in place
+    of `logger.exception` wherever a request or an execution can fail."""
+    kind = db_logs.describe(exc) if db_logs.is_database_error(exc) else type(exc).__name__
+    logger.error(f"{message} kind=%s\n%s", *args, kind, "".join(traceback.format_tb(exc.__traceback__)),
                  stacklevel=2)
 
 
