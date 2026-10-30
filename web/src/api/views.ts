@@ -28,7 +28,6 @@ import type {
   RuleCard,
   SessionMode,
   SessionState,
-  SseEvent,
   ToolName,
   ToolProfile,
 } from './contracts.ts';
@@ -259,21 +258,6 @@ export interface OwnerTranscript {
   /** Replayed from the recorded history into this copy (plan 02b); absent is false. */
   replayed?: boolean;
 }
-
-/**
- * The owner typing after a take-over, as the visitor's stream carries it (plan 02b Task 1, a master
- * amendment to `SseEvent`): the kernel's owner name and how long to show it, no words. Typed here
- * until the generated contracts have it.
- */
-export interface EvOwnerTyping {
-  type: 'owner_typing';
-  name: string;
-  /** Show it until then, or until the owner's message replaces it. */
-  until: string;
-}
-
-/** Every event a visitor's stream carries: the contracts' `SseEvent`s and the owner typing. */
-export type VisitorEvent = SseEvent | EvOwnerTyping;
 
 // Safety
 

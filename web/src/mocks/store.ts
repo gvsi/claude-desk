@@ -22,8 +22,8 @@
  *
  * The mock ships in no build: it runs under `npm run dev:mock` and in tests only.
  */
+import type { SseEvent } from '../api/contracts.ts';
 import { ROUTES, apiPath, type RouteKey, type RouteParams } from '../api/routes.ts';
-import type { VisitorEvent } from '../api/views.ts';
 import { PAYMENT_TOKEN } from './script.ts';
 import type { MockSeed } from './seed.ts';
 import {
@@ -471,7 +471,7 @@ export class MockStore {
    * Sends `ev` on the stream of the session this browser's cookie names for `slug`, as the API
    * would outside a scripted turn: the owner joining, a session error. Returns its seq.
    */
-  emit(slug: string, ev: VisitorEvent): number {
+  emit(slug: string, ev: SseEvent): number {
     const session = this.visitorSession(slug);
     if (!session) throw new Error(`this browser has no session for ${slug}`);
     return this.world.emit(session, ev);
@@ -482,7 +482,7 @@ export class MockStore {
    * browser's, for a `simulated` store): every event after `after` at once, then each new one as it
    * happens. Returns the function that stops it.
    */
-  listen(slug: string, after: number, send: (seq: number, ev: VisitorEvent) => void, cookies: Record<string, string> = {}): () => void {
+  listen(slug: string, after: number, send: (seq: number, ev: SseEvent) => void, cookies: Record<string, string> = {}): () => void {
     const reached = this.reach('events', { slug }, cookies);
     if (isFailure(reached) || reached.server === null) return () => {};
     const visitor = reached.server.visitor(slug, reached.cookies);

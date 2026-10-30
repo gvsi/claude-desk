@@ -8,8 +8,7 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
-import type { EvMessage, OpenStatus, PublicDesk } from '../api/contracts.ts';
-import type { VisitorEvent } from '../api/views.ts';
+import type { EvMessage, OpenStatus, PublicDesk, SseEvent } from '../api/contracts.ts';
 import { rivera } from '../ds/fixtures/index.ts';
 import { CHAT_ENDED_COPY, NEW_CHAT_LABEL, RATE_LIMITED_COPY, UNREACHABLE_COPY } from '../ds/index.ts';
 import { worker } from '../mocks/browser.ts';
@@ -28,11 +27,11 @@ const APP_TITLE = 'Claude Desk';
 const requests = (key: string) => mockStore.requests.filter((r) => r.key === key);
 
 /** Every event this browser's chat with Rivera has carried, in order. */
-function chatEvents(): { seq: number; ev: VisitorEvent }[] {
+function chatEvents(): { seq: number; ev: SseEvent }[] {
   return mockStore.visitorSession(RIVERA.slug)?.events ?? [];
 }
 
-const messagesOf = (events: { ev: VisitorEvent }[]) => events.flatMap(({ ev }) => (ev.type === 'message' ? [ev] : []));
+const messagesOf = (events: { ev: SseEvent }[]) => events.flatMap(({ ev }) => (ev.type === 'message' ? [ev] : []));
 
 /** The messages the page shows from Claude, the Desk or a person. */
 const shownMessages = () => document.querySelectorAll('.cd-claude-message, .cd-person-message');

@@ -6,7 +6,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { RenderResult } from 'vitest-browser-react';
 
-import type { PaymentLinkOut, VisitorEvent } from '../../api/views.ts';
+import type { SseEvent } from '../../api/contracts.ts';
+import type { PaymentLinkOut } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { LINK_CANCELLED, type Language } from '../../mocks/script.ts';
 import { BUSINESS, RIVERA } from '../../mocks/seed.ts';
@@ -17,7 +18,7 @@ import { expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.
 const CHAT = `/d/${RIVERA.slug}`;
 
 /** Every event this browser's chat with Rivera has carried, in order. */
-function chatEvents(): { seq: number; ev: VisitorEvent }[] {
+function chatEvents(): { seq: number; ev: SseEvent }[] {
   return mockStore.visitorSession(RIVERA.slug)?.events ?? [];
 }
 

@@ -4,7 +4,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { DecisionState, EvMessage, LedgerPage, PublicDesk } from '../api/contracts.ts';
+import type { DecisionState, EvMessage, LedgerPage, PublicDesk, SseEvent } from '../api/contracts.ts';
 import type { RouteKey } from '../api/routes.ts';
 import type {
   BriefingList,
@@ -13,7 +13,6 @@ import type {
   NeedsYouItem,
   OwnerTranscript,
   Today,
-  VisitorEvent,
   VisitorSession,
   VisitorTranscript,
 } from '../api/views.ts';
@@ -37,7 +36,7 @@ async function call(key: RouteKey, init: MockRequestInit = {}): Promise<{ status
 async function openChat(after = 0) {
   const opened = await call('openSession', { params: { slug } });
   expect(opened.status).toBe(200);
-  const events: [number, VisitorEvent][] = [];
+  const events: [number, SseEvent][] = [];
   const stop = mockStore.listen(slug, after, (seq, ev) => events.push([seq, ev]));
   return { session: (opened.body as VisitorSession).state, events, stop };
 }
@@ -52,7 +51,7 @@ async function drain(steps = 12) {
   await vi.advanceTimersByTimeAsync(EVENT_GAP_MS * steps);
 }
 
-const typesOf = (events: [number, VisitorEvent][]) => events.map(([, ev]) => ev.type);
+const typesOf = (events: [number, SseEvent][]) => events.map(([, ev]) => ev.type);
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -339,7 +338,7 @@ describe('the scripted Desk', () => {
     // The other status lines are the design system's too: every decision state's, and each reply's.
     const states = Object.keys(rivera.decisions).filter((state): state is Exclude<DecisionState, 'executed'> => state !== 'executed');
     for (const state of states) expect(VISITOR_PLAIN.en[state], state).toBe(rivera.decisions[state].visitor_plain);
-    const reply = (turn: readonly VisitorEvent[]) => turn.find((ev): ev is EvMessage => ev.type === 'message')?.visitor_plain;
+    const reply = (turn: readonly SseEvent[]) => turn.find((ev): ev is EvMessage => ev.type === 'message')?.visitor_plain;
     expect([VISITOR_PLAIN.en.reply_checked, VISITOR_PLAIN.en.reply_handed_off, VISITOR_PLAIN.es.reply_checked]).toEqual([
       reply(rivera.events.quoteTurn),
       reply(rivera.events.heldTurn),
@@ -468,7 +467,7 @@ describe('the scripted Desk', () => {
     stop();
 
     // A reconnect from seq 2 gets 3 and 4 at once, in order, then what comes next as it happens.
-    const replayed: [number, VisitorEvent][] = [];
+    const replayed: [number, SseEvent][] = [];
     mockStore.listen(slug, 2, (seq, ev) => replayed.push([seq, ev]));
     expect(replayed.map(([seq, ev]) => [seq, ev.type])).toEqual([
       [3, 'message'],

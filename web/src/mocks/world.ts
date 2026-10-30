@@ -20,9 +20,10 @@ import type {
   RuleCard,
   OwnerMessageResult,
   SessionState,
+  SseEvent,
   StatusEvent,
 } from '../api/contracts.ts';
-import type { CancelReason, DeskSummary, Handoff, RulesDraft, TranscriptItem, TranscriptKind, VisitorEvent } from '../api/views.ts';
+import type { CancelReason, DeskSummary, Handoff, RulesDraft, TranscriptItem, TranscriptKind } from '../api/views.ts';
 import { cardBlock, placeholderHex, rivera } from '../ds/fixtures/index.ts';
 import { BUSINESS, activePolicy, copyIds, type CopyIds, type MockSeed } from './seed.ts';
 import {
@@ -55,7 +56,7 @@ const sign = (label: string) => placeholderHex(`signature:${label}`, 64);
 const sha256 = (label: string) => placeholderHex(`sha256:${label}`, 32);
 export const LEDGER_KEY = { key_id: rivera.ledger.verified.key_id, public_key_hex: rivera.ledger.verified.public_key_hex };
 
-type Listener = (seq: number, ev: VisitorEvent) => void;
+type Listener = (seq: number, ev: SseEvent) => void;
 
 /** How long a typing signal shows, and how often one counts (plan 02b Task 1). */
 export const TYPING_SHOWS_MS = 5_000;
@@ -76,7 +77,7 @@ export interface SessionRecord {
   /** The owner's view: the visitor's view leaves out whispers. */
   items: TranscriptItem[];
   /** Every event the session's stream has carried, `seq` from 1 with no gaps. */
-  events: { seq: number; ev: VisitorEvent }[];
+  events: { seq: number; ev: SseEvent }[];
   listeners: Set<Listener>;
   /** Until when the visitor is typing, as the owner's view shows it; null when they haven't been. */
   typingUntil: number | null;
@@ -372,7 +373,7 @@ export class MockWorld {
   }
 
   /** Adds `ev` to the session's stream with the next seq, keeps what the transcript keeps, and tells listeners. */
-  emit(session: SessionRecord, ev: VisitorEvent): number {
+  emit(session: SessionRecord, ev: SseEvent): number {
     const seq = session.events.length + 1;
     session.events.push({ seq, ev });
     session.lastActivity = this.now();

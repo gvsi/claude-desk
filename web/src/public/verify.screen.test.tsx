@@ -6,7 +6,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { RenderResult } from 'vitest-browser-react';
 
-import type { VisitorEvent } from '../api/views.ts';
+import type { SseEvent } from '../api/contracts.ts';
 import { rivera } from '../ds/fixtures/index.ts';
 import { CHAT_ENDED_COPY, NEW_CHAT_LABEL, UNREACHABLE_COPY } from '../ds/index.ts';
 import { DEMO_CODE } from '../mocks/script.ts';
@@ -39,7 +39,7 @@ const VERIFY_CARD = rivera.blocks.verify_prompt.en.title ?? '';
 const requests = (key: string) => mockStore.requests.filter((r) => r.key === key);
 
 /** Every event this browser's chat with Rivera has carried, in order. */
-function chatEvents(): { seq: number; ev: VisitorEvent }[] {
+function chatEvents(): { seq: number; ev: SseEvent }[] {
   return mockStore.visitorSession(RIVERA.slug)?.events ?? [];
 }
 
