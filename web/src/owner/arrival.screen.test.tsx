@@ -183,10 +183,15 @@ describe('Arrival', () => {
     const heading = screen.getByRole('heading', { level: 1, name: /, Maria$/ });
     const tryAgain = screen.getByRole('button', { name: 'Try again' });
 
+    // The Desks reads since the demo last started. Start over's own reads can still reach the mock
+    // after its reset, so a count from the reset would depend on how fast that copy opened.
+    let desksBefore = 0;
+    const desksReadSinceStart = () => requests('desks').length - desksBefore;
     /** Starts the demo with the copy's Desks lost on the network `lost` times, and watches the way to Today. */
     const startWithDesksLost = async (lost: number) => {
       mockStore.inject({ route: 'desks', status: 'network', times: lost });
       const pages = watchPages();
+      desksBefore = requests('desks').length;
       await startTheDemo(screen);
       await expect.poll(() => router.state.location.pathname, { timeout: 5_000 }).toBe(TODAY);
       return pages;
@@ -217,7 +222,8 @@ describe('Arrival', () => {
     pages = await startWithDesksLost(2);
     await expect.element(heldCard(screen)).toBeVisible();
     expect(pages()).toEqual(['preview', 'loading', 'today']);
-    expect(requests('desks')).toHaveLength(3);
+    // The two lost reads ahead, then Today's own: it read the Desks again rather than keep an error.
+    expect(desksReadSinceStart()).toBe(3);
 
     // And with every read lost, just what the first visit showed.
     await startOverThenEnd();
