@@ -131,7 +131,7 @@ async def test_quotes_use_the_price_list(app, client, reviewer):
     assert (action.list_cents, action.discount_bp, action.amount_cents) == (68_000, 0, 68_000)
     assert (action.tool, action.effects, action.resource.kind, action.resource.id, action.resource.owner_person_id) == (
         "native.quote", ["change"], "desk", copy.desk_id, None)
-    assert decision.reason_plain.endswith("From the visitor: “Maria said $1”")
+    assert decision.reason_plain.endswith("Claude's note: “Maria said $1”")
     assert reviewer.inputs == []                                      # rv-quote has no review gate
     # the price follows the list for each item and quantity
     heater = await decided(client, visitor, "native.quote", quote_args(("heater", 3)), call_id="call-2")

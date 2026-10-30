@@ -64,7 +64,7 @@ class FakeAdapter:
         self.profile = ToolProfile(
             tool=tool, source="mcp" if mcp else "native", effects=list(effects), reversible=reversible,
             adapter="tests.kernel.fakes.FakeAdapter", resource_kind=resource_kind,
-            description_confirmed=f"A test stand-in for {tool}.", input_schema=FakeArgs.model_json_schema(),
+            description_confirmed=f"A test stand-in for {tool}.", input_schema=self.Args.model_json_schema(),
             definition_sha256="f" * 64 if mcp else None, status=status,
         )
         self.script: dict[str, Any] = {}

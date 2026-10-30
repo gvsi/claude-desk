@@ -29,8 +29,9 @@ call ID or those args), or failed by anything but a refusal once its session is 
 `KernelRepo` refusal, a database error: 500 `internal`), still gets its `decide` entry, written
 after the transaction has rolled back.
 
-Visitor text reaches the decision only as data: the reviewer sees free-text arguments under
-`untrusted_args`, and the owner reads them quoted after "From the visitor".
+A call's free-text arguments are Claude's wording and untrusted (they may repeat what a visitor
+said, or not), and reach the decision only as data: the reviewer sees them under `untrusted_args`,
+and the owner reads them quoted after "Claude's note", never as the visitor's words.
 """
 
 import hashlib
@@ -411,6 +412,7 @@ DECIDE_ROUTE = "POST /decide"
 TOOL_NAME_CHARS = 64                      # a refused call's name is stored cut to this
 CALL_ID_CHARS = 128                       # a longer call ID is refused: a long one can overflow the decisions index
 QUOTED_CHARS = 200                        # free text quoted to the owner is cut to this
+CLAUDES_NOTE = "Claude's note"            # the label on that text: Claude wrote it into the call, the visitor didn't
 MONEY_EFFECTS = frozenset({"charge", "pay_out"})
 BREAKER_STRIKES = 3
 BREAKER_ALERT = ("Claude paused a conversation after the reviewer flagged three requests as attempts to get "
@@ -549,7 +551,7 @@ def _asked(subject: str, tool: str, action: NormalizedAction | None) -> str:
 
 
 def _quoted(text: str) -> str:
-    """Visitor text as the owner reads it: one line, cut, inside quotes it can't close."""
+    """Untrusted text as the owner reads it: one line, cut, inside quotes it can't close."""
     line = " ".join(text.split())[:QUOTED_CHARS]
     return "“" + line.replace("“", '"').replace("”", '"') + "”"
 
@@ -711,8 +713,8 @@ async def _repeat(ctx: KernelCtx, row: DecisionRow, sha: str) -> Decision:
 
 def _reason_plain(call: _Call, outcome: str, reason: str | None, evaluation: Evaluation | None) -> str:
     """The owner's account of a decision: who asked for what, why it went this way (the deciding
-    cards' reasons, the reviewer, or why it was refused early), then each free-text argument quoted
-    after "From the visitor"."""
+    cards' reasons, the reviewer, or why it was refused early), then the call's free-text arguments,
+    each quoted, under one "Claude's note" label: Claude wrote them into the call, the visitor didn't."""
     parts = [_asked(call.subject, call.req.call.tool, call.action)]
     if reason is not None:
         parts.append(REFUSED_PLAIN[reason])
@@ -729,7 +731,8 @@ def _reason_plain(call: _Call, outcome: str, reason: str | None, evaluation: Eva
             parts.append(REVIEW_PLAIN[review.recommendation])
         else:
             parts.append(REVIEW_PLAIN["allow" if outcome == "allow" else "unsure"])
-    parts += [f"From the visitor: {_quoted(text)}" for text in call.quotes.values()]
+    if call.quotes:
+        parts.append(f"{CLAUDES_NOTE}: " + ", ".join(_quoted(text) for text in call.quotes.values()))
     return " ".join(parts)
 
 

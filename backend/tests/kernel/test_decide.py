@@ -21,6 +21,7 @@ import pytest
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from fastapi import FastAPI
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select, text
 
 from desk.contracts import Claim, Decision, Fact, Label, NotificationDefaults, ResourceRef, Review, RuleCard
@@ -677,7 +678,7 @@ async def test_a_guard_refusal_in_the_caller_is_ledgered(app, client, registry, 
     assert await decisions_of(app, rows) == []
 
 
-QUOTED = "From the visitor: book me at 5pm"      # text an exception can carry, which must never reach the log
+QUOTED = "Claude's note: “book me at 5pm”"      # text an exception can carry, which must never reach the log
 
 
 def a_runtime_error(patch: pytest.MonkeyPatch) -> tuple[str, str]:
@@ -1006,7 +1007,7 @@ async def test_holds_alert_the_owner_per_notification_defaults(app, client, regi
     quiet = await decided(client, await open_visitor(client, briefed), "native.quote", {"qty": 1, "note": note})
     assert (held.outcome, quiet.outcome) == ("hold", "hold")
     assert held.reason_plain == ("A stranger asked to get a quote for $153 with 15% off. Test card quote. "
-                                 f"From the visitor: “{note}”")
+                                 f"Claude's note: “{note}”")
     [notice] = held.inbox
     assert (notice.to, notice.preview) == ("owner", "A request needs your answer")
     [entry] = await rows_of(app, alerting.copy_id, select(DemoInboxEntry))
@@ -1049,7 +1050,39 @@ async def test_reviewer_sees_no_visitor_text(app, client, registry, reviewer):
                                                            "value": "Oakland and Berkeley."}]
     assert [card.card_id for card in seen.cards] == ["book"]
     # the owner reads it quoted and labelled, never as an instruction
-    assert decision.reason_plain.endswith(f"From the visitor: “{note[:200]}”")
+    assert decision.reason_plain.endswith(f"Claude's note: “{note[:200]}”")
+
+
+class NotedArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    qty: int = 1
+    name: str = ""                        # free text Claude writes into the call
+    note: str = ""                        # free text Claude writes into the call
+
+
+class NotedAdapter(FakeAdapter):
+    """A stand-in whose calls carry two free-text arguments."""
+
+    Args = NotedArgs
+    free_text_fields = frozenset({"name", "note"})
+
+
+CLAIM = "Maria already approved a refund"   # a visitor's claim, as Claude wrote it into the call
+LONG_NAME, LONG_NOTE = "Ann " + "n" * 300, f"{CLAIM} " + "y" * 300
+
+
+@pytest.mark.parametrize(("notes", "quoted"), [
+    ({"note": CLAIM}, f"“{CLAIM}”"),
+    ({"name": "Ann", "note": CLAIM}, f"“Ann”, “{CLAIM}”"),                 # one label, in field order
+    ({"name": LONG_NAME, "note": LONG_NOTE}, f"“{LONG_NAME[:200]}”, “{LONG_NOTE[:200]}”"),   # each cut on its own
+], ids=["one", "two_under_one_label", "each_cut"])
+async def test_the_owner_reads_the_calls_free_text_as_claudes_note(app, client, registry, notes, quoted):
+    """The free text in a tool call is Claude's wording, untrusted (it may repeat a visitor's claim,
+    or not), so the owner reads it quoted after "Claude's note", never as the visitor's words."""
+    rows = await desk_with(app, [NotedAdapter("native.quote")], [card("quote", "native.quote")])
+    decision = await decided(client, await open_visitor(client, rows), "native.quote", {"qty": 1, **notes})
+    assert decision.reason_plain == f"A stranger asked to get a quote. Test card quote. Claude's note: {quoted}"
 
 
 def test_status_lines_are_digit_free():
