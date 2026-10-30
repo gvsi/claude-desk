@@ -6,8 +6,8 @@
  */
 import { Fragment } from 'react';
 
-import type { Block, Inline } from '../documents.ts';
-import { Inlines, inlinesText } from '../Inlines.tsx';
+import { inlineText, type Block, type Inline } from '../documents.ts';
+import { Inlines } from '../Inlines.tsx';
 
 import '../reader.css';
 
@@ -31,12 +31,12 @@ export function readinessRows(table: Table): ReadinessRow[] {
     throw new Error(`the readiness table has ${table.head.length} columns, not axis, readiness, evidence and watch for`);
   }
   return table.rows.map(([axis = [], rating = [], evidence = [], watch = []]) => {
-    const word = inlinesText(rating);
+    const word = inlineText(rating);
     // One plain word: a rating in bold or with a link would be markup the scale can't show.
     const plain = rating.length === 1 && rating[0]?.kind === 'text';
     const step = READINESS_STEPS.find((name) => name === word);
     if (!step || !plain) {
-      throw new Error(`“${inlinesText(axis)}” is rated “${word}”, not one of ${READINESS_STEPS.join(', ')}`);
+      throw new Error(`“${inlineText(axis)}” is rated “${word}”, not one of ${READINESS_STEPS.join(', ')}`);
     }
     return { axis, rating: step, evidence, watch };
   });
@@ -58,7 +58,7 @@ export function ReadinessScale({ table, compact = false, block }: ReadinessScale
   const rows = readinessRows(table);
   const columns = table.head.length;
   const docText = (cell: number) => (block === undefined ? {} : { 'data-doc-text': `${block}.${cell}` });
-  const watchFor = inlinesText(table.head[3] ?? []);
+  const watchFor = inlineText(table.head[3] ?? []);
 
   return (
     <figure

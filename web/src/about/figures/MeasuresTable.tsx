@@ -5,8 +5,8 @@
  */
 import { Fragment } from 'react';
 
-import type { Block } from '../documents.ts';
-import { Inlines, inlinesText } from '../Inlines.tsx';
+import { inlineText, type Block } from '../documents.ts';
+import { Inlines } from '../Inlines.tsx';
 
 import '../reader.css';
 
@@ -95,7 +95,7 @@ export function MeasuresTable({ table, compact = false, block }: MeasuresTablePr
               return (
                 <dd key={c} className="cd-about-measures-list__more cd-type-body">
                   <span className="cd-about-measures-list__label cd-type-caption" data-label="">
-                    {inlinesText(table.head[c] ?? [])}
+                    {inlineText(table.head[c] ?? [])}
                   </span>
                   <span {...cellOf(r, c)}>
                     <Inlines inlines={cell} />

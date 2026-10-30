@@ -9,7 +9,7 @@ import proposalMarkdown from '../../../docs/product-proposal.md?raw';
 import { ABOUT_PAGES, type AboutId } from './links.ts';
 import { MarkdownError, parseDocument, type Block, type FigureName } from './markdown.ts';
 
-export { documentText, MarkdownError, readingMinutes } from './markdown.ts';
+export { documentText, inlineText, MarkdownError, readingMinutes } from './markdown.ts';
 export type { Block, FigureName, Inline } from './markdown.ts';
 
 // The proposal's sentence that gives the hosted prototype's address, which reads oddly on the hosted page

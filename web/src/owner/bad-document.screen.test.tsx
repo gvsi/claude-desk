@@ -32,6 +32,9 @@ vi.mock('../about/documents.ts', () => {
     get documentText() {
       return unreadable();
     },
+    get inlineText() {
+      return unreadable();
+    },
   };
 });
 

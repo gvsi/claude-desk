@@ -19,6 +19,7 @@ import { ReadinessScale } from './figures/ReadinessScale.tsx';
 import { Tau3Chart } from './figures/Tau3Chart.tsx';
 import { Inlines } from './Inlines.tsx';
 import { ABOUT_LINKS, type AboutId } from './links.ts';
+import { MONTHS } from './months.ts';
 
 import './reader.css';
 
@@ -37,27 +38,12 @@ function isNarrow(): boolean {
 
 type Heading = Extract<Block, { kind: 'heading' }>;
 
-const MONTHS = [
-  'January',
-  'February',
-  'March',
-  'April',
-  'May',
-  'June',
-  'July',
-  'August',
-  'September',
-  'October',
-  'November',
-  'December',
-];
-
 /** The byline, "Name · Month D, YYYY", as the author, the date as the boards print it, and the date's day. */
 function bylineOf(blocks: Block[]): { author: string; date: string; day?: string } {
   const text = blocks.find((block) => block.kind === 'byline')?.text ?? '';
   const [author = '', written = ''] = text.split(' · ');
   const [, month = '', date = '', year = ''] = /^(\w+) (\d{1,2}), (\d{4})$/.exec(written) ?? [];
-  const index = MONTHS.indexOf(month);
+  const index = MONTHS.findIndex((name) => name === month);
   if (index < 0) return { author, date: written };
   return {
     author,

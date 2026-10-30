@@ -217,7 +217,7 @@ function parseInlines(source: string, firstLine: number, resolve: LinkResolver):
 }
 
 /** The words of a run of inlines, as the page shows them. */
-function inlineText(inlines: Inline[]): string {
+export function inlineText(inlines: Inline[]): string {
   return inlines
     .map((inline) => ('children' in inline ? inlineText(inline.children) : inline.text))
     .join('');

@@ -68,8 +68,3 @@ export function Inlines({ inlines }: { inlines: Inline[] }) {
   }
   return out;
 }
-
-/** The words of a run of inlines, as a person reads them. */
-export function inlinesText(inlines: Inline[]): string {
-  return inlines.map((inline) => ('children' in inline ? inlinesText(inline.children) : inline.text)).join('');
-}

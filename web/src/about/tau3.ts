@@ -2,6 +2,7 @@
  * Sierra's τ³-Banking leaderboard as listed, and the straight-line fits the capability prediction cites. The
  * prediction's chart draws only these rows and these fits; `tau3.test.ts` holds each claim to the text.
  */
+import { MONTHS } from './months.ts';
 
 /** Where the rows come from, and the day they were read. */
 export const TAU3_SOURCE = { url: 'https://taubench.com/leaderboard/', read: '2026-10-29' } as const;
@@ -118,21 +119,6 @@ export const TAU3_FITS = {
   opus: logOddsFit(CLAUDE_SCORES.filter((row) => row.model.startsWith('Claude Opus '))),
   claude: logOddsFit(CLAUDE_SCORES),
 } as const;
-
-const MONTHS = [
-  'January',
-  'February',
-  'March',
-  'April',
-  'May',
-  'June',
-  'July',
-  'August',
-  'September',
-  'October',
-  'November',
-  'December',
-] as const;
 
 /** "April 2027": a day's month as the text names it, in UTC. */
 export function monthYear(date: Date): string {

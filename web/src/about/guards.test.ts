@@ -124,6 +124,21 @@ function importProblems(sources: Record<string, string>): string[] {
   return problems;
 }
 
+// Helpers with one home in the shipped About sources, which the rest import rather than copy: the month names, and
+// the walk that reads a run of inlines as words.
+const ONE_HOME: Record<string, { home: string; copy: RegExp }> = {
+  'the month names': { home: 'about/months.ts', copy: /(['"])January\1\s*,\s*(['"])February\2/ },
+  'the words of a run of inlines': { home: 'about/markdown.ts', copy: /(['"])children\1\s+in\s+[\w$]+\s*\?/ },
+};
+
+/** The shipped About sources that hold each helper. */
+function helperHomes(sources: Record<string, string>): Record<string, string[]> {
+  const shipped = Object.entries(sources).filter(([file]) => file.startsWith('about/') && !isTest(file));
+  return Object.fromEntries(
+    Object.entries(ONE_HOME).map(([helper, { copy }]) => [helper, shipped.filter(([, text]) => copy.test(text)).map(([file]) => file)]),
+  );
+}
+
 describe('About page source guards', () => {
   const all = sources();
   const about = Object.entries(all).filter(([file]) => file.startsWith('about/') && !isTest(file));
@@ -218,5 +233,24 @@ describe('About page source guards', () => {
       dynamic: true,
     });
     expect(importProblems(real)).toEqual([]);
+  });
+
+  it('about_helpers_have_one_home', () => {
+    // Copies as they would be written, in a shipped file and in a test, which may hold its own.
+    const copies = {
+      'about/ReaderPage.tsx': "const MONTHS = [\n  'January',\n  'February',\n];",
+      'about/figures/Chart.tsx': 'const NAMES = ["January", "February"] as const;',
+      'about/Inlines.tsx': "inlines.map((inline) => ('children' in inline ? words(inline.children) : inline.text))",
+      'about/months.test.ts': "expect(MONTHS.slice(0, 2)).toEqual(['January', 'February']);",
+      'owner/format.ts': "const MONTHS = ['January', 'February'];",
+    };
+    expect(helperHomes(copies)).toEqual({
+      'the month names': ['about/ReaderPage.tsx', 'about/figures/Chart.tsx'],
+      'the words of a run of inlines': ['about/Inlines.tsx'],
+    });
+
+    expect(helperHomes(sources())).toEqual(
+      Object.fromEntries(Object.entries(ONE_HOME).map(([helper, { home }]) => [helper, [home]])),
+    );
   });
 });
