@@ -557,10 +557,12 @@ async def test_auth_headers_follow_the_kernel_contract():
 @pytest.fixture
 def tier1(pytester: pytest.Pytester):
     """A copy of the eval package holding only the given tier 1 cases, its landed plans and `.env`;
-    returns a runner taking the target."""
+    returns a runner taking the target. No plan's landing file comes with it: Plan 02a's
+    `api_impl.py` stays out as Plan 01a's `create_app` module does (it lives outside `evals/`), and
+    a case that needs one plants it."""
 
     def make(cases: dict[str, str], landed: tuple[str, ...] = ("master",), env: str = ""):
-        ignore = shutil.ignore_patterns("tests", "out", "__pycache__", ".pytest_cache", "test_*.py")
+        ignore = shutil.ignore_patterns("tests", "out", "__pycache__", ".pytest_cache", "test_*.py", "api_impl.py")
         shutil.copytree(EVALS, pytester.path / "evals", ignore=ignore)
         cases_dir = pytester.path / "evals" / "tier1"
         (cases_dir / "landed.toml").write_text(f"plans = {json.dumps(list(landed))}\n")

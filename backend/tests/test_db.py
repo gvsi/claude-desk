@@ -211,15 +211,16 @@ def plan_model_call_columns() -> list[str]:
 
 
 def test_model_calls_follow_the_data_model(admin, api):
-    # Plan 02a's migration adds the usage columns this table still lacks; every column it has is the plan's
-    assert set(columns(admin, "app", "model_calls")) <= set(plan_model_call_columns())
+    # Plan 02a's migration api_tables completes the table: its columns are exactly the plan's
+    assert set(columns(admin, "app", "model_calls")) == set(plan_model_call_columns())
     key = admin.execute("SELECT a.attname FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid"
                         " AND a.attnum = ANY(i.indkey) WHERE i.indrelid = 'app.model_calls'::regclass AND i.indisprimary")
     assert key.fetchall() == [("model_call_id",)]
     # created_at is the call's finish, which only the writer knows: no default stands in for it
     with pytest.raises(psycopg.errors.NotNullViolation), api.transaction(force_rollback=True):
-        api.execute("INSERT INTO app.model_calls (copy_id, route, model, input_tokens, cached_tokens, output_tokens,"
-                    " latency_ms) VALUES ('copy-a', 'conversation', 'claude-opus-5-5', 1200, 0, 80, 2400)")
+        api.execute("INSERT INTO app.model_calls (copy_id, route, model, input_tokens, cached_tokens,"
+                    " cache_write_tokens, output_tokens, latency_ms, stop_reason)"
+                    " VALUES ('copy-a', 'conversation', 'claude-opus-5-5', 1200, 0, 0, 80, 2400, 'end_turn')")
 
 
 def test_kernel_ro_views_carry_copy_id(admin, api):
@@ -719,7 +720,7 @@ def test_visitor_payloads_validate_against_contracts(api_tx):
 
     def message(blocks) -> Message:
         return Message(message_id=f"m-{uuid4().hex}", copy_id="copy-a", desk_id="desk-a", session_id="session-1",
-                       blocks=blocks)
+                       kind="delivered", author="claude", visibility="public", blocks=blocks)
 
     def turn(response) -> A2ATurn:
         return A2ATurn(agent_key_id="agent-1", session_id="session-1", nonce=uuid4().hex, copy_id="copy-a",
