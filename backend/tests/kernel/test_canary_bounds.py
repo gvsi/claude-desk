@@ -2,11 +2,16 @@
 
 Every document's canary is looked for wherever text could carry the document out, so the cost of a
 scan grows with the text and with the canaries it looks for. A scan with no canaries returns before
-it reads the text; one with many reads the text once for all of them, however many there are.
+it reads the text; one with many reads the text once for all of them, however many there are. A
+Desk holds at most 50 documents and 200 knowledge items, and a knowledge item found clean isn't
+read again for a visitor's context until the copy's canaries change, so a full copy still gives a
+visitor their context within half a second. Tests run on Rivera Plumbing copies as `POST /copies`
+seeds them (Friday 10:04 in Oakland).
 """
 
 import random
 import time
+from collections import OrderedDict
 from collections.abc import Mapping
 
 from fastapi import FastAPI
@@ -238,3 +243,34 @@ async def test_a_canary_split_between_a_knowledge_items_id_and_title_keeps_it_th
     assert await knowledge_entries(app, copy) == [
         {"part": "knowledge", "item_id": split["item_id"], "owner_only_forced": True}]
     assert (await context_of(client, visitor.session_id, visitor.headers)).knowledge == []
+
+
+CONTEXT_BUDGET = 0.5                      # seconds for one `/context` call, on a laptop
+
+
+async def test_a_full_copy_reads_its_context_within_budget(app, client, monkeypatch):
+    """A copy with 100 documents (two Desks of 50) and a public 100 KiB knowledge item, written to
+    near-miss every one of their canaries, gives a visitor their context within half a second: the
+    first time the item is read, as after a restart, and every time after, when it isn't."""
+    copy, visitor = await visitor_of(app, client)
+    await add_documents(app, copy, desks.MAX_DOCUMENTS - 2)
+    seeded = [SeedDocument(ref=f"estimate-{n}", title="Estimate", body="Panel upgrade.") for n in range(50)]
+    response = await post_desk(client, copy, new_desk(desk=LOPEZ_DESK.model_copy(update={"documents": seeded})))
+    assert response.status_code == 200, response.text
+    canaries = [row.canary for row in await rows_of(app, copy.copy_id, select(Document))]
+    assert len(canaries) == 100
+    near = " ".join(f"ref {canary[:-1]}x" for canary in canaries) + " "
+    text = (near * (100 * 1024 // len(near) + 1))[:100 * 1024]
+    await stored(client, copy, knowledge("kb-references", "Old references", text, ["public"]))
+
+    async def timed(*, restarted: bool) -> float:
+        if restarted:
+            monkeypatch.setattr(labels, "_CLEAN_SCANS", OrderedDict())
+        started = time.perf_counter()
+        given = await context_of(client, visitor.session_id, visitor.headers)
+        elapsed = time.perf_counter() - started
+        assert [item.item_id for item in given.knowledge] == ["kb-references"]
+        return elapsed
+
+    assert min([await timed(restarted=True) for _ in range(3)]) < CONTEXT_BUDGET
+    assert min([await timed(restarted=False) for _ in range(3)]) < CONTEXT_BUDGET
