@@ -30,12 +30,18 @@ date	[ap]\.\s?m\.?|pm
 # Promises only the owner's rules or a card can make. "free" passes only in "feel free" and in
 # "free to" after "you're", "you are", "you'll be" or "you will be" ("you're free to ask"), where
 # it can't be a price. Anywhere else "free to" may state one: "free to everyone", "free to all
-# customers", "inspections are free to members". So does "free to" before a quantifier, determiner,
-# pronoun or audience, whatever comes before it: "as a member you are free to all classes".
+# customers", "inspections are free to members". So does "free to" before a quantifier ("most"),
+# determiner ("these"), pronoun, a word that starts an audience ("new", "first-time") or an audience,
+# whatever comes before it: "as a member you are free to all classes", "you're free to new members".
+# A verb after "you're free to" passes: "you're free to choose any day".
 promise	guarant(?:ee|ees|eed|eeing|y)|promis(?:e|es|ed|ing)
 promise	(?<!feel )free(?! to\b)
 promise	(?<!feel )(?<!you['’]re )(?<!you are )(?<!you['’]ll be )(?<!you will be )free(?= to\b)
-promise	free(?=[\s-]+to[\s-]+(?:all|any(?:one|body)?|every(?:one|body)?|each|the|an?|our|your|their|you|them|members?|customers?|clients?|guests?)\b)
+promise	free(?=[\s-]+to[\s-]+(?:all|any(?:one|body)?|every(?:one|body)?|each|both|some|most|several|many|no|unlimited)\b)
+promise	free(?=[\s-]+to[\s-]+(?:the|an?|this|that|these|those|our|your|my|his|her|its|their|you|them)\b)
+promise	free(?=[\s-]+to[\s-]+(?:new|existing|first[\s-]?time|current|returning|regular|local)\b)
+promise	free(?=[\s-]+to[\s-]+(?:members?|customers?|clients?|guests?|patrons?|subscribers?|visitors?|locals|residents?)\b)
+promise	free(?=[\s-]+to[\s-]+(?:students?|seniors?|kids|children|famil(?:y|ies)|patients?)\b)
 promise	discount(?:s|ed|ing)?|refund(?:s|ed|ing|able)?|waiv(?:e|es|ed|er|ing)|complimentary
 promise	no[\s-]+charge|on[\s-]+the[\s-]+house|warrant(?:y|ies)|money[\s-]+back
 promise	(?:at[\s-]+)?no[\s-]+(?:extra[\s-]+|additional[\s-]+)?cost

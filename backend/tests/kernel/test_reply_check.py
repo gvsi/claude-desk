@@ -153,6 +153,9 @@ async def test_numbers_and_dates_in_prose_are_blocked(app, client, prose, rule_i
     ("It is free to all customers.", "lex.en.promise", "free", "en"),
     ("Inspections are free to members.", "lex.en.promise", "free", "en"),
     ("As a member you are free to all classes.", "lex.en.promise", "free", "en"),   # an audience after "free to"
+    ("As a member you're free to most classes.", "lex.en.promise", "free", "en"),   # a quantifier
+    ("As a member you're free to these classes.", "lex.en.promise", "free", "en"),  # a demonstrative
+    ("You are free to first-time visitors.", "lex.en.promise", "free", "en"),       # an audience with a modifier
     ("Como socio, usted tiene acceso libre a todas las clases.", "lex.es.promise", "libre", "es"),
     ("Eso es gratis.", "lex.es.promise", "gratis", "es"),
     ("Le prometo.", "lex.es.promise", "prometo", "en"),      # too few words to tell: English
@@ -235,6 +238,8 @@ def test_the_lookalike_table_is_what_its_script_makes():
     ("You may want to turn off the water.", "en"),          # the modal, not the month
     ("Feel free to ask me anything.", "en"),                # free, not a price
     ("You're free to ask me anything.", "en"),
+    ("You're free to choose any day.", "en"),               # a verb after "free to", then a quantifier
+    ("You are free to call me anytime.", "en"),
     ("Usted es libre de preguntarme lo que quiera.", "es"),   # free to ask, not a price
 ])
 async def test_plain_prose_passes(app, client, prose, language):
