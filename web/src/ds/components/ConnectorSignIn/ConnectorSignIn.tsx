@@ -1,10 +1,12 @@
 import { useId } from 'react';
 
 import { Button } from '../Button/Button.tsx';
+import { useSendOnce } from '../Button/useSendOnce.ts';
 import { ConnectorIcon } from '../ConnectorIcon/ConnectorIcon.tsx';
 import { ConnectorPromise } from '../ConnectorHeader/ConnectorPromise.tsx';
 import { ConnectorName, type ConnectorView } from '../ConnectorName/ConnectorName.tsx';
 import { useModalDialog } from '../Dialog/useModalDialog.ts';
+import { Notice } from '../Notice/Notice.tsx';
 import { Steps, type StepsProps } from '../Steps/Steps.tsx';
 
 import './ConnectorSignIn.css';
@@ -35,6 +37,10 @@ export interface ConnectorSignInProps {
   onCancel: () => void;
   /** Where this is in the add flow. */
   steps: StepsProps;
+  /** The screen is connecting the chosen account. */
+  pending?: boolean;
+  /** The screen's message when connecting failed; Continue works again. */
+  error?: string;
 }
 
 /**
@@ -53,6 +59,8 @@ export function ConnectorSignIn({
   onContinue,
   onCancel,
   steps,
+  pending = false,
+  error,
 }: ConnectorSignInProps) {
   const ids = useId();
   const titleId = `${ids}-title`;
@@ -62,6 +70,9 @@ export function ConnectorSignIn({
     dialog.querySelector<HTMLElement>('input[type="radio"]:checked') ?? dialog.querySelector<HTMLElement>('input[type="radio"]'),
   );
   const chosen = choices.some((choice) => choice.id === value);
+  // One press of Continue sends once and spins until the screen answers (`useSendOnce`).
+  const { waiting, send } = useSendOnce<'continue'>(pending, error);
+  const failed = error !== undefined && error.trim() !== '';
 
   return (
     <dialog {...modal} aria-labelledby={titleId} className="cd-connector-sign-in">
@@ -103,10 +114,11 @@ export function ConnectorSignIn({
         <Button variant="secondary" size="main" onClick={() => onCancel()}>
           Cancel
         </Button>
-        <Button variant="primary" size="main" disabled={!chosen} onClick={() => onContinue(value)}>
+        <Button variant="primary" size="main" disabled={!chosen} busy={chosen && waiting} onClick={() => send('continue', () => onContinue(value))}>
           Continue
         </Button>
       </div>
+      {failed && !waiting ? <Notice tone="error">{error}</Notice> : null}
     </dialog>
   );
 }

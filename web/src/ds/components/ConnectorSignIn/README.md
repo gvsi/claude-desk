@@ -15,7 +15,8 @@
 - Under the title, in secondary meta: "A mock sign-in. No {provider} account is used, and nothing is read from or sent to {provider}."
 - The connector's promise as a `ConnectorPromise` card, padded 14 px 16 px here.
 - A radio group named by `question`: a bordered box per choice (`line-control` at `radius-control`, the checked one on `accent-blue`), its native radio in the accent color, `label` in body type and `detail` in secondary meta.
-- At the right, a secondary "Cancel" → `onCancel()` and a primary "Continue" → `onContinue(value)`, disabled until `value` is one of the choices.
+- At the right, a secondary "Cancel" → `onCancel()` and a primary "Continue" → `onContinue(value)`, disabled until `value` is one of the choices. One press of Continue sends once (`useSendOnce`) and spins, keeping its name, until `pending` has come and gone, an `error` is delivered, or the call rejects or throws (`ContinueOnce`). Cancel and Escape still close the dialog meanwhile.
+- `error`, when given, shows as an error `Notice` under the buttons, and Continue works again (`ContinueFailed`).
 - It asks for no account details: no text field and no password.
 - Under 720 px it sits 16 px from the window's edges with 20 px of padding.
 
@@ -39,3 +40,5 @@
 | `onContinue` | `(id: string) => void` | Required. |
 | `onCancel` | `() => void` | Required. |
 | `steps` | `StepsProps` | Required. |
+| `pending` | `boolean` | The screen is connecting the chosen account. |
+| `error` | `string` | The screen's message when connecting failed. |
