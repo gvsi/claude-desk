@@ -195,16 +195,19 @@ interface NeedsYouBase {
   from_the_visitor: string | null;
 }
 
-/** One held request or one open callback that waits for the owner. */
+/**
+ * One held request or one open callback that waits for the owner. The API sends every field, the
+ * other alternative's as null (openapi.json), so code tells them apart with `!= null`.
+ */
 export type NeedsYouItem =
   | (NeedsYouBase & {
       decision: Decision;
-      handoff?: undefined;
+      handoff: null;
       /** The reason of the rule card that held it. */
       held_by: string | null;
       held_at: string;
     })
-  | (NeedsYouBase & { handoff: Handoff; decision?: undefined; held_by?: undefined; held_at?: undefined });
+  | (NeedsYouBase & { handoff: Handoff; decision: null; held_by: null; held_at: null });
 
 export interface ApprovalAnswerOut {
   decision: Decision;

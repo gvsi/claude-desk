@@ -22,6 +22,13 @@
   min-width: 0;
 }
 
+/* On owner screens a decision's receipt leads with the owner's words for its state, in primary
+   ink, so the line names the state and not only the dot's color. Same caption size and weight;
+   the rest of the line stays secondary until hover brightens all of it. */
+.cd-margin-line__lead {
+  color: var(--text-primary);
+}
+
 /* On owner screens a line is a button that opens the full trace: no chrome of its own, the line
    brightens on hover, and the focus ring comes from the base styles. */
 .cd-margin-line--button {
