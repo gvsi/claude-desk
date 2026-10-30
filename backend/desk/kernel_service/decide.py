@@ -55,7 +55,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.attributes import set_committed_value
 
 from desk.contracts import (
-    MONEY_EFFECTS,  # noqa: F401  (decide.MONEY_EFFECTS stays importable)
     ApprovalAnswer,
     Decision,
     InboxNotice,

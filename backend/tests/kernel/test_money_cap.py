@@ -13,8 +13,10 @@ where a test needs people, with a fake `native.payment_link` enabled whose amoun
 A test that proves or confirms a draft needs the solver (`solver`).
 """
 
+import importlib
 import json
 import logging
+import pkgutil
 import re
 from datetime import time
 from pathlib import Path
@@ -27,6 +29,7 @@ from fastapi import FastAPI
 from pydantic import ValidationError
 from sqlalchemy import select
 
+import desk
 from desk import contracts, money_cap
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, Decision, HoursWindow, RuleCard
 from desk.contracts import PolicyVersion as PolicyVersionContract
@@ -484,6 +487,20 @@ def test_one_set_says_which_effects_move_money(monkeypatch):
     assert decide_with([book], NATIVE, req("native.book", amount_cents=TEST_CAP + 1)) == "hold"
     assert decide_with([book], NATIVE, req("native.book", amount_cents=TEST_CAP)) == "allow"
     assert decide.is_money("native.book", ["change"]) and "native.book" in activation.money_uncovered([], NATIVE)
+
+
+def test_no_module_holds_the_money_effects_under_another_name():
+    """The money effects have one name, `desk.contracts.MONEY_EFFECTS`: no module of the backend
+    holds that set, or a copy of it, under a name of its own, which patching the one name (as the
+    test above does) wouldn't reach."""
+    held = []
+    for module in pkgutil.walk_packages(desk.__path__, "desk."):
+        if module.name.endswith(".__main__"):
+            continue
+        for name, value in vars(importlib.import_module(module.name)).items():
+            if isinstance(value, (set, frozenset)) and value == contracts.MONEY_EFFECTS:
+                held.append(f"{module.name}.{name}")
+    assert held == ["desk.contracts.MONEY_EFFECTS"]
 
 
 @pytest.mark.solver
