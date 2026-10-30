@@ -57,6 +57,9 @@ const RAW_CSS_SECONDS = /(?<![\w.-])\d*\.?\d+s\b/;
 // A label swapped for a waiting one ("Starting…", "Sending your answer..."): a busy button keeps its words and spins.
 const BUSY_LABEL = /['"`>]\s*[A-Z][a-z]+ing\b[^'"`<>{}\n]*(?:…|\.{3})\s*(?=['"`<])/;
 
+// The owner sidebar's look, which every owner page leaves to AppShell's default (the Today look).
+const SIDEBAR_LOOK = /\bsidebarLook\b/;
+
 // Formatting money or dates: the visitor's page shows only what the kernel rendered.
 const FORMATS = /\blib\/format\b|\bIntl\.|\btoLocale\w*|\bnew\s+Date\b|\btoFixed\(/;
 
@@ -203,6 +206,19 @@ describe('app source guards', () => {
     const fine = "<Button {...props} busy={busy}>Start the demo</Button>; const rows = [...all]; // GET …/briefing\n<TextField placeholder='Type a message…' />";
     expect(hits(BUSY_LABEL, sample(fine))).toEqual([]);
     expect(hits(BUSY_LABEL)).toEqual([]);
+  });
+
+  it('no_page_sets_the_sidebar_look', () => {
+    // The owner's decision: the sidebar looks the same on every owner page, so nothing outside the
+    // design system passes `sidebarLook`, tests and the mock included.
+    expect(hits(SIDEBAR_LOOK, sample('<AppShell sidebar={sidebar} sidebarLook="ground">'))).toHaveLength(1);
+    expect(hits(SIDEBAR_LOOK, sample("<AppShell {...{ sidebarLook: 'panel' }} />"))).toHaveLength(1);
+    expect(hits(SIDEBAR_LOOK, sample('<AppShell sidebar={sidebar} business={name}>'))).toEqual([]);
+    const outsideTheDs = everyFileButThisOne()
+      .filter((file) => /\.(tsx?|css)$/.test(file) && !file.startsWith('ds/'))
+      .map((file) => ({ file, text: readFileSync(path.join(SRC, file), 'utf8') }));
+    expect(outsideTheDs.map((s) => s.file)).toContain('owner/OwnerLayout.tsx');
+    expect(hits(SIDEBAR_LOOK, outsideTheDs)).toEqual([]);
   });
 
   it('visitor_code_never_formats_money_or_dates', () => {
