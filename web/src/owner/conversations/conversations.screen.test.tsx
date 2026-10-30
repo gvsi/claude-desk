@@ -569,6 +569,11 @@ describe('Conversations', () => {
     await expect
       .element(screen.getByText('Recorded history, replayed into your copy. It happened before you arrived.', { exact: true }))
       .toBeVisible();
+    // No one is on the other side of a recorded chat: nothing to take over, whisper or write.
+    await expect.element(screen.getByRole('heading', { level: 2, name: 'Visitor' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Take over' }).elements()).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Resume Claude' }).elements()).toHaveLength(0);
+    expect(screen.getByRole('textbox').elements()).toHaveLength(0);
     await expectScreenBasics(screen.container, { owner: true });
 
     await link.click();

@@ -296,21 +296,24 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
           </TranscriptRow>
         ) : null}
       </Transcript>
-      <div className="cd-conversation__controls">
-        <TakeOverBar
-          mode={state.mode}
-          visitorName={who}
-          ownerName={business.owner_display_name}
-          agent={state.kind === 'agent'}
-          onTakeOver={controls.takeOver}
-          onHandBack={controls.handBack}
-          onResume={controls.resume}
-          pending={controls.changing}
-          error={controls.modeError ?? undefined}
-        />
-        {composer}
-        {controls.messageError !== null ? <Notice tone="error">{controls.messageError}</Notice> : null}
-      </div>
+      {/* No one is on the other side of a recorded chat: nothing to take over, whisper or write. */}
+      {read.replayed === true ? null : (
+        <div className="cd-conversation__controls">
+          <TakeOverBar
+            mode={state.mode}
+            visitorName={who}
+            ownerName={business.owner_display_name}
+            agent={state.kind === 'agent'}
+            onTakeOver={controls.takeOver}
+            onHandBack={controls.handBack}
+            onResume={controls.resume}
+            pending={controls.changing}
+            error={controls.modeError ?? undefined}
+          />
+          {composer}
+          {controls.messageError !== null ? <Notice tone="error">{controls.messageError}</Notice> : null}
+        </div>
+      )}
     </section>
   );
 }
