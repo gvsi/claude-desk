@@ -38,6 +38,33 @@ function titles(elements: Element[]): string[] {
   return elements.map((el) => el.querySelector(':scope > title')?.textContent ?? '');
 }
 
+const DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * The chart's scales, read off two of its points: Sonnet 4.5 (Sep 29, 2025, 25.3%) and Opus 5 (Jul 24, 2026,
+ * 48.7%). `y(score)` is where a score sits; `days(x, iso)` is how many days `x` lies past the day `iso`.
+ */
+function chartScales(sonnet: Element | undefined, opus5: Element | undefined) {
+  const at = (el: Element | undefined, name: 'cx' | 'cy') => Number(el?.getAttribute(name));
+  const first = { t: Date.parse('2025-09-29T00:00:00Z'), x: at(sonnet, 'cx'), score: 25.3, y: at(sonnet, 'cy') };
+  const last = { t: Date.parse('2026-07-24T00:00:00Z'), x: at(opus5, 'cx'), score: 48.7, y: at(opus5, 'cy') };
+  const perDay = (last.x - first.x) / ((last.t - first.t) / DAY);
+  return {
+    y: (score: number) => first.y + ((score - first.score) / (last.score - first.score)) * (last.y - first.y),
+    days: (x: number, iso: string) => (x - first.x) / perDay - (Date.parse(`${iso}T00:00:00Z`) - first.t) / DAY,
+  };
+}
+
+/** Where a polyline first reaches the height `y` (scores rise as y falls), by straight lines between its points. */
+function crossesAt(points: [number, number][], y: number): number | null {
+  for (let i = 1; i < points.length; i += 1) {
+    const [x0, y0] = points[i - 1] ?? [0, 0];
+    const [x1, y1] = points[i] ?? [0, 0];
+    if (y0 > y && y1 <= y) return x0 + ((y0 - y) / (y0 - y1)) * (x1 - x0);
+  }
+  return null;
+}
+
 /** Text under `root` that a person reads, one entry per text node, outside `aria-hidden` subtrees. */
 function readTexts(root: Element): string[] {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
@@ -141,10 +168,29 @@ describe('Tau3Chart', () => {
         compact ? ['24.7%', 'Opus 5 48.7%'] : ['Top score, Qwen 3.8 Max 55.2%', 'Opus 4.5 24.7%', 'Opus 5 48.7%'],
       );
 
-      // The fit, the 80% bar and the band are drawn.
+      // The fit, the 80% bar and the band are drawn once each, where the text puts them. The chart's scales
+      // come from two of its own points: Sonnet 4.5 (Sep 29, 2025, 25.3%) and Opus 5 (Jul 24, 2026, 48.7%).
       expect(svg.querySelectorAll('[data-fit]')).toHaveLength(1);
       expect(svg.querySelectorAll('[data-bar]')).toHaveLength(1);
       expect(svg.querySelectorAll('[data-band]')).toHaveLength(1);
+      const scales = chartScales(filled[0], filled.at(-1));
+      // The bar at 80%.
+      const bar = Number(svg.querySelector('[data-bar]')?.getAttribute('y1'));
+      expect(Math.abs(bar - scales.y(80)), `compact ${compact}: the bar's y`).toBeLessThan(0.5);
+      // The band from the best-score fit's crossing (Apr 20, 2027) to the all-seven fit's (Oct 3, 2027).
+      const band = svg.querySelector('[data-band]');
+      const left = Number(band?.getAttribute('x'));
+      const right = left + Number(band?.getAttribute('width'));
+      expect(Math.abs(scales.days(left, '2027-04-20')), `compact ${compact}: the band's left edge`).toBeLessThan(1.5);
+      expect(Math.abs(scales.days(right, '2027-10-03')), `compact ${compact}: the band's right edge`).toBeLessThan(1.5);
+      // The all-seven fit runs from Opus 5 and reaches the bar near Oct 3, 2027.
+      const fit = (svg.querySelector('[data-fit]')?.getAttribute('points') ?? '')
+        .split(' ')
+        .map((pair) => pair.split(',').map(Number) as [number, number]);
+      expect(fit[0]?.[0]).toBe(Number(filled.at(-1)?.getAttribute('cx')));
+      const crossing = crossesAt(fit, bar);
+      expect(crossing, `compact ${compact}: the fit reaches the bar`).not.toBeNull();
+      expect(Math.abs(scales.days(crossing ?? 0, '2027-10-03')), `compact ${compact}: where the fit reaches the bar`).toBeLessThan(3);
 
       // Under it, "Figure 1" and the caption with the source.
       const caption = screen.container.querySelector('figcaption')?.textContent?.replace(/\s+/g, ' ').trim();
