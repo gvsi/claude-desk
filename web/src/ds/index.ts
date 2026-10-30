@@ -189,6 +189,7 @@ export {
   type ChangeSide,
 } from './components/ChangeReview/ChangeReview.tsx';
 export { ruleDiff, type RuleDiffRow, type RuleField } from './components/ChangeReview/ruleDiff.ts';
+export { reviewChanges, type ReviewChange } from './components/ChangeReview/reviewChanges.ts';
 export { AskClaudePanel, type AskClaudePanelProps } from './components/AskClaudePanel/AskClaudePanel.tsx';
 
 // The preset menu and the payment limit

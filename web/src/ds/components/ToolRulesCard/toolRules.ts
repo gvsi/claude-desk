@@ -29,7 +29,7 @@ export function groupsOverlap(a: Pick<RuleCard, 'who'>, b: Pick<RuleCard, 'who'>
 const GROUP_AT_WIDTH: Readonly<Record<number, Group>> = { 3: 'anyone', 2: 'verified', 1: 'record_owner' };
 
 /** True when every principal `inner` is for is one `outer` is for too. */
-function containsScope(outer: RuleCard, inner: RuleCard): boolean {
+export function containsScope(outer: RuleCard, inner: RuleCard): boolean {
   if (personScoped(inner)) {
     if (outer.who === 'anyone') return true;
     return outer.who === inner.who && (outer.person_id ?? null) === (inner.person_id ?? null) && (outer.agent_key_id ?? null) === (inner.agent_key_id ?? null);

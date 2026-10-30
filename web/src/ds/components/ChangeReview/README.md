@@ -5,7 +5,7 @@
 ## When to use
 
 - After the owner drafts a rule change (from an outcome menu, the composer or the Ask Claude panel), turns a connector on, or turns a changed tool back on (N-Conn-10-GCal-Confirm, N-Conn-11b-Payments-Review). The screen builds the rows from `ruleDiff` and the tools it turns on, and the checks from the proof report (Plan 04's `checkStatus`).
-- After the owner picks a preset from `PresetMenu` (N-Conn-18-Preset-Review), on its own page under `PageHeader` with the preset's name ("Ask me first", "Recommended rules"), the same page shape as N-Conn-10. Each card the preset drops is a `changed` row to whatever governs its tool afterwards: the preset's own card for it (`rulesForTool`), tagged where `ruleDiff` finds them different, or, when none governs it, the default ask, where the screen tags only a new outcome (`changed: ['mode']`), since the default replaces the whole rule. A card the preset keeps as it is has no row, and each card it adds is an `added` row. `RecommendedRules` shows rules the preset replaces, a rule left to the default ask, and two it keeps, which don't show.
+- After the owner picks a preset from `PresetMenu` (N-Conn-18-Preset-Review), on its own page under `PageHeader` with the preset's name ("Ask me first", "Recommended rules"), the same page shape as N-Conn-10. The rows come from `reviewChanges` (below), so every review reads the same way. `RecommendedRules` shows rules the preset replaces, rules it leaves to the default ask because it covers only part of them, an added rule, and two it keeps, which don't show.
 - After the owner changes the payment limit (N-Conn-20-Ceiling-Review), under `LimitChange`, with `hasOtherChanges`.
 - Not for turning a connector off: that only narrows and applies at once, so it has a plain confirm (`ConnectionPanel`, Task 3).
 - Renamed from `RuleChangeDiff`.
@@ -38,6 +38,17 @@
 - Rows by `card_id`, in `card_id` order; `is_default` cards (the compiler's, re-derived on every draft) are skipped; unchanged cards are left out.
 - `RuleDiffRow = { cardId; change: 'added' | 'removed' | 'changed'; before: RuleCard | null; after: RuleCard | null; fields: RuleField[] }`.
 - `RuleField = 'applies_to' | 'mode' | 'who' | 'limits' | 'hours' | 'review' | 'reason'`, in that order; `person_id` and `agent_key_id` count as `who`, `max_amount_cents` and `max_discount_bp` as `limits`. An absent optional field equals its contract default, so the same reason with a new limit is a `changed` row with `['limits']`.
+
+## Building the rows: `reviewChanges`
+
+`reviewChanges(before: RuleCard[], after: RuleCard[], effectsOf: (tool) => Effect[]): ReviewChange[]` (in `reviewChanges.ts`, also exported) pairs the owner's cards with the draft's, so a preset's review, a chat draft and a tool's draft build their rows the same way. It decides no outcome; the screen gives each side its words.
+
+- A card the draft keeps by its `card_id` is a `changed` row where `ruleDiff` finds it different.
+- A card the draft drops goes to the draft's card that covers its whole scope: of the cards that govern its target in the draft (`rulesForTool` for a tool, most specific first; the cards on the same effect for an effect card), the first whose people include the dropped card's (`containsScope`) and whose hours hold all of its hours. It is a `changed` row tagged where `ruleDiff` finds the two different, or no row when they differ only in their id.
+- With no such card, the dropped card falls to the default ask (`after: null`, the screen's default side), tagged `['mode']` only when its outcome changes. A rule the draft covers only in part, such as weekday bookings from 8:00 am to 6:00 pm under a 9-to-5 rule, falls to it too, so no row claims "Automatic" for times that will ask.
+- A draft card no dropped card goes to is an `added` row; one a dropped card goes to shows as that row's After instead.
+- Rows follow `before`'s order, then the added cards in `after`'s; `is_default` cards never show.
+- `ReviewChange = { change: 'changed' | 'added'; before: RuleCard | null; after: RuleCard | null; fields: RuleField[] }`.
 
 ## Props
 
