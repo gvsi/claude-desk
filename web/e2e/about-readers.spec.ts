@@ -66,8 +66,9 @@ async function eachPage(page: Page, check: (where: string) => Promise<void>): Pr
 }
 
 /**
- * The page fits the window: it doesn't scroll sideways, nothing visible reaches past either edge, and nothing cuts
- * off or scrolls its own content sideways. Visually hidden text, which is clipped on purpose, is left out.
+ * The page fits the window: it doesn't scroll sideways, nothing visible reaches past either edge, nothing cuts
+ * off or scrolls its own content sideways, and nothing hides content below its own bottom edge. Visually hidden
+ * text, which is clipped on purpose, is left out.
  */
 async function expectFits(page: Page, where: string): Promise<void> {
   const problems = await page.evaluate(() => {
@@ -81,8 +82,14 @@ async function expectFits(page: Page, where: string): Promise<void> {
       const box = el.getBoundingClientRect();
       if (box.width === 0 || box.height === 0) continue;
       if (box.left < -0.5 || box.right > width + 0.5) found.push(`${name(el)} runs from ${Math.round(box.left)} to ${Math.round(box.right)} px`);
-      if (el instanceof HTMLElement && getComputedStyle(el).overflowX !== 'visible' && el.scrollWidth > el.clientWidth + 1) {
+      if (!(el instanceof HTMLElement)) continue;
+      const { overflowX, overflowY } = getComputedStyle(el);
+      if (overflowX !== 'visible' && el.scrollWidth > el.clientWidth + 1) {
         found.push(`${name(el)} cuts off its content: ${el.scrollWidth} px in ${el.clientWidth} px`);
+      }
+      // Content taller than its box, where the box hides the rest rather than scrolling to it.
+      if ((overflowY === 'hidden' || overflowY === 'clip') && el.scrollHeight > el.clientHeight + 1) {
+        found.push(`${name(el)} cuts off its content vertically: ${el.scrollHeight} px in ${el.clientHeight} px`);
       }
     }
     return found;
