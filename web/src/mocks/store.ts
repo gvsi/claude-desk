@@ -1,0 +1,453 @@
+/**
+ * The mock API: the copies the routes answer from (served.ts), the faults a test plants, the
+ * requests it can read back and the `/api/` paths nobody mocked. `dispatch` answers a route the
+ * way Plan 02's API does, from and into the copy the request reaches, so an answer on Today
+ * changes what the visitor's chat streams. MSW's handlers (handlers.ts) are only its transport, and
+ * unit tests call it directly. It keeps cookies one of two ways:
+ *
+ * - `simulated` (the screen tests' page and the unit tests, `mockStore`): one copy, and this
+ *   browser's cookies kept here, signed in or not and a session per Desk slug. Requests' own
+ *   cookies are ignored and answers set none, so nothing outlives a `reset`.
+ * - `real` (the dev server, devServer.ts): a copy per owner cookie, as the API keys them, starting
+ *   with none. Each request is answered from the cookies it carries, and answers set the API's
+ *   HttpOnly cookies, so every tab of one browser shares its copy and another browser has its own.
+ *
+ * The mock ships in no build: it runs under `npm run dev:mock` and in tests only.
+ */
+import type { SseEvent } from '../api/contracts.ts';
+import { ROUTES, apiPath, type RouteKey, type RouteParams } from '../api/routes.ts';
+import { PAYMENT_TOKEN } from './script.ts';
+import type { MockSeed } from './seed.ts';
+import {
+  Server,
+  failWith,
+  isFailure,
+  reachOf,
+  serve,
+  SERVED_KEYS,
+  type AnyServed,
+  type CopyNaming,
+  type Cookies,
+  type Failure,
+} from './served.ts';
+import type { MockWorld, SessionRecord } from './world.ts';
+
+export interface MockRequestInit {
+  params?: Record<string, string>;
+  query?: Record<string, string> | URLSearchParams;
+  body?: unknown;
+  /** The body wasn't JSON. */
+  malformed?: boolean;
+  /** The path as sent, with its query; worked out from the route when absent. */
+  path?: string;
+  /** The cookies the request carries, by name (read only by a `real` store). */
+  cookies?: Record<string, string>;
+}
+
+/**
+ * What a route answered: a status, a JSON body and the `Set-Cookie` lines to send with it, or a
+ * connection dropped with no answer.
+ */
+export type MockAnswer = { status: number; body?: unknown; setCookie?: string[] } | { network: true };
+
+export interface MockRequest {
+  key: RouteKey;
+  body: unknown;
+  /** The path as sent, with its query. */
+  path: string;
+}
+
+/** A fault a test plants on a route. */
+export interface Injection {
+  route: RouteKey;
+  /** The answer's status, or `network` for a connection dropped with no answer. */
+  status: number | 'network';
+  /** How many requests it answers (default 1). */
+  times?: number;
+  /** The answer's body; a plain `{error}` for the status when absent. */
+  body?: unknown;
+  /** Waits this long before answering. */
+  delayMs?: number;
+  /** Lets the route apply its change first, then answers with the fault: a write whose answer was lost. */
+  afterCommit?: boolean;
+}
+
+export interface ResetOptions {
+  /** Whether this browser holds the copy's owner cookie (default true). */
+  signedIn?: boolean;
+}
+
+export interface MockStoreOptions {
+  /** How the store keeps cookies (default `simulated`); see the file's header. */
+  cookies?: 'simulated' | 'real';
+}
+
+/** The `{error}` body a planted status answers with when it names none. */
+function faultBody(status: number, key: RouteKey): unknown {
+  if (status < 400) return undefined;
+  if (status === 401) return { error: ROUTES[key].owner ? 'no_owner_session' : 'no_session' };
+  if (status === 404) return { error: 'not_found' };
+  if (status === 409) return { error: 'conflict' };
+  if (status === 429) return { error: 'rate_limited', retry_after: 5 };
+  if (status === 503) return { error: 'kernel', code: 'kernel_unavailable' };
+  if (status >= 500) return { error: 'internal' };
+  return { error: 'invalid' };
+}
+
+function toQuery(query: MockRequestInit['query']): URLSearchParams {
+  return query instanceof URLSearchParams ? query : new URLSearchParams(query ?? {});
+}
+
+/** The path a request would have had, for the request log when the caller gave none. */
+function pathFor(key: RouteKey, params: Record<string, string>, query: URLSearchParams): string {
+  try {
+    const path = apiPath(key, params as RouteParams<typeof key>);
+    const qs = query.toString();
+    return qs === '' ? path : `${path}?${qs}`;
+  } catch {
+    return ROUTES[key].path;
+  }
+}
+
+/** Where a visitor's stream resumes: past `?after=` or the browser's `Last-Event-ID`, whichever is later. */
+export function streamAfter(query: URLSearchParams, lastEventId: string | null): number {
+  const read = (value: string | null) => (value !== null && /^\d+$/.test(value) ? Number(value) : 0);
+  return Math.max(read(query.get('after')), read(lastEventId));
+}
+
+/** Round-trips through JSON, as the wire would: no answer shares an object with the store. */
+const wire = (body: unknown): unknown => (body === undefined ? undefined : JSON.parse(JSON.stringify(body)));
+
+const TOKEN_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+
+/** A random token of `length` letters and digits, as unguessable as the runtime's crypto makes it. */
+function randomToken(length: number): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(length));
+  // 248 is the largest multiple of 62 under 256: rejecting bytes above it keeps every letter equally likely.
+  let out = '';
+  for (const byte of bytes) if (byte < 248) out += TOKEN_ALPHABET.charAt(byte % TOKEN_ALPHABET.length);
+  return out.length === length ? out : out + randomToken(length - out.length);
+}
+
+/** A token none of `taken` holds, which it then holds. */
+function freshToken(taken: Set<string>, length: number): string {
+  let token = randomToken(length);
+  while (taken.has(token)) token = randomToken(length);
+  taken.add(token);
+  return token;
+}
+
+/**
+ * The screen tests' naming: copies numbered from 1, so the first is the seed's (`RIVERA`), and
+ * the first payment link is the fixtures' `k7Hq2vX9`; later links get random tokens of their own.
+ */
+function seedNaming(): CopyNaming {
+  let copyNo = 0;
+  const tokens = new Set<string>();
+  return {
+    copyNo: () => (copyNo += 1),
+    linkToken: () => {
+      if (tokens.has(PAYMENT_TOKEN)) return freshToken(tokens, PAYMENT_TOKEN.length);
+      tokens.add(PAYMENT_TOKEN);
+      return PAYMENT_TOKEN;
+    },
+  };
+}
+
+/** Copy numbers with six base-36 digits, so every copy's slugs are the same length and none is the seed's. */
+const RANDOM_COPY_NO = { from: 36 ** 5, to: 36 ** 6 };
+
+/**
+ * The dev server's naming: each copy numbered at random, so its ids and slugs are its own and a
+ * link from before a restart names nothing, and every payment link with a random token.
+ */
+function randomNaming(): CopyNaming {
+  const numbers = new Set<number>();
+  const tokens = new Set<string>();
+  return {
+    copyNo: () => {
+      const span = RANDOM_COPY_NO.to - RANDOM_COPY_NO.from;
+      let copyNo = 0;
+      while (copyNo === 0 || numbers.has(copyNo)) {
+        copyNo = RANDOM_COPY_NO.from + (crypto.getRandomValues(new Uint32Array(1))[0] ?? 0) % span;
+      }
+      numbers.add(copyNo);
+      return copyNo;
+    },
+    linkToken: () => freshToken(tokens, PAYMENT_TOKEN.length),
+  };
+}
+
+/** The one browser of the screen tests: its cookies, kept here across requests. */
+class SimulatedCookies implements Cookies {
+  /** Desk slug → the session its visitor cookie names. */
+  private readonly sessions = new Map<string, string>();
+
+  constructor(public owner: boolean) {}
+
+  visitor(slug: string): string | undefined {
+    return this.sessions.get(slug);
+  }
+
+  setOwner(): void {
+    this.owner = true;
+  }
+
+  setVisitor(slug: string, sessionId: string): void {
+    this.sessions.set(slug, sessionId);
+  }
+}
+
+/** The owner cookie, as Plan 02a sets it (`Secure` left off: the dev server is plain http). */
+const OWNER_COOKIE = { name: 'desk_owner', path: '/api/owner', maxAge: 604_800 } as const;
+/** The visitor cookie, one per Desk slug. */
+const VISITOR_COOKIE = { name: 'desk_visitor', maxAge: 86_400 } as const;
+
+function setCookieLine(name: string, value: string, path: string, maxAge: number): string {
+  return `${name}=${value}; Path=${path}; Max-Age=${maxAge}; HttpOnly; SameSite=Strict`;
+}
+
+/** The dev server's copies, and what each owner and visitor cookie names. */
+class CookieCopies {
+  readonly naming = randomNaming();
+  readonly copies: Server[] = [];
+  /** Owner cookie value → its copy. */
+  readonly owners = new Map<string, Server>();
+  /** Visitor cookie value → the session it names, in which copy, for which Desk slug. */
+  readonly visitors = new Map<string, { server: Server; slug: string; sessionId: string }>();
+  private readonly cookieValues = new Set<string>();
+
+  cookieValue(): string {
+    return freshToken(this.cookieValues, 32);
+  }
+
+  bySlug(slug: string | undefined): Server | undefined {
+    return this.copies.find((server) => server.world.deskBySlug(slug) !== undefined);
+  }
+
+  byLinkToken(token: string | undefined): Server | undefined {
+    return token === undefined ? undefined : this.copies.find((server) => server.world.links.has(token));
+  }
+}
+
+/** One request's cookies on the dev server: the ones it carries, and the `Set-Cookie` lines its answer sends. */
+class RequestCookies implements Cookies {
+  readonly setCookie: string[] = [];
+
+  constructor(
+    private readonly all: CookieCopies,
+    private readonly server: Server,
+    private readonly sent: Record<string, string>,
+  ) {}
+
+  get owner(): boolean {
+    const value = this.sent[OWNER_COOKIE.name];
+    return value !== undefined && this.all.owners.get(value) === this.server;
+  }
+
+  visitor(slug: string): string | undefined {
+    const value = this.sent[VISITOR_COOKIE.name];
+    const named = value === undefined ? undefined : this.all.visitors.get(value);
+    return named && named.server === this.server && named.slug === slug ? named.sessionId : undefined;
+  }
+
+  /** A passcode's new copy becomes this browser's, and the store keeps it from now on. */
+  setOwner(): void {
+    const value = this.all.cookieValue();
+    this.all.owners.set(value, this.server);
+    if (!this.all.copies.includes(this.server)) this.all.copies.push(this.server);
+    this.setCookie.push(setCookieLine(OWNER_COOKIE.name, value, OWNER_COOKIE.path, OWNER_COOKIE.maxAge));
+  }
+
+  setVisitor(slug: string, sessionId: string): void {
+    const value = this.all.cookieValue();
+    this.all.visitors.set(value, { server: this.server, slug, sessionId });
+    const path = `/api/public/desks/${encodeURIComponent(slug)}`;
+    this.setCookie.push(setCookieLine(VISITOR_COOKIE.name, value, path, VISITOR_COOKIE.maxAge));
+  }
+}
+
+/** The copy a request reached (null for a route that needs none), and the cookies it is answered with. */
+interface Reached {
+  server: Server | null;
+  cookies: Cookies;
+  setCookie: readonly string[];
+}
+
+const NO_OWNER = failWith(401, 'no_owner_session');
+const NOT_FOUND = failWith(404, 'not_found');
+const NO_COOKIES: Cookies = {
+  owner: false,
+  visitor: () => undefined,
+  setOwner: () => undefined,
+  setVisitor: () => undefined,
+};
+
+export class MockStore {
+  private readonly mode: 'simulated' | 'real';
+  private one: { server: Server; cookies: SimulatedCookies } | null = null;
+  private readonly many = new CookieCopies();
+  private injections: (Injection & { left: number })[] = [];
+  private readonly log: MockRequest[] = [];
+  private readonly unhandledPaths: string[] = [];
+
+  constructor(opts: MockStoreOptions = {}) {
+    this.mode = opts.cookies ?? 'simulated';
+    if (this.mode === 'simulated') this.one = { server: new Server('rivera', seedNaming()), cookies: new SimulatedCookies(true) };
+  }
+
+  /** The one copy and this browser's cookies; only a `simulated` store has them. */
+  private oneCopy(): { server: Server; cookies: SimulatedCookies } {
+    if (this.one === null) throw new Error('the dev server keeps a copy per browser: there is no one copy to read');
+    return this.one;
+  }
+
+  /** The copy as it stands, for tests that check what a route changed. */
+  get world(): MockWorld {
+    return this.oneCopy().server.world;
+  }
+
+  /**
+   * Every request a route answered (or a fault answered for it), in order. Only a `simulated`
+   * store keeps them, as it keeps `unhandled`: on the dev server nothing reads them, and they would
+   * grow for as long as it runs.
+   */
+  get requests(): readonly MockRequest[] {
+    return this.log;
+  }
+
+  /** Paths under `/api/` that no mocked route answers, in order. */
+  get unhandled(): readonly string[] {
+    return this.unhandledPaths;
+  }
+
+  /** A fresh copy of `seed`: no visitor cookies, no faults, nothing recorded, no turn in flight. */
+  reset(seed: MockSeed, opts: ResetOptions = {}): void {
+    this.oneCopy().server.stopTurns();
+    this.one = { server: new Server(seed, seedNaming()), cookies: new SimulatedCookies(opts.signedIn ?? true) };
+    this.injections = [];
+    this.log.length = 0;
+    this.unhandledPaths.length = 0;
+  }
+
+  inject(injection: Injection): void {
+    this.injections.push({ ...injection, left: injection.times ?? 1 });
+  }
+
+  recordUnhandled(path: string): void {
+    if (this.mode === 'simulated') this.unhandledPaths.push(path);
+  }
+
+  /** Removes one recorded unhandled request to `path`; throws if there is none. */
+  takeUnhandled(path: string): void {
+    const index = this.unhandledPaths.indexOf(path);
+    if (index === -1) {
+      throw new Error(`expected an unhandled request to ${path}; recorded: ${JSON.stringify(this.unhandledPaths)}`);
+    }
+    this.unhandledPaths.splice(index, 1);
+  }
+
+  private takeInjection(key: RouteKey): Injection | null {
+    const injection = this.injections.find((i) => i.route === key && i.left > 0);
+    if (!injection) return null;
+    injection.left -= 1;
+    return injection;
+  }
+
+  /**
+   * The copy a request to `key` reaches and its cookies, as the API finds them (served.ts
+   * `reachOf`), or why it reaches none. A `simulated` store has one copy, which every request reaches.
+   */
+  private reach(key: RouteKey, params: Record<string, string>, sent: Record<string, string>): Reached | Failure {
+    if (this.one !== null) return { ...this.one, setCookie: [] };
+    const reached = (server: Server): Reached => {
+      const cookies = new RequestCookies(this.many, server, sent);
+      return { server, cookies, setCookie: cookies.setCookie };
+    };
+    switch (reachOf(key)) {
+      case 'none':
+        return { server: null, cookies: NO_COOKIES, setCookie: [] };
+      case 'passcode':
+        // A new copy, kept only if the passcode opens it (`setOwner`).
+        return reached(new Server('rivera', this.many.naming));
+      case 'owner_cookie': {
+        const value = sent[OWNER_COOKIE.name];
+        const server = value === undefined ? undefined : this.many.owners.get(value);
+        return server ? reached(server) : NO_OWNER;
+      }
+      case 'slug': {
+        const server = this.many.bySlug(params.slug);
+        return server ? reached(server) : NOT_FOUND;
+      }
+      case 'token': {
+        const server = this.many.byLinkToken(params.token);
+        return server ? reached(server) : NOT_FOUND;
+      }
+    }
+  }
+
+  /** Answers `key` as the API would: a planted fault first, else the route, from and into the copy it reaches. */
+  async dispatch(key: RouteKey, init: MockRequestInit = {}): Promise<MockAnswer> {
+    const params = init.params ?? {};
+    const query = toQuery(init.query);
+    if (this.mode === 'simulated') this.log.push({ key, body: init.body, path: init.path ?? pathFor(key, params, query) });
+    const injection = this.takeInjection(key);
+    if (injection?.delayMs !== undefined) await new Promise((resolve) => setTimeout(resolve, injection.delayMs));
+    // A planted fault answers in the route's place, unless it lets the route commit first.
+    let served: AnyServed = { status: 0 };
+    let setCookie: readonly string[] = [];
+    if (injection === null || injection.afterCommit === true) {
+      const reached = SERVED_KEYS.includes(key) ? this.reach(key, params, init.cookies ?? {}) : null;
+      const answered =
+        reached === null || isFailure(reached)
+          ? reached
+          : serve(reached.server, key, { params, query, body: init.body, malformed: init.malformed ?? false, cookies: reached.cookies });
+      if (answered === null) this.recordUnhandled(ROUTES[key].path);
+      served = answered ?? failWith(501, 'not_mocked');
+      if (reached !== null && !isFailure(reached)) setCookie = reached.setCookie;
+    }
+    if (injection !== null) {
+      if (injection.status === 'network') return { network: true };
+      return { status: injection.status, body: wire(injection.body ?? faultBody(injection.status, key)) };
+    }
+    return { status: served.status, body: wire(served.body), ...(setCookie.length > 0 ? { setCookie: [...setCookie] } : {}) };
+  }
+
+  /** The visitor session this browser's cookie names for `slug`, or null when there is none. */
+  visitorSession(slug: string): SessionRecord | null {
+    const { server, cookies } = this.oneCopy();
+    const visitor = server.visitor(slug, cookies);
+    return isFailure(visitor) ? null : visitor.session;
+  }
+
+  /**
+   * Sends `ev` on the stream of the session this browser's cookie names for `slug`, as the API
+   * would outside a scripted turn: the owner joining, a session error. Returns its seq.
+   */
+  emit(slug: string, ev: SseEvent): number {
+    const session = this.visitorSession(slug);
+    if (!session) throw new Error(`this browser has no session for ${slug}`);
+    return this.world.emit(session, ev);
+  }
+
+  /**
+   * Follows the stream of the session the request's visitor cookie names for `slug` (this
+   * browser's, for a `simulated` store): every event after `after` at once, then each new one as it
+   * happens. Returns the function that stops it.
+   */
+  listen(slug: string, after: number, send: (seq: number, ev: SseEvent) => void, cookies: Record<string, string> = {}): () => void {
+    const reached = this.reach('events', { slug }, cookies);
+    if (isFailure(reached) || reached.server === null) return () => {};
+    const visitor = reached.server.visitor(slug, reached.cookies);
+    if (isFailure(visitor)) return () => {};
+    const { session } = visitor;
+    for (const { seq, ev } of session.events) if (seq > after) send(seq, ev);
+    session.listeners.add(send);
+    return () => {
+      session.listeners.delete(send);
+    };
+  }
+}
+
+/** The screen tests' and unit tests' mock API: one copy, its cookies simulated. */
+export const mockStore = new MockStore();

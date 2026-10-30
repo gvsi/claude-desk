@@ -1,0 +1,76 @@
+# Product proposal: Claude Desk
+
+Giovanni Alcantara · October 29, 2026
+
+## The product
+
+Claude Desk gives a person or small business a public, always-on Claude that strangers and other people's agents can talk to. It answers, quotes, books, releases documents to verified people and takes payments. Requests that need the owner are held for a one-tap answer. The longer view, shown only as vision screens: every business and person has a Desk, and other people's agents talk to Desks.
+
+Claude proposes every action and every reply; a separate kernel process decides whether each action runs and whether each reply can be shown. The kernel holds every business credential. Talking Claude around can't make it act past the owner's rules. Within what the rules allow, Claude can still be talked into actions the rules permit, and into free text that is wrong or unflattering but carries no price, date or promise. Promises without numbers or words like "guarantee" rely on a model check, which can miss.
+
+## Who it's for and the problem
+
+It's for owners whose time is the business, starting with solo home-service trades and small professional offices, such as an accountant's. Customers and clients wait because every quote, booking, status question or invoice needs the owner. In [Jobber's survey](https://www.getjobber.com/home-service-trends-report/) of 1,050 US home-service owners (December 2025), owners say over 55% of customers expect a reply within the hour. Only 20% of owners reply that fast. Other people's agents are starting to call: [Google calls local businesses for shoppers](https://blog.google/products/shopping/how-to-agentic-calling-let-google-call/).
+
+[Intercom's Fin](https://fin.ai/pricing) ($0.99 per outcome) serves support teams on a helpdesk and calls APIs the business [connects and secures itself](https://www.intercom.com/help/en/articles/10576235-designing-and-using-your-apis-with-actions). [Jobber's AI Receptionist](https://www.getjobber.com/features/ai-receptionist/) answers calls and texts and books visits. Its page doesn't say it takes payments, releases private documents or serves other people's agents. A Desk does, though not by phone.
+
+Bots get talked around: [Meta's AI support assistant](https://www.helpnetsecurity.com/2026/06/08/instagram-ai-support-vulnerability-account-takeovers/) sent attackers reset links for 20,225 Instagram accounts, because a bug in another code path skipped the address check. And a tribunal [held Air Canada liable](https://www.mccarthy.ca/en/insights/blogs/techlex/moffatt-v-air-canada-misrepresentation-ai-chatbot) for a refund policy its chatbot made up.
+
+## Why Anthropic
+
+A Desk speaks as Claude, for an owner, to people the owner doesn't know. The [capability prediction](capability-prediction.md) expects models to gain that agency by October 2027 without matching robustness, so a Desk's limits sit in code, and until then more requests go to the owner.
+
+[Claude's constitution](https://www.anthropic.com/constitution) anticipates Claude "negotiating on behalf of a person with a different AI agent". On a Desk, the owner directs Claude only through rules, approvals and taking over the chat; a visitor is someone Claude serves with limited trust; and a visiting agent acts for someone else, never for the owner.
+
+[Claude Duet](https://claude.com/resources/articles/claude-duet-safety-privacy-and-security) handles credentials, approvals and safety checks on "separate machines the model can't access". A Desk does this in its kernel, a separate process, not a separate machine. Duet counts its owner's request as consent to share private details. To visitors and agents, a Desk releases private records only to the verified person they belong to, and no approval changes that. [Claude for Small Business](https://www.anthropic.com/news/claude-for-small-business) works on tasks the owner starts; a Desk answers requests strangers start.
+
+## v1
+
+v1 is the first release for real owners, who sign in with their Claude account.
+
+**Setup.** Claude asks seven questions, reads the owner's website and, with permission, their Claude memory, then drafts rule cards the owner confirms. Each says who may do what, up to what amount, and whether Claude acts alone, asks or refuses.
+
+**Who's asking.** A stranger gets public tools. Another person's agent signs each request and gets a stranger's access, plus spending within its signed limit and never a payout. A visitor verified by a one-time code sent to the contact on record gets their own records. Those limits on records and codes, AI disclosure, the money rules below and a signed ledger of every attempt on a Desk form an always-on baseline no owner can switch off.
+
+**What runs alone.** In the Rivera Plumbing demo, price-list quotes, bookings in opening hours, payment links up to $300 (both also checked by a reviewer model) and a verified customer's own documents can run without the owner. A quote at 15% off waits for Maria, the owner, as do refunds. Money moves only under an owner rule or an owner's one-time approval, and a visiting agent also needs a signed spending limit with room left. The most a Desk takes or pays out in one action without asking is the money limit in its rules. Each change is proved and confirmed by the owner, and it can't exceed a $10,000 platform ceiling. It is $0 until the owner sets it, so until then every charge and payout asks.
+
+**Enforced in code.** Every action Claude proposes goes through the kernel's decision. Nothing runs without a fresh allow or a single-use owner approval bound to that exact call, and both are decided again at execution. Every reply Claude writes passes the kernel's reply check before a visitor sees it. In Claude's replies, prices, dates, discounts, bookings and policies appear only in typed cards rendered from the business's records; prose with digits, amounts, dates or promise words, in English or Spanish, is blocked, and a second check flags promises the cards don't back. Owner rules are compiled by code from rule cards into Cedar policies. Before a version goes live, SymCC proves it stays within the owner's cards and the always-on baseline; a failed or timed-out proof rejects it, and when proofs can't run, no new rules go live. A bug in the chat layer's visitor and agent paths can't move money outside the owner's rules, change rules, approve anything, verify anyone or forge the ledger. On the owner's own requests a bug could still misdirect an approval or rule confirmation to another held request or proved rule draft of the same Desk, which browser-signed approvals and rule confirmations, on the v1 roadmap, close. This covers a buggy chat layer, not a compromised one.
+
+<!-- figure: architecture -->
+![v1 architecture: Claude proposes; the kernel decides what runs and what is shown](images/v1-architecture.svg)
+
+**Beyond the prototype.** Codes and owner alerts are sent for real; real payments and calendars connect through the kernel. Before real money moves, each approval and rule confirmation will be signed with a key that stays in the owner's browser and is checked by the kernel, so a compromised chat layer can't forge one, though it could still try to mislead the owner about what they are approving. Each business gets separate data, abuse limits and model-spend controls. Not in v1: voice, and high-risk recommendations such as credit decisions, which the [usage policy](https://www.anthropic.com/legal/aup) requires a qualified person to review. Still open: whose spending limits a Desk trusts.
+
+## How we'll know it works
+
+Kernel, prompt and starter-rule changes must pass an evals gate to merge; proofs gate owners' rule changes. Tier 1 runs deterministic checks on every commit. In tier 2, a simulated stranger or agent drives the real system through about 50 attacks and 30 legitimate tasks, graded independently of the kernel's checks. The gate is zero baseline violations. Held-out completion must stay at or above the Wilson 95% lower bound of the first recorded held-out run, a rule fixed before any results.
+
+| Measure | What it shows | Prototype |
+| --- | --- | --- |
+| Baseline violations | money moved, private data released or a verification code leaked outside the rules; a number in prose, or a card the records don't back; a reply denying it's an AI; a ledger that doesn't verify | [measured: tier 2 pass, with its 95% upper bound]; the gate requires 0 |
+| Legitimate tasks completed | a visitor's task done correctly, alone or after the owner's approval | [measured: held-out rate with its 95% interval] |
+| False holds | the owner was asked when the rules allowed the action | [measured: false-hold rate] |
+| Cost per conversation | what a Desk costs to run | `estimate:` $0.20 for 10 turns, 4 tool calls and 10 checked replies, warm cache; [measured: …] |
+| Reveal delay, p50 and p95 | the wait for a checked reply | `estimate:` 0.3 to 0.8 s; [measured: …] |
+
+Limits: we wrote the scenarios, real attackers adapt, 17 held-out tasks make a small sample, and CI can't prove results came from a real run. With real owners, v1 tracks requests closed without the owner, holds and blocked attempts. It suggests loosening a kind of action only on that action's record, for the owner to confirm.
+
+## Business path
+
+A Desk comes with Claude's paid plans and a monthly conversation allowance; which plans, the allowance size and what happens above it are open. `estimate:` at the table's $0.20 per conversation, 100 conversations cost all of [Pro](https://claude.com/pricing)'s $20 monthly price ($20 ÷ $0.20), before the owner's own Claude use. So the allowance size decides the margin.
+
+The main risks are a wrong answer under Claude's name, hostile traffic using up an owner's allowance, and owners who never let Claude act alone.
+
+## The prototype
+
+The prototype, v1's enforced core, is at [owner: hosted URL; the passcode comes with the link], with the code at [owner: repo link]. Each visitor acts as Maria in a fresh copy of Rivera Plumbing. Four things to try: chat as a customer, try to break it, answer a held request and create a Desk.
+
+**Real.**
+
+- The kernel and its signed ledger
+- Approvals, verification logic, quotes, bookings and documents
+- Signed agent requests held to spending limits
+- One MCP server, pinned by hash (the repo's mock payments server)
+- Setup
+
+**Simulated.** In the prototype, payments are mocked. In the prototype, codes land in a Demo inbox that shows them to whoever typed the contact, so verification is simulated. So are alerts, the wallet that signs agents' spending limits, the built-in visiting agent and Claude memory reads.

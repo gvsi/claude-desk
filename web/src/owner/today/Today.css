@@ -1,0 +1,563 @@
+/* Today: the page's column (the greeting, "Things to try", and the sections Today adds) and the
+   right column beside it from 1280 px, 420 px wide; under that the right column stacks under the
+   page. "Things to try" is a heading with its caption and "Hide this list" at the right, then one
+   card of rows divided by hairlines: a 32 px icon tile, the title and its line, and the next step
+   at the right, which drops under the words on a phone. The preview behind the intro dialog uses
+   the same layout. */
+
+.cd-today {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-32);
+  align-items: start;
+}
+
+/* 420 px: the illustration column's 400 and 20 more. */
+@media (min-width: 1280px) {
+  .cd-today {
+    grid-template-columns: minmax(0, 1fr) calc(var(--size-intro-illustration) + var(--space-20));
+  }
+}
+
+.cd-today__main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-32);
+  min-width: 0;
+}
+
+.cd-today__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+}
+
+/* The preview fills the window behind the dialog, as the app does. */
+.cd-today-preview {
+  min-height: 100dvh;
+}
+
+/* Things to try */
+
+.cd-things {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+}
+
+/* The heading, its caption beside it (wrapping in its own column), and "Hide this list" at the right. */
+.cd-things__head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--space-8);
+  row-gap: var(--space-4);
+}
+
+.cd-things__title {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.cd-things__caption {
+  min-width: 0;
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cd-things__hide,
+.cd-things__show {
+  display: flex;
+  flex: none;
+}
+
+.cd-things__list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cd-things__item {
+  display: grid;
+  grid-template-columns: var(--size-control) minmax(0, 1fr) auto;
+  column-gap: var(--space-14);
+  row-gap: var(--space-12);
+  align-items: center;
+  padding-block: var(--space-16);
+  border-top: 1px solid var(--line-hairline);
+}
+
+.cd-things__item:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.cd-things__item:last-child {
+  padding-bottom: 0;
+}
+
+.cd-things__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: var(--size-control);
+  height: var(--size-control);
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-control);
+  color: var(--text-secondary);
+}
+
+.cd-things__text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.cd-things__item-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.cd-things__detail {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cd-things__action {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* The ideas and what a pick did, under the row's words. */
+.cd-things__below {
+  grid-column: 2 / -1;
+}
+
+.cd-things__ideas {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-12);
+}
+
+.cd-things__idea {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+/* The right column */
+
+.cd-today-aside {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20);
+  min-width: 0;
+}
+
+.cd-today-aside__public {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-8);
+}
+
+.cd-today-aside__title {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.cd-today-aside__link {
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.cd-today-aside__text {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cd-today-aside__action {
+  display: flex;
+  padding-top: var(--space-4);
+}
+
+/* On a phone the caption goes under the heading and "Hide this list" under it at the right; in each
+   row the icon tile sits level with the title, and the next step drops under the words, from the
+   row's left edge. */
+@media (max-width: 639.98px) {
+  .cd-things__head {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .cd-things__hide {
+    justify-self: end;
+  }
+
+  .cd-things__item {
+    grid-template-columns: var(--size-control) minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .cd-things__action,
+  .cd-things__below {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+}
+
+/* While Today's first read is out. */
+.cd-today__loading {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+/* A quiet caption link beside a heading: "Includes recorded history". Underlined, so it reads as a
+   link without the accent colour. */
+.cd-today-caption-link {
+  color: var(--text-secondary);
+  text-decoration: underline;
+  text-decoration-color: var(--line-field);
+}
+
+.cd-today-caption-link:hover {
+  color: var(--text-primary);
+}
+
+/* Needs you: held requests, then callbacks, then what was answered here. Each card sits in its
+   own wrapper, which takes focus for "Open the request", so nothing here depends on how the
+   approval card is built. */
+
+.cd-today__section[tabindex='-1']:focus:not(:focus-visible) {
+  outline: none;
+}
+
+.cd-needs-you {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cd-needs-you__item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+.cd-needs-you__card {
+  border-radius: var(--radius-card);
+}
+
+.cd-needs-you__answered {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  padding-top: var(--space-8);
+}
+
+.cd-needs-you__answered-title {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cd-needs-you__dismiss {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* A callback request: who and why as they typed it, the promised time, and the two next steps. */
+.cd-callback {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+}
+
+.cd-callback__top {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cd-callback__reason {
+  margin: 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.cd-callback__when {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cd-callback__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+
+/* Live now */
+.cd-live {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Since last night: rows divided by hairlines, their three columns lined up across rows (the list
+   is the grid, and each row takes its columns), then "See all". */
+.cd-briefing {
+  display: grid;
+  grid-template-columns: max-content max-content minmax(0, 1fr);
+  column-gap: var(--space-16);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cd-briefing__item {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  border-top: 1px solid var(--line-hairline);
+}
+
+.cd-briefing__item:first-child {
+  border-top: 0;
+}
+
+.cd-briefing-row {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  row-gap: var(--space-4);
+  align-items: baseline;
+  padding: var(--space-12) var(--space-8);
+  border-radius: var(--radius-control);
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.cd-briefing-row--link:hover {
+  background: var(--fill-hover);
+}
+
+.cd-briefing-row__when {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.cd-briefing-row__kind {
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.cd-briefing-row__words {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.cd-briefing-row__line {
+  color: var(--text-primary);
+}
+
+/* Whose booking or lead it is: a name someone gave reads like "Visitor" does, since it is the
+   whole line rather than a name inside the interface's words. */
+.cd-briefing-row__who .cd-user-name {
+  font-weight: inherit;
+}
+
+/* A booking's or a lead's own words, under whose they are. */
+.cd-briefing-row__who + .cd-briefing-row__line {
+  color: var(--text-secondary);
+}
+
+.cd-since__all {
+  padding: var(--space-12) var(--space-8) 0;
+}
+
+/* The full briefing */
+.cd-briefing-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20);
+  min-width: 0;
+  max-width: var(--size-content);
+}
+
+/* Last 7 days: the heading and its caption, then three parts divided by hairlines. Bars are layout
+   on tokens: each day's height is its share of the busiest day's, and a day with none keeps a flat
+   stub, so the seven days are there before the first booking. Positioned, so its visually hidden
+   words sit inside it: with no positioned ancestor they would sit against the window, and below
+   the wide layout, deep in the scrolled page, they would stretch the window into a scroll. */
+.cd-week {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+}
+
+.cd-week__head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.cd-week__heading,
+.cd-week__caption,
+.cd-week__title,
+.cd-week__line,
+.cd-week__figure {
+  margin: 0;
+}
+
+.cd-week__heading,
+.cd-week__title {
+  color: var(--text-primary);
+}
+
+.cd-week__line {
+  color: var(--text-secondary);
+}
+
+.cd-week__part {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+.cd-week__part + .cd-week__part {
+  padding-top: var(--space-16);
+  border-top: 1px solid var(--line-hairline);
+}
+
+.cd-week__figure {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--space-8);
+}
+
+/* The figure in the interface's face at the greeting's size. */
+.cd-week .cd-week__number {
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums;
+}
+
+.cd-week__unit {
+  color: var(--text-secondary);
+}
+
+.cd-week__bars {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: var(--space-8);
+  margin: 0;
+  padding: var(--space-8) 0 0;
+  list-style: none;
+}
+
+.cd-week__day {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-width: 0;
+}
+
+.cd-week__bar-room {
+  display: flex;
+  align-items: flex-end;
+  height: calc(var(--space-40) + var(--space-16));
+}
+
+.cd-week__bar {
+  width: 100%;
+  height: max(var(--space-2), calc(var(--cd-week-share) * 100%));
+  border-radius: var(--space-4);
+  background: var(--text-tertiary);
+}
+
+.cd-week__day--today .cd-week__bar {
+  background: var(--text-primary);
+}
+
+.cd-week__initial {
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.cd-week__day--today .cd-week__initial {
+  color: var(--text-primary);
+  font-weight: 520;
+}
+
+/* Handled by Claude, or by you: one thin bar split in two, beside the words that say the same. */
+.cd-week__split {
+  display: flex;
+  gap: var(--space-2);
+  height: var(--space-6);
+  overflow: hidden;
+  border-radius: var(--radius-full);
+}
+
+.cd-week__split-part {
+  flex-shrink: 1;
+  flex-basis: 0;
+  min-width: var(--space-4);
+}
+
+.cd-week__split-part--handled {
+  background: var(--status-handled);
+}
+
+.cd-week__split-part--stepped {
+  background: var(--status-held);
+}
+
+.cd-week__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4) var(--space-16);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-primary);
+}
+
+.cd-week__legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.cd-week__legend-item--quiet {
+  color: var(--text-secondary);
+}
+
+/* On a phone each briefing row puts its words under the time and the kind. */
+@media (max-width: 639.98px) {
+  .cd-briefing {
+    grid-template-columns: max-content minmax(0, 1fr);
+  }
+
+  .cd-briefing-row__words {
+    grid-column: 1 / -1;
+  }
+}
