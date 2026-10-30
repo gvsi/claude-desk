@@ -9,8 +9,10 @@ server, a stand-in prover, an offline reviewer, a frozen clock), then builds the
 refuses to start, then the policy engine over the always-on baseline
 (`app.state.engine`; a baseline it can't take stops the start too) with the shipped proof reports
 in its cache, then runs `desk-prove --selftest` once to pick the proof mode for the whole process
-(`symcc` or `bounded`, which `/health` reports), then the database engine (role desk_kernel), and
-last reconciles the executions a stopped kernel left behind (`execute.reconcile_at_startup`).
+(`symcc` or `bounded`, which `/health` reports), then the database engine (role desk_kernel), then
+rebuilds the active rules versions an earlier kernel stored under another baseline
+(`activation.rebuild_at_startup`), and last reconciles the executions a stopped kernel left behind
+(`execute.reconcile_at_startup`).
 
 Every non-2xx answer is a `KernelError{code}` ("Session state responses"): a `KernelFailure`
 answers its own code, request validation 422 `invalid`, the framework's own errors (an unknown
@@ -143,6 +145,12 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
         app.state.kernel = KernelRuntime(settings=settings, clock=clock, signer=signer, engine=engine,
                                          sessions=factory, policies=policies, decisions=reviewer)
         try:
+            try:
+                # active versions an earlier kernel stored under another baseline, rebuilt and
+                # proved before anything is decided under them; one that isn't decides nothing
+                await activation.rebuild_at_startup(app.state.kernel)
+            except Exception:
+                log.exception("startup_rebuild_failed")
             try:
                 # executions a stopped kernel left behind; a read settles them too, so a failure
                 # here is logged and the kernel starts

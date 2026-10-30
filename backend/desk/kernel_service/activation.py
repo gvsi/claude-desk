@@ -24,8 +24,17 @@ owner confirms a draft at another cap; a draft without one keeps the active vers
 part of what a proof covers (`invariants_sha256` renders the auto invariants at it), so a version
 is proved at its own cap and a report proved at another is never reused.
 
+Versions an earlier kernel stored. A version proved under another baseline than the one this
+kernel enforces (`outdated`) never loads and decides nothing. At startup, before serving, the
+kernel rebuilds each such active version in place (`rebuild_at_startup`): its own cards at its own
+cap, checked, compiled and loaded as a draft is, and written only with a proof of all seven
+obligations, from the cache (a shipped report) in either mode or proved live in `symcc` mode. One
+it can't rebuild stays as stored, refusing every call (`version_outdated`), and each attempt is
+ledgered and alerts the owner.
+
 Loaded versions. A stored version loads into the policy engine on its first use
-(`LoadedVersions`), bounded to `MAX_LOADED_VERSIONS` per engine, least recently used out first.
+(`LoadedVersions`), bounded to `MAX_LOADED_VERSIONS` per engine, least recently used out first,
+and again when it was written anew under its number.
 
 The bounded check (`bounded_check`) stands in for the SymCC proofs when `desk-prove` can't run
 (the kernel's `bounded` proof mode). It evaluates requests generated on every card boundary with
@@ -71,10 +80,11 @@ from desk.contracts import (
 )
 from desk.db.models import AgentKey, Person
 from desk.db.models import PolicyVersion as PolicyVersionRow
-from desk.kernel_service import adapters, compiler, desks, explain, ledger, reference, review_thresholds, seed
+from desk.kernel_service import (adapters, compiler, demo_inbox, desks, explain, ledger, reference, render,
+                                 review_thresholds, seed)
 from desk.kernel_service.auth import OwnerCtx
 from desk.kernel_service.reference import RefSets
-from desk.kernel_service.repo import KernelCtx, KernelFailure
+from desk.kernel_service.repo import KernelCtx, KernelFailure, KernelRuntime, kernel_transaction, outdated_versions
 from desk.presets import PRESETS
 
 log = logging.getLogger(__name__)
@@ -489,13 +499,16 @@ def version_key(desk_id: str, version: int) -> str:
 
 def load_version(engine: desk_kernel.PolicyEngine, row: PolicyVersionRow) -> list[str]:
     """Loads a stored version into `engine` under its two keys and returns the errors; empty means
-    both loaded. The Cedar and schema must still match the hashes they were proved under. On any
-    error neither key stays loaded, so deciding on the version refuses."""
+    both loaded. The Cedar and schema must still match the hashes they were proved under, and the
+    baseline it was proved under must be the one the engine enforces (`outdated`). On any error
+    neither key stays loaded, so deciding on the version refuses."""
     key = version_key(row.desk_id, row.version)
     keys = [key, key + ":approvable"]
     cedar = row.cedar or {}
     if row.schema_json is None or any(not isinstance(cedar.get(name), str) for name in ("F", "A", "H")):
         errors = ["the version has no compiled Cedar or schema"]
+    elif outdated(row):
+        errors = ["the version was proved under another baseline"]
     elif compiler.cedar_sha256(cedar) != row.cedar_sha256:
         errors = ["the version's Cedar doesn't match its cedar_sha256"]
     elif _schema_hash(row.schema_json) != row.schema_sha256:
@@ -519,25 +532,30 @@ def _schema_hash(schema_json: str) -> str | None:
 
 class LoadedVersions:
     """The versions loaded in one engine, least recently used first, at most `MAX_LOADED_VERSIONS`
-    (read at each use). Only this class loads or drops `<desk_id>:<version>` keys."""
+    (read at each use). Only this class loads or drops `<desk_id>:<version>` keys. Each key
+    remembers the Cedar and schema hashes it was loaded with, so a version written again under its
+    number (a rebuild, `rebuild_version`) loads again on its next use."""
 
     def __init__(self, engine: desk_kernel.PolicyEngine):
         self.engine = engine
-        self._recent: OrderedDict[str, None] = OrderedDict()
+        self._recent: OrderedDict[str, tuple[str, str]] = OrderedDict()
         self._lock = threading.Lock()
 
     def use(self, row: PolicyVersionRow) -> list[str]:
         """Makes sure `row` is loaded and marks it most recent; returns the load errors (empty
         means its keys decide). Loading past the cap drops the least recently used version."""
         key = version_key(row.desk_id, row.version)
+        loaded = (row.cedar_sha256, row.schema_sha256)
         with self._lock:
-            if key in self._recent:
+            if self._recent.get(key) == loaded:
                 self._recent.move_to_end(key)
                 return []
-            errors = load_version(self.engine, row)
+            errors = load_version(self.engine, row)       # replaces what the keys held, or drops them
             if errors:
+                self._recent.pop(key, None)
                 return errors
-            self._recent[key] = None
+            self._recent[key] = loaded
+            self._recent.move_to_end(key)
             while len(self._recent) > MAX_LOADED_VERSIONS:
                 evicted, _ = self._recent.popitem(last=False)
                 drop_keys(self.engine, [evicted, evicted + ":approvable"])
@@ -657,6 +675,117 @@ async def active_version(ctx: KernelCtx, desk_id: str) -> PolicyVersionRow | Non
     """The Desk's active version, if it has one (the caller's copy must be bound)."""
     return (await ctx.db.scalars(ctx.repo.scoped(select(PolicyVersionRow).where(
         PolicyVersionRow.desk_id == desk_id, PolicyVersionRow.status == "active")))).one_or_none()
+
+
+# ---- Versions an earlier kernel stored -----------------------------------------------------------
+#
+# A version is proved against the baseline the kernel enforces with it (`baseline_auto` and
+# `baseline_approvable` read `B`), so one stored by an earlier kernel, under another baseline, isn't
+# proved for this one, and may not even load: the kernel core's versions have a schema without
+# `context.auto_money_cap_cents`, which this baseline reads, so strict validation refuses the whole
+# version. At startup, before it serves anything, the kernel rebuilds each active version stored
+# under another baseline (`rebuild_at_startup`): from its own cards, at the money cap it keeps
+# (the money cap revision gave the kernel core's versions their $500), over the Desk's enabled
+# profiles, checked as a draft is, compiled, and written in place of the stored one only with a
+# proof of all seven obligations. The version keeps its number, status and cap, so nothing the
+# owner chose changes.
+
+# What a rebuild rewrites: the compiled sets, what they were proved against and the proof.
+_REBUILT_COLUMNS = ("cards", "cedar", "schema_json", *VersionHashes._fields, "proof")
+# The owner's alert when a version can't be rebuilt (owner-only, in English, like every alert).
+REBUILD_ALERT = ("After an update, Claude couldn't check your rules again, so it won't act on any request until "
+                 "they're checked. Confirm your rules again to turn them back on.")
+
+
+def outdated(row: PolicyVersionRow) -> bool:
+    """Was the version stored under a baseline other than the one this kernel enforces?"""
+    return row.baseline_sha256 != compiler.baseline_sha256()
+
+
+async def rebuild_at_startup(runtime: KernelRuntime) -> dict[tuple[str, int], str | None]:
+    """Rebuilds every copy's active versions stored under another baseline (`rebuild_version`),
+    each in its own transaction, and returns what became of each `(desk_id, version)`: None when
+    rebuilt, else why not. A failure is logged and the next version is tried; a version left as
+    stored decides nothing."""
+    results: dict[tuple[str, int], str | None] = {}
+    for copy_id, desk_id, version in await outdated_versions(runtime, compiler.baseline_sha256()):
+        try:
+            async with kernel_transaction(runtime) as ctx:
+                ctx.bind(copy_id)
+                results[(desk_id, version)] = await rebuild_version(ctx, desk_id, version)
+        except Exception:
+            log.exception("version_rebuild_failed copy_id=%s desk_id=%s version=%s", copy_id, desk_id, version)
+    return results
+
+
+async def rebuild_version(ctx: KernelCtx, desk_id: str, version: int) -> str | None:
+    """Rebuilds the Desk's active version `version`, stored under another baseline, in the
+    caller's transaction, under the Desk's `versions` lock with the row `FOR UPDATE`, as a confirm
+    takes them. Returns None when it is rebuilt, or when it is no longer active or outdated;
+    otherwise why it can't be. A rebuilt version is ledgered `policy` `{version, status: "active",
+    rebuilt: true, auto_money_cap_cents, cedar_sha256, from_cedar_sha256}`. One that can't be is
+    left as stored, so it keeps refusing; the attempt is ledgered `policy` `{version, rebuilt:
+    false, refused: <why>}` and alerts the owner in the Demo inbox whatever their notification
+    defaults, since the Desk acts on nothing until it is fixed."""
+    await _lock(ctx, "versions", desk_id)
+    row = (await ctx.db.scalars(ctx.repo.scoped(select(PolicyVersionRow).where(
+        PolicyVersionRow.desk_id == desk_id, PolicyVersionRow.version == version,
+        PolicyVersionRow.status == "active").with_for_update()))).one_or_none()
+    if row is None or not outdated(row):
+        return None
+    rebuilt = await _rebuilt(ctx, row)
+    if isinstance(rebuilt, str):
+        log.warning("version_not_rebuilt desk_id=%s version=%s reason=%s", desk_id, version, rebuilt)
+        await demo_inbox.deliver(ctx, copy_id=ctx.copy_id, desk_id=desk_id, to="owner", person_id=None, kind="alert",
+                                 body=REBUILD_ALERT, preview=render.owner_preview("rules"))
+        await ledger.append(ctx, copy_id=ctx.copy_id, desk_id=desk_id, event=LedgerEvent(
+            kind="policy", origin="kernel", summary={"version": version, "rebuilt": False, "refused": rebuilt}))
+        return rebuilt
+    stored = row.cedar_sha256
+    for column in _REBUILT_COLUMNS:
+        setattr(row, column, getattr(rebuilt, column))
+    await ctx.db.flush()
+    await ledger.append(ctx, copy_id=ctx.copy_id, desk_id=desk_id, event=LedgerEvent(
+        kind="policy", origin="kernel",
+        summary={"version": version, "status": "active", "rebuilt": True,
+                 "auto_money_cap_cents": row.auto_money_cap_cents, "cedar_sha256": row.cedar_sha256,
+                 "from_cedar_sha256": stored}))
+    return None
+
+
+async def _rebuilt(ctx: KernelCtx, row: PolicyVersionRow) -> PolicyVersionRow | str:
+    """`row` compiled again as a draft of its own cards would be, at its own cap, over the Desk's
+    enabled profiles, with a proof of all seven obligations; or why it can't be."""
+    desk_id, cap = row.desk_id, row.auto_money_cap_cents
+    if type(cap) is not int or not 0 <= cap <= AUTO_MONEY_HARD_CAP_CENTS:
+        return "invalid_money_cap"
+    owned = [card for card in row.cards if not card.is_default]
+    people = await desk_people(ctx, desk_id)
+    if compiler.validate_cards(owned, people=people.keys(), agent_keys=await _agent_keys(ctx),
+                               auto_money_cap_cents=cap):
+        return compiler.ABOVE_MONEY_CAP if compiler.above_money_cap(owned, cap) else "invalid_cards"
+    profiles = await desks.enabled_profiles(ctx, desk_id)
+    try:
+        schema = compiler.desk_schema(profiles)
+        compiled = compiler.compile_cards(owned, profiles, auto_money_cap_cents=cap)
+        a0 = compiler.compile_cards(owned, profiles, auto_money_cap_cents=cap, review=False).A
+        hashes = version_hashes(compiled, schema, profiles, cards=owned, auto_money_cap_cents=cap)
+    except ValueError:
+        return "uncompilable_cards"
+    if load_draft(ctx.policies.engine, key=f"rebuild:{desk_id}:{row.version}", schema_json=json.dumps(schema),
+                  compiled=compiled):
+        return "unloadable"
+    report = ctx.policies.cache.get(hashes)               # a shipped report, or one this process proved
+    if report is None and proof_mode() == "symcc":
+        report = await prove_or_check(ctx.policies.engine, owned, profiles, key_prefix=f"rebuild:{desk_id}",
+                                      auto_money_cap_cents=cap)
+        ctx.policies.cache.put(hashes, report)
+    if report is None or not proved(report):
+        return "not_proved"
+    return version_row(copy_id=row.copy_id, desk_id=desk_id, version=row.version, parent_version=row.parent_version,
+                       compiled=compiled, a0=a0, schema=schema, hashes=hashes, auto_money_cap_cents=cap,
+                       status=row.status, proof=report, created_at=row.created_at, preset=row.preset,
+                       draft_key_sha256=row.draft_key_sha256)
 
 
 # ---- Owner drafts --------------------------------------------------------------------------------

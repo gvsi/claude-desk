@@ -62,6 +62,7 @@ OWNER_PREVIEWS: dict[str, str] = {
     "lockout": "Verification paused for a contact",
     "lead": "New lead",
     "callback": "Callback requested",
+    "rules": "Your rules need checking",
 }
 
 

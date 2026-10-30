@@ -400,9 +400,11 @@ async def test_versions_load_lazily_and_report_errors(app, client, monkeypatch):
     errors = versions.use(broken)
     assert errors and f"{desk_id}:2" not in versions
     assert not_loaded(engine, f"{desk_id}:2", request) and not_loaded(engine, f"{desk_id}:2:approvable", request)
-    # and so does one whose Cedar or schema isn't what its hashes say was proved
+    # and so does one whose Cedar or schema isn't what its hashes say was proved, or one proved
+    # under a baseline other than the one this kernel enforces (an earlier kernel's, not rebuilt)
     for changed in ({"cedar": {**row.cedar, "A": row.cedar["A"] + "\n"}},
-                    {"schema_json": json.dumps({"": {"entityTypes": {}, "actions": {}}})}, {"cedar": None}):
+                    {"schema_json": json.dumps({"": {"entityTypes": {}, "actions": {}}})}, {"cedar": None},
+                    {"baseline_sha256": "0" * 64}):
         errors = versions.use(detached(row, version=3, **changed))
         assert errors, changed
         assert not_loaded(engine, f"{desk_id}:3", request), changed
@@ -429,6 +431,24 @@ async def decide_on_active(app: FastAPI, rows, request: str) -> dict:
         row = await activation.active_version(ctx, rows.desk_id)
     assert app.state.loaded_versions.use(row) == []
     return verdict(app.state.engine, f"{rows.desk_id}:1", request)
+
+
+async def test_a_version_written_again_under_its_number_loads_again(app, client):
+    # a rebuild (`activation.rebuild_version`) writes a version again in place: its key decides on
+    # what was written, never on what the engine loaded before
+    engine, versions = app.state.engine, app.state.loaded_versions
+    created = await post_copy(client)
+    copy_id, [desk_id] = created["copy_id"], created["desk_ids"]
+    key, request = f"{desk_id}:1", slots_request(copy_id, desk_id)
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy_id)
+        row = await activation.active_version(ctx, desk_id)
+    assert versions.use(row) == [] and verdict(engine, key, request)["outcome"] == "allow"
+    without_autos = {**row.cedar, "A": ""}
+    written = detached(row, cedar=without_autos, cedar_sha256=compiler.cedar_sha256(without_autos))
+    assert versions.use(written) == [] and len(versions) == 1
+    assert verdict(engine, key, request)["outcome"] == "hold"          # no auto permit: the card's hold twin
+    assert versions.use(row) == [] and verdict(engine, key, request)["outcome"] == "allow"
 
 
 async def test_loaded_versions_are_capped(app, monkeypatch):

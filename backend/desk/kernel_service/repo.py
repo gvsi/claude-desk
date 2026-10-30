@@ -51,7 +51,10 @@ Activation (`activation.confirm`) holds no session, decision or execution row an
 4: the Desk's `versions` advisory lock, then its `policy_versions` rows `FOR UPDATE`, then the
 payment links its `ON_ACTIVATE` hooks lock and move (Plan 01c; a hook appends nothing), then the
 ledger head: its own `policy` entry first, then the hooks' `payment` events. A draft takes its
-key's advisory lock before the `versions` lock.
+key's advisory lock before the `versions` lock. The startup rebuild of a version an earlier kernel
+stored (`activation.rebuild_version`) takes the same `versions` lock and active row `FOR UPDATE`,
+then the ledger head; the owner alert it writes when it can't rebuild is an insert under a fresh
+key.
 
 A route refuses with `KernelFailure`. Its answer is always a `KernelError{code}`; when the refusal
 must be on record (a ledgered auth failure, an allow that expired), `persist` writes that record
@@ -77,7 +80,7 @@ from fastapi import Depends, Request
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from desk.db.models import Execution
+from desk.db.models import Execution, PolicyVersion
 from desk.db.session import CopyResolver, KernelRepo, resolve_copy
 from desk.kernel_api import KernelError
 from desk.kernel_service.clock import Clock
@@ -256,7 +259,8 @@ async def copy_of_document_link(ctx: KernelCtx, token_sha256: str) -> str | None
     return await _resolve(ctx, "copy_of_document_link", token_sha256)
 
 
-# Startup reconciliation's one lookup across copies: which copies hold an execution to settle.
+# Startup's two lookups across copies: which copies hold an execution to settle, and which hold an
+# active rules version an earlier kernel stored, to rebuild.
 
 async def orphan_intents(runtime: KernelRuntime, older_than: datetime) -> list[tuple[str, str]]:
     """`(copy_id, action_id)` of every execution startup reconciliation must settle: an intent
@@ -275,4 +279,24 @@ async def orphan_intents(runtime: KernelRuntime, older_than: datetime) -> list[t
                 and_(Execution.state == "intent", Execution.started_at < older_than),
                 Execution.state == "unknown")).order_by(Execution.action_id)))
             found += [(copy_id, action_id) for action_id in rows]
+    return found
+
+
+async def outdated_versions(runtime: KernelRuntime, baseline_sha256: str) -> list[tuple[str, str, int]]:
+    """`(copy_id, desk_id, version)` of every active rules version stored under a baseline other
+    than `baseline_sha256`, the one the kernel enforces. Used only by the startup rebuild
+    (`activation.rebuild_at_startup`), which then works through each copy's `KernelRepo`. It visits
+    every copy (`kernel.copy_ids()`) and reads each through its own `KernelRepo`, as
+    `orphan_intents` does."""
+    async with runtime.engine.connect() as conn:
+        copy_ids = list((await conn.scalars(select(func.kernel.copy_ids()))).all())
+    found: list[tuple[str, str, int]] = []
+    for copy_id in copy_ids:
+        copy = KernelRepo(copy_id)
+        async with runtime.sessions() as db:
+            copy.bind(db)
+            rows = await db.execute(copy.scoped(select(PolicyVersion.desk_id, PolicyVersion.version).where(
+                PolicyVersion.status == "active", PolicyVersion.baseline_sha256 != baseline_sha256)
+                .order_by(PolicyVersion.desk_id)))
+            found += [(copy_id, desk_id, version) for desk_id, version in rows]
     return found

@@ -19,7 +19,8 @@ row, which the route holds locked until the decision commits:
 3. Step 1: an unknown tool, one this session isn't given, args its adapter's strict model
    refuses (or text the database can't keep), or a call the adapter can't resolve is refused
    before any action exists.
-4. With no active version that loads, the action is refused.
+4. With no active version that loads, the action is refused: `version_outdated` for one an
+   earlier kernel stored that wasn't rebuilt (`activation.outdated`).
 5. `evaluate`: partial evaluation first; the reviewer runs only when its score can change the
    outcome, and every verdict comes from a full evaluation. Any evaluation error refuses.
 
@@ -494,6 +495,7 @@ REFUSED_PLAIN: dict[str, str] = {
     "adapter_refused": "It didn't match your records, so it was refused.",
     "no_active_version": "This Desk has no rules turned on, so it was refused.",
     "version_unloadable": "Your rules couldn't be loaded, so it was refused.",
+    "version_outdated": "Your rules haven't been checked since an update, so it was refused.",
     "evaluation_error": "Your rules couldn't be checked for it, so it was refused.",
 }
 BASELINE_PLAIN = "The always-on safety rules don't allow it."
@@ -755,6 +757,8 @@ async def decide_call(ctx: KernelCtx, principal: Principal, session_row: Session
         amount_cents=normalized.amount_cents, recipient=normalized.recipient, starts_at=normalized.starts_at)
     if call.version_row is None:
         return await _refuse(ctx, call, "no_active_version", args_json=args_json)
+    if activation.outdated(call.version_row):         # stored by an earlier kernel and not rebuilt
+        return await _refuse(ctx, call, "version_outdated", args_json=args_json)
     if ctx.policies.versions.use(call.version_row):
         return await _refuse(ctx, call, "version_unloadable", args_json=args_json)
     request = cedar_request(principal, call.action, tz=call.business.timezone, now=ctx.clock.now(),
