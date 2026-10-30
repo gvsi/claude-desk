@@ -130,6 +130,66 @@ describe('design tokens', () => {
     expect(buildTokensCss(withStyle({ ...odd, fontVariantNumeric: 'tabular-nums' }))).toContain('.cd-type-odd {');
   });
 
+  test('reading_page_tokens_match_the_reader_boards', () => {
+    // The two About this prototype reading pages: their reading text in serif (the named exception),
+    // their headings and captions in the interface's sans, and a phone size of the body and heading.
+    const reading = tokens.type.groups.find((group) => group.name === 'Reading pages');
+    expect(reading?.family).toBe('serif');
+    const styles = Object.fromEntries((reading?.styles ?? []).map((style) => [style.name, style]));
+    expect(Object.keys(styles)).toEqual([
+      'article-title',
+      'article-body',
+      'article-body-phone',
+      'article-heading',
+      'article-heading-phone',
+      'article-quote',
+      'article-caption',
+    ]);
+    const spec = (name: string) => {
+      const { usage, ...rest } = styles[name] ?? {};
+      expect(usage?.trim().length, `${name} usage`).toBeGreaterThan(0);
+      return rest;
+    };
+    expect(spec('article-title')).toEqual({ name: 'article-title', fontSize: '72px', lineHeight: '78px', fontWeight: 300 });
+    expect(spec('article-body')).toEqual({ name: 'article-body', fontSize: '18px', lineHeight: '30px', fontWeight: 380 });
+    expect(spec('article-body-phone')).toEqual({ name: 'article-body-phone', fontSize: '17px', lineHeight: '28px', fontWeight: 380 });
+    expect(spec('article-heading')).toEqual({ name: 'article-heading', family: 'sans', fontSize: '30px', lineHeight: '36px', fontWeight: 620 });
+    expect(spec('article-heading-phone')).toEqual({
+      name: 'article-heading-phone',
+      family: 'sans',
+      fontSize: '25px',
+      lineHeight: '31px',
+      fontWeight: 620,
+    });
+    expect(spec('article-quote')).toEqual({ name: 'article-quote', fontSize: '32px', lineHeight: '42px', fontWeight: 300, fontStyle: 'italic' });
+    expect(spec('article-caption')).toEqual({ name: 'article-caption', family: 'sans', fontSize: '13px', lineHeight: '19px', fontWeight: 380 });
+    // Today's number styles keep their names; the reading page's caption is not a figure style.
+    expect(tokens.type.groups.flatMap((group) => group.styles.map((style) => style.name)).filter((name) => name.startsWith('figure'))).toEqual([
+      'figure',
+      'figure-small',
+    ]);
+
+    // The text column and the column beside it.
+    expect(tokenValue('size-article-measure')).toBe('648px');
+    expect(tokenValue('size-article-side')).toBe('200px');
+
+    // The generated classes: each family as set, and italic only on the quote.
+    const css = buildTokensCss(tokens);
+    const rule = (name: string) => new RegExp(`\\.cd-type-${name} \\{[^}]*\\}`).exec(css)?.[0] ?? '';
+    expect(rule('article-body')).toContain('font-family: var(--font-serif);');
+    expect(rule('article-heading')).toContain('font-family: var(--font-sans);');
+    expect(rule('article-caption')).toContain('font-family: var(--font-sans);');
+    expect(rule('article-quote')).toContain('font-style: italic;');
+    expect(css.match(/font-style:/g)).toHaveLength(1);
+    // Only italic: anything else, or anything that would write more CSS, is refused.
+    const odd = { name: 'odd', fontSize: '24px', lineHeight: '32px', fontWeight: 420, usage: 'A test style.' };
+    for (const fontStyle of ['oblique', 'normal', 'italic; color: red']) {
+      expect(() => buildTokensCss(withStyle({ ...odd, fontStyle }))).toThrow(/fontStyle/);
+    }
+    expect(rule('odd')).toBe('');
+    expect(buildTokensCss(withStyle({ ...odd, fontStyle: 'italic' }))).toContain('font-style: italic;');
+  });
+
   test('danger_buttons_are_the_refused_rose', () => {
     // The deny answers: a soft fill of the refused status color, and a lighter rose for their words.
     expect(tokenValue('button-danger-text')).toBe('#eba3ae');
