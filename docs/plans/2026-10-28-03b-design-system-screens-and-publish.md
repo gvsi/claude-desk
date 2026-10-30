@@ -294,7 +294,7 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
       - A `changed` row shows "Before" and "After", and each line whose field is in `changed` is tagged "Changed" in text.
     - No rows → "No rules change." and no confirm button. With `hasOtherChanges` (the draft changes something the screen shows above it, such as the money limit), no rows reads "Your rules stay the same." instead, and the controls stay.
     - A card for the checks, headed by `status`: "Checked before you confirm", "This change can't be applied" or "Rules can't be checked right now", with `lines` as a list (the screen's words from the proof report, Plan 04's `checkStatus`).
-    - The primary `confirmLabel` ("Confirm change" by default; "Confirm and turn on") is enabled only when `status` is `checked`. After one click it waits until `pending` clears; `pending` reads "Confirming", with `aria-busy`.
+    - The primary `confirmLabel` ("Confirm change" by default; "Confirm and turn on") is enabled only when `status` is `checked`. After one click it waits until `pending` clears. While it waits it keeps its label under the busy spinner, at the same width, with `aria-busy`, and only it spins.
     - The secondary `cancelLabel` ("Keep my rules" by default; "Back").
     - `error` shows the screen's message in an error `Notice` and enables confirm again.
   - `AskClaudePanel({ onClose; onSend: (text: string) => void; busy?: boolean; children })` (N-Conn-12-Chat):
@@ -324,7 +324,7 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
     - `Connectors/ConnectorSection`: `Quotes`, `Payments`, `Stripe`, `NeedsReview` (Refund `needs_review`), `AddedJustNow`, `Phone`, `NarrowMaxLimit` (320 px).
     - `Connectors/ConnectorList`: `RiveraHub` (seven sections), `Phone`.
     - `Rules/AlwaysOnList`: `Default`.
-    - `Rules/ChangeReview`: `TurnOnPayments` (Chen: two "Turned on" rows at "Ask me first"), `RaiseDiscount`, `AddAndRemove`, `TurnBackOnRefund` (one "Turned on" row for Stripe's Refund at "Ask me first"), `ChecksFailed`, `ChecksUnavailable`, `Confirming`, `LimitOnly` (no rows, with `hasOtherChanges`), `NothingChanges` (no rows: "No rules change." and no confirm), `ConfirmFailed` (the screen's error, and confirm works again), `WidenScope` (a rule widened from Payment link to every tool that charges money), `ScopeChangedWithoutTargets`, `RepeatedFailure` (the same failure three times), `NarrowMaxLimit` (320 px).
+    - `Rules/ChangeReview`: `TurnOnPayments` (Chen: two "Turned on" rows at "Ask me first"), `RaiseDiscount`, `AddAndRemove`, `TurnBackOnRefund` (one "Turned on" row for Stripe's Refund at "Ask me first"), `ChecksFailed`, `ChecksUnavailable`, `Confirming`, `ConfirmingFromTheScreen` (the label and width kept while the screen's `pending` is set), `LimitOnly` (no rows, with `hasOtherChanges`), `NothingChanges` (no rows: "No rules change." and no confirm), `ConfirmFailed` (the screen's error, and confirm works again), `WidenScope` (a rule widened from Payment link to every tool that charges money), `ScopeChangedWithoutTargets`, `RepeatedFailure` (the same failure three times), `NarrowMaxLimit` (320 px).
     - `Rules/AskClaudePanel`: `AddPayments` (Chen's owner: "Add Payments, so clients can pay their invoices"; Claude, in serif: "I can add Payments, so clients can pay with a test payment link. Have a look before anything turns on."), `Writing`, `Phone`.
   - Plays:
     - `mock_badge_always_beside_external_names`: `Mock`, `Brands`, `Stripe` and `RiveraHub` show "Mock" beside every "Stripe" and "Google Calendar".
@@ -422,7 +422,7 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
     - "What you confirmed before", with `description_confirmed` and `describeEffects(profile.effects, profile.reversible)`.
     - "What the connector says now": a `blockquote` (padding 10px 12px, a hairline border, `--bg-app`), labelled "Quoted from the connector. Claude never sees this text; it sees only the description you confirmed.". It holds `pending_definition_text` as literal text (mono 12/18 `.cd-type-trace`, `pre-wrap`, `overflow-wrap: anywhere`, `data-copy="user"`), never parsed as markup.
     - "Turning it back on trusts the new definition and checks your rules again before it runs.", then primary "Turn back on" and secondary "Keep off", each called with `profile.pending_sha256`. Kernel `POST /tools/confirm` drafts a version to prove, which the screen shows in a `ChangeReview`; the tool stays `needs_review` until that version is confirmed.
-    - Without `pending_sha256`, or without `pending_definition_text` to review, both buttons are disabled under "This change can't be reviewed right now. Reload the page."
+    - Without `pending_sha256`, or without `pending_definition_text` to review (missing, empty or only blank space), both buttons are disabled under "This change can't be reviewed right now. Reload the page."
     - `pending` disables both, with `aria-busy`. `error` shows the screen's message (for `conflict`: "The tool changed again while you were reviewing. Review the newest version.").
     - The after-state (N-Conn-15) is the screen's: `ToolPageHeader` with "Definition reviewed today", and an info `Notice` ("Refund is back on. Your rules were checked against its new definition, and refunds still wait for your answer.").
   - `Steps({ label: string; steps: readonly string[]; current: number })` (N-Conn-08 to N-Conn-11b; setup): an ordered list in a row, joined by hairlines. `current` counts from 0, as Plan 04's setup steps do.
@@ -450,7 +450,7 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
   - `Connectors/ConnectorReview`: `ChenPayments`, `CancelFirst`, `GoogleCalendar`, `CoveredByARule`, `TurningOn`, `Error`, `Phone`.
   - `Connectors/ConnectorOfferCard`: `AddPayments`, `Disconnect`, `ComingSoon`.
   - `Connectors/ToolChangedItem`: `StripeRefund`, `Phone`.
-  - `Connectors/ToolReviewCard`: `CreateRefundChanged`, `KeepOff`, `Sending`, `ChangedAgain`, `NoHash`, `NoDefinitionText`, `Phone`.
+  - `Connectors/ToolReviewCard`: `CreateRefundChanged`, `KeepOff`, `Sending`, `ChangedAgain`, `NoHash`, `NoDefinitionText`, `EmptyDefinitionText`, `BlankDefinitionText`, `IndentedDefinition`, `Phone`.
   - `Navigation/Steps`: `ReviewToolsOfFour`, `SetupThirdOfFive`, `Phone`.
   - `Navigation/SubNav`: `Settings` (General, Knowledge, Notifications, Channels, Billing; connectors live only under Rules), `Phone`.
   - `Conversation/ToolLabel`: `Memory`, `Website`, `CouldNotRead`.
@@ -476,12 +476,12 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
 - [ ] **Step 3: Implement** with READMEs and the fixtures. `canvasNote`s:
   - `ToolReviewCard`: the quote is the fixture's drifted definition, whose markup must show as text, not the board's sentence. "What you confirmed before" shows `description_confirmed`, the text Claude sees, where the board shows the tool's short line.
   - `ToolPageHeader`'s `Quote`: a built-in tool has no pinned definition, so it gets no definition note, where the board shows "Definition unchanged".
-  - `ConnectorReview`'s `GoogleCalendar`: the board starts the tool at "Automatic", "from your Bookings rule"; every new tool starts at "Ask me first", with the rules that cover it shown.
+  - `ConnectorReview`'s `GoogleCalendar`: an earlier draft of the board started the tool at "Automatic", "from your Bookings rule"; every new tool starts at "Ask me first", with the rules that cover it shown, and the board's current render agrees.
   - `ConnectorPicker`: a "Close" button, which the board doesn't draw, so the dialog closes by pointer as well as by Escape. The mock line also shows under the coming-soon note.
   - `ConnectionPanel`'s `DisconnectStripe`: the line says the change shows first, which the plain confirm does.
   - `ConnectionPanel`'s `VerificationAlwaysOn` and `ConnectorHeader`'s `Verification`: no board draws Verification's page; the owner decided its words.
   - The Google Calendar stories: Google Calendar is catalog-only in the demo, so they show what the components support once it works.
-- [ ] **Step 4: Run** the same command plus `npm run check:ds` → PASS (54 story tests).
+- [ ] **Step 4: Run** the same command plus `npm run check:ds` → PASS (57 story tests).
 - [ ] **Step 5: Commit** `git add web && git commit -m "feat(ds): add connector and tool pages, the add-a-connector flow and the changed-tool review"`.
 
 ### Task 4: Visual check of the owner boards
@@ -737,3 +737,9 @@ During Task 3 (2026-10-29):
 - A new tool that nothing covers reads the board's "No rule of yours covers this yet, so it starts at Ask me first."
 - The picker names its buttons by connector ("Add Payments"), the disconnect confirm carries the Mock badge, and the turn-off confirm closes once the screen is done.
 - Nineteen more stories cover phone widths, the off states, a tool already covered by a rule, and the answers and states the boards don't draw. Task 3 has 54 story tests.
+
+Task 3 fix round 1 (2026-10-29), from the task review:
+- The changed-tool review keeps both answers disabled when the new definition is empty or only blank space, and still quotes a real definition exactly as sent (`EmptyDefinitionText`, `BlankDefinitionText`, `IndentedDefinition`).
+- A recent request's row draws the base focus ring, 2 px outside the row.
+- The Google Calendar review's note says why every new tool starts at "Ask me first".
+- `ChangeReview`'s confirm keeps "Confirm change" under the busy spinner rather than reading "Confirming", as every busy button does (`ConfirmingFromTheScreen`). Task 2 has 46 story tests and Task 3 57.
