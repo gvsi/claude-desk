@@ -567,7 +567,10 @@ Every string here is owner-facing (no Spanish). Components display what the scre
   - The signed review boards also draw red Before and green After bars, a quieter Before outcome and changed values at weight 520. Those come with the change review's own update for the signed connector boards, not here.
 
 - **The preset review** (N-Conn-18-Preset-Review) is `ChangeReview` with `cancelsLinks`. The rows are the screen's (plan 04):
-  - Each active owner card the preset drops, personal ones included, becomes a `changed` row. `before` is the card's side; `after` is the default side `{ mode: 'ask', reason: 'Not covered by a rule you set, so I ask you.', words: [{ field: 'who', text: 'Anyone' }] }`, the house-rules wording. The default replaces the whole rule, which the row's tag says, so `changed` lists only `mode`, and only when it changes: the "Changed" tag sits beside the outcome only then (Refund already asks, so its row has none). A personal rule's row names the person.
+  - Each active owner card the preset drops, personal ones included, becomes a `changed` row, with the card's side as `before`. Its `after` is what will govern the card's tool once the preset applies, found with `rulesForTool` over the preset's cards, so the review never says a tool asks that the preset runs on its own:
+    - When one of the preset's cards governs it, `after` is that card's side, tagged where `ruleDiff` finds the two cards differ; when the card names a different target ("Every tool that charges money"), both sides say what they apply to. A card the preset keeps as it is (the same outcome, people, limits, hours, review and reason) has no row, as `ruleDiff` leaves unchanged cards out.
+    - When none does, `after` is the default side `{ mode: 'ask', reason: 'Not covered by a rule you set, so I ask you.', words: [{ field: 'who', text: 'Anyone' }] }`, the house-rules wording. The default replaces the whole rule, which the row's tag says, so `changed` lists only `mode`, and only when it changes: the "Changed" tag sits beside the outcome only then (Refund already asks, so its row has none).
+    - A personal rule's row names the person.
   - Cards the preset adds are `added` rows.
   - The page is `PageHeader` with the preset's name ("Ask me first", "Recommended rules") and "Here's exactly what changes on your Desk. Nothing changes until you confirm.", then `ChangeReview` with "Confirm change" and "Keep my rules", the same page shape as N-Conn-10.
 
@@ -575,13 +578,14 @@ Every string here is owner-facing (no Spanish). Components display what the scre
   - `paymentLimit`: `{ line: 'No payment over $500 goes through without asking you, whatever the rules below say.', unset: 'Every payment asks you first.', hint: 'Whole dollars, from 0 to 10,000. Now $500.' }`.
   - `personalBookingCard`: the personal rule "Allow only for Dana Whitfield, always" adds to her held Saturday booking, outside the seed.
   - `askFirstReview: ChangeRowView[]`: nine rows to the default side. They are Rivera's eight own cards (Quote; Book a visit ×2; Share a document; Payment link; Charge within a signed limit; See charges; Refund) and Dana Whitfield's personal booking rule. The board's shared rule for Alex Kim's assistant is the illustrative shared card, which isn't in Rivera's seed.
+  - `recommendedReview: ChangeRowView[]`: the same owner cards under "Recommended rules", from sample cards worded as `desk.presets.PRESETS['auto']` words them. Seven rows: the bookings, the payment link, the signed-limit charge and Refund go to the preset's own rules, and See charges, which nothing in the preset governs, to the default side. Quote and Share a document have no row: the preset's rules for them enforce what Rivera's already do.
   - `limitRaise`: `{ now: 'New limit: no payment over $1,000 without asking you.', was: 'Was $500' }`.
 
 - [ ] **Step 1: Write the stories and tests:**
   - `Rules/PresetMenu`: `Closed`, `Open` (N-Conn-17), `PickOnce`, `ByKeyboard`, `Pending`, `Phone` (390 px, N-Conn-22).
   - `Rules/MoneyLimit`: `Reading` (N-Conn-19), `Editing` (N-Conn-19b), `TooHigh` (error "No single payment can be above $10,000."), `Unset` ("Every payment asks you first."), `Waiting` (`disabled`), `Phone` (N-Conn-22).
   - `Rules/LimitChange`: `Raise` (N-Conn-20).
-  - `Rules/ChangeReview`: `AskMeFirst` (`askFirstReview` with `cancelsLinks`, N-Conn-18).
+  - `Rules/ChangeReview`: `AskMeFirst` (`askFirstReview` with `cancelsLinks`, N-Conn-18) and `RecommendedRules` (`recommendedReview` with `cancelsLinks`; no board draws it, so it cites N-Conn-18 with a note).
   - `Connectors/ToolPageHeader`: `WithSimulate`, `Simulating`; `Quote`, `RefundNeedsReview` and `Off` pass `onSimulateChange` too.
   - `Controls/SegmentedControl`: `Views` (the Safety page's views).
   - Play tests:
@@ -597,6 +601,9 @@ Every string here is owner-facing (no Spanish). Components display what the scre
     - `limit_change_reads_both_amounts`.
     - `preset_review_tags_only_new_outcomes`: Refund's row has no "Changed" beside its outcome; Quote's does.
     - `personal_rules_are_listed`: Dana Whitfield's rule is a changed row that names her.
+    - `replaced_rules_show_the_preset_rule`: in `RecommendedRules`, weekday bookings go to the preset's working hours, still automatic, with "Changed" on the hours, and a payment link to "Every tool that charges money", which asks.
+    - `removed_rules_fall_to_the_default_ask`: See charges, and only See charges, goes to the default side.
+    - `unchanged_rules_are_left_out`: no Quote or Share a document row.
     - `cancel_line_only_when_asked`: `AskMeFirst` shows the line between the checks and the buttons; `LimitOnly` and `RaiseDiscount` don't.
     - `simulate_only_when_on`: moved from Task 3. `WithSimulate` has the strip; `RefundNeedsReview`, `Off` and `Quote` (built in) don't, even with `onSimulateChange`, and `Refund` has none without it.
     - `simulate_calls_once`.
