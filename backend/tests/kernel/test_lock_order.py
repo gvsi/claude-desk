@@ -27,10 +27,12 @@ from desk.kernel_service.adapters.base import AdapterFailure, AdapterResult, Ada
 
 from .fakes import FakeAdapter
 from .helpers import kernel_ctx, ledger_rows
+from .test_adapters import visitor_of
 from .test_approvals import ASK_QUOTES, answered, held_on, post_cancel
 from .test_compiler import card
 from .test_decide import decided, desk_with, owner_decide, set_mode
 from .test_execute import executed, fake_quote_desk, post_execute, read, store_intent
+from .test_reply_check import checked
 
 # The tables whose rows the kernel locks, in the order it locks them (repo.py).
 LOCK_ORDER = ("sessions", "decisions", "executions", "policy_versions", "payment_links", "ledger_heads")
@@ -296,3 +298,13 @@ async def test_a_sessions_decision_read_keeps_the_lock_order(app, client, regist
         assert (await read(client, visitor.headers, allowed)).state == "expired"
     # the session is proved, and seen, in the transaction that read the decision, before it expires it
     assert log.transactions == [["sessions", "decisions", "ledger_heads"]]
+
+
+async def test_a_reply_check_keeps_the_lock_order(app, client, frozen_clock):
+    _, visitor = await visitor_of(app, client)
+    frozen_clock.advance(1)                                         # so the visitor's last_seen_at is written
+    with lock_log(app) as log:
+        verdict = await checked(client, visitor, "I can help with that.")
+    assert verdict.ok
+    # the session is seen at the check's end (no lock across the model call), just before its entry
+    assert log.transactions == [["sessions", "ledger_heads"]]

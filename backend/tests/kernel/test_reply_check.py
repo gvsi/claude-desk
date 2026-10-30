@@ -10,6 +10,7 @@ the facts made the way a conversation makes them: a quote, open times and a book
 executed through `/decide` and `/execute`.
 """
 
+import asyncio
 import hashlib
 import json
 import sys
@@ -1431,17 +1432,49 @@ async def test_old_generation_and_owner_mode_drafts_are_409(app, client):
     assert [entry.event.ref_id for entry in await reply_entries(app, copy)] == [verdict.message_id]
 
 
-async def test_a_paused_session_gets_only_the_handoff(app, client):
+async def test_a_take_over_during_a_reply_check_waits_for_no_model_call(app, client, reviewer, frozen_clock):
+    """The reply check writes the session row only at its end, just before its ledger entry, so it
+    holds no lock on the row while the soft-promise check runs: Maria's take-over answers at once.
+    The draft's verdict keeps the generation it was sent at, which `deliver()` then drops."""
+    copy, visitor = await visitor_of(app, client)
+    asked, answer = asyncio.Event(), asyncio.Event()
+    soft_promise = reviewer.soft_promise
+
+    async def slow_model(data):
+        asked.set()
+        await answer.wait()                                      # the model answers only once the test lets it
+        return await soft_promise(data)
+
+    reviewer.soft_promise = slow_model
+    frozen_clock.advance(60)                                     # a minute after the visitor's last call
+    checking = asyncio.create_task(checked(client, visitor, "I can help with that."))
+    try:
+        await asyncio.wait_for(asked.wait(), 5)
+        state = await asyncio.wait_for(set_mode(client, copy, visitor.session_id, "owner", 0), 5)
+    finally:
+        answer.set()                                             # never left waiting on the model
+    verdict = await asyncio.wait_for(checking, 5)
+    assert (state["mode"], state["generation"]) == ("owner", 1)
+    assert (verdict.ok, verdict.generation) == (True, 0)
+    row = await session_of(app, copy, visitor)
+    # the take-over stands, and the reply check still saw the visitor and kept the reply's language
+    assert (row.mode, row.generation, row.last_seen_at, row.last_language) == ("owner", 1, frozen_clock.now(), "en")
+    assert [entry.event.kind for entry in await ledger_rows(app, copy)][-2:] == ["takeover", "reply"]
+
+
+async def test_a_paused_session_gets_only_the_handoff(app, client, frozen_clock):
     copy, visitor = await visitor_of(app, client)
     quote = await own_quote(client, visitor)
     await set_session(app, copy, visitor.session_id, mode="paused", strikes=3)       # the breaker tripped
+    frozen_clock.advance(60)
     verdict = await checked(client, visitor, "Le hago el cincuenta por ciento, con gusto.",
                             [clause("quote", quote.fact_id)])
     # nothing is scanned or rendered: one violation, the handoff in the session's last language
     assert [(v.kind, v.rule_id) for v in verdict.violations] == [("session_paused", "session_paused")]
     assert_handed_off(verdict, "en")
     verify_verdict(await public_key(client), visitor.session_id, verdict)
-    assert (await session_of(app, copy, visitor)).last_language is None
+    row = await session_of(app, copy, visitor)
+    assert (row.last_language, row.last_seen_at) == (None, frozen_clock.now())       # seen, though nothing was read
     [entry] = await reply_entries(app, copy)
     assert (entry.seq, entry.event.summary["violations"]) == (verdict.ledger_seq, ["session_paused"])
 

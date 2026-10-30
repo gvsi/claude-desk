@@ -28,8 +28,9 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    too (`soft.unavailable`).
 6. `ok` when nothing was found: the prose (when not empty) and the cards; otherwise only the
    handoff clause, in the reply's language.
-7. `finalize`: the session keeps a detected language for its next reply and status lines, and
-   the verdict is ledgered (`reply`) and signed in the same transaction.
+7. `finalize`: the session is seen and keeps a detected language for its next reply and status
+   lines (its row written only now, so no lock on it is held while the model reads the draft),
+   and the verdict is ledgered (`reply`) and signed in the same transaction.
 
 What is shown is exactly what was checked: the prose block holds the prose as the scan read it
 (`shown`: NFKC, without the characters no font draws, such as zero-width spaces, soft hyphens,
@@ -643,7 +644,7 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
     if session_row.mode == "paused":
         return await finalize(ctx, session_row, blocks=[handoff(fallback, desk)], language=fallback, author="claude",
                               violations=[Violation(kind="session_paused", span="", rule_id="session_paused")],
-                              fact_ids=fact_ids)
+                              fact_ids=fact_ids, seen=True)
     canaries = await desk_canaries(ctx, desk_id)
     prose = shown(draft.prose)
     detected = lang.detect(prose)
@@ -664,10 +665,9 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
         blocks = [handoff(language, desk)]
     else:
         blocks = ([RenderedBlock(kind="prose", text=prose)] if prose.strip() else []) + cards
-    if detected in ("en", "es"):
-        session_row.last_language = detected
     return await finalize(ctx, session_row, blocks=blocks, violations=violations, language=language,
-                          author="claude", fact_ids=fact_ids, soft_promise=usage)
+                          author="claude", fact_ids=fact_ids, soft_promise=usage, seen=True,
+                          detected=detected if detected in ("en", "es") else None)
 
 
 async def soft_promises(ctx: KernelCtx, language: render.Language, prose: str,
@@ -701,11 +701,25 @@ def sign_verdict(signer: desk_kernel.Signer, *, session_id: str, generation: int
 
 async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[RenderedBlock],
                    violations: Sequence[Violation], language: render.Language, author: str,
-                   fact_ids: Sequence[str] = (), soft_promise: CallUsage | None = None) -> ReplyVerdict:
+                   fact_ids: Sequence[str] = (), soft_promise: CallUsage | None = None, seen: bool = False,
+                   detected: render.Language | None = None) -> ReplyVerdict:
     """Step 7's record, in the caller's transaction: the `reply` ledger entry
     `{message_id, author, ok, language, violations, rule_ids, fact_ids, soft_promise}`, the reply
-    receipt and the signature, at the session's generation. `ok` is no violations. Plan 01b's
-    owner say ends here too."""
+    receipt and the signature, at the session's generation as the request read it. `ok` is no
+    violations. Plan 01b's owner say ends here too.
+
+    With `seen` (a draft the session's own call sent), the session row is written first: seen
+    now (`last_seen_at`) and, when its prose was English or Spanish, `detected` kept as its
+    `last_language`. It is the request's first write to the row, so the request holds no lock on
+    it while the soft-promise check runs and a take-over doesn't wait for the model; it comes
+    before the ledger head, as the lock order says (`repo.py`). A take-over that commits while
+    the check runs keeps its mode and generation (only these two columns are written), and the
+    verdict carries the generation the draft was checked at, which `deliver()` then drops."""
+    if seen:
+        session_row.last_seen_at = ctx.clock.now()
+        if detected is not None:
+            session_row.last_language = detected
+        await ctx.db.flush()
     ok = not violations
     message_id = new_id("msg")
     summary = {"message_id": message_id, "author": author, "ok": ok, "language": language,
@@ -735,7 +749,8 @@ async def post_check_reply(body: CheckReplyRequest, ctx: Ctx, request: Request) 
     generation, on a Desk not deleted, and not taken over by the owner (409 `mode_owner`); each
     refusal is ledgered `auth`."""
     draft = body.draft
-    row = await auth.require_session(ctx, request, draft.session_id, generation=draft.generation)
+    # seen at the end (`finalize`), so the session row isn't locked while the model reads the draft
+    row = await auth.require_session(ctx, request, draft.session_id, generation=draft.generation, seen=False)
     await auth.require_desk(ctx, request, row, row.desk_id)
     if row.mode == "owner":
         raise AuthError(409, "mode_owner", "mode_owner", route=route_template(request),

@@ -11,7 +11,8 @@ Row locks are taken in one order, so no two kernel transactions wait on each oth
 1. the session row: `FOR UPDATE` by a decision (`auth.lock_session`, held until it commits; the
    breaker's strike writes it under that lock) and by a take-over or hand-back; `FOR SHARE` by
    an allow's execution, in T1 and T2; written by a visitor's or agent's own requests
-   (`last_seen_at`, `last_language`);
+   (`last_seen_at`, `last_language`), the reply check's only at its end, just before its ledger
+   entry, so it holds no lock on the row while the soft-promise check runs;
 2. the decision row, `FOR UPDATE`: lazy expiry, an answer, a cancel, each step of an execution,
    reconciliation;
 3. the execution row: inserted with the intent, `FOR UPDATE` in T2, T3 and reconciliation;
@@ -36,6 +37,13 @@ the first time in the strongest mode the transaction will need, since going from
 `FOR UPDATE` waits like a new lock. Reading a row without a lock (the session a decision names,
 say) waits for nothing and can come at any point. Reconciliation takes the decision and the
 execution `SKIP LOCKED`, so it skips an execution that is running rather than wait for it.
+
+A decision holds the session row through its review on purpose: the closed, generation and mode
+checks then hold for the whole decision, and a take-over or hand-back comes before it (409) or
+after it commits, never during it. So a take-over that arrives while the reviewer runs waits for
+the decision to commit, up to the review's timeout (`decisions.REVIEW_TIMEOUT_S`, 4 s), then
+bumps the generation, and an allow from the old generation expires at `/execute`. No other
+kernel call holds the row across a model call.
 
 Activation (`activation.confirm`) holds no session, decision or execution row and starts at step
 4: the Desk's `versions` advisory lock, then its `policy_versions` rows `FOR UPDATE`, then the
