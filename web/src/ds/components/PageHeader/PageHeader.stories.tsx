@@ -68,3 +68,27 @@ export const WithAction: Story = {
     await expect(runCheck).toHaveBeenCalledTimes(1);
   },
 };
+
+export const Phone: Story = {
+  globals: { viewport: { value: 'phone', isRotated: false } },
+  args: {
+    title: 'Connectors',
+    subtitle: 'What Claude can reach, and the accounts behind it.',
+    actions: <Button variant="secondary">Add a connector</Button>,
+  },
+  parameters: {
+    canvas: 'none',
+    canvasNote: 'The Connectors page’s header on a phone, as the phone Connectors board (N-Conn-24-Phone-Connectors) draws it: the title with its action on one line, the subtitle under both. That board joins the reference boards with the Connectors page’s stories.',
+  },
+  play: async ({ canvas }) => {
+    await expect(window.innerWidth).toBe(390);
+    const title = canvas.getByRole('heading', { level: 1, name: 'Connectors' });
+    const action = canvas.getByRole('button', { name: 'Add a connector' });
+    const subtitle = canvas.getByText('What Claude can reach, and the accounts behind it.');
+    // The action stays on the title's line, at its right; the subtitle runs under both, 8 px under the title.
+    await expect(action.getBoundingClientRect().top).toBe(title.getBoundingClientRect().top);
+    await expect(action.getBoundingClientRect().left).toBeGreaterThan(title.getBoundingClientRect().right);
+    await expect(Math.round(subtitle.getBoundingClientRect().top - title.getBoundingClientRect().bottom)).toBe(8);
+    await expect(subtitle.getBoundingClientRect().right).toBeGreaterThan(action.getBoundingClientRect().left);
+  },
+};
