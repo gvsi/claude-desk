@@ -7,7 +7,7 @@ Two tests race requests that once took a pair of rows in opposite orders: the se
 decision rows, and an adapter's row and the ledger head. The others record the row locks each
 transaction of a path takes (`LockLog`) and check that they come in that order: executions and
 their reconciliation, answers, cancels and reads, a verification start allowed or approved, a
-document link opened, and a person removed.
+right code checked, a document link opened, a person removed, and a Desk deleted.
 """
 
 import asyncio
@@ -38,7 +38,7 @@ from .test_desk_writes import updated
 from .test_execute import executed, fake_quote_desk, post_execute, read, store_intent
 from .test_release_document import DANA, confirmed, documents, links, open_link, released
 from .test_reply_check import checked
-from .test_verification import started
+from .test_verification import check, code_in, entry_of, started
 
 # The tables whose rows the kernel locks, in the order it locks them (repo.py).
 LOCK_ORDER = ("sessions", "decisions", "executions", "policy_versions", "people", "verification_challenges",
@@ -54,7 +54,8 @@ class LockLog:
     `LOCK_ORDER` in the order the transaction first locks a row of each: a `SELECT ... FOR UPDATE`
     or `FOR SHARE` on the table, or an `INSERT`, `UPDATE` or `DELETE` on it. It goes by table, not
     row, so a second lock on a table counts as one the transaction holds already; each path here
-    works on one session, one decision and one execution, and a removal on one person."""
+    works on one session, one decision and one execution, and a removal on one person; a Desk's
+    deletion takes all its open sessions in one statement, in ID order."""
 
     def __init__(self) -> None:
         self.transactions: list[list[str]] = []
@@ -379,4 +380,34 @@ async def test_removing_a_person_runs_in_the_lock_order(app, client):
     # session's close and the write, ledgered
     assert log.transactions == [["sessions", "people", "verification_challenges", "document_links", "documents",
                                  "facts", "ledger_heads"]]
+    assert all(map(in_lock_order, log.transactions))
+
+
+async def test_a_right_code_verifies_in_the_lock_order(app, client):
+    # a fresh session asks for a code as Dana, and checks the one her Demo inbox shows
+    _, visitor = await visitor_of(app, client)
+    [notice] = (await started(client, visitor, DANA)).inbox
+    code = code_in(await entry_of(client, visitor, notice))
+    with lock_log(app) as log:
+        response = await check(client, visitor, code)
+    assert (response.status_code, response.json()["verified"]) == (200, True), response.text
+    # the session row FOR UPDATE, then Dana's row and her live code (consumed), then the facts the
+    # session holds, relabelled for her (`labels.relabel_on_verify`; none in a fresh session, but the
+    # lock is asked for), then its `verify` entry
+    assert log.transactions == [["sessions", "people", "verification_challenges", "facts", "ledger_heads"]]
+    assert all(map(in_lock_order, log.transactions))
+
+
+async def test_deleting_a_desk_runs_in_the_lock_order(app, client):
+    # Dana is verified in one session and her invoice's link is unopened
+    copy, _ = await visitor_of(app, client)
+    dana = await confirmed(client, copy, DANA)
+    await released(client, dana, (await documents(app, copy))["dana-invoice"])
+    with lock_log(app) as log:
+        response = await client.delete(f"/desks/{copy.desk_id}", headers=copy.owner)
+    assert response.status_code == 204, response.text
+    # after the Desk row: its open sessions closed, its live codes cancelled (none, but the lock is
+    # asked for), its links voided in one UPDATE (`ON_DELETE`), their facts expired, then the deletion
+    # ledgered
+    assert log.transactions == [["sessions", "verification_challenges", "document_links", "facts", "ledger_heads"]]
     assert all(map(in_lock_order, log.transactions))
