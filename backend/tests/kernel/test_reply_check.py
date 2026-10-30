@@ -624,10 +624,22 @@ def test_other_languages_outweigh_the_words_spanish_shares(prose):
 
 
 @pytest.mark.parametrize("prose", [
-    "Don't pour grease down the drain.",
+    "Don't pour grease down the drain.",            # "pour" and "et" mark no other language
     "Don't pour it.",
     "We fix sinks, tubs, et cetera.",
+])
+async def test_plumbing_english_with_a_dropped_word_reads_as_english(app, client, prose):
+    copy, visitor = await visitor_of(app, client)
+    assert lang.detect(prose) == "en"
+    verdict = await checked(client, visitor, prose)
+    assert (verdict.ok, verdict.language, verdict.blocks) == (True, "en", [RenderedBlock(kind="prose", text=prose)])
+    assert (await session_of(app, copy, visitor)).last_language == "en"
+
+
+@pytest.mark.parametrize("prose", [
     "It's non-toxic.",                              # "non" stays an Italian marker
+    "Sure, ciao!",                                  # "ciao" stays one too
+    "Ciao, I'm on it.",                             # "i" and "on" count for English, "it" ties "ciao"
 ])
 async def test_a_tie_with_english_reads_as_english(app, client, prose):
     # another language must outnumber English's markers to hand off, so one word it shares with
@@ -637,6 +649,33 @@ async def test_a_tie_with_english_reads_as_english(app, client, prose):
     verdict = await checked(client, visitor, prose)
     assert (verdict.ok, verdict.language, verdict.blocks) == (True, "en", [RenderedBlock(kind="prose", text=prose)])
     assert (await session_of(app, copy, visitor)).last_language == "en"
+
+
+@pytest.mark.parametrize("prose", [
+    "On vient à dix heures.",                       # French writes "on": a time in its own words
+    "On passe demain.",
+    "On fait ça pour trente.",                      # a price in its own words
+    "Ich komme am Montag.",                         # German writes "am", "in", "an", "was", "will", "also"
+    "Ich bin in zehn Minuten da.",
+    "Wir sind am Montag da.",
+    "Ich will morgen kommen.",
+    "Was machen wir morgen?",
+    "Ich rufe an.",
+    "Also, ich komme um zehn.",
+    "I tecnici arrivano subito.",                   # Italian writes "i" and "in"
+    "Arrivo in un'ora, grazie.",
+])
+async def test_english_markers_another_language_writes_dont_outvote_it(app, client, prose):
+    # "on", "in", "an", "am", "was", "will", "i" and "also" are English markers that French, German
+    # or Italian write as their own, so they don't count against that language: one of its own
+    # markers still hands off on a first reply, and a time, a day or a price in its words never
+    # rests on the model check alone
+    copy, visitor = await visitor_of(app, client)
+    assert lang.detect(prose) == "other"
+    verdict = await checked(client, visitor, prose)
+    assert [(v.kind, v.rule_id) for v in verdict.violations] == [("unsupported_language", "language")]
+    assert_handed_off(verdict, "en")
+    assert (await session_of(app, copy, visitor)).last_language is None
 
 
 @pytest.mark.parametrize(("prose", "language"), [
@@ -660,6 +699,19 @@ async def test_words_english_or_spanish_write_mark_no_other_language(app, client
     assert (verdict.ok, verdict.language, verdict.blocks) == (True, language,
                                                               [RenderedBlock(kind="prose", text=prose)])
     assert (await session_of(app, copy, visitor)).last_language == language
+
+
+@pytest.mark.parametrize("prose", [
+    "Pour slowly.",
+    "Et cetera.",
+    "EST hours.",
+    "EU plugs.",
+    "SIM swaps.",
+])
+def test_a_dropped_english_word_alone_is_too_little_to_tell(prose):
+    # one word English writes and no marker of any language, so if that word marked another
+    # language again it would outnumber English's markers and hand off
+    assert lang.detect(prose) == "none"
 
 
 @pytest.mark.parametrize("prose", [

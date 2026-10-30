@@ -7,9 +7,12 @@ counts for none. The three marker sets are disjoint and leave out the words the 
 on ("tu", "te", "ti", "lo", "del", "al", "está", "claro"), which Spanish keeps although French,
 Portuguese or Italian write them too: frequent words of those languages that neither English nor
 Spanish writes ("à", "quand", "já", "vou", "certo", "subito") outweigh them there, and a tie
-with Spanish goes to the other language. A word English or Spanish writes on its own ("pour",
-"et cetera", "EU", "das", "sur") marks no other language, and another language must outnumber
-English's markers, since English writes some of them as prefixes ("non-toxic"). "para" and
+with Spanish goes to the other language. Most words English or Spanish writes on its own ("pour",
+"et cetera", "EU", "das", "sur") mark no other language; a few loanwords, abbreviations and
+prefixes stay ("non", "ciao", "merci", "tout", "com", "il"), so another language must outnumber
+English's markers ("It's non-toxic.", "Sure, ciao!"). English markers that French, German or
+Italian write as their own ("on", "in", "an", "am", "was", "will", "i", "also") don't count
+against that language, so "On passe demain." and "Ich komme am Montag." hand off. "para" and
 "por" count for none, since Portuguese writes them as often as Spanish does.
 
 Prose in any language but English or Spanish hands off to the owner (`unsupported_language`), so
@@ -49,7 +52,8 @@ ES_MARKERS = frozenset("""
 
 # French, Portuguese, Italian and German words that English and Spanish don't write on their own:
 # the homographs ("pour", "et", "est", "eu", "sim"; "das", "des", "une", "sur", "pela", "pode",
-# "che") are left out
+# "che") are left out, and a few loanwords, abbreviations and prefixes stay ("non", "ciao",
+# "merci", "à", "au", "pas", "tout", "ce", "com", "nous", "mit", "ci", "il")
 OTHER_MARKERS = frozenset("""
     je vous nous il elle sont avec dans pas du ce mais ça peux suis avez oui merci bonjour votre très
     voudrais aider qui você não com uma isso obrigado obrigada posso ajudar muito sono non questo grazie
@@ -58,17 +62,24 @@ OTHER_MARKERS = frozenset("""
     ci gli più bene tutto perfetto subito dopo
 """.split())
 
+# English markers that French ("on", "an"), German ("in", "an", "am", "was", "will", "also") or
+# Italian ("i", "in") write as their own frequent words: they still count for English, but not
+# against another language's markers
+EN_SHARED = frozenset("on in an am was will i also".split())
+
 if EN_MARKERS & ES_MARKERS or (EN_MARKERS | ES_MARKERS) & OTHER_MARKERS:
     raise RuntimeError("the language marker sets are disjoint")
+if not EN_SHARED <= EN_MARKERS:
+    raise RuntimeError("the English markers other languages write are English markers")
 
 WORD = re.compile(r"[^\W\d_]+")
 
 
 def detect(text: str) -> Detected:
     """`en` or `es` when that language's markers lead; `other` for another script, more markers
-    of another language than of English and at least as many as of Spanish, or four or more words
-    with no marker of any language; `none` for no words, a tie between English and Spanish, or a
-    few unmarked words ("OK")."""
+    of another language than of English (leaving out the English ones it writes too, `EN_SHARED`)
+    and at least as many as of Spanish, or four or more words with no marker of any language;
+    `none` for no words, a tie between English and Spanish, or a few unmarked words ("OK")."""
     lowered = unicodedata.normalize("NFKC", text).lower()
     words = WORD.findall(lowered)
     if not words:
@@ -82,7 +93,8 @@ def detect(text: str) -> Detected:
     if any(mark in lowered for mark in SPANISH_MARKS):
         es += SPANISH_MARK_BONUS
     other = sum(word in OTHER_MARKERS for word in words)
-    if other > en and other >= es:
+    shared = sum(word in EN_SHARED for word in words)
+    if other > en - shared and other >= es:
         return "other"
     if en == es == 0:
         return "other" if len(words) >= MIN_UNMARKED_WORDS else "none"

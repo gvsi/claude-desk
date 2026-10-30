@@ -6,8 +6,9 @@ rest Plan 01a's merge gate names (its Task 18): `/whoami` with a bad token; the 
 signed and ledgered; seeds that activate only from cached proofs, in either proof mode; owner drafts
 proved before confirm, and a rule set wider than its cards rejected in plain words; the public Desk
 with no private field; a document's canary in a reply; hostile tool names and fact ids, each still
-ledgered; and an owner take-over between an execution's intent and its side effect. One more comes
-from the PR review: a first reply with no marker of any language hands off.
+ledgered; and an owner take-over between an execution's intent and its side effect. Two more come
+from the PR review: a first reply with no marker of any language hands off, and so does a French or
+German one whose only English markers are words that language writes too.
 
 Three cases run kernel code in-process (`white_box`): one breaks the compiler to see the proof
 catch it, one hides the shipped proof reports or the prover and restarts the kernel, and one takes
@@ -58,6 +59,9 @@ STAND_IN_SEEDED = "stub-decision-seeded-hold"
 UNPROVED = Expect(status=503, fields={"code": "seed_unproved"})
 NO_PROVER = "/nonexistent/desk-prove"   # where no prover is: the startup selftest fails, so the kernel runs bounded
 UNMARKED_PROSE = "O técnico chega às dez, combinado?"   # no marker of any language, and a time in its own words
+# One marker of its own beside an English marker the language writes too ("on", "am"), and a time
+# or a day in its own words
+SHARED_MARKER_PROSE = ["On vient à dix heures.", "Ich komme am Montag."]
 PROOF_HASHES = ("cedar_sha256", "schema_sha256", "baseline_sha256", "profiles_sha256", "invariants_sha256",
                 "review_thresholds_version")
 
@@ -333,6 +337,20 @@ async def test_an_unmarked_first_reply_hands_off(k: KernelHarness):
     desk = await golden_desk(k)
     visitor = await open_caller(k, desk, "visitor")
     await check_reply(k, visitor, UNMARKED_PROSE, expect=Expect(fields={
+        **handed_off(visitor, "unsupported_language").fields, "violations": {"$len": 1}, "language": "en"}))
+
+
+@pytest.mark.requires("01a")
+@pytest.mark.parametrize("prose", SHARED_MARKER_PROSE)
+async def test_a_first_reply_with_english_markers_its_language_writes_hands_off(k: KernelHarness, prose: str):
+    """English markers that French, German or Italian write as their own words ("on", "am") don't
+    count against that language, so a session's first reply with one marker of its own beside one
+    of them is another language: `unsupported_language` alone and only the handoff, in English, so
+    a time or a day in words neither lexicon reads ("dix heures", "Montag") never rests on the
+    model check alone."""
+    desk = await golden_desk(k)
+    visitor = await open_caller(k, desk, "visitor")
+    await check_reply(k, visitor, prose, expect=Expect(fields={
         **handed_off(visitor, "unsupported_language").fields, "violations": {"$len": 1}, "language": "en"}))
 
 
