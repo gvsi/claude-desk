@@ -37,6 +37,9 @@ import type { ReviewToolView } from '../components/ConnectorReview/ConnectorRevi
 import type { ConnectorSectionProps } from '../components/ConnectorSection/ConnectorSection';
 import type { DirectoryRowView } from '../components/ConnectorDirectory/ConnectorDirectory';
 import type { RecentRequestView } from '../components/RecentRequests/RecentRequests';
+import type { OutcomeGroupRow } from '../components/OutcomeGroups/OutcomeGroups';
+import type { PersonRuleView } from '../components/PersonRules/PersonRules';
+import type { RuleMode } from '../components/OutcomeMenu/outcomeWords';
 import type { RuleWord } from '../components/RuleRow/RuleRow';
 import { ruleDiff } from '../components/ChangeReview/ruleDiff';
 import { rulesForTool } from '../components/ToolRulesCard/toolRules';
@@ -1016,6 +1019,25 @@ const personalBookingCard = rule({
 
 const word = (field: RuleWord['field'], text: string): RuleWord => ({ field, text });
 
+/**
+ * The rules just for Dana Whitfield, as her page lists them (N-Run2-People-Person, in review). The
+ * board words its own sample rules for her: a Saturday-morning booking rule and her documents.
+ */
+const danaRules: PersonRuleView[] = [
+  {
+    key: 'rv-dana-saturday',
+    title: 'Book a visit',
+    rule: { card_id: 'rv-dana-saturday', mode: 'auto', reason: 'Dana can book Saturday morning visits.' },
+    words: [word('who', people.dana.name), word('hours', 'Saturdays 9:00 am to 1:00 pm')],
+  },
+  {
+    key: 'rv-dana-docs',
+    title: 'Share a document',
+    rule: { card_id: 'rv-dana-docs', mode: 'auto', reason: "Dana gets her own invoices and warranties after confirming it's her." },
+    words: [word('who', people.dana.name), word('who', 'Verified')],
+  },
+];
+
 /** Each card's words as the web app's `ruleWords` renders what it enforces, in the boards' words. */
 const ruleWords = {
   'rv-quote': [word('who', 'Anyone'), word('limits', 'No discounts')],
@@ -1515,6 +1537,27 @@ const paymentLimit = {
   hint: 'Whole dollars, from 0 to 10,000. Now $500.',
 };
 
+/**
+ * The setup interview's draft rules for Rivera, by outcome, in the setup board's words: what Claude
+ * does and who it's for (N-R2-Setup-08-Rules, in review).
+ */
+const setupOutcomes = {
+  auto: [
+    { key: 'quote', text: 'Quotes from your price list, at list price', who: 'Anyone' },
+    { key: 'find-slots', text: 'Finds open times', who: 'Anyone' },
+    { key: 'book-weekday', text: 'Books weekday visits in your hours', who: 'Anyone' },
+    { key: 'leads', text: 'Saves leads and callback requests', who: 'Anyone' },
+    { key: 'documents', text: 'Sends customers their own documents', who: 'Verified customers' },
+  ],
+  ask: [
+    { key: 'discounts', text: 'Discounts', who: 'Anyone' },
+    { key: 'book-saturday', text: 'Saturday bookings', who: 'Anyone' },
+    { key: 'payment-link', text: 'Payment links', who: 'Anyone' },
+    { key: 'charge-mandate', text: 'Charges within a signed limit', who: 'Signed agents' },
+  ],
+  never: [{ key: 'refund', text: 'Refunds', who: 'Anyone' }],
+} satisfies Record<RuleMode, OutcomeGroupRow[]>;
+
 /** The default side a rule falls to when a preset drops it: the house rules' words for a default ask. */
 const defaultAsk = {
   mode: 'ask',
@@ -1967,6 +2010,8 @@ export const rivera = {
   verificationConnection,
   googleCalendar,
   paymentLimit,
+  setupOutcomes,
+  danaRules,
   askFirstReview,
   recommendedReview,
   limitRaise,

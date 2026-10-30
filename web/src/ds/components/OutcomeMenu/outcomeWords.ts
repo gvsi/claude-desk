@@ -30,6 +30,17 @@ export function outcomePhrase(mode: RuleMode, limit?: string): string {
 }
 
 /**
+ * The setup interview's rules grouped by outcome (`OutcomeGroups`), each group's heading in the
+ * setup board's words. Each sits beside its outcome's `OUTCOME_TONE` dot, so a group reads as the
+ * outcome its rules have everywhere else.
+ */
+export const OUTCOME_GROUP_WORDS = {
+  auto: 'Does on its own',
+  ask: 'Asks you',
+  never: 'Never does',
+} as const satisfies Record<RuleMode, string>;
+
+/**
  * The rule presets the owner can start from: the master plan's (`desk.presets.PRESETS`). There is no
  * "Custom" preset: rules the owner changes are simply the Desk's rules, with no preset of their own.
  */

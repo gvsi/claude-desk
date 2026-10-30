@@ -1,0 +1,100 @@
+/* PersonRules: a section header with "Change them on Rules" at the right, 8 px over a card of
+   rows. A row (12 px 16 px, under a hairline but the first) is what the rule is on over its
+   reason at the left, then what it enforces in secondary meta and its outcome, centred at the
+   right. Under 480 px of its own width those two go under the reason. */
+
+.cd-person-rules {
+  container: cd-person-rules / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+.cd-person-rules__change {
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: color var(--motion-instant) var(--motion-ease);
+}
+
+.cd-person-rules__change:hover {
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.cd-person-rules__rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cd-person-rules__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-16);
+  padding: var(--space-12) var(--space-16);
+}
+
+.cd-person-rules__row + .cd-person-rules__row {
+  border-top: 1px solid var(--line-hairline);
+}
+
+.cd-person-rules__text {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+/* What the rule is on, in the control type at weight 520, as the board sets it. */
+.cd-person-rules__title {
+  display: block;
+  color: var(--text-primary);
+  font-weight: 520;
+}
+
+.cd-person-rules__reason {
+  display: block;
+  margin-top: var(--space-2);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.cd-person-rules__words {
+  flex: 0 1 auto;
+  min-width: 0;
+  color: var(--text-secondary);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.cd-person-rules__row > .cd-outcome {
+  flex: none;
+}
+
+.cd-person-rules__none {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+@container cd-person-rules (max-width: 479.98px) {
+  .cd-person-rules__row {
+    flex-wrap: wrap;
+    align-items: baseline;
+    row-gap: var(--space-4);
+    column-gap: var(--space-12);
+  }
+
+  .cd-person-rules__text {
+    flex-basis: 100%;
+  }
+
+  .cd-person-rules__words {
+    text-align: left;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cd-person-rules__change {
+    transition: none;
+  }
+}

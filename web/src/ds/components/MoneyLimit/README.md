@@ -5,6 +5,7 @@
 ## When to use
 
 - At the top of each group of payment tools on the Rules page, Payments and Stripe, as their `ConnectorSection`'s `aboveTools` (N-Conn-19-Ceiling, N-Conn-19b-Ceiling-Edit, N-Conn-22-Phone-Presets). Each group holds its own copy, and only the one the owner opens edits.
+- Above the setup interview's rules, in `OutcomeGroups`' card of its own, where its line is in weight 520 (N-R2-Setup-08-Rules, in review).
 - The limit is the active rules version's money cap (master "Money cap"), whatever the rules below it say. It changes only through a draft the owner confirms on its review page (`LimitChange` above `ChangeReview`, N-Conn-20-Ceiling-Review).
 
 ## What it shows

@@ -153,6 +153,7 @@ export { TakeOverBar, type TakeOverBarProps } from './components/TakeOverBar/Tak
 
 // Rules and connectors
 export {
+  OUTCOME_GROUP_WORDS,
   OUTCOME_TONE,
   OUTCOME_WORDS,
   PRESET_WORDS,
@@ -161,7 +162,9 @@ export {
   type RulesPreset,
 } from './components/OutcomeMenu/outcomeWords.ts';
 export { OutcomeMenu, type OutcomeMenuProps } from './components/OutcomeMenu/OutcomeMenu.tsx';
-export { RuleRow, type RuleRowProps, type RuleWord } from './components/RuleRow/RuleRow.tsx';
+export { OutcomeGroups, type OutcomeGroupRow, type OutcomeGroupsProps } from './components/OutcomeGroups/OutcomeGroups.tsx';
+export { RuleRow, ruleWordsLine, type RuleRowProps, type RuleWord } from './components/RuleRow/RuleRow.tsx';
+export { PersonRules, type PersonRuleView, type PersonRulesProps } from './components/PersonRules/PersonRules.tsx';
 export { ToolRulesCard, type RulesLinkProps, type ToolRulesCardProps } from './components/ToolRulesCard/ToolRulesCard.tsx';
 export { rulesForTool, type RulesTool } from './components/ToolRulesCard/toolRules.ts';
 export { ConnectorIcon, type ConnectorIconName, type ConnectorIconProps } from './components/ConnectorIcon/ConnectorIcon.tsx';
