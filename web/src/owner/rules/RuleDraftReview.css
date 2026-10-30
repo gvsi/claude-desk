@@ -1,0 +1,32 @@
+/* RuleDraftReview: the breadcrumb over the page's title, then the payment limit's change, the
+   draft's summary when it has one, and the change review, 20 px apart in the content column, as
+   the signed change review boards draw them. */
+
+.cd-rule-draft {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20);
+  min-width: 0;
+  max-width: var(--size-content);
+}
+
+.cd-rule-draft__header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+  min-width: 0;
+}
+
+/* The draft's rules by outcome, in Claude's serif. */
+.cd-rule-draft__summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  min-width: 0;
+  color: var(--text-primary);
+}
+
+.cd-rule-draft__summary > p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}

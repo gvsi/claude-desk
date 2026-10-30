@@ -343,11 +343,12 @@ describe('rule drafts', () => {
     expect(quote.before).toEqual({ appliesTo: 'Quote', mode: 'auto', reason: ruleCards['rv-quote'].reason, words: ruleWords(ruleCards['rv-quote'], PEOPLE) });
     expect(quote.after?.words).toContainEqual({ field: 'limits', text: 'Discounts up to 10%' });
 
-    // An effect card: the group in words, and no connector.
+    // An effect card: the group in words, and no connector. An added rule's one side leaves its
+    // target to the row's title, which names it.
     const shared = rowFor('card-charges');
     expect(shared).toMatchObject({ change: 'added', title: 'Every tool that charges money', before: null, changed: [] });
     expect(shared.connector).toBeUndefined();
-    expect(shared.after).toMatchObject({ appliesTo: 'Every tool that charges money', mode: 'auto', limit: '$300' });
+    expect(shared.after).toEqual({ mode: 'auto', limit: '$300', reason: charges.reason, words: ruleWords(charges, PEOPLE) });
 
     // A card retargeted from Payment link to every tool that charges money says so on both sides.
     const link = rowFor('rv-link');
@@ -439,6 +440,7 @@ describe('rule drafts', () => {
     expect(byKey.get('rv-book-wk')?.after).toEqual({ ...DEFAULT_SIDE, appliesTo: 'Book a visit' });
     expect(byKey.get('rv-book-sat')?.after).toEqual({ ...DEFAULT_SIDE, appliesTo: 'Book a visit' });
     expect(byKey.get('preset-book-weekday')).toMatchObject({ change: 'added', title: 'Book a visit', after: { mode: 'auto' } });
+    expect(byKey.get('preset-book-weekday')?.after?.appliesTo).toBeUndefined();
     expect(rows.filter((row) => row.change === 'added').map((row) => row.key)).toEqual(['preset-book-weekday']);
   });
 
@@ -481,14 +483,14 @@ describe('rule drafts', () => {
     expect(draft.turnedOn).toEqual(turnedOn);
     const rows = changeRows(draft, PEOPLE, TOOLS);
     expect(rows).toEqual([
-      { key: 'turned-on:native.payment_link', change: 'turned_on', title: 'Payment link', connector: view('payments'), before: null, after: { ...DEFAULT_SIDE, appliesTo: 'Payment link' }, changed: [] },
+      { key: 'turned-on:native.payment_link', change: 'turned_on', title: 'Payment link', connector: view('payments'), before: null, after: DEFAULT_SIDE, changed: [] },
       {
         key: 'turned-on:native.charge_mandate',
         change: 'turned_on',
         title: 'Charge within a signed limit',
         connector: view('payments'),
         before: null,
-        after: { ...DEFAULT_SIDE, appliesTo: 'Charge within a signed limit' },
+        after: DEFAULT_SIDE,
         changed: [],
       },
     ]);

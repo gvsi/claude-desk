@@ -26,11 +26,15 @@ function connectorFor(card: RuleCard) {
   return card.applies_to.startsWith('effect:') ? undefined : (connectorOf(card.applies_to as ToolName)?.view ?? undefined);
 }
 
-/** A card on one side of a row: what it applies to, its outcome and limit, its reason and its words. */
-function cardSide(card: RuleCard, people: PeopleOut | null | undefined): ChangeSide {
+/**
+ * A card on one side of a row: its outcome and limit, its reason and its words, and, on a changed
+ * row's two sides, what it applies to, so a widened or narrowed target shows. A row's lone side
+ * leaves that to the row's title, which names it.
+ */
+function cardSide(card: RuleCard, people: PeopleOut | null | undefined, withTarget: boolean): ChangeSide {
   const amount = card.mode === 'auto' && card.max_amount_cents != null ? formatCents(card.max_amount_cents) : undefined;
   return {
-    appliesTo: targetWords(card.applies_to),
+    ...(withTarget ? { appliesTo: targetWords(card.applies_to) } : {}),
     mode: card.mode,
     ...(amount === undefined ? {} : { limit: amount }),
     reason: card.reason,
@@ -38,9 +42,9 @@ function cardSide(card: RuleCard, people: PeopleOut | null | undefined): ChangeS
   };
 }
 
-/** The default ask for what `appliesTo` names. */
-function defaultSide(appliesTo: string): ChangeSide {
-  return { ...DEFAULT_SIDE, appliesTo, words: [...DEFAULT_SIDE.words] };
+/** The default ask, for what `appliesTo` names on a changed row's After side. */
+function defaultSide(appliesTo?: string): ChangeSide {
+  return { ...(appliesTo === undefined ? {} : { appliesTo }), ...DEFAULT_SIDE, words: [...DEFAULT_SIDE.words] };
 }
 
 /**
@@ -64,8 +68,8 @@ export function changeRows(draft: RuleDraft, people: PeopleOut | null | undefine
       change: change.change,
       title,
       ...(connector === undefined ? {} : { connector }),
-      before: change.before === null ? null : cardSide(change.before, people),
-      after: change.after === null ? defaultSide(title) : cardSide(change.after, people),
+      before: change.before === null ? null : cardSide(change.before, people, true),
+      after: change.after === null ? defaultSide(title) : cardSide(change.after, people, change.before !== null),
       changed: change.fields,
     };
   });
@@ -83,7 +87,7 @@ export function changeRows(draft: RuleDraft, people: PeopleOut | null | undefine
       title,
       ...(connector === undefined ? {} : { connector }),
       before: null,
-      after: governing === undefined ? defaultSide(title) : cardSide(governing, people),
+      after: governing === undefined ? defaultSide() : cardSide(governing, people, false),
       changed: [],
     });
   }
