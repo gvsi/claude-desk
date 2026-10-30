@@ -506,8 +506,9 @@ UNREADABLE = {
     "the thresholds file doesn't run": (lambda repo, pass_id: write(repo, THRESHOLDS_PATH,
                                                                     THRESHOLDS_FILE + "\nUNDEFINED_ROWS + 1\n"),
                                         "the thresholds file doesn't run: NameError"),
-    "the thresholds file has no initial rows": (lambda repo, pass_id: write(repo, THRESHOLDS_PATH, THRESHOLDS_FILE.replace(
-        "INITIAL_THRESHOLDS: dict", "STARTING_THRESHOLDS: dict")), "the thresholds file has no INITIAL_THRESHOLDS"),
+    "the thresholds file has no initial rows": (lambda repo, pass_id: write(
+        repo, THRESHOLDS_PATH, THRESHOLDS_FILE.replace("INITIAL_THRESHOLDS: dict", "STARTING_THRESHOLDS: dict")),
+        "the thresholds file has no INITIAL_THRESHOLDS"),
     "the table has no charge row": (lambda repo, pass_id: write(repo, THRESHOLDS_PATH, _calibrated_lines(
         THRESHOLDS_FILE, '    "charge": ReviewThresholds(min_within_charter_bp=9000, max_manipulation_bp=1000),\n',
         "")), "has no charge row"),

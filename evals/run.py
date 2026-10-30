@@ -60,10 +60,10 @@ gate over its rows, the current recorded rate, the usage of its judged legitimat
 and hosted latency runs whose `--pass` named it (never a dry run's; without one the report says latency
 wasn't measured), the thresholds' calibration at the pass's commit and, with `--null-baseline`, a
 null-baseline pass that judged exactly the held-out legitimate tasks the pass ran (no `--only`, no stop
-at its budget). Only a pass of the whole suite (`--suite all`, `--split
-heldout` or `all`, no `--only`) that its budget didn't stop becomes the latest report; any other gets
-its report alone, under `evals/out/reports/`. A dry run, a null-baseline pass, a pass with no run, or
-anything it can't read whole is refused: exit 1, the reason on stdout, nothing written.
+at its budget). Only a pass of the whole suite (`--suite all`, `--split heldout` or `all`, no
+`--only`) that its budget didn't stop becomes the latest report; any other gets its report alone,
+under `evals/out/reports/`. A dry run, a null-baseline pass, a pass with no run, or anything it can't
+read whole is refused: exit 1, the reason on stdout, nothing written.
 """
 
 import argparse

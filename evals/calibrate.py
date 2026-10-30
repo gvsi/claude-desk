@@ -223,7 +223,8 @@ def calibrate(pass_id: str, *, root: Path = REPO_ROOT, thresholds_file: Path | N
         staged.write_text(text)
     except OSError as error:
         staged.unlink(missing_ok=True)
-        raise CalibrationRefused(f"the report can't be written ({type(error).__name__}); nothing was written") from error
+        raise CalibrationRefused(f"the report can't be written ({type(error).__name__}); nothing was "
+                                 "written") from error
     original = ""
     try:
         if written:

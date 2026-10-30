@@ -374,7 +374,7 @@ def append_spend(path: Path, row: Mapping[str, Any]) -> None:
         fcntl.flock(handle, fcntl.LOCK_EX)
         try:
             handle.seek(0)
-            if next(csv.reader(handle), None) == list(LEGACY_SPEND_COLUMNS):
+            if next(csv.reader([handle.readline()]), None) == list(LEGACY_SPEND_COLUMNS):
                 _add_estimated_column(path)
             handle.seek(0, os.SEEK_END)
             writer = csv.DictWriter(handle, fieldnames=SPEND_COLUMNS)

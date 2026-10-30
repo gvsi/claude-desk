@@ -100,7 +100,8 @@ def a_pass(runs: list[ReportRun], **changes: Any) -> PassSummary:
         "model_ids": MODEL_IDS, "runs_per_scenario": 3, "external": False, "dry_run": False,
         "null_baseline": False, "stopped_by_budget": False, "pending": {}, "heldout_sha256": HELDOUT_SHA,
         "spend": spend(runs=len(runs)), "runs": runs,
-        "simulator_fallbacks": {"turns": sum(r.fallback_turns for r in runs), "switches": sum(r.switches for r in runs)},
+        "simulator_fallbacks": {"turns": sum(r.fallback_turns for r in runs),
+                                "switches": sum(r.switches for r in runs)},
     }
     return PassSummary.model_validate({**data, **changes})
 
@@ -1013,7 +1014,8 @@ async def unpriced_run(scenario: Any, rep: int, target: Any, simulator: Any, **k
 
 
 REPORT_REFUSALS = {
-    "another run's transcript": (crafted_run, None, _swap_transcript, "the transcript of leg-held rep 1 is another run's"),
+    "another run's transcript": (crafted_run, None, _swap_transcript,
+                                 "the transcript of leg-held rep 1 is another run's"),
     "a latency file that isn't a latency run": (crafted_run, None, _latency("x.json", '{"pass_id": "<pass>"}'),
                                                 "latency file x.json names pass"),
     "a latency file that can't be read": (crafted_run, None, _latency("y.json", "{"),
