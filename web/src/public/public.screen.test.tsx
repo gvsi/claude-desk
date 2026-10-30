@@ -264,7 +264,8 @@ describe('public chat page', () => {
     expect(receiptsOf(bookedRow)).toEqual(booked);
 
     // In a third chat two requests are held. While the first one's cancel is out, the other
-    // request's button can't be pressed, so no click is lost; once it is back, that one cancels too.
+    // request's button waits: its words shown with no spinner, still in the tab order, and a click
+    // on it sends nothing, so no click is lost. Once the first is back, that one cancels too.
     const third = await renderRoute(PAGE, { seed: 'rivera' });
     await ready(third.screen);
     await say(third.screen, 'Can I get 15% off if I pay cash?');
@@ -279,9 +280,18 @@ describe('public chat page', () => {
     const before = requests('cancelRequest').length;
     await cancels.first().click();
     await expect.element(cancels.first()).toHaveAttribute('aria-busy', 'true');
-    await expect.element(cancels.last()).toBeDisabled();
-    expect(secondHold?.getAttribute('aria-busy')).toBeNull();
+    await expect.element(cancels.last()).toHaveAttribute('aria-disabled', 'true');
+    const waiting = secondHold as HTMLButtonElement;
+    expect(waiting.disabled).toBe(false);
+    expect(waiting.tabIndex).toBe(0);
+    expect(waiting.textContent).toBe('Cancel this request');
+    expect(waiting.getAttribute('aria-busy')).toBeNull();
+    expect(waiting.querySelector('.cd-button__spinner')).toBeNull();
+    // The click on the waiting one sends nothing: the paths at the end are each hold's once.
+    await expect.poll(() => requests('cancelRequest').length).toBe(before + 1);
+    waiting.click();
     await vi.waitFor(() => expect(firstHold?.isConnected).toBe(false), { timeout: 3_000 });
+    await expect.element(cancels).not.toHaveAttribute('aria-disabled');
     await expect.element(cancels).toBeEnabled();
     await cancels.click();
     await expect.element(cancels).not.toBeInTheDocument();

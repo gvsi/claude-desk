@@ -4,7 +4,7 @@
  * and the last 7 days, every figure as the API reads it.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { page } from 'vitest/browser';
+import { page, type Locator } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import type { Decision } from '../../api/contracts.ts';
@@ -71,6 +71,20 @@ function region(screen: RenderResult, name: string) {
 /** A held request's card, by what was asked. */
 function heldCard(screen: RenderResult, reason: string) {
   return screen.getByRole('article', { name: `Held for you: ${reason}`, exact: true });
+}
+
+/**
+ * A button beside a busy one, waiting for its request: its words shown with no spinner, announced
+ * as unavailable but not disabled, so it keeps its place in the tab order.
+ */
+async function expectWaiting(button: Locator, words: string): Promise<void> {
+  await expect.element(button).toHaveAttribute('aria-disabled', 'true');
+  const el = button.element() as HTMLButtonElement;
+  expect(el.disabled).toBe(false);
+  expect(el.tabIndex).toBe(0);
+  expect(el.textContent).toBe(words);
+  expect(el.getAttribute('aria-busy')).toBeNull();
+  expect(el.querySelector('.cd-button__spinner')).toBeNull();
 }
 
 /** Waits for `key` to be read `n` more times than now. */
@@ -735,30 +749,37 @@ describe('Today', () => {
   });
 
   it('callback_card_busies_only_the_pressed_button', async () => {
-    const { screen } = await renderRoute(TODAY, { seed: 'rivera_quiet' });
+    const { screen, router } = await renderRoute(TODAY, { seed: 'rivera_quiet' });
     await visitorSays('Can you call me back?');
     const wants = screen.getByRole('article', { name: 'Wants you' });
     await expect.element(wants, { timeout: 2_000 }).toBeVisible();
     const join = wants.getByRole('button', { name: 'Join the chat' });
     const done = wants.getByRole('button', { name: 'Mark done' });
 
-    // While "Mark done" is out, it spins with its words kept, and "Join the chat" can't be pressed.
+    // While "Mark done" is out, it spins with its words kept, and "Join the chat" waits: its words
+    // shown with no spinner, still in the tab order, and a click on it does nothing.
     mockStore.inject({ route: 'handoffDone', status: 503, delayMs: 1_000 });
     await done.click();
     await expect.element(done).toHaveAttribute('aria-busy', 'true');
-    await expect.element(join).toBeDisabled();
-    expect(join.element().getAttribute('aria-busy')).toBeNull();
+    await expectWaiting(join, 'Join the chat');
     expect(wants.element().querySelectorAll('[aria-busy="true"]')).toHaveLength(1);
+    const reads = requests('conversation').length;
+    (join.element() as HTMLButtonElement).click();
     await expect.element(done, { timeout: 3_000 }).not.toHaveAttribute('aria-busy');
+    expect(requests('conversation')).toHaveLength(reads);
+    expect(router.state.location.pathname).toBe(TODAY);
+    await expect.element(join).not.toHaveAttribute('aria-disabled');
     await expect.element(join).toBeEnabled();
 
     // And the other way round, while joining reads the chat.
     mockStore.inject({ route: 'conversation', status: 503, delayMs: 1_000 });
     await join.click();
     await expect.element(join).toHaveAttribute('aria-busy', 'true');
-    await expect.element(done).toBeDisabled();
-    expect(done.element().getAttribute('aria-busy')).toBeNull();
+    await expectWaiting(done, 'Mark done');
     expect(wants.element().querySelectorAll('[aria-busy="true"]')).toHaveLength(1);
+    (done.element() as HTMLButtonElement).click();
+    await expect.poll(() => router.state.location.pathname, { timeout: 3_000 }).not.toBe(TODAY);
+    expect(requests('handoffDone')).toHaveLength(1);
   });
 
   it('handoff_done_clears_the_card', async () => {
