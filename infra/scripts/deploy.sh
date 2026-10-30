@@ -43,6 +43,13 @@
 # with --require-approval never.
 set -euo pipefail
 
+# Under xtrace (bash -x, or SHELLOPTS=xtrace handed down) bash writes each assignment with its value
+# to the output, and so to the log, the passcode's included: refuse before anything else runs.
+if [[ -o xtrace ]]; then
+  echo "deploy: run without xtrace; it would print the passcode" >&2
+  exit 2
+fi
+
 usage() {
   echo "usage: infra/scripts/deploy.sh [--compute express|alb] [--allow-branch] [--data-only]"
 }

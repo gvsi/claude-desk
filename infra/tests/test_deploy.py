@@ -178,9 +178,11 @@ def deploy(tmp_path):
             return call["argv"][call["argv"].index(next(a for a in call["argv"] if a.endswith("smoke.py"))) + 1:]
 
     def run(*args: str, typed: str = ACCOUNT, terminal: bool = True, deployed: dict | None = None,
-            keychain_item: str | None = None, security: bool = True, **extra_env: str) -> Run:
+            keychain_item: str | None = None, security: bool = True, bash_options: tuple[str, ...] = (),
+            **extra_env: str) -> Run:
         """`keychain_item` is the passcode the stub Keychain holds (none by default); without
-        `security`, PATH holds the stubs and only the shell and `dirname` besides."""
+        `security`, PATH holds the stubs and only the shell and `dirname` besides; `bash_options` go
+        to the bash that runs deploy.sh, before the script."""
         if deployed is not None:
             stacks.write_text(json.dumps(deployed))
         if keychain_item is not None:
@@ -205,7 +207,7 @@ def deploy(tmp_path):
             **extra_env,
         }
         env = {name: value for name, value in env.items() if value is not None}
-        command = ["bash", str(SCRIPT), *args]
+        command = ["bash", *bash_options, str(SCRIPT), *args]
         if not terminal:
             result = subprocess.run(command, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True,
                                     timeout=60)
@@ -535,6 +537,21 @@ def test_a_caller_variable_named_passcode_carries_the_keychain_value_to_no_step(
         holding = sorted(name for name, value in call["env"].items() if value == secret)
         assert holding == (["DESK_PASSCODE"] if _is_smoke(call) else []), (call["tool"], call["argv"][:3])
     assert "keychain-test-passcode" not in run.text()
+
+
+@pytest.mark.parametrize("trace", [{"SHELLOPTS": "xtrace"}, {"bash_options": ("-x",)}], ids=["SHELLOPTS", "bash-x"])
+@pytest.mark.parametrize("exported", [False, True], ids=["keychain", "exported"])
+def test_a_traced_run_is_refused_before_any_passcode_is_read(deploy, trace, exported):
+    """Bash's xtrace writes each assignment it runs, with its value, to the output and so to the log,
+    whether the caller's shell hands it down (SHELLOPTS=xtrace) or asks for it (bash -x). deploy.sh
+    refuses to start under it, before it touches an exported passcode or reads the Keychain."""
+    run = deploy(terminal=False, keychain_item="keychain-test-passcode", DESK_DEPLOY_ACCOUNT=ACCOUNT,
+                 DESK_PASSCODE="exported-test-passcode" if exported else None, **trace)
+    assert run.status == 2      # no output in the message: traced, it would hold the passcode
+    assert "deploy: run without xtrace; it would print the passcode" in run.output
+    assert run.calls == []
+    for secret in ("keychain-test-passcode", "exported-test-passcode"):
+        assert secret not in run.text()
 
 
 @pytest.mark.parametrize("locked", [False, True])
