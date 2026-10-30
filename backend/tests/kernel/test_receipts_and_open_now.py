@@ -294,7 +294,6 @@ def test_a_window_end_is_closed():
     assert (status.open, utc(status.until)) == (True, at("2026-11-03 18:00"))
 
 
-
 def assert_valid(status: OpenStatus) -> OpenStatus:
     """The status as the contract checks it, and asked for again within 25 hours."""
     assert OpenStatus.model_validate(status.model_dump()) == status
@@ -371,7 +370,6 @@ def test_refresh_is_capped_at_twenty_five_hours():
     assert status.text == "Closed now. Opens tomorrow at 8:00 am"
 
 
-
 def cedar_local(instant: datetime) -> tuple[int, int]:
     """The `local_dow` and `local_minute` `/decide` sends Cedar for a call decided at `instant` at a
     business in Oakland."""
@@ -417,7 +415,6 @@ def test_open_status_agrees_with_cedars_local_time():
             assert utc(boundary) == next(flip for flip in flips if flip > instant), instant
 
 
-
 async def test_no_hours_means_no_open_status(app, client):
     # a Desk without hours claims neither open nor closed, and the rest of its page is served
     copy = await rivera(app, client)
@@ -434,7 +431,6 @@ async def test_no_hours_means_no_open_status(app, client):
             select(FactRow).where(FactRow.fact_id == "charter:hours")))).one())
     assert await open_status_of(client, copy.slug) is None
     assert public.open_status([], LA.key, at("2026-11-03 10:00"), "en") is None
-
 
 
 async def test_a_failing_open_status_is_none_and_logged(app, client, frozen_clock, monkeypatch, caplog):

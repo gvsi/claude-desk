@@ -681,3 +681,6 @@ async def test_execute_needs_the_decisions_own_session(app, client, registry):
     assert own.outcome == "allow"
     result = await executed(client, visitor, own, headers=rows.owner, session_id=rows.owner_session_id)
     assert (result.state, result.model_view) == ("succeeded", {"ok": True})
+    # and its own setup action ends on the generic line, not a receipt written for a visitor
+    own = await read(client, rows.owner, own)
+    assert (own.state, own.visitor_plain) == ("executed", "Done")
