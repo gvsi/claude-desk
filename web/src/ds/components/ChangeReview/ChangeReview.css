@@ -169,6 +169,13 @@
   color: var(--text-secondary);
 }
 
+/* A change that can cancel open payment links says so between the checks and the buttons. */
+.cd-change-review__cancels {
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
 .cd-change-review__controls {
   display: flex;
   flex-wrap: wrap;

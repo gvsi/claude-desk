@@ -28,8 +28,7 @@ export const REFERENCE_BOARDS = [
   // The first visit.
   'N-Intro-D',
   // The Connectors tab and the Rules page, which replace the Rules and Integrations boards. The
-  // first Rules boards (N-Conn-01-Rules, N-Conn-16-Phone-Rules) are archived; the Rules page's
-  // presets and payment limit (N-Conn-17 to N-Conn-22) are checked where they are built.
+  // first Rules boards (N-Conn-01-Rules, N-Conn-16-Phone-Rules) are archived.
   'N-Conn-02-Payments',
   'N-Conn-03-Stripe',
   'N-Conn-04-GoogleCalendar',
@@ -46,6 +45,15 @@ export const REFERENCE_BOARDS = [
   'N-Conn-13-Changed-Today',
   'N-Conn-14-Changed-Review',
   'N-Conn-15-Changed-After',
+  // The Rules page's preset menu, its payment limit in the payment groups, their reviews, and the
+  // demo's simulate strip on a connected tool's page.
+  'N-Conn-17-Presets',
+  'N-Conn-18-Preset-Review',
+  'N-Conn-19-Ceiling',
+  'N-Conn-19b-Ceiling-Edit',
+  'N-Conn-20-Ceiling-Review',
+  'N-Conn-21-Simulate',
+  'N-Conn-22-Phone-Presets',
   'N-Conn-23-Connectors',
   'N-Conn-24-Phone-Connectors',
   // Recorded history, replayed into each copy: the pages that list it, at a 14-inch laptop's window.
@@ -105,6 +113,7 @@ const BOARD_WINDOWS: Readonly<Partial<Record<ReferenceBoard, Exclude<BoardViewpo
   'N-History-People': 'laptop',
   'N-History-Safety': 'laptop',
   'N-Docs-Sidebar': 'sidebar',
+  'N-Conn-22-Phone-Presets': 'phone',
   'N-Conn-24-Phone-Connectors': 'phone',
   'N-Run2-People-Loading': 'laptop',
   'N-Run2-People-Phone': 'phone',

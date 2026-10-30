@@ -109,10 +109,11 @@ export const GoogleCalendarAdded: Story = {
         connector: rivera.googleCalendar.view,
         tools: 1,
         href: '/connectors/google-calendar',
-        connection: 'Rivera Plumbing jobs (mock) · Added just now',
+        connection: 'Rivera Plumbing jobs (mock)',
       },
     ],
     available: [],
+    justAdded: rivera.googleCalendar.view.id,
   },
   parameters: {
     canvas: 'N-Conn-11-GCal-Done',
@@ -128,6 +129,56 @@ export const GoogleCalendarAdded: Story = {
         name: /^Google Calendar Mock .* Connected · Rivera Plumbing jobs \(mock\) · Added just now 1 tool$/,
       }),
     ).toBeVisible();
+    // just_added_is_quiet: the words follow the account in its secondary ink, and the row's only
+    // status colour is the dot beside "Connected".
+    const [, calendar] = connected.rows as [HTMLElement, HTMLElement];
+    const added = within(calendar).getByText('Added just now', { exact: false });
+    expectComputed(added, { color: 'rgba(250, 249, 245, 0.64)' });
+    const dots = [...calendar.querySelectorAll('.cd-status-dot')];
+    await expect(dots).toHaveLength(1);
+    await expect(dots[0]?.nextElementSibling?.textContent).toBe('Connected');
+    // Only the row just added says so.
+    await expect(canvas.getAllByText(/Added just now/)).toHaveLength(1);
+  },
+};
+
+/** Payments, removed from the Desk earlier, added back from "Add a connector" a moment ago. */
+export const BuiltInAddedBack: Story = {
+  args: { available: directory.available, justAdded: 'payments' },
+  parameters: {
+    canvas: 'N-Conn-11-GCal-Done',
+    canvasNote:
+      'No board draws a built-in connector added back; the nearest is Google Calendar added, whose account line ends in "Added just now". A built-in row has no account, so the words take that line on their own.',
+  },
+  play: async ({ canvas, canvasElement }) => {
+    // just_added_built_in: the words sit under the connector's line, in secondary meta, with no dot.
+    const builtIn = group(canvasElement, 'Built in');
+    const payments = within(builtIn.section).getByRole('link', { name: /^Payments .* Added just now 2 tools$/ });
+    const line = within(payments).getByText(/^Payment links and charges/);
+    const added = within(payments).getByText('Added just now');
+    expectComputed(added, { color: 'rgba(250, 249, 245, 0.64)', fontSize: '13px' });
+    await expect(added.getBoundingClientRect().top).toBeGreaterThanOrEqual(line.getBoundingClientRect().bottom - 1);
+    await expect(payments.querySelectorAll('.cd-status-dot')).toHaveLength(0);
+    await expect(canvas.getAllByText(/Added just now/)).toHaveLength(1);
+    // The app still coming soon in the demo keeps its words and has nothing to press.
+    const available = group(canvasElement, 'Available');
+    const [row] = available.rows;
+    if (!row) throw new Error('No available app');
+    await expect(row.querySelector('.cd-connector-directory__meta')?.textContent?.replace(/\s+/g, ' ')).toBe('Coming soon in this demo · 1 tool');
+    await expect(within(row).queryByRole('button')).toBeNull();
+  },
+};
+
+/** `justAdded` naming an app that is still only available: nothing on the page says it was added. */
+export const NotAddedWhileAvailable: Story = {
+  args: { available: directory.available, justAdded: rivera.googleCalendar.view.id },
+  parameters: { canvasNote: 'A guard, drawn on no board: an app the demo can\'t connect yet is never marked added.' },
+  play: async ({ canvas, canvasElement }) => {
+    // just_added_never_on_available: an app still to connect can't have been added, so its row
+    // keeps only its coming-soon words.
+    await expect(canvas.queryByText(/Added just now/)).toBeNull();
+    const [row] = group(canvasElement, 'Available').rows;
+    await expect(row?.querySelector('.cd-connector-directory__meta')?.textContent?.replace(/\s+/g, ' ')).toBe('Coming soon in this demo · 1 tool');
   },
 };
 

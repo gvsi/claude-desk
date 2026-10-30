@@ -890,22 +890,41 @@ export interface RulesPageProps {
   chips: readonly string[];
   /** A line under the page's title about what just changed. */
   notice?: ReactNode;
+  /** The header's actions: the "Start from a preset" menu, on a line of its own on a phone. */
+  actions?: ReactNode;
+  /** Each section's line above its tools, by connector id: the payment limit on Payments and Stripe. */
+  aboveTools?: Readonly<Record<string, ReactNode>>;
 }
 
 /**
- * The Rules page: its title and line, the composer that asks Claude for a change right under
- * them, the Desk's connectors, a section each, and the always-on rules. Connectors are added from
- * the Connectors page, so it has no "Add a connector".
+ * The Rules page: its title and line, with the preset menu when the page offers it, the composer
+ * that asks Claude for a change right under them, the Desk's connectors, a section each, with the
+ * payment limit above the tools of the money groups when given, and the always-on rules.
+ * Connectors are added from the Connectors page, so it has no "Add a connector".
  */
-export function RulesPage({ hub, chips, notice }: RulesPageProps) {
+export function RulesPage({ hub, chips, notice, actions, aboveTools = {} }: RulesPageProps) {
   return (
     <BoardPage>
-      <PageHeader title="Rules" subtitle="What Claude can do on this Desk, where each tool comes from, and your rules for it." />
+      <div className="board-rules__header">
+        <PageHeader
+          title="Rules"
+          subtitle="What Claude can do on this Desk, where each tool comes from, and your rules for it."
+          actions={actions}
+          actionsBelowOnPhone
+          hideSubtitleOnPhone
+        />
+      </div>
       {notice ? <div className="board-rules__notice">{notice}</div> : null}
       <AskAboutRules placeholder="Ask Claude to change a rule or a connector" chips={chips} />
       <ConnectorList summary={hub.summary}>
         {hub.sections.map((section) => (
-          <ConnectorSection key={section.connector.id} {...section} href={`#${section.href}`} tools={section.tools.map((tool) => ({ ...tool, href: `#${tool.href}` }))} />
+          <ConnectorSection
+            key={section.connector.id}
+            {...section}
+            href={`#${section.href}`}
+            tools={section.tools.map((tool) => ({ ...tool, href: `#${tool.href}` }))}
+            aboveTools={aboveTools[section.connector.id]}
+          />
         ))}
       </ConnectorList>
       <AlwaysOnList />

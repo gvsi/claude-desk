@@ -1,6 +1,7 @@
 /* ToolPageHeader: the serif title, its description in secondary body type 4 px under it, then the
    source line 8 px under that: the 24 px tile, "From {connector}" with its badge, and 16 px on,
-   the status. On a narrow line the status wraps under the source. */
+   the status. On a narrow line the status wraps under the source. For a connected tool that is
+   on, the demo's simulate strip sits 20 px under the source line. */
 
 .cd-tool-page-header {
   min-width: 0;
@@ -43,4 +44,32 @@
 
 .cd-tool-page-header__status {
   min-width: 0;
+}
+
+/* The demo's strip: a bordered row with no fill, the caption at the left and the ghost button at
+   the right. On a narrow line the button wraps under the caption. */
+.cd-tool-page-header__simulate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  column-gap: var(--space-16);
+  row-gap: var(--space-4);
+  margin-top: var(--space-20);
+  padding: var(--space-10) var(--space-14);
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-card);
+}
+
+.cd-tool-page-header__simulate-caption {
+  flex: 1 1 240px;
+  min-width: 0;
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* The button keeps its words on one line beside the caption, and wraps only on its own line. */
+.cd-tool-page-header__simulate > .cd-button {
+  flex: 0 1 auto;
 }

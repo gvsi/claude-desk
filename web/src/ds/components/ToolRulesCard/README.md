@@ -30,6 +30,8 @@
 - Default cards (`is_default`) are left out: the fallback row says what they do.
 - Order: cards for one person or agent on the tool, then on its effects, then the tool's cards, then its effect cards, each in the order given.
 
+`groupsOverlap(a, b)` (also in `toolRules.ts`) says whether two cards' groups of people share someone. Anyone, verified people and record owners nest, so any two do; a card for one person or agent is no group. The presets' description check uses it: a group's refusal refuses part of any audience it overlaps, since a never card always wins.
+
 ## Props
 
 | Prop | Type | Notes |

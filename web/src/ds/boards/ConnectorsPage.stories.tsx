@@ -28,10 +28,11 @@ const GCAL_ADDED: ConnectorsPageProps['directory'] = {
       connector: rivera.googleCalendar.view,
       tools: 1,
       href: '/connectors/google-calendar',
-      connection: 'Rivera Plumbing jobs (mock) · Added just now',
+      connection: 'Rivera Plumbing jobs (mock)',
     },
   ],
   available: [],
+  justAdded: rivera.googleCalendar.view.id,
 };
 
 const meta = {

@@ -11,6 +11,7 @@ import type {
   Decision,
   DecisionState,
   DemoAgentIssued,
+  Effect,
   EvError,
   EvMessage,
   LedgerEntry,
@@ -24,6 +25,7 @@ import type {
   SessionState,
   SseEvent,
   StatusEvent,
+  ToolName,
   ToolProfile,
   VerifyStarted,
 } from '../../api/contracts';
@@ -35,7 +37,11 @@ import type { ReviewToolView } from '../components/ConnectorReview/ConnectorRevi
 import type { ConnectorSectionProps } from '../components/ConnectorSection/ConnectorSection';
 import type { DirectoryRowView } from '../components/ConnectorDirectory/ConnectorDirectory';
 import type { RecentRequestView } from '../components/RecentRequests/RecentRequests';
+import type { OutcomeGroupRow } from '../components/OutcomeGroups/OutcomeGroups';
+import type { PersonRuleView } from '../components/PersonRules/PersonRules';
+import type { RuleMode, RulesPreset } from '../components/OutcomeMenu/outcomeWords';
 import type { RuleWord } from '../components/RuleRow/RuleRow';
+import { reviewChanges } from '../components/ChangeReview/reviewChanges';
 import { executedLine, type ExecutedTool } from './receipts';
 
 /**
@@ -996,7 +1002,40 @@ const sharedChargeCard = rule({
 /** The screen's words for what the shared rule covers, shown under each tool it governs. */
 const sharedChargeAppliesTo = 'Applies to every tool that charges money: Payment link and Charge within a signed limit.';
 
+/**
+ * A personal rule: the card the owner's "Allow only for Dana Whitfield, always" answer to Dana's
+ * held Saturday booking (`heldVerified`) adds. It is not in the seed, so it stays out of
+ * `ruleCards`; the preset review uses it to show that a preset removes personal rules too.
+ */
+const personalBookingCard = rule({
+  card_id: 'rv-dana-book',
+  applies_to: 'native.book',
+  mode: 'auto',
+  who: 'person',
+  person_id: people.dana.personId,
+  reason: 'Dana Whitfield can book visits without asking you.',
+});
+
 const word = (field: RuleWord['field'], text: string): RuleWord => ({ field, text });
+
+/**
+ * The rules just for Dana Whitfield, as her page lists them (N-Run2-People-Person, in review). The
+ * board words its own sample rules for her: a Saturday-morning booking rule and her documents.
+ */
+const danaRules: PersonRuleView[] = [
+  {
+    key: 'rv-dana-saturday',
+    title: 'Book a visit',
+    rule: { card_id: 'rv-dana-saturday', mode: 'auto', reason: 'Dana can book Saturday morning visits.' },
+    words: [word('who', people.dana.name), word('hours', 'Saturdays 9:00 am to 1:00 pm')],
+  },
+  {
+    key: 'rv-dana-docs',
+    title: 'Share a document',
+    rule: { card_id: 'rv-dana-docs', mode: 'auto', reason: "Dana gets her own invoices and warranties after confirming it's her." },
+    words: [word('who', people.dana.name), word('who', 'Verified')],
+  },
+];
 
 /** Each card's words as the web app's `ruleWords` renders what it enforces, in the boards' words. */
 const ruleWords = {
@@ -1009,7 +1048,8 @@ const ruleWords = {
   'rv-refund': [word('who', 'The customer who paid, verified')],
   'rv-mandate': [word('who', 'Signed agents'), word('limits', 'Up to $20')],
   'rv-agent-charges': [word('who', "Alex Kim's assistant"), word('limits', 'Up to $20')],
-} satisfies Record<keyof typeof ruleCards | 'rv-agent-charges', RuleWord[]>;
+  'rv-dana-book': [word('who', people.dana.name)],
+} satisfies Record<keyof typeof ruleCards | 'rv-agent-charges' | 'rv-dana-book', RuleWord[]>;
 
 /** The amount limit of each auto card that has one, formatted as the screen formats it. */
 const ruleLimits = {
@@ -1483,6 +1523,206 @@ const googleCalendar = {
   } satisfies Pick<ConnectorPickerProps, 'business' | 'builtIn' | 'external'>,
 };
 
+// ---------------------------------------------------------------------------------------------
+// The payment limit and the preset review (N-Conn-17 to N-Conn-20), as the Rules page words them.
+
+/**
+ * Rivera's payment limit (`RIVERA_MONEY_CAP_CENTS`, $500), as the Payments and Stripe groups show
+ * it, and the words for a Desk with none set. The screen formats the amounts.
+ */
+const paymentLimit = {
+  line: 'No payment over $500 goes through without asking you, whatever the rules below say.',
+  unset: 'Every payment asks you first.',
+  hint: 'Whole dollars, from 0 to 10,000. Now $500.',
+};
+
+/**
+ * The setup interview's draft rules for Rivera, by outcome, in the setup board's words: what Claude
+ * does and who it's for (N-R2-Setup-08-Rules, in review).
+ */
+const setupOutcomes = {
+  auto: [
+    { key: 'quote', text: 'Quotes from your price list, at list price', who: 'Anyone' },
+    { key: 'find-slots', text: 'Finds open times', who: 'Anyone' },
+    { key: 'book-weekday', text: 'Books weekday visits in your hours', who: 'Anyone' },
+    { key: 'leads', text: 'Saves leads and callback requests', who: 'Anyone' },
+    { key: 'documents', text: 'Sends customers their own documents', who: 'Verified customers' },
+  ],
+  ask: [
+    { key: 'discounts', text: 'Discounts', who: 'Anyone' },
+    { key: 'book-saturday', text: 'Saturday bookings', who: 'Anyone' },
+    { key: 'payment-link', text: 'Payment links', who: 'Anyone' },
+    { key: 'charge-mandate', text: 'Charges within a signed limit', who: 'Signed agents' },
+  ],
+  never: [{ key: 'refund', text: 'Refunds', who: 'Anyone' }],
+} satisfies Record<RuleMode, OutcomeGroupRow[]>;
+
+/** The default side a rule falls to when a preset drops it: the house rules' words for a default ask. */
+const defaultAsk = {
+  mode: 'ask',
+  reason: 'Not covered by a rule you set, so I ask you.',
+  words: [word('who', 'Anyone')],
+} satisfies ChangeRowView['after'];
+
+/** A card of Rivera's on one side of a change: its outcome, limit, reason and words. */
+function cardSide(id: keyof typeof ruleWords, card: RuleCard): NonNullable<ChangeRowView['before']> {
+  const limits: Partial<Record<keyof typeof ruleWords, string>> = ruleLimits;
+  return { mode: card.mode, limit: limits[id], reason: card.reason, words: ruleWords[id] };
+}
+
+/** Each of Rivera's rule targets' effects, as the master plan's tool table lists them. */
+const TOOL_EFFECTS: Partial<Record<ToolName, Effect[]>> = {
+  'native.quote': ['change'],
+  'native.book': ['change'],
+  'native.release_document': ['private_data', 'send_message'],
+  'native.payment_link': ['charge'],
+  'native.charge_mandate': ['charge'],
+  'payments.list_charges': ['private_data'],
+  'payments.create_refund': ['pay_out', 'private_data'],
+};
+
+/**
+ * Sample copies of plan 01a's `desk.presets.PRESETS`, in its words. Both presets let Claude show
+ * open times, take leads and callbacks, start verifications and read the owner's material on its
+ * own (`utilityCards`); Recommended rules adds quotes at list price, weekday bookings, customers'
+ * own documents and an ask before money moves. Sample data for the reviews: the description check
+ * reads the presets' own cards from their export.
+ */
+const utilityCards = [
+  rule({ card_id: 'preset-find-slots', applies_to: 'native.find_slots', mode: 'auto', who: 'anyone', reason: 'Anyone can see the times you have open.' }),
+  rule({ card_id: 'preset-capture-lead', applies_to: 'native.capture_lead', mode: 'auto', who: 'anyone', reason: 'Anyone can leave their name and how to reach them.' }),
+  rule({ card_id: 'preset-request-callback', applies_to: 'native.request_callback', mode: 'auto', who: 'anyone', reason: 'Anyone can ask you to call them back.' }),
+  rule({
+    card_id: 'preset-start-verification',
+    applies_to: 'native.start_verification',
+    mode: 'auto',
+    who: 'anyone',
+    reason: 'Anyone can ask for a code, which goes only to the contact you have on record.',
+  }),
+  rule({ card_id: 'preset-fetch-website', applies_to: 'native.fetch_website', mode: 'auto', who: 'anyone', reason: 'Claude can read your website to learn about your business.' }),
+  rule({ card_id: 'preset-read-memory', applies_to: 'native.read_memory', mode: 'auto', who: 'anyone', reason: 'Claude can read the notes you brought in to learn about your business.' }),
+];
+
+const recommendedCards = [
+  rule({ card_id: 'preset-quote', applies_to: 'native.quote', mode: 'auto', who: 'anyone', reason: 'Quotes from your price list, at list price.' }),
+  rule({
+    card_id: 'preset-book-weekday',
+    applies_to: 'native.book',
+    mode: 'auto',
+    who: 'anyone',
+    hours: { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '09:00:00', end: '17:00:00' },
+    review: true,
+    reason: 'Weekday bookings in working hours, checked by the reviewer.',
+  }),
+  rule({ card_id: 'preset-documents', applies_to: 'native.release_document', mode: 'auto', who: 'record_owner', reason: "Customers get their own documents after confirming it's them." }),
+  rule({ card_id: 'preset-charge-ask', applies_to: 'effect:charge', mode: 'ask', who: 'anyone', reason: 'Taking a payment asks you first.' }),
+  rule({ card_id: 'preset-pay-out-ask', applies_to: 'effect:pay_out', mode: 'ask', who: 'anyone', reason: 'Sending money out asks you first.' }),
+];
+
+const presetSamples = { ask_first: utilityCards, auto: [...utilityCards, ...recommendedCards] } satisfies Record<RulesPreset, RuleCard[]>;
+
+/** Rivera's rules in the order the reviews list them, with each row's title and connector. */
+const reviewOrder = [
+  ['rv-quote', 'Quote', connectorViews.quotes],
+  ['rv-book-wk', 'Book a visit', connectorViews.bookings],
+  ['rv-book-sat', 'Book a visit', connectorViews.bookings],
+  ['rv-dana-book', 'Book a visit', connectorViews.bookings],
+  ['rv-docs', 'Share a document', connectorViews.documents],
+  ['rv-link', 'Payment link', connectorViews.payments],
+  ['rv-mandate', 'Charge within a signed limit', connectorViews.payments],
+  ['rv-charges', 'See charges', connectorViews.stripe],
+  ['rv-refund', 'Refund', connectorViews.stripe],
+] as const;
+
+type ReviewId = (typeof reviewOrder)[number][0];
+
+/**
+ * Rivera's cards before a preset applies: the starter preset's cards, which the seed keeps as it
+ * started with them, its own cards and Dana Whitfield's booking rule (`personalBookingCard`).
+ */
+const riveraCardsById: Record<ReviewId, RuleCard> = { ...ruleCards, 'rv-dana-book': personalBookingCard };
+const riveraBeforePreset = [...utilityCards, ...reviewOrder.map(([id]) => riveraCardsById[id])];
+
+/** The words the web app shows for each Recommended rules card: its row, what it applies to and what it enforces. */
+const presetViews: Record<string, { title: string; connector?: ConnectorView; appliesTo: string; words: RuleWord[] }> = {
+  'preset-quote': { title: 'Quote', connector: connectorViews.quotes, appliesTo: 'Quote', words: [word('who', 'Anyone'), word('limits', 'No discounts')] },
+  'preset-book-weekday': {
+    title: 'Book a visit',
+    connector: connectorViews.bookings,
+    appliesTo: 'Book a visit',
+    words: [word('who', 'Anyone'), word('hours', 'Weekdays, 9:00 am to 5:00 pm'), word('review', 'Checked by the reviewer')],
+  },
+  'preset-documents': { title: 'Share a document', connector: connectorViews.documents, appliesTo: 'Share a document', words: [word('who', "The record's owner, verified")] },
+  'preset-charge-ask': { title: 'Every tool that charges money', appliesTo: 'Every tool that charges money', words: [word('who', 'Anyone')] },
+  'preset-pay-out-ask': { title: 'Every tool that sends money out', appliesTo: 'Every tool that sends money out', words: [word('who', 'Anyone')] },
+};
+
+/** A preset card on one side of a change, saying what it applies to when the row's target moves. */
+function presetSide(card: RuleCard, moved: boolean): NonNullable<ChangeRowView['after']> {
+  const view = presetViews[card.card_id];
+  if (view === undefined) throw new Error(`No words for ${card.card_id}`);
+  return { ...(moved ? { appliesTo: view.appliesTo } : {}), mode: card.mode, reason: card.reason, words: view.words };
+}
+
+/**
+ * A preset's review of Rivera's rules, as the web app builds it: `reviewChanges` pairs each card the
+ * preset drops with the preset's card that covers its whole scope, or the default ask, and lists
+ * the preset's cards nothing maps to as added; this gives each side its words.
+ */
+function presetReview(preset: readonly RuleCard[]): ChangeRowView[] {
+  return reviewChanges(riveraBeforePreset, preset, (tool) => TOOL_EFFECTS[tool] ?? []).map((row): ChangeRowView => {
+    if (row.before === null) {
+      const card = row.after;
+      if (card === null) throw new Error('An added row with no card');
+      const view = presetViews[card.card_id];
+      if (view === undefined) throw new Error(`No words for ${card.card_id}`);
+      return { key: card.card_id, change: 'added', title: view.title, connector: view.connector, before: null, after: presetSide(card, false), changed: [] };
+    }
+    const id = row.before.card_id as ReviewId;
+    const label = reviewOrder.find(([key]) => key === id);
+    if (label === undefined) throw new Error(`No row for ${id}`);
+    const [, title, connector] = label;
+    const before = cardSide(id, row.before);
+    if (row.after === null) return { key: id, change: 'changed', title, connector, before, after: defaultAsk, changed: row.fields };
+    const moved = row.after.applies_to !== row.before.applies_to;
+    return {
+      key: id,
+      change: 'changed',
+      title,
+      connector,
+      before: moved ? { ...before, appliesTo: title } : before,
+      after: presetSide(row.after, moved),
+      changed: row.fields,
+    };
+  });
+}
+
+/**
+ * Choosing "Ask me first" (N-Conn-18-Preset-Review): each of Rivera's own cards goes, personal ones
+ * included (Dana Whitfield's booking rule), and nothing in the preset governs its tool, so each
+ * falls to the default ask. The after side replaces the whole rule, which the row's "Changed" tag
+ * says; within it only a new outcome is tagged, as the board draws it, so Refund, which already
+ * asks, has no tag beside its outcome. The starter cards the preset keeps have no row.
+ */
+const askFirstReview = presetReview(presetSamples.ask_first);
+
+/**
+ * Choosing "Recommended rules": the payment link, the signed-limit charge and Refund go to the
+ * preset's rules for every tool that charges money or sends it out, which ask. The bookings and
+ * See charges fall to the default ask, since no card of the preset covers their whole scope:
+ * weekday bookings from 8:00 am to 6:00 pm reach outside its 9-to-5 rule, Saturdays and Dana's
+ * any-time rule lie outside it, and nothing governs seeing charges. That weekday rule, which no
+ * dropped rule goes to, is an added row. Quotes and documents have no row: the preset's rules for
+ * them enforce what Rivera's already do.
+ */
+const recommendedReview = presetReview(presetSamples.auto);
+
+/** Raising the payment limit to $1,000 (N-Conn-20-Ceiling-Review), in the web app's words. */
+const limitRaise = {
+  now: 'New limit: no payment over $1,000 without asking you.',
+  was: 'Was $500',
+};
+
 /** A hub section as a row on the Connectors page: the connector, its tool count and its page. */
 function directoryRow(section: HubSection): DirectoryRowView {
   return { connector: section.connector, tools: section.tools.length, href: section.href };
@@ -1745,6 +1985,7 @@ export const rivera = {
   ruleCards,
   sharedChargeCard,
   sharedChargeAppliesTo,
+  personalBookingCard,
   ruleWords,
   ruleLimits,
   connectors,
@@ -1756,6 +1997,12 @@ export const rivera = {
   stripeConnection,
   verificationConnection,
   googleCalendar,
+  paymentLimit,
+  setupOutcomes,
+  danaRules,
+  askFirstReview,
+  recommendedReview,
+  limitRaise,
   toolProfiles,
   ledger,
   verifyStarted,

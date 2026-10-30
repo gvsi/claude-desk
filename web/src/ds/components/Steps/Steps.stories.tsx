@@ -76,24 +76,87 @@ export const SetupThirdOfFive: Story = {
   },
 };
 
+/** Drawn on N-R2-Setup-16-Phone-Questions, signed on 2026-10-30 and not yet in the reference set. */
+const PHONE_NOTE =
+  'Drawn on N-R2-Setup-16-Phone-Questions, signed on 2026-10-30. Under 480 px the steps are one line, "Step 1 of 5: Questions", and screen readers still hear the list.';
+
+/** The line drawn in place of the circles under 480 px; screen readers hear the list instead. */
+function compactLine(root: HTMLElement): HTMLElement {
+  const line = root.querySelector<HTMLElement>('.cd-steps__compact');
+  if (!line) throw new Error('No compact line');
+  return line;
+}
+
+/** At 390 px: the list is read but not drawn, and nothing scrolls sideways. */
+async function expectPhoneSteps(canvasElement: HTMLElement, label: string): Promise<HTMLElement[]> {
+  const width = window.innerWidth;
+  await expect(width).toBe(390);
+  const list = within(canvasElement).getByRole('list', { name: label });
+  expectComputed(list, { position: 'absolute', width: '1px' });
+  await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+  const tooWide = [...canvasElement.querySelectorAll('*')].filter((el) => el.getBoundingClientRect().right > width);
+  await expect(tooWide).toEqual([]);
+  return within(list).getAllByRole('listitem');
+}
+
 export const Phone: Story = {
   globals: { viewport: { value: 'phone', isRotated: false } },
-  parameters: {
-    canvas: 'none',
-    canvasNote: 'No board draws the steps on a phone (nearest: N-Conn-09-GCal-Review). Under 480 px only the current step keeps its name on screen; screen readers still hear every name.',
-  },
-  play: async ({ canvas, canvasElement }) => {
-    const width = window.innerWidth;
-    await expect(width).toBe(390);
-    const items = within(canvas.getByRole('list', { name: 'Connect Google Calendar' })).getAllByRole('listitem');
-    // Every name is still read.
+  parameters: { canvas: 'none', canvasNote: PHONE_NOTE },
+  play: async ({ canvasElement }) => {
+    const items = await expectPhoneSteps(canvasElement, 'Connect Google Calendar');
+    // Every name is still read, the current step marked.
     await expect(items[0]).toHaveTextContent('Choose, done');
+    await expect(items[2]).toHaveAttribute('aria-current', 'step');
     await expect(items[3]).toHaveTextContent('Confirm');
-    // The current step's name shows; the others' names are read but not drawn, so the row fits.
-    await expect(within(items[2] as HTMLElement).getByText('Review tools')).toBeVisible();
-    expectComputed(within(items[3] as HTMLElement).getByText('Confirm'), { position: 'absolute', width: '1px' });
-    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
-    const tooWide = [...canvasElement.querySelectorAll('*')].filter((el) => el.getBoundingClientRect().right > width);
-    await expect(tooWide).toEqual([]);
+    // phone_steps_one_line: the steps are drawn as one line, its count in secondary ink and the
+    // current step's name in primary, hidden from screen readers, which hear the list.
+    const line = compactLine(canvasElement);
+    await expect(line.textContent).toBe('Step 3 of 4: Review tools');
+    await expect(line).toHaveAttribute('aria-hidden', 'true');
+    await expect(line).toBeVisible();
+    expectComputed(line, { color: 'rgba(250, 249, 245, 0.64)', fontSize: '13px', lineHeight: '18px' });
+    expectComputed(line.querySelector('.cd-steps__compact-name') as HTMLElement, { color: 'rgba(250, 249, 245, 0.92)' });
+  },
+};
+
+export const SetupPhone: Story = {
+  args: { label: 'Set up your Desk', steps: ['Questions', 'Tools', 'Rules', 'Safety check', 'Live'], current: 0 },
+  globals: { viewport: { value: 'phone', isRotated: false } },
+  parameters: { canvas: 'none', canvasNote: PHONE_NOTE },
+  play: async ({ canvasElement }) => {
+    const items = await expectPhoneSteps(canvasElement, 'Set up your Desk');
+    await expect(items[0]).toHaveAttribute('aria-current', 'step');
+    await expect(compactLine(canvasElement).textContent).toBe('Step 1 of 5: Questions');
+  },
+};
+
+export const LaptopHasNoLine: Story = {
+  args: { label: 'Set up your Desk', steps: ['Questions', 'Tools', 'Rules', 'Safety check', 'Live'], current: 2 },
+  parameters: { canvas: 'none', canvasNote: PHONE_NOTE },
+  play: async ({ canvas, canvasElement }) => {
+    // At 480 px of its own width and over, the steps are the row of circles, and the line isn't drawn.
+    await expect(canvas.getByRole('list', { name: 'Set up your Desk' })).toBeVisible();
+    await expect(compactLine(canvasElement)).not.toBeVisible();
+  },
+};
+
+export const PastTheEnd: Story = {
+  args: { label: 'Set up your Desk', steps: ['Questions', 'Tools', 'Live'], current: 3 },
+  globals: { viewport: { value: 'phone', isRotated: false } },
+  parameters: { canvas: 'none', canvasNote: `${PHONE_NOTE} A step past the last one is read and drawn as the last.` },
+  play: async ({ canvasElement }) => {
+    // steps_clamped_alike: the list marks the step the line names, so both say the same.
+    const items = await expectPhoneSteps(canvasElement, 'Set up your Desk');
+    await expect(items.map((item) => item.getAttribute('aria-current'))).toEqual([null, null, 'step']);
+    await expect(compactLine(canvasElement).textContent).toBe('Step 3 of 3: Live');
+  },
+};
+
+export const NoSteps: Story = {
+  args: { label: 'Set up your Desk', steps: [], current: 0 },
+  globals: { viewport: { value: 'phone', isRotated: false } },
+  parameters: { canvas: 'none', canvasNote: `${PHONE_NOTE} With no steps there is no line.` },
+  play: async ({ canvasElement }) => {
+    await expect(canvasElement.querySelector('.cd-steps__compact')).toBeNull();
   },
 };

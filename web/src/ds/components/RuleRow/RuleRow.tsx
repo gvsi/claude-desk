@@ -30,15 +30,20 @@ export interface RuleRowProps {
   onChangeOutcome?: (mode: RuleMode) => void;
 }
 
+/** What a card enforces as one line: its words, blank ones left out, joined by " · ". */
+export function ruleWordsLine(words: readonly RuleWord[]): string {
+  return words
+    .map((word) => word.text.trim())
+    .filter((text) => text !== '')
+    .join(' · ');
+}
+
 /**
  * One rule: its reason, the words for what it enforces, a line for a shared rule, and its outcome
  * at the right, or on its own line under them when the row is under 640 px wide.
  */
 export function RuleRow({ rule, words, limit, shared, onChangeOutcome }: RuleRowProps) {
-  const line = words
-    .map((word) => word.text.trim())
-    .filter((text) => text !== '')
-    .join(' · ');
+  const line = ruleWordsLine(words);
   return (
     <div className="cd-rule-row">
       <div className="cd-rule-row__layout">

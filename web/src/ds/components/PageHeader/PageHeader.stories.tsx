@@ -1,8 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { expect, fn } from 'storybook/test';
+import { expect, fn, within } from 'storybook/test';
 
 import { expectComputed } from '../../test/expectComputed.ts';
 import { Button } from '../Button/Button.tsx';
+import { PresetMenu } from '../PresetMenu/PresetMenu.tsx';
 import { PageHeader } from './PageHeader.tsx';
 
 const runCheck = fn();
@@ -90,5 +91,58 @@ export const Phone: Story = {
     await expect(action.getBoundingClientRect().left).toBeGreaterThan(title.getBoundingClientRect().right);
     await expect(Math.round(subtitle.getBoundingClientRect().top - title.getBoundingClientRect().bottom)).toBe(8);
     await expect(subtitle.getBoundingClientRect().right).toBeGreaterThan(action.getBoundingClientRect().left);
+  },
+};
+
+const RULES_LINE = 'What Claude can do on this Desk, where each tool comes from, and your rules for it.';
+
+/** The Rules page's header, as the web app composes it: the preset menu as its action. */
+const rulesHeader = {
+  title: 'Rules',
+  subtitle: RULES_LINE,
+  actions: <PresetMenu onPick={fn()} />,
+  actionsBelowOnPhone: true,
+  hideSubtitleOnPhone: true,
+};
+
+export const RulesOnAPhone: Story = {
+  globals: { viewport: { value: 'phone', isRotated: false } },
+  args: rulesHeader,
+  parameters: {
+    canvas: 'N-Conn-22-Phone-Presets',
+    canvasNote: "The Rules page's header on a phone: the preset menu on its own line under the title, at the column's width, and no subtitle.",
+  },
+  play: async ({ canvas, canvasElement, userEvent }) => {
+    await expect(window.innerWidth).toBe(390);
+    const header = canvasElement.querySelector<HTMLElement>('.cd-page-header');
+    if (!header) throw new Error('No header');
+    const title = canvas.getByRole('heading', { level: 1, name: 'Rules' });
+    const button = canvas.getByRole('button', { name: 'Start from a preset' });
+    // actions_below_on_phone: the button 16 px under the title, as wide as the header.
+    await expect(button.getBoundingClientRect().top - title.getBoundingClientRect().bottom).toBe(16);
+    await expect(Math.round(button.getBoundingClientRect().width)).toBe(Math.round(header.getBoundingClientRect().width));
+    // subtitle_hidden_on_phone
+    await expect(canvas.queryByText(RULES_LINE)).not.toBeVisible();
+    // The menu opens under the button at its width.
+    button.focus();
+    await userEvent.keyboard('{Enter}');
+    const menu = within(canvasElement).getByRole('menu', { name: 'Start from a preset' });
+    await expect(Math.round(menu.getBoundingClientRect().width)).toBe(Math.round(button.getBoundingClientRect().width));
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+  },
+};
+
+export const RulesOnALaptop: Story = {
+  args: rulesHeader,
+  parameters: {
+    canvas: 'N-Conn-17-Presets',
+    canvasNote: "The same header at a laptop's width: the phone props change nothing, so the menu sits at the right of the title's line and the subtitle shows.",
+  },
+  play: async ({ canvas }) => {
+    const title = canvas.getByRole('heading', { level: 1, name: 'Rules' });
+    const button = canvas.getByRole('button', { name: 'Start from a preset' });
+    await expect(button.getBoundingClientRect().left).toBeGreaterThan(title.getBoundingClientRect().right);
+    await expect(button.getBoundingClientRect().top).toBeLessThan(title.getBoundingClientRect().bottom);
+    await expect(canvas.getByText(RULES_LINE)).toBeVisible();
   },
 };

@@ -15,7 +15,7 @@
   - Before `current`: a 14 px `check` on `fill-secondary`, and the name in `text-secondary`, read "{name}, done".
   - `current`: the primary button's fill (`button-primary`) with its number in `button-primary-text`, the name in `text-primary`, and `aria-current="step"` on the item.
   - After `current`: its number in `text-secondary` on `fill-secondary`, and the name in `text-secondary`.
-- It lays out by its own width (a container query). Under 480 px, as on a phone, the hairlines shorten to 16 px and only the current step's name is drawn; the others stay in the list for screen readers, so nothing scrolls sideways.
+- It lays out by its own width (a container query on its frame). Under 480 px, as on a phone (N-R2-Setup-16-Phone-Questions), the list is read but not drawn, and one line in `.cd-type-meta` says where the person is: "Step 1 of 5: " in `text-secondary`, then the current step's name in `text-primary`. The line is `aria-hidden`, since the list says the same to screen readers, every step's name and `aria-current` included. Nothing scrolls sideways. This narrow layout follows the setup board on a phone, signed on 2026-10-30. The count ends in a colon, not a "·", following the brand book's rule against "·" separators.
 
 ## Props
 
@@ -23,4 +23,4 @@
 | --- | --- | --- |
 | `label` | `string` | Required. What the steps are of: "Connect Google Calendar", "Set up your Desk". |
 | `steps` | `readonly string[]` | Required. Each step's name, in order. |
-| `current` | `number` | Required. The step the person is on, counted from 0. |
+| `current` | `number` | Required. The step the person is on, counted from 0, kept within the steps: the list and the phone's line name the same step. With no steps there is no line. |
