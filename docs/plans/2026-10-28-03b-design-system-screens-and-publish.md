@@ -589,7 +589,7 @@ Every string here is owner-facing (no Spanish). Components display what the scre
   - `limitRaise`: `{ now: 'New limit: no payment over $1,000 without asking you.', was: 'Was $500' }`.
 
 - [ ] **Step 1: Write the stories and tests:**
-  - `Rules/PresetMenu`: `Closed`, `Open` (N-Conn-17), `PickOnce`, `ByKeyboard`, `Pending`, `Phone` (390 px, N-Conn-22).
+  - `Rules/PresetMenu`: `Closed`, `Open` (N-Conn-17), `PickOnce`, `ByKeyboard`, `TabCloses`, `SpaceChooses`, `PendingClosesTheMenu` (a stateful wrapper turns `pending` on while the menu is open), `Pending`, `Phone` (390 px, N-Conn-22).
   - `Rules/MoneyLimit`: `Reading` (N-Conn-19), `Editing` (N-Conn-19b), `TooHigh` (error "No single payment can be above $10,000."), `Unset` ("Every payment asks you first."), `Waiting` (`disabled`), `Phone` (N-Conn-22).
   - `Rules/LimitChange`: `Raise` (N-Conn-20).
   - `Rules/ChangeReview`: `AskMeFirst` (`askFirstReview` with `cancelsLinks`, N-Conn-18) and `RecommendedRules` (`recommendedReview` with `cancelsLinks`; no board draws it, so it cites N-Conn-18 with a note).
@@ -599,7 +599,8 @@ Every string here is owner-facing (no Spanish). Components display what the scre
     - `preset_pick_calls_once`: "Recommended rules", double-clicked → one `onPick('auto')`, the menu shut and focus on the button.
     - `menu_by_keyboard`: Tab, Enter → the first item; Down wraps; Escape closes with no call; Up → the last item; Enter → `onPick('auto')`.
     - `no_selected_state`: the items are `menuitem`s, none checked or current, each named by its title and described by its line.
-    - `pending_keeps_the_menu_shut`.
+    - `pending_keeps_the_menu_shut`, and `pending_closes_the_menu`: a draft that starts while the menu is open shuts it, focus back on the busy button.
+    - `tab_closes_the_menu`: Tab closes it with nothing chosen and focus on the button; `space_chooses`: Space chooses an item once, as Enter does.
     - `change_opens_the_field`: "Change" → `onEdit`, and focus moves into the field the screen opens.
     - `review_passes_no_value`: "Review change" and Enter → `onReview` with no arguments; typing calls `onChange` with the raw string.
     - `limit_error_is_announced`: `TooHigh` marks the field `aria-invalid` and shows the error in a live region.

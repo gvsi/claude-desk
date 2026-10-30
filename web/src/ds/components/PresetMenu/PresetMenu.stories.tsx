@@ -1,9 +1,10 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
+import { useEffect, useRef, useState } from 'react';
 import { expect, fn, waitFor, within } from 'storybook/test';
 
 import { expectComputed } from '../../test/expectComputed.ts';
 import { PRESET_WORDS } from '../OutcomeMenu/outcomeWords.ts';
-import { PresetMenu } from './PresetMenu.tsx';
+import { PresetMenu, type PresetMenuProps } from './PresetMenu.tsx';
 
 const meta = {
   title: 'Rules/PresetMenu',
@@ -117,6 +118,80 @@ export const ByKeyboard: Story = {
     await expect(args.onPick).toHaveBeenCalledTimes(1);
     await expect(args.onPick).toHaveBeenCalledWith('auto');
     await expect(button).toHaveFocus();
+  },
+};
+
+export const TabCloses: Story = {
+  parameters: { canvasNote: 'The menu by keyboard; the board draws it open.' },
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
+    // tab_closes_the_menu: Tab in the open menu closes it, chooses nothing, and leaves focus on the button.
+    const button = canvas.getByRole('button', { name: BUTTON });
+    button.focus();
+    await userEvent.keyboard('{Enter}');
+    await expect(within(theMenu(canvasElement)).getByRole('menuitem', { name: 'Ask me first' })).toHaveFocus();
+    await userEvent.keyboard('{Tab}');
+    await expect(canvas.queryByRole('menu')).toBeNull();
+    await expect(button).toHaveFocus();
+    await expect(args.onPick).not.toHaveBeenCalled();
+  },
+};
+
+export const SpaceChooses: Story = {
+  parameters: { canvasNote: 'The menu by keyboard; the board draws it open.' },
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
+    // space_chooses: Space on an item chooses it once, as Enter does, and focus goes back to the button.
+    const button = canvas.getByRole('button', { name: BUTTON });
+    button.focus();
+    await userEvent.keyboard('{Enter}');
+    await userEvent.keyboard('{ArrowDown}');
+    await expect(within(theMenu(canvasElement)).getByRole('menuitem', { name: 'Recommended rules' })).toHaveFocus();
+    await userEvent.keyboard(' ');
+    await expect(args.onPick).toHaveBeenCalledTimes(1);
+    await expect(args.onPick).toHaveBeenCalledWith('auto');
+    await expect(canvas.queryByRole('menu')).toBeNull();
+    await expect(button).toHaveFocus();
+  },
+};
+
+/**
+ * The menu as the Rules page holds it, whose draft can start while the menu is open (a pick from
+ * another tab, say): the event `draft-started` on the wrapper turns `pending` on, as the screen would.
+ */
+function PendingLater(props: PresetMenuProps) {
+  const [pending, setPending] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const element = root.current;
+    const start = () => setPending(true);
+    element?.addEventListener('draft-started', start);
+    return () => element?.removeEventListener('draft-started', start);
+  }, []);
+  return (
+    <div ref={root} className="preset-menu-story-pending">
+      <PresetMenu {...props} pending={pending} />
+    </div>
+  );
+}
+
+export const PendingClosesTheMenu: Story = {
+  render: (args) => (
+    <div style={{ display: 'flex', justifyContent: 'flex-end', maxWidth: 960, minHeight: 260 }}>
+      <PendingLater {...args} />
+    </div>
+  ),
+  parameters: { canvasNote: "A preset's draft that starts while the menu is open; the board draws the menu open." },
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
+    // pending_closes_the_menu: when the draft starts, the open menu shuts, focus goes back to the
+    // button, which turns busy, and nothing is chosen.
+    const button = canvas.getByRole('button', { name: BUTTON });
+    button.focus();
+    await userEvent.keyboard('{Enter}');
+    await expect(within(theMenu(canvasElement)).getByRole('menuitem', { name: 'Ask me first' })).toHaveFocus();
+    canvasElement.querySelector('.preset-menu-story-pending')?.dispatchEvent(new Event('draft-started'));
+    await waitFor(() => expect(canvas.queryByRole('menu')).toBeNull());
+    await expect(button).toHaveAttribute('aria-busy', 'true');
+    await expect(button).toHaveFocus();
+    await expect(args.onPick).not.toHaveBeenCalled();
   },
 };
 
