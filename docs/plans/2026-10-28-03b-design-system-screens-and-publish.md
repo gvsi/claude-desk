@@ -566,7 +566,7 @@ The connectors boards are drawn as AGENTS.md asks, at a 14-inch laptop's width o
 
 **Files:**
 - Create: `web/src/ds/boards/{ConnectorsHub,ConnectorPages,AddConnector,ToolChanged}.stories.tsx`
-- Modify: `web/src/ds/reference/README.md`, `web/src/ds/reference/boards.test.ts`, `web/src/ds/boards/{parts.tsx,spec.ts,boards.css}`, `web/.storybook/preview.tsx` (a `board` viewport, 1512×982), and the components whose spacing a render corrects, each README saying what changed. `AppShell`'s phone top bar is among them: N-Conn-16-Phone-Rules is the first signed board to draw it.
+- Modify: `web/src/ds/reference/README.md`, `web/src/ds/reference/boards.test.ts`, `web/src/ds/boards/{parts.tsx,spec.ts,boards.css}`, `web/.storybook/preview.tsx` (a `board` viewport, 1512×982), and the components whose spacing a render corrects, each README saying what changed, with a token for each new measure (`tokens.json`, `tokens.css`). `AppShell`'s phone top bar is among them: N-Conn-16-Phone-Rules is the first signed board to draw it.
 
 **Connectors board spec** (read off the renders; each connectors board story's play asserts the rows that apply with `expectComputed`, with Task 4's spec rows):
 
@@ -579,7 +579,7 @@ The connectors boards are drawn as AGENTS.md asks, at a 14-inch laptop's width o
 | Change tag | width 64px; border 1px `rgba(250, 249, 245, 0.22)`; fully rounded |
 | Steps | circle 22px; the current one `rgb(239, 236, 228)` |
 | Quoted definition | padding 10px 12px; border 1px `rgba(250, 249, 245, 0.12)`; radius 8px; background `rgb(28, 27, 25)`; 12px/18px mono; `white-space: pre-wrap` |
-| Ask Claude panel | width 400px; left border 1px `rgba(250, 249, 245, 0.12)`; at the window's right edge, the page narrowed by its width |
+| Ask Claude panel | width 400px; left border 1px `rgba(250, 249, 245, 0.12)`; at the window's right edge, the page narrowed by its width; under 640px a modal sheet over the whole window (the page inert, focus kept inside and returned to its opener) |
 
 - [ ] **Step 1: Write the failing tests and the board stories.**
   - `boards.test.ts`:
@@ -599,7 +599,7 @@ The connectors boards are drawn as AGENTS.md asks, at a 14-inch laptop's width o
 | `Boards/Connector and tool pages` › Refund | N-Conn-05-Refund | `Breadcrumb` Rules / Stripe / Refund; `ToolPageHeader` "On · Definition unchanged"; "Your rules for refund" (`ToolRulesCard`, no header); the composer with its chips; `RecentRequests` |
 | `Boards/Connector and tool pages` › Quote | N-Conn-06-Quote | the same for Quote, with no definition note (`canvasNote`: a built-in tool has no pinned definition; the board's chips repeat the Refund page's, so the story's are the Quote page's own) |
 | `Boards/Add a connector` › Add a connector, coming soon | N-Conn-07b-Add-Picker-ComingSoon | Chen's Rules page under `ConnectorPicker`: Payments to add, Google Calendar coming soon, Stripe to connect |
-| `Boards/Add a connector` › Add a connector | N-Conn-07-Add-Picker | Rivera's Rules page under the picker, every built-in added and Google Calendar to connect (`canvasNote`: catalog-only in the demo; the board draws Chen's picker, and the Google Calendar flow is Rivera's) |
+| `Boards/Add a connector` › Add a connector | N-Conn-07-Add-Picker | Chen's Rules page with Bookings, Verification and Documents, under the picker: Payments, Quotes and Leads and callbacks to add, Bookings and Documents added, Google Calendar and Stripe to connect (`canvasNote`: catalog-only in the demo; Verification is never listed) |
 | `Boards/Add a connector` › Connect Google Calendar | N-Conn-08-GCal-SignIn | `ConnectorSignIn` over Rivera's Rules page, step 2 of 4 |
 | `Boards/Add a connector` › Review Google Calendar | N-Conn-09-GCal-Review | `Breadcrumb`, `Steps` at 3 of 4, `ConnectorReview` with "See when you're free" at "Ask me first" |
 | `Boards/Add a connector` › Turn on Google Calendar | N-Conn-10-GCal-Confirm | `Steps` at 4 of 4, `PageHeader` "Turn on Google Calendar" ("Here's exactly what changes on your Desk. Nothing changes until you confirm."), `ChangeReview` with "Confirm and turn on" and "Back" |
