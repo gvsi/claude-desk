@@ -243,11 +243,16 @@ def test_ordinary_words_beside_the_amount_and_time_words_pass(prose):
     ("Cierre la llave de paso enseguida.", "es"),
     ("Claro, Maria va enseguida.", "es"),
     ("Claro, Maria sale en seguida.", "es"),                 # the same adverb in two words
+    ("Maria can come right-away.", "en"),                    # a dash between the words
+    ("Claro, Maria va en-seguida.", "es"),                   # "Claro" marks it Spanish (four unmarked words
+                                                             # would read as another language)
+    ("Maria can come RIGHT AWAY.", "en"),                    # capitals
 ])
 async def test_bare_time_adverbs_pass_by_the_owners_decision(app, client, prose, language):
     """The owner's decision of 2026-10-30: the bare adverbs "right away", "first thing" and
-    "enseguida" are no time words, so urgent advice reaches the visitor ("Turn off the water main
-    right away."). A time with its unit or its part of the day still blocks (below)."""
+    "enseguida" are no time words, written with a dash or in capitals too, so urgent advice reaches
+    the visitor ("Turn off the water main right away."). A time with its unit or its part of the
+    day still blocks (below)."""
     copy, visitor = await visitor_of(app, client)
     verdict = await checked(client, visitor, prose)
     assert (verdict.ok, verdict.violations, verdict.language) == (True, [], language)
