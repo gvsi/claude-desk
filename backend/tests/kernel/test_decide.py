@@ -1194,9 +1194,8 @@ def test_status_lines_are_digit_free():
 
 async def test_deciding_checks_what_it_relies_on_and_fails_closed():
     """The reviewer is asked only about a normalized action, and a decision's reasons come from
-    its evaluation and version unless it was refused early. Each is checked with code that raises,
-    which survives `python -O` and ends the call with nothing stored (the request's transaction
-    rolls back), never with an `assert`."""
+    its evaluation and version unless it was refused early: each check raises `RuntimeError`
+    with the check's name."""
     with pytest.raises(RuntimeError, match="^review_without_action$"):
         await decide._review(None, SimpleNamespace(action=None), [])
     call = SimpleNamespace(subject="A visitor", req=SimpleNamespace(call=SimpleNamespace(tool="native.book")),
