@@ -58,7 +58,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import DBAPIError
 
 from desk.contracts import (AUTO_MONEY_HARD_CAP_CENTS, Claim, Clause, Fact, Label, LedgerEvent, NormalizedAction,
-                            ReplyVerdict)
+                            RenderedBlock, ReplyVerdict)
 from desk.db.models import Action as ActionRow
 from desk.db.models import Approval, Business, Desk, Execution, PaymentLink, Person, Quote
 from desk.db.models import Decision as DecisionRow
@@ -70,7 +70,7 @@ from desk.kernel_service import (activation, agents, auth, decide, execute, labe
                                  reply_check, repo)
 from desk.kernel_service.auth import Named, SessionRow
 from desk.kernel_service.decisions import Reviewed
-from desk.kernel_service.render.cards import DeskInfo
+from desk.kernel_service.render.cards import DeskInfo, claims
 from desk.kernel_service.repo import KernelCtx, KernelFailure, KernelRuntime, kernel_transaction
 from desk.kernel_service.sessions import principal_for, verified
 
@@ -1032,15 +1032,44 @@ async def _activation_move(ctx: KernelCtx, link: PaymentLink, version: PolicyVer
     return None
 
 
+async def _cancelled_card(ctx: KernelCtx, link: PaymentLink, session_row: SessionRow, language: render.Language,
+                          desk: DeskInfo, canaries: dict[str, str]) -> RenderedBlock | None:
+    """The `link_cancelled` card for `link` in its session's chat: its amount and what it was for,
+    rendered from the link's own `payment_link` fact (the one named after it, whose `ref` is it)
+    with the reply check's reader test: the session reads as itself and, once verified, its person
+    (`labels.session_readers`), and no field the card shows holds a document canary. None when any
+    of that fails, logged: the chat gets no line rather than figures it may not read, and the
+    checkout page still says why the link was cancelled."""
+    fact_id = f"{LINK_FACT}{link.link_id}"
+    row = (await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
+        FactRow.desk_id == link.desk_id, FactRow.fact_id == fact_id)))).one_or_none()
+    fact = labels.fact_of(row) if row is not None else None
+    template = render.TEMPLATES["link_cancelled"]
+    if fact is None:
+        withheld = "no_such_fact"
+    elif not labels.can_read(fact.label, labels.session_readers(session_row)):
+        withheld = "not_a_reader"
+    elif not template.reads(fact) or claims(fact).get("ref") != link.link_id:
+        withheld = "template_mismatch"
+    else:
+        block = render.render_clause(Clause(template="link_cancelled", fact_id=fact_id), fact, language, desk)
+        if not reply_check.carries(block, canaries):
+            return block
+        withheld = "canary"
+    log.error("link_cancelled_withheld link_id=%s reason=%s", link.link_id, withheld)
+    return None
+
+
 async def cancelled_links(ctx: KernelCtx, desk_id: str, version: int) -> list[LinkCancelled]:
     """`GET /policy/{version}/cancelled_links?desk_id=`: the links `version`'s activation cancelled for
     a rule change whose session is still open, each with its chat line: a verdict with one
-    `link_cancelled` block in the session's last language, rendered when read, signed at the
-    session's current generation and ledgered `reply` (naming the link's fact). Links that version
-    moved to `unknown` are reconciled first, each committed at once (`settle_link`), so one the
-    provider then cancels is listed too. It is idempotent per `(link_id, version)`: a repeat read
-    lists the same links, each with a freshly signed verdict and its own `reply` entry, so the API
-    can read a version again after a failure."""
+    `link_cancelled` card in the session's last language, rendered when read from the link's own
+    fact (`_cancelled_card`; a link whose card can't be shown is left out), signed at the session's
+    current generation and ledgered `reply` (naming the link's fact). Links that version moved to
+    `unknown` are reconciled first, each committed at once (`settle_link`), so one the provider then
+    cancels is listed too. It is idempotent per `(link_id, version)`: a repeat read lists the same
+    links, each with a freshly signed verdict and its own `reply` entry, so the API can read a
+    version again after a failure."""
     pending = await ctx.db.scalars(ctx.repo.scoped(select(PaymentLink.link_id).where(
         PaymentLink.desk_id == desk_id, PaymentLink.state == "unknown", PaymentLink.cancelled_by_version == version)
         .order_by(PaymentLink.link_id)))
@@ -1052,10 +1081,12 @@ async def cancelled_links(ctx: KernelCtx, desk_id: str, version: int) -> list[Li
         PaymentLink.cancelled_by_version == version, SessionRow.closed_at.is_(None))
         .order_by(PaymentLink.link_id).execution_options(populate_existing=True)))).all()
     desk = await _desk_info(ctx, desk_id)
+    canaries = await labels.copy_canaries(ctx)
     listed = []
     for link, session_row in rows:
         language = render.language(session_row.last_language)
-        block = render.render_clause(Clause(template="link_cancelled"), None, language, desk)
+        if (block := await _cancelled_card(ctx, link, session_row, language, desk, canaries)) is None:
+            continue
         verdict = await reply_check.finalize(ctx, session_row, blocks=[block], violations=[], language=language,
                                              author="desk", fact_ids=[f"{LINK_FACT}{link.link_id}"])
         listed.append(LinkCancelled(link_id=link.link_id, session_id=session_row.session_id, verdict=verdict))

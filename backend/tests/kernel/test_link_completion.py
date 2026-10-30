@@ -22,6 +22,7 @@ from datetime import timedelta
 import httpx
 import psycopg
 import pytest
+from cryptography.exceptions import InvalidSignature
 from fastapi import FastAPI
 from sqlalchemy import select
 
@@ -681,19 +682,20 @@ async def test_activation_cancels_open_links_it_no_longer_allows(desk_prove, app
     seen = await view(client, over.token)
     assert (seen.state, seen.cancel_reason, seen.customer_name) == ("cancelled", "rules_changed", None)
 
-    # the chat gets the kernel's line, signed at the session's generation, in its last language
+    # the chat gets the kernel's card for the link, signed at the session's generation, in its last language
     public = await public_key(client)
     [line] = await cancelled_links(client, copy, 2)
     assert (line.link_id, line.session_id) == (over.link_id, visitor.session_id)
     [block] = line.verdict.blocks
     assert (block.kind, block.template, block.fact_id, block.title, block.lines, block.href) == (
-        "card", "link_cancelled", None, CANCELLED["en"], [], None)
+        "card", "link_cancelled", f"payment_link:{over.link_id}", "$300.00",
+        ["Water heater flush × 2", CANCELLED["en"]], None)
     assert (line.verdict.ok, line.verdict.generation, line.verdict.language) == (True, 0, "en")
     verify_verdict(public, visitor.session_id, line.verdict)
     assert (await checked(client, visitor, "Hola, ¿qué tal?")).language == "es"
     [again] = await cancelled_links(client, copy, 2)                    # read again: the same link, signed anew
-    assert (again.link_id, again.verdict.language, again.verdict.blocks[0].title) == (over.link_id, "es",
-                                                                                    CANCELLED["es"])
+    assert (again.link_id, again.verdict.language, again.verdict.blocks[0].lines) == (
+        over.link_id, "es", ["Water heater flush × 2", CANCELLED["es"]])
     assert again.verdict.message_id != line.verdict.message_id
     verify_verdict(public, visitor.session_id, again.verdict)
     replies = [entry for entry in await ledger_rows(app, copy) if entry.event.kind == "reply"
@@ -708,6 +710,51 @@ async def test_activation_cancels_open_links_it_no_longer_allows(desk_prove, app
         assert (await completed(client, link.token)).state == "paid", link.amount_cents
     await set_session(app, copy, visitor.session_id, closed_at=frozen_clock.now())
     assert await cancelled_links(client, copy, 2) == []                 # nor is a closed chat sent a line
+
+
+async def lower_the_cap_to_100(client: httpx.AsyncClient, copy: Rivera) -> int:
+    """Maria lowers her money cap to $100, and `rv-link` with it: the version she confirms."""
+    version = await draft_and_confirm(client, copy.owner_token, copy.desk_id, rivera_cards(link=RV_LINK_100),
+                                      auto_money_cap_cents=10_000)
+    return version.version
+
+
+@pytest.mark.solver
+async def test_a_cancelled_links_card_shows_its_own_title_and_amount(desk_prove, app, client, reviewer):
+    """Each chat's `link_cancelled` card says which link was cancelled: the amount as its headline,
+    then what the link was for and the kernel's line, rendered from that link's own `payment_link`
+    fact, never from model text, and signed with the card (`blocks_sha256`). A verified person's
+    link reads the same way, in the language she last wrote in."""
+    copy = await rivera(app, client)
+    visitor = await open_visitor(client, copy)
+    dana = await confirmed(client, copy, "dana@example.com")
+    heater = await rv_link(app, client, reviewer, copy, visitor, ("heater", 2), call_id="call-heater")   # $300
+    drain = await rv_link(app, client, reviewer, copy, dana, ("drain", 1), call_id="call-drain")         # $180
+    assert (await checked(client, dana, "Hola, ¿qué tal?")).language == "es"
+    version = await lower_the_cap_to_100(client, copy)
+
+    lines = {line.session_id: line for line in await cancelled_links(client, copy, version)}
+    assert {line.link_id for line in lines.values()} == {heater.link_id, drain.link_id}
+    public = await public_key(client)
+    expected = {visitor.session_id: (heater, "$300.00", "Water heater flush × 2", CANCELLED["en"], "en"),
+                dana.session_id: (drain, "$180.00", "Drain clearing", CANCELLED["es"], "es")}
+    for session_id, (link, amount, title, line_text, language) in expected.items():
+        verdict = lines[session_id].verdict
+        assert (lines[session_id].link_id, verdict.ok, verdict.language) == (link.link_id, True, language)
+        [block] = verdict.blocks                                         # the card alone: no prose beside it
+        assert (block.kind, block.template, block.fact_id, block.title, block.lines, block.href) == (
+            "card", "link_cancelled", f"payment_link:{link.link_id}", amount, [title, line_text], None)
+        assert block.text == "\n".join([amount, title, line_text])
+        verify_verdict(public, session_id, verdict)
+        # the title and amount are part of what is signed: a card showing another amount doesn't verify
+        for changed in ({"title": "$1.00"}, {"lines": ["Leak repair", line_text]}):
+            forged = verdict.model_copy(update={"blocks": [block.model_copy(update=changed)]})
+            with pytest.raises(InvalidSignature):
+                verify_verdict(public, session_id, forged)
+    replies =[entry.event for entry in await ledger_rows(app, copy) if entry.event.kind == "reply"
+               and entry.event.summary["author"] == "desk"]
+    assert sorted((event.session_id, tuple(event.summary["fact_ids"])) for event in replies) == sorted(
+        (session_id, (f"payment_link:{link.link_id}",)) for session_id, (link, *_) in expected.items())
 
 
 @pytest.mark.solver

@@ -207,10 +207,13 @@ def payment_confirmed(fact: Fact | None, desk: DeskInfo) -> Card:
 
 
 def link_cancelled(fact: Fact | None, desk: DeskInfo) -> Card:
-    """La línea del kernel para un enlace de pago que canceló un cambio de reglas: nombra al dueño
-    y ningún hecho."""
-    return Card(title=(f"Este enlace de pago se canceló porque cambiaron las reglas de {desk.owner_display_name}. "
-                      "Pídelo de nuevo si todavía quieres pagar."))
+    """`{total}` / `{título}` / `Este enlace de pago se canceló porque cambiaron las reglas de {dueño}.
+    Pídelo de nuevo si todavía quieres pagar.`: la tarjeta del kernel para un enlace de pago que
+    canceló un cambio de reglas, desde el hecho `payment_link` de ese mismo enlace."""
+    return Card(title=money(claims(fact)["total"]), lines=(
+        title_claim(fact),
+        f"Este enlace de pago se canceló porque cambiaron las reglas de {desk.owner_display_name}. "
+        "Pídelo de nuevo si todavía quieres pagar."))
 
 
 # ---- La línea de abierto ahora de la cabecera pública ("Open status") --------------------------------
