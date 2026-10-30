@@ -151,7 +151,9 @@ export const TurnOnPayments: Story = {
     // The title, then the connector's name and badge and the side's words; the reason; the outcome.
     const rows = within(changes).getAllByRole('listitem');
     await expect(rows[0]).toHaveTextContent('Payment link');
-    await expect(rows[0]).toHaveTextContent('Payments Built in · Anyone');
+    // A built-in connector is named alone, without "Built in", as the signed review boards draw it.
+    await expect(rows[0]).toHaveTextContent('Payments · Anyone');
+    await expect(rows[0]).not.toHaveTextContent('Built in');
     await expect(rows[0]).toHaveTextContent(DEFAULT_REASON);
     await expect(within(rows[0] as HTMLElement).getByText('Ask me first')).toBeVisible();
     await expect((rows[0] as HTMLElement).querySelector('.cd-status-dot--held')).not.toBeNull();
@@ -206,7 +208,7 @@ export const AddAndRemove: Story = {
     await expect(tags(canvasElement)).toEqual(['Added', 'Removed']);
     const [added, removed] = canvas.getAllByRole('listitem').slice(0, 2);
     await expect(added).toHaveTextContent('No bookings on Sundays.');
-    await expect(added).toHaveTextContent('Bookings Built in · Anyone · Sundays');
+    await expect(added).toHaveTextContent('Bookings · Anyone · Sundays');
     await expect((added as HTMLElement).querySelector('.cd-status-dot--refused')).not.toBeNull();
     // A removed row shows the rule it removes.
     await expect(removed).toHaveTextContent(saturday.reason);
@@ -571,13 +573,14 @@ export const AskMeFirstForEverything: Story = {
   parameters: {
     canvas: 'N-Conn-18-Preset-Review',
     canvasNote:
-      "Rivera's eight own rules; the board's ninth row, the shared rule for Alex Kim's assistant, is the illustrative shared card, which isn't in Rivera's seed. The board's red Before and green After bars, its quieter Before outcome and its changed values at weight 520 land with the change review's own update for the signed connector boards.",
+      "Rivera's eight own rules and Dana Whitfield's personal booking rule, which the owner's \"Allow only for Dana Whitfield, always\" adds and the board doesn't draw; the board's shared rule for Alex Kim's assistant is the illustrative shared card, which isn't in Rivera's seed. The board's red Before and green After bars, its quieter Before outcome and its changed values at weight 520 land with the change review's own update for the signed connector boards.",
   },
   play: async ({ canvas, canvasElement }) => {
-    // Each of Rivera's own rules goes, and its tool falls to the default ask.
+    // Each of the owner's rules goes, personal ones included, and its tool falls to the default ask.
     const rows = within(canvas.getByRole('region', { name: 'Changes' })).getAllByRole('listitem');
     await expect(rows.map((row) => row.querySelector('.cd-change-review__title')?.textContent)).toEqual([
       'Quote',
+      'Book a visit',
       'Book a visit',
       'Book a visit',
       'Share a document',
@@ -586,7 +589,7 @@ export const AskMeFirstForEverything: Story = {
       'See charges',
       'Refund',
     ]);
-    await expect(tags(canvasElement)).toEqual(Array(8).fill('Changed'));
+    await expect(tags(canvasElement)).toEqual(Array(9).fill('Changed'));
     for (const row of rows) {
       await expect(within(row).getByRole('group', { name: 'After' })).toHaveTextContent('Not covered by a rule you set, so I ask you.');
     }
@@ -598,15 +601,23 @@ export const AskMeFirstForEverything: Story = {
     await expect(quoteOutcome).toHaveTextContent('Ask me first');
     await expect(within(quoteOutcome).getByText('Changed')).toBeVisible();
     await expect(within(quote).getAllByText('Changed')).toHaveLength(1);
-    const refund = afterSide(rows, 7);
+    const refund = afterSide(rows, 8);
     await expect(refund).toHaveTextContent('Ask me first');
     await expect(within(refund).queryByText('Changed')).toBeNull();
     // An auto rule with an amount limit reads its limit before it goes.
-    await expect(within(rows[4] as HTMLElement).getByRole('group', { name: 'Before' })).toHaveTextContent(
+    await expect(within(rows[5] as HTMLElement).getByRole('group', { name: 'Before' })).toHaveTextContent(
       'Automatic up to $300; over $300, ask me first',
     );
-    // A mock connector is never named without "Mock".
-    await expect(rows[7]).toHaveTextContent('Stripe Mock');
+    // A built-in connector is named alone; a mock one is never named without "Mock".
+    await expect(rows[0]?.querySelector('.cd-change-review__meta')).toHaveTextContent(/^Quotes$/);
+    await expect(canvasElement).not.toHaveTextContent('Built in');
+    await expect(rows[8]).toHaveTextContent('Stripe Mock');
+    // personal_rules_are_listed: a rule for one person goes too, and its row names her.
+    const personal = rows[3] as HTMLElement;
+    await expect(within(personal).getByRole('group', { name: 'Before' })).toHaveTextContent('Dana Whitfield');
+    await expect(within(personal).getByRole('group', { name: 'Before' })).toHaveTextContent('Automatic');
+    await expect(afterSide(rows, 3)).toHaveTextContent('Ask me first');
+    await expect(tags(personal)).toEqual(['Changed']);
     // cancel_line_only_when_asked: a preset can cancel open payment links, so the screen asks for
     // the fixed line. It sits above the buttons, under the checks, in secondary body text.
     const line = canvas.getByText(CANCELS_LINKS);

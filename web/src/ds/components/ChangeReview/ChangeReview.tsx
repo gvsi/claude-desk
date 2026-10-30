@@ -103,7 +103,11 @@ function Outcome({ side }: { side: ChangeSide }) {
   );
 }
 
-/** The connector's name and badge, then what the rule applies to, then the side's words, joined by " · ". */
+/**
+ * The connector's name, then what the rule applies to, then the side's words, joined by " · ". A
+ * built-in connector is named alone; an external one keeps its Mock badge (`ConnectorName`), so a
+ * mock is never named without saying so.
+ */
 function MetaLine({
   connector,
   appliesTo,
@@ -118,7 +122,15 @@ function MetaLine({
   const text = joinWords(words);
   const target = appliesTo?.trim() ?? '';
   const parts: ReactNode[] = [];
-  if (connector) parts.push(<ConnectorName key="connector" connector={connector} size="inline" />);
+  if (connector) {
+    parts.push(
+      connector.source.kind === 'built_in' ? (
+        <span key="connector">{connector.name}</span>
+      ) : (
+        <ConnectorName key="connector" connector={connector} size="inline" />
+      ),
+    );
+  }
   if (target !== '') parts.push(<span key="target">{target}</span>);
   if (text !== '') parts.push(<span key="words">{text}</span>);
   if (parts.length === 0) return null;

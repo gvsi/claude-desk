@@ -995,6 +995,20 @@ const sharedChargeCard = rule({
 /** The screen's words for what the shared rule covers, shown under each tool it governs. */
 const sharedChargeAppliesTo = 'Applies to every tool that charges money: Payment link and Charge within a signed limit.';
 
+/**
+ * A personal rule: the card the owner's "Allow only for Dana Whitfield, always" answer to Dana's
+ * held Saturday booking (`heldVerified`) adds. It is not in the seed, so it stays out of
+ * `ruleCards`; the preset review uses it to show that a preset removes personal rules too.
+ */
+const personalBookingCard = rule({
+  card_id: 'rv-dana-book',
+  applies_to: 'native.book',
+  mode: 'auto',
+  who: 'person',
+  person_id: people.dana.personId,
+  reason: 'Dana Whitfield can book visits without asking you.',
+});
+
 const word = (field: RuleWord['field'], text: string): RuleWord => ({ field, text });
 
 /** Each card's words as the web app's `ruleWords` renders what it enforces, in the boards' words. */
@@ -1008,7 +1022,8 @@ const ruleWords = {
   'rv-refund': [word('who', 'The customer who paid, verified')],
   'rv-mandate': [word('who', 'Signed agents'), word('limits', 'Up to $20')],
   'rv-agent-charges': [word('who', "Alex Kim's assistant"), word('limits', 'Up to $20')],
-} satisfies Record<keyof typeof ruleCards | 'rv-agent-charges', RuleWord[]>;
+  'rv-dana-book': [word('who', people.dana.name)],
+} satisfies Record<keyof typeof ruleCards | 'rv-agent-charges' | 'rv-dana-book', RuleWord[]>;
 
 /** The amount limit of each auto card that has one, formatted as the screen formats it. */
 const ruleLimits = {
@@ -1503,31 +1518,31 @@ const defaultAsk = {
 } satisfies ChangeRowView['after'];
 
 /** A card of Rivera's on one side of a change: its outcome, limit, reason and words. */
-function cardSide(id: keyof typeof ruleCards): NonNullable<ChangeRowView['before']> {
-  const card = ruleCards[id];
+function cardSide(id: keyof typeof ruleWords, card: RuleCard): NonNullable<ChangeRowView['before']> {
   const limits: Partial<Record<keyof typeof ruleWords, string>> = ruleLimits;
   return { mode: card.mode, limit: limits[id], reason: card.reason, words: ruleWords[id] };
 }
 
 /**
- * Choosing "Ask me first for everything" (N-Conn-18-Preset-Review): each of Rivera's own cards
- * goes, and its tool falls to the default ask. The after side replaces the whole rule, which the
+ * Choosing "Ask me first for everything" (N-Conn-18-Preset-Review): each of the owner's cards goes,
+ * personal ones included (Dana Whitfield's booking rule), and its tool falls to the default ask. The after side replaces the whole rule, which the
  * row's "Changed" tag says; within it only a new outcome is tagged, as the board draws it, so
  * Refund, which already asks, has no tag beside its outcome.
  */
 const askFirstReview = (
   [
-    ['rv-quote', 'Quote', connectorViews.quotes],
-    ['rv-book-wk', 'Book a visit', connectorViews.bookings],
-    ['rv-book-sat', 'Book a visit', connectorViews.bookings],
-    ['rv-docs', 'Share a document', connectorViews.documents],
-    ['rv-link', 'Payment link', connectorViews.payments],
-    ['rv-mandate', 'Charge within a signed limit', connectorViews.payments],
-    ['rv-charges', 'See charges', connectorViews.stripe],
-    ['rv-refund', 'Refund', connectorViews.stripe],
+    ['rv-quote', ruleCards['rv-quote'], 'Quote', connectorViews.quotes],
+    ['rv-book-wk', ruleCards['rv-book-wk'], 'Book a visit', connectorViews.bookings],
+    ['rv-book-sat', ruleCards['rv-book-sat'], 'Book a visit', connectorViews.bookings],
+    ['rv-dana-book', personalBookingCard, 'Book a visit', connectorViews.bookings],
+    ['rv-docs', ruleCards['rv-docs'], 'Share a document', connectorViews.documents],
+    ['rv-link', ruleCards['rv-link'], 'Payment link', connectorViews.payments],
+    ['rv-mandate', ruleCards['rv-mandate'], 'Charge within a signed limit', connectorViews.payments],
+    ['rv-charges', ruleCards['rv-charges'], 'See charges', connectorViews.stripe],
+    ['rv-refund', ruleCards['rv-refund'], 'Refund', connectorViews.stripe],
   ] as const
-).map(([id, title, connector]): ChangeRowView => {
-  const before = cardSide(id);
+).map(([id, card, title, connector]): ChangeRowView => {
+  const before = cardSide(id, card);
   return {
     key: id,
     change: 'changed',
@@ -1786,6 +1801,7 @@ export const rivera = {
   ruleCards,
   sharedChargeCard,
   sharedChargeAppliesTo,
+  personalBookingCard,
   ruleWords,
   ruleLimits,
   connectors,
