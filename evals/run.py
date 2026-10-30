@@ -39,8 +39,10 @@ fixed in the Desk, not by lowering its bar. `key` prints the inputs key
 database, network or key: exit 0 or 1, the reason on stdout.
 
 `calibrate` (`evals/calibrate.py`) proposes each effect's reviewer thresholds from a finished
-calibration pass and writes `evals/reports/calibration-v<N>.md`, with no model call; it refuses a
-pass of any other split. `--write` also rewrites the calibrated block of
+calibration pass and writes its report with no model call: `evals/reports/calibration-v<N>.md` when a
+row changes, else `calibration-<pass_id>.md` (never over one already there), and under
+`evals/out/reports/` for a dry run or a null baseline; it refuses a pass of any other split. `--write`
+also rewrites the calibrated block of
 `backend/desk/kernel_service/review_thresholds.py` when a row changes (never from a dry run or a
 null baseline), and a `charge` or `pay_out` row looser than the kernel's initial one needs
 `--owner-approved`. It exits 1 when refused, with the reason on stdout.

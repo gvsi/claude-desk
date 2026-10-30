@@ -227,8 +227,9 @@ async def test_refuses_a_heldout_pass(repo, capsys):
         calibrate("20261030-210000-abcdef", root=repo)
     assert not list((repo / "evals" / "reports").glob("calibration-*"))
 
-    calibrated = calibrate(await a_pass(repo, "calibration"), root=repo, today=NOW.date())
-    assert calibrated.report == repo / "evals" / "reports" / "calibration-v2.md"
+    calibration_pass = await a_pass(repo, "calibration")
+    calibrated = calibrate(calibration_pass, root=repo, today=NOW.date())
+    assert calibrated.report == repo / "evals" / "reports" / f"calibration-{calibration_pass}.md"   # no row changes
     assert calibrated.report.is_file() and not calibrated.written
     assert (repo / THRESHOLDS_PATH).read_text() == THRESHOLDS_FILE
 
@@ -277,7 +278,7 @@ async def test_write_bumps_version_and_records_the_calibration(repo, capsys):
     sparse = await a_pass(repo, "calibration", {"atk-cal": CHANGE_ATTACK[:4], "leg-cal": CHANGE_LEGIT})
     assert run.calibrate_command(["--pass", sparse, "--write"], root=repo) == 0
     assert path.read_text() == THRESHOLDS_FILE
-    assert "No row changes" in (reports / "calibration-v2.md").read_text()
+    assert "No row changes" in (reports / f"calibration-{sparse}.md").read_text()
     assert "change 7500 / 2500 (not enough data" in capsys.readouterr().out
 
     pass_id = await a_pass(repo, "calibration", {"atk-cal": CHANGE_ATTACK, "leg-cal": CHANGE_LEGIT})
@@ -308,6 +309,98 @@ async def test_write_bumps_version_and_records_the_calibration(repo, capsys):
     module = import_back(path)
     assert module.REVIEW_THRESHOLDS_VERSION == 3 and module.CALIBRATION["pass_id"] == tighter
     assert module.THRESHOLDS["change"] != CALIBRATED_CHANGE
+
+
+async def test_a_calibration_that_changes_no_row_takes_no_version(repo, capsys):
+    """A calibration that changes no row writes no new version: its report is named by its pass, never by
+    the version the next calibration that changes a row takes, and a report already there is never
+    overwritten."""
+    path, reports = repo / THRESHOLDS_PATH, repo / "evals" / "reports"
+    sparse = await a_pass(repo, "calibration", {"atk-cal": CHANGE_ATTACK[:4], "leg-cal": CHANGE_LEGIT})
+    done = calibrate(sparse, root=repo, write=True, today=NOW.date())
+    assert not done.written and done.version == 1 and done.report == reports / f"calibration-{sparse}.md"
+    kept = done.report.read_text()
+    assert "No row changes, so the thresholds stay at version 1" in kept
+    assert path.read_text() == THRESHOLDS_FILE and not (reports / "calibration-v2.md").exists()
+
+    with pytest.raises(CalibrationRefused, match=f"calibration-{sparse}.md is already there"):
+        calibrate(sparse, root=repo, today=NOW.date().replace(day=31))
+    assert run.calibrate_command(["--pass", sparse], root=repo) == 1
+    assert "already there" in capsys.readouterr().out and done.report.read_text() == kept
+
+    changed = await a_pass(repo, "calibration", {"atk-cal": CHANGE_ATTACK, "leg-cal": CHANGE_LEGIT})
+    assert calibrate(changed, root=repo, write=True).report == reports / "calibration-v2.md"
+    assert done.report.read_text() == kept
+
+
+async def test_a_rehearsal_report_stays_out_of_the_committed_reports(repo):
+    """A dry-run or null-baseline pass measured no real reviewer, so its report rehearses a calibration:
+    it goes under `evals/out/reports/`, named by its pass, never into `evals/reports/`, where a real
+    calibration's report is committed under its version's name, and it takes no version."""
+    reviewed = {"atk-cal": CHANGE_ATTACK, "leg-cal": CHANGE_LEGIT}     # rows that would change
+    for flag in ("dry_run", "null_baseline"):
+        pass_id = await a_pass(repo, "calibration", reviewed, **{flag: True})
+        done = calibrate(pass_id, root=repo, today=NOW.date())
+        assert done.report == repo / "evals" / "out" / "reports" / f"calibration-{pass_id}.md"
+        assert "rehearse" in done.report.read_text() and not done.written and done.version == 1
+        with pytest.raises(CalibrationRefused, match="already there"):
+            calibrate(pass_id, root=repo, today=NOW.date())
+    assert not list((repo / "evals" / "reports").glob("calibration-*"))
+    assert (repo / THRESHOLDS_PATH).read_text() == THRESHOLDS_FILE
+
+
+async def test_the_report_says_what_was_written(repo):
+    """The report's status line matches what the calibration did and what writing it would take: a
+    rehearsal's rows take no version and name no command, a proposal names `--write`, and one with a
+    money row looser than its initial values names `--owner-approved` too."""
+    def status(report: Path) -> str:
+        return report.read_text().split("\n## The rule\n", 1)[0]
+
+    reviewed = {"atk-cal": CHANGE_ATTACK, "leg-cal": CHANGE_LEGIT}
+    rehearsal = await a_pass(repo, "calibration", reviewed, null_baseline=True)
+    said = status(calibrate(rehearsal, root=repo).report)
+    assert "rehearse a calibration and can't be written" in said and "a rehearsal takes no version" in said
+    assert "--write" not in said and "Proposed as version" not in said
+
+    proposal = await a_pass(repo, "calibration", reviewed)
+    said = status(calibrate(proposal, root=repo).report)
+    assert f"Proposed as version 2; `python -m evals.run calibrate --pass {proposal} --write` writes it." in said
+
+    looser = await a_pass(repo, "calibration", {"atk-cal": CHARGE_ATTACK, "leg-cal": CHARGE_LEGIT})
+    said = status(calibrate(looser, root=repo).report)
+    assert (f"Proposed as version 2; its charge row is looser than the kernel's initial one, so `python -m evals.run "
+            f"calibrate --pass {looser} --write --owner-approved \"<name>\"` writes it, with the owner's approval."
+            ) in said
+
+
+async def test_a_report_that_cant_be_written_leaves_the_thresholds_as_they_were(repo, capsys):
+    """The report is staged beside its place first, then the thresholds are written, then the report
+    moves into place. When the report can't be staged nothing is written; when it can't be moved into
+    place the thresholds file is put back as it was, so it never names a report that isn't there."""
+    path, reports = repo / THRESHOLDS_PATH, repo / "evals" / "reports"
+    pass_id = await a_pass(repo, "calibration", {"atk-cal": CHANGE_ATTACK, "leg-cal": CHANGE_LEGIT})
+
+    (reports / "calibration-v2.md").mkdir()             # the report's place is taken
+    with pytest.raises(CalibrationRefused, match="the thresholds file was put back as it was"):
+        calibrate(pass_id, root=repo, write=True)
+    assert path.read_text() == THRESHOLDS_FILE
+    assert sorted(p.name for p in reports.iterdir()) == ["README.md", "calibration-v2.md"]   # nothing staged left
+    assert not list(path.parent.glob("*.calibrating"))
+    assert run.calibrate_command(["--pass", pass_id, "--write"], root=repo) == 1
+    assert "calibrate: the report can't be moved into place" in capsys.readouterr().out
+    (reports / "calibration-v2.md").rmdir()
+
+    reports.chmod(0o555)                                  # nothing can be staged there
+    try:
+        with pytest.raises(CalibrationRefused, match="the report can't be written .*; nothing was written"):
+            calibrate(pass_id, root=repo, write=True)
+    finally:
+        reports.chmod(0o755)
+    assert path.read_text() == THRESHOLDS_FILE and sorted(p.name for p in reports.iterdir()) == ["README.md"]
+
+    assert calibrate(pass_id, root=repo, write=True).written     # with its place free, it goes ahead
+    assert import_back(path).CALIBRATION["report"] == "evals/reports/calibration-v2.md"
+    assert (reports / "calibration-v2.md").is_file()
 
 
 async def test_write_refuses_without_the_markers(repo, capsys):

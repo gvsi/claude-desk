@@ -17,11 +17,16 @@ cards don't.
 `calibrate(pass_id)` (`python -m evals.run calibrate --pass <id> [--write]`) reads a finished
 calibration pass from `evals/out/passes/<id>/`, each scored run's reviewed decisions from its
 transcript, and the kernel's thresholds file (`backend/desk/kernel_service/review_thresholds.py`,
-plan 01a), and writes `evals/reports/calibration-v<N>.md`, N being the version the proposal takes.
-It refuses a pass of any other split. With `write`, when a row changes, it rewrites only the lines
-between the file's `# calibration: begin` and `# calibration: end` lines: the new rows,
-`REVIEW_THRESHOLDS_VERSION` + 1 and `CALIBRATION` (version, pass id, split, date, report and the
-owner's approval). The rewrite is checked by executing it before it replaces the file. When no row
+plan 01a), and writes a report. It refuses a pass of any other split. When a row changes, the
+report is `evals/reports/calibration-v<N>.md`, N being the version the proposal takes. When none
+does, it takes no version: `evals/reports/calibration-<pass_id>.md`, which never overwrites a
+report already there. A rehearsal (a dry-run or null-baseline pass) takes no version either, and
+its report stays under `evals/out/reports/`, never committed. With `write`, when a row changes, it
+rewrites only the lines between the file's `# calibration: begin` and `# calibration: end` lines:
+the new rows, `REVIEW_THRESHOLDS_VERSION` + 1 and `CALIBRATION` (version, pass id, split, date,
+report and the owner's approval). The rewrite is checked by executing it before it replaces the
+file. The report is staged beside its place first, then the thresholds are written, then the
+report moves into place; if it can't, the thresholds file is put back as it was. When no row
 changes, the file is left as it is and only the report is written.
 """
 
@@ -42,6 +47,7 @@ from evals.tier2.verdict import Reviewed, RunVerdict
 
 THRESHOLDS_PATH = "backend/desk/kernel_service/review_thresholds.py"
 REPORTS_PATH = "evals/reports"
+OUT_REPORTS_PATH = "evals/out/reports"   # a rehearsal's report, never committed
 BEGIN_MARKER = "# calibration: begin"
 END_MARKER = "# calibration: end"
 BLOCK_NAMES = ("REVIEW_THRESHOLDS_VERSION", "THRESHOLDS", "CALIBRATION")   # what the markers hold
@@ -179,16 +185,25 @@ def calibrate(pass_id: str, *, root: Path = REPO_ROOT, thresholds_file: Path | N
         raise CalibrationRefused(f"pass {pass_id} ran the {result.config.split} split; thresholds are set only "
                                  "from a calibration pass (tier2 --split calibration), so the held-out split "
                                  "stays unseen")
-    if write and (rehearsal := _rehearsal(result)):
+    rehearsal = _rehearsal(result)
+    if write and rehearsal:
         raise CalibrationRefused(f"pass {pass_id} {rehearsal}; thresholds are written only from a real calibration "
                                  "pass")
     current = load_thresholds(thresholds_file)
     if write:   # before anything is written, whether or not a row changes
         marked_block(thresholds_file.read_text().splitlines(keepends=True))
     proposal = propose_thresholds(reviewed_decisions(result, root), current.table)
-    version = current.version + 1
-    report = root / REPORTS_PATH / f"calibration-v{version}.md"
     changed = proposal.table != current.table
+    # A real calibration that changes a row proposes (or writes) the next version, and its report takes that
+    # version's name. One that changes none, or a rehearsal, takes no version: its report is named by its
+    # pass and never overwrites one already there, and a rehearsal's stays under evals/out/, never committed.
+    versioned = changed and not rehearsal
+    version = current.version + 1 if versioned else current.version
+    report = root / (REPORTS_PATH if not rehearsal else OUT_REPORTS_PATH) / (
+        f"calibration-v{version}.md" if versioned else f"calibration-{result.pass_id}.md")
+    if not versioned and report.exists():
+        raise CalibrationRefused(f"{report.relative_to(root)} is already there; a calibration that takes no version "
+                                 "never overwrites a report")
     written = write and changed
     looser = looser_money_rows(proposal.table, current.initial)
     if written and looser and owner_approved is None:
@@ -200,14 +215,53 @@ def calibrate(pass_id: str, *, root: Path = REPO_ROOT, thresholds_file: Path | N
                                  "values, and this calibration writes no such row")
     text = render_calibration(result, proposal, current, version=version, today=today, written=written,
                               owner_approved=owner_approved)
-    if written:
-        write_thresholds(thresholds_file, proposal.table, version=version, calibration={
-            "version": version, "pass_id": result.pass_id, "split": "calibration", "date": today.isoformat(),
-            "report": f"{REPORTS_PATH}/{report.name}", "owner_approved": owner_approved,
-        })
-    report.parent.mkdir(parents=True, exist_ok=True)
-    report.write_text(text)
+    # The report is staged beside its place first, then the thresholds are written, then the report moves
+    # into place, so the thresholds file never names a report that isn't there.
+    staged = report.with_name(f".{report.name}.staging")
+    try:
+        report.parent.mkdir(parents=True, exist_ok=True)
+        staged.write_text(text)
+    except OSError as error:
+        staged.unlink(missing_ok=True)
+        raise CalibrationRefused(f"the report can't be written ({type(error).__name__}); nothing was written") from error
+    original = ""
+    try:
+        if written:
+            try:
+                original = thresholds_file.read_text()
+                write_thresholds(thresholds_file, proposal.table, version=version, calibration={
+                    "version": version, "pass_id": result.pass_id, "split": "calibration", "date": today.isoformat(),
+                    "report": f"{REPORTS_PATH}/{report.name}", "owner_approved": owner_approved,
+                })
+            except OSError as error:
+                raise CalibrationRefused(f"the thresholds file can't be written ({type(error).__name__}); nothing "
+                                         "was written") from error
+        try:
+            os.replace(staged, report)
+        except OSError as error:
+            moved = f"the report can't be moved into place ({type(error).__name__})"
+            if not written:
+                raise CalibrationRefused(f"{moved}; nothing was written") from error
+            try:
+                _put_back(thresholds_file, original)
+            except OSError:
+                raise CalibrationRefused(f"{moved}, and the thresholds file couldn't be put back: restore "
+                                         f"{THRESHOLDS_PATH} from git before anything else") from error
+            raise CalibrationRefused(f"{moved}, so the thresholds file was put back as it was; nothing was "
+                                     "written") from error
+    finally:
+        staged.unlink(missing_ok=True)
     return Calibrated(proposal=proposal, version=version, report=report, written=written)
+
+
+def _put_back(path: Path, text: str) -> None:
+    """Restore `path` to `text` whole: written beside it, then moved over it."""
+    staged = path.with_name(path.name + ".restoring")
+    try:
+        staged.write_text(text)
+        os.replace(staged, path)
+    finally:
+        staged.unlink(missing_ok=True)
 
 
 def _rehearsal(result: PassResult) -> str | None:
@@ -333,15 +387,23 @@ def render_calibration(result: PassResult, proposal: Proposal, current: Threshol
     scored = sum(r.status == "scored" for r in result.runs)
     scenarios = len({r.scenario_id for r in result.runs})
     looser = looser_money_rows(proposal.table, current.initial)
+    command = f"python -m evals.run calibrate --pass {result.pass_id} --write"
     if proposal.table == current.table:
         status = (f"No row changes, so the thresholds stay at version {current.version} and the thresholds file "
                   "isn't rewritten.")
     elif written:
         status = f"Written to `{THRESHOLDS_PATH}` as version {version}"
         status += f", with the owner's approval ({owner_approved}) of its looser money rows." if owner_approved else "."
+    elif _rehearsal(result):
+        status = ("Some rows would change, but a rehearsal takes no version, so nothing here is written to the "
+                  "thresholds file.")
+    elif looser:
+        rows = "row is" if len(looser) == 1 else "rows are"
+        status = (f"Proposed as version {version}; its {' and '.join(looser)} {rows} looser than the kernel's "
+                  f"initial {'one' if len(looser) == 1 else 'ones'}, so `{command} --owner-approved \"<name>\"` "
+                  "writes it, with the owner's approval.")
     else:
-        status = (f"Proposed as version {version}; `python -m evals.run calibrate --pass {result.pass_id} --write` "
-                  "writes it.")
+        status = f"Proposed as version {version}; `{command}` writes it."
     lines = [
         "# Reviewer calibration",
         "",
