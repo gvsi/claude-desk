@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { expect, fn, within } from 'storybook/test';
 
 import type { DemoInboxEntry, InboxNotice } from '../../../api/contracts.ts';
-import { chen } from '../../fixtures/index.ts';
+import { chen, requestHrefOf } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { DemoInboxPanel, type DemoInboxItem, type DemoInboxPanelProps } from './DemoInboxPanel.tsx';
 
@@ -26,6 +26,8 @@ function entryOf(entryId: string): DemoInboxEntry {
 }
 
 const CODE_ID = 'inbox-code-raj';
+/** Linda's alert about the held consultation, which names that decision. */
+const HOLD_ID = 'inbox-hold-consultation';
 
 /** Raj's code, opened: the notice and the entry fetched for it. */
 const codeOpened: DemoInboxItem = { notice: noticeOf(CODE_ID), entry: entryOf(CODE_ID) };
@@ -205,7 +207,7 @@ export const OwnerAlerts: Story = {
       'Alert',
       'Ledger checkpoint',
     ]);
-    await expect(items.map((item) => within(item).getByText(/\d:\d\d [ap]m/).textContent)).toEqual(['2:14 pm', '11:02 am', '9:30 am']);
+    await expect(items.map((item) => item.querySelector('.cd-demo-inbox__time')?.textContent)).toEqual(['2:14 pm', '11:12 am', '9:30 am']);
     // A ledger checkpoint is the kernel's signed record, word for word, so it reads in the trace's
     // monospace; codes and alerts read in the interface's type.
     const [code, alert, checkpoint] = items.map((item) => item.querySelector('.cd-demo-inbox__body') as HTMLElement);
@@ -214,8 +216,15 @@ export const OwnerAlerts: Story = {
   },
 };
 
-/** Where the screen opens the held request Linda's alert is about, in the owner app. */
-const REQUEST_HREF = '/app/main/today#request-dec-chen-consultation';
+/** The request link a screen builds from a fixture entry's `decision_id`, which the entry must name. */
+function requestHrefFor(entryId: string): string {
+  const href = requestHrefOf(entryOf(entryId));
+  if (!href) throw new Error(`fixture entry ${entryId} names no request`);
+  return href;
+}
+
+/** Where the held request Linda's alert is about sits on the page, built from the alert's decision_id. */
+const REQUEST_HREF = requestHrefFor(HOLD_ID);
 
 /** Linda's inbox with a request link on every item, as a careless screen might pass it. */
 const everythingWithLinks: DemoInboxItem[] = everythingArrived.map((item) => ({ ...item, requestHref: REQUEST_HREF }));

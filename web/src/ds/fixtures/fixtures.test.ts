@@ -10,6 +10,7 @@ import type {
   ClauseTemplate,
   Decision,
   DecisionState,
+  DemoInboxEntry,
   EvMessage,
   NormalizedAction,
   RenderedBlock,
@@ -17,7 +18,7 @@ import type {
   SessionState,
   SseEvent,
 } from '../../api/contracts';
-import { chen, rivera, RIVERA_MONEY_CAP_CENTS } from './index';
+import { chen, requestHrefOf, rivera, RIVERA_MONEY_CAP_CENTS } from './index';
 import type { ConversationFixture, TranscriptTurn } from './index';
 
 const FIXTURES = { rivera, chen };
@@ -732,6 +733,58 @@ describe('fixtures', () => {
         'allow_once deny_once allow_person deny_always',
       ].sort(),
     );
+  });
+
+  test('inbox_alerts_name_their_held_request', () => {
+    // The kernel writes the owner's alert for a held request with that decision's reason as its
+    // body and the decision's own id, under the entry_id its notice gave. Every other entry, a
+    // code or a ledger checkpoint, carries decision_id null, as the API sends it.
+    const entries = collect<DemoInboxEntry>(
+      (node) =>
+        typeof node.entry_id === 'string' &&
+        typeof node.body === 'string' &&
+        typeof node.created_at === 'string' &&
+        ['verification_code', 'alert', 'head_checkpoint'].includes(node.kind as string),
+    );
+    const held = new Map(
+      collect<Decision>(
+        (node) => typeof node.decision_id === 'string' && typeof node.reason_plain === 'string' && Array.isArray(node.answers) && node.state === 'held',
+      ).map((decision) => [decision.decision_id, decision]),
+    );
+    expect(entries.length).toBeGreaterThan(2);
+    let alerts = 0;
+    for (const entry of entries) {
+      const where = entry.entry_id;
+      if (typeof entry.decision_id !== 'string') {
+        expect(entry.decision_id, `${where} carries decision_id null`).toBeNull();
+        continue;
+      }
+      alerts += 1;
+      expect(entry.kind, where).toBe('alert');
+      expect(entry.to, where).toBe('owner');
+      const decision = held.get(entry.decision_id);
+      expect(decision, `${where} names a held fixture decision`).toBeDefined();
+      expect(entry.body, `${where} is its decision's reason`).toBe(decision?.reason_plain);
+      expect((decision?.inbox ?? []).map((notice) => notice.entry_id), `${where} is its decision's notice`).toContain(entry.entry_id);
+    }
+    // At least one alert names its request, so a clean result means something.
+    expect(alerts).toBeGreaterThan(0);
+  });
+
+  test('request_href_is_the_held_requests_place_on_the_page', () => {
+    // A story's "Open the request" goes to the place on the page of the decision its alert names,
+    // the id encoded; an entry that names none, or one not fetched yet, has no link.
+    const { entries } = chen.demoInbox;
+    const alert = entries.find((entry) => entry.kind === 'alert') as DemoInboxEntry;
+    expect(requestHrefOf(alert)).toBe('#request-dec-chen-consultation');
+    expect(requestHrefOf({ ...alert, decision_id: 'dec 1/2#3?' })).toBe('#request-dec%201%2F2%233%3F');
+    for (const decisionId of [null, undefined, '']) {
+      expect(requestHrefOf({ ...alert, decision_id: decisionId }), String(decisionId)).toBeUndefined();
+    }
+    for (const entry of entries.filter((entry) => entry.kind !== 'alert')) {
+      expect(requestHrefOf(entry), entry.entry_id).toBeUndefined();
+    }
+    expect(requestHrefOf(null)).toBeUndefined();
   });
 
   test('slot_ids_name_their_start_in_business_time', () => {

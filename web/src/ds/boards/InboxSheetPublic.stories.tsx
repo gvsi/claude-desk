@@ -23,6 +23,7 @@ const ENTRY: DemoInboxEntry = {
   kind: 'verification_code',
   body: 'Your Rivera Plumbing code is 482913. It works for 10 minutes.',
   created_at: '2026-10-30T10:46:00Z',
+  decision_id: null,
 };
 const CODE: DemoInboxItem = { notice: { entry_id: ENTRY.entry_id, to: ENTRY.to, preview: 'New verification code' }, entry: ENTRY };
 
@@ -114,5 +115,7 @@ export const Board: Story = {
     await expect(Math.round(box.right - close.getBoundingClientRect().right)).toBe(16);
     await expect(within(sheet).getByText(ENTRY.body)).toBeVisible();
     await expect(within(sheet).getByText('To •••• 0143')).toBeVisible();
+    // A request link is the owner's: the visitor's sheet shows none.
+    await expect(within(sheet).queryByRole('link', { name: 'Open the request' })).toBeNull();
   },
 };

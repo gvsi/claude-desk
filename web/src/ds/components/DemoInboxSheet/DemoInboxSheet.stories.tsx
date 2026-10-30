@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { expect, fn, waitFor, within } from 'storybook/test';
 
 import type { DemoInboxEntry } from '../../../api/contracts.ts';
+import { requestHrefOf } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { Button } from '../Button/Button.tsx';
 import type { DemoInboxItem } from '../DemoInboxPanel/DemoInboxPanel.tsx';
@@ -17,6 +18,7 @@ const CODE_ENTRY: DemoInboxEntry = {
   kind: 'verification_code',
   body: 'Your Rivera Plumbing code is 482913. It works for 10 minutes.',
   created_at: '2026-10-30T10:46:00Z',
+  decision_id: null,
 };
 const CODE: DemoInboxItem = { notice: CODE_NOTICE, entry: CODE_ENTRY };
 
@@ -29,6 +31,7 @@ const ALERT: DemoInboxItem = {
     kind: 'alert',
     body: 'Dana Whitfield asked for 10% off a drain clearing. Held by your rule: Quotes from your price list, at list price.',
     created_at: '2026-10-30T10:46:00Z',
+    decision_id: 'dec-dana-discount',
   },
   time: 'Today, 10:46 am',
 };
@@ -219,7 +222,7 @@ export const Owner: Story = {
 };
 
 export const OwnerOpensTheRequest: Story = {
-  args: { viewer: 'owner', items: [{ ...ALERT, requestHref: '#request-dec-dana-discount' }] },
+  args: { viewer: 'owner', items: [{ ...ALERT, requestHref: requestHrefOf(ALERT.entry) }] },
   globals: { viewport: { value: 'laptop', isRotated: false } },
   parameters: {
     canvas: 'N-R2-Inbox-Sheet-Owner',

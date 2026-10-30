@@ -41,6 +41,16 @@ export interface DemoInboxFixture {
   ownerTimes: Record<string, string>;
 }
 
+/**
+ * A story's `requestHref` for an inbox entry: the place on the page of the held request its
+ * `decision_id` names, or nothing when it names none or isn't fetched yet. The owner app builds its
+ * own in-app path; the design system only needs a place on the page.
+ */
+export function requestHrefOf(entry: DemoInboxEntry | null): string | undefined {
+  const decisionId = entry?.decision_id;
+  return decisionId ? `#request-${encodeURIComponent(decisionId)}` : undefined;
+}
+
 export { chen } from './chen';
 export type { CardData } from './rivera';
 export { cardBlock, placeholderHex, proseBlock, rivera, RIVERA_MONEY_CAP_CENTS } from './rivera';
