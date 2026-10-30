@@ -121,6 +121,26 @@ describe('About pages', () => {
       expect(document.title, `after ${path}`).not.toContain(title);
     }
   });
+
+  it('the_tab_title_follows_each_page', async () => {
+    // Every page that names the tab hands it back in the same commit, so from a business's own page through
+    // both documents and on, the tab always names the page it is on.
+    const before = 'Before · Claude Desk';
+    document.title = before;
+    const { screen, router } = await renderRoute(`/d/${RIVERA.slug}`);
+    await expect.element(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeVisible();
+    await expect.poll(() => document.title).toBe('Rivera Plumbing');
+
+    for (const { path, title } of PAGES) {
+      await router.navigate(path);
+      await expect.element(screen.getByRole('heading', { level: 1, name: title, exact: true })).toBeVisible();
+      await expect.poll(() => document.title, { message: path }).toBe(`${title} · Claude Desk`);
+    }
+
+    await router.navigate('/no/such/page');
+    await expect.element(screen.getByText("This page doesn't exist", { exact: true })).toBeVisible();
+    await expect.poll(() => document.title, { message: 'after leaving' }).toBe(before);
+  });
 });
 
 /** Waits a quarter of a second: a request sent while the page drew has reached the mock API by then. */

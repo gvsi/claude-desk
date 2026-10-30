@@ -660,11 +660,13 @@ describe('ReaderPage', () => {
       }, []);
       return <p>The next page</p>;
     }
-    const before = document.title;
+    const before = 'Before · Claude Desk';
+    document.title = before;
     const screen = await render(
       <MemoryRouter initialEntries={['/about/proposal']}>
         <Routes>
           <Route path="/about/proposal" element={<ReaderPage id="proposal" />} />
+          <Route path="/about/prediction" element={<ReaderPage id="prediction" />} />
           <Route path="/next" element={<NextPage />} />
         </Routes>
         <LocationProbe />
@@ -672,6 +674,10 @@ describe('ReaderPage', () => {
     );
     await expect.poll(robots).toEqual(['noindex']);
     await expect.poll(() => document.title).toBe('Product proposal · Claude Desk');
+    // One document gives way to the other: one tag, and the other document's title.
+    at.navigate?.('/about/prediction');
+    await expect.poll(() => document.title).toBe('Capability prediction · Claude Desk');
+    expect(robots()).toEqual(['noindex']);
 
     at.navigate?.('/next');
     await expect.poll(() => seen.length).toBe(1);
