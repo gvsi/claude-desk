@@ -19,7 +19,7 @@ The workflow has nine jobs. Their names are the check names, in this order:
 2. `kernel tests`: the Rust kernel's tests pass (`cargo test --locked`), with cvc5 available to the proof binary's tests.
 3. `proofs`: two things pass. The proof binary's self-test runs against cvc5 (`desk-prove --selftest`). Then every shipped rule set is proved again and has to match its committed proof report (`make check-presets`). A report that is missing, out of date or failing fails the check.
 4. `tier 1 evals`: two suites pass against the real kernel and database. Both need no network and no model key:
-   - the model-free attack suite (`make evals-tier1`);
+   - the model-free attack suite (`make evals-tier1`). Every CI run is the strict one, a manual workflow run on any branch included: a plan whose code is on the branch but which `evals/tier1/landed.toml` doesn't list fails it at collection, and the run's summary names the plan under `unlisted` and counts it as failed. A local run on the plan's own branch only warns and keeps that plan's cases pending;
    - the API's kernel contract tests, against the real kernel and not only the fake one, for each part of the kernel that `evals/tier1/landed.toml` lists as landed (`make kernel-contract`).
 5. `tier 2 results`: on pull requests only. A change to the gated inputs has to carry a passing tier 2 results file for exactly those inputs (`make evals-results-check BASE=origin/main`). The gated inputs are the kernel, prompts, rule presets, shared contracts, mock payments and the eval judging code.
 6. `web tests`: two steps pass in turn. First the web app type-checks and its unit tests pass (`make web-test`). Then it builds, the build check passes and the mocked end-to-end test passes (`make web-e2e`).
