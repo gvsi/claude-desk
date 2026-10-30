@@ -84,7 +84,8 @@ export const GoogleCalendar: Story = {
   args: { connector: rivera.googleCalendar.view, intro: rivera.googleCalendar.review.intro, tools: rivera.googleCalendar.review.tools },
   parameters: {
     canvas: 'N-Conn-09-GCal-Review',
-    canvasNote: 'Google Calendar is catalog-only in the demo, so this shows what the review supports once it works.',
+    canvasNote:
+      'Google Calendar is catalog-only in the demo, so this shows what the review supports once it works. Its tool starts at "Ask me first", as the contract requires of every new tool, with the rules that cover it shown; it never starts at "Automatic" from the Bookings rule, as an earlier draft of this board showed. The current render agrees.',
   },
   play: async ({ canvas, canvasElement }) => {
     await expect(canvas.getByRole('heading', { level: 1, name: 'Review what Claude could do with Google Calendar Mock' })).toBeVisible();
