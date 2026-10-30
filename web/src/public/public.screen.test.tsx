@@ -612,6 +612,57 @@ describe('public chat page', () => {
     expect(askInView(), '"Ask for Maria Rivera", where the visitor moved to, stays in view').toBe(true);
   });
 
+  it('newest_row_follows_a_shorter_window', async () => {
+    const { screen } = await renderRoute(PAGE, { viewport: 'desktop', seed: 'rivera' });
+    await ready(screen);
+    for (const text of ['How much is drain clearing?', 'Can someone come Tuesday afternoon?', 'Book the first one', 'Can I get 15% off if I pay cash?']) {
+      await say(screen, text);
+      await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
+    }
+
+    // The window gets shorter at the end of the chat (a panel docks, a browser bar opens): the
+    // page doesn't scroll and nothing around the conversation changes size, so the end slips under
+    // the composer with no scroll event and nothing for the page to see.
+    const atTheEnd = document.scrollingElement?.scrollTop ?? 0;
+    await page.viewport(VIEWPORTS.desktop.width, 640);
+    await sleep(200);
+    expect(document.scrollingElement?.scrollTop, 'the page did not scroll').toBe(atTheEnd);
+    expect(endUnderTheComposer(screen), 'the end is under the composer').toBeGreaterThan(48);
+
+    // The visitor never moved, so the chat going on brings the end back above the composer.
+    mockStore.emit(RIVERA.slug, { type: 'owner_joined', name: 'Maria Rivera' });
+    await expect.element(screen.getByText('Maria Rivera joined the chat', { exact: true })).toBeInTheDocument();
+    await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
+  });
+
+  it('newest_row_follows_a_growing_composer', async () => {
+    const { screen } = await renderRoute(PAGE, { viewport: 'desktop', seed: 'rivera' });
+    await ready(screen);
+    for (const text of ['How much is drain clearing?', 'Can someone come Tuesday afternoon?', 'Book the first one', 'Can I get 15% off if I pay cash?']) {
+      await say(screen, text);
+      await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
+    }
+
+    // Between two frames, a pasted message grows the composer over the end of the chat, and Maria
+    // joins before the browser's next frame tells the page the composer changed size. The visitor
+    // never moved, so the end comes back above the composer.
+    const box = screen.getByRole('textbox', { name: 'Message Rivera Plumbing' }).element() as HTMLTextAreaElement;
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => {
+        realSetTimeout(() => {
+          Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(box, 'one\ntwo\nthree\nfour\nfive\nsix');
+          box.dispatchEvent(new Event('input', { bubbles: true }));
+          mockStore.emit(RIVERA.slug, { type: 'owner_joined', name: 'Maria Rivera' });
+          resolve();
+        }, 0);
+      });
+    });
+    await expect.element(screen.getByText('Maria Rivera joined the chat', { exact: true })).toBeInTheDocument();
+    await sleep(200);
+    expect(box.value.split('\n'), 'the pasted lines are in the composer').toHaveLength(6);
+    await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
+  });
+
   it('reload_restores_the_conversation', async () => {
     const first = await renderRoute(PAGE);
     await ready(first.screen);
@@ -920,9 +971,7 @@ describe('public chat page', () => {
  * stays at the bottom of the window: in view, and not hidden under it.
  */
 function expectEndAboveTheComposer(screen: RenderResult): void {
-  const composer = screen.getByRole('textbox', { name: 'Message Rivera Plumbing' }).element().closest('.cd-public-shell__composer');
-  const conversation = document.querySelector('.cd-public-shell__conversation');
-  if (!composer || !conversation) throw new Error('no conversation or composer');
+  const { composer, conversation } = conversationAndComposer(screen);
   const end = conversation.getBoundingClientRect().bottom;
   const top = composer.getBoundingClientRect().top;
   expect(Math.abs(end - top), `the conversation ends at ${end}, the composer starts at ${top}`).toBeLessThanOrEqual(2);
@@ -931,6 +980,20 @@ function expectEndAboveTheComposer(screen: RenderResult): void {
   const last = rows[rows.length - 1]?.getBoundingClientRect();
   expect(last?.bottom ?? 0).toBeLessThanOrEqual(top);
   expect(last?.bottom ?? 0).toBeGreaterThan(0);
+}
+
+/** How far the end of the conversation reaches under the top of the composer area, in pixels. */
+function endUnderTheComposer(screen: RenderResult): number {
+  const { composer, conversation } = conversationAndComposer(screen);
+  return conversation.getBoundingClientRect().bottom - composer.getBoundingClientRect().top;
+}
+
+/** The conversation and the composer area that stays at the bottom of the window. */
+function conversationAndComposer(screen: RenderResult): { composer: Element; conversation: Element } {
+  const composer = screen.getByRole('textbox', { name: 'Message Rivera Plumbing' }).element().closest('.cd-public-shell__composer');
+  const conversation = document.querySelector('.cd-public-shell__conversation');
+  if (!composer || !conversation) throw new Error('no conversation or composer');
+  return { composer, conversation };
 }
 
 /** The open status, as the design system's PublicShell draws it in the header. */

@@ -153,6 +153,18 @@ function scrollerOf(el: Element): Element {
   return document.scrollingElement ?? document.documentElement;
 }
 
+/** Where the conversation is scrolled: the element whose scrolling moves it, and how far down. */
+interface ScrollerAt {
+  scroller: Element;
+  top: number;
+}
+
+/** Where the element whose scrolling moves `el` stands now. */
+function scrollerAt(el: Element): ScrollerAt {
+  const scroller = scrollerOf(el);
+  return { scroller, top: scroller.scrollTop };
+}
+
 /** The design system's classes for the shell around the page and its composer area, which stays at the bottom of the window. */
 const SHELL = '.cd-public-shell';
 const COMPOSER_AREA = '.cd-public-shell__composer';
@@ -178,7 +190,7 @@ class BeforeEachChange extends Component<{ before: () => void }> {
     return null;
   }
 
-  // React calls getSnapshotBeforeUpdate only on a class that has componentDidUpdate too.
+  // Without componentDidUpdate, React warns in development that getSnapshotBeforeUpdate is used alone.
   override componentDidUpdate(): void {}
 
   override render(): null {
@@ -201,30 +213,50 @@ interface NewestInView {
  * where they are until they send.
  *
  * Where the visitor is comes from the page's scroll events, and again just before each change the
- * page makes (`beforeChange`): a scroll the page makes at once, such as focus moving up with the
- * keyboard, sends its event only with the next frame, and a reply arriving in between would
- * otherwise take the visitor back down to the end.
+ * page makes (`beforeChange`) if the conversation has scrolled since the page last knew: a scroll
+ * the page makes at once, such as focus moving up with the keyboard, sends its event only with the
+ * next frame, and a reply arriving in between would otherwise take the visitor back down to the
+ * end. The page changing size moves the end without scrolling, so it doesn't count as the visitor
+ * moving away.
  */
 function useNewestInView(end: RefObject<HTMLElement | null>, composer: RefObject<HTMLElement | null>, shown: boolean): NewestInView {
   const atTheEnd = useRef(true);
-  /** The visitor has just sent, and the change that shows their message brings the end back. */
-  const sent = useRef(false);
+  /** Where the conversation's scroller stood when the page last knew where the visitor was. */
+  const seenAt = useRef<ScrollerAt | null>(null);
+
+  // The page knows where the visitor is, with the conversation scrolled as it is now.
+  const noteSeen = useCallback(() => {
+    seenAt.current = end.current ? scrollerAt(end.current) : null;
+  }, [end]);
 
   // Brings the end of the conversation up to the composer, at once and never animated, while the
-  // visitor is at the end.
+  // visitor is at the end, and notes that they still are.
   const pin = useCallback(() => {
     if (!atTheEnd.current || !end.current || !composer.current) return;
     const hidden = hiddenUnderComposer(end.current, composer.current);
-    if (hidden <= 0) return;
-    const scroller = scrollerOf(end.current);
-    if (scroller === document.scrollingElement) window.scrollBy({ top: hidden, behavior: 'instant' });
-    else scroller.scrollBy({ top: hidden, behavior: 'instant' });
-  }, [end, composer]);
+    if (hidden > 0) {
+      const scroller = scrollerOf(end.current);
+      if (scroller === document.scrollingElement) window.scrollBy({ top: hidden, behavior: 'instant' });
+      else scroller.scrollBy({ top: hidden, behavior: 'instant' });
+    }
+    noteSeen();
+  }, [end, composer, noteSeen]);
 
   // Whether the visitor is at the end, as the page stands now.
   const notePlace = useCallback(() => {
     if (end.current && composer.current) atTheEnd.current = hiddenUnderComposer(end.current, composer.current) <= AT_THE_END_PX;
-  }, [end, composer]);
+    noteSeen();
+  }, [end, composer, noteSeen]);
+
+  // Whether the conversation has scrolled since the page last knew where the visitor was. Its
+  // scroller changing is not the visitor moving: setup's preview scrolls the page until the
+  // conversation overflows the panel around it, and the panel from then on.
+  const scrolledSinceSeen = useCallback((): boolean => {
+    const seen = seenAt.current;
+    if (!seen || !end.current) return false;
+    const now = scrollerAt(end.current);
+    return now.scroller === seen.scroller && now.top !== seen.top;
+  }, [end]);
 
   useEffect(() => {
     // Captured on the document, so the page's scrolling and an embedding panel's both count.
@@ -245,21 +277,20 @@ function useNewestInView(end: RefObject<HTMLElement | null>, composer: RefObject
     return () => observer.disconnect();
   }, [shown, end, composer, pin]);
 
-  // Just before each change, unless it shows what the visitor has just sent.
+  // Just before each change, if the visitor may have moved.
   const beforeChange = useCallback(() => {
-    if (!sent.current) notePlace();
-  }, [notePlace]);
+    if (scrolledSinceSeen()) notePlace();
+  }, [scrolledSinceSeen, notePlace]);
 
   // After every render: the conversation may have grown under the composer.
-  useLayoutEffect(() => {
-    pin();
-    sent.current = false;
-  });
+  useLayoutEffect(pin);
 
+  // Wherever the visitor is when they send, the end comes back, even if a scroll of theirs hasn't
+  // sent its event yet.
   const follow = useCallback(() => {
     atTheEnd.current = true;
-    sent.current = true;
-  }, []);
+    noteSeen();
+  }, [noteSeen]);
 
   return { follow, beforeChange };
 }
