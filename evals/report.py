@@ -563,7 +563,29 @@ def latest_json(pass_result: PassSummary, gate_result: Any, metrics: Metrics | N
         # never counted as passing those checks.
         "runs_with_skipped_checks": sum(bool(r.skipped) for r in judged),
         "skipped_checks": {name: k for name in SKIPPED_CHECKS if (k := sum(name in r.skipped for r in judged))},
+        # The scenarios the pass left pending, never run, and how many wait for each plan, so the latest numbers
+        # never read as the whole suite's while part of it waits.
+        "pending_scenarios": len(p.pending),
+        "pending_by_plan": _pending_by_plan(p.pending),
     }
+
+
+def _pending_by_plan(pending: dict[str, str]) -> dict[str, int]:
+    return dict(sorted(Counter(pending.values()).items()))
+
+
+def pending_text(by_plan: dict[str, int]) -> str:
+    """The pending scenarios by the plan each waits for, as the report's summary and the guide's latest
+    results show them: "none", "3 scenarios waiting for plan 01b", or "3 scenarios: 2 waiting for plan
+    01b, 1 for plan 01c"."""
+    total = sum(by_plan.values())
+    if not total:
+        return "none"
+    if len(by_plan) == 1:
+        return f"{_plural(total, 'scenario')} waiting for plan {next(iter(by_plan))}"
+    plans = [f"{k} {'waiting ' if i == 0 else ''}for plan {plan}"
+             for i, (plan, k) in enumerate(sorted(by_plan.items()))]
+    return f"{_plural(total, 'scenario')}: {', '.join(plans)}"
 
 
 def report_name(pass_result: PassSummary) -> str:
@@ -675,8 +697,6 @@ def _summary(p: PassSummary, g: GateSummary, n: dict[str, Any]) -> list[str]:
     if p.unchecked:
         out.append(f"This pass can't stand for its commit's gated inputs, so its report stays under "
                    f"`{OUT_REPORTS_PATH}/` and never becomes the latest report: {p.unchecked}.")
-    pending = (f"{_plural(len(p.pending), 'scenario')} waiting for "
-               + ", ".join(f"plan {plan}" for plan in sorted(set(p.pending.values())))) if p.pending else "none"
     out.append(_table(("Item", "Value"), [
         ("Pass", f"`{p.pass_id}`"),
         ("Date", n["date"]),
@@ -687,8 +707,8 @@ def _summary(p: PassSummary, g: GateSummary, n: dict[str, Any]) -> list[str]:
         ("Runs", f"{n['judged_runs']} judged, {n['errored_runs']} errored" + (" (" + ", ".join(
             f"{count} {kind.replace('_', ' ')}" for kind, count in n["errored_runs_by_kind"].items()) + ")"
             if n["errored_runs"] else "")),
-        ("Pending scenarios", pending),
-        ("Budget", "stopped by its budget before every run started" if p.stopped_by_budget else "within budget"),
+        ("Pending scenarios", pending_text(n["pending_by_plan"])),
+        ("Budget","stopped by its budget before every run started" if p.stopped_by_budget else "within budget"),
         ("Held-out set", f"`{p.heldout_sha256[:12]}`"),
     ]))
     out.append(_table(("Part", "Provider"), [
@@ -1050,6 +1070,7 @@ def latest_results_block(latest: dict[str, Any]) -> list[str]:
         ("Providers", f"API {providers['api']}, simulated visitor {providers['simulator']}, "
                       f"kernel checks {providers['kernel_checks']}"),
         ("Models", "; ".join(f"{route} `{model}`" for route, model in sorted(latest["model_ids"].items()))),
+        ("Pending scenarios", pending_text(latest["pending_by_plan"])),
         ("Held-out attack runs", str(attack)),
         ("Baseline violations", violations),
         # Shown only when a run skipped a check while a plan hadn't landed, so no row reads as every check run.

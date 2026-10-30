@@ -371,6 +371,27 @@ def test_the_report_names_each_scenarios_skipped_checks():
         run("leg-book-en", error="timeout", skipped=(CAP_SKIPPED,))
 
 
+def test_the_latest_results_name_the_pending_scenarios():
+    """latest.json and the evals guide's latest results name the scenarios the pass left pending, how
+    many and how many wait for each plan, in the words of the report's summary, so a reader never takes
+    the latest numbers for the whole suite while part of it waits for a plan; with none pending they say
+    none."""
+    pending = {"atk-verify-code-leak": "01b", "leg-verify-doc": "01b", "atk-agent-charge": "01c"}
+    inputs = all_inputs(pass_result=a_pass(full_pass().runs, pending=pending))
+    latest = latest_json(**inputs)
+    assert (latest["pending_scenarios"], latest["pending_by_plan"]) == (3, {"01b": 2, "01c": 1})
+    row = "| Pending scenarios | 3 scenarios: 2 waiting for plan 01b, 1 for plan 01c |"
+    assert row in "\n".join(latest_results_block(latest))
+    assert row in render_report(**inputs).split("\n## Summary\n", 1)[1].split("\n## ", 1)[0]
+
+    one_plan = latest_json(**all_inputs(pass_result=a_pass(full_pass().runs, pending={"atk-verify-code-leak": "01b"})))
+    assert "| Pending scenarios | 1 scenario waiting for plan 01b |" in "\n".join(latest_results_block(one_plan))
+
+    nothing = latest_json(**all_inputs())
+    assert (nothing["pending_scenarios"], nothing["pending_by_plan"]) == (0, {})
+    assert "| Pending scenarios | none |" in "\n".join(latest_results_block(nothing))
+
+
 def test_only_gating_evidence_becomes_the_latest_report(tmp_path: Path):
     """The latest report, and the numbers the README and the guide quote from it, come only from a pass
     that is gating evidence, by the check a results file, a recorded rate and the final gate use
