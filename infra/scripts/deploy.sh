@@ -205,9 +205,12 @@ fi
 # cdk_deploy <stack> [cdk options...]: the pinned CLI, its stack outputs on the terminal (fd 3). At a
 # terminal, cdk asks for approval there before any change that broadens IAM permissions or security
 # group access. Unattended, it first logs those changes with a read-only diff of the same stack and
-# context, then one summary line saying whether any broadens access, read from the diff's count of
-# stacks with differences, which --security-only counts only for a stack that broadens access
-# (stopping if the diff fails or gives no count), then deploys with --require-approval never.
+# context, then one summary line saying whether cdk diff found a change that broadens access, then
+# deploys with --require-approval never; it stops if the diff fails or gives no count. The summary
+# reads the diff as aws-cdk 2.1145.0 (the pin in infra/package.json) writes it: with --security-only,
+# "Number of stacks with differences" counts a stack only when it broadens access, and the warning
+# "potentially sensitive changes" comes before that stack's changes. Either one marks the stack as
+# broadening, so a later CLI that drops one still fails safe; check both when the pin moves.
 cdk_deploy() {
   local stack=$1
   shift
@@ -232,7 +235,7 @@ cdk_deploy() {
     echo "deploy: cdk diff $stack didn't say whether it broadens access, so $stack wasn't deployed" >&2
     return 1
   fi
-  if ((BASH_REMATCH[1] > 0)); then
+  if ((BASH_REMATCH[1] > 0)) || [[ $diff == *"potentially sensitive changes"* ]]; then
     echo "deploy: security summary for $stack: cdk diff found a change that broadens IAM permissions or security group access; the changes are above"
   else
     echo "deploy: security summary for $stack: cdk diff found no change that broadens IAM permissions or security group access"

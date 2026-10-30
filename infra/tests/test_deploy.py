@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import pty
+import re
 import select
 import shutil
 import stat
@@ -43,10 +44,11 @@ REPLACE_IT = 'security add-generic-password -U -s claude-desk-passcode -a "$USER
 # "<value>" with those bytes as octal escapes when any byte is not; with KEYCHAIN_PROBE_WARNING, -g
 # writes a warning line to stderr before that one, and with KEYCHAIN_RAW both write the stored bytes
 # as they are (-g as `password: "<bytes>"`), as no `security` known does. `cdk diff --security-only`
-# writes what the pinned CDK CLI's (cdk-toolkit.js) does: a warning and the changes for a stack named
-# in STUB_BROADENS, then `✨  Number of stacks with differences: <n>`, which counts only stacks that
-# broaden access (STUB_DIFF_UNCOUNTED leaves that line out). A watched tool (WATCHED) writes the same
-# record, then runs the real tool.
+# writes what the pinned CLI, aws-cdk 2.1145.0, does (its cdk-toolkit.js): a warning and the changes
+# for a stack named in STUB_BROADENS, then `✨  Number of stacks with differences: <n>`, which counts
+# only stacks that broaden access (STUB_DIFF_UNCOUNTED leaves that line out, and with
+# STUB_DIFF_COUNTS_NOTHING it counts none, as a later CLI might). A watched tool (WATCHED) writes the
+# same record, then runs the real tool.
 RECORD = """import hashlib, json, os, re, sys
 tool, args = os.path.basename(sys.argv[0]), sys.argv[1:]
 passcode = os.environ.get("DESK_PASSCODE")
@@ -118,7 +120,8 @@ elif tool == "npx" and args[:3] == ["--no-install", "cdk", "diff"]:
               "approval level.\\nPlease confirm you intend to make the following modifications:\\n", file=sys.stderr)
         print(f"stub: IAM statement changes for {{args[3]}}", file=sys.stderr)
     if not os.environ.get("STUB_DIFF_UNCOUNTED"):
-        print(f"\\n\\u2728  Number of stacks with differences: {{int(broadens)}}\\n", file=sys.stderr)
+        counted = 0 if os.environ.get("STUB_DIFF_COUNTS_NOTHING") else int(broadens)
+        print(f"\\n\\u2728  Number of stacks with differences: {{counted}}\\n", file=sys.stderr)
     sys.exit(1 if os.environ.get("FAIL_DIFF") else 0)
 elif tool == "npx" and args[:2] == ["--no-install", "cdk"] and args[2] == "deploy":
     stack = args[3]
@@ -806,6 +809,27 @@ def test_each_unattended_security_diff_ends_with_a_line_saying_whether_access_br
     assert (log.index("stub: cdk security diff for DeskData") < log.index(data)
             < log.index("stub: cdk events for DeskData") < log.index("stub: IAM statement changes for DeskApp")
             < log.index(app) < log.index("stub: cdk events for DeskApp"))
+
+
+def test_a_security_diff_that_warns_of_sensitive_changes_is_summed_up_as_broadening_whatever_its_count(deploy):
+    """Should a CDK upgrade stop counting a broadening stack, the warning cdk diff writes before that
+    stack's changes ("potentially sensitive changes") still marks it, so the summary fails safe."""
+    run = deploy(terminal=False, DESK_DEPLOY_ACCOUNT=ACCOUNT, STUB_BROADENS="DeskApp", STUB_DIFF_COUNTS_NOTHING="1")
+    assert run.status == 0, run.output
+    assert run.log.count(f"deploy: security summary for DeskData: {BROADENS_NOTHING}") == 1
+    assert run.log.count(f"deploy: security summary for DeskApp: {BROADENS}") == 2
+
+
+def test_the_cdk_cli_whose_diff_deploy_sh_reads_is_the_pinned_one():
+    """deploy.sh reads cdk diff's count line and its "potentially sensitive changes" warning as the CDK
+    CLI version its comment names writes them, and the stub here writes them as that version does.
+    Upgrading the pin fails this test until both are checked against the new CLI's source again and
+    the comments name it."""
+    pinned = json.loads((INFRA / "package.json").read_text())["devDependencies"]["aws-cdk"]
+    locked = json.loads((INFRA / "package-lock.json").read_text())["packages"]["node_modules/aws-cdk"]["version"]
+    for path in (SCRIPT, Path(__file__)):
+        named = set(re.findall(r"aws-cdk (\d+\.\d+\.\d+)", path.read_text()))
+        assert named == {pinned} == {locked}, path.name
 
 
 def test_a_security_diff_that_doesnt_say_whether_access_broadens_stops_before_that_deploy(deploy):
