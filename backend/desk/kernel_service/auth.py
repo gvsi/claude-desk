@@ -210,7 +210,10 @@ async def require_owner(ctx: KernelCtx, request: Request, *, desk_id: str | None
     first two rows): the Desk `desk_id`, or the session `session_id`, must belong to that copy.
     Binds the request's transaction to the owner's copy. A refused token goes on the ledger of the
     session `session_id` names, or of `named` when the call names its session another way (the
-    decision `GET /decisions/{id}` reads), and is logged when there is none."""
+    decision `GET /decisions/{id}` reads), and is logged when there is none. A call passes one of
+    the two, never both (`ValueError`)."""
+    if session_id is not None and named is not None:
+        raise ValueError("require_owner takes session_id or named, not both")
     route = route_template(request)
     # the session a call names is found first, so a refusal goes on its ledger, whatever copy it is in
     target_copy = await repo.copy_of_session_id(ctx, session_id) if session_id is not None else None

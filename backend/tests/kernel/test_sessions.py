@@ -313,6 +313,15 @@ async def test_bad_owner_token_is_401(app, client):
     assert (row.mode, row.generation) == ("ai", 0)
 
 
+async def test_require_owner_takes_one_session_to_ledger_a_refusal_on():
+    # A call names the session a refusal goes on by `session_id` or as `named` (the decision a read
+    # names), never both: a caller passing both would lose `named` without a word. It is a caller's
+    # mistake, raised before the request or the database is read.
+    named = auth.Named(copy_id="copy-1", session_id="s-1")
+    with pytest.raises(ValueError, match="session_id or named"):
+        await auth.require_owner(None, None, session_id="s-1", named=named)
+
+
 async def test_unattributed_failures_are_logged_not_ledgered(app, client, caplog):
     add_session_probe(app)
     rows = await make_copy_rows(app)
