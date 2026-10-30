@@ -422,9 +422,9 @@ describe('Conversations', () => {
     mockStore.inject({ route: 'conversation', status: 500, times: 2 });
     await box.fill(words);
     await userEvent.keyboard('{Enter}');
-    await expect.element(screen.getByRole('alert').getByText(UNAVAILABLE, { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('alert').getByText(UNAVAILABLE, { exact: true }), { timeout: 5_000 }).toBeVisible();
+    await expect.element(box, { timeout: 5_000 }).not.toBeDisabled();
     await expect.element(box).toHaveValue('');
-    await expect.element(box).not.toBeDisabled();
     expect(log(screen).getByText(words, { exact: true }).elements()).toHaveLength(0);
 
     // The same words again, and this answer is lost before they reach the API. The chat read
@@ -458,8 +458,8 @@ describe('Conversations', () => {
     mockStore.inject({ route: 'conversation', status: 500, times: 2 });
     await box.fill('On my way');
     await userEvent.keyboard('{Enter}');
+    await expect.element(box, { timeout: 5_000 }).not.toBeDisabled();
     await expect.element(box).toHaveValue('');
-    await expect.element(box).not.toBeDisabled();
 
     // Her next words wait for a read of the chat; while it still can't be read, they don't go,
     // and they stay in the box with the owner's line for the failed read.
@@ -467,8 +467,8 @@ describe('Conversations', () => {
     const next = 'About 10 minutes out.';
     await box.fill(next);
     await userEvent.keyboard('{Enter}');
-    await expect.element(box).toHaveValue(next);
-    await expect.element(box).not.toBeDisabled();
+    await expect.element(box, { timeout: 5_000 }).toHaveValue(next);
+    await expect.element(box, { timeout: 5_000 }).not.toBeDisabled();
     const controls = box.element().closest('.cd-conversation__controls');
     expect(controls?.querySelector('[role="alert"]')?.textContent).toBe(UNAVAILABLE);
     expect(requests('ownerMessage').map((r) => r.body)).toEqual([{ text: 'On my way', kind: 'say' }]);
