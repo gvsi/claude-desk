@@ -300,7 +300,9 @@ def _receipt_ready(target: _Target) -> None:
     written. A tool with no executed line ("Receipts") is 500 `internal`, ledgered on the decision,
     with no intent row and no side effect, never the generic line and never an error after the
     side effect: every language has a line for the same tools, so one that has a line now still
-    has one when the session's language has changed by the end."""
+    has one when the session's language has changed by the end. The refusal's `persist` only
+    appends, without locking the decision first: it takes no other lock, so it never holds the
+    ledger head while it waits for a row."""
     try:
         decide.status_line("executed", tool=target.action.tool, session=target.session_row,
                            owner=target.business.owner_display_name)
