@@ -11,7 +11,6 @@ import { Fragment, useContext, useLayoutEffect, useRef, useSyncExternalStore } f
 import { Link, UNSAFE_NavigationContext, useLocation, useNavigationType } from 'react-router';
 
 import { Card, ConceptFooter, Icon, Mark, Wordmark } from '../ds/index.ts';
-import { BackLink } from './BackLink.tsx';
 import { ABOUT_DOCUMENTS, readingMinutes, type AboutDocument, type Block, type FigureName } from './documents.ts';
 import { ArchitectureFigure } from './figures/ArchitectureFigure.tsx';
 import { MeasuresTable } from './figures/MeasuresTable.tsx';
@@ -20,6 +19,7 @@ import { Tau3Chart } from './figures/Tau3Chart.tsx';
 import { Inlines } from './Inlines.tsx';
 import { ABOUT_LINKS, type AboutId } from './links.ts';
 import { MONTHS } from './months.ts';
+import { PrototypeLink } from './PrototypeLink.tsx';
 
 import './reader.css';
 
@@ -345,13 +345,13 @@ function Brand() {
   );
 }
 
-/** The bar across the top: the product's name, the two documents and the way back to the Desk. */
+/** The bar across the top, which stays while the page scrolls: the product's name, the two documents and the link into the prototype. */
 function TopBar({ current, compact }: { current: AboutId; compact: boolean }) {
   if (compact) {
     return (
       <>
         <header className="cd-about-top cd-about-top--compact">
-          <BackLink compact />
+          <PrototypeLink compact />
           <Brand />
         </header>
         <DocumentSwitch current={current} compact />
@@ -362,7 +362,7 @@ function TopBar({ current, compact }: { current: AboutId; compact: boolean }) {
     <header className="cd-about-top">
       <Brand />
       <DocumentSwitch current={current} compact={false} />
-      <BackLink />
+      <PrototypeLink />
     </header>
   );
 }

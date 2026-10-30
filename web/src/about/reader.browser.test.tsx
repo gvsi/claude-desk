@@ -6,14 +6,16 @@
  */
 import axe from 'axe-core';
 import { useLayoutEffect } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter, Route, Routes, useLocation, useNavigate, type NavigateFunction } from 'react-router';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 import { render } from 'vitest-browser-react';
 
+import { Icon } from '../ds/index.ts';
 import { CONCEPT_FOOTER_TEXT, assertCleanCopy } from '../ds/test/copy.ts';
 import { writeLocal } from '../lib/storage.ts';
-import { AXE_TAGS, assertNoJargon } from '../test/screen.ts';
+import { AXE_TAGS, assertNoJargon, tokenColor } from '../test/screen.ts';
 import { ABOUT_DOCUMENTS, documentText } from './documents.ts';
 import type { AboutId } from './links.ts';
 import { ReaderPage } from './ReaderPage.tsx';
@@ -85,6 +87,13 @@ afterEach(async () => {
   writeLocal('lastDesk', null);
   await page.viewport(DESKTOP.width, DESKTOP.height);
 });
+
+/** The design system's chat icon, as its paths draw it, to tell it apart from any other icon. */
+const CHAT_ICON = (() => {
+  const holder = document.createElement('div');
+  holder.innerHTML = renderToStaticMarkup(<Icon name="conversations" />);
+  return holder.querySelector('svg')?.innerHTML;
+})();
 
 /** Text with its whitespace collapsed, as a person reads it. */
 function flat(text: string | null | undefined): string {
@@ -180,8 +189,8 @@ describe('ReaderPage', () => {
         for (const id of IDS) {
           for (const size of [DESKTOP, PHONE]) {
             const screen = await renderReader(id, { size, lastDesk });
-            // The page is drawn, its back link read from what this browser stored.
-            const back = screen.getByRole('link', { name: lastDesk ? /your Desk/i : /Back to the prototype/ });
+            // The page is drawn, its link into the prototype read from what this browser stored.
+            const back = screen.getByRole('link', { name: 'Try Desk prototype', exact: true });
             await expect.element(back).toBeInTheDocument();
             await screen.unmount();
           }
@@ -237,8 +246,8 @@ describe('ReaderPage', () => {
         // The reader's own strings, each found where the boards put it.
         const topBar = root.querySelector('header');
         const documents = root.querySelector('nav[aria-label="Documents"]');
-        expect(readText(documents ?? document.body), where).toBe('Product proposal Capability prediction');
-        expect(readText(topBar ?? document.body), where).toMatch(phone ? /^Back to your Desk Claude Desk Beta$/ : /Back to your Desk$/);
+        expect(readText(documents ?? document.body), where).toBe('Capability prediction Product proposal');
+        expect(readText(topBar ?? document.body), where).toMatch(phone ? /^Try Desk prototype Claude Desk Beta$/ : /Try Desk prototype$/);
         // "On this page", without the entries, which are the document's section names.
         const contents = without(root.querySelector('nav[aria-label="On this page"]'), 'ol');
         expect(readText(contents), where).toBe(
@@ -591,7 +600,7 @@ describe('ReaderPage', () => {
           expect(link.getAttribute('target'), link.href).toBe('_blank');
           expect(link.getAttribute('rel'), link.href).toBe('noopener noreferrer');
         }
-        // Every other link stays in the app, in the same tab: the documents, the contents list and the way back.
+        // Every other link stays in the app, in the same tab: the documents, the contents list and the link into the prototype.
         for (const link of links.filter((link) => !external.includes(link))) {
           expect(link.getAttribute('href'), where).toMatch(/^(?:\/|#)/);
           expect(link.getAttribute('target'), link.href).toBeNull();
@@ -601,25 +610,26 @@ describe('ReaderPage', () => {
     }
   });
 
-  it('back_link_says_your_desk_or_the_prototype', async () => {
+  it('prototype_link_opens_your_desk_or_the_prototype', async () => {
     const cases = [
-      { lastDesk: 'desk-rivera', size: DESKTOP, words: 'Back to your Desk', to: '/app/desk-rivera/today' },
-      // The same words at every width.
-      { lastDesk: 'desk-rivera', size: PHONE, words: 'Back to your Desk', to: '/app/desk-rivera/today' },
-      { lastDesk: null, size: DESKTOP, words: 'Back to the prototype', to: '/' },
-      { lastDesk: null, size: PHONE, words: 'Back to the prototype', to: '/' },
+      { lastDesk: 'desk-rivera', size: DESKTOP, to: '/app/desk-rivera/today' },
+      { lastDesk: 'desk-rivera', size: PHONE, to: '/app/desk-rivera/today' },
+      { lastDesk: null, size: DESKTOP, to: '/' },
+      { lastDesk: null, size: PHONE, to: '/' },
     ];
     for (const id of IDS) {
-      for (const { lastDesk, size, words, to } of cases) {
+      for (const { lastDesk, size, to } of cases) {
         const where = `${id} at ${size.width}, last Desk ${lastDesk}`;
         document.title = 'Today · Claude Desk';
         const screen = await renderReader(id, { size, lastDesk });
         expect(document.title, where).toBe(`${PAGES[id].title} · Claude Desk`);
-        // One way back, in the top bar, saying where it goes and never naming the business.
+        // One link into the prototype, in the top bar, the same words at every width, never naming the
+        // business, with the chat icon: to this browser's Desk when it has opened one.
         const back = [...(screen.container.querySelector('header')?.querySelectorAll('a') ?? [])].filter(
           (link) => !link.closest('nav'),
         );
-        expect(back.map(readText), where).toEqual([words]);
+        expect(back.map(readText), where).toEqual(['Try Desk prototype']);
+        expect(back[0]?.querySelector('svg')?.innerHTML, where).toBe(CHAT_ICON);
         expect(back[0]?.getAttribute('href'), where).toBe(to);
         await userEvent.click(back[0] as HTMLElement);
         await expect.poll(() => at.path).toBe(to);
@@ -647,6 +657,73 @@ describe('ReaderPage', () => {
     expect(robots()).toEqual(['noindex']);
     await screen.unmount();
     expect(robots()).toEqual([]);
+  });
+
+  it('the_top_bar_stays_while_reading', async () => {
+    for (const size of [DESKTOP, PHONE]) {
+      const where = `at ${size.width}`;
+      const screen = await renderReader('prediction', { size });
+      const bar = screen.container.querySelector('header') as HTMLElement;
+      window.scrollTo(0, 2000);
+      await expect.poll(() => window.scrollY, { message: where }).toBe(2000);
+      // Part way down, the bar is still at the top of the window, opaque.
+      const box = bar.getBoundingClientRect();
+      expect(box.top, where).toBe(0);
+      expect(getComputedStyle(bar).backgroundColor, where).toBe(tokenColor('--bg-app'));
+      if (size === DESKTOP) {
+        // The contents list stays below it.
+        const contents = screen.container.querySelector('nav.cd-about-contents:not(.cd-about-contents--compact)');
+        expect(contents?.getBoundingClientRect().top, where).toBeGreaterThanOrEqual(box.bottom);
+      } else {
+        // On a phone, the document switch under the bar scrolls away with the page.
+        const documents = screen.container.querySelector('nav[aria-label="Documents"]');
+        expect(documents?.getBoundingClientRect().bottom, where).toBeLessThan(0);
+      }
+      // A figure's marks scrolled under it stay under it.
+      const stop = screen.container.querySelector('[data-stop][data-on]') as HTMLElement;
+      const stopBox = stop.getBoundingClientRect();
+      window.scrollBy(0, stopBox.top - box.height / 2);
+      await expect.poll(() => Math.round(stop.getBoundingClientRect().top), { message: where }).toBeLessThan(box.bottom);
+      const under = stop.getBoundingClientRect();
+      expect(bar.contains(document.elementFromPoint(under.left + under.width / 2, under.top + under.height / 2)), where).toBe(true);
+      // A section opened by its address sits below it.
+      const section = screen.container.querySelector('article h2') as HTMLElement;
+      section.scrollIntoView();
+      await expect.poll(() => section.getBoundingClientRect().top, { message: where }).toBeGreaterThanOrEqual(box.bottom);
+      await screen.unmount();
+    }
+  });
+
+  it('keyboard_focus_stays_clear_of_the_top_bar', async () => {
+    // On a phone the document switch sits under the bar and scrolls with the page: tabbing to it brings it out
+    // from behind the bar.
+    const screen = await renderReader('prediction', { size: PHONE });
+    const bar = screen.container.querySelector('header') as HTMLElement;
+    (screen.container.querySelector('.cd-about-try') as HTMLElement).focus();
+    window.scrollTo(0, 50);
+    await expect.poll(() => window.scrollY).toBe(50);
+    await userEvent.tab();
+    const focused = document.activeElement as HTMLElement;
+    expect(focused.closest('nav[aria-label="Documents"]')).not.toBeNull();
+    await expect.poll(() => focused.getBoundingClientRect().top).toBeGreaterThanOrEqual(bar.getBoundingClientRect().bottom);
+    await screen.unmount();
+  });
+
+  it('tabbing_backwards_stays_clear_of_the_top_bar', async () => {
+    const screen = await renderReader('proposal', { size: DESKTOP });
+    const bar = screen.container.querySelector('header') as HTMLElement;
+    const link = [...screen.container.querySelectorAll('article a')].find(
+      (a) => a.getAttribute('href') === '/about/prediction',
+    ) as HTMLElement;
+    // From the next link down the article, with the page scrolled so that the link sits just under the bar.
+    const links = [...screen.container.querySelectorAll('article a')];
+    (links[links.indexOf(link) + 1] as HTMLElement).focus();
+    window.scrollBy(0, link.getBoundingClientRect().top - 8);
+    await expect.poll(() => Math.round(link.getBoundingClientRect().top)).toBeLessThan(bar.getBoundingClientRect().bottom);
+    await userEvent.tab({ shift: true });
+    expect(document.activeElement).toBe(link);
+    await expect.poll(() => link.getBoundingClientRect().top).toBeGreaterThanOrEqual(bar.getBoundingClientRect().bottom);
+    await screen.unmount();
   });
 
   it('leaving_takes_noindex_and_the_title_away_at_once', async () => {

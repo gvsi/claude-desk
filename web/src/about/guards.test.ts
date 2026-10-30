@@ -70,7 +70,7 @@ function importsOf(file: string, text: string, files: ReadonlySet<string>): Impo
 const READER_ONLY = ['about/documents.ts', 'about/markdown.ts', 'about/ReaderPage.tsx'];
 const READER = (file: string) => file === 'about/ReaderPage.tsx' || /^about\/figures\/[^/]+\.tsx$/.test(file);
 // The page's chrome, which renders when the reader can't: never the registry or the page, even on demand.
-const CHROME = ['about/ReaderError.tsx', 'about/BackLink.tsx', 'about/links.ts'];
+const CHROME = ['about/ReaderError.tsx', 'about/PrototypeLink.tsx', 'about/links.ts'];
 // The one `import()` that may load the reader: the router's, of the page itself.
 const ON_DEMAND = { from: 'app/routes.tsx', to: 'about/ReaderPage.tsx' };
 
@@ -178,8 +178,8 @@ describe('About page source guards', () => {
       'about/links.ts': "import type { SidebarAbout } from '../ds/index.ts';",
       'about/ReaderPage.tsx': "import {\n  ABOUT_DOCUMENTS,\n} from './documents.ts';\nimport { Tau3Chart } from './figures/Tau3Chart.tsx';",
       'about/figures/Tau3Chart.tsx': "import { ABOUT_DOCUMENTS } from '../documents.ts';\nimport '../reader.css';",
-      'about/ReaderError.tsx': "import { BackLink } from './BackLink.tsx';",
-      'about/BackLink.tsx': "import { readLocal } from '../lib/storage.ts';",
+      'about/ReaderError.tsx': "import { PrototypeLink } from './PrototypeLink.tsx';",
+      'about/PrototypeLink.tsx': "import { readLocal } from '../lib/storage.ts';",
       'about/reader.browser.test.tsx': "import { parseDocument } from './markdown.ts';\nimport md from '../../../docs/x.md?raw';",
       'lib/storage.ts': 'export function readLocal() {}',
       'app/routes.tsx': [
@@ -201,7 +201,7 @@ describe('About page source guards', () => {
       ['about/ReaderPage.tsx', "import { parseDocument } from './markdown.ts';", 'only documents.ts may'],
       ['about/links.ts', "import md from '../../../docs/product-proposal.md?raw';", 'only documents.ts may'],
       ['about/ReaderError.tsx', "import {\n  ABOUT_DOCUMENTS,\n} from './documents.ts';", 'chrome never loads'],
-      ['about/BackLink.tsx', "const page = () => import('./ReaderPage.tsx');", 'chrome never loads'],
+      ['about/PrototypeLink.tsx', "const page = () => import('./ReaderPage.tsx');", 'chrome never loads'],
       ['about/links.ts', "export * from './documents';", 'chrome never loads'],
       ['owner/OwnerLayout.tsx', "import { ABOUT_DOCUMENTS } from '../about/documents.ts';", 'not through import()'],
       ['app/routes.tsx', "import { ReaderPage } from '../about/ReaderPage.tsx';", 'not through import()'],
@@ -213,9 +213,9 @@ describe('About page source guards', () => {
       ['owner/OwnerLayout.tsx', "const chart = () => import('../about/figures/Tau3Chart.tsx');", 'only routes.tsx may'],
       ['app/routes.tsx', "const docs = () => import('../about/documents.ts');", 'only routes.tsx may'],
       ['app/routes.tsx', "const reader = () => import('./about.ts');", 'only routes.tsx may'],
-      ['about/BackLink.tsx', "import { request } from '../api/http.ts';", 'make no requests'],
+      ['about/PrototypeLink.tsx', "import { request } from '../api/http.ts';", 'make no requests'],
       ['about/ReaderPage.tsx', "import { useQuery } from '@tanstack/react-query';", 'make no requests'],
-      ['about/BackLink.tsx', "import { useDesks } from '../owner/useDesks.ts';", 'make no requests'],
+      ['about/PrototypeLink.tsx', "import { useDesks } from '../owner/useDesks.ts';", 'make no requests'],
     ];
     for (const [file, text, problem] of broken) {
       // A module the router reaches statically that re-exports the page.

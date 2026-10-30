@@ -1,6 +1,6 @@
 /**
  * The About this prototype reading pages end to end, on the dev server's shared mock (`npm run e2e:mock`): opened
- * from the owner sidebar of a fresh copy and left by the way back to Today; opened cold in a browser that has
+ * from the owner sidebar of a fresh copy and left by the link back to Today; opened cold in a browser that has
  * stored nothing; reached by Back and Forward at the reader's place; and both pages at the desktop and phone
  * sizes, for a stranger with no cookie and for an owner signed in to a copy, fitting the window and passing axe.
  * Expected words are written out here, never read from the app's code.
@@ -47,14 +47,13 @@ async function eachPage(page: Page, check: (where: string) => Promise<void>): Pr
       await startCopy(page, MOCK_PASSCODE);
     }
     expect((await page.context().cookies()).length > 0, signedIn ? 'signed in' : 'no cookie').toBe(signedIn);
-    const back = signedIn ? 'Back to your Desk' : 'Back to the prototype';
     for (const [size, viewport] of Object.entries(VIEWPORTS)) {
       await page.setViewportSize(viewport);
       for (const { path, title: name } of PAGES) {
         const where = `${path} at ${size}, ${signedIn ? 'signed in' : 'no cookie'}`;
         await page.goto(path);
         await expect(title(page, name), where).toBeVisible(FIRST_DRAW);
-        await expect(page.getByRole('link', { name: back, exact: true }), where).toBeVisible();
+        await expect(page.getByRole('link', { name: 'Try Desk prototype', exact: true }), where).toBeVisible();
         // The reading type is a web font: the page is measured as it settles, not in the fallback.
         await page.evaluate(async () => {
           await document.fonts.ready;
@@ -106,13 +105,15 @@ test('open_a_document_from_the_sidebar', async ({ page }) => {
     (window as Window & { aboutStayedInTheApp?: boolean }).aboutStayedInTheApp = true;
   });
 
-  // The sidebar's group opens the proposal, whose way back is to this Desk.
+  // The sidebar's group lists the prediction first and opens the proposal, whose link into the prototype goes
+  // back to this Desk.
   const about = page.getByRole('navigation', { name: 'About this prototype' });
   await expect(about).toBeVisible();
+  await expect(about.getByRole('link')).toHaveText(['Capability prediction', 'Product proposal']);
   await about.getByRole('link', { name: 'Product proposal', exact: true }).click();
   await page.waitForURL('**/about/proposal');
   await expect(title(page, 'Product proposal')).toBeVisible(FIRST_DRAW);
-  const back = page.getByRole('link', { name: 'Back to your Desk', exact: true });
+  const back = page.getByRole('link', { name: 'Try Desk prototype', exact: true });
   await expect(back).toBeVisible();
   await expect(back).toHaveAttribute('href', today);
 
@@ -125,7 +126,7 @@ test('open_a_document_from_the_sidebar', async ({ page }) => {
   await expect(documents.getByRole('link', { name: 'Capability prediction', exact: true })).toHaveAttribute('aria-current', 'page');
   await expect(back).toHaveAttribute('href', today);
 
-  // The way back returns to Today.
+  // The link into the prototype returns to Today.
   await back.click();
   await page.waitForURL(`**${today}`);
   await expect(page.getByRole('heading', { level: 1, name: /^Good (morning|afternoon|evening), Maria$/ })).toBeVisible();
@@ -145,19 +146,18 @@ test('about_pages_on_a_cold_load', async ({ page, context }) => {
     await page.goto(path);
     await expect(title(page, name), path).toBeVisible(FIRST_DRAW);
     expect(await page.evaluate(() => localStorage.length), `${path}: nothing stored`).toBe(0);
-    // With no Desk opened in this browser, the way back is to the start of the prototype.
-    const back = page.getByRole('link', { name: 'Back to the prototype', exact: true });
+    // With no Desk opened in this browser, the link into the prototype goes to its start.
+    const back = page.getByRole('link', { name: 'Try Desk prototype', exact: true });
     await expect(back, path).toBeVisible();
     await expect(back, path).toHaveAttribute('href', '/');
-    await expect(page.getByRole('link', { name: 'Back to your Desk', exact: true }), path).toHaveCount(0);
     await expect(page, path).toHaveTitle(`${name} · Claude Desk`);
     await expect(page.locator('meta[name="robots"]'), path).toHaveAttribute('content', 'noindex');
   }
   // The pages are static: nothing asked the API, on the way in or while they were open.
   expect(api, 'requests to the API').toEqual([]);
 
-  // The way back opens the first visit's intro dialog.
-  await page.getByRole('link', { name: 'Back to the prototype', exact: true }).click();
+  // It opens the first visit's intro dialog.
+  await page.getByRole('link', { name: 'Try Desk prototype', exact: true }).click();
   await page.waitForURL((url) => url.pathname === '/');
   await expect(page.getByRole('dialog', { name: 'A Claude front desk for your business' })).toBeVisible();
 });
@@ -235,6 +235,16 @@ test('going_back_returns_to_the_readers_place', async ({ page }) => {
   await page.goForward();
   await expect(title(page, 'Product proposal')).toBeVisible();
   await expectBackAt(page, 4000, 'forward from the Desk');
+});
+
+test('about_pages_print_without_the_pinned_bar', async ({ page }) => {
+  // On screen the top bar stays while the page scrolls; on paper it is the page's first line.
+  await page.goto('/about/proposal');
+  await expect(title(page, 'Product proposal')).toBeVisible(FIRST_DRAW);
+  const bar = page.locator('header.cd-about-top');
+  expect(await bar.evaluate((el) => getComputedStyle(el).position)).toBe('sticky');
+  await page.emulateMedia({ media: 'print' });
+  expect(await bar.evaluate((el) => getComputedStyle(el).position)).toBe('static');
 });
 
 test('about_pages_fit_phone_width', async ({ page }) => {

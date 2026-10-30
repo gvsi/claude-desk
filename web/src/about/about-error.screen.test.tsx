@@ -1,7 +1,7 @@
 /**
  * A document that can't be parsed, in the whole app against the mock API: `documents.ts` throws here, as it
  * does when a document fails to parse. The About pages, which load it on demand, show their error page with
- * the way back, and the rest of the app, which never loads it, still opens.
+ * the link into the prototype, and the rest of the app, which never loads it, still opens.
  */
 import { describe, expect, it, vi } from 'vitest';
 import { userEvent } from 'vitest/browser';
@@ -45,7 +45,7 @@ describe('A document that cannot be parsed', () => {
         const where = `${path} at ${viewport}`;
         writeLocal('lastDesk', null);
         const { screen, router } = await renderRoute(path, { viewport });
-        // The page's own error line and the way back, never the error or React Router's page.
+        // The page's own error line and the link into the prototype, never the error or React Router's page.
         await expect.element(screen.getByText(ERROR_LINE, { exact: true }), { message: where }).toBeVisible();
         expect(router.state.location.pathname, where).toBe(path);
         const text = document.body.textContent ?? '';
@@ -57,15 +57,15 @@ describe('A document that cannot be parsed', () => {
         await expectScreenBasics(screen.container, { owner: true });
         expectNoHorizontalScroll();
 
-        const back = screen.getByRole('link', { name: 'Back to the prototype', exact: true });
+        const back = screen.getByRole('link', { name: 'Try Desk prototype', exact: true });
         await expect.element(back, { message: where }).toHaveAttribute('href', '/');
       }
     }
 
-    // With a Desk in this browser, the way back is to it.
+    // With a Desk in this browser, the link goes to it.
     writeLocal('lastDesk', RIVERA.deskId);
     const withDesk = await renderRoute('/about/proposal');
-    const back = withDesk.screen.getByRole('link', { name: 'Back to your Desk', exact: true });
+    const back = withDesk.screen.getByRole('link', { name: 'Try Desk prototype', exact: true });
     await expect.element(back).toHaveAttribute('href', `/app/${RIVERA.deskId}/today`);
     writeLocal('lastDesk', null);
 
@@ -79,9 +79,9 @@ describe('A document that cannot be parsed', () => {
       .element(publicPage.screen.getByText("You're chatting with Claude, an AI answering for Rivera Plumbing. Ask for Maria Rivera anytime."))
       .toBeVisible();
 
-    // And from an About page that failed, the way back opens it.
+    // And from an About page that failed, the link opens it.
     const again = await renderRoute('/about/proposal', { seed: { name: 'rivera', signedIn: false } });
-    await userEvent.click(again.screen.getByRole('link', { name: 'Back to the prototype', exact: true }));
+    await userEvent.click(again.screen.getByRole('link', { name: 'Try Desk prototype', exact: true }));
     await expect.poll(() => again.router.state.location.pathname).toBe('/');
     await expect.element(again.screen.getByRole('dialog', { name: 'A Claude front desk for your business' })).toBeVisible();
   });

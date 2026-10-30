@@ -162,8 +162,8 @@ describe('the About documents', () => {
     expect(ABOUT_LINKS).toEqual({
       title: 'About this prototype',
       links: [
-        { id: 'proposal', label: 'Product proposal', href: '/about/proposal' },
         { id: 'prediction', label: 'Capability prediction', href: '/about/prediction' },
+        { id: 'proposal', label: 'Product proposal', href: '/about/proposal' },
       ],
     });
     const { blocks: _proposal, ...proposal } = ABOUT_DOCUMENTS.proposal;

@@ -615,6 +615,8 @@
   --about-gap: calc(var(--space-32) * 2);
   /* The space between the hero and the body, and above the hero. */
   --about-step: calc(var(--space-16) * 7);
+  /* The top bar's height: the contents list and what scrolls into view stop below it. */
+  --about-top: calc(var(--space-32) * 2);
   min-height: 100dvh;
   background: var(--bg-app);
   color: var(--text-primary);
@@ -627,15 +629,32 @@
   }
 }
 
-/* The top bar: the product's name, the document switch and the way back (BackLink.css). */
+/* The top bar: the product's name, the document switch and the link into the prototype (PrototypeLink.css).
+   It stays at the top of the window while the page scrolls, over the page. */
 
 .cd-about-top {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: var(--space-24);
-  height: calc(var(--space-32) * 2);
+  height: var(--about-top);
   padding: 0 var(--about-gutter);
   border-bottom: 1px solid var(--line-hairline);
+  background: var(--bg-app);
+}
+
+/* What keyboard focus scrolls to stops clear of the bar, as a section opened by its address does. */
+.cd-about-page :is(a, button, summary, [tabindex]):not(.cd-about-top *) {
+  scroll-margin-top: calc(var(--about-top) + var(--space-24));
+}
+
+/* On paper the bar is the page's first line, not laid over what follows. */
+@media print {
+  .cd-about-top {
+    position: static;
+  }
 }
 
 .cd-about-brand {
@@ -732,7 +751,7 @@
 
 .cd-about-contents {
   position: sticky;
-  top: var(--space-24);
+  top: calc(var(--about-top) + var(--space-24));
   align-self: start;
   width: var(--size-article-side);
 }
@@ -812,7 +831,7 @@
 .cd-about-article > h2 {
   margin: calc(var(--space-32) * 2) 0 calc(var(--space-16) + var(--space-2));
   letter-spacing: -0.013em;
-  scroll-margin-top: var(--space-24);
+  scroll-margin-top: calc(var(--about-top) + var(--space-24));
 }
 
 .cd-about-article > h2:first-child {
@@ -912,11 +931,11 @@
 
 .cd-about-page--compact {
   --about-gutter: var(--space-20);
+  --about-top: calc(var(--space-28) * 2);
 }
 
 .cd-about-top--compact {
   gap: var(--space-12);
-  height: calc(var(--space-28) * 2);
   padding: 0 var(--space-16);
 }
 

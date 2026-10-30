@@ -35,10 +35,10 @@ describe('About pages', () => {
     });
     for (const [i, { path, title }] of PAGES.entries()) {
       const { screen, router } = await renderRoute(path);
-      // The page is drawn once its code has loaded: its title, its article and the way back.
+      // The page is drawn once its code has loaded: its title, its article and the link into the prototype.
       await expect.element(screen.getByRole('heading', { level: 1, name: title, exact: true })).toBeVisible();
       await expect.element(screen.getByRole('article')).toBeVisible();
-      await expect.element(screen.getByRole('link', { name: 'Back to the prototype', exact: true })).toHaveAttribute('href', '/');
+      await expect.element(screen.getByRole('link', { name: 'Try Desk prototype', exact: true })).toHaveAttribute('href', '/');
       const documents = screen.getByRole('navigation', { name: 'Documents' });
       await expect.element(documents.getByRole('link', { name: title, exact: true })).toHaveAttribute('aria-current', 'page');
 
@@ -61,9 +61,9 @@ describe('About pages', () => {
   });
 
   it('about_pages_make_no_requests', async () => {
-    for (const [lastDesk, back] of [
-      [RIVERA.deskId, 'Back to your Desk'],
-      [null, 'Back to the prototype'],
+    for (const [lastDesk, to] of [
+      [RIVERA.deskId, `/app/${RIVERA.deskId}/today`],
+      [null, '/'],
     ] as const) {
       for (const { path, title } of PAGES) {
         for (const viewport of ['desktop', 'phone'] as const) {
@@ -72,7 +72,9 @@ describe('About pages', () => {
           const before = [...mockStore.requests];
           const { screen } = await renderRoute(path, { viewport });
           await expect.element(screen.getByRole('heading', { level: 1, name: title, exact: true }), { message: where }).toBeVisible();
-          await expect.element(screen.getByRole('link', { name: back, exact: true }), { message: where }).toBeVisible();
+          await expect
+            .element(screen.getByRole('link', { name: 'Try Desk prototype', exact: true }), { message: where })
+            .toHaveAttribute('href', to);
           // Long enough for anything the page asked for as it opened to reach the mock API.
           await settle();
           expect(mockStore.requests, where).toEqual(before);

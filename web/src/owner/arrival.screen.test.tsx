@@ -575,8 +575,8 @@ describe('OwnerLayout', () => {
 
   it('owner_shell_links_the_about_pages', async () => {
     const ABOUT = [
-      ['Product proposal', '/about/proposal'],
       ['Capability prediction', '/about/prediction'],
+      ['Product proposal', '/about/proposal'],
     ];
     const rows = (nav: Element) => [...nav.querySelectorAll('a')].map((a) => [a.textContent.trim(), a.getAttribute('href')]);
 

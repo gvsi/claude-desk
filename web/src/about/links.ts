@@ -9,11 +9,12 @@ export type AboutId = 'proposal' | 'prediction';
 
 /** Each page's route and title, in the order the sidebar lists them. */
 export const ABOUT_PAGES: Record<AboutId, { route: string; title: string }> = {
-  proposal: { route: '/about/proposal', title: 'Product proposal' },
   prediction: { route: '/about/prediction', title: 'Capability prediction' },
+  proposal: { route: '/about/proposal', title: 'Product proposal' },
 };
 
-const ORDER: AboutId[] = ['proposal', 'prediction'];
+// The prediction comes first (project owner, 2026-10-30).
+const ORDER: AboutId[] = ['prediction', 'proposal'];
 
 /** The sidebar's "About this prototype" group. */
 export const ABOUT_LINKS: SidebarAbout = {
