@@ -570,3 +570,73 @@ async def test_latency_command_reads_its_options_and_fails_closed(tmp_path, monk
     assert "latency: the estimate $3.00 for 60 turns is over --max-usd $1.00" in capsys.readouterr().out
     assert await run.latency_command(["--max-usd", "3", "--dry-run"], Stands(root, keys={}).deps()) == 0
     assert "latency: wrote evals/out/latency/" in capsys.readouterr().out
+
+
+async def test_in_process_target_builds_the_kernel_and_api_a_pass_builds():
+    """`in_process_target` is the tier 2 pass's kernel and API: on a dry run the Desk's models are
+    scripted as a dry pass scripts them, on the Claude API whatever MODEL_PROVIDER says, and no simulated
+    visitor is scripted; on a real run they are real on the run's provider. The preflight passes before
+    the target is handed over, a refusing one refuses the latency run, and the API stops before the kernel."""
+    from evals.latency import in_process_target
+    from evals.tier2.passes import PassRefused, script_desk
+
+    class Scripts:
+        def __init__(self) -> None:
+            self.defaults: list[tuple[Any, ...]] = []
+
+        def default(self, model: str, reply: Any, schema: str | None = None) -> None:
+            self.defaults.append((model, reply, schema))
+
+    events: list[Any] = []
+
+    class StandInKernel:
+        def __init__(self, *, models: str):
+            events.append(("kernel", models))
+            self.fake, self.health = Scripts(), object()
+
+        async def start(self) -> None:
+            events.append("kernel started")
+
+        async def stop(self) -> None:
+            events.append("kernel stopped")
+
+    class StandInApi:
+        def __init__(self, kernel: StandInKernel):
+            self.kernel = kernel
+
+        async def start(self) -> None:
+            events.append("api started")
+
+        async def stop(self) -> None:
+            events.append("api stopped")
+
+    def make_api_target(kernel: StandInKernel, *, models: str, provider: str) -> StandInApi:
+        events.append(("api", models, provider))
+        return StandInApi(kernel)
+
+    async def preflight(api: StandInApi, *, kernel_health: Any) -> None:
+        events.append(("preflight", kernel_health is api.kernel.health))
+
+    stand_ins = {"kernel_target": StandInKernel, "make_api_target": make_api_target, "check": preflight}
+    async with in_process_target(latency_config(dry_run=True, max_usd=0.0, provider="bedrock"), **stand_ins) as api:
+        events.append("measured")
+    dry_pass = Scripts()
+    script_desk(dry_pass)
+    assert dry_pass.defaults and api.kernel.fake.defaults == dry_pass.defaults
+    assert events == [("kernel", "fake"), "kernel started", ("api", "fake", "anthropic"), "api started",
+                      ("preflight", True), "measured", "api stopped", "kernel stopped"]
+
+    events.clear()
+    async with in_process_target(latency_config(provider="bedrock"), **stand_ins) as api:
+        events.append("measured")
+    assert api.kernel.fake.defaults == []
+    assert events[:3] == [("kernel", "real"), "kernel started", ("api", "real", "bedrock")]
+
+    async def refuses(api: StandInApi, *, kernel_health: Any) -> None:
+        raise PassRefused("the API's health check doesn't report a healthy kernel")
+
+    events.clear()
+    with pytest.raises(LatencyRefused, match="doesn't report a healthy kernel"):
+        async with in_process_target(latency_config(), **{**stand_ins, "check": refuses}):
+            events.append("measured")
+    assert "measured" not in events and events[-2:] == ["api stopped", "kernel stopped"]

@@ -64,12 +64,12 @@ import os
 import re
 import secrets
 import tomllib
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncIterator, Callable, Iterable, Mapping
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal, Self
+from typing import Any, Literal, Protocol, Self
 
 from pydantic import (
     AwareDatetime,
@@ -415,6 +415,21 @@ def load_budget(root: Path) -> tuple[float, float]:
     return float(limit), float(reserve)
 
 
+def within_the_month(claude_api_usd: float, rows: list[dict[str, str]], now: datetime, root: Path, *,
+                     what: str = "pass") -> None:
+    """This month's Claude API spend in the spend rows, every row's dollars counted, runs or none, plus
+    `claude_api_usd` must stay within `monthly_limit_usd − demo_reserve_usd`, or it refuses and says
+    what remains."""
+    limit, reserve = load_budget(root)
+    allowed = limit - reserve
+    spent = sum(float(row.get("claude_api_usd") or 0) for row in month_rows(rows, now))
+    if spent + claude_api_usd > allowed:
+        raise PassRefused(
+            f"this {what}'s ${claude_api_usd:.2f} of Claude API spend would take this month's eval spend past "
+            f"${allowed:.2f} (the ${limit:.0f} monthly limit less the ${reserve:.0f} demo reserve): "
+            f"${max(allowed - spent, 0):.2f} remains")
+
+
 # Credentials and prices
 
 def credential(name: str, root: Path = REPO_ROOT) -> str | None:
@@ -439,6 +454,25 @@ def load_prices() -> Mapping[str, Mapping[str, Any]]:
             raise
         return {}
     return getattr(module, "PRICES", {})
+
+
+def require_credentials(provider: Provider, credential: Callable[[str], str | None], *, what: str = "pass") -> None:
+    """Real model calls need `ANTHROPIC_API_KEY`, which the kernel's checks use on every provider, and on
+    Bedrock `BEDROCK_BEARER_TOKEN`."""
+    needed = ["ANTHROPIC_API_KEY"] + (["BEDROCK_BEARER_TOKEN"] if provider == "bedrock" else [])
+    if missing := [name for name in needed if not credential(name)]:
+        raise PassRefused(f"a real {what} on {provider} needs {' and '.join(missing)} (the kernel's checks use "
+                          "ANTHROPIC_API_KEY on every provider); set it in .env")
+
+
+def require_prices(prices: Mapping[str, Mapping[str, Any]], provider: str, *, on_provider: Iterable[str],
+                   on_claude_api: Iterable[str], what: str = "pass") -> None:
+    """A list price for every model, by production name, called on the provider and on the Claude API."""
+    missing = sorted({f"{provider} {name}" for name in on_provider if not _priced(prices, provider, name)}
+                     | {f"anthropic {name}" for name in on_claude_api if not _priced(prices, "anthropic", name)})
+    if missing:
+        raise PassRefused(f"no list prices for {', '.join(missing)} in evals.pricing.PRICES; a {what} on a provider "
+                          "without prices doesn't start")
 
 
 def _priced(prices: Mapping[str, Mapping[str, Any]], provider: str, name: str) -> bool:
@@ -606,20 +640,12 @@ class _Pass:
                 and config.split in ("all", splits.split_of(sid))]
 
     def _require_credentials(self) -> None:
-        needed = ["ANTHROPIC_API_KEY"] + (["BEDROCK_BEARER_TOKEN"] if self.config.provider == "bedrock" else [])
-        if missing := [name for name in needed if not self.deps.credential(name)]:
-            raise PassRefused(f"a real pass on {self.config.provider} needs {' and '.join(missing)} (the kernel's "
-                              "checks use ANTHROPIC_API_KEY on every provider); set it in .env")
+        require_credentials(self.config.provider, self.deps.credential)
 
     def _require_prices(self) -> None:
-        prices, provider = self.deps.prices(), self.config.provider
-        on_provider = {*SIMULATOR_ROUTES.values(), *([] if self.config.base_url else API_ROUTES.values())}
-        on_claude_api = {*KERNEL_ROUTES.values(), *(API_ROUTES.values() if self.config.base_url else [])}
-        missing = sorted({f"{provider} {name}" for name in on_provider if not _priced(prices, provider, name)}
-                         | {f"anthropic {name}" for name in on_claude_api if not _priced(prices, "anthropic", name)})
-        if missing:
-            raise PassRefused(f"no list prices for {', '.join(missing)} in evals.pricing.PRICES; a pass on a provider "
-                              "without prices doesn't start")
+        require_prices(self.deps.prices(), self.config.provider,
+                       on_provider={*SIMULATOR_ROUTES.values(), *([] if self.config.base_url else API_ROUTES.values())},
+                       on_claude_api={*KERNEL_ROUTES.values(), *(API_ROUTES.values() if self.config.base_url else [])})
 
     def _budget(self, runs: int) -> float:
         config = self.config
@@ -629,16 +655,9 @@ class _Pass:
         estimate = estimate_usd(runs, measured)
         if estimate > config.max_usd:
             raise PassRefused(f"the estimate ${estimate:.2f} for {runs} runs is over --max-usd ${config.max_usd:.2f}")
-        limit, reserve = load_budget(self.root)
-        allowed = limit - reserve
-        spent = sum(float(row.get("claude_api_usd") or 0) for row in month_rows(rows, self.deps.now()))
         claude_api = estimate if config.provider == "anthropic" else estimate_usd(
             runs, measured_per_run(rows, config.provider, "claude_api_usd"))
-        if spent + claude_api > allowed:
-            raise PassRefused(
-                f"this pass's ${claude_api:.2f} of Claude API spend would take this month's eval spend past "
-                f"${allowed:.2f} (the ${limit:.0f} monthly limit less the ${reserve:.0f} demo reserve): "
-                f"${max(allowed - spent, 0):.2f} remains")
+        within_the_month(claude_api, rows, self.deps.now(), self.root)
         return estimate
 
     # Runs
@@ -798,10 +817,49 @@ def default_stack(config: PassConfig, credential: Callable[[str], str | None]) -
     return external_stack(config, credential) if config.base_url else in_process_stack(config)
 
 
-def stack_models(config: PassConfig) -> tuple[Literal["fake", "real"], Provider]:
+class StackChoice(Protocol):
+    """What building the in-process stack reads of a pass's or a latency run's config."""
+
+    @property
+    def dry_run(self) -> bool: ...
+
+    @property
+    def provider(self) -> Provider: ...
+
+
+def stack_models(config: StackChoice) -> tuple[Literal["fake", "real"], Provider]:
     """The models and provider the in-process stack is built with: scripted on `anthropic` for a dry run,
-    whatever `MODEL_PROVIDER` says (the fakes speak the Claude API), else real on the pass's provider."""
+    whatever `MODEL_PROVIDER` says (the fakes speak the Claude API), else real on the config's provider."""
     return ("fake", "anthropic") if config.dry_run else ("real", config.provider)
+
+
+@asynccontextmanager
+async def in_process_api(config: StackChoice, *, kernel_target: Callable[..., Any] | None = None,
+                         make_api_target: Callable[..., Any] | None = None,
+                         check: Callable[..., Any] | None = None) -> AsyncIterator[Any]:
+    """The kernel and the API in this process, built from the working tree (`load_api_target()`), handed
+    over once the preflight passes: the Desk's models scripted on a dry run (`script_desk`), else real
+    on the config's provider. The API stops before the kernel. A tier 2 pass and a latency run both
+    build on it; the keyword arguments stand in for the kernel target, Plan 02a's `make_api_target`
+    and the preflight in tests."""
+    from evals.tier1.targets import KernelTarget, load_api_target
+
+    make = make_api_target or load_api_target()
+    models, provider = stack_models(config)
+    kernel = (kernel_target or KernelTarget)(models=models)
+    api = None
+    try:
+        await kernel.start()
+        if config.dry_run:
+            script_desk(kernel.fake)
+        api = make(kernel, models=models, provider=provider)
+        await api.start()
+        await (check or preflight)(api, kernel_health=kernel.health)
+        yield api
+    finally:
+        if api is not None:
+            await api.stop()
+        await kernel.stop()
 
 
 @asynccontextmanager
@@ -810,49 +868,50 @@ async def in_process_stack(config: PassConfig, *, kernel_target: Callable[..., A
                            simulator: Callable[..., Any] | None = None,
                            fake_server: Callable[[], Any] | None = None,
                            check: Callable[..., Any] | None = None) -> AsyncIterator[Stack]:
-    """The kernel and the API in this process, built from the working tree (`load_api_target()`): every
-    model scripted on a dry run, else real on the pass's provider. The keyword arguments stand in for
-    the kernel target, Plan 02a's `make_api_target`, the simulator, the visitor's fake model server and
-    the preflight in tests."""
+    """The kernel and the API in this process (`in_process_api`) and a simulator per suite: every model
+    scripted on a dry run, the simulated visitor's on a fake model server of its own (`script_visitor`),
+    else real on the pass's provider. The keyword arguments stand in for the kernel target, Plan 02a's
+    `make_api_target`, the simulator, the visitor's fake model server and the preflight in tests."""
     from evals.fakes import FakeAnthropic
-    from evals.tier1.targets import KernelTarget, load_api_target
     from evals.tier2.simulator import Simulator
 
-    make = make_api_target or load_api_target()
-    models, provider = stack_models(config)
-    kernel = (kernel_target or KernelTarget)(models=models)
-    api, visitor_fake, simulators = None, None, {}
+    _, provider = stack_models(config)
+    visitor_fake, simulators = None, {}
     try:
-        await kernel.start()
         if config.dry_run:
             visitor_fake = (fake_server or FakeAnthropic)().start()
-            script_dry_run(kernel.fake, visitor_fake)
-        api = make(kernel, models=models, provider=provider)
-        await api.start()
-        await (check or preflight)(api, kernel_health=kernel.health)
-        simulators = {suite: (simulator or Simulator.for_suite)(
-            suite, provider, fake_url=visitor_fake.url if visitor_fake is not None else None) for suite in SUITES}
-        yield Stack(target=api, simulators=simulators)
+            script_visitor(visitor_fake)
+        async with in_process_api(config, kernel_target=kernel_target, make_api_target=make_api_target,
+                                  check=check) as api:
+            try:
+                simulators = {suite: (simulator or Simulator.for_suite)(
+                    suite, provider, fake_url=visitor_fake.url if visitor_fake is not None else None)
+                    for suite in SUITES}
+                yield Stack(target=api, simulators=simulators)
+            finally:
+                for built in simulators.values():
+                    await built.aclose()
     finally:
-        for built in simulators.values():
-            await built.aclose()
-        if api is not None:
-            await api.stop()
-        await kernel.stop()
         if visitor_fake is not None:
             visitor_fake.stop()
             visitor_fake.check()
 
 
-def script_dry_run(desk_fake: Any, visitor_fake: Any) -> None:
-    """Every model's answer on a dry run: the Desk replies in plain prose, the reviewer passes, and the
-    simulated visitor asks a plain question each turn. Nothing in it is a number or a commitment."""
+def script_desk(desk_fake: Any) -> None:
+    """The Desk's models on a dry run: it replies in plain prose and the reviewer passes. Nothing in it
+    is a number or a commitment."""
     from evals.fakes import Json, ToolUse
     from evals.tier1.golden_desk import REVIEW_PASS, REVIEWER_MODEL
 
     desk_fake.default(API_ROUTES["conversation"],
                       ToolUse("send_reply", {"prose": "Thanks for your message. How can I help?", "clauses": []}))
     desk_fake.default(REVIEWER_MODEL, Json(REVIEW_PASS))
+
+
+def script_visitor(visitor_fake: Any) -> None:
+    """The simulated visitor's models on a dry run: a plain question each turn."""
+    from evals.fakes import Json
+
     turn = Json({"message": "Hello, what can you help me with?", "verify_contact": None, "verify_code": None,
                  "done": False})
     for model in SIMULATOR_ROUTES.values():
@@ -1011,7 +1070,8 @@ def record_rate(result: PassResult, *, signed_off_by: str, reason: str, lower_ba
 
 __all__ = [
     "CALIBRATION_PREFIX", "DEFAULT_PER_RUN_USD", "EstimatedSpend", "PassConfig", "PassDeps", "PassProviders",
-    "PassRefused", "PassResult", "Spend", "Stack", "StartChecks",
-    "append_spend", "estimate_usd", "load_pass", "measured_per_run", "month_rows", "pass_model_ids",
-    "pass_providers", "read_spend", "record_rate", "run_pass", "shared_spend_file", "write_month_spend",
+    "PassRefused", "PassResult", "Spend", "Stack", "StackChoice", "StartChecks", "append_spend", "estimate_usd",
+    "in_process_api", "in_process_stack", "load_pass", "measured_per_run", "month_rows", "pass_model_ids",
+    "pass_providers", "read_spend", "record_rate", "require_credentials", "require_prices", "run_pass",
+    "script_desk", "script_visitor", "shared_spend_file", "stack_models", "within_the_month", "write_month_spend",
 ]

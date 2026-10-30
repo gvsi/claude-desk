@@ -46,10 +46,9 @@ from pydantic import (
 from desk.events import EvError, EvMessage, EvTurnEnd, SseEvent
 from evals import results
 from evals.client import ApiCallFailed, DeskClient
-from evals.pricing import PRICES, NoPrice, Price, price_of
+from evals.pricing import PRICES, Price
 from evals.report import HostedLatency, Latency, LocalLatency, Spread, TurnSpread
 from evals.tier2 import passes
-from evals.tier2.runner import DESK_MODELS, KERNEL_CHECK_MODELS
 from evals.tier2.schema import Provider
 from evals.usage import UsageRecord, collect_usage, percentile
 
@@ -456,11 +455,11 @@ async def run_latency(config: LatencyConfig, deps: LatencyDeps | None = None) ->
     Before any turn: a real run's estimate ($0.05 a turn) must be within `--max-usd`; a local real run
     needs `ANTHROPIC_API_KEY` (and `BEDROCK_BEARER_TOKEN` on Bedrock), list prices for every model the
     stack calls, and room for the estimate in this month's eval spend (the limit less the demo
-    reserve, as a pass); a hosted run needs `DESK_PASSCODE`. A local run then proves first
+    reserve, by a pass's own checks); a hosted run needs `DESK_PASSCODE`. A local run then proves first
     (`scripts.prove_latency --json`), so a failed proof costs nothing. During a local real run no turn
     starts once the turns' calls cost `--max-usd`, and after it what they cost is appended to the
-    shared spend file, with no tier 2 runs, so the monthly guard counts it. A hosted run's calls are
-    the deployment's, inside its own daily budget, and no dry run spends anything."""
+    shared spend file, with no tier 2 runs, so the monthly guard counts it. A hosted run's calls are the
+    deployment's, inside its own daily budget, and no dry run spends anything."""
     deps = deps or LatencyDeps()
     hosted, real = config.base_url is not None, not config.dry_run
     estimate = round(len(KINDS) * config.turns * PER_TURN_USD, 6) if real else 0.0
@@ -473,9 +472,15 @@ async def run_latency(config: LatencyConfig, deps: LatencyDeps | None = None) ->
         if not passcode:
             raise LatencyRefused("a hosted run enters the deployment as its owner: set DESK_PASSCODE in .env")
     elif real:
-        _require_credentials(config, deps)
-        _require_prices(config, deps)
-        _within_the_month(estimate, deps)
+        try:   # a tier 2 pass's own checks, as a latency run's
+            passes.require_credentials(config.provider, deps.credential, what="latency run")
+            passes.require_prices(deps.prices, config.provider, on_provider=passes.API_ROUTES.values(),
+                                  on_claude_api=passes.KERNEL_ROUTES.values(), what="latency run")
+            # The estimate, all of it counted as Claude API spend.
+            passes.within_the_month(estimate, passes.read_spend(deps.spend_file), deps.now(), deps.root,
+                                    what="latency run")
+        except passes.PassRefused as refused:
+            raise LatencyRefused(str(refused)) from None
     proved = proving = None
     if not hosted:
         try:
@@ -493,7 +498,7 @@ async def run_latency(config: LatencyConfig, deps: LatencyDeps | None = None) ->
         measured = await deps.measure_hosted(config.base_url, passcode, turns=config.turns, kinds=KINDS,
                                              turn_timeout_s=config.turn_timeout_s)
     else:
-        api_provider = "anthropic" if config.dry_run else config.provider
+        _, api_provider = passes.stack_models(config)
         started = False
         try:
             async with deps.target(config) as target:
@@ -535,38 +540,6 @@ async def run_latency(config: LatencyConfig, deps: LatencyDeps | None = None) ->
     return run, out
 
 
-def _require_credentials(config: LatencyConfig, deps: LatencyDeps) -> None:
-    needed = ["ANTHROPIC_API_KEY"] + (["BEDROCK_BEARER_TOKEN"] if config.provider == "bedrock" else [])
-    if missing := [name for name in needed if not deps.credential(name)]:
-        raise LatencyRefused(f"a real run on {config.provider} needs {' and '.join(missing)} (the kernel's checks "
-                             "use ANTHROPIC_API_KEY on every provider); set it in .env")
-
-
-def _require_prices(config: LatencyConfig, deps: LatencyDeps) -> None:
-    wanted = {(config.provider, model) for model in DESK_MODELS.values()} | {
-        ("anthropic", model) for model in KERNEL_CHECK_MODELS.values()}
-    missing = []
-    for provider, model in sorted(wanted):
-        try:
-            price_of(model, provider, deps.prices)
-        except NoPrice:
-            missing.append(f"{provider} {model}")
-    if missing:
-        raise LatencyRefused(f"no list prices for {', '.join(missing)} in evals.pricing.PRICES; a run on a "
-                             "provider without prices doesn't start")
-
-
-def _within_the_month(estimate: float, deps: LatencyDeps) -> None:
-    """The estimate, all of it counted as Claude API spend, must fit in what this month leaves for evals."""
-    limit, reserve = passes.load_budget(deps.root)
-    spent = sum(float(row.get("claude_api_usd") or 0)
-                for row in passes.month_rows(passes.read_spend(deps.spend_file), deps.now()))
-    if spent + estimate > limit - reserve:
-        raise LatencyRefused(f"this run's ${estimate:.2f} would take this month's eval spend past "
-                             f"${limit - reserve:.2f} (the ${limit:.0f} monthly limit less the ${reserve:.0f} demo "
-                             f"reserve): ${max(limit - reserve - spent, 0):.2f} remains")
-
-
 def prove_latency(root: Path) -> dict[str, Any]:
     """`scripts.prove_latency --json` (Plan 01a), run from `backend/`: `{rivera: {p50_ms, p95_ms},
     cards_30: {p50_ms, p95_ms}}` over its timings of each card set."""
@@ -584,34 +557,23 @@ def proving_spread(proved: Mapping[str, Any]) -> Spread:
 
 
 @asynccontextmanager
-async def in_process_target(config: LatencyConfig) -> AsyncIterator[Any]:
-    """The kernel and the API in this process, built from the working tree: every model scripted on a dry
-    run (the Desk replies in plain prose and the reviewer passes), else real on the run's provider."""
-    from evals.fakes import Json, ToolUse
-    from evals.tier1.golden_desk import REVIEW_PASS, REVIEWER_MODEL
-    from evals.tier1.targets import KernelTarget, load_api_target
+async def in_process_target(config: LatencyConfig, *, kernel_target: Callable[..., Any] | None = None,
+                            make_api_target: Callable[..., Any] | None = None,
+                            check: Callable[..., Any] | None = None) -> AsyncIterator[Any]:
+    """The kernel and the API a tier 2 pass runs on (`passes.in_process_api`), built from the working
+    tree: the Desk's models scripted as on a dry pass, else real on the run's provider. A preflight that
+    refuses refuses the run. The keyword arguments stand in for the kernel target, Plan 02a's
+    `make_api_target` and the preflight in tests."""
 
-    make = load_api_target()
-    models, provider = ("fake", "anthropic") if config.dry_run else ("real", config.provider)
-    kernel = KernelTarget(models=models)
-    api = None
-    try:
-        await kernel.start()
-        if config.dry_run:
-            kernel.fake.default(DESK_MODELS["conversation"], ToolUse(
-                "send_reply", {"prose": "Thanks for your message. How can I help?", "clauses": []}))
-            kernel.fake.default(REVIEWER_MODEL, Json(REVIEW_PASS))
-        api = make(kernel, models=models, provider=provider)
-        await api.start()
+    async def preflight(api: Any, *, kernel_health: Any) -> None:
         try:
-            await passes.preflight(api, kernel_health=kernel.health)
+            await (check or passes.preflight)(api, kernel_health=kernel_health)
         except passes.PassRefused as refused:
             raise LatencyRefused(str(refused)) from None
+
+    async with passes.in_process_api(config, kernel_target=kernel_target, make_api_target=make_api_target,
+                                     check=preflight) as api:
         yield api
-    finally:
-        if api is not None:
-            await api.stop()
-        await kernel.stop()
 
 
 __all__ = ["KINDS", "MESSAGES", "PER_TURN_USD", "Chat", "Kind", "LatencyConfig", "LatencyDeps", "LatencyMismatch",

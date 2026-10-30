@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from fractions import Fraction
 from typing import Any
 
-from desk.api.model import BEDROCK_MODEL_IDS
+from evals.tier2.simulator import production_name
 
 
 @dataclass(frozen=True)
@@ -41,9 +41,6 @@ PRICES: dict[str, dict[str, Price]] = {
     "bedrock": {},   # from AWS's pricing page, before the first Bedrock pass
 }
 
-# Each name a provider may give a production model, back to that production name.
-_PRODUCTION_NAMES = {served: name for name, profile in BEDROCK_MODEL_IDS.items()
-                     for served in (name, profile, profile.removeprefix("us."))}
 # A token count's names: the SDK's first, then the API's and the kernel's records'.
 _COUNTS = {"input": ("input_tokens",), "cache_read": ("cache_read_input_tokens", "cached_tokens"),
            "cache_write": ("cache_creation_input_tokens", "cache_write_tokens"), "output": ("output_tokens",)}
@@ -55,7 +52,7 @@ class NoPrice(LookupError):
 
 def price_of(model: str, provider: str, prices: Mapping[str, Mapping[str, Price]] = PRICES) -> Price:
     """The provider's list price for `model` (a production name or the provider's id for it)."""
-    row = (prices.get(provider) or {}).get(_PRODUCTION_NAMES.get(model, model))
+    row = (prices.get(provider) or {}).get(production_name(model))
     if row is None:
         raise NoPrice(f"no {provider} list price for {model} in evals.pricing.PRICES")
     return row
