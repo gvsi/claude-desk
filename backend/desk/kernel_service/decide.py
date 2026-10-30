@@ -430,6 +430,13 @@ REFUSED_PLAIN: dict[str, str] = {
     "evaluation_error": "Your rules couldn't be checked for it, so it was refused.",
 }
 BASELINE_PLAIN = "The always-on safety rules don't allow it."
+# How the deciding rules decided, said before their own text (the owner's wording, 2026-10-30).
+RULE_LEAD_INS: dict[str, str] = {
+    "allow": "Your rule allows it",
+    "ask": "Your rule asks you first",    # a hold an `ask` card decided, the owner's or the default ask
+    "limit": "It goes past your rule, so it waits for you",   # any other hold: an `auto` card's hold twin
+    "refuse": "Your rule says never",     # a refusal's deciding rules are `never` cards; the baseline has none
+}
 REVIEW_PLAIN: dict[str, str] = {
     "absent": "The reviewer couldn't check it.",
     "block": "The reviewer flagged it as an attempt to get around your rules.",
@@ -711,10 +718,20 @@ async def _repeat(ctx: KernelCtx, row: DecisionRow, sha: str) -> Decision:
     return await decision_contract(ctx, await expire_if_due(ctx, row))
 
 
+def _lead_in(call: _Call, outcome: str, evaluation: Evaluation) -> str:
+    """How the deciding rules decided (`RULE_LEAD_INS`). A hold is an ask hold when an `ask` card
+    decided it, by the same test that offers `deny_always` (`held_by_ask`); any other hold went past
+    an `auto` card's amount, discount, hours window or review gate."""
+    if outcome == "hold":
+        return RULE_LEAD_INS["ask" if held_by_ask(call.version_row, evaluation.policy_ids) else "limit"]
+    return RULE_LEAD_INS[outcome]
+
+
 def _reason_plain(call: _Call, outcome: str, reason: str | None, evaluation: Evaluation | None) -> str:
     """The owner's account of a decision: who asked for what, why it went this way (the deciding
-    cards' reasons, the reviewer, or why it was refused early), then the call's free-text arguments,
-    each quoted, under one "Claude's note" label: Claude wrote them into the call, the visitor didn't."""
+    cards' reasons, each quoted after one lead-in that says how they decided; the reviewer; or why
+    it was refused with no card deciding), then the call's free-text arguments, each quoted, under
+    one "Claude's note" label: Claude wrote them into the call, the visitor didn't."""
     parts = [_asked(call.subject, call.req.call.tool, call.action)]
     if reason is not None:
         parts.append(REFUSED_PLAIN[reason])
@@ -722,7 +739,10 @@ def _reason_plain(call: _Call, outcome: str, reason: str | None, evaluation: Eva
         assert evaluation is not None and call.version_row is not None
         cards = {card.card_id: card for card in call.version_row.cards}
         reasons = [cards[card_id].reason for card_id in evaluation.card_ids if card_id in cards]
-        parts += reasons or ([BASELINE_PLAIN] if outcome == "refuse" else [])
+        if reasons:
+            parts.append(f"{_lead_in(call, outcome, evaluation)}: " + ", ".join(_quoted(text) for text in reasons))
+        elif outcome == "refuse":
+            parts.append(BASELINE_PLAIN)
     if evaluation is not None and evaluation.needed_review:
         review = evaluation.review
         if review is None:

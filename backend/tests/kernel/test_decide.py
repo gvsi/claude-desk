@@ -1008,7 +1008,8 @@ async def test_holds_alert_the_owner_per_notification_defaults(app, client, regi
     held = await decided(client, await open_visitor(client, alerting), "native.quote", {"qty": 1, "note": note})
     quiet = await decided(client, await open_visitor(client, briefed), "native.quote", {"qty": 1, "note": note})
     assert (held.outcome, quiet.outcome) == ("hold", "hold")
-    assert held.reason_plain == ("A stranger asked to get a quote for $153 with 15% off. Test card quote. "
+    assert held.reason_plain == ("A stranger asked to get a quote for $153 with 15% off. "
+                                 "It goes past your rule, so it waits for you: “Test card quote.” "
                                  f"Claude's note: “{note}”")
     [notice] = held.inbox
     assert (notice.to, notice.preview) == ("owner", "A request needs your answer")
@@ -1084,7 +1085,55 @@ async def test_the_owner_reads_the_calls_free_text_as_claudes_note(app, client, 
     or not), so the owner reads it quoted after "Claude's note", never as the visitor's words."""
     rows = await desk_with(app, [NotedAdapter("native.quote")], [card("quote", "native.quote")])
     decision = await decided(client, await open_visitor(client, rows), "native.quote", {"qty": 1, **notes})
-    assert decision.reason_plain == f"A stranger asked to get a quote. Test card quote. Claude's note: {quoted}"
+    assert decision.reason_plain == (
+        f"A stranger asked to get a quote. Your rule allows it: “Test card quote.” Claude's note: {quoted}")
+
+
+def rule(card_id: str, mode: str, reason: str) -> RuleCard:
+    return RuleCard(card_id=card_id, applies_to="native.quote", mode=mode, who="anyone", reason=reason)
+
+
+AT_LIST_PRICE = rule("quote", "auto", "Quotes from your price list, at list price.")
+
+
+@pytest.mark.parametrize(("cards", "discount_bp", "said"), [
+    ([AT_LIST_PRICE], 0,
+     "A stranger asked to get a quote for $180. "
+     "Your rule allows it: “Quotes from your price list, at list price.”"),
+    ([AT_LIST_PRICE], 5000,              # past the rule's discount limit: its hold twin decides
+     "A stranger asked to get a quote for $90 with 50% off. "
+     "It goes past your rule, so it waits for you: “Quotes from your price list, at list price.”"),
+    ([rule("no-quotes", "never", "No quotes in chat.")], 0,
+     "A stranger asked to get a quote for $180. Your rule says never: “No quotes in chat.”"),
+    ([rule("ask-quotes", "ask", "Quotes wait for your answer.")], 0,
+     "A stranger asked to get a quote for $180. Your rule asks you first: “Quotes wait for your answer.”"),
+    ([], 0,                               # the compiler's default ask, for a tool no card covers
+     "A stranger asked to get a quote for $180. "
+     "Your rule asks you first: “Not covered by a rule yet, so it asks you.”"),
+    ([AT_LIST_PRICE, rule("quote-two", "auto", "Quotes for one visit.")], 0,   # both decide: one lead-in
+     "A stranger asked to get a quote for $180. "
+     "Your rule allows it: “Quotes from your price list, at list price.”, “Quotes for one visit.”"),
+], ids=["allowed", "held_past_a_limit", "refused_by_never", "held_by_ask", "held_by_the_default_ask",
+        "several_rules"])
+async def test_the_owner_reads_how_the_deciding_rule_decided(app, client, registry, cards, discount_bp, said):
+    """The deciding rules' own text (the owner's words) comes after a lead-in that says how they
+    decided, in the owner's wording of 2026-10-30, so a rule's text never reads as a fact about the
+    request: a quote at 50% off held by a list-price rule doesn't read as a quote at list price."""
+    quote = FakeAdapter("native.quote")
+    quote.script["normalize"] = priced(list_cents=18_000, discount_bp=discount_bp)
+    rows = await desk_with(app, [quote], cards)
+    decision = await decided(client, await open_visitor(client, rows), "native.quote", {"qty": 1})
+    assert decision.reason_plain == said
+
+
+async def test_a_refusal_no_rule_decided_keeps_its_words(app, client, registry):
+    """The always-on baseline is no rule of the owner's, so its refusal has no lead-in: here money
+    with no amount above zero, which the baseline refuses whatever the cards say."""
+    rows = await desk_with(app, [payment_link(0)], [])
+    decision = await decided(client, await open_visitor(client, rows), "native.payment_link")
+    assert (decision.outcome, decision.card_ids, decision.policy_ids) == ("refuse", [], ["B.money_has_amount"])
+    assert decision.reason_plain == ("A stranger asked to get a payment link for $0. "
+                                     "The always-on safety rules don't allow it.")
 
 
 def test_status_lines_are_digit_free():
