@@ -942,7 +942,7 @@
 }
 
 /* The Ask Claude panel beside the page: at the window's right edge, the window's height, and the
-   page narrowed by its width. On a phone it takes the whole window, over the page. */
+   page narrowed by its width. On a phone the panel is its own modal sheet over the whole window. */
 .cd-app-shell__main:has(.board-with-panel__panel) {
   padding-right: calc(var(--size-side-panel) + var(--space-40));
 }
@@ -958,9 +958,5 @@
 @media (max-width: 639.98px) {
   .cd-app-shell__main:has(.board-with-panel__panel) {
     padding-right: var(--space-16);
-  }
-
-  .board-with-panel__panel {
-    left: 0;
   }
 }
