@@ -17,6 +17,9 @@ import type {
 } from '../../api/contracts';
 import type { Bilingual, ConversationFixture, DemoInboxFixture, ProseBlock } from './index';
 import type { ConnectorView } from '../components/ConnectorName/ConnectorName';
+import type { ConnectorPickerProps } from '../components/ConnectorPicker/ConnectorPicker';
+import type { ConnectorOfferCardProps } from '../components/ConnectorOfferCard/ConnectorOfferCard';
+import type { ReviewToolView } from '../components/ConnectorReview/ConnectorReview';
 import type { ConnectorSectionProps } from '../components/ConnectorSection/ConnectorSection';
 import type { RuleWord } from '../components/RuleRow/RuleRow';
 import { executedLine } from './receipts';
@@ -303,6 +306,86 @@ const connectors = {
   sections: hubSections,
 };
 
+/** The apps Chen & Co. CPA could connect, as the picker words them (N-Conn-07b). Both are mocks. */
+const appViews = {
+  google_calendar: {
+    id: 'google_calendar',
+    name: 'Google Calendar',
+    icon: 'google_calendar',
+    description: "Will let Claude see when you're busy, never what the event is.",
+    source: { kind: 'external', mock: true },
+  },
+  stripe: {
+    id: 'stripe',
+    name: 'Stripe',
+    icon: 'stripe',
+    description: "Your clients' charges and refunds, in test mode.",
+    source: { kind: 'external', mock: true },
+  },
+} satisfies Record<string, ConnectorView>;
+
+/**
+ * "Add a connector" on Chen & Co. CPA's Rules page: Payments to add, the four built-in connectors
+ * it has, Google Calendar coming soon and Stripe to connect. Verification is never listed, since
+ * every Desk has it.
+ */
+const picker = {
+  business: business.name,
+  builtIn: [
+    { connector: connectorViews.payments, state: 'available' },
+    { connector: connectorViews.quotes, state: 'added' },
+    { connector: connectorViews.bookings, state: 'added' },
+    { connector: connectorViews.leads, state: 'added' },
+    { connector: connectorViews.documents, state: 'added' },
+  ],
+  external: [
+    { connector: appViews.google_calendar, state: 'coming_soon' },
+    { connector: appViews.stripe, state: 'available' },
+  ],
+  note: 'Google Calendar is coming soon in this demo. Until then, Claude offers the open times you set on Bookings.',
+} satisfies Pick<ConnectorPickerProps, 'business' | 'builtIn' | 'external' | 'note'>;
+
+/** The always-on rule that covers every tool that moves money, on every Desk. */
+const noMoneyWithoutARule = { text: 'No money moves without your rule or a signed limit', mode: 'always_on' } as const;
+
+/**
+ * Reviewing Payments before it turns on (N-Conn-11b): each tool starts at Ask me first, and the
+ * always-on money rule covers both.
+ */
+const paymentsReview = {
+  tools: [
+    {
+      key: 'native.payment_link',
+      name: 'Payment link',
+      description: 'Makes a one-time link to pay an invoice. Charges money. Can be undone.',
+      mode: 'ask',
+      coveredBy: [noMoneyWithoutARule],
+    },
+    {
+      key: 'native.charge_mandate',
+      name: 'Charge within a signed limit',
+      description: "Lets a visiting agent pay from its owner's signed limit. Charges money. Can be undone.",
+      mode: 'ask',
+      coveredBy: [noMoneyWithoutARule],
+    },
+  ],
+} satisfies { tools: ReviewToolView[] };
+
+/** Claude's card in Linda's Ask Claude panel (N-Conn-12-Chat): it leads into Payments' review. */
+const paymentsOffer = {
+  connector: connectorViews.payments,
+  toolsLine: '2 tools · Payment link, Charge within a signed limit',
+  coverage: 'Covered by your always-on rule: no money moves without your rule or a signed limit.',
+  action: 'add',
+} satisfies Omit<ConnectorOfferCardProps, 'onReview'>;
+
+/** Claude's card when Linda asks for Google Calendar, which is coming soon in the demo. */
+const calendarOffer = {
+  connector: appViews.google_calendar,
+  toolsLine: "1 tool · See when you're free",
+  action: 'coming_soon',
+} satisfies Omit<ConnectorOfferCardProps, 'onReview'>;
+
 /**
  * A visitor not on record asks for a first consultation. Linda's ask card holds every booking, so
  * the tool itself is held and Deny always is offered; an unverified visitor has no person to scope
@@ -477,6 +560,10 @@ export const chen = {
   ruleCards,
   ruleWords,
   connectors,
+  picker,
+  paymentsReview,
+  paymentsOffer,
+  calendarOffer,
   heldConsultation,
   verifyStarted,
   demoInbox,

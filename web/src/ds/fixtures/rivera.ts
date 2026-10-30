@@ -29,7 +29,11 @@ import type {
 } from '../../api/contracts';
 import type { Bilingual, ConversationFixture, ProseBlock } from './index';
 import type { ConnectorView } from '../components/ConnectorName/ConnectorName';
+import type { ChangeReviewProps, ChangeRowView } from '../components/ChangeReview/ChangeReview';
+import type { ConnectorPickerProps } from '../components/ConnectorPicker/ConnectorPicker';
+import type { ReviewToolView } from '../components/ConnectorReview/ConnectorReview';
 import type { ConnectorSectionProps } from '../components/ConnectorSection/ConnectorSection';
+import type { RecentRequestView } from '../components/RecentRequests/RecentRequests';
 import type { RuleWord } from '../components/RuleRow/RuleRow';
 import { executedLine, type ExecutedTool } from './receipts';
 
@@ -1224,6 +1228,260 @@ const connectors = {
   sections: hubSections,
 };
 
+// ---------------------------------------------------------------------------------------------
+// A tool's page (N-Conn-05-Refund, N-Conn-06-Quote): the header's strings, as the screen passes them.
+
+const toolPages = {
+  refund: {
+    name: 'Refund',
+    description: "Refunds a payment to the card it came from. Moves money out. Can't be undone.",
+    connector: connectorViews.stripe,
+    definitionNote: 'Definition unchanged',
+  },
+  /** A built-in tool has no pinned definition, so no definition note. */
+  quote: {
+    name: 'Quote',
+    description: 'Prices a job from your price list. Changes something. Can be undone.',
+    connector: connectorViews.quotes,
+  },
+};
+
+/**
+ * The recent requests under a tool's rules, as the screen words them: when (formatted by the
+ * screen), the decision's `reason_plain`, the rule or result that decided it, and the outcome.
+ * Each links to its Safety record.
+ */
+const recentRequests = {
+  refund: [
+    {
+      key: heldRefund.decision_id,
+      when: 'Today, 9:41 am',
+      what: heldRefund.reason_plain,
+      why: `Held by your rule: ${ruleCards['rv-refund'].reason}`,
+      tone: 'held',
+      outcome: 'Waiting for your answer',
+      href: `/safety/${heldRefund.decision_id}`,
+    },
+    {
+      key: 'dec-refund-not-on-record',
+      when: 'Yesterday',
+      what: "A visitor not on record asked for a refund of someone else's payment.",
+      why: 'Refunds go only to the customer who paid.',
+      tone: 'refused',
+      outcome: 'Stopped',
+      href: '/safety/dec-refund-not-on-record',
+    },
+    {
+      key: 'dec-lucia-refund',
+      when: 'Oct 26',
+      what: 'Lucía Herrera asked for a refund of a $20.00 deposit.',
+      why: 'Refunded to the original payment.',
+      tone: 'handled',
+      outcome: 'You allowed it',
+      href: '/safety/dec-lucia-refund',
+    },
+  ],
+  quote: [
+    {
+      key: 'dec-dana-quote',
+      when: 'Today, 8:12 am',
+      what: 'Dana Whitfield asked how much drain clearing costs.',
+      why: "Quoted from Maria Rivera's price list.",
+      tone: 'handled',
+      outcome: 'Automatic',
+      href: '/safety/dec-dana-quote',
+    },
+    {
+      key: heldQuote.decision_id,
+      when: 'Today, 7:55 am',
+      what: heldQuote.reason_plain,
+      why: `Held by your rule: ${ruleCards['rv-quote'].reason}`,
+      tone: 'held',
+      outcome: 'Waiting for your answer',
+      href: `/safety/${heldQuote.decision_id}`,
+    },
+    {
+      key: 'dec-alex-quote',
+      when: 'Yesterday',
+      what: "Alex Kim's assistant asked for a water heater install quote.",
+      why: "Quoted from Maria Rivera's price list.",
+      tone: 'handled',
+      outcome: 'Automatic',
+      href: '/safety/dec-alex-quote',
+    },
+  ],
+} satisfies Record<string, RecentRequestView[]>;
+
+/**
+ * Stripe's refund tool after its definition changed on the mock server (N-Conn-13 to N-Conn-15):
+ * Today's item, the review's words, and the screen's lines around it.
+ */
+const changedRefund = {
+  connector: connectorViews.stripe,
+  tool: 'Refund',
+  /** When it was noticed, as Today words it. */
+  noticedToday: 'Noticed today at 9:14',
+  consequence: "Refunds can't run until you decide.",
+  /** When it was noticed, as the review words it. */
+  noticedReview: 'Noticed today at 9:14, when the tools were listed again',
+  /** The screen's message when the definition changed again during the review (`conflict`). */
+  conflict: 'The tool changed again while you were reviewing. Review the newest version.',
+  /** The screen's notice once the reviewed definition is confirmed (N-Conn-15). */
+  backOn: 'Refund is back on. Your rules were checked against its new definition, and refunds still wait for your answer.',
+};
+
+// ---------------------------------------------------------------------------------------------
+// The end of each connector's page (N-Conn-02, N-Conn-03): what turning it off stops, read by the
+// screen from the Desk's tools and active rules.
+
+/** Payments, built in: turning it off stops both tools and every rule that only they use. */
+const paymentsConnection = {
+  consequence: 'Claude stops offering payment links and charges.',
+  stops: {
+    tools: ['Payment link', 'Charge within a signed limit'],
+    rules: [ruleCards['rv-link'].reason, ruleCards['rv-mandate'].reason, sharedChargeCard.reason],
+  },
+};
+
+/** Stripe, connected: the connection's details as the screen words them, and what disconnecting stops. */
+const stripeConnection = {
+  details: [
+    { label: 'Account', value: 'Rivera Plumbing, test mode (mock)' },
+    { label: 'Connected', value: 'Oct 28 by Maria Rivera' },
+    { label: 'Customers it can see', value: 'Only the verified person Claude is talking to' },
+    { label: 'Tool definitions', value: 'Unchanged since you confirmed them. A change turns that tool off until you review it.' },
+  ],
+  consequence: 'Disconnecting removes its tools from your Desk.',
+  stops: {
+    tools: ['See charges', 'Refund'],
+    rules: [ruleCards['rv-charges'].reason, ruleCards['rv-refund'].reason],
+  },
+};
+
+/** Verification is always on: the owner's words for why. */
+const verificationConnection = {
+  reason: "It's how Claude confirms a customer before sharing anything private.",
+};
+
+// ---------------------------------------------------------------------------------------------
+// Google Calendar, catalog-only in the demo (N-Conn-04, N-Conn-07 to N-Conn-11): what the
+// connector pieces show once it works. It reads busy times only, never what an event is.
+
+const googleCalendarView = {
+  id: 'google_calendar',
+  name: 'Google Calendar',
+  icon: 'google_calendar',
+  description: "When you're busy, so Claude only offers free times.",
+  source: { kind: 'external', mock: true },
+} satisfies ConnectorView;
+
+const googleCalendar = {
+  view: googleCalendarView,
+  /** Its promise, under its page's header and in its sign-in. */
+  promise: {
+    title: "Claude sees only when you're busy, never what the event is: no titles, guests or notes.",
+    detail:
+      'It reads busy time ranges from Rivera Plumbing jobs, so open times never clash with a visit you already have. Nothing is ever added to or changed on your calendar.',
+  },
+  /** The end of its page (N-Conn-04): the connection's details and what disconnecting stops. */
+  connection: {
+    details: [
+      { label: 'Calendar', value: 'Rivera Plumbing jobs (mock)' },
+      { label: 'Connected', value: 'Today by Maria Rivera' },
+      { label: 'Tool definitions', value: 'Unchanged since you confirmed them.' },
+    ],
+    consequence: 'Disconnecting stops Claude from checking your calendar. It then offers only the open times you set on Bookings.',
+    stops: {
+      tools: ["See when you're free"],
+      rules: ["Claude checks when you're busy before offering open times."],
+    },
+  },
+  /** The mock sign-in (N-Conn-08): which calendar shows when Maria is busy. Nothing is typed. */
+  signIn: {
+    provider: 'Google',
+    question: "Which calendar shows when you're busy?",
+    choices: [
+      { id: 'rivera-jobs', label: 'Rivera Plumbing jobs', detail: 'maria@riveraplumbing.example' },
+      { id: 'personal', label: 'Personal', detail: 'Busy times only, like the other' },
+    ],
+    value: 'rivera-jobs',
+    steps: { label: 'Connect Google Calendar', steps: ['Choose', 'Sign in', 'Review tools', 'Confirm'], current: 1 },
+  },
+  /** Reviewing its one tool before it turns on (N-Conn-09): no rule of Maria's covers it yet. */
+  review: {
+    intro: "Claude sees only when you're busy, never what the event is: no titles, guests or notes.",
+    tools: [
+      {
+        key: 'calendar.free_busy',
+        name: "See when you're free",
+        description: "Reads only when you're busy. Never sees what an event is.",
+        mode: 'ask',
+        coveredBy: [],
+      },
+    ],
+  } satisfies { intro: string; tools: ReviewToolView[] },
+  /**
+   * The proved change before it turns on (N-Conn-10), as `ChangeReview` rows: its tool is added at
+   * Ask me first, and open times start skipping busy times.
+   */
+  changes: {
+    rows: [
+      {
+        key: 'calendar.free_busy',
+        change: 'added',
+        title: "See when you're free",
+        connector: googleCalendarView,
+        before: null,
+        after: {
+          mode: 'ask',
+          reason: "Claude checks when you're busy before offering open times. It never sees what an event is.",
+          words: [word('who', 'Claude only'), word('limits', 'Busy times only')],
+        },
+        changed: [],
+      },
+      {
+        key: 'native.find_slots',
+        change: 'changed',
+        title: 'Find open times',
+        connector: connectorViews.bookings,
+        before: { mode: 'auto', reason: 'Open times come from the hours you set on Bookings.', words: [word('who', 'Anyone')] },
+        after: { mode: 'auto', reason: 'Open times now skip anything already on your calendar.', words: [word('who', 'Anyone')] },
+        changed: ['reason'],
+      },
+    ],
+    checks: {
+      status: 'checked',
+      lines: [
+        'No conflict with your other rules.',
+        'Always-on rules still hold.',
+        'Nothing here can move money or change your calendar.',
+        'Event titles, guests and notes never reach Claude.',
+      ],
+    },
+  } satisfies { rows: ChangeRowView[]; checks: ChangeReviewProps['checks'] },
+  /**
+   * "Add a connector" on Rivera's Rules page (N-Conn-07): every built-in connector is added and
+   * Stripe is connected, so Google Calendar is the one to connect. Verification is never listed.
+   */
+  picker: {
+    business: business.name,
+    builtIn: [
+      connectorViews.quotes,
+      connectorViews.bookings,
+      connectorViews.leads,
+      connectorViews.documents,
+      connectorViews.payments,
+    ].map((connector) => ({ connector, state: 'added' as const })),
+    external: [
+      {
+        connector: { ...googleCalendarView, description: "Lets Claude see when you're busy, never what the event is." },
+        state: 'available',
+      },
+      { connector: connectorViews.stripe, state: 'connected' },
+    ],
+  } satisfies Pick<ConnectorPickerProps, 'business' | 'builtIn' | 'external'>,
+};
+
 const listChargesProfile = {
   tool: 'payments.list_charges',
   source: 'mcp',
@@ -1468,6 +1726,13 @@ export const rivera = {
   ruleWords,
   ruleLimits,
   connectors,
+  toolPages,
+  recentRequests,
+  changedRefund,
+  paymentsConnection,
+  stripeConnection,
+  verificationConnection,
+  googleCalendar,
   toolProfiles,
   ledger,
   verifyStarted,

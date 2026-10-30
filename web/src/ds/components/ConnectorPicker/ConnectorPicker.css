@@ -1,0 +1,147 @@
+/* ConnectorPicker: a raised surface 640 px wide, 48 px from the top of the window over the scrim,
+   with the dialog shadow. The serif title with Close at its right, the intro in secondary body
+   type, then each group: its heading and a row per connector under a hairline (the 36 px tile,
+   the name and badge over the description, the state or its button at the right). The notes in
+   secondary meta close it. A long list scrolls inside the dialog. */
+
+.cd-connector-picker {
+  box-sizing: border-box;
+  width: min(640px, calc(100% - var(--space-32)));
+  max-width: none;
+  max-height: calc(100% - var(--space-24) * 4);
+  margin: calc(var(--space-24) * 2) auto auto;
+  padding: var(--space-28);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-card);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-dialog);
+  color: var(--text-primary);
+}
+
+.cd-connector-picker::backdrop {
+  background: var(--scrim);
+}
+
+.cd-connector-picker__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-12);
+}
+
+.cd-connector-picker__title {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+/* The close button's 18 px icon lines up with the title's cap height. */
+.cd-connector-picker__close {
+  flex: none;
+  margin: calc(var(--space-4) * -1) calc(var(--space-6) * -1) 0 0;
+}
+
+.cd-connector-picker__intro {
+  margin: var(--space-8) 0 0;
+  color: var(--text-secondary);
+}
+
+.cd-connector-picker__group {
+  margin-top: var(--space-20);
+}
+
+.cd-connector-picker__group-heading {
+  margin: 0 0 var(--space-8);
+  color: var(--text-primary);
+}
+
+.cd-connector-picker__items {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cd-connector-picker__item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--space-14);
+  padding: var(--space-14) 0;
+  border-top: 1px solid var(--line-hairline);
+}
+
+.cd-connector-picker__text {
+  min-width: 0;
+}
+
+.cd-connector-picker__name {
+  display: block;
+  font-weight: 520;
+}
+
+/* The badge sits 8 px from the name, as the boards set it. */
+.cd-connector-picker__name .cd-connector-name > .cd-pill,
+.cd-connector-picker__name .cd-connector-name__built-in {
+  margin-left: var(--space-4);
+}
+
+.cd-connector-picker__description {
+  display: block;
+  margin-top: var(--space-2);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.cd-connector-picker__state {
+  max-width: 200px;
+  color: var(--text-secondary);
+  text-align: right;
+}
+
+.cd-connector-picker__notes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  margin-top: var(--space-20);
+  color: var(--text-secondary);
+}
+
+.cd-connector-picker__notes p {
+  margin: 0;
+}
+
+/* Under 720 px, each connector's state or button sits under its words, so the name keeps the
+   row's width. */
+@media (max-width: 719.98px) {
+  .cd-connector-picker {
+    max-height: calc(100% - var(--space-32));
+    margin-top: var(--space-16);
+    padding: var(--space-20);
+  }
+
+  .cd-connector-picker__item {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+      'icon text'
+      'icon action';
+    align-items: start;
+    row-gap: var(--space-8);
+  }
+
+  .cd-connector-picker__item > .cd-connector-icon {
+    grid-area: icon;
+  }
+
+  .cd-connector-picker__text {
+    grid-area: text;
+  }
+
+  .cd-connector-picker__action,
+  .cd-connector-picker__state {
+    grid-area: action;
+    justify-self: start;
+    max-width: none;
+    text-align: left;
+  }
+}

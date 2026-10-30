@@ -1,0 +1,81 @@
+/* ConnectionPanel: the section heading, an app's details as rows under hairlines (the term in a
+   216 px column of secondary meta, its value in body type), then the consequence in secondary body
+   type with the secondary button at the right. On a narrow line the button drops under the words,
+   and under 480 px each value sits under its term. */
+
+.cd-connection-panel {
+  container: cd-connection-panel / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+  min-width: 0;
+}
+
+.cd-connection-panel__details {
+  margin: 0;
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+.cd-connection-panel__detail {
+  display: grid;
+  grid-template-columns: 216px minmax(0, 1fr);
+  align-items: baseline;
+  column-gap: var(--space-16);
+  row-gap: var(--space-2);
+  padding: var(--space-12) 0;
+  border-top: 1px solid var(--line-hairline);
+}
+
+.cd-connection-panel__term {
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.cd-connection-panel__value {
+  margin: 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.cd-connection-panel__off {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--space-24);
+  row-gap: var(--space-12);
+}
+
+.cd-connection-panel__line {
+  flex: 1 1 320px;
+  min-width: 0;
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* The confirm's body: its lines and lists, 8 px apart. */
+.cd-connection-panel__confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.cd-connection-panel__confirm p {
+  margin: 0;
+}
+
+.cd-connection-panel__confirm ul {
+  margin: 0;
+  padding-left: var(--space-20);
+  color: var(--text-primary);
+}
+
+.cd-connection-panel__name {
+  overflow-wrap: anywhere;
+}
+
+@container cd-connection-panel (max-width: 479.98px) {
+  .cd-connection-panel__detail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

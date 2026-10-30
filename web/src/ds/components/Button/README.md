@@ -60,3 +60,7 @@ Disabled dims every variant to 40%. Busy never dims, even on a button that is di
 A label longer than its line, such as a long name on a phone or in the take-over bar's controls column, wraps inside the button in balanced lines, and the button grows taller with the same padding. A word wider than the line, such as a name with no spaces, breaks inside the button too (`overflow-wrap: anywhere`), even in a row of buttons. It is never wider than its container, and one line of label keeps it exactly `size-control` (or `size-control-main`) tall.
 
 Hover fills change at `motion-instant`; a press scales to 0.98 at `motion-fast` with `motion-ease-emphasis`; a busy spinner turns once every `motion-spin`. Nothing moves under reduced motion.
+
+## One press at a time
+
+`useSendOnce(pending, error?)` in `useSendOnce.ts` holds a press whose result the screen reports later, for components that send one, such as `ConnectionPanel`, `ConnectorReview` and `ToolReviewCard`. `send(key, call)` calls `call` once and notes which button was pressed (`pressed`, for its `busy` spinner), and every button `waiting` ignores further presses until the screen's `pending` has come and gone, an error is delivered (one appears, or another replaces it), or the promise the call returned rejects. Clearing an error releases nothing, so the same failure twice can be retried. It is used inside the design system and is not exported from the package.

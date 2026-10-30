@@ -1,0 +1,131 @@
+/* ConnectorReview: the 48 px tile beside the serif title and its lead line, the card of tools (each
+   under a hairline: its name at weight 520, its line and what covers it in secondary meta, and its
+   outcome at the right), then Turn it on, Cancel and the hint on one line. Each tool lays out by
+   its own width: under 640 px its outcome sits on its own line under its words. */
+
+.cd-connector-review {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20);
+  min-width: 0;
+}
+
+.cd-connector-review__header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-16);
+  min-width: 0;
+}
+
+.cd-connector-review__heading {
+  min-width: 0;
+}
+
+.cd-connector-review__title {
+  margin: 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.cd-connector-review__title .cd-connector-name__built-in,
+.cd-connector-review__title .cd-pill {
+  margin-left: var(--space-4);
+}
+
+/* "Built in" keeps its caption type beside the serif title, centered on its line. */
+.cd-connector-review__title .cd-connector-name__built-in {
+  vertical-align: middle;
+}
+
+.cd-connector-review__lead {
+  margin: var(--space-4) 0 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.cd-connector-review__tools {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cd-connector-review__tool {
+  container: cd-connector-review-tool / inline-size;
+  padding: var(--space-12) 0;
+  border-top: 1px solid var(--line-hairline);
+}
+
+.cd-connector-review__tool:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.cd-connector-review__tool:last-child {
+  padding-bottom: 0;
+}
+
+.cd-connector-review__layout {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  column-gap: var(--space-16);
+  row-gap: var(--space-8);
+  min-width: 0;
+}
+
+.cd-connector-review__text {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.cd-connector-review__name {
+  margin: 0;
+  color: var(--text-primary);
+  font-weight: 520;
+  overflow-wrap: anywhere;
+}
+
+.cd-connector-review__description {
+  margin: var(--space-2) 0 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.cd-connector-review__covered {
+  margin: var(--space-6) 0 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* The buttons 8 px apart, the hint 16 px after them, and under them, flush left, on a narrow line. */
+.cd-connector-review__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--space-16);
+  row-gap: var(--space-8);
+}
+
+.cd-connector-review__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+
+.cd-connector-review__hint {
+  flex: 1 1 240px;
+  min-width: 0;
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+@container cd-connector-review-tool (max-width: 639.98px) {
+  .cd-connector-review__layout {
+    flex-direction: column;
+  }
+
+  .cd-connector-review__text {
+    flex: none;
+    width: 100%;
+  }
+}
