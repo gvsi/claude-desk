@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { page, userEvent, type Locator } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
-import type { Decision } from '../../api/contracts.ts';
+import type { Decision, DemoInboxEntry } from '../../api/contracts.ts';
 import type { BriefingItem, BriefingList, NeedsYouItem, ThisWeek, Today } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { expectComputed } from '../../ds/test/expectComputed.ts';
@@ -877,6 +877,63 @@ describe("Today's Demo inbox", () => {
     expect(box.top).toBeGreaterThanOrEqual(0);
     expect(box.top).toBeLessThan(window.innerHeight);
   }
+
+  it.each(['desktop', 'phone'] as const)('inbox_alert_opens_the_held_request_%s', async (viewport) => {
+    // The seeded hold's alert, as the kernel wrote it, beside entries that name no request: a code,
+    // an alert about something else, and a ledger checkpoint.
+    const held = seededHold();
+    const alert = mockStore.world.inbox.find((record) => record.entry.decision_id === held.decision_id)?.entry;
+    if (!alert) throw new Error("the seeded hold alerted the owner, naming it");
+    const others: DemoInboxEntry[] = [
+      {
+        entry_id: 'inbox-code',
+        to: rivera.people.dana.maskedContact,
+        kind: 'verification_code',
+        body: 'Your Rivera Plumbing code is 482913. It expires in ten minutes.',
+        created_at: minutesAgo(5),
+        decision_id: null,
+      },
+      {
+        entry_id: 'inbox-paused',
+        to: 'owner',
+        kind: 'alert',
+        body: 'Bookings paused after three refused tries in a minute.',
+        created_at: minutesAgo(4),
+        decision_id: null,
+      },
+      { entry_id: 'inbox-head', to: 'owner', kind: 'head_checkpoint', body: 'Ledger head 412, signed.', created_at: minutesAgo(3), decision_id: null },
+    ];
+    mockStore.inject({ route: 'ownerInbox', status: 200, times: 10_000, body: [alert, ...others] });
+    const { screen, router } = await renderRoute(TODAY, { viewport });
+    const card = heldCard(screen, SEEDED_REASON);
+    await expect.element(card).toBeInTheDocument();
+
+    const open = inboxButton(screen);
+    await open.click();
+    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
+    await expect.element(sheet.getByText(alert.body)).toBeVisible();
+    await expect.element(sheet.getByText(others[0]?.body ?? '')).toBeVisible();
+    // "Open the request" under the hold's alert only.
+    const links = sheet.getByRole('link', { name: 'Open the request' });
+    expect(links.elements()).toHaveLength(1);
+    const link = links.first();
+    expect(link.element().closest('li')?.textContent).toContain(alert.body);
+    expect(link.element().getAttribute('href')).toBe(requestLink(held.decision_id));
+    await expectScreenBasics(screen.container, { owner: true });
+
+    // Following it closes the sheet and lands on the held request's card, in view.
+    await link.click();
+    await expect.element(sheet).not.toBeInTheDocument();
+    expect(router.state.location.pathname).toBe(TODAY);
+    expect(router.state.location.hash).toBe(`#request-${encodeURIComponent(held.decision_id)}`);
+    await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
+    expectInView(card.element());
+    // Focus stays there, and the closed sheet reads no more.
+    const reads = requests('ownerInbox').length;
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(focusIsOn(card.element())).toBe(true);
+    expect(requests('ownerInbox')).toHaveLength(reads);
+  });
 
   it('request_link_lands_on_the_card_once_needs_you_reads', async () => {
     // Opened fresh (a reload, or the link from elsewhere), the page lands on the held request once

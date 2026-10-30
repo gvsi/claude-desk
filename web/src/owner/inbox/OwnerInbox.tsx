@@ -2,7 +2,8 @@
  * Today's Demo inbox: what Claude would have sent the owner by text or email (the kernel's alert
  * for each held request, the copy's codes and ledger checkpoints), in the design system's
  * `DemoInboxSheet` with `viewer="owner"`: a "Demo inbox" button with a count, which opens the
- * entries in a sheet at the right, each with when it came on the business's clock.
+ * entries in a sheet at the right, each with when it came on the business's clock. An alert about a
+ * held request links to that request's card on this Desk's Today ("Open the request").
  *
  * The copy's inbox is read once as Today opens, so the button counts what is there and the sheet
  * opens onto entries already read, never onto an inbox that only looks empty. It is read again as
@@ -18,6 +19,7 @@ import { request } from '../../api/http.ts';
 import { pollMs } from '../../app/poll.ts';
 import { Button, DemoInboxSheet, LoadingLine, Notice, SectionHeader, type DemoInboxItem } from '../../ds/index.ts';
 import { formatWhen } from '../../lib/format.ts';
+import { requestPath } from '../today/requestLink.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 
 import './OwnerInbox.css';
@@ -25,13 +27,15 @@ import './OwnerInbox.css';
 export const OWNER_INBOX_KEY = ['ownerInbox'] as const;
 
 export interface OwnerInboxProps {
+  /** The Desk whose Today the inbox is on: an alert's request opens there. */
+  deskId: string;
   /** The business's IANA time zone: each entry's time is on its clock. */
   timezone: string;
   /** Hears the sheet open (`true`) and close (`false`), after the sheet has handed focus back. */
   onOpenChange?: (open: boolean) => void;
 }
 
-export function OwnerInbox({ timezone, onOpenChange }: OwnerInboxProps) {
+export function OwnerInbox({ deskId, timezone, onOpenChange }: OwnerInboxProps) {
   const titleId = `${useId()}-title`;
   // Whether the sheet is open, as the sheet says each time it opens or closes.
   const [open, setOpen] = useState(false);
@@ -63,6 +67,8 @@ export function OwnerInbox({ timezone, onOpenChange }: OwnerInboxProps) {
       notice: { entry_id: entry.entry_id, to: entry.to, preview: '' },
       entry,
       time: formatWhen(entry.created_at, timezone, now),
+      // The held request the kernel's alert names, by its id, never by anything the entry says.
+      requestHref: entry.decision_id ? requestPath(deskId, entry.decision_id) : undefined,
     }));
 
   // The latest read failed, whether or not one worked before.
