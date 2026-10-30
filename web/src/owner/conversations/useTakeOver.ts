@@ -5,7 +5,9 @@
  * Each change of who answers posts the generation the owner last read, so it never acts on a chat
  * that has moved on since: the API answers that with a 409, and the chat is read again before the
  * owner tries again. Nothing here is sent twice on its own. A write whose answer is lost may have
- * been applied, so the chat is read again first, and it is never called not done when it was.
+ * been applied, so the chat is read again first, and it is never called not done when it was. A
+ * message is looked for only past the messages before it, so the same words sent earlier never
+ * confirm it: after a read that missed one of those, the chat is read again before the next goes.
  */
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useRef, useState } from 'react';
@@ -64,6 +66,9 @@ export function useTakeOver(sessionId: string): UseTakeOver {
   const [messageError, setMessageError] = useState<string | null>(null);
   // Read synchronously, so a second press can't send twice.
   const busy = useRef({ mode: false, message: false });
+  // A message went through, or may have, and the read after it failed: the chat as last read
+  // doesn't show it, so its words could pass for a later message whose answer is lost.
+  const unread = useRef(false);
 
   const lastRead = useCallback(() => queryClient.getQueryData<OwnerTranscript>(conversationKey(sessionId)), [queryClient, sessionId]);
 
@@ -101,16 +106,12 @@ export function useTakeOver(sessionId: string): UseTakeOver {
     [lastRead, queryClient, reread, sessionId],
   );
 
-  const send = useCallback(
-    async (kind: MessageKind, text: string): Promise<boolean> => {
-      if (busy.current.message) return false;
-      busy.current.message = true;
-      const after = maxN(lastRead()?.items ?? []);
-      setSending(true);
-      setMessageError(null);
+  /** Posts one message, looking for it past `after` in the chat as read again if its answer is lost. */
+  const post = useCallback(
+    async (kind: MessageKind, text: string, after: number): Promise<boolean> => {
       try {
         const out = await request('ownerMessage', { params: { session_id: sessionId }, body: { text, kind } });
-        await reread();
+        unread.current = (await reread()) === null;
         if (out.verdict !== null && out.verdict.ok !== true) {
           setMessageError(SAY_STOPPED);
           return false;
@@ -124,6 +125,7 @@ export function useTakeOver(sessionId: string): UseTakeOver {
           return false;
         }
         if (isUncertain(err)) {
+          unread.current = now === null;
           // It may have gone through: only the chat as read again says so.
           if (now?.items.some((item) => isMine(item, after, kind, text)) === true) return true;
           setMessageError(SEND_UNCONFIRMED);
@@ -131,12 +133,35 @@ export function useTakeOver(sessionId: string): UseTakeOver {
         }
         setMessageError(ownerErrorCopy(err));
         return false;
+      }
+    },
+    [reread, sessionId],
+  );
+
+  const send = useCallback(
+    async (kind: MessageKind, text: string): Promise<boolean> => {
+      if (busy.current.message) return false;
+      busy.current.message = true;
+      setSending(true);
+      setMessageError(null);
+      try {
+        // The chat is read first when the last read missed a message that went through or may
+        // have, so a lost answer below is looked for only past every earlier message. While it
+        // can't be read, nothing goes.
+        if (unread.current) {
+          if ((await reread()) === null) {
+            setMessageError(ownerErrorCopy(queryClient.getQueryState(conversationKey(sessionId))?.error));
+            return false;
+          }
+          unread.current = false;
+        }
+        return await post(kind, text, maxN(lastRead()?.items ?? []));
       } finally {
         busy.current.message = false;
         setSending(false);
       }
     },
-    [lastRead, reread, sessionId],
+    [lastRead, post, queryClient, reread, sessionId],
   );
 
   return {

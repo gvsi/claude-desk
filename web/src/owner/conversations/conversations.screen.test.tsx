@@ -406,6 +406,85 @@ describe('Conversations', () => {
     await expectScreenBasics(screen.container, { owner: true });
   });
 
+  it('earlier_words_never_confirm_a_later_send', async () => {
+    const chat = named(DANA_LIVE, DANA);
+    const words = 'On my way';
+    // No poll lands, so the only reads of the chat are the ones sending makes.
+    const { screen } = await renderRoute(conversation(DANA_LIVE), { pollScale: 100 });
+    const reads = requests('conversation').length;
+    await screen.getByRole('button', { name: 'Take over' }).click();
+    const box = screen.getByRole('textbox', { name: 'Write to them' });
+    await expect.element(box).toBeVisible();
+    await expect.poll(() => requests('conversation').length).toBeGreaterThan(reads);
+
+    // Her words go to Dana, but the read after them fails (and its one retry), so the chat as last
+    // read doesn't show them.
+    mockStore.inject({ route: 'conversation', status: 500, times: 2 });
+    await box.fill(words);
+    await userEvent.keyboard('{Enter}');
+    await expect.element(screen.getByRole('alert').getByText(UNAVAILABLE, { exact: true })).toBeVisible();
+    await expect.element(box).toHaveValue('');
+    await expect.element(box).not.toBeDisabled();
+    expect(log(screen).getByText(words, { exact: true }).elements()).toHaveLength(0);
+
+    // The same words again, and this answer is lost before they reach the API. The chat read
+    // afterwards holds the first ones, which never pass for these.
+    mockStore.inject({ route: 'ownerMessage', status: 'network' });
+    await box.fill(words);
+    await userEvent.keyboard('{Enter}');
+    await expect
+      .element(screen.getByRole('alert').getByText("We couldn't confirm that went through. Check the chat before you send it again.", { exact: true }))
+      .toBeVisible();
+    await expect.element(box).toHaveValue(words);
+    expect(requests('ownerMessage').map((r) => r.body)).toEqual([
+      { text: words, kind: 'say' },
+      { text: words, kind: 'say' },
+    ]);
+    const said = chat.events.filter(({ ev }) => ev.type === 'message' && ev.author === 'owner');
+    expect(said).toHaveLength(1);
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('words_wait_for_a_read_of_the_chat_after_one_fails', async () => {
+    named(DANA_LIVE, DANA);
+    const { screen } = await renderRoute(conversation(DANA_LIVE), { pollScale: 100 });
+    const reads = requests('conversation').length;
+    await screen.getByRole('button', { name: 'Take over' }).click();
+    const box = screen.getByRole('textbox', { name: 'Write to them' });
+    await expect.element(box).toBeVisible();
+    await expect.poll(() => requests('conversation').length).toBeGreaterThan(reads);
+
+    // Her words go, and the read after them fails.
+    mockStore.inject({ route: 'conversation', status: 500, times: 2 });
+    await box.fill('On my way');
+    await userEvent.keyboard('{Enter}');
+    await expect.element(box).toHaveValue('');
+    await expect.element(box).not.toBeDisabled();
+
+    // Her next words wait for a read of the chat; while it still can't be read, they don't go,
+    // and they stay in the box with the owner's line for the failed read.
+    mockStore.inject({ route: 'conversation', status: 500, times: 2 });
+    const next = 'About 10 minutes out.';
+    await box.fill(next);
+    await userEvent.keyboard('{Enter}');
+    await expect.element(box).toHaveValue(next);
+    await expect.element(box).not.toBeDisabled();
+    const controls = box.element().closest('.cd-conversation__controls');
+    expect(controls?.querySelector('[role="alert"]')?.textContent).toBe(UNAVAILABLE);
+    expect(requests('ownerMessage').map((r) => r.body)).toEqual([{ text: 'On my way', kind: 'say' }]);
+
+    // Once the chat can be read, they go, after the first ones.
+    await userEvent.keyboard('{Enter}');
+    await expect.element(log(screen).getByText(next, { exact: true })).toBeVisible();
+    await expect.element(log(screen).getByText('On my way', { exact: true })).toBeVisible();
+    await expect.element(box).toHaveValue('');
+    expect(requests('ownerMessage').map((r) => r.body)).toEqual([
+      { text: 'On my way', kind: 'say' },
+      { text: next, kind: 'say' },
+    ]);
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
   it('held_request_answerable_during_take_over', async () => {
     const chat = session(SEEDED_HOLD);
     const { screen } = await renderRoute(conversation(SEEDED_HOLD));
