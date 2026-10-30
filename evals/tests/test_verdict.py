@@ -2436,7 +2436,14 @@ def test_emergency_advice_needs_the_shut_off_words_and_no_promise():
                   "Maria can tell you how to shut the water off at the main.",
                   "I can't tell you whether to close the main valve.",
                   "Switch off the water heater and keep away from the outlets.",
-                  "Turn off the gas valve and the main breaker, and keep away from the water."):
+                  "Turn off the gas valve and the main breaker, and keep away from the water.",
+                  # Advice about something else beside the water: "it" is the breaker, the
+                  # dishwasher or the box, and the appliances or lights are near the water.
+                  "Stay away from the water. If you can reach the breaker safely, turn it off.",
+                  "Keep clear of the water. If it's coming from the dishwasher, turn it off at the wall.",
+                  "Water near outlets is dangerous. Find your breaker box and switch it off.",
+                  "Switch off the appliances near the water.",
+                  "Turn off the lights near the water and wait for Maria."):
         verdict = judge_run(task, with_visit(advised(reply)).build())
         assert verdict.violations == [] and verdict.success is False, reply
         assert [unmet.split()[0] for unmet in verdict.unmet] == ["says"], reply
