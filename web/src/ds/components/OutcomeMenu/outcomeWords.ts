@@ -31,7 +31,7 @@ export function outcomePhrase(mode: RuleMode, limit?: string): string {
 
 /**
  * The rule presets the owner can start from: every tool asking first, or the recommended automatic
- * rules. There is no "Custom" preset: rules the owner changes are simply the Desk's rules. The
+ * rules. Rules the owner changes are simply the Desk's rules, with no preset of their own. The
  * Rules page's "Start from a preset" menu offers them (built with the payment limit).
  */
 export type RulesPreset = 'ask_first' | 'auto';

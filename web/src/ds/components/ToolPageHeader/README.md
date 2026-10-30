@@ -4,7 +4,7 @@
 
 ## When to use
 
-- At the top of each tool's page under Rules (`rules/:connector/:tool`), under its `Breadcrumb`.
+- At the top of each tool's page under Connectors (`connectors/:connector/:tool`), under its `Breadcrumb`.
 - While the tool `needs_review`, a `ToolReviewCard` follows it; after the owner turns it back on, the screen passes "Definition reviewed today" and shows an info `Notice` under it.
 - The demo's "Simulate a tool change" is built later, with the mode switch and the money-limit line, so the header has no control for it.
 

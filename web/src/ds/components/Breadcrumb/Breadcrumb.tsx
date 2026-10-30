@@ -22,7 +22,7 @@ function PlainLink({ children, ...props }: RulesLinkProps) {
 }
 
 /**
- * Where a page sits under Rules: "Rules / Stripe / Refund". Every step but the last links back up;
+ * Where a page sits under Connectors: "Connectors / Stripe / Refund". Every step but the last links back up;
  * the last is the page itself, plain text marked `aria-current="page"`. The slashes between them
  * are drawn only, hidden from screen readers.
  */

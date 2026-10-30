@@ -36,7 +36,7 @@ As on `ApprovalCard`'s menus:
 - `OUTCOME_WORDS` (`satisfies Record<RuleMode, string>`): `auto` "Automatic", `ask` "Ask me first", `never` "Never". Used wherever a rule's outcome shows.
 - `OUTCOME_TONE`: `auto` handled, `ask` held, `never` refused.
 - `outcomePhrase(mode, limit?)`.
-- `RulesPreset = 'ask_first' | 'auto'` and `PRESET_WORDS`, in that order, each with its `label` and its `description`, as the signed presets board words them: "Ask me first" ("Quotes, bookings, documents and payments wait for your answer.") and "Recommended rules" ("Quotes at list price, weekday bookings in your hours, documents to verified customers. Payments ask you first."). These are the presets the owner can start from, which the Rules page's "Start from a preset" menu offers. There is no "Custom" preset.
+- `RulesPreset = 'ask_first' | 'auto'` and `PRESET_WORDS`, in that order, each with its `label` and its `description`, as the signed presets board words them: "Ask me first" ("Quotes, bookings, documents and payments wait for your answer.") and "Recommended rules" ("Quotes at list price, weekday bookings in your hours, documents to verified customers. Payments ask you first."). These are the presets the owner can start from, which the Rules page's "Start from a preset" menu offers. Rules the owner changes are simply the Desk's rules, with no preset of their own.
 
 ## Props
 

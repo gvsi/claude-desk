@@ -887,8 +887,9 @@ export interface RulesPageProps {
 }
 
 /**
- * The Rules page: its title with "Add a connector", the composer that asks Claude for a change,
- * the Desk's connectors, a section each, and the always-on rules.
+ * The Rules page: its title and line, the composer that asks Claude for a change right under
+ * them, the Desk's connectors, a section each, and the always-on rules. Connectors are added from
+ * the Connectors page, so it has no "Add a connector".
  */
 export function RulesPage({ hub, chips, notice }: RulesPageProps) {
   return (

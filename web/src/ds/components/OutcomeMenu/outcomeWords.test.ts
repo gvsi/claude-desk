@@ -15,7 +15,7 @@ describe('outcome words', () => {
 
     expect(OUTCOME_WORDS).toEqual({ auto: 'Automatic', ask: 'Ask me first', never: 'Never' });
     expect(OUTCOME_TONE).toEqual({ auto: 'handled', ask: 'held', never: 'refused' });
-    // A preset is where the owner starts from; there is no "Custom" preset to pick. Each says what
+    // A preset is where the owner starts from; edited rules have no preset of their own. Each says what
     // it sets, in the signed presets board's words.
     expect(PRESET_WORDS).toEqual([
       { value: 'ask_first', label: 'Ask me first', description: 'Quotes, bookings, documents and payments wait for your answer.' },

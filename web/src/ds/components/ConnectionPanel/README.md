@@ -4,7 +4,7 @@
 
 ## When to use
 
-- At the end of every connector's page under Rules, after its tools.
+- At the end of every connector's page under Connectors (`connectors/:connector`), after its tools.
 - Turning a connector off only narrows what Claude can do, so it applies at once after this confirm, with no proved review. Turning one on goes through `ConnectorReview` and `ChangeReview` instead.
 
 ## What it shows

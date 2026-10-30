@@ -1461,7 +1461,7 @@ const googleCalendar = {
     },
   } satisfies { rows: ChangeRowView[]; checks: ChangeReviewProps['checks'] },
   /**
-   * "Add a connector" on Rivera's Rules page (N-Conn-07): every built-in connector is added and
+   * "Add a connector" on Rivera's Connectors page (N-Conn-07): every built-in connector is added and
    * Stripe is connected, so Google Calendar is the one to connect. Verification is never listed.
    */
   picker: {

@@ -4,7 +4,7 @@
 
 ## When to use
 
-- At the top of each connector's page under Rules (`rules/:connector`), under its `Breadcrumb`: Payments, Stripe, Verification, Google Calendar.
+- At the top of each connector's page under Connectors (`connectors/:connector`), under its `Breadcrumb`: Payments, Stripe, Verification, Google Calendar.
 - Not on a tool's page, which has `ToolPageHeader`, and not on the Rules page, whose title is a `PageHeader`.
 
 ## What it shows

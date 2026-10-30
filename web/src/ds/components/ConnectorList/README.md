@@ -1,6 +1,6 @@
 # ConnectorList
 
-`ConnectorList` is the Rules hub's list of connectors: a summary line, one item per connector's section, and "Add a connector" at the end.
+`ConnectorList` is the Rules hub's list of connectors: a summary line and one item per connector's section. With `onAddConnector` it ends with "Add a connector"; the Rules page passes none, as connectors are added from the Connectors page.
 
 ## When to use
 

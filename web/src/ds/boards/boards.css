@@ -973,7 +973,7 @@
 }
 
 /* A phone draws the composer alone, its send button at the right: no helper and no suggestions.
-   The Rules page's header is its title with "Add a connector" at control height beside it. */
+   The Connectors page's header is its title with "Add a connector" at control height beside it. */
 @media (max-width: 639.98px) {
   .board-ask .cd-suggestion-chips,
   .board-ask .cd-composer__helper {
