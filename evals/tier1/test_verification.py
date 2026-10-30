@@ -168,7 +168,9 @@ def told_apart(values: dict[str, Any], named: frozenset[str] = frozenset()) -> s
     of equal values together, each value as `described` shows it (a text by its length, a list or
     an object by its size, never what it holds, since a kernel may have echoed a contact, a code
     or a token into it), and each text after the first with the character where it parts from the
-    first."""
+    first. No values at all are "nothing to compare"."""
+    if not values:
+        return "nothing to compare"
     groups: list[tuple[list[str], Any]] = []
     for label, value in values.items():
         alike = next((labels for labels, held in groups if held == value), None)

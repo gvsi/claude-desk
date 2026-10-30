@@ -32,6 +32,7 @@ from evals.tier1.test_verification import (
     masked_on_record,
     redacted,
     shows_a_code,
+    told_apart,
     wrong_codes,
 )
 
@@ -223,6 +224,11 @@ ECHOED = {
         "Claude sees one thing for Dana's contact, another for a stranger's: "
         "model_view (Dana's: an object with 1 field; the stranger's: an object with 1 field)",
 }
+
+
+def test_no_values_are_told_apart_as_nothing_to_compare():
+    """A failure with no values to tell apart says so, rather than raising over the message."""
+    assert told_apart({}) == "nothing to compare"
 
 
 @pytest.mark.parametrize(("case", "failure"), ECHOED.items(), ids=[case.__name__ for case in ECHOED])
