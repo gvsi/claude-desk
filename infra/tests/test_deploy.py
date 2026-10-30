@@ -50,7 +50,8 @@ RERUN_IT = "run deploy.sh again; if this repeats, export DESK_PASSCODE for this 
 # writes what the pinned CLI, aws-cdk 2.1145.0, does (its cdk-toolkit.js): a warning and the changes
 # for a stack named in STUB_BROADENS, then `✨  Number of stacks with differences: <n>`, which counts
 # only stacks that broaden access (STUB_DIFF_UNCOUNTED leaves that line out, and with
-# STUB_DIFF_COUNTS_NOTHING it counts none, as a later CLI might); with STUB_DIFF_WATCHES_LOG each diff
+# STUB_DIFF_COUNTS_NOTHING it counts none, as a later CLI might; STUB_DIFF_WARNS_NOTHING keeps the count
+# and leaves the warning out, as a later CLI might too); with STUB_DIFF_WATCHES_LOG each diff
 # then waits for what it wrote to show up in the deploy log, and says whether it did before it ends.
 # Each record also holds the stub's process group ("group"); with STUB_HANGS, `aws` then writes
 # nothing for 30 s, as a hung call would. A watched tool (WATCHED) writes the same record, then runs
@@ -124,7 +125,7 @@ elif tool == "aws" and args[:2] == ["cloudformation", "describe-stacks"]:
 elif tool == "npx" and args[:3] == ["--no-install", "cdk", "diff"]:
     print(f"stub: cdk security diff for {{args[3]}}", file=sys.stderr)  # cdk diff writes to stderr
     broadens = args[3] in os.environ.get("STUB_BROADENS", "").split(",")
-    if broadens:
+    if broadens and not os.environ.get("STUB_DIFF_WARNS_NOTHING"):
         print("This deployment will make potentially sensitive changes according to your current security "
               "approval level.\\nPlease confirm you intend to make the following modifications:\\n", file=sys.stderr)
         print(f"stub: IAM statement changes for {{args[3]}}", file=sys.stderr)
@@ -928,6 +929,16 @@ def test_a_security_diff_that_warns_of_sensitive_changes_is_summed_up_as_broaden
     stack's changes ("potentially sensitive changes") still marks it, so the summary fails safe."""
     run = deploy(terminal=False, DESK_DEPLOY_ACCOUNT=ACCOUNT, STUB_BROADENS="DeskApp", STUB_DIFF_COUNTS_NOTHING="1")
     assert run.status == 0, run.output
+    assert run.log.count(f"deploy: security summary for DeskData: {BROADENS_NOTHING}") == 1
+    assert run.log.count(f"deploy: security summary for DeskApp: {BROADENS}") == 2
+
+
+def test_a_security_diff_that_counts_a_broadening_stack_is_summed_up_as_broadening_without_the_warning(deploy):
+    """The other half: should a CDK upgrade drop the warning, the count of stacks that broaden access
+    still marks the stack, so the summary fails safe either way."""
+    run = deploy(terminal=False, DESK_DEPLOY_ACCOUNT=ACCOUNT, STUB_BROADENS="DeskApp", STUB_DIFF_WARNS_NOTHING="1")
+    assert run.status == 0, run.output
+    assert "potentially sensitive changes" not in run.log
     assert run.log.count(f"deploy: security summary for DeskData: {BROADENS_NOTHING}") == 1
     assert run.log.count(f"deploy: security summary for DeskApp: {BROADENS}") == 2
 
