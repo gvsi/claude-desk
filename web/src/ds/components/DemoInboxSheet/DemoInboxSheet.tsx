@@ -36,6 +36,16 @@ export function DemoInboxSheet({ viewer, items, language, onRetry, notice, onOpe
     told.current = isOpen;
     tell.current?.(isOpen);
   }, [isOpen]);
+  // Taken off the screen while open, it has closed too. It always draws closed first, so a remount
+  // under StrictMode tells nothing.
+  useEffect(
+    () => () => {
+      if (!told.current) return;
+      told.current = false;
+      tell.current?.(false);
+    },
+    [],
+  );
 
   // A visitor's sheet opens itself once, when the first entry they may see arrives.
   const seen = useRef(count);
@@ -90,6 +100,16 @@ function Sheet({ openedBy, viewer, items, language, onRetry, notice, onClose }: 
   // Following a link inside, such as an alert's "Open the request", closes the sheet, so it isn't
   // left over the page the link opens. A click that opens a new tab or window leaves this page, and
   // the sheet, as they are.
+  // Something inside that had focus can go while the sheet stays open, such as a notice's Try again
+  // once a read works. Focus then falls to the page behind, which is inert, so it moves back to the
+  // sheet's heading.
+  const dialogRef = modal.ref;
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (dialog?.open && dialog.ownerDocument.activeElement === dialog.ownerDocument.body) {
+      dialog.querySelector<HTMLElement>('.cd-demo-inbox__title')?.focus();
+    }
+  });
   const onLinkClick = (event: MouseEvent<HTMLDialogElement>) => {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     const link = event.target instanceof Element ? event.target.closest('a[href]') : null;
