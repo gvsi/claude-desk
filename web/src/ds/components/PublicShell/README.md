@@ -45,7 +45,7 @@ The header says whether the business is open now, in the kernel's words.
 
 ## Layout
 
-The shell is an inline-size container, so it lays out by its own width, not the window's. Below 900 px the about column moves under the chat, full width. Below 640 px (a phone, or the owner's 420 px panel) the gutters are 16 px instead of 40, and the open status has its own line under the name.
+The shell is an inline-size container, so it lays out by its own width, not the window's. Below 900 px the about column moves under the chat, full width. Below 720 px (each state of the handoff board at 640 px, a phone, or the owner's 420 px panel) the gutters are 16 px instead of 40, and below 640 px the open status also has its own line under the name.
 
 ## Standalone or embedded
 

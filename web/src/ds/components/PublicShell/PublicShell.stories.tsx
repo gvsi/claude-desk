@@ -659,3 +659,33 @@ export const NoOpenStatus: Story = {
     await expect(box.height).toBe(76);
   },
 };
+
+/** Half of a 1280 px board: each state of the handoff board is a whole page 640 px wide. */
+const HALF = 640;
+
+export const HalfWidth: Story = {
+  args: { openStatus: OPEN_EN },
+  decorators: [
+    (Story) => (
+      <div data-testid="half" style={{ width: HALF }}>
+        <Story />
+      </div>
+    ),
+  ],
+  parameters: {
+    canvas: 'N-Public-Handoff-Run1',
+    canvasNote: 'One state of the board, 640 px wide: 16 px gutters, with the open status still at the right of the name, where the board labels the state.',
+  },
+  play: async ({ canvas }) => {
+    // Under 720 px the gutters are 16 px, header and chat alike, as the board draws each half.
+    const header = canvas.getByRole('banner');
+    expectComputed(header, { paddingLeft: '16px', paddingRight: '16px', height: '76px' });
+    expectComputed(canvas.getByRole('main'), { paddingLeft: '16px', paddingRight: '16px' });
+    // From 640 px up the open status stays on the name's line, at the right; only a phone wraps it.
+    const status = within(header).getByText(OPEN_EN.text);
+    const name = within(header).getByRole('heading', { level: 1, name: 'Rivera Plumbing' });
+    await expect(status.getBoundingClientRect().left).toBeGreaterThan(name.getBoundingClientRect().right);
+    await expect(status.getBoundingClientRect().bottom).toBeLessThanOrEqual(header.getBoundingClientRect().bottom);
+    await expect(canvas.getByTestId('half').scrollWidth).toBeLessThanOrEqual(HALF);
+  },
+};
