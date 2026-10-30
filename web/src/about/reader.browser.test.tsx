@@ -518,6 +518,19 @@ describe('ReaderPage', () => {
     await expect.poll(title).toBe('Capability prediction');
     expect(window.scrollY, 'back from the Desk').toBe(1500);
 
+    // A scroll the page hears once the window's address has moved on belongs to the next page: Back restores the
+    // Desk's place before the router draws the Desk. It leaves the reader's place where it was.
+    const own = window.location.href;
+    onTestFinished(() => window.history.replaceState(window.history.state, '', own));
+    window.history.replaceState(window.history.state, '', '/app/desk/today');
+    await scrollTo(0);
+    window.history.replaceState(window.history.state, '', own);
+    at.navigate?.('/desk');
+    await expect.poll(title).toBe('');
+    at.navigate?.(-1);
+    await expect.poll(title).toBe('Capability prediction');
+    expect(window.scrollY, 'after the address moved on').toBe(1500);
+
     // A page opened in place of the current one starts at its top.
     at.navigate?.('/about/proposal', { replace: true });
     await expect.poll(title).toBe('Product proposal');

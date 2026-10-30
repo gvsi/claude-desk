@@ -212,7 +212,8 @@ test('going_back_returns_to_the_readers_place', async ({ page }) => {
   await inText.scrollIntoViewIfNeeded();
   const atLink = await settledScrollY(page);
   expect(atLink, 'the link is part way down').toBeGreaterThan(0);
-  await inText.click();
+  // Clicked where it is: Playwright's own click may scroll the link again first, which moves the reader's place.
+  await inText.evaluate((link: HTMLElement) => link.click());
   await expect(title(page, 'Capability prediction')).toBeVisible();
   expect(await scrollY(page), 'opened from the link').toBe(0);
   await scrollWindow(page, 3000);

@@ -99,8 +99,11 @@ function useReadingPlace(id: AboutId, hash: string) {
       else window.scrollTo(0, 0);
     }
     reading.drawn = true;
+    // Back changes the window's address, and the browser restores the next page's place, before the router
+    // draws that page; a scroll heard after the address moved on is the next page's, not the reader's.
+    const own = window.location.pathname;
     const remember = () => {
-      reading.places[id] = window.scrollY;
+      if (window.location.pathname === own) reading.places[id] = window.scrollY;
     };
     remember();
     window.addEventListener('scroll', remember, { passive: true });
