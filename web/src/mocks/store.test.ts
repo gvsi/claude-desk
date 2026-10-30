@@ -948,6 +948,39 @@ describe('rules and tools', () => {
   });
 });
 
+describe('deleting a Desk', () => {
+  it('delete_desk_closes_its_page_and_chats', async () => {
+    // Rivera's main Desk, with a chat whose turn is still running when the Desk goes.
+    mockStore.reset('rivera_two_desks');
+    const { events } = await openChat();
+    await send('How much is drain clearing?');
+    await vi.advanceTimersByTimeAsync(EVENT_GAP_MS);
+    const before = events.length;
+
+    // Answered 204, with nothing to say.
+    expect(await call('deleteDesk', { params: { desk_id: deskId } })).toEqual({ status: 204, body: undefined });
+
+    // The copy's other Desk stays; this one is gone from the owner's Desks and its pages.
+    const desks = async () => ((await call('me')).body as CopyOut).desks.map((d) => d.desk_id);
+    expect(await desks()).toEqual([RIVERA.emergenciesDeskId]);
+    expect((await call('today', { params: { desk_id: deskId } })).status).toBe(404);
+    // Its public link stops working, its chats close, and the turn in flight says nothing more.
+    expect((await call('publicDesk', { params: { slug } })).status).toBe(404);
+    expect((await call('sendMessage', { params: { slug }, body: { text: 'Hello?' } })).status).toBe(404);
+    await drain();
+    expect(events).toHaveLength(before);
+    expect((await call('publicDesk', { params: { slug: RIVERA.emergenciesSlug } })).status).toBe(200);
+
+    // Deleting it again, or a Desk outside the copy, is not found; without the owner cookie, refused.
+    expect((await call('deleteDesk', { params: { desk_id: deskId } })).status).toBe(404);
+    expect((await call('deleteDesk', { params: { desk_id: 'desk-elsewhere' } })).status).toBe(404);
+    mockStore.reset('rivera_two_desks', { signedIn: false });
+    expect((await call('deleteDesk', { params: { desk_id: deskId } })).status).toBe(401);
+    mockStore.reset('rivera_two_desks');
+    expect(await desks()).toEqual([deskId, RIVERA.emergenciesDeskId]);
+  });
+});
+
 describe('planted faults', () => {
   const answering = async () => ((await call('me')).body as CopyOut).desks[0]?.answering;
 

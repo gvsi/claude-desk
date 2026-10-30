@@ -288,6 +288,15 @@ export class MockWorld {
     return desk;
   }
 
+  /**
+   * Takes `desk` out of the copy, as deleting a Desk does: its public link and its owner pages
+   * answer not found from now on, and so do its chats, which reach it by its slug.
+   */
+  deleteDesk(desk: DeskRecord): void {
+    const index = this.desks.indexOf(desk);
+    if (index !== -1) this.desks.splice(index, 1);
+  }
+
   /** A new chat on `desk`: a visitor's, the owner's preview, or with `agent` a signed visiting agent's, by the name it gave. */
   addSession(desk: DeskRecord, opts: { sessionId?: string; ownerPreview?: boolean; agent?: string } = {}): SessionRecord {
     const sessionId = opts.sessionId ?? this.id('ses-web');

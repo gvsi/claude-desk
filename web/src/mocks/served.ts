@@ -215,6 +215,17 @@ export class Server {
     this.agents.stop();
   }
 
+  /** Deletes `desk` from the copy: its chats close, and a turn one of them has in progress says nothing more. */
+  deleteDesk(desk: DeskRecord): void {
+    for (const session of this.world.sessionsOf(desk.summary.desk_id)) {
+      const sessionId = session.state.session_id;
+      const timer = this.turns.get(sessionId)?.timer;
+      if (timer != null) clearTimeout(timer);
+      this.turns.delete(sessionId);
+    }
+    this.world.deleteDesk(desk);
+  }
+
   /** The session the request's visitor cookie names for `slug`, or why there is none. */
   visitor(slug: string | undefined, cookies: Cookies): { desk: DeskRecord; session: SessionRecord } | Failure {
     const desk = this.world.deskBySlug(slug);
@@ -318,6 +329,12 @@ const SERVED: ServedRoutes = {
     if (typeof on !== 'boolean') return INVALID;
     desk.summary.answering = on;
     return ok({ desk_id: desk.summary.desk_id, updated_at: isoTime(sv.world.now()) } satisfies DeskUpdated);
+  },
+  deleteDesk(sv, req) {
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
+    if (isFailure(desk)) return desk;
+    sv.deleteDesk(desk);
+    return NO_CONTENT;
   },
   openPreview(sv, req) {
     // Always a new preview chat, as the API's is (plan 02b): its owner-path request never carries
