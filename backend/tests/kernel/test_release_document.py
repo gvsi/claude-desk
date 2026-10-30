@@ -195,6 +195,10 @@ async def test_link_opens_once(app, client, frozen_clock):
     assert opened.status_code == 200, opened.text
     assert opened.headers["content-type"] == "text/plain; charset=utf-8"
     assert opened.headers["cache-control"] == "no-store"
+    # read as text alone, followed to nowhere, and named from its title, shown rather than saved
+    assert opened.headers["x-content-type-options"] == "nosniff"
+    assert opened.headers["referrer-policy"] == "no-referrer"
+    assert opened.headers["content-disposition"] == 'inline; filename="Invoice-drain-clearing.txt"'
     assert opened.content == invoice.body.encode()
     [link] = await links(app, copy)
     assert link.consumed_at == frozen_clock.now()
@@ -213,6 +217,31 @@ async def test_link_opens_once(app, client, frozen_clock):
     verdict = await checked(client, dana, "Here is your invoice.", [clause("document_link", fact.fact_id)])
     assert violations(verdict) == [("stale_fact", "not_current", [fact.fact_id])]
     assert_handed_off(verdict)
+
+
+async def test_a_document_is_named_from_its_title_alone(app, client):
+    # a title with quotes, a slash, a line break, accents and an emoji names the file in plain
+    # ASCII letters, digits and hyphens, so nothing in it can end the header or start another
+    copy = await rivera(app, client)
+    response = await client.post("/documents", headers=copy.owner, json={"desk_id": copy.desk_id, "document": {
+        "ref": "dana-receipt", "title": 'Factura "Ñandú" / nº 7\r\nSet-Cookie: x=1 🙂', "body": "Pagado.",
+        "record_owner_ref": "dana"}})
+    assert response.status_code == 200, response.text
+    dana = await confirmed(client, copy, DANA)
+    await released(client, dana, (await documents(app, copy))["dana-receipt"])
+    [link] = await links(app, copy)
+    opened = await open_link(client, link.token)
+    assert opened.status_code == 200, opened.text
+    assert opened.headers["content-disposition"] == 'inline; filename="Factura-Nandu-no-7-Set-Cookie-x-1.txt"'
+
+    # the same rule for any title: at most sixty characters before `.txt`, and a plain name when
+    # no letter or digit is left
+    for title, name in (("Invoice, drain clearing", "Invoice-drain-clearing.txt"),
+                        ("../../etc/passwd", "etc-passwd.txt"), ("Ｗａｒｒａｎｔｙ", "Warranty.txt"),
+                        ("請求書", "document.txt"), ("", "document.txt"), (None, "document.txt"),
+                        ("a" * 100, "a" * 60 + ".txt"), ("x" * 59 + " y", "x" * 59 + ".txt")):
+        assert release_document.download_name(title) == name, title
+        assert re.fullmatch(r"[A-Za-z0-9-]{1,60}\.txt", name)
 
 
 async def test_link_expires_after_a_day(app, client, frozen_clock):

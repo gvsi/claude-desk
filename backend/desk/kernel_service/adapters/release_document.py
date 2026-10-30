@@ -17,16 +17,18 @@ document_id, issued}`.
 A link opens once (`open_document_link`, `GET /document_links/{token}`, which the API proxies at
 `/api/d/{token}`): one UPDATE marks it opened if it is unopened, not voided and unexpired, and its
 document is still its person's on a Desk not deleted, and its fact expires in the same
-transaction, so a later citation is `stale_fact`. Anything else (opened, expired, voided, unknown)
+transaction, so a later citation is `stale_fact`. The document goes out as plain text under a file
+name made from its fact's title (`download_name`). Anything else (opened, expired, voided, unknown)
 is the same 404. Deleting the Desk or removing its person voids the link (`void_links`), and its
 fact expires too.
 """
 
 import re
 import secrets
+import unicodedata
 from datetime import datetime, timedelta
 from functools import partial
-from typing import Any
+from typing import Any, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, update
@@ -45,6 +47,7 @@ LINK_TTL = timedelta(hours=24)
 FACT_PREFIX = "document_link:"
 TOKEN = re.compile(r"[A-Za-z0-9_-]{43}")          # secrets.token_urlsafe(32)
 MEDIA_TYPE = "text/plain; charset=utf-8"
+DOWNLOAD_STEM_CHARS = 60                          # a file name's length before `.txt`
 
 
 def token_sha256(token: str) -> str:
@@ -160,13 +163,32 @@ def _openable(now: datetime) -> list[ColumnElement[bool]]:
             Desk.copy_id == DocumentLink.copy_id, Desk.desk_id == DocumentLink.desk_id, Desk.deleted_at.is_(None)]
 
 
-async def _expire_fact(ctx: KernelCtx, desk_id: str, link_id: str) -> None:
-    """The link's fact can't be cited once the link can't open."""
+async def _expire_fact(ctx: KernelCtx, desk_id: str, link_id: str) -> FactRow | None:
+    """The link's fact can't be cited once the link can't open; returns it (None if it has none)."""
     fact = (await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
         FactRow.desk_id == desk_id, FactRow.fact_id == f"{FACT_PREFIX}{link_id}").with_for_update()))).one_or_none()
     if fact is not None:
         fact.status = "expired"
     await ctx.db.flush()
+    return fact
+
+
+def download_name(title: str | None) -> str:
+    """The file name a released document goes out under (`Content-Disposition`), made from its
+    link's fact's title and never from anything the visitor sent: the title's letters and digits
+    in ASCII (accents dropped), every other run of characters as one hyphen, at most
+    `DOWNLOAD_STEM_CHARS`, then `.txt`; `document.txt` when no letter or digit is left. Nothing in
+    it needs quoting or escaping in a header."""
+    ascii_title = unicodedata.normalize("NFKD", title or "").encode("ascii", "ignore").decode("ascii")
+    stem = re.sub(r"[^A-Za-z0-9]+", "-", ascii_title).strip("-")[:DOWNLOAD_STEM_CHARS].rstrip("-")
+    return f"{stem or 'document'}.txt"
+
+
+class OpenedDocument(NamedTuple):
+    """A released document on its link's first open: its bytes, media type and file name."""
+    body: bytes
+    media_type: str
+    filename: str
 
 
 async def _ledger_link(ctx: KernelCtx, *, copy_id: str, desk_id: str, session_id: str, link_id: str,
@@ -177,14 +199,14 @@ async def _ledger_link(ctx: KernelCtx, *, copy_id: str, desk_id: str, session_id
         summary={"link_id": link_id, **outcome}))
 
 
-async def open_document_link(ctx: KernelCtx, token: str) -> tuple[bytes, str]:
-    """`GET /document_links/{token}`: the document's bytes and media type, on the link's first open
-    within `LINK_TTL`, in the request's transaction (unbound until the token's sha256 names a copy).
-    The link is found by that hash alone, marked opened by one UPDATE, its fact expired and the open
-    ledgered `{link_id, opened}`, all in that transaction. Any other link is 404 `not_found`, the
-    same for all: one opened, expired or voided is ledgered `{link_id, refused}` on its Desk, and a
-    token no link has is logged by the failure's reason alone. The token goes in no ledger entry or
-    log line."""
+async def open_document_link(ctx: KernelCtx, token: str) -> OpenedDocument:
+    """`GET /document_links/{token}`: the document's bytes, media type and file name (from its
+    fact's title, `download_name`), on the link's first open within `LINK_TTL`, in the request's
+    transaction (unbound until the token's sha256 names a copy). The link is found by that hash
+    alone, marked opened by one UPDATE, its fact expired and the open ledgered `{link_id, opened}`,
+    all in that transaction. Any other link is 404 `not_found`, the same for all: one opened,
+    expired or voided is ledgered `{link_id, refused}` on its Desk, and a token no link has is
+    logged by the failure's reason alone. The token goes in no ledger entry or log line."""
     digest = token_sha256(token) if TOKEN.fullmatch(token) else None
     copy_id = await repo.copy_of_document_link(ctx, digest) if digest is not None else None
     if copy_id is None:
@@ -207,9 +229,11 @@ async def open_document_link(ctx: KernelCtx, token: str) -> tuple[bytes, str]:
         raise KernelFailure(404, "not_found", "document_link_refused", persist=partial(
             _ledger_link, copy_id=copy_id, desk_id=desk_id, session_id=session_id, link_id=link_id, refused=True))
     link_id, desk_id, session_id, body = opened
-    await _expire_fact(ctx, desk_id, link_id)
+    fact = await _expire_fact(ctx, desk_id, link_id)
     await _ledger_link(ctx, copy_id=copy_id, desk_id=desk_id, session_id=session_id, link_id=link_id, opened=True)
-    return body.encode("utf-8"), MEDIA_TYPE
+    titles = [claim.value for claim in (fact.claims if fact is not None else []) if claim.key == "title"]
+    title = titles[0] if titles and isinstance(titles[0], str) else None
+    return OpenedDocument(body.encode("utf-8"), MEDIA_TYPE, download_name(title))
 
 
 async def void_links(ctx: KernelCtx, desk_id: str, *, person_id: str | None = None) -> list[str]:

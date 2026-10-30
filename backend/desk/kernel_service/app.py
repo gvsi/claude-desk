@@ -245,13 +245,20 @@ for _part, (_model, _) in desks.PARTS.items():
 document_link_router = APIRouter()
 
 
+# A released document is stored by no one who passes it on, read as plain text and nothing else,
+# sends no Referer with its token to anywhere it is followed from, and is shown rather than saved.
+DOCUMENT_HEADERS = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer"}
+
+
 @document_link_router.get("/document_links/{token}")
 async def get_document_link(token: str, ctx: Ctx) -> Response:
     """A released document, by its link's token alone (`release_document.open_document_link`):
-    the bytes on the link's first open within a day, never stored by whoever passes them on, and
-    404 `not_found` for every other link. The API proxies it at `/api/d/{token}`."""
-    body, media_type = await release_document.open_document_link(ctx, token)
-    return Response(content=body, media_type=media_type, headers={"Cache-Control": "no-store"})
+    the bytes on the link's first open within a day, under `DOCUMENT_HEADERS` and a file name made
+    from its title (never from the request), and 404 `not_found` for every other link. The API
+    proxies it at `/api/d/{token}` with these headers as they are."""
+    document = await release_document.open_document_link(ctx, token)
+    return Response(content=document.body, media_type=document.media_type, headers={
+        **DOCUMENT_HEADERS, "Content-Disposition": f'inline; filename="{document.filename}"'})
 
 
 inbox_router = APIRouter()
