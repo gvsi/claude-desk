@@ -153,8 +153,10 @@ describe('Conversations', () => {
     await expect.element(takeOver).toBeVisible();
     const receipts = log(screen).getByRole('button', { name: /Open the full trace\.$/ });
     await expect.poll(() => receipts.elements().length).toBeGreaterThanOrEqual(6);
-    const rows = screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link').elements() as HTMLElement[];
-    expect(rows).toHaveLength(2);
+    // The list is its own read, which can land after the conversation's.
+    const links = screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link');
+    await expect.poll(() => links.elements()).toHaveLength(2);
+    const rows = links.elements() as HTMLElement[];
 
     // Dana's live conversation as N-Conv-Run1 and N-Conv-TakeOver draw it, at 1440 px: the page
     // fills the main area, and Tab goes through the list, then the receipts, then the take-over bar.
