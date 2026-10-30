@@ -7,7 +7,7 @@ import { ApprovalCard } from '../ApprovalCard/ApprovalCard.tsx';
 import { Greeting } from '../Greeting/Greeting.tsx';
 import { ReviewerBar } from '../ReviewerBar/ReviewerBar.tsx';
 import { SectionHeader } from '../SectionHeader/SectionHeader.tsx';
-import { Sidebar, type NavKey, type SidebarLinkProps } from '../Sidebar/Sidebar.tsx';
+import { Sidebar, type SidebarHrefs, type SidebarLinkProps } from '../Sidebar/Sidebar.tsx';
 import { AppShell } from './AppShell.tsx';
 
 const navigate = fn();
@@ -33,11 +33,13 @@ const hrefs = {
   conversations: '/app/desk-rivera-main/conversations',
   people: '/app/desk-rivera-main/people',
   rules: '/app/desk-rivera-main/rules',
-  connectors: '/app/desk-rivera-main/connectors',
   safety: '/app/desk-rivera-main/safety',
   share: '/app/desk-rivera-main/share',
   settings: '/app/desk-rivera-main/settings',
-} satisfies Record<NavKey, string>;
+} satisfies SidebarHrefs;
+
+/** The same app once it has a Connectors page, as N-Docs-Sidebar draws it. */
+const hrefsWithConnectors = { ...hrefs, connectors: '/app/desk-rivera-main/connectors' } satisfies SidebarHrefs;
 
 /** The documents behind the prototype, linked from the sidebar's "About this prototype" group. */
 const ABOUT = {
@@ -70,7 +72,11 @@ const sidebar = (
 );
 
 /** The eight pages, in the sidebar's fixed order. */
-const PAGES = ['Today', 'Conversations', 'Customers', 'Rules', 'Connectors', 'Safety', 'Share', 'Settings'];
+/** The seven pages Today's board draws, before Connectors. */
+const PAGES = ['Today', 'Conversations', 'Customers', 'Rules', 'Safety', 'Share', 'Settings'];
+
+/** The eight pages N-Docs-Sidebar draws, Connectors after Rules. */
+const PAGES_WITH_CONNECTORS = ['Today', 'Conversations', 'Customers', 'Rules', 'Connectors', 'Safety', 'Share', 'Settings'];
 
 /** The words of each page row in a nav, in order (a row's count is read separately). */
 function pageNames(nav: HTMLElement): string[] {
@@ -140,7 +146,7 @@ export const OwnerToday: Story = {
     await expect(column.getBoundingClientRect().top).toBe(banner.getBoundingClientRect().bottom);
     const nav = within(column).getByRole('navigation', { name: 'Main' });
     await expect(nav).toBeVisible();
-    // nav_order_is_fixed: the eight pages, Connectors after Rules, each to its own route.
+    // nav_order_is_fixed: the board's seven pages, each to its own route (no Connectors page here).
     await expect(pageNames(nav)).toEqual(PAGES);
     await expect(within(nav).getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual(Object.values(hrefs));
     // It runs to the bottom of the window, so the Answering switch sits at the foot.
@@ -271,7 +277,7 @@ export const CompactAbout: Story = {
         currentDeskId="desk-rivera-main"
         onSwitchDesk={fn()}
         current="today"
-        hrefs={hrefs}
+        hrefs={hrefsWithConnectors}
         peopleLabel="Customers"
         answering
         onAnsweringChange={fn()}
@@ -324,7 +330,7 @@ export const ShortWindow: Story = {
         currentDeskId="desk-rivera-main"
         onSwitchDesk={fn()}
         current="today"
-        hrefs={hrefs}
+        hrefs={hrefsWithConnectors}
         peopleLabel="Customers"
         counts={{ conversations: { n: 1, label: '1 needs you' }, safety: { n: 2, label: '2 blocked' } }}
         answering
@@ -349,7 +355,7 @@ export const ShortWindow: Story = {
     const foot = sidebar.querySelector('.cd-sidebar__footer') as HTMLElement;
     const middle = sidebar.querySelector('.cd-sidebar__middle') as HTMLElement | null;
     // All eight pages, Connectors included, and the foot still wholly in the window.
-    await expect(pageNames(within(column).getByRole('navigation', { name: 'Main' }))).toEqual(PAGES);
+    await expect(pageNames(within(column).getByRole('navigation', { name: 'Main' }))).toEqual(PAGES_WITH_CONNECTORS);
 
     // sidebar_foot_stays_in_view: the column itself never scrolls; the foot sits 12 px over its
     // bottom, wholly in the window.
