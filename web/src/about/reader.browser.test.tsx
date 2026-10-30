@@ -234,7 +234,7 @@ describe('ReaderPage', () => {
         const topBar = root.querySelector('header');
         const documents = root.querySelector('nav[aria-label="Documents"]');
         expect(readText(documents ?? document.body), where).toBe('Product proposal Capability prediction');
-        expect(readText(topBar ?? document.body), where).toMatch(phone ? /^Your Desk Claude Desk Beta$/ : /Back to your Desk$/);
+        expect(readText(topBar ?? document.body), where).toMatch(phone ? /^Back to your Desk Claude Desk Beta$/ : /Back to your Desk$/);
         // "On this page", without the entries, which are the document's section names.
         const contents = without(root.querySelector('nav[aria-label="On this page"]'), 'ol');
         expect(readText(contents), where).toBe(
@@ -442,7 +442,8 @@ describe('ReaderPage', () => {
   it('back_link_says_your_desk_or_the_prototype', async () => {
     const cases = [
       { lastDesk: 'desk-rivera', size: DESKTOP, words: 'Back to your Desk', to: '/app/desk-rivera/today' },
-      { lastDesk: 'desk-rivera', size: PHONE, words: 'Your Desk', to: '/app/desk-rivera/today' },
+      // The same words at every width.
+      { lastDesk: 'desk-rivera', size: PHONE, words: 'Back to your Desk', to: '/app/desk-rivera/today' },
       { lastDesk: null, size: DESKTOP, words: 'Back to the prototype', to: '/' },
       { lastDesk: null, size: PHONE, words: 'Back to the prototype', to: '/' },
     ];

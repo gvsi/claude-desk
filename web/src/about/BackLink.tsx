@@ -11,14 +11,14 @@ import { readLocal } from '../lib/storage.ts';
 import './BackLink.css';
 
 export interface BackLinkProps {
-  /** The phone's top bar: the shorter words, without the outline. */
+  /** The phone's top bar: the same words, without the outline. */
   compact?: boolean;
 }
 
 export function BackLink({ compact = false }: BackLinkProps) {
   const lastDesk = readLocal('lastDesk');
   const to = lastDesk ? `/app/${encodeURIComponent(lastDesk)}/today` : '/';
-  const words = lastDesk ? (compact ? 'Your Desk' : 'Back to your Desk') : 'Back to the prototype';
+  const words = lastDesk ? 'Back to your Desk' : 'Back to the prototype';
   return (
     <Link className={`cd-about-back cd-type-control${compact ? ' cd-about-back--compact' : ''}`} to={to}>
       <Icon name="chevron-down" size={compact ? 18 : 16} className="cd-about-back__icon" />
