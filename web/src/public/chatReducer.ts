@@ -45,10 +45,12 @@ export interface ChatState extends RowGroups<ChatItem, ReceiptView> {
   writing: boolean;
   /**
    * The owner typing after a take-over, from the owner's latest `owner_typing`, or null: her name
-   * and until when, never her words. The owner's own message, `owner_left`, the turn's end or the
-   * owner's next typing event replaces or clears it. Its `until` is kept as the API sent it, never
-   * compared with a clock here: the public page shows it as WritingIndicator's person form only
-   * until that time.
+   * and until when, never her words. The public page shows it as WritingIndicator's person form.
+   * The owner's own message (even one the chat already shows), `owner_left`, the turn's end or an
+   * error clears it, and the owner's next typing event replaces it. Its `until` is kept as the API
+   * sent it, never compared with a clock here: the provider reads it once with
+   * `ownerTypingDelayMs`, so a stale event shows nothing (`stale`) and the dots go when that time
+   * runs out (`owner_typing_over`).
    */
   ownerTyping: OwnerTyping | null;
   /** The highest seq the chat has seen; the stream resumes after it. */
@@ -70,6 +72,10 @@ export type ChatAction =
   /** The stored conversation, read at load: it replaces whatever the chat held. */
   | { type: 'history'; transcript: VisitorTranscript }
   | { type: 'event'; seq: number; ev: SseEvent }
+  /** An event too old to show (an owner typing whose time has passed): the stream goes on after it. */
+  | { type: 'stale'; seq: number }
+  /** The owner's typing ran out of time. */
+  | { type: 'owner_typing_over' }
   /** The visitor sent a message: it shows at once, in its place. */
   | { type: 'sent'; id: string; text: string }
   /** Its answer was lost, so the chat reads the conversation before saying anything. */
@@ -96,6 +102,20 @@ export function initialChatState(): ChatState {
     inbox: [],
     seen: new Set(),
   };
+}
+
+/** The API shows the owner typing for 5 s after each ping: the dots never stay longer. */
+const OWNER_TYPING_MAX_MS = 5_000;
+
+/**
+ * How long the owner's typing shows, from `nowMs` (the browser's `Date.now()`): until the event's
+ * `until`, never longer than the API's 5 s, so a clock that runs behind can't keep the dots up.
+ * At 0 the event is stale and shows nothing, as is one whose time can't be read.
+ */
+export function ownerTypingDelayMs(ev: EvOwnerTyping, nowMs: number): number {
+  const left = Date.parse(ev.until) - nowMs;
+  if (!Number.isFinite(left) || left <= 0) return 0;
+  return Math.min(left, OWNER_TYPING_MAX_MS);
 }
 
 const messageKey = (ev: EvMessage) => `m:${ev.message_id}`;
@@ -199,7 +219,7 @@ function onEvent(state: ChatState, seq: number, ev: SseEvent): ChatState {
     case 'demo_inbox':
       return { ...state, inbox: [...state.inbox, ev] };
     case 'error':
-      return { ...state, ...settle(state), writing: false, error: ev.code };
+      return { ...state, ...settle(state), writing: false, ownerTyping: null, error: ev.code };
   }
 }
 
@@ -219,6 +239,10 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       // Seen already: the stream resumed from an earlier seq.
       if (action.seq <= state.lastSeq) return state;
       return onEvent({ ...state, lastSeq: action.seq }, action.seq, action.ev);
+    case 'stale':
+      return action.seq <= state.lastSeq ? state : { ...state, lastSeq: action.seq };
+    case 'owner_typing_over':
+      return state.ownerTyping === null ? state : { ...state, ownerTyping: null };
     case 'sent': {
       const row: ChatItem = { kind: 'visitor', id: action.id, text: action.text, status: 'sent' };
       // A chat that ended stays ended; any other error was the last turn's.

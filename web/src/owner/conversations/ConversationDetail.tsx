@@ -5,7 +5,7 @@
  * back or resume, whisper to Claude, or write to the visitor in their own words. Polled while open.
  */
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 
 import type { SessionState } from '../../api/contracts.ts';
 import { ApiError, request } from '../../api/http.ts';
@@ -26,7 +26,6 @@ import {
 } from '../../ds/index.ts';
 import { fillComposer } from '../../lib/composer.ts';
 import { formatStarted } from '../../lib/format.ts';
-import { useStillTyping } from '../../lib/typing.ts';
 import { AnsweredRequest, HeldRequest, useAnsweredFocus } from '../approvals/HeldRequest.tsx';
 import { useAnswer, type HeldItem } from '../approvals/useAnswer.ts';
 import { publicLink } from '../customerLink.ts';
@@ -36,6 +35,7 @@ import { heldOldestFirst, useNeedsYou } from '../useDesks.ts';
 import { useReadFailure, type ReadFailure } from '../useReadFailure.ts';
 import { OwnerTranscript } from './OwnerTranscript.tsx';
 import { whoLabel } from './status.ts';
+import { useOwnerTyping } from './useOwnerTyping.ts';
 import { conversationKey, useTakeOver } from './useTakeOver.ts';
 
 /** Plan 02's limit on the owner's words. */
@@ -74,21 +74,21 @@ function newestWords(read: OwnerTranscriptRead | undefined): number {
 }
 
 /**
- * Whether the visitor is typing, as the owner's view of the chat says: from a signal the API gave
- * until it runs out, or until a message of theirs newer than the signal takes its place. Never a
- * guess: no signal, none in the future, or one already answered by a message shows nothing.
+ * Whether the visitor's typing bubble shows: while the latest read carries a typing signal, until
+ * a message of theirs newer than the signal takes its place. The API nulls the signal once it has
+ * passed and the chat is read every 2 s, so this browser's clock is never compared with it; and
+ * the screen never guesses: no signal shows nothing.
  */
-function useVisitorTyping(read: OwnerTranscriptRead | undefined): boolean {
-  const until = read?.typing_until ?? null;
+function useTypingBubble(read: OwnerTranscriptRead | undefined): boolean {
+  const signal = read?.typing_until ?? null;
   const words = newestWords(read);
   // The visitor's newest message when each signal was first read.
-  const [signal, setSignal] = useState<{ until: string; words: number } | null>(null);
-  const current = until === null ? null : signal?.until === until ? signal : { until, words };
+  const [seen, setSeen] = useState<{ signal: string; words: number } | null>(null);
+  const current = signal === null ? null : seen?.signal === signal ? seen : { signal, words };
   useEffect(() => {
-    if (current !== signal) setSignal(current);
-  }, [current, signal]);
-  const answered = current !== null && words > current.words;
-  return useStillTyping(current === null || answered ? null : current);
+    if (current !== seen) setSeen(current);
+  }, [current, seen]);
+  return current !== null && words <= current.words;
 }
 
 /** A read that failed, in the owner's words, with a way to read it again. */
@@ -136,7 +136,8 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
   // A request answered here keeps focus as the button pressed goes.
   const answeredFocus = useAnsweredFocus(answers.answered);
   const controls = useTakeOver(sessionId);
-  const typing = useVisitorTyping(chat.data);
+  const ownerTyping = useOwnerTyping(sessionId);
+  const typing = useTypingBubble(chat.data);
   const mode = chat.data?.state.mode;
 
   // Unsent words go back into their own box once it is shown, and only there. The box takes
@@ -213,6 +214,7 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
   // Words that didn't go come back into the box they were written in, as soon as it is there: the
   // owner's words for the visitor wait for her to take the chat over again if it was handed back.
   const say = (text: string) => {
+    ownerTyping.sent();
     void controls.say(text).then((sent) => {
       if (!sent) setUnsent({ kind: 'say', text });
     });
@@ -222,13 +224,11 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
       if (!sent) setUnsent({ kind: 'whisper', text });
     });
   };
-  // While the owner types in a chat she took over, the visitor sees her initials and three dots.
-  const onOwnerInput = (_event: FormEvent<HTMLDivElement>) => controls.typing();
-
   let composer = null;
   if (state.mode === 'owner') {
     composer = (
-      <div ref={composerRef} data-composer="say" onInput={onOwnerInput}>
+      // While the owner types in a chat she took over, the visitor sees her initials and three dots.
+      <div ref={composerRef} data-composer="say" onInput={ownerTyping.onInput}>
         <Composer
           key="say"
           variant="owner"

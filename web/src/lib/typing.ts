@@ -1,49 +1,39 @@
 /**
- * Typing, both ways (plan 02b Task 1): presence, never words. While someone types, their side pings
- * the API at most every 2 s, and the other side shows it until the time the API gives, five
- * seconds on, or until their message takes its place. A signal whose time has passed shows nothing.
- * Shared by the owner's conversation and the visitor's chat; it formats nothing.
+ * Typing pings, both ways (plan 02b Task 1): presence, never words. The owner's
+ * (`useOwnerTyping`) and the visitor's (`useVisitorTyping`) composers ping through this, each
+ * with its own route and its own rules for when not to.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, type FormEvent } from 'react';
 
-/** How often a typing ping goes out while someone types, at most. */
-export const TYPING_PING_EVERY = 2_000;
+import { typingPingMs } from '../app/poll.ts';
 
-/** Someone typing, until a time the API gave (an ISO time). */
-export interface TypingSignal {
-  until: string;
+export interface TypingPings {
+  /** The composer's input events, which bubble to the element around it. */
+  onInput: (event: FormEvent<HTMLElement>) => void;
+  /** The words were sent: the next keystroke starts a new run and pings at once. */
+  sent: () => void;
 }
 
 /**
- * A function to call on every keystroke: it sends `ping` at most once every `TYPING_PING_EVERY`,
- * and ignores how it went, since a missed ping only means the dots don't show.
+ * Calls `ping` on the first keystroke in a composer with words in it, then at most once every
+ * `typingPingMs()` while typing goes on. An emptied composer pings nothing, and neither do words
+ * the page put back in the box itself (only a person's keystrokes are trusted input events).
  */
-export function useTypingPing(ping: () => Promise<unknown>): () => void {
+export function useTypingPings(ping: () => void): TypingPings {
   const last = useRef<number | null>(null);
-  const latest = useRef(ping);
-  useEffect(() => {
-    latest.current = ping;
-  }, [ping]);
-  return useCallback(() => {
-    const now = Date.now();
-    if (last.current !== null && now - last.current < TYPING_PING_EVERY) return;
-    last.current = now;
-    latest.current().catch(() => undefined);
+  const onInput = useCallback(
+    (event: FormEvent<HTMLElement>) => {
+      const box = event.target;
+      if (!event.nativeEvent.isTrusted || !(box instanceof HTMLTextAreaElement) || box.value.trim() === '') return;
+      const now = Date.now();
+      if (last.current !== null && now - last.current < typingPingMs()) return;
+      last.current = now;
+      ping();
+    },
+    [ping],
+  );
+  const sent = useCallback(() => {
+    last.current = null;
   }, []);
-}
-
-/**
- * Whether `signal` still shows: until its time, after which the screen renders again without it.
- * None, a time that can't be read, or one already past shows nothing.
- */
-export function useStillTyping(signal: TypingSignal | null): boolean {
-  const until = signal === null ? Number.NaN : Date.parse(signal.until);
-  const [, setExpired] = useState(0);
-  useEffect(() => {
-    const left = until - Date.now();
-    if (!(left > 0)) return undefined;
-    const timer = setTimeout(() => setExpired((n) => n + 1), left);
-    return () => clearTimeout(timer);
-  }, [until]);
-  return Number.isFinite(until) && until > Date.now();
+  return { onInput, sent };
 }

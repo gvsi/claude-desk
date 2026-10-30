@@ -24,8 +24,7 @@ import { apiPath } from '../api/routes.ts';
 import { openStream, type StreamState } from '../api/stream.ts';
 import type { VisitorSession, VisitorTranscript } from '../api/views.ts';
 import { browserLanguage, type BrowserLanguage } from '../lib/language.ts';
-import { TYPING_PING_EVERY } from '../lib/typing.ts';
-import { chatReducer, initialChatState, type ChatAction, type ChatState, type SendFailure } from './chatReducer.ts';
+import { chatReducer, initialChatState, ownerTypingDelayMs, type ChatAction, type ChatState, type SendFailure } from './chatReducer.ts';
 
 export type ChatStatus = 'loading' | 'ready' | 'not_found' | 'unavailable';
 
@@ -71,8 +70,6 @@ export interface VisitorChatActions {
   /** Starts a new chat after this one ended. */
   newChat: () => void;
   cancel: (decisionId: string) => void;
-  /** The visitor is typing: tells the Desk, at most every 2 s, that someone is, never what. */
-  typing: () => void;
 }
 
 export type VisitorChatView = VisitorChatSnapshot & VisitorChatActions;
@@ -175,8 +172,8 @@ class VisitorChat {
   /** The highest `n` in the conversation as last read: a lost message is looked for after it. */
   private knownN = 0;
   private nextId = 0;
-  /** When the last typing ping went out. */
-  private typedAt: number | null = null;
+  /** Ends the owner's typing when its time runs out. */
+  private ownerTypingTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly slug: string,
@@ -272,12 +269,41 @@ class VisitorChat {
     const url = apiPath('events', { slug: this.slug }, { after: String(this.snapshot.state.lastSeq) });
     this.stopStream = openStream<SseEvent>(url, EVENT_TYPES, {
       event: (seq, ev) => {
-        if (epoch === this.epoch) this.dispatch({ type: 'event', seq, ev });
+        if (epoch === this.epoch) this.onEvent(seq, ev);
       },
       state: (state) => {
         if (epoch === this.epoch) this.onStreamState(state, epoch);
       },
     });
+  }
+
+  /**
+   * An event from the stream. The owner's typing shows only until its time, read once here with
+   * `ownerTypingDelayMs`: a stale one (replayed after a reload or a reconnect included) shows
+   * nothing, and a later one restarts the timer.
+   */
+  private onEvent(seq: number, ev: SseEvent): void {
+    if (ev.type !== 'owner_typing') {
+      this.dispatch({ type: 'event', seq, ev });
+      return;
+    }
+    if (seq <= this.snapshot.state.lastSeq) return;
+    const delay = ownerTypingDelayMs(ev, Date.now());
+    if (delay <= 0) {
+      this.dispatch({ type: 'stale', seq });
+      return;
+    }
+    this.dispatch({ type: 'event', seq, ev });
+    this.clearOwnerTypingTimer();
+    this.ownerTypingTimer = setTimeout(() => {
+      this.ownerTypingTimer = null;
+      this.dispatch({ type: 'owner_typing_over' });
+    }, delay);
+  }
+
+  private clearOwnerTypingTimer(): void {
+    if (this.ownerTypingTimer !== null) clearTimeout(this.ownerTypingTimer);
+    this.ownerTypingTimer = null;
   }
 
   private onStreamState(state: StreamState, epoch: number): void {
@@ -346,6 +372,7 @@ class VisitorChat {
     this.checking = false;
     this.clearCheckTimer();
     this.checkRetries = 0;
+    this.clearOwnerTypingTimer();
     this.dispatch({ type: 'reset' });
     this.set({ session: null, status: 'loading', cancelling: null, cancelFailed: null });
     this.loading = true;
@@ -365,16 +392,6 @@ class VisitorChat {
     const id = `${LOCAL_ID}${this.nextId}`;
     this.dispatch({ type: 'sent', id, text });
     void this.post(id, text);
-  };
-
-  readonly typing = (): void => {
-    const { status, state } = this.snapshot;
-    if (status !== 'ready' || state.error === 'session') return;
-    const now = Date.now();
-    if (this.typedAt !== null && now - this.typedAt < TYPING_PING_EVERY) return;
-    this.typedAt = now;
-    // Presence only: a lost ping means the owner sees no dots, so nothing is said or tried again.
-    request('visitorTyping', { params: { slug: this.slug } }).catch(() => undefined);
   };
 
   readonly resend = (id: string): void => {
@@ -552,7 +569,6 @@ export function useVisitorChat(slug: string, previewDeskId?: string): VisitorCha
       retry: chat.retry,
       newChat: chat.newChat,
       cancel: chat.cancel,
-      typing: chat.typing,
     }),
     [snapshot, chat],
   );

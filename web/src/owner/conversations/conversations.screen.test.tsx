@@ -11,6 +11,7 @@ import type { RenderResult } from 'vitest-browser-react';
 import type { Decision, StatusEvent } from '../../api/contracts.ts';
 import type { ConversationSummary, NeedsYouItem, OwnerTranscript } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
+import { setPollScale } from '../../app/poll.ts';
 import { formatClock } from '../../lib/format.ts';
 import { DECISIONS, VISITOR_PLAIN, writing } from '../../mocks/script.ts';
 import { RIVERA } from '../../mocks/seed.ts';
@@ -589,63 +590,124 @@ describe('Conversations', () => {
     await expect.element(screen.getByRole('button', { name: 'Review the rule' })).toBeVisible();
     await expectScreenBasics(screen.container, { owner: true });
   });
-  it('visitor_typing_shows_as_a_bubble', async () => {
+  it('visitor_typing_shows_a_bubble', async () => {
     const chat = named(DANA_LIVE, DANA);
     const { screen } = await renderRoute(conversation(DANA_LIVE));
     const bubble = log(screen).getByRole('status').filter({ hasText: `${DANA} is typing` });
-    await expect.element(log(screen).getByText(rivera.conversations.danaLive.turns.flatMap((t) => (t.kind === 'visitor' ? [t.text] : []))[0] ?? '', { exact: true })).toBeVisible();
+    const [first] = rivera.conversations.danaLive.turns.flatMap((t) => (t.kind === 'visitor' ? [t.text] : []));
+    await expect.element(log(screen).getByText(first ?? '', { exact: true })).toBeVisible();
     // Nobody is typing: no dots, and the screen never guesses.
     expect(bubble.elements()).toHaveLength(0);
 
-    // Dana types on the public page: her dots show at the end of the chat, on her side.
+    // A read that says she is typing: one bubble at the end of the chat, on her side, with no words.
     mockStore.world.visitorTyping(chat);
     await expect.element(bubble).toBeInTheDocument();
+    expect(bubble.elements()).toHaveLength(1);
     expect(bubble.element().classList.contains('cd-writing-indicator--bubble')).toBe(true);
+    expect(bubble.element().textContent?.replace(/\s+/g, ' ').trim()).toBe(`${DANA} is typing`);
     const rows = log(screen).element().querySelectorAll('.cd-transcript-row');
     expect(rows[rows.length - 1]?.contains(bubble.element())).toBe(true);
     await expectScreenBasics(screen.container, { owner: true });
 
-    // Her message takes their place at once, even while the signal she sent before it still runs.
+    // The next read says she isn't: gone within a poll.
+    chat.typingUntil = null;
+    await expect.poll(() => bubble.elements().length, { timeout: 1_000 }).toBe(0);
+
+    // She types again, then sends: her message takes the bubble's place, even while the API still
+    // reports the signal she sent before it.
+    chat.visitorTypedAt = null;
+    mockStore.world.visitorTyping(chat);
+    await expect.element(bubble, { timeout: 1_000 }).toBeInTheDocument();
     const until = chat.typingUntil;
     mockStore.world.visitorText(chat, 'Thursday works too.');
     chat.typingUntil = until;
     await expect.element(log(screen).getByText('Thursday works too.', { exact: true })).toBeVisible();
     await expect.poll(() => bubble.elements().length, { timeout: 1_000 }).toBe(0);
 
-    // She types again: a new signal shows again, until it runs out.
-    chat.visitorTypedAt = null;
-    mockStore.world.visitorTyping(chat);
+    // The API's word stands, never this browser's clock: a signal whose time this clock has
+    // already passed (it may run ahead of the API's) still shows while the read carries it.
+    chat.typingUntil = null;
+    const read = await served<OwnerTranscript>('conversation', { session_id: DANA_LIVE });
+    const behind = new Date(Date.now() - 60_000).toISOString();
+    mockStore.inject({ route: 'conversation', status: 200, times: 10_000, body: { ...read, typing_until: behind } });
     await expect.element(bubble, { timeout: 1_000 }).toBeInTheDocument();
-    const shortly = Date.now() + 400;
-    chat.typingUntil = shortly;
-    await readsMore('conversation', 1);
-    await expect.poll(() => bubble.elements().length, { timeout: 1_500 }).toBe(0);
-    expect(Date.now()).toBeGreaterThanOrEqual(shortly);
+    await readsMore('conversation', 2);
+    expect(bubble.elements()).toHaveLength(1);
   });
-  it('owner_typing_reaches_the_visitor', async () => {
+
+  it('owner_typing_is_sent_after_take_over', async () => {
     const chat = named(DANA_LIVE, DANA);
-    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    // Pings go at most every 2 s, scaled to a second here.
+    const { screen } = await renderRoute(conversation(DANA_LIVE), { pollScale: 0.5 });
+    const pings = () => requests('ownerTyping');
+    const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
     // A whisper is for Claude: typing one tells Dana nothing.
     await screen.getByRole('textbox', { name: 'Whisper to Claude' }).fill('offer Thursday');
-    expect(requests('ownerTyping')).toHaveLength(0);
+    await wait(200);
+    expect(pings()).toHaveLength(0);
 
-    // In the chat she took over, her typing reaches Dana as her name and three dots: never her words.
+    // In the chat she took over, her typing reaches Dana as her name and dots, never her words.
     await screen.getByRole('button', { name: 'Take over' }).click();
     const box = screen.getByRole('textbox', { name: 'Write to them' });
     await expect.element(box).toBeVisible();
     const streamed = chat.events.length;
-    await userEvent.type(box, 'On my way');
-    await expect.poll(() => requests('ownerTyping').length).toBe(1);
-    expect(requests('ownerTyping').map((r) => r.body)).toEqual([{ generation: chat.state.generation }]);
+    await userEvent.type(box, 'On my');
+    await expect.poll(() => pings().length).toBe(1);
+    expect(pings().map((r) => r.body)).toEqual([{ generation: chat.state.generation }]);
     expect(chat.events.slice(streamed).map(({ ev }) => ev)).toEqual([{ type: 'owner_typing', name: OWNER, until: expect.any(String) as string }]);
 
-    // About every 2 s while she keeps typing, never once per key.
-    await new Promise((resolve) => setTimeout(resolve, 2_100));
+    // More keystrokes within the interval send no more; after it, one more.
+    await userEvent.type(box, ' way');
+    expect(pings()).toHaveLength(1);
+    await wait(1_100);
     await userEvent.type(box, ' now');
-    await expect.poll(() => requests('ownerTyping').length).toBe(2);
-    await expectScreenBasics(screen.container, { owner: true });
+    await expect.poll(() => pings().length).toBe(2);
+
+    // An emptied composer sends nothing.
+    await wait(1_100);
+    await box.clear();
+    await wait(200);
+    expect(pings()).toHaveLength(2);
+
+    // Sending ends it: nothing more goes once her words have.
+    await userEvent.type(box, 'Be there soon');
+    await expect.poll(() => pings().length).toBe(3);
+    await userEvent.keyboard('{Enter}');
+    await expect.element(log(screen).getByText('Be there soon', { exact: true })).toBeVisible();
+    await wait(1_100);
+    expect(pings()).toHaveLength(3);
+
+    // Words the screen puts back in the box (the reply check stopped them) aren't typing.
+    mockStore.inject({ route: 'ownerMessage', status: 200, body: { message_id: 'msg-stopped', verdict: { ok: false }, ledger_seq: 1 } });
+    await userEvent.type(box, 'It is $89.');
+    await expect.poll(() => pings().length).toBe(4);
+    await userEvent.keyboard('{Enter}');
+    await expect.element(box).toHaveValue('It is $89.');
+    await wait(300);
+    expect(pings()).toHaveLength(4);
+    await box.clear();
+
+    // The API turns a ping back (take over first): no line, one read of the chat, and no more
+    // pings for the chat as it was read. Polls stay out of the way while the reads are counted.
+    const again = await renderRoute(conversation(DANA_LIVE), { pollScale: 100 });
+    const write = again.screen.getByRole('textbox', { name: 'Write to them' });
+    await expect.element(write).toBeVisible();
+    mockStore.inject({ route: 'ownerTyping', status: 409, body: { error: 'take_over_first' } });
+    const reads = requests('conversation').length;
+    await userEvent.type(write, 'Still');
+    await expect.poll(() => pings().length).toBe(5);
+    await expect.poll(() => requests('conversation').length).toBe(reads + 1);
+    setPollScale(0.05);
+    await wait(300);
+    await userEvent.type(write, ' there');
+    await wait(300);
+    expect(pings()).toHaveLength(5);
+    expect(requests('conversation')).toHaveLength(reads + 1);
+    expect(again.screen.getByRole('alert').elements()).toHaveLength(0);
+    await expectScreenBasics(again.screen.container, { owner: true });
   });
+
   it('recorded_history_is_marked', async () => {
     const label = 'Includes recorded history';
     // A copy with no recorded history says nothing of it.

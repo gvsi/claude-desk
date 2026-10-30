@@ -34,12 +34,12 @@ import {
 } from '../ds/index.ts';
 import { fillComposer } from '../lib/composer.ts';
 import { browserLanguage } from '../lib/language.ts';
-import { useStillTyping } from '../lib/typing.ts';
 import { brandFrom } from './brand.ts';
 import type { ChatRow, SendFailure } from './chatReducer.ts';
 import { PUBLIC_COPY, type PublicCopy } from './copy.ts';
 import { useVisitorChat } from './PublicChatProvider.tsx';
 import { useOpenStatus } from './useOpenStatus.ts';
+import { useVisitorTyping } from './useVisitorTyping.ts';
 
 import './PublicChat.css';
 
@@ -332,8 +332,8 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
   const endRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   const newest = useNewestInView(endRef, composerRef, desk !== null);
-  // The owner typing after a take-over, until the time the stream gave: a stale one shows nothing.
-  const ownerTyping = useStillTyping(chat.state.ownerTyping);
+  // While the visitor types, the owner's view of the chat shows that someone is, never what.
+  const visitorTyping = useVisitorTyping(slug);
 
   useEffect(() => {
     if (chat.session !== null) onSession?.(chat.session);
@@ -473,6 +473,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
   // What the visitor sends brings the end of the conversation back into view.
   const send = (text: string) => {
     newest.follow();
+    visitorTyping.sent();
     chat.send(text);
   };
   const resend = (id: string) => {
@@ -490,7 +491,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
       about={desk.charter}
       footer={!embedded}
       composer={
-        <div ref={composerRef} onInput={chat.typing}>
+        <div ref={composerRef} onInput={visitorTyping.onInput}>
           <Composer
             variant="visitor"
             label={copy.message(brand.name)}
@@ -527,7 +528,8 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
           />
         ))}
         {state.writing ? <WritingIndicator language={language} /> : null}
-        {ownerTyping && state.ownerTyping !== null ? (
+        {/* The owner typing after a take-over: her initials, her name and three dots, until her words come. */}
+        {state.ownerTyping !== null ? (
           <TranscriptRow>
             <WritingIndicator language={language} variant="person" who={state.ownerTyping.name} />
           </TranscriptRow>

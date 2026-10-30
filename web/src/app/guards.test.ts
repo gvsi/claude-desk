@@ -127,14 +127,24 @@ function functionBody(text: string, name: string): [number, number] | null {
   return null;
 }
 
-/** Reads of an open status's times outside `openStatusDelayMs`. */
+/** The two helpers that may read a time the kernel or the API sent: each schedules what the page does next. */
+const TIME_HELPERS = ['openStatusDelayMs', 'ownerTypingDelayMs'] as const;
+
+/** Reads of an open status's or a typing event's times outside `TIME_HELPERS`. */
 function timeReadsOutsideTheHelper(scanned: Source[]): string[] {
   return scanned.flatMap(({ file, text }) => {
-    const body = functionBody(text, 'openStatusDelayMs');
+    const bodies = TIME_HELPERS.map((name) => functionBody(text, name)).filter((body) => body !== null);
     return [...text.matchAll(STATUS_TIME)]
-      .filter((m) => body === null || m.index < body[0] || m.index >= body[1])
+      .filter((m) => !bodies.some(([start, end]) => m.index >= start && m.index < end))
       .map((m) => `${file}: ${m[0]}`);
   });
+}
+
+/** `lib/` modules the visitor's code imports: they run on the visitor's page too. */
+const LIB_IMPORT = /\bfrom\s+['"]\.\.\/lib\/([\w.-]+)['"]/g;
+function libModulesOf(visitor: Source[], all: Source[] = sources): Source[] {
+  const files = new Set(visitor.flatMap(({ text }) => [...text.matchAll(LIB_IMPORT)].map((m) => `lib/${m[1]}`)));
+  return all.filter((s) => files.has(s.file));
 }
 
 /** Object literals (or types) that pair `open:` with `text:`: an open status the page made itself. */
@@ -331,11 +341,18 @@ describe('app source guards', () => {
     expect(madeUpStatuses(sample("const line = { open: true, text: 'Open now' };"))).toHaveLength(1);
     expect(madeUpStatuses(visitor)).toEqual([]);
 
-    // The times are read only to schedule the next refetch.
+    // The times are read only to schedule what comes next: the open status's refetch, and how long
+    // the owner's typing shows. Not elsewhere on the page, nor in the lib modules it imports.
     const helper = 'export function openStatusDelayMs(status: OpenStatus): number {\n  return Date.parse(status.refresh_at) - Date.parse(status.as_of);\n}\n';
-    expect(timeReadsOutsideTheHelper(sample(helper))).toEqual([]);
-    expect(timeReadsOutsideTheHelper(sample(`${helper}const late = status['until'];\nconst { opens_at } = status;\nx.refresh_at;`))).toHaveLength(3);
-    expect(timeReadsOutsideTheHelper(visitor)).toEqual([]);
+    const typing = 'export function ownerTypingDelayMs(ev: EvOwnerTyping, nowMs: number): number {\n  return Date.parse(ev.until) - nowMs;\n}\n';
+    expect(timeReadsOutsideTheHelper(sample(`${helper}${typing}`))).toEqual([]);
+    expect(timeReadsOutsideTheHelper(sample(`${helper}${typing}const late = status['until'];\nconst { opens_at } = status;\nx.refresh_at;\nsignal.until;`))).toHaveLength(4);
+    const planted: Source[] = [{ file: 'lib/clock.ts', text: 'const left = Date.parse(signal.until);' }, { file: 'lib/other.ts', text: '' }];
+    expect(libModulesOf(sample("import { left } from '../lib/clock.ts';"), planted).map((s) => s.file)).toEqual(['lib/clock.ts']);
+    expect(timeReadsOutsideTheHelper(libModulesOf(sample("import { left } from '../lib/clock.ts';"), planted))).toHaveLength(1);
+    expect(timeReadsOutsideTheHelper([...visitor, ...libModulesOf(visitor)])).toEqual([]);
     expect(functionBody(hook?.text ?? '', 'openStatusDelayMs'), 'openStatusDelayMs is in useOpenStatus.ts').not.toBeNull();
+    const reducer = visitor.find((s) => s.file === 'public/chatReducer.ts');
+    expect(functionBody(reducer?.text ?? '', 'ownerTypingDelayMs'), 'ownerTypingDelayMs is in chatReducer.ts').not.toBeNull();
   });
 });

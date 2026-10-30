@@ -13,7 +13,6 @@ import { useCallback, useRef, useState } from 'react';
 import type { SessionMode } from '../../api/contracts.ts';
 import { ApiError, isUncertain, ownerErrorCopy, request } from '../../api/http.ts';
 import type { OwnerTranscript, TranscriptItem } from '../../api/views.ts';
-import { useTypingPing } from '../../lib/typing.ts';
 
 /** A 409 on any of these: the chat moved on while the owner was acting. */
 export const CHANGED_WHILE_ACTING = 'This chat changed while you were acting. Check the latest and try again.';
@@ -38,8 +37,6 @@ export interface UseTakeOver {
   say(text: string): Promise<boolean>;
   /** Whispers to Claude; resolves true once it was kept. */
   whisper(text: string): Promise<boolean>;
-  /** Pings the visitor's dots while the owner types in a chat she took over. */
-  typing(): void;
   /** A change of who answers is on its way. */
   changing: boolean;
   /** Why the last change didn't happen, in the owner's words. */
@@ -142,21 +139,12 @@ export function useTakeOver(sessionId: string): UseTakeOver {
     [lastRead, reread, sessionId],
   );
 
-  const typing = useTypingPing(
-    useCallback(async () => {
-      const read = lastRead();
-      if (read?.state.mode !== 'owner') return;
-      await request('ownerTyping', { params: { session_id: sessionId }, body: { generation: read.state.generation } });
-    }, [lastRead, sessionId]),
-  );
-
   return {
     takeOver: () => void change('takeover', 'owner'),
     handBack: () => void change('handback', 'ai'),
     resume: () => void change('resume', 'ai'),
     say: (text) => send('say', text),
     whisper: (text) => send('whisper', text),
-    typing,
     changing,
     modeError,
     sending,
