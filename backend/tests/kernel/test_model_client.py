@@ -24,6 +24,8 @@ from desk.kernel_service.clock import SystemClock
 from desk.kernel_service.decisions import (NO_API_KEY, AnthropicDecisions, SoftPromiseInput, SoftPromiseVerdict,
                                            make_decisions)
 
+from .test_decisions import review_input
+
 # The variables the SDK reads for a credential, a host or extra headers, and the kernel's own,
 # which a developer's shell may export.
 VARIABLES = ("DESK_ENV", "DESK_DECISIONS", "DESK_PROVE", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL",
@@ -266,3 +268,14 @@ async def test_no_key_in_development_reaches_the_hook_on_a_real_socket(environ, 
     (seen,) = MessagesHandler.seen
     assert seen["path"] == "/v1/messages" and credential(seen["headers"]) == "the placeholder"
     assert seen["body"]["model"] == "claude-haiku-5-5"
+
+
+async def test_spanish_reaches_the_model_as_text(environ, sent):
+    # Each check sends its input as one JSON object with its letters as themselves, so Spanish
+    # reaches the model as Spanish, not as \u escapes of its accented letters.
+    backend = make_decisions(settings())
+    await backend.review(review_input(note="Señora Peña, ¿el martes por la tarde?"))
+    await backend.soft_promise(SoftPromiseInput(language="es", prose="Mañana le confirmo la cita.", cards=[]))
+    review, soft = (request.content.decode() for request in sent)
+    assert "Señora Peña, ¿el martes por la tarde?" in review and "Mañana le confirmo la cita." in soft
+    assert "\\u" not in review + soft

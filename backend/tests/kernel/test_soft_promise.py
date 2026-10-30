@@ -44,9 +44,9 @@ async def test_soft_promise_request_shape():
     assert request["output_config"] == {"effort": "low",
                                         "format": {"type": "json_schema", "schema": SOFT_PROMISE_SCHEMA}}
     assert not {"tools", "tool_choice", "fallbacks", "betas", "stream"} & request.keys()
-    # one JSON object, so the prose stays a string value
-    assert request["messages"] == [{"role": "user",
-                                    "content": json.dumps(data.model_dump(mode="json"), sort_keys=True)}]
+    # one JSON object, so the prose stays a string value, with its letters as themselves
+    assert request["messages"] == [{"role": "user", "content": json.dumps(data.model_dump(mode="json"), sort_keys=True,
+                                                                          ensure_ascii=False)}]
     # both booleans, required, nothing else; titled so a fake model server can tell it from the reviewer's
     assert SOFT_PROMISE_SCHEMA == {
         "title": "SoftPromiseVerdict", "type": "object",

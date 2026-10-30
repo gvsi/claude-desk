@@ -67,8 +67,8 @@ async def test_review_request_shape():
     assert request["output_config"] == {"effort": "low",
                                         "format": {"type": "json_schema", "schema": REVIEW_SCHEMA}}
     assert not {"tools", "tool_choice", "fallbacks", "betas", "stream"} & request.keys()
-    assert request["messages"] == [{"role": "user",
-                                    "content": json.dumps(data.model_dump(mode="json"), sort_keys=True)}]
+    assert request["messages"] == [{"role": "user", "content": json.dumps(data.model_dump(mode="json"), sort_keys=True,
+                                                                          ensure_ascii=False)}]
 
 
 def test_review_schema_matches_the_contract():

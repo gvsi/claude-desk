@@ -298,16 +298,18 @@ class AnthropicDecisions:
     async def _ask(self, answer: type[Answer], data: BaseModel, *, model: str, max_tokens: int, system: str,
                    schema: dict[str, Any], thinking: dict[str, str], timeout_s: float,
                    failed: str) -> tuple[Answer | None, CallUsage]:
-        """One structured call at effort low: `data` as one JSON object, one try inside `timeout_s`,
-        no tools and no fallback model. The parsed answer, or None on any failure, logged as
-        `failed` by kind and never with what came back; and the call's usage."""
+        """One structured call at effort low: `data` as one JSON object (its letters as themselves,
+        so Spanish reaches the model as text, not escapes), one try inside `timeout_s`, no tools and
+        no fallback model. The parsed answer, or None on any failure, logged as `failed` by kind
+        and never with what came back; and the call's usage."""
         started = time.perf_counter()
         message, parsed, status, kind = None, None, "ok", None
         try:
             client = self._client.with_options(timeout=timeout_s, max_retries=0)
             message = await asyncio.wait_for(client.messages.create(
                 model=model, max_tokens=max_tokens, system=system,
-                messages=[{"role": "user", "content": json.dumps(data.model_dump(mode="json"), sort_keys=True)}],
+                messages=[{"role": "user", "content": json.dumps(data.model_dump(mode="json"), sort_keys=True,
+                                                                  ensure_ascii=False)}],
                 thinking=thinking,
                 output_config={"effort": "low", "format": {"type": "json_schema", "schema": schema}},
             ), timeout_s)
