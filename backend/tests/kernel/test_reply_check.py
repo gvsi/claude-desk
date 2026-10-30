@@ -207,6 +207,7 @@ AMOUNT_AND_TIME_WORDS = [   # (prose, rule_id, span): amounts, fractions, "free"
     ("We can do it on the twentieth.", "lex.en.number", "twentieth"),
     ("Le quito un quinto del precio.", "lex.es.number", "quinto"),
     ("Le rebajo una décima parte.", "lex.es.number", "décima"),
+    ("Le rebajo dos décimos.", "lex.es.number", "dos"),             # the plural, by its number word
     ("Le hago un octavo menos.", "lex.es.number", "octavo"),
     ("Le quito un sétimo.", "lex.es.number", "sétimo"),
     ("Nos vemos el mes que viene.", "lex.es.date", "el mes que viene"),
@@ -231,6 +232,7 @@ def test_amount_and_time_words_are_blocked(prose, rule_id, span):
     "First, let me check with Maria.",                      # "first" and "second" are no fraction or day
     "One second, please.",
     "Un segundo, por favor.",
+    "Le decimos qué opciones hay.",                         # "decimos" (we tell) is no "décimos"
 ])
 def test_ordinary_words_beside_the_amount_and_time_words_pass(prose):
     assert reply_check.scan_prose(prose) == []

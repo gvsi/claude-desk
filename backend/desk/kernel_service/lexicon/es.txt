@@ -21,8 +21,9 @@ number	ceros?
 number	cuart[oa]s?
 number	tercios?|terceras?[\s-]+partes?
 # Fractions from a fifth to a tenth ("un quinto", "una décima parte"); "séptimo" and
-# "décimo" without the accent
-number	quint[oa]s?|sext[oa]s?|sep?tim[oa]s?|octav[oa]s?|noven[oa]s?|decim[oa]s?
+# "décimo" without the accent. "décimos" is left out: without its accent it is "decimos" (we
+# tell), and as a fraction it always follows a number word ("dos décimos"), blocked above.
+number	quint[oa]s?|sext[oa]s?|sep?tim[oa]s?|octav[oa]s?|noven[oa]s?|decim(?:o|a|as)
 number	(?:uno|una|once|medio)[\s-]+(?:y[\s-]+)?(?:cien|cientos?|mil|miles|millon(?:es)?|docenas?|dolar(?:es)?|pesos?|euros?|centavos?|por[\s-]?ciento)
 
 # Money ("dólar" and "dólares" are matched without the accent)
