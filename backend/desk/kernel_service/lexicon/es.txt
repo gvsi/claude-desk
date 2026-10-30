@@ -15,6 +15,11 @@ number	dieci(?:seis|siete|ocho|nueve)|veinte|veinti[a-z]+
 number	treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa
 number	cien|cientos?|(?:dos|tres|cuatro|seis|sete|ocho|nove)cient[oa]s|quinient[oa]s
 number	mil|miles|millon(?:es)?|docenas?|mitad
+number	ceros?
+# "cuarto" is a fraction, a time ("y cuarto"), an ordinal and a room, and is blocked whichever
+# it is: a reply naming a room needs another word for it ("habitación").
+number	cuart[oa]s?
+number	tercios?|terceras?[\s-]+partes?
 number	(?:uno|una|once|medio)[\s-]+(?:y[\s-]+)?(?:cien|cientos?|mil|miles|millon(?:es)?|docenas?|dolar(?:es)?|pesos?|euros?|centavos?|por[\s-]?ciento)
 
 # Money ("dólar" and "dólares" are matched without the accent)
@@ -32,6 +37,11 @@ date	fin(?:es)?[\s-]+de[\s-]+semana|(?:la[\s-]+)?(?:proxima|siguiente)[\s-]+sema
 date	esta[\s-]+(?:noche|tarde|semana)|(?:este|el[\s-]+proximo)[\s-]+mes
 date	las[\s-]+once|la[\s-]+una
 date	(?:el[\s-]+)?mismo[\s-]+dia
+# A time soon: "en" or "dentro de" and up to three words before minutes or hours ("en una
+# hora", "dentro de un par de horas", "en media hora").
+date	(?:en|dentro[\s-]+de)[\s-]+(?:[^\W\d_]+[\s-]+){0,3}(?:minutos?|mins?|horas?|hrs?)
+date	en[\s-]?seguida
+date	(?:a[\s-]+)?primera[\s-]+hora
 
 # Promises only the owner's rules or a card can make ("garantía" without the accent). "libre"
 # states a price before "para", "a" or "al" and everyone, an audience or "usted", "ti" or "vos":
@@ -43,6 +53,8 @@ date	(?:el[\s-]+)?mismo[\s-]+dia
 promise	garantias?|garantiz[a-z]*|promet[a-z]*|promesas?
 promise	gratis|gratuit[oa]s?|descuentos?|descont[a-z]*|reembols[a-z]*
 promise	sin[\s-]+(?:ningun[\s-]+)?(?:costo|coste|cargo)|de[\s-]+regalo
+promise	sin[\s-]+(?:ninguna[\s-]+)?comision(?:es)?
+promise	por[\s-]+nuestra[\s-]+cuenta|(?:por[\s-]+)?cuenta[\s-]+de[\s-]+la[\s-]+casa
 promise	entradas?[\s-]+libres?
 promise	libres?[\s-]+de[\s-]+(?:costos?|costes?|cargos?|pagos?|impuestos?)
 promise	libres?(?=[\s-]+(?:para|a)[\s-]+(?:tod[oa]s|todo[\s-]+el[\s-]+mundo|cualquiera)\b)

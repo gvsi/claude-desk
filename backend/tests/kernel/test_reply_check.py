@@ -157,6 +157,98 @@ async def test_numbers_and_dates_in_prose_are_blocked(app, client, prose, rule_i
     assert_handed_off(verdict, "es" if spanish else "en")
 
 
+AMOUNT_AND_TIME_WORDS = [   # (prose, rule_id, span): amounts, fractions, "free" and near times in other words
+    ("It costs zero for the visit.", "lex.en.number", "zero"),
+    ("La visita cuesta cero.", "lex.es.number", "cero"),
+    ("The visit is a quarter off for you.", "lex.en.number", "quarter"),       # a fraction
+    ("Maria can come at a quarter past.", "lex.en.number", "quarter"),         # a time, blocked as well
+    ("That leaves a couple of quarters.", "lex.en.number", "quarters"),
+    ("Le hacemos un cuarto menos.", "lex.es.number", "cuarto"),
+    ("Le rebajamos una cuarta parte.", "lex.es.number", "cuarta"),
+    ("I can take a third off the drain clearing.", "lex.en.number", "third"),
+    ("You can pay it in thirds.", "lex.en.number", "thirds"),
+    ("Le quito un tercio del precio.", "lex.es.number", "tercio"),
+    ("Se puede pagar en tercios.", "lex.es.number", "tercios"),
+    ("Le rebajo una tercera parte.", "lex.es.number", "tercera parte"),
+    ("That comes to a couple grand.", "lex.en.money", "grand"),
+    ("Eso sale en un par de miles.", "lex.es.number", "miles"),                 # Spanish says "mil", held already
+    ("It is on us this time.", "lex.en.promise", "on us"),
+    ("This one's on us.", "lex.en.promise", "on us"),
+    ("La visita corre por nuestra cuenta.", "lex.es.promise", "por nuestra cuenta"),
+    ("Esta va por cuenta de la casa.", "lex.es.promise", "por cuenta de la casa"),   # "on the house"
+    ("There is no fee for the visit.", "lex.en.promise", "no fee"),
+    ("There are no hidden fees.", "lex.en.promise", "no hidden fees"),
+    ("There's no call-out fee.", "lex.en.promise", "no call-out fee"),
+    ("La visita va sin comisión.", "lex.es.promise", "sin comisión"),
+    ("Sin ninguna comisión por la visita.", "lex.es.promise", "Sin ninguna comisión"),
+    ("Maria can be there in an hour.", "lex.en.date", "in an hour"),
+    ("She can be there in a few minutes.", "lex.en.date", "in a few minutes"),
+    ("Maria can come in a couple of hours.", "lex.en.date", "in a couple of hours"),
+    ("Maria can be there in under an hour.", "lex.en.date", "in under an hour"),
+    ("She can be there within the hour.", "lex.en.date", "within the hour"),
+    ("She'll be there in minutes.", "lex.en.date", "in minutes"),
+    ("Maria llega en una hora.", "lex.es.date", "en una hora"),
+    ("Llega en unos pocos minutos.", "lex.es.date", "en unos pocos minutos"),
+    ("Maria llega dentro de un par de horas.", "lex.es.date", "dentro de un par de horas"),
+    ("Maria llega en media hora.", "lex.es.date", "en media hora"),
+    ("Maria can come right away.", "lex.en.date", "right away"),
+    ("Maria va enseguida.", "lex.es.date", "enseguida"),
+    ("Maria sale en seguida.", "lex.es.date", "en seguida"),
+    ("She can come first thing in the morning.", "lex.en.date", "first thing in the morning"),
+    ("Maria can be there first thing.", "lex.en.date", "first thing"),
+    ("She can be there the first thing in the morning.", "lex.en.date", "first thing in the morning"),
+    ("Maria llega a primera hora.", "lex.es.date", "a primera hora"),
+]
+
+
+@pytest.mark.parametrize(("prose", "rule_id", "span"), AMOUNT_AND_TIME_WORDS)
+def test_amount_and_time_words_are_blocked(prose, rule_id, span):
+    """Amounts, fractions, a price of nothing and a time soon, in words the first lexicons lacked,
+    in English and Spanish: each is the one violation its rule finds."""
+    kind = reply_check.CATEGORIES[rule_id.rsplit(".", 1)[1]]
+    assert [(v.kind, v.rule_id, v.span) for v in reply_check.scan_prose(prose)] == [(kind, rule_id, span)]
+
+
+@pytest.mark.parametrize("prose", [
+    "You can count on us.",                                 # "on us" after count, rely or depend
+    "You can always rely on us for repairs.",
+    "It depends on us getting a look at it.",
+    "The first thing to do is turn off the water.",         # "first thing" after a determiner is advice
+    "Your first thing to check is the valve under the sink.",
+    "Lo primero es cerrar la llave del agua.",
+])
+def test_ordinary_words_beside_the_amount_and_time_words_pass(prose):
+    assert reply_check.scan_prose(prose) == []
+
+
+@pytest.mark.parametrize(("prose", "found"), [
+    ("It costs zеro.", [("lex.en.number", "zеro"), ("mixed_script", "zеro")]),         # Cyrillic e
+    ("Le hacemos un cuаrto menos.", [("lex.es.number", "cuаrto"), ("mixed_script", "cuаrto")]),
+    ("It is оn us.", [("lex.en.promise", "оn us"), ("mixed_script", "оn")]),             # Cyrillic o
+    ("Maria can be there ın an hour.", [("lex.en.date", "ın an hour")]),                    # dotless i
+    ("Va sin comisiоn.", [("lex.es.promise", "sin comisiоn"), ("mixed_script", "comisiоn")]),
+    ("Maria can come RIGHT AWAY.", [("lex.en.date", "RIGHT AWAY")]),
+    ("That comes to a couple GRAND.", [("lex.en.money", "GRAND")]),
+])
+def test_amount_and_time_words_read_lookalike_letters(prose, found):
+    """Letters of another script that look like Latin ones, and capitals, are read as the words
+    they spell (and a word mixing scripts is blocked on its own)."""
+    assert [(v.rule_id, v.span) for v in reply_check.scan_prose(prose)] == found
+
+
+async def test_a_fraction_beside_its_quote_is_blocked(app, client, reviewer):
+    """"A quarter off" beside the quote card it describes is blocked by the prose scan, before the
+    soft-promise check is asked."""
+    copy, visitor = await visitor_of(app, client)
+    quote = await own_quote(client, visitor)
+    reviewer.soft_answer = NOTHING_FLAGGED
+    verdict = await checked(client, visitor, "That's a quarter off.", [clause("quote", quote.fact_id)])
+    assert [(v.kind, v.rule_id, v.span) for v in verdict.violations] == [("number_in_prose", "lex.en.number",
+                                                                          "quarter")]
+    assert_handed_off(verdict)
+    assert reviewer.soft_inputs == []
+
+
 @pytest.mark.parametrize(("prose", "rule_id", "span", "language"), [
     ("I guarantee it.", "lex.en.promise", "guarantee", "en"),
     ("That part is free.", "lex.en.promise", "free", "en"),
@@ -269,6 +361,11 @@ HYPHENATED = [                       # lexicon phrases whose words a dash may jo
     ("entrada-libre", "lex.es.promise"), ("libre-de-impuestos", "lex.es.promise"),
     ("you're-booked", "lex.en.booking"), ("your-visit-is-confirmed", "lex.en.booking"),
     ("tu-cita-está-confirmada", "lex.es.booking"), ("ya-estás-reservado", "lex.es.booking"),
+    ("on-us", "lex.en.promise"), ("no-call-out-fee", "lex.en.promise"), ("in-a-few-minutes", "lex.en.date"),
+    ("right-away", "lex.en.date"), ("first-thing-in-the-morning", "lex.en.date"),
+    ("por-nuestra-cuenta", "lex.es.promise"), ("por-cuenta-de-la-casa", "lex.es.promise"),
+    ("sin-comisión", "lex.es.promise"), ("en-una-hora", "lex.es.date"), ("dentro-de-unos-minutos", "lex.es.date"),
+    ("en-seguida", "lex.es.date"), ("a-primera-hora", "lex.es.date"), ("tercera-parte", "lex.es.number"),
 ]
 
 
@@ -302,6 +399,10 @@ def test_every_apostrophe_reads_as_the_plain_one(apostrophe):
     booked = f"You{apostrophe}re booked"
     found = reply_check.scan_prose(f"{booked}.")
     assert [(v.rule_id, v.span) for v in found] == [("lex.en.booking", reply_check.shown(booked))]
+    for prose in (f"It{apostrophe}s on us.", f"This one{apostrophe}s on us."):
+        assert [(v.rule_id, v.span) for v in reply_check.scan_prose(prose)] == [("lex.en.promise", "on us")], prose
+    found = reply_check.scan_prose(f"She{apostrophe}ll be there in a few minutes.")
+    assert [(v.rule_id, v.span) for v in found] == [("lex.en.date", "in a few minutes")]
 
 
 @pytest.mark.parametrize(("prose", "rule_id"), [
