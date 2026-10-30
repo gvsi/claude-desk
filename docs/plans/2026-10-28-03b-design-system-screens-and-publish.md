@@ -593,15 +593,15 @@ Every string here is owner-facing (no Spanish). Components display what the scre
     - `simulate_calls_once`.
     - `simulate_busy_keeps_its_width`.
   - Unit, in `outcomeWords.test.ts`:
-    - `preset_descriptions_match_the_presets`: reads the presets export and checks each claim against the cards it names, and nothing else:
-      - "Quotes, bookings, documents and payments wait for your answer.": no card for a quote, a booking, a document or a target that takes or sends money runs on its own or refuses. A tool with no card asks by default. The description says nothing about open times, leads, callbacks or identity checks, so the check doesn't either.
-      - "Quotes at list price": an automatic quote card with `max_discount_bp` 0.
-      - "weekday bookings in your hours": every automatic booking card's whole window falls on weekdays between 09:00 and 17:00.
-      - "documents to verified customers": the card is for the record's owner.
-      - "Payments ask you first.": no card for a target that takes or sends money runs on its own or refuses.
+    - `preset_descriptions_match_the_presets`: reads the presets export and checks each claim, and nothing else, against the cards that govern each tool it names. Those are the tool's own cards and the effect cards that cover it and aren't outranked, as `rulesForTool` ranks them under the master's "Coverage and overlap", with each tool's effects from the master's tool table:
+      - "Quotes, bookings, documents and payments wait for your answer.": no card that governs Quote, Book a visit, Share a document or a tool that takes or sends money runs on its own or refuses. A tool no card governs asks by default. The description says nothing about open times, leads, callbacks or identity checks, so the check doesn't either.
+      - "Quotes at list price": an automatic card for anyone governs quotes, every automatic one has `max_discount_bp` 0, and no refusal governs them.
+      - "weekday bookings in your hours": an automatic card for anyone governs bookings, and every automatic one's whole window falls on weekdays between 09:00 and 17:00.
+      - "documents to verified customers": an automatic card for the record's owner governs documents, and every automatic one is for the record's owner.
+      - "Payments ask you first.": no card that governs a tool that takes or sends money runs on its own or refuses.
       - Skipped, naming the export, until it is generated.
-    - `a_changed_preset_card_fails_the_descriptions`: a small hand-built cards object passes the checker, and changing one card fails it: the quote's `max_discount_bp` to 1000, a booking at night or at any hour, a refusal card for payments, Ask me first quoting, booking, sharing a document or making a payment link on its own, among others.
-    - `a_malformed_presets_export_is_refused`: cards are checked against the `RuleCard` contract in every field the check reads, so a null `max_discount_bp`, hours without a start or an end, or an unknown day is refused.
+    - `a_changed_preset_card_fails_the_descriptions`: a small hand-built cards object passes the checker, and changing one card fails it: the quote's `max_discount_bp` to 1000, a booking at night or at any hour, a refusal card for payments, Ask me first quoting, booking, sharing a document or making a payment link on its own, or an effect card that does so (an automatic rule for changes, a refusal for messages), among others. A card that a tool's own card outranks, or one for a tool no description speaks of, changes nothing.
+    - `a_malformed_presets_export_is_refused`: cards are checked against the `RuleCard` contract in every field the check reads, so an unknown target or effect, a null `max_discount_bp`, hours without a start or an end, an unknown day, or hours that end before they start (except at 00:00, midnight) is refused.
     - `preset_descriptions_are_the_owner_words`: the titles and descriptions, word for word, and `'custom'` is no `RulesPreset`.
   - Every story has `parameters.canvas` set to its board, or `'none'` naming the nearest board.
   - axe runs on every story.
@@ -890,3 +890,5 @@ Task 3c rework and fix round 2 (2026-10-29): the project owner redrew and signed
 - Task 3c has 3 unit tests and the skipped presets check, and 37 story tests across its six component folders.
 
 Owner decision after the rework (2026-10-29): the first preset's words change, the preset doesn't. It is "Ask me first", described as "Quotes, bookings, documents and payments wait for your answer.", which holds for its cards: it says nothing about open times, leads, callbacks or identity checks, which still run on their own. The description check holds those four kinds of tool to asking, and passes against the presets' cards as they stand. The preset review's title is "Ask me first".
+
+Task 3c fix round 1, after the rework (2026-10-29), from the task review: the description check judges each claimed tool by the cards that govern it, its own and the effect cards that cover it, ranked by `rulesForTool`. An automatic rule for changes or a refusal for messages now fails it as a tool's own card would. The export's cards must also name a known tool or effect, and their hours must end after they start, or at 00:00 for midnight.
