@@ -72,6 +72,8 @@ export const REFERENCE_BOARDS = [
   // The agents page: the page itself, longer than the window, and the demo key shown once.
   'N-R2-Agents-01-Page',
   'N-R2-Agents-02-Demo-Key',
+  // Sending the built-in agent, signed on 2026-10-30: the panel with its signed spending limit.
+  'N-R2-Agents-03-Send',
   // The chat: a payment link a rule change cancelled.
   'N-R2-Chat-Link-Cancelled',
   // The Demo inbox as a sheet: a visitor's from the bottom of a phone, the owner's beside Today.
@@ -128,6 +130,7 @@ const BOARD_WINDOWS: Readonly<Partial<Record<ReferenceBoard, Exclude<BoardViewpo
   'N-R2-Setup-11-Safety': 'laptop-1150',
   'N-R2-Agents-01-Page': 'laptop-1500',
   'N-R2-Agents-02-Demo-Key': 'laptop',
+  'N-R2-Agents-03-Send': 'laptop',
   'N-R2-Chat-Link-Cancelled': 'laptop',
   'N-R2-Inbox-Sheet-Public': 'phone',
   'N-R2-Inbox-Sheet-Owner': 'laptop',

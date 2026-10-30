@@ -180,6 +180,7 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = Object.freeze([
   ...pairs(['text-primary'], ['fill-secondary'], 4.5, "Try again on an entry that failed to open, inside the Demo inbox's sheet.", 'fill-card', { under: 'bg-surface' }),
   ...pairs(['text-secondary'], ['fill-count'], 4.5, "The count on the Demo inbox's button.", 'fill-secondary', { under: 'bg-app' }),
   ...pairs(['text-primary'], ['fill-secondary'], 4.5, "Code in a card on the agents page: a CodeBlock or a CopyField's box, and a secondary button's label beside it.", 'fill-card', { under: 'bg-app' }),
+  ...pairs(['text-primary', 'text-secondary'], ['fill-card'], 4.5, "An agent's signed limit in the agents page's \"Send an agent\" card: its amounts, their names and whose wallet signed it, on its own fill over the card's.", 'fill-card', { under: 'bg-app' }),
   ...pairs(['button-danger-text'], ['bg-surface'], 4.5, "Deny's answers in its menu on a held request, This time and Always, in red words on the raised surface."),
   ...pairs(['button-danger-text'], ['fill-hover'], 4.5, "Deny's answers in its menu while one is hovered or has focus.", 'bg-surface'),
 ]);

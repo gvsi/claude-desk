@@ -1,0 +1,54 @@
+/* SignedLimitPanel: an inset in the card look, padded 12 px 16 px. The terms 16 px apart, each name
+   in secondary caption type over its value in body type at 520; whose wallet signed it in
+   secondary caption type at the right, centered on the panel. In the "Send an agent" card it sits
+   on the card's own fill, as N-R2-Agents-03 draws it. It lays out by its own width: under 480 px
+   (a phone's card) the line about who signed it takes its own line under the terms. */
+
+.cd-signed-limit {
+  container: cd-signed-limit / inline-size;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8) var(--space-16);
+  box-sizing: border-box;
+  min-width: 0;
+  padding: var(--space-12) var(--space-16);
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-card);
+  background: var(--fill-card);
+}
+
+.cd-signed-limit__terms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8) var(--space-16);
+  margin: 0;
+}
+
+.cd-signed-limit__name,
+.cd-signed-limit__value {
+  margin: 0;
+}
+
+.cd-signed-limit__name {
+  color: var(--text-secondary);
+}
+
+.cd-signed-limit__value {
+  color: var(--text-primary);
+  font-weight: 520;
+  white-space: nowrap;
+}
+
+.cd-signed-limit__source {
+  margin: 0 0 0 auto;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+@container cd-signed-limit (max-width: 479.98px) {
+  .cd-signed-limit__source {
+    flex-basis: 100%;
+    margin-left: 0;
+  }
+}

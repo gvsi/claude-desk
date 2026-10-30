@@ -128,6 +128,7 @@ export { SafetyCheckRow, type SafetyCheckRowProps } from './components/SafetyChe
 export { CodeBlock, type CodeBlockProps } from './components/CodeBlock/CodeBlock.tsx';
 export { CopyField, type CopyFieldProps } from './components/CopyField/CopyField.tsx';
 export { COPY_RESULT_COPY, copyResultLine, useCopyText, type CopyState, type CopyWhat } from './components/CopyField/useCopyText.ts';
+export { SignedLimitPanel, type SignedLimitPanelProps } from './components/SignedLimitPanel/SignedLimitPanel.tsx';
 
 // Knowledge
 export { KnowledgeList, type KnowledgeListProps, type KnowledgeRowView } from './components/KnowledgeList/KnowledgeList.tsx';
