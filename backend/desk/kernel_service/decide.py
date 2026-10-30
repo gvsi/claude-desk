@@ -497,7 +497,7 @@ class HoldDecider:
     """The cards that decided a hold, and whether they are `ask` cards."""
 
     ask: bool                             # an ask card decided it; otherwise an auto card's hold twin did
-    card_ids: list[str]                   # the cards that decided, by `card_id`
+    card_ids: tuple[str, ...]             # the cards that decided, by `card_id`
 
 
 def hold_decider(version_row: PolicyVersionRow | None, policy_ids: Iterable[str]) -> HoldDecider | None:
@@ -526,8 +526,8 @@ def hold_decider(version_row: PolicyVersionRow | None, policy_ids: Iterable[str]
         return None
     top = max(rank for rank, _, _ in ranked)
     ask = any(is_ask for rank, is_ask, _ in ranked if rank == top)
-    return HoldDecider(ask, sorted({card_id for rank, is_ask, ids in ranked if rank == top and is_ask == ask
-                                    for card_id in ids}))
+    return HoldDecider(ask, tuple(sorted({card_id for rank, is_ask, ids in ranked if rank == top and is_ask == ask
+                                          for card_id in ids})))
 
 
 def held_by_ask(version_row: PolicyVersionRow | None, policy_ids: Iterable[str]) -> bool:
@@ -739,7 +739,7 @@ async def _repeat(ctx: KernelCtx, row: DecisionRow, sha: str) -> Decision:
     return await decision_contract(ctx, await expire_if_due(ctx, row))
 
 
-def _rules_decided(call: _Call, outcome: str, evaluation: Evaluation) -> tuple[str, list[str]]:
+def _rules_decided(call: _Call, outcome: str, evaluation: Evaluation) -> tuple[str, Sequence[str]]:
     """How the deciding rules decided (`RULE_LEAD_INS`), and the cards to quote after it. A hold is
     an ask hold when an `ask` card decided it, by the same test that offers `deny_always`
     (`hold_decider`, as `held_by_ask` reads it); any other hold went past an `auto` card's amount,

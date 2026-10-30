@@ -1128,6 +1128,19 @@ async def test_the_owner_reads_how_the_deciding_rule_decided(app, client, regist
     assert decision.reason_plain == said
 
 
+async def test_a_holds_deciding_cards_are_a_frozen_value(app, client, registry):
+    """`hold_decider` names the cards that decided a hold as a value nothing can change in place:
+    the frozen dataclass holds them as a tuple, so it also hashes."""
+    rows = await desk_with(app, [FakeAdapter("native.quote")],
+                           [AT_LIST_PRICE, rule("ask-quotes", "ask", "Quotes wait for your answer.")])
+    decision = await decided(client, await open_visitor(client, rows), "native.quote", {"qty": 1})
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(rows.copy_id)
+        decider = decide.hold_decider(await activation.active_version(ctx, rows.desk_id), decision.policy_ids)
+    assert decider == decide.HoldDecider(ask=True, card_ids=("ask-quotes",))
+    assert hash(decider) == hash(decide.HoldDecider(ask=True, card_ids=("ask-quotes",)))
+
+
 LONG_RULE = ("Quotes from your price list, at list price, for drain clearing, leak repairs, water heater checks and "
              "fixture installs in Oakland, Berkeley, Emeryville and Alameda, on weekdays and Saturday mornings, and "
              "never for commercial buildings.")
