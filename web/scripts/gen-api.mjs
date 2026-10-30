@@ -156,22 +156,31 @@ export async function generateApi(openapi, contracts) {
   return `${BANNER}\n\n${importLine}${types.trimStart()}\n${operationsSource(operations)}`;
 }
 
-async function main(args) {
-  const web = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-  const openapiPath = path.join(web, '..', 'backend', 'desk', 'api', 'openapi.json');
-  const contractsPath = path.join(web, '..', 'backend', 'desk', 'contracts.schema.json');
-  const outPath = path.join(web, 'src', 'api', 'openapi.gen.ts');
+const WEB = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+/** What the command reads and writes: the API's document, the contracts schema and openapi.gen.ts. */
+const PATHS = {
+  openapi: path.join(WEB, '..', 'backend', 'desk', 'api', 'openapi.json'),
+  contracts: path.join(WEB, '..', 'backend', 'desk', 'contracts.schema.json'),
+  out: path.join(WEB, 'src', 'api', 'openapi.gen.ts'),
+};
+
+/**
+ * The command: writes openapi.gen.ts, or with --check only compares it. Returns the exit code: 1
+ * when the file is stale or missing, 2 on an unknown argument. Tests point `paths` at a temp folder.
+ */
+export async function main(args, paths = PATHS) {
   const unknown = args.filter((arg) => arg !== '--check');
   if (unknown.length > 0) {
     console.error(`Unknown argument: ${unknown.join(' ')}. Use --check to verify without writing.`);
     return 2;
   }
   const read = (file) => JSON.parse(readFileSync(file, 'utf8'));
-  const text = await generateApi(read(openapiPath), read(contractsPath));
+  const text = await generateApi(read(paths.openapi), read(paths.contracts));
   if (args.includes('--check')) {
     let current = '';
     try {
-      current = readFileSync(outPath, 'utf8');
+      current = readFileSync(paths.out, 'utf8');
     } catch {
       // A missing file is stale.
     }
@@ -182,7 +191,7 @@ async function main(args) {
     console.log('src/api/openapi.gen.ts matches openapi.json.');
     return 0;
   }
-  writeFileSync(outPath, text);
+  writeFileSync(paths.out, text);
   console.log('Wrote src/api/openapi.gen.ts from openapi.json.');
   return 0;
 }

@@ -1,16 +1,28 @@
 // @vitest-environment node
 // The API type generator (gen-api.mjs) on small documents: the API's own schemas become types,
 // contract schemas are imported from contracts.ts instead, and every operation names its 2xx
-// schemas. Anything it can't name fails, so a stale or odd document never becomes loose types.
+// schemas. Anything it can't name fails, so a stale or odd document never becomes loose types. The
+// command's --check fails when openapi.gen.ts is stale or missing, and writes nothing.
 
 import { spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { apiOperations, generateApi } from './gen-api.mjs';
+import { apiOperations, generateApi, main } from './gen-api.mjs';
 
 const SCRIPT = fileURLToPath(new URL('./gen-api.mjs', import.meta.url));
+
+/** Every temp folder made by a test, removed after it. */
+const made = [];
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  for (const dir of made.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
 
 /** A contracts schema with one model, `Decision`. */
 const CONTRACTS = {
@@ -131,6 +143,39 @@ describe('gen-api', () => {
     // A schema name that isn't a type name, and a contracts schema with nothing in it.
     await expect(generate(doc({ ...schemas, 'Body_x-y': ITEM }))).rejects.toThrow(/"Body_x-y" is not a type name/);
     await expect(generate(doc(schemas), {})).rejects.toThrow(/contracts\.schema\.json: has no \$defs/);
+  });
+
+  it('command_check_fails_when_stale_or_missing', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'gen-api-'));
+    made.push(dir);
+    const paths = {
+      openapi: path.join(dir, 'openapi.json'),
+      contracts: path.join(dir, 'contracts.schema.json'),
+      out: path.join(dir, 'openapi.gen.ts'),
+    };
+    const schemas = { Thing: THING, Item: ITEM, Decision: CONTRACTS.$defs.Decision };
+    writeFileSync(paths.openapi, JSON.stringify(doc(schemas)));
+    writeFileSync(paths.contracts, JSON.stringify(CONTRACTS));
+    const printed = [];
+    vi.spyOn(console, 'log').mockImplementation((line) => printed.push(`log: ${line}`));
+    vi.spyOn(console, 'error').mockImplementation((line) => printed.push(`error: ${line}`));
+    const stale = 'error: src/api/openapi.gen.ts is out of date with openapi.json. Run `npm run gen:api`.';
+    const current = 'log: src/api/openapi.gen.ts matches openapi.json.';
+
+    // A missing file is stale, and the check writes nothing.
+    expect(await main(['--check'], paths)).toBe(1);
+    expect(existsSync(paths.out)).toBe(false);
+    // Once written, it is current.
+    expect(await main([], paths)).toBe(0);
+    expect(readFileSync(paths.out, 'utf8')).toBe(await generateApi(doc(schemas), CONTRACTS));
+    expect(await main(['--check'], paths)).toBe(0);
+    // A document that changes without a rerun makes it stale again, and the check leaves it as it was.
+    const written = readFileSync(paths.out, 'utf8');
+    writeFileSync(paths.openapi, JSON.stringify(doc({ ...schemas, Thing: { ...THING, description: 'A thing, renamed.' } })));
+    expect(await main(['--check'], paths)).toBe(1);
+    expect(readFileSync(paths.out, 'utf8')).toBe(written);
+
+    expect(printed).toEqual([stale, 'log: Wrote src/api/openapi.gen.ts from openapi.json.', current, stale]);
   });
 
   it('command_refuses_unknown_arguments', () => {
