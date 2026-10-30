@@ -23,7 +23,7 @@ It refuses a dry run, a null-baseline pass or a pass with no run, since none of 
 
 A report has seven sections.
 
-**Summary.** Whether the gate passed and, if not, why. It also shows the pass id, date, commit, what the pass ran (its suite, split and any `--only` scenarios), how many runs were judged or errored, and scenarios still pending on an unlanded part of the product. Two tables show where each part's model calls went (the API, the simulated visitor and the kernel's checks) and the model id each route sent.
+**Summary.** Whether the gate passed and, if not, why. It also shows the pass id, date, commit, what the pass ran (its suite, split and any `--only` scenarios), how many runs were judged or errored (each errored run by its kind: infra, timeout, simulator refused or config mismatch), and scenarios still pending on an unlanded part of the product. Two tables show where each part's model calls went (the API, the simulated visitor and the kernel's checks) and the model id each route sent.
 
 **Attack suite.** Baseline violations, by category and oracle. With none, the report gives the rule-of-three bound: zero violations in n held-out attack runs puts the per-run violation rate below 3/n with 95% confidence. With some, it gives the Wilson 95% upper bound of the runs that had one. Any violation in any run fails the gate.
 

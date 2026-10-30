@@ -7,6 +7,7 @@ attributes the gate's result carries, so the report reads it the way it will rea
 
 import csv
 import json
+import os
 import re
 import subprocess
 from datetime import UTC, date, datetime, timedelta
@@ -882,6 +883,36 @@ async def test_report_command_refuses_a_null_baseline_that_doesnt_cover_the_pass
     assert evals_run.report_command(["--pass", pass_id, "--null-baseline", covering], root=root) == 0
 
 
+async def test_report_command_counts_errored_runs_by_kind(report_repo):
+    """A run that timed out keeps its kind; one whose infra error came back on its retry, or whose verdict
+    didn't fit a row, is an infra error. The report judges none of them and counts each by its kind."""
+    root = report_repo
+
+    async def scripted(scenario: Any, rep: int, target: Any, simulator: Any, **kwargs: Any) -> RunOutcome:
+        if scenario.id == "atk-cal":
+            return await timed_out(scenario, rep, target, simulator, **kwargs)
+        crafted = crafted_outcome(scenario, rep, kwargs["pass_id"])
+        if scenario.id == "leg-cal":                 # an infra error, then the same on its retry
+            return crafted.model_copy(update={"artifact": None, "verdict": None,
+                                              "error": RunError(kind="infra", detail="the stack dropped the run")})
+        if scenario.id == "atk-held":                # an attack's verdict with a success: no row holds it
+            return crafted.model_copy(update={"verdict": crafted.verdict.model_copy(update={"success": True})})
+        return crafted
+
+    pass_id = await report_pass(root, scripted)
+    inputs = evals_run.report_inputs(pass_id, root=root)
+    assert {(r.scenario_id, r.error) for r in inputs["pass_result"].runs} == {
+        ("atk-cal", "timeout"), ("leg-cal", "infra"), ("atk-held", "infra"), ("leg-held", None)}
+
+    assert evals_run.report_command(["--pass", pass_id], root=root) == 0
+    text = (root / "evals" / "reports" / f"2026-10-30-{pass_id}.md").read_text()
+    assert "| Runs | 1 judged, 3 errored (2 infra, 1 timeout) |" in text
+    latest = json.loads((root / "evals" / "reports" / "latest.json").read_text())
+    assert (latest["judged_runs"], latest["errored_runs"]) == (1, 3)
+    assert latest["errored_runs_by_kind"] == {"infra": 2, "timeout": 1}
+    assert latest["gate_passed"] is False
+
+
 async def test_report_command_refuses_what_it_cant_read_whole(report_repo, capsys):
     """A pass becomes the latest report only when everything it left reads whole: an unknown pass, a
     dry run, a null-baseline pass, a pass with no run, a suite changed since the pass, a missing or
@@ -939,15 +970,118 @@ async def test_report_command_refuses_what_it_cant_read_whole(report_repo, capsy
     assert (reports / "latest.json").exists() and pass_id in doc.read_text()
 
 
+def _commit_calibration(record: str) -> Any:
+    """Before the pass: the thresholds file at the pass's commit records `record` as its calibration."""
+    def before(root: Path) -> None:
+        write(root, THRESHOLDS_PATH, THRESHOLDS_FILE.replace("CALIBRATION = None", f"CALIBRATION = {record}"))
+        commit(root, "a thresholds file whose calibration the report can't read")
+    return before
+
+
+def _swap_transcript(root: Path, pass_id: str) -> None:
+    """leg-held's transcript replaced by atk-held's."""
+    transcripts = root / "evals" / "out" / "passes" / pass_id / "transcripts"
+    (transcripts / "leg-held-1.json").write_bytes((transcripts / "atk-held-1.json").read_bytes())
+
+
+def _latency(name: str, text: str) -> Any:
+    def after(root: Path, pass_id: str) -> None:
+        write(root, f"evals/out/latency/{name}", text.replace("<pass>", pass_id))
+    return after
+
+
+def _pass_commit(root: Path, pass_id: str) -> None:
+    done = root / "evals" / "out" / "passes" / pass_id / "pass.json"
+    data = json.loads(done.read_text())
+    done.write_text(json.dumps({**data, "git_sha": "0" * 40}))
+
+
+def _unreadable_spend_row(root: Path, pass_id: str) -> None:
+    append_spend(shared_spend_file(root), {"pass_id": "20261030-120000-0b0b0b", "date": "2026-10-30",
+                                           "provider": "anthropic", "runs": "two", "desk_usd": "0.2000",
+                                           "simulator_usd": "0.2000", "claude_api_usd": "0.4000",
+                                           "total_usd": "0.4000", "estimated_usd": "0.0000"})
+
+
+async def unpriced_run(scenario: Any, rep: int, target: Any, simulator: Any, **kwargs: Any) -> RunOutcome:
+    """A crafted run whose legitimate conversation call names a model with no list price."""
+    crafted = crafted_outcome(scenario, rep, kwargs["pass_id"])
+    if scenario.suite == "attack" or crafted.artifact is None:
+        return crafted
+    unlisted = crafted.artifact.model_copy(update={"usage": [model_call("conversation", "claude-unlisted-1")]})
+    return crafted.model_copy(update={"artifact": unlisted})
+
+
+REPORT_REFUSALS = {
+    "another run's transcript": (crafted_run, None, _swap_transcript, "the transcript of leg-held rep 1 is another run's"),
+    "a latency file that isn't a latency run": (crafted_run, None, _latency("x.json", '{"pass_id": "<pass>"}'),
+                                                "latency file x.json names pass"),
+    "a latency file that can't be read": (crafted_run, None, _latency("y.json", "{"),
+                                          "latency file y.json can't be read"),
+    "a calibration of another split": (crafted_run, _commit_calibration(
+        '{"version": 2, "pass_id": "20261029-200000-c0ffee", "split": "heldout", "date": "2026-10-29", '
+        '"report": "evals/reports/calibration-v2.md", "owner_approved": None}'), None,
+        "names no calibration-split pass"),
+    "a calibration that doesn't read as one": (crafted_run, _commit_calibration(
+        '{"version": 2, "pass_id": "20261029-200000-c0ffee", "split": "calibration", "date": "2026-10-29", '
+        '"report": "elsewhere/calibration-v2.md", "owner_approved": None}'), None, "doesn't read as a calibration"),
+    "a pass commit that isn't here": (crafted_run, None, _pass_commit, "the pass's commit can't be read here"),
+    "an unreadable spend row": (crafted_run, None, _unreadable_spend_row,
+                                "a 2026-10 row of the shared spend file can't be read"),
+    "usage with no list price": (unpriced_run, None, None, "the legitimate runs' usage can't be priced"),
+}
+
+
+@pytest.mark.parametrize("case", REPORT_REFUSALS)
+async def test_report_command_refuses_each_input_it_cant_read(report_repo, capsys, case):
+    """Every input the report reads refuses, with its reason and nothing written, when it can't be read
+    whole: a transcript that is another run's, a latency file for the pass that isn't a latency run or
+    can't be read, a calibration at the pass's commit that isn't one, a commit that isn't here, an
+    unreadable spend row of the month, and usage with no list price."""
+    run_one, before, after, why = REPORT_REFUSALS[case]
+    root = report_repo
+    reports, doc = root / "evals" / "reports", root / "docs" / "evals.md"
+    guide = doc.read_text()
+    if before is not None:
+        before(root)
+    pass_id = await report_pass(root, run_one)
+    if after is not None:
+        after(root, pass_id)
+
+    assert evals_run.report_command(["--pass", pass_id], root=root) == 1
+    said = capsys.readouterr().out
+    assert said.startswith("report: ") and why in said, said
+    assert not (reports / "latest.json").exists() and not (reports / "spend.csv").exists()
+    assert not list(reports.glob("2026-*.md")) and doc.read_text() == guide
+    assert not (root / "evals" / "out" / "reports").exists()
+
+
+# What make reads from its environment as the evals targets' variables, and the flags and command-line
+# variables a make that runs these tests passes down to its children.
+MAKE_ENVIRONMENT = ("PASS", "BASE_URL", "DRY_RUN", "FINAL", "TURNS", "LATENCY_MAX_USD", "NULL_BASELINE", "MAKEFLAGS",
+                    "MFLAGS", "MAKEOVERRIDES", "MAKELEVEL")
+
+
 def make(*args: str, dry: bool = True) -> subprocess.CompletedProcess[str]:
-    """`make` in this repository; `dry` prints the commands a target would run without running them."""
+    """`make` in this repository; `dry` prints the commands a target would run without running them. It
+    runs with none of the targets' variables in its environment, so only `args` set them."""
+    env = {name: value for name, value in os.environ.items() if name not in MAKE_ENVIRONMENT}
     return subprocess.run(["make", "--no-print-directory", *(["-n"] if dry else []), "-C", str(EVALS_DOC.parents[1]),
-                           *args], capture_output=True, text=True)
+                           *args], capture_output=True, text=True, env=env)
 
 
-def test_make_targets_gate_measure_and_report_a_pass():
+# Variables a caller may have exported, which make would read as the targets' own.
+CALLERS_VARIABLES = {"PASS": "p-9", "BASE_URL": "https://caller.example.invalid", "DRY_RUN": "1", "FINAL": "1",
+                     "TURNS": "7", "LATENCY_MAX_USD": "9", "NULL_BASELINE": "p-8"}
+
+
+@pytest.mark.parametrize("exported", [False, True], ids=["clean environment", "caller's variables exported"])
+def test_make_targets_gate_measure_and_report_a_pass(monkeypatch, exported):
     """`make evals-gate`, `evals-latency` and `evals-report` run their subcommands with what they are
-    given; the gate and the report name a pass with PASS, and stop before running anything without it."""
+    given; the gate and the report name a pass with PASS, and stop before running anything without it.
+    What a caller exported never reaches the targets the test runs."""
+    for name, value in CALLERS_VARIABLES.items() if exported else ():
+        monkeypatch.setenv(name, value)
     assert "python -m evals.run gate --pass p-1 --final" in make("evals-gate", "PASS=p-1", "FINAL=1").stdout
     assert "--final" not in make("evals-gate", "PASS=p-1").stdout
     # The plan's latency run, locally: 20 turns of each kind for at most $3.

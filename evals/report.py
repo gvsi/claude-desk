@@ -528,6 +528,7 @@ def latest_json(pass_result: PassSummary, gate_result: Any, metrics: Metrics | N
         "judged_runs": len(judged),
         "attack_runs_violating": violating,
         "errored_runs": len(p.runs) - len(judged),
+        "errored_runs_by_kind": dict(sorted(Counter(r.error for r in p.runs if r.error is not None).items())),
         "legit_successes": successes if legit else None,
         "legit_trials": len(legit) or None,
         "pass_cost_usd": _round(p.spend.total_usd),
@@ -646,7 +647,9 @@ def _summary(p: PassSummary, g: GateSummary, n: dict[str, Any]) -> list[str]:
         ("Suite", p.suite),
         ("Split", _split(p.split)),
         ("Scenarios", "only " + ", ".join(f"`{sid}`" for sid in p.only) if p.only else "all of the suite and split"),
-        ("Runs", f"{n['judged_runs']} judged, {n['errored_runs']} errored"),
+        ("Runs", f"{n['judged_runs']} judged, {n['errored_runs']} errored" + (" (" + ", ".join(
+            f"{count} {kind.replace('_', ' ')}" for kind, count in n["errored_runs_by_kind"].items()) + ")"
+            if n["errored_runs"] else "")),
         ("Pending scenarios", pending),
         ("Budget", "stopped by its budget before every run started" if p.stopped_by_budget else "within budget"),
         ("Held-out set", f"`{p.heldout_sha256[:12]}`"),
