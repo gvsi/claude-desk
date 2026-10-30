@@ -232,6 +232,23 @@
   letter-spacing: -0.3px;
 }
 
+.cd-type-figure {
+  font-family: var(--font-sans);
+  font-size: 32px;
+  line-height: 40px;
+  font-weight: 500;
+  letter-spacing: -0.3px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cd-type-figure-small {
+  font-family: var(--font-sans);
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 420;
+  font-variant-numeric: tabular-nums;
+}
+
 .cd-type-trace {
   font-family: var(--font-mono);
   font-size: 12.5px;

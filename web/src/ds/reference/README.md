@@ -23,6 +23,7 @@ npx vitest run --project storybook src/ds/boards
 | Sidebar (the conversation boards, N-Conv-Run1 and N-Conv-Agent-Run1) | width 264px; background `rgb(28, 27, 25)`, the app ground; no right border; at its own height, its Answering switch 4px under the pages |
 | Active nav row | height 36px; background `rgb(60, 57, 47)`; radius 8px; 14px/20px weight 420 |
 | Page title / greeting | Source Serif 4, 24px/32px weight 460 / 36px/44px weight 300 |
+| Today's figures (N-Today-Run1) | the booked total in `figure`, Hanken Grotesk 32px/40px weight 500, -0.3px; the stopped count in `figure-small`, 24px/32px weight 420; both tabular |
 | Content column | max-width 960px; main padding 24px 40px 20px; on the conversation pages, the page fills the main area (below) |
 | Claude's reply | Source Serif 4, 15px/23px weight 360, color `rgba(250, 249, 245, 0.92)` |
 | Visitor bubble | background `rgba(250, 249, 245, 0.06)`; radius 12px; padding 8px 14px; 15px/21px |

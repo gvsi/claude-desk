@@ -254,7 +254,7 @@ export function LastSevenDays({ bars }: LastSevenDaysProps) {
       ) : (
         <div className="board-week__block">
           <p className="board-week__total">
-            <span className="cd-type-amount">$1,860</span> <span className="board-quiet cd-type-message">booked</span>
+            <span className="cd-type-figure">$1,860</span> <span className="board-quiet cd-type-message">booked</span>
           </p>
           <p className="board-quiet cd-type-meta">11 bookings, 2 so far today</p>
         </div>
@@ -298,7 +298,7 @@ export function LastSevenDays({ bars }: LastSevenDaysProps) {
         ) : (
           <>
             <p className="board-week__total">
-              <span className="board-week__count">14</span> <span className="board-quiet cd-type-message">stopped</span>
+              <span className="cd-type-figure-small">14</span> <span className="board-quiet cd-type-message">stopped</span>
             </p>
             <p className="board-quiet cd-type-meta">Nothing was shared and no money moved.</p>
           </>

@@ -18,6 +18,8 @@ export interface TypeStyle {
   lineHeight: string;
   fontWeight: number;
   letterSpacing?: string;
+  /** `tabular-nums`, for figures that line up; the builder refuses any other value. */
+  fontVariantNumeric?: string;
   opticalSize?: number;
   family?: string;
   usage?: string;

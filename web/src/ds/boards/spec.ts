@@ -8,6 +8,7 @@ import { expect, within } from 'storybook/test';
 import { expectComputed, type ComputedExpectation } from '../test/expectComputed.ts';
 
 const SERIF = /^"Source Serif 4"/;
+const SANS = /^"Hanken Grotesk"/;
 
 /** Each spec row, as computed styles. Rows that differ by board say which boards they are for. */
 export const SPEC = {
@@ -34,6 +35,9 @@ export const SPEC = {
   },
   pageTitle: { fontFamily: SERIF, fontSize: '24px', lineHeight: '32px', fontWeight: '460' },
   greeting: { fontFamily: SERIF, fontSize: '36px', lineHeight: '44px', fontWeight: '300' },
+  /** Today's "Last 7 days" (N-Today-Run1): the booked total, then the smaller stopped count, with tabular figures. */
+  figure: { fontFamily: SANS, fontSize: '32px', lineHeight: '40px', fontWeight: '500', letterSpacing: '-0.3px', fontVariantNumeric: 'tabular-nums' },
+  figureSmall: { fontFamily: SANS, fontSize: '24px', lineHeight: '32px', fontWeight: '420', letterSpacing: 'normal', fontVariantNumeric: 'tabular-nums' },
   main: { paddingTop: '24px', paddingRight: '40px', paddingBottom: '20px', paddingLeft: '40px' },
   content: { maxWidth: '960px' },
   /** The conversation boards: the page fills the main area, so its list starts at the sidebar's seam. */

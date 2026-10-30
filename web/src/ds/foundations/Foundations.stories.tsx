@@ -36,6 +36,8 @@ const SAMPLES: Record<string, string> = {
   beta: 'Beta',
   'brand-name': 'Rivera Plumbing',
   amount: '$20.00',
+  figure: '$1,860',
+  'figure-small': '14',
   trace: 'prev_hash 9f2c41d07a',
 };
 
@@ -162,6 +164,7 @@ function TypeSheet() {
                 `weight ${style.fontWeight}`,
                 'opticalSize' in style ? `optical size ${style.opticalSize}` : null,
                 'letterSpacing' in style ? `tracking ${style.letterSpacing}` : null,
+                'fontVariantNumeric' in style ? 'tabular figures' : null,
               ]
                 .filter(Boolean)
                 .join(', ');
