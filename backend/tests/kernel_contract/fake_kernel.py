@@ -277,6 +277,7 @@ OWNER_NAME = re.compile(r"[A-Za-zÀ-ÿ' -]{1,40}")   # Plan 01a's owner_display_
 # A fetched page (the kernel's fetch guard reads the real one): here any `.example` site reads as this, and any
 # other address is refused.
 WEBSITE_TEXT = "{host}: leak repair, drain clearing and water heaters. Call us any weekday."
+RIVERA_MONEY_CAP_CENTS = 50_000   # the money cap of the seed's rules ($500, `DeskSeed.auto_money_cap_cents`)
 
 
 def _card(card_id: str, applies_to: str, mode: str, who: str, reason: str, **limits) -> RuleCard:
@@ -1024,6 +1025,7 @@ class Desk:
     cards: list[RuleCard] = field(default_factory=list)
     policy_version: int = 1
     versions: dict[int, VersionRecord] = field(default_factory=dict)   # owner drafts, by version
+    auto_money_cap_cents: int = 0       # the active version's money cap: 0 for a Desk `POST /desks` makes
     ledger: list[LedgerEntry] = field(default_factory=list)
     booked: set[str] = field(default_factory=set)                     # slot_ids with a confirmed booking
 
@@ -1454,14 +1456,16 @@ class FakeKernelState:
             "cedar_sha256": sha256_hex(canonical(cards)), "schema_sha256": sha256_hex("schema"),
             "baseline_sha256": sha256_hex("baseline"),
             "profiles_sha256": sha256_hex(canonical(sorted(desk.tools))), "invariants_sha256": sha256_hex("invariants"),
-            "review_thresholds_version": 1, "created_at": desk.created_at})
+            "review_thresholds_version": 1, "auto_money_cap_cents": desk.auto_money_cap_cents,
+            "created_at": desk.created_at})
 
     def _put_version(self, desk: Desk, record: VersionRecord) -> None:
         version = self._policy_version(desk, record)
         self._put("policy_versions", (desk.desk_id, record.version), {
             **version.model_dump(mode="json", include={"desk_id", "version", "cards", "status", "proof", "cedar_sha256",
                                                        "schema_sha256", "baseline_sha256", "profiles_sha256",
-                                                       "invariants_sha256", "review_thresholds_version"}),
+                                                       "invariants_sha256", "review_thresholds_version",
+                                                       "auto_money_cap_cents"}),
             "copy_id": desk.copy_id, "parent_version": record.parent, "created_at": record.created_at})
 
     def _policy_version(self, desk: Desk, record: VersionRecord) -> PolicyVersion:
@@ -1471,7 +1475,7 @@ class FakeKernelState:
                              schema_sha256=sha256_hex("schema"), baseline_sha256=sha256_hex("baseline"),
                              profiles_sha256=sha256_hex(canonical(list(record.key[2]))),
                              invariants_sha256=sha256_hex("invariants"), review_thresholds_version=1,
-                             status=record.status, proof=record.proof)
+                             auto_money_cap_cents=desk.auto_money_cap_cents, status=record.status, proof=record.proof)
 
     def _supersede_active(self, desk: Desk) -> None:
         """The active version's row becomes `superseded`, as an activation leaves it."""
@@ -1526,7 +1530,8 @@ class FakeKernelState:
             people=[SeedPerson(ref=ref, display_name=name, contact=contact) for ref, name, contact in RIVERA_PEOPLE],
             documents=[SeedDocument(ref=ref, title=title, body=body, record_owner_ref=owner_ref)
                        for ref, title, owner_ref, body in RIVERA_DOCUMENTS],
-            notifications=NotificationDefaults(**NOTIFICATIONS), connections=["mock_payments"])
+            notifications=NotificationDefaults(**NOTIFICATIONS), connections=["mock_payments"],
+            auto_money_cap_cents=RIVERA_MONEY_CAP_CENTS)
         return self._create_desk(copy_id, business, seed, tools=tuple(TOOL_FACTS), cards=RIVERA_CARDS)
 
     def _create_desk(self, copy_id: str, business: BusinessSeed, seed: DeskSeed, *, tools: tuple[str, ...],
@@ -1547,7 +1552,8 @@ class FakeKernelState:
         desk = Desk(desk_id=new_id("desk"), copy_id=copy_id, business_id=business.existing_business_id or new_id("biz"),
                     business_name=business.name, owner_display_name=business.owner_display_name,
                     brand=dict(business.brand), timezone=business.timezone, name=seed.name,
-                    slug=f"{slugify(business.name)}-{suffix}", hours=list(seed.hours), created_at=self.now)
+                    slug=f"{slugify(business.name)}-{suffix}", hours=list(seed.hours), created_at=self.now,
+                    auto_money_cap_cents=seed.auto_money_cap_cents)
         self.desks[desk.desk_id] = desk
         ids = {"copy_id": copy_id, "desk_id": desk.desk_id}
         if business.existing_business_id is None:
