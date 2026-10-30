@@ -30,7 +30,7 @@ export function Breadcrumb({ items, linkComponent: Link = PlainLink }: Breadcrum
   const last = items.length - 1;
   return (
     <nav aria-label="Breadcrumb" className="cd-breadcrumb">
-      <ol className="cd-breadcrumb__list cd-type-meta">
+      <ol role="list" className="cd-breadcrumb__list cd-type-meta">
         {items.map((item, index) => (
           <li key={`${index}-${item.label}`} className="cd-breadcrumb__item">
             {index > 0 ? (

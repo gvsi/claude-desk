@@ -1,11 +1,11 @@
 # Breadcrumb
 
-`Breadcrumb` shows where a connector's or a tool's page sits under Rules, and links back up: "Rules / Stripe / Refund".
+`Breadcrumb` shows where a connector's or a tool's page sits under Connectors, and links back up: "Connectors / Stripe / Refund".
 
 ## When to use
 
-- At the top of a connector's page ("Rules / Payments"), a tool's page ("Rules / Stripe / Refund") and the add-a-connector pages ("Rules / Google Calendar").
-- Not on the Rules page itself, which is the top of the trail, and not in Settings.
+- At the top of a connector's page ("Connectors / Payments"), a tool's page ("Connectors / Stripe / Refund") and the add-a-connector pages ("Connectors / Google Calendar"), as the Connectors tab boards draw them.
+- Not on the Connectors page itself, which is the top of the trail, and not on Rules or in Settings.
 
 ## What it shows
 

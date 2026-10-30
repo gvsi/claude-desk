@@ -99,9 +99,7 @@ const meta = {
   },
   parameters: {
     layout: 'fullscreen',
-    canvas: 'none',
-    canvasNote:
-      'From the canvas board N-Intro-D on the Claude Desk · First visit page; the design system screens plan adds it to the reference boards.',
+    canvas: 'N-Intro-D',
   },
 } satisfies Meta<typeof IntroDialog>;
 

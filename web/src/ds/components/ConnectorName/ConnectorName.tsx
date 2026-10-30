@@ -25,6 +25,11 @@ export interface ConnectorNameProps {
   size: 'page' | 'section' | 'inline';
   /** A heading at this level; a `span` when left out. */
   level?: 1 | 2 | 3;
+  /**
+   * Leaves out "Built in" where the page already groups connectors by where they come from, as
+   * the Rules page and the Connectors page draw them. The "Mock" badge is never left out.
+   */
+  hideBuiltIn?: boolean;
 }
 
 const TYPE = { page: 'cd-type-page-title', section: 'cd-type-section', inline: null } as const;
@@ -34,7 +39,7 @@ const TYPE = { page: 'cd-type-page-title', section: 'cd-type-section', inline: n
  * connector, or an outlined "Mock" pill for an external one. Every component that names a
  * connector uses it, so "Mock" sits beside every external connector's name.
  */
-export function ConnectorName({ connector, size, level }: ConnectorNameProps) {
+export function ConnectorName({ connector, size, level, hideBuiltIn = false }: ConnectorNameProps) {
   const Tag = level === undefined ? 'span' : (`h${level}` as const);
   const type = TYPE[size];
   // Anything but a built-in connector is external, and so a mock in the demo.
@@ -42,8 +47,12 @@ export function ConnectorName({ connector, size, level }: ConnectorNameProps) {
   return (
     <Tag className={`cd-connector-name cd-connector-name--${size}`}>
       <span className={type ? `cd-connector-name__name ${type}` : 'cd-connector-name__name'}>{connector.name}</span>
-      {/* A real space, so the name and its badge read as two words; the flex gap draws it. */}{' '}
-      {builtIn ? <span className="cd-connector-name__built-in cd-type-caption">Built in</span> : <Pill>Mock</Pill>}
+      {builtIn && hideBuiltIn ? null : (
+        <>
+          {/* A real space, so the name and its badge read as two words; the flex gap draws it. */}{' '}
+          {builtIn ? <span className="cd-connector-name__built-in cd-type-caption">Built in</span> : <Pill>Mock</Pill>}
+        </>
+      )}
     </Tag>
   );
 }

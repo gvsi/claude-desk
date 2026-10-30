@@ -4,7 +4,7 @@
 
 ## When to use
 
-- Two to four short options that are all worth seeing at once, such as a view of the Safety page ("Attempts", "Every entry").
+- Two to four short options that are all worth seeing at once: a view of the Safety page ("Attempts", "Every entry", N-Safety-Run1).
 - Not for the Rules page's presets: a preset is a starting point the owner reviews, so it is a menu (`PresetMenu`), with nothing selected.
 - Not for an on/off setting (use `Switch`), and not for long lists (use a menu).
 

@@ -11,9 +11,9 @@
 
 - A native modal `<dialog>` like the picker's: 600 px wide, 48 px from the top of the window, over `scrim` with `shadow-dialog`, 28 px of padding, 20 px between its parts.
 - `Steps` at the top.
-- The connector's `ConnectorIcon` at `page` size beside its title, "Connect {name}" in serif `.cd-type-page-title` with the Mock badge (`ConnectorName`), which names the dialog ("Connect Google Calendar Mock").
+- The connector's `ConnectorIcon`, drawn 44 px here and centered on the title and the mock line, beside its title, "Connect {name}" in serif `.cd-type-page-title` with the Mock badge (`ConnectorName`), which names the dialog ("Connect Google Calendar Mock").
 - Under the title, in secondary meta: "A mock sign-in. No {provider} account is used, and nothing is read from or sent to {provider}."
-- The connector's promise as a `ConnectorPromise` card.
+- The connector's promise as a `ConnectorPromise` card, padded 14 px 16 px here.
 - A radio group named by `question`: a bordered box per choice (`line-control` at `radius-control`, the checked one on `accent-blue`), its native radio in the accent color, `label` in body type and `detail` in secondary meta.
 - At the right, a secondary "Cancel" → `onCancel()` and a primary "Continue" → `onContinue(value)`, disabled until `value` is one of the choices.
 - It asks for no account details: no text field and no password.

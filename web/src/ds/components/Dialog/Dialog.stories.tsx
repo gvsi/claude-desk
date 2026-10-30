@@ -55,7 +55,7 @@ const meta = {
     layout: 'fullscreen',
     canvas: 'none',
     canvasNote:
-      'No board draws a dialog. "Start over" on N-Reviewer-Arrival and "Delete this Desk" in Settings open one; it takes the raised surface, card border and radius of the switcher on N-Switcher, with no shadow.',
+      'No board draws a dialog. "Start over" in the reviewer bar on N-Today-Run1 and "Delete this Desk" in Settings open one; it takes the raised surface, card border and radius of the switcher on N-Switcher-Run1, with no shadow.',
   },
 } satisfies Meta<typeof Dialog>;
 

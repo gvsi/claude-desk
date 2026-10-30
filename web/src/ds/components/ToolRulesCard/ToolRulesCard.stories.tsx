@@ -4,6 +4,7 @@ import { expect, fn, within } from 'storybook/test';
 import type { RuleCard } from '../../../api/contracts.ts';
 import { rivera } from '../../fixtures';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { expectListsKeepTheirRole } from '../../test/expectListRoles.ts';
 import type { RuleRowProps } from '../RuleRow/RuleRow.tsx';
 import { rulesForTool } from './toolRules.ts';
 import { ToolRulesCard } from './ToolRulesCard.tsx';
@@ -35,7 +36,7 @@ const meta = {
     tool: {
       name: 'Payment link',
       description: 'Makes a one-time link for a quote. Charges money. Can be undone.',
-      href: '/rules/payments/payment-link',
+      href: '/connectors/payments/payment-link',
     },
     // The rules that govern the tool, most specific first: the agent's shared rule, then the tool's own.
     rules: rulesForTool({ tool: 'native.payment_link', effects: ['charge'] }, cards).map((card) => row(card, onChange)),
@@ -58,12 +59,14 @@ export const PaymentLinkOnPayments: Story = {
     canvasNote:
       "The shared rule is the demo agent's charges up to $20, automatic, read as \"Automatic up to $20; over $20, ask me first\"; the board's example is illustrative. A rule for one agent outranks the tool's own rule, so it comes first.",
   },
-  play: async ({ args, canvas }) => {
+  play: async ({ args, canvas, canvasElement }) => {
+    // list_semantics_kept: a list drawn without markers says role="list", so Safari keeps it a list.
+    await expect(expectListsKeepTheirRole(canvasElement)).toBeGreaterThanOrEqual(1);
     const card = canvas.getByRole('region', { name: 'Payment link' });
     expectComputed(card, { paddingTop: '16px', borderTopLeftRadius: '12px' });
     // The tool's name and line are one link to its page, with a chevron.
     const link = canvas.getByRole('link', { name: /^Payment link/ });
-    await expect(link).toHaveAttribute('href', '/rules/payments/payment-link');
+    await expect(link).toHaveAttribute('href', '/connectors/payments/payment-link');
     await expect(link).toHaveTextContent('Makes a one-time link for a quote. Charges money. Can be undone.');
     await expect(link.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
     // A row per rule, the shared one first.
@@ -126,8 +129,8 @@ export const NoFallback: Story = {
 export const Phone: Story = {
   globals: { viewport: { value: 'phone', isRotated: false } },
   parameters: {
-    canvas: 'N-Conn-16-Phone-Rules',
-    canvasNote: "The Payments page's first card on a phone, following the updated phone board: each outcome on its own line.",
+    canvas: 'none',
+    canvasNote: "The Payments page's first card on a phone, each outcome on its own line. No board draws a connector's page on a phone; the nearest is N-Conn-24-Phone-Connectors.",
   },
   play: async ({ canvas, canvasElement }) => {
     const width = window.innerWidth;

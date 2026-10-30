@@ -24,3 +24,4 @@ infra/out/
 infra/cdk.context.json
 # Tools make downloads for this machine (make cvc5).
 .tools/
+evals/out/

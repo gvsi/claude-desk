@@ -23,8 +23,9 @@
   min-width: 0;
 }
 
+/* 4 px under the name, as the connector boards set it. */
 .cd-connector-header__description {
-  margin: var(--space-2) 0 0;
+  margin: var(--space-4) 0 0;
   color: var(--text-secondary);
   overflow-wrap: anywhere;
 }
@@ -43,9 +44,11 @@
   min-width: 0;
 }
 
+/* The 14 px lock sits on the middle of the title's first line: its box is the line's height, and
+   the icon is drawn centered in it. */
 .cd-connector-promise__icon {
   flex: none;
-  margin-top: var(--space-2);
+  height: 1lh;
   color: var(--text-secondary);
 }
 

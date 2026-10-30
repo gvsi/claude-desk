@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, within } from 'storybook/test';
 
 import { expectComputed } from '../../test/expectComputed.ts';
+import { expectListsKeepTheirRole } from '../../test/expectListRoles.ts';
 import { SubNav } from './SubNav.tsx';
 
 const meta = {
@@ -27,7 +28,7 @@ const meta = {
   parameters: {
     layout: 'padded',
     canvas: 'none',
-    canvasNote: "No signed board draws Settings; its rows follow the sidebar's nav rows on N-Conn-01-Rules (36 px, the current one on the selected fill).",
+    canvasNote: "No signed board draws Settings; its rows follow the sidebar's nav rows on N-Conn-23-Connectors (36 px, the current one on the selected fill).",
   },
 } satisfies Meta<typeof SubNav>;
 
@@ -36,7 +37,9 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Settings: Story = {
-  play: async ({ canvas }) => {
+  play: async ({ canvas, canvasElement }) => {
+    // list_semantics_kept: a list drawn without markers says role="list", so Safari keeps it a list.
+    await expect(expectListsKeepTheirRole(canvasElement)).toBeGreaterThanOrEqual(1);
     // current_is_marked: a nav named by its label, one link per item, the current one marked.
     const nav = canvas.getByRole('navigation', { name: 'Settings' });
     const links = within(nav).getAllByRole('link');

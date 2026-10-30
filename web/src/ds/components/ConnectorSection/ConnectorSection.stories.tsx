@@ -4,6 +4,7 @@ import { expect } from 'storybook/test';
 import { chen, rivera } from '../../fixtures';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { expectMockBesideExternalNames } from '../../test/expectMockBadges.ts';
+import { expectListsKeepTheirRole } from '../../test/expectListRoles.ts';
 import { outcomePhrase } from '../OutcomeMenu/outcomeWords.ts';
 import { ConnectorSection, type ConnectorSectionProps, type ToolSummaryView } from './ConnectorSection.tsx';
 
@@ -20,7 +21,7 @@ const meta = {
       <ConnectorSection {...args} />
     </div>
   ),
-  parameters: { layout: 'padded', canvas: 'N-Conn-01-Rules' },
+  parameters: { layout: 'padded', canvas: 'N-Conn-12-Chat' },
 } satisfies Meta<typeof ConnectorSection>;
 
 export default meta;
@@ -35,6 +36,8 @@ function rowName(tool: ToolSummaryView, outcome: string): string {
 export const Quotes: Story = {
   args: quotes,
   play: async ({ canvas, canvasElement }) => {
+    // list_semantics_kept: a list drawn without markers says role="list", so Safari keeps it a list.
+    await expect(expectListsKeepTheirRole(canvasElement)).toBeGreaterThanOrEqual(1);
     const section = canvas.getByRole('region', { name: 'Quotes' });
     expectComputed(section, { paddingTop: '0px', borderTopLeftRadius: '12px', backgroundColor: 'rgba(250, 249, 245, 0.03)' });
     const [header, row] = canvas.getAllByRole('link');
@@ -62,9 +65,12 @@ export const Quotes: Story = {
 
 export const Payments: Story = {
   play: async ({ args, canvas }) => {
-    // section_header_and_rows_are_links: the header is one link to the connector's page, naming it.
-    const header = canvas.getByRole('link', { name: /^Payments Built in .* 2 tools$/ });
+    // section_header_and_rows_are_links: the header is one link to the connector's page under
+    // Connectors, naming it with no "Built in" (the Rules page groups outcomes, not where tools come from).
+    const header = canvas.getByRole('link', { name: /^Payments Payment links .* 2 tools$/ });
     await expect(header).toHaveAttribute('href', args.href);
+    await expect(args.href).toMatch(/^\/connectors\//);
+    await expect(header).not.toHaveTextContent('Built in');
     // Each tool row is a link to its page, named by its name, summary and outcome; an automatic
     // rule with an amount limit reads its limit phrase.
     await expect(args.tools.map((tool) => outcomePhrase(tool.mode, tool.limit))).toEqual([
@@ -119,7 +125,7 @@ export const NeedsReview: Story = {
 
 const addedPayments: ConnectorSectionProps = {
   connector: chen.connectors.views.payments,
-  href: '/rules/payments',
+  href: '/connectors/payments',
   addedNote: 'Added just now',
   tools: [
     {
@@ -129,7 +135,7 @@ const addedPayments: ConnectorSectionProps = {
       summary: 'No rule yet',
       mode: 'ask',
       status: 'enabled',
-      href: '/rules/payments/payment-link',
+      href: '/connectors/payments/payment-link',
     },
     {
       key: 'native.charge_mandate',
@@ -138,7 +144,7 @@ const addedPayments: ConnectorSectionProps = {
       summary: 'No rule yet',
       mode: 'ask',
       status: 'disabled',
-      href: '/rules/payments/charge-within-a-signed-limit',
+      href: '/connectors/payments/charge-within-a-signed-limit',
     },
   ],
 };
@@ -152,7 +158,7 @@ export const AddedJustNow: Story = {
   play: async ({ canvas }) => {
     const note = canvas.getByText('Added just now');
     expectComputed(note, { fontSize: '12px', color: 'rgba(250, 249, 245, 0.64)' });
-    await expect(canvas.getByRole('link', { name: /^Payments Built in .* Added just now 2 tools$/ })).toBeVisible();
+    await expect(canvas.getByRole('link', { name: /^Payments Lets clients .* Added just now 2 tools$/ })).toBeVisible();
     const [link, mandate] = addedPayments.tools;
     if (!link || !mandate) throw new Error('Expected two tools');
     await expect(canvas.getByRole('link', { name: rowName(link, 'Ask me first') })).toBeVisible();
@@ -165,7 +171,7 @@ export const AddedJustNow: Story = {
 export const Phone: Story = {
   args: stripe,
   globals: { viewport: { value: 'phone', isRotated: false } },
-  parameters: { canvas: 'N-Conn-16-Phone-Rules' },
+  parameters: { canvas: 'none', canvasNote: 'No board on this branch draws the Rules page on a phone (its phone board is checked where the presets are built); the nearest is N-Conn-24-Phone-Connectors.' },
   play: async ({ canvas, canvasElement }) => {
     // phone_hides_descriptions: at 390 px the connector's line and count and each tool's line go.
     const width = window.innerWidth;
@@ -202,8 +208,8 @@ export const NarrowMaxLimit: Story = {
   args: paymentsAtTheCeiling,
   globals: { viewport: { value: 'narrow', isRotated: false } },
   parameters: {
-    canvas: 'N-Conn-16-Phone-Rules',
-    canvasNote: 'The largest limit at the narrowest phone width, following the updated phone board: the outcome on its own line.',
+    canvas: 'none',
+    canvasNote: 'The largest limit at the narrowest phone width: the outcome on its own line. No board on this branch draws the Rules page on a phone (its phone board is checked where the presets are built); the nearest is N-Conn-24-Phone-Connectors.',
     viewport: { options: { narrow: { name: 'Narrow phone', styles: { width: '320px', height: '640px' }, type: 'mobile' } } },
   },
   play: async ({ canvas, canvasElement }) => {
@@ -219,5 +225,27 @@ export const NarrowMaxLimit: Story = {
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
     const tooWide = [...canvasElement.querySelectorAll('*')].filter((el) => el.getBoundingClientRect().right > width);
     await expect(tooWide).toEqual([]);
+  },
+};
+
+/** A placeholder for what the screen puts above the tools, as the payment limit line sits there. */
+const LIMIT_LINE = 'No payment over $500 goes through without asking you, whatever the rules below say.';
+
+export const LineAboveTools: Story = {
+  args: { ...payments, aboveTools: <p className="cd-type-body">{LIMIT_LINE}</p> },
+  parameters: {
+    canvas: 'N-Conn-12-Chat',
+    canvasNote:
+      'The line between the header and the tools is the screen’s: on Payments and Stripe the payment limit, which the follow-up builds with its Change button; here a placeholder line.',
+  },
+  play: async ({ canvas }) => {
+    // aboveTools: one row between the header and the first tool, padded as a tool row, under a hairline.
+    const line = canvas.getByText(LIMIT_LINE);
+    const row = line.closest<HTMLElement>('.cd-connector-section__above');
+    if (!row) throw new Error('The line is not in its row');
+    expectComputed(row, { paddingTop: '12px', paddingLeft: '16px', borderTopWidth: '1px', borderTopColor: 'rgba(250, 249, 245, 0.12)' });
+    const [header, firstTool] = canvas.getAllByRole('link');
+    await expect(row.getBoundingClientRect().top).toBeGreaterThanOrEqual((header as HTMLElement).getBoundingClientRect().bottom);
+    await expect(row.getBoundingClientRect().bottom).toBeLessThanOrEqual((firstTool as HTMLElement).closest('li')?.getBoundingClientRect().top ?? 0);
   },
 };

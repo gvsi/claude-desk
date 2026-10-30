@@ -206,7 +206,7 @@ type HubSection = Pick<ConnectorSectionProps, 'connector' | 'href' | 'tools'>;
 const hubSections = [
   {
     connector: connectorViews.quotes,
-    href: '/rules/quotes',
+    href: '/connectors/quotes',
     tools: [
       {
         key: 'native.quote',
@@ -215,13 +215,13 @@ const hubSections = [
         summary: 'Anyone · No discounts',
         mode: 'auto',
         status: 'enabled',
-        href: '/rules/quotes/quote',
+        href: '/connectors/quotes/quote',
       },
     ],
   },
   {
     connector: connectorViews.bookings,
-    href: '/rules/bookings',
+    href: '/connectors/bookings',
     tools: [
       {
         key: 'native.find_slots',
@@ -230,7 +230,7 @@ const hubSections = [
         summary: 'Anyone',
         mode: 'auto',
         status: 'enabled',
-        href: '/rules/bookings/find-open-times',
+        href: '/connectors/bookings/find-open-times',
       },
       {
         key: 'native.book',
@@ -239,13 +239,13 @@ const hubSections = [
         summary: 'Anyone',
         mode: 'ask',
         status: 'enabled',
-        href: '/rules/bookings/book-a-consultation',
+        href: '/connectors/bookings/book-a-consultation',
       },
     ],
   },
   {
     connector: connectorViews.leads,
-    href: '/rules/leads',
+    href: '/connectors/leads',
     tools: [
       {
         key: 'native.capture_lead',
@@ -254,7 +254,7 @@ const hubSections = [
         summary: 'Anyone',
         mode: 'auto',
         status: 'enabled',
-        href: '/rules/leads/save-a-lead',
+        href: '/connectors/leads/save-a-lead',
       },
       {
         key: 'native.request_callback',
@@ -263,13 +263,13 @@ const hubSections = [
         summary: 'Anyone',
         mode: 'auto',
         status: 'enabled',
-        href: '/rules/leads/request-a-callback',
+        href: '/connectors/leads/request-a-callback',
       },
     ],
   },
   {
     connector: connectorViews.verification,
-    href: '/rules/verification',
+    href: '/connectors/verification',
     tools: [
       {
         key: 'native.start_verification',
@@ -278,13 +278,13 @@ const hubSections = [
         summary: 'Always on',
         mode: 'auto',
         status: 'enabled',
-        href: '/rules/verification/confirm-its-them',
+        href: '/connectors/verification/confirm-its-them',
       },
     ],
   },
   {
     connector: connectorViews.documents,
-    href: '/rules/documents',
+    href: '/connectors/documents',
     tools: [
       {
         key: 'native.release_document',
@@ -293,7 +293,7 @@ const hubSections = [
         summary: "The record's owner, verified",
         mode: 'auto',
         status: 'enabled',
-        href: '/rules/documents/share-a-document',
+        href: '/connectors/documents/share-a-document',
       },
     ],
   },

@@ -3,6 +3,7 @@ import { expect, within } from 'storybook/test';
 
 import { rivera } from '../../fixtures';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { expectListsKeepTheirRole } from '../../test/expectListRoles.ts';
 import { RecentRequests } from './RecentRequests.tsx';
 
 const meta = {
@@ -28,6 +29,8 @@ type Story = StoryObj<typeof meta>;
 
 export const Refund: Story = {
   play: async ({ args, canvas, canvasElement, userEvent }) => {
+    // list_semantics_kept: a list drawn without markers says role="list", so Safari keeps it a list.
+    await expect(expectListsKeepTheirRole(canvasElement)).toBeGreaterThanOrEqual(1);
     const section = canvas.getByRole('region', { name: 'Recent requests under these rules' });
     await expect(within(section).getByRole('heading', { level: 2, name: 'Recent requests under these rules' })).toBeVisible();
     const items = within(section).getAllByRole('listitem');
@@ -48,13 +51,13 @@ export const Refund: Story = {
       await expect(link).toHaveAccessibleDescription(`${row.when} ${row.why} ${row.outcome}`);
     }
     await expect(canvas.getAllByRole('link')).toHaveLength(args.rows.length);
-    // Rows under hairlines; when and why in secondary meta, what in body type.
+    // Rows under hairlines; when in secondary meta, why in secondary caption type, what in body type.
     const first = items[0] as HTMLElement;
     const row = args.rows[0];
     if (!row) throw new Error('No rows');
     expectComputed(first, { borderTopWidth: '1px', borderTopColor: 'rgba(250, 249, 245, 0.12)' });
     expectComputed(within(first).getByText(row.when), { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
-    expectComputed(within(first).getByText(row.why), { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(within(first).getByText(row.why), { fontSize: '12px', color: 'rgba(250, 249, 245, 0.64)' });
     expectComputed(within(first).getByRole('link'), { fontSize: '14px', color: 'rgba(250, 249, 245, 0.92)' });
     // The whole row opens the record: the link's overlay covers it.
     const overlay = getComputedStyle(within(first).getByRole('link'), '::after');

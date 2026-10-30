@@ -16,7 +16,7 @@ const meta = {
   parameters: {
     layout: 'padded',
     canvas: 'none',
-    canvasNote: 'No board shows an empty list; this is the conversation list of N-Conv-Live before anyone has written.',
+    canvasNote: 'No board shows an empty list; this is the conversation list of N-Conv-Run1 before anyone has written.',
   },
 } satisfies Meta<typeof EmptyState>;
 

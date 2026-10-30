@@ -9,7 +9,7 @@ const meta = {
   title: 'Layout/Card',
   component: Card,
   args: { children: null },
-  parameters: { layout: 'padded', canvas: 'N-Conn-01-Rules' },
+  parameters: { layout: 'padded', canvas: 'N-Conn-23-Connectors' },
 } satisfies Meta<typeof Card>;
 
 export default meta;
@@ -83,7 +83,7 @@ export const WithStatusHeader: Story = {
     </div>
   ),
   parameters: {
-    canvas: 'N-Today-NeedsYou',
+    canvas: 'N-Today-Run1',
     canvasNote: 'The live handoff card without its two buttons, which the Today screen adds.',
   },
   play: async ({ canvas, canvasElement }) => {

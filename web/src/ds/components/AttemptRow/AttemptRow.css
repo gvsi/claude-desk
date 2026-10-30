@@ -1,6 +1,6 @@
 /* AttemptRow: a row link at the control radius, at least 50 px tall, in three columns: the time,
-   what they tried over where it came from (each one line with an ellipsis), and the checkpoint that
-   stopped it. The open attempt is on the selected fill; others fill on hover at motion-instant.
+   what they tried over where it came from (each one line with an ellipsis, a replayed attempt's
+   Recorded tag 10 px after where it came from), and the checkpoint that stopped it. The open attempt is on the selected fill; others fill on hover at motion-instant.
    In a narrow list the checkpoint moves under the words. Nothing moves under reduced motion. */
 
 .cd-attempt-row {
@@ -62,6 +62,14 @@
 
 .cd-attempt-row__who {
   color: var(--text-secondary);
+}
+
+/* Where it came from, then the Recorded tag 10 px after it; the words give way before the tag. */
+.cd-attempt-row__from {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  min-width: 0;
 }
 
 .cd-attempt-row__stopped {

@@ -6,7 +6,7 @@ import { ConceptFooter } from './ConceptFooter.tsx';
 const meta = {
   title: 'Layout/ConceptFooter',
   component: ConceptFooter,
-  parameters: { layout: 'padded', canvas: 'N-Today-NeedsYou' },
+  parameters: { layout: 'padded', canvas: 'N-Today-Run1' },
 } satisfies Meta<typeof ConceptFooter>;
 
 export default meta;
@@ -27,7 +27,7 @@ export const Default: Story = {
 export const PoweredBy: Story = {
   args: { poweredBy: true },
   parameters: {
-    canvas: 'N-Public-Rivera',
+    canvas: 'N-Public-Rivera-Run1',
     canvasNote: 'The board draws a 14 px mark; here it is the smallest mark size, 16 px.',
   },
   play: async ({ canvas, canvasElement }) => {

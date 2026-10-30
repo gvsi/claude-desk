@@ -32,6 +32,7 @@ export {
   type CopyPair,
 } from './components/Notice/errorCopy.ts';
 export { EmptyState, type EmptyStateProps } from './components/EmptyState/EmptyState.tsx';
+export { DisclosureLine, type DisclosureLineProps } from './components/DisclosureLine/DisclosureLine.tsx';
 
 // Controls
 export { Switch, type SwitchProps } from './components/Switch/Switch.tsx';
@@ -55,6 +56,8 @@ export {
   Sidebar,
   type NavCount,
   type NavKey,
+  type SidebarAbout,
+  type SidebarAboutLink,
   type SidebarLinkProps,
   type SidebarProps,
 } from './components/Sidebar/Sidebar.tsx';
@@ -88,6 +91,22 @@ export {
 } from './components/IntroDialog/IntroDialog.tsx';
 export { INTRO_ERROR_COPY } from './components/IntroDialog/introCopy.ts';
 
+// Verification
+export {
+  VerifyCodeForm,
+  type VerifyCodeFormProps,
+  type VerifyCodeState,
+} from './components/VerifyCodeForm/VerifyCodeForm.tsx';
+export { VerifiedLine, type VerifiedLineProps } from './components/VerifyCodeForm/VerifiedLine.tsx';
+export {
+  DemoInboxPanel,
+  type DemoInboxItem,
+  type DemoInboxPanelProps,
+} from './components/DemoInboxPanel/DemoInboxPanel.tsx';
+
+// Payments
+export { MockCheckout, type MockCheckoutProps } from './components/MockCheckout/MockCheckout.tsx';
+
 // Reply cards
 export { ReplyCard, type ReplyCardProps } from './components/ReplyCard/ReplyCard.tsx';
 export { cardView, type CardView } from './components/ReplyCard/cardView.ts';
@@ -120,6 +139,14 @@ export {
 } from './components/MarginReceipt/receiptTone.ts';
 export { MarginNote, type MarginNoteProps } from './components/MarginNote/MarginNote.tsx';
 
+// Recorded history
+export { RecordedTag, type RecordedTagProps } from './components/RecordedTag/RecordedTag.tsx';
+export { RecordedNote, type RecordedNoteProps } from './components/RecordedNote/RecordedNote.tsx';
+export {
+  RecordedHistoryLink,
+  type RecordedHistoryLinkProps,
+} from './components/RecordedHistoryLink/RecordedHistoryLink.tsx';
+
 // Owner decisions
 export { ApprovalCard, type ApprovalCardProps } from './components/ApprovalCard/ApprovalCard.tsx';
 export { TakeOverBar, type TakeOverBarProps } from './components/TakeOverBar/TakeOverBar.tsx';
@@ -146,6 +173,11 @@ export {
 } from './components/ConnectorSection/ConnectorSection.tsx';
 export { describeEffects } from './components/ConnectorSection/describeEffects.ts';
 export { ConnectorList, type ConnectorListProps } from './components/ConnectorList/ConnectorList.tsx';
+export {
+  ConnectorDirectory,
+  type ConnectorDirectoryProps,
+  type DirectoryRowView,
+} from './components/ConnectorDirectory/ConnectorDirectory.tsx';
 export { AlwaysOnList, type AlwaysOnListProps } from './components/AlwaysOnList/AlwaysOnList.tsx';
 export {
   ChangeReview,

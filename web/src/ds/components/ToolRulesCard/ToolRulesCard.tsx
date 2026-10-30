@@ -55,7 +55,7 @@ export function ToolRulesCard({ label, tool, rules, fallback = true, onAddRule, 
         </Link>
       ) : null}
       {rules.length > 0 ? (
-        <ul className="cd-tool-rules__rules">
+        <ul role="list" className="cd-tool-rules__rules">
           {rules.map((rule) => (
             <li key={rule.rule.card_id} className="cd-tool-rules__rule">
               <RuleRow {...rule} />

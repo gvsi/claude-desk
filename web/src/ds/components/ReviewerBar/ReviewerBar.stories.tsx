@@ -11,9 +11,7 @@ const meta = {
   args: { ownerName: rivera.business.ownerName, onStartOver: fn() },
   parameters: {
     layout: 'fullscreen',
-    canvas: 'N-Reviewer-Arrival',
-    canvasNote:
-      "The board says “You're Maria today.”; the bar names the owner as the business shows them (owner_display_name) and leaves out the board's info icon, which repeats the words.",
+    canvas: 'N-Today-Run1',
   },
 } satisfies Meta<typeof ReviewerBar>;
 

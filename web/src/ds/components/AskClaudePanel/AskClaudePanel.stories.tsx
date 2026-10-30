@@ -1,7 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
+import { useState } from 'react';
 import { expect, fn, within } from 'storybook/test';
 
 import { chen, proseBlock } from '../../fixtures';
+import { AppShell } from '../AppShell/AppShell.tsx';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { ClaudeMessage } from '../ClaudeMessage/ClaudeMessage.tsx';
 import { VisitorMessage } from '../VisitorMessage/VisitorMessage.tsx';
@@ -85,17 +87,99 @@ export const Writing: Story = {
   },
 };
 
+/** The opener on the page behind the panel, as the Rules page's composer opens it. */
+const OPENER = 'Ask Claude to change a rule';
+
+/**
+ * A phone screen with the panel shut: the owner app's shell, a page with its own controls and the
+ * button that opens the panel, which goes in the shell's `panel`. Closing the panel removes it, as
+ * the screen does.
+ */
+function PhoneScreen(args: Parameters<typeof AskClaudePanel>[0]) {
+  const [open, setOpen] = useState(false);
+  return (
+    <AppShell
+      business={chen.business.name}
+      sidebar={
+        <nav aria-label="Main">
+          <a href="#rules">Rules</a>
+        </nav>
+      }
+      panel={
+        open ? (
+          <AskClaudePanel
+            {...args}
+            onClose={() => {
+              args.onClose();
+              setOpen(false);
+            }}
+          />
+        ) : null
+      }
+    >
+      <h1 className="cd-type-page-title">Rules</h1>
+      <p>
+        <a href="#quotes">Quotes</a>
+      </p>
+      <p>
+        <button type="button">Add a connector</button>
+      </p>
+      <p>
+        <button type="button" onClick={() => setOpen(true)}>
+          {OPENER}
+        </button>
+      </p>
+    </AppShell>
+  );
+}
+
 export const Phone: Story = {
   globals: { viewport: { value: 'phone', isRotated: false } },
-  parameters: { canvasNote: 'No board draws the panel on a phone: under 640 px it takes the full width, with no seam.' },
-  play: async ({ canvas, canvasElement }) => {
+  render: (args) => <PhoneScreen {...args} />,
+  parameters: {
+    canvasNote:
+      'No board draws the panel on a phone: under 640 px it is a modal sheet over the whole window, with no seam; the page behind is inert, focus moves into it and stays there, and returns to what opened it.',
+  },
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
     const width = window.innerWidth;
     await expect(width).toBe(390);
-    const panel = canvas.getByRole('complementary', { name: 'Ask Claude' });
-    await expect(panel.getBoundingClientRect().width).toBe(390);
-    expectComputed(panel, { borderLeftWidth: '0px' });
+    const opener = canvas.getByRole('button', { name: OPENER });
+    await userEvent.click(opener);
+
+    // A modal sheet over the whole window, named by its heading, with no seam.
+    const sheet = canvas.getByRole('dialog', { name: 'Ask Claude' });
+    await expect(sheet).toHaveAttribute('aria-modal', 'true');
+    const box = sheet.getBoundingClientRect();
+    await expect([box.left, box.top, box.width, box.height]).toEqual([0, 0, 390, window.innerHeight]);
+    expectComputed(sheet, { borderLeftWidth: '0px' });
+
+    // Focus moves in, to the composer; the page behind is inert.
+    const composer = within(sheet).getByRole('textbox', { name: 'Ask Claude' });
+    await expect(composer).toHaveFocus();
+    const behind = [opener, canvasElement.querySelector<HTMLElement>('a[href="#quotes"]'), canvasElement.querySelector<HTMLElement>('.cd-app-shell__menu')];
+    for (const control of behind) {
+      await expect(control?.closest('[inert]'), `${control?.textContent ?? ''} is inert`).not.toBeNull();
+      control?.focus();
+      await expect(document.activeElement, `${control?.textContent ?? ''} can't take focus`).not.toBe(control);
+    }
+
+    // phone_sheet_keeps_focus: Tab and Shift+Tab stay inside the sheet, every stop on a control in it.
+    for (let i = 0; i < 6; i += 1) {
+      await userEvent.tab();
+      await expect(sheet.contains(document.activeElement), `Tab ${i + 1} stays in the sheet`).toBe(true);
+    }
+    const close = within(sheet).getByRole('button', { name: 'Close' });
+    close.focus();
+    await userEvent.tab({ shift: true });
+    await expect(sheet.contains(document.activeElement), 'Shift+Tab from the first control stays in the sheet').toBe(true);
+
+    // Escape closes it, and focus returns to what opened it; the page is live again.
+    await userEvent.keyboard('{Escape}');
+    await expect(args.onClose).toHaveBeenCalledTimes(1);
+    await expect(canvas.queryByRole('dialog', { name: 'Ask Claude' })).toBeNull();
+    await expect(opener).toHaveFocus();
+    await expect(canvasElement.querySelector('[inert]')).toBeNull();
+
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
-    const tooWide = [...canvasElement.querySelectorAll('*')].filter((el) => el.getBoundingClientRect().right > width);
-    await expect(tooWide).toEqual([]);
   },
 };

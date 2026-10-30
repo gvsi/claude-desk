@@ -33,10 +33,10 @@ export function AlwaysOnList({ level = 2 }: AlwaysOnListProps) {
         title="Always on"
         caption="On every Desk, whatever is connected. They can't be turned off."
       />
-      <ul className="cd-always-on__list">
+      <ul role="list" className="cd-always-on__list">
         {ALWAYS_ON.map((line) => (
           <li key={line} className="cd-always-on__item cd-type-body">
-            <Icon name="lock" size={16} className="cd-always-on__lock" />
+            <Icon name="lock" size={14} className="cd-always-on__lock" />
             {line}
           </li>
         ))}

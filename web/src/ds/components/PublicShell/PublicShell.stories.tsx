@@ -101,7 +101,7 @@ const meta = {
   },
   parameters: {
     layout: 'fullscreen',
-    canvas: 'N-Public-Rivera',
+    canvas: 'N-Public-Rivera-Run1',
     canvasNote:
       "The board's teal and copper are the seed's field and accent here. The accent is only the rule under the header, not the monogram's ring; the header's phone link and opening hours are the about column's cards; and the about column shows the charter's cards, not the board's free text and quote.",
   },
@@ -233,7 +233,7 @@ export const Tablet: Story = {
   ],
   parameters: {
     canvas: 'none',
-    canvasNote: 'No board shows the public page at 800 px; the about column of N-Public-Rivera moves under the chat, and the rows still fill the chat column.',
+    canvasNote: 'No board shows the public page at 800 px; the about column of N-Public-Rivera-Run1 moves under the chat, and the rows still fill the chat column.',
   },
   play: async ({ canvas, canvasElement }) => {
     await expect(canvas.getByTestId('tablet').getBoundingClientRect().width).toBe(TABLET);
@@ -283,7 +283,7 @@ export const Compact: Story = {
   ],
   parameters: {
     canvas: 'none',
-    canvasNote: 'No board shows the public page on a phone; the about column of N-Public-Rivera moves under the chat, and the gutters are 16 px.',
+    canvasNote: 'No board shows the public page on a phone; the about column of N-Public-Rivera-Run1 moves under the chat, and the gutters are 16 px.',
   },
   play: async ({ canvas, canvasElement }) => {
     const phone = canvas.getByTestId('phone');
@@ -317,7 +317,7 @@ export const Embedded: Story = {
   parameters: {
     canvas: 'none',
     canvasNote:
-      "No board shows the public page inside Today; it is N-Public-Rivera in the owner's 420 px panel, without the footer, which the owner screen has its own of.",
+      "No board shows the public page inside Today; it is N-Public-Rivera-Run1 in the owner's 420 px panel, without the footer, which the owner screen has its own of.",
   },
   play: async ({ canvas, canvasElement }) => {
     // No footer of its own, and no page landmarks: the owner screen has its own.
@@ -579,7 +579,7 @@ export const ClosedNowEsPhone: Story = {
   parameters: {
     canvas: 'none',
     canvasNote:
-      'The "Open now" sign-off board\'s phone header in Spanish: N-Public-Rivera at 390 px, with the closed status and "Claude puede ayudarte igual." on their own lines under the name and tagline.',
+      'The "Open now" sign-off board\'s phone header in Spanish: N-Public-Rivera-Run1 at 390 px, with the closed status and "Claude puede ayudarte igual." on their own lines under the name and tagline.',
   },
   play: async ({ canvas, canvasElement }) => {
     await expect(canvasElement.querySelector('.cd-public-shell')).toHaveAttribute('lang', 'es');
@@ -597,7 +597,7 @@ export const OpenNowEsUntilFridayMidnightPhone: Story = {
   parameters: {
     canvas: 'none',
     canvasNote:
-      'The "Open now" sign-off board\'s phone header with the copy table\'s longest Spanish open line: N-Public-Rivera at 390 px, the status on its own line under the name, still on one line.',
+      'The "Open now" sign-off board\'s phone header with the copy table\'s longest Spanish open line: N-Public-Rivera-Run1 at 390 px, the status on its own line under the name, still on one line.',
   },
   play: async ({ canvas }) => {
     const header = canvas.getByRole('banner');
@@ -613,7 +613,7 @@ export const ClosedNowEsLongestPhone: Story = {
   parameters: {
     canvas: 'none',
     canvasNote:
-      'The "Open now" sign-off board\'s phone header with the longest Spanish status: N-Public-Rivera at 390 px, closed until next Wednesday at 13:00 with "Claude puede ayudarte igual." under it, on their own lines under the name. Each still fits on one line, and nothing reaches past the phone\'s edge.',
+      'The "Open now" sign-off board\'s phone header with the longest Spanish status: N-Public-Rivera-Run1 at 390 px, closed until next Wednesday at 13:00 with "Claude puede ayudarte igual." under it, on their own lines under the name. Each still fits on one line, and nothing reaches past the phone\'s edge.',
   },
   play: async ({ canvas }) => {
     const header = canvas.getByRole('banner');
@@ -629,7 +629,7 @@ export const OpenAllWeekPhone: Story = {
   parameters: {
     canvas: 'none',
     canvasNote:
-      'The "Open now" sign-off board\'s phone header with the shortest line: N-Public-Rivera at 390 px, the status on its own line under the name even though it would fit beside it.',
+      'The "Open now" sign-off board\'s phone header with the shortest line: N-Public-Rivera-Run1 at 390 px, the status on its own line under the name even though it would fit beside it.',
   },
   play: async ({ canvas }) => {
     const header = canvas.getByRole('banner');
@@ -657,5 +657,35 @@ export const NoOpenStatus: Story = {
     const box = header.getBoundingClientRect();
     await expect(partOf(header, '.cd-public-shell__brand-text').getBoundingClientRect().right).toBe(box.right - 40);
     await expect(box.height).toBe(76);
+  },
+};
+
+/** Half of a 1280 px board: each state of the handoff board is a whole page 640 px wide. */
+const HALF = 640;
+
+export const HalfWidth: Story = {
+  args: { openStatus: OPEN_EN },
+  decorators: [
+    (Story) => (
+      <div data-testid="half" style={{ width: HALF }}>
+        <Story />
+      </div>
+    ),
+  ],
+  parameters: {
+    canvas: 'N-Public-Handoff-Run1',
+    canvasNote: 'One state of the board, 640 px wide: 16 px gutters, with the open status still at the right of the name, where the board labels the state.',
+  },
+  play: async ({ canvas }) => {
+    // Under 720 px the gutters are 16 px, header and chat alike, as the board draws each half.
+    const header = canvas.getByRole('banner');
+    expectComputed(header, { paddingLeft: '16px', paddingRight: '16px', height: '76px' });
+    expectComputed(canvas.getByRole('main'), { paddingLeft: '16px', paddingRight: '16px' });
+    // From 640 px up the open status stays on the name's line, at the right; only a phone wraps it.
+    const status = within(header).getByText(OPEN_EN.text);
+    const name = within(header).getByRole('heading', { level: 1, name: 'Rivera Plumbing' });
+    await expect(status.getBoundingClientRect().left).toBeGreaterThan(name.getBoundingClientRect().right);
+    await expect(status.getBoundingClientRect().bottom).toBeLessThanOrEqual(header.getBoundingClientRect().bottom);
+    await expect(canvas.getByTestId('half').scrollWidth).toBeLessThanOrEqual(HALF);
   },
 };

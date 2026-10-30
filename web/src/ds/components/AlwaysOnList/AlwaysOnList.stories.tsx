@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect } from 'storybook/test';
 
 import { expectComputed } from '../../test/expectComputed.ts';
+import { expectListsKeepTheirRole } from '../../test/expectListRoles.ts';
 import { AlwaysOnList } from './AlwaysOnList.tsx';
 
 const meta = {
@@ -12,7 +13,7 @@ const meta = {
       <AlwaysOnList {...args} />
     </div>
   ),
-  parameters: { layout: 'padded', canvas: 'N-Conn-01-Rules' },
+  parameters: { layout: 'padded', canvas: 'N-Conn-12-Chat' },
 } satisfies Meta<typeof AlwaysOnList>;
 
 export default meta;
@@ -29,6 +30,8 @@ const LINES = [
 
 export const Default: Story = {
   play: async ({ canvas, canvasElement }) => {
+    // list_semantics_kept: a list drawn without markers says role="list", so Safari keeps it a list.
+    await expect(expectListsKeepTheirRole(canvasElement)).toBeGreaterThanOrEqual(1);
     const heading = canvas.getByRole('heading', { level: 2, name: 'Always on' });
     await expect(heading).toBeVisible();
     await expect(canvas.getByText("On every Desk, whatever is connected. They can't be turned off.")).toBeVisible();

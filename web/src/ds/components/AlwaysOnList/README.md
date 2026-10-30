@@ -4,12 +4,12 @@
 
 ## When to use
 
-- At the end of the Rules page, after the connectors (N-Conn-01-Rules, N-Conn-16-Phone-Rules), and wherever the owner needs to see what can't be turned off.
+- At the end of the Rules page, after the connectors (N-Conn-12-Chat; the first Rules boards it was drawn on, N-Conn-01-Rules and N-Conn-16-Phone-Rules, are archived), and wherever the owner needs to see what can't be turned off.
 
 ## What it shows
 
 - A `section` named by its heading: a `SectionHeader` "Always on" (an `h2`, or `h3` with `level={3}`) with the caption "On every Desk, whatever is connected. They can't be turned off.", which drops under the title on a narrow line.
-- Then one line each, in `.cd-type-body` beside a 16 px `lock` (`aria-hidden`, `text-secondary`):
+- Then one line each, in `.cd-type-body` beside a 14 px `lock` (`aria-hidden`, `text-secondary`):
   - "Always says it's an AI"
   - "Private data only to its verified owner"
   - "Codes only go to the contact on record"

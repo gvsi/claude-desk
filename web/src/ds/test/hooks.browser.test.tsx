@@ -45,14 +45,16 @@ describe('story hooks', () => {
     await expect(probe(text, {}).run()).rejects.toThrow(/parameters\.canvas/);
     await expect(probe(text, { canvas: 'none' }).run()).rejects.toThrow(/canvasNote/);
     await expect(probe(text, { canvas: 'none', canvasNote: '  ' }).run()).rejects.toThrow(/canvasNote/);
-    await expect(probe(text, { canvas: 'N-Conv-Live' }).run()).resolves.toBeUndefined();
+    await expect(probe(text, { canvas: 'N-Conv-Run1' }).run()).resolves.toBeUndefined();
     await expect(probe(text, noBoard).run()).resolves.toBeUndefined();
   });
 
   it('unknown_board_fails', async () => {
     const text = () => <p>Reply checked against Maria Rivera’s rules.</p>;
     await expect(probe(text, { canvas: 'N-Nope' }).run()).rejects.toThrow(/"N-Nope"/);
-    // Only the current N- boards count; an older board name is unknown too.
+    // Only the current N- boards count; an older board name is unknown too, as is a board that
+    // left the reference list.
     await expect(probe(text, { canvas: 'Today-NeedsYou' }).run()).rejects.toThrow(/"Today-NeedsYou"/);
+    await expect(probe(text, { canvas: 'N-Conv-Live' }).run()).rejects.toThrow(/"N-Conv-Live"/);
   });
 });

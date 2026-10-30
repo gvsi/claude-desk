@@ -33,6 +33,7 @@ import type { ChangeReviewProps, ChangeRowView } from '../components/ChangeRevie
 import type { ConnectorPickerProps } from '../components/ConnectorPicker/ConnectorPicker';
 import type { ReviewToolView } from '../components/ConnectorReview/ConnectorReview';
 import type { ConnectorSectionProps } from '../components/ConnectorSection/ConnectorSection';
+import type { DirectoryRowView } from '../components/ConnectorDirectory/ConnectorDirectory';
 import type { RecentRequestView } from '../components/RecentRequests/RecentRequests';
 import type { RuleWord } from '../components/RuleRow/RuleRow';
 import { executedLine, type ExecutedTool } from './receipts';
@@ -1033,7 +1034,7 @@ const ruleLimits = {
 } satisfies Partial<Record<keyof typeof ruleWords, string>>;
 
 // ---------------------------------------------------------------------------------------------
-// Connectors on the Rules page (N-Conn-01-Rules)
+// Connectors on the Rules page (N-Conn-12-Chat) and the Connectors page (N-Conn-23-Connectors)
 
 const connectorViews = {
   quotes: {
@@ -1093,7 +1094,7 @@ type HubSection = Pick<ConnectorSectionProps, 'connector' | 'href' | 'tools'>;
 const hubSections = [
   {
     connector: connectorViews.quotes,
-    href: '/rules/quotes',
+    href: '/connectors/quotes',
     tools: [
       {
         key: 'native.quote',
@@ -1102,13 +1103,13 @@ const hubSections = [
         summary: 'Anyone · No discounts',
         mode: 'auto',
         status: 'enabled',
-        href: '/rules/quotes/quote',
+        href: '/connectors/quotes/quote',
       },
     ],
   },
   {
     connector: connectorViews.bookings,
-    href: '/rules/bookings',
+    href: '/connectors/bookings',
     tools: [
       {
         key: 'native.find_slots',
@@ -1117,7 +1118,7 @@ const hubSections = [
         summary: 'Anyone',
         mode: 'auto',
         status: 'enabled',
-        href: '/rules/bookings/find-open-times',
+        href: '/connectors/bookings/find-open-times',
       },
       {
         key: 'native.book',
@@ -1126,13 +1127,13 @@ const hubSections = [
         summary: '2 rules',
         mode: 'auto',
         status: 'enabled',
-        href: '/rules/bookings/book-a-visit',
+        href: '/connectors/bookings/book-a-visit',
       },
     ],
   },
   {
     connector: connectorViews.leads,
-    href: '/rules/leads',
+    href: '/connectors/leads',
     tools: [
       {
         key: 'native.capture_lead',
@@ -1141,7 +1142,7 @@ const hubSections = [
         summary: 'Anyone',
         mode: 'auto',
         status: 'enabled',
-        href: '/rules/leads/save-a-lead',
+        href: '/connectors/leads/save-a-lead',
       },
       {
         key: 'native.request_callback',
@@ -1150,13 +1151,13 @@ const hubSections = [
         summary: 'Anyone',
         mode: 'auto',
         status: 'enabled',
-        href: '/rules/leads/request-a-callback',
+        href: '/connectors/leads/request-a-callback',
       },
     ],
   },
   {
     connector: connectorViews.verification,
-    href: '/rules/verification',
+    href: '/connectors/verification',
     tools: [
       {
         key: 'native.start_verification',
@@ -1165,13 +1166,13 @@ const hubSections = [
         summary: 'Always on',
         mode: 'auto',
         status: 'enabled',
-        href: '/rules/verification/confirm-its-them',
+        href: '/connectors/verification/confirm-its-them',
       },
     ],
   },
   {
     connector: connectorViews.documents,
-    href: '/rules/documents',
+    href: '/connectors/documents',
     tools: [
       {
         key: 'native.release_document',
@@ -1180,13 +1181,13 @@ const hubSections = [
         summary: "The record's owner, verified",
         mode: 'auto',
         status: 'enabled',
-        href: '/rules/documents/share-a-document',
+        href: '/connectors/documents/share-a-document',
       },
     ],
   },
   {
     connector: connectorViews.payments,
-    href: '/rules/payments',
+    href: '/connectors/payments',
     tools: [
       {
         key: 'native.payment_link',
@@ -1196,7 +1197,7 @@ const hubSections = [
         mode: 'auto',
         limit: '$300',
         status: 'enabled',
-        href: '/rules/payments/payment-link',
+        href: '/connectors/payments/payment-link',
       },
       {
         key: 'native.charge_mandate',
@@ -1206,13 +1207,13 @@ const hubSections = [
         mode: 'auto',
         limit: '$20',
         status: 'enabled',
-        href: '/rules/payments/charge-within-a-signed-limit',
+        href: '/connectors/payments/charge-within-a-signed-limit',
       },
     ],
   },
   {
     connector: connectorViews.stripe,
-    href: '/rules/stripe',
+    href: '/connectors/stripe',
     tools: [
       {
         key: 'payments.list_charges',
@@ -1221,7 +1222,7 @@ const hubSections = [
         summary: "The record's owner, verified",
         mode: 'auto',
         status: 'enabled',
-        href: '/rules/stripe/see-charges',
+        href: '/connectors/stripe/see-charges',
       },
       {
         key: 'payments.create_refund',
@@ -1230,7 +1231,7 @@ const hubSections = [
         summary: 'The customer who paid, verified',
         mode: 'ask',
         status: 'enabled',
-        href: '/rules/stripe/refund',
+        href: '/connectors/stripe/refund',
       },
     ],
   },
@@ -1459,8 +1460,8 @@ const googleCalendar = {
         change: 'changed',
         title: 'Find open times',
         connector: connectorViews.bookings,
-        before: { mode: 'auto', reason: 'Open times come from the hours you set on Bookings.', words: [word('who', 'Anyone')] },
-        after: { mode: 'auto', reason: 'Open times now skip anything already on your calendar.', words: [word('who', 'Anyone')] },
+        before: { mode: 'auto', reason: 'Open times from your opening hours.', words: [word('who', 'Anyone')] },
+        after: { mode: 'auto', reason: 'Open times from your opening hours, skipping anything already on your calendar.', words: [word('who', 'Anyone')] },
         changed: ['reason'],
       },
     ],
@@ -1524,10 +1525,10 @@ function cardSide(id: keyof typeof ruleWords, card: RuleCard): NonNullable<Chang
 }
 
 /**
- * Choosing "Ask me first" (N-Conn-18-Preset-Review): each of the owner's cards goes,
- * personal ones included (Dana Whitfield's booking rule), and its tool falls to the default ask. The after side replaces the whole rule, which the
- * row's "Changed" tag says; within it only a new outcome is tagged, as the board draws it, so
- * Refund, which already asks, has no tag beside its outcome.
+ * Choosing "Ask me first" (N-Conn-18-Preset-Review): each of the owner's cards goes, personal ones
+ * included (Dana Whitfield's booking rule), and its tool falls to the default ask. The after side
+ * replaces the whole rule, which the row's "Changed" tag says; within it only a new outcome is
+ * tagged, as the board draws it, so Refund, which already asks, has no tag beside its outcome.
  */
 const askFirstReview = (
   [
@@ -1558,6 +1559,26 @@ const askFirstReview = (
 const limitRaise = {
   now: 'New limit: no payment over $1,000 without asking you.',
   was: 'Was $500',
+};
+
+/** A hub section as a row on the Connectors page: the connector, its tool count and its page. */
+function directoryRow(section: HubSection): DirectoryRowView {
+  return { connector: section.connector, tools: section.tools.length, href: section.href };
+}
+
+/**
+ * Rivera Plumbing's Connectors page (N-Conn-23-Connectors): the six built-in connectors, Stripe
+ * connected with its test account, and Google Calendar to connect (catalog-only in the demo).
+ */
+const directory = {
+  builtInCaption: 'Part of Claude Desk. Remove one from this Desk on its own page; Verification is always on.',
+  builtIn: hubSections
+    .filter((section) => section.connector.source.kind === 'built_in')
+    .map((section) => (section.connector.id === 'verification' ? { ...directoryRow(section), note: 'Always on' } : directoryRow(section))),
+  connected: hubSections
+    .filter((section) => section.connector.source.kind === 'external')
+    .map((section) => ({ ...directoryRow(section), connection: 'Rivera Plumbing, test mode (mock)' })),
+  available: [{ connector: googleCalendarView, tools: 1 }] as DirectoryRowView[],
 };
 
 const listChargesProfile = {
@@ -1805,6 +1826,7 @@ export const rivera = {
   ruleWords,
   ruleLimits,
   connectors,
+  directory,
   toolPages,
   recentRequests,
   changedRefund,

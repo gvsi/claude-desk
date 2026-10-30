@@ -1,28 +1,28 @@
-/* ConnectionPanel: the section heading, an app's details as rows under hairlines (the term in a
-   216 px column of secondary meta, its value in body type), then the consequence in secondary body
-   type with the secondary button at the right. On a narrow line the button drops under the words,
+/* ConnectionPanel: its parts 20 px apart. The section heading, an app's details as rows of 10 px
+   each under a hairline, none under the last (the term in a 200 px column of secondary meta, its
+   value 16 px after it in body type), then the consequence in secondary body type with the
+   secondary button at the right. On a narrow line the button drops under the words,
    and under 480 px each value sits under its term. */
 
 .cd-connection-panel {
   container: cd-connection-panel / inline-size;
   display: flex;
   flex-direction: column;
-  gap: var(--space-16);
+  gap: var(--space-20);
   min-width: 0;
 }
 
 .cd-connection-panel__details {
   margin: 0;
-  border-bottom: 1px solid var(--line-hairline);
 }
 
 .cd-connection-panel__detail {
   display: grid;
-  grid-template-columns: 216px minmax(0, 1fr);
+  grid-template-columns: var(--size-connection-term) minmax(0, 1fr);
   align-items: baseline;
   column-gap: var(--space-16);
   row-gap: var(--space-2);
-  padding: var(--space-12) 0;
+  padding: var(--space-10) 0;
   border-top: 1px solid var(--line-hairline);
 }
 

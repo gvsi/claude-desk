@@ -95,7 +95,7 @@ function PickerGroup({ id, heading, items, verb, onChoose }: PickerGroupProps) {
       <h3 id={id} className="cd-connector-picker__group-heading cd-type-control">
         {heading}
       </h3>
-      <ul className="cd-connector-picker__items" aria-labelledby={id}>
+      <ul role="list" className="cd-connector-picker__items" aria-labelledby={id}>
         {items.map(({ connector, state }) => (
           <li key={connector.id} className="cd-connector-picker__item">
             <ConnectorIcon icon={connector.icon} size="section" />

@@ -46,7 +46,7 @@ export function RecentRequests({ rows, linkComponent: Link = PlainLink }: Recent
       {rows.length === 0 ? (
         <p className="cd-recent-requests__empty cd-type-body">No requests under these rules yet.</p>
       ) : (
-        <ul className="cd-recent-requests__rows">
+        <ul role="list" className="cd-recent-requests__rows">
           {rows.map((row, index) => {
             const whenId = `${ids}-${index}-when`;
             const whyId = `${ids}-${index}-why`;
@@ -68,7 +68,7 @@ export function RecentRequests({ rows, linkComponent: Link = PlainLink }: Recent
                 ) : (
                   <span className="cd-recent-requests__what cd-type-body">{row.what}</span>
                 )}
-                <span id={whyId} className="cd-recent-requests__why cd-type-meta">
+                <span id={whyId} className="cd-recent-requests__why cd-type-caption">
                   {row.why}
                 </span>
                 <span id={outcomeId} className="cd-recent-requests__outcome cd-type-meta">

@@ -4,6 +4,7 @@ import { expect, fn, waitFor, within } from 'storybook/test';
 
 import { chen, rivera } from '../../fixtures';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { expectListsKeepTheirRole } from '../../test/expectListRoles.ts';
 import { ChangeReview, type ChangeRowView, type ChangeReviewProps } from './ChangeReview.tsx';
 
 /** The compiler's reason for a tool no card of the owner's covers yet. */
@@ -102,6 +103,21 @@ const turnBackOnRefund: ChangeRowView[] = [
   },
 ];
 
+const BOOK_REASON = 'Books a visit in your open times.';
+
+/** Book a visit moved from Ask me first to Automatic: only the outcome changed. */
+const bookAutomatically: ChangeRowView[] = [
+  {
+    key: 'rv-book',
+    change: 'changed',
+    title: 'Book a visit',
+    connector: rivera.connectors.views.bookings,
+    before: { mode: 'ask', reason: BOOK_REASON, words: [{ field: 'who', text: 'Anyone' }] },
+    after: { mode: 'auto', reason: BOOK_REASON, words: [{ field: 'who', text: 'Anyone' }] },
+    changed: ['mode'],
+  },
+];
+
 const CHECKED = {
   status: 'checked',
   lines: ['No conflict with your other rules.', 'Always-on rules still hold.', 'Nothing here can move money without your answer.'],
@@ -141,6 +157,8 @@ export const TurnOnPayments: Story = {
     canvasNote: "Chen & Co. CPA turning Payments on: both tools at Ask me first, under the compiler's default ask.",
   },
   play: async ({ args, canvas, canvasElement }) => {
+    // list_semantics_kept: a list drawn without markers says role="list", so Safari keeps it a list.
+    await expect(expectListsKeepTheirRole(canvasElement)).toBeGreaterThanOrEqual(1);
     const changes = canvas.getByRole('region', { name: 'Changes' });
     expectComputed(changes, { paddingTop: '16px', borderTopLeftRadius: '12px' });
     // rows_are_tagged_in_words: the tag is a word in an outlined pill.
@@ -148,12 +166,15 @@ export const TurnOnPayments: Story = {
     const tag = canvasElement.querySelector('.cd-change-review__tag');
     if (tag === null) throw new Error('No tag');
     expectComputed(tag, { borderTopWidth: '1px', borderTopColor: 'rgba(250, 249, 245, 0.22)', fontSize: '12px' });
-    // The title, then the connector's name and badge and the side's words; the reason; the outcome.
+    // The title, then the connector's name (no "Built in") and the side's words; then what applies,
+    // under "After" beside the handled bar: the words, the reason and the outcome.
     const rows = within(changes).getAllByRole('listitem');
     await expect(rows[0]).toHaveTextContent('Payment link');
-    // A built-in connector is named alone, without "Built in", as the signed review boards draw it.
     await expect(rows[0]).toHaveTextContent('Payments · Anyone');
     await expect(rows[0]).not.toHaveTextContent('Built in');
+    const after = within(rows[0] as HTMLElement).getByRole('group', { name: 'After' });
+    expectComputed(after, { borderLeftWidth: '2px', borderLeftColor: 'rgb(111, 168, 89)', paddingLeft: '12px' });
+    await expect(within(after).getByText('After')).toBeVisible();
     await expect(rows[0]).toHaveTextContent(DEFAULT_REASON);
     await expect(within(rows[0] as HTMLElement).getByText('Ask me first')).toBeVisible();
     await expect((rows[0] as HTMLElement).querySelector('.cd-status-dot--held')).not.toBeNull();
@@ -173,7 +194,7 @@ export const TurnOnPayments: Story = {
 export const RaiseDiscount: Story = {
   args: { rows: raiseDiscount, confirmLabel: undefined, cancelLabel: undefined },
   parameters: {
-    canvasNote: 'The board shows only the after side of a changed row; a changed rule shows both, because the owner confirms what is enforced.',
+    canvasNote: "The board's changed row changes a reason; this one changes a limit, drafted from the Rules page.",
   },
   play: async ({ args, canvas, canvasElement }) => {
     await expect(tags(canvasElement)).toEqual(['Changed']);
@@ -184,10 +205,15 @@ export const RaiseDiscount: Story = {
     await expect(after).toHaveTextContent(QUOTE_REASON);
     await expect(before).toHaveTextContent('Anyone · Discounts up to 10%');
     await expect(after).toHaveTextContent('Anyone · Discounts up to 50%');
-    // Status never by color alone: the line that changed says so in words, on the after side only.
+    // Status never by color alone: the line that changed says so in words, on the after side only,
+    // in weight 520; the bars beside the sides are the refused and handled tones, the words neutral.
     const changedLine = within(after).getByText(/Discounts up to 50%/).closest('p');
     if (changedLine === null) throw new Error('No after line');
     await expect(within(changedLine).getByText('Changed')).toBeVisible();
+    expectComputed(changedLine, { fontWeight: '520', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(before, { borderLeftWidth: '2px', borderLeftColor: 'rgb(220, 130, 144)' });
+    expectComputed(after, { borderLeftWidth: '2px', borderLeftColor: 'rgb(111, 168, 89)' });
+    expectComputed(within(after).getByText(QUOTE_REASON, { exact: false }), { fontWeight: '380', color: 'rgba(250, 249, 245, 0.92)' });
     await expect(within(before).queryByText('Changed')).toBeNull();
     // The reason and the outcome didn't change, so they aren't tagged.
     await expect(within(after).getAllByText('Changed')).toHaveLength(1);
@@ -200,15 +226,37 @@ export const RaiseDiscount: Story = {
   },
 };
 
+export const OutcomeChanged: Story = {
+  args: { rows: bookAutomatically, confirmLabel: undefined, cancelLabel: undefined },
+  parameters: {
+    canvasNote: "The board's changed row changes a reason; this one changes only the outcome, drafted from the Rules page.",
+  },
+  play: async ({ canvas }) => {
+    const before = canvas.getByRole('group', { name: 'Before' });
+    const after = canvas.getByRole('group', { name: 'After' });
+    // changed_outcome_is_strong: the after side's outcome is in weight 520 and says "Changed"; the
+    // before side's, and the lines that didn't change, stay at their own weight.
+    expectComputed(within(after).getByText('Automatic'), { fontWeight: '520' });
+    expectComputed(within(before).getByText('Ask me first'), { fontWeight: '380' });
+    expectComputed(within(after).getByText(BOOK_REASON, { exact: false }), { fontWeight: '380' });
+    await expect(within(after).getAllByText('Changed')).toHaveLength(1);
+    await expect(within(before).queryByText('Changed')).toBeNull();
+  },
+};
+
 export const AddAndRemove: Story = {
   args: { rows: addAndRemove, confirmLabel: undefined, cancelLabel: undefined },
-  parameters: { canvas: 'N-Conn-01-Rules', canvasNote: 'A rule added and one removed, drafted from the Rules page; no board draws this review.' },
+  parameters: { canvas: 'N-Conn-12-Chat', canvasNote: 'A rule added and one removed, drafted from the Rules page; no board draws this review.' },
   play: async ({ canvas, canvasElement }) => {
     // rows_are_tagged_in_words
     await expect(tags(canvasElement)).toEqual(['Added', 'Removed']);
     const [added, removed] = canvas.getAllByRole('listitem').slice(0, 2);
     await expect(added).toHaveTextContent('No bookings on Sundays.');
     await expect(added).toHaveTextContent('Bookings · Anyone · Sundays');
+    // What applies is After, beside the handled bar; what goes is Before, beside the refused bar.
+    expectComputed(within(added as HTMLElement).getByRole('group', { name: 'After' }), { borderLeftColor: 'rgb(111, 168, 89)' });
+    expectComputed(within(removed as HTMLElement).getByRole('group', { name: 'Before' }), { borderLeftWidth: '2px', borderLeftColor: 'rgb(220, 130, 144)' });
+    await expect(within(removed as HTMLElement).queryByRole('group', { name: 'After' })).toBeNull();
     await expect((added as HTMLElement).querySelector('.cd-status-dot--refused')).not.toBeNull();
     // A removed row shows the rule it removes.
     await expect(removed).toHaveTextContent(saturday.reason);
@@ -343,7 +391,7 @@ export const ConfirmingFromTheScreen: Story = {
 
 export const LimitOnly: Story = {
   args: { rows: [], hasOtherChanges: true, checks: { status: 'checked', lines: ['Always-on rules still hold.'] }, confirmLabel: undefined, cancelLabel: undefined },
-  parameters: { canvas: 'N-Conn-01-Rules', canvasNote: 'A draft that changes only what the screen shows above it, such as the money limit; no board draws it.' },
+  parameters: { canvas: 'N-Conn-12-Chat', canvasNote: 'A draft that changes only what the screen shows above it, such as the payment limit on the Rules page; no board on this branch draws it.' },
   play: async ({ args, canvas, canvasElement }) => {
     // limit_only_change_keeps_confirm
     await expect(canvas.getByText('Your rules stay the same.')).toBeVisible();
@@ -540,8 +588,8 @@ export const NarrowMaxLimit: Story = {
   args: { rows: ceiling, confirmLabel: undefined, cancelLabel: undefined },
   globals: { viewport: { value: 'narrow', isRotated: false } },
   parameters: {
-    canvas: 'N-Conn-16-Phone-Rules',
-    canvasNote: 'The largest limit a rule can carry, at the narrowest phone width; no board draws this review on a phone.',
+    canvas: 'none',
+    canvasNote: 'The largest limit a rule can carry, at the narrowest phone width; no board draws this review on a phone. The nearest is N-Conn-10-GCal-Confirm.',
     viewport: { options: { narrow: { name: 'Narrow phone', styles: { width: '320px', height: '640px' }, type: 'mobile' } } },
   },
   play: async ({ canvas, canvasElement }) => {
@@ -571,9 +619,9 @@ function afterSide(rows: HTMLElement[], index: number): HTMLElement {
 export const AskMeFirst: Story = {
   args: { rows: rivera.askFirstReview, checks: ASK_FIRST_CHECKS, confirmLabel: undefined, cancelLabel: undefined, cancelsLinks: true },
   parameters: {
-    canvas: 'N-Conn-18-Preset-Review',
+    canvas: 'none',
     canvasNote:
-      "Rivera's eight own rules and Dana Whitfield's personal booking rule, which the owner's \"Allow only for Dana Whitfield, always\" adds and the board doesn't draw; the board's shared rule for Alex Kim's assistant is the illustrative shared card, which isn't in Rivera's seed. The board's red Before and green After bars, its quieter Before outcome and its changed values at weight 520 land with the change review's own update for the signed connector boards.",
+      "Drawn on N-Conn-18-Preset-Review, which joins the reference boards with its board story. Rivera's eight own rules and Dana Whitfield's personal booking rule, which the owner's \"Allow only for Dana Whitfield, always\" adds and the board doesn't draw; the board's shared rule for Alex Kim's assistant is the illustrative shared card, which isn't in Rivera's seed.",
   },
   play: async ({ canvas, canvasElement }) => {
     // Each of the owner's rules goes, personal ones included, and its tool falls to the default ask.
@@ -627,5 +675,48 @@ export const AskMeFirst: Story = {
     await expect(line.getBoundingClientRect().top - checks.getBoundingClientRect().bottom).toBe(20);
     await expect(confirm.getBoundingClientRect().top - line.getBoundingClientRect().bottom).toBe(20);
     await expect(canvas.getAllByText(CANCELS_LINKS)).toHaveLength(1);
+  },
+};
+
+/** A rule for one person, which a preset replaces too: Dana's refunds up to $50 without asking. */
+const DANA_REASON = 'Dana Whitfield can get refunds up to $50 without asking.';
+const personalRule: ChangeRowView[] = [
+  {
+    key: 'rv-dana-refunds',
+    change: 'removed',
+    title: 'Refund',
+    connector: rivera.connectors.views.stripe,
+    before: {
+      mode: 'auto',
+      limit: '$50',
+      reason: DANA_REASON,
+      words: [
+        { field: 'who', text: 'Dana Whitfield, verified' },
+        { field: 'limits', text: 'Up to $50' },
+      ],
+    },
+    after: null,
+    changed: [],
+  },
+];
+
+export const PersonalRuleReplaced: Story = {
+  args: { rows: personalRule, confirmLabel: undefined, cancelLabel: undefined },
+  parameters: {
+    canvas: 'N-Conn-10-GCal-Confirm',
+    canvasNote: 'A rule for one person, as a preset’s review lists it when the preset replaces personal rules too; no board on this branch draws a preset’s review.',
+  },
+  play: async ({ canvas }) => {
+    // It reads as the person's rule: the tool, then the connector and who it is for first, and the
+    // rule that goes, beside the refused bar, naming her, with its limit phrase.
+    const [row] = canvas.getAllByRole('listitem');
+    await expect(within(row as HTMLElement).getByText('Refund')).toBeVisible();
+    await expect(row).toHaveTextContent('Stripe Mock · Dana Whitfield, verified · Up to $50');
+    const before = within(row as HTMLElement).getByRole('group', { name: 'Before' });
+    await expect(before).toHaveTextContent('Dana Whitfield, verified · Up to $50');
+    await expect(before).toHaveTextContent(DANA_REASON);
+    await expect(within(before).getByText('Automatic up to $50; over $50, ask me first')).toBeVisible();
+    expectComputed(before, { borderLeftColor: 'rgb(220, 130, 144)' });
+    await expect(tags(row?.parentElement as HTMLElement)).toEqual(['Removed']);
   },
 };

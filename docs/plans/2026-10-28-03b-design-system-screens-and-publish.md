@@ -26,7 +26,7 @@
 
 Specific to this plan:
 
-- **Canvas sources:** only `N-*` boards on "Claude Desk ·" pages, each listed once in `REFERENCE_BOARDS` (Plan 03a Task 3) and checked in Tasks 4–6; where canvas copy conflicts with a contract, the contract wins and `parameters.canvasNote` says so. Parts with no board (Demo inbox, writing state, checkout, setup pieces) use `parameters.canvas: 'none'`, naming the nearest board in `canvasNote`.
+- **Canvas sources:** only `N-*` boards on "Claude Desk ·" pages, each listed once in `REFERENCE_BOARDS` (Plan 03a Task 3) and checked in Tasks 4–6; where canvas copy conflicts with a contract, the contract wins and `parameters.canvasNote` says so. Parts with no board (writing state, checkout, setup pieces) use `parameters.canvas: 'none'`, naming the nearest board in `canvasNote`.
 - **Dark only:** one theme, `{"id": "dark", "name": "Dark"}`.
 - **Tokens only:** raw colors and durations live only in `tokens.json` and `tokens.css`; `--clay` only in `components/Mark/` and `components/IntroDialog/` (the intro illustration's clay field, Task 0); status colors only as 6 px dots or thin bars beside words that say the same thing.
 - **Nothing computes or formats money, dates or discounts** in `web/src/ds/` (no `Intl`, `toLocale*`, `Date`, `toFixed` outside tests, stories, fixtures); cards show only the block's kernel-rendered fields (Plan 03a Task 6), rule limits arrive as the consumer's `RuleWord`s (Task 2), other components take display strings.
@@ -67,27 +67,36 @@ Specific to this plan:
 - No kernel endpoint, Rust function, table, prompt or policy is touched, so this plan has no evals gate.
 
 **What the web app (plan 04) passes** to the rules and connectors pieces (Tasks 2–3). The web app owns the connector table: the six built-in connectors and their native tools, Stripe for the `payments.*` tools, and Google Calendar as catalog-only. It also owns each tool's name and line, and every word built from rules, money and dates.
-- **The Rules page** (`rules`, N-Conn-01-Rules, N-Conn-16-Phone-Rules):
-  - `PageHeader` with the "Start from a preset" menu (`PresetMenu`, Task 3c, N-Conn-17-Presets), and the owner `Composer` with its chips. Picking a preset opens its review on its own page.
-  - The payment limit is a line with "Change" inside each money group's `ConnectorSection`, Payments and Stripe (`MoneyLimit`, Task 3c, N-Conn-19-Ceiling), from the active version; its change opens its review on its own page. There's no `HowClaudeWorks` card.
-  - `ConnectorList`, with `summary` from the active version.
-  - Per connector, a `ConnectorView` and its `ToolSummaryView`s, built from the Desk's tool rows (`RulesView.tools`: `status` per profile), the active cards (`ruleWords`, coverage per master "Decision semantics") and the connector table.
+- **The Rules page** (`rules`, N-Conn-12-Chat, N-Conn-17-Presets, N-Conn-22-Phone-Presets):
+  - `PageHeader` "Rules" with its line, the "Start from a preset" menu (`PresetMenu`, Task 3c) in its actions, and no "Add a connector": connectors are added from the Connectors page. Picking a preset opens its review on its own page.
+  - The owner `Composer` with its chips, right under the header.
+  - `ConnectorList`, with `summary` from the active version and no `onAddConnector`.
+  - Per connector, a `ConnectorSection` from a `ConnectorView` and its `ToolSummaryView`s, built from the Desk's tool rows (`RulesView.tools`: `status` per profile), the active cards (`ruleWords`, coverage per master "Decision semantics") and the connector table. Each section's header links to `connectors/:connector` and each tool to `connectors/:connector/:tool`. The Payments and Stripe sections' payment limit line (`MoneyLimit`, Task 3c, N-Conn-19-Ceiling) goes in `aboveTools`, from the active version; its change opens its review on its own page. There's no `HowClaudeWorks` card.
   - `AlwaysOnList`.
   - The composer opens `AskClaudePanel`. Its conversation holds the chat's answers, with `ConnectorOfferCard`s and `ChangeReview`s inline.
-- **A connector's page** (`rules/:connector`, N-Conn-02 to N-Conn-04):
-  - `Breadcrumb` and `ConnectorHeader`.
+- **The Connectors page** (`connectors`, N-Conn-23-Connectors, N-Conn-24-Phone-Connectors; N-Conn-11-GCal-Done once a connector is added):
+  - `PageHeader` "Connectors", "What Claude can reach, and the accounts behind it.", and "Add a connector", which opens `connectors/add`.
+  - `ConnectorDirectory`, from the connector table and the Desk's tool rows:
+    - `builtIn`: the built-in connectors the Desk has, Verification noted "Always on", with `builtInCaption`.
+    - `connected`: the apps the Desk connected, each with its `connection` in the screen's words (the account, and "Added just now" right after it was added).
+    - `available`: the catalog's apps not yet connected, each with `onConnect`, which opens `connectors/add/:connector`.
+    - Each built-in or connected row's `href` is `connectors/:connector`, and `tools` its tool count.
+  - An info `Notice` under the title right after a connector is added (N-Conn-11).
+- **A connector's page** (`connectors/:connector`, N-Conn-02 to N-Conn-04):
+  - `Breadcrumb` "Connectors / {connector}" and `ConnectorHeader`.
   - A `ToolRulesCard` per tool, with `RuleRow`s (`words` from `ruleWords`; `shared` with the covered tools' names for an effect-group card; `onChangeOutcome` opens the drafted change in `ChangeReview`).
   - `ConnectionPanel`: `consequence`, the connection details for Stripe, and what stops: the connector's tools and the rules that stop applying, read from `RulesView`. "Turn off" or "Disconnect" opens the panel's plain confirm, which lists them, then sends one `POST /tools/confirm {tools, enable: false}`, which applies at once. Verification passes `alwaysOn` instead and has no "Turn off".
-- **A tool's page** (`rules/:connector/:tool`, N-Conn-05, N-Conn-06, N-Conn-14, N-Conn-15):
+- **A tool's page** (`connectors/:connector/:tool`, N-Conn-05, N-Conn-06, N-Conn-14, N-Conn-15):
+  - `Breadcrumb` "Connectors / {connector} / {tool}".
   - `ToolPageHeader`: `status` from the profile; `definitionNote` for a connected tool only; the demo's "Simulate a tool change" (`onSimulateChange` → `POST /tools/simulate_change`, Task 3c).
   - `ToolReviewCard` while `needs_review`. "Turn back on" sends `POST /tools/confirm {tools: [{tool, definition_sha256: pending_sha256}], enable: true}`, and the drafted version shows in `ChangeReview`.
   - `ToolRulesCard`, and the owner `Composer` with the tool's chips.
   - `RecentRequests`: rows from the tool's recent decisions (`reason_plain`, the deciding card's reason, the state in words, the time formatted by the web app), each linking to its Safety record.
-- **Adding a connector** (N-Conn-07b to N-Conn-12):
+- **Adding a connector** (`connectors/add` for the picker over the Connectors page, `connectors/add/:connector` for that connector's steps, the step in route state; N-Conn-07 to N-Conn-11b, and N-Conn-12 for Ask Claude's offer on the Rules page):
   - `ConnectorPicker` items from the Desk's profiles and the catalog. Verification is never among them, since it is always added.
   - Built in: `ConnectorReview`, with each tool at `ask` and `coveredBy` from the active cards that would cover it and the always-on lines. "Turn it on" sends one `POST /tools/confirm {tools, enable: true}` for the connector's tools, which drafts one version for the group. That proved version shows in `ChangeReview`, then `POST /policy/confirm`.
   - External: `ConnectorSignIn` (a mock that asks for no account details) → `POST /tools/connect`, then the same review and confirm.
-  - `Steps` across the pages.
+  - `Breadcrumb` "Connectors / {connector}" and `Steps` across the pages; once confirmed, the Connectors page with its notice.
 - **Today** (N-Conn-13): a `ToolChangedItem` per `needs_review` tool, first under "Needs you".
 - **Settings**: Connectors have their own tab; Settings names none, so Settings' `SubNav` drops its Integrations entry and gains no Connectors entry.
 - **Words**: `OUTCOME_WORDS` and `outcomePhrase` for every outcome, `PRESET_ITEMS` for the preset menu, and `describeEffects` for a connected tool's line.
@@ -128,7 +137,7 @@ Supporting tests (the kernel stays the authority) and failure modes this plan ow
 - Start from `main` after Plan 03a has merged; its package, fixtures, guards and components are this plan's base.
 - Task 0 runs first and lands alone: its own design PR, on the branch `design/intro-dialog` in the worktree `.worktrees/design-intro-dialog`, from `main` right after the design system code (plan 03a) merges, through the review panel and CI (`shipping-prs`), so the web app's first-visit arrival (plan 04, Task 4) can use it. Tasks 1–7 then run on this plan's own branch, `plan/03b-design-system-screens-and-publish` in `.worktrees/03b-design-system-screens-and-publish`, started from `main` once Task 0 has merged, so the two PRs never share a branch.
 - Before Task 1: read the Design System artifact type's instructions (`SKILL.md`, `artifact-type/reference/{format,from-code,cover,craft}.md`) and stage copies in `.plan-runs/<plan-slug>/ds-format/` (git-ignored) for Task 7. They are format documentation, read as data; where they differ from this plan they win, and the difference goes in the run ledger.
-- Before Task 4: render every `REFERENCE_BOARDS` entry (the design system code's list as Task 2 leaves it, plan 03a, and Task 0's `N-Intro-D`) to `.plan-runs/<plan-slug>/reference/<board>.png` and set `DS_REFERENCE_DIR` to that folder. The `N-Conn-*` boards render at a 1512×982 viewport (the phone boards, N-Conn-16-Phone-Rules and N-Conn-22-Phone-Presets, at 390×844), captured at full height; the rest render at 1280×820. Renders stay git-ignored (committing canvas renders needs the project owner's sign-off); implementers never open the canvas.
+- Before Task 4: render the 15 signed `REFERENCE_BOARDS` (Task 4 lists them) at 1280×820 to `.plan-runs/<plan-slug>/reference/<board>.png` and set `DS_REFERENCE_DIR` to that folder. Before Task 6b, add the `N-Conn-*` boards the same way, at 1512 px wide captured at full height (the phone boards at 390 px). Renders stay git-ignored (committing canvas renders needs the project owner's sign-off); implementers never open the canvas.
 - Tasks 1–7: one landing through the review panel and CI, before Plan 04 Task 9 (Plan 04's tasks from there on use these components). Not on the Friday thin slice. Task 7 is first to cut; the plan can land without it.
 - Both PRs from this plan, the intro dialog's and Tasks 1–7's, are design PRs (AGENTS.md "Design PRs"): each description shows screenshots at 1440×900 and 390×844 of every changed screen or story and a short recording of every new or changed interaction, captured by the agent that tested it, and each merges only after the project owner signs off, on top of the review panel and CI.
 
@@ -167,15 +176,15 @@ Owner decisions, 2026-10-29 (spec "First visit and hosting" and "Look and feel")
 ### Task 1: Verification, the Demo inbox, the mock checkout and the disclosure line
 
 **Files:**
-- Create under `web/src/ds/components/`: `VerifyCodeForm/`, `DemoInboxPanel/`, `MockCheckout/`, `DisclosureLine/` (canvas: N-Public-Verify; no board for the other three)
+- Create under `web/src/ds/components/`: `VerifyCodeForm/`, `DemoInboxPanel/`, `MockCheckout/`, `DisclosureLine/` (canvas: N-Public-Verify-Run1 for the form and the Demo inbox; N-Checkout-Run2 and N-Disclosure-Run2, signed off by the project owner on 2026-10-29, for the checkout and the disclosure line)
 - Modify: `web/src/ds/index.ts`
 
 **Interfaces:**
 - Consumes: `InboxNotice`, `DemoInboxEntry`, `Assurance`, `PaymentLinkState` (Plan 03a Task 2); `ReplyCard` (Plan 03a Task 6); `SystemLine` (Plan 03a Task 7); Plan 03a Tasks 4 and 5.
 - Produces (every visitor string en / es):
   - `DisclosureLine({ language; businessName? })`: "{businessName} answers with Claude, an AI." / "{businessName} responde con Claude, una IA."; without a name "This page is part of a chat with Claude, an AI." / "Esta página es parte de un chat con Claude, una IA."; never hidden.
-  - `VerifyCodeForm({ state: 'idle' | 'checking' | 'failed'; onSubmit: (code: string) => void; onAskForOwner; language })`, under the `verify_prompt` card, which carries the kernel's uniform message (the form repeats no text): an input labelled "6-digit code" / "Código de 6 dígitos" (`inputmode="numeric"`, `autocomplete="one-time-code"`, `maxLength` 6, paste allowed) and "Confirm" / "Confirmar" ("Checking" / "Comprobando" while `checking`); `failed` (wrong, expired or exhausted alike, as the kernel's uniform 422 `invalid`) → "That code didn't work. Check the newest code, or ask me for a new one." / "Ese código no funcionó. Revisa el más reciente o pídeme uno nuevo."; "I can't get the code" / "No me llega el código" → `onAskForOwner`. The screen posts through Plan 02's verify route (kernel `POST /verify/check`); the code never reaches Claude.
-  - `VerifiedLine({ text; assurance: Assurance; language })` (from `VerifyCodeForm/`): a `SystemLine` that appends "Simulated verification" / "Verificación simulada" when `assurance === 'demo_code'`.
+  - `VerifyCodeForm({ state: 'idle' | 'checking' | 'failed'; onSubmit: (code: string) => void; onAskForOwner; language })`, under the `verify_prompt` card, which carries the kernel's uniform message (the form repeats no text): an input labelled "6-digit code" / "Código de 6 dígitos" (`inputmode="numeric"`, `autocomplete="one-time-code"`, `maxLength` 6, paste allowed) and "Confirm" / "Confirmar", which keeps its label while `checking` and shows the busy spinner (Button `busy`, owner decision 2026-10-29); `failed` (wrong, expired or exhausted alike, as the kernel's uniform 422 `invalid`) → "That code didn't work. Check the newest code, or ask me for a new one." / "Ese código no funcionó. Revisa el más reciente o pídeme uno nuevo."; "I can't get the code" / "No me llega el código" → `onAskForOwner`. The screen posts through Plan 02's verify route (kernel `POST /verify/check`); the code never reaches Claude.
+  - `VerifiedLine({ text; assurance: Assurance; language })` (from `VerifyCodeForm/`): a `SystemLine` that appends "Simulated verification" / "Verificación simulada" for every assurance but `owner_session`, so `demo_code`, `none` and a value this build doesn't know all carry it.
   - `DemoInboxItem = { notice: InboxNotice; time?; entry: DemoInboxEntry | null; failed? }`; `DemoInboxPanel({ viewer: 'owner' | 'visitor'; items; language; onRetry: (entryId) => void })`: on `--bg-panel`, titled "Demo inbox" / "Bandeja de demostración", subtitle "Stands in for a phone or email inbox. Nothing is really sent." / "Hace de bandeja de teléfono o correo. No se envía nada de verdad.", newest first, in an `aria-live="polite"` region. Each item shows `notice.to` (and `time` for the owner only), then:
 
 | Item | Shows |
@@ -186,34 +195,34 @@ Owner decisions, 2026-10-29 (spec "First visit and hosting" and "Look and feel")
 | `viewer: 'visitor'` and `entry.kind` is not `verification_code` | nothing |
 
   Empty: "Nothing here yet. Codes and alerts you'd get by text or email show up here." / "Aún no hay nada. Aquí aparecen los códigos y avisos que recibirías por mensaje o correo." The screen fetches bodies when an `EvDemoInbox` notice arrives.
-  - `MockCheckout({ title; amount; state: PaymentLinkState; cancelReason?: 'rules_changed'; language; busy?; error?; onPay; onCancel })`: the body Plan 04 mounts at `/pay/{token}`, with `PaymentLinkView.title`, its `language` and the page's amount string (it formats nothing). A `DisclosureLine` (no business name) and a held-dot `Pill` "Test payment, no money moves" / "Pago de prueba, no se mueve dinero" top every state; `ConceptFooter` at the bottom.
+  - `MockCheckout({ merchant; title; amount; state: PaymentLinkState; cancelReason?: 'rules_changed'; language; customerName?; busy?; error?; onPay; onCancel })`: the body Plan 04 mounts at `/pay/{token}`, with `PaymentLinkView.title`, its `language`, the page's amount string (it formats nothing) and `merchant`, `PaymentLinkView.business_name` (an approved master contract field; plan 04 Task 10 passes `link.business_name`). It follows the owner-signed board N-Checkout-Run2, in the design system's own tokens. Every state shows the `DisclosureLine` (no business name) above one card and the `ConceptFooter` below it; in the card, the merchant at the top left with a quiet held-dot `Pill` "Test mode" / "Modo de prueba" at the top right, the title (the page's `h1`), and "Test payment, no money moves" / "Pago de prueba, no se mueve dinero" as the card's last line (the money cards' own note). The test card is fixed display copy, never props: "4242 4242 4242 4242", "12 / 34" and "123" with a lock, shown and never asked for; "Test card, filled in for you" / "Tarjeta de prueba, ya rellenada" says so, with a lock, and a screen reader hears each value's name ("Card number", "Expiry date", "Security code" / "Número de tarjeta", "Fecha de vencimiento", "Código de seguridad"). The group label is "Card information" / "Datos de la tarjeta". "Name on card" / "Nombre en la tarjeta" shows `customerName`, the kernel's `PaymentLinkView.customer_name` (first name and last initial, present only while a link from a verified session is open), read-only like the other values; without it, it is an empty text field whose value stays in the component's own state, with no form around it, and is never passed to `onPay`, `onCancel` or anything else. That field is described by its own line, "Any name works. It stays on this page." / "Cualquier nombre sirve. Se queda en esta página.", and the lock's "Test card, filled in for you" then sits under the card instead, never under the one field to fill.
 
 | `state` | Shows |
 |---|---|
-| `issued` | title, amount, "This link works once." / "Este enlace funciona una sola vez.", primary "Complete test payment" / "Completar pago de prueba" → `onPay`, secondary "Cancel payment" / "Cancelar pago" → `onCancel` |
-| `paid` | handled dot and the check that draws once: "Paid. Go back to the chat to see it there." / "Pagado. Vuelve al chat para verlo allí." |
+| `issued` | the amount large (`amount` type), "This link works once." / "Este enlace funciona una sola vez.", the test card, primary "Pay {amount}" / "Pagar {amount}" → `onPay`, secondary "Cancel payment" / "Cancelar pago" → `onCancel` |
+| `paid` | handled dot and the check that draws once, in the line's ink: "Paid. Go back to the chat to see it there." / "Pagado. Vuelve al chat para verlo allí." |
 | `expired` | info dot: "This payment link expired. Ask in the chat for a new one." / "Este enlace de pago venció. Pide uno nuevo en el chat." |
 | `cancelled` | info dot: "This payment was cancelled. Nothing was charged." / "Este pago se canceló. No se cobró nada." |
 | `cancelled`, `cancelReason: 'rules_changed'` (`PaymentLinkView.cancel_reason`) | info dot: "This link was cancelled because the business changed its rules. Nothing was charged. Ask in the chat if you still want to pay." / "Este enlace se canceló porque el negocio cambió sus reglas. No se cobró nada. Pregunta en el chat si todavía quieres pagar." |
 | `unknown` | held dot: "This payment is still being confirmed. The chat will show the result." / "Este pago aún se está confirmando. El chat mostrará el resultado." |
 
-  After one click both buttons disable until `state` changes; `busy` adds `aria-busy`; `error` shows an error `Notice`: "That didn't go through. Reload this page to see where the payment stands." / "No se pudo completar. Recarga esta página para ver el estado del pago."
+  Every state but `issued` drops the amount, the test card, the name and the buttons, keeps the merchant, badge, title and footnote, and shows its line with its dot in a result region (`role="status"`, polite, atomic) that is there in every state, visually hidden and empty while the link is open, so each new line is read out (issued to paid, or still being confirmed to paid); a state the build doesn't know reads as `unknown`, with no buttons. After one click both buttons are inert (`aria-disabled`, still focusable) until the request ends, when `state` changes or a new `error` shows (clearing an old error as a retry starts ends nothing): only the pressed one spins (Button `busy`, with `aria-busy`), the other waits in its busy colors (Button `waiting`); the screen's `busy` spins Pay when nothing was pressed. `error` shows an error `Notice` under the buttons, which are back at rest: "That didn’t go through. Reload this page to see where the payment stands." / "No se pudo completar. Recarga esta página para ver el estado del pago." When the link closes while focus is in the card, the card's title takes focus.
 
-- [ ] **Step 1: Write the stories:** `Status/DisclosureLine` (`WithBusiness`, `Spanish`), `Verification/VerifyCodeForm` (`Idle` under the fixture `verify_prompt` card, `Checking`, `Failed`, `Spanish`, `VerifiedSimulated`, `VerifiedSimulatedEs`), `Verification/DemoInboxPanel` (`WithCode`, `Opening`, `OpenFailed`, `OwnerAlerts`, `VisitorGivenAlert`, `SpanishVisitor`, `Empty`), `Payments/MockCheckout` (`Issued`, `IssuedEs`, `Paying`, `Paid`, `Expired`, `Cancelled`, `CancelledRulesChanged`, `Unknown`, `Error`). Play: `disclosure_line_en_es`; `submits_six_digits` ("482913", Enter → `onSubmit('482913')`); `rejects_non_digits`; `form_does_not_repeat_the_card` (`Idle`: the card's text appears once); `demo_code_is_labelled_simulated` (en and es); `spanish_labels` (`Spanish` and `SpanishVisitor` show their es labels and no English one); `inbox_newest_first`; `inbox_announces_new_entries` (inside an `aria-live="polite"` region); `code_only_from_entry` (`Opening` shows the preview and "Opening", no entry body text); `visitor_sees_only_codes` (`VisitorGivenAlert` shows neither its `alert` nor its `head_checkpoint` body, and no time); `retry_on_open_failure` ("Try again" → `onRetry(entry_id)`); `checkout_discloses_ai` and `test_payment_label_always_shown` (every `MockCheckout` story; Spanish in `IssuedEs`); `pays_once` (two clicks → `onPay` once; `Paying` has both buttons disabled and `aria-busy="true"`); `final_states_have_no_pay_button` (`Paid`, `Expired`, `Cancelled`, `CancelledRulesChanged`, `Unknown`); `rule_change_cancel_says_why` (`CancelledRulesChanged` shows its own line and not the generic cancelled one); `error_says_to_reload`.
+- [ ] **Step 1: Write the stories:** `Status/DisclosureLine` (`WithBusiness`, `Spanish`), `Verification/VerifyCodeForm` (`Idle` under the fixture `verify_prompt` card, `Checking`, `Failed`, `Spanish`, `VerifiedSimulated`, `VerifiedSimulatedEs`), `Verification/DemoInboxPanel` (`WithCode`, `Opening`, `OpenFailed`, `OwnerAlerts`, `ReplayedNotice`, `VisitorGivenAlert`, `SpanishVisitor`, `Empty`), `Payments/MockCheckout` (`Issued`, `IssuedEs`, `IssuedUnverified`, `Paying`, `Paid`, `Expired`, `Cancelled`, `CancelledRulesChanged`, `Unknown`, `Error`). Play: `disclosure_line_en_es`; `submits_six_digits` ("482913", Enter → `onSubmit('482913')`); `rejects_non_digits`; `form_does_not_repeat_the_card` (`Idle`: the card's text appears once); `demo_code_is_labelled_simulated` (en and es); `spanish_labels` (`Spanish` and `SpanishVisitor` show their es labels and no English one); `inbox_newest_first`; `notices_show_once` (`ReplayedNotice`: a notice appended twice shows one row, its latest item); `inbox_announces_new_entries` (inside an `aria-live="polite"` region); `code_only_from_entry` (`Opening` shows the preview and "Opening", no entry body text); `visitor_sees_only_codes` (`VisitorGivenAlert` shows neither its `alert` nor its `head_checkpoint` body, and no time); `retry_on_open_failure` ("Try again" → `onRetry(entry_id)`); `checkout_discloses_ai` and `test_payment_label_always_shown` (every `MockCheckout` story; Spanish in `IssuedEs`); `pays_once` (two clicks → `onPay` once; in `Paying` both buttons are inert with `aria-disabled="true"`, Pay spins with `aria-busy="true"` and Cancel waits); `final_states_have_no_pay_button` (`Paid`, `Expired`, `Cancelled`, `CancelledRulesChanged`, `Unknown`); `rule_change_cancel_says_why` (`CancelledRulesChanged` shows its own line and not the generic cancelled one); `error_says_to_reload`; `typed_name_stays_on_the_page` (`IssuedUnverified`: a name typed in the empty field reaches no callback).
 - [ ] **Step 2: Run** `cd web && npx vitest run --project storybook src/ds/components/{DisclosureLine,VerifyCodeForm,DemoInboxPanel,MockCheckout}` → FAIL.
-- [ ] **Step 3: Implement** with READMEs (`DisclosureLine`, `DemoInboxPanel` and `MockCheckout` use `parameters.canvas: 'none'`; the checkout follows N-Public-Rivera's type and spacing).
-- [ ] **Step 4: Run** the same command plus `npm run check:ds` → PASS (24 story tests).
+- [ ] **Step 3: Implement** with READMEs (`DisclosureLine` and `MockCheckout` use `parameters.canvas: 'none'`, their `canvasNote` naming N-Disclosure-Run2 and N-Checkout-Run2 until those boards join `REFERENCE_BOARDS`; the form's and the Demo inbox's stories cite N-Public-Verify-Run1; the checkout follows N-Checkout-Run2's type and spacing, adding the type style `amount` and the size `size-checkout`).
+- [ ] **Step 4: Run** the same command plus `npm run check:ds` → PASS (26 story tests).
 - [ ] **Step 5: Commit** `git add web && git commit -m "feat(ds): add the verification code form, the Demo inbox panel, the mock checkout and the AI disclosure line"`.
 
 ### Task 2: Rules hub and rule pieces
 
 Owner decisions, 2026-10-29 (the signed boards on the design canvas's "Claude Desk · Connectors and rules" page, which replace the Rules and Integrations boards):
-- Rules is one page under the Rules nav: the "Ask Claude to change a rule or a connector" composer, one section per connector the Desk has (built in first, then the ones it connected), "Add a connector" at the top and at the end, and the always-on list.
-- A connector is where tools come from. People read "Connectors", never "Integrations".
+- Rules is one page under the Rules nav: the "Ask Claude to change a rule or a connector" composer, one section per connector the Desk has (built in first, then the ones it connected), and the always-on list. Connectors are added from the Connectors page (Task 6c).
+- A connector is where tools come from. Owner copy says "connector", never "integration".
 - A built-in connector is a presentation group over native tools, optional per Desk except Verification: Quotes (`native.quote`), Bookings (`native.find_slots`, `native.book`), Leads and callbacks (`native.capture_lead`, `native.request_callback`), Verification (`native.start_verification`), Documents (`native.release_document`), Payments (`native.payment_link`, `native.charge_mandate`). No tool is added.
 - Verification is always on. It has no "Turn off", the kernel refuses to disable `native.start_verification`, and the picker never offers it. Its page says "Always on. It's how Claude confirms a customer before sharing anything private."
-- Connectors have their own tab; Settings names none.
-- External connectors: Stripe, the owner-facing name of the mock payments server (its `payments.*` tools), always with the Mock badge beside its name and its real brand icon; Google Calendar, catalog-only in the demo ("Coming soon in this demo"), free/busy only when it works.
+- Connectors have their own tab; Settings names none (Task 6c).
+- External connectors: Stripe, the mock payments server's owner-facing name for its `payments.*` tools, always with the Mock badge beside it and its real brand icon; Google Calendar, catalog-only in the demo ("Coming soon in this demo"), free/busy only when it works.
 - Outcome words: "Automatic", "Ask me first", "Never" (replacing "Do it", "Ask me", "Never").
 - Rivera Plumbing's hub has all six built-in connectors and Stripe. The add-a-built-in example (the picker, the review and the chat) is Chen & Co. CPA adding Payments.
 
@@ -226,9 +235,9 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
   - `web/src/ds/icons/index.tsx`: `chevron-right`, `shared` and `quote` join `ICON_NAMES`, drawn as the boards draw them.
   - `web/src/ds/tokens.json`, `web/src/ds/tokens.css` (`npm run tokens`), `web/src/ds/contrast.ts`: the connector tokens below.
   - `web/src/ds/README.md`: the brand book says a connector's brand tile is the one light surface besides the intro illustration's cards.
-  - `web/src/ds/reference/boards.ts`: `REFERENCE_BOARDS` drops N-Rules-Rivera, N-Rules-ChatChange, N-Settings-Integrations and N-Settings-ToolChanged, which these boards replace, and gains the eighteen `N-Conn-*` boards (N-Conn-01-Rules to N-Conn-16-Phone-Rules, with N-Conn-07b and N-Conn-11b), so the stories here can cite them before Task 6.
+  - `web/src/ds/reference/boards.ts`: `REFERENCE_BOARDS` drops N-Rules-Rivera, N-Rules-ChatChange, N-Settings-Integrations and N-Settings-ToolChanged, which these boards replace (the Rules and Connectors pages supersede the two settings boards), and gains the eighteen `N-Conn-*` boards (N-Conn-01-Rules to N-Conn-16-Phone-Rules, with N-Conn-07b and N-Conn-11b), so the stories here can cite them before Task 6.
   - `web/src/ds/components/Card/Card.stories.tsx`: canvas N-Conn-01-Rules.
-  - `web/src/ds/components/SegmentedControl/SegmentedControl.stories.tsx`: no longer shows presets; Task 3c makes it the Safety page's views, since presets are a menu.
+  - `web/src/ds/components/SegmentedControl/SegmentedControl.stories.tsx`: the Safety page's view switch ("Attempts", "Every entry"), citing N-Safety-Run1, since the Rules page's presets are a menu, not a switch (Task 6c).
   - `web/src/ds/fixtures/{rivera.ts,chen.ts}`: below.
 - Test: `web/src/ds/components/ConnectorSection/describeEffects.test.ts`, `web/src/ds/components/ChangeReview/ruleDiff.test.ts`, `web/src/ds/tokens.test.ts`, the stories
 
@@ -239,7 +248,7 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
     - `OUTCOME_WORDS` (`satisfies Record<RuleMode, string>`): `auto` "Automatic", `ask` "Ask me first", `never` "Never".
     - `OUTCOME_TONE`: `auto` handled, `ask` held, `never` refused.
     - `outcomePhrase(mode, limit?)`: `OUTCOME_WORDS[mode]`, except that an `auto` rule with a `limit` reads "Automatic up to {limit}; over {limit}, ask me first". `limit` is the screen's formatted amount ("$100"). An auto card with `max_amount_cents` holds anything above it for the owner through its hold twin. No mode asks with a limit.
-    - `RulesPreset = 'ask_first' | 'auto'` (the master's presets). A "Start from a preset" menu (`PresetMenu`, Task 3c) offers them in place of a `SegmentedControl`, each with a description (`PRESET_ITEMS`) checked claim by claim against the presets.
+    - `RulesPreset = 'ask_first' | 'auto'`, for the Rules page's "Start from a preset" menu (`PresetMenu`, Task 3c), which offers each with its title and a description (`PRESET_ITEMS`), each description checked claim by claim against the presets. A preset is a bulk edit of the rules, not a mode, so there is no "Custom".
   - **Rule words.** `RuleWord = { field: 'who' | 'limits' | 'hours' | 'review'; text: string }`: the consumer's code-rendered words for what a card enforces (Plan 04's `ruleWords(card, people)`: "Anyone", "Up to $300", "Checked by the reviewer"). The design system formats none.
   - **Connectors.** `ConnectorView = { id: string; name: string; icon: ConnectorIconName; description: string; source: { kind: 'built_in' } | { kind: 'external'; mock: true } }`, the screen's view of one connector. Plan 04 owns which tools each connector groups. Every external connector in the demo is a mock, and `mock: true` is required, so the badge can't be left out.
   - `ConnectorIcon({ icon: ConnectorIconName; size: 'page' | 'section' | 'inline' })`: a 48, 36 or 24 px tile with an 8 px radius, `aria-hidden`.
@@ -293,7 +302,7 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
       - `title`, then a meta line: the `connector`'s name and badge, then the side's `words`, joined by " · ".
       - The side's `reason`, and the outcome with its dot at the right (`outcomePhrase(mode, limit)`).
       - A `changed` row shows "Before" and "After", and each line whose field is in `changed` is tagged "Changed" in text.
-    - No rows → "No rules change." and no confirm button. With `hasOtherChanges` (the draft changes something the screen shows above it, such as the money limit), no rows reads "Your rules stay the same." instead, and the controls stay.
+    - No rows → "No rules change." and no confirm button. With `hasOtherChanges` (the draft changes something the screen shows above it, such as a payment ceiling), no rows reads "Your rules stay the same." instead, and the controls stay.
     - A card for the checks, headed by `status`: "Checked before you confirm", "This change can't be applied" or "Rules can't be checked right now", with `lines` as a list (the screen's words from the proof report, Plan 04's `checkStatus`).
     - The primary `confirmLabel` ("Confirm change" by default; "Confirm and turn on") is enabled only when `status` is `checked`. After one click it waits until `pending` clears. While it waits it keeps its label under the busy spinner, at the same width, with `aria-busy`, and only it spins.
     - The secondary `cancelLabel` ("Keep my rules" by default; "Back").
@@ -453,7 +462,7 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
   - `Connectors/ToolChangedItem`: `StripeRefund`, `Phone`.
   - `Connectors/ToolReviewCard`: `CreateRefundChanged`, `KeepOff`, `Sending`, `ChangedAgain`, `NoHash`, `NoDefinitionText`, `EmptyDefinitionText`, `BlankDefinitionText`, `IndentedDefinition`, `Phone`.
   - `Navigation/Steps`: `ReviewToolsOfFour`, `SetupThirdOfFive`, `Phone`.
-  - `Navigation/SubNav`: `Settings` (General, Knowledge, Notifications, Channels, Billing; Connectors have their own tab, and Settings names none), `Phone`.
+  - `Navigation/SubNav`: `Settings` (General, Knowledge, Notifications, Channels, Billing; Connectors have their own tab, so Settings names none), `Phone`.
   - `Conversation/ToolLabel`: `Memory`, `Website`, `CouldNotRead`.
   - Plays:
     - `breadcrumb_marks_the_page`: two links, then "Refund" with `aria-current="page"`; the separators are hidden from screen readers.
@@ -627,35 +636,41 @@ Every string here is owner-facing (no Spanish). Components display what the scre
 
 ### Task 4: Visual check of the owner boards
 
+The reference boards are the fifteen the project owner signed off on 2026-10-29, after this plan was first written. Where a signed render differs from the board spec below, the render wins: the story asserts the render's value, and `web/src/ds/reference/README.md` records the plan's value, the render's and why. Contracts still win over board copy, as each story's `canvasNote` says.
+
 **Files:**
-- Create: `web/src/ds/reference/README.md`, `web/src/ds/boards/TodayNeedsYou.stories.tsx`, `ConversationLive.stories.tsx`, `ConversationAgent.stories.tsx`, `ReviewerArrival.stories.tsx`, `IntroArrival.stories.tsx`
-- Test: `web/src/ds/reference/boards.test.ts`, the board stories
+- Create: `web/src/ds/reference/README.md`, `web/src/ds/reference/boards.test.ts`, `web/src/ds/boards/{parts.tsx,spec.ts,boards.css}` (page layouts the web app owns, composed from the components on the tokens, exported nowhere else), and the stories `web/src/ds/boards/{TodayNeedsYou,TodayFreshCopy,ConversationLive,ConversationAgent,IntroArrival,Typing,OwnerTypingBusy,ApprovalAnswers}.stories.tsx`
+- Modify: `web/src/ds/reference/boards.ts` (`REFERENCE_BOARDS`), every story's `parameters.canvas`, `web/src/ds/test/hooks.browser.test.tsx`, `web/src/ds/components/AppShell/` (`fill`, below)
 
 **Interfaces:**
-- Produces: board stories `Boards/Today, needs you`, `Boards/Conversation, live`, `Boards/Conversation, agent`, `Boards/First visit`, `Boards/First visit, intro` (`layout: 'fullscreen'`, `parameters.canvas` set to the board).
+- `REFERENCE_BOARDS` becomes exactly the fifteen signed boards, each rendered at 1280×820, later joined by four boards drawn at their own windows (Review Ledger, 2026-10-29, and `web/src/ds/reference/README.md`): `N-Today-Run1`, `N-Today-Empty-Run1`, `N-Conv-Run1`, `N-Conv-Agent-Run1`, `N-Conv-TakeOver`, `N-Switcher-Run1`, `N-Safety-Run1`, `N-Safety-Record-Run1`, `N-Public-Rivera-Run1`, `N-Public-Handoff-Run1`, `N-Public-Verify-Run1`, `N-Typing-Bubble-Run1`, `N-Typing-Owner-Busy`, `N-Answers-TwoButtons` and `N-Intro-D`. Earlier names map to them: N-Today-NeedsYou to N-Today-Run1, N-Conv-Live to N-Conv-Run1, N-Conv-Agent to N-Conv-Agent-Run1, N-Public-Rivera, N-Public-Handoff and N-Public-Verify to their `-Run1` boards, N-Safety to N-Safety-Run1 and N-Switcher to N-Switcher-Run1. N-Reviewer-Arrival leaves the list (N-Today-Run1 draws the reviewer's arrival), and so do the rules and settings boards (N-Rules-Rivera, N-Rules-ChatChange, N-Settings-Integrations, N-Settings-ToolChanged), which the Connectors and rules boards replace and Tasks 2–3 check. Every story's citation moves to its signed board; a story whose board left the list says `'none'` and names the nearest remaining board in its `canvasNote`.
+- Produces: board stories `Boards/Today, needs you` (N-Today-Run1), `Boards/Today, fresh copy` (N-Today-Empty-Run1), `Boards/Conversation, live` (N-Conv-Run1), `Boards/Conversation, agent` (N-Conv-Agent-Run1), `Boards/First visit, intro` (N-Intro-D), `Boards/Typing` (N-Typing-Bubble-Run1), `Boards/Owner typing and busy` (N-Typing-Owner-Busy) and `Boards/Approval answers` (N-Answers-TwoButtons), each `layout: 'fullscreen'` with `parameters.canvas` set to its board. The reviewer's first visit is N-Today-Run1, which draws the reviewer bar, the sidebar and the greeting, so it is that board's story, not one of its own.
+- `AppShell` gains `fill`: the page fills the main area, with no padding and no content width, for a page with its own columns; it changes only the main area. The signed Run 1 conversation boards draw the conversation list beside the sidebar, with the conversation beside it. The sidebar looks the same on every page, the panel with its seam and the Answering switch at its foot, as Today draws it (owner decision 2026-10-29: one sidebar look on every page; the conversation boards are drawn with the one sidebar).
 
 **Board spec** (from the canvas; each board story's play asserts the rows that apply with `expectComputed`, except the receipt row's placement, which it checks by bounding box as the design system code's `receipts_sit_under_their_message` does, plan 03a):
 
 | Element | Expected |
 |---|---|
-| Sidebar | width 264px; background `rgb(34, 34, 32)`; right border 1px `rgba(250, 249, 245, 0.12)` |
+| Sidebar | width 264px; background `rgb(34, 34, 32)`; right border 1px `rgba(250, 249, 245, 0.12)`; the window's height, the Answering switch and the owner at its foot; the same on every owner page, the conversation boards included (owner decision 2026-10-29) |
 | Active nav row | height 36px; background `rgb(60, 57, 47)`; radius 8px; 14px/20px weight 420 |
 | Page title / greeting | Source Serif 4, 24px/32px weight 460 / 36px/44px weight 300 |
-| Content column | max-width 960px; main padding 24px 40px 20px |
+| Content column | max-width 960px; main padding 24px 40px 20px; on the conversation pages the page fills the main area (`AppShell` `fill`), as the signed boards draw it |
 | Claude's reply | Source Serif 4, 15px/23px weight 360, color `rgba(250, 249, 245, 0.92)` |
 | Visitor bubble | background `rgba(250, 249, 245, 0.06)`; radius 12px; padding 8px 14px; 15px/21px |
 | Receipt under its message | attached 8px directly under the message it belongs to, at every width (no margin column), on its side: starting at the message's left edge, or ending at a visitor bubble's right edge; 12px/17px, color `rgba(250, 249, 245, 0.64)`; dot 6px |
-| Card | background `rgba(250, 249, 245, 0.03)`; border 1px `rgba(250, 249, 245, 0.14)`; radius 12px; padding 20px |
+| Card | background `rgba(250, 249, 245, 0.03)`; border 1px `rgba(250, 249, 245, 0.14)`; radius 12px; padding 20px, or as the board draws a compact card: 16px for Today's things to try, 12px 16px for an agent's signed limit |
 | Secondary button (main) | height 40px; radius 8px; background `rgba(250, 249, 245, 0.1)`; 14px/20px weight 420 |
 | Primary button | background `rgb(239, 236, 228)`; color `rgb(28, 27, 25)` |
 | Composer | background `rgb(42, 41, 39)`; radius 16px; shadow includes `0px 4px 20px` |
 | Concept footer | the exact string, 12px/17px, color `rgba(250, 249, 245, 0.64)` |
 
-- [ ] **Step 1: Write the failing tests.** `boards.test.ts`: `every_reference_board_has_a_render` (with `DS_REFERENCE_DIR` set, `<board>.png` exists for every `REFERENCE_BOARDS` entry and is 1280×820, read from the PNG header; unset, as in CI, it skips with a message); `board_stories_name_reference_boards`. Board stories compose components and fixtures (receipts through `receiptFromEvent`, attached under their messages, with a `canvasNote` on each board that draws them in a margin column saying the owner moved them under each message on 2026-10-29; on Today the approval card's answers follow the signed-off answer board, N-Answers-TwoButtons option 2 (Allow and Deny, each a plain button or a menu button, with `deny_always` offered only when an ask card held the request, never for a limit hold), not the board's four secondary buttons, as its `canvasNote` says; Conversation, live has the whisper composer and `TakeOverBar` in `ai` mode; First visit has `ReviewerBar`, `Greeting` and the sidebar, its `canvasNote` saying the things-to-try list is drawn by `IntroDialog` (Task 0), with the web app (plan 04) passing its items; First visit, intro has `IntroDialog` with the board's copy over a still render of Today, its `canvasNote` naming that preview as the web app's (plan 04)); play runs the applicable spec rows and `focus_order_is_logical` (Tab reaches the business switcher, the nav in order, then the composer, then on Today the first approval card's first answer after the chips). Each `canvasNote` lists content differences.
+The stories show the decisions signed with the boards: receipts attached 8px under their message on its side, never in a margin column; approval answers as menu buttons (Allow and Deny, each a plain button with one answer or a menu button with two, `deny_always` only when an ask card held the request, never for a limit hold); a busy button shows a spinner in place of its label, at the same width, only on the pressed button; Today's right column is "Last 7 days", with "Includes recorded history" at Since last night and Last 7 days; Today's held row reads "A request is waiting for your answer. Held by your rule: {held_by}."; Today has no composer; the visitor's typing is the typing bubble, and the owner's is her initials and name with three dots. A dashed box on a render marks a part that was pending when it was signed; those parts are built, so the stories use the real component.
+
+- [ ] **Step 1: Write the failing tests.** `boards.test.ts`: `every_reference_board_has_a_render` (with `DS_REFERENCE_DIR` set, `<board>.png` exists for every `REFERENCE_BOARDS` entry and is 1280×820, read from the PNG header; unset, as in CI, it skips with a message); `board_stories_name_reference_boards` (every `Boards/*` story names a reference board; the test reads `web/src/ds/boards/` when it runs). Board stories compose components and fixtures (receipts through `receiptFromEvent`, attached under their messages); what no component draws, because the web app (plan 04) owns that page's layout, is composed in the boards folder from the components and tokens, as its `canvasNote` says, and no new component is exported. Each `canvasNote` lists the content differences. Play runs the applicable spec rows and `focus_order_is_logical` (on Today: the reviewer bar, the business switcher, the nav in order, Answering, then the page down to the first approval answer; on a conversation: the switcher, the nav, the list, the receipts, then Take over or Hand back to Claude, then the composer; on the first visit: focus starts in the passcode field and Tab stays in the dialog).
 - [ ] **Step 2: Run** `cd web && npx vitest run --project unit src/ds/reference && npx vitest run --project storybook src/ds/boards` → FAIL (board stories missing, or spec mismatches).
-- [ ] **Step 3: Build the board stories** and fix components (never assertions) until the spec rows pass; a value that truly differs from the canvas goes in the reference README with the reason.
-- [ ] **Step 4: Compare by eye** per `using-browsers` (headless `agent-browser`, its worktree session). With `npm run storybook -- --ci` in the background, per board: `set viewport 1280 820`, open `http://localhost:6006/iframe.html?id=<story-id>&viewMode=story`, screenshot to `.plan-runs/<plan-slug>/shots/` and compare with `$DS_REFERENCE_DIR/<board>.png` (type, colors, spacing, radii, hairlines, receipts under the right messages on their side, at most one motion moment). At `1440 900` and `390 844`, `eval "document.documentElement.scrollWidth <= innerWidth"` is `true` and nothing is clipped. A keyboard walk shows the 2 px blue ring at every stop. Fix deltas in components; rerun Step 2.
-- [ ] **Step 5: Record** one line per board in `reference/README.md` (board, story, date, viewports, deltas fixed, deviations kept and why); the renders themselves stay out of the repo.
+- [ ] **Step 3: Build the board stories** and fix components (never assertions) until the spec rows pass. A component fix that would change what a signed board shows waits for the project owner's sign-off.
+- [ ] **Step 4: Compare by eye** per `using-browsers` (headless `agent-browser`, its own session). With Storybook running in the background on a free port, per board: `set viewport 1280 820`, open `http://localhost:<port>/iframe.html?id=<story-id>&viewMode=story`, screenshot to `.plan-runs/<plan-slug>/shots/` and compare with `$DS_REFERENCE_DIR/<board>.png` (type, colors, spacing, radii, hairlines, receipts under the right messages on their side, at most one motion moment). At `1440 900` and `390 844`, `eval "document.documentElement.scrollWidth <= innerWidth"` is `true` and nothing is clipped. A keyboard walk shows the 2 px blue ring at every stop. Fix deltas in components; rerun Step 2.
+- [ ] **Step 5: Record** in `reference/README.md` the board spec, where the signed renders differ from this plan (the value, the render's and why), and one line per board (board, story, date, viewports, deltas fixed, deviations kept and why); the renders themselves stay out of the repo.
 - [ ] **Step 6: Run** `cd web && npm test && npm run typecheck` → PASS (all unit and story tests).
 - [ ] **Step 7: Commit** `git add web && git commit -m "test(ds): check the owner app boards against the design canvas"`.
 
@@ -663,83 +678,148 @@ Every string here is owner-facing (no Spanish). Components display what the scre
 
 **Files:**
 - Create: `web/src/ds/boards/PublicBooked.stories.tsx`, `PublicHandoff.stories.tsx`, `ConversationTakeOver.stories.tsx`
-- Modify: `web/src/ds/reference/README.md`
+- Modify: `web/src/ds/reference/README.md`, `web/src/ds/boards/{parts.tsx,boards.css}`
 
 **Interfaces:**
-- Produces: `Boards/Public page, booked` (N-Public-Rivera), `Boards/Ask for Maria` (N-Public-Handoff, both states side by side as on the board) and `Boards/Conversation, taken over` (N-Conv-TakeOver: `TakeOverBar` in `owner` mode, `PersonMessage`, the owner composer).
+- Produces: `Boards/Public page, booked` (N-Public-Rivera-Run1), `Boards/Ask for Maria` (N-Public-Handoff-Run1, both states side by side as on the board, each a whole page 640px wide) and `Boards/Conversation, taken over` (N-Conv-TakeOver: `TakeOverBar` in `owner` mode, `PersonMessage` reading "You" beside the owner's initials, the owner composer, on its own board's layout).
 
-- [ ] **Step 1: Write the board stories** with play assertions: brand header 76px high, padding 0px 40px; the AI disclosure; the composer row per the board spec; the booking card is a `ReplyCard` with template `booking_confirmed`; `SystemLine` "Maria Rivera joined the chat" has `role="status"` and no time (`canvasNote`: the board's time is left out, as no contract carries it); visitor receipts are read-only `MarginReceipt`s attached under their messages on the message's side, the rows filling the chat column (the `canvasNote` notes the boards draw none, and that the header's phone is the `contact` charter block); `focus_order_is_logical` ("Ask for Maria Rivera", any card action, the composer; on the take-over board, "Hand back to Claude" then the composer).
+- [ ] **Step 1: Write the board stories** with play assertions: brand header 76px high, padding 12px 40px (the signed open-status board grows it by that padding when the status wraps), and 16px gutters below 720px of page width, as each handoff state is drawn at 640px; "Open now" at the right of the header, the kernel's text verbatim; the AI disclosure; the composer row per the board spec; the booking card is a `ReplyCard` with template `booking_confirmed`; `SystemLine` "Maria Rivera joined the chat" has `role="status"` and no time (`canvasNote`: the board's time is left out, as no contract carries it); visitor receipts are read-only `MarginReceipt`s attached under their messages on the message's side, the rows filling the chat column (the header's phone is the `contact` charter block); `focus_order_is_logical` ("Ask for Maria Rivera", any card action, the composer; on the take-over board, "Hand back to Claude" then the composer).
 - [ ] **Step 2: Run** `cd web && npx vitest run --project storybook src/ds/boards/{PublicBooked,PublicHandoff,ConversationTakeOver}.stories.tsx` → FAIL until the stories and fixes land.
-- [ ] **Step 3: Compare by eye** as in Task 4 Step 4 at 1280×820 against the three references, then 1440×900 and 390×844, with a keyboard walk; check the Spanish story at 390×844 for clipped buttons.
+- [ ] **Step 3: Compare by eye** as in Task 4 Step 4 at 1280×820 against the three references, then 1440×900 and 390×844, with a keyboard walk; check the Spanish public page at 390×844 for clipped buttons.
 - [ ] **Step 4: Record** three README lines.
 - [ ] **Step 5: Run** `cd web && npm test && npm run typecheck` → PASS.
 - [ ] **Step 6: Commit** `git add web && git commit -m "test(ds): check the public page and take-over boards against the design canvas"`.
 
-### Task 6: Visual check of the verification, safety, switcher, rules and connectors boards
+### Task 6: Visual check of the verification, safety and switcher boards
 
-The connectors boards are drawn as AGENTS.md asks, at a 14-inch laptop's width or a phone's. They are rendered at a 1512×982 viewport (N-Conn-16-Phone-Rules at 390×844), and a board taller than one screen is captured at full height. The Chen verify, Safety and Switcher boards stay at 1280×820.
+The Connectors and rules boards, which replace the earlier rules and settings boards, are checked in Task 6b, from their own signed boards.
 
 **Files:**
-- Create: `web/src/ds/boards/ChenVerify.stories.tsx`, `Safety.stories.tsx`, `Switcher.stories.tsx`, `ConnectorsHub.stories.tsx`, `ConnectorPages.stories.tsx`, `AddConnector.stories.tsx`, `ToolChanged.stories.tsx`
-- Modify: `web/src/ds/reference/README.md`, `web/src/ds/reference/boards.test.ts`, `web/.storybook/preview.tsx` (a `board` viewport, 1512×982)
+- Create: `web/src/ds/boards/ChenVerify.stories.tsx`, `Safety.stories.tsx`, `SafetyRecord.stories.tsx`, `Switcher.stories.tsx`
+- Modify: `web/src/ds/reference/README.md`, `web/src/ds/reference/boards.test.ts`, `web/src/ds/boards/{parts.tsx,boards.css}`
 
-**Connectors board spec** (from the board sources; each connectors board story's play asserts the rows that apply with `expectComputed`, with Task 4's spec rows):
+**Interfaces:**
+- Produces: `Boards/Confirm it’s you` (N-Public-Verify-Run1), `Boards/Safety` (N-Safety-Run1), `Boards/Safety, full record` (N-Safety-Record-Run1) and `Boards/Switcher` (N-Switcher-Run1).
+
+- [ ] **Step 1: Write the failing test and the board stories.** `boards.test.ts` adds `every_reference_board_has_a_board_story` (each `REFERENCE_BOARDS` entry is named by exactly one `Boards/*` story). Stories, with the applicable Task 4 spec rows plus: Confirm it’s you shows the board's two states with the Demo inbox between them, built from `VerifyCodeForm` under the `verify_prompt` card and `DemoInboxPanel` while the code is on its way, then `VerifiedLine` with "Simulated verification" and a `document_link` card after it; Safety shows the attempts list with "All" first and chosen (the kinds one radio group: one tab stop, the arrow keys), older attempts dated with their time ("Oct 26, 9:52 am", from fixture strings: nothing in `web/src/ds/` formats a date) and one attempt opened; Safety, full record shows every entry, "Recorded by the checkpoint", and one entry's `FullTrace`; Switcher shows the menu open over Today, listing only businesses and "New business" (`canvasNote`: the board's Desks are in the sidebar's Desk picker); each has `focus_order_is_logical`.
+- [ ] **Step 2: Run** `cd web && npx vitest run --project unit src/ds/reference && npx vitest run --project storybook src/ds/boards` → FAIL until the stories and fixes land.
+- [ ] **Step 3: Compare by eye** as in Task 4 Step 4 for all four boards at 1280×820, 1440×900 and 390×844, with a keyboard walk.
+- [ ] **Step 4: Record** four README lines.
+- [ ] **Step 5: Run** `cd web && npm test && npm run typecheck && npm run check:ds` → PASS.
+- [ ] **Step 6: Commit** `git add web && git commit -m "test(ds): check verification, safety and switcher boards against the design canvas"`.
+
+### Task 6b: Visual check of the rules and connectors boards
+
+The same method as Tasks 4–6 for the eighteen Connectors and rules boards (N-Conn-01-Rules to N-Conn-16-Phone-Rules, with N-Conn-07b and N-Conn-11b), each rebuilt from the components and fixtures of Tasks 2 and 3. Where a render differs from this plan or a spec row, the render wins: the story asserts the render's value, and `web/src/ds/reference/README.md` records both and why. Contracts still win over board copy, as each story's `canvasNote` says. The presets, payment ceiling and simulated-change boards are checked when those pieces are built. Task 6c moves these boards to the Connectors tab boards the owner signed later the same day; where the two differ, Task 6c wins.
+
+The connectors boards are drawn as AGENTS.md asks, at a 14-inch laptop's width or a phone's: they are rendered 1512 px wide (N-Conn-16-Phone-Rules 390 px wide) and captured at full height. The other boards stay at 1280×820.
+
+**Files:**
+- Create: `web/src/ds/boards/{ConnectorsHub,ConnectorPages,AddConnector,ToolChanged}.stories.tsx`
+- Modify: `web/src/ds/reference/README.md`, `web/src/ds/reference/boards.test.ts`, `web/src/ds/boards/{parts.tsx,spec.ts,boards.css}`, `web/.storybook/preview.tsx` (a `board` viewport, 1512×982), and the components whose spacing a render corrects, each README saying what changed, with a token for each new measure (`tokens.json`, `tokens.css`). `AppShell`'s phone top bar is among them: N-Conn-16-Phone-Rules is the first signed board to draw it. `AppShell` also gains `panel`, the Ask Claude panel's place beside the page, and makes everything else inert while that panel is a phone's sheet.
+
+**Connectors board spec** (read off the renders; each connectors board story's play asserts the rows that apply with `expectComputed`, with Task 4's spec rows):
 
 | Element | Expected |
 |---|---|
-| Connector section | Task 4's card background, border and radius 12px; no padding of its own (`overflow: hidden`) |
+| Connector section | Task 4's card background, border and radius 12px; no padding of its own (the header and the last row round their own corners, so nothing is clipped) |
 | Section header link | padding 14px 16px; icon tile 36px, radius 8px, background `rgba(250, 249, 245, 0.1)`, or `rgb(255, 255, 255)` behind a brand mark |
 | Tool row | padding 12px 16px; top border 1px `rgba(250, 249, 245, 0.12)`; name weight 520 |
 | Outcome menu button | height 32px; border 1px `rgba(250, 249, 245, 0.22)`; radius 8px; background `rgba(0, 0, 0, 0)` |
 | Change tag | width 64px; border 1px `rgba(250, 249, 245, 0.22)`; fully rounded |
 | Steps | circle 22px; the current one `rgb(239, 236, 228)` |
 | Quoted definition | padding 10px 12px; border 1px `rgba(250, 249, 245, 0.12)`; radius 8px; background `rgb(28, 27, 25)`; 12px/18px mono; `white-space: pre-wrap` |
-| Ask Claude panel | width 400px; left border 1px `rgba(250, 249, 245, 0.12)` |
+| Ask Claude panel | width 400px; left border 1px `rgba(250, 249, 245, 0.12)`; `AppShell`'s `panel`, at the window's right edge, the page narrowed by its width; under 640px a modal sheet over the whole window (the rest of the app inert across a resize, focus kept inside and returned to its opener) |
 
 - [ ] **Step 1: Write the failing tests and the board stories.**
   - `boards.test.ts`:
-    - Adds `every_reference_board_has_a_board_story`: each `REFERENCE_BOARDS` entry is named by a `Boards/*` story.
-    - Changes `every_reference_board_has_a_render`: an `N-Conn-*` render is 1512 px wide and at least 982 tall; N-Conn-16-Phone-Rules is 390 wide and at least 844 tall; every other board stays 1280×820.
-  - Stories, with the applicable Task 4 spec rows:
-    - Chen verify shows `VerifiedLine` with "Simulated verification" and a `document_link` card.
-    - Safety shows the attempts list and one `FullTrace`.
-    - Switcher shows the menu open over Today, listing only businesses and "New business" (`canvasNote`: the board's two columns become one menu of businesses; its Desks, New Desk and their status dots are in the sidebar's Desk picker or left out).
-  - The connectors stories, each at the `board` viewport (the phone board's at `phone`), with `parameters.canvas` its board. Every Rules page has `PageHeader` "Rules", subtitle "What Claude can do on this Desk, where each tool comes from, and your rules for it.", and "Add a connector". Its owner `Composer` reads "Ask Claude to change a rule or a connector", with the helper "Claude shows you the change and example situations before anything applies.", above the board's chips.
+    - `every_reference_board_has_a_board_story` (Task 6) fails until each `N-Conn-*` board is named by exactly one `Boards/*` story.
+    - `every_reference_board_has_a_render`: an `N-Conn-*` render is 1512 px wide and at least 982 tall; N-Conn-16-Phone-Rules is 390 wide and at least 844 tall; every other board stays 1280×820.
+  - The stories, one per board, each at the `board` viewport (the phone board's at `phone`), with `parameters.canvas` its board. Every Rules page has `PageHeader` "Rules", subtitle "What Claude can do on this Desk, where each tool comes from, and your rules for it.", and "Add a connector". Its owner `Composer` reads "Ask Claude to change a rule or a connector", with the helper "Claude shows you the change and example situations before anything applies.", above the board's chips. A tool's page has the same composer, "Ask Claude to change a rule for {tool}", with that tool's chips.
 
 | Story | Board | Shows |
 |---|---|---|
-| `Boards/Rules and connectors` (`ConnectorsHub`) | N-Conn-01-Rules | Rivera's Rules page: `ConnectorList` with six built-in sections and Stripe, then `AlwaysOnList` |
-| `Boards/Rules on a phone` (`ConnectorsHub`) | N-Conn-16-Phone-Rules | the same at 390 px: sections stacked, each tool's outcome kept, the composer on top (`canvasNote`: the board's placeholder is shorter; the composer keeps one placeholder at every width) |
-| `Boards/Google Calendar added` (`ConnectorsHub`) | N-Conn-11-GCal-Done | Rivera's Rules page with an info `Notice` ("Google Calendar is on. Claude now checks when you're busy before offering times, and never sees what an event is.") and Google Calendar's section with "Added just now" |
-| `Boards/Ask Claude to add a connector` (`ConnectorsHub`) | N-Conn-12-Chat | Chen's Rules page with `AskClaudePanel`: the owner's words, Claude's serif reply and `ConnectorOfferCard` "Review and add" for Payments |
-| `Boards/Payments` (`ConnectorPages`) | N-Conn-02-Payments | `Breadcrumb` Rules / Payments; `ConnectorHeader` "On"; "Tools" with the caption "Each tool with every rule that covers it. Open a tool for its own page."; a `ToolRulesCard` per tool, the shared card under both; `ConnectionPanel` "Turn off Payments" |
-| `Boards/Stripe` (`ConnectorPages`) | N-Conn-03-Stripe | `ConnectorHeader` "Connected"; a `ToolRulesCard` per tool; `ConnectionPanel` with the connection details and "Disconnect" |
-| `Boards/Google Calendar` (`ConnectorPages`) | N-Conn-04-GoogleCalendar | `ConnectorHeader` with its promise; one tool; the connection and "Disconnect" (`canvasNote`: catalog-only in the demo) |
-| `Boards/Refund` (`ConnectorPages`) | N-Conn-05-Refund | `Breadcrumb` Rules / Stripe / Refund; `ToolPageHeader` "On · Definition unchanged"; "Your rules for refund" (`ToolRulesCard`, no header); the composer "Ask Claude to change a rule for refund" with its chips; `RecentRequests` |
-| `Boards/Quote` (`ConnectorPages`) | N-Conn-06-Quote | the same for Quote, with no definition note (`canvasNote`: a built-in tool has no pinned definition; the board's chips repeat the Refund page's, so the story's are the Quote page's own) |
-| `Boards/Add a connector, coming soon` (`AddConnector`) | N-Conn-07b-Add-Picker-ComingSoon | Chen's Rules page under `ConnectorPicker`: Payments to add, Google Calendar coming soon, Stripe to connect |
-| `Boards/Add a connector` (`AddConnector`) | N-Conn-07-Add-Picker | Rivera's Rules page under the picker, every built-in added and Google Calendar to connect (`canvasNote`: catalog-only in the demo) |
-| `Boards/Connect Google Calendar` (`AddConnector`) | N-Conn-08-GCal-SignIn | `ConnectorSignIn` over Rivera's Rules page, step 2 of 4 |
-| `Boards/Review Google Calendar` (`AddConnector`) | N-Conn-09-GCal-Review | `Breadcrumb`, `Steps` at 3 of 4, `ConnectorReview` with "See when you're free" at "Ask me first", covered by the Bookings rule |
-| `Boards/Turn on Google Calendar` (`AddConnector`) | N-Conn-10-GCal-Confirm | `Steps` at 4 of 4, `PageHeader` "Turn on Google Calendar" ("Here's exactly what changes on your Desk. Nothing changes until you confirm."), `ChangeReview` with "Confirm and turn on" and "Back" |
-| `Boards/Review Payments` (`AddConnector`) | N-Conn-11b-Documents-Review | Chen adding Payments: `Breadcrumb` Rules / Payments, `Steps` "Choose", "Review tools", "Confirm" at 2 of 3, `ConnectorReview` with both tools at "Ask me first" (the board keeps its name from when it showed Documents) |
-| `Boards/A tool changed, Today` (`ToolChanged`) | N-Conn-13-Changed-Today | Today with `ToolChangedItem` first under "Needs you", then the seeded held quote as its `ApprovalCard` (`canvasNote`: the board draws the hold as a short row; held requests keep the signed Today's `ApprovalCard`) |
-| `Boards/A tool changed, review` (`ToolChanged`) | N-Conn-14-Changed-Review | the Refund page with `ToolPageHeader` "Off until you review a change" and `ToolReviewCard` above its rules |
-| `Boards/A tool changed, after` (`ToolChanged`) | N-Conn-15-Changed-After | "On · Definition reviewed today" and the info `Notice` |
+| `Boards/Rules` › Rules and connectors | N-Conn-01-Rules | Rivera's Rules page: `ConnectorList` with six built-in sections and Stripe, then `AlwaysOnList` |
+| `Boards/Rules` › Rules on a phone | N-Conn-16-Phone-Rules | the same at 390 px: the title with "Add a connector" beside it, the composer alone on top (no subtitle, helper or chips), sections stacked, each tool's outcome on its own line (`canvasNote`: the board's placeholder is shorter; the composer keeps one placeholder at every width) |
+| `Boards/Rules` › Google Calendar added | N-Conn-11-GCal-Done | Rivera's Rules page with an info `Notice` ("Google Calendar is on. Claude asks you first before it checks when you're busy, and never sees what an event is.") and Google Calendar's section last, with "Added just now" |
+| `Boards/Rules` › Ask Claude to add a connector | N-Conn-12-Chat | Chen's Rules page with `AskClaudePanel`: the owner's words, Claude's serif reply and `ConnectorOfferCard` "Review and add" for Payments |
+| `Boards/Connector and tool pages` › Payments | N-Conn-02-Payments | `Breadcrumb` Rules / Payments; `ConnectorHeader` "On"; "Tools" with the caption "Each tool with every rule that covers it. Open a tool for its own page."; a `ToolRulesCard` per tool, the shared rule first under both; `ConnectionPanel` "Turn off Payments" |
+| `Boards/Connector and tool pages` › Stripe | N-Conn-03-Stripe | `ConnectorHeader` "Connected"; a `ToolRulesCard` per tool; `ConnectionPanel` with the connection details and "Disconnect" |
+| `Boards/Connector and tool pages` › Google Calendar | N-Conn-04-GoogleCalendar | `ConnectorHeader` with its promise; one tool; the connection and "Disconnect" (`canvasNote`: catalog-only in the demo) |
+| `Boards/Connector and tool pages` › Refund | N-Conn-05-Refund | `Breadcrumb` Rules / Stripe / Refund; `ToolPageHeader` "On · Definition unchanged"; "Your rules for refund" (`ToolRulesCard`, no header); the composer with its chips; `RecentRequests` |
+| `Boards/Connector and tool pages` › Quote | N-Conn-06-Quote | the same for Quote, with no definition note (`canvasNote`: a built-in tool has no pinned definition; the board's chips repeat the Refund page's, so the story's are the Quote page's own) |
+| `Boards/Add a connector` › Add a connector, coming soon | N-Conn-07b-Add-Picker-ComingSoon | Chen's Rules page under `ConnectorPicker`: Payments to add, Google Calendar coming soon, Stripe to connect |
+| `Boards/Add a connector` › Add a connector | N-Conn-07-Add-Picker | Chen's Rules page with Bookings, Verification and Documents, under the picker: Payments, Quotes and Leads and callbacks to add, Bookings and Documents added, Google Calendar and Stripe to connect (`canvasNote`: catalog-only in the demo; Verification is never listed) |
+| `Boards/Add a connector` › Connect Google Calendar | N-Conn-08-GCal-SignIn | `ConnectorSignIn` over Rivera's Rules page, step 2 of 4 |
+| `Boards/Add a connector` › Review Google Calendar | N-Conn-09-GCal-Review | `Breadcrumb`, `Steps` at 3 of 4, `ConnectorReview` with "See when you're free" at "Ask me first" |
+| `Boards/Add a connector` › Turn on Google Calendar | N-Conn-10-GCal-Confirm | `Steps` at 4 of 4, `PageHeader` "Turn on Google Calendar" ("Here's exactly what changes on your Desk. Nothing changes until you confirm."), `ChangeReview` with "Confirm and turn on" and "Back" |
+| `Boards/Add a connector` › Review Payments | N-Conn-11b-Payments-Review | Chen adding Payments: `Breadcrumb` Rules / Payments, `Steps` "Choose", "Review tools", "Confirm" at 2 of 3, `ConnectorReview` with both tools at "Ask me first" |
+| `Boards/A tool changed` › A tool changed, Today | N-Conn-13-Changed-Today | Today with `ToolChangedItem` first under "Needs you", then the seeded held quote as its `ApprovalCard` (`canvasNote`: the board draws the hold as a short row; held requests keep the signed Today's `ApprovalCard`) |
+| `Boards/A tool changed` › A tool changed, review | N-Conn-14-Changed-Review | the Refund page with `ToolPageHeader` "Off until you review a change" and `ToolReviewCard` above its rules |
+| `Boards/A tool changed` › A tool changed, after | N-Conn-15-Changed-After | "On · Definition reviewed today" and the info `Notice` |
 
   - Each board story has `focus_order_is_logical`:
     - Rules pages: "Add a connector", the composer, its chips, then each section's header and rows in order, then the last "Add a connector".
-    - A board with a dialog: only the dialog's controls.
+    - A board with a dialog: only the dialog's controls, and Tab stays inside.
+    - A connector's or tool's page: the trail, each tool's link, its outcome menus and "Add a rule", then the composer and its chips, the recent requests, or the panel's button.
     - The review boards: the outcome menus, then "Turn it on".
     - The changed tool's review: "Turn back on", "Keep off", then the rules.
-- [ ] **Step 2: Run** `cd web && npx vitest run --project unit src/ds/reference && npx vitest run --project storybook src/ds/boards` → FAIL until the stories and fixes land.
-- [ ] **Step 3: Compare by eye** as in Task 4 Step 4.
-  - The Chen verify, Safety and Switcher boards at 1280×820.
-  - The connectors boards at `set viewport 1512 982` (N-Conn-16-Phone-Rules at `390 844`), with a full-page screenshot for a board taller than one screen, against `$DS_REFERENCE_DIR/<board>.png`.
-  - Then every board at 1440×900 and 390×844, with a keyboard walk.
-- [ ] **Step 4: Record** a README line per board (21 lines).
-- [ ] **Step 5: Run** `cd web && npm test && npm run typecheck` → PASS.
-- [ ] **Step 6: Commit** `git add web && git commit -m "test(ds): check the verification, safety, switcher, rules and connectors boards against the design canvas"`.
+- [ ] **Step 2: Run** `cd web && npx vitest run --project unit src/ds/reference && npx vitest run --project storybook src/ds/boards` → FAIL until the stories land.
+- [ ] **Step 3: Compare by eye** as in Task 4 Step 4, against `$DS_REFERENCE_DIR/<board>.png` at the render's size (`set viewport 1512 <height>`, N-Conn-16-Phone-Rules at 390), row by row and pixel by pixel; then at 1440×900 and 390×844, with a keyboard walk. Fix a delta in its component unless that would change another signed board, which waits for the project owner.
+- [ ] **Step 4: Record** in the README the connectors board spec, where the renders differ from this plan, and a line per board (18 lines).
+- [ ] **Step 5: Run** `cd web && npm test && npm run typecheck && npm run check:ds` → PASS.
+- [ ] **Step 6: Commit** `git add web && git commit -m "test(ds): check the rules and connectors boards against the design canvas"`.
+
+### Task 6c: The Connectors tab boards
+
+The project owner signed a new set of connector boards on 2026-10-29, after Task 6b, in which connectors have their own tab. This task brings the design system and its board stories to them. The method is Task 6b's: each board is rebuilt from the components and fixtures, compared with its render at the size it is drawn at, and checked at 1440×900 and 390×844 with a keyboard walk; where a render differs from this plan, the render wins and `web/src/ds/reference/README.md` records both.
+
+Owner decisions, 2026-10-29 (the signed Connectors tab boards):
+- **Connectors have their own tab**, an eighth sidebar row after Rules. The Connectors page lists every connector on the Desk by where it comes from ("Built in", "Connected", "Available"), with "Add a connector" in its header. A connector's, a tool's and the add flow's trails start at Connectors: "Connectors / Stripe / Refund". Settings names none.
+- **The Rules page** has its title and line, the composer right under them, one `ConnectorSection` per connector and the always-on list, and no "Add a connector". A section's name carries no "Built in", since the page groups connectors, and its header links to the connector's page (`connectors/<id>`).
+- **What sat at the top of Rules moves.** The "How Claude works" switch and the money limit (plan 04's `RulesPage`) become a "Start from a preset" menu in the Rules page's header, which applies a preset as a bulk edit (`RulesPreset = 'ask_first' | 'auto'`), and a ceiling line inside the Payments and Stripe sections ("No payment over $500 goes through without asking you, whatever the rules below say.", with "Change"), drawn in `ConnectorSection`'s `aboveTools` slot.
+- **Outcome words** stay "Automatic", "Ask me first", "Never". Owner copy says "connector", never "integration". "Stripe" is the mock payments server's owner-facing name, always with its Mock badge. N-Settings-Integrations and N-Settings-ToolChanged stay superseded by the Rules and Connectors pages.
+- **A change's review** shows each side beside a 2 px status bar, refused for "Before" and handled for "After", its words in the neutral text colors. A changed field is in weight 520 with "Changed". A row with one side shows "After" when something is added or turned on, and "Before" when it is removed. A rule for one person replaced by another reads as that rule changed.
+- **Boards.** N-Conn-23-Connectors and N-Conn-24-Phone-Connectors join `REFERENCE_BOARDS`. N-Conn-01-Rules and N-Conn-16-Phone-Rules are archived and leave it. N-Conn-17 to N-Conn-22 (the presets, the payment ceiling and the simulated tool change) are built and checked in a follow-up, with those pieces.
+- **The sidebar's Connectors row** comes with its own change to the Sidebar on main. Until it lands, the board stories keep seven rows, mark Rules current on the Connectors, connector, tool and add pages, and each `canvasNote` says so. Once it merges, this branch merges main again and the stories assert eight rows with Connectors current.
+
+**Files:**
+- Create: `web/src/ds/components/ConnectorDirectory/` (component, CSS, README, stories), `web/src/ds/boards/ConnectorsPage.stories.tsx`
+- Modify:
+  - `web/src/ds/components/{ConnectorName,ConnectorSection,ConnectorList,ChangeReview,PageHeader,OutcomeMenu}/` and their READMEs, as below; `web/src/ds/index.ts`.
+  - `web/src/ds/fixtures/{rivera.ts,chen.ts}`: connector and tool hrefs under `/connectors/`; `rivera.directory`, the Connectors page's rows; the Google Calendar change's reasons in the confirm board's words.
+  - `web/src/ds/boards/{parts.tsx,spec.ts,boards.css,ConnectorsHub,ConnectorPages,AddConnector,ToolChanged}.stories.tsx`, `web/src/ds/reference/{boards.ts,boards.test.ts,README.md}`, and the component stories that cited the archived boards.
+
+**Interfaces produced:**
+- `ConnectorDirectory({ builtIn; builtInCaption?; connected; available; linkComponent? })` with `DirectoryRowView = { connector: ConnectorView; tools: number; href?: string; note?: string; connection?: string; onConnect?: () => void }`. It is its own component rather than a mode of `ConnectorList`: the Rules page's list is a section per connector with its tools and their outcomes, while this is a row per connector with its state.
+  - Up to three groups 20 px apart, each a `section` named by its `SectionHeader`, 20 px over one card of rows; a group with no rows is left out.
+  - A row, padded 14 px 16 px under a hairline: the 36 px tile, the name with no "Built in" (the Mock badge for an app), the description, for a connected app "Connected · {connection}", and at the right the note and the tool count. A built-in or connected row is one link to its page, ending in `chevron-right`; an available app has a secondary "Connect {name}" calling `onConnect`.
+  - Under 640 px of its own width: a 32 px tile, each count under its line after its note, "Connect" under the count.
+- `ConnectorName` `hideBuiltIn?`: leaves "Built in" off where the page groups connectors; the Mock badge always stays.
+- `ConnectorSection` `aboveTools?: ReactNode`: a line between the header and the tool rows, padded 12 px 16 px (12 px 14 px on a phone) under a hairline, for the payment ceiling. The section uses `hideBuiltIn`.
+- `ConnectorList` `onAddConnector?`: without it, no "Add a connector" at the end.
+- `PageHeader` under 640 px: the actions stay on the title's line, at its right, and the subtitle runs under both, 8 px under the title.
+- `RulesPreset = 'ask_first' | 'auto'`; the menu's words are `PRESET_ITEMS` (Task 3c).
+- `ChangeReview`: the bars and words above; the connector line under a title carries no "Built in".
+
+**Stories** (the rest keep Task 6b's, with their trails starting at Connectors):
+
+| Story | Board | Shows |
+|---|---|---|
+| `Boards/Connectors` › Connectors | N-Conn-23-Connectors | Rivera's Connectors page: "Add a connector" in the header; six built-in connectors, Verification "Always on"; Stripe connected with its test account; Google Calendar available with "Connect" |
+| `Boards/Connectors` › Connectors on a phone | N-Conn-24-Phone-Connectors | the same at 390 px, "Add a connector" beside the title at control height |
+| `Boards/Connectors` › Google Calendar added | N-Conn-11-GCal-Done | the Connectors page with the info `Notice` under the title, and Google Calendar connected, "Added just now" |
+| `Boards/Rules` › Ask Claude to add a connector | N-Conn-12-Chat | Chen & Co. CPA's Rules page with three connectors (Bookings, Verification and Documents), the composer under the title, and `AskClaudePanel` offering Payments |
+| `Boards/Add a connector` › Add a connector, and Add a connector, coming soon | N-Conn-07-Add-Picker, N-Conn-07b-Add-Picker-ComingSoon | Chen's picker over Chen's own Connectors page |
+| `Boards/Add a connector` › Connect Google Calendar | N-Conn-08-GCal-SignIn | the sign-in over Rivera's Connectors page |
+
+- [ ] **Step 1: Write the failing tests.** The stories above; `ConnectorList`'s `OnTheRulesPage` (no "Add a connector"); `PageHeader`'s `Phone`; `ConnectorName`'s `WithoutBuiltIn`; `ConnectorSection`'s `LineAboveTools`; `ChangeReview`'s `PersonalRuleReplaced` and the bars on every story; the confirm board's Before and After reasons; `expectRulesPage` checks the Rules page has no "Add a connector" and the composer sits 20 px under the header; `boards.test.ts` names N-Conn-24-Phone-Connectors as the phone board.
+- [ ] **Step 2: Run** `cd web && npx vitest run --project storybook src/ds` → FAIL until the components and stories land.
+- [ ] **Step 3: Implement**, tokens only in components (board CSS may keep a measured value), and fix a delta in its component unless that would change another signed board, which waits for the project owner.
+- [ ] **Step 4: Compare by eye** each changed board against its render at the render's size, then at 1440×900 and 390×844 with a keyboard walk.
+- [ ] **Step 5: Record** in the reference README the Connectors page's spec rows, the differences and a line per changed board.
+- [ ] **Step 6: Run** `cd web && npm test && npm run typecheck && npm run check:ds`, and `make docs-check` → PASS.
+- [ ] **Step 7: Commit** each piece on its own: the components, the board stories, the reference README and this plan.
 
 ### Task 7: Publish to the Design System artifact (first to cut)
 
@@ -884,6 +964,33 @@ Task 3 fix round 1 (2026-10-29), from the task review:
 - A recent request's row draws the base focus ring, 2 px outside the row.
 - The Google Calendar review's note says why every new tool starts at "Ask me first".
 - `ChangeReview`'s confirm keeps "Confirm change" under the busy spinner rather than reading "Confirming", as every busy button does (`ConfirmingFromTheScreen`). Task 2 has 46 story tests and Task 3 57.
+Task 1 checkout, 2026-10-29: MockCheckout follows the owner-signed checkout board (2026-10-29), N-Checkout-Run2: the merchant, a "Test mode" badge and the test-payment footnote inside one card in every state, a locked test card shown as copy, "Pay {amount}" in place of "Complete test payment", and a spinner only on the pressed button. It takes `merchant` and an optional `customerName`. The disclosure line follows N-Disclosure-Run2. The design system gains the type style `amount` and the size `size-checkout`.
+
+Task 1 checkout review, 2026-10-29: the merchant is resolved: `PaymentLinkView.business_name` is an approved master contract field, and plan 04 Task 10 passes `link.business_name` as `merchant` (the open question this plan raised for it is closed). The name on the card is `customerName`, the kernel's `PaymentLinkView.customer_name` (first name and last initial, only while a verified session's link is open); without it the name is an empty field whose value never leaves the page. Clearing an old error no longer unlocks a retry in flight; the result line sits in a persistent polite, atomic region, so a later result is announced; the paid check takes the line's ink, as status color appears only as a dot. The card's title stays in sans as the board's card headline. New story `IssuedUnverified` (25 story tests).
+
+Tasks 4–6, 2026-10-29: the reference boards are the fifteen the project owner signed off that day, after this plan was written, and where a signed render differs from the board spec, the render wins and the reference README records both values and why. Earlier board names map to their signed boards; the reviewer arrival leaves the list (Today draws it), and the rules and settings boards leave it for the Connectors and rules boards, checked with Tasks 2–3. Task 4 builds eight owner board stories (the first visit is Today's), Task 5 three and Task 6 four, one per board, with `every_reference_board_has_a_board_story` requiring exactly one. `AppShell` gains `fill`, for the conversation page's list column at the sidebar's seam. The brand header's signed padding is 12px 40px.
+
+Tasks 4–6 review, 2026-10-29: every value a story asserts is now read off its signed render. The Run 1 conversation boards draw the conversation list at the sidebar's seam (`AppShell` `fill`), and their sidebar is the one look every owner page has, the panel with its seam and the Answering switch at its foot, as Today draws it (owner decision 2026-10-29, below); the agent's signed limit is padded 12px 16px; the public page takes 16px gutters below 720px, as each handoff state is drawn at 640px; each embedded public page keeps its own footer under its composer. The take-over story follows its own board's layout, and the owner's own messages read "You" beside her initials (`PersonMessage` `initials`, owner decision). Radio chips take the radio group's keyboard.
+
+PR panel round 1, 2026-10-29: the review panel's findings on this plan's design PR are fixed.
+- The verification code field's outline is `line-field`, 3:1 against the page, at rest and on hover, as every text field's is, where the signed N-Public-Verify-Run1 draws the fainter `line-control`; the reference README and the board story record both values and why.
+- `VerifiedLine` labels every assurance but `owner_session` "Simulated verification", so an unexpected value fails toward the label.
+- `MockCheckout` moves focus to its title only when focus was in it when the link closed; with no customer's name, the lock's line sits under the card and the name field has its own line; the lock sits inside the card number's `dd`.
+- `DemoInboxPanel` shows a notice appended twice once, as its latest item (`ReplayedNotice`; 26 story tests).
+- `AppShell`'s `fill` sets only the main area. Owner decision 2026-10-29: one sidebar look on every page, the panel with its seam and the Answering switch at its foot, as Today draws it; the conversation boards are drawn with the one sidebar (owner decision, 2026-10-29), and their stories assert the panel like every other board. The `sidebarLook` option added earlier in the round is removed.
+- Today's figures get their own type styles, read off N-Today-Run1, which draws them at two sizes: `figure` (32/40, weight 500) for the booked total and `figure-small` (24/32, weight 420) for the stopped count, both with tabular figures. `amount` stays the checkout's.
+- Task 1's text now matches: Confirm keeps its label while checking (Button `busy`), the board is N-Public-Verify-Run1, and the Demo inbox is no longer a part without a board.
+
+Deferred: master contract fields for the payment link view, a master plan change; and page layouts, which plan 04's page stories check. The figure type styles, first deferred until plan 04 builds Today, landed in this round instead.
+
+Recorded history and the sidebar's about group, 2026-10-29: four boards the project owner signed later that day join the fifteen, each checked at the window it is drawn at, so `REFERENCE_BOARDS` now holds nineteen and the render check holds each board to its own size (`BOARD_VIEWPORTS` and `boardViewport` in `boards.ts`).
+- N-History-Conversations, N-History-People and N-History-Safety, at a 14-inch laptop's 1512×982, and N-Docs-Sidebar, the sidebar alone at 264×982; one board story each, run at that window.
+- Three components mark recorded history, replayed into each copy: `RecordedTag` ("Recorded" with the history icon) on each replayed row, `RecordedNote` on an opened replayed conversation or attempt, and `RecordedHistoryLink` ("Includes recorded history") once in each section that lists replayed rows, Today's two captions included. The design system adds the `history` icon for them.
+- `ConversationListItem` and `AttemptRow` take `recorded`, which puts the tag at the end of the status line, or 10px after where the attempt came from; People's leads compose the tag themselves.
+- An opened replayed conversation shows `RecordedNote` under its header, not a tag in the transcript header, as N-History-Conversations draws it.
+- `Sidebar` takes `about` (`{ title; links: { id; label; href; current? }[] }`): the "About this prototype" group just above the Answering block, also in `AppShell`'s compact sheet. While one of its links is current, the main nav marks no row.
+
+Task 6c, 2026-10-29: the project owner signed the Connectors tab boards. Connectors get their own tab and page (`ConnectorDirectory`, N-Conn-23 and N-Conn-24); the Rules page drops "Add a connector" and keeps the composer under its title; the trails start at Connectors; a change's review shows its sides beside status bars; the presets become a two-word "Start from a preset" menu and the money limit a ceiling line inside the Payments and Stripe sections, both built with N-Conn-17 to N-Conn-22 in a follow-up. N-Conn-01-Rules and N-Conn-16-Phone-Rules are archived. The sidebar's Connectors row lands in its own change to the Sidebar on main; until then the board stories keep seven rows and say so.
 
 Task 3c (2026-10-29): the project owner asked for the mode switch, the money limit and the demo's "Simulate a tool change" to be built after Tasks 2–3, in a change of their own that merges once he signs boards N-Conn-17 to N-Conn-22, and answered its open questions: a change that can cancel open payment links says so in one static line (`ChangeReview` `cancelsLinks`, with no contract field); tool rows stay editable under a preset; a preset's review opens on its own page. Task 3c adds `HowClaudeWorks`, `MoneyLimit`, `LimitChange` and `PRESET_CAPTIONS`, moves the simulate strip from Task 3 into `ToolPageHeader`, and gives `SegmentedControl` a `disabled` state. A preset pick and "Simulate a tool change" each send once; "Review change" passes no value. The board check fixed the mode card's hairline spacing; the preset review keeps `ChangeReview`'s own layout for each side, where the board draws them differently. Task 3c has 2 unit tests and 36 story tests across its five component folders.
 

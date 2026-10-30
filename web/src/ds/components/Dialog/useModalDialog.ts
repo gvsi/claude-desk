@@ -15,6 +15,29 @@ function tabbables(dialog: HTMLElement): HTMLElement[] {
   });
 }
 
+/**
+ * Keeps Tab and Shift+Tab inside `container`: from its last control Tab goes to its first, and
+ * Shift+Tab from its first goes to its last; with nothing to reach, Tab stays put. Call it from the
+ * container's `keydown` for a Tab.
+ */
+export function keepTabInside(event: KeyboardEvent<HTMLElement>, container: HTMLElement): void {
+  const order = tabbables(container);
+  const first = order[0];
+  const last = order[order.length - 1];
+  const active = container.ownerDocument.activeElement;
+  if (!first || !last) {
+    event.preventDefault();
+    return;
+  }
+  if (event.shiftKey && (active === first || !container.contains(active))) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && (active === last || !container.contains(active))) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
 /** The props a modal `<dialog>` takes from `useModalDialog`. */
 export interface ModalDialogProps {
   ref: RefObject<HTMLDialogElement>;
@@ -67,22 +90,7 @@ export function useModalDialog(onDismiss: () => void, firstFocus: (dialog: HTMLD
       return;
     }
     if (event.key !== 'Tab') return;
-    const dialog = event.currentTarget;
-    const order = tabbables(dialog);
-    const first = order[0];
-    const last = order[order.length - 1];
-    const active = dialog.ownerDocument.activeElement;
-    if (!first || !last) {
-      event.preventDefault();
-      return;
-    }
-    if (event.shiftKey && (active === first || !dialog.contains(active))) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && (active === last || !dialog.contains(active))) {
-      event.preventDefault();
-      first.focus();
-    }
+    keepTabInside(event, event.currentTarget);
   };
 
   // The browser's own close request (not a key press) asks the screen, like Escape.

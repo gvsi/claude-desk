@@ -59,6 +59,12 @@
   color: var(--text-primary);
 }
 
+/* The screen's line above the tools (the payment limit), padded as a tool row under a hairline. */
+.cd-connector-section__above {
+  padding: var(--space-12) var(--space-16);
+  border-top: 1px solid var(--line-hairline);
+}
+
 .cd-connector-section__tools {
   margin: 0;
   padding: 0;
@@ -139,6 +145,10 @@
     padding: var(--space-12) var(--space-14);
   }
 
+  .cd-connector-section__above {
+    padding: var(--space-12) var(--space-14);
+  }
+
   .cd-connector-section__header > .cd-connector-icon {
     width: 32px;
     height: 32px;
@@ -169,7 +179,8 @@
 
   .cd-connector-section__tool-summary {
     max-width: none;
-    margin-top: var(--space-2);
+    /* Half the smallest step, as the phone board sets the words under the name. */
+    margin-top: calc(var(--space-2) / 2);
     text-align: left;
     overflow-wrap: anywhere;
   }

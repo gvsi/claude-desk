@@ -24,7 +24,7 @@ const meta = {
   ),
   parameters: {
     layout: 'padded',
-    canvas: 'N-Conv-Live',
+    canvas: 'N-Conv-Run1',
     canvasNote:
       "The board's status lines are written per chat (\"Live, water heater\"); the screen's status says who is asking or what needs the owner, from one table, and the time is the screen's own string.",
   },
@@ -57,13 +57,19 @@ export const Live: Story = {
     const dot = status.parentElement?.querySelector('.cd-status-dot');
     await expect(dot).toHaveClass('cd-status-dot--handled');
     await expect(dot).toHaveAttribute('aria-hidden', 'true');
+
+    // A live conversation carries no Recorded tag.
+    await expect(canvas.queryByText('Recorded')).toBeNull();
   },
 };
 
 export const NeedsYou: Story = {
-  args: { name: 'Visitor', time: '10:58 am', status: { tone: 'held', text: 'Needs you' } },
+  args: { name: 'Visitor', time: '10:58 am', status: { tone: 'held', text: 'Needs you' }, recorded: false },
   play: async ({ canvas }) => {
+    // Not recorded: no tag, and nothing more in the row's name.
     const link = canvas.getByRole('link', { name: 'Visitor 10:58 am Needs you' });
+    await expect(canvas.queryByText('Recorded')).toBeNull();
+    await expect(link.querySelector('.cd-recorded-tag')).toBeNull();
     await expect(link).not.toHaveAttribute('aria-current');
     expectComputed(link, { backgroundColor: 'rgba(0, 0, 0, 0)' });
     const dot = canvas.getByText('Needs you').parentElement?.querySelector('.cd-status-dot');
@@ -87,5 +93,45 @@ export const Agent: Story = {
     const name = canvas.getByText(rivera.conversations.alexAgent.name);
     expectComputed(name, { textOverflow: 'ellipsis', whiteSpace: 'nowrap', overflowX: 'hidden' });
     await expect(link.scrollWidth).toBeLessThanOrEqual(link.clientWidth);
+  },
+};
+
+export const Recorded: Story = {
+  args: {
+    name: 'Visitor',
+    time: '10:10 pm',
+    status: { tone: 'handled', text: 'Visitor who asked for the number in plain digits' },
+    href: '#conversations/ses-recorded-1',
+    recorded: true,
+  },
+  parameters: {
+    canvas: 'N-History-Conversations',
+    canvasNote:
+      'A replayed conversation, as the board marks it: the Recorded tag at the end of the status line. The status here is longer than the board\'s "Visitor", to show the words giving way to the tag.',
+  },
+  play: async ({ canvas }) => {
+    // The tag is part of the row's one link, so a screen reader hears it with the status.
+    const link = canvas.getByRole('link', { name: 'Visitor 10:10 pm Visitor who asked for the number in plain digits Recorded' });
+    const tag = canvas.getByText('Recorded');
+    await expect(tag).toHaveTextContent(/^Recorded$/);
+    await expect(tag.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+    expectComputed(tag, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)', whiteSpace: 'nowrap' });
+
+    // On the status line, after the words, pushed to its end: level with the time above it.
+    const status = canvas.getByText('Visitor who asked for the number in plain digits');
+    const time = canvas.getByText('10:10 pm');
+    await expect(tag.parentElement).toBe(status.parentElement);
+    await expect(Math.round(tag.getBoundingClientRect().right)).toBe(Math.round(time.getBoundingClientRect().right));
+    await expect(tag.getBoundingClientRect().left).toBeGreaterThan(status.getBoundingClientRect().right);
+
+    // The status words ellipsize first; the tag keeps its whole width and the row never scrolls.
+    expectComputed(status, { textOverflow: 'ellipsis', whiteSpace: 'nowrap', overflowX: 'hidden' });
+    await expect(status.scrollWidth).toBeGreaterThan(status.clientWidth);
+    await expect(tag.scrollWidth).toBeLessThanOrEqual(tag.clientWidth);
+    await expect(Math.round(tag.getBoundingClientRect().width)).toBeGreaterThanOrEqual(Math.round(tag.scrollWidth));
+    await expect(link.scrollWidth).toBeLessThanOrEqual(link.clientWidth);
+
+    // The line keeps its height: the 14 px icon sits inside the caption's 17 px line.
+    await expect(Math.round(link.getBoundingClientRect().height)).toBe(49);
   },
 };

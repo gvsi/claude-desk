@@ -38,6 +38,15 @@ const hrefs = {
   settings: '/app/desk-rivera-main/settings',
 } satisfies Record<NavKey, string>;
 
+/** The documents behind the prototype, linked from the sidebar's "About this prototype" group. */
+const ABOUT = {
+  title: 'About this prototype',
+  links: [
+    { id: 'proposal', label: 'Product proposal', href: '/docs/product-proposal' },
+    { id: 'prediction', label: 'Capability prediction', href: '/docs/capability-prediction' },
+  ],
+};
+
 const sidebar = (
   <Sidebar
     business={rivera.business.name}
@@ -91,9 +100,9 @@ const meta = {
   },
   parameters: {
     layout: 'fullscreen',
-    canvas: 'N-Reviewer-Arrival',
+    canvas: 'N-Today-Run1',
     canvasNote:
-      "The board's Today holds the arrival list and the public panel, which are Plan 04's; here the shell holds the greeting and one held request, under the reviewer bar.",
+      "The board's Today also holds the things to try, the last 7 days and the public page panel, which the Today board story composes; here the shell holds the greeting and one held request, under the reviewer bar.",
   },
 } satisfies Meta<typeof AppShell>;
 
@@ -139,12 +148,54 @@ export const OwnerToday: Story = {
   },
 };
 
+/** A page that lays out its own columns, as the conversations page does: a list, then the conversation. */
+const columns = (
+  <div style={{ display: 'flex' }}>
+    <nav aria-label="Conversations" style={{ width: 260, flex: 'none', borderRight: '1px solid var(--line-hairline)' }}>
+      <h1 className="cd-type-page-title" style={{ margin: 'var(--space-24) var(--space-20) 0' }}>
+        Conversations
+      </h1>
+    </nav>
+    <section aria-label="Conversation with Dana Whitfield" style={{ flex: 1, minWidth: 0 }} />
+  </div>
+);
+
+export const FillsTheMain: Story = {
+  args: { banner: undefined, fill: true, children: columns },
+  parameters: {
+    canvas: 'N-Conv-Run1',
+    canvasNote:
+      'Only the page’s frame: the board’s conversation list starts where the sidebar ends and runs the window’s height, with the conversation beside it (fill). The sidebar is the panel, as on every page (owner decision 2026-10-29: one sidebar look on every page; the conversation boards are drawn with the one sidebar).',
+  },
+  play: async ({ canvas }) => {
+    // One sidebar look on every page (owner decision 2026-10-29): beside a filled page too, it is
+    // the panel with its seam, as tall as the window, its Answering switch and owner at the foot.
+    const sidebarColumn = canvas.getByRole('complementary', { name: 'Claude Desk' });
+    expectComputed(sidebarColumn, { backgroundColor: 'rgb(34, 34, 32)', borderRightWidth: '1px' });
+    const foot = sidebarColumn.querySelector('.cd-sidebar__footer') as HTMLElement;
+    await expect(sidebarColumn.getBoundingClientRect().bottom - foot.getBoundingClientRect().bottom).toBe(12);
+
+    // The page fills the main area edge to edge: no padding and no content width, so its first
+    // column starts at the sidebar's seam and runs the height of the window.
+    const column = canvas.getByRole('complementary', { name: 'Claude Desk' });
+    const main = canvas.getByRole('main');
+    expectComputed(main, { paddingTop: '0px', paddingRight: '0px', paddingBottom: '0px', paddingLeft: '0px' });
+    const content = main.firstElementChild as HTMLElement;
+    expectComputed(content, { maxWidth: 'none' });
+    await expect(content.getBoundingClientRect().width).toBe(main.clientWidth);
+    await expect(content.getBoundingClientRect().height).toBe(main.clientHeight);
+    const list = canvas.getByRole('navigation', { name: 'Conversations' });
+    await expect(list.getBoundingClientRect().left).toBe(column.getBoundingClientRect().right);
+    await expect(list.getBoundingClientRect().height).toBe(window.innerHeight);
+  },
+};
+
 export const Compact: Story = {
   args: { layout: 'compact' },
   parameters: {
     canvas: 'none',
     canvasNote:
-      'No board shows the owner app on a phone; the top bar holds the mark, the business and Menu, and Menu opens the sidebar of N-Today-NeedsYou as a sheet.',
+      'No board shows the owner app on a phone; the top bar holds the mark, the business and Menu, and Menu opens the sidebar of N-Today-Run1 as a sheet.',
   },
   play: async ({ canvas, userEvent }) => {
     // A top bar instead of the column: the mark, the business and Menu.
@@ -190,5 +241,133 @@ export const Compact: Story = {
     await expect(navigate).toHaveBeenLastCalledWith(hrefs.rules);
     await expect(canvas.queryByRole('dialog', { name: 'Menu' })).toBeNull();
     await expect(menu).toHaveFocus();
+  },
+};
+
+export const CompactAbout: Story = {
+  args: {
+    layout: 'compact',
+    sidebar: (
+      <Sidebar
+        business={rivera.business.name}
+        onSwitchBusiness={fn()}
+        desks={[{ id: 'desk-rivera-main', name: rivera.business.deskName }]}
+        currentDeskId="desk-rivera-main"
+        onSwitchDesk={fn()}
+        current="today"
+        hrefs={hrefs}
+        peopleLabel="Customers"
+        answering
+        onAnsweringChange={fn()}
+        owner={{ name: rivera.business.ownerName, status: 'Available for chats' }}
+        about={ABOUT}
+        linkComponent={RouterLink}
+      />
+    ),
+  },
+  parameters: {
+    canvas: 'N-Docs-Sidebar',
+    canvasNote:
+      'The board draws the sidebar in its column; on a phone, Menu opens the same sidebar as a sheet, with the about group above the Answering block. The board’s Connectors row is another change’s.',
+  },
+  play: async ({ canvas, userEvent }) => {
+    // compact_sheet_shows_the_about_group: the sheet holds the same group, between the main nav
+    // and the Answering block, in that keyboard order.
+    const menu = canvas.getByRole('button', { name: 'Menu' });
+    await userEvent.click(menu);
+    const sheet = canvas.getByRole('dialog', { name: 'Menu' });
+    const about = within(sheet).getByRole('navigation', { name: 'About this prototype' });
+    const links = within(about).getAllByRole('link');
+    await expect(links.map((link) => link.textContent)).toEqual(['Product proposal', 'Capability prediction']);
+    const mainLinks = within(within(sheet).getByRole('navigation', { name: 'Main' })).getAllByRole('link');
+    mainLinks[mainLinks.length - 1]?.focus();
+    await userEvent.tab();
+    await expect(links[0]).toHaveFocus();
+    await userEvent.tab();
+    await userEvent.tab();
+    await expect(within(sheet).getByRole('switch', { name: 'Answering' })).toHaveFocus();
+
+    // Going to a document closes the sheet, like any page.
+    await userEvent.click(links[0] as HTMLElement);
+    await expect(navigate).toHaveBeenLastCalledWith('/docs/product-proposal');
+    await expect(canvas.queryByRole('dialog', { name: 'Menu' })).toBeNull();
+    await expect(menu).toHaveFocus();
+  },
+};
+
+export const ShortWindow: Story = {
+  args: {
+    sidebar: (
+      <Sidebar
+        business={rivera.business.name}
+        onSwitchBusiness={fn()}
+        desks={[
+          { id: 'desk-rivera-main', name: rivera.business.deskName },
+          { id: 'desk-rivera-emergencies', name: 'Emergencies' },
+        ]}
+        currentDeskId="desk-rivera-main"
+        onSwitchDesk={fn()}
+        current="today"
+        hrefs={hrefs}
+        peopleLabel="Customers"
+        counts={{ conversations: { n: 1, label: '1 needs you' }, safety: { n: 2, label: '2 blocked' } }}
+        answering
+        onAnsweringChange={fn()}
+        owner={{ name: rivera.business.ownerName, status: 'Available for chats' }}
+        about={ABOUT}
+        linkComponent={RouterLink}
+      />
+    ),
+  },
+  // A short laptop window: the reviewer bar, two Desks and the about group are more than its height.
+  globals: { viewport: { value: 'short', isRotated: false } },
+  parameters: {
+    canvas: 'N-Docs-Sidebar',
+    canvasNote:
+      'The board draws the sidebar at 982 px; in a window 657 px tall, under the reviewer bar and with two Desks, the nav and the about group scroll between the pinned top and the pinned foot. The board’s Connectors row is another change’s.',
+  },
+  play: async ({ canvas, userEvent }) => {
+    await expect([window.innerWidth, window.innerHeight]).toEqual([1366, 657]);
+    const column = canvas.getByRole('complementary', { name: 'Claude Desk' });
+    const sidebar = column.querySelector('.cd-sidebar') as HTMLElement;
+    const foot = sidebar.querySelector('.cd-sidebar__footer') as HTMLElement;
+    const middle = sidebar.querySelector('.cd-sidebar__middle') as HTMLElement | null;
+
+    // sidebar_foot_stays_in_view: the column itself never scrolls; the foot sits 12 px over its
+    // bottom, wholly in the window.
+    await expect(column.scrollHeight).toBeLessThanOrEqual(column.clientHeight);
+    await expect(Math.round(column.getBoundingClientRect().bottom - foot.getBoundingClientRect().bottom)).toBe(12);
+    await expect(foot.getBoundingClientRect().top).toBeGreaterThanOrEqual(0);
+    await expect(foot.getBoundingClientRect().bottom).toBeLessThanOrEqual(window.innerHeight);
+
+    // The middle, the nav and the about group, scrolls between the pinned top and the foot.
+    await expect(middle).not.toBeNull();
+    const scroller = middle as HTMLElement;
+    expectComputed(scroller, { overflowY: 'auto' });
+    await expect(scroller.scrollHeight).toBeGreaterThan(scroller.clientHeight);
+    const business = within(column).getByRole('button', { name: `Switch business, current: ${rivera.business.name}` });
+    const businessTop = business.getBoundingClientRect().top;
+    const footTop = foot.getBoundingClientRect().top;
+
+    // Tab reaches the about links through the scroll: each comes into view with its whole ring,
+    // and the top and the foot stay where they are.
+    const about = within(scroller).getByRole('navigation', { name: 'About this prototype' });
+    const links = within(about).getAllByRole('link');
+    const settings = within(within(scroller).getByRole('navigation', { name: 'Main' })).getByRole('link', { name: 'Settings' });
+    settings.focus();
+    await userEvent.tab();
+    await userEvent.tab();
+    await expect(links[1]).toHaveFocus();
+    const box = scroller.getBoundingClientRect();
+    const ring = (links[1] as HTMLElement).getBoundingClientRect();
+    await expect(scroller.scrollTop).toBeGreaterThan(0);
+    await expect(ring.top - 4).toBeGreaterThanOrEqual(box.top);
+    await expect(ring.bottom + 4).toBeLessThanOrEqual(box.bottom);
+    await expect(ring.left - 4).toBeGreaterThanOrEqual(box.left);
+    await expect(ring.right + 4).toBeLessThanOrEqual(box.right);
+    await expect(business.getBoundingClientRect().top).toBe(businessTop);
+    await expect(foot.getBoundingClientRect().top).toBe(footTop);
+    await userEvent.tab();
+    await expect(canvas.getByRole('switch', { name: 'Answering' })).toHaveFocus();
   },
 };

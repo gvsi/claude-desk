@@ -38,7 +38,7 @@ const meta = {
       </div>
     ),
   ],
-  parameters: { layout: 'padded', canvas: 'N-Public-Rivera' },
+  parameters: { layout: 'padded', canvas: 'N-Public-Rivera-Run1' },
 } satisfies Meta<typeof Composer>;
 
 export default meta;
@@ -54,7 +54,7 @@ export const Owner: Story = {
     onAttach: fn(),
     onSpeak: fn(),
   },
-  parameters: { canvas: 'N-Today-NeedsYou' },
+  parameters: { canvas: 'N-Today-Run1' },
   play: async ({ args, canvas, userEvent }) => {
     const input = canvas.getByRole('textbox', { name: 'Ask Claude about your Desk, or change a rule' });
     await expect(input.tagName).toBe('TEXTAREA');
@@ -162,7 +162,7 @@ export const Whisper: Story = {
     placeholder: "Whisper to Claude. Dana won't see it.",
   },
   parameters: {
-    canvas: 'N-Conv-Live',
+    canvas: 'N-Conv-Run1',
     canvasNote: 'The board puts Take over beside the whisper composer; here the composer is on its own, and the take-over bar sits above it.',
   },
   play: async ({ args, canvas, userEvent }) => {

@@ -11,7 +11,7 @@
 
 - `title`, in sentence case. It is the page's one `h1`.
 - `subtitle`, one plain line that says what the page is for. Leave it out when the title says enough.
-- `actions`, usually one `Button` (secondary, or primary when it is the page's main action). They sit at the right end of the title's line and wrap under the title on a narrow line.
+- `actions`, usually one `Button` (secondary, or primary when it is the page's main action). They sit at the right end of the title's line and wrap under the title on a narrow line. On a phone (under 640 px) they stay on the title's line and the subtitle runs under both, 8 px under the title, as the phone Connectors board draws it (N-Conn-24-Phone-Connectors).
 
 ## Props
 

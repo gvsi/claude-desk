@@ -40,6 +40,30 @@ function isCompact(): boolean {
   return container.querySelector('.cd-app-shell--compact') !== null;
 }
 
+it('fill_never_changes_the_sidebar', () => {
+  // The sidebar looks the same on every page: the panel, its seam, the window's height. `fill`
+  // sets only the main area, so moving between a padded page and a filled one leaves it as it is.
+  const shell = (fill: boolean) => (
+    <AppShell sidebar={<nav aria-label="Main">Today</nav>} business="Rivera Plumbing" fill={fill}>
+      <p>Page</p>
+    </AppShell>
+  );
+  const column = () => container.querySelector('.cd-app-shell__column') as HTMLElement;
+  const main = () => container.querySelector('main') as HTMLElement;
+  const look = () => {
+    const style = getComputedStyle(column());
+    return { ground: style.backgroundColor, seam: style.borderRightWidth, align: style.alignItems };
+  };
+  const PANEL = { ground: 'rgb(34, 34, 32)', seam: '1px', align: 'normal' };
+
+  act(() => root.render(shell(false)));
+  expect(look()).toEqual(PANEL);
+  expect(getComputedStyle(main()).paddingLeft).toBe('40px');
+  act(() => root.render(shell(true)));
+  expect(getComputedStyle(main()).paddingLeft).toBe('0px');
+  expect(look()).toEqual(PANEL);
+});
+
 it('page_state_survives_the_breakpoint', async () => {
   act(() =>
     root.render(

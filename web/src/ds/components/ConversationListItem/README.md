@@ -11,8 +11,8 @@
 
 - A row link at `radius-control`, at least 48 px tall, padded 6 px by 10 px.
 - First line: the name in `control` type, shown as written (`data-copy="user"`, since a visitor may have given it), then the time at the right in `caption` type, `text-secondary`, with tabular figures.
-- Second line: the status as a `size-dot` dot beside the words that say the same ("Needs you", "Agent"), in `caption` type, `text-secondary`.
-- Each line stays on one line and ends in an ellipsis when it doesn't fit.
+- Second line: the status as a `size-dot` dot beside the words that say the same ("Needs you", "Agent"), in `caption` type, `text-secondary`. A replayed conversation (`recorded`) ends that line with a `RecordedTag`, pushed to its end under the time.
+- Each line stays on one line and ends in an ellipsis when it doesn't fit. On the second line the status words ellipsize first; the tag keeps its whole width.
 - The conversation open beside the list is `aria-current="true"` on `bg-selected`. Other rows fill with `fill-hover` on hover.
 
 ## What the consumer provides
@@ -21,6 +21,7 @@
 - `time` as the screen writes it ("12:04 pm"); the design system formats no times.
 - `status` from the screen's one status table: a `StatusTone` for the dot and the words.
 - `href`, the conversation's page, and `current` for the one that is open.
+- `recorded` for a conversation the kernel marks as replayed into this copy. The page then shows a `RecordedHistoryLink` under its title.
 
 ## Props
 
@@ -31,5 +32,6 @@
 | `status` | `{ tone: StatusTone; text: string }` | Required. The dot is `aria-hidden`; the words carry the status. |
 | `href` | `string` | Required. |
 | `current` | `boolean` | `aria-current="true"` on the selected fill. |
+| `recorded` | `boolean` | The Recorded tag at the end of the status line. Its word joins the link's name. |
 
 The hover fill changes at `motion-instant`. Nothing moves under reduced motion.

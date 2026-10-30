@@ -29,7 +29,10 @@ export function outcomePhrase(mode: RuleMode, limit?: string): string {
   return OUTCOME_WORDS[mode];
 }
 
-/** The master plan's rule presets (`desk.presets.PRESETS`): the two starting points the Rules page offers. */
+/**
+ * The rule presets the owner can start from: the master plan's (`desk.presets.PRESETS`). There is no
+ * "Custom" preset: rules the owner changes are simply the Desk's rules.
+ */
 export type RulesPreset = 'ask_first' | 'auto';
 
 /**

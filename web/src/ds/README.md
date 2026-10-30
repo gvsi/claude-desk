@@ -19,7 +19,7 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 
 - Set pages on `bg-app`. Put the sidebar and side panels on `bg-panel` with a `line-hairline` seam; the composer, menus and popovers on `bg-surface`; quiet fills on `bg-muted`; the active nav row, the segmented control thumb and the initials avatar on `bg-selected`.
 - Set body text and everything Claude says in `text-primary`; captions, meta lines, helper text and receipts in `text-secondary`. Use `text-tertiary` only for placeholders and labels at 13 px and up.
-- Separate regions by fill and a hairline, not by shadow. A card is `fill-card` with a 1 px `line-card` border. Chips, outlined pills and the whisper composer are outlined in `line-control`, `line-control-hover` on hover. Outline a text field in `line-field`: its outline is its boundary, so it reaches 3:1 against the ground.
+- Separate regions by fill and a hairline, not by shadow. A card is `fill-card` with a 1 px `line-card` border. Chips, outlined pills and the whisper composer are outlined in `line-control`, `line-control-hover` on hover; the recorded-history link is underlined in it. Outline a text field in `line-field`: its outline is its boundary, so it reaches 3:1 against the ground.
 - Make the primary button `button-primary` with `button-primary-text`, `button-primary-hover` on hover: an inverted neutral, at most one per view. Secondary buttons are `fill-secondary` (`fill-secondary-hover` on hover) with `text-primary`; ghost buttons are transparent with `fill-hover` on hover. Visitor bubbles are `fill-bubble`; count pills and the segmented track are `fill-count`.
 - Give an answer that refuses the red look, and nothing else: `danger` buttons are `button-danger-fill` (`button-danger-fill-hover` on hover) with `button-danger-text`, and `danger-ghost` buttons are transparent with `button-danger-text`. They are the only red controls and the only red words in the system, with the items of Deny's menu on a held request, which use `button-danger-text` on `bg-surface`. Their words say what is refused ("Deny this time", "Always" in Deny's menu), and the red is never a status.
 - Use `accent-blue` only for links, the focus ring and selection. Never put text on it and never use it as decoration.
@@ -37,15 +37,16 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 
 ### Type
 
-- Use `serif` (Source Serif 4) for Claude's voice and page identity, `sans` (Hanken Grotesk) for the whole interface, and `mono` (JetBrains Mono) only inside an expanded full trace. All three load from Google Fonts.
-- Apply a style with its class, `.cd-type-<style>`. Claude's voice: `greeting`, `page-title`, `intro-title`, `wordmark`, `summary`, `reply`, `illustration-reply`. Interface: `body` (already set on the page body), `control`, `section`, `message`, `meta`, `caption`, `pill`, `count`, `beta`, `brand-name`. Trace: `trace`.
+- Use `serif` (Source Serif 4) for Claude's voice and page identity, `sans` (Hanken Grotesk) for the whole interface, and `mono` (JetBrains Mono) only inside an expanded full trace and for a connector's quoted tool definition. All three load from Google Fonts.
+- Apply a style with its class, `.cd-type-<style>`. Claude's voice: `greeting`, `page-title`, `intro-title`, `wordmark`, `summary`, `reply`, `illustration-reply`. Interface: `body` (already set on the page body), `control`, `section`, `message`, `meta`, `caption`, `pill`, `count`, `beta`, `brand-name`, `amount`, `figure`, `figure-small`. Trace: `trace`, and `quote` for a connector's quoted tool definition.
+- Set a summary's headline figure, such as Today's booked total, in `figure`, and a secondary one, such as Today's stopped count, in `figure-small`; both use tabular figures. `amount` stays the checkout's amount to pay.
 - Set page titles in `page-title`, left-aligned. Claude's replies are `reply` paragraphs with no bubble and no avatar, like a document; a visitor's message is `message` in a `fill-bubble` bubble at `radius-card`, aligned right.
 
 ### Space, size and shape
 
 - Space with the steps `space-2` to `space-40`. Pad cards with `space-16` to `space-20`; pad content with `space-40` at the sides on desktop and `space-16` on a phone.
 - Lay out the owner app with a `size-sidebar` sidebar and content no wider than `size-content`. A conversation is a `size-reading` column, with each message's receipts attached under it.
-- Make controls `size-control` tall and a screen's main action `size-control-main`; nav rows are `size-nav-row`, icons `size-icon`, avatars `size-avatar`, and the public page's brand header `size-brand-header`. The first-visit intro dialog is `size-intro` wide, its illustration half `size-intro-illustration`. The Ask Claude panel beside a page is `size-side-panel` wide.
+- Make controls `size-control` tall and a screen's main action `size-control-main`; nav rows are `size-nav-row`, icons `size-icon`, avatars `size-avatar`, and the public page's brand header `size-brand-header`. The first-visit intro dialog is `size-intro` wide, its illustration half `size-intro-illustration`. The Ask Claude panel beside a page is `size-side-panel` wide. On the connector pages, the add flow's sign-in and review draw a connector's tile `size-connector-title-tile`, a connection's details put their terms in a `size-connection-term` column, and a tool's recent requests their times in a `size-recent-when` column.
 - Round controls with `radius-control`; cards, dialogs and bubbles with `radius-card`; the composer with `radius-composer`; pills, chips, switches and avatars with `radius-full`.
 - Use `shadow-composer` on the composer and nowhere else. The first-visit intro dialog sits over `scrim` and lifts with `shadow-dialog`.
 
@@ -132,9 +133,10 @@ The mark in `clay` reads 6.5 on `bg-app`, 6.0 on `bg-panel` and 5.5 on `bg-surfa
 On the intro illustration's light cards, `illustration-ink` reads 16.3 and `illustration-ink-secondary` 5.4 on `illustration-card`, and `illustration-ink` reads 13.1 on `illustration-avatar`. The check and the receipt dots in `illustration-handled` read 4.9 (3:1).
 
 - Don't put `text-tertiary` or a link on `fill-secondary-hover`: those pairs aren't listed.
-- `line-hairline`, `line-card`, `line-control`, `line-control-hover`, `scrim`, `illustration-line`, `illustration-arc` and the connector brand colors (`connector-tile-brand`, `connector-stripe`, `connector-google-blue`) are decorative (`DECORATIVE_COLORS`): they separate, dim or outline things that are identified otherwise, or carry nothing. `line-control` is flagged: it is 2.0:1 on `bg-app`, under the 3:1 for control borders, which is acceptable only because a chip or pill is identified by its own text. Never make an outline the only cue that something is a control.
+- `line-hairline`, `line-card`, `line-control`, `line-control-hover`, `scrim`, `illustration-line`, `illustration-arc` and the connector brand colors (`connector-tile-brand`, `connector-stripe`, `connector-google-blue`) are decorative (`DECORATIVE_COLORS`): they separate, dim or outline things that are identified otherwise, or carry nothing. `line-control` is flagged: it is 2.0:1 on `bg-app`, under the 3:1 for control borders, which is acceptable only because a chip or pill, or the recorded-history link it underlines, is identified by its own text. Never make an outline the only cue that something is a control.
 - Show focus with a solid 2 px `accent-blue` outline at a 2 px offset on every focusable element; the base stylesheet sets it. The composer shows `ring-composer` while its text box has focus, solid too, because a translucent ring falls under 3:1; a button inside the composer shows its own ring instead, so only one ring ever shows.
 - Never show status by color alone: a dot always sits beside words that say the same thing, and the dot is `aria-hidden`.
+- A `ul` or `ol` drawn without markers says `role="list"`: Safari drops a list's semantics when its markers are removed, and a screen reader then gives no list navigation or count. `expectListsKeepTheirRole` (`test/expectListRoles.ts`) checks it in one story per component.
 - Put replies and receipts inside the transcript's `role="log"` so screen readers announce them. Chat, approvals and take-over all work from the keyboard.
 
 ## Empty, waiting, error and refusal states
@@ -152,5 +154,5 @@ On the intro illustration's light cards, `illustration-ink` reads 16.3 and `illu
 - No large areas of status color: dots and thin bars only.
 - No staggered page-entrance cascades.
 - No emoji, sparkles or "AI" icons, and no Claude or Anthropic logos.
-- No mono outside the full trace.
+- No mono outside the full trace and a connector's quoted tool definition.
 - No raw colors or durations in components: use the custom properties named after these tokens.

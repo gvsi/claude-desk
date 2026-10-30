@@ -7,7 +7,7 @@ const meta = {
   title: 'Status/StatusDot',
   component: StatusDot,
   args: { tone: 'handled' },
-  parameters: { layout: 'padded', canvas: 'N-Today-NeedsYou' },
+  parameters: { layout: 'padded', canvas: 'N-Today-Run1' },
 } satisfies Meta<typeof StatusDot>;
 
 export default meta;

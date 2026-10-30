@@ -1,5 +1,5 @@
-/* ConnectorReview: the 48 px tile beside the serif title and its lead line, the card of tools (each
-   under a hairline: its name at weight 520, its line and what covers it in secondary meta, and its
+/* ConnectorReview: the 44 px tile, centered on the serif title and its lead line, the card of tools
+   (each under a hairline, the first too, and padded 14 px above and below: its name at weight 520, its line and what covers it in secondary meta, and its
    outcome at the right), then Turn it on, Cancel and the hint on one line. Each tool lays out by
    its own width: under 640 px its outcome sits on its own line under its words. */
 
@@ -12,9 +12,21 @@
 
 .cd-connector-review__header {
   display: flex;
-  align-items: flex-start;
-  gap: var(--space-16);
+  align-items: center;
+  gap: var(--space-14);
   min-width: 0;
+}
+
+.cd-connector-review__header > .cd-connector-icon {
+  width: var(--size-connector-title-tile);
+  height: var(--size-connector-title-tile);
+}
+
+/* On a phone the title wraps over several lines, so the tile stays at its top. */
+@media (max-width: 639.98px) {
+  .cd-connector-review__header {
+    align-items: flex-start;
+  }
 }
 
 .cd-connector-review__heading {
@@ -51,17 +63,8 @@
 
 .cd-connector-review__tool {
   container: cd-connector-review-tool / inline-size;
-  padding: var(--space-12) 0;
+  padding: var(--space-14) 0;
   border-top: 1px solid var(--line-hairline);
-}
-
-.cd-connector-review__tool:first-child {
-  padding-top: 0;
-  border-top: 0;
-}
-
-.cd-connector-review__tool:last-child {
-  padding-bottom: 0;
 }
 
 .cd-connector-review__layout {

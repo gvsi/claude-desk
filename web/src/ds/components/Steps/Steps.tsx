@@ -18,7 +18,7 @@ export interface StepsProps {
  */
 export function Steps({ label, steps, current }: StepsProps) {
   return (
-    <ol className="cd-steps cd-type-meta" aria-label={label}>
+    <ol role="list" className="cd-steps cd-type-meta" aria-label={label}>
       {steps.map((step, index) => {
         const state = index < current ? 'done' : index === current ? 'current' : 'later';
         return (

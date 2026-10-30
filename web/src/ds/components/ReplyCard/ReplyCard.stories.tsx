@@ -12,7 +12,7 @@ const meta = {
   title: 'Reply cards/ReplyCard',
   component: ReplyCard,
   args: { block: blocks.quote.en, language: 'en', ownerName: rivera.business.ownerName },
-  parameters: { layout: 'padded', canvas: 'N-Public-Rivera' },
+  parameters: { layout: 'padded', canvas: 'N-Public-Rivera-Run1' },
 } satisfies Meta<typeof ReplyCard>;
 
 export default meta;
@@ -95,7 +95,7 @@ export const BookingConfirmed: Story = {
 export const PaymentLink: Story = {
   args: { block: blocks.payment_link.en },
   parameters: {
-    canvas: 'N-Conv-Agent',
+    canvas: 'N-Conv-Agent-Run1',
     canvasNote: "The board shows the deposit link as a chip in the owner's transcript; a visitor gets this card, with its test-payment note.",
   },
   play: async ({ canvas, canvasElement }) => {
@@ -110,7 +110,7 @@ export const PaymentLink: Story = {
 export const DocumentLink: Story = {
   args: { block: blocks.document_link.en },
   parameters: {
-    canvas: 'N-Public-Verify',
+    canvas: 'N-Public-Verify-Run1',
     canvasNote: "The board's document card adds a file tile, pills, a preview button and an expiry line; card data carries only the title and the link.",
   },
   play: async ({ canvas, canvasElement }) => {
@@ -143,7 +143,7 @@ export const Contact: Story = {
 export const Handoff: Story = {
   args: { block: blocks.handoff.en },
   parameters: {
-    canvas: 'N-Public-Handoff',
+    canvas: 'N-Public-Handoff-Run1',
     canvasNote: "The board's handoff is Claude's prose; when the kernel blocks a reply, the visitor gets this card instead, with its receipt.",
   },
 };
@@ -151,7 +151,7 @@ export const Handoff: Story = {
 export const VerifyPrompt: Story = {
   args: { block: blocks.verify_prompt.en },
   parameters: {
-    canvas: 'N-Public-Verify',
+    canvas: 'N-Public-Verify-Run1',
     canvasNote: "The board's verification card holds the code form, which is a separate component; this is the kernel's prompt alone.",
   },
 };
@@ -159,7 +159,7 @@ export const VerifyPrompt: Story = {
 export const OwnerSaid: Story = {
   args: { block: blocks.owner_said.en },
   parameters: {
-    canvas: 'N-Public-Handoff',
+    canvas: 'N-Public-Handoff-Run1',
     canvasNote: "The board shows Maria's words as her own message while she is in the chat; passed through Claude, they arrive verbatim in this card.",
   },
   play: async ({ canvas }) => {
@@ -169,14 +169,14 @@ export const OwnerSaid: Story = {
 
 export const Charges: Story = {
   args: { block: blocks.charges.en },
-  parameters: { canvas: 'none', canvasNote: "No board shows a verified visitor's charges; the card follows N-Public-Rivera's booking card." },
+  parameters: { canvas: 'none', canvasNote: "No board shows a verified visitor's charges; the card follows N-Public-Rivera-Run1's booking card." },
 };
 
 export const RefundIssued: Story = {
   args: { block: blocks.refund_issued.en },
   parameters: {
     canvas: 'none',
-    canvasNote: "No board shows a refund to a visitor; the card follows N-Public-Rivera's booking card, with its test-payment note.",
+    canvasNote: "No board shows a refund to a visitor; the card follows N-Public-Rivera-Run1's booking card, with its test-payment note.",
   },
   play: async ({ canvas }) => {
     await expect(canvas.getByRole('article', { name: 'Refund issued' })).toBeVisible();
@@ -188,7 +188,7 @@ export const RefundIssued: Story = {
 export const ChargeConfirmed: Story = {
   args: { block: blocks.charge_confirmed.en },
   parameters: {
-    canvas: 'N-Conv-Agent',
+    canvas: 'N-Conv-Agent-Run1',
     canvasNote:
       "The board shows the agent's paid deposit as a receipt row in the owner's transcript; the visiting agent gets this card, with its test-payment note.",
   },
@@ -202,7 +202,7 @@ export const ChargeConfirmed: Story = {
 export const CallbackConfirmed: Story = {
   args: { block: blocks.callback_confirmed.en },
   parameters: {
-    canvas: 'N-Public-Handoff',
+    canvas: 'N-Public-Handoff-Run1',
     canvasNote: "The board's callback card adds a check, a change button and a reminder line; card data carries only the kernel's title.",
   },
 };
@@ -210,7 +210,7 @@ export const CallbackConfirmed: Story = {
 export const PaymentConfirmed: Story = {
   args: { block: blocks.payment_confirmed.en },
   parameters: {
-    canvas: 'N-Conv-Agent',
+    canvas: 'N-Conv-Agent-Run1',
     canvasNote: "The board shows the paid link as a receipt row in the owner's transcript; the visitor gets this card, with its test-payment note.",
   },
   play: async ({ canvas, canvasElement }) => {
@@ -244,7 +244,7 @@ export const BookingConfirmedEs: Story = {
 export const PaymentLinkEs: Story = {
   args: { block: blocks.payment_link.es, language: 'es' },
   parameters: {
-    canvas: 'N-Conv-Agent',
+    canvas: 'N-Conv-Agent-Run1',
     canvasNote: "The board shows the deposit link as a chip in the owner's transcript, in English; this is the visitor's card in Spanish.",
   },
   play: async ({ canvas, canvasElement }) => {
@@ -257,7 +257,7 @@ export const PaymentLinkEs: Story = {
 export const DocumentLinkEs: Story = {
   args: { block: blocks.document_link.es, language: 'es' },
   parameters: {
-    canvas: 'N-Public-Verify',
+    canvas: 'N-Public-Verify-Run1',
     canvasNote: 'The board is in English; this is the document card for a visitor writing in Spanish.',
   },
   play: async ({ canvas, canvasElement }) => {
@@ -290,7 +290,7 @@ export const LongUnbrokenText: Story = {
   ),
   parameters: {
     canvas: 'none',
-    canvasNote: "No board shows card text wider than a phone's line; it wraps inside the card, as N-Public-Rivera's cards would.",
+    canvasNote: "No board shows card text wider than a phone's line; it wraps inside the card, as N-Public-Rivera-Run1's cards would.",
   },
   play: async ({ canvas, canvasElement }) => {
     // long_unbroken_text_wraps: nothing reaches past the line or out of its card.
@@ -313,7 +313,7 @@ export const LongUnbrokenText: Story = {
 export const UnsafeHref: Story = {
   args: { block: { ...blocks.payment_link.en, href: 'javascript:alert(1)' } },
   parameters: {
-    canvas: 'N-Conv-Agent',
+    canvas: 'N-Conv-Agent-Run1',
     canvasNote: "A payment card whose href is not the checkout's path: it keeps its words and note, and has no link.",
   },
   play: async ({ canvas, canvasElement }) => {
@@ -342,7 +342,7 @@ export const UnknownTemplate: Story = {
   args: { block: unknownBlock },
   parameters: {
     canvas: 'none',
-    canvasNote: "No board shows a template this build doesn't know; its text shows in a plain card, like N-Public-Rivera's cards without their label.",
+    canvasNote: "No board shows a template this build doesn't know; its text shows in a plain card, like N-Public-Rivera-Run1's cards without their label.",
   },
   play: async ({ canvas, canvasElement }) => {
     // unknown_template_renders_text: the text, in a plain frame with no label and no link.
