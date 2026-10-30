@@ -57,6 +57,10 @@ const RAW_CSS_SECONDS = /(?<![\w.-])\d*\.?\d+s\b/;
 // Formatting money or dates: the visitor's page shows only what the kernel rendered.
 const FORMATS = /\blib\/format\b|\bIntl\.|\btoLocale\w*|\bnew\s+Date\b|\btoFixed\(/;
 
+// An owner's reason on a receipt: the decision's `reason_plain` and the receipt props that show it
+// to the owner. The visitor's page shows each receipt's `visitor_plain` and nothing else.
+const OWNER_REASON = /\breason_plain\b|\breason=|\bcardBelow\b/;
+
 // The open status: the kernel's object, passed on as it came, and its times read in one place.
 const SHELL_FILE = 'ds/components/PublicShell/PublicShell.tsx';
 const FALLBACK_NAME = /PlainOpenStatus/;
@@ -191,6 +195,14 @@ describe('app source guards', () => {
     const bad = "import { formatCents } from '../lib/format.ts'; new Intl.NumberFormat(); d.toLocaleString(); new Date(); n.toFixed(2);";
     expect(hits(FORMATS, sample(bad))).toHaveLength(5);
     expect(hits(FORMATS, sources.filter(visitor))).toEqual([]);
+  });
+
+  it('visitor_code_never_shows_owner_reasons', () => {
+    const visitor = (s: Source) => s.file.startsWith('public/');
+    const bad = '<MarginReceipt {...receipt} reason={decision.reason_plain} cardBelow />';
+    expect(hits(OWNER_REASON, sample(bad))).toHaveLength(3);
+    expect(hits(OWNER_REASON, sample('<MarginReceipt {...receipt} onOpenTrace={open} />; const why = reasonPlain;'))).toEqual([]);
+    expect(hits(OWNER_REASON, sources.filter(visitor))).toEqual([]);
   });
 
   it('open_status_comes_from_the_ds_once_it_has_the_slot', () => {

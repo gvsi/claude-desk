@@ -13,7 +13,7 @@ import type { ApprovalAnswer, Decision, DecisionState } from '../../../api/contr
 import { Icon } from '../../icons/index.tsx';
 import { Button, type ButtonVariant } from '../Button/Button.tsx';
 import { Card } from '../Card/Card.tsx';
-import { receiptTone } from '../MarginReceipt/receiptTone.ts';
+import { OWNER_STATE_WORDS, receiptTone } from '../MarginReceipt/receiptTone.ts';
 import { errorCopy } from '../Notice/errorCopy.ts';
 import { Notice } from '../Notice/Notice.tsx';
 import { StatusDot } from '../StatusDot/StatusDot.tsx';
@@ -285,7 +285,7 @@ export function ApprovalCard({ decision, heldBy, context, waiting, personName, o
   );
 
   return (
-    <Card as="article" label={`Held for you: ${decision.reason_plain}`}>
+    <Card as="article" label={`${OWNER_STATE_WORDS.held}: ${decision.reason_plain}`}>
       <div className="cd-approval-card__top cd-type-caption">
         <span className="cd-approval-card__status">
           <StatusDot tone={receiptTone({ kind: 'decision', state: decision.state })} />

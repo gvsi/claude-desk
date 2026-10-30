@@ -78,6 +78,6 @@ export function firstName(displayName: string): string {
 /** Held requests in `items`, oldest first by when they were held, whatever order the answer lists them in. */
 export function heldOldestFirst(items: readonly NeedsYouItem[]): Extract<NeedsYouItem, { decision: object }>[] {
   return items
-    .filter((item): item is Extract<NeedsYouItem, { decision: object }> => item.decision !== undefined)
+    .filter((item): item is Extract<NeedsYouItem, { decision: object }> => item.decision != null)
     .sort((a, b) => Date.parse(a.held_at) - Date.parse(b.held_at));
 }
