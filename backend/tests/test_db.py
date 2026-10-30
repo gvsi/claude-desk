@@ -684,26 +684,43 @@ def test_migration_keeps_existing_versions_at_five_hundred(admin):
 MONEY_CAP_EDGES_REVISION = "01b_3e_money_cap_edges"
 
 
-def test_a_decision_from_before_the_cap_edges_offers_no_allow_person(admin):
+def test_rows_from_before_the_cap_edges_claim_nothing(admin):
     """A decision written before the money cap's edges revision is taken as one whose asker could
-    not be given allow_person, since its standing then wasn't recorded: it fails closed."""
+    not be given allow_person, since its standing then wasn't recorded: it fails closed. An
+    execution from then names no version or cap; from now on one names both or neither, and the cap
+    stays within the platform ceiling."""
+    def insert_execution(action_id: str, *checked: int | None) -> None:
+        """An intent row, with `(policy_version, auto_money_cap_cents)` when `checked` is given."""
+        names, values = (", policy_version, auto_money_cap_cents", ", %s, %s") if checked else ("", "")
+        admin.execute(f"INSERT INTO kernel.executions (action_id, copy_id, decision_id, state, started_at{names})"
+                      f" VALUES (%s, 'copy-edges', 'dec-edges', 'intent', now(){values})", (action_id, *checked))
+
     config = alembic_config()
     before = ScriptDirectory.from_config(config).get_revision(MONEY_CAP_EDGES_REVISION).down_revision
     try:
         command.downgrade(config, before)
         assert "allow_person_eligible" not in columns(admin, "kernel", "decisions")
+        assert "policy_version" not in columns(admin, "kernel", "executions")
         admin.execute(
             "INSERT INTO kernel.decisions (decision_id, copy_id, desk_id, session_id, generation, call_id, call_sha256,"
             " tool, outcome, state, answers, policy_version, reason_plain, visitor_plain, expires_at, ledger_seq)"
             " VALUES ('dec-before-edges', 'copy-edges', 'desk-edges', 'session-edges', 0, 'call-1', 'c',"
             " 'native.payment_link', 'hold', 'held', '[\"allow_once\", \"deny_once\", \"allow_person\"]', 1, 'r',"
             " 'v', now() + interval '1 day', 1)")
+        insert_execution("act-before-edges")
         command.upgrade(config, "head")
         assert admin.execute("SELECT allow_person_eligible FROM kernel.decisions"
                              " WHERE decision_id = 'dec-before-edges'").fetchone() == (False,)
         assert nullable_columns(admin, "kernel", "decisions")["allow_person_eligible"] is False
+        assert admin.execute("SELECT policy_version, auto_money_cap_cents FROM kernel.executions"
+                             " WHERE action_id = 'act-before-edges'").fetchone() == (None, None)
+        insert_execution("act-checked", 1, 50_000)
+        for refused in ((1, None), (None, 50_000), (1, -1), (1, 1_000_001)):
+            with pytest.raises(psycopg.errors.CheckViolation):
+                insert_execution("act-refused", *refused)
     finally:
         admin.execute("DELETE FROM kernel.decisions WHERE copy_id = 'copy-edges'")
+        admin.execute("DELETE FROM kernel.executions WHERE copy_id = 'copy-edges'")
         command.upgrade(config, "head")
 
 

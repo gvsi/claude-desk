@@ -298,8 +298,9 @@ def test_ceiling_literals_match_the_constant():
     money_cap = (compiler.CEDAR_DIR / "invariants" / "auto" / "money_cap.cedar").read_text()
     assert compiler.CAP_PLACEHOLDER in money_cap and not re.findall(r"\b\d+\b", money_cap.split("permit", 1)[1])
     assert "<= 1000000 }" in compiler.invariants(5_000_000)["auto"]["money_cap"]
-    migration = (BACKEND / "alembic" / "versions" / "01b_3b_money_cap.py").read_text()
-    assert re.findall(r"CHECK \(auto_money_cap_cents BETWEEN 0 AND (\d+)\)", migration) == [ceiling]
+    for revision in ("01b_3b_money_cap", "01b_3e_money_cap_edges"):      # the versions' caps, and the executions'
+        migration = (BACKEND / "alembic" / "versions" / f"{revision}.py").read_text()
+        assert re.findall(r"CHECK \(auto_money_cap_cents BETWEEN 0 AND (\d+)\)", migration) == [ceiling], revision
 
 
 def hashes_of(row: PolicyVersion) -> activation.VersionHashes:

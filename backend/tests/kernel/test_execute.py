@@ -298,8 +298,11 @@ async def test_an_orphaned_intent_reconciles_to_failed(app, client, registry, fr
     entries = [e.event.summary for e in await ledger_rows(app, rows)
                if e.event.kind == "execute"]
     base = {"decision_id": allowed.decision_id, "action_id": allowed.action.action_id}
-    assert entries == [{**base, "state": "unknown", "orphaned": True}, {**base, "state": "failed", "reconciled": True},
-                       {**base, "repeat": True}]
+    # an intent T1 wrote names the version its re-check ran under; one written without it (as before
+    # the executions row recorded it) names none
+    checked = {"policy_version": 1, "auto_money_cap_cents": 50_000} if how == "crash" else {}
+    assert entries == [{**base, **checked, "state": "unknown", "orphaned": True},
+                       {**base, **checked, "state": "failed", "reconciled": True}, {**base, "repeat": True}]
 
 
 async def test_an_orphan_with_its_side_effect_reconciles_to_executed(app, client, registry, frozen_clock):
@@ -324,6 +327,51 @@ async def test_an_orphan_with_its_side_effect_reconciles_to_executed(app, client
     assert await executed(client, visitor, allowed) == expected                 # rebuilt as the session may see it
     assert effects == [allowed.action.action_id] and "on_failed" not in quote.calls
     assert quote.calls.count("reconcile") == 1                                  # settled once
+
+
+@pytest.mark.parametrize("outcome", ["executed", "failed", "unknown"])
+@pytest.mark.parametrize("how", ["crash", "error"])
+@pytest.mark.parametrize("path", ["allow", "approved"])
+async def test_reconciled_entries_name_the_version_their_check_ran_under(app, client, registry, frozen_clock, path,
+                                                                         how, outcome):
+    quote = FakeAdapter("native.quote")
+    rows = await desk_with(app, [quote], [card("quote", "native.quote", mode="auto" if path == "allow" else "ask")])
+    visitor = await open_visitor(client, rows)
+    decision = await decided(client, visitor, "native.quote", {"qty": 1})       # under version 1, at $500
+    assert decision.state == ("allowed" if path == "allow" else "held")
+
+    def side_effect_then_lost(xctx, action, args):
+        # the kernel dies after the side effect (an intent is left), or loses the provider's answer (unknown)
+        raise Crash("the kernel died") if how == "crash" else RuntimeError("the provider's answer was lost")
+
+    def what_happened(xctx, action) -> AdapterResult | None:
+        if outcome == "unknown":
+            raise AdapterUnknown("the provider can't say yet")
+        return AdapterResult(model_view={"ok": True}) if outcome == "executed" else None
+
+    quote.script.update(execute=side_effect_then_lost, reconcile=what_happened)
+    run = (post_execute(client, visitor, decision) if path == "allow" else
+           client.post(f"/approvals/{decision.decision_id}/answer", headers=rows.owner, json={"answer": "allow_once"}))
+    if how == "crash":
+        with pytest.raises(Crash):
+            await run
+    else:
+        assert (await run).status_code == 200
+    [execution] = await executions_of(app, rows.copy_id)
+    assert (execution.policy_version, execution.auto_money_cap_cents) == (1, 50_000)   # what T1 checked against
+
+    # the rules change, at another cap, before anything reconciles it
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(rows.copy_id)
+        await activate_cards(ctx, rows.desk_id, [card("quote", "native.quote")], auto_money_cap_cents=10_000)
+    frozen_clock.advance(31)
+    assert (await read(client, visitor.headers, decision)).state == outcome
+    # every entry names the version and cap the execution was checked under, not the ones active now
+    base = {"decision_id": decision.decision_id, "action_id": decision.action.action_id, "policy_version": 1,
+            "auto_money_cap_cents": 50_000}
+    lost = {**base, "state": "unknown", "orphaned": True} if how == "crash" else {**base, "state": "unknown"}
+    settled = [] if outcome == "unknown" else [{**base, "state": outcome, "reconciled": True}]
+    assert [e.event.summary for e in await ledger_rows(app, rows) if e.event.kind == "execute"] == [lost, *settled]
 
 
 async def test_a_fresh_intent_is_left_alone(app, client, registry, frozen_clock, monkeypatch):

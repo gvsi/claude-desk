@@ -279,7 +279,7 @@ async def test_canary_in_model_view_is_emptied(app, client, registry, frozen_clo
     executions = {(e.event.ref_id, e.event.summary.get("state")): e.event.summary for e in await ledger_rows(app, rows)
                   if e.event.kind == "execute"}
     checked = {"policy_version": 1, "auto_money_cap_cents": 50_000}                # the rules step 6 checked them against
-    for decision, extra in ((allowed, checked), (held, checked), (orphan, {"reconciled": True})):
+    for decision, extra in ((allowed, checked), (held, checked), (orphan, {**checked, "reconciled": True})):
         assert executions[(decision.decision_id, "executed")] == {
             "decision_id": decision.decision_id, "action_id": decision.action.action_id, "state": "executed",
             **extra, "violation": "canary"}

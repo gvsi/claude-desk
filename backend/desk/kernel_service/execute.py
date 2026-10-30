@@ -9,7 +9,8 @@ An execution takes up to three transactions, so that a crash leaves a record of 
   follow name as `policy_version` and `auto_money_cap_cents`), makes sure the receipt it will end
   on can be written (`_receipt_ready`),
   runs the adapter's `prepare` and commits the `executions` row in state `intent`, with whatever
-  `prepare` reserved. Nothing outside the kernel has happened yet.
+  `prepare` reserved and the version and cap the re-check ran under. Nothing outside the kernel
+  has happened yet.
 - T2 first holds the session row (`_hold_session`): for an allow `FOR SHARE`, so a take-over
   waits for a running execution and one that came first stops it (the fence); `FOR UPDATE`, on
   either path, for an adapter that writes the session's own rows (`locks_session`). Then it locks
@@ -26,7 +27,8 @@ execution row, the rows the adapter's hooks lock, then the ledger head.
 Reconciliation (`reconcile_orphans`) settles an intent no execution is running (older than
 `ORPHAN_AFTER`, and its rows not locked) and an `unknown` action by asking the adapter what
 happened (`reconcile`, by `action_id`), on every read of the decision and at startup. Nothing is
-retried blindly.
+retried blindly. Its entries name the version and cap the execution row recorded in T1, never the
+ones active when it runs.
 
 Claude sees an execution only through its `model_view`: kept to the adapter's `model_view_keys`,
 and emptied when a fact the session can't read was dropped or a value carries a document canary,
@@ -165,6 +167,14 @@ async def _hold_session(ctx: KernelCtx, session_id: str, action_id: str, path: E
     return None
 
 
+def _checked(execution: Execution) -> Checked | None:
+    """The version and money cap the execution's T1 re-check ran under, as its row records them;
+    None for a row written before they were recorded."""
+    if execution.policy_version is None or execution.auto_money_cap_cents is None:
+        return None
+    return Checked(policy_version=execution.policy_version, auto_money_cap_cents=execution.auto_money_cap_cents)
+
+
 async def _execution(ctx: KernelCtx, action_id: str, *, lock: bool = False) -> Execution | None:
     stmt = select(Execution).where(Execution.action_id == action_id)
     if lock:
@@ -274,11 +284,15 @@ async def _recheck(ctx: KernelCtx, target: _Target, path: ExecPath) -> str | Non
 
 # ---- T1: the intent --------------------------------------------------------------------------------
 
-async def prepare_intent(ctx: KernelCtx, decision_row: DecisionRow) -> bool:
+async def prepare_intent(ctx: KernelCtx, decision_row: DecisionRow, *, checked: Checked | None = None) -> bool:
     """The adapter's `prepare`, then the intent row, in the caller's transaction, which commits them
     together. False, with nothing written, when `prepare` refuses. Either path that runs an action
-    comes through here, so a tool whose receipt can't be written fails first (`_receipt_ready`)."""
-    return await _prepare_intent(ctx, await _target(ctx, decision_row))
+    comes through here, so a tool whose receipt can't be written fails first (`_receipt_ready`).
+    `checked` is the version and money cap the re-check passed under (`recheck_under`), which the
+    intent row records for every entry after it, reconciliation's included."""
+    target = await _target(ctx, decision_row)
+    target.checked = checked
+    return await _prepare_intent(ctx, target)
 
 
 def _receipt_ready(target: _Target) -> None:
@@ -314,8 +328,11 @@ async def _prepare_intent(ctx: KernelCtx, target: _Target) -> bool:
                 await prepare(target.xctx(ctx), target.action)
         except AdapterRefusal:
             return False
+    checked = target.checked
     ctx.db.add(Execution(action_id=target.action.action_id, copy_id=target.action.copy_id,
-                         decision_id=target.decision.decision_id, state="intent", started_at=ctx.clock.now()))
+                         decision_id=target.decision.decision_id, state="intent", started_at=ctx.clock.now(),
+                         policy_version=checked.policy_version if checked is not None else None,
+                         auto_money_cap_cents=checked.auto_money_cap_cents if checked is not None else None))
     await ctx.db.flush()
     return True
 
@@ -627,7 +644,7 @@ async def _reconcile(ctx: KernelCtx, action_id: str, decision_id: str, cutoff: d
     that can't say leaves it `unknown`. A failure while recording is raised, and the rollback
     takes back the adapter's `on_failed` with the record. Rows another transaction holds (a
     running execution holds both) are skipped, never waited on; a lock this transaction holds
-    already is no wait."""
+    already is no wait. Each entry names the version and cap the row recorded in T1 (`_checked`)."""
     decision = (await ctx.db.scalars(ctx.repo.scoped(
         select(DecisionRow).where(DecisionRow.decision_id == decision_id)
         .with_for_update(skip_locked=True).execution_options(populate_existing=True)))).one_or_none()
@@ -639,6 +656,7 @@ async def _reconcile(ctx: KernelCtx, action_id: str, decision_id: str, cutoff: d
     if execution is None:
         return False
     target = await _target(ctx, decision)
+    target.checked = _checked(execution)
     orphaned = execution.state == "intent"
     outcome = await _ask_adapter(ctx, target, action_id)
     if orphaned:

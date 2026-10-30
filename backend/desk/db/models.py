@@ -359,6 +359,10 @@ class Execution(Base):
     result: Mapped[c.ExecResult | None] = mapped_column(ContractJSON(c.ExecResult))
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # the rules version and money cap T1's re-check ran under, which every later entry names;
+    # both null only on a row written before they were recorded
+    policy_version: Mapped[int | None] = mapped_column(Integer)
+    auto_money_cap_cents: Mapped[int | None] = mapped_column(BigInteger)
 
 
 class Fact(Base):

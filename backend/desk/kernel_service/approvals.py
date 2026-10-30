@@ -195,7 +195,7 @@ async def answer(ctx: KernelCtx, owner: OwnerCtx, decision_id: str, answer: Appr
     checked = await execute.recheck_under(ctx, row, path="approved")
     if checked is None:
         return await _refused_at_execution(ctx, row, answer, "recheck")
-    if not await execute.prepare_intent(ctx, row):
+    if not await execute.prepare_intent(ctx, row, checked=checked):
         return await _refused_at_execution(ctx, row, answer, "prepare")
     await decide.set_state(ctx, row, "approved", kind="approval", summary={
         "decision_id": row.decision_id, "action_id": row.action_id, "answer": answer, "state": "approved"})
