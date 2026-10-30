@@ -868,6 +868,35 @@ describe("Today's Demo inbox", () => {
   /** The sheet's button, with its count. */
   const inboxButton = (screen: RenderResult) => screen.getByRole('button', { name: /^Demo inbox \d+ entr(?:y|ies)$/ });
 
+  /** Where a held request's alert links to: its card on Today. */
+  const requestLink = (decisionId: string) => `${TODAY}#request-${encodeURIComponent(decisionId)}`;
+
+  /** The top of `el` is inside the window, where the owner can see it. */
+  function expectInView(el: Element): void {
+    const box = el.getBoundingClientRect();
+    expect(box.top).toBeGreaterThanOrEqual(0);
+    expect(box.top).toBeLessThan(window.innerHeight);
+  }
+
+  it('request_link_lands_on_the_card_once_needs_you_reads', async () => {
+    // Opened fresh (a reload, or the link from elsewhere), the page lands on the held request once
+    // Needs you has read, here slowly, at the phone's size where the card starts below the fold.
+    const held = seededHold();
+    const read = await mockStore.dispatch('needsYou', { params: { desk_id: RIVERA.deskId } });
+    if ('network' in read || read.status !== 200) throw new Error('the mock reads Needs you');
+    mockStore.inject({ route: 'needsYou', status: 200, body: read.body, delayMs: 600 });
+    const { screen, router } = await renderRoute(requestLink(held.decision_id), { viewport: 'phone' });
+    await expect.element(region(screen, 'Things to try')).toBeVisible();
+    // Nothing to land on yet: focus stays where it was.
+    expect(document.activeElement).toBe(document.body);
+
+    const card = heldCard(screen, SEEDED_REASON);
+    await expect.element(card).toBeInTheDocument();
+    await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
+    expectInView(card.element());
+    expect(router.state.location.hash).toBe(`#request-${encodeURIComponent(held.decision_id)}`);
+  });
+
   it('inbox_polls_only_while_the_sheet_is_open', async () => {
     const { screen } = await renderRoute(TODAY);
     const open = inboxButton(screen);

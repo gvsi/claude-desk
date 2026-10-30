@@ -1,5 +1,5 @@
-import { useCallback, useRef, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router';
 
 import { ownerErrorCopy } from '../../api/http.ts';
 import { Greeting } from '../../ds/index.ts';
@@ -14,6 +14,7 @@ import { firstName, heldOldestFirst, useNeedsYou, useToday } from '../useDesks.t
 import { LiveNow } from './LiveNow.tsx';
 import { NeedsYou, type CallbackItem, type ReadFailure } from './NeedsYou.tsx';
 import { greetingPresence } from './presence.ts';
+import { requestInHash } from './requestLink.ts';
 import { SinceLastNight } from './SinceLastNight.tsx';
 import { TodayAside } from './TodayAside.tsx';
 
@@ -32,17 +33,21 @@ const LINK_COPY_LINE: Record<Exclude<LinkCopy, 'idle'>, string> = {
  * "Things to try", then, in this order, "Needs you" and "Live now" when they have something, and
  * "Since last night" always; the right column has the public page a new tab away and the last 7
  * days. Today opens no visitor chat itself, and has no composer: changing a rule by asking Claude
- * lives on Rules.
+ * lives on Rules. An address that names a held request (`#request-<id>`, as the Demo inbox links an
+ * owner's alert) brings that request's card into view and focus.
  */
 export function TodayPage() {
   const { business, desk } = useOwnerDesk();
   const deskId = desk.desk_id;
   const navigate = useNavigate();
+  const location = useLocation();
   const today = useToday(deskId);
   const needsYou = useNeedsYou(deskId);
   const answers = useAnswer(deskId);
   const [linkCopy, setLinkCopy] = useState<LinkCopy>('idle');
   const cards = useRef(new Map<string, HTMLElement>());
+  // Whether the Demo inbox's sheet is open, as it says once it has opened or closed.
+  const [inboxOpen, setInboxOpen] = useState(false);
 
   const name = today.data?.greeting_name ?? firstName(business.owner_display_name);
   const link = publicLink(desk.slug);
@@ -78,9 +83,23 @@ export function TodayPage() {
     if (el) cards.current.set(decisionId, el);
     else cards.current.delete(decisionId);
   }, []);
+  // Focus brings the card into view too. A request with no card here is left alone.
+  const focusCard = useCallback((decisionId: string) => cards.current.get(decisionId)?.focus(), []);
   const focusFirstHeld = () => {
-    if (firstHeld !== null) cards.current.get(firstHeld.decision.decision_id)?.focus();
+    if (firstHeld !== null) focusCard(firstHeld.decision.decision_id);
   };
+
+  // An arrival at `#request-<id>` lands on that card once, as "Open the request" does: once Needs
+  // you has read, and once the Demo inbox's sheet, whose link it may be, has closed and handed focus
+  // back to its button. A request that isn't here (answered, or another Desk's) leaves focus as it is.
+  const requested = requestInHash(location.hash);
+  const needsYouRead = needsYou.data !== undefined;
+  const landed = useRef<string | null>(null);
+  useEffect(() => {
+    if (requested === null || inboxOpen || !needsYouRead || landed.current === location.key) return;
+    landed.current = location.key;
+    focusCard(requested);
+  }, [requested, inboxOpen, needsYouRead, location.key, focusCard]);
 
   const copyLink = () => {
     setLinkCopy('idle');
@@ -119,7 +138,7 @@ export function TodayPage() {
         {live.length > 0 ? <LiveNow live={live} /> : null}
         <SinceLastNight />
       </div>
-      <TodayAside deskId={deskId} slug={desk.slug} inbox={<OwnerInbox timezone={business.timezone} />} />
+      <TodayAside deskId={deskId} slug={desk.slug} inbox={<OwnerInbox timezone={business.timezone} onOpenChange={setInboxOpen} />} />
     </div>
   );
 }
