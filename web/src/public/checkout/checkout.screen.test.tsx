@@ -9,7 +9,7 @@ import type { RenderResult } from 'vitest-browser-react';
 import type { PaymentLinkOut, VisitorEvent } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { LINK_CANCELLED, type Language } from '../../mocks/script.ts';
-import { RIVERA } from '../../mocks/seed.ts';
+import { BUSINESS, RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.ts';
@@ -122,11 +122,6 @@ describe('mock checkout', () => {
     expect(merchant.element().closest('.cd-checkout__top')).not.toBeNull();
     await expect.element(screen.getByRole('group', { name: 'Name on card' }).getByText('Dana W.', { exact: true })).toBeVisible();
     await expect.element(screen.getByRole('textbox', { name: 'Name on card' })).not.toBeInTheDocument();
-    // The business's name is the kernel's, never one the page makes up: a view without it isn't one
-    // the page takes.
-    // @ts-expect-error `business_name` is required on the checkout's view of a link
-    const unnamed: PaymentLinkOut = { title: 'Service call deposit', amount_cents: 2000, state: 'issued', language: 'en' };
-    void unnamed;
 
     // A link from a chat with no one on record: an empty name field to fill in, and what is typed
     // there never leaves the page, not with the payment and not in any other request.
@@ -145,6 +140,48 @@ describe('mock checkout', () => {
     expect(fetches).toHaveBeenCalled();
     for (const call of fetches.mock.calls) expect(JSON.stringify(call)).not.toContain('Sam Ortiz');
     fetches.mockRestore();
+  });
+
+  it('checkout_leaves_out_a_missing_business_name', async () => {
+    // Today's API sends the kernel's view of the link alone: the business's name comes with the
+    // kernel payments plan (plan 01c). Until then the checkout works as it is and leaves the name out.
+    const token = issueLink('en', 2000);
+    const asTheApiSendsIt: PaymentLinkOut = { title: 'Service call deposit', amount_cents: 2000, state: 'issued', language: 'en' };
+    mockStore.inject({ route: 'paymentLink', status: 200, times: 10_000, body: asTheApiSendsIt });
+    const { screen } = await renderRoute(`/pay/${token}`);
+    await expect.element(screen.getByRole('heading', { name: 'Service call deposit' })).toBeVisible();
+    await expect.element(screen.getByText('This page is part of a chat with Claude, an AI.')).toBeVisible();
+    await expect.element(screen.getByText('$20.00', { exact: true })).toBeVisible();
+    const card = screen.getByRole('group', { name: 'Card information' });
+    await expect.element(card.getByText('4242 4242 4242 4242', { exact: true })).toBeVisible();
+    await expect.element(card.getByText('12 / 34', { exact: true })).toBeVisible();
+    await expect.element(card.getByText('123', { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('textbox', { name: 'Name on card' })).toBeVisible();
+    await expect.element(screen.getByText('Test mode')).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Pay $20.00' })).toBeVisible();
+    expect(screen.container.querySelectorAll('[role="alert"]')).toHaveLength(0);
+
+    // No merchant line: the design system's checkout keeps the merchant's place at the card's top,
+    // and with no name it holds no text and takes no room, so the top is just the badge's row.
+    const top = screen.container.querySelector('.cd-checkout__top');
+    const badge = top?.querySelector('.cd-pill');
+    if (!top || !badge) throw new Error("the card's top holds the Test mode badge");
+    const merchant = top.querySelector('.cd-checkout__merchant');
+    if (merchant !== null) {
+      expect(merchant.textContent).toBe('');
+      const { width, height } = merchant.getBoundingClientRect();
+      expect({ width, height }).toEqual({ width: 0, height: 0 });
+    }
+    expect(top.getBoundingClientRect().height).toBe(badge.getBoundingClientRect().height);
+
+    // The page names no business of its own: not the mock's, not the Desk's, not a placeholder.
+    const desk = mockStore.world.desk(RIVERA.deskId);
+    if (!desk) throw new Error("the copy has Rivera's main Desk");
+    const shown = screen.container.textContent ?? '';
+    expect(shown).not.toContain(BUSINESS.name);
+    expect(shown).not.toContain(desk.summary.name);
+    expect(shown).not.toMatch(/\b(?:undefined|null)\b/);
+    await expectScreenBasics(screen.container, { owner: false });
   });
 
   it('checkout_pays_once', async () => {
