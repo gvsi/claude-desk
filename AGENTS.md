@@ -22,7 +22,7 @@ Claude Desk is a concept prototype: a public, always-on Claude for a person or s
 ## Safety invariants (never weaken these, not even to make a test pass)
 
 1. Every tool call goes through kernel `/decide`; nothing executes without `allow` or a single-use owner approval bound to that exact call, and the baseline is rechecked at execution.
-2. Every visitor-facing message or card goes through the kernel's reply check before it is shown. Prices, dates, discounts, bookings and policies appear only in typed cards rendered from facts; free prose carrying them is blocked.
+2. Everything a visitor sees is checked first. Prices, dates, discounts and bookings come only from cards built from the business's facts: Claude's own words can't state a price, date or discount, can't make a promise the cards don't back, and can confirm a booking only next to its card.
 3. The always-on baseline can't be switched off: AI disclosure; private data only to verified, entitled people; verification codes only to the contact on record; no money without an owner rule or a signed limit; every attempt logged.
 4. Rules are compiled from rule cards by code, never written freehand. Reviewer probabilities appear only as AND conditions on auto-allow rules; proofs must hold for any reviewer value, and errors fail closed.
 5. The API process holds no business credentials and can't write policies, facts, approvals or the ledger. MCP tool definitions are pinned by hash; a changed definition disables the tool until the owner reviews it.

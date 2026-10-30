@@ -751,3 +751,53 @@ def test_no_shipped_doc_says_the_model_check_asks_only_about_promises():
             if only_promises.search(sentence) and "denies being an ai" not in sentence:
                 wrong.append(f"{path}: {sentence}")
     assert wrong == []
+
+
+# Safety rule 2 in the owner's approved wording of 2026-10-30. It leads each place that states the rule; the threat
+# model's control row and the reply check's decision follow it with the same sentence on how the check runs.
+REPLY_RULE = (
+    "Everything a visitor sees is checked first. Prices, dates, discounts and bookings come only from cards built from "
+    "the business's facts: Claude's own words can't state a price, date or discount, can't make a promise the cards "
+    "don't back, and can confirm a booking only next to its card."
+)
+REPLY_CHECK_HOW = (
+    "The code check scans Claude's prose in English and Spanish for digits, money, dates, discount and promise words, "
+    "and booking claims without their card; a model check on Haiku 5.5 flags promises the cards don't back, and its "
+    "errors count as violations."
+)
+REPLY_CHECK_DELIVERY = (
+    "A blocked reply is regenerated once with feedback, then replaced with a handoff to the owner. Every "
+    "visitor-visible message passes the kernel's reply check before it is shown: the visitor sees that Claude is "
+    "writing, then the checked reply whole, and nothing unchecked is streamed."
+)
+
+
+def safety_rule_two(path: str) -> str:
+    """Where `path` states safety rule 2: the invariant, the README's part, the control row or the decision."""
+    text = (REPO / path).read_text()
+    if path == "AGENTS.md":
+        invariants = text.split("## Safety invariants", 1)[1].split("\n## ", 1)[0]
+        return next(line.removeprefix("2. ") for line in invariants.splitlines() if line.startswith("2. "))
+    if path == README:
+        status = sections(text)["What's real, mocked and unfinished"]
+        return next(cells[0] for cells in status_table(status) if cells[0].startswith("The reply check"))
+    if path == THREAT_MODEL:
+        controls = status_table(sections(text)["Controls"])
+        where = "`backend/desk/kernel_service/reply_check.py`"
+        return next(cells[0] for cells in controls if cells[1].startswith(where))
+    records = re.split(r"^## ", text, flags=re.MULTILINE)
+    record = next(record for record in records if "Typed cards" in record.splitlines()[0])
+    return next(line.removeprefix("**Decision.** ") for line in record.splitlines() if line.startswith("**Decision.** "))
+
+
+SAFETY_RULE_TWO = {
+    "AGENTS.md": REPLY_RULE,
+    README: f"The reply check: {REPLY_RULE}",
+    THREAT_MODEL: f"{REPLY_RULE} {REPLY_CHECK_HOW}",
+    "docs/architecture-decisions.md": f"{REPLY_RULE} {REPLY_CHECK_HOW} {REPLY_CHECK_DELIVERY}",
+}
+
+
+@pytest.mark.parametrize("path", SAFETY_RULE_TWO)
+def test_safety_rule_two_reads_in_the_owners_wording(path):
+    assert safety_rule_two(path) == SAFETY_RULE_TWO[path]
