@@ -224,3 +224,25 @@ export const NarrowMaxLimit: Story = {
     await expect(tooWide).toEqual([]);
   },
 };
+
+/** A placeholder for what the screen puts above the tools, as the payment limit line sits there. */
+const LIMIT_LINE = 'No payment over $500 goes through without asking you, whatever the rules below say.';
+
+export const LineAboveTools: Story = {
+  args: { ...payments, aboveTools: <p className="cd-type-body">{LIMIT_LINE}</p> },
+  parameters: {
+    canvas: 'N-Conn-12-Chat',
+    canvasNote:
+      'The line between the header and the tools is the screen’s: on Payments and Stripe the payment limit, which the follow-up builds with its Change button; here a placeholder line.',
+  },
+  play: async ({ canvas }) => {
+    // aboveTools: one row between the header and the first tool, padded as a tool row, under a hairline.
+    const line = canvas.getByText(LIMIT_LINE);
+    const row = line.closest<HTMLElement>('.cd-connector-section__above');
+    if (!row) throw new Error('The line is not in its row');
+    expectComputed(row, { paddingTop: '12px', paddingLeft: '16px', borderTopWidth: '1px', borderTopColor: 'rgba(250, 249, 245, 0.12)' });
+    const [header, firstTool] = canvas.getAllByRole('link');
+    await expect(row.getBoundingClientRect().top).toBeGreaterThanOrEqual((header as HTMLElement).getBoundingClientRect().bottom);
+    await expect(row.getBoundingClientRect().bottom).toBeLessThanOrEqual((firstTool as HTMLElement).closest('li')?.getBoundingClientRect().top ?? 0);
+  },
+};

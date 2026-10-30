@@ -59,6 +59,12 @@
   color: var(--text-primary);
 }
 
+/* The screen's line above the tools (the payment limit), padded as a tool row under a hairline. */
+.cd-connector-section__above {
+  padding: var(--space-12) var(--space-16);
+  border-top: 1px solid var(--line-hairline);
+}
+
 .cd-connector-section__tools {
   margin: 0;
   padding: 0;
@@ -136,6 +142,10 @@
 @container cd-connector-section (max-width: 639.98px) {
   .cd-connector-section__header {
     gap: var(--space-12);
+    padding: var(--space-12) var(--space-14);
+  }
+
+  .cd-connector-section__above {
     padding: var(--space-12) var(--space-14);
   }
 

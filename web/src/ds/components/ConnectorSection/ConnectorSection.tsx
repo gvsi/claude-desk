@@ -1,4 +1,4 @@
-import { useId, type ComponentType } from 'react';
+import { useId, type ComponentType, type ReactNode } from 'react';
 
 import type { ToolStatus } from '../../../api/contracts.ts';
 import { Icon } from '../../icons/index.tsx';
@@ -38,6 +38,11 @@ export interface ConnectorSectionProps {
   tools: readonly ToolSummaryView[];
   /** A note beside the name right after the connector was added: "Added just now". */
   addedNote?: string;
+  /**
+   * A line between the header and the tool rows, in a row of its own: on Payments and Stripe, the
+   * payment limit that holds over every rule below it.
+   */
+  aboveTools?: ReactNode;
   /** The app's router link; a plain `<a>` by default. */
   linkComponent?: ComponentType<RulesLinkProps>;
 }
@@ -59,7 +64,7 @@ function toolOutcome(tool: ToolSummaryView): { tone: StatusTone; words: string }
  * tool with its rule words and its outcome. Under 640 px of its own width the descriptions and the
  * count go, and each tool's words sit under its name, with its outcome on its own line under them.
  */
-export function ConnectorSection({ connector, href, tools, addedNote, linkComponent: Link = PlainLink }: ConnectorSectionProps) {
+export function ConnectorSection({ connector, href, tools, addedNote, aboveTools, linkComponent: Link = PlainLink }: ConnectorSectionProps) {
   const ids = useId();
   const count = tools.length === 1 ? '1 tool' : `${tools.length} tools`;
   return (
@@ -80,6 +85,7 @@ export function ConnectorSection({ connector, href, tools, addedNote, linkCompon
           <span className="cd-connector-section__count cd-type-meta">{count}</span>
           <Icon name="chevron-right" size={16} className="cd-connector-section__chevron" />
         </Link>
+        {aboveTools ? <div className="cd-connector-section__above">{aboveTools}</div> : null}
         {tools.length > 0 ? (
           <ul className="cd-connector-section__tools">
             {tools.map((tool, index) => {
