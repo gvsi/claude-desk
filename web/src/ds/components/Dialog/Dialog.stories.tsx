@@ -53,9 +53,9 @@ const meta = {
   render: (args) => <Settings {...args} />,
   parameters: {
     layout: 'fullscreen',
-    canvas: 'none',
+    canvas: 'N-Run2-Settings-DeleteDesk',
     canvasNote:
-      'No board draws a dialog. "Start over" in the reviewer bar on N-Today-Run1 and "Delete this Desk" in Settings open one; it takes the raised surface, card border and radius of the switcher on N-Switcher-Run1, with no shadow.',
+      'N-Run2-Settings-DeleteDesk draws this dialog over Settings › General (Boards/Settings, delete this Desk); here a lone "Delete this Desk" button opens it. "Start over" in the reviewer bar on N-Today-Run1 opens one too.',
   },
 } satisfies Meta<typeof Dialog>;
 
@@ -80,6 +80,11 @@ export const Danger: Story = {
       paddingTop: '24px',
       paddingLeft: '24px',
     });
+    // dialog_backdrop_is_the_scrim: the page behind is dimmed by the scrim at full strength, as
+    // N-Run2-Settings-DeleteDesk draws it.
+    const backdrop = getComputedStyle(dialog, '::backdrop');
+    await expect(backdrop.backgroundColor).toBe('rgba(0, 0, 0, 0.5)');
+    await expect(backdrop.opacity).toBe('1');
     // 440 px wide, the body 12 px under the title, and the answers at a screen's main size.
     await expect(dialog.getBoundingClientRect().width).toBe(440);
     const heading = within(dialog).getByRole('heading', { name: TITLE });
@@ -155,8 +160,9 @@ const nextTask = () => new Promise<void>((resolve) => setTimeout(resolve, 50));
 
 export const ClosedByTheBrowser: Story = {
   parameters: {
+    canvas: 'none',
     canvasNote:
-      'No board draws a dialog; here the browser closes it itself, as a back gesture on Android can, and the screen hears about it.',
+      'No board draws the browser closing a dialog itself, as a back gesture on Android can, and the screen hearing about it. N-Run2-Settings-DeleteDesk draws the dialog open.',
   },
   play: async ({ args, canvas, userEvent }) => {
     // dialog_reports_a_browser_close: a close the screen didn't ask for calls onCancel once, so

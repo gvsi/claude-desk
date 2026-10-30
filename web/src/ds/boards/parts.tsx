@@ -915,7 +915,7 @@ export function RulesPage({ hub, chips, notice, actions, aboveTools = {} }: Rule
         />
       </div>
       {notice ? <div className="board-rules__notice">{notice}</div> : null}
-      <AskAboutRules placeholder="Ask Claude to change a rule or a connector" chips={chips} />
+      <AskAboutRules placeholder="Ask Claude to change a rule" chips={chips} />
       <ConnectorList summary={hub.summary}>
         {hub.sections.map((section) => (
           <ConnectorSection

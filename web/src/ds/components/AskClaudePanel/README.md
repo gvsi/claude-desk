@@ -4,7 +4,7 @@
 
 ## When to use
 
-- As `AppShell`'s `panel`, when the owner sends from the Rules page's "Ask Claude to change a rule or a connector" composer (N-Conn-12-Chat). The screen keeps the conversation and passes it as `children`.
+- As `AppShell`'s `panel`, when the owner sends from the Rules page's "Ask Claude to change a rule" composer (N-Conn-12-Chat). The screen keeps the conversation and passes it as `children`.
 - Nothing turns on, off or changes from the panel itself: Claude's cards lead into the same reviews as the page (`ConnectorOfferCard` opens the connector review, a drafted rule shows in `ChangeReview`).
 
 ## What it shows
