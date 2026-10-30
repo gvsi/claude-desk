@@ -30,6 +30,26 @@ describe('DemoInboxPanel', () => {
     expect(render({ items: [{ notice, entry: codeEntry }] })).toContain('482913');
   });
 
+  it('a_replayed_notice_shows_once_as_its_latest_item', () => {
+    if (!codeEntry || !notice) throw new Error('the Chen fixture has no code entry');
+    const rows = (html: string) => html.match(/<li /g)?.length ?? 0;
+    // The same notice twice, as an event replay after a reconnect appends it: one row, the latest.
+    const opened = render({ items: [{ notice, entry: null }, { notice, entry: codeEntry }] });
+    expect(rows(opened)).toBe(1);
+    expect(opened).toContain('482913');
+    expect(opened).not.toContain('Opening');
+    const failedLast = render({ items: [{ notice, entry: codeEntry }, { notice, entry: null, failed: true }] });
+    expect(rows(failedLast)).toBe(1);
+    expect(failedLast).toContain('Couldn’t open this entry.');
+    expect(failedLast).not.toContain('482913');
+    // For the owner too, and between other notices.
+    const other = { ...notice, entry_id: 'inbox-other', to: 'owner', preview: 'A request needs your answer' };
+    const owner = render({ viewer: 'owner', items: [{ notice, entry: null }, { notice: other, entry: null }, { notice, entry: codeEntry }] });
+    expect(rows(owner)).toBe(2);
+    // Newest first: the code's latest arrival is the newest, so it leads.
+    expect(owner.indexOf('482913')).toBeLessThan(owner.indexOf('A request needs your answer'));
+  });
+
   it('a_visitor_sees_a_row_before_its_entry_only_for_a_contact', () => {
     if (!codeEntry || !notice) throw new Error('the Chen fixture has no code entry');
     const rows = (html: string) => html.match(/<li /g)?.length ?? 0;

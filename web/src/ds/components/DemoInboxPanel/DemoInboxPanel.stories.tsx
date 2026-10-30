@@ -210,6 +210,32 @@ export const OwnerAlerts: Story = {
   },
 };
 
+export const ReplayedNotice: Story = {
+  args: {
+    viewer: 'owner',
+    // After a reconnect the screen replays the events it missed, so Raj's code arrives twice: first
+    // still opening, then with its entry fetched. The alert and the checkpoint arrived in between.
+    items: [{ notice: noticeOf(CODE_ID), entry: null }, ...everythingArrived],
+  },
+  parameters: {
+    canvasNote: `${BOARD}'s panel after a reconnect replayed a notice it already had, which no board shows: one row per entry.`,
+  },
+  play: async ({ canvasElement }) => {
+    // notices_show_once: one row per entry_id, the latest item for it, in the latest one's place.
+    const items = itemsOf(canvasElement);
+    await expect(items).toHaveLength(everythingArrived.length);
+    await expect(items.map((item) => item.querySelector('.cd-demo-inbox__kind')?.textContent)).toEqual([
+      'Verification code',
+      'Alert',
+      'Ledger checkpoint',
+    ]);
+    const [code] = items as [HTMLElement];
+    await expect(within(code).getByText(entryOf(CODE_ID).body)).toBeVisible();
+    await expect(within(code).queryByRole('status')).toBeNull();
+    await expect(canvasElement.textContent?.split(entryOf(CODE_ID).body)).toHaveLength(2);
+  },
+};
+
 /** No clock time, in any form: visitor surfaces show none. */
 const CLOCK = /\d{1,2}:\d{2}|\b(?:am|pm)\b/i;
 

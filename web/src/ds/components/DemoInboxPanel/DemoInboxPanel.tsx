@@ -72,6 +72,23 @@ function shownTo(viewer: DemoInboxPanelProps['viewer'], { notice, entry }: DemoI
 }
 
 /**
+ * The latest item for each `entry_id`, newest first. Replaying events after a reconnect can append
+ * a notice the screen already holds; it shows once, as the item that arrived last, in that item's
+ * place.
+ */
+function latestFirst(items: readonly DemoInboxItem[]): DemoInboxItem[] {
+  const seen = new Set<string>();
+  const latest: DemoInboxItem[] = [];
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (item === undefined || seen.has(item.notice.entry_id)) continue;
+    seen.add(item.notice.entry_id);
+    latest.push(item);
+  }
+  return latest;
+}
+
+/**
  * Where the demo's codes and alerts arrive instead of a phone or email inbox: the newest first, in
  * a polite live region, each entry's body shown word for word once it is fetched. Nothing fetches
  * here; codes come only from the entries the screen passes in.
@@ -79,8 +96,8 @@ function shownTo(viewer: DemoInboxPanelProps['viewer'], { notice, entry }: DemoI
 export function DemoInboxPanel({ viewer, items, language, onRetry }: DemoInboxPanelProps) {
   const copy = INBOX_COPY[language];
   const titleId = `${useId()}-title`;
-  // Newest first: the screen keeps them in the order they arrived.
-  const shown = [...items].reverse().filter((item) => shownTo(viewer, item));
+  // Newest first, one row per entry: the screen keeps them in the order they arrived.
+  const shown = latestFirst(items).filter((item) => shownTo(viewer, item));
 
   return (
     <section className="cd-demo-inbox" aria-labelledby={titleId} lang={language}>

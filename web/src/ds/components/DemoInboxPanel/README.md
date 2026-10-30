@@ -23,6 +23,7 @@
 | `viewer="visitor"`, its own entry not yet fetched, and a recipient that isn't clearly a contact (blank, or the owner's word written another way) | Nothing, until the fetched entry proves it is a verification code. |
 
 - A visitor never sees the owner's alerts or checkpoints, whatever the screen passes in: before its own entry arrives, a row shows (opening or failed to open) only for a notice to a masked contact on record, the legitimate state of a code on its way.
+- Each entry shows once. Replaying events after a reconnect can append a notice the screen already holds, so the panel keeps only the item that arrived last for each `entry_id`, in that item's place, before it decides what a visitor may see. An earlier copy never shows, even when the latest one doesn't.
 - With nothing to show: "Nothing here yet. Codes and alerts you’d get by text or email show up here."
 - No time ever shows on a visitor's panel, even when an item carries one.
 
@@ -33,7 +34,7 @@
 
 ## What the consumer provides
 
-- `items` in the order they arrived, oldest first: append each `EvDemoInbox` notice as it comes, with `entry: null`. The panel puts the newest at the top.
+- `items` in the order they arrived, oldest first: append each `EvDemoInbox` notice as it comes, with `entry: null`. The panel puts the newest at the top, and shows a notice appended twice once, as its later item.
 - The entry for each notice, fetched through the API's Demo inbox route when the notice arrives. Codes come only from those fetched entries, never from a notice. On failure set `failed`; `onRetry` should fetch it again.
 - `time` for the owner's panel only, as a display string the screen formats ("2:14 pm"). The panel formats nothing.
 - `language`: the visitor's language, or the owner's.
