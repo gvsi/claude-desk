@@ -87,7 +87,7 @@ export function ConnectorSection({ connector, href, tools, addedNote, aboveTools
         </Link>
         {aboveTools ? <div className="cd-connector-section__above">{aboveTools}</div> : null}
         {tools.length > 0 ? (
-          <ul className="cd-connector-section__tools">
+          <ul role="list" className="cd-connector-section__tools">
             {tools.map((tool, index) => {
               const outcome = toolOutcome(tool);
               const descriptionId = `${ids}-tool-${index}`;

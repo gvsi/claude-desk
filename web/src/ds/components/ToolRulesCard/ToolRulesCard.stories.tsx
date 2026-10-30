@@ -4,6 +4,7 @@ import { expect, fn, within } from 'storybook/test';
 import type { RuleCard } from '../../../api/contracts.ts';
 import { rivera } from '../../fixtures';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { expectListsKeepTheirRole } from '../../test/expectListRoles.ts';
 import type { RuleRowProps } from '../RuleRow/RuleRow.tsx';
 import { rulesForTool } from './toolRules.ts';
 import { ToolRulesCard } from './ToolRulesCard.tsx';
@@ -58,7 +59,9 @@ export const PaymentLinkOnPayments: Story = {
     canvasNote:
       "The shared rule is the demo agent's charges up to $20, automatic, read as \"Automatic up to $20; over $20, ask me first\"; the board's example is illustrative. A rule for one agent outranks the tool's own rule, so it comes first.",
   },
-  play: async ({ args, canvas }) => {
+  play: async ({ args, canvas, canvasElement }) => {
+    // list_semantics_kept: a list drawn without markers says role="list", so Safari keeps it a list.
+    await expect(expectListsKeepTheirRole(canvasElement)).toBeGreaterThanOrEqual(1);
     const card = canvas.getByRole('region', { name: 'Payment link' });
     expectComputed(card, { paddingTop: '16px', borderTopLeftRadius: '12px' });
     // The tool's name and line are one link to its page, with a chevron.

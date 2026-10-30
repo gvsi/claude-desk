@@ -32,7 +32,7 @@ function PlainLink({ children, ...props }: SidebarLinkProps) {
 export function SubNav({ label, items, current, linkComponent: Link = PlainLink }: SubNavProps) {
   return (
     <nav aria-label={label} className="cd-sub-nav">
-      <ul className="cd-sub-nav__list">
+      <ul role="list" className="cd-sub-nav__list">
         {items.map((item) => (
           <li key={item.key} className="cd-sub-nav__item">
             <Link

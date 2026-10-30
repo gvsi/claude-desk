@@ -4,6 +4,7 @@ import { expect } from 'storybook/test';
 import { chen, rivera } from '../../fixtures';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { expectMockBesideExternalNames } from '../../test/expectMockBadges.ts';
+import { expectListsKeepTheirRole } from '../../test/expectListRoles.ts';
 import { outcomePhrase } from '../OutcomeMenu/outcomeWords.ts';
 import { ConnectorSection, type ConnectorSectionProps, type ToolSummaryView } from './ConnectorSection.tsx';
 
@@ -35,6 +36,8 @@ function rowName(tool: ToolSummaryView, outcome: string): string {
 export const Quotes: Story = {
   args: quotes,
   play: async ({ canvas, canvasElement }) => {
+    // list_semantics_kept: a list drawn without markers says role="list", so Safari keeps it a list.
+    await expect(expectListsKeepTheirRole(canvasElement)).toBeGreaterThanOrEqual(1);
     const section = canvas.getByRole('region', { name: 'Quotes' });
     expectComputed(section, { paddingTop: '0px', borderTopLeftRadius: '12px', backgroundColor: 'rgba(250, 249, 245, 0.03)' });
     const [header, row] = canvas.getAllByRole('link');

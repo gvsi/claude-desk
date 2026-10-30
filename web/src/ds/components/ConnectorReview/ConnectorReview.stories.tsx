@@ -4,6 +4,7 @@ import { expect, fn, within } from 'storybook/test';
 import { chen, rivera } from '../../fixtures';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { expectMockBesideExternalNames } from '../../test/expectMockBadges.ts';
+import { expectListsKeepTheirRole } from '../../test/expectListRoles.ts';
 import { ConnectorReview } from './ConnectorReview.tsx';
 
 const HINT = "You'll see the change to your rules before anything runs.";
@@ -36,7 +37,9 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const ChenPayments: Story = {
-  play: async ({ args, canvas, userEvent }) => {
+  play: async ({ args, canvas, userEvent, canvasElement }) => {
+    // list_semantics_kept: a list drawn without markers says role="list", so Safari keeps it a list.
+    await expect(expectListsKeepTheirRole(canvasElement)).toBeGreaterThanOrEqual(1);
     // The page's h1, with the connector's "Built in" beside its name.
     const title = canvas.getByRole('heading', { level: 1, name: 'Review what Claude could do with Payments Built in' });
     expectComputed(title, { fontFamily: '"Source Serif 4", Georgia, serif', fontSize: '24px' });

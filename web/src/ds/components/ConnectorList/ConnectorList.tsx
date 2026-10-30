@@ -24,7 +24,7 @@ export function ConnectorList({ summary, onAddConnector, children }: ConnectorLi
     <div className="cd-connector-list">
       <div className="cd-connector-list__body">
         <p className="cd-connector-list__summary cd-type-meta">{summary}</p>
-        <ul className="cd-connector-list__items" aria-label="Connectors">
+        <ul role="list" className="cd-connector-list__items" aria-label="Connectors">
           {sections.map((section, index) => (
             <li key={index} className="cd-connector-list__item">
               {section}

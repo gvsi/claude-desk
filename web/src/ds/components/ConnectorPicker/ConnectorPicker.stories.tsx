@@ -5,6 +5,7 @@ import { expect, fn, within } from 'storybook/test';
 import { chen, rivera } from '../../fixtures';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { expectMockBesideExternalNames } from '../../test/expectMockBadges.ts';
+import { expectListsKeepTheirRole } from '../../test/expectListRoles.ts';
 import { Button } from '../Button/Button.tsx';
 import { ConnectorPicker, type ConnectorPickerProps } from './ConnectorPicker.tsx';
 
@@ -57,6 +58,8 @@ type Story = StoryObj<typeof meta>;
 
 export const ChenComingSoon: Story = {
   play: async ({ args, canvas, canvasElement, userEvent }) => {
+    // list_semantics_kept: a list drawn without markers says role="list", so Safari keeps it a list.
+    await expect(expectListsKeepTheirRole(canvasElement)).toBeGreaterThanOrEqual(1);
     // picker_by_keyboard: a modal dialog named by its serif title, with focus on Payments' "Add".
     const dialog = canvas.getByRole('dialog', { name: 'Add a connector' });
     await expect(dialog).toHaveAttribute('aria-modal', 'true');

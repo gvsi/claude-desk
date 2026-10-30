@@ -3,6 +3,7 @@ import { expect, within } from 'storybook/test';
 
 import { rivera } from '../../fixtures';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { expectListsKeepTheirRole } from '../../test/expectListRoles.ts';
 import { RecentRequests } from './RecentRequests.tsx';
 
 const meta = {
@@ -28,6 +29,8 @@ type Story = StoryObj<typeof meta>;
 
 export const Refund: Story = {
   play: async ({ args, canvas, canvasElement, userEvent }) => {
+    // list_semantics_kept: a list drawn without markers says role="list", so Safari keeps it a list.
+    await expect(expectListsKeepTheirRole(canvasElement)).toBeGreaterThanOrEqual(1);
     const section = canvas.getByRole('region', { name: 'Recent requests under these rules' });
     await expect(within(section).getByRole('heading', { level: 2, name: 'Recent requests under these rules' })).toBeVisible();
     const items = within(section).getAllByRole('listitem');

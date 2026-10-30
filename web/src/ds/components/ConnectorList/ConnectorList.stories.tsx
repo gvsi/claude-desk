@@ -3,6 +3,7 @@ import { expect, fn } from 'storybook/test';
 
 import { rivera } from '../../fixtures';
 import { expectMockBesideExternalNames } from '../../test/expectMockBadges.ts';
+import { expectListsKeepTheirRole } from '../../test/expectListRoles.ts';
 import { ConnectorSection } from '../ConnectorSection/ConnectorSection.tsx';
 import { ConnectorList } from './ConnectorList.tsx';
 
@@ -31,6 +32,8 @@ const NAMES = ['Quotes', 'Bookings', 'Leads and callbacks', 'Verification', 'Doc
 export const RiveraHub: Story = {
   parameters: { canvasNote: 'Rivera keeps Documents, so the hub has six built-in connectors.' },
   play: async ({ args, canvas, canvasElement }) => {
+    // list_semantics_kept: a list drawn without markers says role="list", so Safari keeps it a list.
+    await expect(expectListsKeepTheirRole(canvasElement)).toBeGreaterThanOrEqual(1);
     await expect(canvas.getByText(rivera.connectors.summary)).toBeVisible();
     // A list named "Connectors", one item per section, in the hub's order.
     const list = canvas.getByRole('list', { name: 'Connectors' });

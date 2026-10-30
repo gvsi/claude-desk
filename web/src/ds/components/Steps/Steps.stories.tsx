@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, within } from 'storybook/test';
 
 import { expectComputed } from '../../test/expectComputed.ts';
+import { expectListsKeepTheirRole } from '../../test/expectListRoles.ts';
 import { Steps } from './Steps.tsx';
 
 const meta = {
@@ -20,7 +21,9 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const ReviewToolsOfFour: Story = {
-  play: async ({ canvas }) => {
+  play: async ({ canvas, canvasElement }) => {
+    // list_semantics_kept: a list drawn without markers says role="list", so Safari keeps it a list.
+    await expect(expectListsKeepTheirRole(canvasElement)).toBeGreaterThanOrEqual(1);
     // current_step_marked: an ordered list named by its label, one item per step.
     const list = canvas.getByRole('list', { name: 'Connect Google Calendar' });
     await expect(list.tagName).toBe('OL');

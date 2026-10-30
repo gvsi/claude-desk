@@ -85,7 +85,7 @@ export function ConnectorReview({ connector, intro, tools, onChangeOutcome, onTu
         </div>
       </header>
       <Card as="section" label="Tools" padding={16}>
-        <ul className="cd-connector-review__tools">
+        <ul role="list" className="cd-connector-review__tools">
           {tools.map((tool) => (
             <li key={tool.key} className="cd-connector-review__tool">
               <div className="cd-connector-review__layout">

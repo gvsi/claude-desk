@@ -294,7 +294,7 @@ export function ChangeReview({
       <Card as="section" label="Changes" padding={16}>
         <p className="cd-change-review__heading cd-type-control">Changes</p>
         {rows.length > 0 ? (
-          <ul className="cd-change-review__rows">
+          <ul role="list" className="cd-change-review__rows">
             {rows.map((row) => (
               <Row key={row.key} row={row} />
             ))}

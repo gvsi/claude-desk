@@ -4,6 +4,7 @@ import { expect, fn, waitFor, within } from 'storybook/test';
 
 import { chen, rivera } from '../../fixtures';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { expectListsKeepTheirRole } from '../../test/expectListRoles.ts';
 import { ChangeReview, type ChangeRowView, type ChangeReviewProps } from './ChangeReview.tsx';
 
 /** The compiler's reason for a tool no card of the owner's covers yet. */
@@ -141,6 +142,8 @@ export const TurnOnPayments: Story = {
     canvasNote: "Chen & Co. CPA turning Payments on: both tools at Ask me first, under the compiler's default ask.",
   },
   play: async ({ args, canvas, canvasElement }) => {
+    // list_semantics_kept: a list drawn without markers says role="list", so Safari keeps it a list.
+    await expect(expectListsKeepTheirRole(canvasElement)).toBeGreaterThanOrEqual(1);
     const changes = canvas.getByRole('region', { name: 'Changes' });
     expectComputed(changes, { paddingTop: '16px', borderTopLeftRadius: '12px' });
     // rows_are_tagged_in_words: the tag is a word in an outlined pill.

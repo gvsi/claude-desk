@@ -4,6 +4,7 @@ import { expect, fn, within } from 'storybook/test';
 import { rivera } from '../../fixtures';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { expectMockBesideExternalNames } from '../../test/expectMockBadges.ts';
+import { expectListsKeepTheirRole } from '../../test/expectListRoles.ts';
 import { ConnectorDirectory } from './ConnectorDirectory.tsx';
 
 const { directory } = rivera;
@@ -32,6 +33,8 @@ function group(root: HTMLElement, title: string): { section: HTMLElement; rows: 
 
 export const RiveraConnectors: Story = {
   play: async ({ args, canvas, canvasElement }) => {
+    // list_semantics_kept: a list drawn without markers says role="list", so Safari keeps it a list.
+    await expect(expectListsKeepTheirRole(canvasElement)).toBeGreaterThanOrEqual(1);
     // Three groups, in order: what is built in, the apps connected, and the apps to connect.
     const headings = canvas.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent);
     await expect(headings).toEqual(['Built in', 'Connected', 'Available']);

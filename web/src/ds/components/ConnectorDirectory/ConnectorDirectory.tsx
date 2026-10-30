@@ -81,7 +81,7 @@ function Group({
     <section className="cd-connector-directory__group" aria-labelledby={headingId}>
       <SectionHeader id={headingId} title={title} caption={caption} />
       <Card padding={0}>
-        <ul className="cd-connector-directory__rows">
+        <ul role="list" className="cd-connector-directory__rows">
           {rows.map((row) => (
             <li key={row.connector.id} className="cd-connector-directory__row">
               <Row row={row} Link={Link} />
