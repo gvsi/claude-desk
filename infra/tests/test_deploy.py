@@ -3,6 +3,7 @@
 that `cdk deploy` keeps a terminal for its approval prompt, and that the first failing step stops
 the deploy. Nothing reaches AWS or the real Keychain."""
 
+import errno
 import hashlib
 import json
 import os
@@ -251,7 +252,11 @@ def deploy(tmp_path):
         primary, secondary = pty.openpty()
         process = subprocess.Popen(command, env=env, stdin=secondary, stdout=secondary, stderr=secondary)
         os.close(secondary)
-        os.write(primary, f"{typed}\n".encode())
+        try:
+            os.write(primary, f"{typed}\n".encode())
+        except OSError as error:  # deploy.sh already stopped (a usage error) and closed its terminal
+            if error.errno != errno.EIO:
+                raise
         chunks = []
         while True:
             ready, _, _ = select.select([primary], [], [], 60)
