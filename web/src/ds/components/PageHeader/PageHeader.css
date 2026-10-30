@@ -1,7 +1,8 @@
 /* PageHeader: the serif page title at the left with its subtitle beneath, and the page's actions
    at the right of the title's line. The title's 32 px line is a control's height, so a button
    there sits level with it. On a narrow line the actions wrap under the text; on a phone they stay
-   on the title's line and the subtitle runs under both. */
+   on the title's line and the subtitle runs under both, unless the page gives them a line of their
+   own (`actionsBelowOnPhone`) or leaves the subtitle out there (`hideSubtitleOnPhone`). */
 
 .cd-page-header {
   display: flex;
@@ -63,5 +64,21 @@
   .cd-page-header__actions {
     grid-row: 1;
     grid-column: 2;
+  }
+
+  /* The Rules page's preset menu takes a line of its own, 16 px under the title or the subtitle,
+     at the header's full width, and what it holds fills it. */
+  .cd-page-header--actions-below .cd-page-header__actions {
+    grid-row: auto;
+    grid-column: 1 / -1;
+    margin-top: var(--space-8);
+  }
+
+  .cd-page-header--actions-below .cd-page-header__actions > * {
+    flex: 1 1 auto;
+  }
+
+  .cd-page-header--no-phone-subtitle .cd-page-header__subtitle {
+    display: none;
   }
 }

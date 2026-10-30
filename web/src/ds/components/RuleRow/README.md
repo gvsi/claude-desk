@@ -19,6 +19,8 @@
 
 `RuleWord = { field: 'who' | 'limits' | 'hours' | 'review'; text: string }`: one part of what a card enforces, in the consumer's words. `ChangeReview` uses the field to tag what changed.
 
+`ruleWordsLine(words)` joins them as the row shows them, blank ones left out, with " · "; `PersonRules` shows the same line.
+
 ## Props
 
 | Prop | Type | Notes |

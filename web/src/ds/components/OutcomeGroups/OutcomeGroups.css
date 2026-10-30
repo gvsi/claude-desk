@@ -1,0 +1,52 @@
+/* OutcomeGroups: cards 20 px apart, each padded 16 px. A group's heading is its outcome's 6 px dot
+   and its name on a 20 px line, 10 px over the first row's hairline; each row is 10 px over and
+   under a 20 px line, under a hairline, what Claude does at the left and who it's for at the right
+   in secondary meta. */
+
+.cd-outcome-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20);
+  min-width: 0;
+}
+
+.cd-outcome-groups__group {
+  min-width: 0;
+}
+
+.cd-outcome-groups__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin: 0;
+  padding-bottom: var(--space-10);
+  color: var(--text-primary);
+}
+
+.cd-outcome-groups__rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cd-outcome-groups__row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-16);
+  padding: var(--space-10) 0;
+  border-top: 1px solid var(--line-hairline);
+}
+
+.cd-outcome-groups__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.cd-outcome-groups__who {
+  flex: none;
+  max-width: 50%;
+  color: var(--text-secondary);
+  text-align: right;
+}

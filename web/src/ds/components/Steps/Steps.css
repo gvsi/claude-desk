@@ -1,10 +1,15 @@
 /* Steps: a row of 22 px circles with their names, joined by 28 px hairlines. Done: a check on the
    secondary fill. Current: the primary button's fill with its number, and its name in primary
-   text. Later: the number on the secondary fill. It lays out by its own width: under 480 px only
-   the current step's name is drawn, and the others stay for screen readers. */
+   text. Later: the number on the secondary fill. It lays out by its own width: under 480 px the
+   list stays for screen readers but isn't drawn, and one line says "Step 1 of 5: Questions", its
+   count in secondary text and the current step's name in primary. */
+
+.cd-steps-frame {
+  container: cd-steps / inline-size;
+  min-width: 0;
+}
 
 .cd-steps {
-  container: cd-steps / inline-size;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -63,13 +68,19 @@
   overflow-wrap: anywhere;
 }
 
-@container cd-steps (max-width: 479.98px) {
-  .cd-steps__join {
-    width: var(--space-16);
-    margin-left: var(--space-4);
-  }
+.cd-steps__compact {
+  display: none;
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
 
-  .cd-steps__step:not(.cd-steps__step--current) .cd-steps__name {
+.cd-steps__compact-name {
+  color: var(--text-primary);
+}
+
+@container cd-steps (max-width: 479.98px) {
+  .cd-steps {
     position: absolute;
     width: 1px;
     height: 1px;
@@ -78,5 +89,9 @@
     overflow: hidden;
     clip-path: inset(50%);
     white-space: nowrap;
+  }
+
+  .cd-steps__compact {
+    display: block;
   }
 }

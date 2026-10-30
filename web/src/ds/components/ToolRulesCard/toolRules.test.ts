@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 
 import type { RuleCard } from '../../../api/contracts.ts';
-import { rulesForTool } from './toolRules.ts';
+import { groupsOverlap, rulesForTool } from './toolRules.ts';
 
 function card(fields: Partial<RuleCard> & Pick<RuleCard, 'card_id' | 'applies_to'>): RuleCard {
   return {
@@ -116,5 +116,15 @@ describe('rulesForTool', () => {
     expect(ids(rulesForTool(quote, [fallback]))).toEqual([]);
     // A card for another tool or effect is never listed.
     expect(ids(rulesForTool(quote, [card({ card_id: 'book', applies_to: 'native.book' }), card({ card_id: 'reads', applies_to: 'effect:read' })]))).toEqual([]);
+  });
+
+  test('groups_of_people_overlap_and_one_person_is_no_group', () => {
+    // Anyone, verified people and record owners nest, so any two share someone.
+    for (const a of ['anyone', 'verified', 'record_owner'] as const) {
+      for (const b of ['anyone', 'verified', 'record_owner'] as const) expect({ a, b, overlap: groupsOverlap({ who: a }, { who: b }) }).toEqual({ a, b, overlap: true });
+    }
+    // A card for one person or one agent is no group.
+    expect(groupsOverlap({ who: 'person' }, { who: 'anyone' })).toBe(false);
+    expect(groupsOverlap({ who: 'verified' }, { who: 'agent' })).toBe(false);
   });
 });

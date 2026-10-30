@@ -5,6 +5,8 @@
 ## When to use
 
 - After the owner drafts a rule change (from an outcome menu, the composer or the Ask Claude panel), turns a connector on, or turns a changed tool back on (N-Conn-10-GCal-Confirm, N-Conn-11b-Payments-Review). The screen builds the rows from `ruleDiff` and the tools it turns on, and the checks from the proof report (Plan 04's `checkStatus`).
+- After the owner picks a preset from `PresetMenu` (N-Conn-18-Preset-Review), on its own page under `PageHeader` with the preset's name ("Ask me first", "Recommended rules"), the same page shape as N-Conn-10. The rows come from `reviewChanges` (below), so every review reads the same way. `RecommendedRules` shows rules the preset replaces, rules it leaves to the default ask because it covers only part of them, an added rule, and two it keeps, which don't show.
+- After the owner changes the payment limit (N-Conn-20-Ceiling-Review), under `LimitChange`, with `hasOtherChanges`.
 - Not for turning a connector off: that only narrows and applies at once, so it has a plain confirm (`ConnectionPanel`, Task 3).
 - Renamed from `RuleChangeDiff`.
 
@@ -18,6 +20,7 @@
   - Pass `appliesTo` on both sides whenever a rule's target can change, such as a rule widened from Payment link to every tool that charges money. If `changed` has `applies_to` and a side has no `appliesTo`, the title is tagged "Changed" instead, so the change is never unmarked.
   - An added or turned-on row shows its after side; a removed row the rule it removes.
 - No rows: "No rules change." and no confirm button. With `hasOtherChanges` (the draft changes something the screen shows above it, such as the money limit) it reads "Your rules stay the same." instead, and the controls stay.
+- With `cancelsLinks`, the fixed line "Open payment links I made on my own that the new rules don't allow will be cancelled." in secondary body text, between the checks and the buttons. Applying a preset or a lower payment limit cancels the open auto-allowed payment links the new rules no longer allow (master "Cancellation at activation"); a link still inside the new rules stays payable. The screen sets it for a preset switch or a lowered limit, never for a raise; the design system never decides it.
 - A card for the checks, headed by `checks.status`: "Checked before you confirm", "This change can't be applied" or "Rules can't be checked right now", with `checks.lines` as a list in secondary meta: the screen's words from the proof report.
 - The primary `confirmLabel` ("Confirm change" by default; "Confirm and turn on") is enabled only when the status is `checked`. One click calls `onConfirm` once and waits, busy, until `pending` has come and gone, an error is delivered, the promise `onConfirm` returned rejects, or `onConfirm` throws (`useSendOnce`, as every send-once button). An error is delivered each time one appears or another replaces it, so a confirm that fails with the same words as last time (the screen clears its error when a confirm starts) can be tried again; clearing an error releases nothing. While it waits, and while `pending`, it keeps its label under the busy spinner, at the same width, with `aria-busy`; the secondary button waits beside it without a spinner.
 - The secondary `cancelLabel` ("Keep my rules" by default; "Back") calls `onCancel`; it waits while a confirm is in flight.
@@ -36,6 +39,17 @@
 - `RuleDiffRow = { cardId; change: 'added' | 'removed' | 'changed'; before: RuleCard | null; after: RuleCard | null; fields: RuleField[] }`.
 - `RuleField = 'applies_to' | 'mode' | 'who' | 'limits' | 'hours' | 'review' | 'reason'`, in that order; `person_id` and `agent_key_id` count as `who`, `max_amount_cents` and `max_discount_bp` as `limits`. An absent optional field equals its contract default, so the same reason with a new limit is a `changed` row with `['limits']`.
 
+## Building the rows: `reviewChanges`
+
+`reviewChanges(before: RuleCard[], after: RuleCard[], effectsOf: (tool) => Effect[]): ReviewChange[]` (in `reviewChanges.ts`, also exported) pairs the owner's cards with the draft's, so a preset's review, a chat draft and a tool's draft build their rows the same way. It decides no outcome; the screen gives each side its words.
+
+- A card the draft keeps by its `card_id` is a `changed` row where `ruleDiff` finds it different.
+- A card the draft drops goes to the draft's card that covers its whole scope: of the cards that govern its target in the draft (`rulesForTool` for a tool, most specific first; the cards on the same effect for an effect card), the first whose people include the dropped card's (`containsScope`) and whose hours hold all of its hours. It is a `changed` row tagged where `ruleDiff` finds the two different, or no row when they differ only in their id.
+- With no such card, the dropped card falls to the default ask (`after: null`, the screen's default side), tagged `['mode']` only when its outcome changes. A rule the draft covers only in part, such as weekday bookings from 8:00 am to 6:00 pm under a 9-to-5 rule, falls to it too, so no row claims "Automatic" for times that will ask.
+- A draft card no dropped card goes to is an `added` row; one a dropped card goes to shows as that row's After instead.
+- Rows follow `before`'s order, then the added cards in `after`'s; `is_default` cards never show.
+- `ReviewChange = { change: 'changed' | 'added'; before: RuleCard | null; after: RuleCard | null; fields: RuleField[] }`.
+
 ## Props
 
 | Prop | Type | Notes |
@@ -47,5 +61,6 @@
 | `onConfirm` | `() => void \| Promise<unknown>` | Called once per click; a rejection lets the owner confirm again. |
 | `onCancel` | `() => void` | Required. |
 | `hasOtherChanges` | `boolean` | Keeps the controls with no rows. |
+| `cancelsLinks` | `boolean` | Shows the line about cancelled payment links above the buttons. |
 | `pending` | `boolean` | The confirm is in flight: its button keeps its label under the busy spinner. |
 | `error` | `string` | The screen's message; confirm works again. |

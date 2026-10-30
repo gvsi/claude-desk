@@ -55,6 +55,12 @@ export interface ChangeReviewProps {
   onCancel: () => void;
   /** The draft changes something the screen shows above it, such as the money limit, so it can be confirmed with no rows. */
   hasOtherChanges?: boolean;
+  /**
+   * The change can cancel open payment links Claude made on its own (a preset switch, a lowered
+   * money limit), so the fixed line says so above the buttons. The screen decides; a raised limit
+   * cancels none.
+   */
+  cancelsLinks?: boolean;
   /** The confirm is in flight: the confirm keeps its label under the busy spinner. */
   pending?: boolean;
   /** The screen's message when the confirm failed; confirm works again. */
@@ -67,6 +73,9 @@ const TAGS = {
   changed: 'Changed',
   turned_on: 'Turned on',
 } as const satisfies Record<ChangeRowView['change'], string>;
+
+/** What applying such a change does to open payment links, in Claude's first person. */
+const CANCELS_LINKS = "Open payment links I made on my own that the new rules don't allow will be cancelled.";
 
 const CHECK_HEADINGS = {
   checked: 'Checked before you confirm',
@@ -98,7 +107,11 @@ function Outcome({ side, strong = false }: { side: ChangeSide; strong?: boolean 
   );
 }
 
-/** The connector's name and badge, then what the rule applies to, then the side's words, joined by " · ". */
+/**
+ * The connector's name, then what the rule applies to, then the side's words, joined by " · ". A
+ * built-in connector is named alone; an external one keeps its Mock badge (`ConnectorName`), so a
+ * mock is never named without saying so.
+ */
 function MetaLine({
   connector,
   appliesTo,
@@ -238,6 +251,7 @@ export function ChangeReview({
   onConfirm,
   onCancel,
   hasOtherChanges = false,
+  cancelsLinks = false,
   pending = false,
   error,
 }: ChangeReviewProps) {
@@ -279,6 +293,7 @@ export function ChangeReview({
           </ul>
         ) : null}
       </Card>
+      {cancelsLinks ? <p className="cd-change-review__cancels cd-type-body">{CANCELS_LINKS}</p> : null}
       <div className="cd-change-review__controls">
         {canConfirm ? (
           <Button variant="primary" size="main" disabled={!checked} busy={checked && waiting} onClick={confirm}>

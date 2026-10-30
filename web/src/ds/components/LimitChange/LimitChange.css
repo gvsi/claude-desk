@@ -1,0 +1,26 @@
+/* LimitChange: the new limit in serif at the left and what it was in quiet meta at the right, on
+   one baseline. On a narrow line the old amount wraps under the new one. */
+
+.cd-limit-change {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  column-gap: var(--space-16);
+  row-gap: var(--space-4);
+  min-width: 0;
+}
+
+.cd-limit-change__now {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin: 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.cd-limit-change__was {
+  flex: none;
+  margin: 0;
+  color: var(--text-secondary);
+}

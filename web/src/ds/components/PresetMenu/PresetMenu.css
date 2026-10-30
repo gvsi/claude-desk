@@ -1,0 +1,93 @@
+/* PresetMenu: a secondary menu button at a screen's main height, and its menu: a popover 6 px
+   under it, 360 px wide, its right edge on the button's, on the raised surface with the card's
+   border and radius and the dialog shadow. Each item is a title over a quieter line, as the
+   approval answers' items are. On a phone the button fills its line, its words at the left and
+   the chevron at the right, and the menu opens under it at the same width. */
+
+.cd-preset-menu {
+  position: relative;
+  display: inline-flex;
+  align-items: flex-start;
+  align-self: flex-start;
+  max-width: 100%;
+}
+
+.cd-preset-menu__menu {
+  position: absolute;
+  top: calc(100% + var(--space-6));
+  right: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  box-sizing: border-box;
+  width: 360px;
+  max-width: calc(100vw - var(--space-32));
+  padding: var(--space-4);
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-card);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-dialog);
+}
+
+.cd-preset-menu__item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--size-nav-row);
+  margin: 0;
+  padding: var(--space-8) var(--space-10);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--motion-instant) var(--motion-ease);
+}
+
+.cd-preset-menu__item:hover,
+.cd-preset-menu__item:focus-visible {
+  background: var(--fill-hover);
+}
+
+/* The focus ring sits just inside the item, so it clears the menu's edge and the next item. */
+.cd-preset-menu__item:focus-visible {
+  outline-offset: -2px;
+}
+
+.cd-preset-menu__title {
+  color: var(--text-primary);
+}
+
+.cd-preset-menu__line {
+  color: var(--text-secondary);
+}
+
+@media (max-width: 639.98px) {
+  .cd-preset-menu {
+    display: flex;
+    width: 100%;
+  }
+
+  .cd-preset-menu > .cd-button {
+    flex: 1 1 auto;
+    justify-content: space-between;
+  }
+
+  .cd-preset-menu__menu {
+    left: 0;
+    width: auto;
+    max-width: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cd-preset-menu__item {
+    transition: none;
+  }
+}

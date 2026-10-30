@@ -36,6 +36,8 @@ interface ButtonBaseProps {
   waiting?: boolean;
   /** The element's `id`, for a menu or a description that points back at it. */
   id?: string;
+  /** The `id` of the words that tell this button apart from others named alike (`aria-describedby`). */
+  describedBy?: string;
   onClick?: (event: MouseEvent<HTMLButtonElement | HTMLAnchorElement>) => void;
   /** What happens, in words: "Allow this time", "Open payment page". */
   children: ReactNode;
@@ -77,6 +79,7 @@ export function Button({
   waiting = false,
   menuOpen,
   id,
+  describedBy,
   onClick,
   onKeyDown,
   children,
@@ -105,6 +108,7 @@ export function Button({
         target={external && !inert ? '_blank' : undefined}
         rel="noopener noreferrer"
         role={inert ? 'link' : undefined}
+        aria-describedby={describedBy}
         aria-disabled={inert || undefined}
         aria-busy={busy || undefined}
         onClick={handleClick}
@@ -125,6 +129,7 @@ export function Button({
       disabled={disabled}
       aria-haspopup={opensMenu ? 'menu' : undefined}
       aria-expanded={opensMenu ? menuOpen : undefined}
+      aria-describedby={describedBy}
       aria-disabled={busy || waiting || undefined}
       aria-busy={busy || undefined}
       onClick={handleClick}

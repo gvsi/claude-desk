@@ -83,6 +83,14 @@
   color: var(--text-secondary);
 }
 
+/* "Added just now" on a row with no account line (a built-in connector added back): a quiet line
+   of its own where the account would be, in secondary ink, with no status dot. */
+.cd-connector-directory__added {
+  display: block;
+  margin-top: var(--space-4);
+  color: var(--text-secondary);
+}
+
 .cd-connector-directory__meta {
   display: flex;
   flex: none;

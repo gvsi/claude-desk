@@ -182,6 +182,7 @@ export { TakeOverBar, type TakeOverBarProps } from './components/TakeOverBar/Tak
 
 // Rules and connectors
 export {
+  OUTCOME_GROUP_WORDS,
   OUTCOME_TONE,
   OUTCOME_WORDS,
   PRESET_WORDS,
@@ -190,7 +191,9 @@ export {
   type RulesPreset,
 } from './components/OutcomeMenu/outcomeWords.ts';
 export { OutcomeMenu, type OutcomeMenuProps } from './components/OutcomeMenu/OutcomeMenu.tsx';
-export { RuleRow, type RuleRowProps, type RuleWord } from './components/RuleRow/RuleRow.tsx';
+export { OutcomeGroups, type OutcomeGroupRow, type OutcomeGroupsProps } from './components/OutcomeGroups/OutcomeGroups.tsx';
+export { RuleRow, ruleWordsLine, type RuleRowProps, type RuleWord } from './components/RuleRow/RuleRow.tsx';
+export { PersonRules, type PersonRuleView, type PersonRulesProps } from './components/PersonRules/PersonRules.tsx';
 export { ToolRulesCard, type RulesLinkProps, type ToolRulesCardProps } from './components/ToolRulesCard/ToolRulesCard.tsx';
 export { rulesForTool, type RulesTool } from './components/ToolRulesCard/toolRules.ts';
 export { ConnectorIcon, type ConnectorIconName, type ConnectorIconProps } from './components/ConnectorIcon/ConnectorIcon.tsx';
@@ -215,7 +218,13 @@ export {
   type ChangeSide,
 } from './components/ChangeReview/ChangeReview.tsx';
 export { ruleDiff, type RuleDiffRow, type RuleField } from './components/ChangeReview/ruleDiff.ts';
+export { reviewChanges, type ReviewChange } from './components/ChangeReview/reviewChanges.ts';
 export { AskClaudePanel, type AskClaudePanelProps } from './components/AskClaudePanel/AskClaudePanel.tsx';
+
+// The preset menu and the payment limit
+export { MoneyLimit, type MoneyLimitProps } from './components/MoneyLimit/MoneyLimit.tsx';
+export { LimitChange, type LimitChangeProps } from './components/LimitChange/LimitChange.tsx';
+export { PresetMenu, type PresetMenuProps } from './components/PresetMenu/PresetMenu.tsx';
 
 // Connector and tool pages, adding a connector, and a changed tool
 export {

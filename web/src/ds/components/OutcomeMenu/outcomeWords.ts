@@ -30,13 +30,29 @@ export function outcomePhrase(mode: RuleMode, limit?: string): string {
 }
 
 /**
- * The rule presets the owner can start from: every tool asking first, or the recommended automatic
- * rules. Rules the owner changes are simply the Desk's rules, with no preset of their own. The
- * Rules page's "Start from a preset" menu offers them (built with the payment limit).
+ * The setup interview's rules grouped by outcome (`OutcomeGroups`), each group's heading in the
+ * setup board's words. Each sits beside its outcome's `OUTCOME_TONE` dot, so a group reads as the
+ * outcome its rules have everywhere else.
+ */
+export const OUTCOME_GROUP_WORDS = {
+  auto: 'Does on its own',
+  ask: 'Asks you',
+  never: 'Never does',
+} as const satisfies Record<RuleMode, string>;
+
+/**
+ * The rule presets the owner can start from: the master plan's (`desk.presets.PRESETS`). There is no
+ * "Custom" preset: rules the owner changes are simply the Desk's rules, with no preset of their own.
  */
 export type RulesPreset = 'ask_first' | 'auto';
 
-/** The presets' names and what each sets, in order, in the signed presets board's words. */
+/**
+ * The presets' names and what each sets, in order, in the signed presets board's words: the Rules
+ * page's "Start from a preset" menu (`PresetMenu`) offers each by its label and description. The
+ * descriptions describe the master plan's preset cards (`desk.presets.PRESETS`);
+ * `outcomeWords.test.ts` checks each claim against those cards, read from their generated export
+ * (`web/src/api/presets.gen.json`).
+ */
 export const PRESET_WORDS = [
   { value: 'ask_first', label: 'Ask me first', description: 'Quotes, bookings, documents and payments wait for your answer.' },
   {

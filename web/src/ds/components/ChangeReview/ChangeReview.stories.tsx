@@ -217,6 +217,8 @@ export const RaiseDiscount: Story = {
     await expect(within(before).queryByText('Changed')).toBeNull();
     // The reason and the outcome didn't change, so they aren't tagged.
     await expect(within(after).getAllByText('Changed')).toHaveLength(1);
+    // cancel_line_only_when_asked: without cancelsLinks there is no line.
+    await expectNoCancelLine(canvasElement);
     // The default words.
     await expect(canvas.getByRole('button', { name: 'Confirm change' })).toBeEnabled();
     await canvas.getByRole('button', { name: 'Keep my rules' }).click();
@@ -390,13 +392,15 @@ export const ConfirmingFromTheScreen: Story = {
 export const LimitOnly: Story = {
   args: { rows: [], hasOtherChanges: true, checks: { status: 'checked', lines: ['Always-on rules still hold.'] }, confirmLabel: undefined, cancelLabel: undefined },
   parameters: { canvas: 'N-Conn-12-Chat', canvasNote: 'A draft that changes only what the screen shows above it, such as the payment limit on the Rules page; no board on this branch draws it.' },
-  play: async ({ args, canvas }) => {
+  play: async ({ args, canvas, canvasElement }) => {
     // limit_only_change_keeps_confirm
     await expect(canvas.getByText('Your rules stay the same.')).toBeVisible();
     await expect(canvas.queryByText('No rules change.')).toBeNull();
     const confirm = canvas.getByRole('button', { name: 'Confirm change' });
     await expect(confirm).toBeEnabled();
     await expect(canvas.getByRole('button', { name: 'Keep my rules' })).toBeVisible();
+    // cancel_line_only_when_asked: a raised limit cancels no link, so the screen doesn't ask for the line.
+    await expectNoCancelLine(canvasElement);
     await confirm.click();
     await expect(args.onConfirm).toHaveBeenCalledTimes(1);
   },
@@ -489,6 +493,14 @@ export const ScopeChangedWithoutTargets: Story = {
 };
 
 const FAILED = "We couldn't confirm your change. Nothing changed, so you can try again.";
+
+/** The fixed line a change that can cancel open payment links shows above its buttons. */
+const CANCELS_LINKS = "Open payment links I made on my own that the new rules don't allow will be cancelled.";
+
+/** cancel_line_only_when_asked: no line about cancelled links unless the screen says the change can cancel them. */
+async function expectNoCancelLine(root: HTMLElement) {
+  await expect(root).not.toHaveTextContent('payment links I made on my own');
+}
 
 /**
  * A screen whose confirm fails every time with the same words: it clears its error when a confirm
@@ -592,6 +604,80 @@ export const NarrowMaxLimit: Story = {
   },
 };
 
+const ASK_FIRST_CHECKS = {
+  status: 'checked',
+  lines: ['Checked against the always-on rules and your other rules.', 'Open times, leads, callbacks and identity checks still run on their own.'],
+} as const satisfies ChangeReviewProps['checks'];
+
+/** A row's After side, found by its title among the rows. */
+function afterSide(rows: HTMLElement[], index: number): HTMLElement {
+  const row = rows[index];
+  if (row === undefined) throw new Error(`No row ${index}`);
+  return within(row).getByRole('group', { name: 'After' });
+}
+
+export const AskMeFirst: Story = {
+  args: { rows: rivera.askFirstReview, checks: ASK_FIRST_CHECKS, confirmLabel: undefined, cancelLabel: undefined, cancelsLinks: true },
+  parameters: {
+    canvas: 'N-Conn-18-Preset-Review',
+    canvasNote:
+      "Rivera's eight own rules and Dana Whitfield's personal booking rule, which the owner's \"Allow only for Dana Whitfield, always\" adds and the board doesn't draw; the board's shared rule for Alex Kim's assistant is the illustrative shared card, which isn't in Rivera's seed.",
+  },
+  play: async ({ canvas, canvasElement }) => {
+    // Each of the owner's rules goes, personal ones included, and its tool falls to the default ask.
+    const rows = within(canvas.getByRole('region', { name: 'Changes' })).getAllByRole('listitem');
+    await expect(rows.map((row) => row.querySelector('.cd-change-review__title')?.textContent)).toEqual([
+      'Quote',
+      'Book a visit',
+      'Book a visit',
+      'Book a visit',
+      'Share a document',
+      'Payment link',
+      'Charge within a signed limit',
+      'See charges',
+      'Refund',
+    ]);
+    await expect(tags(canvasElement)).toEqual(Array(9).fill('Changed'));
+    for (const row of rows) {
+      await expect(within(row).getByRole('group', { name: 'After' })).toHaveTextContent('Not covered by a rule you set, so I ask you.');
+    }
+    // preset_review_tags_only_new_outcomes: Quote's outcome turns from Automatic to Ask me first,
+    // so "Changed" sits beside it; Refund already asks, so its outcome has none.
+    const quote = afterSide(rows, 0);
+    const quoteOutcome = quote.querySelector<HTMLElement>('.cd-change-review__side-outcome');
+    if (quoteOutcome === null) throw new Error('No outcome on Quote');
+    await expect(quoteOutcome).toHaveTextContent('Ask me first');
+    await expect(within(quoteOutcome).getByText('Changed')).toBeVisible();
+    await expect(within(quote).getAllByText('Changed')).toHaveLength(1);
+    const refund = afterSide(rows, 8);
+    await expect(refund).toHaveTextContent('Ask me first');
+    await expect(within(refund).queryByText('Changed')).toBeNull();
+    // An auto rule with an amount limit reads its limit before it goes.
+    await expect(within(rows[5] as HTMLElement).getByRole('group', { name: 'Before' })).toHaveTextContent(
+      'Automatic up to $300; over $300, ask me first',
+    );
+    // A built-in connector is named alone; a mock one is never named without "Mock".
+    await expect(rows[0]?.querySelector('.cd-change-review__meta')).toHaveTextContent(/^Quotes$/);
+    await expect(canvasElement).not.toHaveTextContent('Built in');
+    await expect(rows[8]).toHaveTextContent('Stripe Mock');
+    // personal_rules_are_listed: a rule for one person goes too, and its row names her.
+    const personal = rows[3] as HTMLElement;
+    await expect(within(personal).getByRole('group', { name: 'Before' })).toHaveTextContent('Dana Whitfield');
+    await expect(within(personal).getByRole('group', { name: 'Before' })).toHaveTextContent('Automatic');
+    await expect(afterSide(rows, 3)).toHaveTextContent('Ask me first');
+    await expect(tags(personal)).toEqual(['Changed']);
+    // cancel_line_only_when_asked: a preset can cancel open payment links, so the screen asks for
+    // the fixed line. It sits above the buttons, under the checks, in secondary body text.
+    const line = canvas.getByText(CANCELS_LINKS);
+    expectComputed(line, { fontSize: '14px', lineHeight: '20px', color: 'rgba(250, 249, 245, 0.64)' });
+    const checks = canvas.getByRole('region', { name: 'Checked before you confirm' });
+    const confirm = canvas.getByRole('button', { name: 'Confirm change' });
+    await expect(line.getBoundingClientRect().top - checks.getBoundingClientRect().bottom).toBe(20);
+    await expect(confirm.getBoundingClientRect().top - line.getBoundingClientRect().bottom).toBe(20);
+    await expect(canvas.getAllByText(CANCELS_LINKS)).toHaveLength(1);
+  },
+};
+
 /** A rule for one person, which a preset replaces too: Dana's refunds up to $50 without asking. */
 const DANA_REASON = 'Dana Whitfield can get refunds up to $50 without asking.';
 const personalRule: ChangeRowView[] = [
@@ -634,3 +720,61 @@ export const PersonalRuleReplaced: Story = {
     await expect(tags(row?.parentElement as HTMLElement)).toEqual(['Removed']);
   },
 };
+
+/** The default ask a rule falls to when nothing in the draft governs its tool. */
+const DEFAULT_ASK = 'Not covered by a rule you set, so I ask you.';
+
+export const RecommendedRules: Story = {
+  args: { rows: rivera.recommendedReview, checks: ASK_FIRST_CHECKS, confirmLabel: undefined, cancelLabel: undefined, cancelsLinks: true },
+  parameters: {
+    canvas: 'N-Conn-18-Preset-Review',
+    canvasNote:
+      "The review of Recommended rules on Rivera's Desk, which no board draws; the nearest is the Ask me first review. A rule goes to the preset's rule that covers its whole scope, or to the default ask; a preset rule nothing goes to is added; a rule the preset keeps as it is doesn't show.",
+  },
+  play: async ({ canvas }) => {
+    const rows = within(canvas.getByRole('region', { name: 'Changes' })).getAllByRole('listitem');
+    const title = (item: HTMLElement) => item.querySelector('.cd-change-review__title')?.textContent;
+    const kind = (item: HTMLElement) => item.querySelector('.cd-change-review__tag')?.textContent;
+    const side = (item: HTMLElement, name: 'Before' | 'After') => within(item).queryByRole('group', { name });
+    const outcome = (item: HTMLElement) => side(item, 'After')?.querySelector('.cd-change-review__side-outcome');
+    // The rows, in Rivera's order, then what the preset adds.
+    await expect(rows.map((item) => [kind(item), title(item)])).toEqual([
+      ['Changed', 'Book a visit'],
+      ['Changed', 'Book a visit'],
+      ['Changed', 'Book a visit'],
+      ['Changed', 'Payment link'],
+      ['Changed', 'Charge within a signed limit'],
+      ['Changed', 'See charges'],
+      ['Changed', 'Refund'],
+      ['Added', 'Book a visit'],
+    ]);
+    // unchanged_rules_are_left_out: the preset quotes at list price and shares documents with
+    // verified customers, as Rivera's rules already do, so neither shows.
+    await expect(rows.map(title)).not.toContain('Quote');
+    await expect(rows.map(title)).not.toContain('Share a document');
+    // uncovered_scopes_ask: no card of the preset covers weekday bookings from 8 to 6, Saturday
+    // mornings, Dana's any-time rule or seeing charges, so each falls to the default ask, its new
+    // outcome tagged; none of them reads "Automatic" after.
+    const [weekday, saturday, dana, link, mandate, charges, refund, added] = rows as HTMLElement[];
+    for (const item of [weekday, saturday, dana, charges] as HTMLElement[]) {
+      await expect(side(item, 'After')).toHaveTextContent(DEFAULT_ASK);
+      await expect(outcome(item)).toHaveTextContent('Ask me firstChanged');
+      await expect(side(item, 'After')).not.toHaveTextContent('Automatic');
+    }
+    await expect(side(dana as HTMLElement, 'Before')).toHaveTextContent('Dana Whitfield');
+    // replaced_rules_show_the_preset_rule: payment links and signed-limit charges go to the
+    // preset's rule for every tool that charges money, and Refund to its rule for sending money out.
+    for (const item of [link, mandate] as HTMLElement[]) {
+      await expect(side(item, 'After')).toHaveTextContent('Every tool that charges money');
+      await expect(outcome(item)).toHaveTextContent('Ask me firstChanged');
+    }
+    await expect(side(refund as HTMLElement, 'After')).toHaveTextContent('Every tool that sends money out');
+    // Refund already asked, so its outcome isn't tagged.
+    await expect(outcome(refund as HTMLElement)).toHaveTextContent(/^Ask me first$/);
+    // preset_rules_nothing_goes_to_are_added: the weekday 9-to-5 rule, alone, with no Before.
+    await expect(side(added as HTMLElement, 'Before')).toBeNull();
+    await expect(side(added as HTMLElement, 'After')).toHaveTextContent('Weekdays, 9:00 am to 5:00 pm');
+    await expect(side(added as HTMLElement, 'After')).toHaveTextContent('Automatic');
+  },
+};
+
