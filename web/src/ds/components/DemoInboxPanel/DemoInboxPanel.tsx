@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { useId, type ReactNode } from 'react';
 
 import type { DemoInboxEntry, InboxNotice } from '../../../api/contracts.ts';
 import { Button } from '../Button/Button.tsx';
@@ -28,6 +28,10 @@ export interface DemoInboxPanelProps {
   language: CopyLanguage;
   /** Fetch an entry again after it failed to open. */
   onRetry: (entryId: string) => void;
+  /** A control at the right of the title's line, such as a sheet's Close. */
+  action?: ReactNode;
+  /** The title can take focus from a script (`tabIndex={-1}`), as a sheet that opens itself moves it there. */
+  titleFocusable?: boolean;
 }
 
 /** What an item shows: its entry, that it is opening, or that it failed to open. */
@@ -89,28 +93,46 @@ function latestFirst(items: readonly DemoInboxItem[]): DemoInboxItem[] {
 }
 
 /**
+ * The items `viewer` may see, newest first and one per entry, as the panel shows them: a visitor
+ * never gets the owner's alerts or checkpoints. The sheet counts these.
+ */
+export function shownItems(viewer: DemoInboxPanelProps['viewer'], items: readonly DemoInboxItem[]): DemoInboxItem[] {
+  return latestFirst(items).filter((item) => shownTo(viewer, item));
+}
+
+/**
  * Where the demo's codes and alerts arrive instead of a phone or email inbox: the newest first, in
  * a polite live region, each entry's body shown word for word once it is fetched. Nothing fetches
  * here; codes come only from the entries the screen passes in.
  */
-export function DemoInboxPanel({ viewer, items, language, onRetry }: DemoInboxPanelProps) {
+export function DemoInboxPanel({ viewer, items, language, onRetry, action, titleFocusable = false }: DemoInboxPanelProps) {
   const copy = INBOX_COPY[language];
   const titleId = `${useId()}-title`;
   // Newest first, one row per entry: the screen keeps them in the order they arrived.
-  const shown = latestFirst(items).filter((item) => shownTo(viewer, item));
+  const shown = shownItems(viewer, items);
+  const title = (
+    <h2 id={titleId} className="cd-demo-inbox__title cd-type-section" tabIndex={titleFocusable ? -1 : undefined}>
+      {copy.title}
+    </h2>
+  );
 
   return (
     <section className="cd-demo-inbox" aria-labelledby={titleId} lang={language}>
-      <h2 id={titleId} className="cd-demo-inbox__title cd-type-section">
-        {copy.title}
-      </h2>
-      <p className="cd-demo-inbox__subtitle cd-type-meta">{copy.subtitle}</p>
+      {action === undefined ? (
+        title
+      ) : (
+        <div className="cd-demo-inbox__head-row">
+          {title}
+          {action}
+        </div>
+      )}
+      <p className="cd-demo-inbox__subtitle cd-type-meta">{viewer === 'owner' ? copy.ownerSubtitle : copy.subtitle}</p>
       {/* Always present, so an entry that arrives later is read out. */}
       <div className="cd-demo-inbox__entries" aria-live="polite">
         {shown.length === 0 ? (
           <p className="cd-demo-inbox__empty cd-type-meta">{copy.empty}</p>
         ) : (
-          <ul className="cd-demo-inbox__list">
+          <ul role="list" className="cd-demo-inbox__list">
             {shown.map((item) => (
               <InboxItem
                 key={item.notice.entry_id}

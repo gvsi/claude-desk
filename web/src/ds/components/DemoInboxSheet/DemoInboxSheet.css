@@ -1,0 +1,60 @@
+/* DemoInboxSheet: the Demo inbox panel in a modal sheet on the raised surface, over the page dimmed
+   by the scrim. A visitor's sheet rises from the bottom, its top edge ruled and rounded; the
+   owner's is a 400 px column at the right, ruled at its left. It appears in place; nothing slides. */
+
+.cd-demo-inbox-sheet {
+  box-sizing: border-box;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  border: 0;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+.cd-demo-inbox-sheet::backdrop {
+  background: var(--scrim);
+}
+
+.cd-demo-inbox-sheet--bottom {
+  inset: auto 0 0;
+  width: 100%;
+  max-height: calc(100% - var(--space-40));
+  border-top: 1px solid var(--line-card);
+  border-radius: var(--radius-card) var(--radius-card) 0 0;
+}
+
+.cd-demo-inbox-sheet--side {
+  inset: 0 0 0 auto;
+  width: min(400px, 100%);
+  height: 100%;
+  border-left: 1px solid var(--line-card);
+}
+
+/* The panel takes the sheet's ground and its gutters: from the bottom, 16 px over Close and at the
+   sides and 24 px under the last entry; at the side, 24 px all round. */
+.cd-demo-inbox-sheet .cd-demo-inbox {
+  background: transparent;
+}
+
+.cd-demo-inbox-sheet--bottom .cd-demo-inbox {
+  padding: var(--space-16) var(--space-16) var(--space-24);
+}
+
+.cd-demo-inbox-sheet--side .cd-demo-inbox {
+  padding: var(--space-24);
+}
+
+/* The button's words and its count, the count 8 px after the words. */
+.cd-demo-inbox-sheet__button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.cd-demo-inbox-sheet__close {
+  display: flex;
+  flex: none;
+}

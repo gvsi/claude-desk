@@ -109,6 +109,10 @@ export const WithCode: Story = {
     expectComputed(subtitle, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
     await expect(subtitle.getBoundingClientRect().top - title.getBoundingClientRect().bottom).toBe(10);
 
+    // list_role_survives_unstyled_markers: the entries' list keeps role="list", which Safari drops
+    // from a list whose markers are removed.
+    await expect(panel.querySelector('ul')).toHaveAttribute('role', 'list');
+
     // One entry: who it went to, what kind it is, and the kernel's body word for word.
     const items = itemsOf(panel);
     await expect(items).toHaveLength(1);

@@ -349,6 +349,8 @@ export const WithAgentLinks: Story = {
   play: async ({ canvas }) => {
     const about = canvas.getByRole('complementary', { name: 'About Rivera Plumbing' });
     const heading = within(about).getByRole('heading', { level: 3, name: 'For AI agents' });
+    // list_role_survives_unstyled_markers: Safari announces the links' list only with role="list".
+    await expect(about.querySelector('.cd-public-shell__link-list')).toHaveAttribute('role', 'list');
     const links = within(about).getAllByRole('link');
     await expect(links.map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
       ['What agents can do here', `/d/${rivera.business.slug}/agents`],

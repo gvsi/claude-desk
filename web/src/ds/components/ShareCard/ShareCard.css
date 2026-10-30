@@ -1,0 +1,68 @@
+/* ShareCard: the printable card, 300 px wide in the card look, padded 20 px, everything centered:
+   the name, the QR code's 152 px square 12 px under it, the link and who answers, each 12 px apart.
+   Print card sits 12 px under it, at its left; on a phone the card spans the column and Print card
+   is centered. */
+
+.cd-share-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.cd-share-card__card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-12);
+  box-sizing: border-box;
+  width: 300px;
+  max-width: 100%;
+  margin: 0;
+  padding: var(--space-20);
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-card);
+  background: var(--fill-card);
+  color: var(--text-primary);
+  text-align: center;
+}
+
+.cd-share-card__card p,
+.cd-share-card__answered {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The square the screen's QR code fills. */
+.cd-share-card__qr {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 152px;
+  height: 152px;
+  overflow: hidden;
+}
+
+.cd-share-card__answered {
+  color: var(--text-secondary);
+}
+
+.cd-share-card__print {
+  margin-top: var(--space-12);
+}
+
+/* On a phone the card takes the whole column, and Print card sits centered under it. */
+@media (max-width: 767.98px) {
+  .cd-share-card {
+    align-items: stretch;
+  }
+
+  .cd-share-card__card {
+    width: 100%;
+  }
+
+  .cd-share-card__print {
+    align-self: center;
+  }
+}

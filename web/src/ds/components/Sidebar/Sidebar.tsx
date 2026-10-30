@@ -251,7 +251,7 @@ function DeskPicker({ business, desks, currentDeskId, onSwitchDesk }: DeskPicker
         <Icon name="chevrons" size={14} className="cd-sidebar__quiet-icon" />
       </button>
       {open ? (
-        <ul id={listId} className="cd-sidebar__desk-list" aria-label={`Desks in ${business}`}>
+        <ul id={listId} role="list" className="cd-sidebar__desk-list" aria-label={`Desks in ${business}`}>
           {desks.map((desk) => {
             const isCurrent = desk.id === currentDeskId;
             return (

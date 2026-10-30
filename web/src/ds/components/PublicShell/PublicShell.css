@@ -24,7 +24,13 @@
   min-height: 100%;
 }
 
-/* The brand header. */
+/* The brand header (PublicBrandHeader): its own inline-size container, so its gutters and its status
+   line follow its own width, inside the shell or on a page of its own. */
+.cd-public-brand {
+  container: cd-public-brand / inline-size;
+  flex: none;
+}
+
 .cd-public-shell__brand {
   display: flex;
   flex: none;
@@ -54,7 +60,7 @@
 }
 
 /* Two classes, so the weight wins over .cd-type-page-title whatever order the stylesheets load in. */
-.cd-public-shell .cd-public-shell__monogram {
+.cd-public-brand .cd-public-shell__monogram {
   font-weight: 600;
 }
 
@@ -265,12 +271,14 @@
 }
 
 /* Narrow, as each state of the handoff board is at 640 px, a phone, or the owner's side panel: 16 px gutters. */
-@container cd-public-shell (max-width: 719.98px) {
+@container cd-public-brand (max-width: 719.98px) {
   .cd-public-shell__brand {
     padding-right: var(--space-16);
     padding-left: var(--space-16);
   }
+}
 
+@container cd-public-shell (max-width: 719.98px) {
   .cd-public-shell__chat {
     padding-right: var(--space-16);
     padding-left: var(--space-16);
@@ -284,7 +292,7 @@
 
 /* A phone, or the owner's side panel: the open status takes its own line under the name, from the
    left gutter, however short. */
-@container cd-public-shell (max-width: 639.98px) {
+@container cd-public-brand (max-width: 639.98px) {
   .cd-public-shell__open-status {
     flex-basis: 100%;
   }

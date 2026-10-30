@@ -1,0 +1,85 @@
+/* CopyField: a value in mono a developer copies. Inline, the value sits on its line (inset 12 px,
+   no box) with the copy button at its right; block, the value is in a quiet box 6 px under its
+   label, with the button 10 px under it and a note beside the button. Narrow, an inline button
+   drops under the value. */
+
+.cd-copy-field {
+  container: cd-copy-field / inline-size;
+  min-width: 0;
+}
+
+.cd-copy-field p {
+  margin: 0;
+}
+
+.cd-copy-field__label,
+.cd-copy-field__note,
+.cd-copy-field__result {
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.cd-copy-field__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8) var(--space-16);
+  min-width: 0;
+}
+
+.cd-copy-field__value {
+  flex: 1 1 0;
+  box-sizing: border-box;
+  min-width: 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.cd-copy-field--inline .cd-copy-field__value {
+  padding-left: var(--space-12);
+}
+
+.cd-copy-field--inline .cd-copy-field__row > .cd-button {
+  flex: none;
+}
+
+.cd-copy-field--block .cd-copy-field__label + .cd-copy-field__row {
+  margin-top: var(--space-6);
+}
+
+.cd-copy-field--block .cd-copy-field__value {
+  padding: var(--space-12) var(--space-14);
+  border-radius: var(--radius-control);
+  background: var(--fill-secondary);
+}
+
+.cd-copy-field__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8) var(--space-12);
+  margin-top: var(--space-10);
+}
+
+.cd-copy-field__note {
+  flex: 1 1 16em;
+  min-width: 0;
+}
+
+/* The line after a press: in the page from the start, so it is read out when its words come, and
+   taking no room until then. */
+.cd-copy-field .cd-copy-field__result {
+  margin-top: var(--space-8);
+}
+
+.cd-copy-field .cd-copy-field__result:empty {
+  margin-top: 0;
+}
+
+/* Narrow, as on a phone: the address takes its own line and the button goes under it. */
+@container cd-copy-field (max-width: 479.98px) {
+  .cd-copy-field--inline .cd-copy-field__value {
+    flex-basis: 100%;
+  }
+}
