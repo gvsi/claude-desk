@@ -14,6 +14,25 @@
   padding-top: var(--space-16);
 }
 
+/* A page that fills the main area (Conversations) draws its own columns, their padding and the
+   concept footer, and grows to the window's height so its dividers run to the bottom; a notice
+   above it keeps the page's gutters. */
+.cd-owner-layout--fill {
+  gap: 0;
+  min-height: 100%;
+}
+
+.cd-owner-layout--fill > .cd-owner-layout__notice {
+  padding: var(--space-16) var(--space-20) 0;
+}
+
+@media (max-width: 767.98px) {
+  .cd-owner-layout--fill > .cd-owner-layout__notice {
+    padding-right: var(--space-16);
+    padding-left: var(--space-16);
+  }
+}
+
 /* The sidebar fills the column (or the phone's sheet), as it does without this wrapper. */
 .cd-owner-layout__sidebar {
   display: flex;

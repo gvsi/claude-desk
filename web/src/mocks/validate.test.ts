@@ -66,6 +66,13 @@ describe('mock payloads', () => {
       await vi.advanceTimersByTimeAsync(EVENT_GAP_MS * 6);
     }
 
+    // On the mock checkout the visitor pays one deposit link, whose payment_confirmed card joins the
+    // stream, and cancels another.
+    const [paid, dropped] = [...mockStore.world.links.keys()];
+    if (paid === undefined || dropped === undefined) throw new Error('the deposit samples issue two links');
+    checks.push(['PaymentLinkStateResult', await body('completePayment', { params: { token: paid } })]);
+    checks.push(['PaymentLinkStateResult', await body('cancelPayment', { params: { token: dropped } })]);
+
     // The visitor cancels one of their holds; its resolved receipt joins the stream.
     const held = (await body('needsYou', { params: { desk_id: RIVERA.deskId } })) as NeedsYouItem[];
     const own = held.find((item) => item.decision?.session_id === opened.state.session_id)?.decision;

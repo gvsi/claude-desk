@@ -5,10 +5,11 @@
  */
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { page } from 'vitest/browser';
+import { page, userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import type { EvMessage, OpenStatus, PublicDesk, SseEvent } from '../api/contracts.ts';
+import { typingPingMs } from '../app/poll.ts';
 import { rivera } from '../ds/fixtures/index.ts';
 import { CHAT_ENDED_COPY, NEW_CHAT_LABEL, RATE_LIMITED_COPY, UNREACHABLE_COPY } from '../ds/index.ts';
 import { worker } from '../mocks/browser.ts';
@@ -786,6 +787,140 @@ describe('public chat page', () => {
     await expect.element(second.screen.getByRole('article', { name: 'Callback set' })).toBeVisible();
   });
 
+  it('owner_typing_shows_their_name_and_dots', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('this browser has a chat');
+    const typing = () => screen.getByRole('status').filter({ hasText: 'Maria Rivera is typing' });
+    const dots = () => document.querySelectorAll('.cd-writing-indicator--person');
+    /** Maria typing, until `ms` from now on this browser's clock. */
+    const typingFor = (ms: number) =>
+      mockStore.emit(RIVERA.slug, { type: 'owner_typing', name: 'Maria Rivera', until: new Date(Date.now() + ms).toISOString() });
+
+    mockStore.world.takeOver(chat);
+    await expect.element(screen.getByRole('status').filter({ hasText: 'Maria Rivera joined the chat' })).toBeVisible();
+
+    // The page's timers and clock are fake from here: the dots go only when the test moves the
+    // clock, and an event is as fresh when it arrives as when it was sent, however long the stream
+    // and the page take. Checks poll in real time (`until`), which never moves the fake clock.
+    useTypingClock();
+
+    // An event whose time has passed shows nothing.
+    typingFor(-1_000);
+    await sleep(200);
+    expect(dots()).toHaveLength(0);
+
+    // While she types: her initials, her name and three dots where her words will start, said
+    // once to screen readers. No words, and nothing says Claude is writing.
+    typingFor(5_000);
+    await until(() => expect(typing().elements()).toHaveLength(1));
+    expect(dots()).toHaveLength(1);
+    const rows = document.querySelectorAll('.cd-transcript-row');
+    expect(rows[rows.length - 1]?.contains(dots()[0] ?? null)).toBe(true);
+    expect(dots()[0]?.textContent?.replace(/\s+/g, ' ').trim()).toBe('MRMaria Rivera is typing');
+    expect(screen.getByText('Claude is writing').elements()).toHaveLength(0);
+    // The screen checks run axe, which waits on timers of its own, so they run in real time. The
+    // dots stay up meanwhile: the fake timer that would take them down goes with the fake clock.
+    vi.useRealTimers();
+    await expectScreenBasics(screen.container, { owner: false });
+    useTypingClock();
+    expect(dots()).toHaveLength(1);
+
+    // Her message takes their place.
+    mockStore.world.say(chat, 'Hi, it is Maria. I can come at 4 today.');
+    await until(() => expect(screen.getByText('Hi, it is Maria. I can come at 4 today.', { exact: true }).element()).toBeVisible());
+    expect(dots()).toHaveLength(0);
+
+    // Typing again shows until its time, and goes then.
+    typingFor(400);
+    await until(() => expect(typing().elements()).toHaveLength(1));
+    await vi.advanceTimersByTimeAsync(399);
+    await settle();
+    expect(dots()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await until(() => expect(dots()).toHaveLength(0));
+
+    // A time far ahead, as a phone whose clock runs behind would read it, shows no longer than the
+    // API's five seconds.
+    typingFor(60_000);
+    await until(() => expect(typing().elements()).toHaveLength(1));
+    await vi.advanceTimersByTimeAsync(5_000 - MARGIN_MS);
+    await settle();
+    expect(dots()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(MARGIN_MS);
+    await until(() => expect(dots()).toHaveLength(0));
+
+    // After a reload, what the stream already carried shows nothing, though its time hasn't run out.
+    typingFor(5_000);
+    await until(() => expect(typing().elements()).toHaveLength(1));
+    const again = await renderRoute(PAGE);
+    await readyNow(again.screen);
+    await until(() => expect(again.screen.getByText('Hi, it is Maria. I can come at 4 today.', { exact: true }).element()).toBeVisible());
+    await sleep(300);
+    expect(dots()).toHaveLength(0);
+  });
+
+  it('owner_typing_ends_with_the_chat', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('this browser has a chat');
+    const dots = () => document.querySelectorAll('.cd-writing-indicator--person');
+    mockStore.world.takeOver(chat);
+    await expect.element(screen.getByRole('status').filter({ hasText: 'Maria Rivera joined the chat' })).toBeVisible();
+
+    // Maria types. The page's timers are fake from here, so her dots can't run out on their own.
+    useTimers();
+    mockStore.emit(RIVERA.slug, { type: 'owner_typing', name: 'Maria Rivera', until: new Date(Date.now() + 5_000).toISOString() });
+    await until(() => expect(dots()).toHaveLength(1));
+
+    // The chat ends (a send answers 401): the line says so, and her dots go with it.
+    mockStore.inject({ route: 'sendMessage', status: 401 });
+    await type(screen, 'Are you still there?');
+    await until(() => expect(screen.getByText(CHAT_ENDED_COPY.en, { exact: true }).query()).not.toBeNull());
+    expect(dots()).toHaveLength(0);
+  });
+
+  it('visitor_typing_pings_the_owner', async () => {
+    // Pings go at most every 2 s, scaled. The clock they are timed by moves only when the test
+    // moves it, so how long typing takes in the browser never changes how many go.
+    const { screen } = await renderRoute(PAGE, { pollScale: 100 });
+    await ready(screen);
+    const clock = freezeClock();
+    const box = screen.getByRole('textbox', { name: 'Message Rivera Plumbing' });
+    const pings = () => requests('visitorTyping').length;
+
+    // Typing tells the Desk someone is typing, never what: a ping with no body.
+    await userEvent.type(box, 'Is');
+    await expect.poll(pings).toBe(1);
+    expect(requests('visitorTyping').map((r) => r.body)).toEqual([undefined]);
+    // More keystrokes within the interval send no more.
+    await userEvent.type(box, ' Thu');
+    expect(pings()).toBe(1);
+    // After it, one more.
+    clock.pass(typingPingMs());
+    await userEvent.type(box, 'rsday');
+    await expect.poll(pings).toBe(2);
+    await sleep(200);
+    expect(pings()).toBe(2);
+    expect(mockStore.visitorSession(RIVERA.slug)?.typingUntil).toBeGreaterThan(Date.now());
+
+    // An emptied composer sends nothing.
+    clock.pass(typingPingMs());
+    await box.clear();
+    await sleep(200);
+    expect(pings()).toBe(2);
+
+    // A ping the server fails says nothing.
+    mockStore.inject({ route: 'visitorTyping', status: 500 });
+    await userEvent.type(box, 'Hello');
+    await expect.poll(pings).toBe(3);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(screen.getByRole('alert').elements()).toHaveLength(0);
+    await expectScreenBasics(screen.container, { owner: false });
+  });
+
   it('about_column_shows_the_charter_cards', async () => {
     const { screen } = await renderRoute(PAGE);
     const about = screen.getByRole('complementary', { name: 'About Rivera Plumbing' });
@@ -1195,6 +1330,30 @@ async function until(check: () => void, timeoutMs = 4_000): Promise<void> {
     }
     await sleep(20);
   }
+}
+
+/**
+ * Fake timers and a fake clock for the owner's typing: her dots go only when the test moves the
+ * clock (`vi.advanceTimersByTimeAsync`), and an event's time is read against the clock it was sent
+ * by. Checks poll with `until`, since `expect.poll` would move the fake clock as it polls.
+ */
+function useTypingClock(): void {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
+}
+
+/**
+ * A clock the typing pings are timed by that moves only when the test moves it (`pass`). Nothing
+ * else is faked: the page's timers and the test's waits keep real time.
+ */
+function freezeClock(): { pass: (ms: number) => void } {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
+  return { pass: (ms) => vi.advanceTimersByTime(ms) };
 }
 
 /**

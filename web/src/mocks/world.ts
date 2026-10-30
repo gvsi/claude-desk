@@ -16,13 +16,15 @@ import type {
   PaymentLinkView,
   PolicyVersion,
   RenderedBlock,
+  ReplyVerdict,
   RuleCard,
+  OwnerMessageResult,
   SessionState,
   SseEvent,
   StatusEvent,
 } from '../api/contracts.ts';
-import type { DeskSummary, Handoff, RulesDraft, TranscriptItem, TranscriptKind } from '../api/views.ts';
-import { placeholderHex, rivera } from '../ds/fixtures/index.ts';
+import type { CancelReason, DeskSummary, Handoff, RulesDraft, TranscriptItem, TranscriptKind } from '../api/views.ts';
+import { cardBlock, placeholderHex, rivera } from '../ds/fixtures/index.ts';
 import { BUSINESS, activePolicy, copyIds, type CopyIds, type MockSeed } from './seed.ts';
 import {
   DECISIONS,
@@ -30,6 +32,7 @@ import {
   VISITOR_PLAIN,
   allows,
   answersFor,
+  linkCancelledBlock,
   statusLine,
   turnEnd,
   turnLanguage,
@@ -55,6 +58,10 @@ export const LEDGER_KEY = { key_id: rivera.ledger.verified.key_id, public_key_he
 
 type Listener = (seq: number, ev: SseEvent) => void;
 
+/** How long a typing signal shows, and how often one counts (plan 02b Task 1). */
+export const TYPING_SHOWS_MS = 5_000;
+export const TYPING_EVERY_MS = 2_000;
+
 export interface SessionRecord {
   state: SessionState;
   deskId: string;
@@ -72,6 +79,12 @@ export interface SessionRecord {
   /** Every event the session's stream has carried, `seq` from 1 with no gaps. */
   events: { seq: number; ev: SseEvent }[];
   listeners: Set<Listener>;
+  /** Until when the visitor is typing, as the owner's view shows it; null when they haven't been. */
+  typingUntil: number | null;
+  /** When the visitor's last typing signal that counted came. */
+  visitorTypedAt: number | null;
+  /** When the owner's last typing event went to the visitor. */
+  ownerTypedAt: number | null;
 }
 
 export interface DeskRecord {
@@ -118,9 +131,14 @@ export interface InboxRecord {
 }
 
 export interface LinkRecord {
+  /** The kernel's `PaymentLinkView`, exactly as the contracts have it. */
   view: PaymentLinkView;
   deskId: string;
   sessionId: string;
+  /** `rules_changed` once a change to the business's rules cancelled the link, else null. */
+  cancelReason: CancelReason | null;
+  /** The kernel's name for a link issued to a verified person, "Dana W."; null otherwise. */
+  customerName: string | null;
 }
 
 /** What verified Dana writes when she asks for her drain clearing payment back. Untrusted, as any visitor's words. */
@@ -143,6 +161,8 @@ export class MockWorld {
   readonly leads: LeadRecord[] = [];
   readonly inbox: InboxRecord[] = [];
   readonly links = new Map<string, LinkRecord>();
+  /** Each session's open demo code, by session id: the code and who it confirms. Spent once it works. */
+  readonly challenges = new Map<string, { code: string; person: { personId: string; name: string } }>();
   private counter = 0;
   private itemN = 0;
   private fixedNow: number | null = null;
@@ -227,6 +247,9 @@ export class MockWorld {
       items: [],
       events: [],
       listeners: new Set(),
+      typingUntil: null,
+      visitorTypedAt: null,
+      ownerTypedAt: null,
     };
     this.sessions.set(sessionId, session);
     this.appendLedger(desk, {
@@ -263,22 +286,90 @@ export class MockWorld {
     session.items.push({ n: this.itemN, kind, created_at: isoTime(this.now()), text, event });
   }
 
+  /** The visitor's message: it takes the place of their typing, and their next keystroke counts at once. */
   visitorText(session: SessionRecord, text: string): void {
     this.addItem(session, 'visitor_text', text, null);
     session.lastVisitorText = text;
     session.language = turnLanguage(text);
     session.lastActivity = this.now();
+    session.typingUntil = null;
+    session.visitorTypedAt = null;
   }
 
-  whisper(session: SessionRecord, text: string): void {
+  /** The owner's whisper: only Claude sees it, so it joins the owner's view and the record, never the visitor's stream. */
+  whisper(session: SessionRecord, text: string): OwnerMessageResult {
+    const messageId = this.id('whisper');
     this.addItem(session, 'whisper', text, null);
-    this.appendLedger(this.deskOf(session), {
+    const entry = this.appendLedger(this.deskOf(session), {
       kind: 'whisper',
       origin: 'kernel',
       session_id: session.state.session_id,
-      ref_id: null,
+      ref_id: messageId,
       summary: { characters: text.length },
     });
+    return { message_id: messageId, verdict: null, ledger_seq: entry.seq };
+  }
+
+  /**
+   * The owner's own words in the chat she took over, as the kernel delivers a say: checked, then
+   * one `owner_said` card with her words verbatim, author `owner`, at the session's generation now.
+   */
+  say(session: SessionRecord, text: string): OwnerMessageResult {
+    const messageId = this.id('msg');
+    const { language } = session;
+    const checked = this.appendLedger(this.deskOf(session), {
+      kind: 'reply',
+      origin: 'kernel',
+      session_id: session.state.session_id,
+      ref_id: messageId,
+      summary: { author: 'owner', ok: true, language, violations: [] },
+    });
+    const blocks = [cardBlock('owner_said', { fact_id: `owner:${messageId}`, title: text })];
+    const signature = sign(messageId);
+    const visitorPlain = VISITOR_PLAIN[language].owner_said;
+    this.emit(session, {
+      type: 'message',
+      message_id: messageId,
+      generation: session.state.generation,
+      author: 'owner',
+      language,
+      handoff: false,
+      blocks,
+      visitor_plain: visitorPlain,
+      ledger_seq: checked.seq,
+      signature,
+    });
+    return {
+      message_id: messageId,
+      verdict: {
+        ok: true,
+        language,
+        blocks,
+        violations: [],
+        message_id: messageId,
+        generation: session.state.generation,
+        visitor_plain: visitorPlain,
+        ledger_seq: checked.seq,
+        signature,
+      },
+      ledger_seq: checked.seq,
+    };
+  }
+
+  /** The visitor is typing: the owner's view shows it for five seconds. A signal within 2 s of the last that counted changes nothing. */
+  visitorTyping(session: SessionRecord): void {
+    const now = this.now();
+    if (session.visitorTypedAt !== null && now - session.visitorTypedAt < TYPING_EVERY_MS) return;
+    session.visitorTypedAt = now;
+    session.typingUntil = now + TYPING_SHOWS_MS;
+  }
+
+  /** The owner is typing in the chat she took over: the visitor's stream is told, at most once every 2 s. */
+  ownerTyping(session: SessionRecord): void {
+    const now = this.now();
+    if (session.ownerTypedAt !== null && now - session.ownerTypedAt < TYPING_EVERY_MS) return;
+    session.ownerTypedAt = now;
+    this.emit(session, { type: 'owner_typing', name: BUSINESS.owner_display_name, until: isoTime(now + TYPING_SHOWS_MS) });
   }
 
   /** Adds `ev` to the session's stream with the next seq, keeps what the transcript keeps, and tells listeners. */
@@ -385,6 +476,18 @@ export class MockWorld {
       ref_id: null,
       summary: { ok: true, assurance: 'demo_code' },
     });
+  }
+
+  /**
+   * Checks a demo code as the kernel's `/verify/check` does: the session's open code confirms its
+   * person, once. A wrong code, or one already used, verifies nothing.
+   */
+  checkCode(session: SessionRecord, code: string): boolean {
+    const challenge = this.challenges.get(session.state.session_id);
+    if (!challenge || challenge.code !== code) return false;
+    this.challenges.delete(session.state.session_id);
+    this.verify(session, challenge.person);
+    return true;
   }
 
   /**
@@ -530,14 +633,13 @@ export class MockWorld {
       decide: (spec) => this.decide(session, spec, language),
       status: (type, decision) => statusEvent(type, decision),
       reply: (blocks, opts) => this.reply(session, blocks, language, opts),
-      inbox: (fields) => this.addVisitorInbox(session, fields),
+      startVerification: (fields) => {
+        this.challenges.set(session.state.session_id, { code: fields.code, person: { personId: fields.person.personId, name: fields.person.name } });
+        return this.addVisitorInbox(session, { to: fields.person.maskedContact, body: fields.body, preview: fields.preview });
+      },
       openHandoff: (fields) => this.openHandoff(session, fields),
       issueLink: (fields) => {
-        this.links.set(this.linkToken(), {
-          view: { title: fields.title, amount_cents: fields.amountCents, state: 'issued', language },
-          deskId: session.deskId,
-          sessionId: session.state.session_id,
-        });
+        this.issueLink(session, { ...fields, language });
       },
       latestLink: () => {
         const mine = [...this.links].filter(([, link]) => link.sessionId === session.state.session_id);
@@ -545,6 +647,103 @@ export class MockWorld {
         if (!newest) throw new Error(`session ${session.state.session_id} has no payment link`);
         return newest[0];
       },
+    };
+  }
+
+  /**
+   * A payment link for `session`, `issued`, with a token of its own, which it returns. A link
+   * issued to a verified person carries their first name and last initial, as the kernel's does.
+   */
+  issueLink(session: SessionRecord, fields: { title: string; amountCents: number; language: Language }): string {
+    const token = this.linkToken();
+    this.links.set(token, {
+      view: { title: fields.title, amount_cents: fields.amountCents, state: 'issued', language: fields.language },
+      deskId: session.deskId,
+      sessionId: session.state.session_id,
+      cancelReason: null,
+      customerName: session.person ? shortName(session.person.name) : null,
+    });
+    return token;
+  }
+
+  /**
+   * The visitor paid on the mock checkout, as the kernel completes a link: it is paid, the record
+   * says so, and the link's chat gets the kernel's `payment_confirmed` card, author `desk`. Only an
+   * `issued` link can be paid (the route refuses the rest).
+   */
+  payLink(token: string, link: LinkRecord): ReplyVerdict {
+    const session = this.sessions.get(link.sessionId);
+    if (!session) throw new Error(`payment link ${token} has no session`);
+    link.view = { ...link.view, state: 'paid' };
+    this.appendLedger(this.deskOf(session), {
+      kind: 'payment',
+      origin: 'kernel',
+      session_id: session.state.session_id,
+      ref_id: token,
+      summary: { state: 'paid', amount_cents: link.view.amount_cents },
+    });
+    return this.fromTheDesk(session, [rivera.blocks.payment_confirmed[session.language]]);
+  }
+
+  /**
+   * The link is cancelled: by the visitor on the checkout, which the chat isn't told of, or by a
+   * change to the business's rules, as the kernel cancels an open link the new rules no longer
+   * allow when the owner confirms them. That one says why on the checkout (`cancel_reason`), and
+   * its chat gets the kernel's `link_cancelled` line, author `desk`.
+   */
+  cancelLink(token: string, link: LinkRecord, by: 'visitor' | 'rules_changed'): void {
+    const session = this.sessions.get(link.sessionId);
+    if (!session) throw new Error(`payment link ${token} has no session`);
+    link.view = { ...link.view, state: 'cancelled' };
+    link.cancelReason = by === 'rules_changed' ? 'rules_changed' : null;
+    this.appendLedger(this.deskOf(session), {
+      kind: 'payment',
+      origin: 'kernel',
+      session_id: session.state.session_id,
+      ref_id: token,
+      summary: { state: 'cancelled', by },
+    });
+    if (by === 'rules_changed') this.fromTheDesk(session, [linkCancelledBlock(session.language)]);
+  }
+
+  /**
+   * A message from the Desk itself (author `desk`), as the kernel issues one: checked and recorded,
+   * then sent to the chat at its generation now, in its last language. Returns its verdict.
+   */
+  private fromTheDesk(session: SessionRecord, blocks: RenderedBlock[]): ReplyVerdict {
+    const messageId = this.id('msg');
+    const { language } = session;
+    const checked = this.appendLedger(this.deskOf(session), {
+      kind: 'reply',
+      origin: 'kernel',
+      session_id: session.state.session_id,
+      ref_id: messageId,
+      summary: { author: 'desk', ok: true, language, violations: [] },
+    });
+    const signature = sign(messageId);
+    const visitorPlain = VISITOR_PLAIN[language].reply_checked;
+    this.emit(session, {
+      type: 'message',
+      message_id: messageId,
+      generation: session.state.generation,
+      author: 'desk',
+      language,
+      handoff: false,
+      blocks,
+      visitor_plain: visitorPlain,
+      ledger_seq: checked.seq,
+      signature,
+    });
+    return {
+      ok: true,
+      language,
+      blocks,
+      violations: [],
+      message_id: messageId,
+      generation: session.state.generation,
+      visitor_plain: visitorPlain,
+      ledger_seq: checked.seq,
+      signature,
     };
   }
 
@@ -620,6 +819,48 @@ export class MockWorld {
     return session.state;
   }
 
+  /** The owner hands the chat back to Claude, at the next generation, and the visitor is told. */
+  handBack(session: SessionRecord): SessionState {
+    session.state = { ...session.state, mode: 'ai', generation: session.state.generation + 1 };
+    this.appendLedger(this.deskOf(session), {
+      kind: 'takeover',
+      origin: 'kernel',
+      session_id: session.state.session_id,
+      ref_id: null,
+      summary: { mode: 'ai', generation: session.state.generation },
+    });
+    this.emit(session, { type: 'owner_left' });
+    return session.state;
+  }
+
+  /**
+   * The breaker pauses the chat after repeated blocked attempts, as the kernel records it: nobody
+   * answers until the owner resumes Claude or takes over. Tests add it; no seed has it.
+   */
+  pause(session: SessionRecord): void {
+    session.state = { ...session.state, mode: 'paused' };
+    this.appendLedger(this.deskOf(session), {
+      kind: 'breaker',
+      origin: 'kernel',
+      session_id: session.state.session_id,
+      ref_id: null,
+      summary: { paused: true },
+    });
+  }
+
+  /** The owner resumes Claude in a paused chat, at the next generation. */
+  resume(session: SessionRecord): SessionState {
+    session.state = { ...session.state, mode: 'ai', generation: session.state.generation + 1 };
+    this.appendLedger(this.deskOf(session), {
+      kind: 'breaker',
+      origin: 'kernel',
+      session_id: session.state.session_id,
+      ref_id: null,
+      summary: { resumed: true, generation: session.state.generation },
+    });
+    return session.state;
+  }
+
   /**
    * A draft of the Desk's rules with `add` merged in by `card_id`, as the kernel drafts an
    * approval's card diff: the next version, checked, and stored until the owner confirms it.
@@ -679,6 +920,15 @@ export class MockWorld {
       t += gap;
     }
   }
+}
+
+/** A person's first name and last initial, as the kernel names them on a payment link: "Dana W.". */
+function shortName(name: string): string {
+  const words = name.trim().split(/\s+/).filter((word) => word !== '');
+  const first = words[0] ?? '';
+  const last = words.length > 1 ? words.at(-1) : undefined;
+  const initial = last === undefined ? '' : (Array.from(last)[0] ?? '');
+  return initial === '' ? first : `${first} ${initial}.`;
 }
 
 function statusEvent(type: StatusEvent['type'], decision: Decision): StatusEvent {

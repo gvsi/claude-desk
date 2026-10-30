@@ -2,7 +2,8 @@
  * How owner screens write times, amounts and the few lines built from them. Every time is read in
  * the business's time zone (its IANA name, `BusinessOut.timezone`), never the browser's: Maria's
  * morning is Los Angeles' morning wherever the reviewer sits. Visitor surfaces never use this file;
- * they show the kernel's text.
+ * they show the kernel's text. The one exception is the mock checkout's amount, which the page
+ * writes from the link's `amount_cents` with `formatMoneyExact`.
  */
 import type { ConversationSummary } from '../api/views.ts';
 
@@ -66,6 +67,14 @@ export function formatCents(cents: number): string {
   }).format(cents / 100);
 }
 
+/**
+ * An amount in cents as the mock checkout shows it, always with its cents: "$20.00", "$1,860.00".
+ * Only the checkout uses it; cards and owner screens keep `formatCents`.
+ */
+export function formatMoneyExact(cents: number): string {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(cents / 100);
+}
+
 /** "10:46 am" from a local hour and minute. */
 function clock({ hour, minute }: Pick<LocalTime, 'hour' | 'minute'>): string {
   const h = hour % 12 === 0 ? 12 : hour % 12;
@@ -96,6 +105,46 @@ export function formatWhen(iso: string, timeZone: string, now: Date): string {
   const sameDay = at.year === today.year && at.month === today.month && at.day === today.day;
   const day = sameDay ? 'Today' : `${MONTHS[at.month - 1] ?? ''} ${at.day}`;
   return `${day}, ${clock(at)}`;
+}
+
+/** Whole days from `at`'s local date to `now`'s, on the business's clock: 0 today, 1 yesterday. */
+function daysBefore(at: Date, now: Date, timeZone: string): number {
+  const day = (t: LocalTime) => Date.UTC(t.year, t.month - 1, t.day);
+  return Math.round((day(localTime(now, timeZone)) - day(localTime(at, timeZone))) / (24 * 60 * MINUTE_MS));
+}
+
+/** Where a conversation sits in the owner's list, by its local day. */
+export type ConversationDay = 'Today' | 'Yesterday' | 'Earlier this week' | 'Earlier';
+
+/**
+ * The list group for `iso` on the business's clock: "Today", "Yesterday", "Earlier this week" for
+ * the rest of the last 7 days (today included, as "Last 7 days" counts them), else "Earlier".
+ */
+export function conversationDay(iso: string, timeZone: string, now: Date): ConversationDay {
+  const at = readDate(iso);
+  if (at === null) return 'Earlier';
+  const days = daysBefore(at, now, timeZone);
+  if (days <= 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  return days <= 6 ? 'Earlier this week' : 'Earlier';
+}
+
+/** A list row's time: the clock for today and yesterday, "10:46 am"; the date before that, "Oct 27". */
+export function formatListTime(iso: string, timeZone: string, now: Date): string {
+  const at = readDate(iso);
+  if (at === null) return '';
+  const local = localTime(at, timeZone);
+  return daysBefore(at, now, timeZone) <= 1 ? clock(local) : `${MONTHS[local.month - 1] ?? ''} ${local.day}`;
+}
+
+/** When a conversation started: "Today at 12:04 pm", "Yesterday at 10:10 pm", "Oct 27 at 9:52 am". */
+export function formatStarted(iso: string, timeZone: string, now: Date): string {
+  const at = readDate(iso);
+  if (at === null) return '';
+  const local = localTime(at, timeZone);
+  const days = daysBefore(at, now, timeZone);
+  const day = days <= 0 ? 'Today' : days === 1 ? 'Yesterday' : `${MONTHS[local.month - 1] ?? ''} ${local.day}`;
+  return `${day} at ${clock(local)}`;
 }
 
 /**

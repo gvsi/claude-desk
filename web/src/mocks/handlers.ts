@@ -106,7 +106,7 @@ type EventMap = Record<SseEvent['type'], SseEvent>;
 
 /** One event as the API frames it: named by its type (an `EvError` as `error`), its seq as the id. */
 function frame(seq: number, ev: SseEvent): ServerSentEventMessage<EventMap> {
-  // MSW types the name and data per event map key; every key here maps to `SseEvent`.
+  // MSW types the name and data per event map key; every key here maps to an `SseEvent`.
   return { id: String(seq), event: ev.type, data: ev } as ServerSentEventMessage<EventMap>;
 }
 

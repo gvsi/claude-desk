@@ -92,3 +92,14 @@ export function tokenColor(token: string): string {
   probe.remove();
   return color;
 }
+
+/**
+ * Whether keyboard focus is on `el`: on it or inside it, or on the element that holds it and
+ * nothing else, such as a held request's focusable wrapper. Never the page itself, which holds
+ * everything.
+ */
+export function focusIsOn(el: Element): boolean {
+  const active = document.activeElement;
+  if (active === null || active === document.body || active === document.documentElement) return false;
+  return el.contains(active) || (active.contains(el) && active.textContent === el.textContent);
+}

@@ -1,0 +1,10 @@
+/* VerifyInline: the code form under the verify card's receipts, 4 px more than the margin's gap
+   above it, as the board sets the form apart from the receipts; a line that the code couldn't be
+   checked follows it, 10 px apart, as the form spaces its own lines. */
+
+.cd-verify-inline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+  padding-top: var(--space-4);
+}

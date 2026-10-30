@@ -8,7 +8,7 @@ import type { EvMessage, EvOwnerJoined, EvOwnerTyping, SseEvent, StatusEvent } f
 import type { TranscriptItem, VisitorTranscript } from '../api/views.ts';
 import { receiptFromEvent } from '../ds/index.ts';
 import { rivera } from '../ds/fixtures/index.ts';
-import { chatReducer, initialChatState, type ChatAction, type ChatState } from './chatReducer.ts';
+import { chatReducer, initialChatState, ownerTypingDelayMs, type ChatAction, type ChatState } from './chatReducer.ts';
 
 /** The fixtures' quote turn: the action's receipt, writing, the checked reply, the turn's end. */
 const [quoteReceipt, , quoteMessage] = rivera.events.quoteTurn as [StatusEvent, SseEvent, EvMessage, SseEvent];
@@ -66,6 +66,34 @@ describe('chatReducer', () => {
       item: { kind: 'visitor', id: 'v2', text: 'How much is drain clearing?', status: 'sent' },
       receipts: [receiptFromEvent(quoteReceipt)],
     });
+  });
+
+  it('a_turn_the_desk_starts_groups_under_its_reply', () => {
+    // The visitor asked and Claude answered; the turn ended.
+    const answered = run([{ type: 'sent', id: 'v1', text: 'Can you send my invoice?' }, ...events([quoteMessage, { type: 'turn_end' }])]);
+    // Then the API wakes Claude with no visitor message (the visitor confirmed it's them): Claude
+    // writes, its action's receipt arrives, then its reply. The receipt explains that reply.
+    const later: EvMessage = { ...quoteMessage, message_id: 'msg-after-verify' };
+    const woke = run(events([{ type: 'writing' }, quoteReceipt, later, { type: 'turn_end' }], 3), answered);
+    expect(woke.rows.map((row) => row.receipts)).toEqual([[], [receiptFromEvent(quoteMessage)], [receiptFromEvent(later), receiptFromEvent(quoteReceipt)]]);
+
+    // A woken turn that ends with no reply keeps its receipt, under the last row.
+    const silent = run(events([{ type: 'writing' }, quoteReceipt, { type: 'turn_end' }], 3), answered);
+    expect(silent.rows.at(-1)?.receipts).toEqual([receiptFromEvent(quoteMessage), receiptFromEvent(quoteReceipt)]);
+
+    // Read back after a reload, where no writing event is stored, the receipt is still the reply's.
+    const reloaded = run([
+      {
+        type: 'history',
+        transcript: transcript(6, [
+          { ...item(1, 'visitor_text'), text: 'Can you send my invoice?' },
+          { ...item(2, 'delivered'), event: quoteMessage },
+          { ...item(3, 'status'), event: quoteReceipt },
+          { ...item(4, 'delivered'), event: later },
+        ]),
+      },
+    ]);
+    expect(reloaded.rows.map((row) => row.receipts)).toEqual(woke.rows.map((row) => row.receipts));
   });
 
   it('status_before_any_row_is_kept', () => {
@@ -237,6 +265,48 @@ describe('chatReducer', () => {
     const reloaded = run([{ type: 'history', transcript: transcript(10, stored) }]);
     expect(receiptsOf(reloaded)).toEqual(receiptsOf(elsewhere));
     expect(reloaded.openHolds).toEqual([]);
+  });
+
+  it('owner_typing_until_the_owner_writes', () => {
+    const typing: EvOwnerTyping = { type: 'owner_typing', name: 'Maria Rivera', until: '2026-10-29T15:04:30Z' };
+    const joined = run(events([{ type: 'owner_joined', name: 'Maria Rivera' }, typing]));
+    // Her name and how long, kept as the event said it, never her words, and no row; nothing says
+    // Claude is writing.
+    expect(joined.ownerTyping).toEqual({ name: 'Maria Rivera', until: '2026-10-29T15:04:30Z' });
+    expect(joined.writing).toBe(false);
+    expect(joined.rows).toHaveLength(1);
+    expect(joined.lastSeq).toBe(2);
+
+    // Her message takes its place, in one step.
+    const said: EvMessage = { ...quoteMessage, message_id: 'msg-owner', author: 'owner' };
+    const answered = run(events([said], 3), joined);
+    expect(answered.ownerTyping).toBeNull();
+    expect(answered.rows.at(-1)?.item).toEqual({ kind: 'message', seq: 3, ev: said });
+    // Claude's doesn't: she may still be typing beside it.
+    expect(run(events([quoteMessage], 3), joined).ownerTyping).toEqual({ name: 'Maria Rivera', until: '2026-10-29T15:04:30Z' });
+    // Handing the chat back ends it, and so does an error, its time running out, the chat ending
+    // (a 401) and a new chat.
+    expect(run(events([{ type: 'owner_left' }], 3), joined).ownerTyping).toBeNull();
+    expect(run(events([{ type: 'error', code: 'kernel_unavailable' }], 3), joined).ownerTyping).toBeNull();
+    expect(run([{ type: 'owner_typing_over' }], joined).ownerTyping).toBeNull();
+    expect(run([{ type: 'ended' }], joined).ownerTyping).toBeNull();
+    expect(run([{ type: 'reset' }], joined).ownerTyping).toBeNull();
+    // A replayed event the chat has seen changes nothing.
+    expect(run(events([typing], 2), answered).ownerTyping).toBeNull();
+    // A stale one shows nothing, and the stream goes on after it.
+    const stale = run([{ type: 'stale', seq: 3 }], run(events([{ type: 'owner_joined', name: 'Maria Rivera' }])));
+    expect(stale.ownerTyping).toBeNull();
+    expect(stale.lastSeq).toBe(3);
+
+    // How long the dots show: until the event's time, never more than the API's 5 s, and nothing
+    // for a time already past or one that can't be read.
+    const now = Date.parse('2026-10-29T15:04:00Z');
+    const until = (ms: number) => ({ ...typing, until: new Date(now + ms).toISOString() });
+    expect(ownerTypingDelayMs(until(3_000), now)).toBe(3_000);
+    expect(ownerTypingDelayMs(until(9_000), now)).toBe(5_000);
+    expect(ownerTypingDelayMs(until(-1_000), now)).toBe(0);
+    expect(ownerTypingDelayMs(until(0), now)).toBe(0);
+    expect(ownerTypingDelayMs({ ...typing, until: 'soon' }, now)).toBe(0);
   });
 });
 

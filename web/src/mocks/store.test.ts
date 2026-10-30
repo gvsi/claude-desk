@@ -18,7 +18,7 @@ import type {
 } from '../api/views.ts';
 import { rivera } from '../ds/fixtures/index.ts';
 import { executedLine } from '../ds/fixtures/receipts.ts';
-import { DECISIONS, EVENT_GAP_MS, HELD_PROSE, VISITOR_PLAIN, matchRule, turnLanguage, type RuleName } from './script.ts';
+import { DECISIONS, DEMO_CODE, EVENT_GAP_MS, HELD_PROSE, VISITOR_PLAIN, matchRule, turnLanguage, type RuleName } from './script.ts';
 import { RIVERA } from './seed.ts';
 import { mockStore, streamAfter, type MockAnswer, type MockRequestInit } from './store.ts';
 
@@ -132,6 +132,28 @@ describe('the scripted Desk', () => {
     expect(replies.map((e) => e.event.summary)).toEqual([
       { author: 'claude', ok: true, language: 'en', violations: [] },
       { author: 'claude', ok: true, language: 'es', violations: [] },
+    ]);
+  });
+
+  it('invoice_asks_to_confirm_first', async () => {
+    // As the signed verify board has it: Claude's checked line, with no digits, then the kernel's
+    // verify card, in the turn's language. The code reaches the Demo inbox in the kernel's own
+    // words (its `inbox_code_body`), in that language too, with the expiry and what to do if the
+    // visitor didn't ask.
+    const { session, events } = await openChat();
+    await send('Can you send my invoice?');
+    await drain();
+    await send('Necesito mi factura');
+    await drain();
+    const replies = events.flatMap(([, ev]) => (ev.type === 'message' ? [[ev.language, ev.blocks.map((b) => [b.kind, b.template, b.text])]] : []));
+    expect(replies).toEqual([
+      ['en', [['prose', null, "I can send that after you confirm it's you."], ['card', 'verify_prompt', rivera.blocks.verify_prompt.en.text]]],
+      ['es', [['prose', null, 'Puedo enviarlo cuando confirmes que eres tú.'], ['card', 'verify_prompt', rivera.blocks.verify_prompt.es.text]]],
+    ]);
+    const codes = mockStore.world.inbox.filter((record) => record.sessionId === session.session_id).map((record) => record.entry.body);
+    expect(codes).toEqual([
+      `Your Rivera Plumbing code is ${DEMO_CODE}. It expires in ten minutes. If you didn't ask for it, ignore this message.`,
+      `Tu código de Rivera Plumbing es ${DEMO_CODE}. Vence en diez minutos. Si no lo pediste, ignora este mensaje.`,
     ]);
   });
 
@@ -611,6 +633,141 @@ describe('taking over', () => {
     expect(typesOf(events).slice(4)).toEqual(['owner_joined', 'resolved', 'turn_end']);
     expect(events[5]?.[1]).toMatchObject({ type: 'resolved', decision_id: decisionId, state: 'executed' });
     expect(kindsFor(session.session_id).filter((kind) => kind === 'reply')).toHaveLength(1);
+  });
+});
+
+describe('the owner in the chat', () => {
+  const owner = async (sessionId: string) => (await call('conversation', { params: { session_id: sessionId } })).body as OwnerTranscript;
+  const ownerKinds = async (sessionId: string) => (await owner(sessionId)).items.map((item) => item.kind);
+  const kindsFor = (sessionId: string) =>
+    (mockStore.world.desks[0]?.ledger ?? []).filter((e) => e.event.session_id === sessionId).map((e) => e.event.kind);
+
+  it('say_reaches_the_visitor_in_the_owners_words', async () => {
+    const { session, events } = await openChat();
+    const sessionId = session.session_id;
+
+    // Not before she has taken the chat over.
+    expect(await call('ownerMessage', { params: { session_id: sessionId }, body: { text: 'Hi, it is Maria.', kind: 'say' } })).toEqual({
+      status: 409,
+      body: { error: 'take_over_first' },
+    });
+    expect((await call('takeover', { params: { session_id: sessionId }, body: { generation: session.generation } })).status).toBe(200);
+    const said = await call('ownerMessage', { params: { session_id: sessionId }, body: { text: 'Hi, it is Maria.', kind: 'say' } });
+    expect(said.status).toBe(200);
+    expect(said.body).toMatchObject({ verdict: { ok: true, violations: [] } });
+
+    // The visitor's stream gets her joining, then her words, verbatim, as one owner_said card.
+    expect(typesOf(events)).toEqual(['owner_joined', 'message']);
+    const [, message] = events[1] ?? [];
+    expect(message).toMatchObject({ type: 'message', author: 'owner', generation: session.generation + 1, visitor_plain: VISITOR_PLAIN.en.owner_said });
+    expect(message?.type === 'message' && message.blocks.map((b) => [b.template, b.text])).toEqual([['owner_said', 'Hi, it is Maria.']]);
+    expect(VISITOR_PLAIN.en.owner_said).toBe(rivera.events.takeOver.find((ev): ev is EvMessage => ev.type === 'message')?.visitor_plain);
+
+    // Stored as a delivered item, author owner, in both transcripts.
+    const item = (await owner(sessionId)).items.at(-1);
+    expect(item).toMatchObject({ kind: 'delivered', text: null, event: { author: 'owner' } });
+    const visitor = (await call('visitorSession', { params: { slug } })).body as VisitorTranscript;
+    expect(visitor.items.at(-1)).toMatchObject({ kind: 'delivered', event: { author: 'owner' } });
+  });
+
+  it('whisper_stays_with_the_owner', async () => {
+    const { session, events } = await openChat();
+    const sessionId = session.session_id;
+    const whispered = await call('ownerMessage', { params: { session_id: sessionId }, body: { text: 'offer Thursday too', kind: 'whisper' } });
+    expect(whispered.status).toBe(200);
+    expect(whispered.body).toMatchObject({ verdict: null });
+    await drain();
+    expect(events).toEqual([]);
+    expect(await ownerKinds(sessionId)).toEqual(['whisper']);
+    expect((await owner(sessionId)).items[0]?.text).toBe('offer Thursday too');
+    const visitor = (await call('visitorSession', { params: { slug } })).body as VisitorTranscript;
+    expect(visitor.items).toEqual([]);
+
+    // Words the API would refuse: none, too long, or no kind it knows.
+    for (const body of [{ text: '', kind: 'say' }, { text: 'x'.repeat(2001), kind: 'whisper' }, { text: 'hi', kind: 'shout' }]) {
+      expect((await call('ownerMessage', { params: { session_id: sessionId }, body })).status).toBe(422);
+    }
+  });
+
+  it('hand_back_and_resume_follow_the_mode', async () => {
+    const { session, events } = await openChat();
+    const sessionId = session.session_id;
+    const at = (generation: number) => ({ params: { session_id: sessionId }, body: { generation } });
+
+    // Hand back only from the owner's mode, at the generation she last read.
+    expect((await call('handback', at(1))).body).toEqual({ error: 'kernel', code: 'conflict' });
+    expect((await call('takeover', at(1))).status).toBe(200);
+    expect((await call('handback', at(1))).body).toEqual({ error: 'kernel', code: 'stale_generation' });
+    expect(await call('handback', at(2))).toEqual({ status: 200, body: { ...session, mode: 'ai', generation: 3 } });
+    expect(typesOf(events)).toEqual(['owner_joined', 'owner_left']);
+
+    // Resume only a chat Claude paused.
+    expect((await call('resume', at(3))).body).toEqual({ error: 'kernel', code: 'conflict' });
+    const record = mockStore.visitorSession(slug);
+    if (!record) throw new Error('this browser has a chat');
+    mockStore.world.pause(record);
+    expect(record.state.mode).toBe('paused');
+    expect(await call('resume', at(3))).toEqual({ status: 200, body: { ...session, mode: 'ai', generation: 4 } });
+    expect(kindsFor(sessionId)).toEqual(['session', 'takeover', 'takeover', 'breaker', 'breaker']);
+  });
+
+  it('typing_shows_both_ways', async () => {
+    const { session, events } = await openChat();
+    const sessionId = session.session_id;
+    const typingUntil = async () => (await owner(sessionId)).typing_until ?? null;
+
+    // The visitor typing reaches only the owner's view, for five seconds.
+    expect(await typingUntil()).toBeNull();
+    expect(await call('visitorTyping', { params: { slug } })).toEqual({ status: 204, body: undefined });
+    const until = await typingUntil();
+    expect(Date.parse(until ?? '') - Date.now()).toBe(5_000);
+    const visitor = (await call('visitorSession', { params: { slug } })).body as VisitorTranscript;
+    expect('typing_until' in visitor).toBe(false);
+    // A second ping within 2 s changes nothing; one after it moves the time on.
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect((await call('visitorTyping', { params: { slug } })).status).toBe(204);
+    expect(await typingUntil()).toBe(until);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(await typingUntil()).toBeNull();
+
+    // The owner typing reaches the visitor only after she took over: her name and how long, no words.
+    const at = { params: { session_id: sessionId }, body: { generation: session.generation } };
+    expect(await call('ownerTyping', at)).toEqual({ status: 409, body: { error: 'take_over_first' } });
+    expect((await call('takeover', at)).status).toBe(200);
+    const typing = { params: { session_id: sessionId }, body: { generation: session.generation + 1 } };
+    expect(await call('ownerTyping', typing)).toEqual({ status: 204, body: undefined });
+    expect(events.map(([, ev]) => ev)).toEqual([
+      { type: 'owner_joined', name: rivera.business.ownerName },
+      { type: 'owner_typing', name: rivera.business.ownerName, until: expect.any(String) as string },
+    ]);
+    const [, sent] = events[1] ?? [];
+    expect(sent?.type === 'owner_typing' && Date.parse(sent.until) - Date.now()).toBe(5_000);
+    // At most once every 2 s.
+    expect((await call('ownerTyping', typing)).status).toBe(204);
+    expect(events).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect((await call('ownerTyping', typing)).status).toBe(204);
+    expect(events).toHaveLength(3);
+  });
+
+  it('a_visitor_message_ends_their_typing', async () => {
+    const { session } = await openChat();
+    const typingUntil = async () => (await owner(session.session_id)).typing_until ?? null;
+    expect((await call('visitorTyping', { params: { slug } })).status).toBe(204);
+    expect(await typingUntil()).not.toBeNull();
+    // Her message takes the dots' place, and her next keystroke counts at once.
+    expect((await call('sendMessage', { params: { slug }, body: { text: 'Thursday works.' } })).status).toBe(202);
+    expect(await typingUntil()).toBeNull();
+    expect((await call('visitorTyping', { params: { slug } })).status).toBe(204);
+    expect(await typingUntil()).not.toBeNull();
+  });
+
+  it('decision_reads_by_id_in_the_copy', async () => {
+    const held = mockStore.world.addHeldRefund();
+    expect(await call('decision', { params: { decision_id: held.decision_id } })).toEqual({ status: 200, body: held });
+    expect((await call('decision', { params: { decision_id: 'dec-elsewhere' } })).status).toBe(404);
+    mockStore.reset('rivera', { signedIn: false });
+    expect((await call('decision', { params: { decision_id: held.decision_id } })).status).toBe(401);
   });
 });
 

@@ -7,6 +7,7 @@ import { greetingFor } from '../../lib/format.ts';
 import { useAnswer, type HeldItem } from '../approvals/useAnswer.ts';
 import { ThingsToTry } from '../arrival/ThingsToTry.tsx';
 import { publicLink } from '../customerLink.ts';
+import { OwnerInbox } from '../inbox/OwnerInbox.tsx';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { firstName, heldOldestFirst, useNeedsYou, useToday } from '../useDesks.ts';
@@ -118,7 +119,7 @@ export function TodayPage() {
         {live.length > 0 ? <LiveNow live={live} /> : null}
         <SinceLastNight />
       </div>
-      <TodayAside deskId={deskId} slug={desk.slug} />
+      <TodayAside deskId={deskId} slug={desk.slug} inbox={<OwnerInbox timezone={business.timezone} />} />
     </div>
   );
 }

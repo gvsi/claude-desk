@@ -8,7 +8,7 @@
  */
 import { Component, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 
-import type { SessionState } from '../api/contracts.ts';
+import type { EvMessage, RenderedBlock, SessionState } from '../api/contracts.ts';
 import {
   Button,
   CHAT_ENDED_COPY,
@@ -16,6 +16,7 @@ import {
   Composer,
   ConceptFooter,
   EmptyState,
+  LinkCancelledCard,
   MarginReceipt,
   NEW_CHAT_LABEL,
   Notice,
@@ -32,12 +33,16 @@ import {
   type CopyLanguage,
   type ReceiptView,
 } from '../ds/index.ts';
+import { fillComposer } from '../lib/composer.ts';
 import { browserLanguage } from '../lib/language.ts';
 import { brandFrom } from './brand.ts';
 import type { ChatRow, SendFailure } from './chatReducer.ts';
 import { PUBLIC_COPY, type PublicCopy } from './copy.ts';
+import { VisitorInbox, inboxShown, useVisitorInbox, useWideWindow } from './inbox/VisitorInbox.tsx';
 import { useVisitorChat } from './PublicChatProvider.tsx';
 import { useOpenStatus } from './useOpenStatus.ts';
+import { useVisitorTyping } from './useVisitorTyping.ts';
+import { VerifyInline } from './verify/VerifyInline.tsx';
 
 import './PublicChat.css';
 
@@ -62,6 +67,43 @@ function initialsOf(name: string): string {
   const first = words[0];
   const last = words.length > 1 ? words.at(-1) : undefined;
   return [first, last].map((word) => (word === undefined ? '' : (Array.from(word)[0] ?? ''))).join('');
+}
+
+/**
+ * The kernel's card for a payment link a confirmed rule change cancelled, which the Desk sends as
+ * its own message (author `desk`). Its template isn't one of the generated contract's
+ * `ClauseTemplate`s yet (kernel payments, plan 01c), so it is named here; the design system's
+ * `LinkCancelledCard` shows its line, the block's `title`, as written.
+ */
+const LINK_CANCELLED_TEMPLATE: string = 'link_cancelled';
+
+function isLinkCancelled(block: RenderedBlock): boolean {
+  return block.kind === 'card' && block.template === LINK_CANCELLED_TEMPLATE;
+}
+
+/**
+ * A delivered message from Claude or the Desk, its blocks in order: each cancelled link as the
+ * design system's card for it, and every other run of blocks as one `ClaudeMessage`.
+ */
+function DeliveredMessage({ ev, ownerName }: { ev: EvMessage; ownerName: string }) {
+  if (!ev.blocks.some(isLinkCancelled)) return <ClaudeMessage blocks={ev.blocks} language={ev.language} ownerName={ownerName} />;
+  const parts: ReactNode[] = [];
+  let run: RenderedBlock[] = [];
+  const endRun = () => {
+    if (run.length === 0) return;
+    parts.push(<ClaudeMessage key={`run-${parts.length}`} blocks={run} language={ev.language} ownerName={ownerName} />);
+    run = [];
+  };
+  ev.blocks.forEach((block, index) => {
+    if (!isLinkCancelled(block)) {
+      run.push(block);
+      return;
+    }
+    endRun();
+    parts.push(<LinkCancelledCard key={`cancelled-${index}`} line={block.title ?? block.text} language={ev.language} />);
+  });
+  endRun();
+  return parts.length === 1 ? parts[0] : <div className="cd-public-chat__message">{parts}</div>;
 }
 
 function failureLine(failure: SendFailure | undefined, language: CopyLanguage, copy: PublicCopy): string {
@@ -135,7 +177,7 @@ function ChatRowView({ row, ownerName, language, onResend, after = [] }: RowProp
       {ev.author === 'owner' ? (
         <PersonMessage name={ownerName} blocks={ev.blocks} language={ev.language} />
       ) : (
-        <ClaudeMessage blocks={ev.blocks} language={ev.language} ownerName={ownerName} />
+        <DeliveredMessage ev={ev} ownerName={ownerName} />
       )}
     </TranscriptRow>
   );
@@ -301,17 +343,12 @@ function useNewestInView(end: RefObject<HTMLElement | null>, composer: RefObject
   return { follow, beforeChange };
 }
 
-/**
- * Puts `text` in the composer's text box as if the visitor had typed it, so the design system's
- * Composer takes it as its own (it keeps its text itself and takes none from outside), then
- * focuses the box with the caret at the end.
- */
-function fillComposer(box: HTMLTextAreaElement, text: string): void {
-  // The prototype's setter, so React sees the change, then the input event it listens for.
-  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(box, text);
-  box.dispatchEvent(new Event('input', { bubbles: true }));
-  box.focus();
-  box.setSelectionRange(box.value.length, box.value.length);
+/** The latest row whose message carries the kernel's verify card, by its key, or null. */
+function latestVerifyRow(rows: readonly ChatRow[]): string | null {
+  const row = rows.findLast(
+    ({ item }) => item.kind === 'message' && item.ev.blocks.some((block) => block.kind === 'card' && block.template === 'verify_prompt'),
+  );
+  return row === undefined ? null : rowKey(row);
 }
 
 /** The visitor's words that didn't send because the chat ended (a 401), in order. */
@@ -343,6 +380,14 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
   const endRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   const newest = useNewestInView(endRef, composerRef, desk !== null);
+  // While the visitor types, the owner's view of the chat shows that someone is, never what.
+  const visitorTyping = useVisitorTyping(slug);
+  // The chat can be written in: it loaded, and its session hasn't ended.
+  const ready = chat.status === 'ready' && chat.state.error !== 'session';
+  // The demo's codes: read while the chat can be used, a column of its own on a wide window.
+  const inbox = useVisitorInbox(slug, chat.session?.session_id ?? null, chat.state.inbox, ready);
+  const wide = useWideWindow();
+  const inboxPlacement = wide && !embedded ? 'column' : 'sheet';
 
   useEffect(() => {
     if (chat.session !== null) onSession?.(chat.session);
@@ -375,8 +420,6 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
 
   // Words that didn't send when the chat ended wait in the new chat's composer once it can be used.
   const carried = useRef<string | null>(null);
-  // The chat can be written in: it loaded, and its session hasn't ended.
-  const ready = chat.status === 'ready' && chat.state.error !== 'session';
   useEffect(() => {
     const text = carried.current;
     const box = composerRef.current?.querySelector('textarea');
@@ -443,6 +486,26 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
       ));
   };
 
+  const askForOwner = () => send(copy.askForOwner(ownerName));
+  // Under the latest message with the kernel's verify card: the code form while the chat can be
+  // written in and the visitor hasn't confirmed it's them, then the verified line.
+  const verified = chat.session?.verified === true;
+  const verifyRow = latestVerifyRow(state.rows);
+  const verifyUnder = (row: ChatRow): ReactNode[] =>
+    verifyRow !== null && rowKey(row) === verifyRow && (verified || ready)
+      ? [
+          <VerifyInline
+            key="verify"
+            status={chat.verifyStatus}
+            verified={verified}
+            assurance={chat.session?.assurance ?? 'none'}
+            language={language}
+            onSubmit={chat.verify}
+            onAskForOwner={askForOwner}
+          />,
+        ]
+      : [];
+
   const startNewChat = () => {
     const unsent = unsentWhenEnded(state.rows);
     carried.current = unsent.length > 0 ? unsent.join('\n') : null;
@@ -482,6 +545,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
   // What the visitor sends brings the end of the conversation back into view.
   const send = (text: string) => {
     newest.follow();
+    visitorTyping.sent();
     chat.send(text);
   };
   const resend = (id: string) => {
@@ -489,64 +553,78 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
     chat.resend(id);
   };
 
+  // The code the chat asked for hasn't been confirmed yet: the inbox is where it arrives.
+  const awaitingCode = verifyRow !== null && !verified;
+  const inboxColumn = inboxPlacement === 'column' && inboxShown(inbox, awaitingCode);
   return (
-    <PublicShell
-      brand={brand}
-      ownerName={ownerName}
-      language={language}
-      openStatus={openStatus}
-      onAskForOwner={() => send(copy.askForOwner(ownerName))}
-      about={desk.charter}
-      footer={!embedded}
-      composer={
-        <div ref={composerRef}>
-          <Composer
-            variant="visitor"
-            label={copy.message(brand.name)}
-            placeholder={copy.message(brand.name)}
-            sendLabel={copy.send}
-            maxLength={MESSAGE_MAX_LENGTH}
-            disabled={!ready}
-            onSend={send}
-          />
-        </div>
-      }
-    >
-      <Transcript label={copy.conversation(brand.name)}>
-        {state.leading.length > 0 ? (
-          <TranscriptRow
-            margin={[
-              ...state.leading.map((receipt, index) => (
-                <MarginReceipt key={`${receipt.ledgerSeq}-${index}`} source={receipt.source} plain={receipt.plain} ledgerSeq={receipt.ledgerSeq} />
-              )),
-              ...cancelsUnder(state.leading),
-            ]}
-          >
-            {null}
-          </TranscriptRow>
+    // One wrapper whatever the inbox does, so the shell (and what is typed in it) never remounts.
+    <div className={`cd-public-chat-page${inboxColumn ? ' cd-public-chat-page--with-inbox' : ''}`}>
+      <PublicShell
+        brand={brand}
+        ownerName={ownerName}
+        language={language}
+        openStatus={openStatus}
+        onAskForOwner={askForOwner}
+        about={desk.charter}
+        footer={!embedded}
+        composer={
+          <div ref={composerRef} onInput={visitorTyping.onInput}>
+            <Composer
+              variant="visitor"
+              label={copy.message(brand.name)}
+              placeholder={copy.message(brand.name)}
+              sendLabel={copy.send}
+              maxLength={MESSAGE_MAX_LENGTH}
+              disabled={!ready}
+              onSend={send}
+            />
+          </div>
+        }
+      >
+        <Transcript label={copy.conversation(brand.name)}>
+          {state.leading.length > 0 ? (
+            <TranscriptRow
+              margin={[
+                ...state.leading.map((receipt, index) => (
+                  <MarginReceipt key={`${receipt.ledgerSeq}-${index}`} source={receipt.source} plain={receipt.plain} ledgerSeq={receipt.ledgerSeq} />
+                )),
+                ...cancelsUnder(state.leading),
+              ]}
+            >
+              {null}
+            </TranscriptRow>
+          ) : null}
+          {state.rows.map((row) => (
+            <ChatRowView
+              key={rowKey(row)}
+              row={row}
+              ownerName={ownerName}
+              language={language}
+              onResend={resend}
+              after={[...cancelsUnder(row.receipts), ...verifyUnder(row)]}
+            />
+          ))}
+          {state.writing ? <WritingIndicator language={language} /> : null}
+          {/* The owner typing after a take-over: her initials, her name and three dots, until her words come. */}
+          {state.ownerTyping !== null ? (
+            <TranscriptRow>
+              <WritingIndicator language={language} variant="person" who={state.ownerTyping.name} />
+            </TranscriptRow>
+          ) : null}
+        </Transcript>
+        {inboxPlacement === 'sheet' ? <VisitorInbox view={inbox} awaitingCode={awaitingCode} placement="sheet" language={language} /> : null}
+        {connectionNotice || turnNotice ? (
+          <div className="cd-public-chat__notices">
+            {turnNotice}
+            {connectionNotice}
+          </div>
         ) : null}
-        {state.rows.map((row) => (
-          <ChatRowView
-            key={rowKey(row)}
-            row={row}
-            ownerName={ownerName}
-            language={language}
-            onResend={resend}
-            after={cancelsUnder(row.receipts)}
-          />
-        ))}
-        {state.writing ? <WritingIndicator language={language} /> : null}
-      </Transcript>
-      {connectionNotice || turnNotice ? (
-        <div className="cd-public-chat__notices">
-          {turnNotice}
-          {connectionNotice}
-        </div>
-      ) : null}
-      {/* The end of the conversation, which useNewestInView keeps above the composer. */}
-      <div ref={endRef} />
-      <BeforeEachChange before={newest.beforeChange} />
-    </PublicShell>
+        {/* The end of the conversation, which useNewestInView keeps above the composer. */}
+        <div ref={endRef} />
+        <BeforeEachChange before={newest.beforeChange} />
+      </PublicShell>
+      {inboxPlacement === 'column' ? <VisitorInbox view={inbox} awaitingCode={awaitingCode} placement="column" language={language} /> : null}
+    </div>
   );
 }
 

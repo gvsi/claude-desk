@@ -3,10 +3,12 @@ import { Navigate, type RouteObject } from 'react-router';
 import { ReaderError } from '../about/ReaderError.tsx';
 import { ABOUT_PAGES, type AboutId } from '../about/links.ts';
 import { Arrival } from '../owner/Arrival.tsx';
+import { ConversationsPage } from '../owner/conversations/ConversationsPage.tsx';
 import { OwnerLayout } from '../owner/OwnerLayout.tsx';
 import { SafetyPage } from '../owner/safety/SafetyPage.tsx';
 import { BriefingPage } from '../owner/today/BriefingPage.tsx';
 import { TodayPage } from '../owner/today/TodayPage.tsx';
+import { CheckoutPage } from '../public/checkout/CheckoutPage.tsx';
 import { PublicPage } from '../public/PublicPage.tsx';
 import { NotFound } from './NotFound.tsx';
 import { RouteError } from './RouteError.tsx';
@@ -51,12 +53,16 @@ export const routes: RouteObject[] = [
       { index: true, element: <Navigate to="today" replace /> },
       { path: 'today', element: <TodayPage /> },
       { path: 'today/briefing', element: <BriefingPage /> },
+      // One route for the list and a conversation open beside it, so the list stays as it is while
+      // the owner moves between conversations.
+      { path: 'conversations/:sessionId?', element: <ConversationsPage /> },
       // One route for the list and an attempt open beside it, so the page stays as it is (its filter
       // included) while the owner moves between attempts.
       { path: 'safety/:refId?', element: <SafetyPage /> },
     ],
   },
   { path: '/d/:slug', element: <PublicPage />, errorElement: <RouteError visitor /> },
+  { path: '/pay/:token', element: <CheckoutPage />, errorElement: <RouteError visitor /> },
   aboutRoute('proposal'),
   aboutRoute('prediction'),
   { path: '*', element: <NotFound /> },

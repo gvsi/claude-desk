@@ -255,10 +255,6 @@
   min-width: 0;
 }
 
-.cd-needs-you__card {
-  border-radius: var(--radius-card);
-}
-
 .cd-needs-you__answered {
   display: flex;
   flex-direction: column;

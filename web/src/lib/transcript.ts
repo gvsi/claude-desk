@@ -9,7 +9,13 @@
  * reply is the message they explain. Any receipt after a reply attaches to the last row; one before
  * any row is kept as `leading`. A receipt that follows an earlier one (a held request's outcome
  * after its hold) attaches wherever that one is, however far the conversation has gone on.
+ *
+ * Claude can also start a turn no one's words began (the API wakes it after the visitor confirmed
+ * it's them). Live, its `writing` event says so; a stored conversation keeps no writing events, so
+ * `opensAReply` finds such a turn by what follows a decision's status, and both the visitor's chat
+ * and the owner's conversation view read it the same way.
  */
+import type { TranscriptItem } from '../api/views.ts';
 
 export interface GroupedRow<Row, R> {
   item: Row;
@@ -35,6 +41,11 @@ export type RowPart<Row, R> =
   | { kind: 'reply'; row: Row; receipt: R | null }
   /** A line about the chat itself (someone joined or left): it ends the turn. */
   | { kind: 'line'; row: Row }
+  /**
+   * Claude started a turn of its own, which no one's words began (the API woke it, as after the
+   * visitor confirmed it's them): the receipts that follow wait for its reply, as a turn's do.
+   */
+  | { kind: 'writing' }
   /**
    * A checkpoint result. With `beside`, a receipt already in the conversation that this one
    * follows, it attaches in the same place; when that one isn't there, as any other receipt.
@@ -93,6 +104,8 @@ export function addPart<Row, R>(groups: RowGroups<Row, R>, part: RowPart<Row, R>
       const settled = settle(groups);
       return { ...settled, rows: [...settled.rows, { item: part.row, receipts: [] }] };
     }
+    case 'writing':
+      return groups.awaitingReply ? groups : { ...groups, awaitingReply: true };
     case 'receipt': {
       const placed = part.beside === undefined ? null : placeBeside(groups, part.receipt, part.beside);
       if (placed !== null) return placed;
@@ -103,14 +116,41 @@ export function addPart<Row, R>(groups: RowGroups<Row, R>, part: RowPart<Row, R>
 }
 
 /**
+ * Whether the stored item at `index` is a decision's status (an action's outcome or a hold, not a
+ * later answer) that comes before a reply of Claude's with no one's words between them: it belongs
+ * to that reply's turn, which Claude may have started on its own. `items` are in their `n` order.
+ */
+export function opensAReply(items: readonly TranscriptItem[], index: number): boolean {
+  const type = items[index]?.event?.type;
+  if (type !== 'receipt' && type !== 'held') return false;
+  const next = items.slice(index + 1).find((item) => item.kind !== 'status');
+  return next?.kind === 'delivered' && next.event?.type === 'message' && next.event.author !== 'owner';
+}
+
+export interface GroupOptions<T> {
+  /**
+   * Whether Claude started a turn of its own just before `items[index]`, which a stored
+   * conversation doesn't record (`opensAReply` for a transcript): that item and the receipts after
+   * it wait for Claude's reply, as they do after a `writing` part.
+   */
+  writingBefore?: (items: readonly T[], index: number) => boolean;
+}
+
+/**
  * Rows for a stored conversation, in the items' order. `partOf` reads each item (null skips it).
  * The result is settled: a turn that has no reply yet keeps its receipts under its last row.
  */
-export function groupRows<T, Row, R>(items: readonly T[], partOf: (item: T) => RowPart<Row, R> | null): RowGroups<Row, R> {
+export function groupRows<T, Row, R>(
+  items: readonly T[],
+  partOf: (item: T) => RowPart<Row, R> | null,
+  options: GroupOptions<T> = {},
+): RowGroups<Row, R> {
   let groups = emptyGroups<Row, R>();
-  for (const item of items) {
+  items.forEach((item, index) => {
     const part = partOf(item);
-    if (part !== null) groups = addPart(groups, part);
-  }
+    if (part === null) return;
+    if (options.writingBefore?.(items, index) === true) groups = addPart(groups, { kind: 'writing' });
+    groups = addPart(groups, part);
+  });
   return settle(groups);
 }

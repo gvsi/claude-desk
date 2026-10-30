@@ -18,6 +18,7 @@ import type {
   NeedsYouItem,
   NeedsYouSession,
   OwnerTranscript,
+  PaymentLinkOut,
   Reports,
   ThisWeek,
   Today,
@@ -33,6 +34,7 @@ import {
   isoTime,
   type DecisionRecord,
   type DeskRecord,
+  type LinkRecord,
   type MockWorld,
   type SessionRecord,
 } from './world.ts';
@@ -488,10 +490,13 @@ export function visitorTranscript(session: SessionRecord): VisitorTranscript {
   };
 }
 
-export function ownerTranscript(session: SessionRecord, after: number): OwnerTranscript {
+/** The owner's view of a chat: every item after `after`, whispers included, and whether the visitor is typing at `now`. */
+export function ownerTranscript(session: SessionRecord, after: number, now: number): OwnerTranscript {
+  const typing = session.typingUntil;
   return {
     state: session.state,
-    items: session.items.filter((item) => item.n > after).map((item) => ({ ...item, owner_translation: null, triage: null })),
+    items: session.items.filter((item) => item.n > after).map((item) => ({ ...item, owner_translation: item.owner_translation ?? null, triage: item.triage ?? null })),
+    typing_until: typing !== null && typing > now ? isoTime(typing) : null,
   };
 }
 
@@ -501,6 +506,19 @@ export function publicDesk(desk: DeskRecord, language: Language): PublicDesk {
     desk_name: desk.summary.name,
     brand: { ...BUSINESS.brand },
     open_status: desk.openStatus?.[language] ?? null,
+  };
+}
+
+/**
+ * The mock checkout's view of a link: the kernel's `PaymentLinkView` and the fields kernel plan 01c
+ * adds (`views.ts` `PaymentLinkOut`). The customer's name shows only while the link is open.
+ */
+export function paymentLinkOut(link: LinkRecord): PaymentLinkOut {
+  return {
+    ...link.view,
+    cancel_reason: link.cancelReason,
+    business_name: BUSINESS.name,
+    customer_name: link.view.state === 'issued' ? link.customerName : null,
   };
 }
 

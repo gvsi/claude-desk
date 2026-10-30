@@ -1,0 +1,40 @@
+/* VisitorInbox: the Demo inbox in its place. Beside the chat from 1280 px, a column on the
+   panel ground with a hairline at its left, as tall as the window and scrolling on its own. Below
+   that, the sheet's button 16 px under the last row (the sheet itself opens over the page); or,
+   when the inbox couldn't be read, its place in a card's edge there. */
+
+.cd-public-chat__inbox-column {
+  position: sticky;
+  top: 0;
+  box-sizing: border-box;
+  height: 100dvh;
+  min-width: 0;
+  overflow-y: auto;
+  border-left: 1px solid var(--line-hairline);
+  background: var(--bg-panel);
+}
+
+.cd-public-chat__inbox-sheet {
+  display: flex;
+  padding-top: var(--space-16);
+}
+
+.cd-public-chat__inbox {
+  margin-top: var(--space-16);
+  overflow: hidden;
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-card);
+}
+
+/* The place when the inbox couldn't be read at all: its title over its line and "Try again", on
+   the panel's ground, with the panel's own padding and 10 px between them, where the panel would
+   be. */
+.cd-public-chat__inbox-failed {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+  box-sizing: border-box;
+  min-width: 0;
+  padding: var(--space-24) var(--space-16);
+  background: var(--bg-panel);
+}

@@ -24,9 +24,16 @@ import { apiPath } from '../api/routes.ts';
 import { openStream, type StreamState } from '../api/stream.ts';
 import type { VisitorSession, VisitorTranscript } from '../api/views.ts';
 import { browserLanguage, type BrowserLanguage } from '../lib/language.ts';
-import { chatReducer, initialChatState, type ChatAction, type ChatState, type SendFailure } from './chatReducer.ts';
+import { chatReducer, initialChatState, ownerTypingDelayMs, type ChatAction, type ChatState, type SendFailure } from './chatReducer.ts';
 
 export type ChatStatus = 'loading' | 'ready' | 'not_found' | 'unavailable';
+
+/**
+ * Where the visitor's demo code stands: `checking` while the verify route has it, `failed` when it
+ * didn't work (one state for a wrong, expired or used-up code, or any refusal but a 401), and
+ * `unreachable` when no answer came and the session isn't verified.
+ */
+export type VerifyStatus = 'idle' | 'checking' | 'failed' | 'unreachable';
 
 /** How long the chat waits before each reopen of a stream the server closed; after the last, it gives up. */
 export const REOPEN_DELAYS_MS = [2_000, 5_000, 10_000] as const;
@@ -59,6 +66,8 @@ export interface VisitorChatSnapshot {
   cancelling: string | null;
   /** The held request whose last cancel failed and wasn't applied, or null. */
   cancelFailed: string | null;
+  /** Where the last demo code the visitor sent stands. */
+  verifyStatus: VerifyStatus;
 }
 
 export interface VisitorChatActions {
@@ -70,6 +79,8 @@ export interface VisitorChatActions {
   /** Starts a new chat after this one ended. */
   newChat: () => void;
   cancel: (decisionId: string) => void;
+  /** Sends a demo code to the verify route: the kernel checks it, and Claude never sees it. */
+  verify: (code: string) => void;
 }
 
 export type VisitorChatView = VisitorChatSnapshot & VisitorChatActions;
@@ -145,6 +156,7 @@ class VisitorChat {
     status: 'loading',
     cancelling: null,
     cancelFailed: null,
+    verifyStatus: 'idle',
   };
   private readonly listeners = new Set<() => void>();
   /** Pages showing this chat; the stream is open only while there is one. */
@@ -172,6 +184,8 @@ class VisitorChat {
   /** The highest `n` in the conversation as last read: a lost message is looked for after it. */
   private knownN = 0;
   private nextId = 0;
+  /** Ends the owner's typing when its time runs out. */
+  private ownerTypingTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly slug: string,
@@ -250,7 +264,7 @@ class VisitorChat {
     this.set({ session });
     if (transcript === null) {
       this.loaded = true;
-      this.dispatch({ type: 'ended' });
+      this.end();
       this.set({ status: 'ready' });
       return;
     }
@@ -267,12 +281,47 @@ class VisitorChat {
     const url = apiPath('events', { slug: this.slug }, { after: String(this.snapshot.state.lastSeq) });
     this.stopStream = openStream<SseEvent>(url, EVENT_TYPES, {
       event: (seq, ev) => {
-        if (epoch === this.epoch) this.dispatch({ type: 'event', seq, ev });
+        if (epoch === this.epoch) this.onEvent(seq, ev);
       },
       state: (state) => {
         if (epoch === this.epoch) this.onStreamState(state, epoch);
       },
     });
+  }
+
+  /**
+   * An event from the stream. The owner's typing shows only until its time, read once here with
+   * `ownerTypingDelayMs`: a stale one (replayed after a reload or a reconnect included) shows
+   * nothing, and a later one restarts the timer.
+   */
+  private onEvent(seq: number, ev: SseEvent): void {
+    if (ev.type !== 'owner_typing') {
+      this.dispatch({ type: 'event', seq, ev });
+      return;
+    }
+    if (seq <= this.snapshot.state.lastSeq) return;
+    const delay = ownerTypingDelayMs(ev, Date.now());
+    if (delay <= 0) {
+      this.dispatch({ type: 'stale', seq });
+      return;
+    }
+    this.dispatch({ type: 'event', seq, ev });
+    this.clearOwnerTypingTimer();
+    this.ownerTypingTimer = setTimeout(() => {
+      this.ownerTypingTimer = null;
+      this.dispatch({ type: 'owner_typing_over' });
+    }, delay);
+  }
+
+  private clearOwnerTypingTimer(): void {
+    if (this.ownerTypingTimer !== null) clearTimeout(this.ownerTypingTimer);
+    this.ownerTypingTimer = null;
+  }
+
+  /** The chat ended (a 401): the owner's typing goes with it, and its timer too. */
+  private end(): void {
+    this.clearOwnerTypingTimer();
+    this.dispatch({ type: 'ended' });
   }
 
   private onStreamState(state: StreamState, epoch: number): void {
@@ -301,7 +350,7 @@ class VisitorChat {
     } catch (err) {
       if (epoch !== this.epoch) return;
       if (sessionGone(err)) {
-        this.dispatch({ type: 'ended' });
+        this.end();
         this.dispatch({ type: 'connection', connection: 'closed' });
         return;
       }
@@ -341,8 +390,9 @@ class VisitorChat {
     this.checking = false;
     this.clearCheckTimer();
     this.checkRetries = 0;
+    this.clearOwnerTypingTimer();
     this.dispatch({ type: 'reset' });
-    this.set({ session: null, status: 'loading', cancelling: null, cancelFailed: null });
+    this.set({ session: null, status: 'loading', cancelling: null, cancelFailed: null, verifyStatus: 'idle' });
     this.loading = true;
     this.open(epoch)
       .catch((err: unknown) => {
@@ -387,7 +437,7 @@ class VisitorChat {
 
   private fail(id: string, failure: SendFailure): void {
     this.dispatch({ type: 'send_failed', id, failure });
-    if (failure === 'session') this.dispatch({ type: 'ended' });
+    if (failure === 'session') this.end();
   }
 
   /**
@@ -414,7 +464,7 @@ class VisitorChat {
     if (gone) {
       // The chat ended. Whether they went through stays unknown, so nothing is said of them.
       this.lost.clear();
-      this.dispatch({ type: 'ended' });
+      this.end();
       return;
     }
     if (transcript === null) {
@@ -468,7 +518,7 @@ class VisitorChat {
       if (generation !== this.generation) return;
       if (sessionGone(err)) {
         this.set({ cancelling: null });
-        this.dispatch({ type: 'ended' });
+        this.end();
         return;
       }
       // Already resolved (the owner answered first): the stream brings that outcome.
@@ -479,6 +529,51 @@ class VisitorChat {
       const applied = isUncertain(err) && (await this.wasResolved(decisionId));
       if (generation !== this.generation) return;
       this.set({ cancelling: null, cancelFailed: applied ? null : decisionId });
+    }
+  }
+
+  readonly verify = (code: string): void => {
+    const { status, state, verifyStatus } = this.snapshot;
+    if (status !== 'ready' || state.error === 'session' || verifyStatus === 'checking') return;
+    this.set({ verifyStatus: 'checking' });
+    void this.checkCode(code);
+  };
+
+  /**
+   * The code goes to the verify route and nowhere else. Verified, the chat's session is the one the
+   * kernel answered with. Every refusal but a 401 is the same failed code, as the kernel answers a
+   * wrong, expired or used-up code alike; a 401 ends the chat. A lost answer may have verified the
+   * session, so the chat reads it before saying the code couldn't be checked.
+   */
+  private async checkCode(code: string): Promise<void> {
+    const generation = this.generation;
+    try {
+      const { state } = await request('verifyCheck', { params: { slug: this.slug }, body: { code } });
+      if (generation !== this.generation) return;
+      this.set(state.verified ? { verifyStatus: 'idle', session: state } : { verifyStatus: 'failed' });
+    } catch (err) {
+      if (generation !== this.generation) return;
+      if (sessionGone(err)) {
+        this.set({ verifyStatus: 'idle' });
+        this.end();
+        return;
+      }
+      if (err instanceof ApiError && err.status !== null && err.status >= 400 && err.status < 500) {
+        this.set({ verifyStatus: 'failed' });
+        return;
+      }
+      const session = isUncertain(err) ? await this.currentSession() : null;
+      if (generation !== this.generation) return;
+      this.set(session?.verified ? { verifyStatus: 'idle', session } : { verifyStatus: 'unreachable' });
+    }
+  }
+
+  /** The chat's session as the API holds it now, or null when it can't be read. */
+  private async currentSession(): Promise<SessionState | null> {
+    try {
+      return (await request('visitorSession', { params: { slug: this.slug } })).state;
+    } catch {
+      return null;
     }
   }
 
@@ -530,7 +625,15 @@ export function useVisitorChat(slug: string, previewDeskId?: string): VisitorCha
   }, [chat]);
 
   return useMemo(
-    () => ({ ...snapshot, send: chat.send, resend: chat.resend, retry: chat.retry, newChat: chat.newChat, cancel: chat.cancel }),
+    () => ({
+      ...snapshot,
+      send: chat.send,
+      resend: chat.resend,
+      retry: chat.retry,
+      newChat: chat.newChat,
+      cancel: chat.cancel,
+      verify: chat.verify,
+    }),
     [snapshot, chat],
   );
 }

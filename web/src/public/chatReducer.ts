@@ -9,6 +9,8 @@
  *
  * A held request's later lines ("Cancelled", "Maria Rivera approved this") stay under the message
  * that holds it, as every receipt stays under its own message, however far the chat has gone on.
+ * Once Claude is writing, the receipts that follow wait for its reply, so a turn the API starts on
+ * its own (after the visitor confirmed it's them) explains its reply too.
  */
 import type {
   EvDemoInbox,
@@ -23,7 +25,7 @@ import type {
 import type { StreamState } from '../api/stream.ts';
 import type { TranscriptItem, VisitorTranscript } from '../api/views.ts';
 import { receiptFromEvent, type ReceiptView } from '../ds/index.ts';
-import { addPart, emptyGroups, groupRows, settle, type GroupedRow, type RowGroups, type RowPart } from '../lib/transcript.ts';
+import { addPart, emptyGroups, groupRows, opensAReply, settle, type GroupedRow, type RowGroups, type RowPart } from '../lib/transcript.ts';
 
 /** The visitor's own message: `sent`, being checked after an answer was lost, or `failed`. */
 export type VisitorStatus = 'sent' | 'checking' | 'failed';
@@ -44,13 +46,13 @@ export type OwnerTyping = Omit<EvOwnerTyping, 'type'>;
 export interface ChatState extends RowGroups<ChatItem, ReceiptView> {
   writing: boolean;
   /**
-   * The owner typing, from the owner's latest `owner_typing`, or null. The owner's own message,
-   * `owner_left`, the turn's end or the owner's next typing event replaces or clears it. Its `until`
-   * is kept as the API sent it, never compared with a clock here, so the page can drop the dots once
-   * that time passes.
-   *
-   * Nothing draws this yet. The public page's typing dots (WritingIndicator's person form) come
-   * with the web app's second run (plan 04, Task 8), which reads this state.
+   * The owner typing after a take-over, from the owner's latest `owner_typing`, or null: her name
+   * and until when, never her words. The public page shows it as WritingIndicator's person form.
+   * The owner's own message (even one the chat already shows), `owner_left`, the turn's end, an
+   * error or the chat ending (`ended`) clears it, and the owner's next typing event replaces it. Its `until` is kept as the API
+   * sent it, never compared with a clock here: the provider reads it once with
+   * `ownerTypingDelayMs`, so a stale event shows nothing (`stale`) and the dots go when that time
+   * runs out (`owner_typing_over`).
    */
   ownerTyping: OwnerTyping | null;
   /** The highest seq the chat has seen; the stream resumes after it. */
@@ -72,6 +74,10 @@ export type ChatAction =
   /** The stored conversation, read at load: it replaces whatever the chat held. */
   | { type: 'history'; transcript: VisitorTranscript }
   | { type: 'event'; seq: number; ev: SseEvent }
+  /** An event too old to show (an owner typing whose time has passed): the stream goes on after it. */
+  | { type: 'stale'; seq: number }
+  /** The owner's typing ran out of time. */
+  | { type: 'owner_typing_over' }
   /** The visitor sent a message: it shows at once, in its place. */
   | { type: 'sent'; id: string; text: string }
   /** Its answer was lost, so the chat reads the conversation before saying anything. */
@@ -98,6 +104,20 @@ export function initialChatState(): ChatState {
     inbox: [],
     seen: new Set(),
   };
+}
+
+/** The API shows the owner typing for 5 s after each ping: the dots never stay longer. */
+const OWNER_TYPING_MAX_MS = 5_000;
+
+/**
+ * How long the owner's typing shows, from `nowMs` (the browser's `Date.now()`): until the event's
+ * `until`, never longer than the API's 5 s, so a clock that runs behind can't keep the dots up.
+ * At 0 the event is stale and shows nothing, as is one whose time can't be read.
+ */
+export function ownerTypingDelayMs(ev: EvOwnerTyping, nowMs: number): number {
+  const left = Date.parse(ev.until) - nowMs;
+  if (!Number.isFinite(left) || left <= 0) return 0;
+  return Math.min(left, OWNER_TYPING_MAX_MS);
 }
 
 const messageKey = (ev: EvMessage) => `m:${ev.message_id}`;
@@ -152,14 +172,18 @@ function fromHistory(transcript: VisitorTranscript): ChatState {
     // Whispers and agents' text never reach a visitor's transcript; anything else is left out.
     return null;
   };
-  const groups = groupRows(items, partOf);
+  // A stored conversation has no writing events: a turn Claude started on its own is found by what
+  // follows a decision's status, as the owner's view finds it.
+  const groups = groupRows(items, partOf, { writingBefore: opensAReply });
   return { ...initialChatState(), ...groups, lastSeq: transcript.last_seq, openHolds, holds, seen };
 }
 
 function onEvent(state: ChatState, seq: number, ev: SseEvent): ChatState {
   switch (ev.type) {
     case 'writing':
-      return { ...state, writing: true, error: null };
+      // Claude has started a turn: what it does now explains the reply it is writing, so the turn's
+      // receipts wait for that reply, even in a turn the API started with no visitor message.
+      return { ...state, ...addPart(state, { kind: 'writing' }), writing: true, error: null };
     case 'turn_end':
       return { ...state, ...settle(state), writing: false, ownerTyping: null };
     case 'message': {
@@ -201,7 +225,7 @@ function onEvent(state: ChatState, seq: number, ev: SseEvent): ChatState {
     case 'demo_inbox':
       return { ...state, inbox: [...state.inbox, ev] };
     case 'error':
-      return { ...state, ...settle(state), writing: false, error: ev.code };
+      return { ...state, ...settle(state), writing: false, ownerTyping: null, error: ev.code };
   }
 }
 
@@ -221,6 +245,10 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       // Seen already: the stream resumed from an earlier seq.
       if (action.seq <= state.lastSeq) return state;
       return onEvent({ ...state, lastSeq: action.seq }, action.seq, action.ev);
+    case 'stale':
+      return action.seq <= state.lastSeq ? state : { ...state, lastSeq: action.seq };
+    case 'owner_typing_over':
+      return state.ownerTyping === null ? state : { ...state, ownerTyping: null };
     case 'sent': {
       const row: ChatItem = { kind: 'visitor', id: action.id, text: action.text, status: 'sent' };
       // A chat that ended stays ended; any other error was the last turn's.
@@ -235,7 +263,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
     case 'connection':
       return { ...state, connection: action.connection };
     case 'ended':
-      return { ...state, ...settle(state), writing: false, error: 'session' };
+      return { ...state, ...settle(state), writing: false, ownerTyping: null, error: 'session' };
     case 'reset':
       return initialChatState();
   }

@@ -17,7 +17,7 @@ import {
   type RouteResponse,
   type RouteSpec,
 } from './routes.ts';
-import type { RulesDraft } from './views.ts';
+import type { CancelReason, RulesDraft } from './views.ts';
 
 /** How long one request may take: a Claude turn longer, a proving route past the API's 25 s hold. */
 export const TIMEOUT_MS = { default: 10_000, model: 45_000, proving: 30_000 } as const;
@@ -46,6 +46,7 @@ interface ApiErrorInit {
   retryAfter?: number | null;
   decision?: Decision | null;
   state?: PaymentLinkState | null;
+  cancelReason?: CancelReason | null;
   draft?: RulesDraft | null;
   capCents?: number | null;
 }
@@ -65,6 +66,8 @@ export class ApiError extends Error {
   readonly decision: Decision | null;
   /** A 409's current payment link state. */
   readonly state: PaymentLinkState | null;
+  /** A 409's `cancel_reason`: `rules_changed` when a change to the business's rules cancelled the link. */
+  readonly cancelReason: CancelReason | null;
   /** A 409's fresh rules draft (the rules changed since the draft). */
   readonly draft: RulesDraft | null;
   /** A 422's `cap_cents`: the limit for taking money without asking that a draft went over. */
@@ -81,6 +84,7 @@ export class ApiError extends Error {
     this.retryAfter = init.retryAfter ?? null;
     this.decision = init.decision ?? null;
     this.state = init.state ?? null;
+    this.cancelReason = init.cancelReason ?? null;
     this.draft = init.draft ?? null;
     this.capCents = init.capCents ?? null;
   }
@@ -202,6 +206,11 @@ function stateOf(value: unknown): PaymentLinkState | null {
   return typeof value === 'string' && PAYMENT_LINK_STATES.has(value) ? (value as PaymentLinkState) : null;
 }
 
+/** Why a payment link was cancelled, as the kernel says it: only a rule change has a reason. */
+function cancelReasonOf(value: unknown): CancelReason | null {
+  return value === 'rules_changed' ? value : null;
+}
+
 function draftOf(value: unknown): RulesDraft | null {
   return isRecord(value) && typeof value.version === 'number' && Array.isArray(value.cards) ? (value as unknown as RulesDraft) : null;
 }
@@ -231,6 +240,7 @@ function errorFrom(key: RouteKey, method: HttpMethod, answer: Answer): ApiError 
     retryAfter: retryAfterOf(body),
     decision: conflict ? decisionOf(body.decision) : null,
     state: conflict ? stateOf(body.state) : null,
+    cancelReason: conflict ? cancelReasonOf(body.cancel_reason) : null,
     draft: conflict ? draftOf(body.draft) : null,
     capCents: answer.status === 422 ? capCentsOf(body.cap_cents) : null,
   });

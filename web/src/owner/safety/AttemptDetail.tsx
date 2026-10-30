@@ -2,7 +2,7 @@ import { useId, useRef, useState, type Ref } from 'react';
 
 import type { LedgerPage } from '../../api/contracts.ts';
 import type { Attempt } from '../../api/views.ts';
-import { Card, CheckpointMeter, FullTrace, Icon, StatusLabel, TextLink } from '../../ds/index.ts';
+import { Card, CheckpointMeter, FullTrace, Icon, OWNER_STATE_WORDS, StatusLabel, TextLink } from '../../ds/index.ts';
 import { formatWhen } from '../../lib/format.ts';
 import { conversationPath } from '../conversations/status.ts';
 import { REPLAYED_LABEL, attemptTime, categoryLabel, entryFor, originCopy, replayedOf, stoppedBy, triageOf } from './copy.ts';
@@ -101,7 +101,8 @@ export function AttemptDetail({ attempt, page, devKey, deskId, timezone }: Attem
     <Card as="section" label="Attempt details">
       <div className="cd-attempt">
         <p className="cd-attempt__status cd-type-meta">
-          <StatusLabel tone={held ? 'held' : 'refused'}>{held ? 'Held for you' : 'Stopped'}</StatusLabel>
+          {/* The owner's words for what the kernel decided, as the receipt in the conversation names it. */}
+          <StatusLabel tone={held ? 'held' : 'refused'}>{OWNER_STATE_WORDS[held ? 'held' : 'refused']}</StatusLabel>
           <span className="cd-attempt__category">{categoryLabel(attempt)}</span>
           <span className="cd-attempt__when">{formatWhen(attemptTime(attempt, page), timezone, new Date())}</span>
         </p>

@@ -1,0 +1,28 @@
+/* CheckoutPage: the window's ground around the design system's MockCheckout, which lays out its
+   own centered column. Before a link shows, the same column holds the disclosure line, the page's
+   one line (opening, not found, or couldn't be read) and the concept footer. */
+
+.cd-checkout-page {
+  box-sizing: border-box;
+  min-height: 100dvh;
+  background: var(--bg-app);
+  color: var(--text-primary);
+}
+
+/* MockCheckout's own column: at most size-checkout wide, 28 px on top, 24 at the sides, 20 below. */
+.cd-checkout-page__column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-14);
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--size-checkout);
+  min-width: 0;
+  margin: 0 auto;
+  padding: var(--space-28) var(--space-24) var(--space-20);
+}
+
+.cd-checkout-page__opening {
+  margin: 0;
+  color: var(--text-secondary);
+}

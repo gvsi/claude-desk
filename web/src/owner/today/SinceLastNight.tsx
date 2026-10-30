@@ -14,7 +14,7 @@ export function briefingPath(deskId: string): string {
 }
 
 /** Safety's every-entry view, where each replayed entry says so. */
-function entriesPath(deskId: string): string {
+export function entriesPath(deskId: string): string {
   return `/app/${encodeURIComponent(deskId)}/safety?view=entries`;
 }
 

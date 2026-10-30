@@ -9,6 +9,7 @@
 import type {
   ApprovalAnswer,
   CardBlock,
+  ClauseTemplate,
   Decision,
   DecisionState,
   EvDemoInbox,
@@ -60,6 +61,7 @@ export const VISITOR_PLAIN = {
     refused_at_execution: "The rules changed, so this didn't go ahead",
     reply_checked: "Reply checked against Maria Rivera's rules",
     reply_handed_off: 'Passed to Maria Rivera to answer',
+    owner_said: 'Written by Maria Rivera',
   },
   es: {
     allowed: 'Revisado con las reglas de Maria Rivera',
@@ -74,8 +76,12 @@ export const VISITOR_PLAIN = {
     refused_at_execution: 'Las reglas cambiaron, así que no se hizo',
     reply_checked: 'Respuesta revisada con las reglas de Maria Rivera',
     reply_handed_off: 'Pasado a Maria Rivera para responder',
+    owner_said: 'Escrito por Maria Rivera',
   },
-} as const satisfies Record<Language, Record<Exclude<DecisionState, 'executed'> | 'reply_checked' | 'reply_handed_off', string>>;
+} as const satisfies Record<
+  Language,
+  Record<Exclude<DecisionState, 'executed'> | 'reply_checked' | 'reply_handed_off' | 'owner_said', string>
+>;
 
 /**
  * Tools that only read for Claude and so have no executed line of their own. Every other tool has
@@ -177,10 +183,50 @@ export const HELD_PROSE: Record<Language, string> = {
   es: 'Eso lo decide Maria, así que ya le pregunté. Su respuesta aparecerá aquí.',
 };
 
+/**
+ * The kernel's `link_cancelled` line, rendered from the owner's name (master plan, "Payment links";
+ * kernel plan 01c), which only the kernel issues.
+ */
+export const LINK_CANCELLED: Record<Language, string> = {
+  en: `This payment link was cancelled because ${OWNER}'s rules changed. Ask again if you still want to pay.`,
+  es: `Este enlace de pago se canceló porque cambiaron las reglas de ${OWNER}. Pide uno nuevo si todavía quieres pagar.`,
+};
+
+/**
+ * The `link_cancelled` card as the kernel renders it. The template joins the generated contracts
+ * with kernel plan 01c; until then it is named here by hand, and the public chat shows it as the
+ * design system's `LinkCancelledCard`, from its `title`.
+ */
+export function linkCancelledBlock(language: Language): RenderedBlock {
+  const text = LINK_CANCELLED[language];
+  const template = 'link_cancelled' as unknown as ClauseTemplate;
+  return { kind: 'card', template, text, fact_id: null, title: text, lines: [], href: null, options: [] };
+}
+
 const inboxPreview: Record<Language, string> = {
   en: 'New verification code',
   es: 'Nuevo código de verificación',
 };
+
+/**
+ * Claude's checked words before the kernel's verify card, as the signed verify board writes them:
+ * what was asked waits until the visitor confirms it's them. No digits, amounts or dates.
+ */
+const verifyFirstProse: Record<Language, RenderedBlock> = {
+  en: proseBlock("I can send that after you confirm it's you."),
+  es: proseBlock('Puedo enviarlo cuando confirmes que eres tú.'),
+};
+
+/**
+ * The kernel's Demo inbox message for a verification code (`inbox_code_body`, kernel verification,
+ * plan 01b), rendered from the business's name and the code in the chat's language.
+ */
+function codeBody(language: Language, code: string): string {
+  const business = rivera.business.name;
+  return language === 'es'
+    ? `Tu código de ${business} es ${code}. Vence en diez minutos. Si no lo pediste, ignora este mensaje.`
+    : `Your ${business} code is ${code}. It expires in ten minutes. If you didn't ask for it, ignore this message.`;
+}
 
 // ---------------------------------------------------------------------------------------------
 // Decisions the script asks the kernel for
@@ -274,6 +320,25 @@ export const DECISIONS = {
     reasonPlain: 'A visitor asked for a link to pay the $20.00 service call deposit.',
     amountCents: 2000,
   },
+  /** A demo code to the contact on record for the person the visitor says they are. */
+  startVerification: {
+    tool: 'native.start_verification',
+    effects: ['send_message'],
+    outcome: 'allow',
+    executed: true,
+    cardIds: [],
+    reasonPlain: "A visitor said they're Dana Whitfield, so a code went to her contact on record.",
+  },
+  /** Verified Dana's invoice, released to her once she confirmed it's her. */
+  releaseInvoice: {
+    tool: 'native.release_document',
+    effects: ['private_data', 'send_message'],
+    outcome: 'allow',
+    executed: true,
+    cardIds: ['rv-docs'],
+    reasonPlain: "Dana Whitfield confirmed it's her with a code, so she got her drain clearing invoice.",
+    resource: { kind: 'document', id: 'doc-dana-invoice', owner_person_id: rivera.people.dana.personId },
+  },
   callback: {
     tool: 'native.request_callback',
     effects: ['send_message'],
@@ -320,8 +385,12 @@ export interface TurnContext {
   status(type: StatusEvent['type'], decision: Decision): StatusEvent;
   /** A checked reply with its ledger entry; `blocked` when Claude's draft failed the check and the visitor gets the handoff. */
   reply(blocks: RenderedBlock[], opts?: { blocked?: boolean }): EvMessage;
-  /** A Demo inbox entry for this session, and the notice the visitor sees (no code in it). */
-  inbox(fields: { to: string; body: string; preview: string }): EvDemoInbox;
+  /**
+   * Sends a demo code to `person`'s contact on record, as the kernel's `/verify/start` does: the
+   * challenge the code answers, a Demo inbox entry for this session with the code in its body, and
+   * the notice the visitor sees, which carries no code.
+   */
+  startVerification(fields: { person: VerifyPerson; code: string; body: string; preview: string }): EvDemoInbox;
   /** An open callback request in Needs you; the visitor becomes a lead under `lead`. */
   openHandoff(fields: { reason: string; callbackWindow: string | null; lead: string }): void;
   /** A payment link for this session, `issued`, with a token of its own. */
@@ -360,6 +429,12 @@ export interface ScriptRule {
   steps: readonly Step[];
 }
 
+/** The deposit link's title, as its card shows it: "Service call deposit, $20". */
+const DEPOSIT_TITLE: Record<Language, string> = {
+  en: blocks.payment_link.en.title ?? '',
+  es: blocks.payment_link.es.title ?? '',
+};
+
 /** The verification code the invoice rule sends to the Demo inbox. */
 export const DEMO_CODE = '482913';
 
@@ -387,12 +462,15 @@ export const SCRIPT: readonly ScriptRule[] = [
     name: 'invoice',
     words: ['invoice', 'return', 'factura'],
     steps: [
+      // The code goes to the contact on record, never to the visitor: the kernel decides that first.
+      (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.startVerification)),
       writing,
-      (ctx) => ctx.reply([blocks.verify_prompt[ctx.language]]),
+      (ctx) => ctx.reply([verifyFirstProse[ctx.language], blocks.verify_prompt[ctx.language]]),
       (ctx) =>
-        ctx.inbox({
-          to: rivera.people.dana.maskedContact,
-          body: `Your Rivera Plumbing verification code is ${DEMO_CODE}.`,
+        ctx.startVerification({
+          person: rivera.people.dana,
+          code: DEMO_CODE,
+          body: codeBody(ctx.language, DEMO_CODE),
           preview: inboxPreview[ctx.language],
         }),
     ],
@@ -403,7 +481,8 @@ export const SCRIPT: readonly ScriptRule[] = [
     steps: [
       (ctx) => {
         const decision = ctx.decide(DECISIONS.paymentLink);
-        ctx.issueLink({ title: 'Service call deposit', amountCents: 2000 });
+        // The checkout's title is the card's, as the kernel writes both from the one link.
+        ctx.issueLink({ title: DEPOSIT_TITLE[ctx.language], amountCents: 2000 });
         return ctx.status('receipt', decision);
       },
       writing,
@@ -471,6 +550,30 @@ export const SCRIPT: readonly ScriptRule[] = [
     words: [],
     steps: [writing, (ctx) => ctx.reply([helpProse[ctx.language]])],
   },
+];
+
+/** Who a demo code is for: a person on record, with the masked contact the code goes to. */
+export interface VerifyPerson {
+  personId: string;
+  name: string;
+  maskedContact: string;
+}
+
+/** Claude's checked words with the invoice: no digits, amounts or dates. */
+const invoiceProse: Record<Language, RenderedBlock> = {
+  en: proseBlock("Thanks, Dana. Here's your invoice."),
+  es: proseBlock('Gracias, Dana. Aquí tienes tu factura.'),
+};
+
+/**
+ * Claude's turn once the visitor confirmed it's them, which the API wakes it for: the invoice they
+ * asked for, released to them as its verified owner. No visitor message starts it, so it begins as
+ * the API's turns do, with Claude writing.
+ */
+export const AFTER_VERIFY: readonly Step[] = [
+  writing,
+  (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.releaseInvoice)),
+  (ctx) => ctx.reply([invoiceProse[ctx.language], blocks.document_link[ctx.language]]),
 ];
 
 /**

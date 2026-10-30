@@ -187,12 +187,20 @@ describe('request', () => {
     expect(changed.draft).toEqual(draft);
 
     replies = [{ status: 409, body: { error: 'conflict', state: 'paid' } }];
-    expect((await failure(request('completePayment', { params: { token: 'k7Hq2vX9' } }))).state).toBe('paid');
+    const paid = await failure(request('completePayment', { params: { token: 'k7Hq2vX9' } }));
+    expect([paid.state, paid.cancelReason]).toEqual(['paid', null]);
+
+    // A link a rule change cancelled says so, as the API reads it back on a 409 (plan 02b).
+    replies = [{ status: 409, body: { error: 'kernel', code: 'conflict', state: 'cancelled', cancel_reason: 'rules_changed' } }];
+    const cancelled = await failure(request('completePayment', { params: { token: 'k7Hq2vX9' } }));
+    expect([cancelled.code, cancelled.state, cancelled.cancelReason]).toEqual(['conflict', 'cancelled', 'rules_changed']);
+    replies = [{ status: 409, body: { error: 'kernel', code: 'conflict', state: 'cancelled', cancel_reason: 'because' } }];
+    expect((await failure(request('cancelPayment', { params: { token: 'k7Hq2vX9' } }))).cancelReason).toBeNull();
 
     // Only a 409 carries them, and only in shape.
-    replies = [{ status: 500, body: { error: 'x', decision: rivera.decisions.approved, state: 'paid', draft } }];
+    replies = [{ status: 500, body: { error: 'x', decision: rivera.decisions.approved, state: 'paid', cancel_reason: 'rules_changed', draft } }];
     const other = await failure(request('me'));
-    expect([other.decision, other.state, other.draft]).toEqual([null, null, null]);
+    expect([other.decision, other.state, other.cancelReason, other.draft]).toEqual([null, null, null, null]);
     replies = [{ status: 409, body: { error: 'x', decision: { decision_id: 7 }, state: 'gone', draft: { version: '8' } } }];
     const malformed = await failure(request('me'));
     expect([malformed.decision, malformed.state, malformed.draft]).toEqual([null, null, null]);

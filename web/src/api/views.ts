@@ -20,6 +20,7 @@ import type {
   Health,
   HoursWindow,
   KnowledgeItem,
+  PaymentLinkView,
   PolicyVersion,
   ProbeResult,
   ProofReport,
@@ -70,6 +71,8 @@ export interface ConversationSummary {
   outcome_counts: Partial<Record<DecisionState, number>>;
   /** The owner's own preview chat (`kernel_ro.sessions.preview`, a boolean). */
   owner_preview: boolean;
+  /** Replayed from the recorded history into this copy (plan 02b); absent is false. */
+  replayed?: boolean;
 }
 
 export type BriefingKind = 'blocked' | 'booking' | 'lead' | 'answer';
@@ -247,6 +250,13 @@ export interface VisitorTranscript {
 export interface OwnerTranscript {
   state: SessionState;
   items: TranscriptItem[];
+  /**
+   * Until when the visitor is typing, while that is in the future, else null (plan 02b Task 1,
+   * owner view only). Optional until the API sends it.
+   */
+  typing_until?: string | null;
+  /** Replayed from the recorded history into this copy (plan 02b); absent is false. */
+  replayed?: boolean;
 }
 
 // Safety
@@ -450,6 +460,27 @@ export interface DemoAgentRun {
   task: string;
   state: 'running' | 'done' | 'failed';
   turns: AgentTurn[];
+}
+
+// Tokens
+
+/** Why a payment link was cancelled: only a change to the business's rules gives a reason. */
+export type CancelReason = 'rules_changed';
+
+/**
+ * `GET /api/pay/{token}`: the kernel's `PaymentLinkView` with the fields the kernel payments,
+ * agents and setup plan (plan 01c) adds to it, typed here and optional until plan 01c's
+ * regenerated types have them. `business_name` is the Desk's business as the kernel names it; the
+ * live API doesn't send it yet, and the checkout leaves the business's name out when it's missing,
+ * never naming one of its own. `cancel_reason` is `rules_changed` for a link a rule change
+ * cancelled, else null; `customer_name` is the kernel's first name and last initial for a link from
+ * a verified session ("Dana W."), present only while the link is open. Names are someone's own
+ * words and render as text.
+ */
+export interface PaymentLinkOut extends PaymentLinkView {
+  business_name?: string;
+  cancel_reason?: CancelReason | null;
+  customer_name?: string | null;
 }
 
 // Request bodies
