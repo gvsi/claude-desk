@@ -34,7 +34,7 @@ import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { REPLAYED_LABEL } from '../safety/copy.ts';
 import { DraftedRule, aboutTheRequest, withNoAnswers } from '../today/NeedsYou.tsx';
 import { heldOldestFirst, useNeedsYou } from '../useDesks.ts';
-import { useReadFailure } from '../useReadFailure.ts';
+import { useReadFailure, type ReadFailure } from '../useReadFailure.ts';
 import { OwnerTranscript } from './OwnerTranscript.tsx';
 import { whoLabel } from './status.ts';
 import { conversationKey, useTakeOver } from './useTakeOver.ts';
@@ -92,6 +92,22 @@ function useVisitorTyping(read: OwnerTranscriptRead | undefined): boolean {
   return useStillTyping(current === null || answered ? null : current);
 }
 
+/** A read that failed, in the owner's words, with a way to read it again. */
+function FailedRead({ failure }: { failure: ReadFailure }) {
+  return (
+    <Notice
+      tone="error"
+      action={
+        <Button variant="secondary" busy={failure.retrying} onClick={failure.retry}>
+          Try again
+        </Button>
+      }
+    >
+      {failure.line}
+    </Notice>
+  );
+}
+
 /** What the page says about where the chat came from: "Today at 12:04 pm, web chat from …". */
 function startedLine(read: OwnerTranscriptRead, slug: string, who: string, timezone: string): string | null {
   const first = [...read.items].sort((a, b) => a.n - b.n)[0];
@@ -115,6 +131,8 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
   });
   const failure = useReadFailure(chat);
   const needsYou = useNeedsYou(deskId);
+  // The requests held here come from Needs you: a failed read says so, rather than a hold with nothing to answer.
+  const heldFailure = useReadFailure(needsYou);
   const answers = useAnswer(deskId);
   const controls = useTakeOver(sessionId);
   const typing = useVisitorTyping(chat.data);
@@ -139,20 +157,7 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
         />
       );
     }
-    if (failure !== null) {
-      return (
-        <Notice
-          tone="error"
-          action={
-            <Button variant="secondary" busy={failure.retrying} onClick={failure.retry}>
-              Try again
-            </Button>
-          }
-        >
-          {failure.line}
-        </Notice>
-      );
-    }
+    if (failure !== null) return <FailedRead failure={failure} />;
     return (
       <p className="cd-conversation__loading cd-type-meta" role="status">
         Opening the conversation
@@ -267,18 +272,8 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
       </header>
       {read.replayed === true ? <p className="cd-conversation__quiet cd-type-caption">{REPLAYED_LABEL}. It happened before you arrived.</p> : null}
       {notice !== null ? <Notice tone="error">{notice}</Notice> : null}
-      {failure !== null ? (
-        <Notice
-          tone="error"
-          action={
-            <Button variant="secondary" busy={failure.retrying} onClick={failure.retry}>
-              Try again
-            </Button>
-          }
-        >
-          {failure.line}
-        </Notice>
-      ) : null}
+      {failure !== null ? <FailedRead failure={failure} /> : null}
+      {heldFailure !== null ? <FailedRead failure={heldFailure} /> : null}
       <Transcript label={`Conversation with ${who}`}>
         <TranscriptHeader left={started ?? 'No messages yet.'} right="Notes from the checks sit under each message. Select one for the full trace." />
         <OwnerTranscript

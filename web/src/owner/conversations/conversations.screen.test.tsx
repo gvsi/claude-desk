@@ -35,6 +35,9 @@ const SEEDED_HOLD = 'ses-visitor-web';
 
 const conversation = (sessionId: string) => `${LIST}/${sessionId}`;
 
+/** The owner's line for a read the server failed. */
+const UNAVAILABLE = 'Something went wrong on our side. Try again in a moment.';
+
 /** The requests a route got, by key. */
 const requests = (key: string) => mockStore.requests.filter((r) => r.key === key);
 
@@ -373,6 +376,23 @@ describe('Conversations', () => {
     expect(chat.state.mode).toBe('owner');
     await expect.element(screen.getByRole('button', { name: 'Hand back to Claude' })).toBeVisible();
     await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('held_requests_that_cant_be_read_say_so', async () => {
+    // What needs the owner can't be read (the read and its one retry fail): the chat says so, with
+    // a way to read it again, rather than showing a hold with nothing to answer.
+    mockStore.inject({ route: 'needsYou', status: 500, times: 2 });
+    const { screen } = await renderRoute(conversation(SEEDED_HOLD), { pollScale: 100 });
+    await expect.element(log(screen).getByRole('button', { name: `${SEEDED_REASON} Open the full trace.` })).toBeVisible();
+    const line = screen.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
+    await expect.element(line, { timeout: 4_000 }).toBeVisible();
+    expect(heldCard(screen, SEEDED_REASON).elements()).toHaveLength(0);
+    await expectScreenBasics(screen.container, { owner: true });
+
+    // Reading again works: the request is there to answer, and the line goes.
+    await screen.getByRole('button', { name: 'Try again', exact: true }).click();
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    await expect.element(line).not.toBeInTheDocument();
   });
 
   it('paused_offers_resume', async () => {
