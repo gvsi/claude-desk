@@ -409,6 +409,12 @@ export interface ScriptRule {
   steps: readonly Step[];
 }
 
+/** The deposit link's title, as its card shows it: "Service call deposit, $20". */
+const DEPOSIT_TITLE: Record<Language, string> = {
+  en: blocks.payment_link.en.title ?? '',
+  es: blocks.payment_link.es.title ?? '',
+};
+
 /** The verification code the invoice rule sends to the Demo inbox. */
 export const DEMO_CODE = '482913';
 
@@ -455,7 +461,8 @@ export const SCRIPT: readonly ScriptRule[] = [
     steps: [
       (ctx) => {
         const decision = ctx.decide(DECISIONS.paymentLink);
-        ctx.issueLink({ title: 'Service call deposit', amountCents: 2000 });
+        // The checkout's title is the card's, as the kernel writes both from the one link.
+        ctx.issueLink({ title: DEPOSIT_TITLE[ctx.language], amountCents: 2000 });
         return ctx.status('receipt', decision);
       },
       writing,
