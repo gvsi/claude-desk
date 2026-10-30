@@ -260,6 +260,29 @@ def test_deny_list_is_optional_and_applied(tmp_path):
     assert "plans/plan.md" not in out          # only shipped docs are scanned
 
 
+def test_flags_private_references_in_the_committed_images(tmp_path):
+    # An SVG's title, description and labels are public text wherever the repository is read.
+    root = passing_tree(tmp_path)
+    write(root, ".local/docs-deny.txt", "northwind pilot\n")
+    write(root, "docs/images/figure.svg", '<svg xmlns="http://www.w3.org/2000/svg">\n'
+          "  <title>A figure</title>\n  <desc>Drawn from /Users/someone/figure.fig</desc>\n</svg>\n")
+    write(root, "docs/images/chart.svg", '<svg xmlns="http://www.w3.org/2000/svg">\n'
+          '  <text x="0" y="10">Built for the Northwind Pilot</text>\n</svg>\n')
+
+    code, out = run(root)
+
+    assert code == 1
+    assert out.splitlines() == [
+        "docs-check: docs/images/chart.svg:2: private reference (a term from .local/docs-deny.txt, line 1)",
+        "docs-check: docs/images/figure.svg:3: private reference (/Users/)",
+        "docs-check: 2 problems",
+    ]
+
+    write(root, "docs/images/figure.svg", '<svg xmlns="http://www.w3.org/2000/svg"><title>A figure</title></svg>\n')
+    write(root, "docs/images/chart.svg", '<svg xmlns="http://www.w3.org/2000/svg"><text>Built for a pilot</text></svg>\n')
+    assert run(root) == (0, "docs-check: ok")
+
+
 def git(*args: str) -> None:
     subprocess.run(["git", *args], check=True, capture_output=True)
 
@@ -339,7 +362,7 @@ def test_about_documents_are_shipped_docs():
 def test_about_documents_pass_the_docs_check():
     found = check_docs.check_private(REPO) + check_docs.check_links(REPO)
 
-    assert [str(problem) for problem in found if problem.path in ABOUT_DOCS] == []
+    assert [str(problem) for problem in found if problem.path in [*ABOUT_DOCS, "docs/images/v1-architecture.svg"]] == []
     # The architecture figure GitHub readers see, linked from the proposal, is a committed SVG.
     proposal = (REPO / "docs/product-proposal.md").read_text()
     assert "images/v1-architecture.svg" in [target for _, target in check_docs.link_targets(proposal)]

@@ -7,7 +7,9 @@ are ignored). The shipped docs (SHIPPED_DOCS) hold no private reference: no `~/`
 or code; no /Users/ or /home/ path, run-ledger path or claude.ai artifact or share link anywhere; and
 no term from the optional, git-ignored .local/docs-deny.txt (one per line, `#` comments, matched
 ignoring case), read from the root or, in a git worktree, from the main checkout. With no list
-found, the check says that private terms were not checked and still passes.
+found, the check says that private terms were not checked and still passes. The SVG images in
+docs/images/, whose titles and labels are public text too, are scanned line by line for the same
+references private anywhere and the same terms.
 Each phrase in DISCLOSURES appears in every doc it names, ignoring case, line breaks and curly
 apostrophes. With --final, the shipped docs also hold no placeholder: a value still to be measured
 (`[measured: …]`) or a link the owner still has to give (`[owner: …]`).
@@ -48,6 +50,7 @@ SHIPPED_DOCS = (
 PRIVATE_ANYWHERE = (".plan-runs/", "claude.ai/artifact", "claude.ai/code/artifact", "claude.ai/share", "/Users/", "/home/")
 PRIVATE_IN_PATHS = ("~/",)
 DENY_LIST = ".local/docs-deny.txt"
+IMAGES = "docs/images"   # its SVGs are scanned like the shipped docs, line by line
 
 PLACEHOLDERS = ("[measured:", "[owner:")
 
@@ -207,21 +210,30 @@ def deny_terms(root: Path) -> list[tuple[int, str]]:
     return terms
 
 
+def _private_anywhere(line: str, terms: list[tuple[int, str]]) -> set[str]:
+    """What in the line is private wherever it appears: a PRIVATE_ANYWHERE pattern or a deny-list term."""
+    folded = line.casefold()
+    return ({p for p in PRIVATE_ANYWHERE if p in line}
+            | {f"a term from {DENY_LIST}, line {at}" for at, term in terms if term in folded})
+
+
 def check_private(root: Path) -> list[Problem]:
     problems = []
     terms = deny_terms(root)
     for name, text in shipped_docs(root):
-        found: dict[int, set[str]] = {}
-        for number, line in enumerate(text.splitlines(), start=1):
-            found.setdefault(number, set()).update(p for p in PRIVATE_ANYWHERE if p in line)
-            folded = line.casefold()
-            found[number].update(f"a term from {DENY_LIST}, line {at}" for at, term in terms if term in folded)
+        found = {number: _private_anywhere(line, terms) for number, line in enumerate(text.splitlines(), start=1)}
         paths = list(code_segments(text)) + list(link_targets(text))
         for number, segment in paths:
             found.setdefault(number, set()).update(f"{p} in a link or code" for p in PRIVATE_IN_PATHS if p in segment)
         for number in sorted(found):
             for what in sorted(found[number]):
                 problems.append(Problem(name, number, f"private reference ({what})"))
+    # A committed image's title, description and labels are public text too.
+    for image in sorted((root / IMAGES).glob("*.svg")):
+        name = image.relative_to(root).as_posix()
+        for number, line in enumerate(image.read_text().splitlines(), start=1):
+            problems += [Problem(name, number, f"private reference ({what})")
+                         for what in sorted(_private_anywhere(line, terms))]
     return problems
 
 
