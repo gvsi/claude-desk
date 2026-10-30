@@ -19,7 +19,7 @@ const meta = {
       <ConnectorList {...args} />
     </div>
   ),
-  parameters: { layout: 'padded', canvas: 'N-Conn-01-Rules' },
+  parameters: { layout: 'padded', canvas: 'N-Conn-12-Chat' },
 } satisfies Meta<typeof ConnectorList>;
 
 export default meta;
@@ -49,10 +49,10 @@ export const RiveraHub: Story = {
 
 export const Phone: Story = {
   globals: { viewport: { value: 'phone', isRotated: false } },
-  parameters: { canvas: 'N-Conn-16-Phone-Rules' },
+  parameters: { canvas: 'none', canvasNote: 'No current board draws the Rules page on a phone; this is the archived first phone Rules board’s layout.' },
   play: async ({ canvas, canvasElement }) => {
-    // phone_hides_descriptions: at 390 px the summary and the last button go, as the phone board
-    // draws them (the page header keeps its "Add a connector"), and nothing scrolls sideways.
+    // phone_hides_descriptions: at 390 px the summary and the last button go, as the archived phone
+    // Rules board drew them, and nothing scrolls sideways.
     const width = window.innerWidth;
     await expect(width).toBe(390);
     await expect(canvas.getByText(rivera.connectors.summary)).not.toBeVisible();
@@ -64,5 +64,14 @@ export const Phone: Story = {
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
     const tooWide = [...canvasElement.querySelectorAll('*')].filter((el) => el.getBoundingClientRect().right > width);
     await expect(tooWide).toEqual([]);
+  },
+};
+
+export const OnTheRulesPage: Story = {
+  args: { onAddConnector: undefined },
+  parameters: { canvasNote: 'The Rules page adds no connectors: they are added from the Connectors page, so the list ends with its last section.' },
+  play: async ({ canvas }) => {
+    await expect(canvas.getByRole('list', { name: 'Connectors' })).toBeVisible();
+    await expect(canvas.queryByRole('button', { name: 'Add a connector' })).toBeNull();
   },
 };

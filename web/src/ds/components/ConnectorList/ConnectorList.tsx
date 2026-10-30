@@ -7,8 +7,8 @@ import './ConnectorList.css';
 export interface ConnectorListProps {
   /** One line about the Desk's connectors and its rules version, from the active version. */
   summary: string;
-  /** "Add a connector" after the last connector: the screen opens the picker. */
-  onAddConnector: () => void;
+  /** Adds "Add a connector" after the last connector: the screen opens the picker. The Rules page leaves it out, as connectors are added from the Connectors page. */
+  onAddConnector?: () => void;
   /** One `ConnectorSection` per connector the Desk has: built in first, then the ones it connected. */
   children: ReactNode;
 }
@@ -31,11 +31,13 @@ export function ConnectorList({ summary, onAddConnector, children }: ConnectorLi
             </li>
           ))}
         </ul>
-        <div className="cd-connector-list__add">
-          <Button variant="secondary" size="main" onClick={() => onAddConnector()}>
-            Add a connector
-          </Button>
-        </div>
+        {onAddConnector ? (
+          <div className="cd-connector-list__add">
+            <Button variant="secondary" size="main" onClick={() => onAddConnector()}>
+              Add a connector
+            </Button>
+          </div>
+        ) : null}
       </div>
     </div>
   );
