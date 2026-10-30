@@ -139,8 +139,7 @@
 }
 
 .cd-app-shell__sheet::backdrop {
-  background: var(--bg-app);
-  opacity: 0.72;
+  background: var(--scrim);
 }
 
 .cd-app-shell__sheet-head {
