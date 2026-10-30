@@ -13,8 +13,9 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    the language, with each letter that looks like a Latin one read as it, from
    `lexicon/lookalikes.txt`, every dash as "-" and every apostrophe as "’"; booking claims such
    as "you're booked" among them), five or more words in a row repeated from a rule the session
-   may read (`readable_policies`), and the Desk's document canaries. Bookings and policies reach
-   a visitor only in their cards, so prose saying them is blocked even beside the card.
+   may read (`readable_policies`), links and email addresses (`LINK`), and the Desk's document
+   canaries. Bookings, policies, links and contacts reach a visitor only in their cards, so prose
+   saying them is blocked even beside the card.
 4. Each clause renders from a fact this session may read, current, of the template's kind and ID,
    with no canary in what it renders. The Desk's catalog (`context.catalog_fact`) is cited like a
    stored fact, and no template renders it, so it backs no card.
@@ -40,6 +41,7 @@ out before anything else is scanned, and a canary violation's span is empty. The
 kinds, rule IDs and the cited fact IDs (through `ledger.safe_ref`), never prose.
 """
 
+import bisect
 import hashlib
 import json
 import re
@@ -83,6 +85,24 @@ CONDITION_REACH = 32               # more characters than the longest condition 
 ECHO_WORDS = 5                     # this many words in a row shared with a policy's text: the policy in prose
 WORD = re.compile(r"[^\W_]+")      # a word, for the policy-echo scan: a run of letters and digits
 RULE_KEYS = frozenset({"service_area", "deposit", "cancellation"})   # charter claims stating a rule, beside policy:*
+# A link or an email address reaches a visitor only on a card (a payment or document card's `href`,
+# the contact clause from charter facts), so prose holding one of these shapes is blocked, read on
+# folded text like the lexicons. NFKC already writes the full-width and small dots, slashes and @
+# signs as ASCII ones; the ideographic full stop, and the fraction and division slashes, it keeps.
+DOT, SLASH = "[.\u3002]", "[/\u2044\u2215]"
+LABEL = r"[^\W_][\w-]*"            # one label of a domain name
+DOMAIN_START = r"(?<![\w.\u3002-])"
+LINK_TLDS = ("com", "net", "org", "io", "co", "us", "app", "dev", "info", "biz", "mx", "es", "example")
+LINK = re.compile(
+    r"://|(?<!\w)(?:https?|mailto|tel):"            # a scheme: "https://", any other before "://", "https:", "tel:"
+    rf"|{DOMAIN_START}www{DOT}"                      # "www."
+    rf"|{DOMAIN_START}{LABEL}(?:{DOT}{LABEL})+{SLASH}"   # a domain before a path: "rivera-pay.example/checkout"
+    rf"|{DOMAIN_START}{LABEL}(?:{DOT}{LABEL})*{DOT}(?:{'|'.join(LINK_TLDS)})(?![\w-])"   # a bare domain: "riverapl.com"
+    r"|(?<=\w)@(?=\w)",                              # an email address: "maria@riverapl.example"
+    re.IGNORECASE)
+BLANKS = re.compile(r"\S+")        # a run of text between blanks, which a link's span takes in
+LINK_OPENERS = frozenset("([{<«‹\"'“‘¿¡")             # around a link, left out of its span
+LINK_CLOSERS = frozenset(".,;:!?…)]}>»›\"'”’")
 
 
 # Default-ignorable code points beyond category Cf (Unicode's DerivedCoreProperties): the combining
@@ -364,24 +384,49 @@ def _booking_claims(text: str, readings: dict[str, list[int]]) -> list[tuple[int
     return hits
 
 
+def _links(text: str, readings: dict[str, list[int]]) -> list[tuple[int, str, Violation]]:
+    """A `promise_word` (`link`) for each run of `text` between blanks holding a link shape
+    (`LINK`) in any reading, spanning that run without the punctuation around it."""
+    runs = [(run.start(), run.end()) for run in BLANKS.finditer(text)]
+    starts = [start for start, _ in runs]
+    found: dict[int, tuple[int, int]] = {}      # a run's index: where its first link shape starts, its last ends
+    for reading, origin, match in ((reading, origin, match) for reading, origin in readings.items()
+                                   for match in LINK.finditer(reading)):
+        start, end = origin[match.start()], origin[match.end() - 1] + 1
+        index = bisect.bisect_right(starts, start) - 1
+        first, last = found.get(index, (start, end))
+        found[index] = (min(first, start), max(last, end))
+    hits = []
+    for index, (first, last) in found.items():
+        start, end = runs[index]
+        while start < first and text[start] in LINK_OPENERS:
+            start += 1
+        while end > last and text[end - 1] in LINK_CLOSERS:
+            end -= 1
+        hits.append((start, "link", Violation(kind="promise_word", span=_span(text[start:end]), rule_id="link")))
+    return hits
+
+
 def scan_prose(text: str, canaries: Iterable[str] = (), names: Iterable[str] = (),
                policies: Iterable[tuple[str, str]] = ()) -> list[Violation]:
-    """Every number, currency sign, lexicon word, policy echo and canary in `text`, after `shown`:
-    any Unicode numeral or character drawn as a digit (`digit`, with the separators inside one
-    number and the letters shaped like 0 or 1 next to it in the same span, and a word made only of
-    such letters unless it is plain ASCII), currency sign (`currency`) or percent sign
+    """Every number, currency sign, lexicon word, policy echo, link and canary in `text`, after
+    `shown`: any Unicode numeral or character drawn as a digit (`digit`, with the separators inside
+    one number and the letters shaped like 0 or 1 next to it in the same span, and a word made only
+    of such letters unless it is plain ASCII), currency sign (`currency`) or percent sign
     (`percent_sign`) and every match of both lexicons (`lex.<lang>.<category>`) is
     `number_in_prose`, or `promise_word` for the promise and booking categories, but for a booking
     claim with a condition straight before it (`BOOKING_CONDITION`: "once you're booked", "si" but
     not "sí") or inside such a claim, a claim inside another being one (`_booking_claims`); a run
     of `ECHO_WORDS` or more words shared with the text of one of `policies` (`(fact_id, text)`
-    pairs) is `promise_word` (`policy_echo`, naming the fact); a word mixing Latin letters with another
+    pairs) is `promise_word` (`policy_echo`, naming the fact); a run of text between blanks holding
+    a URL scheme, "www.", a domain before a path, a bare domain ending in one of `LINK_TLDS` or an
+    "@" between word characters is `promise_word` (`link`); a word mixing Latin letters with another
     script is `unsupported_language` (`mixed_script`), unless it lies inside one of `names` (the
-    Desk's own names) as it is written there; a canary verbatim is `canary`. The lexicons and the
-    policy-echo scan read lookalike letters as the Latin ones, a bare stroke both as l and as I, an
-    ASCII capital I as l too, every dash and hyphen as "-" and every apostrophe as "’", an acute
-    accent (a space and a combining acute after NFKC) both as that space and as "’". Canaries come
-    first, then the rest in the order they appear."""
+    Desk's own names) as it is written there; a canary verbatim is `canary`. The lexicons, the
+    policy-echo scan and the link scan read lookalike letters as the Latin ones, a bare stroke both
+    as l and as I, an ASCII capital I as l too, every dash and hyphen as "-" and every apostrophe as
+    "’", an acute accent (a space and a combining acute after NFKC) both as that space and as "’".
+    Canaries come first, then the rest in the order they appear."""
     text, found = _blank_canaries(shown(text), canaries)
     hits: list[tuple[int, str, Violation]] = [
         (-1, "canary", Violation(kind="canary", span="", rule_id="canary")) for _ in found]
@@ -407,6 +452,7 @@ def scan_prose(text: str, canaries: Iterable[str] = (), names: Iterable[str] = (
     readings = _readings(text)
     hits += _policy_echoes(text, readings, policies)
     hits += _booking_claims(text, readings)
+    hits += _links(text, readings)
     seen: set[tuple[str, int, int]] = set()
     for language, entries in LEXICONS.items():
         for category, pattern in entries:

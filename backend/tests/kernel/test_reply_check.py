@@ -1,9 +1,9 @@
 """POST /check_reply and GET /public/{desk_slug}: what a visitor may be shown.
 
 A draft from Claude is guarded prose plus typed clauses. The kernel scans the prose in English and
-Spanish for numbers, money, percentages, dates and promise words, renders each clause from a fact
-the session may read, in the reply's language, and answers with a signed, ledgered verdict: the
-prose and cards when everything passed, else only the handoff clause.
+Spanish for numbers, money, percentages, dates, promise words and links, renders each clause from
+a fact the session may read, in the reply's language, and answers with a signed, ledgered verdict:
+the prose and cards when everything passed, else only the handoff clause.
 
 Tests run on Rivera Plumbing copies as `POST /copies` seeds them (Friday 10:04 in Oakland), with
 the facts made the way a conversation makes them: a quote, open times and a booking decided and
@@ -965,6 +965,123 @@ async def test_policy_echoes_cover_the_rules_the_session_reads(app, client, revi
     for prose in ("Maria texts before she arrives.", "Just text the shop line and Maria calls back."):
         assert (await checked(client, visitor, prose)).violations == [], prose
     assert not reply_check.states_rule("contact")
+
+
+@pytest.mark.parametrize(("prose", "span", "language"), [
+    ("Pay for it at rivera-pay.example/checkout", "rivera-pay.example/checkout", "en"),
+    ("Email maria@riverapl.example to confirm.", "maria@riverapl.example", "en"),
+    ("Pague en rivera-pay.example/checkout antes de la visita.", "rivera-pay.example/checkout", "es"),
+    ("Escríbale a maria@riverapl.example para confirmar la visita.", "maria@riverapl.example", "es"),
+])
+async def test_a_link_beside_a_quote_card_is_blocked(app, client, reviewer, prose, span, language):
+    """A link or an email address reaches a visitor only on a card (a payment or document card's
+    `href`, the contact clause), so prose holding one is blocked even beside the quote it is about,
+    by the prose scan, before the soft-promise check is asked; the ledger names the rule, never
+    the link."""
+    copy, visitor = await visitor_of(app, client)
+    quote = await own_quote(client, visitor)
+    reviewer.soft_answer = NOTHING_FLAGGED
+    verdict = await checked(client, visitor, prose, [clause("quote", quote.fact_id)])
+    assert [(v.kind, v.rule_id, v.span) for v in verdict.violations] == [("promise_word", "link", span)]
+    assert_handed_off(verdict, language)
+    assert reviewer.soft_inputs == []
+    [entry] = await reply_entries(app, copy)
+    assert (entry.event.summary["violations"], entry.event.summary["rule_ids"]) == (["promise_word"], ["link"])
+    assert span not in json.dumps(entry.event.summary)
+
+
+LINK_TLDS = ["com", "net", "org", "io", "co", "us", "app", "dev", "info", "biz", "mx", "es", "example"]
+
+
+@pytest.mark.parametrize(("prose", "span"), [
+    ("Open https://riverapl to pay.", "https://riverapl"),                        # a scheme
+    ("Open http://localhost/pay to finish.", "http://localhost/pay"),
+    ("Try ftp://riverapl/files for the photos.", "ftp://riverapl/files"),          # any scheme before "://"
+    ("Open https:riverapl.shop to pay.", "https:riverapl.shop"),                  # no slashes, as browsers take it
+    ("Open mailto:riverapl to write to Maria.", "mailto:riverapl"),
+    ("Tap tel:riveraplumbing to call Maria.", "tel:riveraplumbing"),
+    ("See www.riveraplumbing.shop for photos.", "www.riveraplumbing.shop"),      # www.
+    ("Maria's page is rivera.shop/maria.", "rivera.shop/maria"),                  # a domain before a path
+    ("Find us at riveraplumbing.com.", "riveraplumbing.com"),                     # a bare domain
+    ("Find us at riverapl.co.uk as well.", "riverapl.co.uk"),
+    ("FIND US AT RIVERAPL.COM", "RIVERAPL.COM"),
+    ("Reach her at maria@rivera.", "maria@rivera"),                               # an @ between word characters
+    ("Write to mailto:maria@riverapl.example.", "mailto:maria@riverapl.example"),   # several shapes, one link
+    ("(See https://rivera-pay.example/checkout?visit=next.)", "https://rivera-pay.example/checkout?visi"),   # cut to 40
+    ("Pague en https://rivera-pay.example/checkout antes de la visita.", "https://rivera-pay.example/checkout"),
+    ("Visite www.riverapl.mx para ver fotos.", "www.riverapl.mx"),
+    ("Estamos en riverapl.es, con fotos.", "riverapl.es"),
+    ("¿Ya vio riverapl.org?", "riverapl.org"),
+    ("Lo tiene en «riverapl.com/visitas».", "riverapl.com/visitas"),
+    ("Llame a tel:riverapl desde su teléfono.", "tel:riverapl"),
+    ("Escriba a maria.rivera@riverapl.example y se lo confirmamos.", "maria.rivera@riverapl.example"),
+    *((f"Find us at riverapl.{tld} any time.", f"riverapl.{tld}") for tld in LINK_TLDS),
+])
+def test_links_and_email_addresses_in_prose_are_blocked(prose, span):
+    """A URL scheme, "www.", a domain before a path, a bare domain ending in a common top-level
+    domain and an "@" between word characters are each a link in prose, in English and Spanish:
+    one violation for each run of text between blanks, spanning it without the punctuation around it."""
+    assert [(v.kind, v.rule_id, v.span) for v in reply_check.scan_prose(prose)] == [("promise_word", "link", span)]
+
+
+def test_each_link_in_a_reply_is_one_violation():
+    found = reply_check.scan_prose("Pay at riverapl.com/pay or write to maria@riverapl.example.")
+    assert [(v.rule_id, v.span) for v in found] == [("link", "riverapl.com/pay"), ("link", "maria@riverapl.example")]
+
+
+@pytest.mark.parametrize("prose", [
+    "Maria can look at a few options, e.g. a new valve.",
+    "Turn off the main valve, i.e. the one under the sink.",
+    "Thanks. Maria will call you back.",                    # a sentence's full stop
+    "That's all... Maria will call you back.",
+    "Mr. Rivera and Dr. Lee are both on the job.",
+    "Maria fixes drains and/or water heaters.",
+    "Maria works across the U.S. and the whole bay.",
+    "Maria is @ the shop right now.",                       # an "@" between blanks
+    "Hotel: the one by the station.",                       # "tel:" inside a word
+    "Gracias. Maria le llama de vuelta.",
+    "Puede ser una llave nueva, p.ej. la de paso.",
+    "Hay talleres en EE.UU. y en México.",
+])
+def test_ordinary_dots_and_signs_are_no_link(prose):
+    assert reply_check.scan_prose(prose) == []
+
+
+@pytest.mark.parametrize(("prose", "found"), [
+    ("Find us at riverapl.\u0441\u043em.", [("link", "riverapl.\u0441\u043em"), ("mixed_script", "\u0441\u043em")]),
+    ("See \u051d\u051d\u051d.riverapl.shop for photos.", [("link", "\u051d\u051d\u051d.riverapl.shop")]),   # Cyrillic we
+    ("Find us at riverapl.\u0131o now.", [("link", "riverapl.\u0131o")]),                       # a dotless i
+    ("See \uff57\uff57\uff57\uff0eriverapl\uff0eshop for photos.", [("link", "www.riverapl.shop")]),   # full width
+    ("Pay at rivera-pay\u3002example/checkout before the visit.", [("link", "rivera-pay\u3002example/checkout")]),
+    ("Pay at rivera.shop\u2044checkout before the visit.", [("link", "rivera.shop\u2044checkout")]),   # a fraction slash
+    ("Pay at rivera.shop\u2215checkout before the visit.", [("link", "rivera.shop\u2215checkout")]),   # a division slash
+    ("Pay at rivera-pay.ex\u200bample/checkout first.", [("link", "rivera-pay.example/checkout")]),   # a zero-width space
+    ("Pay at rivera\u2010pay.example/checkout first.", [("link", "rivera\u2010pay.example/checkout")]),   # a Unicode hyphen
+    ("Email maria\uff20riverapl.example to confirm.", [("link", "maria@riverapl.example")]),   # a full-width @
+    ("Email maria\ufe6briverapl.example to confirm.", [("link", "maria@riverapl.example")]),   # a small @
+])
+def test_links_read_lookalikes(prose, found):
+    """A link written with letters of another script that look like Latin ones, with full-width
+    characters, an ideographic full stop for a dot, a fraction or division slash for a slash, or an
+    invisible character inside, is a link too (and a word mixing scripts is blocked on its own)."""
+    assert [(v.rule_id, v.span) for v in reply_check.scan_prose(prose)] == found
+
+
+def test_a_long_draft_of_near_links_is_scanned_in_one_pass():
+    """Long words, dotted runs and many links in one run of text are read in one pass: a domain is
+    looked for only where no letter, digit, dot or hyphen comes before it, and the links in one run
+    of text are one violation."""
+    started = time.perf_counter()
+    found = reply_check.scan_prose("x" * 40_000 + " " + "a." * 20_000 + " " + "rivera.pay.section " * 2_000
+                                   + "a.b/" * 10_000)
+    assert time.perf_counter() - started < 2
+    assert [(v.rule_id, v.span) for v in found] == [("link", ("a.b/" * 10)[:40])]
+
+
+def test_a_m_and_p_m_are_no_link():
+    """"a.m." and "p.m." are time words, never a domain: each is the date word alone."""
+    found = reply_check.scan_prose("Maria takes calls in the a.m./p.m. hours.")
+    assert [(v.rule_id, v.span) for v in found] == [("lex.en.date", "a.m."), ("lex.en.date", "p.m.")]
 
 
 def verify_verdict(public_key_hex: str, session_id: str, verdict: ReplyVerdict) -> None:
