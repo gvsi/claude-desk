@@ -935,6 +935,33 @@ describe("Today's Demo inbox", () => {
     expect(requests('ownerInbox')).toHaveLength(reads);
   });
 
+  it('request_link_without_its_card_leaves_focus_alone', async () => {
+    // A request with no card here (answered, or another Desk's): Today opens as it would without
+    // the address, with no error, and focus stays where it was.
+    const { screen, router } = await renderRoute(requestLink('dec-not-here'));
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    await readsMore('needsYou', 2);
+    expect(document.activeElement).toBe(document.body);
+
+    // A request held later under that id isn't jumped to: the address was spent when Needs you read.
+    const [seeded] = await heldItems();
+    if (!seeded?.decision) throw new Error('the seed holds a request');
+    const later: NeedsYouItem = {
+      ...seeded,
+      decision: { ...seeded.decision, decision_id: 'dec-not-here', reason_plain: 'A visitor asked to book Sunday at 10:00 pm.' },
+      held_at: new Date().toISOString(),
+    };
+    mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: [seeded, later] });
+    await expect.element(heldCard(screen, 'A visitor asked to book Sunday at 10:00 pm.')).toBeVisible();
+    expect(document.activeElement).toBe(document.body);
+
+    // An address whose request can't be read does nothing either.
+    await router.navigate(`${TODAY}#request-%E0%A4%A`);
+    await readsMore('needsYou', 2);
+    expect(document.activeElement).toBe(document.body);
+    await expect.element(region(screen, 'Needs you')).toBeVisible();
+  });
+
   it('request_link_lands_on_the_card_once_needs_you_reads', async () => {
     // Opened fresh (a reload, or the link from elsewhere), the page lands on the held request once
     // Needs you has read, here slowly, at the phone's size where the card starts below the fold.
