@@ -2,8 +2,9 @@
 // `npm run typecheck`: every `ROUTES[k]` method and path is an operation in `API_OPERATIONS`
 // (openapi.gen.ts, from `npm run gen:api`), and each of its 2xx answers names the model in
 // `ROUTE_MODELS`, apart from the routes in `NOT_YET_SERVED`, which must still be missing from the
-// document. routes.contract.test.ts makes the same checks at run time from openapi.json, and is
-// the only importer of this file.
+// document; and every operation in `API_OPERATIONS` is some route's, apart from those on
+// `NEVER_CALLED`. routes.contract.test.ts makes the same checks at run time from openapi.json, and
+// is the only importer of this file.
 
 import type { API_OPERATIONS } from './openapi.gen.ts';
 import type { ROUTES, RouteKey } from './routes.ts';
@@ -154,6 +155,15 @@ export const NOT_YET_SERVED = [
   'cancelPayment',
 ] as const satisfies readonly RouteKey[];
 
+/**
+ * Operations the API serves that the web deliberately never calls, as "METHOD /path": one served
+ * for another caller (the load balancer, a visiting agent) that no screen needs. None today.
+ * Every other operation in the document must be some route's, so a route the API serves under
+ * another path or method fails both checks rather than waiting on `NOT_YET_SERVED` forever. Each
+ * entry must be served and called by no route.
+ */
+export const NEVER_CALLED = [] as const satisfies readonly string[];
+
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 
 type Operations = typeof API_OPERATIONS;
@@ -185,6 +195,47 @@ export type AnswerNameChecks = [
   Assert<Equal<AnswerNames<'events', { 200: null }>, null>>,
 ];
 
+/**
+ * What is wrong with the `Served` operations against the `Called` ones and the `Listed` ones
+ * (NEVER_CALLED), or never: an operation that no route calls and the list doesn't name, such as a
+ * route the API serves under another path or method, and a listed operation that a route calls or
+ * the document doesn't serve. Spelled out as `RouteProblems` is, so the compiler prints the
+ * sentences rather than this alias.
+ */
+type OperationProblems<Served extends string, Called extends string, Listed extends string> =
+  (
+    | (Served extends Called | Listed ? never : `${Served} is in openapi.json, but no route calls it: match a route to it, or put it on NEVER_CALLED`)
+    | (Listed extends Called
+        ? `${Listed} is on NEVER_CALLED, but a route calls it`
+        : Listed extends Served
+          ? never
+          : `${Listed} is on NEVER_CALLED, but openapi.json doesn't serve it`)
+  ) extends infer P
+    ? P extends string
+      ? P
+      : never
+    : never;
+
+/** The operation checks on their own, since every operation the document serves is called today. */
+export type OperationProblemChecks = [
+  // An operation a route calls, or one on NEVER_CALLED, is fine;
+  Assert<Equal<OperationProblems<'GET /a' | 'GET /b', 'GET /a' | 'GET /c', 'GET /b'>, never>>,
+  // one that no route calls isn't, such as a route the API serves under another path,
+  Assert<
+    Equal<
+      OperationProblems<'GET /as', 'GET /a', never>,
+      'GET /as is in openapi.json, but no route calls it: match a route to it, or put it on NEVER_CALLED'
+    >
+  >,
+  // and nor is a listed one that a route calls or the document doesn't serve.
+  Assert<
+    Equal<
+      OperationProblems<'GET /a', 'GET /a', 'GET /a' | 'GET /gone'>,
+      'GET /a is on NEVER_CALLED, but a route calls it' | "GET /gone is on NEVER_CALLED, but openapi.json doesn't serve it"
+    >
+  >,
+];
+
 /** What is wrong with a route against the document, as a sentence, or never. */
 type RouteProblem<K extends RouteKey> = K extends NotYetServed
   ? OperationOf<K> extends keyof Operations
@@ -199,5 +250,16 @@ type RouteProblem<K extends RouteKey> = K extends NotYetServed
 /** Every route's problem, spelled out (a distributive copy, so the compiler prints the sentences). */
 type RouteProblems = { [K in RouteKey]: RouteProblem<K> }[RouteKey] extends infer P ? (P extends string ? P : never) : never;
 
-/** `true` only when no route has a problem; otherwise the compiler names each one. */
-export const routesMatchTheApi: [RouteProblems] extends [never] ? true : RouteProblems = true;
+/** Every route's operation, pending ones included. */
+type CalledOperations = { [K in RouteKey]: OperationOf<K> }[RouteKey];
+
+/** Every problem of the routes and of the document's operations, spelled out the same way. */
+type Problems =
+  (RouteProblems | OperationProblems<keyof Operations & string, CalledOperations, (typeof NEVER_CALLED)[number]>) extends infer P
+    ? P extends string
+      ? P
+      : never
+    : never;
+
+/** `true` only when no route or operation has a problem; otherwise the compiler names each one. */
+export const routesMatchTheApi: [Problems] extends [never] ? true : Problems = true;
