@@ -190,7 +190,7 @@ The hosted thin slice (quote → hold → approve → execute → checked receip
   - `test_kernel_seams.py`: `test_fake_adapter_satisfies_the_protocol` (registered → in `registered_profiles()`, absent from `registered_profiles(source="mcp")`; its schema sets `additionalProperties: false`); `test_cedar_request_shape` (principal type per kind; `local_dow` 1 and `local_minute` 600 for a Tuesday 10:00 `starts_at` in `America/Los_Angeles`, else from `now`; absent optional attributes; no `owner_approved`; `review` only when given; `mandate_remaining_cents` only on `Agent`); `test_writers_share_the_callers_transaction` (`ledger.append` and `demo_inbox.deliver`, then an exception → neither row); `test_owner_alerts_follow_notification_defaults` (`approval` writes; `lead` doesn't); `test_only_an_approval_alert_names_a_decision` (a `decision_id` on a `breaker` or `booking` alert, or given to `deliver` for anything but an alert to the owner → `ValueError`, nothing written; on the `approval` alert it is stored).
 - [ ] **Step 2: Run** `docker compose up -d db && cd backend && uv run pytest tests/kernel/test_app.py tests/kernel/test_ledger.py tests/kernel/test_kernel_seams.py -v` → FAIL (`ModuleNotFoundError: desk.kernel_service`).
 - [ ] **Step 3: Implement** the files above; the lifespan builds `Signer.from_env()`, so production without a seed refuses to start.
-- [ ] **Step 4: Run** the same command → PASS (16 passed, 21 cases); `cd backend && uv run alembic heads` → one head.
+- [ ] **Step 4: Run** the same command → PASS (17 passed, 22 cases); `cd backend && uv run alembic heads` → one head.
 - [ ] **Step 5: Commit** `git commit -m "feat(kernel): add the kernel app with a signed, hash-chained ledger append"`.
 
 ### Task 2: Sessions, tokens, `/whoami` and take-over
