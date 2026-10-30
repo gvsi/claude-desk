@@ -458,8 +458,9 @@ async def run_latency(config: LatencyConfig, deps: LatencyDeps | None = None) ->
     reserve, by a pass's own checks); a hosted run needs `DESK_PASSCODE`. A local run then proves first
     (`scripts.prove_latency --json`), so a failed proof costs nothing. During a local real run no turn
     starts once the turns' calls cost `--max-usd`, and after it what they cost is appended to the
-    shared spend file, with no tier 2 runs, so the monthly guard counts it. A hosted run's calls are the
-    deployment's, inside its own daily budget, and no dry run spends anything."""
+    shared spend file with no tier 2 runs, so the monthly guard counts it and no pass's cost per run
+    does. A hosted run's calls are the deployment's, inside its own daily budget, and no dry run spends
+    anything."""
     deps = deps or LatencyDeps()
     hosted, real = config.base_url is not None, not config.dry_run
     estimate = round(len(KINDS) * config.turns * PER_TURN_USD, 6) if real else 0.0

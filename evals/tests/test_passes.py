@@ -174,6 +174,38 @@ async def test_a_calibrations_spend_counts_against_the_month_but_measures_no_run
     assert run_one.calls == []
 
 
+async def test_a_latency_row_counts_against_the_month_but_not_per_run(repo):
+    """A latency run's spend row holds no tier 2 runs: the cost per run measured on either provider, in
+    either column, leaves it out, so it moves no pass's estimate, but its dollars still count against
+    this month's limit, for a pass and for the next latency run."""
+    from evals.tier2.passes import append_spend, measured_per_run, read_spend, within_the_month
+
+    spend = repo / "spend.csv"
+    # Passes this month: anthropic at $0.40 a run; Bedrock at $0.50 a run, $0.005 of it the Claude API's.
+    spend_rows(spend, ("2026-10-02", "anthropic", 1490, 596.0, 596.0), ("2026-10-03", "bedrock", 100, 0.5, 50.0))
+    passes_only = read_spend(spend)
+    for provider, claude_api, total in (("anthropic", 2.0, 2.0), ("bedrock", 0.5, 1.5)):
+        append_spend(spend, {"pass_id": f"latency-20261029-120000-{provider[:6]}", "date": "2026-10-29",
+                             "provider": provider, "runs": 0, "desk_usd": total, "simulator_usd": 0.0,
+                             "claude_api_usd": claude_api, "total_usd": total})
+    rows = read_spend(spend)
+    for provider, column, per_run in (("anthropic", "total_usd", 0.40), ("anthropic", "claude_api_usd", 0.40),
+                                      ("bedrock", "total_usd", 0.50), ("bedrock", "claude_api_usd", 0.005)):
+        assert measured_per_run(passes_only, provider, column) == pytest.approx(per_run)
+        assert measured_per_run(rows, provider, column) == pytest.approx(per_run), (provider, column)
+    assert measured_per_run(rows[2:], "anthropic") is None   # a latency row alone measures no run
+
+    # The month: $596.50 of passes and $2.50 of latency runs, so $1.00 of the $600 remains.
+    run_one = Scripted()
+    with pytest.raises(PassRefused, match=r"this pass's \$1\.60 .* \$1\.00 remains"):   # four runs at $0.40
+        await run_pass(config(runs=2, split="heldout"), deps(repo, run_one))
+    assert run_one.calls == []
+    with pytest.raises(PassRefused, match=r"this latency run's \$1\.05 .* \$1\.00 remains"):
+        within_the_month(1.05, rows, NOW, repo, what="latency run")
+    result = await run_pass(config(runs=1, split="heldout"), deps(repo, run_one))
+    assert result.estimate_usd == pytest.approx(0.80) and len(result.runs) == 2   # two runs at $0.40
+
+
 async def test_spend_is_shared_across_worktrees(repo, tmp_path):
     from evals.tests.eval_repo import git
     from evals.tier2.passes import shared_spend_file
