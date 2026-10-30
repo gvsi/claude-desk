@@ -742,7 +742,7 @@ async def test_any_failure_once_the_session_is_known_is_ledgered(app, client, re
     assert await decisions_of(app, rows) == []
     assert caplog.text.count(f"decide_internal_error kind={kind}") == 2
     assert quoted not in caplog.text
-    assert QUOTED_CORE not in caplog.text       # nor the text escaped to ASCII ("“book me at 5pm”")
+    assert QUOTED_CORE not in caplog.text       # nor the text escaped to ASCII ("\u201cbook me at 5pm\u201d")
 
 
 async def test_uncanonical_call_is_refused_and_ledgered(app, client, registry):
