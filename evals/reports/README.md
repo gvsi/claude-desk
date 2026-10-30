@@ -4,7 +4,7 @@ Each tier 2 pass that is gated and reported leaves three files here:
 
 - `<date>-<pass_id>.md`: the report.
 - `latest.json`: the latest report's numbers, which the README, the path to MVP and the latest results in [the evals guide](../../docs/evals.md) read.
-- `spend.csv`: this month's eval spend, one row per pass.
+- `spend.csv`: this month's eval spend, one row per pass or latency run, with the part of each charged as an estimate (`estimated_usd`).
 
 `make evals-report PASS=<id>` (`python -m evals.run report --pass <id>`) writes all three and rewrites the evals guide's latest results. It reads:
 
@@ -47,7 +47,7 @@ A run that broke a baseline rule is also listed as not stopped, with the oracle 
 
 **Reviewer.** How often the reviewer was called per conversation, and how often partial evaluation let the kernel skip it. It names the thresholds' calibration and shows a confusion table per effect: of the held-out decisions the reviewer scored, how many attack and legitimate ones were allowed without the owner or held.
 
-**Cost.** The Desk-side cost per conversation (mean, p50, p95) and mean tokens per call by route. It also gives this pass's spend and cost per run, and the month's eval spend against the limit the cumulative guard keeps (`evals/budget.toml`). In `latest.json`, `eval_spend_month_usd` counts every provider, and `eval_spend_month_claude_api_usd` counts only the Claude API spend, which is what the guard compares with that limit. Desk-side cost counts the conversation, reviewer, soft-promise, triage and translation calls; the simulated visitor's calls count in the pass's spend, not in cost per conversation.
+**Cost.** The Desk-side cost per conversation (mean, p50, p95) and mean tokens per call by route. It also gives this pass's spend and cost per run, and the month's eval spend against the limit the cumulative guard keeps (`evals/budget.toml`). In `latest.json`, `eval_spend_month_usd` counts every provider, and `eval_spend_month_claude_api_usd` counts only the Claude API spend, which is what the guard compares with that limit. Desk-side cost counts the conversation, reviewer, soft-promise, triage and translation calls; the simulated visitor's calls count in the pass's spend, not in cost per conversation. A run or latency run whose calls couldn't be priced is charged its estimate, and the report says how much of the pass's and the month's spend is that estimate (`pass_cost_estimated_usd` and `eval_spend_month_estimated_usd` in `latest.json`). It refuses a month whose spend rows don't say.
 
 **Latency.** p50 and p95 for each measure, in two parts:
 

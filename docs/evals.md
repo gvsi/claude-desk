@@ -100,7 +100,7 @@ Its limit, said plainly: CI can recompute pass or fail from the committed rows, 
 
 ## Cost and provider
 
-Each run's usage comes from the API's model-call records and from the kernel's reviewer and soft-promise ledger entries, priced at each provider's list prices.
+Each run's usage comes from the API's model-call records and from the kernel's reviewer and soft-promise ledger entries, priced at each provider's list prices. A run whose calls can't be priced is charged its estimate instead, and the report and the latest results say how much of the spend is estimated.
 
 Claude API spend counts against the organization's $1,000 monthly limit, which it shares with the hosted demo. The demo's model spend is capped at $80 a day, so evals keep a $400 reserve for it, five days of that cap. A pass is refused when its estimate would take the month's eval spend on the Claude API past the limit less the reserve. Each pass also sets its own ceiling with `--max-usd`.
 

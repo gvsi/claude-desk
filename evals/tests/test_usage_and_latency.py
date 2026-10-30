@@ -528,6 +528,7 @@ async def test_latency_run_writes_labelled_numbers_and_its_spend(tmp_path):
     assert row["pass_id"] == f"latency-{run.latency_id}" and row["date"] == "2026-11-01" and row["runs"] == "0"
     assert float(row["total_usd"]) == float(row["claude_api_usd"]) == pytest.approx(0.0139 + 0.00252, abs=1e-4)
     assert data["spend_usd"] == pytest.approx(0.0139 + 0.00252)
+    assert row["estimated_usd"] == "0.0000" and data["spend_estimated"] is False     # every call was priced
 
     hosted = Stands(root, measured)
     run, path = await run_latency(latency_config(base_url="https://desk.example.com"), hosted.deps())
@@ -553,8 +554,9 @@ async def test_latency_run_writes_labelled_numbers_and_its_spend(tmp_path):
     deps.measure_local = breaks_off
     with pytest.raises(KeyboardInterrupt):
         await run_latency(latency_config(turns=2), deps)
-    last = read_spend(root / "spend.csv")[-1]   # what it spent is unknown: charged at the estimate
+    last = read_spend(root / "spend.csv")[-1]   # what it spent is unknown: charged at the estimate, marked so
     assert last["pass_id"].startswith("latency-") and float(last["claude_api_usd"]) == pytest.approx(0.30)
+    assert last["estimated_usd"] == last["total_usd"] == "0.3000"
 
 
 async def test_latency_command_reads_its_options_and_fails_closed(tmp_path, monkeypatch, capsys):
@@ -670,9 +672,12 @@ def test_proving_is_timed_as_many_times_as_reported(tmp_path, monkeypatch):
     assert cwd == tmp_path / "backend" and latency.proving_spread(PROVED).n == latency.PROVE_RUNS
 
 
-async def test_latency_spend_that_cant_be_priced_is_charged_the_estimate(tmp_path):
+async def test_latency_spend_that_cant_be_priced_is_charged_the_estimate(tmp_path, monkeypatch, capsys):
     """A local run whose calls can't all be priced at the end (a model with no list price, first seen in
-    the last turn) still appends its spend row, at the run's estimate, so the monthly guard counts it."""
+    the last turn) still appends its spend row, at the run's estimate, so the monthly guard counts it;
+    the row, the run's file and the command's output say the figure is an estimate."""
+    from evals import run as evals_run
+
     root = make_repo(tmp_path / "repo")
     unlisted = UsageRecord(route="conversation", model="claude-unlisted-1", session_id="s-q", input_tokens=900,
                            cached_tokens=0, cache_write_tokens=0, output_tokens=40, ms=700)
@@ -684,6 +689,12 @@ async def test_latency_spend_that_cant_be_priced_is_charged_the_estimate(tmp_pat
     assert row["pass_id"] == f"latency-{run.latency_id}" and row["runs"] == "0"
     assert float(row["total_usd"]) == float(row["claude_api_usd"]) == pytest.approx(0.30)
     assert run.spend_usd == pytest.approx(0.30)
+    # The figure is the estimate, never a measurement: the spend row and the run's file both say so.
+    assert row["estimated_usd"] == "0.3000" and run.spend_estimated is True
+
+    monkeypatch.setenv("MODEL_PROVIDER", "anthropic")
+    assert await evals_run.latency_command(["--max-usd", "3", "--turns", "2"], Stands(root, measured).deps()) == 0
+    assert "$0.30 charged as an estimate, since its calls couldn't all be priced" in capsys.readouterr().out
 
 
 async def test_latency_command_names_a_failed_call_without_its_body(tmp_path, capsys):

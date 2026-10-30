@@ -336,7 +336,9 @@ async def latency_command(argv: list[str], deps: "LatencyDeps | None" = None) ->
         return 1
     part = run.latency.hosted if run.where == "hosted" else run.latency.local
     measured = len(run.samples) - part.errored_turns
-    spent = "" if run.spend_usd is None else f", ${run.spend_usd:.2f} spent"
+    spent = ("" if run.spend_usd is None
+             else f", ${run.spend_usd:.2f} charged as an estimate, since its calls couldn't all be priced"
+             if run.spend_estimated else f", ${run.spend_usd:.2f} spent")
     print(f"latency: {run.where} run {run.latency_id}: {measured} of {len(run.samples)} turns measured, "
           f"{part.errored_turns} failed{', stopped by --max-usd' if run.stopped_by_budget else ''}{spent}")
     print(f"latency: wrote {written.relative_to(deps.root)}")
@@ -482,6 +484,10 @@ def _month_spend(root: Path, day: date) -> list["SpendRow"]:
     for row in read_spend(shared_spend_file(root)):
         if not (row.get("date") or "").startswith(month):
             continue
+        if not row.get("estimated_usd"):   # written before spend rows marked the part charged as an estimate
+            raise ReportRefused(f"a {month} row of the shared spend file doesn't say how much of it was estimated (it "
+                                "was written before rows marked that), so the month's spend can't be reported as "
+                                "measured; fill its estimated_usd, 0 when every call it counts was priced")
         try:
             rows.append(SpendRow.model_validate({**{column: row.get(column) for column in SPEND_COLUMNS},
                                                  "runs": int(row.get("runs") or "")}))

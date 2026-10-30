@@ -420,11 +420,18 @@ class LatencyRun(BaseModel):
     turns_per_kind: int
     kinds: list[Kind]
     estimate_usd: float
-    spend_usd: float | None                      # measured at list prices; None for a dry run or a deployment
+    spend_usd: float | None                      # at list prices; None for a dry run or a deployment
+    spend_estimated: bool                        # spend_usd is the estimate: the calls couldn't be priced
     stopped_by_budget: bool
     latency: Latency
     proving: dict[str, Any] | None               # `scripts.prove_latency --json` as it printed
     samples: list[TurnSample]
+
+    @model_validator(mode="after")
+    def _estimated_spend_is_spend(self) -> Self:
+        if self.spend_estimated and self.spend_usd is None:
+            raise ValueError("only a run that spent can have its spend estimated")
+        return self
 
 
 @dataclass
@@ -459,8 +466,9 @@ async def run_latency(config: LatencyConfig, deps: LatencyDeps | None = None) ->
     (`scripts.prove_latency --json`), so a failed proof costs nothing. During a local real run no turn
     starts once the turns' calls cost `--max-usd`, and after it what they cost is appended to the
     shared spend file with no tier 2 runs, so the monthly guard counts it and no pass's cost per run
-    does. A hosted run's calls are the deployment's, inside its own daily budget, and no dry run spends
-    anything."""
+    does. When the calls can't all be priced, the run is charged its estimate instead, and the spend
+    row (`estimated_usd`) and the run's file (`spend_estimated`) say so. A hosted run's calls are the
+    deployment's, inside its own daily budget, and no dry run spends anything."""
     deps = deps or LatencyDeps()
     hosted, real = config.base_url is not None, not config.dry_run
     estimate = round(len(KINDS) * config.turns * PER_TURN_USD, 6) if real else 0.0
@@ -494,7 +502,7 @@ async def run_latency(config: LatencyConfig, deps: LatencyDeps | None = None) ->
     latency_id = f"{now.astimezone(UTC):%Y%m%d-%H%M%S}-{secrets.token_hex(3)}"
     git_sha = results.git(deps.root, "rev-parse", "--verify", "HEAD^{commit}").strip()
     measured: Measured | None = None
-    spend = None
+    spend, estimated = None, False
     if hosted:
         measured = await deps.measure_hosted(config.base_url, passcode, turns=config.turns, kinds=KINDS,
                                              turn_timeout_s=config.turn_timeout_s)
@@ -511,21 +519,23 @@ async def run_latency(config: LatencyConfig, deps: LatencyDeps | None = None) ->
         finally:
             # Recorded before the numbers are read, so a run whose numbers disagree still counts; a run that
             # broke off before its calls were read, or whose calls can't all be priced, is charged its
-            # estimate, all of it to the Claude API.
+            # estimate, all of it to the Claude API, and the row marks it as estimated.
             if real and started:
                 spend = claude_api = estimate
+                estimated = True
                 if measured is not None:
                     try:
                         spent = spend_usd(measured.usage, config.provider)
                     except (LookupError, ValueError):   # no list price for a model, or a count that isn't one
                         pass
                     else:
-                        spend = spent.total_usd
+                        spend, estimated = spent.total_usd, False
                         claude_api = spent.kernel_usd + (spent.api_usd if config.provider == "anthropic" else 0.0)
                 passes.append_spend(deps.spend_file, {
                     "pass_id": f"latency-{latency_id}", "date": now.astimezone(UTC).date().isoformat(),
                     "provider": config.provider, "runs": 0, "desk_usd": f"{spend:.4f}",
-                    "simulator_usd": f"{0:.4f}", "claude_api_usd": f"{claude_api:.4f}", "total_usd": f"{spend:.4f}"})
+                    "simulator_usd": f"{0:.4f}", "claude_api_usd": f"{claude_api:.4f}", "total_usd": f"{spend:.4f}",
+                    "estimated_usd": f"{spend if estimated else 0:.4f}"})
     if hosted:
         latency = Latency(hosted=hosted_latency(measured.samples, ledger_entries=measured.ledger_entries,
                                                 session_ids=measured.session_ids))
@@ -538,7 +548,8 @@ async def run_latency(config: LatencyConfig, deps: LatencyDeps | None = None) ->
         where="hosted" if hosted else "local", base_url=config.base_url,
         provider="unknown" if hosted else "fake" if config.dry_run else config.provider,
         turns_per_kind=config.turns, kinds=list(KINDS), estimate_usd=estimate, spend_usd=spend,
-        stopped_by_budget=measured.stopped_by_budget, latency=latency, proving=proved, samples=measured.samples)
+        spend_estimated=estimated, stopped_by_budget=measured.stopped_by_budget, latency=latency, proving=proved,
+        samples=measured.samples)
     out = deps.root / "evals" / "out" / "latency" / f"{latency_id}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(run.model_dump_json(indent=1) + "\n")

@@ -123,7 +123,7 @@ def spend_rows(path: Path, *rows: tuple[str, str, int, float, float]) -> None:
     for i, (date, provider, runs, claude_api, total) in enumerate(rows):
         append_spend(path, {"pass_id": f"earlier-{i}", "date": date, "provider": provider, "runs": runs,
                             "desk_usd": total / 2, "simulator_usd": total / 2, "claude_api_usd": claude_api,
-                            "total_usd": total})
+                            "total_usd": total, "estimated_usd": 0.0})
 
 
 async def test_cumulative_budget_refuses_a_pass(repo):
@@ -187,7 +187,7 @@ async def test_a_latency_row_counts_against_the_month_but_not_per_run(repo):
     for provider, claude_api, total in (("anthropic", 2.0, 2.0), ("bedrock", 0.5, 1.5)):
         append_spend(spend, {"pass_id": f"latency-20261029-120000-{provider[:6]}", "date": "2026-10-29",
                              "provider": provider, "runs": 0, "desk_usd": total, "simulator_usd": 0.0,
-                             "claude_api_usd": claude_api, "total_usd": total})
+                             "claude_api_usd": claude_api, "total_usd": total, "estimated_usd": 0.0})
     rows = read_spend(spend)
     for provider, column, per_run in (("anthropic", "total_usd", 0.40), ("anthropic", "claude_api_usd", 0.40),
                                       ("bedrock", "total_usd", 0.50), ("bedrock", "claude_api_usd", 0.005)):
@@ -325,6 +325,40 @@ async def test_a_failing_pass_cancels_and_awaits_its_runs_before_the_stack_close
     row = spend_row(repo)   # atk-cal priced at $0.10 before it failed; the three cut short at the $0.40 estimate
     assert row["runs"] == "4" and float(row["total_usd"]) == pytest.approx(1.30)
     assert float(row["claude_api_usd"]) == pytest.approx(1.30)
+
+
+async def test_spend_charged_as_an_estimate_is_marked(repo):
+    """A run that left no usage to price is charged a run's estimate, and the pass's spend and its spend
+    row say how much of the figure is that estimate (`estimated_usd`), so it never reads as measured; a
+    pass whose runs were all priced marks none."""
+    from evals.tier2.passes import read_spend
+
+    unpriced = await run_pass(config(split="heldout"), deps(repo, cost=lambda outcome, providers: None))
+    assert unpriced.spend.total_usd == pytest.approx(0.80) and unpriced.spend.estimated_usd == pytest.approx(0.80)
+    priced = await run_pass(config(split="heldout"), deps(repo))
+    assert priced.spend.estimated_usd == 0
+    rows = read_spend(repo / "spend.csv")
+    assert [(row["pass_id"], row["total_usd"], row["estimated_usd"]) for row in rows] == [
+        (unpriced.pass_id, "0.8000", "0.8000"), (priced.pass_id, "0.2000", "0.0000")]
+
+
+def test_a_spend_file_from_before_the_mark_gains_its_column(tmp_path):
+    """A spend file whose header predates `estimated_usd` gets the column in place, under the lock,
+    before the next row is appended, so the new row's mark lines up with its header; the rows written
+    before say nothing about estimates, and every row's dollars still count."""
+    from evals.tier2.passes import append_spend, read_spend
+
+    spend = tmp_path / "desk-eval-spend.csv"
+    spend.write_bytes(b"pass_id,date,provider,runs,desk_usd,simulator_usd,claude_api_usd,total_usd\r\n"   # as csv
+                      b"earlier,2026-10-29,anthropic,240,60.0,36.0,96.0,96.0\r\n")                     # writes it
+    append_spend(spend, {"pass_id": "later", "date": "2026-10-30", "provider": "anthropic", "runs": 2,
+                         "desk_usd": "0.8000", "simulator_usd": "0.0000", "claude_api_usd": "0.8000",
+                         "total_usd": "0.8000", "estimated_usd": "0.8000"})
+    assert spend.read_bytes().split(b"\r\n")[0] == (
+        b"pass_id,date,provider,runs,desk_usd,simulator_usd,claude_api_usd,total_usd,estimated_usd")
+    earlier, later = read_spend(spend)
+    assert earlier["total_usd"] == "96.0" and earlier["estimated_usd"] is None
+    assert later["total_usd"] == "0.8000" and later["estimated_usd"] == "0.8000"
 
 
 async def test_pending_scenarios_skipped_and_listed(tmp_path):

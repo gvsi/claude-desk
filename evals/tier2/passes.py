@@ -40,10 +40,11 @@ Desk's on the kernel target's `FakeAnthropic` and the visitor's on its own, both
 `anthropic` whatever `MODEL_PROVIDER` says, recorded as provider `fake`. A `--base-url` pass
 records the API's provider as `unknown`, since the deployment's setting isn't visible here. A real
 pass appends one spend row (`pass_id, date, provider, runs, desk_usd, simulator_usd, claude_api_usd,
-total_usd`); only `claude_api_usd` counts against the monthly limit, since a Bedrock pass bills AWS
-credits except for the kernel's checks. Each attempt is charged its priced usage, or a run's estimate
-(listed in `estimated_spend`) when it left no usage or its usage can't be priced. A pass that fails or
-is cancelled cancels its other runs, each charged its estimate, and awaits them before the stack
+total_usd, estimated_usd`); only `claude_api_usd` counts against the monthly limit, since a Bedrock
+pass bills AWS credits except for the kernel's checks. Each attempt is charged its priced usage, or a
+run's estimate (listed in `estimated_spend`) when it left no usage or its usage can't be priced, and
+`estimated_usd` says how much of the total that is, so it never reads as measured. A pass that fails
+or is cancelled cancels its other runs, each charged its estimate, and awaits them before the stack
 closes and the spend row is written, so the row counts every run.
 
 `record_rate` appends a held-out legitimate completion rate to `recorded_rates.json`, with the owner's
@@ -102,7 +103,9 @@ from evals.tier2.suite import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PER_RUN_USD = 0.40   # a run's cost until spend rows measure it (master "Model cost and latency budget")
 SPEND_FILE = "desk-eval-spend.csv"
-SPEND_COLUMNS = ("pass_id", "date", "provider", "runs", "desk_usd", "simulator_usd", "claude_api_usd", "total_usd")
+SPEND_COLUMNS = ("pass_id", "date", "provider", "runs", "desk_usd", "simulator_usd", "claude_api_usd", "total_usd",
+                 "estimated_usd")
+LEGACY_SPEND_COLUMNS = SPEND_COLUMNS[:-1]   # a spend file written before rows marked estimated spend
 # A calibration's spend rows (`evals/calibration`) start their pass_id with this. Their runs are single
 # model calls, not tier 2 runs, so they count against the monthly limit but never measure a run's cost.
 CALIBRATION_PREFIX = "calibration-"
@@ -198,22 +201,25 @@ class PassConfig(BaseModel):
 
 class Spend(BaseModel):
     """US dollars: the Desk side (the API's calls and the kernel's checks), the simulated visitor, and
-    the part billed to the Claude API, which alone counts against the monthly limit."""
+    the part billed to the Claude API, which alone counts against the monthly limit; `estimated_usd` is
+    the part of the total charged as an estimate because nothing could be priced, never measured."""
 
     model_config = ConfigDict(extra="forbid")
     desk_usd: float = 0.0
     simulator_usd: float = 0.0
     claude_api_usd: float = 0.0
     total_usd: float = 0.0
+    estimated_usd: float = 0.0
 
     @classmethod
-    def of(cls, *, desk_usd: float, simulator_usd: float, claude_api_usd: float) -> "Spend":
+    def of(cls, *, desk_usd: float, simulator_usd: float, claude_api_usd: float, estimated_usd: float = 0.0) -> "Spend":
         return cls(desk_usd=desk_usd, simulator_usd=simulator_usd, claude_api_usd=claude_api_usd,
-                   total_usd=desk_usd + simulator_usd)
+                   total_usd=desk_usd + simulator_usd, estimated_usd=estimated_usd)
 
     def __add__(self, other: "Spend") -> "Spend":
         return Spend.of(desk_usd=self.desk_usd + other.desk_usd, simulator_usd=self.simulator_usd + other.simulator_usd,
-                        claude_api_usd=self.claude_api_usd + other.claude_api_usd)
+                        claude_api_usd=self.claude_api_usd + other.claude_api_usd,
+                        estimated_usd=self.estimated_usd + other.estimated_usd)
 
 
 class EstimatedSpend(BaseModel):
@@ -360,11 +366,16 @@ def read_spend(path: Path) -> list[dict[str, str]]:
 
 
 def append_spend(path: Path, row: Mapping[str, Any]) -> None:
-    """Append one row under an exclusive lock, writing the header when the file is new."""
+    """Append one row under an exclusive lock, writing the header when the file is new. A file whose
+    header predates `estimated_usd` gets that column in its header first, in place, so the new row's
+    mark lines up; its earlier rows read the mark as missing."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+", newline="") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX)
         try:
+            handle.seek(0)
+            if next(csv.reader(handle), None) == list(LEGACY_SPEND_COLUMNS):
+                _add_estimated_column(path)
             handle.seek(0, os.SEEK_END)
             writer = csv.DictWriter(handle, fieldnames=SPEND_COLUMNS)
             if handle.tell() == 0:
@@ -372,6 +383,17 @@ def append_spend(path: Path, row: Mapping[str, Any]) -> None:
             writer.writerow({column: row[column] for column in SPEND_COLUMNS})
         finally:
             fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def _add_estimated_column(path: Path) -> None:
+    """Rewrite the spend file's header with `estimated_usd`, in the same file (never a replacement, which
+    another worktree waiting on the lock would miss), its rows left as they were. The caller holds the
+    file's lock."""
+    with path.open("r+", newline="") as handle:
+        header, _, rest = handle.read().partition("\n")
+        handle.seek(0)
+        handle.write(",".join(SPEND_COLUMNS) + ("\r\n" if header.endswith("\r") else "\n") + rest)
+        handle.truncate()
 
 
 def month_rows(rows: list[dict[str, str]], now: datetime) -> list[dict[str, str]]:
@@ -746,10 +768,12 @@ class _Pass:
         return spend
 
     def _estimate(self, scenario_id: str, rep: int, attempt: int, reason: str) -> Spend:
-        """A run's estimate, all of it on the Claude API so no budget undercounts, noted as estimated."""
+        """A run's estimate, all of it on the Claude API so no budget undercounts, noted as estimated in
+        `estimated_spend` and marked in `estimated_usd`, so it never reads as measured."""
         self.estimated.append(EstimatedSpend(scenario_id=scenario_id, rep=rep, attempt=attempt, usd=self.per_run,
                                              reason=reason))
-        return Spend.of(desk_usd=self.per_run, simulator_usd=0.0, claude_api_usd=self.per_run)
+        return Spend.of(desk_usd=self.per_run, simulator_usd=0.0, claude_api_usd=self.per_run,
+                        estimated_usd=self.per_run)
 
     def _note_served(self, outcome: RunOutcome) -> None:
         if outcome.artifact is not None:

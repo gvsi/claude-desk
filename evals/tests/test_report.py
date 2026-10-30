@@ -86,10 +86,10 @@ def run(scenario_id: str, *, split: str = "heldout", rep: int = 1, success: bool
 
 
 def spend(pass_id: str = PASS_ID, day: date = PASS_DATE, *, runs: int = 18, desk_usd: float = 4.5,
-          simulator_usd: float = 2.7) -> SpendRow:
+          simulator_usd: float = 2.7, estimated_usd: float = 0.0) -> SpendRow:
     return SpendRow(pass_id=pass_id, date=day, provider="anthropic", runs=runs, desk_usd=desk_usd,
                     simulator_usd=simulator_usd, claude_api_usd=desk_usd + simulator_usd,
-                    total_usd=desk_usd + simulator_usd)
+                    total_usd=desk_usd + simulator_usd, estimated_usd=estimated_usd)
 
 
 def a_pass(runs: list[ReportRun], **changes: Any) -> PassSummary:
@@ -276,7 +276,7 @@ def test_latest_json_matches_the_report_numbers(tmp_path: Path):
     assert latest["eval_spend_month_usd"] == pytest.approx(14.4 + 7.2)   # October's pass is another month
     assert latest["eval_spend_month_claude_api_usd"] == pytest.approx(14.4 + 7.2)
     bedrock = SpendRow(pass_id="p-20261101-b7b7", date=PASS_DATE, provider="bedrock", runs=18, desk_usd=4.0,
-                       simulator_usd=2.0, claude_api_usd=0.0, total_usd=6.0)
+                       simulator_usd=2.0, claude_api_usd=0.0, total_usd=6.0, estimated_usd=0.0)
     mixed = latest_json(**{**inputs, "spend_month": [*inputs["spend_month"], bedrock]})
     assert mixed["eval_spend_month_usd"] == pytest.approx(14.4 + 7.2 + 6.0)     # every provider
     assert mixed["eval_spend_month_claude_api_usd"] == pytest.approx(14.4 + 7.2)   # what the guard counts
@@ -335,6 +335,33 @@ def test_the_month_spend_must_hold_the_pass_own_row(tmp_path: Path):
         with pytest.raises(ValueError, match="this pass's own spend row"):
             write_report(**all_inputs(spend_month=rows), reports_dir=reports, evals_doc=doc)
     assert not reports.exists()
+
+
+def test_spend_charged_as_an_estimate_is_reported_as_estimated(tmp_path: Path):
+    """Spend a pass or a latency run charged as an estimate, because its calls couldn't be priced, is
+    never shown as measured: the report's cost section, latest.json and the guide's latest results say
+    how much of the pass's and the month's spend is estimated, and say nothing of estimates when none is."""
+    measured = all_inputs()
+    cost = render_report(**measured).split("\n## Cost\n", 1)[1].split("\n## ", 1)[0]
+    assert "estimate" not in cost
+    latest = latest_json(**measured)
+    assert latest["pass_cost_estimated_usd"] == 0 and latest["eval_spend_month_estimated_usd"] == 0
+    assert "estimate" not in "\n".join(latest_results_block(latest))
+
+    own = spend(runs=len(full_pass().runs), estimated_usd=0.40)
+    latency_row = SpendRow(pass_id="latency-20261101-090000-0d0d0d", date=PASS_DATE, provider="anthropic", runs=0,
+                           desk_usd=0.30, simulator_usd=0.0, claude_api_usd=0.30, total_usd=0.30, estimated_usd=0.30)
+    inputs = all_inputs(pass_result=full_pass().model_copy(update={"spend": own}))
+    inputs["spend_month"] = [*inputs["spend_month"][:2], own, latency_row]
+    cost = render_report(**inputs).split("\n## Cost\n", 1)[1].split("\n## ", 1)[0]
+    assert "This pass: $7.20" in cost and "Of that, $0.40 is an estimate, not a measurement" in cost
+    assert "Of the month's spend, $0.70 is an estimate" in cost
+    latest = latest_json(**inputs)
+    assert latest["pass_cost_estimated_usd"] == pytest.approx(0.40)
+    assert latest["eval_spend_month_estimated_usd"] == pytest.approx(0.70)
+    assert "$7.20 for the pass, of which $0.40 is estimated, not measured" in "\n".join(latest_results_block(latest))
+    with pytest.raises(ValueError, match="estimated"):     # never more estimated than spent
+        spend(estimated_usd=7.5)
 
 
 # What a code, contact, key or link token looks like (the runner redacts the same things).
@@ -620,8 +647,8 @@ def latency_file(root: Path, pass_id: str | None, *, where: str = "local", provi
     done = LatencyRun(latency_id=latency_id, created_at=created, git_sha=GIT_SHA, pass_id=pass_id, where=where,
                       base_url=None if where == "local" else "https://desk.example.invalid",
                       provider=provider if where == "local" else "unknown", turns_per_kind=20, kinds=list(KINDS),
-                      estimate_usd=3.0, spend_usd=None, stopped_by_budget=False, latency=measured, proving=None,
-                      samples=[])
+                      estimate_usd=3.0, spend_usd=None, spend_estimated=False, stopped_by_budget=False,
+                      latency=measured, proving=None, samples=[])
     out = root / "evals" / "out" / "latency" / f"{latency_id}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(done.model_dump_json(indent=1) + "\n")
@@ -654,10 +681,10 @@ async def test_report_command_writes_the_report_of_a_finished_pass(report_repo, 
     spend_file = shared_spend_file(root)
     append_spend(spend_file, {"pass_id": "20260929-120000-0a0a0a", "date": "2026-09-29", "provider": "anthropic",
                               "runs": 4, "desk_usd": "1.0000", "simulator_usd": "0.6000", "claude_api_usd": "1.6000",
-                              "total_usd": "1.6000"})
+                              "total_usd": "1.6000", "estimated_usd": "0.0000"})
     append_spend(spend_file, {"pass_id": "latency-20261030-120000-0b0b0b", "date": "2026-10-30",
                               "provider": "anthropic", "runs": 0, "desk_usd": "2.4000", "simulator_usd": "0.0000",
-                              "claude_api_usd": "2.4000", "total_usd": "2.4000"})
+                              "claude_api_usd": "2.4000", "total_usd": "2.4000", "estimated_usd": "0.0000"})
     pass_id = await report_pass(root)
     latency_file(root, pass_id)
     latency_file(root, pass_id, provider="fake", reveal_p50=7.0, minutes=90)      # a dry run's: never read
@@ -690,6 +717,26 @@ async def test_report_command_writes_the_report_of_a_finished_pass(report_repo, 
         assert [row["pass_id"] for row in csv.DictReader(handle)] == [pass_id, "latency-20261030-120000-0b0b0b"]
     doc = (root / "docs" / "evals.md").read_text()
     assert f"[report for pass `{pass_id}`](../evals/reports/{report.name})" in doc and PLACEHOLDER not in doc
+
+
+async def test_report_command_refuses_a_month_row_that_doesnt_mark_its_estimate(report_repo, capsys):
+    """A row of the month written before spend rows marked estimated spend can't say whether its figure
+    was measured, so the report refuses rather than show the month's spend as measured; another month's
+    such row doesn't matter."""
+    root = report_repo
+    spend_file = shared_spend_file(root)
+    spend_file.write_bytes(b"pass_id,date,provider,runs,desk_usd,simulator_usd,claude_api_usd,total_usd\r\n"
+                           b"20260929-120000-0a0a0a,2026-09-29,anthropic,4,1.0,0.6,1.6,1.6\r\n")
+    pass_id = await report_pass(root)
+    assert evals_run.report_command(["--pass", pass_id], root=root) == 0     # September's row is another month
+    capsys.readouterr()
+
+    append_spend(spend_file, {"pass_id": "20261030-120000-0b0b0b", "date": "2026-10-30", "provider": "anthropic",
+                              "runs": 4, "desk_usd": "0.2000", "simulator_usd": "0.2000", "claude_api_usd": "0.4000",
+                              "total_usd": "0.4000", "estimated_usd": ""})
+    assert evals_run.report_command(["--pass", pass_id], root=root) == 1
+    assert ("report: a 2026-10 row of the shared spend file doesn't say how much of it was estimated"
+            in capsys.readouterr().out)
 
 
 async def test_report_command_keeps_a_partial_pass_out_of_the_latest_results(report_repo, capsys):

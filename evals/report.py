@@ -52,7 +52,8 @@ BEGIN_MARKER = "<!-- latest-results:begin -->"
 END_MARKER = "<!-- latest-results:end -->"
 PLACEHOLDER = "[measured: first held-out pass]"
 
-SPEND_COLUMNS = ("pass_id", "date", "provider", "runs", "desk_usd", "simulator_usd", "claude_api_usd", "total_usd")
+SPEND_COLUMNS = ("pass_id", "date", "provider", "runs", "desk_usd", "simulator_usd", "claude_api_usd", "total_usd",
+                 "estimated_usd")
 
 _STRICT = ConfigDict(extra="forbid", frozen=True)
 
@@ -206,6 +207,13 @@ class SpendRow(BaseModel):
     simulator_usd: Usd
     claude_api_usd: Usd                  # what the cumulative guard counts
     total_usd: Usd
+    estimated_usd: Usd                   # the part of total_usd charged as an estimate, its calls unpriced
+
+    @model_validator(mode="after")
+    def _estimated_within_total(self) -> Self:
+        if self.estimated_usd > self.total_usd:
+            raise ValueError("the estimated part of a spend row is at most its total")
+        return self
 
 
 class Budget(BaseModel):
@@ -502,6 +510,9 @@ def latest_json(pass_result: PassSummary, gate_result: Any, metrics: Metrics | N
         "measured_cost_per_run_usd": _round(p.spend.total_usd / p.spend.runs) if p.spend.runs else None,
         "eval_spend_month_usd": _round(sum(row.total_usd for row in month)),          # every provider
         "eval_spend_month_claude_api_usd": _round(sum(row.claude_api_usd for row in month)),   # what the guard counts
+        # The parts of the pass's and the month's spend charged as an estimate, because nothing could be priced.
+        "pass_cost_estimated_usd": _round(p.spend.estimated_usd),
+        "eval_spend_month_estimated_usd": _round(sum(row.estimated_usd for row in month)),
         "simulator_fallbacks": p.simulator_fallbacks.model_dump(),
         "provider": p.providers.api,
         "model_ids": dict(p.model_ids),
@@ -833,14 +844,22 @@ def _cost(p: PassSummary, metrics: Metrics | None, spend_month: Sequence[SpendRo
             f"visitor; {dollars(s.claude_api_usd)} on the Claude API)")
     if n["measured_cost_per_run_usd"] is not None:
         line += f", {dollars(n['measured_cost_per_run_usd'])} per run over {_plural(s.runs, 'run')}"
-    out.append(line + ".")
+    line += "."
+    if s.estimated_usd:
+        line += (f" Of that, {dollars(s.estimated_usd)} is an estimate, not a measurement: a run that left no usage "
+                 "to price is charged a run's estimated cost.")
+    out.append(line)
     month = _month_rows(spend_month, p.date)
     headroom = budget.monthly_limit_usd - budget.demo_reserve_usd
-    out.append(f"Eval spend this month: {dollars(n['eval_spend_month_usd'])} over "
-               f"{_plural(len(month), 'pass', 'passes')}, {dollars(n['eval_spend_month_claude_api_usd'])} of it "
-               "on the Claude API, which the cumulative "
-               f"guard holds under {dollars(headroom)}: the {dollars(budget.monthly_limit_usd)} monthly limit less "
-               f"the demo's {dollars(budget.demo_reserve_usd)} reserve.")
+    line = (f"Eval spend this month: {dollars(n['eval_spend_month_usd'])} over "
+            f"{_plural(len(month), 'pass', 'passes')}, {dollars(n['eval_spend_month_claude_api_usd'])} of it "
+            "on the Claude API, which the cumulative "
+            f"guard holds under {dollars(headroom)}: the {dollars(budget.monthly_limit_usd)} monthly limit less "
+            f"the demo's {dollars(budget.demo_reserve_usd)} reserve.")
+    if n["eval_spend_month_estimated_usd"]:
+        line += (f" Of the month's spend, {dollars(n['eval_spend_month_estimated_usd'])} is an estimate, charged "
+                 "where a pass's or a latency run's calls couldn't be priced.")
+    out.append(line)
     return out
 
 
@@ -978,7 +997,9 @@ def latest_results_block(latest: dict[str, Any]) -> list[str]:
          shown(latest["false_hold_rate"], lambda rate: f"{percent(rate)} of decisions the tasks expect allowed",
                "false holds")),
         ("Measured cost", shown(latest["measured_cost_per_run_usd"], lambda per_run: (
-            f"{dollars(per_run)} per run, {dollars(latest['pass_cost_usd'])} for the pass"), "cost per run")),
+            f"{dollars(per_run)} per run, {dollars(latest['pass_cost_usd'])} for the pass"
+            + (f", of which {dollars(latest['pass_cost_estimated_usd'])} is estimated, not measured"
+               if latest["pass_cost_estimated_usd"] else "")), "cost per run")),
     ]
     return [
         f"From the [report for pass `{latest['pass_id']}`]({link}), run on {latest['date']} at commit "
