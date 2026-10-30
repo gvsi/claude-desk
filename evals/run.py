@@ -9,6 +9,7 @@
     python -m evals.run record-rate --pass <id> --signed-off-by "<name>" --reason "<text>" [--lower-bar]
     python -m evals.run key
     python -m evals.run results-check --base <ref>
+    python -m evals.run latency --max-usd X [--turns 20] [--base-url URL] [--dry-run] [--pass <id>]
 
 With no test paths among the pytest args, `tier1` runs all of `evals/tier1`. It exits non-zero
 when pytest does, when no case was collected, or when the run left no summary or a summary with a
@@ -34,6 +35,12 @@ held-out set unless `--lower-bar` is given, and then marks the entry `lowered` a
 fixed in the Desk, not by lowering its bar. `key` prints the inputs key
 (`make evals-key`), and `results-check` is the check CI runs (`make evals-results-check`), with no
 database, network or key: exit 0 or 1, the reason on stdout.
+
+`latency` (`evals/latency.py`) makes `--turns` visitor turns each of a plain question, a quote and a
+booking, each kind in its own copy, on the in-process stack built from this tree (its API on
+`MODEL_PROVIDER`; every model scripted with `--dry-run`) or on the deployment at `--base-url`, and
+writes `evals/out/latency/<id>.json`, its numbers labelled `local` or `hosted` and `--pass` naming the
+pass they are for. It exits 1 when the run is refused or measured nothing it can report.
 """
 
 import argparse
@@ -48,6 +55,7 @@ import pytest
 from evals.tier1.harness import SUMMARY_FILE, TARGETS, TIER1_DIR
 
 if TYPE_CHECKING:
+    from evals.latency import LatencyConfig, LatencyDeps
     from evals.tier2.passes import PassConfig
 
 EVALS_DIR = Path(__file__).resolve().parent
@@ -232,8 +240,55 @@ def results_check(argv: list[str]) -> int:
     return 0 if passed else 1
 
 
+def latency_config(argv: list[str]) -> "LatencyConfig":
+    """The latency run asked for; the in-process stack's provider is `MODEL_PROVIDER`."""
+    from evals.latency import LatencyConfig
+    from evals.tier2.passes import credential
+
+    parser = argparse.ArgumentParser(prog="python -m evals.run latency", allow_abbrev=False)
+    parser.add_argument("--turns", type=int, default=20, help="turns of each kind")
+    parser.add_argument("--max-usd", type=float, required=True)
+    parser.add_argument("--base-url", help="the hosted deployment; the in-process stack when left out")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--pass", dest="pass_id", help="the pass these numbers are for")
+    options = parser.parse_args(argv)
+    provider = credential("MODEL_PROVIDER") or "anthropic"
+    if provider not in ("anthropic", "bedrock"):
+        parser.error(f"MODEL_PROVIDER is anthropic or bedrock, not {provider!r}")
+    try:
+        return LatencyConfig(turns=options.turns, max_usd=options.max_usd, base_url=options.base_url,
+                             dry_run=options.dry_run, provider=provider, pass_id=options.pass_id)
+    except ValueError as error:
+        parser.error(str(error))
+
+
+async def latency_command(argv: list[str], deps: "LatencyDeps | None" = None) -> int:
+    from evals.latency import LatencyDeps, LatencyMismatch, LatencyRefused, run_latency
+    from evals.tier2.passes import PassRefused
+
+    config = latency_config(argv)
+    deps = deps or LatencyDeps()
+    try:
+        run, written = await run_latency(config, deps)
+    except (LatencyRefused, LatencyMismatch, PassRefused) as refused:
+        print(f"latency: {refused}")
+        return 1
+    part = run.latency.hosted if run.where == "hosted" else run.latency.local
+    measured = len(run.samples) - part.errored_turns
+    spent = "" if run.spend_usd is None else f", ${run.spend_usd:.2f} spent"
+    print(f"latency: {run.where} run {run.latency_id}: {measured} of {len(run.samples)} turns measured, "
+          f"{part.errored_turns} failed{', stopped by --max-usd' if run.stopped_by_budget else ''}{spent}")
+    print(f"latency: wrote {written.relative_to(deps.root)}")
+    return 0 if measured else 1
+
+
+def latency(argv: list[str]) -> int:
+    return asyncio.run(latency_command(argv))
+
+
 COMMANDS = {"tier1": tier1, "simulator-check": simulator_check, "tier2": tier2, "gate": gate_command,
-            "results": results_command, "record-rate": record_rate_command, "key": key, "results-check": results_check}
+            "results": results_command, "record-rate": record_rate_command, "key": key, "results-check": results_check,
+            "latency": latency}
 
 
 def main(argv: list[str]) -> int:
