@@ -57,7 +57,8 @@ pass they are for. It exits 1 when the run is refused or measured nothing it can
 gate over its rows, the current recorded rate, the usage of its judged legitimate runs, the latest local
 and hosted latency runs whose `--pass` named it (never a dry run's; without one the report says latency
 wasn't measured), the thresholds' calibration at the pass's commit and, with `--null-baseline`, a
-null-baseline pass of the same held-out set. Only a pass of the whole suite (`--suite all`, `--split
+null-baseline pass that judged exactly the held-out legitimate tasks the pass ran (no `--only`, no stop
+at its budget). Only a pass of the whole suite (`--suite all`, `--split
 heldout` or `all`, no `--only`) that its budget didn't stop becomes the latest report; any other gets
 its report alone, under `evals/out/reports/`. A dry run, a null-baseline pass, a pass with no run, or
 anything it can't read whole is refused: exit 1, the reason on stdout, nothing written.
@@ -363,8 +364,8 @@ def report_inputs(pass_id: str, *, root: Path, null_baseline_id: str | None = No
     the pass left: `pass.json`, `runs.jsonl` and each run's transcript, the gate over its rows and the
     current recorded rate, this month's rows of the shared spend file (its own among them), the usage of
     its judged legitimate runs, the latency runs that name it, the thresholds' calibration at its commit
-    and, with `null_baseline_id`, a null-baseline pass of the same held-out set. Anything missing or
-    inconsistent refuses, so no run or number is left out unseen."""
+    and, with `null_baseline_id`, a null-baseline pass that judged the same held-out legitimate tasks.
+    Anything missing or inconsistent refuses, so no run or number is left out unseen."""
     from pydantic import ValidationError
 
     from evals.gate import gate
@@ -562,7 +563,9 @@ def _calibration_at(root: Path, git_sha: str) -> "Calibration | None":
 
 def _null_baseline(root: Path, null_id: str, real: "PassResult") -> "NullBaseline":
     """The held-out legitimate runs of `null_id`, a real pass run with Answering off on the same held-out
-    set as `real`, as the report's null baseline."""
+    set as `real`, as the report's null baseline. It must have judged exactly the held-out legitimate
+    tasks `real` ran, with no `--only` and no stop at its budget, since the report sets the two side by
+    side."""
     from evals.report import NullBaseline
     from evals.tier2.passes import load_pass
 
@@ -573,7 +576,20 @@ def _null_baseline(root: Path, null_id: str, real: "PassResult") -> "NullBaselin
     if null.heldout_sha256 != real.heldout_sha256:
         raise ReportRefused(f"null-baseline pass {null_id} ran on another held-out set than pass {real.pass_id}, so "
                             "the two can't be compared")
+    covers = f"so it may not cover the held-out legitimate tasks pass {real.pass_id} ran"
+    if null.config.only:
+        raise ReportRefused(f"null-baseline pass {null_id} ran with --only, {covers}")
+    if null.stopped_by_budget:
+        raise ReportRefused(f"null-baseline pass {null_id} was stopped by its --max-usd budget, {covers}")
     rows = [r for r in null.runs if r.status == "scored" and r.suite == "legit" and r.split == "heldout"]
+    ran = {r.scenario_id for r in real.runs if r.suite == "legit" and r.split == "heldout"}
+    judged = {r.scenario_id for r in rows}
+    if missing := sorted(ran - judged):
+        raise ReportRefused(f"null-baseline pass {null_id} didn't judge {', '.join(missing)}, which pass "
+                            f"{real.pass_id} ran, so the two can't be compared")
+    if extra := sorted(judged - ran):
+        raise ReportRefused(f"null-baseline pass {null_id} judged {', '.join(extra)}, which pass {real.pass_id} "
+                            "didn't run, so the two can't be compared")
     if not rows:
         raise ReportRefused(f"null-baseline pass {null_id} judged no held-out legitimate run")
     return NullBaseline(pass_id=null.pass_id, successes=sum(bool(r.success) for r in rows), trials=len(rows))

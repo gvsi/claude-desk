@@ -13,7 +13,7 @@ Each tier 2 pass that is gated and reported leaves three files here:
 - the latest local and hosted latency runs made for the pass (`make evals-latency PASS=<id>`), never a dry run's;
 - the calibration the reviewer's thresholds came from, at the pass's commit;
 - the current recorded rate;
-- with `NULL_BASELINE=<id>`, a null-baseline pass of the same held-out set.
+- with `NULL_BASELINE=<id>`, a null-baseline pass that judged exactly the held-out legitimate tasks the pass ran, with no `--only` and no stop at its budget.
 
 Only a pass of the whole suite becomes the latest report: `--suite all`, `--split heldout` or `all`, no `--only`, and not stopped by its `--max-usd` budget. Any other pass, such as a calibration pass, gets its report alone, under `evals/out/reports/`, which is never committed. That report says what the pass left out, and the files here and the evals guide stay as they were.
 

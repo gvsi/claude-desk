@@ -290,7 +290,8 @@ evals-soft-promise:
 # TURNS turns of each kind for at most LATENCY_MAX_USD on the stack built from this tree, or on the
 # deployment at BASE_URL (DRY_RUN=1 scripts every model for $0), for the pass PASS names. evals-report
 # writes the pass's report, latest.json and this month's spend.csv under evals/reports and the latest
-# results in docs/evals.md, with a null-baseline pass of the same held-out set when NULL_BASELINE names one.
+# results in docs/evals.md, with a null-baseline pass of the same held-out legitimate tasks when NULL_BASELINE
+# names one. A pass of part of the suite gets its report alone, under evals/out/reports.
 .PHONY: evals-gate evals-latency evals-report
 TURNS ?= 20
 LATENCY_MAX_USD ?= 3

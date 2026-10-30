@@ -53,7 +53,7 @@ from evals.tests.test_calibrate import THRESHOLDS_FILE, THRESHOLDS_PATH
 from evals.tests.test_passes import NOW, config, deps
 from evals.tests.test_usage_and_latency import model_call
 from evals.tier2.passes import append_spend, run_pass, shared_spend_file
-from evals.tier2.runner import RunOutcome, SimulatorStats
+from evals.tier2.runner import RunError, RunOutcome, SimulatorStats
 from evals.tier2.schema import ATTACK_CATEGORIES, RecordedRate, wilson_lower_95
 from evals.tier2.verdict import ORACLES, RunViolation, judge_run
 
@@ -768,6 +768,38 @@ async def test_report_command_reads_the_null_baseline_pass(report_repo, capsys):
     splits.write_text(original)                    # the reported pass's suite again
     assert evals_run.report_command(["--pass", pass_id, "--null-baseline", moved], root=root) == 1
     assert "ran on another held-out set" in capsys.readouterr().out
+
+
+async def timed_out(scenario: Any, rep: int, target: Any, simulator: Any, **kwargs: Any) -> RunOutcome:
+    """A run that timed out, so it judged nothing."""
+    return RunOutcome(scenario_id=scenario.id, suite=scenario.suite, rep=rep, pass_id=kwargs["pass_id"],
+                      error=RunError(kind="timeout", detail="the visitor's turn didn't end"),
+                      simulator=SimulatorStats(provider="anthropic", model="claude-sonnet-5-5", turns=1,
+                                               fallback_turns=0, switches=0, served_models=["claude-sonnet-5-5"]))
+
+
+async def test_report_command_refuses_a_null_baseline_that_doesnt_cover_the_pass(report_repo, capsys):
+    """The null baseline is compared with the pass's held-out completion, so it must have judged exactly
+    the held-out legitimate tasks the pass ran: a null-baseline pass run with `--only`, stopped by its
+    budget, or that didn't judge one of those tasks is refused with the reason, and nothing is written."""
+    root = report_repo
+    latest_file = root / "evals" / "reports" / "latest.json"
+    pass_id = await report_pass(root)
+    null = {"suite": "legit", "split": "heldout", "null_baseline": True}
+    cases = [
+        (await report_pass(root, answering_off, only=("leg-held",), **null), "ran with --only"),
+        # Two runs at the measured $0.10 a run fit $0.25; the first costs $0.30, so the second never starts.
+        (await report_pass(root, answering_off, runs=2, max_usd=0.25, cost_usd=0.30, **null),
+         "stopped by its --max-usd budget"),
+        (await report_pass(root, timed_out, **null), "didn't judge leg-held"),
+    ]
+    for null_id, why in cases:
+        assert evals_run.report_command(["--pass", pass_id, "--null-baseline", null_id], root=root) == 1
+        assert f"null-baseline pass {null_id}" in (said := capsys.readouterr().out) and why in said, said
+        assert not latest_file.exists()
+
+    covering = await report_pass(root, answering_off, **null)
+    assert evals_run.report_command(["--pass", pass_id, "--null-baseline", covering], root=root) == 0
 
 
 async def test_report_command_refuses_what_it_cant_read_whole(report_repo, capsys):

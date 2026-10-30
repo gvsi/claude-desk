@@ -130,7 +130,7 @@ make evals-report PASS=<id>
 
 - `FINAL=1` makes `evals-gate` the final gate, which also needs three runs of every scenario, no pending scenario and a recorded rate.
 - `BASE_URL=<url>` makes `evals-latency` measure the hosted deployment instead, entering it with the owner's passcode as `DESK_PASSCODE` in `.env`.
-- `NULL_BASELINE=<id>` adds a null-baseline pass of the same held-out set to the report.
+- `NULL_BASELINE=<id>` adds a null-baseline pass to the report. It must have judged exactly the held-out legitimate tasks the pass ran, with no `--only` and no stop at its budget.
 
 The report includes the latest local and hosted latency runs made for the pass. Without one, it says latency wasn't measured. Only a pass of the whole suite that its budget didn't stop becomes the latest results below; the report of any other pass, such as a calibration pass, is kept under `evals/out/reports/`.
 
