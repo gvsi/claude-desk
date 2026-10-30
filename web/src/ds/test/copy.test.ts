@@ -55,7 +55,7 @@ describe('assertCleanCopy', () => {
     expect(check('<p data-copy="user">PLEASE CALL ME</p>')).not.toThrow();
   });
 
-  it('allows_the_reading_pages_acronyms_by_whole_word', () => {
+  it('allows_the_reading_pages_acronyms', () => {
     // The acronyms the About this prototype documents use, each as they write it.
     for (const word of ['AP2', 'API', 'SymCC', 'CEO', 'CI', 'MCP', 'URL', 'US']) {
       expect(check(`<p>About the ${word} here</p>`), word).not.toThrow();
