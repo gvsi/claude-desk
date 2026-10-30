@@ -282,6 +282,79 @@ async def test_any_of_matches_one_alternative():
     assert await k.call("POST /decide", body=decide_body(), auth=Auth.none(), expect=expect) == KernelError(code="conflict")
 
 
+def test_a_mismatch_never_prints_what_a_list_or_object_held():
+    """A list or an object the response held is told by its type and size alone: a start that
+    should send nothing but sent a code fails showing neither the entry's code nor its contact,
+    nor any other part of it."""
+    entry = {"entry_id": "e-1", "to": "dana@example.com", "preview": "Your code is 482913"}
+    assert match_expect(200, {"inbox": [entry]}, Expect(fields={"inbox": []})) == [
+        "inbox: expected [], got a list of 1 item"]
+    assert match_expect(200, {"inbox": [entry, entry]}, Expect(fields={"inbox": {"$len": 1}})) == [
+        "inbox: expected {'$len': 1}, got a list of 2 items"]
+    assert match_expect(200, {"model_view": entry}, Expect(fields={"model_view": {}})) == [
+        "model_view: expected {}, got an object with 3 fields"]
+    assert match_expect(200, {"execution": {"state": "succeeded"}}, Expect(fields={"execution": None})) == [
+        "execution: expected None, got an object with 1 field"]
+
+
+def test_a_mismatch_tells_a_string_by_its_size_unless_the_expectation_names_it():
+    """A string the response held is shown only when the expectation itself names it and it is
+    short and shaped like a field name or an enum value; any other is told by its length, since it
+    may be a contact, a code or a token. A code or token the expectation names is still hidden:
+    a code starts with a digit, and a token is longer than any field name or enum value."""
+    session_token = secrets.token_urlsafe(32)   # tokens made fresh each run, so none is in the source
+    named_token = "tok_" + secrets.token_hex(16)
+    hex_token = "e" + secrets.token_hex(15)     # 31 characters, one over the longest shown
+    mismatches = {
+        "a raw contact for a masked one": ({"to": "dana@example.com"}, {"to": "d•••@example.com"},
+                                           "to: expected 'd•••@example.com', got a string of 16 characters"),
+        "a code in a preview": ({"preview": "Your code is 482913"}, {"preview": {"$not": {"$has": "482913"}}},
+                                "preview: expected {'$not': {'$has': '482913'}}, got a string of 19 characters"),
+        "a code the expectation names": ({"preview": "482913"}, {"preview": {"$not": "482913"}},
+                                         "preview: expected {'$not': '482913'}, got a string of 6 characters"),
+        "a token for none": ({"session_token": session_token}, {"session_token": None},
+                             "session_token: expected None, got a string of 43 characters"),
+        "an enum value it doesn't name": ({"outcome": "hold"}, {"outcome": "allow"},
+                                          "outcome: expected 'allow', got a string of 4 characters"),
+        "an empty string": ({"outcome": ""}, {"outcome": "allow"}, "outcome: expected 'allow', got an empty string"),
+        "a named value with a capital letter": ({"outcome": "Allow"}, {"outcome": {"$not": "Allow"}},
+                                                "outcome: expected {'$not': 'Allow'}, got a string of 5 characters"),
+    }
+    for name, (body, fields, shown) in mismatches.items():
+        assert match_expect(200, body, Expect(fields=fields)) == [shown], name
+    for token in (named_token, hex_token):   # named, and shaped like a field name, but longer than one
+        [mismatch] = match_expect(200, {"session_token": token}, Expect(fields={"session_token": {"$not": token}}))
+        assert mismatch.endswith(f", got a string of {len(token)} characters"), len(token)
+
+
+def test_a_mismatch_shows_numbers_and_the_names_the_expectation_gives():
+    """Numbers, booleans and None are shown as they are, and so is a string the expectation names
+    anywhere, in a matcher or another alternative, when it is shaped like a field name or an enum
+    value (lowercase words, a tool's dotted name) and no longer than one."""
+    shown = {
+        "a number": ({"amount_cents": 18500}, {"amount_cents": 18000}, "amount_cents: expected 18000, got 18500"),
+        "a boolean for a number": ({"verified": True}, {"verified": 1}, "verified: expected 1, got True"),
+        "a number for none": ({"first_bad_seq": 3}, {"first_bad_seq": None}, "first_bad_seq: expected None, got 3"),
+        "none": ({"verdict": None}, {"verdict": "pass"}, "verdict: expected 'pass', got None"),
+        "a value it rules out": ({"outcome": "allow"}, {"outcome": {"$not": "allow"}},
+                                 "outcome: expected {'$not': 'allow'}, got 'allow'"),
+        "a tool it rules out": ({"tool": "native.quote"}, {"tool": {"$not": {"$in": ["native.book", "native.quote"]}}},
+                                "tool: expected {'$not': {'$in': ['native.book', 'native.quote']}}, "
+                                "got 'native.quote'"),
+        "the longest field name": ({"field": "agent_mandate_remaining_cents"},
+                                   {"field": {"$not": "agent_mandate_remaining_cents"}},
+                                   "field: expected {'$not': 'agent_mandate_remaining_cents'}, "
+                                   "got 'agent_mandate_remaining_cents'"),
+    }
+    for name, (body, fields, mismatch) in shown.items():
+        assert match_expect(200, body, Expect(fields=fields)) == [mismatch], name
+    either = Expect(any_of=[Expect(fields={"outcome": "allow", "state": "allowed"}),
+                            Expect(fields={"outcome": "hold", "state": "held"})])
+    assert match_expect(200, {"outcome": "hold", "state": "allowed"}, either) == [
+        "matches none of 2 alternatives: outcome: expected 'allow', got 'hold' | "
+        "state: expected 'held', got 'allowed'"]
+
+
 async def test_agent_auth_signs_from_the_target_clock():
     k = ContractStub()
     issued = await k.call("POST /agents/demo", body={"desk_id": "d-1"}, auth=Auth.none())

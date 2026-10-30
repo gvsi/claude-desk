@@ -29,8 +29,9 @@ from evals.tier1.harness import Auth, ContractError, Expect, KernelHarness, load
 from evals.tier1.targets import DUMMY_KEY, SYMCC_REQUIRED, KernelTarget, MockpayClient, TargetError
 
 WATCHED = ("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "DESK_ENV", "DESK_DECISIONS", "DESK_SIGNING_SEED")
-LEAKED_CODE = "482913"   # what the stand-in's /verify/start puts in a field the contract doesn't declare
+LEAKED_CODE = "482913"   # the code the stand-in leaks: in a field, as a key, or in a preview
 BROKEN_CONTACT = "broken@example.com"   # the stand-in's /verify/start breaks VerifyStarted for this contact
+SENT_CONTACT = "sent@example.com"   # the stand-in's /verify/start sends this contact, unmasked, a code
 # Keys a stand-in answer chooses that a token could have: one spelled like a field name, and one in
 # hexadecimal that starts with a letter. Made fresh each run, so no token-like text is in the source.
 TOKEN_KEY = "tok_" + secrets.token_hex(16)
@@ -93,6 +94,10 @@ class StandInKernel:
                 notice = {"entry_id": 314159, "to": "d•••@example.com",
                           "preview": f"Your code {LEAKED_CODE} is here."}
                 return JSONResponse({"inbox": [notice], "verification_code": LEAKED_CODE})
+            if (await request.json())["contact"] == SENT_CONTACT:   # on contract, but a code to the raw contact
+                notice = {"entry_id": "e-1", "to": SENT_CONTACT, "preview": f"Your code is {LEAKED_CODE}"}
+                return JSONResponse({"message": "If that contact is on record, a code is on its way.",
+                                     "inbox": [notice]})
             notice = {"entry_id": "e-1", "to": "d•••@example.com", "preview": "A code is on its way."}
             if (await request.json())["contact"] == "keyed@example.com":   # token-shaped keys, one nested
                 return JSONResponse({"message": "If that contact is on record, a code is on its way.",
@@ -268,6 +273,31 @@ async def test_an_undeclared_key_is_never_printed_whatever_its_spelling(kernel: 
                               auth=Auth.none())
         assert TOKEN_KEY not in str(failure.value) and HEX_KEY not in str(failure.value), str(failure.value)
         assert target.responses == []
+    finally:
+        await target.stop()
+
+
+async def test_an_expectation_mismatch_never_prints_what_the_answer_held(kernel: StandInKernel):
+    """An on-contract answer that doesn't match its expectation fails the call by type and size
+    alone: a start that should send nothing (`{"inbox": []}`) but sent a code fails showing neither
+    the Demo inbox entry nor its contact nor the code, and so does one whose code went to the raw
+    contact where the masked one was expected."""
+    target = await KernelTarget(models="fake").start()
+    try:
+        expectations = {
+            "inbox: expected [], got a list of 1 item": {"inbox": []},
+            "inbox.0.to: expected 's•••@example.com', got a string of 16 characters": {
+                "inbox.0.to": "s\u2022\u2022\u2022@example.com"},
+        }
+        for mismatch, fields in expectations.items():
+            failed = re.escape(f"POST /verify/start answered 200: {mismatch}")
+            with pytest.raises(AssertionError, match=failed) as failure:
+                await target.call("POST /verify/start", body={"session_id": "s-1", "contact": SENT_CONTACT},
+                                  auth=Auth.none(), expect=Expect(fields=fields))
+            shown = str(failure.value)
+            held = [value for value in (LEAKED_CODE, SENT_CONTACT, "Your code", "e-1") if value in shown]
+            assert held == [], f"the failure shows {held}"
+        assert [called.raw["inbox"][0]["to"] for called in target.responses] == [SENT_CONTACT, SENT_CONTACT]
     finally:
         await target.stop()
 

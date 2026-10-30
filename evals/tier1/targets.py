@@ -404,6 +404,7 @@ class KernelTarget:
         self.responses.append(Called(route=route, request=request, status=status, body=answer, raw=raw))
         if mismatches := match_expect(status, answer, expect):
             error = isinstance(answer, dict) and status >= 300 and "code" in answer
+            # A contract word, safe to show: the answer was validated as a KernelError, whose code is a Literal.
             code = f" (code {answer['code']!r})" if error else ""
             raise AssertionError(f"{route} answered {status}{code}: {'; '.join(mismatches)}")
         return value

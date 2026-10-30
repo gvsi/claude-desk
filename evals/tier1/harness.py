@@ -262,9 +262,15 @@ class Expect:
 
 
 def match_expect(status: int, body: Any, expect: Expect) -> list[str]:
-    """Every way a response differs from the expectation; empty when it matches."""
+    """Every way a response differs from the expectation; empty when it matches. A mismatch shows
+    what the response held only as `described` allows, so it never prints a code, a contact or a
+    token the response carries."""
+    return _mismatches(status, body, expect, named_strings(expect))
+
+
+def _mismatches(status: int, body: Any, expect: Expect, named: frozenset[str]) -> list[str]:
     if expect.any_of:
-        missed = [match_expect(status, body, alternative) for alternative in expect.any_of]
+        missed = [_mismatches(status, body, alternative, named) for alternative in expect.any_of]
         if all(missed):
             return [f"matches none of {len(missed)} alternatives: " + " | ".join("; ".join(m) for m in missed)]
         return []
@@ -274,8 +280,59 @@ def match_expect(status: int, body: Any, expect: Expect) -> list[str]:
         if actual is _MISSING:
             mismatches.append(f"{path}: missing")
         elif not matches(actual, expected):
-            mismatches.append(f"{path}: expected {expected!r}, got {actual!r}")
+            mismatches.append(f"{path}: expected {expected!r}, got {described(actual, named)}")
     return mismatches
+
+
+def named_strings(expect: Expect) -> frozenset[str]:
+    """Every string the expectation names as a value: its fields' values, its matchers' arguments
+    and the strings in the lists and objects it expects, across all its alternatives."""
+    found: set[str] = set()
+
+    def walk(value: Any) -> None:
+        if isinstance(value, str):
+            found.add(value)
+        elif isinstance(value, list):
+            for item in value:
+                walk(item)
+        elif isinstance(value, dict):
+            for item in value.values():
+                walk(item)
+        elif isinstance(value, Expect):
+            walk([*value.fields.values(), *value.any_of])
+
+    walk(expect)
+    return frozenset(found)
+
+
+# A string a mismatch may show, when the expectation names it: shaped like the contract's field
+# names and enum values (lowercase words joined by underscores, a tool's dotted name) and no
+# longer than one (the longest is 29 characters). A code starts with a digit; a token mixes case
+# or runs longer (a 256-bit session token takes at least 43 characters, sixteen bytes in hex 32).
+SHOWN_STRING = re.compile(r"[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)?")
+SHOWN_MAX = 30
+
+
+def described(value: Any, named: frozenset[str] = frozenset()) -> str:
+    """How a mismatch shows a value the response held: a number, a boolean or None as it is; a
+    string as it is only when the expectation names it (`named`) and it is a short field name or
+    enum value (`SHOWN_STRING`, `SHOWN_MAX`); any other string, and every list and object, by its
+    type and size alone, since it may be or hold a code, a contact or a token."""
+    if value is None or isinstance(value, bool | int | float):
+        return repr(value)
+    if isinstance(value, str):
+        if value in named and len(value) <= SHOWN_MAX and SHOWN_STRING.fullmatch(value):
+            return repr(value)
+        return _sized("a string of", len(value), "character", "an empty string")
+    if isinstance(value, list):
+        return _sized("a list of", len(value), "item", "an empty list")
+    if isinstance(value, dict):
+        return _sized("an object with", len(value), "field", "an empty object")
+    return f"a {type(value).__name__}"
+
+
+def _sized(kind: str, n: int, unit: str, empty: str) -> str:
+    return empty if n == 0 else f"{kind} {n} {unit}{'' if n == 1 else 's'}"
 
 
 def is_matcher(expected: Any) -> bool:
