@@ -39,6 +39,7 @@
 | `waiting` | `boolean` | Another button's request is in flight, such as the answer a held request's owner didn't choose: the busy colors without the spinner, its words still shown, `aria-disabled`, and clicks are swallowed. |
 | `menuOpen` | `boolean` | Makes it a menu button: a chevron, `aria-haspopup="menu"`, `aria-expanded`. Leave it out for a plain button. Not on a link. |
 | `id` | `string` | The element's `id`. |
+| `describedBy` | `string` | The `id` of the words that tell it apart from buttons named alike (`aria-describedby`): each payment limit's "Change" points at its own line. |
 | `onClick` | `(event) => void` | Not called while disabled or busy. |
 | `onKeyDown` | `(event) => void` | Keys pressed on the button. Not on a link. |
 | `children` | `ReactNode` | The label, in `.cd-type-control` (primary at weight 500), held as one run of text, so words around a name stay together and the gap only separates them from a menu button's chevron. |

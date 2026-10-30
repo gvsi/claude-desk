@@ -83,6 +83,9 @@ export const Reading: Story = {
     const words = canvas.getByText(line);
     expectComputed(words, { fontSize: '14px', lineHeight: '20px', fontWeight: '380', color: 'rgba(250, 249, 245, 0.92)' });
     const change = canvas.getByRole('button', { name: 'Change' });
+    // change_is_described_by_its_limit: "Change" says which limit it changes.
+    await expect(change).toHaveAccessibleDescription(line);
+    await expect(change.getAttribute('aria-describedby')).toBe(words.id);
     await expect(change).toHaveClass('cd-button--secondary');
     expectComputed(change, { height: '32px' });
     await expect(group.getBoundingClientRect().right - change.getBoundingClientRect().right).toBe(16);

@@ -11,7 +11,7 @@
 ## What it shows
 
 - The section's line above its tools holds it: padded 12 px 16 px (12 px 14 px on a phone) under a hairline, as a tool row is. It adds no padding or line of its own but for 4 px under the editing buttons.
-- Reading: `line` in body type, `text-primary` ("No payment over $500 goes through without asking you, whatever the rules below say.", or "Every payment asks you first." when no limit is set), and a secondary "Change" at the right, centered on it, which calls `onEdit()`.
+- Reading: `line` in body type, `text-primary` ("No payment over $500 goes through without asking you, whatever the rules below say.", or "Every payment asks you first." when no limit is set), and a secondary "Change" at the right, centered on it, which calls `onEdit()`. "Change" is described by the line (`aria-describedby`), so the Rules page's two, in Payments and Stripe, say which limit each changes.
 - Editing, in a form, 16 px above the next hairline in all:
   - A `TextField` named by `label` ("Most a payment can be without asking you, in dollars" by default), at most 360 px wide, holding `value` exactly as typed. `hint` sits under it, and so does `error` when given (the field is then `aria-invalid` and the error is announced).
   - 12 px under it, a primary "Review change" and a secondary "Cancel".

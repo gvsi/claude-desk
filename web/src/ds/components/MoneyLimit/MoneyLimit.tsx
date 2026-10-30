@@ -1,4 +1,4 @@
-import { useEffect, useRef, type FormEvent } from 'react';
+import { useEffect, useId, useRef, type FormEvent } from 'react';
 
 import { Button } from '../Button/Button.tsx';
 import { TextField } from '../TextField/TextField.tsx';
@@ -53,6 +53,8 @@ export function MoneyLimit({
   disabled = false,
 }: MoneyLimitProps) {
   const root = useRef<HTMLDivElement>(null);
+  // "Change" is described by its own line, so the Rules page's two (Payments and Stripe) differ.
+  const lineId = useId();
   // Opening the field puts focus in it; closing it puts focus back on "Change". Only when the
   // screen switches it, never on first render, so a page that opens with the field steals no focus.
   const wasEditing = useRef(editing);
@@ -87,8 +89,10 @@ export function MoneyLimit({
         </form>
       ) : (
         <div className="cd-money-limit__reading">
-          <p className="cd-money-limit__line cd-type-body">{line}</p>
-          <Button variant="secondary" waiting={disabled} onClick={() => onEdit()}>
+          <p id={lineId} className="cd-money-limit__line cd-type-body">
+            {line}
+          </p>
+          <Button variant="secondary" waiting={disabled} describedBy={lineId} onClick={() => onEdit()}>
             Change
           </Button>
         </div>

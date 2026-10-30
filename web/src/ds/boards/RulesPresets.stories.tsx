@@ -198,7 +198,15 @@ export const PaymentLimit: Story = {
     await expect(line.getBoundingClientRect().height).toBe(57);
     const change = within(line).getByRole('button', { name: 'Change' });
     expectComputed(change, { height: '32px' });
-    await expectLimitLine(section(main, 'Stripe'));
+    const stripeLine = await expectLimitLine(section(main, 'Stripe'));
+    // The page's two "Change" buttons each point at their own group's limit line.
+    const stripeChange = within(stripeLine).getByRole('button', { name: 'Change' });
+    const described = [change, stripeChange].map((button) => button.getAttribute('aria-describedby'));
+    await expect(new Set(described).size).toBe(2);
+    for (const [i, button] of [change, stripeChange].entries()) {
+      await expect(button).toHaveAccessibleDescription(rivera.paymentLimit.line);
+      await expect([line, stripeLine][i]?.querySelector(`#${CSS.escape(described[i] ?? '')}`)).not.toBeNull();
+    }
     const [head, ...tools] = within(payments).getAllByRole('link');
     await expectTabOrder(userEvent, [head as HTMLElement, change, ...tools], 160);
     payments.scrollIntoView({ block: 'start' });
