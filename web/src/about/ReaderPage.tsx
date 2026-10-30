@@ -7,7 +7,7 @@
  *
  * The page is static: it reads its document from `documents.ts`, which only it loads, and makes no request.
  */
-import { Fragment, useContext, useEffect, useLayoutEffect, useRef, useSyncExternalStore } from 'react';
+import { Fragment, useContext, useLayoutEffect, useRef, useSyncExternalStore } from 'react';
 import { Link, UNSAFE_NavigationContext, useLocation, useNavigationType } from 'react-router';
 
 import { Card, ConceptFooter, Icon, Mark, Wordmark } from '../ds/index.ts';
@@ -380,8 +380,9 @@ export function ReaderPage({ id }: ReaderPageProps) {
   useReadingPlace(id, hash);
 
   // Search engines are asked not to list the page while it is open. A best effort: the app serves one
-  // index.html for every address, so the tag exists only once the page has drawn.
-  useEffect(() => {
+  // index.html for every address, so the tag exists only once the page has drawn. Both this and the title are
+  // set and taken back in the commit that draws or leaves the page, so the next page never inherits them.
+  useLayoutEffect(() => {
     const robots = document.createElement('meta');
     robots.name = 'robots';
     robots.content = 'noindex';
@@ -390,7 +391,7 @@ export function ReaderPage({ id }: ReaderPageProps) {
   }, []);
 
   // The tab names the document while it is open, and goes back to what it said when it closes.
-  useEffect(() => {
+  useLayoutEffect(() => {
     const before = document.title;
     document.title = `${about.title} · Claude Desk`;
     return () => {
