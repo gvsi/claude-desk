@@ -3,7 +3,6 @@
 that `cdk deploy` keeps a terminal for its approval prompt, and that the first failing step stops
 the deploy. Nothing reaches AWS or the real Keychain."""
 
-import errno
 import hashlib
 import json
 import os
@@ -11,9 +10,11 @@ import pty
 import re
 import select
 import shutil
+import signal
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -219,12 +220,13 @@ def deploy(tmp_path):
 
     def run(*args: str, typed: str = ACCOUNT, terminal: bool = True, deployed: dict | None = None,
             keychain_item: str | None = None, security: bool = True, bash_options: tuple[str, ...] = (),
-            watch: bool = False, **extra_env: str) -> Run:
+            watch: bool = False, read_after_exit: bool = False, **extra_env: str) -> Run:
         """`keychain_item` is the passcode the stub Keychain holds (none by default); without
         `security`, PATH holds the stubs and only the shell and `dirname` besides; `bash_options` go
         to the bash that runs deploy.sh, before the script. With `watch`, PATH holds the stubs, the
         shell and the WATCHED tools alone, each recording its call before it runs the real one, so
-        every command deploy.sh runs is in the calls, or it stops at one it can't find."""
+        every command deploy.sh runs is in the calls, or it stops at one it can't find. With
+        `read_after_exit`, the terminal is read only once deploy.sh has exited."""
         if deployed is not None:
             stacks.write_text(json.dumps(deployed))
         if keychain_item is not None:
@@ -264,31 +266,49 @@ def deploy(tmp_path):
             result = subprocess.run(command, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True,
                                     timeout=60)
             return Run(result.returncode, result.stdout + result.stderr)
+        # deploy.sh runs in a process group of its own, and the terminal end it's given (secondary)
+        # stays open here too until every process in that group is gone and all they wrote has been
+        # read: macOS drops a pseudo-terminal's unread output once no process holds that end, and
+        # typing into it then fails. The log's tee, which deploy.sh starts, can outlive it by a moment.
+        # (Not a session of its own: macOS hangs up the terminal when a session's leader exits.)
         primary, secondary = pty.openpty()
-        process = subprocess.Popen(command, env=env, stdin=secondary, stdout=secondary, stderr=secondary)
-        os.close(secondary)
-        try:
-            os.write(primary, f"{typed}\n".encode())
-        except OSError as error:  # deploy.sh already stopped (a usage error) and closed its terminal
-            if error.errno != errno.EIO:
-                raise
-        chunks = []
+        process = subprocess.Popen(command, env=env, stdin=secondary, stdout=secondary, stderr=secondary,
+                                   process_group=0)
+        os.write(primary, f"{typed}\n".encode())
+        if read_after_exit:
+            process.wait(timeout=60)
+        chunks, last_output = [], time.monotonic()
         while True:
-            ready, _, _ = select.select([primary], [], [], 60)
-            if not ready:
-                process.kill()
-                raise AssertionError("deploy.sh hung: " + b"".join(chunks).decode(errors="replace"))
-            try:
+            ready, _, _ = select.select([primary], [], [], 0.1)
+            if ready:
                 chunk = os.read(primary, 4096)
-            except OSError:
+                if not chunk:                                                 # hung up: nothing more comes
+                    break
+                chunks.append(chunk)
+                last_output = time.monotonic()
+            elif process.poll() is not None and not _group_runs(process.pid):
+                while select.select([primary], [], [], 0)[0] and (chunk := os.read(primary, 4096)):
+                    chunks.append(chunk)                                      # what they wrote last
                 break
-            if not chunk:
-                break
-            chunks.append(chunk)
+            elif time.monotonic() - last_output > 60:
+                os.killpg(process.pid, signal.SIGKILL)
+                raise AssertionError("deploy.sh hung: " + b"".join(chunks).decode(errors="replace"))
+        os.close(secondary)
         os.close(primary)
         return Run(process.wait(timeout=60), b"".join(chunks).decode(errors="replace"))
 
     return run
+
+
+def _group_runs(group: int) -> bool:
+    """Whether any process is left in a process group, until the system says none is (ESRCH)."""
+    try:
+        os.killpg(group, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:  # macOS, while the only ones left are exiting and not yet reaped
+        pass
+    return True
 
 
 def _context(call: dict) -> dict[str, str]:
@@ -346,6 +366,15 @@ def test_cdk_deploys_ask_for_approval_on_the_terminal(deploy, account):
         assert context["compute"] == "express"
         assert context["git_sha"] == _head()
         assert context["web_dist"] == str(REPO / "web" / "dist")
+
+
+def test_the_terminal_keeps_what_deploy_sh_wrote_when_it_exits_before_being_read(deploy):
+    """macOS drops a pseudo-terminal's unread output once no process holds its terminal end, so a
+    deploy.sh that stops at once could lose its message before these tests read it. The tests hold
+    that end open until they have read everything; here they read only after deploy.sh exited."""
+    run = deploy(DESK_IMAGE_DIR="/elsewhere", read_after_exit=True)
+    assert run.status == 2
+    assert "deploy: unset DESK_IMAGE_DIR" in run.output
 
 
 def test_the_image_is_built_from_this_checkout_at_head(deploy):
