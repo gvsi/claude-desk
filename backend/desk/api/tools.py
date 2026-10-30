@@ -185,7 +185,9 @@ def result_json(result: dict) -> str:
 class ToolOutcome:
     """How one tool call ended. `result` is the JSON Claude receives (`block` wraps it in its `tool_result`);
     `status` the decision shown to the visitor; `delivered` what a reply put on screen. The flags tell the turn
-    how to go on (module docstring); the timings feed the turn's metrics."""
+    how to go on (module docstring); the timings feed the turn's metrics. `unread` (with `unavailable`) marks a call
+    `recover_call` couldn't look up by its call ID: whether it ran isn't known, and with no decision ID nothing else
+    can carry its outcome, so it is never answered but left open for a later request."""
 
     result: dict
     is_error: bool
@@ -196,6 +198,7 @@ class ToolOutcome:
     session_ended: bool = False
     unavailable: bool = False
     turn_over: bool = False
+    unread: bool = False
     decide_ms: int = 0
     execute_ms: int = 0
     check_reply_ms: int = 0
@@ -423,11 +426,16 @@ async def recover_call(conn: AsyncConnection, caller: Caller, generation: int, b
     decision: `unknown` while it isn't final); a final decision answers with what it ended as. When the session has
     left that generation since (`generation` is the session's now), the decision is only shown and answered from its
     state (`_settle`). If settling it raises (a publication that failed), a decision that isn't final is left as a
-    `decision_pending` row before the error goes on, so its final state is still shown once it has one."""
+    `decision_pending` row before the error goes on, so its final state is still shown once it has one.
+
+    A lookup that can't reach the kernel answers `unread`: the call may have run, so its caller leaves it open, with no
+    results row, for a later request to look up again. Once the decision is found the kernel was asked, and whatever
+    settling it answers (`unknown` after a 409 whose decision couldn't be read, left pending) closes the call, so
+    /execute is never sent again for it."""
     call = tool_call(block)
     found = await _by_call(caller, made_at, call.call_id)
     if isinstance(found, ToolOutcome):
-        return found
+        return replace(found, unread=True) if found.unavailable else found
     try:
         return await _settle(conn, caller, generation if made_at == generation else None, found)
     except Exception:

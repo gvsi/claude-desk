@@ -321,15 +321,17 @@ class _Turn:
 
         A call that raised before the kernel had it didn't run, and ends the turn with the static error. One that
         raised once the kernel may have had it is found by its call ID and settled (`_recover_raised`); if nothing
-        can settle it, the response is left without its results row and the turn stops, so the session's next
-        request answers it by call ID (`_recover`) before Claude is asked anything."""
+        can settle it (settling raised too, or its decision couldn't be looked up: `unread`), the response is left
+        without its results row and the turn stops, so the session's next request answers it by call ID (`_recover`)
+        before Claude is asked anything. A call whose decision was found is answered however settling it ended, an
+        `unknown` after a 409 whose decision couldn't be read included, so /execute is never sent again for it."""
         conn, ids = self.conn, self.caller.ids
         assistant_n = await append_assistant(conn, ids, content, generation=self.generation)
         await conn.commit()
         calls = [block for block in tool_uses if block["name"] != SEND_REPLY]
         routed = await asyncio.gather(*(self._route(block) for block in calls), return_exceptions=True)
         outcomes: dict[str, ToolOutcome] = {}
-        unasked: list[ToolOutcome] = []                    # calls left open as the kernel couldn't be asked about them
+        unread: list[ToolOutcome] = []                     # calls left open as their decisions couldn't be looked up
         raised = False
         for block, outcome in zip(calls, routed, strict=True):
             if isinstance(outcome, NotSent):               # the kernel never had it: not run
@@ -342,14 +344,14 @@ class _Turn:
                 if outcome is None:                        # recovering it raised too: left open
                     raised = True
                     continue
-                if outcome.unavailable and outcome.status is None:
-                    unasked.append(outcome)
+                if outcome.unread:                         # its decision couldn't be looked up: left open
+                    unread.append(outcome)
                     continue
             outcomes[block["id"]] = outcome
             self.decide_ms += outcome.decide_ms
             self.execute_ms += outcome.execute_ms
         self.tool_calls += len(calls)
-        stop = _stop([*outcomes.values(), *unasked]) or ("internal" if raised else None)
+        stop = _stop([*outcomes.values(), *unread]) or ("internal" if raised else None)
         if len(outcomes) < len(calls):                     # a call left open: no results row until it is settled
             return stop
         shown = False
@@ -588,7 +590,11 @@ async def _recover(conn: AsyncConnection, caller: Caller, generation: int,
     """Answer the tool calls a turn left without results (it stopped after they went out), before any model call
     and never by deciding again: a reply is `delivered` when a `delivered` row carries its call ID, else `not_run`;
     any other call is found by its ID at the generation its turn ran at (`recover_call`), even after a take-over
-    or a hand-back moved the session on (`generation`, the session's now)."""
+    or a hand-back moved the session on (`generation`, the session's now).
+
+    A call whose decision couldn't be looked up (`unread`: the kernel was out of reach) may have run, so the response
+    keeps no results row: the outcomes stop the turn as the kernel being unavailable, and the next request tries
+    again. Answering it `unavailable` would tell Claude a call that ran never did, and leave its receipt unshown."""
     outcomes = []
     for block in open_tool_use.tool_uses:
         if block["name"] == SEND_REPLY:
@@ -596,6 +602,8 @@ async def _recover(conn: AsyncConnection, caller: Caller, generation: int,
             await conn.commit()
         else:
             outcomes.append(await recover_call(conn, caller, generation, block, made_at=open_tool_use.generation))
+    if any(outcome.unread for outcome in outcomes):        # left open: the next request looks it up again
+        return outcomes
     await append_tool_results(conn, caller.ids, open_tool_use.assistant_n, [
         outcome.block(block["id"]) for block, outcome in zip(open_tool_use.tool_uses, outcomes, strict=True)])
     await conn.commit()

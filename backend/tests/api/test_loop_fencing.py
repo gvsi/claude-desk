@@ -395,6 +395,78 @@ async def test_a_call_nothing_could_settle_stays_open_for_the_next_request(api_c
                                               ("turn_end", None)]
 
 
+async def test_a_call_whose_decision_cant_be_read_stays_open_until_it_can(api_conn, engine, locks, caller, fake,
+                                                                          monkeypatch):
+    """The booking ran, but neither its receipt nor the recovery's reached the visitor, and the next request can't reach
+    the kernel to find the call's decision. Whether it ran isn't known there, so Claude's call stays open, with no
+    results row, and the turn stops before Claude is asked anything. The request after that, with the kernel back,
+    settles it: the visitor sees the receipt once, and Claude reads that the booking went through, never that it was
+    unavailable, so it has no reason to propose it again."""
+    failed, deliver = failing_statuses(2)
+    monkeypatch.setattr(tools, "deliver", deliver)
+    await said(api_conn, caller, "Book me the earliest visit.")
+    model = ScriptedModel([response(tool_use("native__book", {"slot_id": open_slot(fake, caller)}, id="toolu_book"))])
+    assert await pending(caller, model, engine, locks) == "internal"
+    assert failed == ["receipt", "receipt"]                    # the call's publication, then the recovery's
+    (decision_id,) = session_decisions(fake, caller.session_id)
+    assert fake.decisions[decision_id].decision.state == "executed"
+    assert await rows(api_conn, caller.session_id, "model_tool_results", "n") == []
+
+    fake.fail("GET /decisions/by_call", "connect", times=1)    # the next request can't reach the kernel to find it
+    model = ScriptedModel()
+    assert await pending(caller, model, engine, locks) == "kernel_unavailable"
+    assert model.requests == []
+    assert await rows(api_conn, caller.session_id, "model_tool_results", "n") == []      # the call stays open
+    assert await control_rows(api_conn, caller.session_id) == []
+    assert [(event.type, getattr(event, "code", None)) for event in await events(api_conn, caller.session_id)] == [
+        ("writing", None), ("error", "internal"), ("turn_end", None), ("error", "kernel_unavailable"),
+        ("turn_end", None)]
+
+    model = ScriptedModel([response(reply("You're booked.", id="toolu_done"))])
+    assert await pending(caller, model, engine, locks) == "done"
+    assert len(fake.called("/decide")) == 1 and len(fake.desks[caller.desk_id].booked) == 1
+    (result,) = tool_results(model.requests[0])
+    assert (result["tool_use_id"], result["content"]["outcome"], result["content"]["decision_id"],
+            result["is_error"]) == ("toolu_book", "done", decision_id, False)
+    answered = await rows(api_conn, caller.session_id, "model_tool_results", "model_content")
+    assert [[result["tool_use_id"] for result in results] for (results,) in answered] == [["toolu_book"],
+                                                                                          ["toolu_done"]]
+    assert [(event.type, getattr(event, "decision_id", None)) for event in await events(
+        api_conn, caller.session_id)][5:] == [("receipt", decision_id), ("writing", None), ("message", None),
+                                              ("turn_end", None)]
+
+
+async def test_a_conflict_whose_decision_cant_be_read_is_never_sent_to_execute_again(
+        api_conn, engine, locks, caller, visitor, fake):
+    """A call whose routing raised once the kernel had it (here its `/decide` answer was lost to an error the API can't
+    name) is settled by call ID. Its `/execute` answers 409 `conflict` (another request began it a moment ago) and the
+    decision can't be read after it. The kernel was asked, so the call isn't left open as one it never had: Claude
+    reads `unknown`, the decision is left for the visitor's next request, which publishes its final state, and
+    `/execute` is never sent again for it."""
+    async def lost(request: httpx.Request) -> None:
+        raise RuntimeError("the answer was lost")
+
+    await said(api_conn, caller, "Book me the earliest visit.")
+    fake.in_flight("native.book")
+    fake.fail("GET /decisions/{id}", "connect", times=1)
+    model = ScriptedModel([response(tool_use("native__book", {"slot_id": open_slot(fake, caller)}, id="toolu_book"))])
+    kernel = Kernel(fake, after={"/decide": lost})
+    async with KernelHttp("http://fake-kernel", transport=kernel) as http:
+        outcome = await pending(replace(caller, kernel=http.session(visitor.token)), model, engine, locks)
+
+    assert outcome == "kernel_unavailable"
+    (decision_id,) = session_decisions(fake, caller.session_id)
+    assert kernel.answered("/execute") == [(409, "conflict")]
+    assert await control_rows(api_conn, caller.session_id) == [("decision_pending", {"decision_id": decision_id})]
+    ((results,),) = await rows(api_conn, caller.session_id, "model_tool_results", "model_content")
+    assert [(result["tool_use_id"], json.loads(result["content"]), result["is_error"]) for result in results] == [
+        ("toolu_book", {"outcome": "unknown", "decision_id": decision_id}, True)]
+
+    # the next request finds nothing open, and sends nothing to /execute
+    assert await pending(caller, ScriptedModel(), engine, locks) == "idle"
+    assert len(fake.called("/execute")) == 1 and len(fake.called("/decide")) == 1
+
+
 async def interrupt_after(path: str, caller: Caller, visitor, fake, engine: AsyncEngine, locks: AsyncEngine,
                           script: list) -> None:
     """Run a turn on `script` and stop its worker (a deploy, a crash) once the kernel answered `path`, before the
