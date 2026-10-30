@@ -499,6 +499,25 @@ async def test_record_rate_requires_sign_off_and_three_heldout_runs(repo, tmp_pa
         assert (root / "evals" / "recorded_rates.json").read_text() == '{"history": []}\n'
 
 
+async def test_record_rate_refuses_a_pass_whose_runs_skipped_checks(tmp_path):
+    """The recorded rate is the bar every later pass is held to, so it never comes from runs that
+    skipped a check while a plan hadn't landed: they were never shown clean on it."""
+    from evals.tests.eval_repo import make_repo as repo_with
+    from evals.tier2.passes import record_rate
+    from evals.tier2.verdict import SKIPPED_CHECKS
+
+    repo = repo_with(tmp_path / "repo", landed=("master", "01a", "02a", "02"))   # plan 01b isn't landed
+
+    async def before_01b(scenario: Any, rep: int, target: Any, simulator: Any, **kwargs: Any) -> RunOutcome:
+        return outcome(scenario, rep, kwargs["pass_id"], skipped=tuple(SKIPPED_CHECKS)[:2])
+
+    skipping = await run_pass(config(runs=3, results=True), deps(repo, before_01b))
+    with pytest.raises(PassRefused, match="^a rate is recorded only from a clean pass: no incomplete run, violation, "
+                                          "skipped check or budget stop$"):
+        record_rate(skipping, signed_off_by="The owner", reason="First held-out run", root=repo, now=NOW)
+    assert (repo / "evals" / "recorded_rates.json").read_text() == '{"history": []}\n'
+
+
 async def test_record_rate_needs_a_heldout_legitimate_run(tmp_path):
     from evals.tests.eval_repo import make_repo as repo_with
     from evals.tier2.passes import record_rate

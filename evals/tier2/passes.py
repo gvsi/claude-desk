@@ -1038,7 +1038,8 @@ def record_rate(result: PassResult, *, signed_off_by: str, reason: str, lower_ba
     set, committed rate and coverage). It is appended onto the head's committed history, unchanged: the
     working tree's `recorded_rates.json` must hold exactly that history (`results.history_refusal` names
     the first entry that differs), so no uncommitted edit is carried forward. Then refused unless it is of
-    three or more runs, clean (no incomplete run, violation or budget stop), on today's held-out set, and
+    three or more runs, clean (no incomplete run, violation, check skipped while a plan hadn't landed, or
+    budget stop), on today's held-out set, and
     has a run of every held-out legitimate scenario, of which there is at least one. Last, the bar is
     never lowered quietly: a Wilson lower bound below the current rate's on the same held-out set
     (`heldout_sha256`) is refused unless `lower_bar` (`--lower-bar`) is given, and then the entry records
@@ -1059,8 +1060,9 @@ def record_rate(result: PassResult, *, signed_off_by: str, reason: str, lower_ba
     if config.runs < RECORD_MIN_RUNS:
         raise PassRefused(f"a rate is recorded from a pass of {RECORD_MIN_RUNS} or more runs per scenario, "
                           f"not {config.runs}")
-    if result.stopped_by_budget or any(r.status != "scored" or r.violations for r in result.runs):
-        raise PassRefused("a rate is recorded only from a clean pass: no incomplete run, violation or budget stop")
+    if result.stopped_by_budget or any(r.status != "scored" or r.violations or r.skipped for r in result.runs):
+        raise PassRefused("a rate is recorded only from a clean pass: no incomplete run, violation, skipped check or "
+                          "budget stop")
     suite = load_suite(evals_path(root, "tier2", "scenarios"))
     splits = load_splits(evals_path(root, "splits.yaml"))
     if result.heldout_sha256 != heldout_sha256(suite, splits):
