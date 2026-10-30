@@ -125,6 +125,15 @@ export interface DraftRecord {
 /** Why the kernel refuses a tool confirm: a tool the Desk doesn't have, or a hash or a change it won't take. */
 export type ToolConfirmRefusal = 'not_found' | 'conflict';
 
+/**
+ * The hash a tool's connector lists now, which an enable must name, at the tool confirm and again
+ * at the draft's confirm (the master plan's `/tools/confirm` and `/policy/confirm`): a changed
+ * definition's pending hash while it waits for review, else the pinned one.
+ */
+function listedHash(tool: ToolProfile): string | null {
+  return tool.pending_sha256 != null && tool.pending_sha256 !== '' ? tool.pending_sha256 : (tool.definition_sha256 ?? null);
+}
+
 /** A card with every optional field at its default, so two cards compare by what they enforce. */
 function canonicalCard(card: RuleCard): string {
   const full: Record<string, unknown> = {
@@ -992,12 +1001,19 @@ export class MockWorld {
   /**
    * Activates a draft, as the kernel's confirm does: the draft becomes the active version, its
    * tools turn on at the hashes the owner confirmed, and the record says so. A draft that isn't open
-   * is not found, and one made from a version no longer active is stale.
+   * is not found, and one made from a version no longer active is stale. One that turns a tool on at
+   * a hash its connector no longer lists (its definition changed again since) is a conflict, and
+   * nothing changes: the tool waits for the owner's review of the new definition.
    */
-  confirmDraft(desk: DeskRecord, version: number): PolicyVersionOut | 'not_found' | 'stale' {
+  confirmDraft(desk: DeskRecord, version: number): PolicyVersionOut | 'not_found' | 'stale' | 'conflict' {
     const record = desk.drafts.get(version);
     if (record === undefined) return 'not_found';
     if (record.parent !== desk.policy.version) return 'stale';
+    const drifted = record.enables.some((entry) => {
+      const tool = desk.tools.find((row) => row.tool === entry.tool);
+      return tool === undefined || entry.definition_sha256 !== listedHash(tool);
+    });
+    if (drifted) return 'conflict';
     desk.policy = this.versionOf(desk, record, 'active');
     desk.drafts.delete(version);
     for (const entry of record.enables) {
@@ -1020,8 +1036,9 @@ export class MockWorld {
   /**
    * A tool confirm, as the kernel takes its batch: a whole connector in one action. Turning off
    * applies at once with no draft, except that verification can't be turned off. Turning on names
-   * each tool's listed hash (or a changed one's pending hash) and drafts one version for the tools
-   * not yet on, at the active rules and cap, which applies only when the owner confirms it.
+   * each tool's listed hash (a changed one's pending hash, never the old one) and drafts one version
+   * for the tools not yet on, at the active rules and cap, which applies only when the owner
+   * confirms it.
    */
   confirmTools(desk: DeskRecord, entries: readonly ToolConfirmEntry[], enable: boolean): ToolConfirmedOut | ToolConfirmRefusal {
     const tools = entries.map((entry) => desk.tools.find((tool) => tool.tool === entry.tool));
@@ -1040,7 +1057,7 @@ export class MockWorld {
     }
     const hashed = entries.every((entry, i) => {
       const tool = tools[i];
-      return tool !== undefined && entry.definition_sha256 !== '' && (entry.definition_sha256 === tool.definition_sha256 || entry.definition_sha256 === tool.pending_sha256);
+      return tool !== undefined && entry.definition_sha256 !== '' && entry.definition_sha256 === listedHash(tool);
     });
     if (!hashed) return 'conflict';
     const enables = entries.filter((entry) => {

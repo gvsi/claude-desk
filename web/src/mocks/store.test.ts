@@ -895,6 +895,56 @@ describe('rules and tools', () => {
     expect(again.status).toBe(200);
     expect((again.body as ToolConfirmedOut).draft).toBeNull();
   });
+
+  /** The connector changes `tool`'s definition to one hashed `sha`: it waits for the owner's review. */
+  const drift = (tool: string, sha: string) => {
+    const desk = mockStore.world.desk(deskId);
+    if (!desk) throw new Error('the mock has the main Desk');
+    desk.tools = desk.tools.map((row) => (row.tool === tool ? { ...row, status: 'needs_review', pending_definition_text: `Changed ${sha[0]}`, pending_sha256: sha } : row));
+  };
+  const rowOf = async (tool: string) => (await rules()).tools.find((row) => row.tool === tool);
+
+  it('changed_tool_confirms_only_its_pending_hash', async () => {
+    const refund = 'payments.create_refund';
+    const old = await hashOf(refund);
+    drift(refund, 'e'.repeat(64));
+
+    // The definition the owner reviewed is the changed one: the old hash is refused, and nothing is drafted.
+    expect(await confirmTools({ tools: [{ tool: refund, definition_sha256: old }], enable: true })).toEqual({ status: 409, body: { error: 'kernel', code: 'conflict' } });
+    expect(mockStore.world.desk(deskId)?.drafts.size).toBe(0);
+
+    // The changed definition's hash drafts a version that turns it on at that hash.
+    const on = await confirmTools({ tools: [{ tool: refund, definition_sha256: 'e'.repeat(64) }], enable: true });
+    expect(on.status).toBe(200);
+    const version = (on.body as ToolConfirmedOut).draft?.version;
+    expect(await rowOf(refund)).toMatchObject({ status: 'needs_review', definition_sha256: old, pending_sha256: 'e'.repeat(64) });
+    expect((await confirm(version)).status).toBe(200);
+    expect(await rowOf(refund)).toMatchObject({ status: 'enabled', definition_sha256: 'e'.repeat(64), pending_sha256: null, pending_definition_text: null });
+  });
+
+  it('second_drift_blocks_the_pending_confirm', async () => {
+    const refund = 'payments.create_refund';
+    const old = await hashOf(refund);
+    drift(refund, 'e'.repeat(64));
+    const on = await confirmTools({ tools: [{ tool: refund, definition_sha256: 'e'.repeat(64) }], enable: true });
+    const version = (on.body as ToolConfirmedOut).draft?.version;
+
+    // The definition changes again before the owner confirms: the draft names a hash that is no
+    // longer listed, so the kernel refuses it and the tool stays off, waiting for the new review.
+    drift(refund, 'a'.repeat(64));
+    expect(await confirm(version)).toEqual({ status: 409, body: { error: 'kernel', code: 'conflict' } });
+    expect((await rules()).active.version).toBe(7);
+    expect(await rowOf(refund)).toMatchObject({ status: 'needs_review', definition_sha256: old, pending_sha256: 'a'.repeat(64) });
+
+    // A tool turned back on from off is refused the same way when its definition changed since.
+    const charges = 'payments.list_charges';
+    const listed = await hashOf(charges);
+    expect((await confirmTools({ tools: [{ tool: charges, definition_sha256: listed }], enable: false })).status).toBe(200);
+    const back = await confirmTools({ tools: [{ tool: charges, definition_sha256: listed }], enable: true });
+    drift(charges, 'b'.repeat(64));
+    expect(await confirm((back.body as ToolConfirmedOut).draft?.version)).toEqual({ status: 409, body: { error: 'kernel', code: 'conflict' } });
+    expect(await rowOf(charges)).toMatchObject({ status: 'needs_review', pending_sha256: 'b'.repeat(64) });
+  });
 });
 
 describe('planted faults', () => {

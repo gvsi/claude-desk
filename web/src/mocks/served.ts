@@ -481,6 +481,8 @@ const SERVED: ServedRoutes = {
     if (confirmed === 'not_found') return NOT_FOUND;
     // Drafted from rules that have changed since: the owner asks for the change again.
     if (confirmed === 'stale') return failWith(409, 'rules_changed_since_draft');
+    // A tool it turns on changed again since: the kernel refuses, and nothing changes.
+    if (confirmed === 'conflict') return failWith(409, 'kernel', { code: 'conflict' });
     return ok(confirmed);
   },
   confirmTool(sv, req) {
