@@ -94,8 +94,8 @@ Claude Desk was built with Claude Code. Claude Opus 5.5 agents wrote the plans a
 
 ## Documents
 
-- Capability prediction: [owner: link]
-- Product proposal: [owner: link]
+- [Capability prediction](docs/capability-prediction.md)
+- [Product proposal](docs/product-proposal.md)
 - [Design spec](docs/specs/2026-10-28-claude-desk-design.md): the product, the locked decisions and why.
 - [Threat model](docs/threat-model.md): what is claimed, what isn't, and where each control is enforced.
 - [Architecture decisions](docs/architecture-decisions.md): the main choices, with the alternatives and their costs.
