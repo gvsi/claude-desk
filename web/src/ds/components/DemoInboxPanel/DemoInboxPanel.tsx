@@ -4,6 +4,7 @@ import type { DemoInboxEntry, InboxNotice } from '../../../api/contracts.ts';
 import { Button } from '../Button/Button.tsx';
 import type { CopyLanguage } from '../Notice/errorCopy.ts';
 import { Notice } from '../Notice/Notice.tsx';
+import { TextLink } from '../TextLink/TextLink.tsx';
 import { INBOX_COPY, type InboxCopy } from './inboxCopy.ts';
 
 import './DemoInboxPanel.css';
@@ -18,6 +19,11 @@ export interface DemoInboxItem {
   entry: DemoInboxEntry | null;
   /** Fetching the entry failed. */
   failed?: boolean;
+  /**
+   * Where the owner app opens the held request an alert is about. Only an owner's opened alert shows
+   * it, as "Open the request"; a code, a checkpoint and every row a visitor sees never do.
+   */
+  requestHref?: string;
 }
 
 export interface DemoInboxPanelProps {
@@ -138,6 +144,7 @@ export function DemoInboxPanel({ viewer, items, language, onRetry, action, title
                 key={item.notice.entry_id}
                 notice={item.notice}
                 time={viewer === 'owner' ? item.time : undefined}
+                requestHref={viewer === 'owner' ? item.requestHref : undefined}
                 view={viewOf(item)}
                 copy={copy}
                 onRetry={onRetry}
@@ -154,12 +161,14 @@ interface InboxItemProps {
   notice: InboxNotice;
   /** The owner's display time, or nothing for a visitor. */
   time: string | undefined;
+  /** The owner's link to the held request, or nothing for a visitor. */
+  requestHref: string | undefined;
   view: ItemView;
   copy: InboxCopy;
   onRetry: (entryId: string) => void;
 }
 
-function InboxItem({ notice, time, view, copy, onRetry }: InboxItemProps) {
+function InboxItem({ notice, time, requestHref, view, copy, onRetry }: InboxItemProps) {
   return (
     <li className="cd-demo-inbox__item">
       <p className="cd-demo-inbox__head cd-type-caption">
@@ -173,6 +182,11 @@ function InboxItem({ notice, time, view, copy, onRetry }: InboxItemProps) {
           <p className={`cd-demo-inbox__body ${view.entry.kind === 'head_checkpoint' ? 'cd-type-trace' : 'cd-type-body'}`}>
             {view.entry.body}
           </p>
+          {requestHref && view.entry.kind === 'alert' ? (
+            <p className="cd-demo-inbox__request cd-type-meta">
+              <TextLink href={requestHref}>{copy.openRequest}</TextLink>
+            </p>
+          ) : null}
         </>
       ) : (
         <>

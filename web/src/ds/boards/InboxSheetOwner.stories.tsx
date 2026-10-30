@@ -20,6 +20,7 @@ const ALERTS: DemoInboxItem[] = [
       created_at: '2026-10-30T09:58:00Z',
     },
     time: 'Today, 9:58 am',
+    requestHref: '#request-dec-rivera-saturday',
   },
   {
     notice: { entry_id: 'inbox-alert-discount', to: 'owner', preview: 'A request is waiting for your answer' },
@@ -31,6 +32,7 @@ const ALERTS: DemoInboxItem[] = [
       created_at: '2026-10-30T10:46:00Z',
     },
     time: 'Today, 10:46 am',
+    requestHref: '#request-dec-rivera-discount',
   },
 ];
 
@@ -58,7 +60,7 @@ const meta = {
       'Built against the board in review; sign-off pending.',
       'The owner’s Demo inbox on Today: DemoInboxSheet as a 400 px side sheet over the dimmed, inert page, opened from its button under the greeting, which the board doesn’t draw; Today behind it is only its header, as the board draws it.',
       'Close keeps its focus ring, since focus moves to it when the sheet opens; the board draws it at rest.',
-      'Each alert reads as DemoInboxPanel draws an entry, “To owner”, the time, “Alert” and the kernel’s body, where the board draws a held dot, a headline and “Open the request”: a DemoInboxEntry carries only its kind and body.',
+      'Each alert reads as DemoInboxPanel draws an entry, “To owner”, the time, “Alert” and the kernel’s body, then “Open the request” as the board draws it; the board’s held dot and headline aren’t drawn, since a DemoInboxEntry carries only its kind and body.',
       'The sidebar’s Connectors row belongs to another change.',
     ].join(' '),
   },
@@ -81,6 +83,11 @@ export const Board: Story = {
     const entries = within(sheet).getAllByRole('listitem');
     await expect(Math.round(entries[0]!.getBoundingClientRect().left)).toBe(1137);
     await expect(entries.map((entry) => entry.querySelector('.cd-demo-inbox__time')?.textContent)).toEqual(['Today, 10:46 am', 'Today, 9:58 am']);
+    // Each alert opens the held request it is about, as the board draws it.
+    await expect(entries.map((entry) => within(entry).getByRole('link', { name: 'Open the request' }).getAttribute('href'))).toEqual([
+      '#request-dec-rivera-discount',
+      '#request-dec-rivera-saturday',
+    ]);
     await expect(within(sheet).getByRole('button', { name: 'Close' })).toHaveFocus();
   },
 };

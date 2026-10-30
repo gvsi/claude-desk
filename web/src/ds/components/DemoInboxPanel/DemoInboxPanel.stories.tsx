@@ -214,6 +214,31 @@ export const OwnerAlerts: Story = {
   },
 };
 
+/** Where the screen opens the held request Linda's alert is about, in the owner app. */
+const REQUEST_HREF = '/app/main/today#request-dec-chen-consultation';
+
+/** Linda's inbox with a request link on every item, as a careless screen might pass it. */
+const everythingWithLinks: DemoInboxItem[] = everythingArrived.map((item) => ({ ...item, requestHref: REQUEST_HREF }));
+
+export const OwnerAlertOpensItsRequest: Story = {
+  args: { viewer: 'owner', items: everythingWithLinks },
+  parameters: {
+    canvas: 'N-R2-Inbox-Sheet-Owner',
+    canvasNote: `${BOARD}'s panel holding Linda's code, hold alert and ledger checkpoint, each passed a request link: only the alert shows "Open the request", under its body, as N-R2-Inbox-Sheet-Owner draws it.`,
+  },
+  play: async ({ canvasElement }) => {
+    // alert_opens_its_request: an owner's alert links to the held request it is about, 8 px under
+    // the kernel's words. A code or a ledger checkpoint never does, whatever the screen passes in.
+    const [code, alert, checkpoint] = itemsOf(canvasElement) as [HTMLElement, HTMLElement, HTMLElement];
+    const link = within(alert).getByRole('link', { name: 'Open the request' });
+    await expect(link).toHaveAttribute('href', REQUEST_HREF);
+    const body = alert.querySelector('.cd-demo-inbox__body') as HTMLElement;
+    const line = link.closest('.cd-demo-inbox__request') as HTMLElement;
+    await expect(Math.round(line.getBoundingClientRect().top - body.getBoundingClientRect().bottom)).toBe(8);
+    for (const item of [code, checkpoint]) await expect(within(item).queryByRole('link')).toBeNull();
+  },
+};
+
 export const ReplayedNotice: Story = {
   args: {
     viewer: 'owner',
@@ -258,7 +283,10 @@ const ownerFailedToOpen: DemoInboxItem = {
 };
 
 export const VisitorGivenAlert: Story = {
-  args: { viewer: 'visitor', items: [...everythingArrived, ownerStillOpening, ownerFailedToOpen] },
+  args: {
+    viewer: 'visitor',
+    items: [...everythingArrived, ownerStillOpening, ownerFailedToOpen].map((item) => ({ ...item, requestHref: '/app/main/today' })),
+  },
   parameters: {
     canvasNote: `${BOARD}'s visitor panel, handed the owner's alerts and ledger checkpoint by mistake, opened, still opening and failed to open (the kernel never sends a visitor any of them); it shows only the code.`,
   },
@@ -281,6 +309,8 @@ export const VisitorGivenAlert: Story = {
     await expect(canvas.queryByText('Alert')).toBeNull();
     await expect(canvas.queryByText('Ledger checkpoint')).toBeNull();
     await expect(canvas.queryByText('To owner')).toBeNull();
+    // A request link is the owner's: a visitor's panel shows none, even on their own code.
+    await expect(canvas.queryByRole('link')).toBeNull();
     await expect(text).not.toMatch(CLOCK);
   },
 };

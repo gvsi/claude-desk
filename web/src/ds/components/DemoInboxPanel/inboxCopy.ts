@@ -21,6 +21,8 @@ export interface InboxCopy {
   openFailed: string;
   /** The button that fetches it again. */
   retry: string;
+  /** The link under an owner's alert to the held request it is about. */
+  openRequest: string;
   /** When there is nothing to show. */
   empty: string;
   /** The sheet's button that closes it. */
@@ -39,6 +41,7 @@ export const INBOX_COPY = {
     opening: 'Opening',
     openFailed: 'Couldn’t open this entry.',
     retry: 'Try again',
+    openRequest: 'Open the request',
     empty: 'Nothing here yet. Codes and alerts you’d get by text or email show up here.',
     close: 'Close',
     entries: (count) => (count === 1 ? '1 entry' : `${count} entries`),
@@ -52,6 +55,7 @@ export const INBOX_COPY = {
     opening: 'Abriendo',
     openFailed: 'No se pudo abrir esta entrada.',
     retry: 'Intentar de nuevo',
+    openRequest: 'Abrir la solicitud',
     empty: 'Aún no hay nada. Aquí aparecen los códigos y avisos que recibirías por mensaje o correo.',
     close: 'Cerrar',
     entries: (count) => (count === 1 ? '1 entrada' : `${count} entradas`),

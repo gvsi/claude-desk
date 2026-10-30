@@ -192,3 +192,35 @@ export const Owner: Story = {
     await expect(button).toHaveFocus();
   },
 };
+
+export const OwnerOpensTheRequest: Story = {
+  args: { viewer: 'owner', items: [{ ...ALERT, requestHref: '#request-dec-dana-discount' }] },
+  globals: { viewport: { value: 'laptop', isRotated: false } },
+  parameters: {
+    canvas: 'N-R2-Inbox-Sheet-Owner',
+    canvasNote: 'The owner follows “Open the request” under an alert, which the board draws but doesn’t act out: the sheet closes, so the request isn’t left under it.',
+  },
+  play: async ({ canvas, userEvent }) => {
+    // following_a_link_closes_the_sheet: the link goes where it says, and the sheet doesn't stay
+    // over the page it opens.
+    await userEvent.click(canvas.getByRole('button', { name: 'Demo inbox 1 entry' }));
+    const sheet = canvas.getByRole('dialog', { name: 'Demo inbox' });
+    // The story's page stays put: the link's own navigation is stopped and its target kept, as a
+    // router would take it over.
+    let followed: string | null = null;
+    const keep = (event: MouseEvent) => {
+      const link = event.target instanceof Element ? event.target.closest('a') : null;
+      if (!link) return;
+      event.preventDefault();
+      followed = link.getAttribute('href');
+    };
+    window.addEventListener('click', keep, true);
+    try {
+      await userEvent.click(within(sheet).getByRole('link', { name: 'Open the request' }));
+    } finally {
+      window.removeEventListener('click', keep, true);
+    }
+    await expect(followed).toBe('#request-dec-dana-discount');
+    await expect(canvas.queryByRole('dialog')).toBeNull();
+  },
+};

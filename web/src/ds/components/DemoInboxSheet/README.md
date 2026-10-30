@@ -25,7 +25,7 @@
 
 - A visitor's sheet opens itself once, when the first entry the visitor may see arrives (the count goes from nothing to something). A later entry only raises the count. An owner's alert in the items opens nothing, and isn't counted. Opening and closing the empty sheet before anything arrives doesn't use up that one opening.
 - The button opens it at any time.
-- Opened from the button, focus moves to Close. Opened by itself, focus moves to the sheet's heading (`tabIndex={-1}`), so the visitor's next keystroke, perhaps meant for the chat, doesn't press Close. Either way it stays inside the sheet; the page behind is inert (`showModal()`). Escape, Close, or the browser's own close request (a back gesture) closes it, and focus goes back to what had it: the button, or, when the sheet opened itself, where the visitor was typing.
+- Opened from the button, focus moves to Close. Opened by itself, focus moves to the sheet's heading (`tabIndex={-1}`), so the visitor's next keystroke, perhaps meant for the chat, doesn't press Close. Either way it stays inside the sheet; the page behind is inert (`showModal()`). Escape, Close, or the browser's own close request (a back gesture) closes it, and focus goes back to what had it: the button, or, when the sheet opened itself, where the visitor was typing. Following a link inside, such as "Open the request" under an owner's alert, closes it too, so it isn't left over the page the link opens.
 - The open and close behavior is Dialog's `useModalDialog`, the same modal mechanism the Connectors change's picker and sign-in use.
 
 ## Copy (`inboxCopy.ts`)
