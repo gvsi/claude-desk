@@ -37,6 +37,19 @@ test("routes_to_index", () => {
   }
 });
 
+test("routes_every_owner_path_to_index", () => {
+  // The owner app's tool pages end in a tool name with a dot (payments.create_refund); nothing
+  // under /app/ is a file, so a reload or a shared link to one still gets the app.
+  for (const uri of [
+    "/app/desk_abc123/connectors/stripe/payments.create_refund",
+    "/app/desk_abc123/connectors/mcp_xyz/calendar.list_events",
+    "/app/setup/v1.2",
+    "/app/",
+  ]) {
+    assert.deepEqual(handle(viewerRequest(uri)), { ...viewerRequest(uri), uri: "/index.html" }, uri);
+  }
+});
+
 test("keeps_files", () => {
   for (const uri of ["/assets/app-1a2b.js", "/favicon.svg", "/index.html"]) {
     assert.deepEqual(handle(viewerRequest(uri)), viewerRequest(uri), uri);
