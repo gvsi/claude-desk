@@ -26,4 +26,4 @@
 
 ## Icons
 
-`IconName` lists the line icons: `today`, `conversations`, `people`, `rules`, `safety`, `share`, `settings`, `chevrons`, `plus`, `mic`, `send`, `copy`, `check`, `lock`, `pin`, `translate`, `whisper`, `agent`, `person`, `document`, `calendar`, `card`, `clock`, `close`, `menu`. `Icon({ name, size? })` draws one at 20 px by default (14, 16 and 18 for compact places), always `aria-hidden`, in `currentColor`, with a 1.5 px effective stroke at every size. Most shapes come from Lucide (ISC license, credited in `icons/index.tsx`).
+`IconName` lists the line icons: `today`, `conversations`, `people`, `rules`, `connectors` (a plug), `safety`, `share`, `settings`, `chevrons`, `plus`, `mic`, `send`, `copy`, `check`, `lock`, `pin`, `translate`, `whisper`, `agent`, `person`, `document`, `calendar`, `card`, `clock`, `close`, `menu`. `Icon({ name, size? })` draws one at 20 px by default (14, 16 and 18 for compact places), always `aria-hidden`, in `currentColor`, with a 1.5 px effective stroke at every size. Most shapes come from Lucide (ISC license, credited in `icons/index.tsx`).

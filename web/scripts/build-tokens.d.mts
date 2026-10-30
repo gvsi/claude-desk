@@ -17,6 +17,8 @@ export interface TypeStyle {
   fontSize: string;
   lineHeight: string;
   fontWeight: number;
+  /** `italic`, for a reading page's quotations; the builder refuses any other value. */
+  fontStyle?: string;
   letterSpacing?: string;
   /** `tabular-nums`, for figures that line up; the builder refuses any other value. */
   fontVariantNumeric?: string;

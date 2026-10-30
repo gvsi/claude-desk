@@ -18,6 +18,8 @@ const PLAIN_VALUE = /^[A-Za-z0-9 #%(),./+_-]{1,200}$/;
 const LIST_FAMILIES = ['spacing', 'radius', 'size', 'motion'];
 // The numeral forms a type style may ask for: tabular figures, for numbers that line up.
 const NUMERIC = new Set(['tabular-nums']);
+// The font styles a type style may ask for: italic, for a reading page's quotations.
+const FONT_STYLES = new Set(['italic']);
 
 function fail(message) {
   throw new Error(`tokens.json: ${message}`);
@@ -79,6 +81,10 @@ function typeStyleRule(style, groupFamily, families) {
     `  line-height: ${style.lineHeight};`,
     `  font-weight: ${style.fontWeight};`,
   ];
+  if (style.fontStyle !== undefined) {
+    if (!FONT_STYLES.has(style.fontStyle)) fail(`type style ${style.name} has an unsupported fontStyle`);
+    lines.push(`  font-style: ${style.fontStyle};`);
+  }
   if (style.letterSpacing !== undefined) {
     if (!LENGTH.test(style.letterSpacing)) fail(`type style ${style.name} has an unsupported letterSpacing`);
     lines.push(`  letter-spacing: ${style.letterSpacing};`);

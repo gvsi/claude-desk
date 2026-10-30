@@ -54,7 +54,7 @@ export function TodayPage() {
   const listedIds = new Set(listed.map((item) => item.decision.decision_id));
   const kept = [...answers.kept.values()].filter((item) => !listedIds.has(item.decision.decision_id));
   const held: HeldItem[] = heldOldestFirst([...listed, ...kept]).filter((item) => !answers.answered.has(item.decision.decision_id));
-  const callbacks = items.filter((item): item is CallbackItem => item.handoff !== undefined);
+  const callbacks = items.filter((item): item is CallbackItem => item.handoff != null);
   const firstHeld = held[0] ?? null;
   // A failed read says so in Needs you, over whatever was read before, so it never looks as if
   // nothing needs the owner. It stays until a read works: React Query starts each read of a query

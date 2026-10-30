@@ -4,7 +4,7 @@ import { expect, fn, within } from 'storybook/test';
 
 import { chen, rivera } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
-import { Sidebar, type NavKey } from '../Sidebar/Sidebar.tsx';
+import { Sidebar, type SidebarHrefs } from '../Sidebar/Sidebar.tsx';
 import { SwitcherMenu, type SwitcherBusiness, type SwitcherMenuProps } from './SwitcherMenu.tsx';
 
 const MAIN_LINE = { id: 'desk-rivera-main', name: rivera.business.deskName };
@@ -16,6 +16,7 @@ const businesses = [
   { id: 'biz-chen', name: chen.business.name, desks: [CHEN_MAIN] },
 ] satisfies SwitcherBusiness[];
 
+// The switcher board draws the sidebar's seven pages, from before Connectors: no Connectors href.
 const hrefs = {
   today: '#today',
   conversations: '#conversations',
@@ -24,7 +25,7 @@ const hrefs = {
   safety: '#safety',
   share: '#share',
   settings: '#settings',
-} satisfies Record<NavKey, string>;
+} satisfies SidebarHrefs;
 
 const OPENER = `Switch business, current: ${rivera.business.name}`;
 
