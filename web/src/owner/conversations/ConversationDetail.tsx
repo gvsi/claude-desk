@@ -17,6 +17,7 @@ import {
   EmptyState,
   Notice,
   Pill,
+  RecordedNote,
   StatusDot,
   TakeOverBar,
   Transcript,
@@ -30,7 +31,6 @@ import { AnsweredRequest, HeldRequest, useAnsweredFocus } from '../approvals/Hel
 import { useAnswer, type HeldItem } from '../approvals/useAnswer.ts';
 import { publicLink } from '../customerLink.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
-import { REPLAYED_LABEL } from '../safety/copy.ts';
 import { heldOldestFirst, useNeedsYou } from '../useDesks.ts';
 import { useReadFailure, type ReadFailure } from '../useReadFailure.ts';
 import { OwnerTranscript } from './OwnerTranscript.tsx';
@@ -272,7 +272,11 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
         {state.assurance === 'demo_code' ? <span className="cd-conversation__quiet cd-type-caption">Simulated verification</span> : null}
         {latest !== null ? <p className="cd-conversation__latest cd-type-meta">Latest: {latest}</p> : null}
       </header>
-      {read.replayed === true ? <p className="cd-conversation__quiet cd-type-caption">{REPLAYED_LABEL}. It happened before you arrived.</p> : null}
+      {read.replayed === true ? (
+        <div className="cd-conversation__recorded">
+          <RecordedNote />
+        </div>
+      ) : null}
       {notice !== null ? <Notice tone="error">{notice}</Notice> : null}
       {failure !== null ? <FailedRead failure={failure} /> : null}
       {heldFailure !== null ? <FailedRead failure={heldFailure} /> : null}

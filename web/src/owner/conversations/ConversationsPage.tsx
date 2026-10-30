@@ -11,12 +11,12 @@ import { useLocation, useNavigate, useParams } from 'react-router';
 import { request } from '../../api/http.ts';
 import type { ConversationSummary } from '../../api/views.ts';
 import { pollMs } from '../../app/poll.ts';
-import { Button, ConceptFooter, ConversationListItem, EmptyState, Notice, TextLink } from '../../ds/index.ts';
+import { Button, ConceptFooter, ConversationListItem, EmptyState, Notice, RecordedHistoryLink, TextLink } from '../../ds/index.ts';
 import { conversationDay, formatListTime, type ConversationDay } from '../../lib/format.ts';
 import { customerLink } from '../customerLink.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
-import { RecordedHistoryLink } from '../today/SinceLastNight.tsx';
+import { entriesPath } from '../today/SinceLastNight.tsx';
 import { useReadFailure } from '../useReadFailure.ts';
 import { ConversationDetail } from './ConversationDetail.tsx';
 import { conversationPath, conversationStatus, whoLabel, type ConversationArrival } from './status.ts';
@@ -107,6 +107,7 @@ export function ConversationsPage() {
                 status={conversationStatus(s, s.outcome_counts.held ?? 0)}
                 href={conversationPath(deskId, s.session_id)}
                 current={s.session_id === sessionId}
+                recorded={s.replayed === true}
               />
             </li>
           ))}
@@ -126,7 +127,7 @@ export function ConversationsPage() {
         </h1>
         {replayed ? (
           <p className="cd-conversations__caption">
-            <RecordedHistoryLink deskId={deskId} />
+            <RecordedHistoryLink href={entriesPath(deskId)} />
           </p>
         ) : null}
         {failure !== null ? (

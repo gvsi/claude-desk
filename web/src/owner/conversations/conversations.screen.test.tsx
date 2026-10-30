@@ -719,15 +719,23 @@ describe('Conversations', () => {
     await expectScreenBasics(again.screen.container, { owner: true });
   });
 
-  it('recorded_history_is_marked', async () => {
+  it('recorded_conversations_are_tagged', async () => {
     const label = 'Includes recorded history';
-    // A copy with no recorded history says nothing of it.
+    const note = 'Recorded history, replayed into your copy. It happened before you arrived.';
+    /** The list's rows, newest first: Dana's live chat, then the seeded visitor's. */
+    const rowsOf = (screen: RenderResult) => screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: /^(?!Includes)/ });
+    const tagsIn = (row: Element) => [...row.querySelectorAll('span')].filter((span) => span.textContent?.trim() === 'Recorded');
+    named(DANA_LIVE, DANA);
+
+    // A copy with no recorded history says nothing of it: no caption, no tag, no note.
     const plain = await renderRoute(conversation(SEEDED_HOLD));
     await expect.element(plain.screen.getByRole('heading', { level: 2, name: 'Visitor' })).toBeVisible();
+    await expect.poll(() => rowsOf(plain.screen).elements()).toHaveLength(2);
     expect(plain.screen.getByRole('link', { name: label }).elements()).toHaveLength(0);
+    expect(rowsOf(plain.screen).elements().flatMap(tagsIn)).toHaveLength(0);
     expect(plain.screen.getByText(/^Recorded history/).elements()).toHaveLength(0);
 
-    // The seeded visitor's chat replayed from the recorded history into this copy.
+    // The seeded visitor's chat replayed from the recorded history into this copy; Dana's is live.
     const list = await served<ConversationSummary[]>('conversations', { desk_id: RIVERA.deskId });
     const chat = await served<OwnerTranscript>('conversation', { session_id: SEEDED_HOLD });
     mockStore.inject({
@@ -739,15 +747,35 @@ describe('Conversations', () => {
     mockStore.inject({ route: 'conversation', status: 200, times: 10_000, body: { ...chat, replayed: true } });
     const { screen, router } = await renderRoute(conversation(SEEDED_HOLD));
 
+    // "Recorded", with its history icon, at the end of the replayed row's status line only.
+    await expect.poll(() => rowsOf(screen).elements()).toHaveLength(2);
+    const [live, replayed] = rowsOf(screen).elements();
+    expect(live?.textContent).toContain(DANA);
+    expect(tagsIn(live as Element)).toHaveLength(0);
+    const tags = tagsIn(replayed as Element);
+    expect(tags).toHaveLength(1);
+    const tag = tags[0] as HTMLElement;
+    expect(tag.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    expect(tag.parentElement?.lastElementChild).toBe(tag);
+
     // The page says so under its title, linking to the record where each replayed entry says so.
     const nav = screen.getByRole('navigation', { name: 'Conversations' });
     const link = nav.getByRole('link', { name: label });
     await expect.element(link).toHaveAttribute('href', `${DESK}/safety?view=entries`);
     expect(getComputedStyle(link.element()).textDecorationLine).toBe('underline');
-    // The open chat says it happened before she arrived.
-    await expect
-      .element(screen.getByText('Recorded history, replayed into your copy. It happened before you arrived.', { exact: true }))
-      .toBeVisible();
+    const title = nav.getByRole('heading', { level: 1, name: 'Conversations' }).element();
+    expect(title.compareDocumentPosition(link.element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    // The open chat says it happened before she arrived, with the history icon, between its head
+    // and the transcript.
+    const line = screen.getByText(note, { exact: true });
+    await expect.element(line).toBeVisible();
+    const noteLine = line.element().closest('p');
+    expect(noteLine).not.toBeNull();
+    expect((noteLine as HTMLElement).querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    const head = screen.getByRole('heading', { level: 2, name: 'Visitor' }).element();
+    expect(head.compareDocumentPosition(noteLine as HTMLElement) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect((noteLine as HTMLElement).compareDocumentPosition(log(screen).element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // No one is on the other side of a recorded chat: nothing to take over, whisper or write.
     await expect.element(screen.getByRole('heading', { level: 2, name: 'Visitor' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Take over' }).elements()).toHaveLength(0);
@@ -758,6 +786,7 @@ describe('Conversations', () => {
     await link.click();
     await expect.poll(() => `${router.state.location.pathname}${router.state.location.search}`).toBe(`${DESK}/safety?view=entries`);
   });
+
   it('conversations_fit_a_phone', async () => {
     named(DANA_LIVE, DANA);
     mockStore.world.addHeldRefund();

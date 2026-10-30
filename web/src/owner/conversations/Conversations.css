@@ -138,8 +138,9 @@
   color: var(--text-secondary);
 }
 
-.cd-conversation > .cd-conversation__quiet {
-  margin: calc(var(--space-8) - var(--space-16)) 0 0;
+/* A replayed chat's RecordedNote, 8 px under the head. */
+.cd-conversation__recorded {
+  margin-top: calc(var(--space-8) - var(--space-16));
 }
 
 /* A held request's card, and a receipt's full trace, in the conversation's column. */
