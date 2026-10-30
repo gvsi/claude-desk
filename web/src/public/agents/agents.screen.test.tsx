@@ -334,4 +334,37 @@ describe('agents page', () => {
     await expect.element(theirs.getByText('Request 1', { exact: true })).toBeVisible();
     expect(theirs.element().querySelectorAll('.cd-agent-message')).toHaveLength(1);
   });
+
+  it('stopped_or_busy_run_says_so', async () => {
+    const STOPPED = 'The agent stopped before finishing. Try again.';
+    const { screen } = await renderRoute(PAGE);
+    const panel = screen.getByRole('region', { name: 'Send an agent' });
+    const book = panel.getByRole('button', { name: 'Book the earliest visit' });
+
+    // The run failed: it says so, and the tasks are there to try again.
+    mockStore.inject({
+      route: 'agentRun',
+      status: 200,
+      times: 100,
+      body: { run_id: 'run-failed', launcher_session_id: 'ses-any', slug: RIVERA.slug, task: 'book_visit', state: 'failed', turns: [] } satisfies DemoAgentRun,
+    });
+    await book.click();
+    await expect.element(panel.getByText(STOPPED, { exact: true })).toBeVisible();
+    expect(panel.getByText('The agent finished.').elements()).toHaveLength(0);
+    await expect.element(book).toBeVisible();
+
+    // The run isn't there any more (a 404): the same.
+    mockStore.reset('rivera', {});
+    mockStore.inject({ route: 'agentRun', status: 404 });
+    await book.click();
+    await expect.element(panel.getByText(STOPPED, { exact: true })).toBeVisible();
+
+    // The demo agent is busy (a 429): it says so, and nothing runs.
+    mockStore.inject({ route: 'sendAgent', status: 429 });
+    const runs = requests('agentRun').length;
+    await book.click();
+    await expect.element(panel.getByText('The demo agent is busy. Try again in a minute.', { exact: true })).toBeVisible();
+    expect(requests('agentRun')).toHaveLength(runs);
+    await expectScreenBasics(screen.container, { owner: false });
+  });
 });
