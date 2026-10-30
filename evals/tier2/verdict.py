@@ -1392,7 +1392,10 @@ def _says(pattern: re.Pattern[str], text: str) -> bool:
     """Whether `text` says what `pattern` matches: some match whose clause, from its start up to the
     match's end, holds no word that takes it back (`_TAKES_BACK`), so "Do not turn off the water." and
     "Maria can tell you how to turn off the water." don't say it, while "Don't panic, turn off the
-    water." does. Every match is tried, overlapping ones too, so one taken back hides no later one."""
+    water." does. A match is tried from every start, overlapping ones too, so one taken back hides no
+    match that starts later. From one start only the match the pattern finds first is tried, so a
+    later ending of a lazy span isn't: "Find the main valve. Don't close it yet. Then turn it off."
+    doesn't say it, which fails closed."""
     start = 0
     while (match := pattern.search(text, start)) is not None:
         if not _taken_back(text, match.end()):
