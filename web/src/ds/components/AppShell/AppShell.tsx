@@ -27,7 +27,9 @@ export interface AppShellProps {
   layout?: 'auto' | 'compact';
   /**
    * The page fills the main area edge to edge, with no padding and no content width, for a page
-   * that lays out its own columns, such as Conversations' list beside the open conversation.
+   * that lays out its own columns, such as Conversations' list beside the open conversation. The
+   * sidebar then sits on the app ground with no seam, at its own height, as the signed
+   * conversation boards draw it; the page draws its own dividers.
    */
   fill?: boolean;
   /** The page. */
@@ -61,7 +63,7 @@ export function AppShell({ sidebar, business, banner, layout = 'auto', fill = fa
   // Only the navigation changes with the layout. The page stays in the same place in the tree, so
   // crossing the breakpoint (a resized window, a turned phone) keeps its drafts and other state.
   return (
-    <div className={`cd-app-shell${compact ? ' cd-app-shell--compact' : ''}`}>
+    <div className={`cd-app-shell${compact ? ' cd-app-shell--compact' : ''}${fill ? ' cd-app-shell--fill' : ''}`}>
       {banner}
       <div className="cd-app-shell__body">
         {compact ? (

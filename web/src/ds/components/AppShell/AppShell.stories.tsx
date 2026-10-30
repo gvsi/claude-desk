@@ -155,9 +155,17 @@ export const FillsTheMain: Story = {
   args: { banner: undefined, fill: true, children: columns },
   parameters: {
     canvas: 'N-Conv-Run1',
-    canvasNote: 'Only the page’s frame: the board’s conversation list starts at the sidebar’s seam and runs the window’s height, with the conversation beside it.',
+    canvasNote: 'Only the page’s frame: the board’s conversation list starts where the sidebar ends and runs the window’s height, with the conversation beside it.',
   },
   play: async ({ canvas }) => {
+    // The signed conversation boards draw the sidebar on the app ground with no seam, at its own
+    // height: its Answering switch and owner sit under the pages, not at the window's foot.
+    const sidebarColumn = canvas.getByRole('complementary', { name: 'Claude Desk' });
+    expectComputed(sidebarColumn, { backgroundColor: 'rgb(28, 27, 25)', borderRightWidth: '0px' });
+    const nav = within(sidebarColumn).getByRole('navigation', { name: 'Main' });
+    const foot = sidebarColumn.querySelector('.cd-sidebar__footer') as HTMLElement;
+    await expect(foot.getBoundingClientRect().top - nav.getBoundingClientRect().bottom).toBe(4);
+
     // The page fills the main area edge to edge: no padding and no content width, so its first
     // column starts at the sidebar's seam and runs the height of the window.
     const column = canvas.getByRole('complementary', { name: 'Claude Desk' });

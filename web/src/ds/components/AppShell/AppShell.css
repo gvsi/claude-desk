@@ -52,7 +52,15 @@
 }
 
 /* Fill: a page with its own columns takes the whole main area, its height and its width. The
-   content is one grid cell, so the page in it stretches to the window's height. */
+   content is one grid cell, so the page in it stretches to the window's height. The sidebar sits
+   on the app ground with no seam, at its own height, so its Answering switch follows the pages;
+   the page draws its own dividers. */
+.cd-app-shell--fill .cd-app-shell__column {
+  align-items: flex-start;
+  border-right: 0;
+  background: var(--bg-app);
+}
+
 .cd-app-shell__main--fill {
   display: flex;
   flex-direction: column;
