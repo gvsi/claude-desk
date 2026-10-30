@@ -753,10 +753,12 @@ async def test_only_a_held_decision_lists_answers(app, client, registry, frozen_
 
         quote.script["execute"] = run
         answering = asyncio.create_task(post_answer(client, rows.owner, held.decision_id, "allow_once"))
-        await asyncio.wait_for(running.wait(), 10)
-        decision = await read_id(client, rows.owner, held.decision_id)
-        reads = await read_back(client, rows, visitor, decision)
-        release.set()
+        try:
+            await asyncio.wait_for(running.wait(), 10)
+            decision = await read_id(client, rows.owner, held.decision_id)
+            reads = await read_back(client, rows, visitor, decision)
+        finally:
+            release.set()                                       # never left holding the decision row
         assert (await asyncio.wait_for(answering, 10)).status_code == 200
     else:
         if state == "allowed":

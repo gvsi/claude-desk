@@ -118,10 +118,12 @@ async def test_an_owner_execute_and_a_repeated_decide_never_deadlock(app, client
     monkeypatch.setattr(execute, "_lock_decision", pause_holding_the_decision)
     executing = asyncio.create_task(client.post("/execute", headers=rows.owner, json={
         "decision_id": allowed.decision_id, "session_id": rows.owner_session_id, "generation": 0}))
-    await asyncio.wait_for(locked.wait(), 5)
-    repeating = asyncio.create_task(owner_decide(client, rows, "native.fetch_website", desk_id=rows.desk_id))
-    assert await a_kernel_backend_waits()                       # the repeat waits for a row the execution holds
-    release.set()
+    try:
+        await asyncio.wait_for(locked.wait(), 5)
+        repeating = asyncio.create_task(owner_decide(client, rows, "native.fetch_website", desk_id=rows.desk_id))
+        assert await a_kernel_backend_waits()                   # the repeat waits for a row the execution holds
+    finally:
+        release.set()                                           # never left holding the decision row
     execution, repeat = await asyncio.wait_for(asyncio.gather(executing, repeating), 10)
 
     # neither is a deadlock's victim: the execution expired the allow, and the repeat reads it expired
@@ -225,10 +227,12 @@ async def test_reconciliation_and_a_running_execution_never_deadlock(app, client
 
     quote.script.update(execute=charge, reconcile=look_up)
     executing = asyncio.create_task(post_execute(client, visitor, running))
-    await asyncio.wait_for(holding.wait(), 10)
-    reading = asyncio.create_task(client.get(f"/decisions/{orphan.decision_id}", headers=rows.owner))
-    assert await a_kernel_backend_waits()                           # the reconciliation waits for the mandate
-    release.set()
+    try:
+        await asyncio.wait_for(holding.wait(), 10)
+        reading = asyncio.create_task(client.get(f"/decisions/{orphan.decision_id}", headers=rows.owner))
+        assert await a_kernel_backend_waits()                       # the reconciliation waits for the mandate
+    finally:
+        release.set()                                               # never left holding the mandate
     execution, settled = await asyncio.wait_for(asyncio.gather(executing, reading), 10)
 
     # neither is a deadlock's victim: the charge succeeded, and the orphan, which never charged, failed

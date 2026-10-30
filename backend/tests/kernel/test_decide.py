@@ -448,11 +448,13 @@ async def test_take_over_waits_for_a_decision_in_flight(app, client, registry):
 
     quote.script["normalize"] = held
     deciding = asyncio.create_task(decided(client, visitor, "native.quote"))
-    await asyncio.wait_for(evaluating.wait(), 5)                          # the decision is mid-evaluation
-    taking_over = asyncio.create_task(set_mode(client, rows, visitor.session_id, "owner", 0))
-    assert await a_take_over_waits_for_the_session_row()                  # the row the decision holds
-    assert not taking_over.done()
-    release.set()
+    try:
+        await asyncio.wait_for(evaluating.wait(), 5)                      # the decision is mid-evaluation
+        taking_over = asyncio.create_task(set_mode(client, rows, visitor.session_id, "owner", 0))
+        assert await a_take_over_waits_for_the_session_row()              # the row the decision holds
+        assert not taking_over.done()
+    finally:
+        release.set()                                                     # never left holding the session row
     decision, state = await asyncio.wait_for(asyncio.gather(deciding, taking_over), 10)
     assert not await a_take_over_waits_for_the_session_row(within=0.3)   # both committed: nothing waits now
     assert (decision.outcome, decision.action.generation) == ("allow", 0)

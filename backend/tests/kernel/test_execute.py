@@ -326,19 +326,21 @@ async def test_startup_reconciles_only_old_unlocked_intents(app, client, registr
     quote.script["execute"] = slow
     await store_intent(app, rows.copy_id, old)
     execution = asyncio.create_task(post_execute(client, visitor, running))
-    await asyncio.wait_for(entered.wait(), 10)
-    frozen_clock.advance(31)                                    # the running one's intent is as old as the orphan
-    await store_intent(app, rows.copy_id, fresh)
+    try:
+        await asyncio.wait_for(entered.wait(), 10)
+        frozen_clock.advance(31)                                # the running one's intent is as old as the orphan
+        await store_intent(app, rows.copy_id, fresh)
 
-    restarted = create_app(clock=frozen_clock, decisions=reviewer)              # a second kernel task starting up
-    # its startup reconciliation skips the running execution's locked row rather than waiting on it
-    async with asyncio.timeout(10), restarted.router.lifespan_context(restarted):
-        pass
-    assert await committed(app, rows.copy_id, old.action.action_id) == ("failed", "failed")
-    assert await committed(app, rows.copy_id, fresh.action.action_id) == ("intent", "allowed")
-    assert await committed(app, rows.copy_id, running.action.action_id) == ("intent", "allowed")
-    assert quote.calls.count("reconcile") == 1                                  # the old orphan's alone
-    release.set()
+        restarted = create_app(clock=frozen_clock, decisions=reviewer)          # a second kernel task starting up
+        # its startup reconciliation skips the running execution's locked row rather than waiting on it
+        async with asyncio.timeout(10), restarted.router.lifespan_context(restarted):
+            pass
+        assert await committed(app, rows.copy_id, old.action.action_id) == ("failed", "failed")
+        assert await committed(app, rows.copy_id, fresh.action.action_id) == ("intent", "allowed")
+        assert await committed(app, rows.copy_id, running.action.action_id) == ("intent", "allowed")
+        assert quote.calls.count("reconcile") == 1                              # the old orphan's alone
+    finally:
+        release.set()                                           # never left holding the execution's rows
     response = await asyncio.wait_for(execution, 10)
     assert response.status_code == 200, response.text
     assert ExecResult.model_validate(response.json()).state == "succeeded"
