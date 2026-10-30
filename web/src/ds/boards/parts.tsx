@@ -18,6 +18,7 @@ import { MarginNote } from '../components/MarginNote/MarginNote.tsx';
 import { MarginReceipt } from '../components/MarginReceipt/MarginReceipt.tsx';
 import { receiptFromEvent } from '../components/MarginReceipt/receiptTone.ts';
 import { PersonMessage } from '../components/PersonMessage/PersonMessage.tsx';
+import { RecordedHistoryLink } from '../components/RecordedHistoryLink/RecordedHistoryLink.tsx';
 import { SystemLine } from '../components/SystemLine/SystemLine.tsx';
 import { TranscriptRow } from '../components/TranscriptRow/TranscriptRow.tsx';
 import { VisitorMessage } from '../components/VisitorMessage/VisitorMessage.tsx';
@@ -212,14 +213,8 @@ function PublicPagePanel() {
 /** The day letters under the bookings chart: the seven dates ending today, today last. */
 const DAYS = ['F', 'S', 'S', 'M', 'T', 'W', 'T'] as const;
 
-/** "Includes recorded history": the link to the ledger's explanation of the replayed night. */
-function RecordedHistoryLink() {
-  return (
-    <span className="board-recorded cd-type-caption">
-      <TextLink href="#recorded-history">Includes recorded history</TextLink>
-    </span>
-  );
-}
+/** Where "Includes recorded history" goes: the ledger's explanation of the replayed history. */
+export const RECORDED_HISTORY_HREF = '#recorded-history';
 
 export interface LastSevenDaysProps {
   /** Each day's bar, as a share of the week's busiest day; null for the empty copy. */
@@ -240,7 +235,7 @@ export function LastSevenDays({ bars }: LastSevenDaysProps) {
         <h2 id="board-week-title" className="board-week__title cd-type-section">
           Last 7 days
         </h2>
-        {empty ? null : <RecordedHistoryLink />}
+        {empty ? null : <RecordedHistoryLink href={RECORDED_HISTORY_HREF} />}
       </div>
       {empty ? (
         <div className="board-week__block">
@@ -395,7 +390,7 @@ export function TodayNeedsYou({
             </ul>
           </section>
           <section className="board-section" aria-labelledby="board-since-last-night">
-            <SectionHeader id="board-since-last-night" title="Since last night" caption={<RecordedHistoryLink />} />
+            <SectionHeader id="board-since-last-night" title="Since last night" caption={<RecordedHistoryLink href={RECORDED_HISTORY_HREF} />} />
             <SinceLastNight
               summary="All 7 conversations stayed inside your rules. I booked three visits, answered a question and stopped two attempts. Nothing was shared."
               rows={[

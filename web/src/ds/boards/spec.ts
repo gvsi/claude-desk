@@ -69,6 +69,15 @@ export const SPEC = {
   primary: { backgroundColor: 'rgb(239, 236, 228)', color: 'rgb(28, 27, 25)' },
   composer: { backgroundColor: 'rgb(42, 41, 39)', borderTopLeftRadius: '16px', boxShadow: /0px 4px 20px/ },
   footer: { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' },
+  /** "Includes recorded history" (RecordedHistoryLink): caption type in secondary ink, underlined in line-control 3 px down. */
+  recordedLink: {
+    fontSize: '12px',
+    lineHeight: '17px',
+    color: 'rgba(250, 249, 245, 0.64)',
+    textDecorationLine: 'underline',
+    textDecorationColor: 'rgba(250, 249, 245, 0.22)',
+    textUnderlineOffset: '3px',
+  },
 } as const satisfies Record<string, ComputedExpectation>;
 
 /** The concept footer, word for word. */

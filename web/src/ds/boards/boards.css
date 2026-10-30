@@ -183,10 +183,6 @@
   gap: var(--space-8);
 }
 
-.board-recorded .cd-text-link {
-  color: var(--text-secondary);
-}
-
 /* The bookings chart: one thin bar a day, today's in full ink. Decorative: the line says it. */
 .board-chart {
   display: grid;
