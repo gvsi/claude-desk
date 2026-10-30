@@ -1,0 +1,50 @@
+/* The breadcrumb is one line of meta type. Each step back is a link in the accent color with the
+   quiet underline TextLink draws; the page itself is primary text; a tertiary "/" sits 8 px from
+   each. A long trail wraps rather than leaving the line. */
+
+.cd-breadcrumb__list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  row-gap: var(--space-4);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cd-breadcrumb__item {
+  display: inline-flex;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.cd-breadcrumb__separator {
+  margin: 0 var(--space-8);
+  color: var(--text-tertiary);
+}
+
+.cd-breadcrumb__link {
+  color: var(--accent-blue);
+  text-decoration-line: underline;
+  text-decoration-thickness: 1px;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
+  transition: text-decoration-color var(--motion-instant) var(--motion-ease);
+}
+
+.cd-breadcrumb__link:hover {
+  text-decoration-color: currentColor;
+}
+
+.cd-breadcrumb__page {
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cd-breadcrumb__link {
+    transition: none;
+  }
+}

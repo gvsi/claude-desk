@@ -1,0 +1,57 @@
+/* SubNav: the sidebar's nav rows for one section's pages. Each row is size-nav-row tall at the
+   control radius, the current one on bg-selected with no accent bar, hovered rows on fill-hover.
+   Under 768 px, where the app shell drops its sidebar, the rows become one line that scrolls
+   sideways inside itself. */
+
+.cd-sub-nav__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cd-sub-nav__link {
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  height: var(--size-nav-row);
+  padding: 0 var(--space-10);
+  border-radius: var(--radius-control);
+  color: var(--text-primary);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color var(--motion-instant) var(--motion-ease);
+}
+
+.cd-sub-nav__link:hover {
+  background: var(--fill-hover);
+}
+
+.cd-sub-nav__link[aria-current='page'],
+.cd-sub-nav__link[aria-current='page']:hover {
+  background: var(--bg-selected);
+}
+
+@media (max-width: 767.98px) {
+  .cd-sub-nav__list {
+    flex-direction: row;
+    gap: var(--space-4);
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    /* Room for the focus ring inside the scroller. */
+    padding: var(--space-4);
+    scrollbar-width: none;
+  }
+
+  .cd-sub-nav__item {
+    flex: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cd-sub-nav__link {
+    transition: none;
+  }
+}

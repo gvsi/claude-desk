@@ -1,0 +1,82 @@
+/* Steps: a row of 22 px circles with their names, joined by 28 px hairlines. Done: a check on the
+   secondary fill. Current: the primary button's fill with its number, and its name in primary
+   text. Later: the number on the secondary fill. It lays out by its own width: under 480 px only
+   the current step's name is drawn, and the others stay for screen readers. */
+
+.cd-steps {
+  container: cd-steps / inline-size;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  row-gap: var(--space-8);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cd-steps__step {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-8);
+  min-width: 0;
+  color: var(--text-secondary);
+}
+
+/* 12 px from the name before it and, with the step's own 8 px gap, from the circle after it. */
+.cd-steps__join {
+  flex: none;
+  width: var(--space-28);
+  height: 1px;
+  margin: 0 var(--space-4) 0 var(--space-12);
+  background: var(--line-hairline);
+}
+
+.cd-steps__circle {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-full);
+  background: var(--fill-secondary);
+  color: var(--text-secondary);
+  font-weight: 520;
+}
+
+.cd-steps__step--done .cd-steps__circle {
+  color: var(--text-primary);
+}
+
+.cd-steps__step--current .cd-steps__circle {
+  background: var(--button-primary);
+  color: var(--button-primary-text);
+}
+
+.cd-steps__step--current .cd-steps__name {
+  color: var(--text-primary);
+}
+
+.cd-steps__name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@container cd-steps (max-width: 479.98px) {
+  .cd-steps__join {
+    width: var(--space-16);
+    margin-left: var(--space-4);
+  }
+
+  .cd-steps__step:not(.cd-steps__step--current) .cd-steps__name {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}

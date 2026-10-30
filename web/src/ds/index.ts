@@ -75,6 +75,9 @@ export {
   ConversationListItem,
   type ConversationListItemProps,
 } from './components/ConversationListItem/ConversationListItem.tsx';
+export { Breadcrumb, type BreadcrumbItem, type BreadcrumbProps } from './components/Breadcrumb/Breadcrumb.tsx';
+export { Steps, type StepsProps } from './components/Steps/Steps.tsx';
+export { SubNav, type SubNavItem, type SubNavProps } from './components/SubNav/SubNav.tsx';
 
 // First visit
 export {
@@ -99,6 +102,7 @@ export { AgentMessage, type AgentMessageProps } from './components/AgentMessage/
 export { Whisper, type WhisperProps } from './components/Whisper/Whisper.tsx';
 export { SystemLine, type SystemLineProps } from './components/SystemLine/SystemLine.tsx';
 export { WritingIndicator, type WritingIndicatorProps } from './components/WritingIndicator/WritingIndicator.tsx';
+export { ToolLabel, type ToolLabelProps } from './components/ToolLabel/ToolLabel.tsx';
 
 // Margin receipts
 export {
