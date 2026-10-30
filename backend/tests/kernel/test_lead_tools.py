@@ -21,15 +21,17 @@ import pytest
 from fastapi import FastAPI
 from sqlalchemy import event, select, text
 
-from desk.contracts import Claim, Decision, DemoInboxEntry, ExecResult, HoursWindow
+from desk.contracts import ApprovalResult, Claim, Decision, DemoInboxEntry, ExecResult, HoursWindow
 from desk.db.models import Desk, Fact, Handoff, Lead, LedgerEntry, NotificationPref, Person, VerificationChallenge
 from desk.db.session import database_url, libpq_url
 from desk.kernel_api import DeskUpdated
 from desk.kernel_service import adapters, compiler, desks, ledger, verification
 from desk.kernel_service.desks import mask_contact
 
-from .helpers import kernel_ctx, ledger_rows, make_copy_rows, rows_of, verify_session
+from .helpers import activate_cards, kernel_ctx, ledger_rows, make_copy_rows, rows_of, verify_session
 from .test_adapters import Rivera, objects, rivera, run, visitor_of
+from .test_approvals import post_answer
+from .test_compiler import card
 from .test_context import context_of, tools
 from .test_decide import Visitor, decided, open_visitor, post_decide
 from .test_execute import executed, post_execute
@@ -359,21 +361,23 @@ def connections_of(app: FastAPI) -> Iterator[set[int]]:
 
 
 async def lock_waiters(app: FastAPI, pids: Collection[int], table: str | None = "kernel.sessions") -> int:
-    """How many of the connections `pids` are waiting now for a row lock on `table` (any table when
-    None). A backend waiting for a row holds or waits for that row's tuple lock, which `pg_locks`
-    shows on the row's table."""
-    relation = "" if table is None else "AND l.relation = to_regclass(:table)"
+    """How many of the connections `pids` are waiting on a lock now: for a row of `table`, or for
+    any lock when `table` is None (an insert waiting to learn whether its key is taken holds no
+    row's lock). A backend waiting for a row holds or waits for that row's tuple lock, which
+    `pg_locks` shows on the row's table."""
+    relation = "" if table is None else (
+        "AND EXISTS (SELECT 1 FROM pg_locks l WHERE l.pid = a.pid AND l.locktype = 'tuple' "
+        "AND l.relation = to_regclass(:table))")
     async with app.state.kernel.engine.connect() as conn:
         return (await conn.execute(text(
-            "SELECT count(DISTINCT l.pid) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid "
-            f"WHERE a.wait_event_type = 'Lock' AND l.locktype = 'tuple' AND l.pid = ANY(:pids) {relation}"),
+            f"SELECT count(*) FROM pg_stat_activity a WHERE a.wait_event_type = 'Lock' AND a.pid = ANY(:pids) {relation}"),
             {"pids": sorted(pids), "table": table})).scalar_one()
 
 
 async def until_waiting(app: FastAPI, task: asyncio.Task, pids: Collection[int], table: str | None = "kernel.sessions",
                         timeout: float = 5.0) -> None:
-    """Returns once `task` has answered or one of the connections `pids` waits for a row of
-    `table` (any table when None)."""
+    """Returns once `task` has answered or one of the connections `pids` waits on a lock: for a
+    row of `table`, or any lock when `table` is None."""
     deadline = asyncio.get_running_loop().time() + timeout
     while not task.done() and await lock_waiters(app, pids, table) == 0:
         assert asyncio.get_running_loop().time() < deadline, "nothing waited on a lock"
@@ -435,8 +439,8 @@ async def test_lock_waiters_count_only_this_tests_waits_for_the_table(app):
 async def test_a_repeated_start_waits_for_the_running_one(app, client, monkeypatch):
     """A repeat `/execute` of a verification start that is running waits for the session row the
     start holds, then answers with the start's stored result. It must not hold the decision while
-    it waits: the start locks the decision once it has sent the code, so each would wait on the
-    other until Postgres ended one, answering 500 or leaving the start `unknown`."""
+    it waits: the start locks the decision after the session row, so each would wait on the other
+    until Postgres ended one, answering 500 or leaving the start `unknown`."""
     copy, visitor = await visitor_of(app, client)
     allowed = await decided(client, visitor, "native.start_verification", {"contact": "dana@example.com"})
     assert allowed.outcome == "allow", allowed.reason_plain
@@ -465,6 +469,45 @@ async def test_a_repeated_start_waits_for_the_running_one(app, client, monkeypat
     assert [event.summary["outcome"] for event in entries if event.kind == "verify"] == ["started"]
     assert [event.summary.get("repeat") for event in entries if event.kind == "execute"
             and event.ref_id == allowed.decision_id] == [None, True]
+
+
+async def test_a_second_answer_waits_for_an_approved_start(app, client, monkeypatch):
+    """A second answer to a verification start the owner approved, sent while the start runs, waits
+    for the decision the start holds and is refused once it has run. The start takes the decision
+    before its `verify` entry takes the ledger head: an answer that held the decision and then
+    waited for the ledger head would wait on a start waiting for the decision, until Postgres ended
+    one."""
+    copy, visitor = await visitor_of(app, client)
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        await activate_cards(ctx, copy.desk_id, [card("ask-verify", "native.start_verification", mode="ask")])
+    held = await decided(client, visitor, "native.start_verification", {"contact": "dana@example.com"})
+    assert held.state == "held", held.reason_plain
+    start, ledgered, go_on = verification.start, asyncio.Event(), asyncio.Event()
+
+    async def start_then_wait(ctx, session_row, contact):
+        started = await start(ctx, session_row, contact)             # its verify entry holds the ledger head
+        ledgered.set()
+        await go_on.wait()
+        return started
+
+    monkeypatch.setattr(verification, "start", start_then_wait)
+    first = asyncio.create_task(post_answer(client, copy.owner, held.decision_id, "allow_once"))
+    await asyncio.wait_for(ledgered.wait(), timeout=5)
+    with connections_of(app) as pids:
+        second = asyncio.create_task(post_answer(client, copy.owner, held.decision_id, "deny_once"))
+        await until_waiting(app, second, pids, None)
+    go_on.set()
+    answers = await asyncio.gather(first, second)
+
+    assert [response.status_code for response in answers] == [200, 409], [response.text for response in answers]
+    result = ApprovalResult.model_validate(answers[0].json())
+    assert (result.decision.state, result.execution.state) == ("executed", "succeeded")
+    assert [row.status for row in await rows_of(app, copy.copy_id, select(VerificationChallenge))] == ["live"]
+    entries = [entry.event for entry in await ledger_rows(app, copy)]
+    assert [event.summary["outcome"] for event in entries if event.kind == "verify"] == ["started"]
+    assert [event.summary for event in entries if event.kind == "approval" and "refused" in event.summary] == [
+        {"decision_id": held.decision_id, "answer": "deny_once", "refused": "executed"}]
 
 
 async def test_start_verification_is_for_unverified_sessions(app, client):

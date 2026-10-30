@@ -427,8 +427,10 @@ async def _side_effect(ctx: KernelCtx, decision_id: str, action_id: str, session
                        checked: Checked | None) -> ExecResult | KernelFailure:
     """T2: holding the decision's session row, `session_id`, taken first (`_hold_session`), then
     under the decision's and the intent row's locks, the adapter's `execute`, then `succeeded` and
-    `executed`, committed. A failure answer comes back as a `KernelFailure`, already committed,
-    for `_run` to raise."""
+    `executed`, committed. The decision is locked before anything here takes the ledger head (an
+    adapter's own entry, such as a verification start's `verify`), as an answer or a read that
+    locks it and then ledgers does. A failure answer comes back as a `KernelFailure`, already
+    committed, for `_run` to raise."""
     session = await _hold_session(ctx, session_id, action_id, path)
     decision = await _lock_decision(ctx, decision_id)
     execution = await _execution(ctx, action_id, lock=True)
