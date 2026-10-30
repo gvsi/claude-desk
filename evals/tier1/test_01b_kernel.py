@@ -243,7 +243,7 @@ async def test_a_deleted_desks_held_request_runs_nothing(k: KernelHarness, recor
     run once the owner has deleted its Desk: allowing it is refused at execution, with nothing run
     and no card drafted, its signature verifying for that state; it can't be answered again (409
     `conflict`); and the deleted Desk's ledger, which still reads and verifies, records the answer
-    as refused for changed rules. No quote was made."""
+    as refused for changed rules, naming the Desk as the check that failed. No quote was made."""
     desk = await golden_desk(k)
     decision_id = await seeded_hold_id(k, records, desk)
     path, read = {"decision_id": decision_id}, {"id": decision_id}
@@ -268,8 +268,8 @@ async def test_a_deleted_desks_held_request_runs_nothing(k: KernelHarness, recor
         assert signed, "the refused decision's signature doesn't verify"
         refused = [entry.event.summary for entry in new if entry.event.kind == "approval"
                    and entry.event.ref_id == decision_id]
-        reasons = [(summary.get("state"), summary.get("reason")) for summary in refused]
-        assert ("refused_at_execution", "rules_changed") in reasons, f"the answer is ledgered as {reasons}"
+        reasons = [(summary.get("state"), summary.get("reason"), summary.get("check")) for summary in refused]
+        assert ("refused_at_execution", "rules_changed", "desk") in reasons, f"the answer is ledgered as {reasons}"
         assert await desk_quotes(records, desk) == quotes_before, "a deleted Desk's held request made a quote"
 
 

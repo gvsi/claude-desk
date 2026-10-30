@@ -213,14 +213,16 @@ async def recheck(ctx: KernelCtx, decision_row: DecisionRow, *, path: ExecPath) 
     enabled, and the adapter must normalize the stored args to exactly the stored action. The rules
     are the active version's, evaluated at its money cap, so a re-check after a confirm uses the
     new version's cap."""
-    return await recheck_under(ctx, decision_row, path=path) is not None
+    return isinstance(await recheck_under(ctx, decision_row, path=path), Checked)
 
 
-async def recheck_under(ctx: KernelCtx, decision_row: DecisionRow, *, path: ExecPath) -> Checked | None:
-    """`recheck`, answering with the version and money cap it passed under, or None when it fails."""
+async def recheck_under(ctx: KernelCtx, decision_row: DecisionRow, *, path: ExecPath) -> Checked | str:
+    """`recheck`, answering with the version and money cap it passed under, or, when it fails, with
+    the part that failed (`desk`, `tool`, `session`, `args`, `profile`, `policy` or `binding`), the
+    `check` its refusal is ledgered with, as an allow's is."""
     target = await _target(ctx, decision_row)
-    if await _recheck(ctx, target, path) is not None:
-        return None
+    if (failed := await _recheck(ctx, target, path)) is not None:
+        return failed
     return target.checked
 
 

@@ -619,9 +619,9 @@ async def test_deleted_desk_holds_are_refused_at_execution(app, client):
     assert result.decision.visitor_plain == "The rules changed, so this didn't go ahead"
     assert await rows_of(app, copy.copy_id, select(Quote)) == []                 # nothing ran
     assert await rows_of(app, copy.copy_id, select(Execution)) == []
-    [entry] = [e for e in await entries_of(app, copy) if e.event.kind == "approval"]
+    [entry] = [e for e in await entries_of(app, copy) if e.event.kind == "approval"]   # the deleted Desk refused it
     assert entry.event.summary == {"decision_id": held.decision_id, "action_id": held.action_id, "answer": "allow_once",
-                                   "state": "refused_at_execution", "reason": "rules_changed", "check": "recheck"}
+                                   "state": "refused_at_execution", "reason": "rules_changed", "check": "desk"}
 
 
 async def upload(client: httpx.AsyncClient, copy: Rivera, document: dict, *, desk_id: str | None = None

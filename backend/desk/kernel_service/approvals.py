@@ -130,8 +130,9 @@ async def _refused(ctx: KernelCtx, row: DecisionRow, answer: ApprovalAnswer, ref
 
 async def _refused_at_execution(ctx: KernelCtx, row: DecisionRow, answer: ApprovalAnswer,
                                 check: str) -> ApprovalResult:
-    """An approval that can't run ("rules changed"): the re-check failed or `prepare` refused. The
-    approval is used up all the same, nothing ran and no intent row was written."""
+    """An approval that can't run ("rules changed"): the re-check failed, and `check` names the
+    part that did (a deleted Desk is `desk`), or `prepare` refused (`prepare`). The approval is used
+    up all the same, nothing ran and no intent row was written."""
     await decide.set_state(ctx, row, "refused_at_execution", kind="approval", summary={
         "decision_id": row.decision_id, "action_id": row.action_id, "answer": answer,
         "state": "refused_at_execution", "reason": "rules_changed", "check": check})
@@ -193,8 +194,8 @@ async def answer(ctx: KernelCtx, owner: OwnerCtx, decision_id: str, answer: Appr
             "decision_id": row.decision_id, "action_id": row.action_id, "answer": answer, "state": "denied"})
         return ApprovalResult(decision=await decide.decision_contract(ctx, row), execution=None, card_diff=card_diff)
     checked = await execute.recheck_under(ctx, row, path="approved")
-    if checked is None:
-        return await _refused_at_execution(ctx, row, answer, "recheck")
+    if not isinstance(checked, execute.Checked):     # not a version: the part of the re-check that failed
+        return await _refused_at_execution(ctx, row, answer, checked)
     if not await execute.prepare_intent(ctx, row, checked=checked):
         return await _refused_at_execution(ctx, row, answer, "prepare")
     await decide.set_state(ctx, row, "approved", kind="approval", summary={

@@ -275,7 +275,7 @@ async def test_answers_after_a_rule_change_are_re_decided(app, client):
     [entry] = [e for e in await ledger_rows(app, copy) if e.seq > held.ledger_seq]
     assert (entry.seq, entry.event.kind, entry.event.summary) == (result.decision.ledger_seq, "approval", {
         "decision_id": held.decision_id, "action_id": held.action_id, "answer": "allow_once",
-        "state": "refused_at_execution", "reason": "rules_changed", "check": "recheck"})
+        "state": "refused_at_execution", "reason": "rules_changed", "check": "policy"})   # the new rules refused it
     assert await read_id(client, copy.owner, held.decision_id) == result.decision
     response = await post_answer(client, copy.owner, held.decision_id, "allow_once")   # and it stays refused
     assert (response.status_code, response.json()) == (409, {"code": "conflict"})
