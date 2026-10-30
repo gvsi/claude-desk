@@ -9,14 +9,14 @@ from pathlib import Path
 import desk_kernel
 import psycopg
 import pytest
-
+from fastapi.routing import APIRoute, RouteContext, iter_route_contexts
 from sqlalchemy import select
 
 from desk import kernel_service
 from desk.contracts import LedgerEvent
 from desk.db.models import Desk, PriceItem
 from desk.db.session import database_url, dispose_engines, libpq_url
-from desk.kernel_api import LedgerAppendRequest
+from desk.kernel_api import KERNEL_ROUTES, LedgerAppendRequest
 from desk.kernel_service import compiler, ledger
 from desk.kernel_service.app import KernelSettings, create_app, serve_config
 from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure
@@ -292,3 +292,47 @@ def test_kernel_logs_never_print_an_errors_text():
                     or any(keyword.arg == "exc_info" for keyword in node.keywords)):
                 found.append(f"{path.relative_to(package)}:{node.lineno}")
     assert found == []
+
+
+# The KERNEL_ROUTES rows the later kernel plans serve, as each plan's "Produced" list names them. A
+# plan takes its rows out of here in the commit that serves them, since the test below fails until then.
+DESK_PARTS = ("business", "charter", "hours", "prices", "calendar", "people", "notifications", "answering")
+LATER_ROUTES = {
+    "01b": {"POST /desks", *(f"PUT /desks/{{id}}/{part}" for part in DESK_PARTS), "DELETE /desks/{id}",
+            "POST /documents", "GET /document_links/{token}", "POST /verify/start", "POST /verify/check",
+            "GET /demo_inbox?session_id=", "GET /demo_inbox", "POST /knowledge", "POST /owner/messages",
+            "POST /handoffs/{id}/done"},
+    "01c": {"POST /tools/connect", "POST /tools/confirm", "POST /tools/simulate_change", "GET /payment_links/{token}",
+            "POST /payment_links/{token}/complete", "POST /payment_links/{token}/cancel", "POST /agents/demo",
+            "POST /policy/{version}/probe"},
+}
+
+
+def dispatched(routes: list[RouteContext], key: str) -> RouteContext | None:
+    """The route the kernel runs for the `KERNEL_ROUTES` key `key`, its path parameters filled in and
+    its query left out: the first route that matches, as the router tries them."""
+    method, path = key.split(" ", 1)
+    path = re.sub(r"\{[^}]*\}", "p-1", path.split("?", 1)[0])
+    return next((route for route in routes if method in route.methods and route.path_regex.match(path)), None)
+
+
+def test_the_kernel_serves_its_routes_as_the_contract_says():
+    """Every route the kernel serves runs a `KERNEL_ROUTES` key, with the contract's request and
+    response models, and every key is served but the rows a later kernel plan serves; so the API's
+    client, built from `KERNEL_ROUTES`, and the kernel can't drift apart unnoticed."""
+    app = create_app(KernelSettings(database_url="postgresql+asyncpg://unused/unused"))
+    routes = list(iter_route_contexts(app.routes))
+    assert all(isinstance(route.original_route, APIRoute) for route in routes)     # no mount or bare route
+    later = set().union(*LATER_ROUTES.values())
+    assert later <= set(KERNEL_ROUTES)
+    ran = []
+    for key, (request, response) in KERNEL_ROUTES.items():
+        route = dispatched(routes, key)
+        if key in later:
+            assert route is None, f"{key} is served now: take it out of LATER_ROUTES"
+            continue
+        assert route is not None, f"{key} is not served"
+        bodies = [param.field_info.annotation for param in route.dependant.body_params]
+        assert (bodies or [None], route.response_model) == ([request], response), key
+        ran.append(route.original_route)
+    assert [route.path for route in routes if route.original_route not in ran] == []   # every route runs a key
