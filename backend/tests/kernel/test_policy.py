@@ -9,6 +9,7 @@ against is still current. Each failing check reads in the owner's words.
 import asyncio
 import dataclasses
 import json
+import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,6 +28,7 @@ from desk.kernel_service.repo import new_id
 
 from .helpers import TEST_CAP, CopyRows, compile_at, draft_and_confirm, kernel_ctx, make_copy_rows, rows_of
 from .test_compiler import NATIVE, card, req
+from .test_money_cap import draft_refusals
 
 STUBS = Path(__file__).parent / "stubs"
 
@@ -260,6 +262,31 @@ async def test_invalid_cards_are_422(app, client, monkeypatch):
     assert runs == [] and [row.version for row in await versions(app, desk)] == [1]
     # Dana, a person of this Desk, can have a card of her own
     assert (await drafted(client, desk, [card("dana", "native.book", who="person", person_id=desk.dana)])).version == 2
+
+
+async def test_a_draft_with_a_card_on_verification_is_422(app, client, monkeypatch, caplog):
+    """Verification is always on: a draft holding an `ask`, a `never` or an `auto` card on
+    `native.start_verification`, alone or among valid cards, is refused whole as `invalid_cards`
+    before anything is proved or written. The presets' own card for it, unchanged, drafts."""
+    caplog.set_level(logging.INFO, logger="desk.kernel_service")
+    desk = await desk_with_tools(app)
+    runs = count_prover_runs(monkeypatch)
+    use_prover(monkeypatch, "desk_prove_slow_ok.sh")
+    verify = [card("verify", "native.start_verification", mode="ask"),
+              card("verify", "native.start_verification", mode="never", who="person", person_id=desk.dana),
+              card("verify", "native.start_verification")]
+    for cards in ([one] for one in verify):
+        response = await post_draft(client, desk, cards)
+        assert (response.status_code, response.json()) == (422, {"code": "invalid"}), cards
+    for one in verify:
+        response = await post_draft(client, desk, [*BOOK_AND_ASK_CHARGES, one])
+        assert (response.status_code, response.json()) == (422, {"code": "invalid"}), one
+    assert draft_refusals(caplog) == ["invalid_cards"] * 6
+    assert runs == [] and [row.version for row in await versions(app, desk)] == [1]
+    assert await policy_entries(app, desk) == [{"version": 1, "status": "active"}]
+    # the same valid cards draft with the presets' own card for it
+    [shipped] = compiler.ALWAYS_ON_CARDS
+    assert (await drafted(client, desk, [*BOOK_AND_ASK_CHARGES, shipped])).version == 2
 
 
 async def post_confirm(client: httpx.AsyncClient, desk: DeskRows, version: int) -> httpx.Response:

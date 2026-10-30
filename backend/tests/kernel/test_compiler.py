@@ -17,6 +17,8 @@ import pytest
 
 from desk.contracts import HoursWindow, ReviewThresholds, RuleCard, ToolName, ToolProfile
 from desk.kernel_service import compiler, review_thresholds
+from desk.kernel_service.seed import RIVERA_CARDS
+from desk.presets import PRESETS
 
 from .helpers import TEST_CAP, compile_at
 from .helpers import context as cedar_context
@@ -511,3 +513,45 @@ def test_invalid_cards_are_rejected():
         compile_at([card("inject", "native.book", who="person", person_id='dana" || true || "')], NATIVE)
     with pytest.raises(ValueError):
         compile_at([card("quote", "native.quote"), card("quote", "native.book")], NATIVE)
+
+
+ALWAYS_ON = "native.start_verification: verification is always on, so no rule can change it"
+
+
+def test_no_card_can_change_verification():
+    """Verification belongs to the always-on baseline: a card on `native.start_verification`, in
+    any mode and scope, is refused with a reason that names the tool (the presets' own card for it
+    is the one exception, in the next test), and one such card refuses the whole set."""
+    def errors(*cards: RuleCard) -> list[str]:
+        return compiler.validate_cards(list(cards), people={"dana"}, agent_keys=(), auto_money_cap_cents=TEST_CAP)
+
+    valid = [card("quote", "native.quote"), card("dana-book", "native.book", who="person", **DANA)]
+    assert errors(*valid) == []
+    for verify in (card("verify", "native.start_verification", mode="ask"),
+                   card("verify", "native.start_verification", mode="never", who="person", **DANA),
+                   card("verify", "native.start_verification", who="verified")):
+        assert errors(verify) == [f"verify: {ALWAYS_ON}"], verify.mode
+        assert errors(*valid, verify) == [f"verify: {ALWAYS_ON}"], verify.mode
+
+
+def test_the_shipped_verification_card_stays_as_it_is():
+    """Every preset and the Rivera seed carry `preset-start-verification` (auto, for anyone): the
+    always-on behaviour itself, which the API drafts back with the rest of a preset. That card is
+    the one card on the tool a set may hold, its `reason` reworded or not (the owner's words,
+    which compile to nothing, as `lower_to_cap` matches a carried card); any other change to it
+    is refused."""
+    def errors(*cards: RuleCard) -> list[str]:
+        return compiler.validate_cards(list(cards), people=(), agent_keys=(), auto_money_cap_cents=TEST_CAP)
+
+    [shipped] = [c for c in PRESETS["ask_first"] if c.applies_to == "native.start_verification"]
+    assert (shipped.card_id, shipped.mode, shipped.who) == ("preset-start-verification", "auto", "anyone")
+    for cards in (PRESETS["ask_first"], PRESETS["auto"], RIVERA_CARDS):
+        assert shipped in cards and errors(*cards) == []
+    reworded = shipped.model_copy(update={"reason": "Anyone can get a code sent to the contact on record."})
+    assert errors(reworded) == [] and compile_at([reworded], NATIVE).sets() == compile_at([shipped], NATIVE).sets()
+    changes = ({"who": "verified"}, {"mode": "ask"}, {"mode": "never"}, {"review": True},
+               {"hours": WEEKDAYS}, {"card_id": "verify"})
+    for change in changes:
+        changed = RuleCard.model_validate({**shipped.model_dump(), **change})
+        assert errors(changed) == [f"{changed.card_id}: {ALWAYS_ON}"], change
+        assert errors(*PRESETS["ask_first"], changed) != [], change

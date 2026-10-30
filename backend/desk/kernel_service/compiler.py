@@ -38,6 +38,7 @@ import desk_kernel
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, MONEY_TOOLS, RuleCard, ToolProfile
 from desk.kernel_service import review_thresholds
 from desk.money_cap import auto_money, moves_money  # noqa: F401  (compiler.moves_money stays importable)
+from desk.presets import PRESETS
 
 CEDAR_DIR = Path(__file__).resolve().parents[3] / "kernel" / "cedar"
 
@@ -243,6 +244,19 @@ def with_defaults(cards: Iterable[RuleCard], profiles: Iterable[ToolProfile]) ->
 # -- Checks before compiling
 
 ABOVE_MONEY_CAP = "above_money_cap"
+# Tools of the always-on baseline: verification codes go only to the contact on record, and no
+# rule can make a start ask, hold it or turn it off, so `validate_cards` refuses a card on one. The
+# presets' own card for it (auto, for anyone) is that behaviour itself; every preset and the seed
+# carry it and the API drafts it back with the rest, so that card is the one allowed (`_always_on`).
+ALWAYS_ON_TOOLS: frozenset[str] = frozenset({"native.start_verification"})
+ALWAYS_ON_CARDS: tuple[RuleCard, ...] = tuple(c for c in PRESETS["ask_first"] if c.applies_to in ALWAYS_ON_TOOLS)
+
+
+def _always_on(card: RuleCard) -> bool:
+    """Is `card` one of the presets' own `ALWAYS_ON_CARDS`? Every field but `reason` must match:
+    the reason is the owner's words, which compile to nothing, and a carried card may come back
+    reworded (as `desk.money_cap.lower_to_cap` allows)."""
+    return any(card.model_copy(update={"reason": shipped.reason}) == shipped for shipped in ALWAYS_ON_CARDS)
 
 
 def above_money_cap(cards: Iterable[RuleCard], auto_money_cap_cents: int) -> list[RuleCard]:
@@ -258,7 +272,9 @@ def validate_cards(cards: Iterable[RuleCard], *, people: Collection[str], agent_
     """Plain reasons a set of owner cards can't be compiled at a version's money cap; empty means
     it can. Defaults are left out (`with_defaults` drops and derives them again). A reason names a
     card by its `card_id` only when that is safe to show, and never repeats the offending value;
-    an auto money card above the cap reads `<card>: above_money_cap: ...`."""
+    an auto money card above the cap reads `<card>: above_money_cap: ...`, and a card on a tool
+    of the always-on baseline (`ALWAYS_ON_TOOLS`), other than the presets' own card for it, reads
+    `<card>: <tool>: ...`."""
     cap = capped(auto_money_cap_cents)
     errors: list[str] = []
     seen: set[str] = set()
@@ -279,6 +295,8 @@ def validate_cards(cards: Iterable[RuleCard], *, people: Collection[str], agent_
         except ValueError:
             errors.append(f"{label}: the card doesn't meet the rule card checks")
             continue
+        if c.applies_to in ALWAYS_ON_TOOLS and not _always_on(c):
+            errors.append(f"{label}: {c.applies_to}: verification is always on, so no rule can change it")
         for field in ("applies_to", "person_id", "agent_key_id"):
             value = getattr(c, field)
             if value is not None and not CEDAR_STRING.fullmatch(value):
