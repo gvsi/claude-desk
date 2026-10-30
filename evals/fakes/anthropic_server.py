@@ -430,7 +430,7 @@ class LoopbackServer:
             self._thread = threading.Thread(target=self._run, args=(self._server, sock), name=self.name, daemon=True)
             self._thread.start()
         except BaseException:   # a port in use, say: close it, so a retry on another port leaves none open
-            self._server = self._thread = None   # nothing started, so a later stop() does nothing
+            self._server = self._thread = None   # keep neither, so a later stop() does nothing
             sock.close()
             raise
         deadline = time.monotonic() + timeout_s
