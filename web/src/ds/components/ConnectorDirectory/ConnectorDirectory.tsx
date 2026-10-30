@@ -38,9 +38,17 @@ export interface ConnectorDirectoryProps {
   connected: readonly DirectoryRowView[];
   /** The apps that can be connected. */
   available: readonly DirectoryRowView[];
+  /**
+   * The id of the connector added a moment ago, built in or connected: its row says "Added just
+   * now". An app still to connect can't have been added, so an available row never says it.
+   */
+  justAdded?: ConnectorView['id'];
   /** The app's router link; a plain `<a>` by default. */
   linkComponent?: ComponentType<RulesLinkProps>;
 }
+
+/** What a row says right after its connector was added, in the signed board's words. */
+const JUST_ADDED = 'Added just now';
 
 function PlainLink({ children, ...props }: RulesLinkProps) {
   return <a {...props}>{children}</a>;
@@ -54,14 +62,22 @@ function toolCount(tools: number): string {
 /**
  * The Connectors page's list: what is built in, the apps connected, and the apps that can be, each
  * a group under its heading in one card of rows. A built-in or connected row is one link to the
- * connector's page; an available app has "Connect" instead. Under 640 px of its own width each
- * row's count sits under its line, and "Connect" under the count.
+ * connector's page; an available app has "Connect" instead. The row of the connector just added
+ * says so. Under 640 px of its own width each row's count sits under its line, and "Connect" under
+ * the count.
  */
-export function ConnectorDirectory({ builtIn, builtInCaption, connected, available, linkComponent: Link = PlainLink }: ConnectorDirectoryProps) {
+export function ConnectorDirectory({
+  builtIn,
+  builtInCaption,
+  connected,
+  available,
+  justAdded,
+  linkComponent: Link = PlainLink,
+}: ConnectorDirectoryProps) {
   return (
     <div className="cd-connector-directory">
-      <Group title="Built in" caption={builtInCaption} rows={builtIn} Link={Link} />
-      <Group title="Connected" rows={connected} Link={Link} />
+      <Group title="Built in" caption={builtInCaption} rows={builtIn} justAdded={justAdded} Link={Link} />
+      <Group title="Connected" rows={connected} justAdded={justAdded} Link={Link} />
       <Group title="Available" rows={available} Link={Link} />
     </div>
   );
@@ -71,11 +87,13 @@ function Group({
   title,
   caption,
   rows,
+  justAdded,
   Link,
 }: {
   title: string;
   caption?: string;
   rows: readonly DirectoryRowView[];
+  justAdded?: string;
   Link: ComponentType<RulesLinkProps>;
 }) {
   const headingId = useId();
@@ -87,7 +105,7 @@ function Group({
         <ul role="list" className="cd-connector-directory__rows">
           {rows.map((row) => (
             <li key={row.connector.id} className="cd-connector-directory__row">
-              <Row row={row} Link={Link} />
+              <Row row={row} added={justAdded !== undefined && row.connector.id === justAdded} Link={Link} />
             </li>
           ))}
         </ul>
@@ -96,7 +114,7 @@ function Group({
   );
 }
 
-function Row({ row, Link }: { row: DirectoryRowView; Link: ComponentType<RulesLinkProps> }) {
+function Row({ row, added, Link }: { row: DirectoryRowView; added: boolean; Link: ComponentType<RulesLinkProps> }) {
   const { connector } = row;
   const body: ReactNode = (
     <>
@@ -108,8 +126,17 @@ function Row({ row, Link }: { row: DirectoryRowView; Link: ComponentType<RulesLi
           <>
             {' '}
             <span className="cd-connector-directory__connection cd-type-meta">
-              <StatusLabel tone="handled">Connected</StatusLabel> <span className="cd-connector-directory__account">· {row.connection}</span>
+              <StatusLabel tone="handled">Connected</StatusLabel>{' '}
+              <span className="cd-connector-directory__account">
+                · {row.connection}
+                {added ? ` · ${JUST_ADDED}` : null}
+              </span>
             </span>
+          </>
+        ) : added ? (
+          <>
+            {' '}
+            <span className="cd-connector-directory__added cd-type-meta">{JUST_ADDED}</span>
           </>
         ) : null}
       </span>{' '}
