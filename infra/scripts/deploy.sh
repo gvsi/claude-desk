@@ -136,8 +136,14 @@ echo "deploy: log $log"
 step "AWS account"
 account=$(aws sts get-caller-identity --query Account --output text) || fail "no AWS credentials: set AWS_PROFILE"
 echo "deploy: AWS profile ${AWS_PROFILE:-default}, account $account"
-read -r -p "Type that account ID to deploy to it: " typed
-[[ $typed == "$account" ]] || fail "the typed account ID isn't $account; nothing was deployed"
+if [[ -n ${DESK_DEPLOY_ACCOUNT:-} ]]; then
+  [[ $DESK_DEPLOY_ACCOUNT == "$account" ]] ||
+    fail "DESK_DEPLOY_ACCOUNT is $DESK_DEPLOY_ACCOUNT, but the AWS credentials are for account $account; nothing was deployed"
+  echo "deploy: DESK_DEPLOY_ACCOUNT names that account"
+else
+  read -r -p "Type that account ID to deploy to it: " typed
+  [[ $typed == "$account" ]] || fail "the typed account ID isn't $account; nothing was deployed"
+fi
 
 step "Preflight"
 uv run --project "$INFRA" python "$INFRA/scripts/preflight.py" ${allow_branch:+"$allow_branch"} \

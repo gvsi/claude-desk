@@ -1,11 +1,14 @@
-"""deploy.sh, run in a pseudo-terminal with `aws`, `npx`, `npm`, `make` and `uv` stubbed: the
-order of the steps, what each is given, that `cdk deploy` keeps a terminal for its approval prompt,
-and that the first failing step stops the deploy. Nothing reaches AWS."""
+"""deploy.sh, run in a pseudo-terminal (or, unattended, without one) with `aws`, `npx`, `npm`,
+`make`, `uv` and the Keychain's `security` stubbed: the order of the steps, what each is given,
+that `cdk deploy` keeps a terminal for its approval prompt, and that the first failing step stops
+the deploy. Nothing reaches AWS or the real Keychain."""
 
+import hashlib
 import json
 import os
 import pty
 import select
+import shutil
 import stat
 import subprocess
 import sys
@@ -22,14 +25,27 @@ ENDPOINT = "https://desk-0a1b2c3d.ecs.us-west-2.on.aws/"
 LOAD_BALANCER = "arn:aws:elasticloadbalancing:us-west-2:123456789012:loadbalancer/app/ecs-express-desk/0a1b2c3d4e5f6071"
 DOMAIN = "desk.example.com"
 CERTIFICATE = f"arn:aws:acm:us-east-1:{ACCOUNT}:certificate/0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9"
+KEYCHAIN_LOOKUP = ["find-generic-password", "-s", "claude-desk-passcode", "-w"]
+STORE_IT = 'security add-generic-password -s claude-desk-passcode -a "$USER" -w'
 
-# Each stub appends {"tool", "argv", "cwd", "tty"} to $STUB_LOG; aws and cdk read and write the
-# deployed stacks' outputs in $STACKS (JSON), as CloudFormation would hold them.
+# Each stub appends {"tool", "argv", "cwd", "tty", "passcode"} to $STUB_LOG, "passcode" being the
+# SHA-256 of the DESK_PASSCODE it was given (None without one), so no passcode is ever written;
+# aws and cdk read and write the deployed stacks' outputs in $STACKS (JSON), as CloudFormation would
+# hold them; `security` answers the one Keychain lookup deploy.sh makes from the file $KEYCHAIN.
 STUB = """#!{python}
-import json, os, re, sys
+import hashlib, json, os, re, sys
 tool, args = os.path.basename(sys.argv[0]), sys.argv[1:]
+passcode = os.environ.get("DESK_PASSCODE")
 with open(os.environ["STUB_LOG"], "a") as log:
-    log.write(json.dumps({{"tool": tool, "argv": args, "cwd": os.getcwd(), "tty": os.isatty(1)}}) + "\\n")
+    log.write(json.dumps({{"tool": tool, "argv": args, "cwd": os.getcwd(), "tty": os.isatty(1),
+                          "passcode": hashlib.sha256(passcode.encode()).hexdigest() if passcode else None}}) + "\\n")
+if tool == "security":
+    if args != {lookup} or not os.path.exists(os.environ["KEYCHAIN"]):
+        print("security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.",
+              file=sys.stderr)
+        sys.exit(44)
+    print(open(os.environ["KEYCHAIN"]).read())
+    sys.exit(0)
 stacks_path = os.environ["STACKS"]
 stacks = json.load(open(stacks_path)) if os.path.exists(stacks_path) else {{}}
 joined = " ".join(args)
@@ -50,6 +66,9 @@ elif tool == "aws" and args[:2] == ["cloudformation", "describe-stacks"]:
               f"Stack with id {{stack}} does not exist", file=sys.stderr)
         sys.exit(254)
     print(stacks[stack].get(key, "None"))
+elif tool == "npx" and args[:3] == ["--no-install", "cdk", "diff"]:
+    print(f"stub: cdk security diff for {{args[3]}}", file=sys.stderr)  # cdk diff writes to stderr
+    sys.exit(1 if os.environ.get("FAIL_DIFF") else 0)
 elif tool == "npx" and args[:2] == ["--no-install", "cdk"] and args[2] == "deploy":
     stack = args[3]
     print(f"stub: cdk events for {{stack}}", file=sys.stderr)  # cdk's diff, prompt and events: stderr
@@ -76,14 +95,19 @@ elif tool == "npx" and args[:2] == ["--no-install", "cdk"] and args[2] == "deplo
 def deploy(tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
+    keychain_bin = tmp_path / "keychain-bin"  # the stub `security`, ahead of the real one on PATH
+    keychain_bin.mkdir()
     body = STUB.format(python=sys.executable, account=ACCOUNT, distribution=DISTRIBUTION_URL, endpoint=ENDPOINT,
-                       load_balancer=LOAD_BALANCER)
+                       load_balancer=LOAD_BALANCER, lookup=repr(KEYCHAIN_LOOKUP))
     for tool in ("aws", "npx", "npm", "make", "uv"):
         (bin_dir / tool).write_text(body)
         (bin_dir / tool).chmod(stat.S_IRWXU)
+    (keychain_bin / "security").write_text(body)
+    (keychain_bin / "security").chmod(stat.S_IRWXU)
     out = tmp_path / "out"
     stacks = tmp_path / "stacks.json"
     log = tmp_path / "stub.log"
+    keychain = tmp_path / "keychain"
 
     class Run:
         def __init__(self, status: int, output: str) -> None:
@@ -110,22 +134,40 @@ def deploy(tmp_path):
                     steps.append(f"{call['tool']} {argv[0]}")
             return steps
 
-        def cdk(self, stack: str) -> list[dict]:
-            return [call for call in self.calls if call["tool"] == "npx" and call["argv"][3] == stack]
+        def cdk(self, stack: str, command: str = "deploy") -> list[dict]:
+            return [call for call in self.calls
+                    if call["tool"] == "npx" and call["argv"][2] == command and call["argv"][3] == stack]
+
+        def text(self) -> str:
+            """Everything the run printed, logged or gave a stub on its command line."""
+            return self.output + self.log + json.dumps([call["argv"] for call in self.calls])
 
         def smoke(self) -> list[str]:
             [call] = [call for call in self.calls if call["tool"] == "uv" and any("smoke.py" in a for a in call["argv"])]
             return call["argv"][call["argv"].index(next(a for a in call["argv"] if a.endswith("smoke.py"))) + 1:]
 
     def run(*args: str, typed: str = ACCOUNT, terminal: bool = True, deployed: dict | None = None,
-            **extra_env: str) -> Run:
+            keychain_item: str | None = None, security: bool = True, **extra_env: str) -> Run:
+        """`keychain_item` is the passcode the stub Keychain holds (none by default); without
+        `security`, PATH holds the stubs and only the shell and `dirname` besides."""
         if deployed is not None:
             stacks.write_text(json.dumps(deployed))
+        if keychain_item is not None:
+            keychain.write_text(keychain_item)
+        path = [bin_dir, keychain_bin, os.environ["PATH"]]
+        if not security:
+            basics = tmp_path / "basics"
+            basics.mkdir(exist_ok=True)
+            for tool in ("bash", "dirname"):
+                if not (basics / tool).exists():
+                    (basics / tool).symlink_to(shutil.which(tool))
+            path = [bin_dir, basics]
         env = {
-            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+            "PATH": os.pathsep.join(map(str, path)),
             "HOME": os.environ.get("HOME", str(tmp_path)),
             "STUB_LOG": str(log),
             "STACKS": str(stacks),
+            "KEYCHAIN": str(keychain),
             "DESK_DEPLOY_OUT": str(out),
             "DESK_PASSCODE": "deploy-test-passcode",
             "TERM": "dumb",
@@ -344,6 +386,25 @@ def test_wrong_account_stops_before_anything_else(deploy):
     run = deploy(typed="999999999999")
     assert run.status == 1
     assert run.steps() == ["aws sts get-caller-identity"]
+
+
+def test_the_deploy_account_replaces_retyping_it(deploy):
+    """With DESK_DEPLOY_ACCOUNT set, the account step compares it with the credentials' account and
+    asks nothing, even at a terminal: what's typed there is never read."""
+    run = deploy(typed="999999999999", DESK_DEPLOY_ACCOUNT=ACCOUNT)
+    assert run.status == 0, run.output
+    assert "Type that account ID" not in run.output
+    assert run.steps()[:2] == ["aws sts get-caller-identity", "uv preflight.py"]
+
+
+@pytest.mark.parametrize("args", [[], ["--data-only"]])
+def test_a_deploy_account_other_than_the_credentials_is_refused_before_anything_runs(deploy, args):
+    run = deploy(*args, typed=ACCOUNT, DESK_DEPLOY_ACCOUNT="999999999999")
+    assert run.status == 1
+    assert run.steps() == ["aws sts get-caller-identity"]
+    assert f"DESK_DEPLOY_ACCOUNT is 999999999999, but the AWS credentials are for account {ACCOUNT}" in run.log
+    assert "nothing was deployed" in run.log
+    assert "Type that account ID" not in run.output
 
 
 def test_preflight_failure_stops_before_any_change(deploy):
