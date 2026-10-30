@@ -526,6 +526,12 @@ describe('the About Markdown reader', () => {
       'He said “wait…”. The prefix “pre-”. A path “/about/”.',
     );
     expect(shown('He trailed off with "wait…"')).toBe('He trailed off with “wait…”');
+    // A quotation that starts with punctuation still opens after a space, as it always did.
+    expect(shown('The character ")" and "..." and "’" and "\'Hi,\' she said".')).toBe(
+      'The character “)” and “...” and “’” and “‘Hi,’ she said”.',
+    );
+    // After a dash too, a mark closes before punctuation and opens before words.
+    expect(shown('He said "no—". She said—"yes".')).toBe('He said “no—”. She said—“yes”.');
     // What follows a mark is read across bold and links, as what comes before it is.
     const blocks = curlQuotes(parseDocument(doc("In the '**90s**, and '[90s](https://example.com/90s) too."), resolve));
     expect(documentText(blocks).at(-1)).toBe('In the ’90s, and ’90s too.');

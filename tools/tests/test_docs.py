@@ -533,6 +533,9 @@ def test_a_link_target_may_nest_parentheses():
 
     assert reader_subset_problems(text, "capability-prediction.md") == []
     assert [target for _, target in check_docs.link_targets(text)][-1] == "https://en.wikipedia.org/wiki/A_(b_(c))"
+    deepest = IN_SUBSET + "See [a](https://x.org/A_(b_(c_(d)))) here.\n"
+    assert reader_subset_problems(deepest, "capability-prediction.md") == []
+    assert [target for _, target in check_docs.link_targets(deepest)][-1] == "https://x.org/A_(b_(c_(d)))"
 
     # Unbalanced, or four levels deep, it isn't read as a link, so its address is flagged: the check fails safe.
     for line in ["See [a](https://x.org/A_(b here.", "See [a](https://x.org/A_(b_(c_(d_(e))))) here."]:

@@ -253,10 +253,12 @@ export function documentText(blocks: Block[]): string[] {
 
 /** Each straight quote mark's curly pair: the one that opens a quotation, then the one for everywhere else. */
 const CURLY: Partial<Record<string, readonly [string, string]>> = { "'": ['‘', '’'], '"': ['“', '”'] };
-// A quote mark with nothing shown before it, or after a space, an opening bracket, an opening quote, a dash, a
-// hyphen, an ellipsis or a slash, opens a quotation, when words follow it rather than a space, punctuation or
-// the end of the block.
-const OPENS_AFTER = /^$|[\s([{“‘—–…/-]/;
+// A quote mark with nothing shown before it, or after a space, an opening bracket or an opening quote, opens a
+// quotation unless a space follows it.
+const OPENS_AFTER = /^$|[\s([{“‘]/;
+// After a dash, a hyphen, an ellipsis or a slash a mark can as well close a quotation, so there it opens only
+// when words follow, not a space, punctuation or the end of the block.
+const OPENS_AFTER_JOIN = /[—–…/-]/;
 const CLOSES_BEFORE = /^(?:$|[\s.,;:!?)\]}”’])/;
 // What follows a ' that starts a word but is an apostrophe: a whole leading elision such as ’til, ’em or rock
 // ’n’ roll, or a year such as ’90s or ’26, but not a quoted word or number such as ‘em-dash’, ‘N/A’, ‘26’, ‘24/7’
@@ -278,7 +280,11 @@ function curl(text: string, before: string, after = ''): string {
       continue;
     }
     const rest = text.slice(at + 1) + after;
-    const opens = OPENS_AFTER.test(out.at(-1) ?? before) && !CLOSES_BEFORE.test(rest) && !(char === "'" && ELISION.test(rest));
+    const shownBefore = out.at(-1) ?? before;
+    const opensHere = OPENS_AFTER.test(shownBefore)
+      ? !/^\s/.test(rest)
+      : OPENS_AFTER_JOIN.test(shownBefore) && !CLOSES_BEFORE.test(rest);
+    const opens = opensHere && !(char === "'" && ELISION.test(rest));
     out += opens ? pair[0] : pair[1];
   }
   return out;
