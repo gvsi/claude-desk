@@ -13,6 +13,8 @@ Desks with scripted adapters (`FakeAdapter`) where a test says what a tool retur
 for the document release tool, which comes later in this plan.
 """
 
+import unicodedata
+
 import httpx
 import pytest
 from fastapi import FastAPI
@@ -179,13 +181,49 @@ ACCENTED = str.maketrans("abcdef", "áḃćďéḟ")      # each hex letter with
 def disguises(canary: str) -> list[str]:
     """A canary split by spaces and other separators, in capitals, in full width, all at once, with
     an accent on each letter (precomposed, "Çďķ-…"), with a combining accent after each character,
-    and split by accented letters ("cdk-0123é4567ñ…")."""
+    split by accented letters ("cdk-0123é4567ñ…"), and with accented letters on it and between its
+    characters at once ("çdk-0123é4567…", "cdk-0123é4567 89áb cdef")."""
     body = canary.removeprefix("cdk-")
     spaced = f"cdk {body[:4]} {body[4:8]} {body[8:12]} {body[12:]}"
     return [spaced, canary.upper(), full_width(canary),
             f"C.D.K – {full_width(body[:6].upper())}\u00a0{body[6:11]}-{body[11:].upper()}",
             f"Çďķ-{body.translate(ACCENTED)}", "".join(f"{ch}\u0301" for ch in canary),
-            f"cdk-{body[:4]}é{body[4:8]}ñ{body[8:12]}Ç{body[12:]}"]
+            f"cdk-{body[:4]}é{body[4:8]}ñ{body[8:12]}Ç{body[12:]}", f"çdk-{body[:4]}é{body[4:]}",
+            f"cdk-{body[:4]}é{body[4:8]} {body[8:12].translate(ACCENTED)} {body[12:]}"]
+
+
+def test_one_reading_folds_accents_on_a_canary_and_between_its_characters():
+    """An accented letter is read both as its base letter and as a separator, in one reading, so a
+    canary with accents on its own letters and accented letters between them at once is caught,
+    whether the accents are precomposed or combining, and the match maps onto the text as written.
+    An ASCII letter or digit between its characters still breaks it."""
+    canaries = {"doc-1": "cdk-0123456789abcdef"}
+    for disguised in ("çdk-0123é456789abcdef", "cdk-0123é4567 89áb cdef", "c\u0327dk-0123e\u0301456789abcdef"):
+        text = f"Reference: {disguised}."
+        assert labels.canary_spans(text, canaries) == [("doc-1", len("Reference: "), len(text) - 1)], disguised
+    assert labels.find_canaries("cdk-0123x456789abcdef cdk-01237456789abcdef", canaries) == []
+
+
+def test_the_one_reading_keeps_whatever_either_form_kept():
+    """For every character up to the third plane, the reading keeps what NFKD and NFKC each kept:
+    a character that isn't accented gives the same letters in both forms, an accented one gives
+    its NFKC letters in order among its NFKD ones (so passing over the rest leaves them), and a
+    combining mark gives none. A canary either form found, the one reading finds."""
+    def letters(text: str) -> str:
+        return "".join(part for part in text.casefold() if part.isascii() and part.isalnum())
+
+    def within(part: str, whole: str) -> bool:
+        rest = iter(whole)
+        return all(letter in rest for letter in part)
+
+    for point in range(0x30000):
+        ch = chr(point)
+        if 0xD800 <= point <= 0xDFFF:
+            continue
+        read, accented, mark = labels._read(ch)
+        full, bare = letters(unicodedata.normalize("NFKD", ch)), letters(unicodedata.normalize("NFKC", ch))
+        assert read == full and (not mark or read == ""), hex(point)
+        assert within(bare, full) if accented else bare == full, hex(point)
 
 
 async def test_canary_split_with_spaces_case_or_width_is_caught(app, client):
@@ -198,11 +236,12 @@ async def test_canary_split_with_spaces_case_or_width_is_caught(app, client):
         assert labels.find_canaries(text, canaries) == [dana.document_id], disguised
         # what a tool shows Claude and every field of a card are matched alike
         assert labels.find_canaries_in({"ok": True, "ref": disguised}, canaries) == [dana.document_id], disguised
-        # the match maps back onto the text as written, from the canary's first character to its
-        # last, once even where both readings find it, and one reading of it is the canary exactly
+        # the match maps back onto the text as written, once, from the canary's first character to
+        # its last: the span holds the canary, and no letter or digit is left after it
         [(document_id, start, end)] = labels.canary_spans(text, canaries)
         assert (document_id, text[:start]) == (dana.document_id, "Reference: "), disguised
-        assert labels.canary_key(dana.canary) in labels.canary_keys(text[start:end]), disguised
+        assert labels.find_canaries(text[start:end], canaries) == [dana.document_id], disguised
+        assert labels.canary_key(text[end:]) == "", disguised
         verdict = await checked(client, visitor, f"Your invoice reference is {disguised}.")
         # only the canary: none of its digits is read as an amount, so no span quotes a piece of it
         assert violations(verdict) == blocked_by(dana), disguised

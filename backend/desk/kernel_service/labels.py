@@ -17,18 +17,25 @@ the session and action that wrote it.
 Every document's body ends with its canary, a random marker (`cdk-` and 16 hex digits) that no
 other text holds. Text that carries one is carrying the document out, so canaries are looked for
 (`find_canaries`) wherever text could leave for someone the document isn't for: Claude's replies,
-the owner's say, what a tool shows Claude and knowledge the owner adds (`store_knowledge`). They
-are matched on two readings of the text (`canary_keys`), each keeping only ASCII letters and digits
-after case folding, and a canary in either one counts: in NFKD an accented letter keeps its base
-letter, so accents on a canary's letters don't hide it, and in NFKC an accented letter isn't an
-ASCII one, so accented letters put between its characters don't either. Spaces, punctuation,
-capitals and full-width forms hide one in neither.
+the owner's say, what a tool shows Claude and knowledge the owner adds (`store_knowledge`).
+
+A canary is matched on the text's letters and digits (`canary_key`): each character in NFKD and
+case-folded, keeping only ASCII letters and digits, so an accented letter gives its base letter.
+It is found where its own letters and digits occur in order with nothing between them but what
+that drops (spaces, punctuation, symbols, other scripts' letters, combining marks) and accented
+letters, precomposed or with a combining mark. In the same reading an accented letter may be one of
+the canary's own or a separator between them, so capitals, full-width forms, accents on its letters
+and accented letters between its characters hide it neither alone nor all together
+("Çdk-0123é4567 89áb cdef" holds "cdk-0123456789abcdef"). A plain ASCII letter or digit between its
+characters does hide it, as does a letter of another script drawn like one of its own.
 """
 
+import functools
 import unicodedata
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from datetime import datetime
 from types import MappingProxyType
+from typing import NamedTuple
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -140,62 +147,118 @@ async def copy_canaries(ctx: KernelCtx) -> dict[str, str]:
     return {document_id: canary for document_id, canary in rows if canary}
 
 
-# The forms `canary_keys` reads text in: NFKD first (`canary_key`), then NFKC. Neither alone is
-# enough: NFKD turns an accented letter put between a canary's characters into a letter that
-# breaks it, and NFKC keeps an accented letter of the canary itself as a non-ASCII character.
-KEY_FORMS = ("NFKD", "NFKC")
+class _Reading(NamedTuple):
+    """Text as canaries are matched in it (`_reading`)."""
+
+    key: str                              # its letters and digits (`canary_key`)
+    accented: list[bool]                  # for each, whether it came from an accented letter
+    origin: list[int]                     # for each, the index in the text of the character it came from
 
 
-def _keyed(text: str, form: str) -> tuple[str, list[int]]:
-    """`text` read in `form` (one of `KEY_FORMS`): each character in that form and case-folded,
-    keeping only ASCII letters and digits; and the index in `text` each of them came from."""
-    chars: list[str] = []
+def _letters(text: str) -> str:
+    """The ASCII letters and digits of `text`, case-folded."""
+    return "".join(part for part in text.casefold() if part.isascii() and part.isalnum())
+
+
+def _is_mark(ch: str) -> bool:
+    return unicodedata.category(ch)[0] == "M"
+
+
+@functools.lru_cache(maxsize=4096)        # bounded: text may hold any of Unicode's characters
+def _read(ch: str) -> tuple[str, bool, bool]:
+    """One character as `_reading` takes it: its letters (`_letters` of its NFKD form, so an
+    accented letter gives its base letter); whether it is an accented letter (its NFKD form holds a
+    combining mark, or its NFKC form keeps fewer of those letters); and whether it is a combining
+    mark itself, which accents the character before it."""
+    if _is_mark(ch):
+        return "", False, True
+    decomposed = unicodedata.normalize("NFKD", ch)
+    letters = _letters(decomposed)
+    accented = bool(letters) and (any(_is_mark(part) for part in decomposed)
+                                  or letters != _letters(unicodedata.normalize("NFKC", ch)))
+    return letters, accented, False
+
+
+def _reading(text: str) -> _Reading:
+    """`text` as canaries are matched in it: each character's letters (`_read`) in order, each
+    marked accented when its character is an accented letter or is followed by a combining mark,
+    and the index of the character it came from."""
+    letters: list[str] = []
+    accented: list[bool] = []
     origin: list[int] = []
+    base = 0                              # where the letters of the last character that isn't a mark start
     for i, ch in enumerate(text):
-        for part in unicodedata.normalize(form, ch).casefold():
-            if part.isascii() and part.isalnum():
-                chars.append(part)
-                origin.append(i)
-    return "".join(chars), origin
-
-
-def canary_keys(text: str) -> tuple[str, ...]:
-    """The readings of `text` canaries are matched in, one per `KEY_FORMS` form: each character in
-    that form and case-folded, keeping only ASCII letters and digits, so spaces, punctuation,
-    capitals and full-width forms hide a canary in neither. In NFKD an accented letter keeps its
-    base letter, precomposed or with a combining mark ("çďķ-0123" reads as "cdk0123"); in NFKC it
-    is dropped like any other non-ASCII letter ("cdk-01é23" reads as "cdk0123")."""
-    return tuple(_keyed(text, form)[0] for form in KEY_FORMS)
+        read, is_accented, is_mark = _read(ch)
+        if is_mark:
+            accented[base:] = [True] * (len(accented) - base)
+            continue
+        base = len(letters)
+        letters.extend(read)
+        accented.extend([is_accented] * len(read))
+        origin.extend([i] * len(read))
+    return _Reading("".join(letters), accented, origin)
 
 
 def canary_key(text: str) -> str:
-    """`text` in its first reading (`canary_keys`), NFKD: "Ｃdk-0123 4567" reads as "cdk01234567",
-    and so does "çďķ-0123 4567"."""
-    return _keyed(text, KEY_FORMS[0])[0]
+    """The letters and digits of `text` as canaries are matched on: each character in NFKD and
+    case-folded, keeping only ASCII letters and digits, so "Ｃdk-0123 4567" reads as
+    "cdk01234567", and so does "çďķ-0123 4567"."""
+    return _reading(text).key
+
+
+def _places(reading: _Reading, wanted: str) -> list[tuple[int, int]]:
+    """Where `wanted` (a canary's `canary_key`) occurs in `reading`, each as the start and end of
+    the characters it takes up in the text: its letters in order, with only accented ones passed
+    over between them. One pass over the letters, keeping for each count of letters matched so far
+    the earliest start that reached it: a place that starts later and ends at the same letter lies
+    inside it."""
+    key, accented, origin = reading
+    places: list[tuple[int, int]] = []
+    matched: dict[int, int] = {}          # letters of `wanted` matched -> the earliest start that did
+    i = 0
+    while i < len(key):
+        if not matched:                   # nothing under way: on to where one could start
+            i = key.find(wanted[0], i)
+            if i < 0:
+                break
+        letter, moved = key[i], {}
+        for count, start in matched.items():
+            if letter == wanted[count] and moved.get(count + 1, start) >= start:
+                moved[count + 1] = start  # the letter is the canary's next one
+            if accented[i] and moved.get(count, start) >= start:
+                moved[count] = start      # or an accented letter between two of its own
+        if letter == wanted[0] and 1 not in moved:
+            moved[1] = origin[i]
+        if len(wanted) in moved:
+            places.append((moved.pop(len(wanted)), origin[i] + 1))
+        matched = moved
+        i += 1
+    return places
 
 
 def canary_spans(text: str, canaries: Mapping[str, str]) -> list[tuple[str, int, int]]:
-    """Each place a canary of `canaries` (document ID → canary) occurs in either reading of `text`
-    (`canary_keys`): the document's ID, and the start and end of the characters it takes up in
-    `text`, from its first letter or digit to its last, whatever lies between. A place both
-    readings find is listed once; each document's places are in the order they start."""
-    readings = [(form, *_keyed(text, form)) for form in KEY_FORMS]
+    """Each place a canary of `canaries` (document ID → canary) occurs in `text`: the document's
+    ID, and the start and end of the characters it takes up in `text`, from its first letter or
+    digit to its last, whatever lies between (see the module docstring for what may). Places of one
+    canary that overlap are listed once, as the characters they take up together; each document's
+    places are in the order they start."""
+    reading = _reading(text)
     spans = []
     for document_id, canary in canaries.items():
-        places = set()
-        for form, key, origin in readings:
-            wanted = _keyed(canary, form)[0]
-            start = key.find(wanted) if wanted else -1
-            while start >= 0:
-                places.add((origin[start], origin[start + len(wanted) - 1] + 1))
-                start = key.find(wanted, start + 1)
-        spans.extend((document_id, start, end) for start, end in sorted(places))
+        wanted = canary_key(canary)
+        merged: list[tuple[int, int]] = []
+        for start, end in sorted(_places(reading, wanted) if wanted else []):
+            if merged and start < merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(end, merged[-1][1]))
+            else:
+                merged.append((start, end))
+        spans.extend((document_id, start, end) for start, end in merged)
     return spans
 
 
 def find_canaries(text: str, canaries: Mapping[str, str]) -> list[str]:
-    """The IDs of the documents whose canary occurs in either reading of `text` (`canary_spans`),
-    in the order `canaries` lists them."""
+    """The IDs of the documents whose canary occurs in `text` (`canary_spans`), in the order
+    `canaries` lists them."""
     found = {document_id for document_id, _, _ in canary_spans(text, canaries)}
     return [document_id for document_id in canaries if document_id in found]
 
