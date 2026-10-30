@@ -129,6 +129,8 @@ describe('the About Markdown reader', () => {
     });
   });
 
+  const BARE_ADDRESS = 'a bare address, which GitHub links; write it as [text](https://…)';
+
   // Each case is added after the section heading, on line 7; the number is how many lines further down
   // the refusal is. The tools tests (tools/tests/test_docs.py) refuse the common ones without the web toolchain.
   const outsideTheSubset: [string, string, number][] = [
@@ -212,6 +214,16 @@ describe('the About Markdown reader', () => {
     ['Text.\n| A | B |\n| --- | --- |', 'a table without a blank line before it', 1],
     ['| A | B |\n| --- | --- |\nText.', 'a table without a blank line after it', 2],
     ['A | B\n--- | ---', 'a table row that doesn’t start and end with |', 1],
+    // GitHub links a bare web or e-mail address that starts a word; the page would show it as plain text.
+    ['See https://example.com/report.', BARE_ADDRESS, 0],
+    ['See HTTP://EXAMPLE.COM here.', BARE_ADDRESS, 0],
+    ['See www.example.com for more.', BARE_ADDRESS, 0],
+    ['Write to desk@example.com.', BARE_ADDRESS, 0],
+    ['Text and\n(desk+orders@mail.example.co.uk) here.', BARE_ADDRESS, 1],
+    ['- An item at https://example.com', BARE_ADDRESS, 0],
+    ['| A | B |\n| --- | --- |\n| www.example.com | y |', BARE_ADDRESS, 2],
+    ['[owner: www.example.com]', BARE_ADDRESS, 0],
+    ['## Write to desk@example.com', BARE_ADDRESS, 0],
   ];
 
   it('refuses_what_the_reader_subset_leaves_out', () => {
@@ -221,8 +233,18 @@ describe('the About Markdown reader', () => {
       expect(error?.line, added).toBe(7 + further);
       expect(error?.message, added).toBe(`line ${7 + further}: ${reason}`);
     }
-    // Look-alikes inside the subset: an intraword underscore, an ampersand and a tilde in code, a plain number.
-    const inside = ['A snake_case word.', 'Fish & chips.', 'About `~700` documents.', 'In 2026, prices rose.', 'Use $20 ÷ $0.20.'];
+    // Look-alikes inside the subset: an intraword underscore, an ampersand and a tilde in code, a plain number,
+    // addresses as a link's words or in code, which GitHub doesn't link, and words that aren't addresses.
+    const inside = [
+      'A snake_case word.',
+      'Fish & chips.',
+      'About `~700` documents.',
+      'In 2026, prices rose.',
+      'Use $20 ÷ $0.20.',
+      'See [www.example.com](https://www.example.com) or [desk@example.com](https://example.com/contact).',
+      'Write `desk@example.com` or `https://example.com` in code.',
+      'An @ alone, 5@6 and awww.example are words.',
+    ];
     for (const line of inside) expect(refusal(doc(line)), line).toBeNull();
   });
 

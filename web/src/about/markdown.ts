@@ -56,6 +56,10 @@ const DIVIDER_CELL = /^:?-+:?$/;
 const PLACEHOLDER = /^(?:measured|owner): /;
 const CHARACTER_REFERENCE = /^&(?:#\d+|#x[0-9a-f]+|[a-z][a-z0-9]*);/i;
 const WORD_CHARACTER = /[\p{L}\p{N}]/u;
+// A web or e-mail address at the start of a word, which GitHub links though no one wrote a link. Sticky: each is
+// tried at one place in the text.
+const BARE_ADDRESSES = [/(?:https?:\/\/|www\.)/iy, /[\w.+-]+@[\w-]+\.[\w.-]+/y];
+const BARE_ADDRESS = 'a bare address, which GitHub links; write it as [text](https://…)';
 
 // Lines that start a construct outside the subset, checked in this order wherever a line can start a block.
 const OUTSIDE: [RegExp, string][] = [
@@ -82,10 +86,18 @@ function slug(text: string): string {
 function parseInlines(source: string, firstLine: number, resolve: LinkResolver): Inline[] {
   let at = 0;
   let inBrackets = false;
+  /** Where the first bare address inside the open brackets starts, refused unless they turn out to be a link. */
+  let bareInBrackets: number | null = null;
   const fail = (index: number, reason: string): never => {
     throw new MarkdownError(firstLine + (source.slice(0, index).match(/\n/g)?.length ?? 0), reason);
   };
   const isSpace = (index: number) => /^\s?$/.test(source[index] ?? '');
+  const startsBareAddress = (index: number) =>
+    !WORD_CHARACTER.test(source[index - 1] ?? '') &&
+    BARE_ADDRESSES.some((pattern) => {
+      pattern.lastIndex = index;
+      return pattern.test(source);
+    });
 
   function run(until: '**' | ']' | null): Inline[] {
     const start = at;
@@ -140,6 +152,11 @@ function parseInlines(source: string, firstLine: number, resolve: LinkResolver):
       } else if (char === '~') {
         fail(at, 'a tilde, which GitHub reads as strikethrough');
       } else {
+        if (startsBareAddress(at)) {
+          // GitHub links it anywhere but in a link's words, which brackets hold until a ( follows them.
+          if (!inBrackets) fail(at, BARE_ADDRESS);
+          bareInBrackets ??= at;
+        }
         pending += char;
         at += 1;
       }
@@ -166,9 +183,12 @@ function parseInlines(source: string, firstLine: number, resolve: LinkResolver):
     const open = at;
     at += 1;
     inBrackets = true;
+    bareInBrackets = null;
     const children = run(']');
     inBrackets = false;
     if (source[at] === '(') return link(open, children);
+    // Brackets that aren't a link are text to GitHub, which links an address in them.
+    if (bareInBrackets !== null) fail(bareInBrackets, BARE_ADDRESS);
     const only = children.length === 1 ? children[0] : undefined;
     if (only?.kind === 'text' && PLACEHOLDER.test(only.text)) return { kind: 'placeholder', text: only.text };
     return fail(open, 'a [ … ] that is neither a link nor a placeholder');
