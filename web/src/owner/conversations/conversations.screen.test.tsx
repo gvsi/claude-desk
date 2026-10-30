@@ -413,7 +413,7 @@ describe('Conversations', () => {
     await expect.element(card).toBeVisible();
 
     // The card sits right after the row its hold's receipt is under.
-    const heldReceipt = log(screen).getByRole('button', { name: `${SEEDED_REASON} Open the full trace.` });
+    const heldReceipt = receipt(screen, 'Held for you');
     await expect.element(heldReceipt).toBeVisible();
     const row = heldReceipt.element().closest('.cd-transcript-row');
     expect(row?.nextElementSibling?.contains(card.element())).toBe(true);
@@ -462,7 +462,8 @@ describe('Conversations', () => {
     // a way to read it again, rather than showing a hold with nothing to answer.
     mockStore.inject({ route: 'needsYou', status: 500, times: 2 });
     const { screen } = await renderRoute(conversation(SEEDED_HOLD), { pollScale: 100 });
-    await expect.element(log(screen).getByRole('button', { name: `${SEEDED_REASON} Open the full trace.` })).toBeVisible();
+    // With no card under it, the hold's receipt says why itself.
+    await expect.element(receipt(screen, `Held for you. ${SEEDED_REASON}`)).toBeVisible();
     const line = screen.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
     await expect.element(line, { timeout: 4_000 }).toBeVisible();
     expect(heldCard(screen, SEEDED_REASON).elements()).toHaveLength(0);
@@ -472,6 +473,8 @@ describe('Conversations', () => {
     await screen.getByRole('button', { name: 'Try again', exact: true }).click();
     await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
     await expect.element(line).not.toBeInTheDocument();
+    // The card says why now, so the receipt over it names only the state.
+    await expect.element(receipt(screen, 'Held for you')).toBeVisible();
   });
 
   it('paused_offers_resume', async () => {
@@ -529,10 +532,10 @@ describe('Conversations', () => {
 
     const { screen } = await renderRoute(conversation(chat.state.session_id));
 
-    // The hold, and the quote Claude ran on its own, say why in the owner's words: the kernel's
-    // reason, read once by each decision.
-    await expect.element(receipt(screen, REFUND_REASON)).toBeVisible();
-    await expect.element(receipt(screen, quote.reason_plain)).toBeVisible();
+    // The hold, answered so no card is under it, and the quote Claude ran on its own name their
+    // state in the owner's words, then say why: the kernel's reason, read once by each decision.
+    await expect.element(receipt(screen, `Held for you. ${REFUND_REASON}`)).toBeVisible();
+    await expect.element(receipt(screen, `Automatic. ${quote.reason_plain}`)).toBeVisible();
     expect(decisionReads(refund.decision_id)).toHaveLength(1);
     expect(decisionReads(quote.decision_id)).toHaveLength(1);
 
@@ -552,6 +555,17 @@ describe('Conversations', () => {
     await readsMore('conversation', 2);
     expect(requests('decision')).toHaveLength(2);
     await expectScreenBasics(screen.container, { owner: true });
+
+    // A hold still waiting, its card right under the row, reads "Held for you" alone: the card's
+    // headline already says why.
+    const waiting = await renderRoute(conversation(SEEDED_HOLD));
+    const card = heldCard(waiting.screen, SEEDED_REASON);
+    await expect.element(card).toBeVisible();
+    const held = receipt(waiting.screen, 'Held for you');
+    await expect.element(held).toBeVisible();
+    expect(held.element().closest('.cd-transcript-row')?.nextElementSibling?.contains(card.element())).toBe(true);
+    expect(held.element().textContent).not.toContain(SEEDED_REASON);
+    await expectScreenBasics(waiting.screen.container, { owner: true });
 
     // When the reason can't be read, the hold shows the visitor's words: never nothing.
     mockStore.inject({ route: 'decision', status: 500, times: 10 });
@@ -581,8 +595,8 @@ describe('Conversations', () => {
 
     // The release's receipt, in the owner's words, sits under the invoice it explains, never under
     // the card that asked for the code, which keeps the receipt of the code it sent.
-    const released = receipt(screen, DECISIONS.releaseInvoice.reasonPlain);
-    const started = receipt(screen, DECISIONS.startVerification.reasonPlain);
+    const released = receipt(screen, `Automatic. ${DECISIONS.releaseInvoice.reasonPlain}`);
+    const started = receipt(screen, `Automatic. ${DECISIONS.startVerification.reasonPlain}`);
     await expect.element(released).toBeVisible();
     await expect.element(started).toBeVisible();
     expect(rowOf(invoice)?.contains(released.element())).toBe(true);

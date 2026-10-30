@@ -1,9 +1,11 @@
 /**
  * A stored conversation as the owner reads it: each message in its own row with its receipts
  * attached under it, the owner's own words as "You", whispers with their caption, a visiting
- * agent's signed requests, and each held request's card after the row its hold is under. A receipt
- * opens the full trace of its ledger entry under its row; Escape or the close button returns focus
- * to the receipt.
+ * agent's signed requests, and each held request's card after the row its hold is under. The
+ * receipt that reports what the kernel decided names its state and why (ownerReceipt.ts), and a
+ * hold with its card right under it names only its state, since the card says why. A receipt opens
+ * the full trace of its ledger entry under its row; Escape or the close button returns focus to the
+ * receipt.
  */
 import { useQuery } from '@tanstack/react-query';
 import { Fragment, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -103,21 +105,44 @@ function holdsUnder(receipts: readonly OwnerReceiptSource[]): string[] {
   return receipts.flatMap(({ event }) => (event.type === 'held' ? [event.decision_id] : []));
 }
 
+/**
+ * The held requests whose cards go right after each row, given each row's receipts in order: a
+ * request after the row its hold is under, once, and only one of `heldIds`, the requests the screen
+ * draws a card for.
+ */
+function cardsAfter(rows: readonly (readonly OwnerReceiptSource[])[], heldIds: readonly string[]): string[][] {
+  const placed = new Set<string>();
+  return rows.map((receipts) =>
+    holdsUnder(receipts).filter((id) => {
+      if (!heldIds.includes(id) || placed.has(id)) return false;
+      placed.add(id);
+      return true;
+    }),
+  );
+}
+
 interface ReceiptLineProps {
   source: OwnerReceiptSource;
   /** Its message reports something done, so an executed receipt draws the check. */
   done: boolean;
+  /** The held requests whose cards are drawn right after this receipt's row. */
+  cards: readonly string[];
   onOpenTrace: (ledgerSeq: number) => void;
 }
 
 /** One receipt: the owner's line for it, a button that opens its trace. */
-function ReceiptLine({ source, done, onOpenTrace }: ReceiptLineProps) {
+function ReceiptLine({ source, done, cards, onOpenTrace }: ReceiptLineProps) {
   const view = useOwnerReceipt(source.event, source.first);
+  const { event } = source;
+  // The hold that reports what the kernel decided, with its card right under the row: the card says why.
+  const cardBelow = source.first && event.type === 'held' && cards.includes(event.decision_id);
   return (
     <MarginReceipt
       source={view.source}
       plain={view.plain}
       ledgerSeq={view.ledgerSeq}
+      reason={view.reason}
+      cardBelow={cardBelow}
       onOpenTrace={onOpenTrace}
       drawCheck={done && view.source.kind === 'decision' && view.source.state === 'executed'}
     />
@@ -126,17 +151,19 @@ function ReceiptLine({ source, done, onOpenTrace }: ReceiptLineProps) {
 
 interface RowViewProps {
   row: OwnerRow;
+  /** The held requests whose cards are drawn right after this row. */
+  cards: readonly string[];
   agentName: string;
   ownerName: string;
   timezone: string;
   onOpenTrace: (ledgerSeq: number) => void;
 }
 
-function RowView({ row, agentName, ownerName, timezone, onOpenTrace }: RowViewProps) {
+function RowView({ row, cards, agentName, ownerName, timezone, onOpenTrace }: RowViewProps) {
   const { item } = row;
   const done = item.kind === 'message' && item.ev.blocks.some((block) => block.kind === 'card' && DONE_CARDS.has(block.template ?? ''));
   const margin = row.receipts.map((source, index) => (
-    <ReceiptLine key={`${source.event.ledger_seq}-${index}`} source={source} done={done} onOpenTrace={onOpenTrace} />
+    <ReceiptLine key={`${source.event.ledger_seq}-${index}`} source={source} done={done} cards={cards} onOpenTrace={onOpenTrace} />
   ));
   let message: ReactNode;
   switch (item.kind) {
@@ -229,26 +256,23 @@ export function OwnerTranscript({ items, agentName, ownerName, timezone, deskId,
   );
 
   // Each held request after the row its hold is under; one whose hold isn't in the conversation yet goes last.
-  const placed = new Set<string>();
-  const heldAfter = (receipts: readonly OwnerReceiptSource[]): ReactNode[] =>
-    holdsUnder(receipts)
-      .filter((id) => heldIds.includes(id) && !placed.has(id))
-      .map((id) => {
-        placed.add(id);
-        return <Fragment key={`held-${id}`}>{renderHeld(id)}</Fragment>;
-      });
+  const leading = groups.leading;
+  const [leadingCards = [], ...rowCards] = cardsAfter([leading, ...groups.rows.map((row) => row.receipts)], heldIds);
+  const placed = new Set([leadingCards, ...rowCards].flat());
+  const held = (ids: readonly string[]): ReactNode[] => ids.map((id) => <Fragment key={`held-${id}`}>{renderHeld(id)}</Fragment>);
   const hasSeq = (receipts: readonly OwnerReceiptSource[]) => openSeq !== null && receipts.some((r) => r.event.ledger_seq === openSeq);
 
-  const leading = groups.leading;
-  const leadingHeld = heldAfter(leading);
-  const rows = groups.rows.map((row) => (
-    <Fragment key={`${row.item.kind}-${row.item.n}`}>
-      <RowView row={row} agentName={agentName} ownerName={ownerName} timezone={timezone} onOpenTrace={openTrace} />
-      {hasSeq(row.receipts) ? trace : null}
-      {heldAfter(row.receipts)}
-    </Fragment>
-  ));
-  const rest = heldIds.filter((id) => !placed.has(id)).map((id) => <Fragment key={`held-${id}`}>{renderHeld(id)}</Fragment>);
+  const rows = groups.rows.map((row, index) => {
+    const cards = rowCards[index] ?? [];
+    return (
+      <Fragment key={`${row.item.kind}-${row.item.n}`}>
+        <RowView row={row} cards={cards} agentName={agentName} ownerName={ownerName} timezone={timezone} onOpenTrace={openTrace} />
+        {hasSeq(row.receipts) ? trace : null}
+        {held(cards)}
+      </Fragment>
+    );
+  });
+  const rest = held(heldIds.filter((id) => !placed.has(id)));
 
   return (
     <>
@@ -256,13 +280,13 @@ export function OwnerTranscript({ items, agentName, ownerName, timezone, deskId,
         <>
           <TranscriptRow
             margin={leading.map((source, index) => (
-              <ReceiptLine key={`${source.event.ledger_seq}-${index}`} source={source} done={false} onOpenTrace={openTrace} />
+              <ReceiptLine key={`${source.event.ledger_seq}-${index}`} source={source} done={false} cards={leadingCards} onOpenTrace={openTrace} />
             ))}
           >
             {null}
           </TranscriptRow>
           {hasSeq(leading) ? trace : null}
-          {leadingHeld}
+          {held(leadingCards)}
         </>
       ) : null}
       {rows}
