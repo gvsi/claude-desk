@@ -1,0 +1,87 @@
+# Spanish words free prose may not use: amounts, percentages, dates, promises and bookings reach a
+# visitor only in cards rendered from the business's records. One `<category>\t<regex>` per line,
+# matched case-insensitively as whole words on the prose with accents and other marks dropped
+# ("dólares" is matched as "dolares"), each run of whitespace read as one space and every dash and
+# hyphen as "-" ("fin‐de‐semana" with U+2010 is "fin-de-semana"). Categories: number, money,
+# percent and date (number_in_prose), and promise and booking (promise_word). A booking claim with
+# a condition straight before it ("cuando tu cita está confirmada") passes (`BOOKING_CONDITION`
+# in reply_check.py), but not after "sí" (yes), whose accent tells it from "si" (if). Both
+# lexicons run on every draft, whatever its language.
+
+# Spelled-out numbers. A bare "uno", "una", "once" or "medio" counts only next to a unit or another
+# number word, so "una pregunta" passes; "las once" and "la una" are clock times (below).
+number	dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|doce|trece|catorce|quince
+number	dieci(?:seis|siete|ocho|nueve)|veinte|veinti[a-z]+
+number	treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa
+number	cien|cientos?|(?:dos|tres|cuatro|seis|sete|ocho|nove)cient[oa]s|quinient[oa]s
+number	mil|miles|millon(?:es)?|docenas?|mitad
+number	ceros?
+# "cuarto" is a fraction, a time ("y cuarto"), an ordinal and a room, and is blocked whichever
+# it is: a reply naming a room needs another word for it ("habitación").
+number	cuart[oa]s?
+number	tercios?|terceras?[\s-]+partes?
+# Fractions from a fifth to a tenth ("un quinto", "una décima parte"); "séptimo" and
+# "décimo" without the accent. "décimos" is left out: without its accent it is "decimos" (we
+# tell), and as a fraction it always follows a number word ("dos décimos"), blocked above.
+number	quint[oa]s?|sext[oa]s?|sep?tim[oa]s?|octav[oa]s?|noven[oa]s?|decim(?:o|a|as)
+number	(?:uno|una|once|medio)[\s-]+(?:y[\s-]+)?(?:cien|cientos?|mil|miles|millon(?:es)?|docenas?|dolar(?:es)?|pesos?|euros?|centavos?|por[\s-]?ciento)
+
+# Money ("dólar" and "dólares" are matched without the accent)
+money	dolar(?:es)?|pesos?|euros?|centavos?|usd|mxn
+
+# Percentages
+percent	por[\s-]?ciento|porcentajes?
+
+# Days, months and times ("miércoles", "sábado", "mañana", "mediodía", "día" without accents),
+# "el mismo día" among them
+date	lunes|martes|miercoles|jueves|viernes|sabados?|domingos?
+date	enero|febrero|marzo|abril|mayo|junio|julio|agosto|sept?iembre|octubre|noviembre|diciembre
+date	hoy|manana|ayer|anoche|mediodia|medianoche
+date	fin(?:es)?[\s-]+de[\s-]+semana|(?:la[\s-]+)?(?:proxima|siguiente)[\s-]+semana|semana[\s-]+(?:que[\s-]+viene|proxima|entrante)
+date	esta[\s-]+(?:noche|tarde|semana)|(?:este|el[\s-]+proximo)[\s-]+mes
+date	las[\s-]+once|la[\s-]+una
+date	(?:el[\s-]+)?mismo[\s-]+dia
+date	(?:el[\s-]+)?mes[\s-]+que[\s-]+viene
+# A time soon: "en" or "dentro de" and up to three words before minutes or hours ("en una
+# hora", "dentro de un par de horas", "en media hora").
+date	(?:en|dentro[\s-]+de)[\s-]+(?:[^\W\d_]+[\s-]+){0,3}(?:minutos?|mins?|horas?|hrs?)
+date	en[\s-]?seguida
+date	(?:a[\s-]+)?primera[\s-]+hora
+
+# Promises only the owner's rules or a card can make ("garantía" without the accent). "libre"
+# states a price before "para", "a" or "al" and everyone, an audience or "usted", "ti" or "vos":
+# "acceso libre a todas las clases", "libre para los socios", "la entrada es libre al público",
+# "libre para usted", "libre para vosotros". It passes elsewhere, where it is a time that is open
+# or a freedom: "un horario libre", "tengo la tarde libre", "libre para la cita", "usted es libre
+# de preguntar". "entrada libre" and "libre de costo", "de cargo", "de pago" or "de impuestos" are
+# a price wherever they stand.
+promise	garantias?|garantiz[a-z]*|promet[a-z]*|promesas?
+promise	gratis|gratuit[oa]s?|descuentos?|descont[a-z]*|reembols[a-z]*
+promise	sin[\s-]+(?:ningun[\s-]+)?(?:costo|coste|cargo)|de[\s-]+regalo
+promise	sin[\s-]+(?:ninguna[\s-]+)?comision(?:es)?
+promise	por[\s-]+nuestra[\s-]+cuenta|(?:por[\s-]+)?cuenta[\s-]+de[\s-]+la[\s-]+casa
+promise	entradas?[\s-]+libres?
+promise	libres?[\s-]+de[\s-]+(?:costos?|costes?|cargos?|pagos?|impuestos?)
+promise	libres?(?=[\s-]+(?:para|a)[\s-]+(?:tod[oa]s|todo[\s-]+el[\s-]+mundo|cualquiera)\b)
+promise	libres?(?=[\s-]+(?:(?:para|a)[\s-]+(?:(?:el|la|l[oa]s|nuestr[oa]s?|sus?|tus?)[\s-]+)?|al[\s-]+)(?:soci[oa]s?|miembros?|clientes?|publico|usted(?:es)?|ti|vos(?:otros|otras)?)\b)
+
+# Booking confirmations, which only a booking card makes, written from a claim's parts rather than
+# sample phrasings ("está", "estás", "están" and "quedó" without the accent). A claim is a booking
+# noun (cita, reserva, visita, turno, hora) or none, a verb (está, estás, queda, quedó, fue, ha
+# quedado, ha sido, in the singular and the plural), and a participle (confirmado, reservado,
+# agendado, apartado, hecho, in either gender and number): "tu cita está confirmada", "su turno
+# quedó reservado", "las citas están confirmadas", "su reserva quedó hecha", "ya estás
+# reservado". The first line takes the determiner and one more word before the noun, so a
+# condition before the whole claim is seen ("cuando su próxima cita está confirmada"). The second
+# holds the verb and the participle whatever comes before it ("la cita de Ana está confirmada",
+# "la suya está confirmada", "listo, quedó apartado") and starts at a whole-word "ya" when it is
+# there, but with "hecho" only before a booking noun ("quedó hecha la reserva"), since otherwise it
+# says what something is made of ("el tubo está hecho de cobre"). A claim inside a longer one is
+# that claim, so one claim is one violation.
+booking	(?:tus?|sus?|el|la|los|las|una?|mis?|est[ea]s?|es[ea]s?|nuestr[oa]s?)[\s-]+(?:[^\W\d_]+[\s-]+)?(?:cita|reserva|visita|turno|hora)s?[\s-]+(?:ya[\s-]+)?(?:estan?|quedan?|quedo|quedaron|fu(?:e|eron)|ha[ns]?[\s-]+(?:quedado|sido))[\s-]+(?:confirmad|reservad|agendad|apartad|hech)[oa]s?
+booking	(?:ya[\s-]+)?(?:estas|estan?|quedas|quedan?|quedo|quedaste|quedaron|fu(?:e|iste|eron)|ha[ns]?[\s-]+(?:quedado|sido))[\s-]+(?:(?:confirmad|reservad|agendad|apartad)[oa]s?|hech[oa]s?(?=[\s-]+(?:(?:tus?|sus?|el|la|los|las)[\s-]+)?(?:cita|reserva|visita|turno|hora)s?(?!\w)))
+# The headline, with the noun first and a blank or a colon before the participle ("Reserva
+# confirmada.", "Visita: confirmada."), where no word comes straight before the noun: after a
+# determiner the participle only describes it ("para dejar una cita confirmada, necesito su
+# dirección").
+booking	(?<![^\W_] )(?:cita|reserva|visita|turno|hora)s?(?:[\s-]+|[\s-]*:[\s-]*)(?:ya[\s-]+)?(?:confirmad|reservad|agendad|apartad|hech)[oa]s?

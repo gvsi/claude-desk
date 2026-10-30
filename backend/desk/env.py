@@ -13,7 +13,9 @@ import os
 DEVELOPMENT_ENVS = frozenset({"", "dev", "development", "test", "ci", "local"})
 
 
-def is_development() -> bool:
-    """True when the process's `DESK_ENV` names a development environment."""
-    value = os.environ.get("DESK_ENV", "").strip(" \t\n\f\r")   # the ASCII whitespace Rust's str::trim_ascii drops
+def is_development(value: str | None = None) -> bool:
+    """True when `value` (by default the process's `DESK_ENV`) names a development environment."""
+    if value is None:
+        value = os.environ.get("DESK_ENV", "")
+    value = value.strip(" \t\n\f\r")   # the ASCII whitespace Rust's str::trim_ascii drops
     return value.isascii() and value.lower() in DEVELOPMENT_ENVS
