@@ -406,9 +406,10 @@ def test_the_deploy_account_replaces_retyping_it(deploy):
     assert run.steps()[:2] == ["aws sts get-caller-identity", "uv preflight.py"]
 
 
+@pytest.mark.parametrize("terminal", [True, False])
 @pytest.mark.parametrize("args", [[], ["--data-only"]])
-def test_a_deploy_account_other_than_the_credentials_is_refused_before_anything_runs(deploy, args):
-    run = deploy(*args, typed=ACCOUNT, DESK_DEPLOY_ACCOUNT="999999999999")
+def test_a_deploy_account_other_than_the_credentials_is_refused_before_anything_runs(deploy, args, terminal):
+    run = deploy(*args, typed=ACCOUNT, terminal=terminal, DESK_DEPLOY_ACCOUNT="999999999999")
     assert run.status == 1
     assert run.steps() == ["aws sts get-caller-identity"]
     assert f"DESK_DEPLOY_ACCOUNT is 999999999999, but the AWS credentials are for account {ACCOUNT}" in run.log
