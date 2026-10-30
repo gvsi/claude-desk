@@ -3,6 +3,7 @@ import { expect, fn, within } from 'storybook/test';
 
 import { rivera } from '../../fixtures';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { expectMockBesideExternalNames } from '../../test/expectMockBadges.ts';
 import { ToolReviewCard } from './ToolReviewCard.tsx';
 
 const { changedRefund } = rivera;
@@ -44,11 +45,17 @@ type Story = StoryObj<typeof meta>;
 
 export const CreateRefundChanged: Story = {
   play: async ({ args, canvas, canvasElement, userEvent }) => {
+    // mock_badge_always_beside_external_names: the card names Stripe with its badge at the top, so
+    // the summary's "Stripe changed" sits in a card that says it is a mock.
+    await expect(expectMockBesideExternalNames(canvasElement)).toBe(1);
     const card = canvas.getByRole('region', { name: 'Needs your review' });
-    // A held dot and "Needs your review", with when it was noticed at the right.
+    // A held dot and "Needs your review", with the connector and its badge and when it was noticed
+    // at the right.
     const status = within(card).getByRole('heading', { level: 2, name: 'Needs your review' });
     await expect(status.querySelector('.cd-status-dot--held')).toHaveAttribute('aria-hidden', 'true');
-    await expect(within(card).getByText(args.noticed)).toBeVisible();
+    const noticed = card.querySelector<HTMLElement>('.cd-tool-review__noticed');
+    await expect(noticed?.textContent?.replace(/\s+/g, ' ')).toBe(`Stripe Mock · ${args.noticed}`);
+    await expect(noticed).toBeVisible();
     // quoted_definition_is_text: the summary in serif, Claude's words.
     const summary = within(card).getByText(SUMMARY);
     expectComputed(summary, { fontFamily: '"Source Serif 4", Georgia, serif', fontSize: '18px' });
@@ -101,7 +108,8 @@ export const CreateRefundChanged: Story = {
 
 export const KeepOff: Story = {
   parameters: { canvasNote: 'The same review, answered "Keep off"; the board draws the review only.' },
-  play: async ({ args, canvas, userEvent }) => {
+  play: async ({ args, canvas, userEvent, canvasElement }) => {
+    await expect(expectMockBesideExternalNames(canvasElement)).toBe(1);
     await userEvent.click(canvas.getByRole('button', { name: 'Keep off' }));
     await expect(args.onKeepOff).toHaveBeenCalledTimes(1);
     await expect(args.onKeepOff).toHaveBeenCalledWith(reviewedHash);
@@ -112,7 +120,8 @@ export const KeepOff: Story = {
 export const Sending: Story = {
   args: { pending: true },
   parameters: { canvasNote: 'The review while the screen sends the answer; no board draws it.' },
-  play: async ({ args, canvas, userEvent }) => {
+  play: async ({ args, canvas, userEvent, canvasElement }) => {
+    await expect(expectMockBesideExternalNames(canvasElement)).toBe(1);
     const card = canvas.getByRole('region', { name: 'Needs your review' });
     await expect(card.querySelector('.cd-tool-review')).toHaveAttribute('aria-busy', 'true');
     // Both answers wait, and neither can be sent again.
@@ -129,7 +138,8 @@ export const Sending: Story = {
 export const ChangedAgain: Story = {
   args: { error: changedRefund.conflict },
   parameters: { canvasNote: 'The review after the tool changed again while the owner was reviewing; no board draws it.' },
-  play: async ({ args, canvas, userEvent }) => {
+  play: async ({ args, canvas, userEvent, canvasElement }) => {
+    await expect(expectMockBesideExternalNames(canvasElement)).toBe(1);
     await expect(canvas.getByRole('alert')).toHaveTextContent(changedRefund.conflict);
     // The answers work again, still naming the reviewed definition.
     await userEvent.click(canvas.getByRole('button', { name: 'Turn back on' }));
@@ -140,7 +150,8 @@ export const ChangedAgain: Story = {
 export const NoHash: Story = {
   args: { profile: { ...changed, pending_sha256: null } },
   parameters: { canvasNote: "A changed tool whose new definition has no hash; no board draws it. Without the hash there's nothing to confirm." },
-  play: async ({ args, canvas, userEvent }) => {
+  play: async ({ args, canvas, userEvent, canvasElement }) => {
+    await expect(expectMockBesideExternalNames(canvasElement)).toBe(1);
     // no_hash_no_confirm: both answers are disabled, under the notice.
     const notice = canvas.getByText(NO_HASH);
     await expect(notice).toBeVisible();
@@ -160,6 +171,7 @@ export const NoDefinitionText: Story = {
   args: { profile: { ...changed, pending_definition_text: null } },
   parameters: { canvasNote: "A changed tool whose new definition wasn't kept; no board draws it. With nothing to review, nothing can be confirmed." },
   play: async ({ canvas, canvasElement }) => {
+    await expect(expectMockBesideExternalNames(canvasElement)).toBe(1);
     await expect(canvas.getByText(NO_HASH)).toBeVisible();
     await expect(canvasElement.querySelector('blockquote')).toBeNull();
     for (const name of ['Turn back on', 'Keep off']) await expect(canvas.getByRole('button', { name })).toBeDisabled();
@@ -178,6 +190,7 @@ export const EmptyDefinitionText: Story = {
   args: { profile: { ...changed, pending_definition_text: '' } },
   parameters: { canvasNote: 'A changed tool whose new definition came back empty; no board draws it. With nothing to review, nothing can be confirmed.' },
   play: async ({ args, canvas, canvasElement, userEvent }) => {
+    await expect(expectMockBesideExternalNames(canvasElement)).toBe(1);
     await expectNothingToReview(canvas, canvasElement);
     await userEvent.click(canvas.getByRole('button', { name: 'Turn back on' }));
     await expect(args.onTurnBackOn).not.toHaveBeenCalled();
@@ -188,6 +201,7 @@ export const BlankDefinitionText: Story = {
   args: { profile: { ...changed, pending_definition_text: '  \n\t ' } },
   parameters: { canvasNote: 'A changed tool whose new definition is only spaces and line breaks; no board draws it. With nothing to review, nothing can be confirmed.' },
   play: async ({ args, canvas, canvasElement, userEvent }) => {
+    await expect(expectMockBesideExternalNames(canvasElement)).toBe(1);
     await expectNothingToReview(canvas, canvasElement);
     await userEvent.click(canvas.getByRole('button', { name: 'Keep off' }));
     await expect(args.onKeepOff).not.toHaveBeenCalled();
@@ -198,6 +212,7 @@ export const IndentedDefinition: Story = {
   args: { profile: { ...changed, pending_definition_text: `\n  ${changed.pending_definition_text}\n` } },
   parameters: { canvasNote: 'A changed definition that starts and ends with blank space; no board draws it. The quote keeps the text exactly as sent.' },
   play: async ({ args, canvasElement }) => {
+    await expect(expectMockBesideExternalNames(canvasElement)).toBe(1);
     // The quote is the connector's words exactly as sent, leading and trailing space included.
     const text = canvasElement.querySelector('blockquote [data-copy="user"]');
     await expect(text?.textContent).toBe(args.profile.pending_definition_text);
@@ -208,6 +223,7 @@ export const Phone: Story = {
   globals: { viewport: { value: 'phone', isRotated: false } },
   parameters: { canvasNote: 'The review on a phone; no board draws it. The quoted definition wraps inside its box.' },
   play: async ({ canvasElement }) => {
+    await expect(expectMockBesideExternalNames(canvasElement)).toBe(1);
     const width = window.innerWidth;
     await expect(width).toBe(390);
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
