@@ -1,36 +1,16 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import { expect, fn, waitFor } from 'storybook/test';
 
 import { rivera } from '../../fixtures';
 import { expectComputed } from '../../test/expectComputed.ts';
-import { Card } from '../Card/Card.tsx';
-import { ConnectorIcon } from '../ConnectorIcon/ConnectorIcon.tsx';
-import { ConnectorName } from '../ConnectorName/ConnectorName.tsx';
+import { ConnectorSection } from '../ConnectorSection/ConnectorSection.tsx';
 import { MoneyLimit, type MoneyLimitProps } from './MoneyLimit.tsx';
 
 const { line, unset, hint } = rivera.paymentLimit;
-const payments = rivera.connectors.views.payments;
-
-/** The Payments group's head, as the Rules page draws it above the limit (a stand-in for its section's header). */
-function Group({ children }: { children: ReactNode }) {
-  return (
-    <div style={{ maxWidth: 960 }}>
-      <Card as="section" label={payments.name} padding={0}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px' }}>
-          <ConnectorIcon icon={payments.icon} size="section" />
-          <div>
-            <ConnectorName connector={payments} size="section" />
-            <p className="cd-type-meta" style={{ margin: 0, color: 'var(--text-secondary)' }}>
-              {payments.description}
-            </p>
-          </div>
-        </div>
-        {children}
-      </Card>
-    </div>
-  );
-}
+/** Rivera's Payments group on the Rules page, whose line above its tools holds the limit. */
+const payments = rivera.connectors.sections.find((section) => section.connector.id === 'payments');
+if (payments === undefined) throw new Error('No Payments section');
 
 /**
  * The limit as the Rules page holds it: "Change" opens the field, "Cancel" closes it, and the field
@@ -66,9 +46,9 @@ const meta = {
   component: MoneyLimit,
   args: { line, editing: false, value: '', hint, onEdit: fn(), onChange: fn(), onReview: fn(), onCancel: fn() },
   render: (args) => (
-    <Group>
-      <Controlled {...args} />
-    </Group>
+    <div style={{ maxWidth: 960 }}>
+      <ConnectorSection {...payments} aboveTools={<Controlled {...args} />} />
+    </div>
   ),
   parameters: { layout: 'padded', canvas: 'none', canvasNote: 'Drawn on N-Conn-19-Ceiling, which joins the reference boards with its board story.' },
 } satisfies Meta<typeof MoneyLimit>;
@@ -77,33 +57,35 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-/** The limit's row, and the padded body inside it. */
+/** The limit, and the group's row that holds it. */
 function row(canvasElement: HTMLElement): HTMLElement {
   const el = canvasElement.querySelector<HTMLElement>('.cd-money-limit');
   if (el === null) throw new Error('No payment limit');
   return el;
 }
 
-function body(canvasElement: HTMLElement): HTMLElement {
-  const el = row(canvasElement).firstElementChild;
-  if (!(el instanceof HTMLElement)) throw new Error('No body');
+function slot(canvasElement: HTMLElement): HTMLElement {
+  const el = row(canvasElement).closest<HTMLElement>('.cd-connector-section__above');
+  if (el === null) throw new Error('The limit is not in its group');
   return el;
 }
 
 export const Reading: Story = {
   play: async ({ args, canvas, canvasElement, userEvent }) => {
-    // A row under the group's head: a hairline above it, padded 12 px 16 px, the limit in body type
-    // and a secondary "Change" at the right, centered on it.
+    // The group's line above its tools holds it, under a hairline, padded 12 px 16 px; the limit
+    // adds no padding or line of its own. The limit in body type and a secondary "Change" at the
+    // right, centered on it, 56 px under the hairline in all.
+    const group = slot(canvasElement);
+    expectComputed(group, { borderTopWidth: '1px', borderTopColor: 'rgba(250, 249, 245, 0.12)', paddingTop: '12px', paddingLeft: '16px', paddingBottom: '12px' });
     const limit = row(canvasElement);
-    expectComputed(limit, { borderTopWidth: '1px', borderTopColor: 'rgba(250, 249, 245, 0.12)' });
-    expectComputed(body(canvasElement), { paddingTop: '12px', paddingLeft: '16px', paddingBottom: '12px' });
+    expectComputed(limit, { paddingTop: '0px', paddingBottom: '0px', borderTopWidth: '0px' });
+    await expect(group.getBoundingClientRect().height).toBe(57);
     const words = canvas.getByText(line);
     expectComputed(words, { fontSize: '14px', lineHeight: '20px', fontWeight: '380', color: 'rgba(250, 249, 245, 0.92)' });
     const change = canvas.getByRole('button', { name: 'Change' });
     await expect(change).toHaveClass('cd-button--secondary');
     expectComputed(change, { height: '32px' });
-    const box = limit.getBoundingClientRect();
-    await expect(box.right - change.getBoundingClientRect().right).toBe(16);
+    await expect(group.getBoundingClientRect().right - change.getBoundingClientRect().right).toBe(16);
     const middle = (r: DOMRect) => r.top + r.height / 2;
     await expect(middle(change.getBoundingClientRect())).toBe(middle(words.getBoundingClientRect()));
     await expect(canvas.queryByRole('textbox')).toBeNull();
@@ -125,9 +107,11 @@ export const Editing: Story = {
   args: { editing: true, value: '1000' },
   parameters: { canvas: 'none', canvasNote: 'Drawn on N-Conn-19b-Ceiling-Edit, which joins the reference boards with its board story.' },
   play: async ({ args, canvas, canvasElement, userEvent }) => {
-    // The field, named by its default label, with the screen's hint, 360 px wide at most; the row
-    // pads 12 px above and 16 px below.
-    expectComputed(body(canvasElement), { paddingTop: '12px', paddingBottom: '16px' });
+    // The field, named by its default label, with the screen's hint, 360 px wide at most; 12 px
+    // above it and 16 px under the buttons, 163 px under the hairline in all, as the board draws it.
+    const group = slot(canvasElement);
+    await expect(group.getBoundingClientRect().height).toBe(163);
+    await expect(group.getBoundingClientRect().bottom - canvas.getByRole('button', { name: 'Review change' }).getBoundingClientRect().bottom).toBe(16);
     const field = canvas.getByRole('textbox', { name: 'Most a payment can be without asking you, in dollars' });
     await expect(field).toHaveValue('1000');
     await expect(field).toHaveAccessibleDescription(hint);
@@ -202,7 +186,7 @@ export const Phone: Story = {
   play: async ({ canvas, canvasElement }) => {
     await expect(window.innerWidth).toBe(390);
     // On a phone the row pads 12 px 14 px, and "Change" sits 10 px under the limit, at its left.
-    expectComputed(body(canvasElement), { paddingTop: '12px', paddingLeft: '14px' });
+    expectComputed(slot(canvasElement), { paddingTop: '12px', paddingLeft: '14px' });
     const words = canvas.getByText(line);
     const change = canvas.getByRole('button', { name: 'Change' });
     await expect(change.getBoundingClientRect().top - words.getBoundingClientRect().bottom).toBe(10);

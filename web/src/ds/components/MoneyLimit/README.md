@@ -4,18 +4,18 @@
 
 ## When to use
 
-- At the top of each group of payment tools on the Rules page, Payments and Stripe, under the group's head and above its tools (N-Conn-19-Ceiling, N-Conn-19b-Ceiling-Edit, N-Conn-22-Phone-Presets). The consumer places it inside the group; each group holds its own copy, and only the one the owner opens edits.
+- At the top of each group of payment tools on the Rules page, Payments and Stripe, as their `ConnectorSection`'s `aboveTools` (N-Conn-19-Ceiling, N-Conn-19b-Ceiling-Edit, N-Conn-22-Phone-Presets). Each group holds its own copy, and only the one the owner opens edits.
 - The limit is the active rules version's money cap (master "Money cap"), whatever the rules below it say. It changes only through a draft the owner confirms on its review page (`LimitChange` above `ChangeReview`, N-Conn-20-Ceiling-Review).
 
 ## What it shows
 
-- A row, with a hairline above it when anything comes before it in the group, as above each tool row.
-- Reading, padded 12 px 16 px: `line` in body type, `text-primary` ("No payment over $500 goes through without asking you, whatever the rules below say.", or "Every payment asks you first." when no limit is set), and a secondary "Change" at the right, centered on it, which calls `onEdit()`.
-- Editing, in a form padded 12 px 16 px 16 px:
+- The section's line above its tools holds it: padded 12 px 16 px (12 px 14 px on a phone) under a hairline, as a tool row is. It adds no padding or line of its own but for 4 px under the editing buttons.
+- Reading: `line` in body type, `text-primary` ("No payment over $500 goes through without asking you, whatever the rules below say.", or "Every payment asks you first." when no limit is set), and a secondary "Change" at the right, centered on it, which calls `onEdit()`.
+- Editing, in a form, 16 px above the next hairline in all:
   - A `TextField` named by `label` ("Most a payment can be without asking you, in dollars" by default), at most 360 px wide, holding `value` exactly as typed. `hint` sits under it, and so does `error` when given (the field is then `aria-invalid` and the error is announced).
   - 12 px under it, a primary "Review change" and a secondary "Cancel".
 - Opening the field moves focus into it; closing it moves focus back to "Change". Only a change of `editing` moves focus, never the first render.
-- It lays out by its own width: under 640 px (a phone) it pads 12 px 14 px, and "Change" sits 10 px under the limit at its own width.
+- It lays out by its own width: under 640 px (a phone) "Change" sits 10 px under the limit at its own width.
 
 ## Behavior
 

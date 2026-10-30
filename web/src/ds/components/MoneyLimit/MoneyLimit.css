@@ -1,25 +1,17 @@
-/* MoneyLimit: a row at the top of a group of payment tools, under the group's head. A hairline
-   above it, as above each tool row, when anything comes before it in the group. Reading, padded
-   12 px 16 px: the limit in body type and a secondary "Change" at the right, centered on it.
-   Editing, padded 12 px 16 px 16 px: the field (at most 360 px wide) with its hint, then "Review
-   change" and "Cancel" 12 px under it. It lays out by its own width: under 640 px (a phone) it
-   pads 12 px 14 px and "Change" sits 10 px under the limit, at its own width. */
+/* MoneyLimit: the line at the top of a group of payment tools, in its ConnectorSection's line
+   above the tools, which pads it 12 px 16 px (12 px 14 px on a phone) under a hairline. Reading:
+   the limit in body type and a secondary "Change" at the right, centered on it. Editing: the field
+   (at most 360 px wide) with its hint, then "Review change" and "Cancel" 12 px under it, and 4 px
+   more under them, so they sit 16 px above the next hairline, as the board draws it. It lays out
+   by its own width: under 640 px (a phone) "Change" sits 10 px under the limit, at its own width. */
 
 .cd-money-limit {
   container: cd-money-limit / inline-size;
   min-width: 0;
 }
 
-.cd-money-limit__body {
-  padding: var(--space-12) var(--space-16);
-}
-
-* + .cd-money-limit {
-  border-top: 1px solid var(--line-hairline);
-}
-
-.cd-money-limit__body--editing {
-  padding-bottom: var(--space-16);
+.cd-money-limit--editing {
+  padding-bottom: var(--space-4);
 }
 
 .cd-money-limit__reading {
@@ -57,10 +49,6 @@
 }
 
 @container cd-money-limit (max-width: 639.98px) {
-  .cd-money-limit__body {
-    padding-inline: var(--space-14);
-  }
-
   .cd-money-limit__reading {
     flex-direction: column;
     align-items: flex-start;

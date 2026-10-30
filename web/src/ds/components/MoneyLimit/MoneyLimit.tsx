@@ -34,10 +34,10 @@ export interface MoneyLimitProps {
 }
 
 /**
- * The Desk's payment limit, a row at the top of a group of payment tools on the Rules page: the
- * limit in words with "Change", or, while editing, a field with "Review change" and "Cancel". It
- * never reads the value: the screen checks it, shows `error`, and drafts the change, which applies
- * only after its review.
+ * The Desk's payment limit, the line at the top of a group of payment tools on the Rules page (its
+ * `ConnectorSection`'s `aboveTools`): the limit in words with "Change", or, while editing, a field
+ * with "Review change" and "Cancel". It never reads the value: the screen checks it, shows
+ * `error`, and drafts the change, which applies only after its review.
  */
 export function MoneyLimit({
   line,
@@ -70,31 +70,29 @@ export function MoneyLimit({
   };
 
   return (
-    <div ref={root} className="cd-money-limit">
-      <div className={`cd-money-limit__body${editing ? ' cd-money-limit__body--editing' : ''}`}>
-        {editing ? (
-          <form className="cd-money-limit__form" noValidate onSubmit={review}>
-            <div className="cd-money-limit__field">
-              <TextField label={label} value={value} hint={hint} error={error} autoComplete="off" onChange={(next) => onChange(next)} />
-            </div>
-            <div className="cd-money-limit__controls">
-              <Button variant="primary" type="submit" waiting={disabled}>
-                Review change
-              </Button>
-              <Button variant="secondary" waiting={disabled} onClick={() => onCancel()}>
-                Cancel
-              </Button>
-            </div>
-          </form>
-        ) : (
-          <div className="cd-money-limit__reading">
-            <p className="cd-money-limit__line cd-type-body">{line}</p>
-            <Button variant="secondary" waiting={disabled} onClick={() => onEdit()}>
-              Change
+    <div ref={root} className={`cd-money-limit${editing ? ' cd-money-limit--editing' : ''}`}>
+      {editing ? (
+        <form className="cd-money-limit__form" noValidate onSubmit={review}>
+          <div className="cd-money-limit__field">
+            <TextField label={label} value={value} hint={hint} error={error} autoComplete="off" onChange={(next) => onChange(next)} />
+          </div>
+          <div className="cd-money-limit__controls">
+            <Button variant="primary" type="submit" waiting={disabled}>
+              Review change
+            </Button>
+            <Button variant="secondary" waiting={disabled} onClick={() => onCancel()}>
+              Cancel
             </Button>
           </div>
-        )}
-      </div>
+        </form>
+      ) : (
+        <div className="cd-money-limit__reading">
+          <p className="cd-money-limit__line cd-type-body">{line}</p>
+          <Button variant="secondary" waiting={disabled} onClick={() => onEdit()}>
+            Change
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
