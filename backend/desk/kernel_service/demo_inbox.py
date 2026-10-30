@@ -23,11 +23,13 @@ async def deliver(ctx: KernelCtx, *, copy_id: str, desk_id: str, to: str, person
                   body: str, preview: str, decision_id: str | None = None) -> InboxNotice:
     """Write one entry in the caller's transaction. `to` is "owner" or the masked contact on record;
     `body` may hold a code, `preview` never does. `decision_id` is only for an owner alert: anywhere
-    else it raises ValueError here, before the table's check would refuse the row."""
+    else it raises ValueError here, before the table's check would refuse the row, saying whether the
+    entry went to the owner or to a contact, never which contact."""
     if kind not in KINDS:
         raise ValueError(f"{kind!r} is not a Demo inbox kind")
     if decision_id is not None and (kind != "alert" or to != "owner"):
-        raise ValueError(f"only an owner alert names a decision, not this {kind!r} entry")
+        recipient = "the owner" if to == "owner" else "a contact"
+        raise ValueError(f"only an alert to the owner names a decision, not a {kind!r} entry to {recipient}")
     ctx.bind(copy_id)
     notice = InboxNotice(entry_id=new_id("inbox"), to=to, preview=preview)
     await ctx.db.execute(insert(DemoInboxRow).values(

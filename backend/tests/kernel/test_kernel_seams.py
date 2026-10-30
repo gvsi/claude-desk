@@ -219,12 +219,15 @@ async def test_only_an_approval_alert_names_a_decision(app):
         for event_kind in ("breaker", "booking"):
             with pytest.raises(ValueError, match="approval"):
                 await demo_inbox.alert_owner(ctx, rows.desk_id, event_kind, "...", "...", decision_id=decision_id)
-        # the writer under it refuses one on anything but an owner alert itself, not only by the table's check
-        for to, kind in (("d•••@example.com", "verification_code"), ("d•••@example.com", "alert"),
-                         ("owner", "head_checkpoint")):
-            with pytest.raises(ValueError, match="owner alert"):
+        # the writer under it refuses one on anything but an owner alert itself, not only by the table's check, and
+        # says which part was wrong, the kind or the recipient, without naming the contact
+        for to, kind, recipient in (("d•••@example.com", "verification_code", "a contact"),
+                                    ("d•••@example.com", "alert", "a contact"), ("owner", "head_checkpoint", "the owner")):
+            with pytest.raises(ValueError) as refused:
                 await demo_inbox.deliver(ctx, copy_id=rows.copy_id, desk_id=rows.desk_id, to=to, person_id=None,
                                          kind=kind, body="...", preview="...", decision_id=decision_id)
+            assert str(refused.value) == (f"only an alert to the owner names a decision, not a {kind!r} entry"
+                                          f" to {recipient}")
         held = await demo_inbox.alert_owner(ctx, rows.desk_id, "approval", "A request needs your answer", "...",
                                             decision_id=decision_id)
     [entry] = await rows_of(app, rows.copy_id, select(DemoInboxEntry))   # only the approval alert was written
