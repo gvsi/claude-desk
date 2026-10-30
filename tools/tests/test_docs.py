@@ -754,7 +754,8 @@ def test_no_shipped_doc_says_the_model_check_asks_only_about_promises():
 
 
 # Safety rule 2 in the owner's approved wording of 2026-10-30. It leads each place that states the rule; the threat
-# model's control row and the reply check's decision follow it with the same sentence on how the check runs.
+# model's control row and the reply check's decision follow it with the same sentence on how the check runs, and the
+# decision then keeps its sentences on links and on how a reply is delivered.
 REPLY_RULE = (
     "Everything a visitor sees is checked first. Prices, dates, discounts and bookings come only from cards built from "
     "the business's facts: Claude's own words can't state a price, date or discount, can't make a promise the cards "
@@ -765,6 +766,7 @@ REPLY_CHECK_HOW = (
     "and booking claims without their card; a model check on Haiku 5.5 flags promises the cards don't back and prose "
     "that denies being an AI, and its errors count as violations."
 )
+REPLY_CHECK_LINKS = "Claude may write links and email addresses, guided by its prompt."   # owner's decision, 2026-10-30
 REPLY_CHECK_DELIVERY = (
     "A blocked reply is regenerated once with feedback, then replaced with a handoff to the owner. Every "
     "visitor-visible message passes the kernel's reply check before it is shown: the visitor sees that Claude is "
@@ -794,7 +796,7 @@ SAFETY_RULE_TWO = {
     "AGENTS.md": REPLY_RULE,
     README: f"The reply check: {REPLY_RULE[0].lower()}{REPLY_RULE[1:]}",   # lowercase after the colon, like its table
     THREAT_MODEL: f"{REPLY_RULE} {REPLY_CHECK_HOW}",
-    "docs/architecture-decisions.md": f"{REPLY_RULE} {REPLY_CHECK_HOW} {REPLY_CHECK_DELIVERY}",
+    "docs/architecture-decisions.md": f"{REPLY_RULE} {REPLY_CHECK_HOW} {REPLY_CHECK_LINKS} {REPLY_CHECK_DELIVERY}",
 }
 
 
