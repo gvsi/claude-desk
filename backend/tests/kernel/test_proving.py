@@ -28,6 +28,7 @@ from desk.db.session import database_url, dispose_engines, libpq_url
 from desk.kernel_service import activation, compiler, seed
 from desk.kernel_service.app import create_app
 from desk.kernel_service.seed import RIVERA_CARDS
+from scripts import prove_latency
 
 from .conftest import BACKEND
 from .fakes import FrozenClock
@@ -458,6 +459,35 @@ def test_prove_presets_check_passes(desk_prove):
     assert run.returncode == 0, run.stderr
     assert sorted(run.stdout.splitlines()) == sorted(f"{preset}: proved, and {preset}.json matches"
                                                      for preset in activation.SHIPPED_PRESETS)
+
+
+def test_prove_latency_writes_its_inputs_at_the_rivera_cap(monkeypatch, capsys):
+    """The latency script up to the image: it writes `desk-prove`'s inputs for both of its sets at
+    the money cap the Rivera seed is proved at (`make proofs`), then hands them to docker, which is
+    stubbed here, so nothing is proved."""
+    mounted = {}
+
+    def docker(argv: list[str], **kwargs) -> subprocess.CompletedProcess:
+        directory = Path(argv[argv.index("-v") + 1].removesuffix(":/inputs:ro"))
+        for name in ("rivera", "cards_30"):
+            mounted[name] = {part: json.loads((directory / name / f"{part}.json").read_text())
+                             for part in ("schema", "sets", "checks")}
+        times = {"rivera": [2.0, 1.0], "cards_30": [3.0, 4.0]}
+        return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(times), stderr="")
+
+    monkeypatch.setattr(prove_latency.subprocess, "run", docker)
+    assert prove_latency.main(["--json", "--runs", "2"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"rivera": {"p50_ms": 1.0, "p95_ms": 2.0},
+                                                   "cards_30": {"p50_ms": 3.0, "p95_ms": 4.0}}
+    cap = activation.SHIPPED_CAPS["rivera"]
+    profiles = prove_latency.schema_profiles()
+    rivera = activation.build_proof_inputs(RIVERA_CARDS, profiles, compiler.desk_schema(profiles),
+                                           auto_money_cap_cents=cap)
+    assert mounted["rivera"]["sets"] == {**rivera.sets, "always": rivera.always, "auto": rivera.auto}
+    invariants = compiler.invariants(cap)
+    assert mounted["cards_30"]["sets"]["always"] == list(invariants["always"].values())
+    assert mounted["cards_30"]["sets"]["auto"] == list(invariants["auto"].values())
+    assert all(files["checks"]["checks"] == list(activation.PROOF_CHECKS) for files in mounted.values())
 
 
 @pytest.mark.parametrize("mode", [pytest.param("symcc", marks=pytest.mark.solver), "bounded"])
