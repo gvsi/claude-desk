@@ -34,6 +34,10 @@
   --status-held: #dabe4a;
   --status-refused: #dc8290;
   --status-info: var(--text-secondary);
+  --mark-tile: #ffffff;
+  --mark-clay: #d97757;
+  --mark-ink: #141413;
+  --mark-hairline: rgba(20,20,19,0.1);
   --clay: #e08968;
   --scrim: rgba(0,0,0,0.5);
   --illustration-card: #faf9f5;

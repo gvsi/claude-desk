@@ -104,6 +104,23 @@ describe('design tokens', () => {
     expect(reply).not.toHaveProperty('letterSpacing');
   });
 
+  test('mark_tokens_match_the_signed_mark', () => {
+    // The mark's fixed colors, the same in every theme: its white tile and the tile's hairline edge,
+    // the clay of the bell's dome and the black ink. They are the favicon's own colors
+    // (scripts/gen-mark.test.mjs), and nothing but the mark uses them (guards.test.ts).
+    const expected = {
+      'mark-tile': '#ffffff',
+      'mark-clay': '#d97757',
+      'mark-ink': '#141413',
+      'mark-hairline': 'rgba(20,20,19,0.1)',
+    };
+    const actual = Object.fromEntries(Object.keys(expected).map((name) => [name, tokenValue(name)]));
+    expect(actual).toEqual(expected);
+    expect(colorNames.filter((name) => name.startsWith('mark-')).sort()).toEqual(Object.keys(expected).sort());
+    // The hairline only edges the tile on a light ground; the tile itself carries the contrast.
+    expect(DECORATIVE_COLORS['mark-hairline']).toBeDefined();
+  });
+
   test('figure_tokens_match_the_today_board', () => {
     // Today's "Last 7 days" draws two figures at two sizes (N-Today-Run1): the booked total, and
     // the smaller stopped count. Both are interface type with tabular figures.
@@ -264,7 +281,11 @@ describe('design tokens', () => {
     const marks = ['accent-blue', 'ring-composer', 'status-handled', 'status-held', 'status-refused', 'status-info'];
     add(marks, ['bg-app', 'bg-panel', 'bg-surface', 'bg-selected'], 3);
     add(marks, ['fill-card'], 3, 'bg-app');
-    add(['clay'], ['bg-app', 'bg-panel'], 3);
+    // The mark: its tile on the app and the sidebar, and its drawing on the tile, the ink where it
+    // crosses the clay dome included.
+    add(['mark-tile'], ['bg-app', 'bg-panel'], 3);
+    add(['mark-ink', 'mark-clay'], ['mark-tile'], 3);
+    add(['mark-ink'], ['mark-clay'], 3);
     // The switch: its track when on, its knob on the track, on or off.
     add(['button-primary'], ['bg-app', 'bg-panel'], 3);
     add(['bg-app'], ['button-primary'], 3);
@@ -272,7 +293,7 @@ describe('design tokens', () => {
     // The switch row's label and description while it is hovered in the sidebar.
     add(['text-primary', 'text-secondary'], ['fill-hover'], 4.5, 'bg-panel');
     // The first-visit intro dialog: the mark on its surface and the passcode in its field.
-    add(['clay'], ['bg-surface'], 3);
+    add(['mark-tile'], ['bg-surface'], 3);
     add(['text-primary'], ['fill-card'], 4.5, 'bg-surface');
     // The intro illustration's light cards: their text, the initials, the check and receipt dots.
     add(['illustration-ink', 'illustration-ink-secondary'], ['illustration-card'], 4.5);
@@ -411,6 +432,7 @@ describe('design tokens', () => {
 
   test('every_color_token_is_classified', () => {
     expect(Object.keys(DECORATIVE_COLORS).sort()).toEqual([
+      'clay',
       'connector-google-blue',
       'connector-stripe',
       'connector-tile-brand',
@@ -420,6 +442,7 @@ describe('design tokens', () => {
       'line-control',
       'line-control-hover',
       'line-hairline',
+      'mark-hairline',
       'scrim',
     ]);
     for (const [name, reason] of Object.entries(DECORATIVE_COLORS)) {

@@ -24,7 +24,8 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 - Give an answer that refuses the red look, and nothing else: `danger` buttons are `button-danger-fill` (`button-danger-fill-hover` on hover) with `button-danger-text`, and `danger-ghost` buttons are transparent with `button-danger-text`. They are the only red controls and the only red words in the system, with the items of Deny's menu on a held request, which use `button-danger-text` on `bg-surface`. Their words say what is refused ("Deny this time", "Always" in Deny's menu), and the red is never a status.
 - Use `accent-blue` only for links, the focus ring and selection. Never put text on it and never use it as decoration.
 - Show status only as a `size-dot` dot or a thin bar in `status-handled` (handled or allowed), `status-held` (held, needs you), `status-refused` (refused or blocked) or `status-info` (a hollow dot), always beside words that say the same thing. Never a colored tile, a filled badge or colored text.
-- Use `clay` only inside the Claude Desk mark, and as the field behind the first-visit intro's illustration.
+- Use `clay` only as the field behind the first-visit intro's illustration.
+- The Claude Desk mark has its own fixed colors, the same in every theme: `mark-tile`, `mark-clay`, `mark-ink` and `mark-hairline`. Nothing else uses them, and its white tile is part of the mark, not a light surface.
 - The intro illustration's cards (`illustration-card`, with `illustration-ink`, `illustration-ink-secondary`, `illustration-avatar`, `illustration-line` and `illustration-handled`) are one of the product's two light surfaces. They are decorative and hidden from assistive tech, and nothing else uses these colors.
 - A connector's brand tile is the one light surface besides the intro illustration's cards: a third-party connector (Stripe, Google Calendar) shows its own mark on `connector-tile-brand`, in its brand's colors (`connector-stripe`, `connector-google-blue`), always beside its name and its Mock badge. The tile is decorative and hidden from assistive tech, nothing is read on it, and nothing else uses these colors. Built-in connectors keep the line icons on `fill-secondary`.
 
@@ -75,7 +76,7 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 ## Iconography
 
 - Use 20 px (`size-icon`) line icons with a 1.5 px effective stroke in the current text color. No filled icons, no emoji, no sparkles or other "AI" glyphs.
-- The Claude Desk mark, a rounded square with one horizontal line stroked in `clay`, is the only mark, and the only use of `clay` apart from the field behind the first-visit intro's illustration. Never use a Claude or Anthropic logo.
+- The Claude Desk mark, a hand-drawn service bell on a white tile (a clay dome under black ink), is the only mark, and its colors are used nowhere else. Never use a Claude or Anthropic logo.
 - Render initials avatars and monograms `aria-hidden`, beside the name written out as text.
 
 ## Accessibility
@@ -128,14 +129,14 @@ Focus rings and status dots, 3:1 (`ring-composer` is `accent-blue`):
 | `fill-hover` over `bg-app` | 6.3 | 5.2 | 8.0 | 5.3 | 6.6 |
 | `fill-card` over `bg-panel` | 6.3 | 5.2 | 8.0 | 5.3 | 6.6 |
 
-The mark in `clay` reads 6.5 on `bg-app`, 6.0 on `bg-panel` and 5.5 on `bg-surface` (the intro dialog).
+The mark's tile, `mark-tile`, reads 17.2 on `bg-app`, 15.9 on `bg-panel` and 14.5 on `bg-surface` (the intro dialog). On the tile, `mark-ink` reads 18.4 and `mark-clay` 3.1, and the ink reads 5.9 where it crosses the clay.
 
 `line-field`, a text field's outline, reads 3.1 on `bg-surface` and 3.2 on `bg-app` (3:1).
 
 On the intro illustration's light cards, `illustration-ink` reads 16.3 and `illustration-ink-secondary` 5.4 on `illustration-card`, and `illustration-ink` reads 13.1 on `illustration-avatar`. The check and the receipt dots in `illustration-handled` read 4.9 (3:1).
 
 - Don't put `text-tertiary` or a link on `fill-secondary-hover`: those pairs aren't listed.
-- `line-hairline`, `line-card`, `line-control`, `line-control-hover`, `scrim`, `illustration-line`, `illustration-arc` and the connector brand colors (`connector-tile-brand`, `connector-stripe`, `connector-google-blue`) are decorative (`DECORATIVE_COLORS`): they separate, dim or outline things that are identified otherwise, or carry nothing. `line-control` is flagged: it is 2.0:1 on `bg-app`, under the 3:1 for control borders, which is acceptable only because a chip or pill, or the recorded-history link it underlines, is identified by its own text. Never make an outline the only cue that something is a control.
+- `line-hairline`, `line-card`, `line-control`, `line-control-hover`, `scrim`, `clay` (the intro illustration's field), `illustration-line`, `illustration-arc`, `mark-hairline` and the connector brand colors (`connector-tile-brand`, `connector-stripe`, `connector-google-blue`) are decorative (`DECORATIVE_COLORS`): they separate, dim or outline things that are identified otherwise, or carry nothing. `line-control` is flagged: it is 2.0:1 on `bg-app`, under the 3:1 for control borders, which is acceptable only because a chip or pill, or the recorded-history link it underlines, is identified by its own text. Never make an outline the only cue that something is a control.
 - Show focus with a solid 2 px `accent-blue` outline at a 2 px offset on every focusable element; the base stylesheet sets it. The composer shows `ring-composer` while its text box has focus, solid too, because a translucent ring falls under 3:1; a button inside the composer shows its own ring instead, so only one ring ever shows.
 - Never show status by color alone: a dot always sits beside words that say the same thing, and the dot is `aria-hidden`.
 - A `ul` or `ol` drawn without markers says `role="list"`: Safari drops a list's semantics when its markers are removed, and a screen reader then gives no list navigation or count. `expectListsKeepTheirRole` (`test/expectListRoles.ts`) checks it in one story per component.

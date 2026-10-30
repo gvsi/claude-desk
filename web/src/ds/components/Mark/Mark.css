@@ -1,10 +1,24 @@
-/* The Claude Desk mark: the only place clay appears. The stroke is set here, not as an SVG
-   attribute, because presentation attributes can't read custom properties. */
+/* The Claude Desk mark: a white tile with a hairline edge, a clay dome and black ink. These are the
+   mark's fixed colors (the mark-* tokens), the same in every theme, and nothing else uses them. The
+   fills are set here, not as SVG attributes, because presentation attributes can't read custom
+   properties. */
 
 .cd-mark {
   display: block;
   flex: none;
-  stroke: var(--clay);
+}
+
+.cd-mark__tile {
+  fill: var(--mark-tile);
+  stroke: var(--mark-hairline);
+}
+
+.cd-mark__clay {
+  fill: var(--mark-clay);
+}
+
+.cd-mark__ink {
+  fill: var(--mark-ink);
 }
 
 .cd-wordmark {

@@ -22,6 +22,7 @@
     "test:screens": "vitest run --project screens",
     "typecheck": "tsc --noEmit",
     "tokens": "node scripts/build-tokens.mjs",
+    "gen:mark": "node scripts/gen-mark.mjs",
     "gen:contracts": "node scripts/gen-contracts.mjs",
     "check:ds": "vitest run --project unit src/ds/guards.test.ts && vitest run --project ds-browser && tsc --noEmit"
   },
