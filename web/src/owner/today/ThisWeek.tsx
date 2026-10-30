@@ -62,7 +62,7 @@ function Bookings({ week }: { week: ThisWeekFigures }) {
         <>
           <h3 className="cd-sr-only">Bookings</h3>
           <p className="cd-week__figure">
-            <span className="cd-week__number cd-type-greeting">{formatCents(booked)}</span>{' '}
+            <span className="cd-week__number cd-type-figure">{formatCents(booked)}</span>{' '}
             <span className="cd-week__unit cd-type-body">booked</span>
           </p>
         </>
@@ -118,7 +118,7 @@ function Attempts({ week, deskId }: { week: ThisWeekFigures; deskId: string }) {
         <p className="cd-week__line cd-type-meta">No attempts in the last 7 days.</p>
       ) : (
         <p className="cd-week__figure">
-          <span className="cd-week__number cd-type-greeting">{week.stopped}</span> <span className="cd-week__unit cd-type-body">stopped</span>
+          <span className="cd-week__number cd-type-figure-small">{week.stopped}</span> <span className="cd-week__unit cd-type-body">stopped</span>
         </p>
       )}
       <p className="cd-week__line cd-type-meta">

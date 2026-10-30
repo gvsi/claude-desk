@@ -10,6 +10,7 @@ import type { RenderResult } from 'vitest-browser-react';
 import type { Decision } from '../../api/contracts.ts';
 import type { BriefingItem, BriefingList, NeedsYouItem, ThisWeek, Today } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
+import { expectComputed } from '../../ds/test/expectComputed.ts';
 import { formatWhen } from '../../lib/format.ts';
 import { CALLBACK_REASON } from '../../mocks/script.ts';
 import { RIVERA } from '../../mocks/seed.ts';
@@ -382,6 +383,17 @@ describe('Today', () => {
     await expect.element(block.getByText('You stepped in 1 time', { exact: true })).toBeVisible();
     await expect.element(block.getByText('2 stopped', { exact: true })).toBeVisible();
     await expect.element(block.getByRole('link', { name: 'Open Safety' })).toHaveAttribute('href', `${DESK}/safety`);
+
+    // The design system's figure styles: the booked total at the figure size, the stopped count at
+    // the smaller one, both in the interface's face with tabular figures.
+    const [booked, stopped] = [...block.element().querySelectorAll('.cd-week__number')];
+    expect([booked?.textContent, stopped?.textContent]).toEqual(['$378', '2']);
+    if (!booked || !stopped) throw new Error('Last 7 days shows both figures');
+    expect([...booked.classList]).toContain('cd-type-figure');
+    expect([...stopped.classList]).toContain('cd-type-figure-small');
+    const sans = /^"Hanken Grotesk"/;
+    expectComputed(booked, { fontFamily: sans, fontSize: '32px', lineHeight: '40px', fontWeight: '500', fontVariantNumeric: 'tabular-nums' });
+    expectComputed(stopped, { fontFamily: sans, fontSize: '24px', lineHeight: '32px', fontWeight: '420', fontVariantNumeric: 'tabular-nums' });
 
     // The block shows the API's figures and adds none of its own.
     const heading = block.getByRole('heading', { level: 2 }).element();
