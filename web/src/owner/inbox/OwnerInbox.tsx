@@ -12,7 +12,7 @@
  * sheet's button, so the entries read before never pass for current.
  */
 import { useQuery } from '@tanstack/react-query';
-import { useCallback, useEffect, useId, useRef, useSyncExternalStore, type RefObject } from 'react';
+import { useEffect, useId, useState } from 'react';
 
 import { request } from '../../api/http.ts';
 import { pollMs } from '../../app/poll.ts';
@@ -27,30 +27,18 @@ export const OWNER_INBOX_KEY = ['ownerInbox'] as const;
 export interface OwnerInboxProps {
   /** The business's IANA time zone: each entry's time is on its clock. */
   timezone: string;
+  /** Hears the sheet open (`true`) and close (`false`), after the sheet has handed focus back. */
+  onOpenChange?: (open: boolean) => void;
 }
 
-/**
- * Whether the sheet inside `box` is open. The design system's sheet keeps that to itself and draws
- * its `dialog` only while it is open, so this watches `box` for it.
- */
-function useSheetOpen(box: RefObject<HTMLElement | null>): boolean {
-  const subscribe = useCallback(
-    (onChange: () => void) => {
-      const el = box.current;
-      if (!el) return () => undefined;
-      const observer = new MutationObserver(onChange);
-      observer.observe(el, { childList: true, subtree: true, attributes: true, attributeFilter: ['open'] });
-      return () => observer.disconnect();
-    },
-    [box],
-  );
-  return useSyncExternalStore(subscribe, () => box.current?.querySelector('dialog[open]') != null);
-}
-
-export function OwnerInbox({ timezone }: OwnerInboxProps) {
-  const box = useRef<HTMLDivElement>(null);
+export function OwnerInbox({ timezone, onOpenChange }: OwnerInboxProps) {
   const titleId = `${useId()}-title`;
-  const open = useSheetOpen(box);
+  // Whether the sheet is open, as the sheet says each time it opens or closes.
+  const [open, setOpen] = useState(false);
+  const openChanged = (next: boolean) => {
+    setOpen(next);
+    onOpenChange?.(next);
+  };
   const inbox = useQuery({
     queryKey: OWNER_INBOX_KEY,
     queryFn: () => request('ownerInbox'),
@@ -98,7 +86,7 @@ export function OwnerInbox({ timezone }: OwnerInboxProps) {
     // sheet stays first, so a failed read's line coming or going never closes it.
     content = (
       <>
-        <DemoInboxSheet viewer="owner" items={items} language="en" onRetry={() => void refetch()} />
+        <DemoInboxSheet viewer="owner" items={items} language="en" onRetry={() => void refetch()} onOpenChange={openChanged} />
         {failed}
       </>
     );
@@ -114,7 +102,7 @@ export function OwnerInbox({ timezone }: OwnerInboxProps) {
     content = <LoadingLine>Opening your Demo inbox</LoadingLine>;
   }
   return (
-    <div ref={box} className="cd-owner-inbox">
+    <div className="cd-owner-inbox">
       {content}
     </div>
   );

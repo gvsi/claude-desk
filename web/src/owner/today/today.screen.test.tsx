@@ -4,7 +4,7 @@
  * and the last 7 days, every figure as the API reads it.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { page, type Locator } from 'vitest/browser';
+import { page, userEvent, type Locator } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import type { Decision } from '../../api/contracts.ts';
@@ -861,5 +861,44 @@ describe('Today', () => {
       .toBeVisible();
     expect(document.body.textContent).not.toContain("That didn't go through. Check it and try again.");
     expect(router.state.location.pathname).toBe(TODAY);
+  });
+});
+
+describe("Today's Demo inbox", () => {
+  /** The sheet's button, with its count. */
+  const inboxButton = (screen: RenderResult) => screen.getByRole('button', { name: /^Demo inbox \d+ entr(?:y|ies)$/ });
+
+  it('inbox_polls_only_while_the_sheet_is_open', async () => {
+    const { screen } = await renderRoute(TODAY);
+    const open = inboxButton(screen);
+    await expect.element(open).toBeVisible();
+    // Read once as Today opens, and not again while the sheet is closed.
+    expect(requests('ownerInbox')).toHaveLength(1);
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(requests('ownerInbox')).toHaveLength(1);
+
+    // Read as it opens, and every few seconds while it is open.
+    await open.click();
+    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
+    await expect.element(sheet).toBeVisible();
+    await readsMore('ownerInbox', 3);
+
+    // Close stops it.
+    await sheet.getByRole('button', { name: 'Close' }).click();
+    await expect.element(sheet).not.toBeInTheDocument();
+    await expect.element(open).toHaveFocus();
+    let reads = requests('ownerInbox').length;
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(requests('ownerInbox')).toHaveLength(reads);
+
+    // Opened again, it reads again at once, and stops again once Escape closes it.
+    await open.click();
+    await expect.element(sheet).toBeVisible();
+    await readsMore('ownerInbox', 2);
+    await userEvent.keyboard('{Escape}');
+    await expect.element(sheet).not.toBeInTheDocument();
+    reads = requests('ownerInbox').length;
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(requests('ownerInbox')).toHaveLength(reads);
   });
 });
