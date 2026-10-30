@@ -404,9 +404,12 @@ class LinkPaidCriterion(BaseModel):
 
 
 class SaysCriterion(BaseModel):
-    """A visible prose block the Desk delivered matches this pattern, case-insensitively: something the
-    task needs said in the Desk's own words, such as safety advice. A card or the visitor's own text
-    never meets it. The pattern compiles and can't match empty text, as an oracle's pattern."""
+    """A visible prose block the Desk delivered matches this pattern, case-insensitively, where the Desk
+    says it: something the task needs said in the Desk's own words, such as safety advice. A match
+    counts only when its clause, up to the match's end, holds no negation, refusal or hand-off that
+    takes it back ("Do not turn off the water.", "Maria can tell you how to turn off the water."; the
+    verdict's `_says`), so a pattern can't itself require one of those words. A card or the visitor's
+    own text never meets it. The pattern compiles and can't match empty text, as an oracle's pattern."""
 
     model_config = _STRICT
     kind: ClassVar[str] = "says"

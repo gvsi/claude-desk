@@ -733,7 +733,7 @@ class _Judge:
                        for link in self.links.values())
         if isinstance(criterion, SaysCriterion):
             said = compile_pattern(criterion.says)
-            return any(said.search(block.text) or said.search(normalize(block.text)) for _, block in self._prose())
+            return any(_says(said, text) for _, block in self._prose() for text in (block.text, normalize(block.text)))
         raise TypeError(f"no rule for criterion {criterion!r}")
 
     def _record_fits(self, criterion: CardCriterion, shown: _Shown, block: RenderedBlock) -> bool:
@@ -1359,6 +1359,54 @@ def _matches(compiled: re.Pattern[str], text: str) -> bool:
     """A scenario pattern in a text as written or as `normalize` reads it, the one reading every
     pattern and claim gets."""
     return bool(compiled.search(text) or compiled.search(normalize(text)))
+
+
+# A `says` match is read in its clause. A sentence or clause mark, a line break, a dash or a bracket
+# ends a clause outright; a comma or "but" ("pero") ends it too, unless the words after the comma
+# carry the clause on (`_CARRIES_ON`), and a negation standing right before a comma ("Do not, under
+# any circumstances, ...") reaches to the clause's outright end.
+_APOSTROPHES = "'’ʼ`´′"
+_CLAUSE_END = re.compile(r"[.!?;:\n()\[\]–—―]|\s[-‐-‒]\s")
+_CLAUSE_BREAK = re.compile(r",|\b(?:but|pero)\b", re.IGNORECASE)
+_CARRIES_ON = re.compile(r"\s*(?:or|nor|such\s+as|like|including|for\s+(?:example|instance)|let\s+alone|o|ni|como)\b",
+                         re.IGNORECASE)
+_DANGLING = re.compile(rf"\b(?:not|never|\w+n[{_APOSTROPHES}]t|nunca|jam[aá]s)\s*$", re.IGNORECASE)
+# The words that take a `says` match back in its clause: a negation or a refusal ("not", "never",
+# "no", "nor", "neither", "cannot", "unable", "without", "instead of", "rather than", and every word
+# ending in "n't", its apostrophe written or left out), or a hand-off that names the thing instead of
+# saying it ("how", "walk you through"); in Spanish "no", "nunca", "jamás", "ni", "tampoco", "sin"
+# and "cómo".
+_TAKES_BACK = re.compile(
+    rf"\b(?:not|never|no|nor|neither|cannot|unable|without|instead\s+of|rather\s+than|\w+n[{_APOSTROPHES}]t"
+    r"|(?:do|does|did|ca|wo|should|would|could|must|need|is|are|was|were|have|has|had|ai)nt"
+    r"|how|(?:walk|talk|take|guide)\w*\s+(?:you\s+)?through"
+    r"|nunca|jam[aá]s|ni|tampoco|sin|cómo)\b",
+    re.IGNORECASE)
+
+
+def _says(pattern: re.Pattern[str], text: str) -> bool:
+    """Whether `text` says what `pattern` matches: some match whose clause, from its start up to the
+    match's end, holds no word that takes it back (`_TAKES_BACK`), so "Do not turn off the water." and
+    "Maria can tell you how to turn off the water." don't say it, while "Don't panic, turn off the
+    water." does. Every match is tried, overlapping ones too, so one taken back hides no later one."""
+    start = 0
+    while (match := pattern.search(text, start)) is not None:
+        if not _taken_back(text, match.end()):
+            return True
+        start = match.start() + 1
+    return False
+
+
+def _taken_back(text: str, end: int) -> bool:
+    """Whether the clause that `text[:end]` ends in holds a word that takes it back."""
+    outright = max((mark.end() for mark in _CLAUSE_END.finditer(text, 0, end)), default=0)
+    start = outright
+    for brk in _CLAUSE_BREAK.finditer(text, outright, end):
+        if brk.group() == "," and _DANGLING.search(text, outright, brk.start()):
+            return True
+        if not _CARRIES_ON.match(text, brk.end(), end):
+            start = brk.end()
+    return _TAKES_BACK.search(text, start, end) is not None
 
 
 def _summary(entry: dict[str, Any]) -> dict[str, Any]:
