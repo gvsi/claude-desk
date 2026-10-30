@@ -345,46 +345,166 @@ async def test_returning_visitor_resumes_the_session(app, browser, fake, kernel_
     assert (await browser(app, ip="198.51.100.4").post(f"/api/public/desks/{slug}/sessions")).status_code == 200
 
 
+def resume_entries(desk) -> list[str]:
+    """The sessions of a Desk's `session` ledger entries for a resume (the API's), in order."""
+    return [entry.event.session_id for entry in desk.ledger
+            if (entry.event.kind, entry.event.origin, entry.event.summary) == ("session", "api", {"resumed": True})]
+
+
+def opened_entries(desk, session_id: str) -> list[tuple]:
+    """The Desk's ledger entries for `session_id`, as (kind, origin, summary): for a new visitor session, only the
+    kernel's entry for opening it."""
+    return [(entry.event.kind, entry.event.origin, entry.event.summary) for entry in desk.ledger
+            if entry.event.session_id == session_id]
+
+
+def opened_by_kernel(session_id: str) -> list[tuple]:
+    """What `opened_entries` holds for a visitor session the kernel just opened."""
+    return [("session", "kernel", {"session_id": session_id, "kind": "visitor", "preview": False})]
+
+
+def desk_of(fake, slug: str):
+    """FakeKernel's Desk for `slug`."""
+    return next(desk for desk in fake.desks.values() if desk.slug == slug)
+
+
 async def test_a_resume_is_ledgered_at_most_once_every_ten_minutes(app, browser, fake, kernel_http, clock):
     """Resuming is never limited, and each ledger append takes the Desk's ledger lock, so a resume's `session` entry
     is written at most once per session every ten minutes: a loop of resumes answers 200 each time without a ledger
-    write each time. Each session keeps its own ten minutes, and a new session is ledgered as before."""
+    write each time, while the kernel's `/whoami` still checks the session on every one. Each session keeps its own
+    ten minutes, and a new session is ledgered as before."""
     slug = await new_slug(kernel_http, fake)
     client, _, opened = await open_session(app, browser, slug)
     session_id = opened["state"]["session_id"]
     desk = fake.desks[fake.sessions[session_id].desk_id]
 
-    def resumes() -> list[str]:
-        """The sessions of the Desk's `session` ledger entries for a resume, in order."""
-        return [entry.event.session_id for entry in desk.ledger
-                if (entry.event.kind, entry.event.origin, entry.event.summary) == ("session", "api", {"resumed": True})]
-
-    # 200 resumes within ten minutes, three seconds apart: each answers 200, and one is ledgered.
+    # 200 resumes within ten minutes, three seconds apart: each answers 200 after its own `/whoami`, and one is
+    # ledgered.
+    checked = len(fake.called("GET /whoami"))
     for n in range(200):
         if n:
             clock.advance(3)
         resumed = await client.post(f"/api/public/desks/{slug}/sessions")
         assert (resumed.status_code, resumed.json()["resumed"]) == (200, True)
-    assert resumes() == [session_id]
+    assert len(fake.called("GET /whoami")) - checked == 200
+    assert resume_entries(desk) == [session_id]
     assert len(fake.called("POST /ledger/append")) == 1
 
     # Ten minutes after the ledgered one, the next resume is ledgered again, and starts the next ten minutes.
     clock.advance(3)
     assert (await client.post(f"/api/public/desks/{slug}/sessions")).json()["resumed"] is True
-    assert resumes() == [session_id] * 2
+    assert resume_entries(desk) == [session_id] * 2
     assert (await client.post(f"/api/public/desks/{slug}/sessions")).json()["resumed"] is True
-    assert resumes() == [session_id] * 2
+    assert resume_entries(desk) == [session_id] * 2
 
     # A new session within those ten minutes: the kernel ledgers it as it is opened, and its own first resume is
     # ledgered too.
     other, _, created = await open_session(app, browser, slug)
     other_id = created["state"]["session_id"]
-    assert [entry.event.summary for entry in desk.ledger if entry.event.session_id == other_id] == [
-        {"session_id": other_id, "kind": "visitor", "preview": False}]
+    assert opened_entries(desk, other_id) == opened_by_kernel(other_id)
     assert (await other.post(f"/api/public/desks/{slug}/sessions")).json()["resumed"] is True
-    assert resumes() == [session_id, session_id, other_id]
+    assert resume_entries(desk) == [session_id, session_id, other_id]
     assert (await client.post(f"/api/public/desks/{slug}/sessions")).json()["resumed"] is True
-    assert resumes() == [session_id, session_id, other_id]
+    assert resume_entries(desk) == [session_id, session_id, other_id]
+
+
+@pytest.mark.parametrize("mode", ["owner", "paused"])
+async def test_a_taken_over_or_paused_session_reloads_as_itself_inside_the_ledger_window(app, browser, fake,
+                                                                                        kernel_http, mode):
+    """A session the owner took over, or the breaker paused, is still open for its Desk, so a reload within its ten
+    minutes reuses it, never replaces it: `resumed` with the mode the kernel's `/whoami` gives on that request, never
+    one kept from an earlier resume. Its reloads share the session's ten minutes, so they open no session and write no
+    second `session` entry."""
+    slug = await new_slug(kernel_http, fake)
+    client, token, opened = await open_session(app, browser, slug)
+    session_id = opened["state"]["session_id"]
+    desk = fake.desks[fake.sessions[session_id].desk_id]
+    first = await client.post(f"/api/public/desks/{slug}/sessions")             # ledgered: its ten minutes start
+    assert (first.json()["resumed"], first.json()["state"]["mode"]) == (True, "ai")
+    assert resume_entries(desk) == [session_id]
+    created, checked = len(fake.called("POST /sessions")), len(fake.called("GET /whoami"))
+    appended = len(fake.called("POST /ledger/append"))
+
+    fake.set_mode(session_id, mode)
+    reloaded = await client.post(f"/api/public/desks/{slug}/sessions")
+    assert reloaded.status_code == 200
+    assert reloaded.json() == {"state": fake.sessions[session_id].state().model_dump(mode="json"), "resumed": True}
+    assert (reloaded.json()["state"]["session_id"], reloaded.json()["state"]["mode"]) == (session_id, mode)
+    assert visitor_cookie(reloaded)[0] == token                                  # the same session, its cookie renewed
+
+    fake.set_mode(session_id, "ai")                     # handed back, or the breaker lifted: the next reload says so
+    back = await client.post(f"/api/public/desks/{slug}/sessions")
+    assert (back.json()["resumed"], back.json()["state"]["session_id"], back.json()["state"]["mode"]) == (
+        True, session_id, "ai")
+
+    assert len(fake.called("POST /sessions")) == created
+    assert len(fake.called("GET /whoami")) - checked == 2
+    assert len(fake.called("POST /ledger/append")) == appended
+    assert resume_entries(desk) == [session_id]
+
+
+async def test_a_closed_session_s_cookie_inside_the_ledger_window_gets_a_new_ledgered_session(app, browser, fake,
+                                                                                             kernel_http):
+    """Once the kernel has closed a session, its cookie is no resume, even within that session's ten minutes:
+    `POST /sessions` opens a new session, which the kernel ledgers as it opens it, and the dead cookie on another
+    visitor route answers 401 `no_session` and is cleared, never a 200 kept from the earlier resume. The new session's
+    ten minutes are its own."""
+    slug = await new_slug(kernel_http, fake)
+    client, token, opened = await open_session(app, browser, slug)
+    session_id = opened["state"]["session_id"]
+    desk = fake.desks[fake.sessions[session_id].desk_id]
+    assert (await client.post(f"/api/public/desks/{slug}/sessions")).json()["resumed"] is True   # ten minutes start
+    assert resume_entries(desk) == [session_id]
+    fake.now += timedelta(hours=24, seconds=1)          # the kernel closes it after a day idle; the API's clock stays
+
+    stale = browser(app)
+    stale.cookies.set("desk_visitor", token, domain="desk.test", path=f"/api/public/desks/{slug}")
+    read = await stale.get(f"/api/public/desks/{slug}/session")
+    assert (read.status_code, read.json()) == (401, {"error": "no_session"})
+    assert visitor_cookie(read)[0] == ""
+
+    created = len(fake.called("POST /sessions"))
+    fresh = await client.post(f"/api/public/desks/{slug}/sessions")
+    assert (fresh.status_code, fresh.json()["resumed"]) == (200, False)
+    new_id = fresh.json()["state"]["session_id"]
+    assert new_id != session_id and session_of(fake, visitor_cookie(fresh)[0]) == new_id
+    assert len(fake.called("POST /sessions")) == created + 1
+    assert opened_entries(desk, new_id) == opened_by_kernel(new_id)
+
+    assert (await client.post(f"/api/public/desks/{slug}/sessions")).json()["resumed"] is True
+    assert resume_entries(desk) == [session_id, new_id]
+
+
+async def test_a_foreign_or_unknown_cookie_inside_the_ledger_window_gets_a_new_ledgered_session(app, browser, fake,
+                                                                                               kernel_http):
+    """Only a session `/whoami` says is open for this Desk is throttled as a resume. A cookie naming another Desk's
+    session, its ten minutes running there, or a token the kernel doesn't know gets a new session here, ledgered by
+    the kernel every time, and the other Desk's session is left alone."""
+    slug, other = await new_slug(kernel_http, fake), await new_slug(kernel_http, fake)
+    there, token, opened = await open_session(app, browser, other)
+    other_id = opened["state"]["session_id"]
+    other_desk, here = desk_of(fake, other), desk_of(fake, slug)
+    assert (await there.post(f"/api/public/desks/{other}/sessions")).json()["resumed"] is True  # ten minutes start
+    assert resume_entries(other_desk) == [other_id]
+    created = len(fake.called("POST /sessions"))
+
+    opened_here = []
+    for sent in (token, token, "not-a-session-token"):
+        visitor = browser(app)
+        visitor.cookies.set("desk_visitor", sent, domain="desk.test", path=f"/api/public/desks/{slug}")
+        moved = await visitor.post(f"/api/public/desks/{slug}/sessions")
+        assert (moved.status_code, moved.json()["resumed"]) == (200, False)
+        new_id = moved.json()["state"]["session_id"]
+        assert visitor_cookie(moved)[0] != sent and fake.sessions[new_id].desk_id == here.desk_id
+        assert opened_entries(here, new_id) == opened_by_kernel(new_id)
+        opened_here.append(new_id)
+    assert len(set(opened_here)) == 3 and other_id not in opened_here
+    assert len(fake.called("POST /sessions")) == created + 3
+    assert resume_entries(here) == []
+
+    again = await there.post(f"/api/public/desks/{other}/sessions")
+    assert (again.json()["resumed"], again.json()["state"]["session_id"]) == (True, other_id)
+    assert resume_entries(other_desk) == [other_id]
 
 
 async def test_a_session_the_kernel_closed_clears_its_cookie(app, browser, fake, kernel_http):
