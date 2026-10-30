@@ -3,13 +3,12 @@
  * each one, an attempt's detail in tiers, and every entry of the signed record with its chain,
  * each saying where it came from and when it happened.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import type { LedgerEntry, LedgerEvent, LedgerPage } from '../../api/contracts.ts';
 import type { Attempt, Today, TriageCategory } from '../../api/views.ts';
-import { formatWhen } from '../../lib/format.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { isoTime } from '../../mocks/world.ts';
@@ -18,7 +17,6 @@ import { expectNoWindowScroll, expectScreenBasics } from '../../test/screen.ts';
 import { attemptTime } from './copy.ts';
 
 const DESK = `/app/${RIVERA.deskId}`;
-const LA = 'America/Los_Angeles';
 const SAFETY = `${DESK}/safety`;
 const UNAVAILABLE = 'Something went wrong on our side. Try again in a moment.';
 
@@ -182,11 +180,24 @@ function recordRow(screen: RenderResult, seq: number) {
   return screen.getByRole('list', { name: 'Every entry, newest first' }).getByRole('button', { name: new RegExp(`^Entry ${seq},`) });
 }
 
+/**
+ * 10:30 am on Friday, October 30, in Los Angeles: the clock every test here runs on, the page's and
+ * the mock's alike, so what reads "Today" and what reads a date don't depend on the hour the suite
+ * runs. Run on the real clock just after midnight, the seeded hold (twelve minutes before its copy
+ * opened) was yesterday's.
+ */
+const NOW = new Date('2026-10-30T17:30:00Z');
+
 beforeEach(() => {
   localStorage.clear();
+  // Only `Date` is faked, and it runs on from NOW, so the page's polls and waits keep real time.
+  // The setup seeded a copy on the real clock before this; seed it again on this one.
+  vi.useFakeTimers({ toFake: ['Date'], now: NOW, shouldAdvanceTime: true });
+  mockStore.reset('rivera');
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   localStorage.clear();
 });
 
@@ -484,12 +495,8 @@ describe('Safety', () => {
   });
 
   it('attempt_times_show_the_day_and_time', async () => {
-    // 9:52 am today on the business's clock, whichever offset Los Angeles is on today.
-    const day = new Intl.DateTimeFormat('en-CA', { timeZone: LA, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
-    const todayAt = ['-07:00', '-08:00']
-      .map((offset) => new Date(`${day}T09:52:00${offset}`).toISOString())
-      .find((iso) => formatWhen(iso, LA, new Date()) === 'Today, 9:52 am');
-    if (!todayAt) throw new Error('no 9:52 am today in Los Angeles');
+    // 9:52 am today on the business's clock (38 minutes before NOW), and four days before.
+    const todayAt = isoTime(NOW.getTime() - 38 * 60_000);
     const olderAt = '2026-10-26T16:52:00.000000Z';
     injectLedger(
       ledgerPage([
