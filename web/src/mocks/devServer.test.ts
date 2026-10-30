@@ -252,6 +252,39 @@ describe('the dev server mock', () => {
     }
   });
 
+  it('start_over_sets_a_fresh_owner_cookie', async () => {
+    const api = createMockApi();
+    const browser = browserOf(api);
+    const tab = browser.tab();
+    const ownerCookie = (response: Response) => response.headers.getSetCookie().filter((line) => line.startsWith('desk_owner='));
+    const valueOf = (line: string | undefined) => /^desk_owner=([^;]*);/.exec(line ?? '')?.[1];
+
+    const opened = await tab.send('POST', apiPath('copies', {}), { passcode: 'demo' });
+    expect(opened.status).toBe(201);
+    const first = (await opened.json()) as CopyOut;
+    const [firstLine] = ownerCookie(opened);
+    const firstValue = valueOf(firstLine);
+    expect(firstValue).toMatch(/^[A-Za-z0-9]{32}$/);
+
+    // Start over makes a new copy and sets a new owner cookie for it, with the same attributes.
+    const restarted = await tab.send('POST', apiPath('startOver', {}));
+    expect(restarted.status).toBe(200);
+    const fresh = (await restarted.json()) as CopyOut;
+    expect(fresh.copy_id).not.toBe(first.copy_id);
+    const lines = ownerCookie(restarted);
+    expect(lines).toHaveLength(1);
+    const [line] = lines;
+    const value = valueOf(line);
+    expect(value).toMatch(/^[A-Za-z0-9]{32}$/);
+    expect(value).not.toBe(firstValue);
+    expect(line).toBe(`desk_owner=${value ?? ''}; Path=/api/owner; Max-Age=604800; HttpOnly; SameSite=Strict`);
+
+    // The next `me` names the new copy, and the old cookie names nothing any more.
+    expect((await tab.json<CopyOut>('GET', apiPath('me', {}))).copy_id).toBe(fresh.copy_id);
+    const stale = await api.handle(new Request(new URL(apiPath('me', {}), ORIGIN), { headers: { cookie: `desk_owner=${firstValue ?? ''}` } }));
+    expect([stale.status, await stale.json()]).toEqual([401, { error: 'no_owner_session' }]);
+  });
+
   it('separate_browsers_get_separate_copies', { timeout: 15_000 }, async () => {
     const api = createMockApi();
     const first = browserOf(api);

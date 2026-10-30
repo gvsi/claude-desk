@@ -47,6 +47,11 @@ export interface Cookies {
   visitor(slug: string): string | undefined;
   /** Answers with the owner cookie for the copy the request reached. */
   setOwner(): void;
+  /**
+   * Answers with a new owner cookie for the copy the request reached, which a start over has just
+   * replaced, as the API issues one for a new copy: the cookie the request carried names nothing now.
+   */
+  renewOwner(): void;
   /** Answers with the visitor cookie for `slug`, naming `sessionId`. */
   setVisitor(slug: string, sessionId: string): void;
 }
@@ -234,6 +239,7 @@ const SERVED: ServedRoutes = {
   startOver(sv, req) {
     if (!req.cookies.owner) return NO_OWNER;
     sv.startOver();
+    req.cookies.renewOwner();
     return ok(copyOut(sv.world));
   },
   me(sv, req) {
