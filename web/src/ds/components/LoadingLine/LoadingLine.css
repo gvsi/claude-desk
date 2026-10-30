@@ -1,0 +1,37 @@
+/* LoadingLine: the busy spinner and one meta line in the secondary text color. No fill, no border:
+   it sits where the content will be and goes when the content arrives. */
+
+.cd-loading-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  min-width: 0;
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+/* The spinner's arc is text-secondary at full strength, 7.3:1 on the page, where a graphic needs 3:1. */
+.cd-loading-line__spinner {
+  flex: none;
+  width: var(--size-spinner);
+  height: var(--size-spinner);
+  animation: cd-loading-line-spin var(--motion-spin) linear infinite;
+}
+
+.cd-loading-line__words {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@keyframes cd-loading-line-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+/* Reduced motion: the spinner holds still; the words still say it is loading. */
+@media (prefers-reduced-motion: reduce) {
+  .cd-loading-line__spinner {
+    animation: none;
+  }
+}

@@ -39,6 +39,8 @@ Owner lines by `KernelError.code`:
 | `seed_unproved` | "Rules can't be checked right now. Try again in a moment." |
 | `internal`, `replayed` | `UNREACHABLE_COPY` |
 
+After a conflict (`conflict`, `stale_generation`, `mode_owner`, `mode_paused`), use `CHANGED_REFRESHED`, "This changed while you were looking. Here's where it stands now.", when the screen has already read the item again and shows it as it stands; use the reload line above when the screen can't refresh in place and the owner has to reload.
+
 Both maps are `satisfies Record<…Code, CopyPair>`, so a code added to the contract without a line is a compile error.
 
 ## Props

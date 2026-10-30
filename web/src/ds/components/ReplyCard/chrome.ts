@@ -63,6 +63,15 @@ export const CARD_CHROME: Readonly<Record<ClauseTemplate, Readonly<Record<CopyLa
   },
 };
 
+/**
+ * The fixed words of the card for a payment link a confirmed rule change cancelled
+ * (`LinkCancelledCard`): its label only. No money moved, so it has no test-payment note.
+ */
+export const LINK_CANCELLED_CHROME: Readonly<Record<CopyLanguage, Readonly<CardChrome>>> = {
+  en: { label: 'Payment link cancelled' },
+  es: { label: 'Enlace de pago cancelado' },
+};
+
 /** The template's chrome in `language`, or null for a template this build doesn't know. */
 export function cardChrome(template: string, language: CopyLanguage): Readonly<CardChrome> | null {
   if (!Object.hasOwn(CARD_CHROME, template)) return null;

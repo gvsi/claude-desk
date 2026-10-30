@@ -1,13 +1,13 @@
-import { useId, type CSSProperties, type ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 
 import type { CardBlock, PublicDesk, RenderedBlock } from '../../../api/contracts.ts';
 import { Button } from '../Button/Button.tsx';
 import { ConceptFooter } from '../ConceptFooter/ConceptFooter.tsx';
 import type { CopyLanguage } from '../Notice/errorCopy.ts';
 import { ReplyCard } from '../ReplyCard/ReplyCard.tsx';
-import { StatusDot } from '../StatusDot/StatusDot.tsx';
 import { TextLink } from '../TextLink/TextLink.tsx';
-import { aboutLinkHref, brandColor, openStatusLine } from './guards.ts';
+import { aboutLinkHref } from './guards.ts';
+import { PublicBrandHeader } from './PublicBrandHeader.tsx';
 
 import './PublicShell.css';
 
@@ -87,7 +87,6 @@ const COPY = {
     askFor: (owner: ReactNode) => <>Ask for {owner}</>,
     about: (name: ReactNode) => <>About {name}</>,
     forAgents: 'For AI agents',
-    stillHelps: 'Claude can still help.',
   },
   es: {
     chatWith: (name: ReactNode) => <>Chatea con {name}</>,
@@ -99,7 +98,6 @@ const COPY = {
     askFor: (owner: ReactNode) => <>Pedir hablar con {owner}</>,
     about: (name: ReactNode) => <>Sobre {name}</>,
     forAgents: 'Para agentes de IA',
-    stillHelps: 'Claude puede ayudarte igual.',
   },
 } satisfies Record<CopyLanguage, unknown>;
 
@@ -127,19 +125,10 @@ export function PublicShell({
   const name = <Name>{brand.name}</Name>;
   const owner = <Name>{ownerName}</Name>;
 
-  const style = {
-    '--brand-field': brandColor(brand.field, 'var(--bg-panel)'),
-    '--brand-ink': brandColor(brand.ink, 'var(--text-primary)'),
-    '--brand-ink-secondary': brandColor(brand.inkSecondary, 'var(--text-secondary)'),
-    '--brand-accent': brandColor(brand.accent, 'var(--line-hairline)'),
-  } as CSSProperties;
-
   // Standalone, the shell is the page: a banner, the main region and a complementary column.
   // Embedded in an owner screen, the same parts as plain blocks and a named region.
-  const Header = embedded ? 'div' : 'header';
   const Chat = embedded ? 'div' : 'main';
   const About = embedded ? 'section' : 'aside';
-  const BrandName = embedded ? 'p' : 'h1';
   // Only links to a path on this site; anything else is left out.
   const links = (aboutLinks ?? []).flatMap((link) => {
     const href = aboutLinkHref(link.href);
@@ -147,31 +136,10 @@ export function PublicShell({
   });
   const blocks = about ?? [];
   const hasAbout = blocks.length > 0 || links.length > 0;
-  const status = openStatusLine(openStatus);
 
   return (
-    <div className={`cd-public-shell${embedded ? ' cd-public-shell--embedded' : ''}`} lang={language} style={style}>
-      <Header className={`cd-public-shell__brand${status ? ' cd-public-shell__brand--open-status' : ''}`}>
-        <span className="cd-public-shell__monogram cd-type-page-title" aria-hidden="true">
-          {brand.monogram}
-        </span>
-        <div className="cd-public-shell__brand-text" data-copy="user">
-          <BrandName className="cd-public-shell__brand-name cd-type-brand-name">{brand.name}</BrandName>
-          <p className="cd-public-shell__tagline cd-type-meta">{brand.tagline}</p>
-        </div>
-        {status ? (
-          <div className="cd-public-shell__open-status">
-            <StatusDot tone={status.open ? 'handled' : 'info'} />
-            <div className="cd-public-shell__open-status-lines">
-              {/* The kernel's words, as written. */}
-              <p className="cd-public-shell__open-status-text cd-type-meta" data-copy="user">
-                {status.text}
-              </p>
-              {status.open ? null : <p className="cd-public-shell__still-helps cd-type-caption">{copy.stillHelps}</p>}
-            </div>
-          </div>
-        ) : null}
-      </Header>
+    <div className={`cd-public-shell${embedded ? ' cd-public-shell--embedded' : ''}`} lang={language}>
+      <PublicBrandHeader brand={brand} language={language} openStatus={openStatus} landmark={!embedded} nameAsHeading={!embedded} />
       <div className="cd-public-shell__body">
         <Chat className="cd-public-shell__chat">
           <div className="cd-public-shell__column">
@@ -214,7 +182,7 @@ export function PublicShell({
             {links.length > 0 ? (
               <div className="cd-public-shell__links">
                 <h3 className="cd-public-shell__links-heading cd-type-meta">{copy.forAgents}</h3>
-                <ul className="cd-public-shell__link-list cd-type-body">
+                <ul role="list" className="cd-public-shell__link-list cd-type-body">
                   {links.map((link) => (
                     <li key={`${link.href} ${link.label}`}>
                       <TextLink href={link.href}>{link.label}</TextLink>

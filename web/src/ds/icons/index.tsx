@@ -32,6 +32,7 @@ export const ICON_NAMES = [
   'conversations',
   'people',
   'rules',
+  'connectors',
   'safety',
   'share',
   'settings',
@@ -89,6 +90,15 @@ const SHAPES = {
       <path d="M13 6h8" />
       <path d="M13 12h8" />
       <path d="M13 18h8" />
+    </>
+  ),
+  // A plug: what Claude can reach through the owner's connectors.
+  connectors: (
+    <>
+      <path d="M12 22v-5" />
+      <path d="M9 8V2" />
+      <path d="M15 8V2" />
+      <path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z" />
     </>
   ),
   safety: (

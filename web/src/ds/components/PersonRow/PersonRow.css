@@ -1,0 +1,81 @@
+/* PersonRow and LeadRow: a name in control type over one caption line in the secondary ink, padded
+   6 px by 10 px, 51 px tall. No fill until a row that links is hovered. */
+
+.cd-person-row {
+  display: grid;
+  gap: var(--space-2);
+  box-sizing: border-box;
+  min-width: 0;
+  padding: var(--space-6) var(--space-10);
+  border-radius: var(--radius-control);
+  color: var(--text-primary);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.cd-person-row--link {
+  transition: background-color var(--motion-instant) var(--motion-ease);
+}
+
+.cd-person-row--link:hover {
+  background: var(--fill-hover);
+}
+
+.cd-person-row__name {
+  min-width: 0;
+  color: var(--text-primary);
+}
+
+.cd-person-row__detail {
+  min-width: 0;
+  color: var(--text-secondary);
+}
+
+/* A lead: its own container, so its tag can move under the note when the row is narrow. */
+.cd-lead-row {
+  container: cd-lead-row / inline-size;
+}
+
+/* The name with the time at its right, on the name's baseline; the note under the name, with a
+   replayed lead's tag at the end of that line, under the time. */
+.cd-lead-row__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: var(--space-16);
+  row-gap: var(--space-2);
+  min-width: 0;
+}
+
+.cd-lead-row__name,
+.cd-lead-row__time {
+  align-self: baseline;
+}
+
+.cd-lead-row__time {
+  justify-self: end;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.cd-lead-row__recorded {
+  justify-self: end;
+}
+
+/* Narrow, as on a phone: the note takes the whole line, and the tag a line of its own under it,
+   from the note's start. */
+@container cd-lead-row (max-width: 479.98px) {
+  .cd-lead-row__note {
+    grid-column: 1 / -1;
+  }
+
+  .cd-lead-row__recorded {
+    grid-column: 1;
+    justify-self: start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cd-person-row--link {
+    transition: none;
+  }
+}

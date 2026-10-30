@@ -53,6 +53,16 @@ const CHANGED = {
   es: 'Esto cambió mientras mirabas. Recarga para ver cómo está.',
 } as const satisfies CopyPair;
 
+/**
+ * The owner's line after a conflict when the screen has already read the item again and shows it as
+ * it stands now. It pairs with the reload line `errorCopy` gives for `conflict`, `stale_generation`,
+ * `mode_owner` and `mode_paused`, which a screen that can't refresh in place shows instead.
+ */
+export const CHANGED_REFRESHED = {
+  en: "This changed while you were looking. Here's where it stands now.",
+  es: 'Esto cambió mientras mirabas. Así está ahora.',
+} as const satisfies CopyPair;
+
 const KERNEL_ERROR_COPY = {
   auth: {
     en: 'Your session ended. Open the demo again to keep going.',

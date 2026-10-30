@@ -65,6 +65,8 @@ export const BookingOptions: Story = {
   },
   play: async ({ canvas }) => {
     const options = canvas.getAllByRole('listitem');
+    // list_role_survives_unstyled_markers: Safari announces the options only with role="list".
+    await expect(canvas.getByRole('list')).toHaveAttribute('role', 'list');
     await expect(options.map((option) => option.textContent)).toEqual(blocks.booking_options.en.options?.map((o) => o.label));
     // The kernel writes each open time as a line and as an option; the card shows it once.
     for (const option of blocks.booking_options.en.options ?? []) {

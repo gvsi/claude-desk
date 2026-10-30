@@ -3,8 +3,8 @@ import { expect, within } from 'storybook/test';
 
 import { ConceptFooter } from '../components/ConceptFooter/ConceptFooter.tsx';
 import { PageHeader } from '../components/PageHeader/PageHeader.tsx';
+import { LeadRow, PersonRow } from '../components/PersonRow/PersonRow.tsx';
 import { RecordedHistoryLink } from '../components/RecordedHistoryLink/RecordedHistoryLink.tsx';
-import { RecordedTag } from '../components/RecordedTag/RecordedTag.tsx';
 import { SectionHeader } from '../components/SectionHeader/SectionHeader.tsx';
 import { rivera } from '../fixtures/index.ts';
 import { expectComputed } from '../test/expectComputed.ts';
@@ -40,9 +40,8 @@ const LEADS: Lead[] = [
 ];
 
 /**
- * People, which the owner's sidebar calls Customers: those on record, then the leads. There is no
- * row component for either; the web app composes each lead and puts a replayed lead's Recorded tag
- * at the end of its second line, under the time.
+ * People, which the owner's sidebar calls Customers: those on record (`PersonRow`), then the leads
+ * (`LeadRow`), each replayed lead with its Recorded tag at the end of its second line, under the time.
  */
 function HistoryPeople() {
   return (
@@ -54,13 +53,10 @@ function HistoryPeople() {
             <div className="board-people__head">
               <SectionHeader id="board-contacts" title="Contacts on record" count={{ n: CONTACTS.length, label: `${CONTACTS.length} contacts on record` }} />
             </div>
-            <ul className="board-people__rows" aria-labelledby="board-contacts">
+            <ul role="list" className="board-people__rows" aria-labelledby="board-contacts">
               {CONTACTS.map((person) => (
-                <li key={person.personId} className="board-person">
-                  <span className="cd-type-control" data-copy="user">
-                    {person.name}
-                  </span>
-                  <span className="board-quiet cd-type-caption">Contact on record: {person.maskedContact}</span>
+                <li key={person.personId}>
+                  <PersonRow name={person.name} contact={person.maskedContact} />
                 </li>
               ))}
             </ul>
@@ -72,15 +68,10 @@ function HistoryPeople() {
                 <RecordedHistoryLink href={RECORDED_HISTORY_HREF} />
               </p>
             </div>
-            <ul className="board-people__rows" aria-labelledby="board-leads">
+            <ul role="list" className="board-people__rows" aria-labelledby="board-leads">
               {LEADS.map((lead) => (
-                <li key={lead.name} className="board-person board-person--lead">
-                  <span className="board-person__name cd-type-control" data-copy="user">
-                    {lead.name}
-                  </span>
-                  <span className="board-person__time board-quiet cd-type-caption">{lead.time}</span>
-                  <span className="board-person__note board-quiet cd-type-caption">Lead · {lead.note}</span>
-                  {lead.recorded ? <RecordedTag className="board-person__end" /> : null}
+                <li key={lead.name}>
+                  <LeadRow {...lead} />
                 </li>
               ))}
             </ul>
@@ -102,7 +93,8 @@ const meta = {
     canvas: 'N-History-People',
     canvasNote: [
       'People, which the sidebar calls Customers: the contacts on record, then the leads under “Includes recorded history” (RecordedHistoryLink), each replayed lead with the Recorded tag (RecordedTag) at the end of its second line, under its time.',
-      'There is no row component for people or leads: the page, its 760 px column, its sections and rows and the footer at the window’s foot are page layout the web app (plan 04) owns, composed here from PageHeader, SectionHeader, RecordedHistoryLink, RecordedTag and the tokens.',
+      'The rows are PersonRow and LeadRow; the page, its 760 px column, its sections and the footer at the window’s foot are page layout the web app (plan 04) owns, composed here from PageHeader, SectionHeader, RecordedHistoryLink and the tokens.',
+      'A lead’s note reads without the board’s “Lead ·” before it: the section’s heading says it, and facts are never joined with a middle dot (run 2’s phone board, N-Run2-People-Phone, drops it too).',
       'The render sets a replayed lead’s icon on the text’s baseline, 2 px above the words’ middle, which makes that row 2 px taller; the tag here is the one tag, its icon centered on the line as the other boards draw it, and every row keeps its height.',
     ].join(' '),
   },
@@ -145,15 +137,13 @@ export const Board: Story = {
     const people = within(contacts).getAllByRole('listitem');
     await expect(await expectRecordedTags(people, () => false)).toEqual([]);
     const rows = within(leads).getAllByRole('listitem');
-    await expect(rows.map((row) => within(row).getByText((_, el) => el?.getAttribute('data-copy') === 'user').textContent)).toEqual(
-      LEADS.map((lead) => lead.name),
-    );
+    await expect(rows.map((row) => one(row, '.cd-person-row__name').textContent)).toEqual(LEADS.map((lead) => lead.name));
     const tags = await expectRecordedTags(rows, (row) => LEADS[rows.indexOf(row)]?.recorded === true);
     await expect(tags).toHaveLength(2);
     for (const tag of tags) {
       const row = tag.closest('li') as HTMLElement;
-      const time = one(row, '.board-person__time');
-      const note = one(row, '.board-person__note');
+      const time = one(row, '.cd-lead-row__time');
+      const note = one(row, '.cd-lead-row__note');
       await expect(Math.round(tag.getBoundingClientRect().right)).toBe(Math.round(time.getBoundingClientRect().right));
       await expect(tag.getBoundingClientRect().top).toBe(note.getBoundingClientRect().top);
       await expect(tag.getBoundingClientRect().top).toBeGreaterThanOrEqual(time.getBoundingClientRect().bottom);

@@ -1061,35 +1061,6 @@
   list-style: none;
 }
 
-.board-person {
-  display: grid;
-  gap: var(--space-2);
-  padding: var(--space-6) var(--space-10);
-}
-
-.board-person--lead {
-  grid-template-columns: minmax(0, 1fr) auto;
-  column-gap: var(--space-16);
-}
-
-.board-person__end {
-  justify-self: end;
-}
-
-/* A lead's time sits at the right of its name, on the name's baseline. */
-.board-person__name,
-.board-person__time {
-  align-self: baseline;
-}
-
-.board-person__time {
-  justify-self: end;
-}
-
-.board-person__note {
-  min-width: 0;
-}
-
 /* The sidebar on its own, as its board draws it: the column the AppShell gives it, the window's
    height, on the panel with its seam. */
 .board-sidebar-column {
@@ -1099,4 +1070,419 @@
   height: 100dvh;
   border-right: 1px solid var(--line-hairline);
   background: var(--bg-panel);
+}
+
+/* Customers while the list loads: a hairline where the first section's head would sit, then the line. */
+.board-people__loading {
+  margin-top: var(--space-28);
+  padding-top: var(--space-16);
+  border-top: 1px solid var(--line-hairline);
+}
+
+/* Customers on a phone (N-Run2-People-Phone): 16 px under the top bar, sections 16 px apart, and the
+   footer right under the list rather than at the window's foot. */
+@media (max-width: 767.98px) {
+  .board-page:has(> .board-people) {
+    padding-top: var(--space-16);
+  }
+
+  .board-people__section {
+    margin-top: var(--space-16);
+  }
+
+  .board-people > .cd-concept-footer {
+    margin-top: 0;
+  }
+}
+
+/* The setup interview: a 64 px bar over a hairline, then one 720 px column, 40 px under the bar,
+   with the footer at the window's foot. */
+.board-setup {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  background: var(--bg-app);
+}
+
+.board-setup__bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-16);
+  box-sizing: border-box;
+  height: 65px;
+  padding: 0 var(--space-40);
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+.board-setup__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+}
+
+.board-setup__business {
+  color: var(--text-secondary);
+}
+
+.board-setup__end {
+  margin-left: auto;
+}
+
+.board-setup__main {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: calc(720px + 2 * var(--space-40));
+  margin: 0 auto;
+  padding: var(--space-40) var(--space-40) var(--space-20);
+}
+
+.board-setup__column {
+  display: flex;
+  flex-direction: column;
+}
+
+.board-setup__main > .cd-concept-footer {
+  margin-top: auto;
+  padding-top: var(--space-16);
+}
+
+/* A card of rows: the rows' own hairlines run inside its 16 px sides. */
+.board-setup__rows {
+  margin: var(--space-20) 0 0;
+  padding: var(--space-16) var(--space-16) var(--space-16);
+  list-style: none;
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-card);
+  background: var(--fill-card);
+}
+
+.board-setup__actions {
+  display: flex;
+  gap: var(--space-8);
+  margin-top: var(--space-20);
+}
+
+.board-setup__summary {
+  margin: var(--space-20) 0 0;
+  color: var(--text-primary);
+}
+
+.board-setup__lead {
+  margin: var(--space-6) 0 0;
+  color: var(--text-secondary);
+}
+
+/* The agents page: the brand header, then one 760 px column 32 px under it, its cards 16 px apart,
+   and the footer at the window's foot. */
+.board-agents {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  background: var(--bg-app);
+}
+
+.board-agents__main {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: calc(760px + 2 * var(--space-40));
+  margin: 0 auto;
+  padding: var(--space-32) var(--space-40) var(--space-20);
+}
+
+.board-agents__back,
+.board-agents__title,
+.board-agents__disclosure {
+  margin: 0;
+}
+
+.board-agents__title {
+  margin-top: var(--space-16);
+}
+
+.board-agents__disclosure {
+  margin-top: var(--space-16);
+  color: var(--text-secondary);
+}
+
+.board-agents__cards {
+  display: grid;
+  gap: var(--space-16);
+  margin-top: var(--space-16);
+}
+
+.board-agents__main > .cd-concept-footer {
+  margin-top: auto;
+  padding-top: var(--space-16);
+}
+
+.board-agents__card-title {
+  margin: 0;
+}
+
+.board-agents__card-lead {
+  margin: var(--space-2) 0 0;
+  color: var(--text-secondary);
+}
+
+.board-agents__card-body {
+  display: grid;
+  gap: var(--space-10);
+  margin-top: var(--space-10);
+}
+
+.board-agents__list {
+  display: grid;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0 0 0 calc(var(--space-16) + var(--space-2));
+}
+
+.board-agents__list--quiet {
+  color: var(--text-secondary);
+}
+
+.board-agents__label {
+  margin: var(--space-4) 0 0;
+}
+
+@media (max-width: 767.98px) {
+  .board-agents__main {
+    padding-right: var(--space-16);
+    padding-left: var(--space-16);
+  }
+}
+
+/* The Demo inbox sheet's button on the public page board: after the page, under the sheet. */
+.board-inbox-button {
+  padding: var(--space-16);
+  background: var(--bg-app);
+}
+
+/* Today, short, under the owner's Demo inbox sheet: its header and the sheet's button under it. */
+.board-inbox-today {
+  display: grid;
+  align-content: start;
+  justify-items: start;
+  gap: var(--space-16);
+}
+
+/* Share: the link card 24 px under the header, then the printable card and the ready-made words
+   side by side, 32 px apart, 24 px under it; the footer at the window's foot. */
+.board-share {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.board-share > .cd-card {
+  margin-top: var(--space-24);
+}
+
+.board-share__caption,
+.board-share__url,
+.board-share__heading {
+  margin: 0;
+}
+
+.board-share__caption {
+  color: var(--text-secondary);
+}
+
+.board-share__link {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-12);
+  margin-top: var(--space-6);
+}
+
+.board-share__url {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-right: var(--space-12);
+  overflow-wrap: anywhere;
+}
+
+.board-share__kit {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: var(--space-24) var(--space-32);
+  align-items: start;
+  margin-top: var(--space-24);
+}
+
+.board-share__words {
+  display: grid;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+/* Coming later: an outline with no fill, its pill at the right, 20 px under the words. */
+.board-share__later {
+  display: flex;
+  align-items: center;
+  gap: var(--space-16);
+  margin-top: var(--space-12);
+  padding: var(--space-14) var(--space-16);
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-card);
+}
+
+.board-share__later-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.board-share__later-text p {
+  margin: 0;
+}
+
+.board-share .board-share__later-title {
+  font-weight: 520;
+}
+
+.board-share__later-text .board-share__later-line {
+  margin-top: var(--space-2);
+  color: var(--text-secondary);
+}
+
+.board-share > .cd-concept-footer {
+  margin-top: auto;
+  padding-top: var(--space-16);
+}
+
+@media (max-width: 767.98px) {
+  .board-share__kit {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Settings › General behind the Delete Desk dialog: the section links at the left, the details at
+   the right, then Answering and Delete this Desk; the footer at the window's foot. */
+.board-settings {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  width: 100%;
+  max-width: var(--size-content);
+  margin: 0 auto;
+}
+
+.board-settings__columns {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: var(--space-40);
+  margin-top: var(--space-16);
+}
+
+.board-settings__nav ul,
+.board-settings__rows {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.board-settings__nav-link {
+  display: flex;
+  align-items: center;
+  height: var(--size-nav-row);
+  padding: 0 var(--space-10);
+  border-radius: var(--radius-control);
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+
+.board-settings__nav-link[aria-current='page'] {
+  background: var(--fill-hover);
+  color: var(--text-primary);
+}
+
+.board-settings__content {
+  display: grid;
+  gap: var(--space-20);
+  min-width: 0;
+}
+
+.board-settings__heading {
+  margin: 0 0 var(--space-8);
+}
+
+.board-settings__rows {
+  gap: 0;
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-card);
+  background: var(--fill-card);
+}
+
+.board-settings__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-16);
+  padding: var(--space-12) var(--space-16);
+}
+
+.board-settings__row + .board-settings__row {
+  border-top: 1px solid var(--line-hairline);
+}
+
+.board-settings__detail {
+  display: grid;
+  min-width: 0;
+}
+
+.board-settings__answering {
+  padding: var(--space-16);
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-card);
+  background: var(--fill-card);
+}
+
+.board-settings__delete {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-16);
+}
+
+.board-settings__delete p {
+  margin: 0;
+}
+
+.board-settings > .cd-concept-footer {
+  margin-top: auto;
+  padding-top: var(--space-16);
+}
+
+/* The setup interview on a phone: 16 px gutters, and the bar's brand and business on one line each. */
+@media (max-width: 767.98px) {
+  .board-setup__bar {
+    gap: var(--space-12);
+    padding: 0 var(--space-16);
+  }
+
+  .board-setup__brand,
+  .board-setup__business {
+    white-space: nowrap;
+  }
+
+  .board-setup__business {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+
+  .board-setup__main {
+    padding-right: var(--space-16);
+    padding-left: var(--space-16);
+  }
 }
