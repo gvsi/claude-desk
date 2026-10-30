@@ -454,10 +454,22 @@ class Document(Base):
 
 
 class DocumentLink(Base):
+    """A document released to its verified record owner, opened once by its token within a day;
+    never in a view (01b_6_document_links)."""
+
     __tablename__ = "document_links"
     __table_args__ = {"schema": "kernel"}
     link_id: Mapped[str] = mapped_column(Text, primary_key=True)
     copy_id: Mapped[str] = mapped_column(Text)
+    desk_id: Mapped[str] = mapped_column(Text)
+    document_id: Mapped[str] = mapped_column(Text)
+    session_id: Mapped[str] = mapped_column(Text)            # the session that asked for it
+    person_id: Mapped[str] = mapped_column(Text)             # the verified record owner it was released to
+    token: Mapped[str] = mapped_column(Text)                 # unique; the link's one credential, only ever here
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))   # opened
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))     # its Desk or person gone
 
 
 class PaymentLink(Base):

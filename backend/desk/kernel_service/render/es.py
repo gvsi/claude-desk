@@ -9,7 +9,8 @@ from datetime import datetime, time
 
 from desk.contracts import Fact, HoursWindow
 from desk.kernel_service.render.cards import (Card, DeskInfo, booking_window, callback_window, claims, day_groups,
-                                              hours_windows, local, money, percent_text, slot_claims, text_claim)
+                                              hours_windows, local, money, percent_text, slot_claims, text_claim,
+                                              title_claim)
 
 STATUS: dict[str, str] = {
     "allowed": "Revisado con las reglas de {owner}",
@@ -140,3 +141,8 @@ def callback_confirmed(fact: Fact | None, desk: DeskInfo) -> Card:
 def owner_said(fact: Fact | None, desk: DeskInfo) -> Card:
     """Las palabras del dueño, tal como las escribió."""
     return Card(title=text_claim(fact))
+
+
+def document_link(fact: Fact | None, desk: DeskInfo) -> Card:
+    """El título del documento; el enlace va en el `href` de la tarjeta, que llena la revisión."""
+    return Card(title=title_claim(fact))

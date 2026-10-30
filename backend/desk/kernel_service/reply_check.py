@@ -467,10 +467,11 @@ async def check_clauses(ctx: KernelCtx, session_row: SessionRow, desk_id: str, d
     template Claude may draft (`template_unavailable`, `kernel_only_template`); a handoff or
     verify prompt names no fact; any other names a fact of this copy and Desk (`unknown_fact`)
     that the session may read (`unentitled_fact`; a session learns nothing more about a fact it
-    can't read), of the template's kind and ID (`template_mismatch`), current (`stale_fact`), and
-    with no canary in any field it renders (`canary`, naming the documents, as is a canary given as
-    the fact ID). The catalog, which the kernel builds on each read rather than stores, is looked
-    up with the stored facts and checked the same way."""
+    can't read), of the template's kind and ID (`template_mismatch`), current (`stale_fact`), with
+    a link to follow when its card links (`href_for`; else `stale_fact`), and with no canary in any
+    field it renders (`canary`, naming the documents, as is a canary given as the fact ID). The
+    catalog, which the kernel builds on each read rather than stores, is looked up with the stored
+    facts and checked the same way."""
     wanted = {clause.fact_id for clause in clauses if clause.fact_id is not None and _storable(clause.fact_id)}
     rows: dict[str, FactRow | Fact] = {}
     if wanted:
@@ -518,7 +519,8 @@ async def check_clauses(ctx: KernelCtx, session_row: SessionRow, desk_id: str, d
                 violations.append(_clause_violation(clause, "stale_fact", "not_current"))
                 continue
         try:
-            block = render.render_clause(clause, fact, language, desk)
+            href = await template.href_for(ctx, fact) if template.href_for is not None and fact is not None else None
+            block = render.render_clause(clause, fact, language, desk, href=href)
         except render.NothingToShow:
             violations.append(_clause_violation(clause, "stale_fact", "nothing_to_show"))
             continue

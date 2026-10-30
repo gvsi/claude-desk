@@ -836,7 +836,8 @@ COPY_POLICY = "(copy_id = NULLIF(current_setting('desk.copy_id'::text, true), ''
 COPY_READ_POLICY = {"people": f"({COPY_POLICY} AND (removed_at IS NULL))"}
 # What the copy resolvers' role may read: the copy and the lookup key of each table, in every copy.
 RESOLVER_READS = {"copies": {"copy_id"}, "sessions": {"copy_id", "secret_hash", "session_id"},
-                  "desks": {"copy_id", "slug"}, "decisions": {"copy_id", "decision_id"}}
+                  "desks": {"copy_id", "slug"}, "decisions": {"copy_id", "decision_id"},
+                  "document_links": {"copy_id", "token"}}
 
 
 def test_every_kernel_table_forces_copy_row_security(admin):
@@ -1058,7 +1059,7 @@ def committed_copies(admin):
                           (f"doc-{copy_id}", copy_id, f"desk-{copy_id}"))
         yield copies
     finally:
-        for table in ("decisions", "documents", "sessions", "desks", "copies"):
+        for table in ("decisions", "document_links", "documents", "sessions", "desks", "copies"):
             admin.execute(f"DELETE FROM kernel.{table} WHERE copy_id = ANY(%s)", (list(copies),))
 
 
@@ -1109,7 +1110,8 @@ def test_api_reads_kernel_ro_for_its_copy_only(committed_copies, api):
 # may call them.
 
 COPY_RESOLVERS = ("kernel.copy_of_session(text)", "kernel.copy_of_session_id(text)",
-                  "kernel.copy_of_desk_slug(text)", "kernel.copy_of_decision_id(text)", "kernel.copy_ids()")
+                  "kernel.copy_of_desk_slug(text)", "kernel.copy_of_decision_id(text)",
+                  "kernel.copy_of_document_link(text)", "kernel.copy_ids()")
 
 
 def test_copy_resolvers_are_narrow(admin):
@@ -1140,16 +1142,22 @@ async def test_copy_resolvers_find_a_copy_before_it_is_bound(admin, committed_co
             " call_sha256, tool, outcome, state, policy_version, reason_plain, visitor_plain, expires_at, ledger_seq)"
             " VALUES (%s, %s, %s, %s, 0, 'call-1', '', 'native.quote', 'refuse', 'refused', 1, '', '', now(), 1)",
             (f"dec-{copy_id}", copy_id, f"desk-{copy_id}", f"session-{copy_id}"))
+        admin.execute(   # and a link that released its document
+            "INSERT INTO kernel.document_links (link_id, copy_id, desk_id, document_id, session_id, person_id, token,"
+            " created_at, expires_at) VALUES (%s, %s, %s, %s, %s, 'person-1', %s, now(), now() + interval '1 day')",
+            (f"link-{copy_id}", copy_id, f"desk-{copy_id}", f"doc-{copy_id}", f"session-{copy_id}", f"token-{copy_id}"))
     try:
         for copy_id in committed_copies:
             assert await resolve_copy("copy_of_session", token_hash(copy_id)) == copy_id
             assert await resolve_copy("copy_of_session_id", f"session-{copy_id}") == copy_id
             assert await resolve_copy("copy_of_desk_slug", f"slug-{copy_id}") == copy_id
             assert await resolve_copy("copy_of_decision_id", f"dec-{copy_id}") == copy_id
+            assert await resolve_copy("copy_of_document_link", f"token-{copy_id}") == copy_id
         assert await resolve_copy("copy_of_session", "0" * 64) is None
         assert await resolve_copy("copy_of_session_id", "no-such-session") is None
         assert await resolve_copy("copy_of_desk_slug", "no-such-desk") is None
         assert await resolve_copy("copy_of_decision_id", "no-such-decision") is None
+        assert await resolve_copy("copy_of_document_link", "no-such-token") is None
         assert set(committed_copies) <= set(await copy_ids())
         with pytest.raises(ValueError):
             await resolve_copy("copy_of_anything", "x")
@@ -1167,7 +1175,8 @@ def test_only_the_kernel_runs_the_copy_resolvers(committed_copies):
     for prefix in ("API", "MOCKPAY"):
         with connect(prefix) as conn:
             for call in ("kernel.copy_of_session(%s)", "kernel.copy_of_session_id(%s)",
-                         "kernel.copy_of_desk_slug(%s)", "kernel.copy_of_decision_id(%s)"):
+                         "kernel.copy_of_desk_slug(%s)", "kernel.copy_of_decision_id(%s)",
+                         "kernel.copy_of_document_link(%s)"):
                 with pytest.raises(psycopg.errors.InsufficientPrivilege):
                     conn.execute(f"SELECT {call}", (token_hash(committed_copies[0]),))
             with pytest.raises(psycopg.errors.InsufficientPrivilege):

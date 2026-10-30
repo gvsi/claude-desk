@@ -18,16 +18,24 @@ A card's `text` is the headline and then the details, one per line. A template t
 kinds (handoff, verify_prompt) renders without one. `Template.current` says whether a fact may
 still be shown (a status the template renders, not expired), and a fact with nothing to render,
 such as hours with no windows, raises `NothingToShow` rather than make an empty card.
+
+A card that links somewhere (a document or payment link) registers `href_for`, which the reply
+check awaits once the cited fact has passed its checks, and passes to `render_clause` as the card's
+`href`: the link's path, looked up from the fact by the kernel, so the link's token is in no fact,
+and the `href` is the only field of the card that carries it.
 """
 
-from collections.abc import Callable, Collection
+from collections.abc import Awaitable, Callable, Collection
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from desk.contracts import CardOption, Clause, ClauseTemplate, Fact, RenderedBlock
 from desk.kernel_service.render import en, es
 from desk.kernel_service.render.cards import Card, DeskInfo, NothingToShow
+
+if TYPE_CHECKING:
+    from desk.kernel_service.repo import KernelCtx
 
 Language = Literal["en", "es"]
 LANGUAGES: dict[str, dict[str, str]] = {"en": en.STATUS, "es": es.STATUS}
@@ -64,6 +72,7 @@ def owner_preview(kind: str) -> str:
 # ---- Clause cards ---------------------------------------------------------------------------------
 
 Renderer = Callable[[Fact | None, DeskInfo], Card]
+HrefFor = Callable[["KernelCtx", Fact], Awaitable[str]]   # the card's link, from its fact
 
 
 @dataclass(frozen=True)
@@ -73,6 +82,7 @@ class Template:
     key: str | None                       # the fact ID it reads, or the ID's prefix when it ends in ":"
     statuses: frozenset[str]              # the fact statuses it renders as current
     renderers: dict[str, Renderer]        # by language
+    href_for: HrefFor | None = None       # a card that links: its `href`, awaited once the fact passes its checks
 
     def reads(self, fact: Fact) -> bool:
         """Whether the fact is of a kind and ID this template renders."""
@@ -92,24 +102,32 @@ TEMPLATES: dict[str, Template] = {}
 
 def register_template(template: ClauseTemplate, fact_kinds: Collection[str], renderer_en: Renderer,
                       renderer_es: Renderer, *, key: str | None = None,
-                      statuses: Collection[str] = ("available",)) -> Template:
-    """Registers how the clause `template` renders, once per template."""
+                      statuses: Collection[str] = ("available",), href_for: HrefFor | None = None) -> Template:
+    """Registers how the clause `template` renders, once per template. `href_for` gives a linking
+    card its `href` from its fact; it raises `NothingToShow` when the link can't be followed."""
     if template in TEMPLATES:
         raise ValueError(f"the {template} template is already registered")
+    if href_for is not None and not fact_kinds:
+        raise ValueError("a card links only from a fact")
     registered = Template(name=template, fact_kinds=frozenset(fact_kinds), key=key, statuses=frozenset(statuses),
-                          renderers={"en": renderer_en, "es": renderer_es})
+                          renderers={"en": renderer_en, "es": renderer_es}, href_for=href_for)
     TEMPLATES[template] = registered
     return registered
 
 
-def render_clause(clause: Clause, fact: Fact | None, lang: Language, desk: DeskInfo) -> RenderedBlock:
+def render_clause(clause: Clause, fact: Fact | None, lang: Language, desk: DeskInfo, *,
+                  href: str | None = None) -> RenderedBlock:
     """The card for `clause`, rendered from `fact` (None for a template that names no fact) in
-    `lang`. The caller has checked that the template is registered and reads this fact. A fact
-    with nothing to render raises `NothingToShow`; one that lacks a claim its template needs
-    raises any other error, which the caller answers as an internal error."""
-    card = TEMPLATES[clause.template].renderers[lang](fact, desk)
+    `lang`, with `href` as its link (what the template's `href_for` gave). The caller has checked
+    that the template is registered and reads this fact, and gives `href` exactly when the
+    template links. A fact with nothing to render raises `NothingToShow`; one that lacks a claim
+    its template needs raises any other error, which the caller answers as an internal error."""
+    template = TEMPLATES[clause.template]
+    if (href is None) != (template.href_for is None):
+        raise ValueError(f"the {clause.template} card links exactly when its template has href_for")
+    card = template.renderers[lang](fact, desk)
     return RenderedBlock(kind="card", template=clause.template, text="\n".join([card.title, *card.lines]),
-                         fact_id=clause.fact_id, title=card.title, lines=list(card.lines), href=card.href,
+                         fact_id=clause.fact_id, title=card.title, lines=list(card.lines), href=href,
                          options=[CardOption(option_id=option_id, label=label) for option_id, label in card.options])
 
 

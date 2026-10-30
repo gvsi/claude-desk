@@ -89,6 +89,13 @@ async def test_tools_follow_the_session_kind(app, client, registry):
     assert {profile.status for profile in seen.tools} == {"enabled"}
     declared = {profile.tool: profile for profile in seen.tools_declared}
     assert all(declared[profile.tool] == profile for profile in seen.tools)
+    # verified as Dana, the same visitor asks for her own documents instead of a code
+    [dana] = await rows_of(app, copy.copy_id, select(Person).where(Person.ref == "dana"))
+    await verify_session(app, copy.copy_id, stranger.session_id, dana.person_id)
+    seen = await context_of(client, stranger.session_id, stranger.headers)
+    assert tools(seen.tools) == ["native.book", "native.capture_lead", "native.find_slots", "native.quote",
+                                 "native.release_document", "native.request_callback"]
+    assert {profile.status for profile in seen.tools} == {"enabled"}
     # the owner has no setup tool on this Desk yet
     owner = await context_of(client, await owner_session_id(client, copy.owner), copy.owner, desk_id=copy.desk_id)
     assert (owner.tools, owner.tools_declared) == ([], [])

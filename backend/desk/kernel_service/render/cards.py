@@ -41,7 +41,6 @@ class Card:
     title: str
     lines: tuple[str, ...] = ()
     options: tuple[tuple[str, str], ...] = ()
-    href: str | None = None
 
 
 def claims(fact: Fact | None) -> dict[str, int | str]:
@@ -82,6 +81,14 @@ def text_claim(fact: Fact) -> str:
     if claim.kind != "text" or not isinstance(claim.value, str):
         raise TypeError("a charter fact or an owner's statement holds one text claim")
     return claim.value
+
+
+def title_claim(fact: Fact | None) -> str:
+    """A document link's `title` claim: the document's title, as the owner wrote it."""
+    title = claims(fact)["title"]
+    if not isinstance(title, str):
+        raise TypeError("a document's title is text")
+    return title
 
 
 def booking_window(fact: Fact, desk: DeskInfo) -> tuple[datetime, datetime]:

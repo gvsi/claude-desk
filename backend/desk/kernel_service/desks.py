@@ -443,8 +443,8 @@ async def put_people(ctx: KernelCtx, desk_row: Desk, body: DeskPeopleRequest) ->
     the one on record; a changed contact cancels the person's live verification code, which went
     to the old one. A removed person (`removed_at`) is never on record again, and their ref isn't
     reused (409): their live code is cancelled, the sessions verified as them close (ledgered
-    `session`), and their documents become the owner's alone. Removing them again changes nothing;
-    an unknown ref is 422.
+    `session`), their documents become the owner's alone, and the links that released documents to
+    them and haven't opened are void. Removing them again changes nothing; an unknown ref is 422.
 
     The Desk's people are locked `FOR UPDATE` in ID order, as verification locks them, then their
     challenges, so a code can't be sent to a contact as it changes or its person goes."""
@@ -495,11 +495,16 @@ async def put_people(ctx: KernelCtx, desk_row: Desk, body: DeskPeopleRequest) ->
 
 async def _off_the_record(ctx: KernelCtx, desk_row: Desk, person_id: str, now: datetime) -> None:
     """What a removed person leaves: the sessions verified as them closed, each ledgered `session`,
-    and their documents the owner's alone (no record owner; `document:*` facts relabelled
-    `["owner"]`)."""
-    sessions = await ctx.db.scalars(ctx.repo.scoped(select(ActorSession).where(
+    their unopened document links void, with their facts expired, and their documents the owner's
+    alone (no record owner; `document:*` facts relabelled `["owner"]`).
+
+    The sessions are locked first, so a release running in one of them has committed its link
+    before the links are voided; the links are voided before the ledger head is taken, as an open
+    of one takes them."""
+    sessions = (await ctx.db.scalars(ctx.repo.scoped(select(ActorSession).where(
         ActorSession.desk_id == desk_row.desk_id, ActorSession.person_id == person_id,
-        ActorSession.closed_at.is_(None)).order_by(ActorSession.session_id).with_for_update()))
+        ActorSession.closed_at.is_(None)).order_by(ActorSession.session_id).with_for_update()))).all()
+    await adapters.release_document.void_links(ctx, desk_row.desk_id, person_id=person_id)
     for session in sessions:
         session.closed_at = now
         await ledger.append(ctx, copy_id=desk_row.copy_id, desk_id=desk_row.desk_id, event=LedgerEvent(
@@ -584,10 +589,16 @@ async def upload_document(ctx: KernelCtx, desk_row: Desk, document: SeedDocument
 
 DeleteHook = Callable[[KernelCtx, str], Awaitable[None]]
 
-# What else a Desk's deletion ends (`(ctx, desk_id)`, in order, inside its transaction): document
-# links (Task 6 of this plan) and payment links (Plan 01c) register here. An exception from any of
+
+async def void_document_links(ctx: KernelCtx, desk_id: str) -> None:
+    """The Desk's unopened document links, void, and their facts expired."""
+    await adapters.release_document.void_links(ctx, desk_id)
+
+
+# What else a Desk's deletion ends (`(ctx, desk_id)`, in order, inside its transaction): its
+# document links here, and payment links (Plan 01c) register beside them. An exception from any of
 # them rolls the whole deletion back (500 `internal`).
-ON_DELETE: list[DeleteHook] = []
+ON_DELETE: list[DeleteHook] = [void_document_links]
 
 
 async def delete_desk(ctx: KernelCtx, desk_row: Desk) -> None:

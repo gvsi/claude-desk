@@ -1,6 +1,6 @@
 """The registry of adapters, one per tool. Each adapter module registers itself at import; the
-native adapters (quote, open times, booking, lead capture, callbacks and verification) are
-imported at the end of this module.
+native adapters (quote, open times, booking, lead capture, callbacks, verification and document
+release) are imported at the end of this module.
 
 `register` refuses an adapter whose args model isn't strict and closed, or whose profile's
 `input_schema` isn't exactly that model's JSON Schema, so the schema Claude sees is the one the
@@ -64,4 +64,4 @@ def _check(adapter: Adapter) -> None:
 # The native adapters register themselves when imported, so importing this package gives the kernel
 # all of them; they import `register` above, which is why they come last.
 from desk.kernel_service.adapters import (book, capture_lead, find_slots, quote,  # noqa: E402, F401
-                                         request_callback, start_verification)
+                                         release_document, request_callback, start_verification)

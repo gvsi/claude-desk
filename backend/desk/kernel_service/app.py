@@ -20,6 +20,7 @@ the request's transaction has rolled back.
 
 import logging
 import os
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -46,6 +47,7 @@ from desk.kernel_api import (CreateDeskRequest, DeskCreated, DeskUpdated, Docume
                              PolicyConfirmRequest, PolicyDraftRequest)
 from desk.kernel_service import (activation, approvals, auth, context, copies, decide, demo_inbox, desks, execute,
                                  labels, ledger, public, reply_check, sessions, verification)
+from desk.kernel_service.adapters import release_document
 from desk.kernel_service.auth import AuthError, Named, SessionRow
 from desk.kernel_service.clock import Clock, SystemClock
 from desk.kernel_service.decisions import DecisionsBackend, make_decisions
@@ -53,6 +55,30 @@ from desk.kernel_service.repo import (Ctx, KernelCtx, KernelFailure, KernelRunti
                                       route_template)
 
 log = logging.getLogger("desk.kernel_service")
+
+# A link's path carries its single-use token (`/document_links/{token}`, and Plan 01c's
+# `/payment_links/{token}`); its segment is written `<redacted>` wherever it is logged.
+LINK_TOKEN_PATH = re.compile(r"(/(?:document_links|payment_links)/)[^/?#\s\"]+")
+
+
+def redact_link_tokens(text: str) -> str:
+    return LINK_TOKEN_PATH.sub(r"\1<redacted>", text)
+
+
+class RedactLinkTokens(logging.Filter):
+    """On the `uvicorn.access` logger: a request line's link token, in its message or its
+    arguments, becomes `<redacted>`. `serve_config` keeps the access log off; this covers a kernel
+    run with it on (uvicorn's command line turns it on by default)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.msg, str):
+            record.msg = redact_link_tokens(record.msg)
+        if isinstance(record.args, tuple):
+            record.args = tuple(redact_link_tokens(arg) if isinstance(arg, str) else arg for arg in record.args)
+        return True
+
+
+ACCESS_LOG_FILTER = RedactLinkTokens()
 
 
 @dataclass(frozen=True)
@@ -94,6 +120,7 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
     `DESK_DECISIONS`); the lifespan refuses them outside development."""
     settings = settings or KernelSettings.from_env()
     clock = clock or SystemClock()
+    logging.getLogger("uvicorn.access").addFilter(ACCESS_LOG_FILTER)   # once: the same filter isn't added twice
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -140,6 +167,7 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
     app.include_router(public.router)
     app.include_router(verification.router)
     app.include_router(desk_router)
+    app.include_router(document_link_router)
     app.include_router(inbox_router)
     app.include_router(handoff_router)
     app.include_router(owner_router)
@@ -204,6 +232,18 @@ def _put_route(part: str, model: type[BaseModel]) -> None:
 
 for _part, (_model, _) in desks.PARTS.items():
     _put_route(_part, _model)
+
+
+document_link_router = APIRouter()
+
+
+@document_link_router.get("/document_links/{token}")
+async def get_document_link(token: str, ctx: Ctx) -> Response:
+    """A released document, by its link's token alone (`release_document.open_document_link`):
+    the bytes on the link's first open within a day, never stored by whoever passes them on, and
+    404 `not_found` for every other link. The API proxies it at `/api/d/{token}`."""
+    body, media_type = await release_document.open_document_link(ctx, token)
+    return Response(content=body, media_type=media_type, headers={"Cache-Control": "no-store"})
 
 
 inbox_router = APIRouter()
