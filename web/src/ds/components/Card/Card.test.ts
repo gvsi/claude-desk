@@ -13,6 +13,18 @@ describe('Card', () => {
     expect(() => renderToStaticMarkup(nested)).toThrow(/A Card is inside another Card/);
   });
 
+  it('a_card_that_holds_cards_lets_one_level_in', () => {
+    // A frame such as the agents page's "Send an agent" card holds the Desk's reply cards.
+    const frame = (children: ReturnType<typeof createElement>) => createElement(Card, { holdsCards: true, children });
+    expect(renderToStaticMarkup(frame(createElement(Card, null, 'Reply card'))).match(/class="cd-card /g)).toHaveLength(2);
+    // Only one level: a card inside the held card still fails.
+    const deeper = frame(createElement(Card, null, createElement(Card, null, 'Inner')));
+    expect(() => renderToStaticMarkup(deeper)).toThrow(/A Card is inside another Card/);
+    // And the frame is still a card: it can't sit inside another one.
+    const framed = createElement(Card, null, frame(createElement('p', null, 'Run')));
+    expect(() => renderToStaticMarkup(framed)).toThrow(/A Card is inside another Card/);
+  });
+
   it('padding_zero_for_rows_that_reach_the_edge', () => {
     // A card of link rows pads each row itself, so its hairlines run edge to edge.
     expect(renderToStaticMarkup(createElement(Card, { padding: 0, children: 'Rows' }))).toMatch(/^<div class="cd-card cd-card--padding-0">/);

@@ -1078,10 +1078,13 @@ export function AgentsFrame({ brand, children }: { brand: PublicBrand; children:
   );
 }
 
-/** A card on the agents page: its title, an optional line under it, then what it holds. */
-export function AgentsCard({ title, lead, children }: { title: string; lead?: string; children: ReactNode }) {
+/**
+ * A card on the agents page: its title, an optional line under it, then what it holds. "Send an
+ * agent" `holdsCards`, since the agent's run in it carries the Desk's reply cards.
+ */
+export function AgentsCard({ title, lead, holdsCards = false, children }: { title: string; lead?: string; holdsCards?: boolean; children: ReactNode }) {
   return (
-    <Card as="section" label={title} padding={16}>
+    <Card as="section" label={title} padding={16} holdsCards={holdsCards}>
       <h2 className="board-agents__card-title cd-type-section">{title}</h2>
       {lead === undefined ? null : <p className="board-agents__card-lead cd-type-meta">{lead}</p>}
       <div className="board-agents__card-body">{children}</div>
