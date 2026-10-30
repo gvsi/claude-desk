@@ -1,19 +1,21 @@
 """The tier 1 harness: the contract stub, expectations, plan markers, the summary and the guards."""
 
 import hashlib
+import importlib
 import json
 import secrets
 import shutil
 import sys
 import textwrap
-from datetime import UTC, datetime, timedelta
+from collections import deque
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
 import rfc8785
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from pydantic import BaseModel, TypeAdapter
+from pydantic import AwareDatetime, BaseModel, NaiveDatetime, TypeAdapter
 
 from desk.contracts import CopyCreated, Decision, ExecResult, ProbeResult, SessionCreated
 from desk.kernel_api import KERNEL_RESPONSES, KERNEL_ROUTES, KernelError, VerifyStarted, WhoAmI
@@ -179,14 +181,98 @@ async def test_stub_returns_a_valid_response_with_the_expected_fields():
     assert "accent" in public.brand and len(public.brand) == 2 and len(public.charter) != 1
 
 
-def test_stub_builds_every_response_model():
+def kernel_response_types() -> dict[str, type]:
     routes = [tp for _, tp in KERNEL_ROUTES.values() if tp is not None]
-    response_types = {repr(tp): tp for tp in [*routes, *KERNEL_RESPONSES]}   # KernelError answers non-2xx
-    for name, tp in response_types.items():
+    return {repr(tp): tp for tp in [*routes, *KERNEL_RESPONSES]}   # KernelError answers non-2xx
+
+
+def test_stub_builds_every_response_model():
+    for name, tp in kernel_response_types().items():
         first, second = build(tp), build(tp)
         adapter = TypeAdapter(tp)
         assert adapter.validate_python(adapter.dump_python(first)) == first, name
         assert adapter.dump_json(first) == adapter.dump_json(second), name
+
+
+@pytest.fixture
+def wall_clock(monkeypatch: pytest.MonkeyPatch) -> type:
+    """The wall clock as the stub's generators could read it, moved by `wall_clock.offset`. The
+    modules that read it for a generated value (Faker's date and time provider, polyfactory's
+    constrained dates) get `datetime` and `date` classes whose `now` and `today` are that far off;
+    `isinstance` against them still takes the real classes' values."""
+
+    class WallClock:
+        offset = timedelta()
+
+    class TakesReal(type):
+        def __instancecheck__(cls, value: object) -> bool:
+            return isinstance(value, cls.__base__)
+
+    class MovedDatetime(datetime, metaclass=TakesReal):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime.now(tz) + WallClock.offset
+
+        @classmethod
+        def today(cls):
+            return datetime.today() + WallClock.offset
+
+    class MovedDate(date, metaclass=TakesReal):
+        @classmethod
+        def today(cls):
+            return date.today() + WallClock.offset
+
+    for name in ("faker.providers.date_time", "polyfactory.value_generators.constrained_dates"):
+        module = importlib.import_module(name)
+        names = vars(module)
+        assert any(value is datetime for value in names.values()), f"{name} no longer reads the clock as datetime"
+        for attr, value in list(names.items()):
+            if value is datetime or value is date:
+                monkeypatch.setattr(module, attr, MovedDatetime if value is datetime else MovedDate)
+    return WallClock
+
+
+class Moments(BaseModel):
+    """A field of each date and time type the stub's generators fill."""
+
+    at: datetime
+    aware: AwareDatetime
+    naive: NaiveDatetime
+    day: date
+    clock: time
+    span: timedelta
+
+
+class Bare(BaseModel):
+    """A field of each bare collection the stub's generators fill with plain values."""
+
+    bag: dict
+    items: list
+    row: tuple
+    kinds: set
+    frozen: frozenset
+    queue: deque
+
+
+def test_stub_responses_never_read_the_wall_clock(wall_clock):
+    """The stub's answer to a call doesn't depend on when it is built: every date and time it
+    generates, nested ones, those in a bare collection's values and those a `$not` makes it build
+    again, comes from its seeded generators, never the wall clock (moved here twenty years either
+    way)."""
+    models = {**kernel_response_types(), "Moments": Moments, "Bare": Bare}
+
+    def build_all() -> dict[str, str]:
+        built = {name: TypeAdapter(tp).dump_json(build(tp)).decode() for name, tp in models.items()}
+        rejected = Expect(fields={field: {"$not": value} for field, value in json.loads(built["Moments"]).items()})
+        built["Moments, each field rejected"] = build(Moments, rejected).model_dump_json()
+        return built
+
+    wall_clock.offset = timedelta(days=-20 * 365)
+    earlier = build_all()
+    wall_clock.offset = timedelta(days=20 * 365)
+    assert build_all() == earlier
+    first, again = json.loads(earlier["Moments"]), json.loads(earlier["Moments, each field rejected"])
+    assert [field for field in first if again[field] == first[field]] == []   # each was built again
 
 
 async def test_stub_honours_the_expected_status():

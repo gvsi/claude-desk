@@ -9,8 +9,9 @@ import copy
 import hashlib
 import json
 import types
+from collections import deque
 from collections.abc import Callable, Iterator
-from datetime import datetime
+from datetime import date, datetime, time, timedelta
 from itertools import chain
 from random import Random
 from typing import Annotated, Any, Literal, Union, get_args, get_origin
@@ -19,7 +20,7 @@ from zoneinfo import ZoneInfo
 from faker import Faker
 from polyfactory.exceptions import FactoryException
 from polyfactory.factories.pydantic_factory import ModelFactory
-from pydantic import BaseModel, TypeAdapter, ValidationError, create_model
+from pydantic import AwareDatetime, BaseModel, NaiveDatetime, TypeAdapter, ValidationError, create_model
 
 from desk.contracts import (
     ApprovalResult,
@@ -54,6 +55,8 @@ __all__ = ["STUB_CARD", "ContractError", "ContractStub", "build"]
 
 SEED = 5   # each response's generators start from this seed, so the same call gets the same answer
 RESEEDS = 8   # further seeds a field is built from when `$not` rejects its generated value
+MOMENT_SPREAD_S = 30 * 24 * 3600   # a generated date or time is within thirty days of the open status's as_of
+PLAIN_VALUES = ("str", "int", "float", "bool")   # the Faker value types a bare collection holds
 
 # A rule card that passes RuleCard's validator, for responses whose expectations need one.
 STUB_CARD = RuleCard(
@@ -98,14 +101,46 @@ def _fixed_fields(model: type[BaseModel]) -> dict[str, Any]:
     }.get(model, {})
 
 
+def _clock_free(rng: Random, faker: Faker) -> dict[Any, Callable[[], Any]]:
+    """Providers in place of polyfactory's that read the wall clock: those for each date and time
+    type, and Faker's bare collections, whose plain values include a `date_time`. A date or time is
+    drawn from `rng` within thirty days of the open status's Tuesday morning, so the same call gets
+    the same answer whenever it is built. (Past, future and bounded dates still read the clock
+    through polyfactory; no contract has one, and the stub's wall clock test would fail on one.)"""
+
+    def moment() -> datetime:
+        return STUB_OPEN_STATUS.as_of + timedelta(seconds=rng.randrange(-MOMENT_SPREAD_S, MOMENT_SPREAD_S))
+
+    plain = {"value_types": PLAIN_VALUES}
+    return {
+        datetime: moment,
+        AwareDatetime: moment,
+        NaiveDatetime: lambda: moment().replace(tzinfo=None),
+        date: lambda: moment().date(),
+        time: lambda: moment().time(),   # a time of day carries no offset
+        timedelta: lambda: timedelta(seconds=rng.randrange(MOMENT_SPREAD_S)),
+        dict: lambda: faker.pydict(**plain),
+        list: lambda: faker.pylist(**plain),
+        tuple: lambda: faker.pytuple(**plain),
+        set: lambda: faker.pyset(**plain),
+        frozenset: lambda: frozenset(faker.pyset(**plain)),
+        deque: lambda: deque(faker.pylist(**plain)),
+    }
+
+
 class _SameGenerators:
-    """A factory mixin: nested models are built from the same seeded generators, with fixed fields."""
+    """A factory mixin: nested models are built from the same seeded generators, with fixed fields,
+    and never from the wall clock."""
 
     @classmethod
     def _get_or_create_factory(cls, model: Any) -> Any:
         if isinstance(model, type) and issubclass(model, BaseModel):
             return _factory(model, cls.__random__, cls.__faker__)
         return super()._get_or_create_factory(model)
+
+    @classmethod
+    def get_provider_map(cls) -> dict[Any, Callable[[], Any]]:
+        return {**super().get_provider_map(), **_clock_free(cls.__random__, cls.__faker__)}
 
 
 def _factory(model: type[BaseModel], rng: Random, faker: Faker) -> type[ModelFactory]:
