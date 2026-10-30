@@ -418,6 +418,13 @@ describe('the About Markdown reader', () => {
     expect(refusal('# A document\n\nNot a byline.\n')?.message).toBe(`line 3: ${byline}`);
     expect(refusal('# A document\n\nGiovanni Alcantara · October 29, 2026\nand more.\n')?.message).toBe(`line 3: ${byline}`);
     expect(refusal('# A document\n')?.message).toBe(`line 2: ${byline}`);
+    // GitHub links a bare address in the byline as anywhere else, so the reader refuses it there too.
+    const bare = 'a bare address, which GitHub links; write it as [text](https://…)';
+    expect(refusal('# A document\n\nwww.example.com · October 29, 2026\n')?.message).toBe(`line 3: ${bare}`);
+    expect(refusal('# A document\n\nGiovanni desk@example.com · October 29, 2026\n')?.message).toBe(`line 3: ${bare}`);
+    // However far into the line, whatever the characters before it.
+    const far = `${'𐐀'.repeat(30)} a@b.co · October 29, 2026`;
+    expect(refusal(`# A document\n\n${far}\n`)?.message).toBe(`line 3: ${bare}`);
     // The title is plain text, as the sections' headings are.
     const after = '\n\nGiovanni Alcantara · October 29, 2026\n';
     expect(refusal(`# A **bold** document${after}`)?.message).toBe('line 1: a heading with markup');
@@ -492,5 +499,41 @@ describe('the About Markdown reader', () => {
     ]);
     // The parse itself is left as the Markdown has it.
     expect(blocks[2]).toEqual({ kind: 'heading', depth: 2, text: "Who it's for", id: 'who-its-for' });
+  });
+  it('quote_marks_curl_elisions_numbers_and_marks_after_dashes', () => {
+    const shown = (line: string) => documentText(curlQuotes(parseDocument(doc(line), resolve))).at(-1);
+    // A leading elision is an apostrophe, as is one before a year.
+    expect(shown("Open 'til six, tell 'em, rock 'n' roll, the class of '26.")).toBe(
+      'Open ’til six, tell ’em, rock ’n’ roll, the class of ’26.',
+    );
+    // A quoted number opens and closes.
+    expect(shown("A score of '24.7%' then '9'.")).toBe('A score of ‘24.7%’ then ‘9’.');
+    // A quotation opens after a hyphen, an ellipsis or a slash, and closes before a space.
+    expect(shown('A well-"known" fact; he said…"yes" and/"no".')).toBe('A well-“known” fact; he said…“yes” and/“no”.');
+    expect(shown('He stopped at "so…" and went on.')).toBe('He stopped at “so…” and went on.');
+    // A mark before punctuation, or at the end of the block, closes, after a dash or an ellipsis too.
+    expect(shown('He said "wait-". She said "so…", and "**so…**".')).toBe('He said “wait-”. She said “so…”, and “so…”.');
+    expect(shown('It ends "so…"')).toBe('It ends “so…”');
+    // A quoted word or number that only starts like an elision is a quotation.
+    expect(shown("An 'em-dash', an 'n-gram' and '26' in quotes.")).toBe('An ‘em-dash’, an ‘n-gram’ and ‘26’ in quotes.');
+    expect(shown("Mark it 'N/A', the 'Nürnberg' trial, the 'cause' field, the unit 'em'.")).toBe(
+      'Mark it ‘N/A’, the ‘Nürnberg’ trial, the ‘cause’ field, the unit ‘em’.',
+    );
+    expect(shown("A score of '42', open '24/7', at '10:30', '10x' faster.")).toBe(
+      'A score of ‘42’, open ‘24/7’, at ‘10:30’, ‘10x’ faster.',
+    );
+    expect(shown('He said "wait…". The prefix "pre-". A path "/about/".')).toBe(
+      'He said “wait…”. The prefix “pre-”. A path “/about/”.',
+    );
+    expect(shown('He trailed off with "wait…"')).toBe('He trailed off with “wait…”');
+    // A quotation that starts with punctuation still opens after a space, as it always did.
+    expect(shown('The character ")" and "..." and "’" and "\'Hi,\' she said".')).toBe(
+      'The character “)” and “...” and “’” and “‘Hi,’ she said”.',
+    );
+    // After a dash too, a mark closes before punctuation and opens before words.
+    expect(shown('He said "no—". She said—"yes".')).toBe('He said “no—”. She said—“yes”.');
+    // What follows a mark is read across bold and links, as what comes before it is.
+    const blocks = curlQuotes(parseDocument(doc("In the '**90s**, and '[90s](https://example.com/90s) too."), resolve));
+    expect(documentText(blocks).at(-1)).toBe('In the ’90s, and ’90s too.');
   });
 });

@@ -92,7 +92,13 @@ _CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)((?:(?!\n[ \t]*\n).)+?)(?<!`)\1(?!`)", 
 # so links are matched over the whole text, and each target's line comes from its offset.
 _GAP = r"[ \t]*(?:\n[ \t]*)?"
 _TEXT_CHAR = r"(?:(?!\n[ \t]*\n)[^\[\]\\]|\\.)"
-_BARE_TARGET = r"(?:[^\s()\\]|\\.|\((?:[^\s()\\]|\\.)*\))+"   # parentheses in it must balance, one level deep
+_TARGET_CHAR = r"(?:[^\s()\\]|\\.)"
+# Parentheses in a bare target must balance. GitHub allows any depth; `re` has no recursion, so the pattern
+# nests three levels, more than any address has.
+_BALANCED = _TARGET_CHAR
+for _ in range(3):
+    _BALANCED = rf"(?:{_TARGET_CHAR}|\({_BALANCED}*\))"
+_BARE_TARGET = rf"{_BALANCED}+"
 _INLINE_LINK = re.compile(   # [text](target "title") or ![alt](<target>); the target is group 1
     rf"!?\[(?:{_TEXT_CHAR}|\[{_TEXT_CHAR}*\])*\]"
     rf"\({_GAP}(<[^<>\n]*>|{_BARE_TARGET})(?:(?=\s){_GAP}(?:\"[^\"]*\"|'[^']*'|\([^)]*\)))?{_GAP}\)"
