@@ -29,10 +29,10 @@ const PAGES = {
     summary: 'What Claude Desk is, who it’s for, what v1 enforces in code, and how we’ll know it works.',
     sections: [
       'The product',
-      "Who it's for and the problem",
+      'Who it’s for and the problem',
       'Why Anthropic',
       'v1',
-      "How we'll know it works",
+      'How we’ll know it works',
       'Business path',
       'The prototype',
     ],
@@ -42,7 +42,7 @@ const PAGES = {
     title: 'Capability prediction',
     summary:
       'What a generally available Claude model will do for a small business by October 2027, and what will still hold it back.',
-    sections: ['Capability', "Why it's coming", 'Characteristics', 'Limitations', 'Readiness'],
+    sections: ['Capability', 'Why it’s coming', 'Characteristics', 'Limitations', 'Readiness'],
   },
 } as const;
 
@@ -90,7 +90,7 @@ function flat(text: string | null | undefined): string {
   return (text ?? '').replace(/\s+/g, ' ').trim();
 }
 
-/** Curly apostrophes as straight ones, so a typographic apostrophe compares equal to the Markdown's. */
+/** Curly apostrophes as straight ones, so the page and the parsed blocks compare equal however each writes them. */
 function apostrophes(text: string): string {
   return text.replace(/[‘’]/g, "'");
 }
