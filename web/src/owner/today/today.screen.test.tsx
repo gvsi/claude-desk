@@ -30,6 +30,8 @@ const UNCERTAIN = "I couldn't confirm your answer went through. Try again; it ca
 const LIMIT_LINE = "That's above your limit for taking money without asking. Allow it this time, or change the limit on Rules.";
 const NOT_OFFERED = "That answer isn't available for this request.";
 const UNAVAILABLE = 'Something went wrong on our side. Try again in a moment.';
+/** The owner line for the kernel's `conflict` (the design system's error copy). */
+const CHANGED = 'This changed while you were looking. Reload to see where it stands.';
 
 /** The requests a route got, by key. */
 const requests = (key: string) => mockStore.requests.filter((r) => r.key === key);
@@ -516,6 +518,33 @@ describe('Today', () => {
     await expect.element(card.getByText('This request expired before you answered. Nothing was done.', { exact: true })).toBeVisible();
     expect(region(screen, 'Needs you').getByRole('alert').elements()).toHaveLength(0);
     expect(card.getByRole('button', { name: /Allow|Deny/ }).elements()).toHaveLength(0);
+  });
+
+  it('held_conflict_shows_the_owner_line', async () => {
+    const { screen } = await renderRoute(TODAY);
+    // The kernel's own conflict, with no decision: the request is still held, so the card says
+    // what the owner line for it says and keeps its answers to try again. A decision in that body
+    // isn't the final state (only `already_resolved` carries one), so it's never shown.
+    const held = seededHold();
+    mockStore.inject({ route: 'answer', status: 409, body: { error: 'kernel', code: 'conflict' } });
+    mockStore.inject({ route: 'answer', status: 409, body: { error: 'kernel', code: 'conflict', decision: { ...held, state: 'executed', answers: [] } } });
+    const card = heldCard(screen, SEEDED_REASON);
+    const allow = card.getByRole('button', { name: 'Allow this time' });
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      await allow.click();
+      await expect.poll(() => requests('answer').length).toBe(attempt);
+      await expect.element(card.getByRole('alert').getByText(CHANGED, { exact: true })).toBeVisible();
+      expect(card.getByText("You allowed this. It's done.", { exact: true }).elements()).toHaveLength(0);
+      await expect.element(card.getByText('Waiting for your answer', { exact: true })).toBeVisible();
+      await expect.element(allow).not.toHaveAttribute('aria-disabled');
+      await expect.element(card.getByRole('button', { name: 'Deny this time' })).not.toHaveAttribute('aria-disabled');
+    }
+
+    // Trying again goes through.
+    await allow.click();
+    await expect.element(card.getByText("You allowed this. It's done.", { exact: true })).toBeVisible();
+    expect(requests('answer')).toHaveLength(3);
+    expect(card.getByRole('alert').elements()).toHaveLength(0);
   });
 
   it('lost_answer_is_not_called_held', async () => {

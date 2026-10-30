@@ -9,7 +9,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useRef, useState } from 'react';
 
 import type { ApprovalAnswer, Decision, RuleCard } from '../../api/contracts.ts';
-import { ApiError, isUncertain, request } from '../../api/http.ts';
+import { ApiError, isUncertain, ownerErrorCopy, request } from '../../api/http.ts';
 import type { NeedsYouItem, RulesDraft } from '../../api/views.ts';
 
 /** A held request as Needs you lists it. */
@@ -53,6 +53,15 @@ const ABOVE_LIMIT_LINE = "That's above your limit for taking money without askin
 const NOT_OFFERED_LINE = "That answer isn't available for this request.";
 const CHANGED_LINE = 'This request changed while you were answering. Reload to see where it stands.';
 
+/**
+ * The 409 that says the request was answered already, with its final state: `already_resolved`.
+ * The kernel's own 409 (`{error: "kernel", code}`) carries no decision and leaves the request held.
+ */
+function finalStateOf(err: unknown, decisionId: string): Decision | null {
+  if (!(err instanceof ApiError) || err.kind !== 'conflict' || err.code !== 'already_resolved') return null;
+  return err.decision !== null && err.decision.decision_id === decisionId ? err.decision : null;
+}
+
 /** The owner's line for an answer that didn't settle the request. */
 function lineFor(err: unknown, a: ApprovalAnswer): string {
   if (isUncertain(err)) return UNCERTAIN_LINE;
@@ -61,8 +70,12 @@ function lineFor(err: unknown, a: ApprovalAnswer): string {
     // a screen read before the cap was lowered can send it.
     return a === 'allow_person' ? ABOVE_LIMIT_LINE : NOT_OFFERED_LINE;
   }
-  // A conflict without the request's state says only that it moved on.
-  if (err instanceof ApiError && err.kind === 'conflict') return CHANGED_LINE;
+  if (err instanceof ApiError && err.kind === 'conflict') {
+    // Answered already, but without a final state to show: it moved on.
+    if (err.code === 'already_resolved') return CHANGED_LINE;
+    // The kernel's conflict on a request that is still held: its line, and the answers stay to try again.
+    return ownerErrorCopy(err);
+  }
   return STILL_HELD_LINE;
 }
 
@@ -125,8 +138,9 @@ export function useAnswer(deskId: string): UseAnswer {
       } catch (err) {
         // Answered already (a repeat of an answer that went through, or one that came too late):
         // the request's final state is the answer.
-        if (err instanceof ApiError && err.kind === 'conflict' && err.decision !== null && err.decision.decision_id === id) {
-          settle(item, err.decision, null);
+        const final = finalStateOf(err, id);
+        if (final !== null) {
+          settle(item, final, null);
           return;
         }
         setErrors((current) => withEntry(current, id, lineFor(err, a)));
