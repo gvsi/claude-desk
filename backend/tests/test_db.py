@@ -4,14 +4,16 @@ These tests run against the local Postgres (`docker compose up -d db`) after
 `cd backend && uv run alembic upgrade head && cd .. && make db-roles`. Introspection runs as
 desk_admin; privilege checks connect as the role under test. Every write is rolled back, except
 the rows `committed_copies` commits as desk_admin (another role sees only committed rows) and
-removes afterwards. A migration taken down and up runs in a scratch database of its own, dropped
-afterwards; the suite's database is never downgraded.
+removes afterwards. A migration taken down and up runs in a scratch database of its own, made
+next to the suite's and dropped afterwards (`scratch`, `scratch_database`); the suite's database
+is never downgraded.
 """
 
 import hashlib
 import re
 import warnings
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import get_args
@@ -649,9 +651,42 @@ def alembic_config() -> Config:
     return config
 
 
-def test_migration_keeps_existing_versions_at_five_hundred(admin):
+@dataclass
+class Scratch:
+    """A database of the migration tests' own, next to the suite's, migrated from empty to head and
+    dropped once they have run: a test migrates it down and back up, never the suite's database."""
+
+    url: str
+    conn: psycopg.Connection              # as desk_admin, autocommitted
+
+    def migrate(self, step: Callable[[Config, str], None], revision: str) -> None:
+        """Alembic's `step` (`command.upgrade`, `downgrade` or `stamp`) to `revision` on this
+        database: env.py migrates the database ADMIN_DATABASE_URL names."""
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setenv("ADMIN_DATABASE_URL", self.url)
+            step(alembic_config(), revision)
+
+
+@pytest.fixture(scope="module")
+def scratch(admin) -> Iterator[Scratch]:
+    base = make_url(database_url("ADMIN"))
+    name = f"{base.database}_migrations_{uuid4().hex[:8]}"
+    admin.execute(SQL("CREATE DATABASE {}").format(Identifier(name)))
+    try:
+        url = base.set(database=name).render_as_string(hide_password=False)
+        with psycopg.connect(libpq_url(url), autocommit=True) as conn:
+            made = Scratch(url, conn)
+            made.migrate(command.upgrade, "head")
+            yield made
+    finally:
+        admin.execute(SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(Identifier(name)))
+
+
+def test_migration_keeps_existing_versions_at_five_hundred(scratch):
     """A version written before the money cap's revision keeps the $500 it was held to; one written
     after it without a cap is at 0, so every charge and payout asks."""
+    admin = scratch.conn
+
     def insert(desk_id: str) -> None:
         admin.execute(
             "INSERT INTO kernel.policy_versions (desk_id, version, copy_id, cards, status, cedar_sha256, schema_sha256,"
@@ -662,13 +697,12 @@ def test_migration_keeps_existing_versions_at_five_hundred(admin):
         return admin.execute("SELECT auto_money_cap_cents FROM kernel.policy_versions WHERE desk_id = %s",
                              (desk_id,)).fetchone()[0]
 
-    config = alembic_config()
-    before = ScriptDirectory.from_config(config).get_revision(MONEY_CAP_REVISION).down_revision
+    before = ScriptDirectory.from_config(alembic_config()).get_revision(MONEY_CAP_REVISION).down_revision
     try:
-        command.downgrade(config, before)
+        scratch.migrate(command.downgrade, before)
         assert "auto_money_cap_cents" not in columns(admin, "kernel", "policy_versions")
         insert("desk-before-cap")
-        command.upgrade(config, "head")
+        scratch.migrate(command.upgrade, "head")
         assert cap("desk-before-cap") == 50_000
         insert("desk-after-cap")
         assert cap("desk-after-cap") == 0
@@ -678,27 +712,28 @@ def test_migration_keeps_existing_versions_at_five_hundred(admin):
                               (refused, "desk-after-cap"))
     finally:
         admin.execute("DELETE FROM kernel.policy_versions WHERE copy_id = 'copy-cap'")
-        command.upgrade(config, "head")
+        scratch.migrate(command.upgrade, "head")
 
 
 MONEY_CAP_EDGES_REVISION = "01b_3e_money_cap_edges"
 
 
-def test_rows_from_before_the_cap_edges_claim_nothing(admin):
+def test_rows_from_before_the_cap_edges_claim_nothing(scratch):
     """A decision written before the money cap's edges revision is taken as one whose asker could
     not be given allow_person, since its standing then wasn't recorded: it fails closed. An
     execution from then names no version or cap; from now on one names both or neither, and the cap
     stays within the platform ceiling."""
+    admin = scratch.conn
+
     def insert_execution(action_id: str, *checked: int | None) -> None:
         """An intent row, with `(policy_version, auto_money_cap_cents)` when `checked` is given."""
         names, values = (", policy_version, auto_money_cap_cents", ", %s, %s") if checked else ("", "")
         admin.execute(f"INSERT INTO kernel.executions (action_id, copy_id, decision_id, state, started_at{names})"
                       f" VALUES (%s, 'copy-edges', 'dec-edges', 'intent', now(){values})", (action_id, *checked))
 
-    config = alembic_config()
-    before = ScriptDirectory.from_config(config).get_revision(MONEY_CAP_EDGES_REVISION).down_revision
+    before = ScriptDirectory.from_config(alembic_config()).get_revision(MONEY_CAP_EDGES_REVISION).down_revision
     try:
-        command.downgrade(config, before)
+        scratch.migrate(command.downgrade, before)
         assert "allow_person_eligible" not in columns(admin, "kernel", "decisions")
         assert "policy_version" not in columns(admin, "kernel", "executions")
         admin.execute(
@@ -708,7 +743,7 @@ def test_rows_from_before_the_cap_edges_claim_nothing(admin):
             " 'native.payment_link', 'hold', 'held', '[\"allow_once\", \"deny_once\", \"allow_person\"]', 1, 'r',"
             " 'v', now() + interval '1 day', 1)")
         insert_execution("act-before-edges")
-        command.upgrade(config, "head")
+        scratch.migrate(command.upgrade, "head")
         assert admin.execute("SELECT allow_person_eligible FROM kernel.decisions"
                              " WHERE decision_id = 'dec-before-edges'").fetchone() == (False,)
         assert nullable_columns(admin, "kernel", "decisions")["allow_person_eligible"] is False
@@ -721,33 +756,33 @@ def test_rows_from_before_the_cap_edges_claim_nothing(admin):
     finally:
         admin.execute("DELETE FROM kernel.decisions WHERE copy_id = 'copy-edges'")
         admin.execute("DELETE FROM kernel.executions WHERE copy_id = 'copy-edges'")
-        command.upgrade(config, "head")
+        scratch.migrate(command.upgrade, "head")
 
 
 DOCUMENT_LINKS_REVISION = "01b_6_document_links"
 
 
-def test_a_downgrade_below_document_links_leaves_no_link_behind(admin, committed_copies):
+def test_a_downgrade_below_document_links_leaves_no_link_behind(scratch):
     """Below the document links' revision a link would keep only its key and copy, and the upgrade
     couldn't add its NOT NULL columns back: the downgrade empties the table first. Back at head,
     a link's token hash is 64 lowercase hex digits."""
+    admin = scratch.conn
+
     def insert(link_id: str, token: str, digest: str) -> None:
-        copy_id = committed_copies[0]
         admin.execute(
             "INSERT INTO kernel.document_links (link_id, copy_id, desk_id, document_id, session_id, person_id, token,"
             " token_sha256, created_at, expires_at)"
-            " VALUES (%s, %s, %s, %s, %s, 'person-1', %s, %s, now(), now() + interval '1 day')",
-            (link_id, copy_id, f"desk-{copy_id}", f"doc-{copy_id}", f"session-{copy_id}", token, digest))
+            " VALUES (%s, 'copy-links', 'desk-links', 'doc-links', 'session-links', 'person-1', %s, %s, now(),"
+            " now() + interval '1 day')", (link_id, token, digest))
 
     insert("link-downgraded", "token-downgraded", hashlib.sha256(b"token-downgraded").hexdigest())
-    config = alembic_config()
-    before = ScriptDirectory.from_config(config).get_revision(DOCUMENT_LINKS_REVISION).down_revision
+    before = ScriptDirectory.from_config(alembic_config()).get_revision(DOCUMENT_LINKS_REVISION).down_revision
     try:
-        command.downgrade(config, before)
+        scratch.migrate(command.downgrade, before)
         assert columns(admin, "kernel", "document_links") == ["link_id", "copy_id"]
         assert admin.execute("SELECT count(*) FROM kernel.document_links").fetchone() == (0,)
     finally:
-        command.upgrade(config, "head")
+        scratch.migrate(command.upgrade, "head")
     assert "token_sha256" in columns(admin, "kernel", "document_links")
     for digest in ("A" * 64, "0" * 63, "token-upgraded"):
         with pytest.raises(psycopg.errors.CheckViolation):
