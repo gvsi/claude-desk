@@ -154,7 +154,8 @@ if [[ -z $data_only ]]; then
     # Keychain is the likely cause. For either, the advice is to run again, then to export DESK_PASSCODE.
     probe=$(security find-generic-password -s claude-desk-passcode -g 2>&1 >/dev/null) ||
       no_passcode retry "the macOS Keychain item claude-desk-passcode couldn't be read a second time, to check how it's stored (is the login Keychain unlocked?)"
-    if [[ $probe == 'password: 0x'* ]] || (LC_ALL=C; [[ $passcode == *[![:print:]]* || $passcode == *\\* ]]); then
+    if [[ $probe == 'password: 0x'* || $probe == *$'\n''password: 0x'* ]] ||
+      (LC_ALL=C; [[ $passcode == *[![:print:]]* || $passcode == *\\* ]]); then
       no_passcode replace "the macOS Keychain item claude-desk-passcode has a character outside printable ASCII, or a backslash (it isn't shown)"
     fi
     [[ $probe == "password: \"$passcode\"" ]] ||

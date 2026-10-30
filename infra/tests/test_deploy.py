@@ -771,21 +771,29 @@ def test_a_keychain_passcode_that_isnt_printable_ascii_is_refused_unshown_before
         assert form not in run.text()
 
 
-@pytest.mark.parametrize("item", ["café-keychain-passcode", "printable-keychain-passcode"])
-def test_a_stored_form_shown_any_other_way_is_refused_unshown_before_any_step(deploy, item):
-    """deploy.sh accepts only `password: "<the value -w gave>"` from -g, and refuses any other answer,
-    failing closed: here a warning line before the password line, which hid a `password: 0x…` from
-    a check on how the answer starts, and would hide it before a printable one just the same. Such
-    an answer says nothing against the item, which may be fine, so the advice is to run deploy.sh
-    again and, if it repeats, to export DESK_PASSCODE for the run, never to replace the item."""
+@pytest.mark.parametrize(("item", "refused", "advice"), [
+    ("café-keychain-passcode", "has a character outside printable ASCII, or a backslash (it isn't shown)",
+     REPLACE_IT),
+    ("printable-keychain-passcode",
+     "couldn't be checked: `security -g` showed it in a form deploy.sh doesn't accept (it isn't shown)", RERUN_IT),
+], ids=["not-printable", "printable"])
+def test_a_stored_form_behind_another_line_is_refused_unshown_with_advice_that_fits(deploy, item, refused, advice):
+    """deploy.sh accepts only the one line `password: "<the value -w gave>"` from -g, and refuses any
+    other answer, failing closed; here a warning line comes before the password line. A
+    `password: 0x…` line is found wherever it is, so a passcode outside printable ASCII is refused as
+    such, with the advice to replace the item. A printable passcode's answer says nothing against the
+    item, which may be fine, so the advice is to run deploy.sh again and, if it repeats, to export
+    DESK_PASSCODE for the run, never to replace the item."""
     run = deploy(keychain_item=item, DESK_PASSCODE=None, DESK_DEPLOY_ACCOUNT=ACCOUNT, KEYCHAIN_PROBE_WARNING="1",
                  LANG="en_US.UTF-8", LC_ALL="en_US.UTF-8")
     assert run.status == 2
     assert [call["argv"] for call in run.calls] == [KEYCHAIN_LOOKUP, KEYCHAIN_PROBE]
-    assert ("the macOS Keychain item claude-desk-passcode couldn't be checked: `security -g` showed it in a form "
-            "deploy.sh doesn't accept (it isn't shown)") in run.output
-    assert RERUN_IT in run.output
-    assert "add-generic-password" not in run.output                   # neither storing nor replacing it
+    assert f"the macOS Keychain item claude-desk-passcode {refused}" in run.output
+    assert advice in run.output
+    if advice == RERUN_IT:
+        assert "add-generic-password" not in run.output               # neither storing nor replacing it
+    else:
+        assert STORE_IT not in run.output and RERUN_IT not in run.output  # the item is there: replace it
     secret = "keychain-passcode"
     for form in (secret, secret.encode().hex(), secret.encode().hex().upper()):
         assert form not in run.text()
