@@ -216,8 +216,11 @@ interface NewestInView {
  * page makes (`beforeChange`) if the conversation has scrolled since the page last knew: a scroll
  * the page makes at once, such as focus moving up with the keyboard, sends its event only with the
  * next frame, and a reply arriving in between would otherwise take the visitor back down to the
- * end. The page changing size moves the end without scrolling, so it doesn't count as the visitor
- * moving away.
+ * end. The page changing size moves the end under the composer, and doesn't count as the visitor
+ * moving away. It can scroll the conversation too: when the window narrows and the rows rewrap
+ * taller, the browser's scroll anchoring moves the conversation down to keep the rows on screen
+ * where they were. So while the visitor is at the end, only a move up counts as them leaving it;
+ * once they have moved back, any move counts.
  */
 function useNewestInView(end: RefObject<HTMLElement | null>, composer: RefObject<HTMLElement | null>, shown: boolean): NewestInView {
   const atTheEnd = useRef(true);
@@ -248,14 +251,17 @@ function useNewestInView(end: RefObject<HTMLElement | null>, composer: RefObject
     noteSeen();
   }, [end, composer, noteSeen]);
 
-  // Whether the conversation has scrolled since the page last knew where the visitor was. Its
-  // scroller changing is not the visitor moving: setup's preview scrolls the page until the
-  // conversation overflows the panel around it, and the panel from then on.
+  // Whether the conversation has scrolled since the page last knew where the visitor was, in a way
+  // that may have moved them. Its scroller changing is not the visitor moving: setup's preview
+  // scrolls the page until the conversation overflows the panel around it, and the panel from then
+  // on. While the visitor is at the end, only a move up counts: nothing lies below the end, and the
+  // browser's scroll anchoring moves the conversation down when the rows above grow.
   const scrolledSinceSeen = useCallback((): boolean => {
     const seen = seenAt.current;
     if (!seen || !end.current) return false;
     const now = scrollerAt(end.current);
-    return now.scroller === seen.scroller && now.top !== seen.top;
+    if (now.scroller !== seen.scroller) return false;
+    return atTheEnd.current ? now.top < seen.top : now.top !== seen.top;
   }, [end]);
 
   useEffect(() => {

@@ -647,19 +647,57 @@ describe('public chat page', () => {
     // joins before the browser's next frame tells the page the composer changed size. The visitor
     // never moved, so the end comes back above the composer.
     const box = screen.getByRole('textbox', { name: 'Message Rivera Plumbing' }).element() as HTMLTextAreaElement;
+    let grownOver = 0;
     await new Promise<void>((resolve) => {
       requestAnimationFrame(() => {
         realSetTimeout(() => {
           Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(box, 'one\ntwo\nthree\nfour\nfive\nsix');
           box.dispatchEvent(new Event('input', { bubbles: true }));
+          grownOver = endUnderTheComposer(screen);
           mockStore.emit(RIVERA.slug, { type: 'owner_joined', name: 'Maria Rivera' });
           resolve();
         }, 0);
       });
     });
+    expect(grownOver, 'the composer grew over the end before Maria joined').toBeGreaterThan(48);
     await expect.element(screen.getByText('Maria Rivera joined the chat', { exact: true })).toBeInTheDocument();
     await sleep(200);
     expect(box.value.split('\n'), 'the pasted lines are in the composer').toHaveLength(6);
+    await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
+  });
+
+  it('newest_row_follows_a_narrower_window', async () => {
+    const { screen } = await renderRoute(PAGE, { viewport: 'desktop', seed: 'rivera' });
+    await page.viewport(700, VIEWPORTS.desktop.height);
+    await ready(screen);
+    const long = Array.from({ length: 5 }, () => 'The kitchen sink drains slowly and gurgles whenever the dishwasher runs, and the bathroom one has started to smell.').join(' ');
+    for (const text of ['How much is drain clearing?', 'Can someone come Tuesday afternoon?', 'Book the first one', 'Can I get 15% off if I pay cash?', long]) {
+      await say(screen, text);
+      await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
+    }
+
+    // The window narrows in one step at the end of the chat (a split view, a window snapped
+    // narrower), and the visitor cancels their held request in that same moment, before the
+    // browser tells the page the shell changed size. The rows rewrap taller: the browser's scroll
+    // anchoring moves the page down to keep the rows on screen where they were, and the end slips
+    // under the composer. The visitor never moved, so the end comes back above the composer and
+    // stays there as the chat goes on.
+    const cancel = screen.getByRole('button', { name: 'Cancel this request' }).element() as HTMLButtonElement;
+    const atTheEnd = document.scrollingElement?.scrollTop ?? 0;
+    let anchoredTo = atTheEnd;
+    const narrowed = () => {
+      anchoredTo = document.scrollingElement?.scrollTop ?? 0;
+      cancel.click();
+    };
+    window.addEventListener('resize', narrowed, { once: true });
+    onTestFinished(() => window.removeEventListener('resize', narrowed));
+    await page.viewport(380, VIEWPORTS.desktop.height);
+    await expect.element(screen.getByRole('button', { name: 'Cancel this request' })).not.toBeInTheDocument();
+    expect(anchoredTo, 'scroll anchoring moved the page down as the rows rewrapped').toBeGreaterThan(atTheEnd);
+    await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
+
+    mockStore.emit(RIVERA.slug, { type: 'owner_joined', name: 'Maria Rivera' });
+    await expect.element(screen.getByText('Maria Rivera joined the chat', { exact: true })).toBeInTheDocument();
     await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
   });
 
