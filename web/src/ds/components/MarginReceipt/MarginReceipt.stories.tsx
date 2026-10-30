@@ -1,9 +1,13 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn } from 'storybook/test';
 
-import type { SseEvent } from '../../../api/contracts.ts';
+import type { Decision, SseEvent } from '../../../api/contracts.ts';
 import { rivera } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { ApprovalCard } from '../ApprovalCard/ApprovalCard.tsx';
+import { Transcript } from '../Transcript/Transcript.tsx';
+import { TranscriptRow } from '../TranscriptRow/TranscriptRow.tsx';
+import { VisitorMessage } from '../VisitorMessage/VisitorMessage.tsx';
 import { MarginReceipt } from './MarginReceipt.tsx';
 import { receiptFromEvent } from './receiptTone.ts';
 
@@ -24,7 +28,9 @@ function statusIn(turns: (typeof rivera.conversations)['danaLive']['turns'], dec
   throw new Error(`no status event for ${decisionId}`);
 }
 
-const executed = receiptFromEvent(only(rivera.events.quoteTurn, 'receipt'));
+/** Dana's list-price quote ran on its own: its receipt reads `executed`, and its decision is `rivera.decisions.allowed`. */
+const quoteRan = only(rivera.events.quoteTurn, 'receipt');
+const executed = receiptFromEvent(quoteRan);
 const held = receiptFromEvent(only(rivera.events.heldTurn, 'held'));
 const replyChecked = receiptFromEvent(only(rivera.events.quoteTurn, 'message'));
 const replyHandedOff = receiptFromEvent(only(rivera.events.heldTurn, 'message'));
@@ -37,6 +43,63 @@ function dotIn(root: HTMLElement): HTMLElement {
   const dots = root.querySelectorAll<HTMLElement>('.cd-status-dot');
   if (dots.length !== 1) throw new Error(`expected one status dot, found ${dots.length}`);
   return dots[0] as HTMLElement;
+}
+
+/** `text-primary` and `text-secondary`, as the browser computes them. */
+const TEXT_PRIMARY = 'rgba(250, 249, 245, 0.92)';
+const TEXT_SECONDARY = 'rgba(250, 249, 245, 0.64)';
+
+/** A decision's receipt as an owner screen passes it: the event's line, and the decision's reason. */
+function ownerReceipt(decision: Decision) {
+  return {
+    source: { kind: 'decision', state: decision.state } as const,
+    plain: decision.visitor_plain,
+    ledgerSeq: decision.ledger_seq,
+    reason: decision.reason_plain,
+  };
+}
+
+/**
+ * The four states an owner receipt gives a reason for, each with its decision's reason, the owner's
+ * words and the dot it shows. The executed one is Dana's quote, which ran without a hold, as an
+ * auto-allowed action's receipt does; the fixture's `decisions.executed` is the held discount after
+ * it was allowed, whose later receipts keep the kernel's line.
+ */
+const OWNER_LINES = [
+  { receipt: ownerReceipt(rivera.decisions.held), words: 'Held for you', tone: 'held' },
+  { receipt: ownerReceipt(rivera.decisions.refused), words: 'Stopped', tone: 'refused' },
+  { receipt: { ...executed, reason: rivera.decisions.allowed.reason_plain }, words: 'Automatic', tone: 'handled' },
+  { receipt: ownerReceipt(rivera.decisions.allowed), words: 'Running', tone: 'handled' },
+] as const;
+
+/** What a receipt shows on screen: its text without the screen-reader-only trace hint. */
+function visibleText(receipt: HTMLElement): string {
+  const copy = receipt.cloneNode(true) as HTMLElement;
+  for (const hidden of copy.querySelectorAll('.cd-sr-only')) hidden.remove();
+  return copy.textContent ?? '';
+}
+
+/** The owner's words that lead a receipt's line. */
+function leadIn(receipt: HTMLElement): HTMLElement {
+  const lead = receipt.querySelector<HTMLElement>('.cd-margin-line__lead');
+  if (!lead) throw new Error('no state words lead the receipt');
+  return lead;
+}
+
+/** The words lead in primary ink, in the line's caption size and weight; the rest stays secondary. */
+function expectLeadLook(receipt: HTMLElement): void {
+  const line = getComputedStyle(receipt);
+  expectComputed(leadIn(receipt), {
+    color: TEXT_PRIMARY,
+    fontFamily: line.fontFamily,
+    fontSize: '12px',
+    lineHeight: '17px',
+    fontWeight: line.fontWeight,
+  });
+  const text = receipt.querySelector('.cd-margin-line__text');
+  if (!text) throw new Error('no line text');
+  expectComputed(receipt, { color: TEXT_SECONDARY });
+  expectComputed(text, { color: TEXT_SECONDARY });
 }
 
 const meta = {
@@ -169,6 +232,100 @@ export const VisitorReadOnly: Story = {
     if (!receipt) throw new Error('no receipt');
     await expect(receipt.tagName).toBe('P');
     await expect(receipt.textContent).toBe(only(rivera.events.heldTurn, 'held').visitor_plain);
+    await expect(dotIn(canvasElement)).toHaveClass('cd-status-dot--held');
+  },
+};
+
+export const OwnerReason: Story = {
+  render: ({ onOpenTrace }) => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-8)' }}>
+      {OWNER_LINES.map(({ receipt }) => (
+        <MarginReceipt key={receipt.ledgerSeq} {...receipt} onOpenTrace={onOpenTrace} />
+      ))}
+    </div>
+  ),
+  parameters: {
+    canvasNote:
+      "The board's receipts are owner notes written for the board; here each decision's receipt leads with the owner's words for its state, then the decision's reason_plain from the Rivera fixture.",
+  },
+  play: async ({ canvas, canvasElement }) => {
+    await expect(quoteRan.state).toBe('executed');
+    await expect(quoteRan.decision_id).toBe(rivera.decisions.allowed.decision_id);
+    const shown = [...canvasElement.querySelectorAll<HTMLElement>('.cd-margin-receipt')];
+    await expect(shown).toHaveLength(OWNER_LINES.length);
+    for (const [index, { receipt: { reason }, words, tone }] of OWNER_LINES.entries()) {
+      // owner_receipt_names_its_state: "{words}. {reason}", and the button is named by that line.
+      const line = `${words}. ${reason}`;
+      const receipt = canvas.getByRole('button', { name: `${line} Open the full trace.` });
+      await expect(receipt).toBe(shown[index]);
+      await expect(visibleText(receipt)).toBe(line);
+      // The period after the words belongs to the lead.
+      await expect(leadIn(receipt).textContent).toBe(`${words}.`);
+      expectLeadLook(receipt);
+      const dot = receipt.querySelector('.cd-status-dot');
+      await expect(dot).toHaveClass(`cd-status-dot--${tone}`);
+      await expect(dot).toHaveAttribute('aria-hidden', 'true');
+    }
+  },
+};
+
+/** The visitor's question the seeded hold answers: the row its receipt attaches under. */
+const heldQuestion = rivera.conversations.visitor.turns.flatMap((turn) => (turn.kind === 'visitor' ? [turn.text] : []))[0];
+
+export const HeldWithCardBelow: Story = {
+  render: ({ onOpenTrace }) => (
+    <Transcript label="Conversation with a visitor">
+      <TranscriptRow margin={<MarginReceipt {...ownerReceipt(rivera.decisions.held)} cardBelow onOpenTrace={onOpenTrace} />}>
+        <VisitorMessage text={heldQuestion ?? ''} />
+      </TranscriptRow>
+      <ApprovalCard
+        decision={rivera.decisions.held}
+        heldBy={rivera.ruleCards['rv-quote'].reason}
+        waiting="Web chat, 2 min ago"
+        onAnswer={fn()}
+      />
+    </Transcript>
+  ),
+  parameters: {
+    canvasNote:
+      "The board's receipts are owner notes written for the board; here the held quote's receipt names only its state, because its ApprovalCard sits right under the row and its headline gives the reason.",
+  },
+  play: async ({ canvas, canvasElement }) => {
+    const hold = rivera.decisions.held;
+    if (heldQuestion === undefined) throw new Error('the Rivera fixture has no visitor question');
+
+    // held_receipt_with_card_below: the words alone, with no period, and nothing of the reason.
+    const receipt = canvas.getByRole('button', { name: 'Held for you Open the full trace.' });
+    await expect(visibleText(receipt)).toBe('Held for you');
+    await expect(leadIn(receipt).textContent).toBe('Held for you');
+    expectLeadLook(receipt);
+    const dots = receipt.querySelectorAll('.cd-status-dot');
+    await expect(dots).toHaveLength(1);
+    await expect(dots[0]).toHaveClass('cd-status-dot--held');
+
+    // The reason is the card's headline, shown once on the page.
+    const card = canvas.getByRole('article', { name: `Held for you: ${hold.reason_plain}` });
+    await expect(canvas.getAllByText(hold.reason_plain)).toHaveLength(1);
+    await expect(card).toHaveTextContent(hold.reason_plain);
+
+    // The card is drawn right under the receipt's row.
+    const row = receipt.closest<HTMLElement>('.cd-transcript-row');
+    if (!row) throw new Error('the receipt is not in a row');
+    await expect(row.nextElementSibling).toBe(card);
+    await expect(card.getBoundingClientRect().top).toBeGreaterThanOrEqual(receipt.getBoundingClientRect().bottom);
+    await expect(canvasElement.querySelectorAll('.cd-margin-receipt')).toHaveLength(1);
+  },
+};
+
+export const ReplyIgnoresReason: Story = {
+  // A reply's check has no owner words: given a decision's reason and a card below, it still shows its own line.
+  args: { ...replyHandedOff, reason: rivera.decisions.held.reason_plain, cardBelow: true },
+  play: async ({ canvas, canvasElement }) => {
+    const receipt = canvas.getByRole('button', { name: `${replyHandedOff.plain} Open the full trace.` });
+    await expect(visibleText(receipt)).toBe(replyHandedOff.plain);
+    await expect(receipt.querySelector('.cd-margin-line__lead')).toBeNull();
+    await expect(canvas.queryByText(rivera.decisions.held.reason_plain, { exact: false })).toBeNull();
+    expectComputed(receipt, { color: TEXT_SECONDARY });
     await expect(dotIn(canvasElement)).toHaveClass('cd-status-dot--held');
   },
 };

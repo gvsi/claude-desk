@@ -10,7 +10,7 @@
 
 ## What the card shows
 
-- An `article` named "Held for you: {reason_plain}".
+- An `article` named "Held for you: {reason_plain}", its first words from `OWNER_STATE_WORDS.held`, the same words a held receipt leads with.
 - The status line: the dot from `receiptTone` and "Waiting for your answer" while held, with `waiting` at the right ("Web chat, 2 min ago").
 - `reason_plain` in serif (`.cd-type-summary`), `context` in `.cd-type-meta`, then "Held by your rule: {heldBy}".
 - A `role="group"` "Your answer" with two controls, Allow then Deny, built from the answers in `decision.answers` and only those. `allow_once` and `allow_person` are Allow's; `deny_once` and `deny_always` are Deny's. Allow is `secondary`, Deny `danger` (the soft red fill). Answers show only while `state` is `held`; with no answers there is no group, and a side with no answers has no control.
