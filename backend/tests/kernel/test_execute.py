@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from desk.contracts import Claim, Decision, ExecResult, Fact, Label, Review
+from desk.contracts import Claim, Decision, ExecResult, Fact, InboxNotice, Label, Review
 from desk.db.models import Decision as DecisionRow
 from desk.db.models import DemoInboxEntry, Document, Execution, NotificationPref, PriceItem, Quote, Tool
 from desk.kernel_service import demo_inbox, execute, ledger
@@ -158,6 +158,22 @@ async def test_a_bookings_owner_alert_reaches_only_the_owners_inbox(app, client,
     assert [(entry["to"], entry["kind"], entry["body"]) for entry in response.json()
             if " booked " in entry["body"]] == [
         ("owner", "alert", "A stranger booked Monday, November 2, from 10:00 am to 12:00 pm.")]
+
+
+async def test_an_owner_notice_never_rides_in_the_result(app, client, registry, caplog):
+    """Whatever an adapter returns, the result a session reads holds no notice addressed to the
+    owner: it is dropped, and logged by its kind alone, never its entry or preview."""
+    caplog.set_level(logging.INFO, logger="desk.kernel_service")
+    quote, rows, visitor, allowed = await fake_quote_desk(app, client)
+    code = InboxNotice(entry_id="inbox-code", to="d•••@example.com", preview="New verification code")
+    alert = InboxNotice(entry_id="inbox-alert", to="owner", preview="A stranger booked Monday at 10:00 am")
+    quote.script["execute"] = AdapterResult(model_view={"ok": True}, inbox=[alert, code])
+    result = await executed(client, visitor, allowed)
+    assert (result.state, result.model_view, result.inbox) == ("succeeded", {"ok": True}, [code])
+    assert await executed(client, visitor, allowed) == result                   # stored as the session saw it
+    assert [record.getMessage() for record in caplog.records if "notice" in record.getMessage()] == [
+        "inbox_notice_dropped to=owner tool=native.quote"]
+    assert "inbox-alert" not in caplog.text and "booked" not in caplog.text
 
 
 async def activate(app: FastAPI, copy: Rivera, cards) -> None:

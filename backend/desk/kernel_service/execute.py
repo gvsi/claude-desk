@@ -551,7 +551,9 @@ async def _visible(ctx: KernelCtx, target: _Target, result: AdapterResult) -> tu
     its readers can read, and a `model_view` kept to the adapter's `model_view_keys`, or `{}` when a
     fact was dropped or the kept view holds one of the copy's document canaries, even split by
     spaces or in another case or width (`labels.find_canaries_in`); a canary adds
-    `{violation: "canary"}` to the entry. The execution's state is the same either way."""
+    `{violation: "canary"}` to the entry. The execution's state is the same either way. Its `inbox`
+    holds no notice addressed to the owner, whose alerts are read only from the Demo inbox: one an
+    adapter returns is dropped and logged by its kind alone."""
     readers = labels.session_readers(target.session_row)
     facts = [fact for fact in result.facts if labels.can_read(fact.label, readers)]
     keys = target.adapter.model_view_keys if target.adapter is not None else frozenset()
@@ -559,8 +561,14 @@ async def _visible(ctx: KernelCtx, target: _Target, result: AdapterResult) -> tu
     flagged = {"violation": "canary"} if labels.find_canaries_in(view, await labels.copy_canaries(ctx)) else {}
     if len(facts) < len(result.facts) or flagged:
         view = {}
+    inbox = []
+    for notice in result.inbox:
+        if notice.to == "owner":
+            log.warning("inbox_notice_dropped to=owner tool=%s", target.action.tool)
+        else:
+            inbox.append(notice)
     return ExecResult(action_id=target.action.action_id, state="succeeded", facts=facts, model_view=view,
-                      inbox=list(result.inbox)), flagged
+                      inbox=inbox), flagged
 
 
 # ---- Reconciliation ---------------------------------------------------------------------------------
