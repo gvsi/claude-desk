@@ -41,11 +41,13 @@ database, network or key: exit 0 or 1, the reason on stdout.
 `calibrate` (`evals/calibrate.py`) proposes each effect's reviewer thresholds from a finished
 calibration pass and writes its report with no model call: `evals/reports/calibration-v<N>.md` when a
 row changes, else `calibration-<pass_id>.md` (never over one already there), and under
-`evals/out/reports/` for a dry run or a null baseline; it refuses a pass of any other split. `--write`
-also rewrites the calibrated block of
-`backend/desk/kernel_service/review_thresholds.py` when a row changes (never from a dry run or a
-null baseline), and a `charge` or `pay_out` row looser than the kernel's initial one needs
-`--owner-approved`. It exits 1 when refused, with the reason on stdout.
+`evals/out/reports/` for a dry run, a null baseline or a pass that isn't gating evidence (on the Claude
+API with the production 5.5 models, `evals.results.gating_refusal`); it refuses a pass of any other
+split. `--write` also rewrites the calibrated block of
+`backend/desk/kernel_service/review_thresholds.py` when a row changes (never from a dry run, a null
+baseline or a pass that isn't gating evidence, which it refuses), and a `charge` or `pay_out` row
+looser than the kernel's initial one needs `--owner-approved`. It exits 1 when refused, with the
+reason on stdout.
 
 `latency` (`evals/latency.py`) makes `--turns` visitor turns each of a plain question, a quote and a
 booking, each kind in its own copy, on the in-process stack built from this tree (its API on
@@ -61,9 +63,11 @@ and hosted latency runs whose `--pass` named it (never a dry run's; without one 
 wasn't measured), the thresholds' calibration at the pass's commit and, with `--null-baseline`, a
 null-baseline pass that judged exactly the held-out legitimate tasks the pass ran (no `--only`, no stop
 at its budget). Only a pass of the whole suite (`--suite all`, `--split heldout` or `all`, no
-`--only`) that its budget didn't stop becomes the latest report; any other gets its report alone,
-under `evals/out/reports/`. A dry run, a null-baseline pass, a pass with no run, or anything it can't
-read whole is refused: exit 1, the reason on stdout, nothing written.
+`--only`) that its budget didn't stop, and that is gating evidence (on the Claude API with the
+production 5.5 models, `evals.results.gating_refusal`), becomes the latest report; any other, such as
+a pass on Bedrock, gets its report alone, under `evals/out/reports/`, and the command says why. A dry
+run, a null-baseline pass, a pass with no run, or anything it can't read whole is refused: exit 1,
+the reason on stdout, nothing written.
 """
 
 import argparse
@@ -410,8 +414,8 @@ def report_inputs(pass_id: str, *, root: Path, null_baseline_id: str | None = No
     try:
         summary = PassSummary(
             pass_id=result.pass_id, date=day, git_sha=result.git_sha, suite=config.suite, split=config.split,
-            only=list(config.only), providers=result.providers.model_dump(),
-            model_ids=result.model_ids, runs_per_scenario=config.runs, external=config.base_url is not None,
+            only=list(config.only), providers=result.providers.model_dump(), model_ids=result.model_ids,
+            served_models=result.served_models, runs_per_scenario=config.runs, external=config.base_url is not None,
             dry_run=config.dry_run, null_baseline=config.null_baseline, stopped_by_budget=result.stopped_by_budget,
             pending=result.pending, heldout_sha256=result.heldout_sha256, spend=own[0],
             simulator_fallbacks=result.simulator_fallbacks, runs=runs)
@@ -605,7 +609,7 @@ def _null_baseline(root: Path, null_id: str, real: "PassResult") -> "NullBaselin
 
 
 def report_command(argv: list[str], *, root: Path | None = None) -> int:
-    from evals.report import partial, write_report
+    from evals.report import exploratory, partial, write_report
     from evals.tier2.passes import REPO_ROOT, PassRefused
 
     parser = _pass_parser("report")
@@ -623,9 +627,13 @@ def report_command(argv: list[str], *, root: Path | None = None) -> int:
     judged = inputs["gate_result"]
     print(f"report: pass {options.pass_id}: the gate {'passed' if judged.passed else 'failed'}; latency "
           f"{'measured' if inputs['latency'] is not None else 'not measured'}")
-    if left_out := partial(inputs["pass_result"]):
-        print(f"report: the pass ran part of the suite ({', '.join(left_out)}), so the latest report, "
-              "evals/reports/spend.csv and the latest results in docs/evals.md stay as they were")
+    kept = "so the latest report, evals/reports/spend.csv and the latest results in docs/evals.md stay as they were"
+    left_out, explores = partial(inputs["pass_result"]), exploratory(inputs["pass_result"])
+    if left_out:
+        print(f"report: the pass ran part of the suite ({', '.join(left_out)}), {kept}")
+    if explores:
+        print(f"report: {explores}; {kept}")
+    if left_out or explores:
         print(f"report: wrote {written.relative_to(root)}")
         return 0
     print(f"report: wrote {written.relative_to(root)}, evals/reports/latest.json and evals/reports/spend.csv, and "

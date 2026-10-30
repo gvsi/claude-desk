@@ -192,6 +192,7 @@ class Reviewing:
     reviewed decisions."""
 
     reviewed: dict[str, list[Reviewed]] = field(default_factory=dict)
+    served: str = "claude-sonnet-5-5"   # the model that served the simulated visitor
 
     async def __call__(self, scenario: Any, rep: int, target: Any, simulator: Any, **kwargs: Any) -> RunOutcome:
         legit = scenario.suite == "legit"
@@ -200,7 +201,7 @@ class Reviewing:
         return RunOutcome(scenario_id=scenario.id, suite=scenario.suite, rep=rep, pass_id=kwargs["pass_id"],
                           verdict=verdict,
                           simulator=SimulatorStats(provider="anthropic", model="claude-sonnet-5-5", turns=1,
-                                                   fallback_turns=0, switches=0, served_models=["claude-sonnet-5-5"]))
+                                                   fallback_turns=0, switches=0, served_models=[self.served]))
 
 
 @pytest.fixture
@@ -347,6 +348,38 @@ async def test_a_rehearsal_report_stays_out_of_the_committed_reports(repo):
             calibrate(pass_id, root=repo, today=NOW.date())
     assert not list((repo / "evals" / "reports").glob("calibration-*"))
     assert (repo / THRESHOLDS_PATH).read_text() == THRESHOLDS_FILE
+
+
+async def test_only_a_pass_on_the_claude_api_with_the_production_models_is_written(repo, capsys):
+    """The thresholds are written only from a calibration pass that is gating evidence, by the check a
+    results file, a recorded rate and the final gate use (`results.gating_refusal`): every part on the
+    Claude API, the production 5.5 model ids, and only production models serving. Any other pass
+    explores: `--write` refuses it and writes nothing, and without `--write` its report goes under
+    `evals/out/reports/`, named by its pass, takes no version and says why it can't be written."""
+    path, reports, out = repo / THRESHOLDS_PATH, repo / "evals" / "reports", repo / "evals" / "out" / "reports"
+    reviewed = {"atk-cal": CHANGE_ATTACK, "leg-cal": CHANGE_LEGIT}     # rows that would change
+    bedrock = await a_pass(repo, "calibration", reviewed, provider="bedrock")
+    off_model = (await run_pass(config(split="calibration"),
+                                deps(repo, Reviewing(reviewed, served="claude-sonnet-4-5")))).pass_id
+    for pass_id, why in ((bedrock, "it ran the API on bedrock, the simulator on bedrock"),
+                         (off_model, "the simulator was served by claude-sonnet-4-5")):
+        with pytest.raises(CalibrationRefused, match=f"pass {pass_id} isn't gating evidence: {why}.*nothing was "
+                                                     "written"):
+            calibrate(pass_id, root=repo, write=True)
+        assert run.calibrate_command(["--pass", pass_id, "--write"], root=repo) == 1
+        assert f"calibrate: pass {pass_id} isn't gating evidence: {why}" in capsys.readouterr().out
+        assert path.read_text() == THRESHOLDS_FILE and not (out / f"calibration-{pass_id}.md").exists()
+
+        done = calibrate(pass_id, root=repo, today=NOW.date())
+        assert done.report == out / f"calibration-{pass_id}.md" and not done.written and done.version == 1
+        said = done.report.read_text().split("\n## The rule\n", 1)[0]
+        assert f"This pass explores, so its proposal can't be written: pass {pass_id} isn't gating evidence" in said
+        assert "an exploratory pass takes no version" in said and "Proposed as version" not in said
+    assert not list(reports.glob("calibration-*")) and path.read_text() == THRESHOLDS_FILE
+
+    gating = await a_pass(repo, "calibration", reviewed)
+    done = calibrate(gating, root=repo, write=True)
+    assert done.written and done.report == reports / "calibration-v2.md" and "explores" not in done.report.read_text()
 
 
 async def test_the_report_says_what_was_written(repo):

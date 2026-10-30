@@ -21,7 +21,11 @@ plan 01a), and writes a report. It refuses a pass of any other split. When a row
 report is `evals/reports/calibration-v<N>.md`, N being the version the proposal takes. When none
 does, it takes no version: `evals/reports/calibration-<pass_id>.md`, which never overwrites a
 report already there. A rehearsal (a dry-run or null-baseline pass) takes no version either, and
-its report stays under `evals/out/reports/`, never committed. With `write`, when a row changes, it
+its report stays under `evals/out/reports/`, never committed. So does an exploratory pass, one that
+isn't gating evidence by the check a results file, a recorded rate and the final gate use
+(`results.gating_refusal`: every part on the Claude API, the production 5.5 model ids and only
+production models serving), such as a pass on Bedrock. `write` refuses a rehearsal and an
+exploratory pass before anything is written. With `write`, when a row changes, it
 rewrites only the lines between the file's `# calibration: begin` and `# calibration: end` lines:
 the new rows, `REVIEW_THRESHOLDS_VERSION` + 1 and `CALIBRATION` (version, pass id, split, date,
 report and the owner's approval). The rewrite is checked by executing it before it replaces the
@@ -42,6 +46,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from desk.contracts import Effect, ReviewThresholds
+from evals.results import gating_refusal
 from evals.tier2.passes import REPO_ROOT, PassRefused, PassResult, load_pass, pass_dir
 from evals.tier2.verdict import Reviewed, RunVerdict
 
@@ -189,17 +194,24 @@ def calibrate(pass_id: str, *, root: Path = REPO_ROOT, thresholds_file: Path | N
     if write and rehearsal:
         raise CalibrationRefused(f"pass {pass_id} {rehearsal}; thresholds are written only from a real calibration "
                                  "pass")
+    explores = _exploratory(result)
+    if write and explores:
+        raise CalibrationRefused(f"{explores}. The reviewer's thresholds are written only from a calibration pass on "
+                                 "the Claude API with the production 5.5 models, so nothing was written; without "
+                                 f"--write, its proposal is reported under {OUT_REPORTS_PATH}/")
     current = load_thresholds(thresholds_file)
     if write:   # before anything is written, whether or not a row changes
         marked_block(thresholds_file.read_text().splitlines(keepends=True))
     proposal = propose_thresholds(reviewed_decisions(result, root), current.table)
     changed = proposal.table != current.table
     # A real calibration that changes a row proposes (or writes) the next version, and its report takes that
-    # version's name. One that changes none, or a rehearsal, takes no version: its report is named by its
-    # pass and never overwrites one already there, and a rehearsal's stays under evals/out/, never committed.
-    versioned = changed and not rehearsal
+    # version's name. One that changes none, a rehearsal or an exploratory pass takes no version: its report is
+    # named by its pass and never overwrites one already there, and a rehearsal's or an exploratory pass's stays
+    # under evals/out/, never committed.
+    kept_back = rehearsal or explores
+    versioned = changed and not kept_back
     version = current.version + 1 if versioned else current.version
-    report = root / (REPORTS_PATH if not rehearsal else OUT_REPORTS_PATH) / (
+    report = root / (REPORTS_PATH if not kept_back else OUT_REPORTS_PATH) / (
         f"calibration-v{version}.md" if versioned else f"calibration-{result.pass_id}.md")
     if not versioned and report.exists():
         raise CalibrationRefused(f"{report.relative_to(root)} is already there; a calibration that takes no version "
@@ -272,6 +284,13 @@ def _rehearsal(result: PassResult) -> str | None:
     if result.config.null_baseline:
         return "ran with Answering off (the null baseline)"
     return None
+
+
+def _exploratory(result: PassResult) -> str | None:
+    """Why a real pass isn't gating evidence, by the check a results file, a recorded rate and the final
+    gate use (`results.gating_refusal`: every part on the Claude API, the production 5.5 model ids and
+    only production models serving), or None when it is or when it rehearses (`_rehearsal` says why)."""
+    return None if _rehearsal(result) else gating_refusal(result)
 
 
 def reviewed_decisions(result: PassResult, root: Path = REPO_ROOT) -> list[Reviewed]:
@@ -398,6 +417,9 @@ def render_calibration(result: PassResult, proposal: Proposal, current: Threshol
     elif _rehearsal(result):
         status = ("Some rows would change, but a rehearsal takes no version, so nothing here is written to the "
                   "thresholds file.")
+    elif _exploratory(result):
+        status = ("Some rows would change, but an exploratory pass takes no version, so nothing here is written to "
+                  "the thresholds file.")
     elif looser:
         rows = "row is" if len(looser) == 1 else "rows are"
         status = (f"Proposed as version {version}; its {' and '.join(looser)} {rows} looser than the kernel's "
@@ -417,6 +439,8 @@ def render_calibration(result: PassResult, proposal: Proposal, current: Threshol
     ]
     if rehearsal := _rehearsal(result):
         lines += [f"This pass {rehearsal}, so these numbers rehearse a calibration and can't be written.", ""]
+    elif explores := _exploratory(result):
+        lines += [f"This pass explores, so its proposal can't be written: {explores}.", ""]
     lines += [
         status,
         "",

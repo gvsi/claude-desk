@@ -62,8 +62,12 @@ PASS_ID = "p-20261101-a1b2"
 GIT_SHA = "3f2a9c1e" * 5
 PASS_DATE = date(2026, 11, 1)
 HELDOUT_SHA = "ab" * 32
-MODEL_IDS = {"conversation": "claude-opus-5-5", "triage": "claude-haiku-5-5", "reviewer": "claude-sonnet-5-5",
-             "soft_promise": "claude-haiku-5-5", "attacker": "claude-opus-5-5", "visitor": "claude-sonnet-5-5"}
+# A gating pass's: the production 5.5 model ids, route by route, and the production models that served each part.
+MODEL_IDS = {"conversation": "claude-opus-5-5", "triage": "claude-haiku-5-5", "translation": "claude-haiku-5-5",
+             "reviewer": "claude-sonnet-5-5", "soft_promise": "claude-haiku-5-5", "attacker": "claude-opus-5-5",
+             "visitor": "claude-sonnet-5-5"}
+SERVED_MODELS = {"api": ["claude-haiku-5-5", "claude-opus-5-5"], "simulator": ["claude-opus-5-5", "claude-sonnet-5-5"],
+                 "kernel_checks": ["claude-haiku-5-5", "claude-sonnet-5-5"]}
 SECTIONS = ("Summary", "Attack suite", "Legitimate-task suite", "Reviewer", "Cost", "Latency", "Limits")
 
 
@@ -97,8 +101,9 @@ def a_pass(runs: list[ReportRun], **changes: Any) -> PassSummary:
     data: dict[str, Any] = {
         "pass_id": PASS_ID, "date": PASS_DATE, "git_sha": GIT_SHA, "suite": "all", "split": "all", "only": [],
         "providers": {"api": "anthropic", "simulator": "anthropic", "kernel_checks": "anthropic"},
-        "model_ids": MODEL_IDS, "runs_per_scenario": 3, "external": False, "dry_run": False,
-        "null_baseline": False, "stopped_by_budget": False, "pending": {}, "heldout_sha256": HELDOUT_SHA,
+        "model_ids": MODEL_IDS, "served_models": SERVED_MODELS, "runs_per_scenario": 3, "external": False,
+        "dry_run": False, "null_baseline": False, "stopped_by_budget": False, "pending": {},
+        "heldout_sha256": HELDOUT_SHA,
         "spend": spend(runs=len(runs)), "runs": runs,
         "simulator_fallbacks": {"turns": sum(r.fallback_turns for r in runs),
                                 "switches": sum(r.switches for r in runs)},
@@ -316,6 +321,42 @@ def test_latest_json_matches_the_report_numbers(tmp_path: Path):
         refused = all_inputs(pass_result=a_pass(full_pass().runs, **rehearsal))
         with pytest.raises(ValueError, match="never becomes the latest report"):
             write_report(**refused, reports_dir=reports, evals_doc=doc)
+
+
+def test_only_gating_evidence_becomes_the_latest_report(tmp_path: Path):
+    """The latest report, and the numbers the README and the guide quote from it, come only from a pass
+    that is gating evidence, by the check a results file, a recorded rate and the final gate use
+    (`results.gating_refusal`): every part on the Claude API, the production 5.5 model ids and only
+    production models serving. `write_report` runs the check itself, so no caller can skip it. Any
+    other pass explores: its report goes under the out directory, says why, and nothing else is written."""
+    reports, out, doc = tmp_path / "reports", tmp_path / "out", tmp_path / "evals.md"
+    doc.write_text(f"# Evals\n\n## Latest results\n\n{BEGIN_MARKER}\n{PLACEHOLDER}\n{END_MARKER}\n")
+    guide = doc.read_text()
+    bedrock_ids = {route: f"us.anthropic.{model}-v1:0" if route not in ("reviewer", "soft_promise") else model
+                   for route, model in MODEL_IDS.items()}
+    exploratory = {
+        "it ran the API on bedrock, the simulator on bedrock": {
+            "providers": {"api": "bedrock", "simulator": "bedrock", "kernel_checks": "anthropic"},
+            "model_ids": bedrock_ids},
+        "it ran the API on unknown": {
+            "external": True, "providers": {"api": "unknown", "simulator": "anthropic", "kernel_checks": "anthropic"},
+            "model_ids": {**MODEL_IDS, "conversation": "unknown", "triage": "unknown", "translation": "unknown"}},
+        "it recorded conversation on claude-opus-4-5, not claude-opus-5-5": {
+            "model_ids": {**MODEL_IDS, "conversation": "claude-opus-4-5"}},
+    }
+    for why, changes in exploratory.items():
+        p = a_pass(full_pass().runs, **changes)
+        inputs = all_inputs(pass_result=p)
+        written = write_report(**inputs, reports_dir=reports, evals_doc=doc, out_dir=out)
+        assert written == out / f"2026-11-01-{PASS_ID}.md", why
+        assert (f"This pass explores, so its report stays under `evals/out/reports/` and never becomes the latest "
+                f"report: pass {PASS_ID} isn't gating evidence: {why}") in written.read_text(), why
+        assert latest_json(**inputs)["report"] == f"evals/out/reports/2026-11-01-{PASS_ID}.md", why
+        assert not reports.exists() and doc.read_text() == guide, why
+
+    written = write_report(**all_inputs(), reports_dir=reports, evals_doc=doc, out_dir=out)
+    assert written == reports / f"2026-11-01-{PASS_ID}.md" and "explores" not in written.read_text()
+    assert (reports / "latest.json").is_file() and PASS_ID in doc.read_text()
 
 
 def test_the_month_spend_must_hold_the_pass_own_row(tmp_path: Path):
@@ -776,6 +817,44 @@ async def test_report_command_keeps_a_partial_pass_out_of_the_latest_results(rep
     text = (reports / f"2026-10-30-{heldout}.md").read_text()
     assert "| Suite | all |" in text and "| Split | held out |" in text and "This pass ran part" not in text
     assert heldout in doc.read_text()
+
+
+async def test_report_command_keeps_an_exploratory_pass_out_of_the_latest_results(report_repo, capsys):
+    """Only a pass that is gating evidence (on the Claude API with the production 5.5 models, by the check
+    a results file, a recorded rate and the final gate use) becomes the latest report. A whole-suite pass
+    on Bedrock, or one a model other than the production ones served, explores: the command says so, its
+    report goes under `evals/out/reports/` saying why, and latest.json, spend.csv and the evals guide's
+    latest results stay as they were."""
+    root = report_repo
+    reports, out, doc = root / "evals" / "reports", root / "evals" / "out" / "reports", root / "docs" / "evals.md"
+    guide = doc.read_text()
+
+    async def off_model(scenario: Any, rep: int, target: Any, simulator: Any, **kwargs: Any) -> RunOutcome:
+        outcome = crafted_outcome(scenario, rep, kwargs["pass_id"])
+        served = outcome.simulator.model_copy(update={"served_models": ["claude-sonnet-4-5"]})
+        return outcome.model_copy(update={"simulator": served})
+
+    explored = [(await report_pass(root, provider="bedrock"), "it ran the API on bedrock, the simulator on bedrock"),
+                (await report_pass(root, off_model), "the simulator was served by claude-sonnet-4-5")]
+    for pass_id, why in explored:
+        assert evals_run.report_command(["--pass", pass_id], root=root) == 0
+        printed = capsys.readouterr().out
+        report = out / f"2026-10-30-{pass_id}.md"
+        assert (f"report: pass {pass_id} isn't gating evidence: {why}" in printed
+                and "so the latest report, evals/reports/spend.csv and the latest results in docs/evals.md stay as "
+                    "they were" in printed), printed
+        assert printed.rstrip().endswith(f"report: wrote evals/out/reports/{report.name}"), printed
+        text = report.read_text()
+        assert headings(text) == list(SECTIONS)
+        assert (f"This pass explores, so its report stays under `evals/out/reports/` and never becomes the latest "
+                f"report: pass {pass_id} isn't gating evidence: {why}") in text
+        assert not (reports / "latest.json").exists() and not (reports / "spend.csv").exists(), why
+        assert not list(reports.glob("2026-*.md")) and doc.read_text() == guide, why
+
+    gating = await report_pass(root)
+    assert evals_run.report_command(["--pass", gating], root=root) == 0
+    assert f"report: wrote evals/reports/2026-10-30-{gating}.md" in capsys.readouterr().out
+    assert json.loads((reports / "latest.json").read_text())["pass_id"] == gating and gating in doc.read_text()
 
 
 async def test_report_command_counts_the_fallbacks_of_every_attempt(report_repo):

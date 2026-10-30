@@ -3,7 +3,9 @@
 `render_report` turns a pass, its gate result, usage, latency and calibration into the report a
 reader of the repo opens; `latest_json` gives the same numbers as data, so the two can't disagree,
 since the report is rendered from them. `write_report` writes both under `evals/reports/`, copies
-the month's spend rows beside them and rewrites the latest-results block of `docs/evals.md`.
+the month's spend rows beside them and rewrites the latest-results block of `docs/evals.md`, only
+for a pass of the whole suite that is gating evidence (on the Claude API with the production 5.5
+models, by `results.gating_refusal`); any other pass's report stays under `evals/out/reports/`.
 
 The inputs are the report's own models, built from what the pass runner, the usage and latency
 measurements and the calibration leave. The report judges nothing: whether the pass passed comes
@@ -27,6 +29,7 @@ from typing import Annotated, Any, Literal, Self, get_args
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, StringConstraints, model_validator
 
 from desk.contracts import Effect, Violation
+from evals.results import gating_refusal
 from evals.tier2.artifact import RunArtifact
 from evals.tier2.schema import (
     DEMO_INBOX_ASSUMPTION,
@@ -45,7 +48,7 @@ OUT_REPORTS_DIR = EVALS_DIR / "out" / "reports"
 EVALS_DOC = REPO_ROOT / "docs" / "evals.md"
 BUDGET_FILE = EVALS_DIR / "budget.toml"
 REPORTS_PATH = "evals/reports"          # where reports live, relative to the repository root
-OUT_REPORTS_PATH = "evals/out/reports"   # where a partial pass's report stays, never committed
+OUT_REPORTS_PATH = "evals/out/reports"   # where a partial or exploratory pass's report stays, never committed
 DOC_DIR = "docs"                         # where the evals guide lives, for its link to the report
 
 BEGIN_MARKER = "<!-- latest-results:begin -->"
@@ -335,6 +338,7 @@ class PassSummary(BaseModel):
     only: list[ScenarioId]                         # --only, empty for every scenario of the suite and split
     providers: Providers
     model_ids: dict[StrictStr, StrictStr]          # by route, the model id sent
+    served_models: dict[StrictStr, list[StrictStr]]   # by part, the models that served it
     runs_per_scenario: StrictInt = Field(ge=1)
     external: StrictBool                           # drove a deployment by URL
     dry_run: StrictBool                            # every model scripted
@@ -520,7 +524,7 @@ def latest_json(pass_result: PassSummary, gate_result: Any, metrics: Metrics | N
         "git_sha": p.git_sha,
         "date": p.date.isoformat(),
         # Beyond the fields the README and the path to MVP read: what the docs' table also shows.
-        "report": f"{OUT_REPORTS_PATH if partial(p) else REPORTS_PATH}/{report_name(p)}",
+        "report": f"{OUT_REPORTS_PATH if kept_out(p) else REPORTS_PATH}/{report_name(p)}",
         "suite": p.suite,
         "split": p.split,
         "only": list(p.only),
@@ -638,6 +642,9 @@ def _summary(p: PassSummary, g: GateSummary, n: dict[str, Any]) -> list[str]:
     if left_out := partial(p):
         out.append(f"This pass ran part of the suite ({', '.join(left_out)}), so its report stays under "
                    f"`{OUT_REPORTS_PATH}/` and never becomes the latest report.")
+    if explores := exploratory(p):
+        out.append(f"This pass explores, so its report stays under `{OUT_REPORTS_PATH}/` and never becomes the "
+                   f"latest report: {explores}.")
     pending = (f"{_plural(len(p.pending), 'scenario')} waiting for "
                + ", ".join(f"plan {plan}" for plan in sorted(set(p.pending.values())))) if p.pending else "none"
     out.append(_table(("Item", "Value"), [
@@ -1053,6 +1060,20 @@ def partial(p: PassSummary) -> list[str]:
     return left_out
 
 
+def exploratory(p: PassSummary) -> str | None:
+    """Why the pass isn't gating evidence, by the check a results file, a recorded rate and the final
+    gate use (`results.gating_refusal`: every part on the Claude API, the production 5.5 model ids and
+    only production models serving), or None when it is. Only gating evidence may become the latest
+    report; any other pass, such as one on Bedrock or one that drove a deployment by URL, explores."""
+    return gating_refusal(p)
+
+
+def kept_out(p: PassSummary) -> bool:
+    """Whether the pass's report stays under `evals/out/reports/` and never becomes the latest: it ran
+    part of the suite (`partial`) or explores (`exploratory`)."""
+    return bool(partial(p)) or exploratory(p) is not None
+
+
 def write_report(pass_result: PassSummary, gate_result: Any, metrics: Metrics | None, latency: Latency | None,
                  calibration: Calibration | None, *, recorded: RecordedRate | None = None,
                  null_baseline: NullBaseline | None = None, spend_month: Sequence[SpendRow],
@@ -1060,16 +1081,16 @@ def write_report(pass_result: PassSummary, gate_result: Any, metrics: Metrics | 
                  out_dir: Path = OUT_REPORTS_DIR) -> Path:
     """Writes `<date>-<pass_id>.md` and `latest.json` under `reports_dir`, this month's spend rows as
     its `spend.csv`, and the evals guide's latest-results block; returns the report's path. A pass
-    that ran part of the suite (`partial`) writes only its report, under `out_dir`, and none of the
-    rest. A dry run or a null-baseline pass is refused before anything is written: neither measures
-    a Desk."""
+    that ran part of the suite (`partial`) or isn't gating evidence (`exploratory`) writes only its
+    report, under `out_dir`, and none of the rest. A dry run or a null-baseline pass is refused
+    before anything is written: neither measures a Desk."""
     p = PassSummary.model_validate(pass_result)
     if refusal := latest_refusal(p.pass_id, dry_run=p.dry_run, null_baseline=p.null_baseline):
         raise ValueError(refusal)
     inputs = {"recorded": recorded, "null_baseline": null_baseline, "spend_month": spend_month}
     latest = latest_json(p, gate_result, metrics, latency, calibration, **inputs)
     text = render_report(p, gate_result, metrics, latency, calibration, **inputs, budget=budget)
-    if partial(p):
+    if kept_out(p):
         out_dir.mkdir(parents=True, exist_ok=True)
         report = out_dir / report_name(p)
         report.write_text(text)
