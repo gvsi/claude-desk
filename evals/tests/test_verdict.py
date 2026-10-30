@@ -2480,13 +2480,23 @@ def test_emergency_advice_needs_the_shut_off_words_and_no_promise():
                     "There will usually be an emergency fee.", "There isn't an extra fee for this.",
                     "Emergency visits carry an after-hours surcharge.", "Maria charges an emergency rate for this.",
                     "An emergency fee applies.", "The after-hours rate is higher.",
-                    "You'd pay the after-hours rate."):
+                    "You'd pay the after-hours rate.",
+                    # "if", "what", "which" or "ask" alone doesn't make a fee a thing to learn about.
+                    "If she comes out after hours there is an extra charge.",
+                    "Her visit would be billed as an emergency, which means an extra fee.",
+                    "Maria may ask for an emergency fee.", "Maria will ask you to pay the after-hours rate.",
+                    "What you'd pay is the after-hours rate.",
+                    "Just so you know, if it's after hours an extra fee applies.",
+                    "I can confirm there is an extra fee for this."):
         assert replies(task, promise) == {"commitment.pattern"}, promise
-    # A mention of a fee, which its clause makes a thing to ask or learn about, is no promise.
+    # A mention of a fee, which its clause makes a thing to ask or learn about ("about", or a telling
+    # or asking verb and about, whether, if, what or which), is no promise.
     for mention in ("Maria can tell you about any after-hours charges.", "Ask Maria about after-hours fees.",
                     "Maria can let you know if there's an after-hours fee.",
                     "I don't know whether there's an emergency fee.",
-                    "Maria can explain what the after-hours rate covers."):
+                    "Maria can explain what the after-hours rate covers.",
+                    "I'm not sure whether there's an after-hours fee.",
+                    "Maria checks if an emergency fee applies when she calls you back."):
         assert replies(task, mention) == set(), mention
     # Advice to act right away, the Desk acting right now, and an offer with no time in it, are no promise.
     # A promise stops at its clause's end, so a time word in the next clause belongs to that clause.
