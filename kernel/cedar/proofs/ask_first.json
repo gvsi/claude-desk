@@ -1,0 +1,60 @@
+{
+  "baseline_sha256": "581210756d4345c31324f64c84e7008b1609ae2bbb5bc85bd727bd644dffe991",
+  "cards_sha256": "0ceea09cf33f1327277b4c8809b6b2a53897158c5e1010c9817dfce9a2f96d8f",
+  "cedar_sha256": "3e5247dd2a9e9d4265ccda38a7696ce882dd450ce12f60979537c14c72b375bc",
+  "invariants_sha256": "05f672b80818db0b2e3a520c60370c2ab05c0527e368cec20de83acf0f6be4a2",
+  "preset": "ask_first",
+  "profiles_sha256": "281127ae3aa9dc9d7f4efd4a07bb270a22fe0e8f349467525adaf4a698970caf",
+  "proof": {
+    "cases": null,
+    "checks": [
+      {
+        "counterexample_plain": null,
+        "counterexample_raw": null,
+        "name": "never_errors",
+        "ok": true
+      },
+      {
+        "counterexample_plain": null,
+        "counterexample_raw": null,
+        "name": "baseline_auto",
+        "ok": true
+      },
+      {
+        "counterexample_plain": null,
+        "counterexample_raw": null,
+        "name": "baseline_approvable",
+        "ok": true
+      },
+      {
+        "counterexample_plain": null,
+        "counterexample_raw": null,
+        "name": "auto_within_cards",
+        "ok": true
+      },
+      {
+        "counterexample_plain": null,
+        "counterexample_raw": null,
+        "name": "review_only_narrows",
+        "ok": true
+      },
+      {
+        "counterexample_plain": null,
+        "counterexample_raw": null,
+        "name": "hold_within_cards",
+        "ok": true
+      },
+      {
+        "counterexample_plain": null,
+        "counterexample_raw": null,
+        "name": "money_needs_card",
+        "ok": true
+      }
+    ],
+    "method": "symcc",
+    "ok": true,
+    "timed_out": false
+  },
+  "review_thresholds_version": 1,
+  "schema_sha256": "31808fdb19b2090e39429efc26c7e5b07e331b459e97d8dbccbe5de3d56ab407"
+}

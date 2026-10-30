@@ -350,7 +350,7 @@ CHAIN_ROLES = ("desk_kernel", "desk_api", "desk_mockpay", "desk_resolver", "desk
 SCHEMAS = ("kernel", "kernel_ro", "app", "mockpay", "procrastinate")
 
 # The owner roles a migration lends the admin to change an owner, each with the schema the role is
-# lent CREATE on (`_change_owner` in 0004_copy_resolvers, 0005_kernel_ro_owner and 0006_preview_and_pins).
+# lent CREATE on (`_change_owner` in each revision that changes an owner, from 0004_copy_resolvers on).
 LENT = (("desk_resolver", "kernel"), ("desk_ro_owner", "kernel_ro"))
 
 

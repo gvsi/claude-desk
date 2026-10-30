@@ -112,6 +112,7 @@ class Desk(Base):
     hours: Mapped[list[c.HoursWindow]] = mapped_column(ContractJSON(list[c.HoursWindow]), server_default=EMPTY_LIST)
     answering: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Person(Base):
@@ -124,6 +125,9 @@ class Person(Base):
     masked_contact: Mapped[str] = mapped_column(Text)
     notes: Mapped[str] = mapped_column(Text, server_default=text("''"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
+    ref: Mapped[str] = mapped_column(Text)                   # the seed's handle, unique per Desk
+    contact: Mapped[str] = mapped_column(Text)               # on record; verification codes go only here; never in a view
+    contact_norm: Mapped[str] = mapped_column(Text)          # normalized for lookup; never in a view
 
 
 class Lead(Base):
@@ -160,6 +164,7 @@ class ActorSession(Base):
     preview: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))   # the owner trying the Desk as a customer
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))   # visitor sessions close after 24 h idle
 
 
 class VerificationChallenge(Base):
@@ -228,6 +233,8 @@ class Tool(Base):
     definition_sha256: Mapped[str | None] = mapped_column(Text)     # MCP tools' pinned definition; None for native tools
     pending_definition_text: Mapped[str | None] = mapped_column(Text)
     pending_sha256: Mapped[str | None] = mapped_column(Text)
+    profile: Mapped[c.ToolProfile | None] = mapped_column(ContractJSON(c.ToolProfile))
+    profile_sha256: Mapped[str | None] = mapped_column(Text)   # the profile without status or pending fields
 
 
 class PolicyVersion(Base):
@@ -247,6 +254,11 @@ class PolicyVersion(Base):
     invariants_sha256: Mapped[str] = mapped_column(Text)
     review_thresholds_version: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
+    cards_sha256: Mapped[str | None] = mapped_column(Text)
+    draft_key_sha256: Mapped[str | None] = mapped_column(Text)        # what makes /policy/draft idempotent
+    cedar: Mapped[dict[str, str] | None] = mapped_column(ContractJSON(dict[str, str]))   # {F, A, H, A0} Cedar texts
+    schema_json: Mapped[str | None] = mapped_column(Text)             # the Desk's Cedar schema, as loaded
+    preset: Mapped[str | None] = mapped_column(Text)                  # the preset or seed it came from, if any
 
 
 class Action(Base):
@@ -266,6 +278,10 @@ class Action(Base):
     recipient: Mapped[str | None] = mapped_column(Text)
     starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
+    args_json: Mapped[dict[str, Any]] = mapped_column(JSONB)         # adapter-normalized args; never in a view
+    args_sha256: Mapped[str] = mapped_column(Text)
+    profile_sha256: Mapped[str] = mapped_column(Text)
+    resource: Mapped[c.ResourceRef] = mapped_column(ContractJSON(c.ResourceRef))
 
 
 class Decision(Base):
@@ -291,6 +307,10 @@ class Decision(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     ledger_seq: Mapped[int] = mapped_column(BigInteger)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
+    action_id: Mapped[str | None] = mapped_column(Text)      # None for a step-1 refusal
+    policy_ids: Mapped[list[str]] = mapped_column(ContractJSON(list[str]), server_default=EMPTY_LIST)
+    signature: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Approval(Base):
@@ -302,13 +322,24 @@ class Approval(Base):
     answer: Mapped[str] = mapped_column(Text)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    nonce: Mapped[str | None] = mapped_column(Text)          # never in a view
+    binding_sha256: Mapped[str | None] = mapped_column(Text)
+    policy_version: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Execution(Base):
+    """An action's execution: the intent row commits before any side effect."""
+
     __tablename__ = "executions"
     __table_args__ = {"schema": "kernel"}
     action_id: Mapped[str] = mapped_column(Text, primary_key=True)
     copy_id: Mapped[str] = mapped_column(Text)
+    decision_id: Mapped[str] = mapped_column(Text)
+    state: Mapped[str] = mapped_column(Text)                 # intent, succeeded, failed, unknown
+    result: Mapped[c.ExecResult | None] = mapped_column(ContractJSON(c.ExecResult))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Fact(Base):
@@ -322,6 +353,11 @@ class Fact(Base):
     claims: Mapped[list[c.Claim]] = mapped_column(ContractJSON(list[c.Claim]))
     readers: Mapped[list[str]] = mapped_column(ContractJSON(list[str]), server_default=OWNER_ONLY)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    session_id: Mapped[str | None] = mapped_column(Text)
+    action_id: Mapped[str | None] = mapped_column(Text)
+    source: Mapped[str | None] = mapped_column(Text)         # Fact.source: kernel or owner
+    record_owner: Mapped[str | None] = mapped_column(Text)   # Label.record_owner
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class KnowledgeItem(Base):
@@ -359,6 +395,8 @@ class Quote(Base):
     amount_cents: Mapped[int] = mapped_column(Cents)
     status: Mapped[str] = mapped_column(Text)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    action_id: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class CalendarSlot(Base):
@@ -382,6 +420,8 @@ class Booking(Base):
     person_id: Mapped[str | None] = mapped_column(Text)
     lead_id: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(Text)
+    action_id: Mapped[str | None] = mapped_column(Text)
+    session_id: Mapped[str | None] = mapped_column(Text)
 
 
 class Document(Base):
@@ -395,6 +435,7 @@ class Document(Base):
     body: Mapped[str] = mapped_column(Text)                  # never in a view
     canary: Mapped[str] = mapped_column(Text)                # never in a view
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
+    ref: Mapped[str | None] = mapped_column(Text)            # the seed's handle
 
 
 class DocumentLink(Base):
@@ -439,10 +480,19 @@ class NotificationPref(Base):
 
 
 class DemoInboxEntry(Base):
+    """A simulated delivery (codes, owner alerts, head checkpoints); never in a view or in app.*."""
+
     __tablename__ = "demo_inbox"
     __table_args__ = {"schema": "kernel"}
     entry_id: Mapped[str] = mapped_column(Text, primary_key=True)
     copy_id: Mapped[str] = mapped_column(Text)
+    desk_id: Mapped[str] = mapped_column(Text)
+    to: Mapped[str] = mapped_column(Text)                    # "owner", or the masked contact on record
+    person_id: Mapped[str | None] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(Text)                  # DemoInboxEntry.kind
+    body: Mapped[str] = mapped_column(Text)                  # may hold a code
+    preview: Mapped[str] = mapped_column(Text)               # code-free kernel template
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class LedgerHead(Base):
