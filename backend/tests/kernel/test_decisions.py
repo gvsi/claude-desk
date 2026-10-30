@@ -58,8 +58,8 @@ async def test_review_request_shape():
     client = FakeAnthropicClient(model_message(PASSING))
     await AnthropicDecisions(client).review(data)
 
-    assert client.options == [{"timeout": 4.0, "max_retries": 0}]            # one try, inside the 4 s budget
     [request] = client.requests
+    assert request["timeout"] == 4.0                                           # one try, inside the 4 s budget
     assert request["model"] == "claude-sonnet-5-5"
     assert request["max_tokens"] == 2048
     assert request["system"] == REVIEW_SYSTEM

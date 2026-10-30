@@ -176,6 +176,43 @@ async def test_custom_headers_are_refused_before_any_client(environ, monkeypatch
     assert built == []
 
 
+async def test_custom_headers_set_after_the_start_never_reach_a_request(environ, sent):
+    # The refusal runs when the kernel starts. Every later call uses the client built then, never a
+    # copy that would read the environment again, so a variable set afterwards (by code in the
+    # process) adds nothing to a request.
+    backend = make_decisions(settings())
+    await backend.soft_promise(REPLY)
+    environ({"ANTHROPIC_CUSTOM_HEADERS": "Authorization: Bearer ambient\nX-Injected: ambient"})
+    await backend.review(review_input())
+    await backend.soft_promise(REPLY)
+    assert len(sent) == 3
+    for request in sent:
+        assert credential(request.headers) == "the placeholder"
+        assert "x-injected" not in request.headers
+        leaked = carries(request, "ambient")
+        assert not leaked
+
+
+async def test_each_call_is_one_try_with_its_own_timeout(environ, monkeypatch):
+    # The client makes no retries, so an overloaded answer is the call's failure, asked once, and
+    # each check's timeout goes with its request (the reviewer's 4 s, the soft-promise check's 2 s).
+    requests: list[httpx2.Request] = []
+
+    def overloaded(request: httpx2.Request) -> httpx2.Response:
+        requests.append(request)
+        return httpx2.Response(529, json={"type": "error", "error": {"type": "overloaded_error",
+                                                                     "message": "Overloaded"}})
+
+    monkeypatch.setattr(anthropic, "AsyncAnthropic", functools.partial(
+        anthropic.AsyncAnthropic, http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(overloaded))))
+    backend = make_decisions(settings())
+    assert backend._client.max_retries == 0
+    reviewed = await backend.review(review_input())
+    verdict, usage = await backend.soft_promise(REPLY)
+    assert (reviewed.review, reviewed.usage.status, verdict, usage.status) == (None, "error", None, "error")
+    assert [request.extensions["timeout"]["read"] for request in requests] == [4.0, 2.0]
+
+
 @pytest.mark.parametrize("named_by", ["settings", "process"])
 async def test_production_calls_the_claude_api_whatever_the_base_url(named_by, environ, sent):
     # ANTHROPIC_BASE_URL is a test hook: production refuses it at the start ("Test hooks"), and the

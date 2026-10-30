@@ -158,20 +158,16 @@ def model_message(text: str | None, *, stop_reason: str = "end_turn", model: str
 
 
 class FakeAnthropicClient:
-    """Stands in for `anthropic.AsyncAnthropic`. `with_options(**opts)` records its options and returns
-    the client; `messages.create(**kwargs)` records the request, waits `delay` seconds, then raises
-    `reply` if it is an exception or returns it (a `Message`, see `model_message`)."""
+    """Stands in for `anthropic.AsyncAnthropic`, as `make_client` builds it: used as it is, never
+    copied, so it has no `with_options`. `messages.create(**kwargs)` records the request, its
+    per-request `timeout` included, waits `delay` seconds, then raises `reply` if it is an
+    exception or returns it (a `Message`, see `model_message`)."""
 
     def __init__(self, reply: Message | BaseException, *, delay: float = 0.0):
         self.reply = reply
         self.delay = delay
-        self.options: list[dict[str, Any]] = []
         self.requests: list[dict[str, Any]] = []
         self.messages = _FakeMessages(self)
-
-    def with_options(self, **opts: Any) -> "FakeAnthropicClient":
-        self.options.append(opts)
-        return self
 
 
 class _FakeMessages:

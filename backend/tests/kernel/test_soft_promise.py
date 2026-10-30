@@ -35,8 +35,8 @@ async def test_soft_promise_request_shape():
 
     assert verdict == SoftPromiseVerdict(promises_beyond_cards=False, denies_being_ai=False)
     assert (usage.model, usage.status, usage.input_tokens, usage.output_tokens) == (HAIKU, "ok", 900, 12)
-    assert client.options == [{"timeout": 2.0, "max_retries": 0}]            # one try, inside the 2 s budget
     [request] = client.requests
+    assert request["timeout"] == 2.0                                           # one try, inside the 2 s budget
     assert request["model"] == HAIKU
     assert request["max_tokens"] == 1024
     assert request["system"] == SOFT_PROMISE_SYSTEM

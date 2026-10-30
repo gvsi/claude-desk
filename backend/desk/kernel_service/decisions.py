@@ -243,6 +243,9 @@ def make_client(settings: "KernelSettings") -> anthropic.AsyncAnthropic:
     - The key is `ANTHROPIC_API_KEY`, one run of printable ASCII. Outside development it is
       required; in development a missing or empty one is `NO_API_KEY`, never "".
     - The host is the `ANTHROPIC_BASE_URL` test hook in development, else the Claude API.
+    - One try: `max_retries=0`, with each call's timeout passed to the request. The client is built
+      once, at the start, and never copied (`with_options`), since a copy reads
+      `ANTHROPIC_CUSTOM_HEADERS` from the environment again.
 
     Development is the settings' and the process's `DESK_ENV` both naming it, as for the other test
     hooks. Each refusal is a `RuntimeError` naming the variable, never its value, raised before any
@@ -256,7 +259,7 @@ def make_client(settings: "KernelSettings") -> anthropic.AsyncAnthropic:
     if not _KEY.fullmatch(api_key):
         raise RuntimeError("ANTHROPIC_API_KEY must be one API key: printable ASCII with no spaces")
     base_url = (os.environ.get("ANTHROPIC_BASE_URL") if development else None) or ANTHROPIC_API_URL
-    return anthropic.AsyncAnthropic(api_key=api_key, base_url=base_url)
+    return anthropic.AsyncAnthropic(api_key=api_key, base_url=base_url, max_retries=0)
 
 
 def refuse_custom_headers() -> None:
@@ -285,8 +288,8 @@ Answer = TypeVar("Answer", bound=BaseModel)
 
 class AnthropicDecisions:
     """The reviewer and the soft-promise check on the Anthropic API. `client` is an
-    `anthropic.AsyncAnthropic`, which the kernel builds with `make_client`. Each timeout is read
-    when the call is made, so a test can shorten it."""
+    `anthropic.AsyncAnthropic`, which the kernel builds once with `make_client` and uses as built.
+    Each timeout is read when the call is made, so a test can shorten it."""
 
     def __init__(self, client: Any):
         self._client = client
@@ -310,18 +313,19 @@ class AnthropicDecisions:
                    failed: str) -> tuple[Answer | None, CallUsage]:
         """One structured call at effort low: `data` as one JSON object (its letters as themselves,
         so Spanish reaches the model as text, not escapes), one try inside `timeout_s`, no tools and
-        no fallback model. The parsed answer, or None on any failure, logged as `failed` by kind
-        and never with what came back; and the call's usage."""
+        no fallback model (the client makes no retries, and the timeout goes with the request).
+        The parsed answer, or None on any failure, logged as `failed` by kind and never with what
+        came back; and the call's usage."""
         started = time.perf_counter()
         message, parsed, status, kind = None, None, "ok", None
         try:
-            client = self._client.with_options(timeout=timeout_s, max_retries=0)
-            message = await asyncio.wait_for(client.messages.create(
+            message = await asyncio.wait_for(self._client.messages.create(
                 model=model, max_tokens=max_tokens, system=system,
                 messages=[{"role": "user", "content": json.dumps(data.model_dump(mode="json"), sort_keys=True,
                                                                   ensure_ascii=False)}],
                 thinking=thinking,
                 output_config={"effort": "low", "format": {"type": "json_schema", "schema": schema}},
+                timeout=timeout_s,
             ), timeout_s)
             parsed, status, kind = _parse(message, answer)
         except (TimeoutError, anthropic.APITimeoutError):
