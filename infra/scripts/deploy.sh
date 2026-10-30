@@ -144,15 +144,12 @@ if [[ -z $data_only ]]; then
     passcode=$(security find-generic-password -s claude-desk-passcode -w) ||
       no_passcode store "the macOS Keychain item claude-desk-passcode couldn't be read (is it stored, and is the login Keychain unlocked?)"
     [[ -n $passcode ]] || no_passcode replace "the macOS Keychain item claude-desk-passcode is empty"
-    # Printable ASCII with no backslash: -w hands back any other passcode as hex, which wouldn't sign
-    # in and is itself printable, so the stored form is checked. -g writes the password to stderr as
-    # `password: 0x<HEX>...` when any byte is outside space to ~ or is a backslash, else as
-    # `password: "<value>"`. Only that stderr is kept (the attributes on stdout are dropped); it holds
-    # the passcode too, so it's never shown and is unset once checked. The one answer accepted is that
-    # last line alone, holding the value -w gave, and that value is itself checked byte by byte (a C
-    # locale, in a subshell); any other answer can't be checked, so it's refused, though it says
-    # nothing against the item. Nor does -g failing: -w has just read the item, so a locked or denied
-    # Keychain is the likely cause. For either, the advice is to run again, then to export DESK_PASSCODE.
+    # Printable ASCII with no backslash: -w gives any other passcode as hex, printable but wrong, so -g's
+    # stderr, which shows how it's stored, is checked (it holds the passcode too and is never shown). A
+    # `password: 0x...` line anywhere in it marks a byte outside space to ~ or a backslash; the one
+    # answer accepted is `password: "<what -w gave>"` alone, whose value is checked byte by byte too (a
+    # C locale, in a subshell). If -g fails, or answers in any other form, nothing is known against the
+    # item (-w has just read it), so the advice is to run again, then to export DESK_PASSCODE.
     probe=$(security find-generic-password -s claude-desk-passcode -g 2>&1 >/dev/null) ||
       no_passcode retry "the macOS Keychain item claude-desk-passcode couldn't be read a second time, to check how it's stored (is the login Keychain unlocked?)"
     if [[ $probe == 'password: 0x'* || $probe == *$'\n''password: 0x'* ]] ||
@@ -208,15 +205,12 @@ if [[ -z $data_only ]]; then
 fi
 
 # cdk_deploy <stack> [cdk options...]: the pinned CLI, its stack outputs on the terminal (fd 3). At a
-# terminal, cdk asks for approval there before any change that broadens IAM permissions or security
-# group access. Unattended, it first logs those changes with a read-only diff of the same stack and
-# context, streamed to the log as it runs, then one summary line saying whether cdk diff found a
-# change that broadens access, then deploys with --require-approval never; it stops if the diff
-# fails or gives no count. The summary reads the diff as aws-cdk 2.1145.0 (the pin in
-# infra/package.json) writes it: with --security-only, "Number of stacks with differences" counts a
-# stack only when it broadens access, and the warning "potentially sensitive changes" comes before
-# that stack's changes. Either one marks the stack as broadening, so a later CLI that drops one
-# still fails safe; check both when the pin moves.
+# terminal, cdk asks for approval there before a change that broadens access. Unattended, a read-only
+# diff of the same stack and context streams to the log, then a summary line, then the deploy runs
+# with --require-approval never; a failed diff, or one with no count, stops it. With --security-only,
+# aws-cdk 2.1145.0 (the pin) counts a stack in "Number of stacks with differences" only when it
+# broadens access, and warns "potentially sensitive changes" before its changes; either marks it as
+# broadening, so a CLI that drops one still fails safe. Recheck both when the pin moves.
 cdk_deploy() {
   local stack=$1
   shift
