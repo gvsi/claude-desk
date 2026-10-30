@@ -1212,6 +1212,7 @@ AREA_ES = "Trabajamos en Oakland, Berkeley, Alameda y Emeryville."
     "Sí, trabajamos en Oakland, Berkeley, Alameda y Emeryville.",
     "Recuerde: para cancelar la visita, avisenos con un dia de antelacion.",   # accents dropped
     "We work in Oakland.",                                                  # four words in a row
+    "We work in Oakland and nearby towns.",
     "Maria covers Oakland and Berkeley, plus Alameda and Emeryville.",      # the policy in other words
     "Trabajamos en toda la zona de Oakland.",
 ])
