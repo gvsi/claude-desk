@@ -305,12 +305,15 @@ class WeekDay(BaseModel):
 
 class ThisWeek(BaseModel):
     """"Last 7 days": the seven local dates ending today, in `timezone`. Totals run from 00:00 on `start` to now;
-    `handled + stepped_in == conversations`; `days` holds all seven, oldest first, the last one `end`."""
+    `booked_cents` adds, for each booking, the newest quote of its conversation made at or before it that no earlier
+    booking took (none: 0); `handled + stepped_in == conversations`; `days` holds all seven, oldest first, the last
+    one `end`."""
 
     timezone: str
     start: LocalDate
     end: LocalDate
     bookings: int
+    booked_cents: int
     conversations: int
     handled: int
     stepped_in: int

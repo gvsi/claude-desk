@@ -197,6 +197,14 @@ class Scene:
         assert result.state == "succeeded"
         return decision
 
+    async def quote(self, who: Guest, when: datetime, item: str = "Drain clearing", qty: int = 1) -> int:
+        """A quote at list price, made and executed (the kernel's quotes row, made at `when`); returns its amount."""
+        self.fake.now = when
+        decision, result = await who.run("native.quote", {"items": [{"item_id": item_ids(self.fake, self.owner, item),
+                                                                     "qty": qty}]})
+        assert result.state == "succeeded"
+        return decision.action.amount_cents
+
     async def lead(self, who: Guest, when: datetime, name: str = "Sam Ortiz", note: str | None = None) -> str:
         self.fake.now = when
         _, result = await who.run("native.capture_lead", {"name": name, "contact": "(510) 555-0199", "note": note})
@@ -672,6 +680,49 @@ async def test_this_week_handled_versus_stepped_in(app, browser, fake, kernel_ht
     quiet_week = (await quiet.owner.get(f"desks/{quiet.owner.desk_id}/today")).json()["this_week"]
     assert {key: quiet_week[key] for key in ("conversations", "stepped_in", "handled")} == {
         "conversations": 0, "stepped_in": 0, "handled": 0}
+
+
+async def test_booked_amount_is_the_conversations_newest_quote(scene, clock):
+    # Two quotes a second apart, then a booking: the second quote backs it.
+    two_quotes = await scene.visitor(local(2026, 10, 29, 10))
+    await scene.quote(two_quotes, local(2026, 10, 29, 10), qty=1)
+    newer = await scene.quote(two_quotes, local(2026, 10, 29, 10, 0, 1), qty=2)
+    await scene.booking(two_quotes, local(2026, 10, 29, 10, 5))
+    # One quote, then two bookings: the quote backs the first only.
+    one_quote = await scene.visitor(local(2026, 10, 29, 11))
+    once = await scene.quote(one_quote, local(2026, 10, 29, 11), item="Water heater flush")
+    await scene.booking(one_quote, local(2026, 10, 29, 11, 5))
+    await scene.booking(one_quote, local(2026, 10, 29, 11, 10))
+    # A booking with no quote before it adds nothing, nor does a quote made after it.
+    no_quote = await scene.visitor(local(2026, 10, 29, 12))
+    await scene.booking(no_quote, local(2026, 10, 29, 12))
+    await scene.quote(no_quote, local(2026, 10, 29, 12, 30), item="Leak repair")
+    # A booking held at 17:00 yesterday and approved at 19:00 is booked at 19:00, backed by its earlier quote.
+    held_chat = await scene.visitor(local(2026, 10, 29, 16, 50))
+    held_quote = await scene.quote(held_chat, local(2026, 10, 29, 16, 50), item="Leak repair")
+    scene.fake.script("native.book", "hold")
+    scene.fake.now = local(2026, 10, 29, 17)
+    desk = scene.fake.desks[scene.owner.desk_id]
+    held = await held_chat.decide("native.book", {
+        "slot_id": max(slot.slot_id for slot in desk.slots.values() if slot.slot_id not in desk.booked)})
+    scene.fake.script("native.book")                         # back to the seed's rule
+    assert held.state == "held"
+    await scene.answer(held.decision_id, local(2026, 10, 29, 19))
+    assert scene.fake.decisions[held.decision_id].decision.state == "executed"
+    clock.now = local(2026, 10, 30, 9)
+    owner = scene.owner
+
+    today = (await owner.get(f"desks/{owner.desk_id}/today")).json()
+
+    assert (newer, once, held_quote) == (36000, 15000, 25000)
+    this_week = today["this_week"]
+    assert (this_week["bookings"], this_week["booked_cents"]) == (5, newer + once + held_quote)
+    assert by_day(this_week, "bookings")["2026-10-29"] == 5
+    booking = today["briefing"]["newest"]["booking"]
+    assert (today["briefing"]["bookings"], booking["ref_id"], booking["at"]) == (
+        1, held.decision_id, stamp(local(2026, 10, 29, 19)))
+    listed = (await owner.get(f"desks/{owner.desk_id}/briefing")).json()["items"]
+    assert [(item["kind"], item["ref_id"]) for item in listed] == [("booking", held.decision_id)]
 
 
 async def test_stopped_counts_only_attempts(scene, clock):

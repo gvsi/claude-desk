@@ -236,6 +236,7 @@ class Activity:
 
     people: People
     bookings: list[Timed]                      # native.book executed, at its ledger entry
+    booked: dict[str, int]                     # each booking's amount, by its decision ID (`booked_amounts`)
     leads: list[Timed]
     stopped: list[Stopped]
     holds: list[Timed]                         # decisions with outcome hold
@@ -274,6 +275,27 @@ def _stopped_attempts(decisions: list[dict], ledger: list[dict], sessions: dict[
     return found
 
 
+def booked_amounts(bookings: Iterable[Timed], quotes: Iterable[dict]) -> dict[str, int]:
+    """What each booking was booked for, by its decision ID. Taking the bookings in time order, each takes the newest
+    quote of its session made at or before it (the latest `created_at`, then the greatest `quote_id`) that no earlier
+    booking took, and is booked for its `amount_cents`; with none it is booked for 0, so a quote backs at most one
+    booking. A quote with no `created_at` can't be placed before a booking and backs none."""
+    by_session: dict[str, list[dict]] = {}
+    for quote in quotes:
+        if quote["created_at"] is not None and quote["session_id"] is not None:
+            by_session.setdefault(quote["session_id"], []).append(quote)
+    taken: set[str] = set()
+    amounts: dict[str, int] = {}
+    for booking in sorted(bookings, key=lambda booking: (booking.at, booking.ref_id)):
+        made = [quote for quote in by_session.get(booking.session_id, ())
+                if quote["quote_id"] not in taken and utc(quote["created_at"]) <= booking.at]
+        newest = max(made, key=lambda quote: (utc(quote["created_at"]), quote["quote_id"]), default=None)
+        if newest is not None:
+            taken.add(newest["quote_id"])
+        amounts[booking.ref_id] = newest["amount_cents"] if newest is not None else 0
+    return amounts
+
+
 STEPPED_KINDS = ("approval", "takeover", "whisper", "breaker")
 
 
@@ -308,6 +330,7 @@ async def activity(ctx: OwnerCtx, desk_id: str, start: datetime) -> Activity:
     decisions = [row for row in await ctx.ro.rows("decisions", desk_id=desk_id) if row["session_id"] in who.sessions]
     ledger = await ctx.ro.rows("ledger_entries", desk_id=desk_id, order_by=("seq",))
     entries = {entry["seq"]: entry for entry in ledger}
+    quotes = [row for row in await ctx.ro.rows("quotes", desk_id=desk_id) if row["session_id"] in who.sessions]
 
     def executed(tool: str) -> list[Timed]:
         return [Timed(at=entry_time(entries[row["ledger_seq"]]), session_id=row["session_id"],
@@ -333,8 +356,10 @@ async def activity(ctx: OwnerCtx, desk_id: str, start: datetime) -> Activity:
         elif row.kind == "delivered" and row.author == "claude" and not any(
                 block.template == "handoff" for block in row.blocks or []):
             replies.append(at)
+    bookings = executed("native.book")
     return Activity(
-        people=who, bookings=executed("native.book"), callbacks=executed("native.request_callback"),
+        people=who, bookings=bookings, booked=booked_amounts(bookings, quotes),
+        callbacks=executed("native.request_callback"),
         leads=[Timed(at=utc(row["created_at"]), session_id=row["session_id"], ref_id=row["lead_id"], line=row["note"])
                for row in leads],
         stopped=_stopped_attempts(decisions, ledger, who.sessions),
@@ -402,7 +427,8 @@ def briefing(done: Activity, frame: Windows) -> Briefing:
 
 def this_week(done: Activity, frame: Windows) -> ThisWeek:
     """The last 7 days: totals from `start` to now, and each local date's conversations, bookings and stopped
-    attempts. A conversation the owner stepped into (inside the window) isn't one Claude handled."""
+    attempts. A conversation the owner stepped into (inside the window) isn't one Claude handled. Each booking's
+    amount is taken over all the Desk's bookings, so a quote a booking before the window took backs none in it."""
     texts = _within(done.texts, frame.start, frame.now)
     bookings = _within(done.bookings, frame.start, frame.now)
     stopped = _within(done.stopped, frame.start, frame.now)
@@ -415,6 +441,7 @@ def this_week(done: Activity, frame: Windows) -> ThisWeek:
     blocked = Counter(frame.local_date(attempt.at) for attempt in stopped)
     return ThisWeek(
         timezone=frame.zone.key, start=frame.dates[0], end=frame.dates[-1], bookings=len(bookings),
+        booked_cents=sum(done.booked[booking.ref_id] for booking in bookings),
         conversations=len(conversations), handled=len(conversations) - stepped_in, stepped_in=stepped_in,
         stopped=len(stopped),
         days=[WeekDay(date=day, conversations=len(talked[day]), bookings=booked[day], stopped=blocked[day])

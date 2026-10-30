@@ -4025,6 +4025,10 @@
             "type": "integer",
             "title": "Bookings"
           },
+          "booked_cents": {
+            "type": "integer",
+            "title": "Booked Cents"
+          },
           "conversations": {
             "type": "integer",
             "title": "Conversations"
@@ -4055,6 +4059,7 @@
           "start",
           "end",
           "bookings",
+          "booked_cents",
           "conversations",
           "handled",
           "stepped_in",
@@ -4062,7 +4067,7 @@
           "days"
         ],
         "title": "ThisWeek",
-        "description": "\"Last 7 days\": the seven local dates ending today, in `timezone`. Totals run from 00:00 on `start` to now;\n`handled + stepped_in == conversations`; `days` holds all seven, oldest first, the last one `end`."
+        "description": "\"Last 7 days\": the seven local dates ending today, in `timezone`. Totals run from 00:00 on `start` to now;\n`booked_cents` adds, for each booking, the newest quote of its conversation made at or before it that no earlier\nbooking took (none: 0); `handled + stepped_in == conversations`; `days` holds all seven, oldest first, the last\none `end`."
       },
       "Today": {
         "properties": {
