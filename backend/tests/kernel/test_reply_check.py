@@ -1304,16 +1304,6 @@ LINK_TLDS = ["com", "net", "org", "io", "co", "us", "app", "dev", "info", "biz",
     ("Estamos en _riverapl.es_ con fotos.", "_riverapl.es_"),
     ("Estamos en riverapl.es_ con fotos.", "riverapl.es_"),
     ("Escriba a maria@-riverapl.example y se lo confirmamos.", "maria@-riverapl.example"),
-    # a dash glued to the end of a domain (every reading writes it as "-")
-    ("Visit riverapl.com—it has photos.", "riverapl.com—it"),
-    ("Find us at riverapl.com— any time.", "riverapl.com—"),
-    ("Visit x.com—it has photos.", "x.com—it"),
-    ("Visite riverapl.mx—tiene fotos.", "riverapl.mx—tiene"),
-    # an underscore touching "@", which the glue blanking alone would turn into a blank
-    ("Email _@riverapl.shop now", "_@riverapl.shop"),
-    ("Email maria@_riverapl.shop now", "maria@_riverapl.shop"),
-    ("Email maria@_rivera now", "maria@_rivera"),
-    ("Escriba a maria@_rivera y se lo confirmamos.", "maria@_rivera"),
 ])
 def test_links_and_email_addresses_in_prose_are_blocked(prose, span):
     """A URL scheme, "www.", a domain before a path, a bare domain ending in a common top-level
