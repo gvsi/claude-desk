@@ -10,10 +10,13 @@ import { CONNECTORS_SPEC, SPEC, expectFooter, expectOwnerFrame, expectTabOrder, 
 
 const COUNTS = { conversations: { n: 2, label: '2 live conversations' }, safety: { n: 2, label: '2 blocked' } };
 
-/** Rivera's Connectors page, its apps to connect each with "Connect". */
+/**
+ * Rivera's Connectors page as the board draws it, its apps to connect each with "Connect". In the
+ * demo Google Calendar is coming soon, with no "Connect" (`rivera.directory`).
+ */
 const RIVERA: ConnectorsPageProps['directory'] = {
   ...rivera.directory,
-  available: rivera.directory.available.map((row) => ({ ...row, onConnect: () => {} })),
+  available: rivera.directory.available.map(({ connector, tools }) => ({ connector, tools, onConnect: () => {} })),
 };
 
 /** Right after Google Calendar was connected: both apps connected, none left to connect. */
@@ -74,7 +77,7 @@ export const Page: Story = {
   parameters: {
     canvas: 'N-Conn-23-Connectors',
     canvasNote: [
-      'The page layout is the web app’s (plan 04), composed from PageHeader and ConnectorDirectory. Google Calendar is catalog-only in the demo, so this shows it available to connect once it works.',
+      'The page layout is the web app’s (plan 04), composed from PageHeader and ConnectorDirectory. Google Calendar is catalog-only in the demo, where the web app passes it as coming soon with no “Connect” (ConnectorDirectory › Coming soon in the demo); this shows the signed board’s “Connect”, the state it will have once it works.',
       SIDEBAR_NOTE,
     ].join(' '),
   },

@@ -18,11 +18,14 @@ export interface DirectoryRowView {
   tools: number;
   /** Its page under Connectors (`connectors/<id>`). An app that isn't connected has none yet. */
   href?: string;
-  /** A quiet word before the count: "Always on" for Verification. */
+  /** A quiet word before the count: "Always on" for Verification, "Coming soon in this demo" for an app the demo can't connect yet. */
   note?: string;
   /** A connected app's account, in the screen's words, after "Connected": "Rivera Plumbing, test mode (mock)". */
   connection?: string;
-  /** An app to connect: "Connect" calls this, and opens the add flow's sign-in. */
+  /**
+   * An app to connect: "Connect" calls this, and opens the add flow's sign-in. An available app
+   * without it has no button, as an app that is coming soon in the demo, which says so in `note`.
+   */
   onConnect?: () => void;
 }
 

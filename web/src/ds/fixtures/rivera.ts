@@ -1490,7 +1490,8 @@ function directoryRow(section: HubSection): DirectoryRowView {
 
 /**
  * Rivera Plumbing's Connectors page (N-Conn-23-Connectors): the six built-in connectors, Stripe
- * connected with its test account, and Google Calendar to connect (catalog-only in the demo).
+ * connected with its test account, and Google Calendar, catalog-only in the demo, so coming soon
+ * with no "Connect".
  */
 const directory = {
   builtInCaption: 'Part of Claude Desk. Remove one from this Desk on its own page; Verification is always on.',
@@ -1500,7 +1501,7 @@ const directory = {
   connected: hubSections
     .filter((section) => section.connector.source.kind === 'external')
     .map((section) => ({ ...directoryRow(section), connection: 'Rivera Plumbing, test mode (mock)' })),
-  available: [{ connector: googleCalendarView, tools: 1 }] as DirectoryRowView[],
+  available: [{ connector: googleCalendarView, tools: 1, note: 'Coming soon in this demo' }] as DirectoryRowView[],
 };
 
 const listChargesProfile = {

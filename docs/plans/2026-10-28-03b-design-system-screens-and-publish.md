@@ -79,7 +79,7 @@ Specific to this plan:
   - `ConnectorDirectory`, from the connector table and the Desk's tool rows:
     - `builtIn`: the built-in connectors the Desk has, Verification noted "Always on", with `builtInCaption`.
     - `connected`: the apps the Desk connected, each with its `connection` in the screen's words (the account, and "Added just now" right after it was added).
-    - `available`: the catalog's apps not yet connected, each with `onConnect`, which opens `connectors/add/:connector`.
+    - `available`: the catalog's apps not yet connected, each with `onConnect`, which opens `connectors/add/:connector`. In the demo, Google Calendar is catalog-only, so the web app passes it with `note: "Coming soon in this demo"` and no `onConnect`, and its row has no button. The signed N-Conn-23 draws the eventual "Connect", and its board story's `canvasNote` says so.
     - Each built-in or connected row's `href` is `connectors/:connector`, and `tools` its tool count.
   - An info `Notice` under the title right after a connector is added (N-Conn-11).
 - **A connector's page** (`connectors/:connector`, N-Conn-02 to N-Conn-04):

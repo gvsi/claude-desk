@@ -24,6 +24,7 @@ It is its own component rather than a mode of `ConnectorList`: the Rules page's 
   - at the right, in secondary meta, the note ("Always on" for Verification, in caption type) and the count, "1 tool" or "{n} tools".
 - A built-in or connected row is one link to the connector's page (`href`, `connectors/<id>`), ending in a `chevron-right`, its focus ring just inside the card. Its name comes from its content: "Stripe Mock Your customers' charges and refunds. Test mode, no money moves. Connected · Rivera Plumbing, test mode (mock) 2 tools".
 - An available app has a secondary "Connect" in place of the chevron, named "Connect {name}", which calls `onConnect`. The screen opens the add flow's sign-in from it. Nothing connects from the row itself.
+- An available app the demo can't connect yet has no `onConnect` and its `note` says so, "Coming soon in this demo", before its count; its row has no button and no link (`ComingSoonInTheDemo`). In the demo, Google Calendar is passed this way; the signed board draws the "Connect" it will have once it works.
 - Under 640 px of its own width (N-Conn-24-Phone-Connectors):
   - each row's count goes under its line, after its note and a dot ("Always on · 1 tool");
   - "Connect" sits under the count;
