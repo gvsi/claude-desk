@@ -185,24 +185,8 @@ export function ThingsToTry({ things }: { things: ThingToTry[] }) {
   );
 }
 
-/** A section of Today: its heading, an optional caption or link at the right, and what's in it. */
-export function TodaySection({ id, title, count, end, children }: { id: string; title: string; count?: ReactNode; end?: ReactNode; children: ReactNode }) {
-  return (
-    <section className="board-section" aria-labelledby={id}>
-      <div className="board-section__head">
-        <h2 id={id} className="board-section__title cd-type-section">
-          {title}
-        </h2>
-        {count}
-        {end ? <span className="board-section__end">{end}</span> : null}
-      </div>
-      {children}
-    </section>
-  );
-}
-
 /** "Your public page", at the top of Today's right column. */
-export function PublicPagePanel() {
+function PublicPagePanel() {
   return (
     <div className="board-panel-card">
       <h2 className="board-panel-card__title cd-type-control">Your public page</h2>
@@ -221,7 +205,7 @@ export function PublicPagePanel() {
 const DAYS = ['F', 'S', 'S', 'M', 'T', 'W', 'T'] as const;
 
 /** "Includes recorded history": the link to the ledger's explanation of the replayed night. */
-export function RecordedHistoryLink() {
+function RecordedHistoryLink() {
   return (
     <span className="board-recorded cd-type-caption">
       <TextLink href="#recorded-history">Includes recorded history</TextLink>
@@ -347,7 +331,7 @@ export function SinceLastNight({ summary, rows, seeAll }: { summary: string; row
 }
 
 /** Each day's bookings as a share of the busiest day, Friday to today, as the board draws them. */
-export const WEEK = [64, 32, 0, 64, 100, 32, 64] as const;
+const WEEK = [64, 32, 0, 64, 100, 32, 64] as const;
 
 /**
  * Today as Maria Rivera first sees it: the greeting, the things to try, the held request, Live now,
