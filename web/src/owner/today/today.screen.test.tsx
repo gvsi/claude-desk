@@ -233,6 +233,16 @@ describe('Today', () => {
     mockStore.reset('rivera');
     await expect.element(heldCard(screen, SEEDED_REASON), { timeout: 5_000 }).toBeVisible();
     expect(needs.getByText(UNAVAILABLE).elements()).toHaveLength(0);
+  });
+
+  it('needs_you_poll_failure_keeps_what_was_read', async () => {
+    // Each failed read waits a second before its one retry, so this half of the read failure story
+    // runs on its own, after a read that worked, rather than at the end of the one above.
+    const { screen } = await renderRoute(TODAY);
+    const needs = region(screen, 'Needs you');
+    const line = needs.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    expect(line.elements()).toHaveLength(0);
 
     // A later poll fails: what was read stays, with the line, until a read works again.
     mockStore.inject({ route: 'needsYou', status: 503, times: 10_000 });
@@ -243,6 +253,12 @@ describe('Today', () => {
     mockStore.reset('rivera');
     await expect.element(line, { timeout: 5_000 }).not.toBeInTheDocument();
     await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+
+    // And it comes back when a poll fails again, after the last failure cleared.
+    mockStore.inject({ route: 'needsYou', status: 503, times: 10_000 });
+    await expect.element(line, { timeout: 5_000 }).toBeVisible();
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    mockStore.reset('rivera');
   });
 
   it('quiet_today_leaves_out_empty_sections', async () => {
