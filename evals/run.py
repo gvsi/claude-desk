@@ -64,10 +64,11 @@ wasn't measured), the thresholds' calibration at the pass's commit and, with `--
 null-baseline pass that judged exactly the held-out legitimate tasks the pass ran (no `--only`, no stop
 at its budget). Only a pass of the whole suite (`--suite all`, `--split heldout` or `all`, no
 `--only`) that its budget didn't stop, and that is gating evidence (on the Claude API with the
-production 5.5 models, `evals.results.gating_refusal`), becomes the latest report; any other, such as
-a pass on Bedrock, gets its report alone, under `evals/out/reports/`, and the command says why. A dry
-run, a null-baseline pass, a pass with no run, or anything it can't read whole is refused: exit 1,
-the reason on stdout, nothing written.
+production 5.5 models, `evals.results.gating_refusal`), becomes the latest report, and its null
+baseline must be gating evidence too; any other, such as a pass on Bedrock, gets its report alone,
+under `evals/out/reports/`, and the command says why. A dry run, a null-baseline pass, a pass with no
+run, a null baseline that isn't gating evidence for a report that would become the latest, or anything
+it can't read whole is refused: exit 1, the reason on stdout, nothing written.
 """
 
 import argparse
@@ -372,12 +373,13 @@ def report_inputs(pass_id: str, *, root: Path, null_baseline_id: str | None = No
     the pass left: `pass.json`, `runs.jsonl` and each run's transcript, the gate over its rows and the
     current recorded rate, this month's rows of the shared spend file (its own among them), the usage of
     its judged legitimate runs, the latency runs that name it, the thresholds' calibration at its commit
-    and, with `null_baseline_id`, a null-baseline pass that judged the same held-out legitimate tasks.
-    Anything missing or inconsistent refuses, so no run or number is left out unseen."""
+    and, with `null_baseline_id`, a null-baseline pass that judged the same held-out legitimate tasks (and is
+    gating evidence when the report would become the latest). Anything missing or inconsistent refuses, so
+    no run or number is left out unseen."""
     from pydantic import ValidationError
 
     from evals.gate import gate
-    from evals.report import PassSummary, latest_refusal, load_budget
+    from evals.report import PassSummary, kept_out, latest_refusal, load_budget
     from evals.tier2.passes import load_pass
     from evals.tier2.suite import load_recorded_rates, load_splits, load_suite, suite_sha256
     from evals.usage import conversation_metrics
@@ -426,7 +428,8 @@ def report_inputs(pass_id: str, *, root: Path, null_baseline_id: str | None = No
         "pass_result": summary, "gate_result": gate(result, rates), "metrics": metrics,
         "latency": _pass_latency(root, result.pass_id), "calibration": _calibration_at(root, result.git_sha),
         "recorded": rates.current,
-        "null_baseline": _null_baseline(root, null_baseline_id, result) if null_baseline_id else None,
+        "null_baseline": (_null_baseline(root, null_baseline_id, result, latest=not kept_out(summary))
+                          if null_baseline_id else None),
         "spend_month": spend_month, "budget": budget,
     }
 
@@ -574,18 +577,24 @@ def _calibration_at(root: Path, git_sha: str) -> "Calibration | None":
                             f"({error.errors()[0]['msg']})") from None
 
 
-def _null_baseline(root: Path, null_id: str, real: "PassResult") -> "NullBaseline":
+def _null_baseline(root: Path, null_id: str, real: "PassResult", *, latest: bool) -> "NullBaseline":
     """The held-out legitimate runs of `null_id`, a real pass run with Answering off on the same held-out
     set as `real`, as the report's null baseline. It must have judged exactly the held-out legitimate
     tasks `real` ran, with no `--only` and no stop at its budget, since the report sets the two side by
-    side."""
+    side. When `real`'s report would become the latest, it must also be gating evidence, by the check the
+    pass itself is held to (`results.gating_refusal`), so the latest report never quotes a null baseline
+    run on another provider or served by a model other than the production ones."""
     from evals.report import NullBaseline
+    from evals.results import gating_refusal
     from evals.tier2.passes import load_pass
 
     null = load_pass(null_id, root)
     if not null.config.null_baseline or null.config.dry_run:
         raise ReportRefused(f"pass {null_id} isn't a null baseline: --null-baseline names a real pass run with "
                             "tier2 --null-baseline")
+    if latest and (refusal := gating_refusal(null)):
+        raise ReportRefused(f"null-baseline {refusal}; pass {real.pass_id}'s report would become the latest, which "
+                            "quotes a null baseline only from such a pass")
     if null.heldout_sha256 != real.heldout_sha256:
         raise ReportRefused(f"null-baseline pass {null_id} ran on another held-out set than pass {real.pass_id}, so "
                             "the two can't be compared")

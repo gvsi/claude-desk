@@ -963,6 +963,41 @@ async def test_report_command_refuses_a_null_baseline_that_doesnt_cover_the_pass
     assert evals_run.report_command(["--pass", pass_id, "--null-baseline", covering], root=root) == 0
 
 
+async def test_report_command_quotes_only_a_gating_null_baseline_in_the_latest_report(report_repo, capsys):
+    """A report that may become the latest quotes a null baseline only from gating evidence, by the check
+    the pass itself is held to (`results.gating_refusal`): a null-baseline pass on Bedrock, or one a model
+    other than the production ones served, is refused with the reason, and nothing is written. An
+    exploratory pass's report, which stays under `evals/out/reports/`, may still quote one."""
+    root = report_repo
+    reports, out = root / "evals" / "reports", root / "evals" / "out" / "reports"
+    null = {"suite": "legit", "split": "heldout", "null_baseline": True}
+
+    async def off_model(scenario: Any, rep: int, target: Any, simulator: Any, **kwargs: Any) -> RunOutcome:
+        outcome = await answering_off(scenario, rep, target, simulator, **kwargs)
+        return outcome.model_copy(update={"simulator": outcome.simulator.model_copy(
+            update={"served_models": ["claude-sonnet-4-5"]})})
+
+    pass_id = await report_pass(root)
+    on_bedrock = await report_pass(root, answering_off, provider="bedrock", **null)
+    for null_id, why in ((on_bedrock, "it ran the API on bedrock, the simulator on bedrock"),
+                         (await report_pass(root, off_model, **null), "the simulator was served by claude-sonnet-4-5")):
+        assert evals_run.report_command(["--pass", pass_id, "--null-baseline", null_id], root=root) == 1
+        said = capsys.readouterr().out
+        assert f"report: null-baseline pass {null_id} isn't gating evidence: {why}" in said, said
+        assert f"pass {pass_id}'s report would become the latest" in said, said
+        assert not (reports / "latest.json").exists() and not list(reports.glob("2026-*.md")), why
+        assert not out.exists(), why
+
+    explored = await report_pass(root, provider="bedrock")
+    assert evals_run.report_command(["--pass", explored, "--null-baseline", on_bedrock], root=root) == 0
+    assert f"on pass `{on_bedrock}`." in (out / f"2026-10-30-{explored}.md").read_text()
+    assert not (reports / "latest.json").exists()
+
+    gating = await report_pass(root, answering_off, **null)
+    assert evals_run.report_command(["--pass", pass_id, "--null-baseline", gating], root=root) == 0
+    assert json.loads((reports / "latest.json").read_text())["null_baseline_point"] == 0.0
+
+
 async def test_report_command_counts_errored_runs_by_kind(report_repo):
     """A run that timed out keeps its kind; one whose infra error came back on its retry, or whose verdict
     didn't fit a row, is an infra error. The report judges none of them and counts each by its kind."""
