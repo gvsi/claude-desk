@@ -4,7 +4,7 @@
 
 ## When to use
 
-- Every `RenderedBlock` of kind `card` in a visitor reply, an owner's transcript or an agent's conversation. Prices, dates, times, discounts, bookings and policies reach a visitor only this way; Claude's own words can't state a price, date or discount, can't make a promise the cards don't back, and can confirm a booking only next to a booking card.
+- Every `RenderedBlock` of kind `card` in a visitor reply, an owner's transcript or an agent's conversation. Prices, dates, times, discounts and bookings reach a visitor only this way; Claude's own words can't state a price, date or discount, can't make a promise the cards don't back, and can confirm a booking only next to a booking card.
 - Never for anything a component made up. The card shows only what the block carries. Plain status lines are margin receipts, not cards.
 - A blocked reply reaches the visitor as the kernel's `handoff` card, with its receipt.
 
