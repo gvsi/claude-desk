@@ -22,7 +22,7 @@ from desk.contracts import (ApprovalResult, Decision, DecisionState, ExecResult,
                             RuleCard)
 from desk.db.models import Action, ActorSession, Approval, Booking, Execution, Person, Quote
 from desk.db.models import Decision as DecisionRow
-from desk.kernel_service import activation, adapters, approvals, compiler, demo_inbox, desks, execute, render
+from desk.kernel_service import activation, adapters, approvals, compiler, decide, demo_inbox, desks, execute, render
 from desk.kernel_service.adapters.base import AdapterFailure, AdapterRefusal, AdapterResult, AdapterUnknown
 from desk.kernel_service.repo import new_id
 from desk.kernel_service.seed import RIVERA_CARDS
@@ -431,13 +431,22 @@ async def test_allow_person_is_capped_for_money(app, client, registry, monkeypat
     assert (response.status_code, response.json()) == (422, {"code": "invalid"})
     assert "execute" not in link.calls and await approvals_of(app, rows.copy_id) == []
 
-    # an answers list that offered it anyway is no way past the cap: the answer checks again
+    # a stored answers list that offered it anyway is no way past the cap: with the refresh every read
+    # runs switched off, the stale offer reaches the answer, and the answer's own check of the card it
+    # would draft refuses it
     async with kernel_ctx(app) as ctx:
         ctx.bind(rows.copy_id)
         row = (await ctx.db.scalars(ctx.repo.scoped(select(DecisionRow).where(
             DecisionRow.decision_id == held.decision_id)))).one()
         row.answers = [*row.answers, "allow_person"]
-    response = await post_answer(client, rows.owner, held.decision_id, "allow_person")
+
+    async def unrefreshed(ctx, row: DecisionRow) -> DecisionRow:
+        return row
+
+    with monkeypatch.context() as patch:
+        patch.setattr(decide, "refresh_answers", unrefreshed)
+        assert "allow_person" in (await read_id(client, rows.owner, held.decision_id)).answers   # still offered
+        response = await post_answer(client, rows.owner, held.decision_id, "allow_person")
     assert (response.status_code, response.json()) == (422, {"code": "invalid"})
     assert "execute" not in link.calls and await approvals_of(app, rows.copy_id) == []
     assert (await read_id(client, rows.owner, held.decision_id)).state == "held"
