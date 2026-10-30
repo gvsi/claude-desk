@@ -273,8 +273,8 @@ export function ChangeReview({
         <p className="cd-change-review__heading cd-type-control">{CHECK_HEADINGS[status]}</p>
         {checks.lines.length > 0 ? (
           <ul className="cd-change-review__checks cd-type-meta">
-            {checks.lines.map((line) => (
-              <li key={line}>{line}</li>
+            {checks.lines.map((line, index) => (
+              <li key={`${index}-${line}`}>{line}</li>
             ))}
           </ul>
         ) : null}
