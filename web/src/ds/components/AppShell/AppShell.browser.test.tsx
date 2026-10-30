@@ -93,3 +93,39 @@ it('page_state_survives_the_breakpoint', async () => {
   expect(box.element()).toBe(textarea);
   expect(textarea.value).toBe('Keep this draft');
 });
+
+it('long_pages_scroll_inside_the_shell', async () => {
+  // The shell is the window's height and its main area scrolls. A long page, with the
+  // screen-reader-only labels receipts carry, must not stretch the document behind it: the page
+  // itself never scrolls, on a laptop or a phone, padded or filled.
+  const longPage = (
+    <div>
+      {Array.from({ length: 80 }, (_, index) => (
+        <p key={index}>
+          Message {index + 1}
+          <span className="cd-sr-only">Reply checked before the visitor saw it.</span>
+        </p>
+      ))}
+    </div>
+  );
+  for (const [width, height] of [
+    [1440, 900],
+    [390, 844],
+  ] as const) {
+    await page.viewport(width, height);
+    for (const fill of [false, true]) {
+      act(() =>
+        root.render(
+          <AppShell sidebar={<nav aria-label="Main">Today</nav>} business="Rivera Plumbing" fill={fill}>
+            {longPage}
+          </AppShell>,
+        ),
+      );
+      const main = container.querySelector('main') as HTMLElement;
+      // The page is longer than the window, so the main area scrolls...
+      await vi.waitFor(() => expect(main.scrollHeight).toBeGreaterThan(main.clientHeight));
+      // ...and the document doesn't.
+      expect([width, fill, document.documentElement.scrollHeight]).toEqual([width, fill, height]);
+    }
+  }
+});

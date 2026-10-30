@@ -36,7 +36,11 @@
   background: var(--bg-panel);
 }
 
+/* The main area scrolls, and it is positioned so that anything absolutely placed in a page, such
+   as a receipt's screen-reader label, is placed in it and scrolls with it, instead of stretching
+   the document behind the shell. */
 .cd-app-shell__main {
+  position: relative;
   flex: 1 1 auto;
   box-sizing: border-box;
   min-width: 0;
