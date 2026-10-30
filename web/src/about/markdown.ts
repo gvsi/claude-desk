@@ -254,11 +254,15 @@ export function documentText(blocks: Block[]): string[] {
 /** Each straight quote mark's curly pair: the one that opens a quotation, then the one for everywhere else. */
 const CURLY: Partial<Record<string, readonly [string, string]>> = { "'": ['‘', '’'], '"': ['“', '”'] };
 // A quote mark with nothing shown before it, or after a space, an opening bracket, an opening quote, a dash, a
-// hyphen, an ellipsis or a slash, opens a quotation unless a space follows it.
+// hyphen, an ellipsis or a slash, opens a quotation, when words follow it rather than a space, punctuation or
+// the end of the block.
 const OPENS_AFTER = /^$|[\s([{“‘—–…/-]/;
-// What follows a ' that starts a word but is an apostrophe: a leading elision such as ’til, ’em, rock ’n’ roll
-// or a year such as ’90s or ’26, but not a quoted number such as ‘24.7%’.
-const ELISION = /^(?:(?:til|em|cause|tis|twas|n)\b|\d\d(?:s\b|(?![\d%]|[.,]\d)))/i;
+const CLOSES_BEFORE = /^(?:$|[\s.,;:!?)\]}”’])/;
+// What follows a ' that starts a word but is an apostrophe: a whole leading elision such as ’til, ’em or rock
+// ’n’ roll, or a year such as ’90s or ’26, but not a quoted word or number such as ‘em-dash’, ‘N/A’, ‘26’, ‘24/7’
+// or ‘24.7%’.
+const ELISION =
+  /^(?:(?:til|em|cause|tis|twas)(?![\p{L}\p{N}'’-])|n['’](?![\p{L}\p{N}])|\d\d(?:s(?![\p{L}\p{N}])|(?![\p{L}\p{N}%'’/:]|[.,]\d)))/iu;
 
 /**
  * `text` with its straight quote marks curled, `before` being the character the page shows just ahead of it and
@@ -274,7 +278,7 @@ function curl(text: string, before: string, after = ''): string {
       continue;
     }
     const rest = text.slice(at + 1) + after;
-    const opens = OPENS_AFTER.test(out.at(-1) ?? before) && !/^\s/.test(rest) && !(char === "'" && ELISION.test(rest));
+    const opens = OPENS_AFTER.test(out.at(-1) ?? before) && !CLOSES_BEFORE.test(rest) && !(char === "'" && ELISION.test(rest));
     out += opens ? pair[0] : pair[1];
   }
   return out;
@@ -421,7 +425,10 @@ export function parseDocument(markdown: string, resolve: LinkResolver): Block[] 
   }
   const byline = lineAt(n).trim();
   // GitHub links a bare address in the byline as anywhere else.
-  if ([...byline].some((_, at) => startsBareAddress(byline, at))) fail(n, BARE_ADDRESS);
+  // Every offset in the line, as the address check counts them, however many characters take two.
+  if (Array.from({ length: byline.length }, (_, at) => at).some((at) => startsBareAddress(byline, at))) {
+    fail(n, BARE_ADDRESS);
+  }
   blocks.push({ kind: 'byline', text: byline });
   n += 1;
 

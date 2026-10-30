@@ -527,12 +527,17 @@ def test_the_reader_subset_check_catches_each_break(added, problem):
 
 
 def test_a_link_target_may_nest_parentheses():
-    # GitHub, like the reader, keeps balanced parentheses in a link target at any depth, so the address in it
-    # is a link's, not a bare one.
+    # GitHub, like the reader, keeps balanced parentheses in a link target, so the address in it is a link's, not
+    # a bare one. The check reads up to three levels.
     text = IN_SUBSET + "See [the wiki](https://en.wikipedia.org/wiki/A_(b_(c))) here.\n"
 
     assert reader_subset_problems(text, "capability-prediction.md") == []
     assert [target for _, target in check_docs.link_targets(text)][-1] == "https://en.wikipedia.org/wiki/A_(b_(c))"
+
+    # Unbalanced, or four levels deep, it isn't read as a link, so its address is flagged: the check fails safe.
+    for line in ["See [a](https://x.org/A_(b here.", "See [a](https://x.org/A_(b_(c_(d_(e))))) here."]:
+        found = reader_subset_problems(IN_SUBSET + line + "\n", "capability-prediction.md")
+        assert [problem for problem in found if "a bare address" in problem], line
 
 
 def test_about_documents_stay_in_the_reader_subset():

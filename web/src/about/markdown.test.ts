@@ -422,6 +422,9 @@ describe('the About Markdown reader', () => {
     const bare = 'a bare address, which GitHub links; write it as [text](https://…)';
     expect(refusal('# A document\n\nwww.example.com · October 29, 2026\n')?.message).toBe(`line 3: ${bare}`);
     expect(refusal('# A document\n\nGiovanni desk@example.com · October 29, 2026\n')?.message).toBe(`line 3: ${bare}`);
+    // However far into the line, whatever the characters before it.
+    const far = `${'𐐀'.repeat(30)} a@b.co · October 29, 2026`;
+    expect(refusal(`# A document\n\n${far}\n`)?.message).toBe(`line 3: ${bare}`);
     // The title is plain text, as the sections' headings are.
     const after = '\n\nGiovanni Alcantara · October 29, 2026\n';
     expect(refusal(`# A **bold** document${after}`)?.message).toBe('line 1: a heading with markup');
@@ -508,6 +511,21 @@ describe('the About Markdown reader', () => {
     // A quotation opens after a hyphen, an ellipsis or a slash, and closes before a space.
     expect(shown('A well-"known" fact; he said…"yes" and/"no".')).toBe('A well-“known” fact; he said…“yes” and/“no”.');
     expect(shown('He stopped at "so…" and went on.')).toBe('He stopped at “so…” and went on.');
+    // A mark before punctuation, or at the end of the block, closes, after a dash or an ellipsis too.
+    expect(shown('He said "wait-". She said "so…", and "**so…**".')).toBe('He said “wait-”. She said “so…”, and “so…”.');
+    expect(shown('It ends "so…"')).toBe('It ends “so…”');
+    // A quoted word or number that only starts like an elision is a quotation.
+    expect(shown("An 'em-dash', an 'n-gram' and '26' in quotes.")).toBe('An ‘em-dash’, an ‘n-gram’ and ‘26’ in quotes.');
+    expect(shown("Mark it 'N/A', the 'Nürnberg' trial, the 'cause' field, the unit 'em'.")).toBe(
+      'Mark it ‘N/A’, the ‘Nürnberg’ trial, the ‘cause’ field, the unit ‘em’.',
+    );
+    expect(shown("A score of '42', open '24/7', at '10:30', '10x' faster.")).toBe(
+      'A score of ‘42’, open ‘24/7’, at ‘10:30’, ‘10x’ faster.',
+    );
+    expect(shown('He said "wait…". The prefix "pre-". A path "/about/".')).toBe(
+      'He said “wait…”. The prefix “pre-”. A path “/about/”.',
+    );
+    expect(shown('He trailed off with "wait…"')).toBe('He trailed off with “wait…”');
     // What follows a mark is read across bold and links, as what comes before it is.
     const blocks = curlQuotes(parseDocument(doc("In the '**90s**, and '[90s](https://example.com/90s) too."), resolve));
     expect(documentText(blocks).at(-1)).toBe('In the ’90s, and ’90s too.');
