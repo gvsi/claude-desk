@@ -3,6 +3,7 @@
 that `cdk deploy` keeps a terminal for its approval prompt, and that the first failing step stops
 the deploy. Nothing reaches AWS or the real Keychain."""
 
+import contextlib
 import hashlib
 import json
 import os
@@ -50,14 +51,16 @@ REPLACE_IT = 'security add-generic-password -U -s claude-desk-passcode -a "$USER
 # only stacks that broaden access (STUB_DIFF_UNCOUNTED leaves that line out, and with
 # STUB_DIFF_COUNTS_NOTHING it counts none, as a later CLI might); with STUB_DIFF_WATCHES_LOG each diff
 # then waits for what it wrote to show up in the deploy log, and says whether it did before it ends.
-# A watched tool (WATCHED) writes the same record, then runs the real tool.
+# Each record also holds the stub's process group ("group"); with STUB_HANGS, `aws` then writes
+# nothing for 30 s, as a hung call would. A watched tool (WATCHED) writes the same record, then runs
+# the real tool.
 RECORD = """import hashlib, json, os, re, sys
 tool, args = os.path.basename(sys.argv[0]), sys.argv[1:]
 passcode = os.environ.get("DESK_PASSCODE")
 sha256 = lambda text: hashlib.sha256(text.encode(errors="surrogateescape")).hexdigest()
 with open(os.environ["STUB_LOG"], "a") as log:
     log.write(json.dumps({"tool": tool, "argv": args, "cwd": os.getcwd(), "tty": os.isatty(1),
-                          "passcode": sha256(passcode) if passcode else None,
+                          "group": os.getpgrp(), "passcode": sha256(passcode) if passcode else None,
                           "env": {name: sha256(value) for name, value in os.environ.items()}}) + "\\n")
 """
 WATCHED = ("dirname", "date", "mkdir", "tee", "git", "tr")  # every other command deploy.sh runs
@@ -104,6 +107,9 @@ for name, needle in (("FAIL_PREFLIGHT", "preflight.py"), ("FAIL_ADMIN", "run_adm
         sys.exit(1)
 if tool == "uv" and "smoke.py" in joined:
     sys.exit(int(os.environ.get("SMOKE_STATUS", "0")))
+if tool == "aws" and os.environ.get("STUB_HANGS"):
+    import time
+    time.sleep(30)                          # bounded, so a stub nobody kills still ends on its own
 if tool == "aws" and args[:2] == ["sts", "get-caller-identity"]:
     print("{account}")
 elif tool == "aws" and args[:2] == ["cloudformation", "describe-stacks"]:
@@ -220,13 +226,14 @@ def deploy(tmp_path):
 
     def run(*args: str, typed: str = ACCOUNT, terminal: bool = True, deployed: dict | None = None,
             keychain_item: str | None = None, security: bool = True, bash_options: tuple[str, ...] = (),
-            watch: bool = False, read_after_exit: bool = False, **extra_env: str) -> Run:
+            watch: bool = False, read_after_exit: bool = False, hang_after: float = 60, **extra_env: str) -> Run:
         """`keychain_item` is the passcode the stub Keychain holds (none by default); without
         `security`, PATH holds the stubs and only the shell and `dirname` besides; `bash_options` go
         to the bash that runs deploy.sh, before the script. With `watch`, PATH holds the stubs, the
         shell and the WATCHED tools alone, each recording its call before it runs the real one, so
         every command deploy.sh runs is in the calls, or it stops at one it can't find. With
-        `read_after_exit`, the terminal is read only once deploy.sh has exited."""
+        `read_after_exit`, the terminal is read only once deploy.sh has exited. A run at the terminal
+        that writes nothing there for `hang_after` seconds is reported as hung."""
         if deployed is not None:
             stacks.write_text(json.dumps(deployed))
         if keychain_item is not None:
@@ -272,29 +279,40 @@ def deploy(tmp_path):
         # typing into it then fails. The log's tee, which deploy.sh starts, can outlive it by a moment.
         # (Not a session of its own: macOS hangs up the terminal when a session's leader exits.)
         primary, secondary = pty.openpty()
-        process = subprocess.Popen(command, env=env, stdin=secondary, stdout=secondary, stderr=secondary,
-                                   process_group=0)
-        os.write(primary, f"{typed}\n".encode())
-        if read_after_exit:
-            process.wait(timeout=60)
-        chunks, last_output = [], time.monotonic()
-        while True:
-            ready, _, _ = select.select([primary], [], [], 0.1)
-            if ready:
-                chunk = os.read(primary, 4096)
-                if not chunk:                                                 # hung up: nothing more comes
+        process = None
+        try:
+            process = subprocess.Popen(command, env=env, stdin=secondary, stdout=secondary, stderr=secondary,
+                                       process_group=0)
+            os.write(primary, f"{typed}\n".encode())
+            if read_after_exit:
+                process.wait(timeout=60)
+            chunks, last_output = [], time.monotonic()
+            while True:
+                ready, _, _ = select.select([primary], [], [], 0.1)
+                if ready:
+                    chunk = os.read(primary, 4096)
+                    if not chunk:                                             # hung up: nothing more comes
+                        break
+                    chunks.append(chunk)
+                    last_output = time.monotonic()
+                elif process.poll() is not None and not _group_runs(process.pid):
+                    while select.select([primary], [], [], 0)[0] and (chunk := os.read(primary, 4096)):
+                        chunks.append(chunk)                                  # what they wrote last
                     break
-                chunks.append(chunk)
-                last_output = time.monotonic()
-            elif process.poll() is not None and not _group_runs(process.pid):
-                while select.select([primary], [], [], 0)[0] and (chunk := os.read(primary, 4096)):
-                    chunks.append(chunk)                                      # what they wrote last
-                break
-            elif time.monotonic() - last_output > 60:
-                os.killpg(process.pid, signal.SIGKILL)
-                raise AssertionError("deploy.sh hung: " + b"".join(chunks).decode(errors="replace"))
-        os.close(secondary)
-        os.close(primary)
+                elif time.monotonic() - last_output > hang_after:
+                    raise AssertionError("deploy.sh hung: " + b"".join(chunks).decode(errors="replace"))
+        finally:
+            # However the reading stops (a hang, a failed read, or Ctrl-C, which the group doesn't get),
+            # nothing deploy.sh started outlives the test, and neither terminal end stays open. Killing
+            # the group may find it gone or holding only zombies (EPERM on macOS); once deploy.sh is
+            # reaped here, init reaps the rest.
+            if process is not None and _group_runs(process.pid):
+                with contextlib.suppress(ProcessLookupError, PermissionError):
+                    os.killpg(process.pid, signal.SIGKILL)
+                with contextlib.suppress(subprocess.TimeoutExpired):
+                    process.wait(timeout=10)
+            os.close(secondary)
+            os.close(primary)
         return Run(process.wait(timeout=60), b"".join(chunks).decode(errors="replace"))
 
     return run
@@ -309,6 +327,11 @@ def _group_runs(group: int) -> bool:
     except PermissionError:  # macOS, while the only ones left are exiting and not yet reaped
         pass
     return True
+
+
+def _open_terminals() -> set[int]:
+    """This process's open file descriptors that are terminals, pseudo-terminal ends included."""
+    return {fd for fd in map(int, os.listdir("/dev/fd")) if os.isatty(fd)}
 
 
 def _context(call: dict) -> dict[str, str]:
@@ -375,6 +398,22 @@ def test_the_terminal_keeps_what_deploy_sh_wrote_when_it_exits_before_being_read
     run = deploy(DESK_IMAGE_DIR="/elsewhere", read_after_exit=True)
     assert run.status == 2
     assert "deploy: unset DESK_IMAGE_DIR" in run.output
+
+
+def test_a_hung_deploy_is_reported_and_leaves_no_process_or_terminal_behind(deploy, tmp_path):
+    """deploy.sh runs in a process group of its own, which pytest's Ctrl-C doesn't reach, so the
+    terminal harness cleans up however it stops reading: a deploy.sh that writes nothing for a while
+    is reported as hung, and then its process group is gone and both terminal ends are closed."""
+    terminals = _open_terminals()
+    with pytest.raises(AssertionError, match="deploy.sh hung"):
+        deploy(STUB_HANGS="1", hang_after=2)
+    assert _open_terminals() == terminals
+    [hung] = [json.loads(line) for line in (tmp_path / "stub.log").read_text().splitlines()]
+    assert hung["tool"] == "aws"                                  # the account step, hung
+    deadline = time.monotonic() + 10                              # what deploy.sh started is reaped by init
+    while _group_runs(hung["group"]) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert not _group_runs(hung["group"])
 
 
 def test_the_image_is_built_from_this_checkout_at_head(deploy):
