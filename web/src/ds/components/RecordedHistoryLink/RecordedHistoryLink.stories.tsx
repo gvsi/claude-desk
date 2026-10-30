@@ -11,12 +11,8 @@ const meta = {
   title: 'Recorded history/RecordedHistoryLink',
   component: RecordedHistoryLink,
   args: { href: LEDGER_EXPLANATION },
-  parameters: {
-    layout: 'padded',
-    canvas: 'none',
-    canvasNote:
-      'Drawn on the recorded-history boards (N-History-Conversations, N-History-People and N-History-Safety), which join the reference boards with their board stories, and on Today (N-Today-Run1).',
-  },
+  // Drawn on every recorded-history board, and twice on Today (N-Today-Run1).
+  parameters: { layout: 'padded', canvas: 'N-History-Conversations' },
 } satisfies Meta<typeof RecordedHistoryLink>;
 
 export default meta;

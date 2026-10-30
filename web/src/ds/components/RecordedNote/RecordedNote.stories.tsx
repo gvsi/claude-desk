@@ -18,12 +18,7 @@ function partsOf(canvasElement: HTMLElement): { note: HTMLElement; icon: SVGSVGE
 const meta = {
   title: 'Recorded history/RecordedNote',
   component: RecordedNote,
-  parameters: {
-    layout: 'padded',
-    canvas: 'none',
-    canvasNote:
-      'Drawn on the recorded-history boards (N-History-Conversations and N-History-Safety), which join the reference boards with their board stories.',
-  },
+  parameters: { layout: 'padded', canvas: 'N-History-Conversations' },
 } satisfies Meta<typeof RecordedNote>;
 
 export default meta;
@@ -57,6 +52,7 @@ export const Default: Story = {
 };
 
 export const Wrapped: Story = {
+  parameters: { canvas: 'N-History-Safety', canvasNote: 'The line alone at the opened attempt’s inner width, where the board draws it inside the card.' },
   // An attempt's detail card, narrow enough that the line wraps as the Safety board draws it.
   decorators: [
     (Story) => (

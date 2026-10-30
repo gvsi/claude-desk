@@ -1,6 +1,6 @@
 import type { Preview } from '@storybook/react-vite';
 
-import { assertCanvasParameter } from '../src/ds/reference/boards.ts';
+import { BOARD_VIEWPORTS, assertCanvasParameter } from '../src/ds/reference/boards.ts';
 import { assertCleanCopy } from '../src/ds/test/copy.ts';
 
 import '../src/ds/tokens.css';
@@ -18,7 +18,13 @@ const preview: Preview = {
     a11y: { test: 'error' },
     viewport: {
       options: {
-        canvas: { name: 'Canvas', styles: { width: '1280px', height: '820px' }, type: 'desktop' },
+        // The windows the boards are drawn at: the canvas's, and a 14-inch laptop's.
+        ...Object.fromEntries(
+          Object.entries(BOARD_VIEWPORTS).map(([key, { name, width, height }]) => [
+            key,
+            { name, styles: { width: `${width}px`, height: `${height}px` }, type: 'desktop' },
+          ]),
+        ),
         desktop: { name: 'Desktop', styles: { width: '1440px', height: '900px' }, type: 'desktop' },
         tablet: { name: 'Tablet', styles: { width: '768px', height: '1024px' }, type: 'tablet' },
         phone: { name: 'Phone', styles: { width: '390px', height: '844px' }, type: 'mobile' },

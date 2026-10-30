@@ -105,8 +105,9 @@ export const Recorded: Story = {
     recorded: true,
   },
   parameters: {
+    canvas: 'N-History-Conversations',
     canvasNote:
-      'A replayed conversation, as the recorded-history board marks it: the Recorded tag at the end of the status line. The status here is longer than the board\'s "Visitor", to show the words giving way to the tag.',
+      'A replayed conversation, as the board marks it: the Recorded tag at the end of the status line. The status here is longer than the board\'s "Visitor", to show the words giving way to the tag.',
   },
   play: async ({ canvas }) => {
     // The tag is part of the row's one link, so a screen reader hears it with the status.

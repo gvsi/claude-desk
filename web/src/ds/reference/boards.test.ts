@@ -1,6 +1,7 @@
 /**
- * Ties the reference boards to what checks them: each board's render at 1280×820 (when the renders
- * are on this machine) and the `Boards/*` stories that rebuild the boards from the components.
+ * Ties the reference boards to what checks them: each board's render at its own size (when the
+ * renders are on this machine) and the `Boards/*` stories that rebuild the boards from the
+ * components, each run at its board's size.
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -10,10 +11,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { isExportStory } from 'storybook/internal/csf';
 import { describe, expect, it } from 'vitest';
 
-import { REFERENCE_BOARDS } from './boards.ts';
-
-/** The size every board is rendered at, as the Storybook "Canvas" viewport. */
-const RENDER_SIZE = { width: 1280, height: 820 };
+import { BOARD_VIEWPORTS, REFERENCE_BOARDS, boardViewport, isReferenceBoard } from './boards.ts';
 
 /** A PNG's width and height, read from its IHDR chunk, or null when the bytes aren't a PNG. */
 function pngSize(bytes: Uint8Array): { width: number; height: number } | null {
@@ -35,6 +33,14 @@ interface BoardStory {
   id: string;
   /** The story's `parameters.canvas`, its own or its meta's. */
   canvas: unknown;
+  /** The Storybook viewport it runs at: its own or its meta's `globals.viewport`, else the preview's "canvas". */
+  viewport: unknown;
+}
+
+/** The viewport a story or meta's `globals` picks, if any. */
+function viewportOf(globals: Record<string, unknown> | undefined): unknown {
+  const viewport = globals?.viewport as { value?: unknown } | undefined;
+  return viewport?.value;
 }
 
 /** Every story in `boards/`, with the board it names. */
@@ -49,6 +55,7 @@ async function boardStories(): Promise<BoardStory[]> {
       .map(([name, story]) => ({
         id: `${meta.title} › ${name}`,
         canvas: story.parameters?.canvas ?? meta.parameters?.canvas,
+        viewport: viewportOf(story.globals) ?? viewportOf(meta.globals) ?? 'canvas',
       }));
   });
 }
@@ -65,9 +72,9 @@ describe('reference boards', () => {
       if (!existsSync(file)) return [`${board}: no ${board}.png`];
       const size = pngSize(readFileSync(file));
       if (!size) return [`${board}: ${board}.png is not a PNG`];
-      return size.width === RENDER_SIZE.width && size.height === RENDER_SIZE.height
-        ? []
-        : [`${board}: ${size.width}×${size.height}, not ${RENDER_SIZE.width}×${RENDER_SIZE.height}`];
+      // Each board at the one size it is drawn at: 1280×820, or 1512×982 for the laptop boards.
+      const want = BOARD_VIEWPORTS[boardViewport(board)];
+      return size.width === want.width && size.height === want.height ? [] : [`${board}: ${size.width}×${size.height}, not ${want.width}×${want.height}`];
     });
     expect(problems).toEqual([]);
   });
@@ -87,5 +94,18 @@ describe('reference boards', () => {
       return `${board}: ${naming.length === 1 ? 'one story' : `${naming.length} stories${naming.length > 1 ? ` (${naming.join('; ')})` : ''}`}`;
     });
     expect(counts).toEqual(REFERENCE_BOARDS.map((board) => `${board}: one story`));
+  });
+
+  it('board_stories_run_at_their_boards_window', async () => {
+    // The plays measure the board as drawn, so each runs in the window its board was rendered at.
+    const stories = await boardStories();
+    const wrong = stories.flatMap(({ id, canvas, viewport }) =>
+      isReferenceBoard(canvas) && viewport !== boardViewport(canvas)
+        ? [`${id}: runs at ${JSON.stringify(viewport)}, drawn at ${boardViewport(canvas)}`]
+        : [],
+    );
+    expect(wrong).toEqual([]);
+    // Both windows are in use, so the check reads the stories' globals as they are written.
+    expect(new Set(stories.map(({ viewport }) => viewport))).toEqual(new Set(Object.keys(BOARD_VIEWPORTS)));
   });
 });

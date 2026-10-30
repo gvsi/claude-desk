@@ -19,12 +19,9 @@ async function expectHistoryIcon(tag: HTMLElement) {
 const meta = {
   title: 'Recorded history/RecordedTag',
   component: RecordedTag,
-  parameters: {
-    layout: 'padded',
-    canvas: 'none',
-    canvasNote:
-      'Drawn on the recorded-history boards (N-History-Conversations, N-History-People and N-History-Safety), which join the reference boards with their board stories.',
-  },
+  // Drawn on every recorded-history board: on a conversation's status line, after where an
+  // attempt came from, and on a lead.
+  parameters: { layout: 'padded', canvas: 'N-History-Conversations' },
 } satisfies Meta<typeof RecordedTag>;
 
 export default meta;
@@ -76,7 +73,7 @@ export const OnALead: Story = {
       </li>
     </ul>
   ),
-  parameters: { layout: 'padded' },
+  parameters: { canvas: 'N-History-People', canvasNote: 'One replayed lead, as People composes it; the board lists three under their section.' },
   play: async ({ canvas }) => {
     const lead = within(canvas.getByRole('list', { name: 'Leads' })).getByRole('listitem');
     const tag = within(lead).getByText('Recorded');

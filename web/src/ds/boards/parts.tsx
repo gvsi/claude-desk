@@ -4,7 +4,7 @@
  * its "Last 7 days" column and briefing, and the conversation page's columns. They are composed
  * here from the components and tokens, only for the `Boards/*` stories, and exported nowhere else.
  */
-import type { CSSProperties, ReactNode } from 'react';
+import { useState, type CSSProperties, type ReactNode } from 'react';
 import { fn } from 'storybook/test';
 
 import type { EvMessage, PublicDesk, RenderedBlock, StatusEvent } from '../../api/contracts.ts';
@@ -29,6 +29,7 @@ import { AppShell } from '../components/AppShell/AppShell.tsx';
 import { Button } from '../components/Button/Button.tsx';
 import { Card } from '../components/Card/Card.tsx';
 import { ChainStatus } from '../components/ChainStatus/ChainStatus.tsx';
+import { Chip } from '../components/Chip/Chip.tsx';
 import { PageHeader } from '../components/PageHeader/PageHeader.tsx';
 import { SegmentedControl } from '../components/SegmentedControl/SegmentedControl.tsx';
 import { ConversationListItem } from '../components/ConversationListItem/ConversationListItem.tsx';
@@ -416,6 +417,14 @@ export interface ListedConversation {
   name: string;
   time: string;
   status: { tone: StatusTone; text: string };
+  /** Replayed into this copy: the row carries the Recorded tag. */
+  recorded?: boolean;
+}
+
+/** The list under one day's label: "Today", "Yesterday", "Earlier this week". */
+export interface ConversationGroup {
+  label: string;
+  items: ListedConversation[];
 }
 
 /** The conversations the Run 1 boards list beside the open one. */
@@ -426,25 +435,51 @@ export const CONVERSATION_LIST: ListedConversation[] = [
   { name: 'Visitor in Berkeley', time: '10:58 am', status: { tone: 'held', text: 'Needs you' } },
 ];
 
+export interface ConversationsPageProps {
+  /** The open conversation, by the name the list shows. */
+  open: string;
+  /** Its time too, where the list repeats a name ("Visitor"). */
+  openTime?: string;
+  /** Today's conversations, under one "Today" label, unless `groups` is given. */
+  items?: ListedConversation[];
+  /** The list by day, each under its own label. */
+  groups?: ConversationGroup[];
+  /** A line under the title: "Includes recorded history". */
+  caption?: ReactNode;
+  /**
+   * The recorded-history board's page, at a 14-inch laptop's window: a 312 px list with its days
+   * spaced as that board draws them, and the footer at the open column's foot.
+   */
+  history?: boolean;
+  children: ReactNode;
+}
+
 /**
- * The conversations page: the list of today's conversations in its own column at the left, and the
- * open conversation in the reading column beside it.
+ * The conversations page: the list of conversations in its own column at the left, under their
+ * days, and the open conversation in the reading column beside it.
  */
-export function ConversationsPage({ open, items = CONVERSATION_LIST, children }: { open: string; items?: ListedConversation[]; children: ReactNode }) {
+export function ConversationsPage({ open, openTime, items = CONVERSATION_LIST, groups, caption, history = false, children }: ConversationsPageProps) {
+  const days = groups ?? [{ label: 'Today', items }];
+  const isOpen = (item: ListedConversation) => item.name === open && (openTime === undefined || item.time === openTime);
   return (
-    <div className="board-conversations">
+    <div className={`board-conversations${history ? ' board-conversations--history' : ''}`}>
       <nav className="board-conversations__list" aria-labelledby="board-conversations-title">
         <h1 id="board-conversations-title" className="board-conversations__title cd-type-page-title">
           Conversations
         </h1>
-        <p className="board-quiet cd-type-meta">Today</p>
-        <ul className="board-conversations__items">
-          {items.map((item) => (
-            <li key={item.name}>
-              <ConversationListItem {...item} href={`#conversation-${item.time}`} current={item.name === open} />
-            </li>
-          ))}
-        </ul>
+        {caption ? <p className="board-conversations__caption cd-type-caption">{caption}</p> : null}
+        {days.map((day) => (
+          <div key={day.label} className="board-conversations__day">
+            <p className="board-quiet cd-type-meta">{day.label}</p>
+            <ul className="board-conversations__items">
+              {day.items.map((item) => (
+                <li key={`${item.name} ${item.time}`}>
+                  <ConversationListItem {...item} href={`#conversation-${item.time}`} current={isOpen(item)} />
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
       </nav>
       <div className="board-conversations__open">{children}</div>
     </div>
@@ -657,40 +692,98 @@ export function checkedReply(id: string, blocks: RenderedBlock[], ledgerSeq: num
 
 export type SafetyView = 'attempts' | 'entries';
 
+/** The kinds an attempt is sorted into, "All" first and chosen. */
+export const KINDS = ['All', 'Posing as you', 'Money', 'Private data', 'Codes', 'Hidden instructions', 'Other', 'Not sorted yet'] as const;
+
+/** The kinds as the screen holds them: "All" chosen at first, and the choice follows each pick. */
+export function KindChips() {
+  const [kind, setKind] = useState<(typeof KINDS)[number]>('All');
+  return (
+    <div className="board-chips" role="radiogroup" aria-label="Kind of attempt">
+      {KINDS.map((option) => (
+        <Chip key={option} asRadio selected={option === kind} onClick={() => setKind(option)}>
+          {option}
+        </Chip>
+      ))}
+    </div>
+  );
+}
+
+export interface SafetyPageProps {
+  view: SafetyView;
+  entries: number;
+  list: ReactNode;
+  detail: ReactNode;
+  /** Claude's line about the week. */
+  summary?: string;
+  /** A caption beside the summary: "Includes recorded history". */
+  caption?: ReactNode;
+  /** The counts beside Conversations and Safety in the sidebar. */
+  counts?: RiveraFrameProps['counts'];
+  /**
+   * The recorded-history board's page, at a 14-inch laptop's window: the page fills the main area
+   * with its own 24/40/20 padding, the opened attempt is 400 px wide, 32 px from the list, and the
+   * footer sits at the page's foot.
+   */
+  history?: boolean;
+}
+
 /**
  * The Safety page: its title and Claude's line about the week, the held request waiting on Today,
  * the ledger's chain check beside the view switch, and the page's two columns.
  */
-export function SafetyPage({ view, entries, list, detail }: { view: SafetyView; entries: number; list: ReactNode; detail: ReactNode }) {
-  return (
-    <RiveraFrame current="safety" counts={{ conversations: { n: 3, label: '3 live conversations' }, safety: { n: 2, label: '2 blocked' } }}>
-      <div className="board-safety">
-        <PageHeader
-          title="Safety"
-          subtitle={<span className="board-safety__week cd-type-summary">6 attempts to talk me around were stopped this week.</span>}
-          actions={
-            <Button variant="secondary" href="#today">
-              <StatusLabel tone="held">1 held for you, in Today</StatusLabel>
-            </Button>
-          }
+export function SafetyPage({
+  view,
+  entries,
+  list,
+  detail,
+  summary = '6 attempts to talk me around were stopped this week.',
+  caption,
+  counts = { conversations: { n: 3, label: '3 live conversations' }, safety: { n: 2, label: '2 blocked' } },
+  history = false,
+}: SafetyPageProps) {
+  const page = (
+    <div className={`board-safety${history ? ' board-safety--history' : ''}`}>
+      <PageHeader
+        title="Safety"
+        subtitle={
+          caption ? (
+            <span className="board-safety__summary">
+              <span className="board-safety__week cd-type-summary">{summary}</span>
+              {caption}
+            </span>
+          ) : (
+            <span className="board-safety__week cd-type-summary">{summary}</span>
+          )
+        }
+        actions={
+          <Button variant="secondary" href="#today">
+            <StatusLabel tone="held">1 held for you, in Today</StatusLabel>
+          </Button>
+        }
+      />
+      <div className="board-safety__bar">
+        <ChainStatus chainOk firstBadSeq={null} entries={entries} devKey />
+        <SegmentedControl
+          label="Show"
+          options={[
+            { value: 'attempts', label: 'Attempts' },
+            { value: 'entries', label: 'Every entry' },
+          ]}
+          value={view}
+          onChange={fn()}
         />
-        <div className="board-safety__bar">
-          <ChainStatus chainOk firstBadSeq={null} entries={entries} devKey />
-          <SegmentedControl
-            label="Show"
-            options={[
-              { value: 'attempts', label: 'Attempts' },
-              { value: 'entries', label: 'Every entry' },
-            ]}
-            value={view}
-            onChange={fn()}
-          />
-        </div>
-        <div className={`board-safety__columns board-safety__columns--${view}`}>
-          <div className="board-safety__list">{list}</div>
-          <div className="board-safety__detail">{detail}</div>
-        </div>
       </div>
+      <div className={`board-safety__columns board-safety__columns--${view}`}>
+        <div className="board-safety__list">{list}</div>
+        <div className="board-safety__detail">{detail}</div>
+      </div>
+      {history ? <ConceptFooter /> : null}
+    </div>
+  );
+  return (
+    <RiveraFrame current="safety" counts={counts} fill={history}>
+      {history ? <div className="board-page">{page}</div> : page}
     </RiveraFrame>
   );
 }

@@ -110,7 +110,8 @@ export const Recorded: Story = {
     recorded: true,
   },
   parameters: {
-    canvasNote: 'A replayed attempt, as the recorded-history Safety board (N-History-Safety) marks it: the Recorded tag 10 px after where it came from.',
+    canvas: 'N-History-Safety',
+    canvasNote: 'One replayed attempt, as the board marks it: the Recorded tag 10 px after where it came from. The board lists it with four others.',
   },
   play: async ({ canvas }) => {
     // The tag's word joins the row's name, before the checkpoint that stopped it.
@@ -144,7 +145,8 @@ export const RecordedNarrow: Story = {
     </ul>
   ),
   parameters: {
-    canvasNote: 'A replayed attempt in a phone-wide list, narrower than the recorded-history Safety board (N-History-Safety) draws it.',
+    canvas: 'N-History-Safety',
+    canvasNote: 'A replayed attempt in a phone-wide list, narrower than the board draws it, where where it came from gives way to the tag.',
   },
   play: async ({ canvas }) => {
     const link = canvas.getByRole('link', { name: /Recorded Stopped by: Reply checkpoint$/ });
