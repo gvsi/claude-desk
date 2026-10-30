@@ -553,11 +553,12 @@ async def handoff_status(records: Any, desk: GoldenDesk, handoff_id: str) -> str
 @pytest.mark.requires("01b")
 async def test_a_handoff_is_marked_done_once_by_its_own_owner(k: KernelHarness, records):
     """A callback the visitor asked for is marked done by the owner of its copy, once. Another
-    copy's owner gets 404 `not_found`, as an unknown handoff does, and a visitor's token 401 `auth`:
-    the handoff stays open, its card still shows, and nothing of the other copy reaches this one's
-    ledger. The owner's mark is ledgered `desk_data` naming the handoff; the callback card is stale
-    from then on, so a call that happened is never promised again; and marking it again is 409
-    `conflict`."""
+    copy's owner gets 404 `not_found` and this copy's ledger is unchanged: that copy can't see the
+    handoff at all, so the refusal is only logged. An unknown handoff is 404 too, and a visitor's
+    token 401 `auth`. The handoff stays open, its card still shows, and nothing of the other copy
+    reaches this one's ledger. The owner's mark is ledgered `desk_data` naming the handoff; the
+    callback card is stale from then on, so a call that happened is never promised again; and
+    marking it again is 409 `conflict`."""
     a = await golden_desk(k)
     b = await desk_of(k, await k.new_copy())
     visitor = await open_caller(k, a, "visitor")
@@ -570,8 +571,11 @@ async def test_a_handoff_is_marked_done_once_by_its_own_owner(k: KernelHarness, 
     promised = passes(visitor, ["prose", "callback_confirmed"])
     await check_reply(k, visitor, CALLBACK_PROSE, card, expect=promised)
 
-    async with ledgered_during(records, a.copy, a.desk_id) as on_a:
+    async with ledgered_during(records, a.copy, a.desk_id) as by_b:
         await mark_done(k, handoff_id, b.owner, expect=NOT_FOUND)
+    written = [entry.event.kind for entry in by_b]
+    assert written == [], f"another copy's mark wrote {written} on this copy's ledger"
+    async with ledgered_during(records, a.copy, a.desk_id) as on_a:
         await mark_done(k, "handoff-made-up", a.owner, expect=NOT_FOUND)
         await mark_done(k, handoff_id, visitor.auth, expect=UNAUTHENTICATED)
     assert_only_auth(on_a, {**copy_secrets(b.copy, "B's"), **token_secrets(session_token(visitor), "the visitor's")})
