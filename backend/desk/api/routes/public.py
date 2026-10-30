@@ -7,9 +7,7 @@ sends is never read. Claude's turns run in the process's `TurnRunner`, which hol
 memory only; what they show reaches the visitor on the event stream.
 """
 
-import contextlib
 import json
-from collections.abc import AsyncIterator
 from typing import Annotated
 from urllib.parse import quote
 
@@ -17,12 +15,10 @@ from fastapi import APIRouter, Depends, Header, Path, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, StringConstraints
 from sqlalchemy import func, select
 from sse_starlette import EventSourceResponse
-from starlette.background import BackgroundTask
 
 from desk.api.cookies import VISITOR_COOKIE, set_visitor_cookie
 from desk.api.deliver import Status, deliver
 from desk.api.deps import ApiProblem, VisitorCtx, client_ip, public_origin, runtime, visitor_context, visitor_ctx
-from desk.api.ratelimit import StreamSlot
 from desk.api.schemas import (
     AgentCardOut,
     AgentCardSigning,
@@ -174,25 +170,6 @@ def _cursor(last_event_id: str | None, after: int | None) -> int | None:
     return int(last_event_id)
 
 
-def _released(response: EventSourceResponse, slot: StreamSlot) -> EventSourceResponse:
-    """Free the stream's place when it ends, however it ends: the background task runs after a normal end or a hang
-    up, the body's `finally` when the stream failed. Closing the body closes the stream's frames at once, which lets
-    go of their listener subscription."""
-    frames = response.body_iterator
-
-    async def releasing() -> AsyncIterator:
-        try:
-            async with contextlib.aclosing(frames):
-                async for frame in frames:
-                    yield frame
-        finally:
-            slot.release()
-
-    response.body_iterator = releasing()
-    response.background = BackgroundTask(slot.release)
-    return response
-
-
 @router.get("/desks/{slug}/events", response_class=EventSourceResponse,
             responses={200: {"content": {"text/event-stream": {}}, "description": "The session's events"},
                        **error_responses(401, 422, 429, 503)})
@@ -202,7 +179,9 @@ async def events(slug: str, request: Request, after: Annotated[int | None, Query
     control row appears while it is open, the session's runner does what control rows left and runs waiting work,
     with the visitor's credential, in a task of its own: a hang-up never cuts it short. Three streams per session
     and thirty per address may be open at once: a session's fourth closes its oldest (opening a stream is never
-    refused for its session's streams, so a reload never is), and past the address's thirty it is 429."""
+    refused for its session's streams, so a reload never is), and past the address's thirty it is 429. A closed
+    stream ends even while its client has stopped reading, and its place is freed once it has ended, however it
+    ended."""
     state = runtime(request).started()
     cursor = _cursor(last_event_id, after)
     token = request.cookies.get(VISITOR_COOKIE)
@@ -220,12 +199,12 @@ async def events(slug: str, request: Request, after: Annotated[int | None, Query
 
     try:
         response = event_stream(state.database(), state.listener, caller.ids, cursor, on_control=on_control,
-                                on_open=on_open, wakeup=wakeup)
+                                on_open=on_open, wakeup=wakeup, on_end=slot.release)
     except BaseException:
         slot.release()
         raise
     set_visitor_cookie(response, slug, token)
-    return _released(response, slot)
+    return response
 
 
 # Held requests -----------------------------------------------------------------------------------------------

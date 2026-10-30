@@ -8,6 +8,7 @@ ASGI response in a task, until the test hangs up, since httpx's in-process trans
 """
 
 import asyncio
+import contextlib
 import dataclasses
 import hashlib
 import json
@@ -22,13 +23,12 @@ from fastapi import FastAPI
 from procrastinate.testing import InMemoryConnector
 from pydantic import TypeAdapter
 from sqlalchemy import text
-from sse_starlette import EventSourceResponse
 
 from desk.api import runner as runner_module
+from desk.api import sse
 from desk.api.main import create_app
 from desk.api.ratelimit import StreamSlots
-from desk.api.routes.public import _released
-from desk.api.sse import append_control, emit
+from desk.api.sse import EventStream, Wakeup, append_control, emit
 from desk.api.store import Ids, append_message
 from desk.contracts import ToolCall
 from desk.events import EvError, EvTurnEnd, EvWriting, SseEvent
@@ -98,19 +98,26 @@ def parse_frames(text: str) -> list[Frame]:
 
 @dataclass
 class Stream:
-    """A request to the app run as a browser runs an event stream: in a task, until `close()` hangs up."""
+    """A request to the app run as a browser runs an event stream: in a task, until `close()` hangs up. A client that
+    stops reading (`reading` False, or `stop_reading()`) leaves each body send waiting until it hangs up; `blocked` is
+    set once one waits."""
 
     app: FastAPI
     path: str
     headers: list[tuple[str, str]] = field(default_factory=list)
     ip: str = CLIENT_IP
+    reading: bool = True
     status: int | None = None
     response_headers: list[tuple[str, str]] = field(default_factory=list)
     body: str = ""
+    blocked: asyncio.Event = field(default_factory=asyncio.Event)
     _started: asyncio.Event = field(default_factory=asyncio.Event)
     _changed: asyncio.Event = field(default_factory=asyncio.Event)
     _hung_up: asyncio.Event = field(default_factory=asyncio.Event)
     _task: asyncio.Task | None = None
+
+    def stop_reading(self) -> None:
+        self.reading = False
 
     async def open(self) -> "Stream":
         path, _, query = self.path.partition("?")
@@ -135,6 +142,10 @@ class Stream:
                 self.response_headers = [(name.decode(), value.decode()) for name, value in message["headers"]]
                 self._started.set()
             elif message["type"] == "http.response.body":
+                if not self.reading:                    # the send waits for a client that never reads
+                    self.blocked.set()
+                    await self._hung_up.wait()
+                    return
                 self.body += message.get("body", b"").decode()
                 self._changed.set()
 
@@ -824,7 +835,61 @@ async def test_open_streams_are_capped(app, browser, fake, kernel_http):
     assert slots.open_counts() == ({}, {})
 
 
-async def test_a_stream_closed_mid_send_closes_its_frames_and_frees_its_place():
+async def test_a_client_that_stops_reading_never_keeps_more_than_the_cap_open(app, browser, fake, kernel_http,
+                                                                              engine):
+    """A client that stops reading leaves its stream's send waiting. Closing that stream for a newer one of its session
+    still ends it at once, its waiting send included: however many streams the session opens, no more than its three
+    stay open, with their listener subscriptions, and a closed stream's place is counted until it has ended."""
+    slug = await new_slug(kernel_http, fake)
+    _, token, opened = await open_session(app, browser, slug)
+    session_id = opened["state"]["session_id"]
+    async with engine.begin() as conn:                    # an event to replay, so each stream's first send waits
+        await emit(conn, ids_of(fake, session_id), EvTurnEnd(type="turn_end"))
+    runtime = app.state.runtime
+    streams: list[Stream] = []
+
+    def alive() -> int:
+        return sum(not stream._task.done() for stream in streams)
+
+    def subscribed() -> int:
+        return len(runtime.listener._streams.get(session_id, ()))
+
+    for _ in range(8):
+        stream = Stream(app, events_path(slug), headers=[cookie(token)], reading=False)
+        streams.append(await stream.open())
+        await asyncio.wait_for(stream.blocked.wait(), 5)  # its first send waits for the client
+        assert subscribed() <= runtime.stream_slots.open_counts()[0][session_id]     # never counted below what is open
+    with contextlib.suppress(TimeoutError):
+        await until(lambda: alive() <= 3, timeout=2)
+
+    assert (alive(), subscribed()) == (3, 3)
+    assert runtime.stream_slots.open_counts() == ({session_id: 3}, {CLIENT_IP: 3})
+    for stream in streams:
+        await stream.close()
+    assert runtime.stream_slots.open_counts() == ({}, {})
+
+
+async def test_a_closed_stream_whose_client_stops_reading_after_the_close_still_ends(app, browser, fake, kernel_http,
+                                                                                      monkeypatch):
+    """A stream closed while no send waits is woken to end at its next look. Should its client stop reading just then,
+    its last send waits, and the stream is ended within `CLOSE_GRACE_S` all the same."""
+    monkeypatch.setattr(sse, "CLOSE_GRACE_S", 0.05)
+    slug = await new_slug(kernel_http, fake)
+    _, token, opened = await open_session(app, browser, slug)
+    slots = app.state.runtime.stream_slots
+    streams = [await Stream(app, events_path(slug), headers=[cookie(token)]).open() for _ in range(3)]
+    streams[0].stop_reading()                             # idle, with no send waiting: its next one will
+    fourth = await Stream(app, events_path(slug), headers=[cookie(token)]).open()
+
+    await asyncio.wait_for(streams[0]._task, 5)
+    assert streams[0].blocked.is_set()                    # its last send waited, and the stream ended all the same
+    assert slots.open_counts() == ({opened["state"]["session_id"]: 3}, {CLIENT_IP: 3})
+    for stream in [*streams[1:], fourth]:
+        await stream.close()
+    assert slots.open_counts() == ({}, {})
+
+
+async def test_a_stream_that_fails_mid_send_closes_its_frames_and_frees_its_place():
     closed = []
 
     async def frames() -> AsyncIterator[str]:
@@ -834,13 +899,19 @@ async def test_a_stream_closed_mid_send_closes_its_frames_and_frees_its_place():
         finally:
             closed.append(True)                          # the listener subscription is let go here
 
-    slots = StreamSlots()
-    inner = frames()
-    body = _released(EventSourceResponse(inner), slots.acquire("session-1", CLIENT_IP)).body_iterator
-    assert await anext(body) == "first"
-    await body.aclose()                                   # as sse-starlette closes the body after an interrupted send
+    async def send(message: dict) -> None:
+        if message["type"] == "http.response.body" and message["more_body"]:
+            raise OSError("the connection dropped")
 
-    assert closed == [True]                               # at once, not when the inner generator is collected
+    async def receive() -> dict:
+        await asyncio.Event().wait()
+
+    slots = StreamSlots()
+    response = EventStream(frames(), wakeup=Wakeup(), on_end=slots.acquire("session-1", CLIENT_IP).release)
+    with pytest.raises(OSError):
+        await response({"type": "http", "method": "GET"}, receive, send)
+
+    assert closed == [True]                               # at once, not when the generator is collected
     assert slots.open_counts() == ({}, {})
 
 

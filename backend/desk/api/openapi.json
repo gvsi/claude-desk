@@ -1492,7 +1492,7 @@
     "/api/public/desks/{slug}/events": {
       "get": {
         "summary": "Events",
-        "description": "The session's events after the cursor, then live ones (SSE `id` is the event's `seq`). On opening, and as each\ncontrol row appears while it is open, the session's runner does what control rows left and runs waiting work,\nwith the visitor's credential, in a task of its own: a hang-up never cuts it short. Three streams per session\nand thirty per address may be open at once: a session's fourth closes its oldest (opening a stream is never\nrefused for its session's streams, so a reload never is), and past the address's thirty it is 429.",
+        "description": "The session's events after the cursor, then live ones (SSE `id` is the event's `seq`). On opening, and as each\ncontrol row appears while it is open, the session's runner does what control rows left and runs waiting work,\nwith the visitor's credential, in a task of its own: a hang-up never cuts it short. Three streams per session\nand thirty per address may be open at once: a session's fourth closes its oldest (opening a stream is never\nrefused for its session's streams, so a reload never is), and past the address's thirty it is 429. A closed\nstream ends even while its client has stopped reading, and its place is freed once it has ended, however it\nended.",
         "operationId": "public_events",
         "parameters": [
           {

@@ -17,8 +17,10 @@ streams of the session each notification names. `event_stream` replays the sessi
 client's `Last-Event-ID`, calls `on_open`, then sends each new event as it is committed (a wake-up, or a
 poll every 2 s when a notification is missed) and hands each control row that appears unhandled while it is
 open to `on_control`, once per stream; an idle stream gets a `keep-alive` comment every `ping_s`. A hang-up
-ends the stream wherever it is, as a cancellation, even when a database read reports it as an error of its own; a
-stream whose `Wakeup` is closed (a newer stream of its session took its place) ends at its next look.
+ends the stream wherever it is, as a cancellation, even when a database read reports it as an error of its own. A
+stream whose `Wakeup` is closed (a newer stream of its session took its place) ends at once when a send of its waits
+for the client (one that stopped reading never lets it finish), else at its next look, and is cancelled wherever it
+waits should it still run `CLOSE_GRACE_S` later. `on_end` runs once the stream has ended, however it ended.
 """
 
 import asyncio
@@ -28,12 +30,14 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
+import anyio
 import psycopg
 from pydantic import BaseModel, TypeAdapter
 from sqlalchemy import func, insert, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 from sse_starlette import EventSourceResponse, ServerSentEvent
+from starlette.types import Message, Receive, Scope, Send
 
 from desk.api.metrics import metric_row
 from desk.api.store import Ids, lock_events
@@ -49,6 +53,8 @@ _EVENT = TypeAdapter(SseEvent)
 POLL_S = 2.0
 PING_S = 15.0
 RECONNECT_S = 1.0
+# How long a closed stream with no send waiting has to end at its next look before it is cancelled wherever it waits.
+CLOSE_GRACE_S = 1.0
 logger = logging.getLogger(__name__)
 
 
@@ -106,11 +112,13 @@ async def claim_control(conn: AsyncConnection, row_id: int) -> bool:
 
 class Wakeup:
     """A stream's wake-up: set by the listener when its session gets a notification. `close()` ends the stream it
-    wakes: a newer stream of the session took its place."""
+    wakes, a newer stream of the session having taken its place: it wakes the stream's frames, which end at their next
+    look, and has the stream's response (`EventStream`, while it runs) end itself, at once if a send waits."""
 
     def __init__(self) -> None:
         self._event = asyncio.Event()
         self.closed = False
+        self._on_close: Callable[[], None] | None = None     # the running response's own end
 
     def set(self) -> None:
         self._event.set()
@@ -118,6 +126,8 @@ class Wakeup:
     def close(self) -> None:
         self.closed = True
         self._event.set()
+        if self._on_close is not None:
+            self._on_close()
 
     async def wait(self, timeout: float) -> bool:
         """True when woken within `timeout` seconds; either way the next wait starts afresh."""
@@ -262,7 +272,7 @@ def being_cancelled() -> bool:
 async def _frames(engine: AsyncEngine, listener: Listener, ids: Ids, after: int,
                   on_control: Callable[[ControlRow], Awaitable[None]] | None,
                   on_open: Callable[[], Awaitable[None]] | None, poll_s: float,
-                  wakeup: Wakeup | None) -> AsyncIterator[ServerSentEvent]:
+                  wakeup: Wakeup) -> AsyncIterator[ServerSentEvent]:
     try:
         async with listener.subscribe(ids.session_id, wakeup) as wakeup:
             # Control rows are tracked by the IDs this stream has seen, not by a high-water mark: a row's ID is
@@ -295,20 +305,65 @@ async def _frames(engine: AsyncEngine, listener: Listener, ids: Ids, after: int,
         raise
 
 
+class EventStream(EventSourceResponse):
+    """An SSE response that its `wakeup`'s `close()` ends wherever it waits, and that calls `on_end` once it has ended,
+    however it ended: a normal end, a hang-up, an error or a close, whether or not its body ever started.
+
+    Closed while one of its sends waits (in a server, only a client that isn't reading keeps a send waiting), it is
+    cancelled at once. Closed otherwise, its frames end at their next look, which the close wakes, and its last send
+    goes out; should it still run `CLOSE_GRACE_S` later (a client that stopped reading just then), it is cancelled."""
+
+    def __init__(self, content: Any, *, wakeup: Wakeup, on_end: Callable[[], None] | None = None, **options: Any):
+        super().__init__(content, **options)
+        self.wakeup, self.on_end = wakeup, on_end
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        sending = 0
+
+        async def counted(message: Message) -> None:
+            nonlocal sending
+            sending += 1
+            try:
+                await send(message)
+            finally:
+                sending -= 1
+
+        try:
+            with anyio.CancelScope() as running:
+                def close() -> None:
+                    if sending:                    # a send waits for a client that isn't reading: end now
+                        running.cancel()
+                    else:                          # end at the next look, which the close woke, or be cancelled
+                        running.deadline = min(running.deadline, anyio.current_time() + CLOSE_GRACE_S)
+
+                self.wakeup._on_close = close
+                if self.wakeup.closed:            # closed before it began
+                    close()
+                await super().__call__(scope, receive, counted)
+        finally:
+            self.wakeup._on_close = None
+            if self.on_end is not None:
+                self.on_end()
+
+
 def event_stream(engine: AsyncEngine, listener: Listener, ids: Ids, last_event_id: int | None, *,
                  on_control: Callable[[ControlRow], Awaitable[None]] | None,
                  on_open: Callable[[], Awaitable[None]] | None, ping_s: float = PING_S,
-                 poll_s: float = POLL_S, wakeup: Wakeup | None = None) -> EventSourceResponse:
+                 poll_s: float = POLL_S, wakeup: Wakeup | None = None,
+                 on_end: Callable[[], None] | None = None) -> EventStream:
     """The session's events after `last_event_id` (all of them when None), then live ones: SSE `event` is the
     event's `type` and `id` its `seq`. `on_open` runs after the replay (the control rows and pending work already
     waiting); `on_control` gets each control row that appears unhandled while the stream is open, whatever order
-    the rows' writers commit in. `wakeup`, when given, is the stream's own, and its `close()` ends the stream.
+    the rows' writers commit in. `wakeup`, when given, is the stream's own, and its `close()` ends the stream
+    (`EventStream`); `on_end` runs once the stream has ended, however it ended.
 
     Both callbacks run inside the stream and hold back its frames until they return, so they return promptly
     and start longer work (a resumed turn) as a task. A row can reach `on_open` and `on_control`, or several
     streams; `claim_control` decides which caller handles it."""
+    wakeup = wakeup or Wakeup()
     frames = _frames(engine, listener, ids, last_event_id or 0, on_control, on_open, poll_s, wakeup)
-    return EventSourceResponse(frames, ping=ping_s, ping_message_factory=lambda: ServerSentEvent(comment="keep-alive"))
+    return EventStream(frames, wakeup=wakeup, on_end=on_end, ping=ping_s,
+                       ping_message_factory=lambda: ServerSentEvent(comment="keep-alive"))
 
 
 async def append_metric(conn: AsyncConnection, ids: Ids, metric: BaseModel) -> int:

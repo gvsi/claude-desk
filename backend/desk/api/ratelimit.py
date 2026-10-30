@@ -234,13 +234,14 @@ STREAM_RETRY_AFTER_S = 5      # an open stream frees its place when its client g
 
 
 class StreamSlot:
-    """One open stream's place; `release()` (or leaving its `with` block) frees it, once. `close()` also ends the
-    stream, through the `on_close` its route gave."""
+    """One open stream's place; `release()` (or leaving its `with` block) frees it, once, when the stream has ended.
+    `close()` ends the stream, through the `on_close` its route gave."""
 
     def __init__(self, slots: "StreamSlots", session_id: str, ip: str | None,
                  on_close: Callable[[], None] | None = None):
         self._slots, self.session_id, self.ip, self._on_close = slots, session_id, ip, on_close
         self._held = True
+        self.closing = False
 
     def release(self) -> None:
         if self._held:
@@ -248,8 +249,11 @@ class StreamSlot:
             self._slots._free(self)
 
     def close(self) -> None:
-        """Make way for a newer stream: free the place at once and end the stream."""
-        self.release()
+        """Make way for a newer stream: end the stream, once. Its place stays counted until the stream has ended and
+        released it, so the counts never fall below the streams still open."""
+        if self.closing:
+            return
+        self.closing = True
         if self._on_close is not None:
             self._on_close()
 
@@ -263,7 +267,11 @@ class StreamSlot:
 class StreamSlots:
     """Open event streams, per session (oldest first) and counted per client address (None: exempt from the address
     cap). A session's stream past its cap closes the session's oldest instead of being refused, so a reload never
-    answers 429 while the old page's stream is still counted; past the address's cap a stream is refused."""
+    answers 429 while the old page's stream is still counted; past the address's cap a stream is refused.
+
+    A closed stream counts until it has ended (it is cancelled wherever it waits, so that takes a moment), but not
+    toward its session's cap, so it is never closed again. Meanwhile its address may count one stream past its cap:
+    the newer stream it made way for. Another stream from that address waits, refused, until the closed one ends."""
 
     def __init__(self, per_session: int = STREAMS_PER_SESSION, per_ip: int = STREAMS_PER_IP):
         self.per_session, self.per_ip = per_session, per_ip
@@ -272,9 +280,9 @@ class StreamSlots:
 
     def acquire(self, session_id: str, ip: str | None, *, on_close: Callable[[], None] | None = None) -> StreamSlot:
         """A place for one more stream, `on_close` ending it should a newer one close it. At the session's cap its
-        oldest stream is closed to make way; `RateLimited` when the address would still be past its cap (counting the
-        place that closing frees), and then nothing is closed."""
-        open_here = self._sessions.get(session_id, [])
+        oldest stream still open is closed to make way; `RateLimited` when the address would still be past its cap
+        (counting the place that closing frees), and then nothing is closed."""
+        open_here = [slot for slot in self._sessions.get(session_id, []) if not slot.closing]
         oldest = open_here[0] if len(open_here) >= self.per_session else None
         if ip is not None:
             freed = 1 if oldest is not None and oldest.ip == ip else 0
@@ -299,5 +307,5 @@ class StreamSlots:
                 del self._ips[slot.ip]
 
     def open_counts(self) -> tuple[dict[str, int], dict[str, int]]:
-        """The open streams by session and by address."""
+        """The streams not yet ended by session and by address, closed ones still ending included."""
         return {session_id: len(open_here) for session_id, open_here in self._sessions.items()}, dict(self._ips)

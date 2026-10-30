@@ -266,8 +266,10 @@ def test_stream_slots_cap_each_session_and_address():
 
     held = [stream(f"s1-{n}", "s1", "203.0.113.7") for n in range(3)]
     held.append(stream("s1-3", "s1", "203.0.113.7"))   # a fourth on one session closes its oldest, never 429
-    assert closed == ["s1-0"] and slots.open_counts() == ({"s1": 3}, {"203.0.113.7": 3})
-    held[0].release()                                   # releasing a closed stream frees nothing more
+    assert closed == ["s1-0"]
+    assert slots.open_counts() == ({"s1": 4}, {"203.0.113.7": 4})   # counted until the closed stream has ended
+    held[0].release()                                   # it ended: its place frees now
+    assert slots.open_counts() == ({"s1": 3}, {"203.0.113.7": 3})
     held[1].release()
     held[1].release()                                   # releasing twice frees one place, once
     assert slots.open_counts() == ({"s1": 2}, {"203.0.113.7": 2})
@@ -279,20 +281,28 @@ def test_stream_slots_cap_each_session_and_address():
     with pytest.raises(RateLimited) as refused:         # another session's 31st from the address
         stream("s2-0", "s2", "203.0.113.7")
     assert refused.value.retry_after == 5 and closed == ["s1-0"]
-    held.append(stream("s1-5", "s1", "203.0.113.7"))   # its own session's oldest makes way: the address stays at 30
-    assert closed == ["s1-0", "s1-2"] and slots.open_counts()[1] == {"203.0.113.7": 30}
+    held.append(stream("s1-5", "s1", "203.0.113.7"))   # its own session's oldest makes way
+    assert closed == ["s1-0", "s1-2"]
+    assert slots.open_counts()[1] == {"203.0.113.7": 31}     # one past the cap only while the closed one ends
+    with pytest.raises(RateLimited):                    # so another reload waits until it has ended
+        stream("s1-6", "s1", "203.0.113.7")
+    assert closed == ["s1-0", "s1-2"]
+    held[2].release()
+    assert slots.open_counts()[1] == {"203.0.113.7": 30}
     with stream("s2-1", "s2", "203.0.113.8"):           # another address; the slot frees on leaving the block
         pass
     for n in range(3):
         held.append(stream(f"s3-{n}", "s3", None))      # an exempt peer counts toward its session only
     held.append(stream("s3-3", "s3", None))
     assert closed[-1] == "s3-0"
+    held.append(stream("s3-4", "s3", None))             # one still ending isn't closed again: the oldest open is
+    assert closed[-2:] == ["s3-0", "s3-1"] and slots.open_counts()[0]["s3"] == 5
     # A session moved to another address at its cap: closing its oldest frees no place at this one.
     for n in range(3):
         held.append(stream(f"s4-{n}", "s4", "198.51.100.4"))
     with pytest.raises(RateLimited):
         stream("s4-3", "s4", "203.0.113.7")
-    assert closed[-1] == "s3-0"                          # refused: nothing closed
+    assert closed[-1] == "s3-1"                          # refused: nothing closed
     for slot in held:
         slot.release()
     assert slots.open_counts() == ({}, {})
