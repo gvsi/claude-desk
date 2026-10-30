@@ -534,29 +534,70 @@ describe('Today', () => {
 
   it('held_conflict_shows_the_owner_line', async () => {
     const { screen } = await renderRoute(TODAY);
-    // The kernel's own conflict, with no decision: the request is still held, so the card says
-    // what the owner line for it says and keeps its answers to try again. A decision in that body
-    // isn't the final state (only `already_resolved` carries one), so it's never shown.
+    // The kernel's own conflict, with no decision: the request is still held, so the owner line for
+    // it shows under the card with "Try again", which sends the owner's last answer again, and the
+    // card keeps its answers. A decision in that body isn't the final state (only `already_resolved`
+    // carries one), so it's never shown.
     const held = seededHold();
+    const stray = { ...held, state: 'executed', answers: [] };
     mockStore.inject({ route: 'answer', status: 409, body: { error: 'kernel', code: 'conflict' } });
-    mockStore.inject({ route: 'answer', status: 409, body: { error: 'kernel', code: 'conflict', decision: { ...held, state: 'executed', answers: [] } } });
+    mockStore.inject({ route: 'answer', status: 409, delayMs: 1_000, body: { error: 'kernel', code: 'conflict', decision: stray } });
+    mockStore.inject({ route: 'answer', status: 409, delayMs: 1_000, body: { error: 'kernel', code: 'conflict' } });
+    const needsYou = region(screen, 'Needs you');
     const card = heldCard(screen, SEEDED_REASON);
     const allow = card.getByRole('button', { name: 'Allow this time' });
-    for (let attempt = 1; attempt <= 2; attempt += 1) {
-      await allow.click();
-      await expect.poll(() => requests('answer').length).toBe(attempt);
-      await expect.element(card.getByRole('alert').getByText(CHANGED, { exact: true })).toBeVisible();
+    const deny = card.getByRole('button', { name: 'Deny this time' });
+    const line = needsYou.getByRole('alert');
+    const tryAgain = needsYou.getByRole('button', { name: 'Try again', exact: true });
+
+    /** The line, once, under the card and outside it, with "Try again" beside it; the card still held and answerable. */
+    const stillHeld = async () => {
+      await expect.element(line.getByText(CHANGED, { exact: true })).toBeVisible();
+      expect(line.elements()).toHaveLength(1);
+      expect(card.getByRole('alert').elements()).toHaveLength(0);
+      expect(line.element().closest('li')).toBe(card.element().closest('li'));
+      expect(line.element().contains(tryAgain.element())).toBe(true);
       expect(card.getByText("You allowed this. It's done.", { exact: true }).elements()).toHaveLength(0);
       await expect.element(card.getByText('Waiting for your answer', { exact: true })).toBeVisible();
       await expect.element(allow).not.toHaveAttribute('aria-disabled');
-      await expect.element(card.getByRole('button', { name: 'Deny this time' })).not.toHaveAttribute('aria-disabled');
-    }
+      await expect.element(deny).not.toHaveAttribute('aria-disabled');
+    };
 
-    // Trying again goes through.
+    await deny.click();
+    await expect.poll(() => requests('answer').length).toBe(1);
+    await stillHeld();
+
+    // "Try again" sends the same answer. While it's out it spins with its words kept, the line
+    // stays, and the card's answers wait without a spinner of their own.
+    await tryAgain.click();
+    await expect.element(tryAgain).toHaveAttribute('aria-busy', 'true');
+    await expect.element(allow).toHaveAttribute('aria-disabled', 'true');
+    await expect.element(deny).toHaveAttribute('aria-disabled', 'true');
+    expect(allow.element().getAttribute('aria-busy')).toBeNull();
+    expect(deny.element().getAttribute('aria-busy')).toBeNull();
+    await expect.element(line.getByText(CHANGED, { exact: true })).toBeVisible();
+    await expect.element(tryAgain, { timeout: 3_000 }).not.toHaveAttribute('aria-busy');
+    expect(requests('answer')).toHaveLength(2);
+    await stillHeld();
+    expect(document.activeElement).toBe(tryAgain.element());
+
+    // An answer from the card sends that one instead, and the line waits for its result, as the
+    // card's own lines do.
     await allow.click();
-    await expect.element(card.getByText("You allowed this. It's done.", { exact: true })).toBeVisible();
+    await expect.element(allow).toHaveAttribute('aria-busy', 'true');
+    expect(line.elements()).toHaveLength(0);
+    expect(tryAgain.elements()).toHaveLength(0);
+    await expect.element(allow, { timeout: 3_000 }).not.toHaveAttribute('aria-busy');
     expect(requests('answer')).toHaveLength(3);
-    expect(card.getByRole('alert').elements()).toHaveLength(0);
+    await stillHeld();
+
+    // Trying again goes through, with the owner's last answer, and focus follows the answered card.
+    await tryAgain.click();
+    await expect.element(card.getByText("You allowed this. It's done.", { exact: true })).toBeVisible();
+    expect(requests('answer').map((r) => r.body)).toEqual([{ answer: 'deny_once' }, { answer: 'deny_once' }, { answer: 'allow_once' }, { answer: 'allow_once' }]);
+    expect(line.elements()).toHaveLength(0);
+    expect(tryAgain.elements()).toHaveLength(0);
+    await expect.poll(() => document.activeElement?.contains(card.element()) === true).toBe(true);
   });
 
   it('lost_answer_is_not_called_held', async () => {

@@ -29,13 +29,31 @@ export interface AnswerDraftState {
   draft: RulesDraft;
 }
 
+/**
+ * An answer the kernel turned back with its own conflict, leaving the request held: the owner's line
+ * for it, and the answer that "Try again" sends again.
+ */
+export interface AnswerRetry {
+  line: string;
+  answer: ApprovalAnswer;
+}
+
 export interface UseAnswer {
   /** Sends `a` for `item`. Resolves once the request has its final state, and rejects when it doesn't. */
   answer(item: HeldItem, a: ApprovalAnswer): Promise<void>;
   /** The requests whose answer is on its way, by `decision_id`. */
   pending: ReadonlySet<string>;
-  /** Why the last answer for a request didn't settle it, in the owner's words. */
+  /**
+   * Why the last answer for a request didn't settle it, in the owner's words. When `retryFor` has
+   * the request, the same line belongs beside its "Try again" instead.
+   */
   errorFor(decisionId: string): string | undefined;
+  /**
+   * The answer the kernel turned back on a request it still holds, with its line. It stays while
+   * "Try again" sends that answer again, and goes once an answer settles the request or fails
+   * another way.
+   */
+  retryFor(decisionId: string): AnswerRetry | undefined;
   /** What was answered here, by `decision_id`, in the order it was answered. */
   answered: ReadonlyMap<string, Answered>;
   /**
@@ -62,6 +80,11 @@ function finalStateOf(err: unknown, decisionId: string): Decision | null {
   return err.decision !== null && err.decision.decision_id === decisionId ? err.decision : null;
 }
 
+/** The kernel's own conflict (`{error: "kernel", code}`): the request is still held, so the same answer can be sent again. */
+function isHeldConflict(err: unknown): err is ApiError {
+  return err instanceof ApiError && err.kind === 'conflict' && err.code !== 'already_resolved';
+}
+
 /** The owner's line for an answer that didn't settle the request. */
 function lineFor(err: unknown, a: ApprovalAnswer): string {
   if (isUncertain(err)) return UNCERTAIN_LINE;
@@ -70,12 +93,10 @@ function lineFor(err: unknown, a: ApprovalAnswer): string {
     // a screen read before the cap was lowered can send it.
     return a === 'allow_person' ? ABOVE_LIMIT_LINE : NOT_OFFERED_LINE;
   }
-  if (err instanceof ApiError && err.kind === 'conflict') {
-    // Answered already, but without a final state to show: it moved on.
-    if (err.code === 'already_resolved') return CHANGED_LINE;
-    // The kernel's conflict on a request that is still held: its line, and the answers stay to try again.
-    return ownerErrorCopy(err);
-  }
+  // The kernel's conflict on a request that is still held: its line, beside "Try again".
+  if (isHeldConflict(err)) return ownerErrorCopy(err);
+  // Answered already, but without a final state to show: it moved on.
+  if (err instanceof ApiError && err.kind === 'conflict') return CHANGED_LINE;
   return STILL_HELD_LINE;
 }
 
@@ -106,6 +127,7 @@ export function useAnswer(deskId: string): UseAnswer {
   const [errors, setErrors] = useState<ReadonlyMap<string, string>>(() => new Map());
   const [answered, setAnswered] = useState<ReadonlyMap<string, Answered>>(() => new Map());
   const [kept, setKept] = useState<ReadonlyMap<string, HeldItem>>(() => new Map());
+  const [retries, setRetries] = useState<ReadonlyMap<string, AnswerRetry>>(() => new Map());
   // The answers on their way, read synchronously so a second click can't send twice.
   const sending = useRef(new Set<string>());
 
@@ -119,6 +141,7 @@ export function useAnswer(deskId: string): UseAnswer {
       setAnswered((current) => withEntry(current, id, { item, decision, card_diff: cardDiff }));
       setKept((current) => without(current, id));
       setErrors((current) => without(current, id));
+      setRetries((current) => without(current, id));
       refresh();
     },
     [refresh],
@@ -143,7 +166,10 @@ export function useAnswer(deskId: string): UseAnswer {
           settle(item, final, null);
           return;
         }
-        setErrors((current) => withEntry(current, id, lineFor(err, a)));
+        const line = lineFor(err, a);
+        setErrors((current) => withEntry(current, id, line));
+        // "Try again" sends the answer the kernel just turned back; any other failure takes it away.
+        setRetries((current) => (isHeldConflict(err) ? withEntry(current, id, { line, answer: a }) : without(current, id)));
         // A lost answer keeps its card to be asked again, even once Needs you no longer lists the
         // request; one that surely didn't go through shows wherever Needs you still lists it.
         if (!isUncertain(err)) setKept((current) => without(current, id));
@@ -162,10 +188,11 @@ export function useAnswer(deskId: string): UseAnswer {
   );
 
   const errorFor = useCallback((decisionId: string) => errors.get(decisionId), [errors]);
+  const retryFor = useCallback((decisionId: string) => retries.get(decisionId), [retries]);
 
   const dismiss = useCallback((decisionId: string) => {
     setAnswered((current) => without(current, decisionId));
   }, []);
 
-  return { answer, pending, errorFor, answered, kept, dismiss };
+  return { answer, pending, errorFor, retryFor, answered, kept, dismiss };
 }

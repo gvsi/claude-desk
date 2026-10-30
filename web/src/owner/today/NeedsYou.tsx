@@ -2,11 +2,12 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 
+import type { ApprovalAnswer } from '../../api/contracts.ts';
 import { ApiError, ownerErrorCopy, request } from '../../api/http.ts';
 import type { NeedsYouItem } from '../../api/views.ts';
 import { ApprovalCard, Button, Card, Notice, SectionHeader, StatusLabel } from '../../ds/index.ts';
 import { aboveMoneyCapCopy, callbackLine, relativeWait } from '../../lib/format.ts';
-import type { AnswerDraftState, Answered, HeldItem, UseAnswer } from '../approvals/useAnswer.ts';
+import type { AnswerDraftState, Answered, AnswerRetry, HeldItem, UseAnswer } from '../approvals/useAnswer.ts';
 import { conversationPath, type ConversationArrival } from '../conversations/status.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { needsYouKey, todayKey } from '../useDesks.ts';
@@ -113,6 +114,8 @@ export function NeedsYou({ held, callbacks, answers, registerCard, readFailure }
         <ul className="cd-needs-you">
           {held.map((item) => {
             const id = item.decision.decision_id;
+            const pending = answers.pending.has(id);
+            const retry = answers.retryFor(id);
             return (
               <li key={id} className="cd-needs-you__item">
                 <div ref={(el) => registerCard(id, el)} className="cd-needs-you__card" tabIndex={-1}>
@@ -120,10 +123,11 @@ export function NeedsYou({ held, callbacks, answers, registerCard, readFailure }
                     decision={item.decision}
                     {...aboutTheRequest(item, now)}
                     onAnswer={(a) => answers.answer(item, a)}
-                    pending={answers.pending.has(id)}
-                    error={answers.errorFor(id)}
+                    pending={pending}
+                    error={retry === undefined ? answers.errorFor(id) : undefined}
                   />
                 </div>
+                {retry !== undefined ? <AnswerAgain retry={retry} pending={pending} send={(a) => answers.answer(item, a)} /> : null}
               </li>
             );
           })}
@@ -165,6 +169,38 @@ export function NeedsYou({ held, callbacks, answers, registerCard, readFailure }
         </div>
       ) : null}
     </section>
+  );
+}
+
+/**
+ * The kernel turned the owner's answer back and still holds the request: its line under the card,
+ * and "Try again", which sends that answer again. A repeat can't run the action twice, since the
+ * kernel resolves a request once. While "Try again" is out it spins and the card's answers wait; an
+ * answer chosen on the card hides the line until its own result, as the card's lines do.
+ */
+function AnswerAgain({ retry, pending, send }: { retry: AnswerRetry; pending: boolean; send: (a: ApprovalAnswer) => Promise<void> }) {
+  const [sending, setSending] = useState(false);
+  if (pending && !sending) return null;
+
+  const again = () => {
+    setSending(true);
+    // A failure says why in the line it leaves.
+    void send(retry.answer)
+      .catch(() => undefined)
+      .finally(() => setSending(false));
+  };
+
+  return (
+    <Notice
+      tone="error"
+      action={
+        <Button variant="secondary" busy={sending} onClick={again}>
+          Try again
+        </Button>
+      }
+    >
+      {retry.line}
+    </Notice>
   );
 }
 
