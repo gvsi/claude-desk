@@ -41,6 +41,14 @@ export function Arrival() {
   const [error, setError] = useState<IntroErrorCode | undefined>(undefined);
   // One `me` per visit, kept across a development remount, so the page asks once.
   const asked = useRef<Promise<CopyOut> | null>(null);
+  // Whether this page is still shown: the owner may leave it while Today is read ahead.
+  const shown = useRef(true);
+  useEffect(() => {
+    shown.current = true;
+    return () => {
+      shown.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     let live = true;
@@ -71,7 +79,7 @@ export function Arrival() {
     if (!first) return false;
     await invalidateCopy(queryClient);
     await readTodayAhead(queryClient, first.desk_id, READ_AHEAD_MS);
-    void navigate(todayPath(first.desk_id), { replace: true });
+    if (shown.current) void navigate(todayPath(first.desk_id), { replace: true });
     return true;
   };
 

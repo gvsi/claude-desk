@@ -91,9 +91,11 @@ describe('Arrival', () => {
     const look = () => {
       const preview = document.querySelector('.cd-today-preview') !== null;
       if (document.querySelector('.cd-owner-state') !== null) seen.push('loading');
-      else if (!preview && document.querySelector('.cd-today') !== null)
-        seen.push(document.querySelector(held) !== null ? 'today' : 'today without its held request');
-      else if (preview) seen.push('preview');
+      else if (!preview && document.querySelector('.cd-today') !== null) {
+        if (document.querySelector(held) === null) seen.push('today without its held request');
+        else if (document.querySelector('.cd-today__loading') !== null) seen.push('today still reading its briefing');
+        else seen.push('today');
+      } else if (preview) seen.push('preview');
     };
     const watch = new MutationObserver(look);
     watch.observe(document.body, { childList: true, subtree: true });
@@ -104,6 +106,20 @@ describe('Arrival', () => {
     await expect.element(screen.getByRole('dialog', { name: TITLE })).not.toBeInTheDocument();
     await expect.element(screen.getByRole('article', { name: `Held for you: ${rivera.decisions.held.reason_plain}`, exact: true })).toBeVisible();
     expect([...new Set(seen)]).toEqual(['preview', 'today']);
+  });
+
+  it('leaving_while_today_is_read_stays_where_you_went', async () => {
+    const { screen, router } = await renderRoute('/', { seed: { name: 'rivera', signedIn: false } });
+    await expect.element(introDialog(screen)).toBeVisible();
+    // Needs you answers slowly, so the dialog is still waiting on it when the page is left.
+    mockStore.inject({ route: 'needsYou', status: 500, delayMs: 600 });
+
+    await startTheDemo(screen);
+    await expect.poll(() => requests('needsYou').length).toBeGreaterThan(0);
+    await router.navigate('/about/proposal');
+    // Past the read-ahead's 3 s cap, by when the dialog would have gone on to Today.
+    await new Promise((resolve) => setTimeout(resolve, 3_500));
+    expect(router.state.location.pathname).toBe('/about/proposal');
   });
 
   it('intro_dialog_cannot_be_dismissed', async () => {
