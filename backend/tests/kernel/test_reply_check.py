@@ -246,6 +246,9 @@ def test_the_lookalike_table_is_what_its_script_makes():
     ("¿Tiene un horario libre para usted?", "es"),           # a time that is open, not a price
     ("¿Está libre para la cita?", "es"),
     ("Hay un espacio libre al lado de la entrada.", "es"),
+    ("BILLING IS IN ILLINOIS.", "en"),                      # capitals with I, which is read as l too
+    ("Isla, Inés, Iván e Isabel ya están en la lista.", "es"),
+    ("OK, I will call.", "en"),                             # I and O as words, not numbers
 ])
 async def test_plain_prose_passes(app, client, prose, language):
     copy, visitor = await visitor_of(app, client)
