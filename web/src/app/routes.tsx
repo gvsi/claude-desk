@@ -1,5 +1,7 @@
 import { Navigate, type RouteObject } from 'react-router';
 
+import { ReaderError } from '../about/ReaderError.tsx';
+import { ABOUT_PAGES, type AboutId } from '../about/links.ts';
 import { Arrival } from '../owner/Arrival.tsx';
 import { OwnerLayout } from '../owner/OwnerLayout.tsx';
 import { SafetyPage } from '../owner/safety/SafetyPage.tsx';
@@ -9,11 +11,34 @@ import { PublicPage } from '../public/PublicPage.tsx';
 import { NotFound } from './NotFound.tsx';
 import { RouteError } from './RouteError.tsx';
 
+/** What an About page shows while its code loads on a first visit: the page's own background, briefly. */
+function ReaderLoading() {
+  return null;
+}
+
+/**
+ * An About this prototype reading page. Its code, the two documents and their parser load only when the
+ * page opens (`import()`), so a document that can't be parsed fails here and nowhere else: `ReaderError`,
+ * which loads with the app, says so and points the way back.
+ */
+function aboutRoute(id: AboutId): RouteObject {
+  return {
+    path: ABOUT_PAGES[id].route,
+    errorElement: <ReaderError />,
+    HydrateFallback: ReaderLoading,
+    lazy: async () => {
+      const { ReaderPage } = await import('../about/ReaderPage.tsx');
+      return { element: <ReaderPage id={id} /> };
+    },
+  };
+}
+
 /**
  * The app's routes. Screens join as they are built: `/` (the first visit's intro dialog),
  * `/app/:deskId/*` (owner), `/app/setup/*`, `/d/:slug` (public page), `/d/:slug/agents`,
- * `/pay/:token` and `/vision/*`. Each screen's route carries `RouteError`, so a page that throws
- * while it draws shows a kind line and never React Router's own error page.
+ * `/pay/:token`, `/vision/*` and `/about/*` (the About this prototype reading pages). Each screen's
+ * route carries an error element, so a page that throws while it draws shows a kind line and never
+ * React Router's own error page.
  */
 export const routes: RouteObject[] = [
   { path: '/', element: <Arrival />, errorElement: <RouteError /> },
@@ -32,5 +57,7 @@ export const routes: RouteObject[] = [
     ],
   },
   { path: '/d/:slug', element: <PublicPage />, errorElement: <RouteError visitor /> },
+  aboutRoute('proposal'),
+  aboutRoute('prediction'),
   { path: '*', element: <NotFound /> },
 ];

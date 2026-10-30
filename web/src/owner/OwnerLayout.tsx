@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import { Link, Outlet, useLocation, useNavigate, useOutletContext, useParams } from 'react-router';
 
+import { ABOUT_LINKS } from '../about/links.ts';
 import { ApiError, isUncertain, ownerErrorCopy, request } from '../api/http.ts';
 import type { BusinessOut, CopyOut, DeskSummary } from '../api/views.ts';
 import { NotFound } from '../app/NotFound.tsx';
@@ -71,8 +72,8 @@ const onOff = (on: boolean) => (on ? 'on' : 'off');
 /**
  * `/app/:deskId`: the owner's frame around every page of a Desk. The reviewer bar with Start over,
  * the sidebar (the business, which opens the business switcher; the Desk picker; the pages; the
- * Answering switch; the owner), the page, and one concept footer under it. A Desk outside the copy
- * is not found.
+ * About this prototype links; the Answering switch; the owner), the page, and one concept footer
+ * under it. A Desk outside the copy is not found.
  */
 export function OwnerLayout() {
   const { deskId = '' } = useParams();
@@ -273,6 +274,7 @@ function OwnerSidebar(props: OwnerSidebarProps) {
         onAnsweringChange={props.onAnsweringChange}
         owner={{ name: business.owner_display_name, status: 'Available for chats' }}
         linkComponent={RouterLink}
+        about={ABOUT_LINKS}
       />
       {props.switching ? (
         <BesideTheBusinessRow container={ref}>

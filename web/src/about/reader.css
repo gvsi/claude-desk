@@ -1,0 +1,1036 @@
+/* The About this prototype reading pages: their figures, laid out as the reader boards draw them. Type comes
+   from the type classes (the article styles included), and every color, space and size from a token; the only
+   raw lengths are line widths (hairlines, outlines, the chart's strokes) and proportions. */
+
+/* Figures: a panel with a hairline edge, then "Figure 1" and the caption under it. */
+
+.cd-about-figure {
+  margin: 0;
+  font-family: var(--font-sans);
+  text-align: left;
+}
+
+.cd-about-frame {
+  box-sizing: border-box;
+  padding: var(--space-32);
+  border-radius: var(--radius-composer);
+  background: var(--bg-panel);
+  box-shadow: inset 0 0 0 1px var(--line-hairline);
+}
+
+.cd-about-figure-title {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.cd-about-figcaption {
+  display: flex;
+  gap: var(--space-14);
+  margin: var(--space-14) var(--space-4) 0;
+  color: var(--text-secondary);
+  text-wrap: pretty;
+}
+
+.cd-about-fignum {
+  flex: none;
+  font-weight: 520;
+  color: var(--text-primary);
+}
+
+.cd-about-figure--compact .cd-about-figcaption {
+  display: block;
+  margin: var(--space-12) var(--space-2) 0;
+}
+
+.cd-about-figure--compact .cd-about-fignum {
+  margin-right: var(--space-8);
+}
+
+/* A code span, such as the `estimate:` label. */
+.cd-about-code {
+  padding: var(--space-2) var(--space-6);
+  border-radius: var(--radius-control);
+  background: var(--fill-secondary);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 0.78em;
+  white-space: nowrap;
+}
+
+/* The τ³-Banking chart: one series in primary ink, the rest in secondary ink and hairlines. */
+
+.cd-about-chart__frame {
+  padding: var(--space-28) var(--space-32) var(--space-20);
+}
+
+.cd-about-chart__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-16);
+  margin-bottom: var(--space-14);
+}
+
+.cd-about-chart__key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4) var(--space-16);
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cd-about-chart__key-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.cd-about-chart__key-dot {
+  width: var(--space-10);
+  height: var(--space-10);
+  border-radius: var(--radius-full);
+  background: var(--text-primary);
+}
+
+.cd-about-chart__key-dash {
+  width: var(--space-20);
+  border-top: 2px dashed var(--text-secondary);
+}
+
+.cd-about-chart__plot {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.cd-about-chart__band {
+  fill: var(--fill-count);
+}
+
+.cd-about-chart__grid {
+  stroke: var(--line-hairline);
+  stroke-width: 1;
+}
+
+.cd-about-chart__axis-line {
+  stroke: var(--line-control);
+  stroke-width: 1;
+}
+
+.cd-about-chart__bar {
+  stroke: var(--text-secondary);
+  stroke-width: 1.5;
+  stroke-dasharray: 2 5;
+  stroke-linecap: round;
+}
+
+.cd-about-chart__rule {
+  stroke: var(--line-control-hover);
+  stroke-width: 1;
+}
+
+.cd-about-chart__fit {
+  fill: none;
+  stroke: var(--text-secondary);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.cd-about-chart__point {
+  fill: var(--text-primary);
+  stroke: var(--bg-panel);
+  stroke-width: 2;
+}
+
+.cd-about-chart__top {
+  fill: var(--bg-panel);
+  stroke: var(--text-secondary);
+  stroke-width: 2;
+}
+
+.cd-about-chart__ring {
+  fill: none;
+  stroke: var(--text-primary);
+  stroke-width: 1.5;
+}
+
+.cd-about-chart__axis {
+  fill: var(--text-secondary);
+}
+
+.cd-about-chart__label {
+  fill: var(--text-primary);
+  font-weight: 520;
+}
+
+.cd-about-chart--compact .cd-about-chart__frame {
+  padding: var(--space-16);
+}
+
+.cd-about-chart--compact .cd-about-chart__head {
+  display: block;
+  margin-bottom: var(--space-14);
+}
+
+.cd-about-chart--compact .cd-about-chart__key {
+  margin-top: var(--space-6);
+}
+
+/* The v1 architecture: the visitor, the chat layer and the kernel side by side, each box sized as the board
+   draws them in the hero (104, 168 and 592 of 864), stacked on a phone. */
+
+.cd-about-arch__frame {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-14);
+}
+
+.cd-about-arch__visitor {
+  display: flex;
+  flex: 13 1 0;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+}
+
+.cd-about-arch__box {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  min-width: 0;
+  padding: var(--space-14) var(--space-16);
+  border-radius: var(--radius-card);
+  background: var(--bg-surface);
+  box-shadow: inset 0 0 0 1px var(--line-card);
+}
+
+.cd-about-arch__box--center {
+  align-items: center;
+  text-align: center;
+}
+
+.cd-about-arch__name {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.cd-about-arch__line {
+  margin-top: var(--space-4);
+  color: var(--text-secondary);
+}
+
+.cd-about-arch__kicker {
+  display: block;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.cd-about-arch__kicker--kernel {
+  color: var(--text-primary);
+}
+
+.cd-about-arch__chat {
+  flex: 21 1 0;
+  justify-content: center;
+  gap: var(--space-14);
+  padding: var(--space-16);
+}
+
+.cd-about-arch__proposes {
+  display: block;
+  margin-top: var(--space-6);
+  line-height: var(--space-24);
+  color: var(--text-primary);
+}
+
+.cd-about-arch__credential {
+  margin-top: 0;
+  padding-top: var(--space-12);
+  border-top: 1px solid var(--line-hairline);
+}
+
+.cd-about-arch__link {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+}
+
+.cd-about-arch__connector {
+  display: block;
+  fill: none;
+  stroke: var(--line-control-hover);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.cd-about-arch__kernel {
+  flex: 74 1 0;
+  min-width: 0;
+  padding: var(--space-16) var(--space-20) var(--space-20);
+  border-radius: var(--radius-composer);
+  background: var(--bg-app);
+  box-shadow: inset 0 0 0 1.5px var(--text-secondary);
+}
+
+.cd-about-arch__kernel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4) var(--space-12);
+  margin-bottom: var(--space-16);
+}
+
+.cd-about-arch__kernel-head .cd-about-arch__line {
+  margin-top: 0;
+}
+
+.cd-about-arch__checks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+}
+
+.cd-about-arch__check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-14);
+}
+
+.cd-about-arch__check > .cd-about-arch__box {
+  flex: 43 1 0;
+}
+
+.cd-about-arch__outcomes {
+  display: flex;
+  flex: 81 1 0;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cd-about-arch__ledger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-8);
+  margin-top: var(--space-16);
+  padding: var(--space-8) var(--space-12);
+  border-radius: var(--radius-control);
+  background: var(--fill-secondary);
+  color: var(--text-primary);
+  text-align: center;
+}
+
+.cd-about-arch__ledger svg {
+  flex: none;
+}
+
+/* On a phone the boxes stack, each check's outcomes inside its box. */
+
+.cd-about-arch--compact .cd-about-arch__frame {
+  flex-direction: column;
+  gap: 0;
+  padding: var(--space-16);
+}
+
+.cd-about-arch--compact .cd-about-arch__link--down {
+  padding: var(--space-6) 0;
+}
+
+.cd-about-arch--compact .cd-about-arch__box {
+  padding: var(--space-12) var(--space-14);
+}
+
+.cd-about-arch--compact .cd-about-arch__chat {
+  gap: var(--space-10);
+}
+
+.cd-about-arch--compact .cd-about-arch__credential {
+  padding-top: var(--space-10);
+}
+
+.cd-about-arch--compact .cd-about-arch__kernel {
+  padding: var(--space-14);
+}
+
+.cd-about-arch--compact .cd-about-arch__kernel-head {
+  display: block;
+  margin-bottom: var(--space-12);
+}
+
+.cd-about-arch--compact .cd-about-arch__kernel-head .cd-about-arch__line {
+  display: block;
+  margin-top: var(--space-2);
+}
+
+.cd-about-arch--compact .cd-about-arch__checks {
+  gap: var(--space-10);
+}
+
+.cd-about-arch--compact .cd-about-arch__outcomes {
+  gap: var(--space-6);
+  margin-top: var(--space-12);
+}
+
+.cd-about-arch--compact .cd-about-arch__ledger {
+  margin-top: var(--space-12);
+}
+
+/* The readiness scale: on each row the axis, its rating marked on four steps, and the rating in words; its
+   evidence and what to watch for line up under the scale. On a phone the name and rating share a line. */
+
+.cd-about-readiness {
+  --readiness-columns: minmax(0, 7fr) minmax(0, 10fr) minmax(0, 8fr);
+}
+
+.cd-about-readiness__legend {
+  display: grid;
+  grid-template-columns: var(--readiness-columns);
+  column-gap: var(--space-20);
+}
+
+.cd-about-readiness__steps {
+  display: grid;
+  grid-column: 2;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  text-align: center;
+}
+
+.cd-about-readiness__step {
+  color: var(--text-secondary);
+}
+
+.cd-about-readiness__axes {
+  margin: var(--space-10) 0 0;
+  padding: 0;
+  list-style: none;
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+.cd-about-readiness__axis {
+  display: grid;
+  grid-template-columns: var(--readiness-columns);
+  align-items: center;
+  column-gap: var(--space-20);
+  padding: var(--space-16) 0;
+  border-top: 1px solid var(--line-hairline);
+}
+
+.cd-about-readiness__top {
+  display: contents;
+}
+
+.cd-about-readiness__name {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.cd-about-readiness__rating {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.cd-about-readiness__track {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: center;
+  justify-items: center;
+  height: var(--space-20);
+}
+
+.cd-about-readiness__track-line {
+  position: absolute;
+  top: 50%;
+  right: 12.5%;
+  left: 12.5%;
+  border-top: 1px solid var(--line-control);
+}
+
+.cd-about-readiness__stop {
+  position: relative;
+  width: var(--space-8);
+  height: var(--space-8);
+  border-radius: var(--radius-full);
+  background: var(--bg-app);
+  box-shadow: inset 0 0 0 1.5px var(--line-control-hover);
+}
+
+.cd-about-readiness__stop--on {
+  width: var(--space-14);
+  height: var(--space-14);
+  background: var(--text-primary);
+  box-shadow: 0 0 0 var(--space-4) var(--bg-app);
+}
+
+.cd-about-readiness__evidence,
+.cd-about-readiness__watch {
+  grid-column: 2 / -1;
+  margin: 0;
+}
+
+.cd-about-readiness__evidence {
+  margin-top: var(--space-10);
+  color: var(--text-primary);
+}
+
+.cd-about-readiness__watch {
+  display: flex;
+  gap: var(--space-10);
+  margin-top: var(--space-4);
+  color: var(--text-secondary);
+}
+
+.cd-about-readiness__watch-label {
+  flex: none;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.cd-about-readiness--compact .cd-about-readiness__legend,
+.cd-about-readiness--compact .cd-about-readiness__axis {
+  display: block;
+}
+
+.cd-about-readiness--compact .cd-about-readiness__axis {
+  padding: var(--space-16) 0 var(--space-14);
+}
+
+.cd-about-readiness--compact .cd-about-readiness__top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-12);
+}
+
+.cd-about-readiness--compact .cd-about-readiness__track {
+  margin-top: var(--space-10);
+}
+
+.cd-about-readiness--compact .cd-about-readiness__watch {
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* A table in the article, such as the proposal's measures; on a phone, a list. */
+
+.cd-about-measures {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-sans);
+}
+
+.cd-about-measures thead th {
+  padding: 0 var(--space-16) var(--space-12) 0;
+  border-bottom: 1px solid var(--line-control);
+  font-weight: 520;
+  text-align: left;
+  color: var(--text-secondary);
+}
+
+.cd-about-measures tbody th,
+.cd-about-measures td {
+  padding: var(--space-16) var(--space-16) var(--space-16) 0;
+  border-bottom: 1px solid var(--line-hairline);
+  text-align: left;
+  vertical-align: top;
+}
+
+.cd-about-measures tbody th {
+  width: 23%;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.cd-about-measures td {
+  color: var(--text-secondary);
+}
+
+.cd-about-measures td:nth-child(2) {
+  width: 46%;
+}
+
+.cd-about-measures td:last-child {
+  padding-right: 0;
+  color: var(--text-primary);
+}
+
+.cd-about-measures-list__items {
+  margin: 0;
+  border-top: 1px solid var(--line-control);
+  font-family: var(--font-sans);
+}
+
+.cd-about-measures-list__item {
+  padding: var(--space-14) 0;
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+.cd-about-measures-list__item dt {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.cd-about-measures-list__item dd {
+  margin: var(--space-4) 0 0;
+  color: var(--text-primary);
+}
+
+/* What the measure shows, under its name, in secondary ink. */
+.cd-about-measures-list__item .cd-about-measures-list__shows {
+  color: var(--text-secondary);
+}
+
+.cd-about-measures-list__label {
+  display: block;
+  margin-top: var(--space-8);
+  font-weight: 520;
+  color: var(--text-secondary);
+}
+
+/* A placeholder pill and the punctuation after it, kept on one line. */
+.cd-about-nowrap {
+  white-space: nowrap;
+}
+
+/* The reading page, as the reader boards draw it. On a desktop: a top bar, the centered title, summary and
+   lead figure, then the contents list, the article and its details in three columns, the article
+   size-article-measure wide and the columns beside it size-article-side. Below the page's breakpoint
+   (ReaderPage's NARROW), one column: the contents list folds into a row and the details into a line under
+   the summary. Every space is a token or a sum of tokens; the only raw lengths are hairlines. A rule that
+   changes what a type class sets (a weight, a line height) is scoped under .cd-about-page, so it holds
+   whichever stylesheet loads first. */
+
+.cd-about-page {
+  /* The page's side gutter and the gap between its columns. */
+  --about-gutter: calc(var(--space-40) * 2);
+  --about-gap: calc(var(--space-32) * 2);
+  /* The space between the hero and the body, and above the hero. */
+  --about-step: calc(var(--space-16) * 7);
+  min-height: 100dvh;
+  background: var(--bg-app);
+  color: var(--text-primary);
+}
+
+@media (max-width: 1335.98px) {
+  .cd-about-page {
+    --about-gutter: var(--space-40);
+    --about-gap: var(--space-40);
+  }
+}
+
+/* The top bar: the product's name, the document switch and the way back (BackLink.css). */
+
+.cd-about-top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-24);
+  height: calc(var(--space-32) * 2);
+  padding: 0 var(--about-gutter);
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+.cd-about-brand {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-10);
+}
+
+.cd-about-brand .cd-mark {
+  margin-top: var(--space-2);
+}
+
+.cd-about-switch {
+  display: flex;
+  gap: var(--space-4);
+  margin-left: auto;
+}
+
+.cd-about-switch__link {
+  display: inline-flex;
+  align-items: center;
+  height: var(--size-control);
+  padding: 0 var(--space-12);
+  border-radius: var(--radius-full);
+  color: var(--text-secondary);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.cd-about-switch__link:hover {
+  background: var(--fill-hover);
+  color: var(--text-primary);
+}
+
+.cd-about-switch__link[aria-current='page'] {
+  background: var(--fill-secondary);
+  color: var(--text-primary);
+}
+
+/* The hero: "About this prototype", the title, the summary and the lead figure, centered. */
+
+.cd-about-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--about-step) var(--about-gutter) 0;
+  text-align: center;
+}
+
+.cd-about-hero__kicker {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cd-about-page .cd-about-hero__title {
+  max-width: calc(var(--size-content) + var(--space-20));
+  margin: calc(var(--space-20) + var(--space-2)) 0 0;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+
+.cd-about-hero__summary {
+  max-width: calc(var(--size-reading) - var(--space-20));
+  margin: var(--space-24) 0 0;
+  color: var(--text-secondary);
+  text-wrap: balance;
+}
+
+.cd-about-hero__figure {
+  width: 100%;
+  max-width: calc(var(--size-article-measure) + 2 * var(--size-article-side) - var(--space-8));
+  margin-top: calc(var(--space-24) * 3);
+}
+
+/* The body: the contents list, the article and its details. The side columns grow with the window, so the
+   article stays centered with the contents list and the details at the gutters. */
+
+.cd-about-body {
+  display: grid;
+  grid-template-columns:
+    minmax(var(--size-article-side), 1fr) minmax(0, var(--size-article-measure))
+    minmax(var(--size-article-side), 1fr);
+  column-gap: var(--about-gap);
+  max-width: calc(var(--size-article-measure) + 4 * var(--size-article-side) + 2 * var(--about-gutter));
+  margin: 0 auto;
+  padding: var(--about-step) var(--about-gutter) 0;
+}
+
+.cd-about-page .cd-about-side-label {
+  margin: 0 0 var(--space-14);
+  font-weight: 520;
+  color: var(--text-secondary);
+}
+
+.cd-about-contents {
+  position: sticky;
+  top: var(--space-24);
+  align-self: start;
+  width: var(--size-article-side);
+}
+
+.cd-about-contents__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+.cd-about-contents__list li {
+  border-top: 1px solid var(--line-hairline);
+}
+
+.cd-about-contents__link {
+  display: flex;
+  gap: var(--space-14);
+  padding: var(--space-10) 0;
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.cd-about-contents__link:hover {
+  color: var(--accent-blue);
+}
+
+.cd-about-page .cd-about-contents__number {
+  flex: none;
+  width: var(--space-20);
+  font-family: var(--font-mono);
+  line-height: var(--space-20);
+  color: var(--text-secondary);
+}
+
+.cd-about-meta {
+  align-self: start;
+  justify-self: end;
+  width: var(--size-article-side);
+}
+
+.cd-about-meta dl {
+  margin: 0;
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+.cd-about-meta dl > div {
+  display: grid;
+  grid-template-columns: calc(var(--space-40) * 2 + var(--space-4)) minmax(0, 1fr);
+  gap: var(--space-12);
+  padding: var(--space-10) 0;
+  border-top: 1px solid var(--line-hairline);
+}
+
+.cd-about-meta dt {
+  font-weight: 520;
+  color: var(--text-primary);
+}
+
+.cd-about-meta dd {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+/* The article: the document in serif, its headings in sans. Only the article's own blocks: a figure inside
+   it lays out its paragraphs and lists itself. */
+
+.cd-about-column {
+  min-width: 0;
+}
+
+.cd-about-article > p {
+  margin: 0 0 var(--space-24);
+  text-wrap: pretty;
+}
+
+.cd-about-article > h2 {
+  margin: calc(var(--space-32) * 2) 0 calc(var(--space-16) + var(--space-2));
+  letter-spacing: -0.013em;
+  scroll-margin-top: var(--space-24);
+}
+
+.cd-about-article > h2:first-child {
+  margin-top: 0;
+}
+
+.cd-about-article strong {
+  font-weight: 640;
+}
+
+.cd-about-article > ul {
+  margin: 0 0 var(--space-24);
+  padding-left: calc(var(--space-20) + var(--space-2));
+}
+
+.cd-about-article > ul > li {
+  margin: var(--space-6) 0;
+  padding-left: var(--space-4);
+}
+
+/* A figure or table inside the article. */
+.cd-about-article .cd-about-figure,
+.cd-about-article .cd-about-measures,
+.cd-about-article .cd-about-measures-list {
+  margin: var(--space-8) 0 var(--space-32);
+}
+
+/* The pull quote, after the first section. */
+.cd-about-pull {
+  margin: calc(var(--space-28) * 2) 0;
+  padding-top: var(--space-28);
+  border-top: 1px solid var(--line-control);
+}
+
+.cd-about-pull p {
+  margin: 0;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+/* "Read next": the other document, the whole card one link. */
+
+.cd-about-next {
+  position: relative;
+  margin-top: calc(var(--space-24) * 3);
+}
+
+.cd-about-next .cd-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  transition: border-color var(--motion-instant) var(--motion-ease);
+}
+
+.cd-about-next:hover .cd-card {
+  border-color: var(--line-control-hover);
+}
+
+.cd-about-page .cd-about-next__label {
+  margin: 0;
+}
+
+.cd-about-next__link {
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.cd-about-next__link::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-card);
+}
+
+.cd-about-next__link:focus-visible {
+  outline: none;
+}
+
+.cd-about-next__link:focus-visible::after {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 2px;
+}
+
+.cd-about-next__summary {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cd-about-footer {
+  display: flex;
+  justify-content: center;
+  padding: calc(var(--space-32) * 3) var(--about-gutter) calc(var(--space-24) * 2);
+  text-align: center;
+}
+
+/* The phone layout. */
+
+.cd-about-page--compact {
+  --about-gutter: var(--space-20);
+}
+
+.cd-about-top--compact {
+  gap: var(--space-12);
+  height: calc(var(--space-28) * 2);
+  padding: 0 var(--space-16);
+}
+
+.cd-about-top--compact .cd-about-brand {
+  margin-left: auto;
+}
+
+.cd-about-switch--compact {
+  flex-wrap: wrap;
+  gap: var(--space-6);
+  margin: 0;
+  padding: var(--space-12) var(--space-16) 0;
+}
+
+.cd-about-page--compact .cd-about-hero {
+  padding-top: calc(var(--space-24) * 2);
+}
+
+.cd-about-page--compact .cd-about-hero__title {
+  margin-top: var(--space-14);
+}
+
+.cd-about-page--compact .cd-about-hero__summary {
+  margin-top: var(--space-16);
+}
+
+.cd-about-hero__byline {
+  margin: var(--space-20) 0 0;
+  color: var(--text-secondary);
+}
+
+.cd-about-page--compact .cd-about-hero__figure {
+  max-width: var(--size-article-measure);
+  margin-top: calc(var(--space-32) + var(--space-4));
+}
+
+.cd-about-page--compact .cd-about-body {
+  display: block;
+  max-width: calc(var(--size-article-measure) + 2 * var(--about-gutter));
+  padding-top: calc(var(--space-40));
+}
+
+.cd-about-contents--compact {
+  position: static;
+  width: auto;
+  border-top: 1px solid var(--line-hairline);
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+.cd-about-page .cd-about-contents__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  min-height: calc(var(--space-24) * 2);
+  font-weight: 520;
+  color: var(--text-primary);
+  list-style: none;
+  cursor: pointer;
+}
+
+.cd-about-contents__row::-webkit-details-marker {
+  display: none;
+}
+
+.cd-about-contents__count {
+  margin-left: auto;
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.cd-about-contents__chevron {
+  flex: none;
+  color: var(--text-secondary);
+}
+
+.cd-about-contents__fold[open] .cd-about-contents__chevron {
+  transform: rotate(180deg);
+}
+
+.cd-about-contents--compact .cd-about-contents__list {
+  border-bottom: 0;
+}
+
+.cd-about-page--compact .cd-about-article {
+  padding-top: var(--space-32);
+}
+
+.cd-about-page--compact .cd-about-article > p {
+  margin-bottom: var(--space-20);
+}
+
+.cd-about-page--compact .cd-about-article > h2 {
+  margin: calc(var(--space-24) * 2) 0 var(--space-14);
+}
+
+.cd-about-page--compact .cd-about-article > h2:first-child {
+  margin-top: 0;
+}
+
+.cd-about-page--compact .cd-about-pull {
+  margin: var(--space-40) 0;
+}
+
+.cd-about-page--compact .cd-about-next {
+  margin-top: calc(var(--space-24) * 2);
+}
+
+.cd-about-page--compact .cd-about-footer {
+  padding: calc(var(--space-32) * 2) var(--space-20) calc(var(--space-32) + var(--space-4));
+}
+
+/* Between a phone and a desktop the phone chart would scale its words up with its width; its plot stops
+   growing at three quarters of the reading column, centered in its frame. */
+.cd-about-page--compact .cd-about-chart__plot {
+  max-width: calc(var(--size-article-measure) * 0.75);
+  margin: 0 auto;
+}

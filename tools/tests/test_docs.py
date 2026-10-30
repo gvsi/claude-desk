@@ -371,15 +371,19 @@ def test_about_documents_pass_the_docs_check():
 
 FIGURE_MARKER = re.compile(r"<!-- figure: (architecture|tau3|readiness) -->")
 FIGURE_IMAGE = re.compile(r"!\[[^\[\]\n]+\]\(images/v1-architecture\.svg\)")
+# A web or e-mail address at the start of a word (after anything but a letter or digit), which GitHub links
+# though no one wrote a link.
+BARE_ADDRESS = re.compile(
+    r"(?<![^\W_])(?:(?i:https?://|www\.)|[A-Za-z0-9_.+-]+@[A-Za-z0-9_-]+\.[A-Za-z0-9_.-]+)")
 
 
 def reader_subset_problems(text: str, other: str) -> list[str]:
     """What in `text` the About pages' Markdown reader would refuse, by line: a fenced code block or a code span
     across lines, HTML other than a figure marker on a line of its own, an image other than the architecture
     figure's line right after its marker, a heading below `##` or a second `#` heading, a blockquote, a thematic
-    break, a setext heading, a nested list, or a link that is neither `https://` nor `other`, the other document's
-    file name. The reader's own tests run the full parse; this catches the common breaks without the web
-    toolchain."""
+    break, a setext heading, a nested list, a link that is neither `https://` nor `other`, the other document's
+    file name, or a bare web or e-mail address outside a link. The reader's own tests run the full parse; this
+    catches the common breaks without the web toolchain."""
     problems: list[str] = []
     # The reader has no code blocks, and the blanking below would hide what one holds, so each is refused first.
     # The checker's own fence lines are the ones it skips, opener then closer, so every other one opens a block.
@@ -429,6 +433,12 @@ def reader_subset_problems(text: str, other: str) -> list[str]:
     for number, target in check_docs.link_targets(text):
         if number not in figure_images and not (target.startswith("https://") or target == other):
             problems.append(f"line {number}: a link to {target}, neither https:// nor {other}")
+    # GitHub links a bare address anywhere but in a link, so each link, its words and its target, is blanked first.
+    prose = check_docs._prose(text)
+    unlinked = check_docs._INLINE_LINK.sub(lambda link: re.sub(r"[^\n]", " ", link.group(0)), prose)
+    line_of = check_docs._line_of(unlinked)
+    problems += [f"line {line_of(address.start())}: a bare address, which GitHub links; write it as [text](https://…)"
+                 for address in BARE_ADDRESS.finditer(unlinked)]
     return problems
 
 
@@ -441,7 +451,9 @@ IN_SUBSET = "\n".join([
     "## A section",
     "",
     "Read [the other one](capability-prediction.md) and [a source](https://example.com/report). Code such as",
-    "`<b>`, `![x](y.png)` or `[x](notes.md)` is text.",
+    "`<b>`, `![x](y.png)` or `[x](notes.md)` is text. Addresses as a link's words or in code aren't linked:",
+    "[www.example.com](https://www.example.com), [desk@example.com](https://example.com/contact),",
+    "`desk@example.com`; nor are an @ alone, 5@6 or awww.example.",
     "",
     "<!-- figure: architecture -->",
     "![The architecture](images/v1-architecture.svg)",
@@ -498,6 +510,13 @@ IN_SUBSET = "\n".join([
     ("- In a list:\n\n  ```\n  ![A chart](images/chart.png)\n  ```", "a fenced code block"),
     ("Code such as `a\n<script>alert(1)</script>` is not text.", "a code span across lines"),
     ("Code such as `a\n### A subsection` is not text.", "a code span across lines"),
+    # GitHub links a bare web or e-mail address that starts a word; the page would show it as plain text.
+    ("See https://example.com/report.", "a bare address"),
+    ("See HTTP://EXAMPLE.COM here.", "a bare address"),
+    ("See www.example.com for more.", "a bare address"),
+    ("Write to desk@example.com.", "a bare address"),
+    ("Text and\n(desk+orders@mail.example.co.uk) here.", "a bare address"),
+    ("[owner: www.example.com]", "a bare address"),
 ])
 def test_the_reader_subset_check_catches_each_break(added, problem):
     assert reader_subset_problems(IN_SUBSET, "capability-prediction.md") == []
