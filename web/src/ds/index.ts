@@ -32,6 +32,7 @@ export {
   type CopyPair,
 } from './components/Notice/errorCopy.ts';
 export { EmptyState, type EmptyStateProps } from './components/EmptyState/EmptyState.tsx';
+export { DisclosureLine, type DisclosureLineProps } from './components/DisclosureLine/DisclosureLine.tsx';
 
 // Controls
 export { Switch, type SwitchProps } from './components/Switch/Switch.tsx';
@@ -87,6 +88,22 @@ export {
   type IntroThing,
 } from './components/IntroDialog/IntroDialog.tsx';
 export { INTRO_ERROR_COPY } from './components/IntroDialog/introCopy.ts';
+
+// Verification
+export {
+  VerifyCodeForm,
+  type VerifyCodeFormProps,
+  type VerifyCodeState,
+} from './components/VerifyCodeForm/VerifyCodeForm.tsx';
+export { VerifiedLine, type VerifiedLineProps } from './components/VerifyCodeForm/VerifiedLine.tsx';
+export {
+  DemoInboxPanel,
+  type DemoInboxItem,
+  type DemoInboxPanelProps,
+} from './components/DemoInboxPanel/DemoInboxPanel.tsx';
+
+// Payments
+export { MockCheckout, type MockCheckoutProps } from './components/MockCheckout/MockCheckout.tsx';
 
 // Reply cards
 export { ReplyCard, type ReplyCardProps } from './components/ReplyCard/ReplyCard.tsx';

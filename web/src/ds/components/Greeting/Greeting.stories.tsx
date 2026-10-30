@@ -20,7 +20,7 @@ const meta = {
       </div>
     ),
   ],
-  parameters: { layout: 'padded', canvas: 'N-Today-NeedsYou' },
+  parameters: { layout: 'padded', canvas: 'N-Today-Run1' },
 } satisfies Meta<typeof Greeting>;
 
 export default meta;

@@ -1,19 +1,30 @@
 /**
- * The design canvas boards the design system is checked against: only the current N- boards on
- * the "Claude Desk ·" pages, each listed once. A story names its board in `parameters.canvas`, or
- * says `'none'` and explains in `parameters.canvasNote` (usually naming the nearest board).
+ * The design canvas boards the design system is checked against: the N- boards on the "Claude
+ * Desk ·" pages that the project owner signed off, each listed once. Each is rebuilt by one
+ * `Boards/*` story and compared by eye with its render at 1280×820 (`reference/README.md`). A story
+ * names its board in `parameters.canvas`, or says `'none'` and explains in `parameters.canvasNote`
+ * (usually naming the nearest board).
  */
 export const REFERENCE_BOARDS = [
-  'N-Today-NeedsYou',
-  'N-Conv-Live',
-  'N-Conv-Agent',
+  // The owner app: Today, the conversations and the decisions made in them.
+  'N-Today-Run1',
+  'N-Today-Empty-Run1',
+  'N-Conv-Run1',
+  'N-Conv-Agent-Run1',
   'N-Conv-TakeOver',
-  'N-Reviewer-Arrival',
-  'N-Public-Rivera',
-  'N-Public-Handoff',
-  'N-Public-Verify',
-  'N-Safety',
-  'N-Switcher',
+  'N-Switcher-Run1',
+  'N-Safety-Run1',
+  'N-Safety-Record-Run1',
+  // The public page.
+  'N-Public-Rivera-Run1',
+  'N-Public-Handoff-Run1',
+  'N-Public-Verify-Run1',
+  // Typing, busy buttons and the approval answers, signed as their own boards.
+  'N-Typing-Bubble-Run1',
+  'N-Typing-Owner-Busy',
+  'N-Answers-TwoButtons',
+  // The first visit.
+  'N-Intro-D',
   // The "Connectors and rules" page, which replaces the Rules and Integrations boards.
   'N-Conn-01-Rules',
   'N-Conn-02-Payments',

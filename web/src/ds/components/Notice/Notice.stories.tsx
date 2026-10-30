@@ -17,7 +17,7 @@ const meta = {
       <Notice {...args} />
     </div>
   ),
-  parameters: { layout: 'padded', canvas: 'N-Today-NeedsYou' },
+  parameters: { layout: 'padded', canvas: 'N-Today-Run1' },
 } satisfies Meta<typeof Notice>;
 
 export default meta;
@@ -57,7 +57,7 @@ export const Waiting: Story = {
   args: { tone: 'waiting', children: 'Reconnecting to the chat' },
   parameters: {
     canvas: 'none',
-    canvasNote: "No board shows a reconnecting line; it takes the shape of N-Today-NeedsYou's overnight line, with the held dot.",
+    canvasNote: "No board shows a reconnecting line; it takes the shape of N-Today-Run1's overnight line, with the held dot.",
   },
   play: async ({ canvas, canvasElement }) => {
     await expect(canvas.getByRole('status')).toHaveTextContent('Reconnecting to the chat');
@@ -69,7 +69,7 @@ export const Error: Story = {
   args: { tone: 'error', children: "That didn't send. Your message is still here; try again." },
   parameters: {
     canvas: 'none',
-    canvasNote: "No board shows a failed send; it takes the shape of N-Today-NeedsYou's overnight line, with the refused dot.",
+    canvasNote: "No board shows a failed send; it takes the shape of N-Today-Run1's overnight line, with the refused dot.",
   },
   play: async ({ canvas, canvasElement }) => {
     // error_notice_is_an_alert
@@ -92,7 +92,7 @@ export const Unreachable: Story = {
   },
   parameters: {
     canvas: 'none',
-    canvasNote: "No board shows an outage; the static line from errorCopy.ts in the shape of N-Today-NeedsYou's overnight line.",
+    canvasNote: "No board shows an outage; the static line from errorCopy.ts in the shape of N-Today-Run1's overnight line.",
   },
   play: async ({ canvas, canvasElement }) => {
     const alert = canvas.getByRole('alert');

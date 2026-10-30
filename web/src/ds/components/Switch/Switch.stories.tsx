@@ -27,7 +27,7 @@ const meta = {
   component: Switch,
   args: { label: 'Answering', description: 'Claude answers under your rules', checked: true, onChange: fn() },
   render: (args) => <Controlled {...args} />,
-  parameters: { layout: 'padded', canvas: 'N-Today-NeedsYou' },
+  parameters: { layout: 'padded', canvas: 'N-Today-Run1' },
 } satisfies Meta<typeof Switch>;
 
 export default meta;

@@ -19,7 +19,7 @@ const meta = {
       </div>
     ),
   ],
-  parameters: { layout: 'padded', canvas: 'N-Safety' },
+  parameters: { layout: 'padded', canvas: 'N-Safety-Run1' },
 } satisfies Meta<typeof PageHeader>;
 
 export default meta;

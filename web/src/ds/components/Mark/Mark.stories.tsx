@@ -7,7 +7,7 @@ const meta = {
   title: 'Layout/Mark',
   component: DeskMark,
   args: { size: 20 },
-  parameters: { layout: 'padded', canvas: 'N-Today-NeedsYou' },
+  parameters: { layout: 'padded', canvas: 'N-Today-Run1' },
 } satisfies Meta<typeof DeskMark>;
 
 export default meta;

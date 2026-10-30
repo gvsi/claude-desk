@@ -21,7 +21,7 @@ const meta = {
     meta: 'Request 1',
     time: '11:42:03',
   },
-  parameters: { layout: 'padded', canvas: 'N-Conv-Agent' },
+  parameters: { layout: 'padded', canvas: 'N-Conv-Agent-Run1' },
 } satisfies Meta<typeof AgentMessage>;
 
 export default meta;

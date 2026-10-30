@@ -84,6 +84,7 @@
   --size-intro: 880px;
   --size-intro-illustration: 400px;
   --size-side-panel: 400px;
+  --size-checkout: 420px;
   --motion-instant: 60ms;
   --motion-fast: 120ms;
   --motion-base: 200ms;
@@ -225,6 +226,14 @@
   font-size: 17px;
   line-height: 22px;
   font-weight: 620;
+}
+
+.cd-type-amount {
+  font-family: var(--font-sans);
+  font-size: 32px;
+  line-height: 40px;
+  font-weight: 500;
+  letter-spacing: -0.3px;
 }
 
 .cd-type-trace {

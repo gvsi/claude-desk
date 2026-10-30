@@ -13,7 +13,7 @@ const meta = {
   component: Whisper,
   // The time is the owner screen's display string; the design system formats none.
   args: { caption: 'Your whisper, 12:08. Only Claude sees this.', text: whisperText },
-  parameters: { layout: 'padded', canvas: 'N-Conv-Live' },
+  parameters: { layout: 'padded', canvas: 'N-Conv-Run1' },
 } satisfies Meta<typeof Whisper>;
 
 export default meta;

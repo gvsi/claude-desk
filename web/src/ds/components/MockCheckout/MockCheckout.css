@@ -1,0 +1,223 @@
+/* MockCheckout: one centered column, at most size-checkout wide: the AI disclosure, the card and
+   the concept footer, 14 px apart. In the card, 14 px apart: the merchant with the "Test mode"
+   badge, the title, then the amount, the locked test card and the two buttons while the link is
+   open, or the result region's line once it isn't, and the test-payment footnote last. The only
+   input is the name, when the link carries none, and it goes nowhere. The paid check draws once at
+   motion-base; nothing moves under reduced motion. */
+
+.cd-checkout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-14);
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--size-checkout);
+  min-width: 0;
+  margin: 0 auto;
+  padding: var(--space-28) var(--space-24) var(--space-20);
+  color: var(--text-primary);
+}
+
+.cd-checkout__card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-14);
+  min-width: 0;
+  padding: var(--space-24);
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-card);
+  background: var(--fill-card);
+}
+
+/* The merchant at the left and the badge at the right, on one line. */
+.cd-checkout__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-12);
+  min-width: 0;
+}
+
+.cd-checkout__merchant {
+  min-width: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.cd-checkout__title {
+  margin: 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.cd-checkout__amount-value {
+  margin: 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.cd-checkout__once {
+  margin: var(--space-2) 0 0;
+  color: var(--text-secondary);
+}
+
+/* A label over its fields, 6 px apart. */
+.cd-checkout__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-width: 0;
+}
+
+.cd-checkout__label {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+/* The test card in one control outline: the number across the top with a lock at its right, and
+   the expiry and the security code side by side under it, split by the same line. */
+.cd-checkout__card-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  margin: 0;
+  border: 1px solid var(--line-control);
+  border-radius: var(--radius-control);
+  overflow: hidden;
+}
+
+/* A shown value, never a field to type in: size-control-main tall inside its lines, in the body
+   type and the secondary ink. Lines are drawn outside that height, as the board's are. */
+.cd-checkout__field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  box-sizing: content-box;
+  height: var(--size-control-main);
+  min-width: 0;
+  margin: 0;
+  padding: 0 var(--space-12);
+  color: var(--text-secondary);
+}
+
+.cd-checkout__field--number {
+  grid-column: 1 / -1;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line-control);
+}
+
+.cd-checkout__card-fields > .cd-checkout__field:last-child {
+  border-left: 1px solid var(--line-control);
+}
+
+.cd-checkout__field--name {
+  border: 1px solid var(--line-control);
+  border-radius: var(--radius-control);
+}
+
+/* The name to type when the link carries none: the field look every editable field has, the
+   page's own ground in the field outline (3:1 against it), as tall as the shown values. */
+.cd-checkout__name-field {
+  display: block;
+  box-sizing: content-box;
+  width: calc(100% - 2 * var(--space-12) - 2px);
+  height: var(--size-control-main);
+  min-width: 0;
+  margin: 0;
+  padding: 0 var(--space-12);
+  border: 1px solid var(--line-field);
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-primary);
+}
+
+.cd-checkout__value {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cd-checkout__lock {
+  flex: none;
+}
+
+.cd-checkout__hint {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cd-checkout__hint > svg {
+  flex: none;
+}
+
+/* Pay over Cancel, each as wide as the card's content. */
+.cd-checkout__actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+/* A final state's line, inside the result region: its dot, then the words, wrapping beside the
+   dot. Paid adds the check before the words. The dot and the check sit on the middle of the first
+   line. While the link is open the region is visually hidden, empty and out of the flow. */
+.cd-checkout__result {
+  min-width: 0;
+}
+
+.cd-checkout__state {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-10);
+  min-width: 0;
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.cd-checkout__state-words {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-6);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.cd-checkout__state-mark {
+  display: flex;
+  flex: none;
+  align-items: center;
+  height: 1lh;
+}
+
+/* The paid check, drawn once in the line's own ink: status color stays on the dot. */
+
+.cd-checkout__check path {
+  stroke-dasharray: 24;
+  stroke-dashoffset: 24;
+  animation: cd-checkout-draw var(--motion-base) var(--motion-ease-emphasis) forwards;
+}
+
+@keyframes cd-checkout-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* The card's last line, under a hairline. */
+.cd-checkout__footnote {
+  margin: 0;
+  padding-top: var(--space-12);
+  border-top: 1px solid var(--line-hairline);
+  color: var(--text-secondary);
+}
+
+/* Reduced motion: the check is drawn from the start. */
+@media (prefers-reduced-motion: reduce) {
+  .cd-checkout__check path {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+}

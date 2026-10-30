@@ -15,7 +15,8 @@ export interface CardChrome {
   note?: string;
 }
 
-const TEST_PAYMENT = {
+/** The note on every card about money moving, and on the mock checkout. */
+export const TEST_PAYMENT = {
   en: 'Test payment, no money moves',
   es: 'Pago de prueba, no se mueve dinero',
 } as const;

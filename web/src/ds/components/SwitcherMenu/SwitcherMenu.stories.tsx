@@ -79,7 +79,7 @@ const meta = {
   render: (args) => <OwnerLayout {...args} />,
   parameters: {
     layout: 'fullscreen',
-    canvas: 'N-Switcher',
+    canvas: 'N-Switcher-Run1',
     canvasNote:
       "The board's two columns become one menu of businesses, with New business last. The current business's Desks, New Desk and the Desks' status dots and captions aren't in it: the sidebar's Desk picker has the Desks. It has no shadow, which the brand book keeps for the composer.",
   },

@@ -14,7 +14,7 @@ const meta = {
   title: 'Actions/Button',
   component: Button,
   args: { variant: 'secondary', children: 'Allow this time', onClick: fn() },
-  parameters: { layout: 'padded', canvas: 'N-Today-NeedsYou' },
+  parameters: { layout: 'padded', canvas: 'N-Today-Run1' },
 } satisfies Meta<typeof Button>;
 
 export default meta;

@@ -83,7 +83,7 @@ export const WithStatusHeader: Story = {
     </div>
   ),
   parameters: {
-    canvas: 'N-Today-NeedsYou',
+    canvas: 'N-Today-Run1',
     canvasNote: 'The live handoff card without its two buttons, which the Today screen adds.',
   },
   play: async ({ canvas, canvasElement }) => {

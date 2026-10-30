@@ -7,7 +7,7 @@ const meta = {
   title: 'Status/Pill',
   component: Pill,
   args: { children: 'Public' },
-  parameters: { layout: 'padded', canvas: 'N-Conv-Live' },
+  parameters: { layout: 'padded', canvas: 'N-Conv-Run1' },
 } satisfies Meta<typeof Pill>;
 
 export default meta;

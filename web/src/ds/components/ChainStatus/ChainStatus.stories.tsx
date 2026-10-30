@@ -26,7 +26,7 @@ const meta = {
   ],
   parameters: {
     layout: 'padded',
-    canvas: 'N-Safety',
+    canvas: 'N-Safety-Run1',
     canvasNote:
       "The board has no header for every entry; this one follows the board's status dots and count pills, over the list Plan 04 adds.",
   },

@@ -38,7 +38,7 @@ const meta = {
     layout: 'padded',
     canvas: 'none',
     canvasNote:
-      'No board draws a form field on its own. The passcode field opens the demo before N-Reviewer-Arrival, and the nearest drawn field is the code input on N-Public-Verify; this one keeps the design system’s control radius and outline.',
+      'No board draws a form field on its own. The passcode field is part of the first-visit dialog on N-Intro-D, and the code input on N-Public-Verify-Run1 is drawn from this component; this one keeps the design system’s control radius and outline.',
   },
 } satisfies Meta<typeof TextField>;
 
@@ -103,7 +103,7 @@ export const Password: Story = {
   args: { label: 'Passcode', type: 'password', value: '', hint: undefined, autoComplete: 'current-password' },
   parameters: {
     canvasNote:
-      'No board draws the passcode screen; it opens the demo before N-Reviewer-Arrival, so this story names no board.',
+      'No board draws the passcode field on its own; the first-visit dialog on N-Intro-D draws it inside the dialog, so this story names no board.',
   },
   play: async ({ args, canvas, userEvent }) => {
     const field = canvas.getByLabelText('Passcode');

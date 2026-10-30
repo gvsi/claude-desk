@@ -105,7 +105,7 @@ const meta = {
   ],
   parameters: {
     layout: 'padded',
-    canvas: 'N-Conv-Live',
+    canvas: 'N-Conv-Run1',
     canvasNote:
       'The board puts Take over beside the whisper composer with its lines beneath; the bar sits above the composer with its lines in the reading column and its controls beside them, and names are written in full, as the screen passes them.',
   },
@@ -255,7 +255,7 @@ export const Agent: Story = {
   args: { agent: true, visitorName: alex.name },
   render: (args) => <Screen {...args} />,
   parameters: {
-    canvas: 'N-Conv-Agent',
+    canvas: 'N-Conv-Agent-Run1',
     canvasNote:
       "The board shows a finished agent visit; while one is live the bar offers Take over, without the line about what the visitor sees, which agents never receive.",
   },

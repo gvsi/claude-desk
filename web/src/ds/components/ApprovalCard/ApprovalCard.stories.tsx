@@ -267,9 +267,9 @@ const meta = {
   ],
   parameters: {
     layout: 'padded',
-    canvas: 'N-Today-NeedsYou',
+    canvas: 'N-Today-Run1',
     canvasNote:
-      "The board's 50% cash discount is the Rivera fixture's held quote; its held-by line names the rule card's reason, and the counter-offer row is static vision.",
+      "The board's held request is the Rivera fixture's held quote, and its held-by line names the rule card's reason.",
   },
 } satisfies Meta<typeof ApprovalCard>;
 

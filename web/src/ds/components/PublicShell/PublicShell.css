@@ -4,7 +4,8 @@
    panel, 300 px as on the board.
 
    The shell is an inline-size container: below 900 px wide the about column moves under the chat,
-   and below 640 px the gutters are 16 px and the open status has its own line under the name. The
+   below 720 px the gutters are 16 px, and below 640 px the open status has its own line under the
+   name. The
    composer and the footer stay at the bottom of the window while the conversation scrolls above
    them. */
 
@@ -263,16 +264,11 @@
   }
 }
 
-/* A phone, or the owner's side panel: 16 px gutters. */
-@container cd-public-shell (max-width: 639.98px) {
+/* Narrow, as each state of the handoff board is at 640 px, a phone, or the owner's side panel: 16 px gutters. */
+@container cd-public-shell (max-width: 719.98px) {
   .cd-public-shell__brand {
     padding-right: var(--space-16);
     padding-left: var(--space-16);
-  }
-
-  /* The open status takes its own line under the name, from the left gutter, however short. */
-  .cd-public-shell__open-status {
-    flex-basis: 100%;
   }
 
   .cd-public-shell__chat {
@@ -283,5 +279,13 @@
   .cd-public-shell__about {
     padding-right: var(--space-16);
     padding-left: var(--space-16);
+  }
+}
+
+/* A phone, or the owner's side panel: the open status takes its own line under the name, from the
+   left gutter, however short. */
+@container cd-public-shell (max-width: 639.98px) {
+  .cd-public-shell__open-status {
+    flex-basis: 100%;
   }
 }

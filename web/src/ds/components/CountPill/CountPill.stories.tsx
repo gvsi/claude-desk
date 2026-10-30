@@ -7,7 +7,7 @@ const meta = {
   title: 'Status/CountPill',
   component: CountPill,
   args: { count: 2, label: '2 need you' },
-  parameters: { layout: 'padded', canvas: 'N-Today-NeedsYou' },
+  parameters: { layout: 'padded', canvas: 'N-Today-Run1' },
 } satisfies Meta<typeof CountPill>;
 
 export default meta;

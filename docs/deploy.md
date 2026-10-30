@@ -57,7 +57,7 @@ The hosted demo's domain is `desk.alcantara.xyz`. CloudFront reads certificates 
 
    ```sh
    export DESK_DOMAIN_NAME=desk.alcantara.xyz
-   export DESK_CERTIFICATE_ARN=<the certificate's ARN, from: aws acm list-certificates --region us-east-1>
+   export DESK_CERTIFICATE_ARN=<the certificate's ARN, from: aws acm list-certificates --region us-east-1 --includes keyTypes=EC_prime256v1,RSA_2048 (without --includes the call lists only RSA 2048 certificates)>
    infra/scripts/deploy.sh
    ```
 

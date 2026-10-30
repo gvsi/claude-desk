@@ -19,6 +19,8 @@ const preview: Preview = {
     viewport: {
       options: {
         canvas: { name: 'Canvas', styles: { width: '1280px', height: '820px' }, type: 'desktop' },
+        // The Connectors and rules boards are drawn at a 14-inch laptop's width.
+        board: { name: 'Board', styles: { width: '1512px', height: '982px' }, type: 'desktop' },
         desktop: { name: 'Desktop', styles: { width: '1440px', height: '900px' }, type: 'desktop' },
         tablet: { name: 'Tablet', styles: { width: '768px', height: '1024px' }, type: 'tablet' },
         phone: { name: 'Phone', styles: { width: '390px', height: '844px' }, type: 'mobile' },
