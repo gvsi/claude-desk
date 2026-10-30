@@ -12,6 +12,13 @@
  *   with none. Each request is answered from the cookies it carries, and answers set the API's
  *   HttpOnly cookies, so every tab of one browser shares its copy and another browser has its own.
  *
+ * Requests also belong to an epoch. The screen tests start a new one before each test and stamp
+ * every request with the epoch it was sent in, because the service worker hands a request to the
+ * store a few milliseconds after the page sends it: one the last test's page sent just before it
+ * ended would otherwise be recorded in the next test and applied to its copy. The store drops a
+ * request from an earlier epoch like a lost connection, unrecorded and unapplied. A `reset` inside
+ * a test keeps the epoch, so a page still on screen goes on reaching the new copy.
+ *
  * The mock ships in no build: it runs under `npm run dev:mock` and in tests only.
  */
 import type { SseEvent } from '../api/contracts.ts';
@@ -42,6 +49,8 @@ export interface MockRequestInit {
   path?: string;
   /** The cookies the request carries, by name (read only by a `real` store). */
   cookies?: Record<string, string>;
+  /** The epoch the page sent it in, when the page stamps its requests (the screen tests' page does). */
+  epoch?: number;
 }
 
 /**
@@ -290,6 +299,7 @@ export class MockStore {
   private injections: (Injection & { left: number })[] = [];
   private readonly log: MockRequest[] = [];
   private readonly unhandledPaths: string[] = [];
+  private epochNo = 0;
 
   constructor(opts: MockStoreOptions = {}) {
     this.mode = opts.cookies ?? 'simulated';
@@ -319,6 +329,21 @@ export class MockStore {
   /** Paths under `/api/` that no mocked route answers, in order. */
   get unhandled(): readonly string[] {
     return this.unhandledPaths;
+  }
+
+  /** The epoch requests are sent in now; see the file's header. */
+  get epoch(): number {
+    return this.epochNo;
+  }
+
+  /** Starts a new epoch: from now on, a request sent before this call is dropped when it arrives. */
+  nextEpoch(): void {
+    this.epochNo += 1;
+  }
+
+  /** Whether a request sent in `epoch` is still answered: one from this epoch, or one with none. */
+  admits(epoch: number | undefined): boolean {
+    return epoch === undefined || epoch === this.epochNo;
   }
 
   /** A fresh copy of `seed`: no visitor cookies, no faults, nothing recorded, no turn in flight. */
@@ -386,13 +411,22 @@ export class MockStore {
     }
   }
 
-  /** Answers `key` as the API would: a planted fault first, else the route, from and into the copy it reaches. */
+  /**
+   * Answers `key` as the API would: a planted fault first, else the route, from and into the copy it
+   * reaches. A request from an earlier epoch, or one still waiting on a planted delay when its epoch
+   * ends, is dropped instead.
+   */
   async dispatch(key: RouteKey, init: MockRequestInit = {}): Promise<MockAnswer> {
+    if (!this.admits(init.epoch)) return { network: true };
+    const epoch = this.epochNo;
     const params = init.params ?? {};
     const query = toQuery(init.query);
     if (this.mode === 'simulated') this.log.push({ key, body: init.body, path: init.path ?? pathFor(key, params, query) });
     const injection = this.takeInjection(key);
-    if (injection?.delayMs !== undefined) await new Promise((resolve) => setTimeout(resolve, injection.delayMs));
+    if (injection?.delayMs !== undefined) {
+      await new Promise((resolve) => setTimeout(resolve, injection.delayMs));
+      if (!this.admits(epoch)) return { network: true };
+    }
     // A planted fault answers in the route's place, unless it lets the route commit first.
     let served: AnyServed = { status: 0 };
     let setCookie: readonly string[] = [];

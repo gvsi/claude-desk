@@ -10,6 +10,7 @@ import { apiPath } from '../api/routes.ts';
 import { openStream, type StreamState } from '../api/stream.ts';
 import type { CopyOut } from '../api/views.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
+import { startTest } from './browser.ts';
 import { RIVERA } from './seed.ts';
 import { mockStore } from './store.ts';
 
@@ -125,6 +126,30 @@ describe('mock API handlers', () => {
     await renderRoute('/no/such/page', { seed: 'rivera_quiet' });
     expect((await me()).status).toBe(200);
     expect(await (await fetch(apiPath('needsYou', { desk_id: RIVERA.deskId }))).json()).toEqual([]);
+  });
+
+  it('late_requests_from_the_last_test_are_dropped', async () => {
+    // The last test's page sent these just before it ended. The service worker hands each one to
+    // the mock only after the next test has started over, as on a slow runner.
+    const session = fetch(apiPath('openSession', { slug: RIVERA.slug }), { method: 'POST' });
+    const unmocked = fetch('/api/nope');
+    const stream = new EventSource(apiPath('events', { slug: RIVERA.slug }, { after: '0' }));
+    const streamAnswered = new Promise((resolve) => {
+      stream.onopen = resolve;
+      stream.onerror = resolve;
+    });
+    startTest();
+    await Promise.allSettled([session, unmocked]);
+    await streamAnswered;
+    stream.close();
+    // None of them is recorded in this test or changes its copy.
+    expect(mockStore.requests).toEqual([]);
+    expect(mockStore.unhandled).toEqual([]);
+    expect(mockStore.visitorSession(RIVERA.slug)).toBeNull();
+
+    // What this test sends is answered and recorded as ever.
+    expect((await fetch(apiPath('openSession', { slug: RIVERA.slug }), { method: 'POST' })).status).toBe(200);
+    expect(mockStore.requests.map((r) => r.key)).toEqual(['openSession']);
   });
 
   it('unknown_api_path_is_recorded', async () => {
