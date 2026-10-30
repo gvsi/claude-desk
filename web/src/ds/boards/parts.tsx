@@ -11,6 +11,7 @@ import type { Effect, EvMessage, PublicDesk, RenderedBlock, RuleCard, StatusEven
 import { AlwaysOnList } from '../components/AlwaysOnList/AlwaysOnList.tsx';
 import { Breadcrumb } from '../components/Breadcrumb/Breadcrumb.tsx';
 import { Composer } from '../components/Composer/Composer.tsx';
+import { ConnectorDirectory, type ConnectorDirectoryProps } from '../components/ConnectorDirectory/ConnectorDirectory.tsx';
 import { ConnectorList } from '../components/ConnectorList/ConnectorList.tsx';
 import { ConnectorSection, type ConnectorSectionProps } from '../components/ConnectorSection/ConnectorSection.tsx';
 import type { RuleRowProps } from '../components/RuleRow/RuleRow.tsx';
@@ -148,6 +149,16 @@ function OwnerFrame({
     </AppShell>
   );
 }
+
+/**
+ * The Connectors tab boards draw an eighth sidebar row, Connectors, current on the Connectors,
+ * connector and tool pages. That row comes with its own change to the Sidebar on main; until then
+ * these boards' stories mark Rules current, the pages' earlier home, and say so.
+ */
+export const SIDEBAR_NOTE = 'The Connectors row lands with the Sidebar change on main; until then the sidebar has seven rows and these pages mark Rules current.';
+
+/** The same, for a board whose current page is in the seven rows (Today, Rules). */
+export const SIDEBAR_ROW_NOTE = 'The Connectors row lands with the Sidebar change on main; until then the sidebar has seven rows.';
 
 /** The public link as Today shows it beside the greeting. */
 export const PUBLIC_LINK = 'desk.example/rivera';
@@ -798,10 +809,37 @@ export interface RulesPageProps {
 export function RulesPage({ hub, chips, notice }: RulesPageProps) {
   return (
     <BoardPage>
-      <div className="board-rules__header">
+      <PageHeader title="Rules" subtitle="What Claude can do on this Desk, where each tool comes from, and your rules for it." />
+      {notice ? <div className="board-rules__notice">{notice}</div> : null}
+      <AskAboutRules placeholder="Ask Claude to change a rule or a connector" chips={chips} />
+      <ConnectorList summary={hub.summary}>
+        {hub.sections.map((section) => (
+          <ConnectorSection key={section.connector.id} {...section} href={`#${section.href}`} tools={section.tools.map((tool) => ({ ...tool, href: `#${tool.href}` }))} />
+        ))}
+      </ConnectorList>
+      <AlwaysOnList />
+    </BoardPage>
+  );
+}
+
+export interface ConnectorsPageProps {
+  /** The Desk's connectors, as the Connectors page groups them. */
+  directory: Omit<ConnectorDirectoryProps, 'linkComponent'>;
+  /** A line under the page's title about what just changed. */
+  notice?: ReactNode;
+}
+
+/**
+ * The Connectors page: its title with "Add a connector", a line about what just changed when there
+ * is one, and the Desk's connectors grouped by where they come from.
+ */
+export function ConnectorsPage({ directory, notice }: ConnectorsPageProps) {
+  return (
+    <BoardPage>
+      <div className="board-connectors__header">
         <PageHeader
-          title="Rules"
-        subtitle="What Claude can do on this Desk, where each tool comes from, and your rules for it."
+          title="Connectors"
+          subtitle="What Claude can reach, and the accounts behind it."
           actions={
             <Button variant="secondary" size="main" onClick={fn()}>
               Add a connector
@@ -809,14 +847,12 @@ export function RulesPage({ hub, chips, notice }: RulesPageProps) {
           }
         />
       </div>
-      {notice ? <div className="board-rules__notice">{notice}</div> : null}
-      <AskAboutRules placeholder="Ask Claude to change a rule or a connector" chips={chips} />
-      <ConnectorList summary={hub.summary} onAddConnector={fn()}>
-        {hub.sections.map((section) => (
-          <ConnectorSection key={section.connector.id} {...section} href={`#${section.href}`} tools={section.tools.map((tool) => ({ ...tool, href: `#${tool.href}` }))} />
-        ))}
-      </ConnectorList>
-      <AlwaysOnList />
+      {notice ? <div className="board-connectors__notice">{notice}</div> : null}
+      <ConnectorDirectory
+        {...directory}
+        builtIn={directory.builtIn.map((row) => ({ ...row, href: row.href ? `#${row.href}` : undefined }))}
+        connected={directory.connected.map((row) => ({ ...row, href: row.href ? `#${row.href}` : undefined }))}
+      />
     </BoardPage>
   );
 }

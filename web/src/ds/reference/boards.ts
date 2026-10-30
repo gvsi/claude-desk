@@ -1,7 +1,7 @@
 /**
  * The design canvas boards the design system is checked against: the N- boards on the "Claude
  * Desk ·" pages that the project owner signed off, each listed once. Each is rebuilt by one
- * `Boards/*` story and compared by eye with its render at 1280×820 (`reference/README.md`). A story
+ * `Boards/*` story and compared by eye with its render at the size it is drawn at (`reference/README.md`). A story
  * names its board in `parameters.canvas`, or says `'none'` and explains in `parameters.canvasNote`
  * (usually naming the nearest board).
  */
@@ -25,8 +25,9 @@ export const REFERENCE_BOARDS = [
   'N-Answers-TwoButtons',
   // The first visit.
   'N-Intro-D',
-  // The "Connectors and rules" page, which replaces the Rules and Integrations boards.
-  'N-Conn-01-Rules',
+  // The Connectors tab and the Rules page, which replace the Rules and Integrations boards. The
+  // first Rules boards (N-Conn-01-Rules, N-Conn-16-Phone-Rules) are archived; the Rules page's
+  // presets and payment limit (N-Conn-17 to N-Conn-22) are checked where they are built.
   'N-Conn-02-Payments',
   'N-Conn-03-Stripe',
   'N-Conn-04-GoogleCalendar',
@@ -43,7 +44,8 @@ export const REFERENCE_BOARDS = [
   'N-Conn-13-Changed-Today',
   'N-Conn-14-Changed-Review',
   'N-Conn-15-Changed-After',
-  'N-Conn-16-Phone-Rules',
+  'N-Conn-23-Connectors',
+  'N-Conn-24-Phone-Connectors',
 ] as const;
 
 export type ReferenceBoard = (typeof REFERENCE_BOARDS)[number];

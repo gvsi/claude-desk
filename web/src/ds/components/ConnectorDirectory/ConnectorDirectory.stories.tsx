@@ -17,11 +17,7 @@ const meta = {
       <ConnectorDirectory {...args} />
     </div>
   ),
-  parameters: {
-    layout: 'padded',
-    canvas: 'none',
-    canvasNote: 'Rivera’s Connectors page list, as the Connectors board (N-Conn-23-Connectors) draws it. That board joins the reference boards with the Connectors page’s stories.',
-  },
+  parameters: { layout: 'padded', canvas: 'N-Conn-23-Connectors' },
 } satisfies Meta<typeof ConnectorDirectory>;
 
 export default meta;
@@ -112,9 +108,9 @@ export const GoogleCalendarAdded: Story = {
 export const Phone: Story = {
   globals: { viewport: { value: 'phone', isRotated: false } },
   parameters: {
-    canvas: 'none',
+    canvas: 'N-Conn-24-Phone-Connectors',
     canvasNote:
-      'The list on a phone, as the phone Connectors board (N-Conn-24-Phone-Connectors) draws it, which joins the reference boards with the Connectors page’s stories. The caption is the laptop board’s at every width; the phone board shortens it to “Remove one on its own page. Verification is always on.”',
+      'The caption is the laptop board’s at every width; the phone board shortens it to “Remove one on its own page. Verification is always on.”',
   },
   play: async ({ canvasElement }) => {
     const width = window.innerWidth;

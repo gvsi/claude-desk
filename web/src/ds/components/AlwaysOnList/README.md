@@ -4,7 +4,7 @@
 
 ## When to use
 
-- At the end of the Rules page, after the connectors (N-Conn-01-Rules, N-Conn-16-Phone-Rules), and wherever the owner needs to see what can't be turned off.
+- At the end of the Rules page, after the connectors (N-Conn-12-Chat; the first Rules boards it was drawn on, N-Conn-01-Rules and N-Conn-16-Phone-Rules, are archived), and wherever the owner needs to see what can't be turned off.
 
 ## What it shows
 

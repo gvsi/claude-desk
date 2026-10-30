@@ -281,23 +281,20 @@ export async function expectRulesComposer(
 }
 
 /**
- * A Rules page: the serif title, its line and "Add a connector"; the composer and its chips; each
- * connector's section; the always-on rules, with no controls.
+ * A Rules page: the serif title and its line; the composer and its chips right under them; each
+ * connector's section; the always-on rules, with no controls. Connectors are added from the
+ * Connectors page, so the Rules page has no "Add a connector".
  */
 export async function expectRulesPage(root: HTMLElement, chips: readonly string[]): Promise<{ composer: HTMLElement; chips: HTMLElement[] }> {
   const main = within(root).getByRole('main');
   expectComputed(within(main).getByRole('heading', { level: 1, name: 'Rules' }), SPEC.pageTitle);
   await expect(within(main).getByText('What Claude can do on this Desk, where each tool comes from, and your rules for it.')).toBeVisible();
-  const [add] = within(main).getAllByRole('button', { name: 'Add a connector' });
-  expectComputed(add as HTMLElement, SPEC.secondaryMain);
+  await expect(within(main).queryByRole('button', { name: 'Add a connector' })).toBeNull();
   const ask = await expectRulesComposer(main, 'Ask Claude to change a rule or a connector', chips);
-  // As the board spaces them: the button 4 px under the top of the title's line, the composer 20 px
-  // under the header (or the notice under it), its suggestions 10 px under it, and the connectors'
-  // summary 20 px under them.
+  // As the board spaces them: the composer 20 px under the header (or the notice under it), its
+  // suggestions 10 px under it, and the connectors' summary 20 px under them.
   const top = (el: Element) => Math.round(el.getBoundingClientRect().top);
   const bottom = (el: Element) => Math.round(el.getBoundingClientRect().bottom);
-  const header = one(main, '.cd-page-header');
-  await expect(top(add as HTMLElement) - top(header), 'the button under the title line').toBe(4);
   const box = ask.composer.closest('.cd-composer__box') as HTMLElement;
   const above = one(main, '.board-ask').previousElementSibling as HTMLElement;
   await expect(top(box) - bottom(above), 'the composer under the header').toBe(20);

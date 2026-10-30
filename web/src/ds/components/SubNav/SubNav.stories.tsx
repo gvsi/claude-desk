@@ -27,7 +27,7 @@ const meta = {
   parameters: {
     layout: 'padded',
     canvas: 'none',
-    canvasNote: "No signed board draws Settings; its rows follow the sidebar's nav rows on N-Conn-01-Rules (36 px, the current one on the selected fill).",
+    canvasNote: "No signed board draws Settings; its rows follow the sidebar's nav rows on N-Conn-23-Connectors (36 px, the current one on the selected fill).",
   },
 } satisfies Meta<typeof SubNav>;
 

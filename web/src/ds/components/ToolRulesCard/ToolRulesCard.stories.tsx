@@ -35,7 +35,7 @@ const meta = {
     tool: {
       name: 'Payment link',
       description: 'Makes a one-time link for a quote. Charges money. Can be undone.',
-      href: '/rules/payments/payment-link',
+      href: '/connectors/payments/payment-link',
     },
     // The rules that govern the tool, most specific first: the agent's shared rule, then the tool's own.
     rules: rulesForTool({ tool: 'native.payment_link', effects: ['charge'] }, cards).map((card) => row(card, onChange)),
@@ -63,7 +63,7 @@ export const PaymentLinkOnPayments: Story = {
     expectComputed(card, { paddingTop: '16px', borderTopLeftRadius: '12px' });
     // The tool's name and line are one link to its page, with a chevron.
     const link = canvas.getByRole('link', { name: /^Payment link/ });
-    await expect(link).toHaveAttribute('href', '/rules/payments/payment-link');
+    await expect(link).toHaveAttribute('href', '/connectors/payments/payment-link');
     await expect(link).toHaveTextContent('Makes a one-time link for a quote. Charges money. Can be undone.');
     await expect(link.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
     // A row per rule, the shared one first.
@@ -126,8 +126,8 @@ export const NoFallback: Story = {
 export const Phone: Story = {
   globals: { viewport: { value: 'phone', isRotated: false } },
   parameters: {
-    canvas: 'N-Conn-16-Phone-Rules',
-    canvasNote: "The Payments page's first card on a phone, following the updated phone board: each outcome on its own line.",
+    canvas: 'none',
+    canvasNote: "The Payments page's first card on a phone, each outcome on its own line. No board draws a connector's page on a phone; the nearest is N-Conn-24-Phone-Connectors.",
   },
   play: async ({ canvas, canvasElement }) => {
     const width = window.innerWidth;

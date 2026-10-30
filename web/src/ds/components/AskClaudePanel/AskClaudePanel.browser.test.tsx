@@ -48,11 +48,11 @@ function panel(): HTMLElement {
   return found;
 }
 
-/** The page's controls behind the sheet: the top bar's Menu, "Add a connector" and the page's composer. */
+/** The page's controls behind the sheet: the top bar's Menu, a connector's link and the page's composer. */
 function behind(): HTMLElement[] {
   const controls = [
     container.querySelector<HTMLElement>('.cd-app-shell__menu'),
-    container.querySelector<HTMLElement>('.cd-page-header button'),
+    container.querySelector<HTMLElement>('.cd-connector-section__header'),
     container.querySelector<HTMLElement>('.board-ask textarea'),
   ];
   if (controls.some((el) => el === null)) throw new Error('A control behind the sheet is missing');
@@ -105,8 +105,8 @@ it('leaving_the_phone_lifts_the_inert_page', async () => {
   expect(panel().hasAttribute('aria-modal')).toBe(false);
   expect(container.querySelector('[inert]')).toBeNull();
   const today = container.querySelector<HTMLElement>('.cd-sidebar a');
-  const add = container.querySelector<HTMLElement>('.cd-page-header button');
-  for (const control of [today, add]) {
+  const connector = container.querySelector<HTMLElement>('.cd-connector-section__header');
+  for (const control of [today, connector]) {
     control?.focus();
     expect(document.activeElement, `${control?.textContent ?? ''} takes focus again`).toBe(control);
   }

@@ -26,7 +26,7 @@ const CONNECTORS_PHONE_SIZE = { width: 390, minHeight: 844 };
 /** The problem with a render's size, or null when it is the size its board is drawn at. */
 function sizeProblem(board: string, size: { width: number; height: number }): string | null {
   if (board.startsWith('N-Conn-')) {
-    const expected = board === 'N-Conn-16-Phone-Rules' ? CONNECTORS_PHONE_SIZE : CONNECTORS_SIZE;
+    const expected = board === 'N-Conn-24-Phone-Connectors' ? CONNECTORS_PHONE_SIZE : CONNECTORS_SIZE;
     return size.width === expected.width && size.height >= expected.minHeight
       ? null
       : `${board}: ${size.width}×${size.height}, not ${expected.width} wide and at least ${expected.minHeight} tall`;

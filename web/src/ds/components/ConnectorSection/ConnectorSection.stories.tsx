@@ -20,7 +20,7 @@ const meta = {
       <ConnectorSection {...args} />
     </div>
   ),
-  parameters: { layout: 'padded', canvas: 'N-Conn-01-Rules' },
+  parameters: { layout: 'padded', canvas: 'N-Conn-12-Chat' },
 } satisfies Meta<typeof ConnectorSection>;
 
 export default meta;
@@ -168,7 +168,7 @@ export const AddedJustNow: Story = {
 export const Phone: Story = {
   args: stripe,
   globals: { viewport: { value: 'phone', isRotated: false } },
-  parameters: { canvas: 'N-Conn-16-Phone-Rules' },
+  parameters: { canvas: 'none', canvasNote: 'No board on this branch draws the Rules page on a phone (its phone board is checked where the presets are built); the nearest is N-Conn-24-Phone-Connectors.' },
   play: async ({ canvas, canvasElement }) => {
     // phone_hides_descriptions: at 390 px the connector's line and count and each tool's line go.
     const width = window.innerWidth;
@@ -205,8 +205,8 @@ export const NarrowMaxLimit: Story = {
   args: paymentsAtTheCeiling,
   globals: { viewport: { value: 'narrow', isRotated: false } },
   parameters: {
-    canvas: 'N-Conn-16-Phone-Rules',
-    canvasNote: 'The largest limit at the narrowest phone width, following the updated phone board: the outcome on its own line.',
+    canvas: 'none',
+    canvasNote: 'The largest limit at the narrowest phone width: the outcome on its own line. No board on this branch draws the Rules page on a phone (its phone board is checked where the presets are built); the nearest is N-Conn-24-Phone-Connectors.',
     viewport: { options: { narrow: { name: 'Narrow phone', styles: { width: '320px', height: '640px' }, type: 'mobile' } } },
   },
   play: async ({ canvas, canvasElement }) => {

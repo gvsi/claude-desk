@@ -4,6 +4,7 @@ import { expect, fn, waitFor, within } from 'storybook/test';
 
 import { ChangeReview } from '../components/ChangeReview/ChangeReview.tsx';
 import { ConnectorPicker, type ConnectorPickerProps } from '../components/ConnectorPicker/ConnectorPicker.tsx';
+import type { ConnectorView } from '../components/ConnectorName/ConnectorName.tsx';
 import { ConnectorReview } from '../components/ConnectorReview/ConnectorReview.tsx';
 import { ConnectorSignIn } from '../components/ConnectorSignIn/ConnectorSignIn.tsx';
 import { PageHeader } from '../components/PageHeader/PageHeader.tsx';
@@ -11,13 +12,11 @@ import { Steps } from '../components/Steps/Steps.tsx';
 import { chen, rivera } from '../fixtures/index.ts';
 import { expectComputed } from '../test/expectComputed.ts';
 import { expectMockBesideExternalNames } from '../test/expectMockBadges.ts';
-import { BoardPage, ChenFrame, RiveraFrame, RulesPage, Trail, type RulesHub } from './parts.tsx';
+import { BoardPage, ChenFrame, ConnectorsPage, RiveraFrame, Trail, type ConnectorsPageProps, SIDEBAR_NOTE } from './parts.tsx';
 import { CONNECTORS_SPEC, SPEC, expectFooter, expectOutcomeMenus, expectOwnerFrame, expectTabOrder, one, some } from './spec.ts';
 
 const RIVERA_COUNTS = { conversations: { n: 2, label: '2 live conversations' }, safety: { n: 2, label: '2 blocked' } };
 const CHEN_COUNTS = { conversations: { n: 1, label: '1 live conversation' } };
-const RIVERA_CHIPS = ['Turn off Payments', 'Quote water heater installs up to $600', 'Why was Dana’s refund held?'];
-const CHEN_CHIPS = ['Add Payments', 'Let verified clients book without asking', 'Why was the consultation held?'];
 
 const { googleCalendar } = rivera;
 
@@ -25,30 +24,51 @@ const { googleCalendar } = rivera;
 const APP_STEPS = ['Choose', 'Sign in', 'Review tools', 'Confirm'];
 const BUILT_IN_STEPS = ['Choose', 'Review tools', 'Confirm'];
 
-/**
- * Chen & Co. CPA as the signed picker board draws it: Bookings, Verification and Documents on its
- * Rules page, so Payments, Quotes and Leads and callbacks are there to add.
- */
-const CHEN_THREE_CONNECTORS: RulesHub = {
-  summary: '3 built-in connectors · Version 3, checked against the always-on rules',
-  sections: chen.connectors.sections.filter((section) => ['bookings', 'verification', 'documents'].includes(section.connector.id)),
-};
+/** Chen & Co. CPA's three built-in connectors, as the signed picker boards draw its Desk. */
+const CHEN_THREE = chen.connectors.sections.filter((section) => ['bookings', 'verification', 'documents'].includes(section.connector.id));
 
-/** The picker over that page, every app to connect: Google Calendar once it works, and Stripe. */
+/** Chen & Co. CPA's apps, as the picker words them. */
+const [CHEN_CALENDAR, CHEN_STRIPE] = chen.picker.external.map((item) => item.connector);
+if (!CHEN_CALENDAR || !CHEN_STRIPE) throw new Error('The Chen picker fixture lost an app');
+
+/**
+ * Chen & Co. CPA's Connectors page behind the picker: Bookings, Verification and Documents built
+ * in, nothing connected yet, and the apps it can connect.
+ */
+function chenConnectors(apps: readonly ConnectorView[]): ConnectorsPageProps['directory'] {
+  return {
+    builtInCaption: rivera.directory.builtInCaption,
+    builtIn: CHEN_THREE.map((section) => ({
+      connector: section.connector,
+      tools: section.tools.length,
+      href: section.href,
+      note: section.connector.id === 'verification' ? 'Always on' : undefined,
+    })),
+    connected: [],
+    available: apps.map((connector) => ({ connector, tools: connector.id === 'google_calendar' ? 1 : 2, onConnect: fn() })),
+  };
+}
+
+/** The built-in rows of Chen's picker as the boards sign them: Payments, Quotes and Leads to add. */
+const CHEN_BUILT_IN = [
+  { connector: chen.connectors.views.payments, state: 'available' },
+  { connector: chen.connectors.views.quotes, state: 'available' },
+  { connector: chen.connectors.views.leads, state: 'available' },
+  { connector: chen.connectors.views.bookings, state: 'added' },
+  { connector: chen.connectors.views.documents, state: 'added' },
+] satisfies ConnectorPickerProps['builtIn'];
+
+/** The picker with Google Calendar coming soon in the demo (N-Conn-07b). */
+const CHEN_PICKER_COMING_SOON = { ...chen.picker, builtIn: CHEN_BUILT_IN } satisfies Pick<ConnectorPickerProps, 'business' | 'builtIn' | 'external' | 'note'>;
+
+/** The picker with every app to connect: Google Calendar once it works, and Stripe (N-Conn-07). */
 const CHEN_PICKER_TO_CONNECT = {
   business: chen.business.name,
-  builtIn: [
-    { connector: chen.connectors.views.payments, state: 'available' },
-    { connector: chen.connectors.views.quotes, state: 'available' },
-    { connector: chen.connectors.views.leads, state: 'available' },
-    { connector: chen.connectors.views.bookings, state: 'added' },
-    { connector: chen.connectors.views.documents, state: 'added' },
+  builtIn: CHEN_BUILT_IN,
+  external: [
+    { connector: { ...CHEN_CALENDAR, description: "Lets Claude see when you're busy, never what the event is." }, state: 'available' },
+    { connector: CHEN_STRIPE, state: 'available' },
   ],
-  external: chen.picker.external.map((item) =>
-    item.connector.id === 'google_calendar'
-      ? { connector: { ...item.connector, description: "Lets Claude see when you're busy, never what the event is." }, state: 'available' as const }
-      : item,
-  ),
 } satisfies Pick<ConnectorPickerProps, 'business' | 'builtIn' | 'external'>;
 
 const meta = {
@@ -92,26 +112,29 @@ export const ComingSoon: Story = {
   name: 'Add a connector, coming soon',
   render: () => (
     <ChenFrame current="rules" counts={CHEN_COUNTS}>
-      <RulesPage hub={chen.connectors} chips={CHEN_CHIPS} />
-      <ConnectorPicker {...chen.picker} onChoose={fn()} onClose={fn()} />
+      <ConnectorsPage directory={chenConnectors([CHEN_STRIPE])} />
+      <ConnectorPicker {...CHEN_PICKER_COMING_SOON} onChoose={fn()} onClose={fn()} />
     </ChenFrame>
   ),
   parameters: {
     canvas: 'N-Conn-07b-Add-Picker-ComingSoon',
     canvasNote: [
-      'Verification is never listed, since every Desk has it, where the board lists it as “Always on”.',
-      'Chen & Co. CPA has the five built-in connectors its seed uses, so Quotes and Leads and callbacks read “Added”, where the board offers them; the picker has a Close button the board doesn’t draw.',
+      'Chen & Co. CPA’s picker as the board draws it, over Chen’s Connectors page with its three built-in connectors, where the redrawn board puts Rivera Plumbing’s page and sidebar behind Chen’s picker.',
+      'Verification is never listed, since every Desk has it, where the board lists it as “Always on”; the mock line also shows under the coming-soon note; the picker has a Close button the board doesn’t draw.',
+      SIDEBAR_NOTE,
     ].join(' '),
   },
   play: async ({ canvasElement, userEvent }) => {
     const dialog = await expectPickerOver(canvasElement);
     await expect(within(dialog).getByText('Coming soon in this demo')).toBeVisible();
     await expect(within(dialog).queryByRole('button', { name: 'Connect Google Calendar' })).toBeNull();
-    await expect(within(dialog).getAllByText('Added')).toHaveLength(4);
+    await expect(within(dialog).getAllByText('Added')).toHaveLength(2);
     await expect(within(dialog).getByText(chen.picker.note)).toBeVisible();
     // focus_order_is_logical: only the dialog's controls, from "Add Payments".
     await expectTabStaysIn(dialog, userEvent, [
       within(dialog).getByRole('button', { name: 'Add Payments' }),
+      within(dialog).getByRole('button', { name: 'Add Quotes' }),
+      within(dialog).getByRole('button', { name: 'Add Leads and callbacks' }),
       within(dialog).getByRole('button', { name: 'Connect Stripe' }),
       within(dialog).getByRole('button', { name: 'Close' }),
     ]);
@@ -122,7 +145,7 @@ export const Picker: Story = {
   name: 'Add a connector',
   render: () => (
     <ChenFrame current="rules" counts={CHEN_COUNTS}>
-      <RulesPage hub={CHEN_THREE_CONNECTORS} chips={CHEN_CHIPS} />
+      <ConnectorsPage directory={chenConnectors([CHEN_CALENDAR, CHEN_STRIPE])} />
       <ConnectorPicker {...CHEN_PICKER_TO_CONNECT} onChoose={fn()} onClose={fn()} />
     </ChenFrame>
   ),
@@ -131,6 +154,7 @@ export const Picker: Story = {
     canvasNote: [
       'Chen & Co. CPA’s picker as the board draws it: Payments, Quotes and Leads and callbacks to add, Bookings and Documents added, and Google Calendar and Stripe to connect. Google Calendar is catalog-only in the demo, so this shows the picker once it works.',
       'Verification is never listed, since every Desk has it, where the board lists it as “Always on”; the picker has a Close button the board doesn’t draw; the connectors’ lines are the fixture’s.',
+      SIDEBAR_NOTE,
     ].join(' '),
   },
   play: async ({ canvasElement, userEvent }) => {
@@ -182,13 +206,13 @@ export const ConnectGoogleCalendar: Story = {
   name: 'Connect Google Calendar',
   render: () => (
     <RiveraFrame current="rules" counts={RIVERA_COUNTS}>
-      <RulesPage hub={rivera.connectors} chips={RIVERA_CHIPS} />
+      <ConnectorsPage directory={{ ...rivera.directory, available: rivera.directory.available.map((row) => ({ ...row, onConnect: fn() })) }} />
       <SignIn />
     </RiveraFrame>
   ),
   parameters: {
     canvas: 'N-Conn-08-GCal-SignIn',
-    canvasNote: 'Google Calendar is catalog-only in the demo, so this shows its mock sign-in once it works. It asks for no account details.',
+    canvasNote: ['Google Calendar is catalog-only in the demo, so this shows its mock sign-in once it works. It asks for no account details.', SIDEBAR_NOTE].join(' '),
   },
   play: async ({ canvasElement, userEvent }) => {
     await expect(window.innerWidth).toBe(1512);
@@ -250,7 +274,7 @@ export const ReviewGoogleCalendar: Story = {
   render: () => (
     <RiveraFrame current="rules" counts={RIVERA_COUNTS}>
       <BoardPage>
-        <Trail items={['Rules', 'Google Calendar']} />
+        <Trail items={['Connectors', 'Google Calendar']} />
         <Steps label="Connect Google Calendar" steps={APP_STEPS} current={2} />
         <ConnectorReview
           connector={googleCalendar.view}
@@ -268,10 +292,11 @@ export const ReviewGoogleCalendar: Story = {
     canvasNote: [
       'Google Calendar is catalog-only in the demo, so this shows its review once it works.',
       'Every new tool starts at Ask me first, with the rules that cover it shown; none of Maria’s covers this one yet, as the board says.',
+      SIDEBAR_NOTE,
     ].join(' '),
   },
   play: async ({ canvasElement, userEvent }) => {
-    const main = await expectAddStep(canvasElement, ['Rules', 'Google Calendar'], APP_STEPS, 'Review tools');
+    const main = await expectAddStep(canvasElement, ['Connectors', 'Google Calendar'], APP_STEPS, 'Review tools');
     // Google Calendar is named with its Mock badge on the page; the trail names it as the board does.
     await expect(expectMockBesideExternalNames(one(main, '.cd-connector-review'))).toBe(1);
     expectReviewLook(main);
@@ -291,7 +316,7 @@ export const TurnOnGoogleCalendar: Story = {
   render: () => (
     <RiveraFrame current="rules" counts={RIVERA_COUNTS}>
       <BoardPage>
-        <Trail items={['Rules', 'Google Calendar']} />
+        <Trail items={['Connectors', 'Google Calendar']} />
         <Steps label="Connect Google Calendar" steps={APP_STEPS} current={3} />
         <PageHeader title="Turn on Google Calendar" subtitle="Here’s exactly what changes on your Desk. Nothing changes until you confirm." />
         <ChangeReview
@@ -309,16 +334,21 @@ export const TurnOnGoogleCalendar: Story = {
     canvas: 'N-Conn-10-GCal-Confirm',
     canvasNote: [
       'Google Calendar is catalog-only in the demo, so this shows its proved change once it works.',
-      'A changed row shows both sides, “Before” and “After”, because the owner confirms what is enforced, where the board shows only the after side.',
+      SIDEBAR_NOTE,
     ].join(' '),
   },
   play: async ({ canvasElement, userEvent }) => {
-    const main = await expectAddStep(canvasElement, ['Rules', 'Google Calendar'], APP_STEPS, 'Confirm');
+    const main = await expectAddStep(canvasElement, ['Connectors', 'Google Calendar'], APP_STEPS, 'Confirm');
     expectComputed(within(main).getByRole('heading', { level: 1, name: 'Turn on Google Calendar' }), SPEC.pageTitle);
     // A tag per row in words, in the change tag's look.
     const tags = some(main, '.cd-change-review__tag');
     await expect(tags.map((tag) => tag.textContent)).toEqual(['Added', 'Changed']);
     for (const tag of tags) expectComputed(tag, CONNECTORS_SPEC.changeTag);
+    // The changed row's two sides, in the board's words.
+    const before = one(main, '.cd-change-review__side--before');
+    const after = some(main, '.cd-change-review__side--after').at(-1) as HTMLElement;
+    await expect(within(before).getByText('Open times from your opening hours.')).toBeVisible();
+    await expect(within(after).getByText('Open times from your opening hours, skipping anything already on your calendar.')).toBeVisible();
     await expect(within(main).getByText('Checked before you confirm')).toBeVisible();
     const confirm = within(main).getByRole('button', { name: 'Confirm and turn on' });
     expectComputed(confirm, SPEC.primary);
@@ -334,7 +364,7 @@ export const ReviewPayments: Story = {
   render: () => (
     <ChenFrame current="rules" counts={CHEN_COUNTS}>
       <BoardPage>
-        <Trail items={['Rules', 'Payments']} />
+        <Trail items={['Connectors', 'Payments']} />
         <Steps label="Add Payments" steps={BUILT_IN_STEPS} current={1} />
         <ConnectorReview connector={chen.connectors.views.payments} tools={chen.paymentsReview.tools} onChangeOutcome={fn()} onTurnOn={fn()} onCancel={fn()} />
       </BoardPage>
@@ -345,10 +375,11 @@ export const ReviewPayments: Story = {
     canvasNote: [
       'Chen & Co. CPA adding Payments, a built-in connector: no sign-in step.',
       'Each tool shows the always-on rule that covers it, “No money moves without your rule or a signed limit”, where the board says none of the owner’s rules covers it yet.',
+      SIDEBAR_NOTE,
     ].join(' '),
   },
   play: async ({ canvasElement, userEvent }) => {
-    const main = await expectAddStep(canvasElement, ['Rules', 'Payments'], BUILT_IN_STEPS, 'Review tools');
+    const main = await expectAddStep(canvasElement, ['Connectors', 'Payments'], BUILT_IN_STEPS, 'Review tools');
     await expect(within(main).getByText("A built-in connector, so there's nothing to sign in to. Nothing runs until you turn it on.")).toBeVisible();
     expectReviewLook(main);
     // review_starts_at_ask_me_first: both tools at Ask me first.

@@ -14,7 +14,7 @@ import { ToolRulesCard } from '../components/ToolRulesCard/ToolRulesCard.tsx';
 import { rivera } from '../fixtures/index.ts';
 import { expectComputed } from '../test/expectComputed.ts';
 import { expectMockBesideExternalNames } from '../test/expectMockBadges.ts';
-import { AskAboutRules, BoardPage, PageSection, RiveraFrame, Trail, riveraRulesFor } from './parts.tsx';
+import { AskAboutRules, BoardPage, PageSection, RiveraFrame, Trail, riveraRulesFor, SIDEBAR_NOTE, SIDEBAR_ROW_NOTE } from './parts.tsx';
 import { CONNECTORS_SPEC, SPEC, expectFooter, expectOutcomeMenus, expectOwnerFrame, expectRulesComposer, expectTabOrder, one } from './spec.ts';
 
 const COUNTS = { conversations: { n: 2, label: '2 live conversations' }, safety: { n: 2, label: '2 blocked' } };
@@ -79,6 +79,7 @@ export const Today: Story = {
     canvasNote: [
       'The changed tool is first under “Needs you”, as its own card. The held quote keeps the signed Today’s ApprovalCard (N-Today-Run1, N-Answers-TwoButtons), where the board draws it as a short row in the same card.',
       'The presence line keeps the signed Today’s size (N-Today-Run1), where this board draws it a size smaller. The rest of Today is left out, as the board leaves it out.',
+      SIDEBAR_ROW_NOTE,
     ].join(' '),
   },
   play: async ({ canvas, canvasElement, userEvent }) => {
@@ -109,7 +110,7 @@ export const Review: Story = {
   render: () => (
     <RiveraFrame current="rules" counts={COUNTS}>
       <BoardPage>
-        <Trail items={['Rules', 'Stripe', 'Refund']} />
+        <Trail items={['Connectors', 'Stripe', 'Refund']} />
         <ToolPageHeader {...rivera.toolPages.refund} status="needs_review" />
         <ToolReviewCard
           title={changedRefund.tool}
@@ -132,6 +133,7 @@ export const Review: Story = {
     canvasNote: [
       'The quote is the fixture’s changed definition, whose markup must show as text, not the board’s sentence. “What you confirmed before” shows the description Claude sees, where the board shows the tool’s short line.',
       'The recent requests are those before the tool went off, as the board lists them.',
+      SIDEBAR_NOTE,
     ].join(' '),
   },
   play: async ({ canvas, canvasElement, userEvent }) => {
@@ -167,7 +169,7 @@ export const After: Story = {
   render: () => (
     <RiveraFrame current="rules" counts={COUNTS}>
       <BoardPage>
-        <Trail items={['Rules', 'Stripe', 'Refund']} />
+        <Trail items={['Connectors', 'Stripe', 'Refund']} />
         <ToolPageHeader {...rivera.toolPages.refund} status="enabled" definitionNote="Definition reviewed today" />
         <Notice tone="info">{changedRefund.backOn}</Notice>
         <PageSection title="Your rules for refund">
@@ -180,7 +182,7 @@ export const After: Story = {
   ),
   parameters: {
     canvas: 'N-Conn-15-Changed-After',
-    canvasNote: 'The Refund page right after the reviewed definition was confirmed: on again, its definition reviewed today, and the screen’s notice.',
+    canvasNote: ['The Refund page right after the reviewed definition was confirmed: on again, its definition reviewed today, and the screen’s notice.', SIDEBAR_NOTE].join(' '),
   },
   play: async ({ canvas, canvasElement, userEvent }) => {
     await expect(window.innerWidth).toBe(1512);

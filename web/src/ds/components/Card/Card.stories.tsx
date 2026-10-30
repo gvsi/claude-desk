@@ -9,7 +9,7 @@ const meta = {
   title: 'Layout/Card',
   component: Card,
   args: { children: null },
-  parameters: { layout: 'padded', canvas: 'N-Conn-01-Rules' },
+  parameters: { layout: 'padded', canvas: 'N-Conn-23-Connectors' },
 } satisfies Meta<typeof Card>;
 
 export default meta;

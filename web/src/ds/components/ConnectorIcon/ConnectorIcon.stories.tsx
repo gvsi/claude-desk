@@ -11,7 +11,7 @@ const meta = {
   title: 'Connectors/ConnectorIcon',
   component: ConnectorIcon,
   args: { icon: 'quotes', size: 'section' },
-  parameters: { layout: 'padded', canvas: 'N-Conn-01-Rules' },
+  parameters: { layout: 'padded', canvas: 'N-Conn-23-Connectors' },
 } satisfies Meta<typeof ConnectorIcon>;
 
 export default meta;

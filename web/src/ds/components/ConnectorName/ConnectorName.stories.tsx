@@ -10,7 +10,7 @@ const meta = {
   title: 'Connectors/ConnectorName',
   component: ConnectorName,
   args: { connector: rivera.connectors.views.payments, size: 'section' },
-  parameters: { layout: 'padded', canvas: 'N-Conn-01-Rules' },
+  parameters: { layout: 'padded', canvas: 'N-Conn-23-Connectors' },
 } satisfies Meta<typeof ConnectorName>;
 
 export default meta;

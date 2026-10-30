@@ -892,8 +892,8 @@
   min-width: 0;
 }
 
-/* The Rules page's "Add a connector" sits 4 px under the top of the title's line. */
-.board-rules__header .cd-page-header__actions {
+/* The Connectors page's "Add a connector" sits 4 px under the top of the title's line. */
+.board-connectors__header .cd-page-header__actions {
   padding-top: var(--space-4);
 }
 
@@ -920,15 +920,11 @@
     min-height: calc(100dvh - var(--size-control) - var(--space-24) - var(--space-16) - var(--space-20));
   }
 
-  .board-rules__header .cd-page-header__subtitle {
-    display: none;
-  }
-
-  .board-rules__header .cd-page-header__actions {
+  .board-connectors__header .cd-page-header__actions {
     padding-top: 0;
   }
 
-  .board-rules__header .cd-button--main {
+  .board-connectors__header .cd-button--main {
     min-height: var(--size-control);
     padding: calc((var(--size-control) - 1lh) / 2) var(--space-12);
   }

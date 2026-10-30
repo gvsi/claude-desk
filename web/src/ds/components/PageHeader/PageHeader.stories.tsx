@@ -77,8 +77,8 @@ export const Phone: Story = {
     actions: <Button variant="secondary">Add a connector</Button>,
   },
   parameters: {
-    canvas: 'none',
-    canvasNote: 'The Connectors page’s header on a phone, as the phone Connectors board (N-Conn-24-Phone-Connectors) draws it: the title with its action on one line, the subtitle under both. That board joins the reference boards with the Connectors page’s stories.',
+    canvas: 'N-Conn-24-Phone-Connectors',
+    canvasNote: 'The Connectors page’s header on a phone: the title with its action on one line, the subtitle under both.',
   },
   play: async ({ canvas }) => {
     await expect(window.innerWidth).toBe(390);

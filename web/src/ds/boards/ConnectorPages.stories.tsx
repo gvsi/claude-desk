@@ -10,7 +10,7 @@ import { ToolRulesCard } from '../components/ToolRulesCard/ToolRulesCard.tsx';
 import { rivera } from '../fixtures/index.ts';
 import { expectComputed } from '../test/expectComputed.ts';
 import { expectMockBesideExternalNames } from '../test/expectMockBadges.ts';
-import { AskAboutRules, BoardPage, PageSection, RiveraFrame, Trail, riveraRulesFor } from './parts.tsx';
+import { AskAboutRules, BoardPage, PageSection, RiveraFrame, Trail, riveraRulesFor, SIDEBAR_NOTE } from './parts.tsx';
 import { SPEC, expectFooter, expectOutcomeMenus, expectOwnerFrame, expectRulesComposer, expectTabOrder, one } from './spec.ts';
 
 const COUNTS = { conversations: { n: 2, label: '2 live conversations' }, safety: { n: 2, label: '2 blocked' } };
@@ -71,7 +71,7 @@ export const Payments: Story = {
   render: () => (
     <RiveraFrame current="rules" counts={COUNTS}>
       <BoardPage>
-        <Trail items={['Rules', 'Payments']} />
+        <Trail items={['Connectors', 'Payments']} />
         <ConnectorHeader connector={views.payments} status="on" />
         <PageSection title="Tools" caption={TOOLS_CAPTION}>
           <ToolRulesCard
@@ -101,10 +101,11 @@ export const Payments: Story = {
       'The page layout is the web app’s (plan 04), composed from Breadcrumb, ConnectorHeader, SectionHeader, ToolRulesCard and ConnectionPanel.',
       'Signed after the board: the shared rule, Alex Kim’s assistant up to $20, is listed first under both tools, since a rule for one agent outranks each tool’s rule for anyone; every amount-limited rule reads its limit phrase.',
       'The turn-off line is the screen’s consequence and says the change shows first; the rules that stop applying are listed in the confirm, where the board lists them in the line.',
+      SIDEBAR_NOTE,
     ].join(' '),
   },
   play: async ({ canvas, canvasElement, userEvent }) => {
-    const main = await expectConnectorPage(canvasElement, ['Rules', 'Payments'], 'Payments');
+    const main = await expectConnectorPage(canvasElement, ['Connectors', 'Payments'], 'Payments');
     await expect(within(main).getByText(TOOLS_CAPTION)).toBeVisible();
     // Each tool's card lists the shared rule first, then the tool's own.
     const link = canvas.getByRole('region', { name: 'Payment link' });
@@ -139,7 +140,7 @@ export const Stripe: Story = {
   render: () => (
     <RiveraFrame current="rules" counts={COUNTS}>
       <BoardPage>
-        <Trail items={['Rules', 'Stripe']} />
+        <Trail items={['Connectors', 'Stripe']} />
         <ConnectorHeader connector={views.stripe} status="connected" />
         <PageSection title="Tools">
           <ToolRulesCard
@@ -168,10 +169,11 @@ export const Stripe: Story = {
     canvasNote: [
       'Stripe is the mock payments server, so its Mock badge is beside its name in the header and in the disconnect confirm.',
       'The disconnect line says the change shows first, which the plain confirm does.',
+      SIDEBAR_NOTE,
     ].join(' '),
   },
   play: async ({ canvas, canvasElement, userEvent }) => {
-    const main = await expectConnectorPage(canvasElement, ['Rules', 'Stripe'], 'Stripe');
+    const main = await expectConnectorPage(canvasElement, ['Connectors', 'Stripe'], 'Stripe');
     // The connection's details as a description list, then Disconnect.
     const terms = [...main.querySelectorAll('dt')].map((term) => term.textContent);
     await expect(terms).toEqual(rivera.stripeConnection.details.map((detail) => detail.label));
@@ -200,7 +202,7 @@ export const GoogleCalendar: Story = {
   render: () => (
     <RiveraFrame current="rules" counts={COUNTS}>
       <BoardPage>
-        <Trail items={['Rules', 'Google Calendar']} />
+        <Trail items={['Connectors', 'Google Calendar']} />
         <ConnectorHeader connector={rivera.googleCalendar.view} status="connected" promise={rivera.googleCalendar.promise} />
         <PageSection title="Tools">
           <ToolRulesCard
@@ -223,10 +225,11 @@ export const GoogleCalendar: Story = {
     canvasNote: [
       'Google Calendar is catalog-only in the demo, so this shows what its page does once it works, with its rule at Automatic as the board draws it.',
       'The rule reads “before offering open times”, its words wherever it is listed, where the board says “offering times”.',
+      SIDEBAR_NOTE,
     ].join(' '),
   },
   play: async ({ canvas, canvasElement, userEvent }) => {
-    const main = await expectConnectorPage(canvasElement, ['Rules', 'Google Calendar'], 'Google Calendar');
+    const main = await expectConnectorPage(canvasElement, ['Connectors', 'Google Calendar'], 'Google Calendar');
     // Its promise under the header: Claude sees only when Maria is busy.
     await expect(within(main).getByText(rivera.googleCalendar.promise.title)).toBeVisible();
     const disconnect = canvas.getByRole('button', { name: 'Disconnect' });
@@ -261,7 +264,7 @@ export const Refund: Story = {
   render: () => (
     <RiveraFrame current="rules" counts={COUNTS}>
       <BoardPage>
-        <Trail items={['Rules', 'Stripe', 'Refund']} />
+        <Trail items={['Connectors', 'Stripe', 'Refund']} />
         <ToolPageHeader {...rivera.toolPages.refund} status="enabled" />
         <PageSection title="Your rules for refund">
           <ToolRulesCard label="Your rules for refund" rules={riveraRulesFor('payments.create_refund', ['pay_out', 'private_data'])} onAddRule={fn()} />
@@ -276,10 +279,11 @@ export const Refund: Story = {
     canvasNote: [
       'The page layout is the web app’s (plan 04), composed from Breadcrumb, ToolPageHeader, ToolRulesCard, Composer, SuggestionChips and RecentRequests.',
       'The recent requests are the fixture’s: the refunded deposit was Lucía Herrera’s, where the board names Lucía Torres. Each time is the screen’s string.',
+      SIDEBAR_NOTE,
     ].join(' '),
   },
   play: async ({ canvasElement, userEvent }) => {
-    const page = await expectToolPage(canvasElement, ['Rules', 'Stripe', 'Refund'], 'Refund', REFUND_CHIPS);
+    const page = await expectToolPage(canvasElement, ['Connectors', 'Stripe', 'Refund'], 'Refund', REFUND_CHIPS);
     // The source line: from Stripe, with its Mock badge, on, and its definition unchanged.
     await expect(within(page.main).getByText('Definition unchanged', { exact: false })).toBeVisible();
     await expect(expectMockBesideExternalNames(one(page.main, '.cd-tool-page-header'))).toBe(1);
@@ -306,7 +310,7 @@ export const Quote: Story = {
   render: () => (
     <RiveraFrame current="rules" counts={COUNTS}>
       <BoardPage>
-        <Trail items={['Rules', 'Quotes', 'Quote']} />
+        <Trail items={['Connectors', 'Quotes', 'Quote']} />
         <ToolPageHeader {...rivera.toolPages.quote} status="enabled" />
         <PageSection title="Your rules for quote">
           <ToolRulesCard label="Your rules for quote" rules={riveraRulesFor('native.quote', ['change'])} onAddRule={fn()} />
@@ -321,10 +325,11 @@ export const Quote: Story = {
     canvasNote: [
       'A built-in tool has no pinned definition, so its status reads “On” with no definition note, where the board shows “Definition unchanged”.',
       'The board’s suggestions repeat the Refund page’s, so these are the Quote page’s own.',
+      SIDEBAR_NOTE,
     ].join(' '),
   },
   play: async ({ canvasElement, userEvent }) => {
-    const page = await expectToolPage(canvasElement, ['Rules', 'Quotes', 'Quote'], 'Quote', QUOTE_CHIPS);
+    const page = await expectToolPage(canvasElement, ['Connectors', 'Quotes', 'Quote'], 'Quote', QUOTE_CHIPS);
     await expect(within(page.main).queryByText(/Definition/)).toBeNull();
     await expect(within(page.main).getByText('Built in')).toBeVisible();
     const [menu] = expectOutcomeMenus(page.main);

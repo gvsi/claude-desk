@@ -12,7 +12,7 @@ const meta = {
       <AlwaysOnList {...args} />
     </div>
   ),
-  parameters: { layout: 'padded', canvas: 'N-Conn-01-Rules' },
+  parameters: { layout: 'padded', canvas: 'N-Conn-12-Chat' },
 } satisfies Meta<typeof AlwaysOnList>;
 
 export default meta;

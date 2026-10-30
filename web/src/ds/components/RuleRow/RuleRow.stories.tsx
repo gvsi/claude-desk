@@ -95,8 +95,8 @@ export const NarrowMaxLimit: Story = {
   },
   globals: { viewport: { value: 'narrow', isRotated: false } },
   parameters: {
-    canvas: 'N-Conn-16-Phone-Rules',
-    canvasNote: 'The largest limit a rule can carry, at the narrowest phone width, following the updated phone board: the outcome on its own line.',
+    canvas: 'none',
+    canvasNote: 'The largest limit a rule can carry, at the narrowest phone width: the outcome on its own line. No board on this branch draws the Rules page on a phone (its phone board is checked where the presets are built); the nearest is N-Conn-24-Phone-Connectors.',
     viewport: { options: { narrow: { name: 'Narrow phone', styles: { width: '320px', height: '640px' }, type: 'mobile' } } },
   },
   play: async ({ canvas, canvasElement }) => {
@@ -123,8 +123,8 @@ export const NarrowColumn: Story = {
     </div>
   ),
   parameters: {
-    canvas: 'N-Conn-16-Phone-Rules',
-    canvasNote: 'A row under 640 px wide, as on a phone or in a side panel, following the updated phone board: the outcome on its own line.',
+    canvas: 'none',
+    canvasNote: 'A row under 640 px wide, as on a phone or in a side panel: the outcome on its own line. No board on this branch draws the Rules page on a phone (its phone board is checked where the presets are built); the nearest is N-Conn-24-Phone-Connectors.',
   },
   play: async ({ canvas }) => {
     // Under 640 px of its own width, even a short outcome sits on its own line under the words.
