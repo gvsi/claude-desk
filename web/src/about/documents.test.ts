@@ -234,7 +234,14 @@ describe('the About documents', () => {
       // The Markdown keeps its straight ones; the page shows none.
       expect(raw(file), file).toMatch(/'[^]*"|"[^]*'/);
       expect(shown(ABOUT_DOCUMENTS[id].blocks).filter((piece) => /['"]/.test(piece)), file).toEqual([]);
+      // Double marks pair up inside each piece, the opening one first.
+      for (const piece of documentText(ABOUT_DOCUMENTS[id].blocks)) {
+        expect(piece.replace(/[^“”]/g, ''), file).toMatch(/^(?:“”)*$/);
+      }
     }
+    // The only opening single marks are the prediction's nested quotation's; every other ' is an apostrophe.
+    expect(documentText(ABOUT_DOCUMENTS.prediction.blocks).join('\n').match(/‘\S+/g)).toEqual(['‘capable’', '‘completely']);
+    expect(documentText(ABOUT_DOCUMENTS.proposal.blocks).join('\n')).not.toContain('‘');
     const prediction = documentText(ABOUT_DOCUMENTS.prediction.blocks);
     expect(prediction).toContain('Why it’s coming');
     expect(prediction.join('\n')).toContain('“the gap between ‘capable’ and ‘completely robust’ remains wide”');
