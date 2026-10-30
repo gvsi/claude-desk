@@ -277,16 +277,63 @@ export const ChecksUnavailable: Story = {
   },
 };
 
+/** busy_keeps_the_label: the confirm in flight keeps its label under one spinner; the other button only waits. */
+async function expectConfirmBusy(canvasElement: HTMLElement, confirm: HTMLElement, cancel: HTMLElement) {
+  await expect(confirm).toHaveAttribute('aria-busy', 'true');
+  await expect(confirm).toHaveTextContent('Confirm change');
+  await expect(confirm.querySelectorAll('.cd-button__spinner')).toHaveLength(1);
+  await expect(cancel).toHaveAttribute('aria-disabled', 'true');
+  await expect(cancel.querySelector('.cd-button__spinner')).toBeNull();
+  await expect(canvasElement).not.toHaveTextContent('Confirming');
+}
+
 export const Confirming: Story = {
   args: { rows: raiseDiscount, pending: true, confirmLabel: undefined, cancelLabel: undefined },
   parameters: { canvasNote: 'The confirm in flight; no board draws it.' },
-  play: async ({ args, canvas }) => {
-    // pending reads "Confirming", with aria-busy, and nothing can be pressed twice.
-    const confirm = canvas.getByRole('button', { name: 'Confirming' });
-    await expect(confirm).toHaveAttribute('aria-busy', 'true');
+  play: async ({ args, canvas, canvasElement }) => {
+    // pending keeps "Confirm change" as the button's name under its spinner, with aria-busy, and
+    // nothing can be pressed twice.
+    const confirm = canvas.getByRole('button', { name: 'Confirm change' });
+    await expectConfirmBusy(canvasElement, confirm, canvas.getByRole('button', { name: 'Keep my rules' }));
     await confirm.click();
     await expect(args.onConfirm).not.toHaveBeenCalled();
     await expect(canvas.queryByRole('alert')).toBeNull();
+  },
+};
+
+/** A screen that sets `pending` as soon as the confirm is sent, and keeps it while the change applies. */
+function ConfirmsSlowly(props: ChangeReviewProps) {
+  const [pending, setPending] = useState(false);
+  return (
+    <ChangeReview
+      {...props}
+      pending={pending}
+      onConfirm={() => {
+        void props.onConfirm();
+        setPending(true);
+      }}
+    />
+  );
+}
+
+export const ConfirmingFromTheScreen: Story = {
+  args: { rows: raiseDiscount, confirmLabel: undefined, cancelLabel: undefined },
+  render: (args) => (
+    <div style={{ maxWidth: 960 }}>
+      <ConfirmsSlowly {...args} />
+    </div>
+  ),
+  parameters: { canvasNote: 'The confirm pressed, then in flight as the screen reports it; no board draws it.' },
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
+    const confirm = canvas.getByRole('button', { name: 'Confirm change' });
+    const width = confirm.getBoundingClientRect().width;
+    await userEvent.click(confirm);
+    await expect(args.onConfirm).toHaveBeenCalledTimes(1);
+    // The pressed button keeps its name and its width, its spinner in place of the label.
+    await waitFor(() => expect(canvas.getByRole('button', { name: 'Confirm change' })).toHaveAttribute('aria-busy', 'true'));
+    await expect(canvas.getByRole('button', { name: 'Confirm change' })).toBe(confirm);
+    await expect(confirm.getBoundingClientRect().width).toBe(width);
+    await expectConfirmBusy(canvasElement, confirm, canvas.getByRole('button', { name: 'Keep my rules' }));
   },
 };
 

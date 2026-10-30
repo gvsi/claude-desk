@@ -51,7 +51,7 @@ export interface ChangeReviewProps {
   onCancel: () => void;
   /** The draft changes something the screen shows above it, such as the money limit, so it can be confirmed with no rows. */
   hasOtherChanges?: boolean;
-  /** The confirm is in flight: "Confirming". */
+  /** The confirm is in flight: the confirm keeps its label under the busy spinner. */
   pending?: boolean;
   /** The screen's message when the confirm failed; confirm works again. */
   error?: string;
@@ -302,7 +302,7 @@ export function ChangeReview({
       <div className="cd-change-review__controls">
         {canConfirm ? (
           <Button variant="primary" size="main" disabled={!checked} busy={checked && waiting} onClick={confirm}>
-            {pending ? 'Confirming' : confirmLabel}
+            {confirmLabel}
           </Button>
         ) : null}
         <Button variant="secondary" size="main" waiting={waiting} onClick={() => onCancel()}>
