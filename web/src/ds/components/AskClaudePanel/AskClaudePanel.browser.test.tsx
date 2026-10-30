@@ -11,6 +11,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 
 import * as boards from '../../boards/ConnectorsHub.stories.tsx';
+import { AskClaudePanel } from './AskClaudePanel.tsx';
 import * as panelStories from './AskClaudePanel.stories.tsx';
 
 declare global {
@@ -134,4 +135,53 @@ it('ask_claude_sheet_keyboard_walk_at_320', async () => {
   await vi.waitFor(() => expect(container.querySelector('.cd-ask-claude')).toBeNull());
   expect(document.activeElement).toBe(opener.element());
   expect(container.querySelector('[inert]')).toBeNull();
+});
+
+it('standalone_sheet_keeps_focus_inside', async () => {
+  // Without AppShell nothing makes the page inert, so the sheet itself keeps focus: a script's
+  // focus on a control behind it, and the Tab after it, both stay in the sheet.
+  await page.viewport(PHONE.width, PHONE.height);
+  act(() =>
+    root.render(
+      <div>
+        <button type="button">Behind the sheet</button>
+        <a href="#behind">Another control behind</a>
+        <AskClaudePanel onClose={() => {}} onSend={() => {}}>
+          <p>Conversation</p>
+        </AskClaudePanel>
+      </div>,
+    ),
+  );
+  await vi.waitFor(() => expect(panel().getAttribute('role')).toBe('dialog'));
+  expect(panel().contains(document.activeElement)).toBe(true);
+  const behindButton = container.querySelector<HTMLElement>('button');
+  behindButton?.focus();
+  expect(panel().contains(document.activeElement), 'a script cannot move focus behind the sheet').toBe(true);
+  for (let i = 0; i < 4; i += 1) {
+    await userEvent.keyboard('{Tab}');
+    expect(panel().contains(document.activeElement), `Tab ${i + 1} stays in the sheet`).toBe(true);
+  }
+  container.querySelector<HTMLElement>('a')?.focus();
+  await userEvent.keyboard('{Shift>}{Tab}{/Shift}');
+  expect(panel().contains(document.activeElement)).toBe(true);
+});
+
+it('open_menu_closes_when_the_panel_becomes_a_sheet', async () => {
+  // A compact screen with the panel beside the page: the navigation sheet is open. Narrowing to a
+  // phone makes the panel a modal sheet, so the navigation sheet closes and focus moves into the panel.
+  await page.viewport(700, 900);
+  act(() => root.render(<AskClaude />));
+  expect(panel().getAttribute('role')).toBe('complementary');
+  await userEvent.click(page.getByRole('button', { name: 'Menu' }));
+  await vi.waitFor(() => expect(container.querySelector('dialog.cd-app-shell__sheet[open]')).not.toBeNull());
+
+  await page.viewport(PHONE.width, PHONE.height);
+  await vi.waitFor(() => expect(panel().getAttribute('role')).toBe('dialog'));
+  await vi.waitFor(() => expect(container.querySelector('dialog.cd-app-shell__sheet[open]')).toBeNull());
+  expect(panel().contains(document.activeElement), 'focus moved into the panel').toBe(true);
+  for (const link of container.querySelectorAll<HTMLElement>('.cd-sidebar a, .cd-app-shell__menu')) {
+    link.focus();
+    expect(document.activeElement, `${link.textContent ?? ''} can't take focus`).not.toBe(link);
+  }
+  await expectModal();
 });

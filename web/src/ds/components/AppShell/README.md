@@ -19,7 +19,7 @@
 - Menu opens the sidebar as a modal sheet from the left, over a dimmed page, with focus inside it. Escape, "Close menu", the dimmed page or going to a page closes it, and focus returns to Menu. Escape inside the sidebar's Desk list closes only the list.
 - The sheet appears in place; nothing slides.
 - `panel`, when given, sits at the right of the main area at its height, and the page narrows to make room (the Ask Claude panel beside Rules, N-Conn-12-Chat). Below 768 px the top bar runs above the page and the panel.
-- A panel that becomes a modal sheet, as `AskClaudePanel` does under 640 px, says so through `AppShellPanelContext`. While it does, the banner, the navigation and the page are `inert`: the attribute is part of every render, so whatever the shell draws there as the window changes (the top bar replacing the column) stays out of reach. When the panel stops being a sheet the page is live again; if the panel was removed with focus in it, the shell returns focus to the element the panel names.
+- A panel that becomes a modal sheet, as `AskClaudePanel` does under 640 px, says so through `AppShellPanelContext`. While it does, the banner, the navigation and the page are `inert`: the attribute is part of every render, so whatever the shell draws there as the window changes (the top bar replacing the column) stays out of reach. If Menu's sheet is open when that starts (the window narrowed to a phone), it closes, and focus moves into the panel rather than back to Menu. When the panel stops being a sheet the page is live again; if the panel was removed with focus in it, the shell returns focus to the element the panel names.
 
 ## What the consumer provides
 

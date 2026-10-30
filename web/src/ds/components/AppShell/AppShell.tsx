@@ -52,10 +52,11 @@ export interface AppShellProps {
 /**
  * Given to the shell's `panel`: a panel calls it with `true` while it is a modal sheet over the
  * window, and the shell makes its banner, navigation and page inert, whatever it draws there as the
- * window changes. With `false` the shell lifts that, and focuses `returnFocusTo` once the page is
- * live again if focus was left nowhere (the sheet was removed with focus in it).
+ * window changes, and closes the navigation sheet if it is open. `focusTo` is where focus goes once
+ * the shell has done that: into the panel when it becomes a sheet; back to what opened it when it
+ * was removed with focus in it, if focus was left nowhere.
  */
-export type SetPanelModal = (modal: boolean, returnFocusTo?: HTMLElement | null) => void;
+export type SetPanelModal = (modal: boolean, focusTo?: HTMLElement | null) => void;
 
 export const AppShellPanelContext = createContext<SetPanelModal | null>(null);
 
@@ -92,18 +93,20 @@ export function AppShell({ sidebar, business, banner, layout = 'auto', fill = fa
   // attribute is part of each render, so a part drawn anew (the top bar replacing the column as the
   // window narrows) is inert from the start.
   const [panelModal, setPanelModal] = useState(false);
-  const returnFocus = useRef<HTMLElement | null>(null);
-  const setModal = useCallback<SetPanelModal>((modal, returnFocusTo) => {
-    returnFocus.current = modal ? null : (returnFocusTo ?? null);
+  const pendingFocus = useRef<HTMLElement | null>(null);
+  const setModal = useCallback<SetPanelModal>((modal, focusTo) => {
+    pendingFocus.current = focusTo ?? null;
     setPanelModal(modal);
   }, []);
   const inert = panelModal && panel !== undefined && panel !== null;
+  // Runs after the navigation has closed its sheet (a child's effects run first), so the panel's
+  // control can take focus.
   useLayoutEffect(() => {
-    if (inert) return;
-    const target = returnFocus.current;
-    returnFocus.current = null;
+    const target = pendingFocus.current;
+    pendingFocus.current = null;
+    if (!target?.isConnected) return;
     const active = document.activeElement;
-    if (target?.isConnected && (active === null || active === document.body)) target.focus();
+    if (inert || active === null || active === document.body) target.focus();
   }, [inert]);
 
   // Only the navigation changes with the layout. The page stays in the same place in the tree, so
@@ -155,6 +158,14 @@ function CompactNav({ sidebar, business, inert }: { sidebar: ReactNode; business
     const dialog = sheet.current;
     if (dialog && open && !dialog.open) dialog.showModal();
   }, [open]);
+
+  // A panel that becomes a modal sheet (the window narrowed to a phone with the menu open) takes
+  // over: the menu's sheet closes, and the shell moves focus into the panel, not back to Menu.
+  useLayoutEffect(() => {
+    if (!inert || !open) return;
+    sheet.current?.close();
+    setOpen(false);
+  }, [inert, open]);
 
   // Every way of closing ends here: Escape, Close menu, a page link, the backdrop, or the
   // dialog's own close. Focus goes back to Menu.

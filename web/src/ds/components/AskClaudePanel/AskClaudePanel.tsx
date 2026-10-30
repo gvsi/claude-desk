@@ -34,10 +34,12 @@ function isNarrow(): boolean {
 
 /**
  * While `modal`, the panel is a modal sheet. In `AppShell`'s `panel`, it asks the shell to make
- * everything else inert; on entering, focus moves to its composer unless it is already inside. When
- * the panel is removed with focus inside it, focus returns to what opened it: the shell does that
- * once the page is live again. Leaving the phone width with the panel still open lifts the inert
- * page and leaves focus where it is.
+ * everything else inert; on entering, focus moves to its composer unless it is already inside.
+ * Whatever else happens, focus stays inside: a focus that lands outside it, by Tab or by a script,
+ * is pulled back to the last control inside it, so it holds with or without a shell. When the
+ * panel is removed with focus inside it, focus returns to what opened it: the shell does that once
+ * the page is live again. Leaving the phone width with the panel still open lifts the inert page and
+ * leaves focus where it is.
  */
 function useModalSheet(panelRef: { current: HTMLElement | null }, modal: boolean): void {
   const setPageModal = useContext(AppShellPanelContext);
@@ -59,9 +61,27 @@ function useModalSheet(panelRef: { current: HTMLElement | null }, modal: boolean
   useLayoutEffect(() => {
     const panel = panelRef.current;
     if (!modal || !panel) return undefined;
-    setPageModal?.(true);
-    if (!panel.contains(panel.ownerDocument.activeElement)) panel.querySelector<HTMLElement>('.cd-ask-claude__composer textarea')?.focus();
+    const doc = panel.ownerDocument;
+    const composer = () => panel.querySelector<HTMLElement>('.cd-ask-claude__composer textarea');
+
+    // Focus stays inside: anything that takes focus outside hands it back to the last control
+    // inside, or to the composer.
+    let last: HTMLElement | null = panel.contains(doc.activeElement) ? (doc.activeElement as HTMLElement) : null;
+    const onFocusIn = (event: FocusEvent) => {
+      const target = event.target;
+      if (target instanceof HTMLElement && panel.contains(target)) {
+        last = target;
+        return;
+      }
+      (last?.isConnected && panel.contains(last) ? last : composer())?.focus();
+    };
+    doc.addEventListener('focusin', onFocusIn);
+
+    const entering = panel.contains(doc.activeElement) ? null : composer();
+    if (setPageModal) setPageModal(true, entering);
+    else entering?.focus();
     return () => {
+      doc.removeEventListener('focusin', onFocusIn);
       if (!removing.current) {
         setPageModal?.(false);
         return;
