@@ -7,7 +7,7 @@ import predictionMarkdown from '../../../docs/capability-prediction.md?raw';
 import proposalMarkdown from '../../../docs/product-proposal.md?raw';
 
 import { ABOUT_PAGES, type AboutId } from './links.ts';
-import { MarkdownError, parseDocument, type Block, type FigureName } from './markdown.ts';
+import { curlQuotes, MarkdownError, parseDocument, type Block, type FigureName } from './markdown.ts';
 
 export { documentText, inlineText, MarkdownError, readingMinutes } from './markdown.ts';
 export type { Block, FigureName, Inline } from './markdown.ts';
@@ -74,13 +74,16 @@ const SOURCES: Record<AboutId, Source> = {
   },
 };
 
-/** One document's page from its Markdown. A `MarkdownError` names the file as well as the line. */
+/**
+ * One document's page from its Markdown, with curly quote marks where the Markdown has straight ones. A
+ * `MarkdownError` names the file as well as the line.
+ */
 export function readDocument(id: AboutId, markdown: string): AboutDocument {
   const { file, next, forThePage, words } = SOURCES[id];
   // The one relative link a document may hold is the other document's file name, which becomes its page.
   const resolve = (target: string) => (target === SOURCES[next].file ? ABOUT_PAGES[next].route : undefined);
   try {
-    return { ...ABOUT_PAGES[id], ...words, next, blocks: parseDocument(forThePage(markdown), resolve) };
+    return { ...ABOUT_PAGES[id], ...words, next, blocks: curlQuotes(parseDocument(forThePage(markdown), resolve)) };
   } catch (error) {
     if (error instanceof MarkdownError) throw new MarkdownError(error.line, error.reason, `docs/${file}`);
     throw error;
