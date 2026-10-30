@@ -8,14 +8,12 @@ import type { SessionEndedState } from '../app/providers.tsx';
 import { IntroDialog, type IntroErrorCode } from '../ds/index.ts';
 import { THINGS_TO_TRY } from './arrival/ideas.ts';
 import { TodayPreview } from './arrival/TodayPreview.tsx';
-import { DESKS_KEY, invalidateCopy, lastOrFirst, readTodayAhead, todayPath } from './useDesks.ts';
+import { DESKS_KEY, invalidateCopy, lastOrFirst, READ_AHEAD_MS, readTodayAhead, todayPath } from './useDesks.ts';
 
 const TITLE = 'A Claude front desk for your business';
 const INTRO =
   'You’re Maria Rivera today, owner of Rivera Plumbing. Her Desk answers customers and their agents under her rules. Try it, then try to break it.';
 const SESSION_ENDED = 'Your demo session ended. Enter the passcode to start a fresh copy.';
-/** How long the dialog waits for the new copy's Today before it opens anyway, still loading. */
-const READ_AHEAD_MS = 3_000;
 
 /** What the dialog says when a try fails: a wrong passcode, too many tries, or anything else. */
 function introErrorFor(err: unknown): IntroErrorCode {
@@ -50,6 +48,9 @@ export function Arrival() {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<IntroErrorCode | undefined>(undefined);
+  // The copy this browser has is opening: Today is read ahead behind the preview, which assistive
+  // technology doesn't see, so a status says so.
+  const [opening, setOpening] = useState(false);
   // One `me` per visit, kept across a development remount, so the page asks once.
   const asked = useRef<Promise<CopyOut> | null>(null);
   // Whether this page is still shown: the owner may leave it while Today is read ahead.
@@ -74,6 +75,7 @@ export function Arrival() {
           setOpen(true);
           return;
         }
+        setOpening(true);
         await readAhead(queryClient, deskId);
         if (live) void navigate(todayPath(deskId), { replace: true });
       },
@@ -124,6 +126,10 @@ export function Arrival() {
   return (
     <>
       <TodayPreview />
+      {/* There from the start, so the line is announced when it comes. */}
+      <p className="cd-sr-only" role="status">
+        {opening ? 'Opening your Desk' : null}
+      </p>
       {open ? (
         <IntroDialog
           title={TITLE}

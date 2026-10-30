@@ -22,8 +22,15 @@ const todayQuery = (deskId: string) =>
 const needsYouQuery = (deskId: string) =>
   queryOptions({ queryKey: needsYouKey(deskId), queryFn: () => request('needsYou', { params: { desk_id: deskId } }) });
 
-/** How long a page's own reads count as fresh: a page opened just after the read ahead doesn't send them again. */
-const FRESH_MS = 2_000;
+/** How long a page waits for a Desk's Today to be read ahead before it opens Today anyway, still loading. */
+export const READ_AHEAD_MS = 3_000;
+
+/**
+ * How long a page's own reads count as fresh, so a page opened just after a read ahead doesn't send
+ * them again. Each read is fresh from when it came in, and a read ahead waits for its slowest, so
+ * this outlasts the read ahead's cap: the first read in is still fresh when Today opens.
+ */
+export const FRESH_MS = READ_AHEAD_MS + 2_000;
 
 /**
  * The copy's businesses, each with its Desks, for a page of `deskId`. A list that doesn't hold that
