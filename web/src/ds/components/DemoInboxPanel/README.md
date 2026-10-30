@@ -39,7 +39,8 @@
 - `items` in the order they arrived, oldest first: append each `EvDemoInbox` notice as it comes, with `entry: null`. The panel puts the newest at the top, and shows a notice appended twice once, as its later item.
 - The entry for each notice, fetched through the API's Demo inbox route when the notice arrives. Codes come only from those fetched entries, never from a notice. On failure set `failed`; `onRetry` should fetch it again.
 - `time` for the owner's panel only, as a display string the screen formats ("2:14 pm"). The panel formats nothing.
-- `requestHref` for the owner's alerts only: where the owner app opens the held request, built from the entry's `decision_id` once the kernel's Demo inbox entry carries it. Without it an alert shows no link.
+- `requestHref` for the owner's alerts only: where the owner app opens the held request, built from the entry's `decision_id` once the kernel's Demo inbox entry carries it, as an in-app path such as `/app/<desk>/today#request-<encodeURIComponent(decision_id)>`, never text taken from an entry. Only a path in the app (`/…`, not `//…`) or a place on the page (`#…`) draws a link. Without one an alert shows no link.
+- On arrival the screen brings the held request's card into view and moves focus to it, as Things to try's "Open the request" does. In the sheet, following the link closes it first, which returns focus to the sheet's button, so the screen moves focus once the sheet has closed.
 - `language`: the visitor's language, or the owner's.
 
 ## Copy (`inboxCopy.ts`)

@@ -73,9 +73,12 @@ function Sheet({ openedBy, viewer, items, language, onRetry, onClose }: SheetPro
     dialog.querySelector<HTMLElement>(openedBy === 'itself' ? '.cd-demo-inbox__title' : '.cd-demo-inbox-sheet__close button'),
   );
   // Following a link inside, such as an alert's "Open the request", closes the sheet, so it isn't
-  // left over the page the link opens.
+  // left over the page the link opens. A click that opens a new tab or window leaves this page, and
+  // the sheet, as they are.
   const onLinkClick = (event: MouseEvent<HTMLDialogElement>) => {
-    if (event.target instanceof Element && event.target.closest('a[href]')) onClose();
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const link = event.target instanceof Element ? event.target.closest('a[href]') : null;
+    if (link && link.getAttribute('target') === null) onClose();
   };
   return (
     <dialog

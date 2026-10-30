@@ -53,6 +53,15 @@ function viewOf({ notice, entry, failed }: DemoInboxItem): ItemView {
   return entry || failed ? { kind: 'failed' } : { kind: 'opening' };
 }
 
+/**
+ * A request link stays in the owner app: a path in it ("/app/…") or a place on this page ("#…").
+ * Anything else, another site or a script URL, draws no link.
+ */
+function inAppHref(href: string | undefined): string | undefined {
+  if (href === undefined) return undefined;
+  return (href.startsWith('/') && !href.startsWith('//')) || href.startsWith('#') ? href : undefined;
+}
+
 /** The recipient the kernel writes for the owner; anything else is a masked contact on record. */
 const OWNER_RECIPIENT = 'owner';
 
@@ -144,7 +153,7 @@ export function DemoInboxPanel({ viewer, items, language, onRetry, action, title
                 key={item.notice.entry_id}
                 notice={item.notice}
                 time={viewer === 'owner' ? item.time : undefined}
-                requestHref={viewer === 'owner' ? item.requestHref : undefined}
+                requestHref={viewer === 'owner' ? inAppHref(item.requestHref) : undefined}
                 view={viewOf(item)}
                 copy={copy}
                 onRetry={onRetry}

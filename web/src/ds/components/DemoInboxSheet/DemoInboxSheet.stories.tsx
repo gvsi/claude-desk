@@ -214,13 +214,22 @@ export const OwnerOpensTheRequest: Story = {
       event.preventDefault();
       followed = link.getAttribute('href');
     };
+    const link = within(sheet).getByRole('link', { name: 'Open the request' });
     window.addEventListener('click', keep, true);
     try {
-      await userEvent.click(within(sheet).getByRole('link', { name: 'Open the request' }));
+      // A click that opens a new tab leaves this page, and the sheet, as they are.
+      await userEvent.keyboard('{Meta>}');
+      await userEvent.click(link);
+      await userEvent.keyboard('{/Meta}');
+      await expect(canvas.getByRole('dialog', { name: 'Demo inbox' })).toBeVisible();
+      followed = null;
+      await userEvent.click(link);
     } finally {
       window.removeEventListener('click', keep, true);
     }
     await expect(followed).toBe('#request-dec-dana-discount');
     await expect(canvas.queryByRole('dialog')).toBeNull();
+    // Closing returns focus to the sheet's button; the screen then moves it to the request.
+    await expect(canvas.getByRole('button', { name: 'Demo inbox 1 entry' })).toHaveFocus();
   },
 };

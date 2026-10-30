@@ -315,6 +315,45 @@ export const VisitorGivenAlert: Story = {
   },
 };
 
+export const OwnerAlertNotOpenYet: Story = {
+  args: { viewer: 'owner', items: [ownerStillOpening, ownerFailedToOpen].map((item) => ({ ...item, requestHref: REQUEST_HREF })) },
+  parameters: {
+    canvasNote: `${BOARD}'s owner panel with two alerts whose entries haven't opened, each passed a request link, which no board shows: a link waits for its alert's words.`,
+  },
+  play: async ({ canvas, canvasElement }) => {
+    // request_link_waits_for_the_entry: an alert still opening, or one that failed to open, shows
+    // no link, only its preview and its state.
+    await expect(itemsOf(canvasElement)).toHaveLength(2);
+    await expect(canvas.queryByRole('link')).toBeNull();
+  },
+};
+
+/** Linda's hold alert, opened, as her screen holds it. */
+const holdAlert = everythingArrived.find((item) => item.entry?.kind === 'alert') as DemoInboxItem;
+
+export const OwnerAlertLinkLeavesTheApp: Story = {
+  args: { viewer: 'owner', items: [{ ...holdAlert, requestHref: '//elsewhere.example/request' }] },
+  parameters: {
+    canvasNote: `${BOARD}'s owner panel with a request link that leaves the owner app, which no screen builds: the alert shows no link.`,
+  },
+  play: async ({ canvas, canvasElement }) => {
+    // request_link_stays_in_the_app: only a path in the app or a place on the page draws a link.
+    await expect(within(itemsOf(canvasElement)[0] as HTMLElement).getByText(holdAlert.entry?.body ?? '')).toBeVisible();
+    await expect(canvas.queryByRole('link')).toBeNull();
+  },
+};
+
+export const OwnerAlertInSpanish: Story = {
+  args: { viewer: 'owner', language: 'es', items: [{ ...holdAlert, requestHref: REQUEST_HREF }] },
+  parameters: {
+    canvasNote: `${BOARD}'s owner panel in Spanish, which no board shows: the request link in Spanish.`,
+  },
+  play: async ({ canvas }) => {
+    await expect(canvas.getByRole('link', { name: 'Abrir la solicitud' })).toHaveAttribute('href', REQUEST_HREF);
+    await expect(canvas.queryByRole('link', { name: 'Open the request' })).toBeNull();
+  },
+};
+
 /** Raj's code as the kernel writes it for a visitor chatting in Spanish (its `inbox_code_body`). */
 const codeEs: DemoInboxEntry = {
   ...entryOf(CODE_ID),
