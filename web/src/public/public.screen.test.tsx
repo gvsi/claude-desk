@@ -12,7 +12,7 @@ import type { EvMessage, OpenStatus, PublicDesk, SseEvent } from '../api/contrac
 import { rivera } from '../ds/fixtures/index.ts';
 import { CHAT_ENDED_COPY, NEW_CHAT_LABEL, RATE_LIMITED_COPY, UNREACHABLE_COPY } from '../ds/index.ts';
 import { worker } from '../mocks/browser.ts';
-import { SCRIPT, matchRule, type RuleName } from '../mocks/script.ts';
+import { HELD_PROSE, SCRIPT, matchRule, type RuleName } from '../mocks/script.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
 import { VIEWPORTS, renderRoute } from '../test/renderRoute.tsx';
@@ -203,10 +203,12 @@ describe('public chat page', () => {
     await say(screen, 'Can I get 15% off if I pay cash?');
     const held = screen.getByText(rivera.decisions.held.visitor_plain, { exact: true });
     await expect.element(held).toBeVisible();
-    // Under Claude's handoff reply, after its own line, and the ghost cancel under that.
+    // Under Claude's checked reply, which says Maria decides (no card), after the reply's own
+    // line, and the ghost cancel under that.
     const row = rowOf(held.element());
-    expect(row.querySelector('[aria-label="Handed to a person"]')).not.toBeNull();
-    expect(receiptsOf(row)).toEqual(['Passed to Maria Rivera to answer', rivera.decisions.held.visitor_plain]);
+    expect([...row.querySelectorAll('.cd-claude-message__prose')].map((p) => p.textContent)).toEqual([HELD_PROSE.en]);
+    expect(row.querySelectorAll('article')).toHaveLength(0);
+    expect(receiptsOf(row)).toEqual(["Reply checked against Maria Rivera's rules", rivera.decisions.held.visitor_plain]);
     const cancel = screen.getByRole('button', { name: 'Cancel this request' });
     await expect.element(cancel).toBeVisible();
     expect(cancel.element().getBoundingClientRect().top).toBeGreaterThanOrEqual(held.element().getBoundingClientRect().bottom);
@@ -233,7 +235,7 @@ describe('public chat page', () => {
     const line = resolved?.type === 'resolved' ? resolved.visitor_plain : '';
     await expect.element(screen.getByText(line, { exact: true })).toBeVisible();
     expect(receiptsOf(rowOf(screen.getByText(line, { exact: true }).element()))).toEqual([
-      'Passed to Maria Rivera to answer',
+      "Reply checked against Maria Rivera's rules",
       held.visitor_plain,
       line,
     ]);
@@ -258,7 +260,7 @@ describe('public chat page', () => {
 
     await cancel.click();
     await expect.element(second.screen.getByRole('button', { name: 'Cancel this request' })).not.toBeInTheDocument();
-    await vi.waitFor(() => expect(receiptsOf(heldRow)).toEqual(['Passed to Maria Rivera to answer', held.visitor_plain, 'Cancelled']));
+    await vi.waitFor(() => expect(receiptsOf(heldRow)).toEqual(["Reply checked against Maria Rivera's rules", held.visitor_plain, 'Cancelled']));
     expect(receiptsOf(bookedRow)).toEqual(booked);
 
     // In a third chat two requests are held. While the first one's cancel is out, the other

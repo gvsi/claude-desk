@@ -167,6 +167,16 @@ const helpProse: Record<Language, RenderedBlock> = {
   es: proseBlock('Maria te lo puede decir cuando lo vea. Puedes pedir hablar con ella aquí cuando quieras.'),
 };
 
+/**
+ * Claude's checked words after a request is held for Maria, as the signed board writes them: she
+ * decides, and her answer comes back into this chat. No amount, discount or date, and no promise
+ * of what she'll say.
+ */
+export const HELD_PROSE: Record<Language, string> = {
+  en: "That's for Maria to decide, so I've asked her. Her answer will show up here.",
+  es: 'Eso lo decide Maria, así que ya le pregunté. Su respuesta aparecerá aquí.',
+};
+
 const inboxPreview: Record<Language, string> = {
   en: 'New verification code',
   es: 'Nuevo código de verificación',
@@ -369,8 +379,8 @@ export const SCRIPT: readonly ScriptRule[] = [
     steps: [
       (ctx) => ctx.status('held', ctx.decide(DECISIONS.heldQuote)),
       writing,
-      // Claude's draft named the discount in its own words, so the visitor gets the handoff card.
-      (ctx) => ctx.reply([blocks.handoff[ctx.language]], { blocked: true }),
+      // Claude's checked words say Maria decides; the held receipt under them says what waits.
+      (ctx) => ctx.reply([proseBlock(HELD_PROSE[ctx.language])]),
     ],
   },
   {
@@ -464,6 +474,18 @@ export const SCRIPT: readonly ScriptRule[] = [
 ];
 
 /**
+ * The seeded hold's turn, as the design system's fixtures have it (`rivera.conversations.visitor`):
+ * the 15% quote is held, and Claude's draft named the discount in its own words, so the reply was
+ * stopped and the visitor got the handoff card. A fresh copy keeps that stopped reply, which
+ * Safety and the briefing show; a discount asked in a live chat gets the discount row's reply.
+ */
+export const SEEDED_HOLD_STEPS: readonly Step[] = [
+  (ctx) => ctx.status('held', ctx.decide(DECISIONS.heldQuote)),
+  writing,
+  (ctx) => ctx.reply([blocks.handoff[ctx.language]], { blocked: true }),
+];
+
+/**
  * Whether `lower` has `word` (or a phrase of words) as words of their own, with no letter or digit
  * either side: "off" is in "15% off", never in "offer".
  */
@@ -477,12 +499,6 @@ export function matchRule(text: string): ScriptRule {
   const lower = text.toLowerCase();
   const rule = SCRIPT.find((r) => r.words.some((word) => hasWord(lower, word))) ?? SCRIPT[SCRIPT.length - 1];
   if (!rule) throw new Error('the script has no rules');
-  return rule;
-}
-
-export function ruleNamed(name: RuleName): ScriptRule {
-  const rule = SCRIPT.find((r) => r.name === name);
-  if (!rule) throw new Error(`the script has no rule named ${name}`);
   return rule;
 }
 

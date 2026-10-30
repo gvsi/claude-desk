@@ -18,7 +18,7 @@ import type {
 } from '../api/views.ts';
 import { rivera } from '../ds/fixtures/index.ts';
 import { executedLine } from '../ds/fixtures/receipts.ts';
-import { DECISIONS, EVENT_GAP_MS, VISITOR_PLAIN, matchRule, turnLanguage, type RuleName } from './script.ts';
+import { DECISIONS, EVENT_GAP_MS, HELD_PROSE, VISITOR_PLAIN, matchRule, turnLanguage, type RuleName } from './script.ts';
 import { RIVERA } from './seed.ts';
 import { mockStore, streamAfter, type MockAnswer, type MockRequestInit } from './store.ts';
 
@@ -110,6 +110,31 @@ describe('the scripted Desk', () => {
     ]);
   });
 
+  it('held_discount_says_maria_decides', async () => {
+    // A discount past the quote card's limit is held, and Claude's checked reply says Maria decides,
+    // in the turn's language, with the reply's own receipt and the held one: no handoff card.
+    const { session, events } = await openChat();
+    await send('Can I get 15% off if I pay cash?');
+    await drain();
+    await send('¿Me hacen un descuento?');
+    await drain();
+    const turns = events.flatMap(([, ev]) =>
+      ev.type === 'message' ? [[ev.language, ev.handoff, ev.visitor_plain, ev.blocks.map((b) => [b.kind, b.template, b.text])]] : [],
+    );
+    expect(turns).toEqual([
+      ['en', false, VISITOR_PLAIN.en.reply_checked, [['prose', null, HELD_PROSE.en]]],
+      ['es', false, VISITOR_PLAIN.es.reply_checked, [['prose', null, HELD_PROSE.es]]],
+    ]);
+    const held = events.flatMap(([, ev]) => (ev.type === 'held' ? [ev.visitor_plain] : []));
+    expect(held).toEqual([VISITOR_PLAIN.en.held, VISITOR_PLAIN.es.held]);
+    // Each reply passed its check: no reply of this chat was stopped.
+    const replies = (mockStore.world.desks[0]?.ledger ?? []).filter((e) => e.event.kind === 'reply' && e.event.session_id === session.session_id);
+    expect(replies.map((e) => e.event.summary)).toEqual([
+      { author: 'claude', ok: true, language: 'en', violations: [] },
+      { author: 'claude', ok: true, language: 'es', violations: [] },
+    ]);
+  });
+
   it('script_matches_whole_words', async () => {
     // A rule's word picks it only as a word of its own, never inside another one.
     const cases: [text: string, rule: RuleName][] = [
@@ -165,9 +190,10 @@ describe('the scripted Desk', () => {
     expect(events.map(([seq]) => seq)).toEqual([1, 2, 3, 4]);
     const [, held] = events[0] ?? [];
     expect(held).toMatchObject({ type: 'held', state: 'held', visitor_plain: 'Waiting for Maria Rivera to approve' });
+    // Claude says, in checked words, that Maria decides and her answer will show up in the chat.
     const [, reply] = events[2] ?? [];
-    expect(reply).toMatchObject({ type: 'message', handoff: true, language: 'en' });
-    expect(reply?.type === 'message' && reply.blocks.map((b) => b.template)).toEqual(['handoff']);
+    expect(reply).toMatchObject({ type: 'message', handoff: false, language: 'en', visitor_plain: VISITOR_PLAIN.en.reply_checked });
+    expect(reply?.type === 'message' && reply.blocks.map((b) => [b.kind, b.text])).toEqual([['prose', HELD_PROSE.en]]);
 
     const needsYou = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
     expect(needsYou).toHaveLength(1);
