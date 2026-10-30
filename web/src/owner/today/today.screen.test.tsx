@@ -1154,6 +1154,37 @@ describe("Today's Demo inbox", () => {
     expect(focusIsOn(card.element())).toBe(false);
   });
 
+  it('request_link_falls_back_to_the_answered_card', async () => {
+    // Answered here a moment ago, the request's card is under "Answered just now": that is where its
+    // address lands.
+    const held = seededHold();
+    const { screen, router } = await renderRoute(TODAY);
+    const card = heldCard(screen, SEEDED_REASON);
+    await card.getByRole('button', { name: 'Allow this time' }).click();
+    await expect.element(card.getByText("You allowed this. It's done.", { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { name: 'Answered just now' })).toBeVisible();
+    (document.activeElement as HTMLElement | null)?.blur();
+
+    await router.navigate(requestLink(held.decision_id));
+    await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
+    expect(card.element().closest('.cd-needs-you__answered')).not.toBeNull();
+  });
+
+  it('request_link_reads_needs_you_once_more_before_giving_up', async () => {
+    // Held since Needs you was last read, the request isn't in the list Today has. Its address reads
+    // Needs you once more before giving up, and lands on the card that read brings.
+    const { screen, router } = await renderRoute(TODAY, { pollScale: 100 });
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    const reads = requests('needsYou').length;
+    const refund = mockStore.world.addHeldRefund();
+
+    await router.navigate(requestLink(refund.decision_id));
+    const card = heldCard(screen, REFUND_REASON);
+    await expect.element(card).toBeInTheDocument();
+    await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
+    expect(requests('needsYou')).toHaveLength(reads + 1);
+  });
+
   it('request_link_without_its_card_leaves_focus_alone', async () => {
     // A request with no card here (answered, or another Desk's): Today opens as it would without
     // the address, with no error, and focus stays where it was.

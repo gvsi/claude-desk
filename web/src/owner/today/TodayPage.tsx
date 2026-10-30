@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from 'react-router';
 import { ownerErrorCopy } from '../../api/http.ts';
 import { Greeting } from '../../ds/index.ts';
 import { greetingFor } from '../../lib/format.ts';
+import { useAnsweredFocus } from '../approvals/HeldRequest.tsx';
 import { useAnswer, type HeldItem } from '../approvals/useAnswer.ts';
 import { ThingsToTry } from '../arrival/ThingsToTry.tsx';
 import { publicLink } from '../customerLink.ts';
@@ -44,6 +45,8 @@ export function TodayPage() {
   const today = useToday(deskId);
   const needsYou = useNeedsYou(deskId);
   const answers = useAnswer(deskId);
+  // An answered card moves to "Answered just now", and focus that fell to the page follows it.
+  const answeredFocus = useAnsweredFocus(answers.answered);
   const [linkCopy, setLinkCopy] = useState<LinkCopy>('idle');
   const cards = useRef(new Map<string, HTMLElement>());
   // Whether the Demo inbox's sheet is open, as it says once it has opened or closed.
@@ -89,20 +92,38 @@ export function TodayPage() {
     if (firstHeld !== null) focusCard(firstHeld.decision.decision_id);
   };
 
-  // An arrival at `#request-<id>` lands on that card once, as "Open the request" does: once the
-  // latest read of Needs you has worked (a list kept from before a failed read may be missing the
-  // request), and once the Demo inbox's sheet, whose link it may be, has closed and handed focus
-  // back to its button. A request that isn't here (answered, or another Desk's) leaves focus as it is.
-  // Every change of address starts a new visit, Back and Forward included, each with one landing.
-  const [visit, setVisit] = useState({ key: location.key, spent: false });
-  if (visit.key !== location.key) setVisit({ key: location.key, spent: false });
+  // An arrival at `#request-<id>` lands on that card once, as "Open the request" does: on the held
+  // request's card, or under "Answered just now" if it was answered here. It lands once the latest
+  // read of Needs you has worked (a list kept from before a failed read may be missing the request),
+  // and once the Demo inbox's sheet, whose link it may be, has closed and handed focus back to its
+  // button. A request that isn't in the list gets one more read of Needs you, as it may have been
+  // held since the last; if it still isn't here (answered elsewhere, or another Desk's), focus stays
+  // as it is. Every change of address starts a new visit, Back and Forward included, each with one
+  // landing.
+  const [visit, setVisit] = useState<{ key: string; spent: boolean; rereadAfter: number | null }>({
+    key: location.key,
+    spent: false,
+    rereadAfter: null,
+  });
+  if (visit.key !== location.key) setVisit({ key: location.key, spent: false, rereadAfter: null });
   const requested = visit.key === location.key && !visit.spent ? requestInHash(location.hash) : null;
   const readWorked = needsYou.data !== undefined && needsYou.errorUpdatedAt <= needsYou.dataUpdatedAt;
+  const { cardFor: answeredCardFor } = answeredFocus;
+  const { refetch: readNeedsYou } = needsYou;
   useEffect(() => {
     if (requested === null || inboxOpen || !readWorked) return;
-    setVisit((now) => (now.key === location.key ? { ...now, spent: true } : now));
-    focusCard(requested);
-  }, [requested, inboxOpen, readWorked, location.key, focusCard]);
+    const key = location.key;
+    const card = cards.current.get(requested) ?? answeredCardFor(requested);
+    if (card === undefined && visit.rereadAfter === null) {
+      setVisit((now) => (now.key === key ? { ...now, rereadAfter: readAt } : now));
+      void readNeedsYou();
+      return;
+    }
+    // Still waiting for that read.
+    if (card === undefined && visit.rereadAfter !== null && readAt <= visit.rereadAfter) return;
+    setVisit((now) => (now.key === key ? { ...now, spent: true } : now));
+    card?.focus();
+  }, [requested, inboxOpen, readWorked, readAt, visit.rereadAfter, location.key, answeredCardFor, readNeedsYou]);
   // While it waits because Needs you can't be read, the owner's first pointer or key press spends
   // it: a read that works later doesn't pull focus from what they're doing by then.
   const readFailing = needsYou.errorUpdatedAt > needsYou.dataUpdatedAt;
@@ -150,6 +171,7 @@ export function TodayPage() {
             answers={answers}
             readAt={readAt}
             registerCard={registerCard}
+            answeredFocus={answeredFocus}
             readFailure={readFailure}
           />
         ) : null}
