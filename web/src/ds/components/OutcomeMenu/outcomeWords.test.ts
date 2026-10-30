@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
 
 import type { RuleCard } from '../../../api/contracts.ts';
-import { OUTCOME_TONE, OUTCOME_WORDS, PRESET_CAPTIONS, PRESET_WORDS, outcomePhrase } from './outcomeWords.ts';
+import { OUTCOME_TONE, OUTCOME_WORDS, PRESET_ITEMS, PRESET_WORDS, outcomePhrase } from './outcomeWords.ts';
 
 /**
  * The presets export: `desk.presets.PRESETS` (plan 01a Task 3) as JSON, generated into
@@ -21,152 +21,159 @@ type PresetCards = Record<PresetName, readonly RuleCard[]>;
 
 const MODES: ReadonlySet<string> = new Set(['auto', 'ask', 'never']);
 const WHO: ReadonlySet<string> = new Set(['anyone', 'verified', 'record_owner', 'person', 'agent']);
+const DAYS: ReadonlySet<string> = new Set(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']);
+/** A JSON time, as the kernel's `RuleCard` writes `HoursWindow.start` and `end`: "09:00:00". */
+const TIME = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d(\.\d+)?)?$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** The export, read: both presets, each a list of cards with a target, a mode and who they are for. Anything else throws. */
+/** What is wrong with one card against the `RuleCard` contract, in the fields the check reads, or null. */
+function cardProblem(card: unknown): string | null {
+  if (!isRecord(card)) return 'not an object';
+  for (const field of ['card_id', 'applies_to', 'reason']) {
+    if (typeof card[field] !== 'string') return `no ${field}`;
+  }
+  if (typeof card.mode !== 'string' || !MODES.has(card.mode)) return `mode ${String(card.mode)}`;
+  if (typeof card.who !== 'string' || !WHO.has(card.who)) return `who ${String(card.who)}`;
+  // Optional, and never null: a whole number from 0 to 10,000 basis points.
+  if ('max_discount_bp' in card) {
+    const bp = card.max_discount_bp;
+    if (typeof bp !== 'number' || !Number.isInteger(bp) || bp < 0 || bp > 10_000) return `max_discount_bp ${String(bp)}`;
+  }
+  // Optional, or null for any time; otherwise at least one day, a start and an end.
+  if ('hours' in card && card.hours !== null) {
+    const window = card.hours;
+    if (!isRecord(window)) return 'hours not an object';
+    const days = window.days;
+    if (!Array.isArray(days) || days.length === 0 || !days.every((day) => typeof day === 'string' && DAYS.has(day))) return 'hours days';
+    if (typeof window.start !== 'string' || !TIME.test(window.start)) return 'hours start';
+    if (typeof window.end !== 'string' || !TIME.test(window.end)) return 'hours end';
+  }
+  return null;
+}
+
+/** The export, read and checked against the contract: both presets, each a list of rule cards. Anything else throws. */
 function parsePresetCards(value: unknown): PresetCards {
   if (!isRecord(value)) throw new Error('The presets export is not an object');
   const read = (name: PresetName): RuleCard[] => {
     const list = value[name];
     if (!Array.isArray(list)) throw new Error(`The presets export has no "${name}" list`);
     return list.map((card: unknown, i) => {
-      const ok =
-        isRecord(card) &&
-        typeof card.applies_to === 'string' &&
-        typeof card.mode === 'string' &&
-        MODES.has(card.mode) &&
-        typeof card.who === 'string' &&
-        WHO.has(card.who);
-      if (!ok) throw new Error(`Card ${i} of "${name}" is not a rule card`);
-      return card as unknown as RuleCard;
+      const problem = cardProblem(card);
+      if (problem !== null) throw new Error(`Card ${i} of "${name}" is not a rule card: ${problem}`);
+      return card as RuleCard;
     });
   };
   return { ask_first: read('ask_first'), auto: read('auto') };
 }
 
+/** True when `read` throws. */
+function refuses(read: () => unknown): boolean {
+  try {
+    read();
+    return false;
+  } catch {
+    return true;
+  }
+}
+
 /**
  * Owner-session setup tools: Claude reads the owner's own website and notes. Visitors can't reach
- * them and the Rules page doesn't list them (the web app's `capabilities`), so no caption names them.
+ * them and the Rules page doesn't list them (the web app's `capabilities`), so "every tool" on the
+ * Rules page doesn't include them.
  */
 const SETUP_TOOLS: ReadonlySet<string> = new Set(['native.fetch_website', 'native.read_memory']);
 
 /** Every target that takes or sends money: the money effects and the tools that have them. */
-const MONEY_TARGETS = ['effect:charge', 'effect:pay_out', 'native.payment_link', 'native.charge_mandate', 'payments.create_refund'];
+const MONEY_TARGETS: readonly string[] = ['effect:charge', 'effect:pay_out', 'native.payment_link', 'native.charge_mandate', 'payments.create_refund'];
 
-const WEEKDAYS: ReadonlySet<string> = new Set(['mon', 'tue', 'wed', 'thu', 'fri']);
+/** Working hours, as the preset's booking card keeps them (plan 01a: weekday bookings from 09:00 to 17:00). */
+const WORKING_HOURS = { days: new Set(['mon', 'tue', 'wed', 'thu', 'fri']), start: '09:00:00', end: '17:00:00' };
 
-/** A preset's automatic cards for one target. */
-function autoCards(cards: readonly RuleCard[], target: string): RuleCard[] {
-  return cards.filter((card) => card.applies_to === target && card.mode === 'auto');
+/** Seconds since midnight of a JSON time. */
+function seconds(time: string): number {
+  const [h = '0', m = '0', s = '0'] = time.split(':');
+  return Number(h) * 3600 + Number(m) * 60 + Number(s);
 }
 
-/** One thing a caption says: its words, whether they say Claude runs the targets on its own, and what must hold. */
+/** One thing a description says, and what's wrong with a preset's cards for it, or null. */
 interface Claim {
   words: string;
-  runsOnItsOwn: boolean;
-  targets: readonly string[];
-  /** Further targets the words account for, such as the other tool of the same connector. */
-  covers?: readonly string[];
-  /** What's wrong with the preset's cards, or null when the claim holds. */
   problem: (cards: readonly RuleCard[]) => string | null;
 }
 
-/** Claude asks before any of the targets: no automatic card for them. */
-function asks(words: string, targets: readonly string[]): Claim {
+/** Claude does the target on its own: there is an automatic card for it, and every one passes `each`. */
+function onItsOwn(words: string, target: string, each: (card: RuleCard) => string | null): Claim {
   return {
     words,
-    runsOnItsOwn: false,
-    targets,
     problem: (cards) => {
-      const automatic = targets.filter((target) => autoCards(cards, target).length > 0);
-      return automatic.length === 0 ? null : `runs ${automatic.join(', ')} on its own`;
-    },
-  };
-}
-
-/** Claude runs each target on its own for anyone, and every automatic card for it passes `each`. */
-function runs(words: string, targets: readonly string[], each: (card: RuleCard) => string | null = () => null, covers?: readonly string[]): Claim {
-  return {
-    words,
-    runsOnItsOwn: true,
-    targets,
-    covers,
-    problem: (cards) => {
-      for (const target of targets) {
-        const found = autoCards(cards, target);
-        if (found.length === 0) return `has no automatic card for ${target}`;
-        for (const card of found) {
-          const wrong = each(card);
-          if (wrong !== null) return `${card.card_id}: ${wrong}`;
-        }
+      const found = cards.filter((card) => card.applies_to === target && card.mode === 'auto');
+      if (found.length === 0) return `no automatic card for ${target}`;
+      for (const card of found) {
+        const wrong = each(card);
+        if (wrong !== null) return `${card.card_id}: ${wrong}`;
       }
       return null;
     },
   };
 }
 
-const forAnyone = (card: RuleCard) => (card.who === 'anyone' ? null : `is for ${card.who}, not anyone`);
+/**
+ * Claude asks before the targets `covers` names: no card for one of them runs it on its own or
+ * refuses it. A target with no card asks by the compiler's default.
+ */
+function asksFirst(words: string, covers: (target: string) => boolean): Claim {
+  return {
+    words,
+    problem: (cards) => {
+      const wrong = cards.filter((card) => covers(card.applies_to) && card.mode !== 'ask');
+      return wrong.length === 0 ? null : wrong.map((card) => `${card.card_id} is ${card.mode} for ${card.applies_to}`).join('; ');
+    },
+  };
+}
 
-/** What each preset's caption says about its cards, phrase by phrase. */
+/** What each preset's description claims about its cards, and nothing it doesn't. */
 const CLAIMS: Record<PresetName, readonly Claim[]> = {
-  ask_first: [
-    asks('asks you before it quotes', ['native.quote']),
-    asks('books', ['native.book']),
-    asks('shares a document', ['native.release_document']),
-    asks('takes a payment', MONEY_TARGETS),
-    runs('still finds open times', ['native.find_slots'], forAnyone),
-    // Leads and callbacks: saving a lead and asking the owner to call back both keep who to get back to.
-    runs('saves leads', ['native.capture_lead'], forAnyone, ['native.request_callback']),
-    runs('confirms who people are', ['native.start_verification'], forAnyone),
-  ],
+  ask_first: [asksFirst('Every tool asks you first.', (target) => !SETUP_TOOLS.has(target))],
   auto: [
-    runs('quotes at list price', ['native.quote'], (card) =>
-      forAnyone(card) ?? ((card.max_discount_bp ?? 0) === 0 ? null : `allows a ${card.max_discount_bp} bp discount`),
+    onItsOwn('Quotes at list price', 'native.quote', (card) =>
+      (card.max_discount_bp ?? 0) === 0 ? null : `allows a ${card.max_discount_bp} bp discount`,
     ),
-    runs('books weekdays in your hours', ['native.book'], (card) => {
-      const days = card.hours?.days ?? [];
-      if (days.length === 0) return 'books at any hour';
-      return days.every((day) => WEEKDAYS.has(day)) ? null : `books on ${days.join(', ')}`;
+    onItsOwn('weekday bookings in your hours', 'native.book', (card) => {
+      const window = card.hours;
+      if (window === null || window === undefined) return 'books at any hour';
+      const outside = window.days.filter((day) => !WORKING_HOURS.days.has(day));
+      if (outside.length > 0) return `books on ${outside.join(', ')}`;
+      const [start, end] = [seconds(window.start), seconds(window.end)];
+      if (start < seconds(WORKING_HOURS.start) || end > seconds(WORKING_HOURS.end) || start >= end) {
+        return `books ${window.start} to ${window.end}, outside ${WORKING_HOURS.start} to ${WORKING_HOURS.end}`;
+      }
+      return null;
     }),
-    runs('sends verified customers their own documents', ['native.release_document'], (card) =>
-      card.who === 'record_owner' ? null : `is for ${card.who}, not the record's owner`,
+    onItsOwn('documents to verified customers', 'native.release_document', (card) =>
+      card.who === 'record_owner' ? null : `is for ${card.who}, not the verified customer the document is for`,
     ),
-    asks('Payments ask you first', MONEY_TARGETS),
+    asksFirst('Payments ask you first.', (target) => MONEY_TARGETS.includes(target)),
   ],
 };
 
-/** Everything the captions say that the presets' cards don't do; empty when they agree. */
-function captionProblems(cards: PresetCards): string[] {
+/** Everything the descriptions say that the presets' cards don't do; empty when they agree. */
+function descriptionProblems(cards: PresetCards): string[] {
   const problems: string[] = [];
   for (const preset of ['ask_first', 'auto'] as const) {
+    const description = PRESET_ITEMS.find((item) => item.value === preset)?.description ?? '';
     for (const claim of CLAIMS[preset]) {
-      if (!PRESET_CAPTIONS[preset].includes(claim.words)) problems.push(`${preset}: the caption doesn't say "${claim.words}"`);
+      if (!description.includes(claim.words)) problems.push(`${preset}: the description doesn't say "${claim.words}"`);
       const wrong = claim.problem(cards[preset]);
       if (wrong !== null) problems.push(`${preset}, "${claim.words}": ${wrong}`);
-    }
-  }
-  // Ask me first runs on its own only what its caption says it still does; Automatic only that and
-  // what its own caption adds.
-  const said = (preset: PresetName) =>
-    CLAIMS[preset].filter((claim) => claim.runsOnItsOwn).flatMap((claim) => [...claim.targets, ...(claim.covers ?? [])]);
-  const allowed: Record<PresetName, ReadonlySet<string>> = {
-    ask_first: new Set(said('ask_first')),
-    auto: new Set([...said('ask_first'), ...said('auto')]),
-  };
-  for (const preset of ['ask_first', 'auto'] as const) {
-    for (const card of cards[preset]) {
-      if (card.mode === 'auto' && !allowed[preset].has(card.applies_to) && !SETUP_TOOLS.has(card.applies_to)) {
-        problems.push(`${preset}: ${card.card_id} runs ${card.applies_to} on its own, which the caption doesn't say`);
-      }
     }
   }
   return problems;
 }
 
-/** A hand-built pair of presets that does what the captions say, for the checker's own test. */
+/** A hand-built pair of presets that does what the descriptions say, for the checker's own test. */
 function handBuilt(): PresetCards {
   let n = 0;
   const card = (applies_to: string, mode: RuleCard['mode'], who: RuleCard['who'], extra: Partial<RuleCard> = {}): RuleCard => ({
@@ -174,18 +181,13 @@ function handBuilt(): PresetCards {
     applies_to,
     mode,
     who,
-    reason: 'Hand-built for the caption check.',
+    reason: 'Hand-built for the description check.',
     ...extra,
   });
-  const askFirst = [
-    card('native.find_slots', 'auto', 'anyone'),
-    card('native.capture_lead', 'auto', 'anyone'),
-    card('native.start_verification', 'auto', 'anyone'),
-  ];
   return {
-    ask_first: askFirst,
+    // Every tool asks: an explicit ask, and an owner-session setup tool, which no visitor reaches.
+    ask_first: [card('native.quote', 'ask', 'anyone'), card('native.read_memory', 'auto', 'anyone')],
     auto: [
-      ...askFirst,
       card('native.quote', 'auto', 'anyone', { max_discount_bp: 0 }),
       card('native.book', 'auto', 'anyone', { hours: { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '09:00:00', end: '17:00:00' } }),
       card('native.release_document', 'auto', 'record_owner'),
@@ -203,49 +205,96 @@ function changed(cards: PresetCards, preset: PresetName, edit: { appliesTo?: str
   return { ...cards, [preset]: edit.add ? [...list, edit.add] : list };
 }
 
+/** A card the hand-built presets don't have. */
+function extra(applies_to: string, mode: RuleCard['mode']): RuleCard {
+  return { card_id: 'hand-extra', applies_to, mode, who: 'anyone', reason: 'Added.' };
+}
+
+/** A change to a card's booking window: weekdays unless `days` says otherwise. */
+function hours(start: string, end: string, days: NonNullable<RuleCard['hours']>['days'] = ['mon', 'tue', 'wed', 'thu', 'fri']): Partial<RuleCard> {
+  return { hours: { days, start, end } };
+}
+
 describe('outcome words', () => {
-  test('preset_captions_match_the_presets', ({ skip }) => {
+  test('preset_descriptions_match_the_presets', ({ skip }) => {
     skip(!existsSync(PRESETS_EXPORT), 'waits for the generated presets export, web/src/api/presets.gen.json');
-    // Every claim each caption makes holds for the presets' own cards, and Ask me first runs on its
-    // own only what its caption says it still does.
+    // Every claim each description makes holds for the presets' own cards.
     const cards = parsePresetCards(JSON.parse(readFileSync(PRESETS_EXPORT, 'utf8')));
-    expect(captionProblems(cards)).toEqual([]);
+    expect(descriptionProblems(cards)).toEqual([]);
   });
 
-  test('a_changed_preset_card_fails_the_captions', () => {
+  test('a_changed_preset_card_fails_the_descriptions', () => {
     const good = handBuilt();
-    // The checker passes presets that do what the captions say, read the way the export is read.
-    expect(captionProblems(parsePresetCards(JSON.parse(JSON.stringify(good))))).toEqual([]);
+    // The checker passes presets that do what the descriptions say, read the way the export is read.
+    expect(descriptionProblems(parsePresetCards(JSON.parse(JSON.stringify(good))))).toEqual([]);
     // Changing one card alone fails it.
-    const anyone = (applies_to: string): RuleCard => ({ card_id: 'hand-added', applies_to, mode: 'auto', who: 'anyone', reason: 'Added.' });
     const broken: [string, PresetCards][] = [
+      // "Quotes at list price"
       ['quotes with a discount', changed(good, 'auto', { appliesTo: 'native.quote', change: { max_discount_bp: 1000 } })],
       ['quotes no longer automatic', changed(good, 'auto', { appliesTo: 'native.quote', change: { mode: 'ask' } })],
       ['no quote card', changed(good, 'auto', { appliesTo: 'native.quote', change: null })],
+      // "weekday bookings in your hours"
+      ['bookings at night', changed(good, 'auto', { appliesTo: 'native.book', change: hours('01:00:00', '02:00:00') })],
+      ['bookings before and after working hours', changed(good, 'auto', { appliesTo: 'native.book', change: hours('08:00:00', '18:00:00') })],
+      ['bookings ending before they start', changed(good, 'auto', { appliesTo: 'native.book', change: hours('17:00:00', '09:00:00') })],
       ['bookings at any hour', changed(good, 'auto', { appliesTo: 'native.book', change: { hours: null } })],
-      ['bookings on Saturdays', changed(good, 'auto', { appliesTo: 'native.book', change: { hours: { days: ['mon', 'sat'], start: '09:00:00', end: '17:00:00' } } })],
+      ['bookings on Saturdays', changed(good, 'auto', { appliesTo: 'native.book', change: hours('09:00:00', '17:00:00', ['mon', 'sat']) })],
+      ['no automatic bookings', changed(good, 'auto', { appliesTo: 'native.book', change: null })],
+      // "documents to verified customers"
       ['documents for anyone', changed(good, 'auto', { appliesTo: 'native.release_document', change: { who: 'anyone' } })],
+      ['documents for anyone verified', changed(good, 'auto', { appliesTo: 'native.release_document', change: { who: 'verified' } })],
+      // "Payments ask you first": neither automatic nor refused
       ['payments automatic', changed(good, 'auto', { appliesTo: 'effect:charge', change: { mode: 'auto' } })],
-      ['payment links automatic', changed(good, 'auto', { add: anyone('native.payment_link') })],
-      ['Automatic adds a tool its caption leaves out', changed(good, 'auto', { add: anyone('payments.list_charges') })],
-      ['Ask me first quotes on its own', changed(good, 'ask_first', { add: anyone('native.quote') })],
-      ['Ask me first refunds on its own', changed(good, 'ask_first', { add: anyone('payments.create_refund') })],
-      ['Ask me first stops finding open times', changed(good, 'ask_first', { appliesTo: 'native.find_slots', change: null })],
+      ['payments refused', changed(good, 'auto', { appliesTo: 'effect:charge', change: { mode: 'never' } })],
+      ['payment links automatic', changed(good, 'auto', { add: extra('native.payment_link', 'auto') })],
+      ['refunds refused', changed(good, 'auto', { add: extra('payments.create_refund', 'never') })],
+      // "Every tool asks you first": neither automatic nor refused
+      ['Ask me first quotes on its own', changed(good, 'ask_first', { appliesTo: 'native.quote', change: { mode: 'auto' } })],
+      ['Ask me first refuses quotes', changed(good, 'ask_first', { appliesTo: 'native.quote', change: { mode: 'never' } })],
+      ['Ask me first finds open times on its own', changed(good, 'ask_first', { add: extra('native.find_slots', 'auto') })],
+      ['Ask me first requests callbacks on its own', changed(good, 'ask_first', { add: extra('native.request_callback', 'auto') })],
+      ['Ask me first refuses payments', changed(good, 'ask_first', { add: extra('effect:charge', 'never') })],
     ];
-    for (const [what, cards] of broken) expect({ what, problems: captionProblems(cards).length > 0 }).toEqual({ what, problems: true });
-    // An export of the wrong shape is refused, never read as no cards.
-    expect(() => parsePresetCards({ ask_first: [] })).toThrow();
-    expect(() => parsePresetCards({ ask_first: [{ applies_to: 'native.quote' }], auto: [] })).toThrow();
+    for (const [what, cards] of broken) expect({ what, problems: descriptionProblems(cards).length > 0 }).toEqual({ what, problems: true });
   });
 
-  test('preset_captions_are_the_owner_words', () => {
-    expect(Object.keys(PRESET_CAPTIONS)).toEqual(PRESET_WORDS.map((option) => option.value));
-    expect(PRESET_CAPTIONS).toEqual({
-      ask_first:
-        'Claude asks you before it quotes, books, shares a document or takes a payment. It still finds open times, saves leads and confirms who people are.',
-      auto: 'Claude quotes at list price, books weekdays in your hours and sends verified customers their own documents. Payments ask you first.',
-      custom: 'Your own rules, tool by tool. Change any of them below.',
-    });
+  test('a_malformed_presets_export_is_refused', () => {
+    // An export of the wrong shape is refused, never read as no cards or as the contract's defaults.
+    const good = handBuilt();
+    const withCard = (change: Record<string, unknown>) => ({ ...good, auto: [...good.auto, { ...good.auto[0], ...change }] });
+    const without = (field: string) => {
+      const card: Record<string, unknown> = { ...good.auto[0] };
+      delete card[field];
+      return { ...good, auto: [card] };
+    };
+    const malformed: [string, unknown][] = [
+      ['no auto list', { ask_first: [] }],
+      ['not an object', []],
+      ['a card without its target', without('applies_to')],
+      ['a card without its id', without('card_id')],
+      ['a card without its reason', without('reason')],
+      ['an unknown mode', withCard({ mode: 'maybe' })],
+      ['an unknown audience', withCard({ who: 'everyone' })],
+      ['a null discount', withCard({ max_discount_bp: null })],
+      ['a discount that is not a whole number', withCard({ max_discount_bp: 0.5 })],
+      ['a discount over 100%', withCard({ max_discount_bp: 10001 })],
+      ['hours without a start or an end', withCard({ hours: { days: ['mon'] } })],
+      ['hours with no days', withCard({ hours: { days: [], start: '09:00:00', end: '17:00:00' } })],
+      ['hours on an unknown day', withCard({ hours: { days: ['monday'], start: '09:00:00', end: '17:00:00' } })],
+      ['hours that are not a time', withCard({ hours: { days: ['mon'], start: '9am', end: '17:00:00' } })],
+    ];
+    for (const [what, value] of malformed) expect({ what, refused: refuses(() => parsePresetCards(value)) }).toEqual({ what, refused: true });
+  });
+
+  test('preset_descriptions_are_the_owner_words', () => {
+    expect(PRESET_ITEMS).toEqual([
+      { value: 'ask_first', title: 'Ask me first for everything', description: 'Every tool asks you first.' },
+      {
+        value: 'auto',
+        title: 'Recommended rules',
+        description: 'Quotes at list price, weekday bookings in your hours, documents to verified customers. Payments ask you first.',
+      },
+    ]);
   });
 
   test('outcome_phrase_with_limit', () => {
