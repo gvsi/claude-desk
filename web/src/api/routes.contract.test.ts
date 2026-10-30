@@ -58,10 +58,14 @@ function routeProblems(
       problems.push(`${key}: ${operation} is not in openapi.json`);
       continue;
     }
-    for (const [status, name] of Object.entries(answers)) {
-      // A proving route's 202 is the proving protocol's retry, which `request()` follows.
-      if (route.proving && status === '202' && name === 'ProvingPending') continue;
-      if (name !== ROUTE_MODELS[key]) problems.push(`${key}: ${operation} answers ${status} with ${name}, not ${ROUTE_MODELS[key]}`);
+    // The answers' names, without a proving route's 202 (the proving protocol's retry, which
+    // `request()` follows), must be exactly the route's model, as the typecheck's `Equal` requires:
+    // none other, and not none at all.
+    const model = ROUTE_MODELS[key];
+    const named = Object.entries(answers).filter(([status, name]) => !(route.proving && status === '202' && name === 'ProvingPending'));
+    if (named.length === 0) problems.push(`${key}: ${operation} answers only with the proving retry, not ${model}`);
+    for (const [status, name] of named) {
+      if (name !== model) problems.push(`${key}: ${operation} answers ${status} with ${name}, not ${model}`);
     }
   }
   for (const operation of neverCalled) {
@@ -102,6 +106,10 @@ describe('routes against the API contract', () => {
       [op('me')]: { 200: 'CopyOut', 202: 'ProvingPending' },
     };
     expect(routeProblems(operations, new Set(['health']), keys)).toEqual(['me: GET /api/owner/me answers 202 with ProvingPending, not CopyOut']);
+    // A proving route that answers only with the retry names no model, as the typecheck finds too.
+    expect(routeProblems({ [op('draftPreset')]: { 202: 'ProvingPending' } }, new Set(), ['draftPreset'])).toEqual([
+      'draftPreset: POST /api/owner/policy/{desk_id}/preset answers only with the proving retry, not RulesDraft',
+    ]);
     // A pending route the document serves, and a served route it lacks, are problems too.
     expect(routeProblems({ [op('health')]: { 200: 'HealthOut' } }, new Set(['health']), ['health'])).toEqual([
       'health: GET /api/health is served now; take it off NOT_YET_SERVED',

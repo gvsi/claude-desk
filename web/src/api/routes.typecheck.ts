@@ -189,6 +189,9 @@ type Assert<T extends true> = T;
 export type AnswerNameChecks = [
   // A proving route's 202 retry isn't its model,
   Assert<Equal<AnswerNames<'draftRules', { 200: 'RulesDraft'; 202: 'ProvingPending' }>, 'RulesDraft'>>,
+  // so a proving route that answers only with the retry names nothing, which no model equals
+  // (the contract test reports it as answering "only with the proving retry"),
+  Assert<Equal<AnswerNames<'draftRules', { 202: 'ProvingPending' }>, never>>,
   // but any other route's 202 is, as each of its 2xx answers is.
   Assert<Equal<AnswerNames<'me', { 200: 'CopyOut'; 202: 'ProvingPending' }>, 'CopyOut' | 'ProvingPending'>>,
   Assert<Equal<AnswerNames<'sendMessage', { 202: 'MessageAccepted' }>, 'MessageAccepted'>>,
