@@ -221,12 +221,11 @@ def route_template(request: Request) -> str:
 # the copy it belongs to (a token by its sha256, never the token itself) through the database's
 # copy resolvers (SECURITY DEFINER functions that return only a copy id), on their own connection,
 # so the caller can bind the request's transaction to that copy and read the rows through
-# KernelRepo as usual. Only auth.py, GET /whoami,
-# GET /decisions/{id}, POST /sessions, GET /public/{desk_slug} and GET /document_links/{token} use
-# them, and they run before the request's transaction has run anything: a request that held its
-# transaction's connection while it waited for a resolver's would, with as many such requests at
-# once as the pool has connections, wait until checkout timed out. Asked later, a resolver raises
-# (500 `internal`) instead.
+# KernelRepo as usual. Only auth.py, GET /whoami, GET /decisions/{id}, POST /sessions,
+# GET /public/{desk_slug} and GET /document_links/{token} use them, and they run before the
+# request's transaction has run anything: a request that held its transaction's connection while it
+# waited for a resolver's would, with as many such requests at once as the pool has connections,
+# wait until checkout timed out. Asked later, a resolver raises (500 `internal`) instead.
 
 async def _resolve(ctx: KernelCtx, resolver: CopyResolver, key: str) -> str | None:
     if ctx.db.in_transaction():
