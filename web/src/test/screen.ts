@@ -77,3 +77,8 @@ export async function expectScreenBasics(root: HTMLElement, { owner }: ScreenBas
 export function expectNoHorizontalScroll(): void {
   expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
 }
+
+/** The window itself doesn't scroll: the app shell is the window's height, and only its own columns scroll. */
+export function expectNoWindowScroll(): void {
+  expect(document.documentElement.scrollHeight).toBe(window.innerHeight);
+}

@@ -402,8 +402,11 @@
 
 /* Last 7 days: the heading and its caption, then three parts divided by hairlines. Bars are layout
    on tokens: each day's height is its share of the busiest day's, and a day with none keeps a flat
-   stub, so the seven days are there before the first booking. */
+   stub, so the seven days are there before the first booking. Positioned, so its visually hidden
+   words sit inside it: with no positioned ancestor they would sit against the window, and below
+   the wide layout, deep in the scrolled page, they would stretch the window into a scroll. */
 .cd-week {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--space-16);

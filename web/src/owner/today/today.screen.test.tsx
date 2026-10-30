@@ -4,6 +4,7 @@
  * and the last 7 days, every figure as the API reads it.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { page } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import type { Decision } from '../../api/contracts.ts';
@@ -14,7 +15,7 @@ import { CALLBACK_REASON } from '../../mocks/script.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
-import { expectScreenBasics } from '../../test/screen.ts';
+import { expectNoWindowScroll, expectScreenBasics } from '../../test/screen.ts';
 
 const TODAY = `/app/${RIVERA.deskId}/today`;
 const DESK = `/app/${RIVERA.deskId}`;
@@ -374,6 +375,19 @@ describe('Today', () => {
     await expect.element(again.getByText('Claude handled 3', { exact: true })).toBeVisible();
     await expect.element(again.getByText('No one has needed you in the last 7 days.', { exact: true })).toBeVisible();
     expect(again.getByText(/You stepped in/).elements()).toHaveLength(0);
+  });
+
+  it('window_stays_put_below_the_wide_layout', async () => {
+    // Below 1280 px "Last 7 days" sits under the page, deep in the shell's scrolling column. The
+    // window itself never scrolls: only the column does, so the shell's bars stay in place.
+    const { screen } = await renderRoute(TODAY, { viewport: 'phone' });
+    const block = region(screen, 'Last 7 days');
+    await expect.element(block.getByText('$180 booked', { exact: true })).toBeVisible();
+    expect(block.getByRole('list', { name: 'Bookings per day' }).getByRole('listitem').elements()).toHaveLength(7);
+    expectNoWindowScroll();
+    await page.viewport(1024, 768);
+    await expect.poll(() => window.innerWidth).toBe(1024);
+    expectNoWindowScroll();
   });
 
   it('recorded_history_label', async () => {
