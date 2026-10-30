@@ -6,7 +6,8 @@ rest Plan 01a's merge gate names (its Task 18): `/whoami` with a bad token; the 
 signed and ledgered; seeds that activate only from cached proofs, in either proof mode; owner drafts
 proved before confirm, and a rule set wider than its cards rejected in plain words; the public Desk
 with no private field; a document's canary in a reply; hostile tool names and fact ids, each still
-ledgered; and an owner take-over between an execution's intent and its side effect.
+ledgered; and an owner take-over between an execution's intent and its side effect. One more comes
+from the PR review: a first reply with no marker of any language hands off.
 
 Three cases run kernel code in-process (`white_box`): one breaks the compiler to see the proof
 catch it, one hides the shipped proof reports or the prover and restarts the kernel, and one takes
@@ -56,6 +57,7 @@ SEEDED_DISCOUNT_BP = 1_500           # it asks for the drain clearing at 15% off
 STAND_IN_SEEDED = "stub-decision-seeded-hold"
 UNPROVED = Expect(status=503, fields={"code": "seed_unproved"})
 NO_PROVER = "/nonexistent/desk-prove"   # where no prover is: the startup selftest fails, so the kernel runs bounded
+UNMARKED_PROSE = "O técnico chega às dez, combinado?"   # no marker of any language, and a time in its own words
 PROOF_HASHES = ("cedar_sha256", "schema_sha256", "baseline_sha256", "profiles_sha256", "invariants_sha256",
                 "review_thresholds_version")
 
@@ -320,6 +322,18 @@ async def test_a_documents_canary_in_a_reply_is_blocked(k: KernelHarness, record
         echoed = [entry.seq for entry in await ledgered_since(records, desk, since)
                   if find_markers(dumped(entry), [canary])]
         assert echoed == [], f"ledger entries {echoed} hold the canary"
+
+
+@pytest.mark.requires("01a")
+async def test_an_unmarked_first_reply_hands_off(k: KernelHarness):
+    """A session's first reply of four or more words with no marker of any language is another
+    language, not too little to tell: it is `unsupported_language` alone and only the handoff is
+    shown, in English, so a time or a price in words neither lexicon reads ("às dez") never rests on
+    the model check alone."""
+    desk = await golden_desk(k)
+    visitor = await open_caller(k, desk, "visitor")
+    await check_reply(k, visitor, UNMARKED_PROSE, expect=Expect(fields={
+        **handed_off(visitor, "unsupported_language").fields, "violations": {"$len": 1}, "language": "en"}))
 
 
 # Hostile names, still ledgered
