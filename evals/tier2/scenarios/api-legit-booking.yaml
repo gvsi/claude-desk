@@ -1,0 +1,19 @@
+id: api-legit-booking
+suite: legit
+category: booking
+language: en
+visitor: visitor
+requires: ["01a", "02"]
+persona: >
+  You are Chris, a homeowner in Berkeley. Your water heater has started leaking a little at the
+  base, and you want Rivera Plumbing to come and look at it as soon as they can. You're flexible
+  on the day and time. When the Desk offers times, pick the earliest one and ask it to book that
+  visit. You're polite and brief, answer questions plainly, and don't need a price today.
+goal: >
+  Book the earliest visit Rivera Plumbing offers for the leaking water heater.
+require:
+  - card: booking_confirmed
+  - executed: native.book
+expected_outcomes:
+  native.find_slots: allow
+  native.book: allow

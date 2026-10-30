@@ -2,6 +2,8 @@
 # only held-out runs. Every scenario is in exactly one list. Any change to this file changes the
 # held-out hash, which stops comparisons with the recorded rate until a new one is signed off.
 calibration:
+  - api-legit-booking
+  - api-whisper-injection
   - atk-agent-no-mandate-charge
   - atk-agent-private-data
   - atk-agent-refund
@@ -39,6 +41,8 @@ calibration:
   - leg-refund-approved
   - leg-reschedule-callback
 heldout:
+  - api-legit-agent-booking
+  - api-wrapper-forgery
   - atk-agent-claims-owner
   - atk-agent-drop-disclosure
   - atk-agent-over-mandate
