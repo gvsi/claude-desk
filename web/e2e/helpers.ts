@@ -108,6 +108,10 @@ export async function demoPath(page: Page, { passcode, live }: DemoPathOptions):
 
   const heldCards = page.getByRole('article', { name: /^Held for you: / });
   let seeded = 0;
+  const liveNow = page.getByRole('region', { name: 'Live now', exact: true });
+  // The chats under Live now on arrival, by the conversation each opens: a fresh copy may already
+  // have one, so the chat this path starts is the one whose link wasn't there.
+  let liveOnArrival = new Set<string>();
   await test.step("Today as Maria, with no chat open and the right column's public page and last 7 days", async () => {
     await expect(page.getByText(live ? /You're .+ today\./ : "You're Maria Rivera today.")).toBeVisible();
     await expect(page.getByRole('textbox', { name: /^Message / })).toHaveCount(0);
@@ -120,6 +124,8 @@ export async function demoPath(page: Page, { passcode, live }: DemoPathOptions):
     // The seeded hold waits for the owner.
     await expect(heldCards.first(), 'the seeded hold shows in Needs you').toBeVisible({ timeout: wait.update });
     seeded = await heldCards.count();
+    // Today's read is in: "Last 7 days" comes from it, and so does Live now.
+    liveOnArrival = new Set(await liveChats(liveNow));
   });
 
   const publicTab = await test.step('"Chat as a customer" opens the public page in a new tab', async () => {
@@ -163,9 +169,13 @@ export async function demoPath(page: Page, { passcode, live }: DemoPathOptions):
     await page.bringToFront();
     await expect(heldCards, NOT_HELD).toHaveCount(seeded + 1, { timeout: wait.approval });
     await expect(newCard).toHaveCount(1);
-    const liveNow = page.getByRole('region', { name: 'Live now', exact: true });
-    await expect(liveNow.getByRole('link').first()).toBeVisible({ timeout: wait.update });
-    if (!live) await expect(liveNow.getByRole('link', { name: /Your preview/ })).toBeVisible();
+    const newChats = async () => (await liveChats(liveNow)).filter((href) => !liveOnArrival.has(href));
+    await expect.poll(newChats, { message: 'the chat shows under Live now', timeout: wait.update }).not.toHaveLength(0);
+    if (!live) {
+      const preview = liveNow.getByRole('link', { name: /Your preview/ });
+      await expect(preview).toBeVisible();
+      expect(await newChats(), 'the new chat is the preview').toContain(await preview.getAttribute('href'));
+    }
   });
 
   await test.step('"Allow this time" shows its final line, and the public tab its resolved receipt', async () => {
@@ -195,6 +205,11 @@ export async function demoPath(page: Page, { passcode, live }: DemoPathOptions):
 /** The "Your public page" card in Today's right column. */
 function publicPageSection(page: Page): Locator {
   return page.locator('.cd-today-aside section').filter({ has: page.getByRole('heading', { name: 'Your public page' }) });
+}
+
+/** The links under Live now that show, by the conversation each opens; none while it isn't there. */
+function liveChats(liveNow: Locator): Promise<string[]> {
+  return liveNow.getByRole('link').evaluateAll((links) => links.filter((a) => a.checkVisibility()).map((a) => a.getAttribute('href') ?? ''));
 }
 
 /** Types `text` into the public page's composer and sends it. */
