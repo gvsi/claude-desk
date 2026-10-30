@@ -842,6 +842,27 @@ describe('public chat page', () => {
     expect(dots()).toHaveLength(0);
   });
 
+  it('owner_typing_ends_with_the_chat', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('this browser has a chat');
+    const dots = () => document.querySelectorAll('.cd-writing-indicator--person');
+    mockStore.world.takeOver(chat);
+    await expect.element(screen.getByRole('status').filter({ hasText: 'Maria Rivera joined the chat' })).toBeVisible();
+
+    // Maria types. The page's timers are fake from here, so her dots can't run out on their own.
+    useTimers();
+    mockStore.emit(RIVERA.slug, { type: 'owner_typing', name: 'Maria Rivera', until: new Date(Date.now() + 5_000).toISOString() });
+    await until(() => expect(dots()).toHaveLength(1));
+
+    // The chat ends (a send answers 401): the line says so, and her dots go with it.
+    mockStore.inject({ route: 'sendMessage', status: 401 });
+    await type(screen, 'Are you still there?');
+    await until(() => expect(screen.getByText(CHAT_ENDED_COPY.en, { exact: true }).query()).not.toBeNull());
+    expect(dots()).toHaveLength(0);
+  });
+
   it('visitor_typing_pings_the_owner', async () => {
     // Pings at most every 2 s, scaled to a second here.
     const { screen } = await renderRoute(PAGE, { pollScale: 0.5 });

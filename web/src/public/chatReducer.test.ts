@@ -284,10 +284,12 @@ describe('chatReducer', () => {
     expect(answered.rows.at(-1)?.item).toEqual({ kind: 'message', seq: 3, ev: said });
     // Claude's doesn't: she may still be typing beside it.
     expect(run(events([quoteMessage], 3), joined).ownerTyping).toEqual({ name: 'Maria Rivera', until: '2026-10-29T15:04:30Z' });
-    // Handing the chat back ends it, and so does an error, its time running out, and a new chat.
+    // Handing the chat back ends it, and so does an error, its time running out, the chat ending
+    // (a 401) and a new chat.
     expect(run(events([{ type: 'owner_left' }], 3), joined).ownerTyping).toBeNull();
     expect(run(events([{ type: 'error', code: 'kernel_unavailable' }], 3), joined).ownerTyping).toBeNull();
     expect(run([{ type: 'owner_typing_over' }], joined).ownerTyping).toBeNull();
+    expect(run([{ type: 'ended' }], joined).ownerTyping).toBeNull();
     expect(run([{ type: 'reset' }], joined).ownerTyping).toBeNull();
     // A replayed event the chat has seen changes nothing.
     expect(run(events([typing], 2), answered).ownerTyping).toBeNull();

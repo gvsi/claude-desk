@@ -48,8 +48,8 @@ export interface ChatState extends RowGroups<ChatItem, ReceiptView> {
   /**
    * The owner typing after a take-over, from the owner's latest `owner_typing`, or null: her name
    * and until when, never her words. The public page shows it as WritingIndicator's person form.
-   * The owner's own message (even one the chat already shows), `owner_left`, the turn's end or an
-   * error clears it, and the owner's next typing event replaces it. Its `until` is kept as the API
+   * The owner's own message (even one the chat already shows), `owner_left`, the turn's end, an
+   * error or the chat ending (`ended`) clears it, and the owner's next typing event replaces it. Its `until` is kept as the API
    * sent it, never compared with a clock here: the provider reads it once with
    * `ownerTypingDelayMs`, so a stale event shows nothing (`stale`) and the dots go when that time
    * runs out (`owner_typing_over`).
@@ -263,7 +263,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
     case 'connection':
       return { ...state, connection: action.connection };
     case 'ended':
-      return { ...state, ...settle(state), writing: false, error: 'session' };
+      return { ...state, ...settle(state), writing: false, ownerTyping: null, error: 'session' };
     case 'reset':
       return initialChatState();
   }

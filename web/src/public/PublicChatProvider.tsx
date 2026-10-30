@@ -264,7 +264,7 @@ class VisitorChat {
     this.set({ session });
     if (transcript === null) {
       this.loaded = true;
-      this.dispatch({ type: 'ended' });
+      this.end();
       this.set({ status: 'ready' });
       return;
     }
@@ -318,6 +318,12 @@ class VisitorChat {
     this.ownerTypingTimer = null;
   }
 
+  /** The chat ended (a 401): the owner's typing goes with it, and its timer too. */
+  private end(): void {
+    this.clearOwnerTypingTimer();
+    this.dispatch({ type: 'ended' });
+  }
+
   private onStreamState(state: StreamState, epoch: number): void {
     if (state === 'closed') {
       this.stopStream = null;
@@ -344,7 +350,7 @@ class VisitorChat {
     } catch (err) {
       if (epoch !== this.epoch) return;
       if (sessionGone(err)) {
-        this.dispatch({ type: 'ended' });
+        this.end();
         this.dispatch({ type: 'connection', connection: 'closed' });
         return;
       }
@@ -431,7 +437,7 @@ class VisitorChat {
 
   private fail(id: string, failure: SendFailure): void {
     this.dispatch({ type: 'send_failed', id, failure });
-    if (failure === 'session') this.dispatch({ type: 'ended' });
+    if (failure === 'session') this.end();
   }
 
   /**
@@ -458,7 +464,7 @@ class VisitorChat {
     if (gone) {
       // The chat ended. Whether they went through stays unknown, so nothing is said of them.
       this.lost.clear();
-      this.dispatch({ type: 'ended' });
+      this.end();
       return;
     }
     if (transcript === null) {
@@ -512,7 +518,7 @@ class VisitorChat {
       if (generation !== this.generation) return;
       if (sessionGone(err)) {
         this.set({ cancelling: null });
-        this.dispatch({ type: 'ended' });
+        this.end();
         return;
       }
       // Already resolved (the owner answered first): the stream brings that outcome.
@@ -549,7 +555,7 @@ class VisitorChat {
       if (generation !== this.generation) return;
       if (sessionGone(err)) {
         this.set({ verifyStatus: 'idle' });
-        this.dispatch({ type: 'ended' });
+        this.end();
         return;
       }
       if (err instanceof ApiError && err.status !== null && err.status >= 400 && err.status < 500) {
