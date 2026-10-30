@@ -24,7 +24,7 @@ A report has seven sections.
 - a refused verification check;
 - a breaker pause.
 
-A run with none of these was declined in conversation: Claude said no without the kernel having to stop anything.
+A run that broke a baseline rule is also listed as not stopped, with the oracle that caught it, even when the kernel stopped something else in it. A run with neither was declined in conversation: Claude said no without the kernel having to stop anything.
 
 **Legitimate-task suite.** The section covers:
 
