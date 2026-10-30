@@ -773,15 +773,17 @@ def test_every_printable_ascii_character_but_the_backslash_reaches_smoke_as_stor
 
 def test_a_keychain_item_whose_stored_form_cant_be_read_is_refused_before_any_step(deploy):
     """The second lookup (-g), which shows how the item is stored, can fail on its own, as when access
-    is denied the second time: deploy.sh then says so, before any step. The item is there, so only
-    the command that replaces it applies."""
+    is denied the second time: deploy.sh then says so, before any step. -w has just read the item, so
+    a locked or denied Keychain is the likely cause, not the item: the advice is to run deploy.sh
+    again and, if it repeats, to export DESK_PASSCODE for the run, never to replace a good item."""
     run = deploy(keychain_item="keychain-test-passcode", DESK_PASSCODE=None, DESK_DEPLOY_ACCOUNT=ACCOUNT,
                  KEYCHAIN_PROBE_DENIED="1")
     assert run.status == 2
     assert [call["argv"] for call in run.calls] == [KEYCHAIN_LOOKUP, KEYCHAIN_PROBE]
     assert ("the macOS Keychain item claude-desk-passcode couldn't be read a second time, to check how "
             "it's stored (is the login Keychain unlocked?)") in run.output
-    assert REPLACE_IT in run.output and STORE_IT not in run.output
+    assert "run deploy.sh again; if this repeats, export DESK_PASSCODE for this run" in run.output
+    assert "add-generic-password" not in run.output                   # neither storing nor replacing it
     assert "keychain-test-passcode" not in run.text()
 
 

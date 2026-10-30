@@ -150,9 +150,10 @@ if [[ -z $data_only ]]; then
     # the passcode too, so it's never shown and is unset once checked. The one answer accepted is that
     # last line alone, holding the value -w gave, and that value is itself checked byte by byte (a C
     # locale, in a subshell); any other answer can't be checked, so it's refused, though it says
-    # nothing against the item: the advice is to run again, then to export DESK_PASSCODE.
+    # nothing against the item. Nor does -g failing: -w has just read the item, so a locked or denied
+    # Keychain is the likely cause. For either, the advice is to run again, then to export DESK_PASSCODE.
     probe=$(security find-generic-password -s claude-desk-passcode -g 2>&1 >/dev/null) ||
-      no_passcode replace "the macOS Keychain item claude-desk-passcode couldn't be read a second time, to check how it's stored (is the login Keychain unlocked?)"
+      no_passcode retry "the macOS Keychain item claude-desk-passcode couldn't be read a second time, to check how it's stored (is the login Keychain unlocked?)"
     if [[ $probe == 'password: 0x'* ]] || (LC_ALL=C; [[ $passcode == *[![:print:]]* || $passcode == *\\* ]]); then
       no_passcode replace "the macOS Keychain item claude-desk-passcode has a character outside printable ASCII, or a backslash (it isn't shown)"
     fi
