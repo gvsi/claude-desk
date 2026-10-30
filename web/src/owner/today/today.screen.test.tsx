@@ -1099,6 +1099,25 @@ describe("Today's Demo inbox", () => {
     await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
   });
 
+  it('request_link_waits_for_the_sheet_to_close', async () => {
+    // An address that changes under the open sheet lands once the sheet has closed and handed focus
+    // back to its button, not while the page behind it is out of reach.
+    const held = seededHold();
+    const { screen, router } = await renderRoute(TODAY);
+    const card = heldCard(screen, SEEDED_REASON);
+    await expect.element(card).toBeVisible();
+    await inboxButton(screen).click();
+    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
+    await expect.element(sheet).toBeVisible();
+
+    await router.navigate(requestLink(held.decision_id), { flushSync: true });
+    await nextFrames();
+    expect(focusIsOn(card.element())).toBe(false);
+    await userEvent.keyboard('{Escape}');
+    await expect.element(sheet).not.toBeInTheDocument();
+    await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
+  });
+
   it('request_link_without_its_card_leaves_focus_alone', async () => {
     // A request with no card here (answered, or another Desk's): Today opens as it would without
     // the address, with no error, and focus stays where it was.
