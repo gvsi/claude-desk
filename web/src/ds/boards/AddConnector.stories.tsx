@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { expect, fn, waitFor, within } from 'storybook/test';
 
 import { ChangeReview } from '../components/ChangeReview/ChangeReview.tsx';
-import { ConnectorPicker } from '../components/ConnectorPicker/ConnectorPicker.tsx';
+import { ConnectorPicker, type ConnectorPickerProps } from '../components/ConnectorPicker/ConnectorPicker.tsx';
 import { ConnectorReview } from '../components/ConnectorReview/ConnectorReview.tsx';
 import { ConnectorSignIn } from '../components/ConnectorSignIn/ConnectorSignIn.tsx';
 import { PageHeader } from '../components/PageHeader/PageHeader.tsx';
@@ -11,7 +11,7 @@ import { Steps } from '../components/Steps/Steps.tsx';
 import { chen, rivera } from '../fixtures/index.ts';
 import { expectComputed } from '../test/expectComputed.ts';
 import { expectMockBesideExternalNames } from '../test/expectMockBadges.ts';
-import { BoardPage, ChenFrame, RiveraFrame, RulesPage, Trail } from './parts.tsx';
+import { BoardPage, ChenFrame, RiveraFrame, RulesPage, Trail, type RulesHub } from './parts.tsx';
 import { CONNECTORS_SPEC, SPEC, expectFooter, expectOutcomeMenus, expectOwnerFrame, expectTabOrder, one, some } from './spec.ts';
 
 const RIVERA_COUNTS = { conversations: { n: 2, label: '2 live conversations' }, safety: { n: 2, label: '2 blocked' } };
@@ -24,6 +24,32 @@ const { googleCalendar } = rivera;
 /** The steps of adding an app from outside, and a built-in connector. */
 const APP_STEPS = ['Choose', 'Sign in', 'Review tools', 'Confirm'];
 const BUILT_IN_STEPS = ['Choose', 'Review tools', 'Confirm'];
+
+/**
+ * Chen & Co. CPA as the signed picker board draws it: Bookings, Verification and Documents on its
+ * Rules page, so Payments, Quotes and Leads and callbacks are there to add.
+ */
+const CHEN_THREE_CONNECTORS: RulesHub = {
+  summary: '3 built-in connectors · Version 3, checked against the always-on rules',
+  sections: chen.connectors.sections.filter((section) => ['bookings', 'verification', 'documents'].includes(section.connector.id)),
+};
+
+/** The picker over that page, every app to connect: Google Calendar once it works, and Stripe. */
+const CHEN_PICKER_TO_CONNECT = {
+  business: chen.business.name,
+  builtIn: [
+    { connector: chen.connectors.views.payments, state: 'available' },
+    { connector: chen.connectors.views.quotes, state: 'available' },
+    { connector: chen.connectors.views.leads, state: 'available' },
+    { connector: chen.connectors.views.bookings, state: 'added' },
+    { connector: chen.connectors.views.documents, state: 'added' },
+  ],
+  external: chen.picker.external.map((item) =>
+    item.connector.id === 'google_calendar'
+      ? { connector: { ...item.connector, description: "Lets Claude see when you're busy, never what the event is." }, state: 'available' as const }
+      : item,
+  ),
+} satisfies Pick<ConnectorPickerProps, 'business' | 'builtIn' | 'external'>;
 
 const meta = {
   title: 'Boards/Add a connector',
@@ -95,24 +121,42 @@ export const ComingSoon: Story = {
 export const Picker: Story = {
   name: 'Add a connector',
   render: () => (
-    <RiveraFrame current="rules" counts={RIVERA_COUNTS}>
-      <RulesPage hub={rivera.connectors} chips={RIVERA_CHIPS} />
-      <ConnectorPicker {...googleCalendar.picker} onChoose={fn()} onClose={fn()} />
-    </RiveraFrame>
+    <ChenFrame current="rules" counts={CHEN_COUNTS}>
+      <RulesPage hub={CHEN_THREE_CONNECTORS} chips={CHEN_CHIPS} />
+      <ConnectorPicker {...CHEN_PICKER_TO_CONNECT} onChoose={fn()} onClose={fn()} />
+    </ChenFrame>
   ),
   parameters: {
     canvas: 'N-Conn-07-Add-Picker',
     canvasNote: [
-      'Google Calendar is catalog-only in the demo, so this shows the picker once it works: Rivera’s, the Desk the Google Calendar flow belongs to (N-Conn-08 to N-Conn-11), with every built-in connector added and Stripe connected.',
-      'The board draws Chen & Co. CPA’s picker, Verification listed as “Always on”; Verification is never listed, since every Desk has it.',
+      'Chen & Co. CPA’s picker as the board draws it: Payments, Quotes and Leads and callbacks to add, Bookings and Documents added, and Google Calendar and Stripe to connect. Google Calendar is catalog-only in the demo, so this shows the picker once it works.',
+      'Verification is never listed, since every Desk has it, where the board lists it as “Always on”; the picker has a Close button the board doesn’t draw; the connectors’ lines are the fixture’s.',
     ].join(' '),
   },
   play: async ({ canvasElement, userEvent }) => {
     const dialog = await expectPickerOver(canvasElement);
-    await expect(within(dialog).getAllByText('Added')).toHaveLength(5);
-    await expect(within(dialog).getByText('Connected')).toBeVisible();
+    await expect(within(dialog).getByText(/^Add what fits Chen & Co\. CPA\./)).toBeVisible();
+    // The signed state: Payments, Quotes and Leads and callbacks to add, Bookings and Documents
+    // added, Google Calendar and Stripe to connect; Verification never listed.
+    const builtIn = within(dialog).getByRole('list', { name: 'Claude Desk' });
+    const rows = within(builtIn).getAllByRole('listitem');
+    await expect(rows.map((row) => row.querySelector('.cd-connector-name__name')?.textContent)).toEqual([
+      'Payments',
+      'Quotes',
+      'Leads and callbacks',
+      'Bookings',
+      'Documents',
+    ]);
+    await expect(within(dialog).getAllByText('Added')).toHaveLength(2);
+    await expect(within(dialog).queryByText('Coming soon in this demo')).toBeNull();
+    await expect(within(dialog).queryByText(chen.picker.note)).toBeNull();
+    // focus_order_is_logical: only the dialog's controls, from "Add Payments" to Close.
     await expectTabStaysIn(dialog, userEvent, [
+      within(dialog).getByRole('button', { name: 'Add Payments' }),
+      within(dialog).getByRole('button', { name: 'Add Quotes' }),
+      within(dialog).getByRole('button', { name: 'Add Leads and callbacks' }),
       within(dialog).getByRole('button', { name: 'Connect Google Calendar' }),
+      within(dialog).getByRole('button', { name: 'Connect Stripe' }),
       within(dialog).getByRole('button', { name: 'Close' }),
     ]);
   },
