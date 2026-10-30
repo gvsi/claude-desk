@@ -3,9 +3,13 @@
    the end, and the view at the right. Under it, the list (the attempts with their filters, or
    every entry of the record) and, from 1280 px, the open attempt or entry in a 360 px column
    beside it; under that width the column stacks under the list. A failed read's line sits first,
-   over what was read before. */
+   over what was read before. Positioned, so the visually hidden words in each attempt's checkpoint
+   line sit inside it: with no positioned ancestor they would sit against the window, and below the
+   wide layout, deep in the scrolled page, they would stretch the window, so picking an attempt
+   would scroll the window and push the app shell's bars off the top. */
 
 .cd-safety {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--space-20);

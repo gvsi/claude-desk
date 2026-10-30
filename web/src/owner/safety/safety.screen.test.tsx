@@ -4,6 +4,7 @@
  * each saying where it came from and when it happened.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { page } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import type { LedgerEntry, LedgerEvent, LedgerPage } from '../../api/contracts.ts';
@@ -12,7 +13,7 @@ import { formatWhen } from '../../lib/format.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
-import { expectScreenBasics } from '../../test/screen.ts';
+import { expectNoWindowScroll, expectScreenBasics } from '../../test/screen.ts';
 
 const DESK = `/app/${RIVERA.deskId}`;
 const LA = 'America/Los_Angeles';
@@ -633,13 +634,18 @@ describe('Safety', () => {
     await expect.poll(() => document.activeElement?.contains(open.element()) ?? false).toBe(true);
 
     // On a phone the attempt opens under the list, mostly past the window's edge: picking a row
-    // also scrolls it into view, all of it, or from its top when it is taller than the window.
+    // also scrolls it into view, all of it, or from its top when it is taller than the window. A
+    // short phone window, so the list's rows reach past its edge too.
     const phone = await renderRoute(SAFETY, { viewport: 'phone' });
+    await page.viewport(390, 600);
+    await expect.poll(() => window.innerHeight).toBe(600);
     const under = detail(phone.screen);
     await expect.element(under.getByText('This reply was never shown.', { exact: true })).toBeInTheDocument();
     const main = document.querySelector('.cd-app-shell__main');
     if (!main) throw new Error('the page area');
     expect(box(under.element()).bottom).toBeGreaterThan(box(main).bottom);
+    // Only the page area scrolls, never the window, so the shell's bars stay in place.
+    expectNoWindowScroll();
     await phone.screen.getByRole('link', { name: held }).click();
     await expect.element(under.getByText('Held for you', { exact: true })).toBeInTheDocument();
     await expect.poll(() => document.activeElement?.contains(under.element()) ?? false).toBe(true);
@@ -651,6 +657,8 @@ describe('Safety', () => {
         return main.scrollTop > 0 && opened.top >= area.top && (opened.bottom <= area.bottom || opened.top <= area.top + margin + 1);
       })
       .toBe(true);
+    expectNoWindowScroll();
+    expect(window.scrollY).toBe(0);
   });
 
   it('chain_key_sits_at_the_end', async () => {
