@@ -10,7 +10,8 @@ alerts or ledger checkpoints. No code reaches visitor text, Claude's tool result
 
 Codes come only from a session's own Demo inbox, read where the case plays that session's own
 verification ("Demo limit: the Demo inbox"). The cases never print a code: a failure names the
-text or entry by label, with any code shown as `<code>`.
+text or entry by label, with any code shown as `<code>`. An entry's recipient is named only as
+masked, unmasked or owner (`recipient`), and a contact on record is never printed.
 """
 
 import json
@@ -192,8 +193,35 @@ async def owner_inbox(k: KernelHarness, desk: GoldenDesk) -> list[DemoInboxEntry
 
 
 def addressed(entries: list[DemoInboxEntry]) -> list[tuple[str, str]]:
-    """Each entry's kind and recipient, never its body, so a failure can show them."""
+    """Each entry's kind and recipient, never its body: what the cases compare. A failure shows
+    them only through `recipients`."""
     return [(entry.kind, entry.to) for entry in entries]
+
+
+MASK = "\u2022"   # what Plan 01a's `mask_contact` puts in place of a contact's hidden part
+
+
+def recipient(to: str) -> str:
+    """An entry's recipient as a failure names it: "owner", "masked" (it holds `mask_contact`'s
+    mask) or "unmasked", never the address, so a kernel that addressed an entry to a raw contact
+    can't make a failure print that contact."""
+    if to == "owner":
+        return "owner"
+    return "masked" if MASK in to else "unmasked"
+
+
+def recipients(pairs: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """`addressed` pairs as a failure shows them: each kind with its `recipient`."""
+    return [(kind, recipient(to)) for kind, to in pairs]
+
+
+def assert_addressed(pairs: list[tuple[str, str]], expected: list[tuple[str, str]], failure: str) -> None:
+    """`pairs` (from `addressed`) are exactly `expected`, each recipient compared as its address.
+    `failure` says what the pairs are, with `{}` where they go, and shows them only as `recipients`
+    names them; pytest is given only whether they matched, so its explanation can't print an
+    address either."""
+    same = pairs == expected
+    assert same, failure.format(recipients(pairs))
 
 
 async def code_for(k: KernelHarness, caller: Caller, notice: InboxNotice) -> str:
@@ -206,7 +234,8 @@ async def code_for(k: KernelHarness, caller: Caller, notice: InboxNotice) -> str
     count, wanted = len(named), notice.to
     assert count == 1, f"the session's Demo inbox has {count} entries with notice {notice.entry_id}'s id"
     to = named[0].to
-    assert to == wanted, f"notice {notice.entry_id} went to {wanted}, but its entry to {to}"
+    same, named_to = to == wanted, (recipient(wanted), recipient(to))
+    assert same, f"notice {notice.entry_id} and its entry name different recipients: {' and '.join(named_to)}"
     return code_in(named[0])
 
 
@@ -226,7 +255,9 @@ async def masked_on_record(k: KernelHarness, records: Any, desk: GoldenDesk) -> 
     for name, person_id in desk.people.items():
         masked = rows.get(person_id)
         hidden = isinstance(masked, str) and CONTACTS[name] not in masked
-        assert hidden, f"kernel_ro.people shows {name}'s contact as {masked!r}, not masked"
+        problem = ("is missing" if masked is None else
+                   "holds the raw contact" if isinstance(masked, str) else "isn't text")
+        assert hidden, f"kernel_ro.people's masked contact for {name} {problem}"
     return rows
 
 
@@ -249,7 +280,7 @@ async def public_contact(k: KernelHarness, records: Any, desk: GoldenDesk) -> st
               if fact["desk_id"] == desk.desk_id and fact["kind"] == "charter" and "public" in fact["readers"]
               for claim in fact["claims"] if claim["key"] == "contact"]
     count = len(values)
-    assert count == 1, f"the Desk's public charter has {count} contacts: {values}"
+    assert count == 1, f"the Desk's public charter has {count} contacts"
     return values[0]
 
 
@@ -305,15 +336,15 @@ async def test_code_goes_only_to_contact_on_record(k: KernelHarness, records):
     entries = await own_inbox(k, visitor, expect=Expect(fields={"0.kind": "verification_code", "0.to": masked}))
     copy_entries = await owner_inbox(k, desk)
     if k.is_real:
-        shown, ids, notice_id = addressed(entries), [entry.entry_id for entry in entries], started.inbox[0].entry_id
-        assert shown == [("verification_code", masked)], f"the session's Demo inbox holds {shown}"
+        ids, notice_id = [entry.entry_id for entry in entries], started.inbox[0].entry_id
+        assert_addressed(addressed(entries), [("verification_code", masked)], "the session's Demo inbox holds {}")
         assert ids == [notice_id], f"the session's entry {ids} isn't the one its notice names, {notice_id}"
         code_in(entries[0])   # one six-digit code
         misaddressed = [(kind, to) for kind, to in addressed(copy_entries)
                         if (to not in on_record.values() if kind == "verification_code" else to != "owner")]
-        assert misaddressed == [], f"entries to neither a masked contact on record nor the owner: {misaddressed}"
+        assert_addressed(misaddressed, [], "entries to neither a masked contact on record nor the owner: {}")
         new = addressed([entry for entry in copy_entries if entry.entry_id not in before])
-        assert new == [("verification_code", masked)], f"Dana's start added {new} to the copy's Demo inbox"
+        assert_addressed(new, [("verification_code", masked)], "Dana's start added {} to the copy's Demo inbox")
 
 
 @pytest.mark.requires("01b")
@@ -334,14 +365,14 @@ async def test_unknown_contact_gets_the_same_message_and_a_lead_note(k: KernelHa
     stranger_entries = await own_inbox(k, stranger)
     copy_entries = await owner_inbox(k, desk)
     if k.is_real:
-        shown = addressed(stranger_entries)
-        assert shown == [], f"the stranger's Demo inbox holds {shown}"
+        assert_addressed(addressed(stranger_entries), [], "the stranger's Demo inbox holds {}")
         new = addressed([entry for entry in copy_entries if entry.entry_id not in before])
-        assert new == [], f"a start for a contact not on record added {new} to the copy's Demo inbox"
+        assert_addressed(new, [], "a start for a contact not on record added {} to the copy's Demo inbox")
         notes = [row["note"] for row in await records.leads(desk.copy.copy_id)
                  if row["lead_id"] not in leads_before and row["desk_id"] == desk.desk_id]
-        noted = len(notes) == 1 and STRANGER in notes[0]
-        assert noted, f"the start left these new lead notes, not one holding the typed contact: {notes}"
+        noted, holding = len(notes) == 1 and STRANGER in notes[0], sum(STRANGER in note for note in notes)
+        assert noted, (f"the start left {len(notes)} new lead notes ({holding} holding the typed contact), "
+                       "not one that holds it")
 
 
 # Whose inbox
@@ -358,9 +389,8 @@ async def test_session_b_cannot_read_session_as_entries(k: KernelHarness, record
     a_entries = await own_inbox(k, a)
     b_entries = await own_inbox(k, b)
     if k.is_real:
-        a_shown, b_shown = addressed(a_entries), addressed(b_entries)
-        assert a_shown == [("verification_code", masked)], f"A's Demo inbox holds {a_shown}"
-        assert b_shown == [], f"B's Demo inbox holds {b_shown}"
+        assert_addressed(addressed(a_entries), [("verification_code", masked)], "A's Demo inbox holds {}")
+        assert_addressed(addressed(b_entries), [], "B's Demo inbox holds {}")
     tokens = {**token_secrets(session_token(a), "A's"), **token_secrets(session_token(b), "B's")}
     async with assert_ledgered(records, desk.copy, desk.desk_id, "auth", session_id=a.state.session_id) as new:
         await k.call("GET /demo_inbox?session_id=", query={"session_id": a.state.session_id}, auth=b.auth,
@@ -382,12 +412,13 @@ async def test_owner_alerts_never_reach_a_visitor_inbox(k: KernelHarness, fake: 
     owner_kinds = {kind for kind, _ in addressed(await owner_inbox(k, desk))}
     if k.is_real:
         assert {"alert", "head_checkpoint"} <= owner_kinds, f"the owner's Demo inbox holds only {sorted(owner_kinds)}"
-    for typed in ("owner", await public_contact(k, records, desk)):
+    typed_in = (("owner", "'owner'"), (await public_contact(k, records, desk), "the business's public contact"))
+    for typed, what in typed_in:
         visitor = await open_caller(k, desk, "visitor")
         await start(k, visitor, typed, expect=NOTHING_SENT)
         shown = addressed(await own_inbox(k, visitor))
         if k.is_real:
-            assert shown == [], f"a visitor who typed {typed!r} reads {shown} in their Demo inbox"
+            assert_addressed(shown, [], f"a visitor who typed {what} reads {{}} in their Demo inbox")
 
 
 # Limits
@@ -412,10 +443,10 @@ async def test_sixth_challenge_in_an_hour_refused_and_ledgered(k: KernelHarness,
     sixth_entries = await own_inbox(k, sixth)
     copy_entries = await owner_inbox(k, desk)
     if k.is_real:
-        shown = addressed(sixth_entries)
-        assert shown == [], f"the sixth session's Demo inbox holds {shown}"
+        assert_addressed(addressed(sixth_entries), [], "the sixth session's Demo inbox holds {}")
         new = addressed([entry for entry in copy_entries if entry.entry_id not in before])
-        assert new == [("alert", "owner")], f"the sixth start added {new} to the copy's Demo inbox, not an owner alert"
+        assert_addressed(new, [("alert", "owner")],
+                         "the sixth start added {} to the copy's Demo inbox, not an owner alert")
     k.clock.advance(HOUR_S + 1)
     await check(k, sixth, await started_code(k, sixth, masked), expect=verified_as(sixth))
 
@@ -508,11 +539,10 @@ async def test_eleventh_failed_attempt_locks_the_contact_and_alerts_the_owner(k:
     fresh_entries = await own_inbox(k, fresh)
     copy_entries = await owner_inbox(k, desk)
     if k.is_real:
-        shown = addressed(fresh_entries)
-        assert shown == [], f"the fresh session's Demo inbox holds {shown}"
+        assert_addressed(addressed(fresh_entries), [], "the fresh session's Demo inbox holds {}")
         new = sorted(addressed([entry for entry in copy_entries if entry.entry_id not in before]))
         sent = sorted([("alert", "owner"), *[("verification_code", masked)] * len(messages)])
-        assert new == sent, f"the copy's Demo inbox gained {new}: one code per challenge and one owner alert"
+        assert_addressed(new, sent, "the copy's Demo inbox gained {}: one code per challenge and one owner alert")
 
 
 # One person per session, simulated
@@ -541,10 +571,10 @@ async def test_second_person_in_one_session_refused(k: KernelHarness, records):
     dana_entries = await own_inbox(k, dana)
     copy_entries = await owner_inbox(k, desk)
     if k.is_real:
-        to_bob = [shown for shown in addressed(dana_entries) if shown[1] == bob_masked]
-        assert to_bob == [], f"Dana's session reads {to_bob}"
+        to_bob = [pair for pair in addressed(dana_entries) if pair[1] == bob_masked]
+        assert_addressed(to_bob, [], "Dana's session reads {} addressed to Bob's masked contact")
         new = addressed([entry for entry in copy_entries if entry.entry_id not in before])
-        assert new == [], f"the starts from Dana's verified session added {new} to the copy's Demo inbox"
+        assert_addressed(new, [], "the starts from Dana's verified session added {} to the copy's Demo inbox")
     await check(k, dana, STUB_CODE, expect=verified_as(dana))   # any code
     await k.call("GET /whoami", auth=dana.auth, expect=Expect(fields={
         "session.session_id": dana.state.session_id, "session.verified": True, "session.assurance": "demo_code",
