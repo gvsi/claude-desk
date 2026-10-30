@@ -26,10 +26,24 @@
   padding: var(--space-16) var(--space-20) 0;
 }
 
+/* A page that centers the content column itself (Settings): a notice above it sits in that column,
+   at the page's gutters, and the page's own top padding keeps it clear of the title. */
+.cd-owner-layout--centered > .cd-owner-layout__notice {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: calc(var(--size-content) + 2 * var(--space-40));
+  margin: 0 auto;
+  padding: var(--space-24) var(--space-40) 0;
+}
+
 @media (max-width: 767.98px) {
   .cd-owner-layout--fill > .cd-owner-layout__notice {
     padding-right: var(--space-16);
     padding-left: var(--space-16);
+  }
+
+  .cd-owner-layout--centered > .cd-owner-layout__notice {
+    padding-top: var(--space-16);
   }
 }
 

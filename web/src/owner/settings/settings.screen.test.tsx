@@ -1,0 +1,424 @@
+/**
+ * Settings in a real browser against the mock API: its sections, with no connectors (they have
+ * their own tab); General's details from the copy's Desks, its Answering switch (the sidebar's,
+ * the same control) and deleting a Desk; Notifications and Billing as vision; each as its signed
+ * board draws it, on a laptop and on a phone.
+ */
+import { afterEach, describe, expect, it, onTestFinished } from 'vitest';
+import { userEvent } from 'vitest/browser';
+import type { RenderResult } from 'vitest-browser-react';
+
+import { SPEC, expectFooterAtFoot, one } from '../../ds/boards/spec.ts';
+import { expectComputed } from '../../ds/test/expectComputed.ts';
+import { formatHours } from '../../lib/format.ts';
+import { RIVERA, RIVERA_HOURS } from '../../mocks/seed.ts';
+import { mockStore } from '../../mocks/store.ts';
+import { expectOwnerBoard } from '../../test/boards.ts';
+import { renderRoute } from '../../test/renderRoute.tsx';
+import { expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.ts';
+
+const DESK = `/app/${RIVERA.deskId}`;
+const SETTINGS = `${DESK}/settings`;
+const GENERAL = `${SETTINGS}/general`;
+const NOTIFICATIONS = `${SETTINGS}/notifications`;
+const BILLING = `${SETTINGS}/billing`;
+
+/** What Answering on means, under General's switch (owner decision, 2026-10-30: the short line everywhere). */
+const ANSWERING_LINE = 'Claude answers under your rules.';
+
+/** What deleting a Desk does, beside its button and in the dialog that asks first. */
+const DELETE_LINE = 'Its public link stops working and its chats close. Its safety record is kept.';
+
+/** The owner's line for a request the server failed. */
+const UNAVAILABLE = 'Something went wrong on our side. Try again in a moment.';
+
+/** Notifications' lead, under its vision note. */
+const NOTIFICATIONS_LEAD = 'Held requests and paused chats reach your Demo inbox right away. Other alerts wait for your briefing.';
+
+/** The alerts set for a plumber, as the board writes them: when, which, and how they arrive. */
+const PLUMBER = [
+  ['Right away', 'Held requests, paused chats and emergencies', 'Demo inbox'],
+  ['In your briefing', 'New leads, bookings and payments', 'Each morning at 7:00 am'],
+  ['Not at all', 'Messages Claude answered on its own'],
+];
+
+/** The sections Settings ships with, in order. Knowledge and Channels join when their pages do. */
+const SECTIONS = ['General', 'Notifications', 'Billing'];
+
+/** The requests a route got, by key. */
+const requests = (key: string) => mockStore.requests.filter((r) => r.key === key);
+
+function main(screen: RenderResult) {
+  return screen.getByRole('main');
+}
+
+/** Settings' own navigation. */
+function subNav(screen: RenderResult) {
+  return main(screen).getByRole('navigation', { name: 'Settings' });
+}
+
+/** The section SubNav marks as the page the owner is on. */
+function currentSection(screen: RenderResult): (string | null)[] {
+  return subNav(screen)
+    .getByRole('link')
+    .elements()
+    .filter((link) => link.getAttribute('aria-current') === 'page')
+    .map((link) => link.textContent);
+}
+
+afterEach(() => {
+  localStorage.clear();
+});
+
+describe('Settings', () => {
+  it('settings_sub_nav_without_connectors', async () => {
+    // Settings opens on General, under the sidebar's Settings row.
+    const { screen, router } = await renderRoute(SETTINGS);
+    await expect.element(main(screen).getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible();
+    await expect.poll(() => router.state.location.pathname).toBe(GENERAL);
+    const sidebar = screen.getByRole('complementary', { name: 'Claude Desk' });
+    await expect.element(sidebar.getByRole('link', { name: /^Settings/ })).toHaveAttribute('aria-current', 'page');
+
+    // Its sections in order, General current; nothing about connectors, which have their own tab.
+    await expect.poll(() => subNav(screen).getByRole('link').elements().map((link) => link.textContent)).toEqual(SECTIONS);
+    expect(currentSection(screen)).toEqual(['General']);
+    expect(main(screen).element().textContent).not.toMatch(/Integrations|Connectors/);
+
+    // Each section at its own address, marked as the current one.
+    for (const [name, path] of [
+      ['Notifications', NOTIFICATIONS],
+      ['Billing', BILLING],
+      ['General', GENERAL],
+    ] as const) {
+      await subNav(screen).getByRole('link', { name }).click();
+      await expect.poll(() => router.state.location.pathname).toBe(path);
+      await expect.poll(() => currentSection(screen)).toEqual([name]);
+      expect(main(screen).element().textContent).not.toMatch(/Integrations|Connectors/);
+    }
+    expect(requests('setAnswering')).toEqual([]);
+
+    // Integrations, and anything under it, isn't a page.
+    for (const path of [`${SETTINGS}/integrations`, `${SETTINGS}/integrations/stripe`]) {
+      const missing = await renderRoute(path);
+      await expect.element(missing.screen.getByRole('main', { name: "This page doesn't exist" })).toBeVisible();
+    }
+  });
+
+  it('general_shows_the_business_details', async () => {
+    const { screen } = await renderRoute(GENERAL);
+    const business = main(screen).getByRole('region', { name: 'Your business' });
+    await expect.element(business).toBeVisible();
+
+    // Each label over its value, from the copy's Desks: the business, this Desk, the name customers
+    // see, the time zone as the owner reads it, and the Desk's hours.
+    const terms = business.getByRole('term').elements().map((term) => term.textContent);
+    const values = business.getByRole('definition').elements().map((value) => value.textContent);
+    expect(terms.map((term, index) => [term, values[index]])).toEqual([
+      ['Business', 'Rivera Plumbing'],
+      ['This Desk', 'Main line'],
+      ['Customers see you as', 'Maria Rivera'],
+      ['Time zone', 'Pacific Time (Los Angeles)'],
+      ['Hours', RIVERA_HOURS.map(formatHours).join('; ')],
+    ]);
+    expect(values.at(-1)).toBe('Mon to Fri, 8:00 am to 6:00 pm; Sat, 9:00 am to 1:00 pm');
+    // Read-only: nothing in them can be changed here.
+    expect(business.getByRole('button').elements()).toEqual([]);
+    expect(business.getByRole('link').elements()).toEqual([]);
+
+    // Another Desk's details are its own: its name and its hours.
+    const emergencies = await renderRoute(`/app/${RIVERA.emergenciesDeskId}/settings/general`, { seed: 'rivera_two_desks' });
+    const other = main(emergencies.screen).getByRole('region', { name: 'Your business' });
+    await expect.element(other.getByText('Emergencies', { exact: true })).toBeVisible();
+    await expect.element(other.getByText('Every day, all day', { exact: true })).toBeVisible();
+  });
+
+  it('answering_is_one_switch', async () => {
+    const { screen } = await renderRoute(GENERAL);
+    const sidebar = screen.getByRole('complementary', { name: 'Claude Desk' }).getByRole('switch', { name: 'Answering' });
+    const page = main(screen).getByRole('switch', { name: 'Answering' });
+    const saved = () => mockStore.world.desk(RIVERA.deskId)?.summary.answering;
+    await expect.element(page).toHaveAttribute('aria-checked', 'true');
+    await expect.element(page).toHaveAccessibleDescription(ANSWERING_LINE);
+    await expect.element(main(screen).getByRole('region', { name: 'Answering' })).toBeVisible();
+
+    // General's switch sends one change, and the sidebar's follows it.
+    await page.click();
+    await expect.element(page).toHaveAttribute('aria-checked', 'false');
+    await expect.element(sidebar).toHaveAttribute('aria-checked', 'false');
+    await expect.poll(() => saved()).toBe(false);
+    expect(requests('setAnswering').map((r) => r.body)).toEqual([{ on: false }]);
+
+    // The sidebar's sends one too, and General's follows it.
+    await sidebar.click();
+    await expect.element(page).toHaveAttribute('aria-checked', 'true');
+    await expect.poll(() => saved()).toBe(true);
+    expect(requests('setAnswering').map((r) => r.body)).toEqual([{ on: false }, { on: true }]);
+
+    // A change that didn't save puts both back, with the sidebar's line.
+    mockStore.inject({ route: 'setAnswering', status: 500, delayMs: 400 });
+    await page.click();
+    await expect.element(sidebar).toHaveAttribute('aria-checked', 'false');
+    await expect.element(screen.getByRole('alert')).toHaveTextContent("That didn't save, so Answering is still on.");
+    await expect.element(page).toHaveAttribute('aria-checked', 'true');
+    await expect.element(sidebar).toHaveAttribute('aria-checked', 'true');
+    expect(requests('setAnswering')).toHaveLength(3);
+    expect(saved()).toBe(true);
+  });
+
+  it('delete_desk_confirms', async () => {
+    const { screen, router } = await renderRoute(GENERAL, { seed: 'rivera_two_desks' });
+    const section = main(screen).getByRole('region', { name: 'Delete this Desk' });
+    await expect.element(section.getByText(DELETE_LINE, { exact: true })).toBeVisible();
+    const remove = section.getByRole('button', { name: 'Delete this Desk' });
+
+    // It asks first, with "Keep it" focused; Escape keeps the Desk, and focus goes back.
+    await remove.click();
+    const dialog = screen.getByRole('dialog', { name: 'Delete Main line?' });
+    await expect.element(dialog).toHaveAccessibleDescription(DELETE_LINE);
+    await expect.element(dialog.getByRole('button', { name: 'Keep it' })).toHaveFocus();
+    await userEvent.keyboard('{Escape}');
+    await expect.element(screen.getByRole('dialog')).not.toBeInTheDocument();
+    await expect.element(remove).toHaveFocus();
+
+    // "Keep it" too.
+    await remove.click();
+    await screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Keep it' }).click();
+    await expect.element(screen.getByRole('dialog')).not.toBeInTheDocument();
+    expect(requests('deleteDesk')).toEqual([]);
+
+    // A delete the server failed says so and changes nothing: still on Settings, the Desk still there.
+    mockStore.inject({ route: 'deleteDesk', status: 500 });
+    await remove.click();
+    await screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
+    await expect.element(section.getByRole('alert')).toHaveTextContent(UNAVAILABLE);
+    await expect.element(screen.getByRole('dialog')).not.toBeInTheDocument();
+    expect(router.state.location.pathname).toBe(GENERAL);
+    expect(mockStore.world.desk(RIVERA.deskId)).toBeDefined();
+    expect(requests('deleteDesk')).toHaveLength(1);
+
+    // Confirmed: one delete, answered 204, then the other Desk's Today, with no "not found" on the way.
+    const sawNotFound = watchFor("This page doesn't exist");
+    await remove.click();
+    await screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
+    await expect.poll(() => router.state.location.pathname).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
+    expect(requests('deleteDesk').map((r) => r.path)).toEqual([0, 1].map(() => `/api/owner/desks/${RIVERA.deskId}`));
+    expect(mockStore.world.desk(RIVERA.deskId)).toBeUndefined();
+    await expect.element(screen.getByRole('button', { name: /^Switch Desk/ })).not.toBeInTheDocument();
+    await expect.element(screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
+    expect(sawNotFound()).toBe(false);
+
+    // A delete whose answer was lost but which went through is never reported as failed: the copy
+    // is read again, and without the Desk the owner moves on as from a 204.
+    const lost = await renderRoute(GENERAL, { seed: 'rivera_two_desks' });
+    mockStore.inject({ route: 'deleteDesk', status: 'network', afterCommit: true });
+    await main(lost.screen).getByRole('button', { name: 'Delete this Desk' }).click();
+    await lost.screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
+    await expect.poll(() => lost.router.state.location.pathname).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
+    expect(lost.screen.getByText(UNAVAILABLE).elements()).toEqual([]);
+
+    // The business's last Desk: deleting it opens setup, to make another.
+    const last = await renderRoute(GENERAL, { seed: 'rivera' });
+    await main(last.screen).getByRole('button', { name: 'Delete this Desk' }).click();
+    await last.screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
+    await expect.poll(() => last.router.state.location.pathname).toBe('/app/setup');
+    expect(requests('deleteDesk')).toHaveLength(1);
+  });
+});
+
+describe('Settings against its boards', () => {
+  it('settings_match_their_boards', async () => {
+    // General as N-Run2-Settings-General draws it, at 1440 px: the page fills the main area and
+    // centers its column, and Tab goes through SubNav, then Answering, then Delete this Desk.
+    const { screen } = await renderRoute(GENERAL);
+    const business = main(screen).getByRole('region', { name: 'Your business' });
+    await expect.element(business).toBeVisible();
+    const answering = main(screen).getByRole('switch', { name: 'Answering' });
+    const remove = main(screen).getByRole('button', { name: 'Delete this Desk' });
+    await expectOwnerBoard(screen.container, {
+      current: 'Settings',
+      fill: true,
+      tabStops: [...links(screen), answering.element() as HTMLElement, remove.element() as HTMLElement],
+    });
+    let content = await expectSettingsColumns(screen, 'General');
+
+    // The details 8 px under their heading, as wide as the column, with no Change; Answering in its
+    // own card 20 px under them; Delete this Desk's heading 28 px under that, its neutral button at
+    // the column's right.
+    const card = one(business.element(), '.cd-card');
+    expect(round(top(card) - bottom(one(business.element(), 'h2')))).toBe(8);
+    expect(round(card.getBoundingClientRect().width)).toBe(720);
+    const answeringCard = main(screen).getByRole('region', { name: 'Answering' }).element();
+    expectComputed(answeringCard, SPEC.card);
+    expect(round(top(answeringCard) - bottom(card))).toBe(20);
+    const removal = main(screen).getByRole('region', { name: 'Delete this Desk' }).element();
+    expect(round(top(one(removal, 'h2')) - bottom(answeringCard))).toBe(28);
+    expectComputed(remove.element(), SPEC.secondaryMain);
+    expect(round(remove.element().getBoundingClientRect().right)).toBe(round(content.getBoundingClientRect().right));
+    await expectFooterAtFoot(screen.container);
+
+    // Its dialog is the general one (owner decision, 2026-10-30): no refused dot, Delete Desk the
+    // neutral primary beside "Keep it".
+    await remove.click();
+    const dialog = screen.getByRole('dialog', { name: 'Delete Main line?' });
+    await expect.element(dialog).toBeVisible();
+    expect(dialog.element().querySelector('.cd-status-dot')).toBeNull();
+    expectComputed(dialog.getByRole('button', { name: 'Delete Desk' }).element(), SPEC.primary);
+    await userEvent.keyboard('{Escape}');
+    await expect.element(screen.getByRole('dialog')).not.toBeInTheDocument();
+
+    // Notifications as N-Run2-Settings-Notifications draws it: the vision note, the lead 20 px
+    // under it, then the alerts set for a plumber 20 px under that, read-only.
+    await subNav(screen).getByRole('link', { name: 'Notifications' }).click();
+    const alerts = main(screen).getByRole('region', { name: 'Set for a plumber' });
+    await expect.element(alerts).toBeVisible();
+    await expectOwnerBoard(screen.container, { current: 'Settings', fill: true });
+    content = await expectSettingsColumns(screen, 'Notifications');
+    const vision = expectVisionNote(content, 'In this prototype, alerts reach your Demo inbox.');
+    const lead = main(screen).getByText(NOTIFICATIONS_LEAD, { exact: true }).element();
+    expectComputed(lead, { fontSize: '14px', color: 'rgba(250, 249, 245, 0.92)' });
+    expect(round(top(lead) - bottom(vision))).toBe(20);
+    expect(round(top(alerts.element()) - bottom(lead))).toBe(20);
+    await expect.element(alerts.getByText('From your business type', { exact: true })).toBeVisible();
+    const rows = alerts.getByRole('list', { name: 'Set for a plumber' }).getByRole('listitem').elements();
+    expect(rows.map((row) => row.textContent)).toEqual(PLUMBER.map((alert) => alert.join('')));
+    expect(round(top(one(alerts.element(), '.cd-card')) - bottom(one(alerts.element(), 'h2')))).toBe(8);
+    expect(content.querySelectorAll('button, a, input')).toHaveLength(0);
+    await expectFooterAtFoot(screen.container);
+
+    // Billing as N-Run2-Settings-Billing draws it: the vision note, then the plan 20 px under it,
+    // each of its lines 8 px under the one before.
+    await subNav(screen).getByRole('link', { name: 'Billing' }).click();
+    const plan = main(screen).getByRole('region', { name: 'Plan' });
+    await expect.element(plan).toBeVisible();
+    await expectOwnerBoard(screen.container, { current: 'Settings', fill: true });
+    content = await expectSettingsColumns(screen, 'Billing');
+    const note = expectVisionNote(content, 'Nothing is billed in this prototype.');
+    expect(round(top(plan.element()) - bottom(note))).toBe(20);
+    const name = plan.getByRole('heading', { level: 2, name: 'Plan' }).element();
+    expectComputed(name, { fontSize: '15px', lineHeight: '20px', fontWeight: '520' });
+    const offer = plan.getByText('One business, up to three Desks.', { exact: true }).element();
+    const later = plan.getByText('Billing would live here, with usage per Desk.', { exact: true }).element();
+    expectComputed(offer, { fontSize: '14px', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(later, { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
+    expect(round(top(offer) - bottom(name))).toBe(8);
+    expect(round(top(later) - bottom(offer))).toBe(8);
+    expect(content.querySelectorAll('button, a, input')).toHaveLength(0);
+    await expectFooterAtFoot(screen.container);
+
+    // On a phone, as N-Run2-Settings-Phone draws it: the title 16 px under the top bar, SubNav as one
+    // line across the page, and each part 16 px under the one before, down to the footer.
+    const phone = await renderRoute(GENERAL, { viewport: 'phone' });
+    const title = main(phone.screen).getByRole('heading', { level: 1, name: 'Settings' });
+    await expect.element(title).toBeVisible();
+    expect(round(top(title.element()) - bottom(one(phone.screen.container, '.cd-app-shell__topbar')))).toBe(16);
+    const nav = subNav(phone.screen).element();
+    const [first] = links(phone.screen);
+    expect(round(top(first as HTMLElement) - bottom(title.element()))).toBe(16);
+    expect([round(nav.getBoundingClientRect().left), round(nav.getBoundingClientRect().width)]).toEqual([0, 390]);
+    expect(round((first as HTMLElement).getBoundingClientRect().left)).toBe(16);
+    const details = main(phone.screen).getByRole('region', { name: 'Your business' }).element();
+    expect(round(top(details) - bottom(nav))).toBe(16);
+    const detailCard = one(details, '.cd-card');
+    expect([round(detailCard.getBoundingClientRect().left), round(detailCard.getBoundingClientRect().width)]).toEqual([16, 358]);
+    const switchCard = main(phone.screen).getByRole('region', { name: 'Answering' }).element();
+    expect(round(top(switchCard) - bottom(detailCard))).toBe(16);
+    const deleting = main(phone.screen).getByRole('region', { name: 'Delete this Desk' });
+    const heading = deleting.getByRole('heading', { name: 'Delete this Desk' }).element();
+    const line = deleting.getByText(DELETE_LINE, { exact: true }).element();
+    const button = deleting.getByRole('button', { name: 'Delete this Desk' }).element();
+    expect(round(top(heading) - bottom(switchCard))).toBe(16);
+    expect(round(top(line) - bottom(heading))).toBe(8);
+    expect(round(top(button) - bottom(line))).toBe(8);
+    expect(round(button.getBoundingClientRect().left)).toBe(16);
+    expect(round(top(one(phone.screen.container, '[data-ds="concept-footer"]')) - bottom(button))).toBe(16);
+    expectNoHorizontalScroll();
+  });
+
+  it('settings_have_no_jargon', async () => {
+    // Each section: one footer, clean copy, no axe violations and no technical words.
+    const { screen } = await renderRoute(GENERAL);
+    await expect.element(main(screen).getByRole('region', { name: 'Your business' })).toBeVisible();
+    await expectScreenBasics(screen.container, { owner: true });
+    for (const [name, region] of [
+      ['Notifications', 'Set for a plumber'],
+      ['Billing', 'Plan'],
+    ] as const) {
+      await subNav(screen).getByRole('link', { name }).click();
+      await expect.element(main(screen).getByRole('region', { name: region })).toBeVisible();
+      await expectScreenBasics(screen.container, { owner: true });
+    }
+
+    // The delete dialog, and a delete that failed.
+    await subNav(screen).getByRole('link', { name: 'General' }).click();
+    await main(screen).getByRole('button', { name: 'Delete this Desk' }).click();
+    await expect.element(screen.getByRole('dialog', { name: 'Delete Main line?' })).toBeVisible();
+    await expectScreenBasics(screen.container, { owner: true });
+    mockStore.inject({ route: 'deleteDesk', status: 500 });
+    await screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
+    await expect.element(main(screen).getByRole('alert')).toHaveTextContent(UNAVAILABLE);
+    await expectScreenBasics(screen.container, { owner: true });
+
+    // On a phone too, with nothing scrolling sideways.
+    const phone = await renderRoute(NOTIFICATIONS, { viewport: 'phone' });
+    await expect.element(main(phone.screen).getByRole('region', { name: 'Set for a plumber' })).toBeVisible();
+    await expectScreenBasics(phone.screen.container, { owner: true });
+    expectNoHorizontalScroll();
+  });
+});
+
+/** The vision note at the top of `content`: the Pill, then its line 12 px after it, in quiet meta type. */
+function expectVisionNote(content: HTMLElement, words: string): HTMLElement {
+  const first = content.firstElementChild as HTMLElement;
+  const pill = one(first, '.cd-pill');
+  expect(pill.textContent).toBe('Vision');
+  const note = first.querySelector('p') as HTMLElement;
+  expect(note.textContent).toBe(words);
+  expectComputed(note, { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
+  expect(round(note.getBoundingClientRect().left - pill.getBoundingClientRect().right)).toBe(12);
+  return first;
+}
+
+/** SubNav's rows. */
+function links(screen: RenderResult): HTMLElement[] {
+  return subNav(screen).getByRole('link').elements() as HTMLElement[];
+}
+
+/**
+ * A Settings page on a laptop, as the Settings boards measure it: the serif title 24 px into the
+ * page; SubNav 200 px wide, 24 px under it, with `current` marked; the section's content 40 px to
+ * its right, 720 px wide and level with SubNav; and the 960 px column centered in the main area.
+ * Returns the content column.
+ */
+async function expectSettingsColumns(screen: RenderResult, current: string): Promise<HTMLElement> {
+  await expect.poll(() => currentSection(screen)).toEqual([current]);
+  const area = main(screen).element();
+  const title = main(screen).getByRole('heading', { level: 1, name: 'Settings' }).element();
+  expectComputed(title, SPEC.pageTitle);
+  const nav = subNav(screen).element();
+  const content = nav.parentElement?.nextElementSibling as HTMLElement;
+  expect(round(top(title) - top(area))).toBe(24);
+  expect(round(top(nav) - bottom(title))).toBe(24);
+  expect(round(nav.getBoundingClientRect().width)).toBe(200);
+  expect(round(content.getBoundingClientRect().left - nav.getBoundingClientRect().right)).toBe(40);
+  expect(round(content.getBoundingClientRect().width)).toBe(720);
+  expect(round(top(content))).toBe(round(top(nav)));
+  const column = { left: title.getBoundingClientRect().left, right: content.getBoundingClientRect().right };
+  expect(round(column.right - column.left)).toBe(960);
+  expect(Math.abs(column.left - area.getBoundingClientRect().left - (area.clientWidth - 960) / 2)).toBeLessThanOrEqual(1);
+  return content;
+}
+
+const round = Math.round;
+const top = (el: Element) => el.getBoundingClientRect().top;
+const bottom = (el: Element) => el.getBoundingClientRect().bottom;
+
+/** Whether `text` showed anywhere on the page at any point from now until the test ends. */
+function watchFor(text: string): () => boolean {
+  let seen = false;
+  const observer = new MutationObserver(() => {
+    if (document.body.textContent?.includes(text)) seen = true;
+  });
+  observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+  onTestFinished(() => observer.disconnect());
+  return () => seen;
+}

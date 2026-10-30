@@ -7,6 +7,7 @@ import { ConversationsPage } from '../owner/conversations/ConversationsPage.tsx'
 import { OwnerLayout } from '../owner/OwnerLayout.tsx';
 import { RuleDraftPage } from '../owner/rules/RuleDraftReview.tsx';
 import { SafetyPage } from '../owner/safety/SafetyPage.tsx';
+import { FIRST_SETTINGS_SECTION, SETTINGS_SECTIONS, SettingsLayout } from '../owner/settings/SettingsLayout.tsx';
 import { BriefingPage } from '../owner/today/BriefingPage.tsx';
 import { TodayPage } from '../owner/today/TodayPage.tsx';
 import { AgentCardPage } from '../public/agents/AgentCardPage.tsx';
@@ -63,6 +64,16 @@ export const routes: RouteObject[] = [
       { path: 'safety/:refId?', element: <SafetyPage /> },
       // A card draft's review, from router state or read again by its version after a reload.
       { path: 'rules/drafts/:version', element: <RuleDraftPage /> },
+      // Settings opens on its first section. A path under it that names no section (Integrations,
+      // which Connectors replaced) matches nothing here, so it is the not-found screen.
+      {
+        path: 'settings',
+        element: <SettingsLayout />,
+        children: [
+          { index: true, element: <Navigate to={FIRST_SETTINGS_SECTION} replace /> },
+          ...SETTINGS_SECTIONS.map(({ path, element }) => ({ path, element })),
+        ],
+      },
     ],
   },
   { path: '/d/:slug', element: <PublicPage />, errorElement: <RouteError visitor /> },

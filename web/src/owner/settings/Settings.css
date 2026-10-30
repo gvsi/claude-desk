@@ -1,0 +1,120 @@
+/* Settings: the page fills the main area (AppShell `fill`) with an owner page's 24/40/20 padding and
+   centers the content column, as the Settings boards draw it. Under the title, SubNav (200 px) and
+   the section's page beside it, 40 px apart; the section's parts 20 px apart; the concept footer at
+   the window's foot. On a phone, 16 px gutters and one column: SubNav as one line across the page,
+   the parts 16 px apart, and the footer 16 px under them. */
+
+.cd-settings {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  box-sizing: border-box;
+  min-width: 0;
+  padding: var(--space-24) var(--space-40) var(--space-20);
+}
+
+.cd-settings__page {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  width: 100%;
+  max-width: var(--size-content);
+  margin: 0 auto;
+}
+
+.cd-settings__columns {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: var(--space-40);
+  align-items: start;
+  margin-top: var(--space-24);
+}
+
+.cd-settings__nav,
+.cd-settings__content {
+  min-width: 0;
+}
+
+.cd-settings__content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20);
+}
+
+.cd-settings__content p,
+.cd-settings__content h2 {
+  margin: 0;
+}
+
+/* A section: its heading, and its card 8 px under it. */
+.cd-settings__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.cd-settings__quiet {
+  color: var(--text-secondary);
+}
+
+/* A vision note: the Pill, then its line 12 px after it. */
+.cd-settings__vision {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+}
+
+/* Billing's plan: each line 8 px under the one before it. */
+.cd-settings__content .cd-settings__plan-line {
+  margin-top: var(--space-8);
+}
+
+/* Delete this Desk: its heading 28 px under Answering, then its line with the button at the right. */
+.cd-settings__delete {
+  padding-top: var(--space-8);
+}
+
+.cd-settings__delete-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-16);
+}
+
+.cd-settings__delete-line {
+  flex: 1;
+}
+
+.cd-settings__footer {
+  margin-top: auto;
+  padding-top: var(--space-16);
+}
+
+@media (max-width: 767.98px) {
+  .cd-settings {
+    padding: var(--space-16) var(--space-16) var(--space-20);
+  }
+
+  .cd-settings__columns {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-16);
+    margin-top: var(--space-16);
+  }
+
+  .cd-settings__content {
+    gap: var(--space-16);
+  }
+
+  .cd-settings__delete {
+    padding-top: 0;
+  }
+
+  .cd-settings__delete-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-8);
+  }
+
+  .cd-settings__footer {
+    margin-top: 0;
+  }
+}

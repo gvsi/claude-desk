@@ -31,6 +31,11 @@ import './OwnerLayout.css';
 export interface OwnerDeskContext {
   business: BusinessOut;
   desk: DeskSummary;
+  /**
+   * Turns Answering on or off for this Desk: the sidebar's switch, which any other Answering switch
+   * calls too, so they always agree, with its quick change and its lines when a change didn't save.
+   */
+  setAnswering: (on: boolean) => void;
 }
 
 /** The business and Desk the owner is on, for a page under `/app/:deskId`. */
@@ -42,9 +47,13 @@ const NAV_KEYS: readonly NavKey[] = ['today', 'conversations', 'people', 'rules'
 
 /**
  * The pages that lay out their own columns across the main area (`AppShell` `fill`), each with the
- * concept footer in the column its boards put it in.
+ * concept footer in the column its boards put it in. Settings centers the content column itself,
+ * with the footer at the window's foot.
  */
-const FILL_PAGES: ReadonlySet<NavKey> = new Set<NavKey>(['conversations']);
+const FILL_PAGES: ReadonlySet<NavKey> = new Set<NavKey>(['conversations', 'settings']);
+
+/** Of those, the pages that center the content column: a notice above one keeps to that column. */
+const CENTERED_PAGES: ReadonlySet<NavKey> = new Set<NavKey>(['settings']);
 
 /** The sidebar row for the page at `pathname`: the segment after the Desk, Today when it names no row. */
 function currentNav(pathname: string): NavKey {
@@ -58,8 +67,8 @@ function hrefsFor(deskId: string): SidebarHrefs {
   return Object.fromEntries(NAV_KEYS.map((key) => [key, `${base}/${key}`])) as SidebarHrefs;
 }
 
-/** The sidebar's rows as router links, so moving between pages keeps the app loaded. */
-function RouterLink({ href, children, ...rest }: SidebarLinkProps) {
+/** The sidebar's rows (and a page's SubNav rows) as router links, so moving between pages keeps the app loaded. */
+export function RouterLink({ href, children, ...rest }: SidebarLinkProps) {
   return (
     <Link to={href} {...rest}>
       {children}
@@ -197,8 +206,13 @@ function DeskFrame({ businesses, business, desk }: DeskFrameProps) {
 
   const live = today.data?.live.length ?? 0;
   const current = currentNav(location.pathname);
-  // Conversations lays out its own columns from the sidebar's edge, as its boards draw it.
+  // Conversations lays out its own columns from the sidebar's edge, as its boards draw it; Settings
+  // centers its own, with the footer at the window's foot.
   const fill = FILL_PAGES.has(current);
+  const layoutClass = ['cd-owner-layout', fill ? 'cd-owner-layout--fill' : '', CENTERED_PAGES.has(current) ? 'cd-owner-layout--centered' : '']
+    .filter(Boolean)
+    .join(' ');
+  const setAnswering = (on: boolean) => answering.mutate(on);
   const sidebar = (
     <OwnerSidebar
       businesses={businesses}
@@ -212,7 +226,7 @@ function DeskFrame({ businesses, business, desk }: DeskFrameProps) {
       onPickBusiness={pickBusiness}
       onNewBusiness={() => void navigate('/app/setup')}
       onSwitchDesk={(id) => void navigate(todayPath(id))}
-      onAnsweringChange={(on) => answering.mutate(on)}
+      onAnsweringChange={setAnswering}
     />
   );
 
@@ -223,13 +237,13 @@ function DeskFrame({ businesses, business, desk }: DeskFrameProps) {
       sidebar={sidebar}
       fill={fill}
     >
-      <div className={`cd-owner-layout${fill ? ' cd-owner-layout--fill' : ''}`}>
+      <div className={layoutClass}>
         {notice !== null ? (
           <div className="cd-owner-layout__notice">
             <Notice tone="error">{notice}</Notice>
           </div>
         ) : null}
-        <Outlet context={{ business, desk } satisfies OwnerDeskContext} />
+        <Outlet context={{ business, desk, setAnswering } satisfies OwnerDeskContext} />
         {fill ? null : (
           <footer className="cd-owner-layout__footer">
             <ConceptFooter />
