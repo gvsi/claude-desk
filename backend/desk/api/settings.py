@@ -3,8 +3,9 @@
 Plan 06b's runtime seam sets them: `DESK_ENV`, `API_DATABASE_URL`, `ANTHROPIC_API_KEY`,
 `PASSCODE_HASH`, `KERNEL_URL`, `PUBLIC_ORIGIN` and `TRUSTED_PROXY_HOPS`. `ANTHROPIC_BASE_URL` is a
 test hook that points the model client at a fake server. `a2a_loopback` and `kernel_ro_schema`
-are not read from the environment; tests and `make_api_target` override them with
-`dataclasses.replace`, which checks the result again.
+are not read from the environment; tests override them with `dataclasses.replace`, which checks
+the result again, and the evals' `make_api_target` builds `Settings` directly, never from the
+environment.
 
 The model provider (`MODEL_PROVIDER`) is the Claude API (`anthropic`, the default) or, for local
 evals, Amazon Bedrock (`bedrock`) in `AWS_REGION` with the one Bedrock credential the API ever
