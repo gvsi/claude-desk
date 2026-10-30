@@ -15,7 +15,7 @@ masked, unmasked or owner (`recipient`), and the on-record checks never print a 
 case expects to be the same (the starts' messages, what Claude sees, the failed checks' answers)
 are told apart by size and where they part (`told_apart`), never by what they say, so a contact a
 kernel echoed into one isn't printed either. Only the code leak scan prints visitor text: the text
-it flags, with its codes shown as `<code>`.
+it flags or failed to read, with its codes shown as `<code>`.
 """
 
 import json

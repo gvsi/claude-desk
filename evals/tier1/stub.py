@@ -130,9 +130,9 @@ def _clock_free(rng: Random, faker: Faker) -> dict[Any, Callable[[], Any]]:
     type, and Faker's bare collections, whose plain values include a `date_time`. A date or time is
     drawn from `rng` within thirty days of the open status's Tuesday morning, so the same call gets
     the same answer whenever it is built. A past or a future date has no such value, so building one
-    fails, naming its type (`_relative_to_today`), and a contract that adds one fails at build time.
-    (Bounded dates still read the clock through polyfactory; no contract has one, and the stub's wall
-    clock test would fail on one.)"""
+    fails, naming its type (`_relative_to_today`); an optional one that a build leaves empty fails
+    only when an expectation needs a value for it. (Bounded dates still read the clock through
+    polyfactory; no contract has one, and the stub's wall clock test would fail on one.)"""
 
     def moment() -> datetime:
         return STUB_OPEN_STATUS.as_of + timedelta(seconds=rng.randrange(-MOMENT_SPREAD_S, MOMENT_SPREAD_S))
