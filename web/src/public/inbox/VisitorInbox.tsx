@@ -7,15 +7,24 @@
  * as failed to open, and "Try again" reads again; one with no entry to mark, while a code is
  * awaited, says so in the inbox's place.
  *
- * It shows once there is something in it: a column beside the chat on a window at least 1280 px
- * wide, else in the chat under the conversation. The design system's Demo inbox sheet takes the
- * narrow place once it ships; until then the panel sits there as it is.
+ * On a window at least 1280 px wide it is a column beside the chat, once there is something in it.
+ * Below that it is the design system's `DemoInboxSheet`: its "Demo inbox" button under the
+ * conversation, from the moment the chat asks for a code or a code's notice arrives, and the sheet
+ * that rises from the bottom and opens itself on the first code.
  */
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import type { DemoInboxEntry, EvDemoInbox } from '../../api/contracts.ts';
 import { ApiError, request } from '../../api/http.ts';
-import { Button, DemoInboxPanel, Notice, type CopyLanguage, type DemoInboxItem } from '../../ds/index.ts';
+import {
+  Button,
+  DemoInboxPanel,
+  DemoInboxSheet,
+  Notice,
+  SectionHeader,
+  type CopyLanguage,
+  type DemoInboxItem,
+} from '../../ds/index.ts';
 import { PUBLIC_COPY } from '../copy.ts';
 
 import './VisitorInbox.css';
@@ -44,6 +53,8 @@ interface Read {
 
 export interface VisitorInboxView {
   items: DemoInboxItem[];
+  /** A notice has arrived on this page: the chat sent a code here. */
+  noticed: boolean;
   /** The last read failed. With no items it names no entry, as after a reload whose read failed. */
   failed: boolean;
   retry: () => void;
@@ -98,58 +109,97 @@ export function useVisitorInbox(slug: string, sessionId: string | null, notices:
     return { notice: { entry_id, to, preview }, entry, failed: entry === null && index < read.covers };
   });
   const retry = useCallback(() => void readInbox(), [readInbox]);
-  return { items: [...earlier, ...arrived], failed: read.failed, retry };
+  return { items: [...earlier, ...arrived], noticed: notices.length > 0, failed: read.failed, retry };
 }
 
 /**
- * Whether the inbox has a place on the page: once it has something in it, or, while the visitor
- * waits for a code (`awaitingCode`), when it couldn't be read at all, so the place says so.
+ * The read failed with no entry to mark it on (a reload mid-verification whose read on load
+ * failed) while the visitor waits for a code (`awaitingCode`): the inbox's place says so, rather
+ * than showing nothing or an inbox that looks empty.
  */
+function unreadable(view: VisitorInboxView, awaitingCode: boolean): boolean {
+  return view.items.length === 0 && view.failed && awaitingCode;
+}
+
+/** Whether the inbox's column has a place beside the chat: once it has something in it, or says it couldn't be read. */
 export function inboxShown(view: VisitorInboxView, awaitingCode: boolean): boolean {
-  return view.items.length > 0 || (view.failed && awaitingCode);
+  return view.items.length > 0 || unreadable(view, awaitingCode);
 }
 
 export interface VisitorInboxProps {
   view: VisitorInboxView;
   /** The chat asked for a code that hasn't been confirmed: the inbox is where it arrives. */
   awaitingCode: boolean;
-  /** `column` beside the chat on a wide window, `inline` under the conversation otherwise. */
-  placement: 'column' | 'inline';
+  /** `column` beside the chat on a wide window, `sheet` under the conversation otherwise. */
+  placement: 'column' | 'sheet';
   /** Page chrome's language: the browser's. */
   language: CopyLanguage;
 }
 
 /**
- * The panel in its place; nothing until the inbox has something in it. A read that failed with no
- * entry to mark (a reload mid-verification whose read on load failed) shows the place with that
- * line and "Try again" while a code is awaited, so the code never just isn't there.
+ * The inbox in its place. As a column, nothing until it has something in it. As a sheet, its
+ * button from the moment the chat asks for a code or a code's notice arrives. Either way, a read
+ * that failed with no entry to mark shows the inbox's title over that line and "Try again" while a
+ * code is awaited, so the code never just isn't there.
  */
 export function VisitorInbox({ view, awaitingCode, placement, language }: VisitorInboxProps) {
-  if (!inboxShown(view, awaitingCode)) return null;
-  const place = placement === 'column' ? 'cd-public-chat__inbox-column' : 'cd-public-chat__inbox';
-  if (view.items.length === 0) {
-    const copy = PUBLIC_COPY[language];
+  if (unreadable(view, awaitingCode)) {
     return (
-      <div className={place}>
-        <section className="cd-public-chat__inbox-failed" aria-label={copy.demoInbox} lang={language}>
-          <Notice
-            tone="error"
-            action={
-              <Button variant="secondary" onClick={view.retry}>
-                {copy.tryAgain}
-              </Button>
-            }
-          >
-            {copy.inboxFailed}
-          </Notice>
-        </section>
+      <div className={placement === 'column' ? 'cd-public-chat__inbox-column' : 'cd-public-chat__inbox'}>
+        <UnreadableInbox view={view} language={language} />
       </div>
     );
   }
+  if (placement === 'sheet') {
+    if (!awaitingCode && !view.noticed) return null;
+    return (
+      <div className="cd-public-chat__inbox-sheet">
+        <VisitorSheet view={view} language={language} />
+      </div>
+    );
+  }
+  if (view.items.length === 0) return null;
   // The panel is a region named by its own title, so the place around it is a plain block.
   return (
-    <div className={place}>
+    <div className="cd-public-chat__inbox-column">
       <DemoInboxPanel viewer="visitor" items={view.items} language={language} onRetry={view.retry} />
     </div>
+  );
+}
+
+/** Nothing in the sheet on its first render. */
+const NO_ITEMS: DemoInboxItem[] = [];
+
+/**
+ * The design system's sheet, which opens itself when its count goes from nothing to something. It
+ * is drawn once the inbox matters to the chat, which can be the moment the first code's notice
+ * arrives (the API streams it while Claude is still answering, before the verify card), so it
+ * starts with nothing in it and takes the entries on its next render: the first code opens it
+ * whichever comes first.
+ */
+function VisitorSheet({ view, language }: { view: VisitorInboxView; language: CopyLanguage }) {
+  const [drawn, setDrawn] = useState(false);
+  useLayoutEffect(() => setDrawn(true), []);
+  return <DemoInboxSheet viewer="visitor" items={drawn ? view.items : NO_ITEMS} language={language} onRetry={view.retry} />;
+}
+
+/** The inbox's title over the line that it couldn't be read and "Try again", on the panel's ground. */
+function UnreadableInbox({ view, language }: { view: VisitorInboxView; language: CopyLanguage }) {
+  const copy = PUBLIC_COPY[language];
+  const titleId = `${useId()}-title`;
+  return (
+    <section className="cd-public-chat__inbox-failed" aria-labelledby={titleId} lang={language}>
+      <SectionHeader id={titleId} title={copy.demoInbox} />
+      <Notice
+        tone="error"
+        action={
+          <Button variant="secondary" onClick={view.retry}>
+            {copy.tryAgain}
+          </Button>
+        }
+      >
+        {copy.inboxFailed}
+      </Notice>
+    </section>
   );
 }

@@ -387,7 +387,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
   // The demo's codes: read while the chat can be used, a column of its own on a wide window.
   const inbox = useVisitorInbox(slug, chat.session?.session_id ?? null, chat.state.inbox, ready);
   const wide = useWideWindow();
-  const inboxPlacement = wide && !embedded ? 'column' : 'inline';
+  const inboxPlacement = wide && !embedded ? 'column' : 'sheet';
 
   useEffect(() => {
     if (chat.session !== null) onSession?.(chat.session);
@@ -612,7 +612,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
             </TranscriptRow>
           ) : null}
         </Transcript>
-        {inboxPlacement === 'inline' ? <VisitorInbox view={inbox} awaitingCode={awaitingCode} placement="inline" language={language} /> : null}
+        {inboxPlacement === 'sheet' ? <VisitorInbox view={inbox} awaitingCode={awaitingCode} placement="sheet" language={language} /> : null}
         {connectionNotice || turnNotice ? (
           <div className="cd-public-chat__notices">
             {turnNotice}

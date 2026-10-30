@@ -7,7 +7,7 @@ import { ThisWeek } from './ThisWeek.tsx';
 export interface TodayAsideProps {
   deskId: string;
   slug: string;
-  /** Under the public page: Today's Demo inbox, which opens in place. */
+  /** Under the public page: Today's Demo inbox, whose button opens it in a sheet at the right. */
   inbox?: ReactNode;
 }
 

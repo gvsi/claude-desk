@@ -4,6 +4,7 @@
  * failed code, the simulated label once it works, and the inbox each side reads.
  */
 import { describe, expect, it, vi } from 'vitest';
+import { userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import type { SseEvent } from '../api/contracts.ts';
@@ -28,6 +29,15 @@ const CODE_BODY = `Your Rivera Plumbing code is ${DEMO_CODE}. It expires in ten 
 
 /** The inbox's place when it couldn't be read at all, so no entry can say it failed. */
 const INBOX_FAILED = 'Couldn’t open the Demo inbox, where your code arrives.';
+
+/** What the visitor's Demo inbox stands for, under its title. */
+const VISITOR_SUBTITLE = 'Stands in for a phone or email inbox. Nothing is really sent.';
+
+/** What the owner's Demo inbox stands for, under its title. */
+const OWNER_SUBTITLE = 'What Claude would have sent you by text or email. Nothing is really sent.';
+
+/** The owner's line for a read the server failed. */
+const UNAVAILABLE = 'Something went wrong on our side. Try again in a moment.';
 
 /** Claude's checked line before the verify card, as the signed verify board writes it. */
 const VERIFY_FIRST = "I can send that after you confirm it's you.";
@@ -208,12 +218,93 @@ describe('Demo inbox', () => {
     expect(inbox.element().closest('.cd-public-chat__inbox-column')).not.toBeNull();
     await expectScreenBasics(screen.container, { owner: false });
 
-    // At phone width it sits with the chat, read again after the reload, the code still there.
+    // At phone width it is a sheet over the page, read again after the reload: the code is still
+    // awaited, so the sheet opens itself with it.
     const phone = await renderRoute(PAGE, { viewport: 'phone' });
-    const narrow = phone.screen.getByRole('region', { name: 'Demo inbox' });
-    await expect.element(narrow.getByText(CODE_BODY)).toBeVisible();
-    expect(narrow.element().closest('.cd-public-chat__inbox-column')).toBeNull();
+    const sheet = phone.screen.getByRole('dialog', { name: 'Demo inbox' });
+    await expect.element(sheet.getByText(CODE_BODY)).toBeVisible();
+    expect(sheet.element().closest('.cd-public-chat__inbox-column')).toBeNull();
+    expect(phone.screen.container.querySelector('.cd-public-chat__inbox-column')).toBeNull();
     expectNoHorizontalScroll();
+  });
+
+  it('inbox_sheet_opens_on_the_first_code', async () => {
+    const { screen } = await renderRoute(PAGE, { viewport: 'phone' });
+    await ready(screen);
+    // Nothing to read yet, and no code asked for: no Demo inbox on the page.
+    expect(screen.getByRole('button', { name: /^Demo inbox/ }).elements()).toHaveLength(0);
+
+    // The code arrives and the sheet opens itself from the bottom, over the page, its heading
+    // focused so the visitor's next key doesn't close it.
+    await say(screen, 'Can you send my invoice?');
+    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
+    await expect.element(sheet.getByText(CODE_BODY)).toBeVisible();
+    await expect.element(sheet.getByRole('heading', { level: 2, name: 'Demo inbox' })).toHaveFocus();
+    await expect.element(sheet.getByText(VISITOR_SUBTITLE)).toBeVisible();
+    await expect.element(sheet.getByText(`To ${rivera.people.dana.maskedContact}`)).toBeVisible();
+    const box = sheet.element().getBoundingClientRect();
+    expect([Math.round(box.left), Math.round(box.width), Math.round(box.bottom)]).toEqual([0, 390, 844]);
+    expect(sheet.element().textContent).not.toMatch(/\d{1,2}:\d{2}/);
+    await expectScreenBasics(screen.container, { owner: false });
+
+    // Escape closes it. Its button, under the conversation, counts the code and opens it again,
+    // focus on Close; closing goes back to the button.
+    await userEvent.keyboard('{Escape}');
+    await expect.element(sheet).not.toBeInTheDocument();
+    const button = screen.getByRole('button', { name: 'Demo inbox 1 entry' });
+    await expect.element(button).toBeVisible();
+    expect(button.element().closest('.cd-public-shell__conversation, .cd-public-shell__column')).not.toBeNull();
+    await button.click();
+    const again = screen.getByRole('dialog', { name: 'Demo inbox' });
+    const close = again.getByRole('button', { name: 'Close' });
+    await expect.element(close).toHaveFocus();
+    await close.click();
+    await expect.element(again).not.toBeInTheDocument();
+    await expect.element(button).toHaveFocus();
+    expectNoHorizontalScroll();
+  });
+
+  it('inbox_sheet_opens_when_the_code_comes_before_the_card', async () => {
+    // The API streams a code's notice while Claude is still answering, before the verify card.
+    const { screen } = await renderRoute(PAGE, { viewport: 'phone' });
+    await ready(screen);
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('the page opened a chat');
+    const notice = mockStore.world
+      .context(chat, 'en', '')
+      .startVerification({ person: rivera.people.dana, code: DEMO_CODE, body: CODE_BODY, preview: 'New verification code' });
+    mockStore.emit(RIVERA.slug, notice);
+
+    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
+    await expect.element(sheet.getByText(CODE_BODY)).toBeVisible();
+    await expect.element(sheet.getByRole('heading', { level: 2, name: 'Demo inbox' })).toHaveFocus();
+    expect(requests('ownerInbox')).toEqual([]);
+  });
+
+  it('inbox_that_cant_be_read_names_itself_below_1280', async () => {
+    // A reload while the code is awaited, whose read on load fails: under the conversation, the
+    // inbox's title over its line and "Try again", never a sheet that would say it's empty.
+    const first = await renderRoute(PAGE, { viewport: 'phone' });
+    await ready(first.screen);
+    await say(first.screen, 'Can you send my invoice?');
+    await expect.element(first.screen.getByRole('dialog', { name: 'Demo inbox' }).getByText(CODE_BODY)).toBeVisible();
+
+    mockStore.inject({ route: 'visitorInbox', status: 500 });
+    const { screen } = await renderRoute(PAGE, { viewport: 'phone' });
+    await ready(screen);
+    const place = screen.getByRole('region', { name: 'Demo inbox' });
+    await expect.element(place.getByText(INBOX_FAILED)).toBeVisible();
+    await expect.element(place.getByRole('heading', { level: 2, name: 'Demo inbox' })).toBeVisible();
+    expect(screen.getByRole('dialog').elements()).toHaveLength(0);
+    expect(screen.getByRole('button', { name: /^Demo inbox/ }).elements()).toHaveLength(0);
+    await expectScreenBasics(screen.container, { owner: false });
+    expectNoHorizontalScroll();
+
+    // Reading again works: the line goes and the sheet opens itself with the code.
+    await place.getByRole('button', { name: 'Try again' }).click();
+    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
+    await expect.element(sheet.getByText(CODE_BODY)).toBeVisible();
+    await expect.element(screen.getByText(INBOX_FAILED)).not.toBeInTheDocument();
   });
 
   it('inbox_retry_after_failure', async () => {
@@ -241,6 +332,8 @@ describe('Demo inbox', () => {
     await ready(reloaded.screen);
     const place = reloaded.screen.getByRole('region', { name: 'Demo inbox' });
     await expect.element(place.getByText(INBOX_FAILED)).toBeVisible();
+    // The column names itself over the line, as the panel does.
+    await expect.element(place.getByRole('heading', { level: 2, name: 'Demo inbox' })).toBeVisible();
     expect(place.element().textContent).not.toMatch(/\d{6}/);
     expect(place.element().closest('.cd-public-chat__inbox-column')).not.toBeNull();
     await expectScreenBasics(reloaded.screen.container, { owner: false });
@@ -266,28 +359,53 @@ describe('Demo inbox', () => {
     const alert = mockStore.world.inbox.find((record) => record.entry.kind === 'alert')?.entry;
     if (!alert) throw new Error('the seed holds a request, which alerts the owner');
     const { screen } = await renderRoute(`/app/${RIVERA.deskId}/today`);
-    const open = screen.getByRole('button', { name: 'Open the Demo inbox' });
+    // Read once as Today opens, so its button counts what is there, and not again while it is closed.
+    const open = screen.getByRole('button', { name: /^Demo inbox \d+ entr(?:y|ies)$/ });
     await expect.element(open).toBeVisible();
-    // Nothing is read until the owner opens it.
-    expect(requests('ownerInbox')).toEqual([]);
+    expect(open.element().closest('.cd-today-aside')).not.toBeNull();
+    expect(requests('ownerInbox')).toHaveLength(1);
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(requests('ownerInbox')).toHaveLength(1);
 
+    // It opens as a sheet at the right, over Today, focus on Close.
     await open.click();
-    const inbox = screen.getByRole('region', { name: 'Demo inbox' });
-    await expect.element(inbox.getByText(alert.body)).toBeVisible();
-    await expect.element(inbox.getByText('Alert', { exact: true })).toBeVisible();
-    await expect.element(inbox.getByText('To owner')).toBeVisible();
+    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
+    await expect.element(sheet.getByText(alert.body)).toBeVisible();
+    await expect.element(sheet.getByText('Alert', { exact: true }).first()).toBeVisible();
+    await expect.element(sheet.getByText('To owner').first()).toBeVisible();
+    await expect.element(sheet.getByText(OWNER_SUBTITLE)).toBeVisible();
+    await expect.element(sheet.getByRole('button', { name: 'Close' })).toHaveFocus();
+    const box = sheet.element().getBoundingClientRect();
+    expect([Math.round(box.right), Math.round(box.width), Math.round(box.top), Math.round(box.height)]).toEqual([1440, 400, 0, 900]);
     // When it came, on the business's clock.
-    expect(inbox.element().querySelector('.cd-demo-inbox__time')?.textContent).toMatch(/^(?:Today|[A-Z][a-z]{2} \d{1,2}), \d{1,2}:\d{2} (?:am|pm)$/);
+    expect(sheet.element().querySelector('.cd-demo-inbox__time')?.textContent).toMatch(/^(?:Today|[A-Z][a-z]{2} \d{1,2}), \d{1,2}:\d{2} (?:am|pm)$/);
     await expectScreenBasics(screen.container, { owner: true });
 
-    // It reads again while open, and stops once closed.
-    await vi.waitFor(() => expect(requests('ownerInbox').length).toBeGreaterThanOrEqual(2));
-    await screen.getByRole('button', { name: 'Close the Demo inbox' }).click();
-    await expect.element(screen.getByRole('region', { name: 'Demo inbox' })).not.toBeInTheDocument();
+    // It reads again while open, and stops once closed; focus goes back to its button.
+    await vi.waitFor(() => expect(requests('ownerInbox').length).toBeGreaterThanOrEqual(3));
+    await userEvent.keyboard('{Escape}');
+    await expect.element(sheet).not.toBeInTheDocument();
+    await expect.element(open).toHaveFocus();
     const reads = requests('ownerInbox').length;
     await new Promise((resolve) => setTimeout(resolve, 600));
     expect(requests('ownerInbox')).toHaveLength(reads);
     // Its own codes stay the visitor's: the owner's inbox never calls the visitor's read.
     expect(requests('visitorInbox')).toEqual([]);
+  });
+
+  it('owner_inbox_that_cant_be_read_says_so', async () => {
+    // While Today reads it, the inbox's place says so; when the read and its retry fail, it says
+    // the Demo inbox couldn't be opened, with "Try again", never a sheet that would say it's empty.
+    mockStore.inject({ route: 'ownerInbox', status: 500, times: 2, delayMs: 300 });
+    const { screen } = await renderRoute(`/app/${RIVERA.deskId}/today`);
+    await expect.element(screen.getByRole('status').filter({ hasText: 'Opening your Demo inbox' })).toBeVisible();
+    const line = screen.getByText(`Couldn't open your Demo inbox. ${UNAVAILABLE}`, { exact: true });
+    await expect.element(line, { timeout: 4_000 }).toBeVisible();
+    expect(screen.getByRole('button', { name: /^Demo inbox/ }).elements()).toHaveLength(0);
+    await expectScreenBasics(screen.container, { owner: true });
+
+    await screen.getByRole('button', { name: 'Try again', exact: true }).click();
+    await expect.element(screen.getByRole('button', { name: /^Demo inbox \d+ entr(?:y|ies)$/ })).toBeVisible();
+    await expect.element(line).not.toBeInTheDocument();
   });
 });
