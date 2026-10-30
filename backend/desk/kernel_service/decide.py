@@ -29,15 +29,15 @@ call ID or those args), or failed by anything but a refusal once its session is 
 `KernelRepo` refusal, a database error: 500 `internal`), still gets its `decide` entry, written
 after the transaction has rolled back.
 
-Visitor text reaches the decision only as data: the reviewer sees free-text arguments under
-`untrusted_args`, and the owner reads them quoted after "From the visitor".
+A call's free-text arguments are Claude's wording and untrusted (they may repeat what a visitor
+said, or not), and reach the decision only as data: the reviewer sees them under `untrusted_args`,
+and the owner reads them quoted after "Claude's note", never as the visitor's words.
 """
 
 import hashlib
 import json
 import logging
 import re
-import traceback
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -412,6 +412,7 @@ DECIDE_ROUTE = "POST /decide"
 TOOL_NAME_CHARS = 64                      # a refused call's name is stored cut to this
 CALL_ID_CHARS = 128                       # a longer call ID is refused: a long one can overflow the decisions index
 QUOTED_CHARS = 200                        # free text quoted to the owner is cut to this
+CLAUDES_NOTE = "Claude's note"            # the label on that text: Claude wrote it into the call, the visitor didn't
 MONEY_EFFECTS = frozenset({"charge", "pay_out"})
 BREAKER_STRIKES = 3
 BREAKER_ALERT = ("Claude paused a conversation after the reviewer flagged three requests as attempts to get "
@@ -429,6 +430,16 @@ REFUSED_PLAIN: dict[str, str] = {
     "evaluation_error": "Your rules couldn't be checked for it, so it was refused.",
 }
 BASELINE_PLAIN = "The always-on safety rules don't allow it."
+# How the deciding rules decided, said before their own text (the owner's wording, 2026-10-30).
+RULE_LEAD_INS: dict[str, str] = {
+    "allow": "Your rule allows it",
+    "ask": "Your rule asks you first",    # a hold an owner's `ask` card decided (the default ask has none)
+    "limit": "It goes past your rule, so it waits for you",   # any other hold: an `auto` card's hold twin
+    "refuse": "Your rule says never",     # a refusal's deciding rules are `never` cards; the baseline has none
+}
+# A hold only the compiler's default ask decided: no rule of the owner's decided, so it takes no
+# lead-in and no quotes, only the default ask's own words.
+DEFAULT_ASK_PLAIN = compiler.DEFAULT_REASON
 REVIEW_PLAIN: dict[str, str] = {
     "absent": "The reviewer couldn't check it.",
     "block": "The reviewer flagged it as an attempt to get around your rules.",
@@ -484,32 +495,50 @@ def is_money(tool: str, effects: Iterable[str]) -> bool:
     return tool in MONEY_TOOLS or bool(MONEY_EFFECTS & set(effects))
 
 
-def held_by_ask(version_row: PolicyVersionRow | None, policy_ids: Iterable[str]) -> bool:
-    """Was a hold decided by an `ask` card, the owner's or the compiler's default ask, rather than
-    by an `auto` card's hold twin, whose amount, discount, hours or review gate failed (a limit
-    hold)? ("Decision lifecycle".) Read from the deciding policies' `@tier` and the cards their
-    `@card` names in the version that decided it.
+@dataclass(frozen=True)
+class HoldDecider:
+    """The cards that decided a hold, and whether they are `ask` cards."""
+
+    ask: bool                             # an ask card decided it; otherwise an auto card's hold twin did
+    card_ids: tuple[str, ...]             # the cards that decided, by `card_id`
+
+
+def hold_decider(version_row: PolicyVersionRow | None, policy_ids: Iterable[str]) -> HoldDecider | None:
+    """Which cards decided a hold, read from the deciding policies' `@tier` and the cards their
+    `@card` names in the version that decided it ("Decision lifecycle").
 
     A hold's deciding policies are the `@tier("hold")` permits of `H` that matched: ask cards' own
-    and the twins of auto cards. Several can match, so "Coverage and overlap" settles which card
-    decided: the most specific, an ask card winning a tie. A person's own auto card thus decides
-    over the default ask that matches them too. Any deciding policy that is no hold permit of a
-    known card (step 5's money hold, decided by an auto permit) makes it no ask hold."""
+    and the twins of auto cards. Hold permits carry no exclusions, so every matching one is listed,
+    and "Coverage and overlap" settles which cards decided: the most specific, the ask cards among
+    them when there are any (an ask card wins a tie). A person's own auto card thus decides over
+    the default ask that matches them too. None when there is no deciding policy, or any is no hold
+    permit of a known card (step 5's money hold, decided by an auto permit)."""
     if version_row is None:
-        return False
+        return None
     heads = policy_heads(version_row)
     cards = {card.card_id: card for card in version_row.cards}
-    ranked: list[tuple[tuple[int, int], bool]] = []
+    ranked: list[tuple[tuple[int, int], bool, tuple[str, ...]]] = []
     for policy_id in policy_ids:
         head = heads.get(policy_id)
         if head is None or head.tier != "hold" or not head.cards or not set(head.cards) <= cards.keys():
-            return False
+            return None
         behind = [cards[card_id] for card_id in head.cards]
-        ranked.append((max(compiler.specificity(card) for card in behind), all(card.mode == "ask" for card in behind)))
+        ranked.append((max(compiler.specificity(card) for card in behind), all(card.mode == "ask" for card in behind),
+                       head.cards))
     if not ranked:
-        return False
-    top = max(rank for rank, _ in ranked)
-    return any(ask for rank, ask in ranked if rank == top)
+        return None
+    top = max(rank for rank, _, _ in ranked)
+    ask = any(is_ask for rank, is_ask, _ in ranked if rank == top)
+    return HoldDecider(ask, tuple(sorted({card_id for rank, is_ask, ids in ranked if rank == top and is_ask == ask
+                                          for card_id in ids})))
+
+
+def held_by_ask(version_row: PolicyVersionRow | None, policy_ids: Iterable[str]) -> bool:
+    """Was a hold decided by an `ask` card, the owner's or the compiler's default ask, rather than
+    by an `auto` card's hold twin, whose amount, discount, hours or review gate failed (a limit
+    hold)? (`hold_decider`; a hold it can't read is no ask hold.)"""
+    decider = hold_decider(version_row, policy_ids)
+    return decider is not None and decider.ask
 
 
 def held_answers(principal: Principal, action: NormalizedAction | None, *, ask_held: bool) -> list[ApprovalAnswer]:
@@ -549,9 +578,12 @@ def _asked(subject: str, tool: str, action: NormalizedAction | None) -> str:
     return f"{subject} asked to {what}."
 
 
-def _quoted(text: str) -> str:
-    """Visitor text as the owner reads it: one line, cut, inside quotes it can't close."""
-    line = " ".join(text.split())[:QUOTED_CHARS]
+def _quoted(text: str, *, cut: bool = True) -> str:
+    """Text as the owner reads it: one line inside quotes it can't close. Untrusted free text is
+    cut to `QUOTED_CHARS`; a rule's text (`cut=False`), the owner's own words, is quoted whole."""
+    line = " ".join(text.split())
+    if cut:
+        line = line[:QUOTED_CHARS]
     return "“" + line.replace("“", '"').replace("”", '"') + "”"
 
 
@@ -676,8 +708,8 @@ def _internal_error(named: Named, req: DecideRequest, exc: BaseException) -> Ker
     """A failure while deciding that isn't a refusal (`KernelRepo` refusing a statement kernel code
     built, the database failing the transaction, an error in the engine): 500 `internal`, with the
     attempt still on record (`_refused_call`). The log names the failure's kind and the frames it
-    rose through, never its text, which can quote the visitor's arguments."""
-    log.error("decide_internal_error kind=%s\n%s", type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)))
+    rose through, never its text, which can quote the visitor's arguments (`repo.log_error`)."""
+    repo.log_error(log, exc, "decide_internal_error")
     return _refused_call(500, "internal", "internal_error", named, req)
 
 
@@ -710,18 +742,43 @@ async def _repeat(ctx: KernelCtx, row: DecisionRow, sha: str) -> Decision:
     return await decision_contract(ctx, await expire_if_due(ctx, row))
 
 
+def _rules_decided(call: _Call, outcome: str, evaluation: Evaluation) -> tuple[str, Sequence[str]]:
+    """How the deciding rules decided (`RULE_LEAD_INS`), and the cards to quote after it. A hold is
+    an ask hold when an `ask` card decided it, by the same test that offers `deny_always`
+    (`hold_decider`, as `held_by_ask` reads it); any other hold went past an `auto` card's amount,
+    discount, hours window or review gate. Only the cards that decided a hold are quoted, so the
+    lead-in and the quotes agree. An allow's permits already leave out every less specific card
+    (their `unless` exclusions), and every matching `never` card refuses on its own, so those quote
+    every deciding card."""
+    if outcome != "hold":
+        return RULE_LEAD_INS[outcome], evaluation.card_ids
+    decider = hold_decider(call.version_row, evaluation.policy_ids)
+    if decider is None:
+        return RULE_LEAD_INS["limit"], evaluation.card_ids
+    return RULE_LEAD_INS["ask" if decider.ask else "limit"], decider.card_ids
+
+
 def _reason_plain(call: _Call, outcome: str, reason: str | None, evaluation: Evaluation | None) -> str:
-    """The owner's account of a decision: who asked for what, why it went this way (the deciding
-    cards' reasons, the reviewer, or why it was refused early), then each free-text argument quoted
-    after "From the visitor"."""
+    """The owner's account of a decision: who asked for what, why it went this way (the reasons of
+    the cards that decided, each quoted after one lead-in that says how they decided; the reviewer;
+    or why it was refused with no card deciding), then the call's free-text arguments, each
+    quoted, under one "Claude's note" label: Claude wrote them into the call, the visitor didn't.
+    A hold only the compiler's default ask decided quotes no rule: the lead-ins say "your rule",
+    and no rule of the owner's decided it (`DEFAULT_ASK_PLAIN`)."""
     parts = [_asked(call.subject, call.req.call.tool, call.action)]
     if reason is not None:
         parts.append(REFUSED_PLAIN[reason])
     else:
         assert evaluation is not None and call.version_row is not None
         cards = {card.card_id: card for card in call.version_row.cards}
-        reasons = [cards[card_id].reason for card_id in evaluation.card_ids if card_id in cards]
-        parts += reasons or ([BASELINE_PLAIN] if outcome == "refuse" else [])
+        lead_in, card_ids = _rules_decided(call, outcome, evaluation)
+        deciding = [cards[card_id] for card_id in card_ids if card_id in cards]
+        if outcome == "hold" and deciding and all(card.is_default for card in deciding):
+            parts.append(DEFAULT_ASK_PLAIN)
+        elif deciding:
+            parts.append(f"{lead_in}: " + ", ".join(_quoted(card.reason, cut=False) for card in deciding))
+        elif outcome == "refuse":
+            parts.append(BASELINE_PLAIN)
     if evaluation is not None and evaluation.needed_review:
         review = evaluation.review
         if review is None:
@@ -730,7 +787,8 @@ def _reason_plain(call: _Call, outcome: str, reason: str | None, evaluation: Eva
             parts.append(REVIEW_PLAIN[review.recommendation])
         else:
             parts.append(REVIEW_PLAIN["allow" if outcome == "allow" else "unsure"])
-    parts += [f"From the visitor: {_quoted(text)}." for text in call.quotes.values()]
+    if call.quotes:
+        parts.append(f"{CLAUDES_NOTE}: " + ", ".join(_quoted(text) for text in call.quotes.values()))
     return " ".join(parts)
 
 

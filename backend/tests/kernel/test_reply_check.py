@@ -1,7 +1,7 @@
 """POST /check_reply and GET /public/{desk_slug}: what a visitor may be shown.
 
 A draft from Claude is guarded prose plus typed clauses. The kernel scans the prose in English and
-Spanish for numbers, money, percentages, dates, promise words and links, renders each clause from
+Spanish for numbers, money, percentages, dates and promise words, renders each clause from
 a fact the session may read, in the reply's language, and answers with a signed, ledgered verdict:
 the prose and cards when everything passed, else only the handoff clause.
 
@@ -10,6 +10,7 @@ the facts made the way a conversation makes them: a quote, open times and a book
 executed through `/decide` and `/execute`.
 """
 
+import asyncio
 import hashlib
 import json
 import sys
@@ -29,7 +30,7 @@ from desk.db.models import ActorSession, Business, Desk, Document
 from desk.db.models import Fact as FactRow
 from desk.kernel_api import PublicDesk
 from desk.kernel_service import labels, lang, ledger, reply_check
-from desk.kernel_service.decisions import SoftPromiseVerdict
+from desk.kernel_service.decisions import SoftPromiseInput, SoftPromiseVerdict
 from scripts import lookalikes
 
 from .fakes import FakeDecisions
@@ -191,11 +192,8 @@ AMOUNT_AND_TIME_WORDS = [   # (prose, rule_id, span): amounts, fractions, "free"
     ("Llega en unos pocos minutos.", "lex.es.date", "en unos pocos minutos"),
     ("Maria llega dentro de un par de horas.", "lex.es.date", "dentro de un par de horas"),
     ("Maria llega en media hora.", "lex.es.date", "en media hora"),
-    ("Maria can come right away.", "lex.en.date", "right away"),
-    ("Maria va enseguida.", "lex.es.date", "enseguida"),
-    ("Maria sale en seguida.", "lex.es.date", "en seguida"),
+    # the bare "right away", "first thing" and "enseguida" pass (the owner's decision, below)
     ("She can come first thing in the morning.", "lex.en.date", "first thing in the morning"),
-    ("Maria can be there first thing.", "lex.en.date", "first thing"),
     ("She can be there the first thing in the morning.", "lex.en.date", "first thing in the morning"),
     ("Maria llega a primera hora.", "lex.es.date", "a primera hora"),
     # the ordinals and fractions the evals read as a date or an amount ("on the fifth", "a fifth off")
@@ -226,7 +224,7 @@ def test_amount_and_time_words_are_blocked(prose, rule_id, span):
     "You can count on us.",                                 # "on us" after count, rely or depend
     "You can always rely on us for repairs.",
     "It depends on us getting a look at it.",
-    "The first thing to do is turn off the water.",         # "first thing" after a determiner is advice
+    "The first thing to do is turn off the water.",         # "first thing" is advice, no time
     "Your first thing to check is the valve under the sink.",
     "Lo primero es cerrar la llave del agua.",
     "First, let me check with Maria.",                      # "first" and "second" are no fraction or day
@@ -238,13 +236,36 @@ def test_ordinary_words_beside_the_amount_and_time_words_pass(prose):
     assert reply_check.scan_prose(prose) == []
 
 
+@pytest.mark.parametrize(("prose", "language"), [
+    ("Turn off the water main right away.", "en"),
+    ("Maria can come right away.", "en"),
+    ("Maria can be there first thing.", "en"),
+    ("Cierre la llave de paso enseguida.", "es"),
+    ("Claro, Maria va enseguida.", "es"),
+    ("Claro, Maria sale en seguida.", "es"),                 # the same adverb in two words
+    ("Maria can come right-away.", "en"),                    # a dash between the words
+    ("Claro, Maria va en-seguida.", "es"),                   # "Claro" marks it Spanish (four unmarked words
+                                                             # would read as another language)
+    ("Maria can come RIGHT AWAY.", "en"),                    # capitals
+])
+async def test_bare_time_adverbs_pass_by_the_owners_decision(app, client, prose, language):
+    """The owner's decision of 2026-10-30: the bare adverbs "right away", "first thing" and
+    "enseguida" are no time words, written with a dash or in capitals too, so urgent advice reaches
+    the visitor ("Turn off the water main right away."). A time with its unit or its part of the
+    day still blocks (below)."""
+    copy, visitor = await visitor_of(app, client)
+    verdict = await checked(client, visitor, prose)
+    assert (verdict.ok, verdict.violations, verdict.language) == (True, [], language)
+    assert verdict.blocks == [RenderedBlock(kind="prose", text=prose)]
+
+
 @pytest.mark.parametrize(("prose", "found"), [
     ("It costs zеro.", [("lex.en.number", "zеro"), ("mixed_script", "zеro")]),         # Cyrillic e
     ("Le hacemos un cuаrto menos.", [("lex.es.number", "cuаrto"), ("mixed_script", "cuаrto")]),
     ("It is оn us.", [("lex.en.promise", "оn us"), ("mixed_script", "оn")]),             # Cyrillic o
     ("Maria can be there ın an hour.", [("lex.en.date", "ın an hour")]),                    # dotless i
     ("Va sin comisiоn.", [("lex.es.promise", "sin comisiоn"), ("mixed_script", "comisiоn")]),
-    ("Maria can come RIGHT AWAY.", [("lex.en.date", "RIGHT AWAY")]),
+    ("Maria can be there IN AN HOUR.", [("lex.en.date", "IN AN HOUR")]),
     ("That comes to a couple GRAND.", [("lex.en.money", "GRAND")]),
 ])
 def test_amount_and_time_words_read_lookalike_letters(prose, found):
@@ -258,7 +279,7 @@ async def test_a_fraction_beside_its_quote_is_blocked(app, client, reviewer):
     soft-promise check is asked."""
     copy, visitor = await visitor_of(app, client)
     quote = await own_quote(client, visitor)
-    reviewer.soft_answer = NOTHING_FLAGGED
+    reviewer.soft_answer = NOTHING_BEYOND_THE_CARDS
     verdict = await checked(client, visitor, "That's a quarter off.", [clause("quote", quote.fact_id)])
     assert [(v.kind, v.rule_id, v.span) for v in verdict.violations] == [("number_in_prose", "lex.en.number",
                                                                           "quarter")]
@@ -381,10 +402,10 @@ HYPHENATED = [                       # lexicon phrases whose words a dash may jo
     ("booking-confirmed", "lex.en.booking"), ("we-have-you-booked", "lex.en.booking"),
     ("reserva-confirmada", "lex.es.booking"), ("quedó-apartado", "lex.es.booking"),
     ("on-us", "lex.en.promise"), ("no-call-out-fee", "lex.en.promise"), ("in-a-few-minutes", "lex.en.date"),
-    ("right-away", "lex.en.date"), ("first-thing-in-the-morning", "lex.en.date"),
+    ("first-thing-in-the-morning", "lex.en.date"),
     ("por-nuestra-cuenta", "lex.es.promise"), ("por-cuenta-de-la-casa", "lex.es.promise"),
     ("sin-comisión", "lex.es.promise"), ("en-una-hora", "lex.es.date"), ("dentro-de-unos-minutos", "lex.es.date"),
-    ("en-seguida", "lex.es.date"), ("a-primera-hora", "lex.es.date"), ("tercera-parte", "lex.es.number"),
+    ("a-primera-hora", "lex.es.date"), ("tercera-parte", "lex.es.number"),
 ]
 
 
@@ -581,7 +602,7 @@ async def test_language_detection(app, client, prose, detected):
 
 @pytest.mark.parametrize(("prose", "rule_ids"), [
     ("Perfecto, ya lo reviso.", []),
-    ("Claro, enseguida lo reviso.", ["lex.es.date"]),                  # "enseguida" is a time: in Spanish now
+    ("Claro, enseguida lo reviso.", []),                               # no time word (the owner's decision)
     ("Tu cita está confirmada.", ["lex.es.booking"]),                  # a booking claim: in Spanish now
     ("Maria te escribe antes de llegar.", []),
     ("Listo, quedó anotado para ti.", []),
@@ -862,27 +883,69 @@ async def test_card_text_is_headline_then_details(app, client, reviewer):
 
 
 # The soft-promise check flagging nothing, so a block below is the code's own.
-NOTHING_FLAGGED = SoftPromiseVerdict(prose_states_terms=False, denies_being_ai=False)
+NOTHING_BEYOND_THE_CARDS = SoftPromiseVerdict(promises_beyond_cards=False, denies_being_ai=False)
 
 
-async def test_a_booking_claim_beside_its_card_is_blocked(app, client, reviewer):
-    """A booking appears only in its card: "You're booked." is blocked even beside the booking card
-    it repeats, by the prose scan, before the soft-promise check is asked."""
+@pytest.mark.parametrize(("prose", "language"), [("You're booked.", "en"), ("Tu cita está confirmada.", "es")])
+async def test_a_booking_claim_beside_its_booking_card_passes_by_the_owners_decision(app, client, reviewer, prose,
+                                                                                     language):
+    """The owner's decision of 2026-10-30: a reply carrying the booking's card may say the visit is
+    booked, since the card says it too. The claim passes the prose scan, reaches the soft-promise
+    check beside the card's text, and, with no promise found beyond the card, is shown with it."""
     copy, visitor = await visitor_of(app, client)
     booking = await own_booking(client, reviewer, visitor)
-    reviewer.soft_answer = NOTHING_FLAGGED
+    reviewer.soft_answer = NOTHING_BEYOND_THE_CARDS
+    verdict = await checked(client, visitor, prose, [clause("booking_confirmed", booking.fact_id)])
+    assert (verdict.ok, verdict.violations, verdict.language) == (True, [], language)
+    prose_block, card = verdict.blocks
+    assert (prose_block.text, card.template, card.fact_id) == (prose, "booking_confirmed", booking.fact_id)
+    assert reviewer.soft_inputs == [SoftPromiseInput(language=language, prose=prose, cards=[card.text])]
+
+
+@pytest.mark.parametrize(("prose", "language", "span"), [
+    ("You're booked.", "en", "You're booked"), ("Tu cita está confirmada.", "es", "Tu cita está confirmada")])
+async def test_a_booking_claim_without_a_booking_card_is_blocked(app, client, reviewer, prose, language, span):
+    """Only a booking card lets a reply say the visit is booked: with no card, or beside another
+    card (a quote), the claim is blocked by the prose scan, before the soft-promise check is asked."""
+    copy, visitor = await visitor_of(app, client)
+    quote = await own_quote(client, visitor)
+    reviewer.soft_answer = NOTHING_BEYOND_THE_CARDS
+    for clauses in ([], [clause("quote", quote.fact_id)]):
+        verdict = await checked(client, visitor, prose, clauses)
+        assert [(v.kind, v.rule_id, v.span) for v in verdict.violations] == [
+            ("promise_word", f"lex.{language}.booking", span)], clauses
+        assert_handed_off(verdict, language)
+    assert reviewer.soft_inputs == []
+
+
+@pytest.mark.parametrize(("case", "kind", "rule_id"), [
+    ("another session's booking", "unentitled_fact", "not_a_reader"),
+    ("an expired booking", "stale_fact", "not_current"),
+])
+async def test_a_booking_card_the_checks_refuse_lets_no_booking_claim_through(app, client, reviewer, case, kind,
+                                                                              rule_id):
+    """Only a booking card the clause checks pass lets the claim through: one citing another
+    session's booking or a booking fact no longer current is refused as before, so the reply
+    carries no booking card and the claim is blocked as well."""
+    copy, visitor = await visitor_of(app, client)
+    if case == "another session's booking":
+        booking = await own_booking(client, reviewer, await open_visitor(client, copy))
+    else:
+        booking = await own_booking(client, reviewer, visitor)
+        await change_fact(app, copy, booking.fact_id, status="expired")
     verdict = await checked(client, visitor, "You're booked.", [clause("booking_confirmed", booking.fact_id)])
-    assert [(v.kind, v.rule_id, v.span) for v in verdict.violations] == [
-        ("promise_word", "lex.en.booking", "You're booked")]
+    assert [(v.kind, v.rule_id) for v in verdict.violations] == [("promise_word", "lex.en.booking"), (kind, rule_id)]
     assert_handed_off(verdict)
     assert reviewer.soft_inputs == []
+    [entry] = await reply_entries(app, copy)
+    assert entry.event.summary["rule_ids"] == ["lex.en.booking", rule_id]
 
 
 async def test_a_reply_naming_only_the_card_passes(app, client, reviewer):
     """Prose that points at the booking card, and claims nothing itself, is shown with it."""
     copy, visitor = await visitor_of(app, client)
     booking = await own_booking(client, reviewer, visitor)
-    reviewer.soft_answer = NOTHING_FLAGGED
+    reviewer.soft_answer = NOTHING_BEYOND_THE_CARDS
     for prose, language in (("The booking is below.", "en"), ("Abajo tiene los datos de su reserva.", "es")):
         verdict = await checked(client, visitor, prose, [clause("booking_confirmed", booking.fact_id)])
         assert (verdict.ok, verdict.violations, verdict.language) == (True, [], language)
@@ -1025,9 +1088,20 @@ async def test_a_reply_naming_only_the_card_passes(app, client, reviewer):
     ("Ya está hecha tu reserva.", "lex.es.booking", "Ya está hecha"),
 ])
 def test_booking_claims_in_prose_are_blocked(prose, rule_id, span):
-    """Only a booking card says a visit is booked: the claim in prose is a promise word, in English
-    and Spanish, whatever card is beside it."""
+    """Only a booking card says a visit is booked: with none in the reply, the claim in prose is a
+    promise word, in English and Spanish; beside one, it passes (the owner's decision, below)."""
     assert [(v.kind, v.rule_id, v.span) for v in reply_check.scan_prose(prose)] == [("promise_word", rule_id, span)]
+    assert reply_check.scan_prose(prose, booking_card=True) == []
+
+
+def test_a_booking_card_lets_only_the_booking_claim_through():
+    """The owner's decision of 2026-10-30 passes a booking claim beside its card, and nothing else
+    the scan finds: a day, a digit or a promise word in the same prose still blocks."""
+    found = reply_check.scan_prose("You're booked for Tuesday at 10, free of charge.", booking_card=True)
+    assert [(v.rule_id, v.span) for v in found] == [("lex.en.date", "Tuesday"), ("digit", "10"),
+                                                    ("lex.en.promise", "free")]
+    found = reply_check.scan_prose("Tu cita está confirmada para el martes, sin costo.", booking_card=True)
+    assert [(v.rule_id, v.span) for v in found] == [("lex.es.date", "martes"), ("lex.es.promise", "sin costo")]
 
 
 def test_booking_claims_read_lookalike_letters():
@@ -1128,61 +1202,39 @@ def test_a_long_draft_of_booking_claims_is_scanned_in_one_pass():
 
 SERVICE_AREA = "We work in Oakland, Berkeley, Alameda and Emeryville."        # Rivera's seeded policy
 AREA_ES = "Trabajamos en Oakland, Berkeley, Alameda y Emeryville."
-NOTICE_ES = "Para cancelar la visita, avísenos con un día de antelación."
-
-
-@pytest.mark.parametrize(("prose", "policy", "span"), [
-    (SERVICE_AREA, SERVICE_AREA, "We work in Oakland, Berkeley, Alameda an"),            # cut to 40 characters
-    ("Good news: we WORK IN OAKLAND; Berkeley too.", SERVICE_AREA, "we WORK IN OAKLAND; Berkeley"),   # case, commas
-    ("We work in OakIand, BerkeIey and more.", SERVICE_AREA, "We work in OakIand, BerkeIey"),    # a capital I for l
-    ("We work in Oakland—Berkeley and around.", SERVICE_AREA, "We work in Oakland—Berkeley"),   # a dash
-    ("Sí, trabajamos en Oakland, Berkeley, Alameda y Emeryville.", AREA_ES,
-     "trabajamos en Oakland, Berkeley, Alameda"),
-    ("Recuerde: para cancelar la visita, avisenos con un dia de antelacion.", NOTICE_ES,   # accents dropped
-     "para cancelar la visita, avisenos con un"),
-])
-def test_prose_repeating_a_policy_is_blocked(prose, policy, span):
-    """A policy appears only in its card: five or more words in a row shared with a policy's text,
-    in either language, with case, punctuation and the lexicons' readings set aside, is the policy
-    in prose, and names the policy it repeats."""
-    found = reply_check.scan_prose(prose, policies=[("charter:policy:rule", policy)])
-    assert [(v.kind, v.rule_id, v.span, v.fact_ids) for v in found] == [
-        ("promise_word", "policy_echo", span, ["charter:policy:rule"])]
 
 
 @pytest.mark.parametrize("prose", [
+    SERVICE_AREA,                                                           # word for word
+    "Good news: we WORK IN OAKLAND; Berkeley too.",
+    "We work in OakIand, BerkeIey and more.",                               # a capital I for l
+    "We work in Oakland—Berkeley and around.",                              # a dash
+    "Sí, trabajamos en Oakland, Berkeley, Alameda y Emeryville.",
+    "Recuerde: para cancelar la visita, avisenos con un dia de antelacion.",   # accents dropped
     "We work in Oakland.",                                                  # four words in a row
     "We work in Oakland and nearby towns.",
     "Maria covers Oakland and Berkeley, plus Alameda and Emeryville.",      # the policy in other words
     "Trabajamos en toda la zona de Oakland.",
 ])
-def test_shorter_overlaps_and_paraphrases_of_a_policy_pass(prose):
-    """Fewer than five words in a row, or the policy in other words, is left to the soft-promise
-    check."""
-    policies = [("charter:policy:a", SERVICE_AREA), ("charter:policy:b", AREA_ES)]
-    assert reply_check.scan_prose(prose, policies=policies) == []
+def test_prose_repeating_a_policy_passes_the_scan_by_the_owners_decision(prose):
+    """The owner's decision of 2026-10-30: the prose scan doesn't compare prose with the Desk's
+    policies, so a policy's words in prose, in either language, are no violation of it; the policy
+    card carries the policy, and the soft-promise check flags a promise beyond the cards."""
+    assert reply_check.scan_prose(prose) == []
 
 
-def test_a_long_draft_repeating_a_policy_is_scanned_in_one_pass():
-    """A draft that repeats one word of a policy over and over is one stretch, found in one pass."""
-    started = time.perf_counter()
-    found = reply_check.scan_prose("the " * 5_000, policies=[("charter:policy:a", "the " * 400)])
-    assert time.perf_counter() - started < 2
-    assert [(v.rule_id, v.span) for v in found] == [("policy_echo", ("the " * 10)[:40])]
-
-
-async def test_a_policy_echo_beside_its_card_is_blocked(app, client, reviewer):
-    """The seeded service area's text in prose is blocked even beside the policy card it repeats,
-    by the prose scan, before the soft-promise check is asked; the ledger names the rule."""
+async def test_a_policy_restated_beside_its_card_is_shown_by_the_owners_decision(app, client, reviewer):
+    """The owner's decision of 2026-10-30: prose may restate the policy whose card it carries. The
+    seeded service area's text passes the prose scan, reaches the soft-promise check beside the
+    card's text, and, with no promise found beyond the card, is shown with the card."""
     copy, visitor = await visitor_of(app, client)
-    reviewer.soft_answer = NOTHING_FLAGGED
+    reviewer.soft_answer = NOTHING_BEYOND_THE_CARDS
     verdict = await checked(client, visitor, SERVICE_AREA, [clause("policy", "charter:policy:service_area")])
-    assert [(v.kind, v.rule_id, v.span, v.fact_ids) for v in verdict.violations] == [
-        ("promise_word", "policy_echo", "We work in Oakland, Berkeley, Alameda an", ["charter:policy:service_area"])]
-    assert_handed_off(verdict)
-    assert reviewer.soft_inputs == []
+    assert (verdict.ok, verdict.violations) == (True, [])
+    assert [(block.kind, block.text) for block in verdict.blocks] == [("prose", SERVICE_AREA), ("card", SERVICE_AREA)]
+    assert reviewer.soft_inputs == [SoftPromiseInput(language="en", prose=SERVICE_AREA, cards=[SERVICE_AREA])]
     [entry] = await reply_entries(app, copy)
-    assert (entry.event.summary["violations"], entry.event.summary["rule_ids"]) == (["promise_word"], ["policy_echo"])
+    assert (entry.event.summary["ok"], entry.event.summary["rule_ids"]) == (True, [])
 
 
 async def add_charter(app: FastAPI, copy: Rivera, key: str, value: str) -> str:
@@ -1195,129 +1247,145 @@ async def add_charter(app: FastAPI, copy: Rivera, key: str, value: str) -> str:
     return fact.fact_id
 
 
-async def test_policy_echoes_cover_the_rules_the_session_reads(app, client, reviewer):
-    """Every charter claim stating a rule counts, `policy:*` and the service area, deposit and
-    cancellation claims, in either language; a policy the session can't read isn't one it is
-    shown, so repeating it isn't this check's to block (a session learns nothing about it)."""
+async def test_the_rules_the_session_reads_pass_in_prose_by_the_owners_decision(app, client, reviewer):
+    """The owner's decision of 2026-10-30: no charter claim stating a rule, `policy:*` or the
+    service area, deposit and cancellation claims, is matched against prose in either language, so
+    a reply restating one passes the prose scan and is left to the soft-promise check."""
     copy, visitor = await visitor_of(app, client)
-    reviewer.soft_answer = NOTHING_FLAGGED
-    deposit = await add_charter(app, copy, "deposit", "The deposit is taken when you book the visit.")
-    cancellation = await add_charter(app, copy, "cancellation", "Cancel any time up until the evening before.")
-    area = await add_charter(app, copy, "service_area", "Maria drives out to the whole East Bay.")
-    for prose, fact_id in (("Just so you know, the deposit is taken when you book the visit.", deposit),
-                           ("You can cancel any time up until the evening before.", cancellation),
-                           ("Maria drives out to the whole East Bay.", area)):
-        verdict = await checked(client, visitor, prose)
-        assert [(v.rule_id, v.fact_ids) for v in verdict.violations] == [("policy_echo", [fact_id])], prose
-        assert_handed_off(verdict)
-
-    # in Spanish: a policy the owner wrote in Spanish, repeated in a Spanish reply
+    reviewer.soft_answer = NOTHING_BEYOND_THE_CARDS
+    await add_charter(app, copy, "deposit", "The deposit is taken when you book the visit.")
+    await add_charter(app, copy, "cancellation", "Cancel any time up until the evening before.")
+    await add_charter(app, copy, "service_area", "Maria drives out to the whole East Bay.")
     await change_fact(app, copy, "charter:policy:first_visit",
                       claims=[{"key": "policy:first_visit", "kind": "text", "value": AREA_ES}])
-    verdict = await checked(client, visitor, f"Claro. {AREA_ES}")
-    assert [(v.rule_id, v.fact_ids) for v in verdict.violations] == [("policy_echo", ["charter:policy:first_visit"])]
-    assert_handed_off(verdict, "es")
+    for prose, language in (("Just so you know, the deposit is taken when you book the visit.", "en"),
+                            ("You can cancel any time up until the evening before.", "en"),
+                            ("Maria drives out to the whole East Bay.", "en"),
+                            (f"Claro. {AREA_ES}", "es")):
+        verdict = await checked(client, visitor, prose)
+        assert (verdict.ok, verdict.violations, verdict.language) == (True, [], language), prose
+        assert verdict.blocks == [RenderedBlock(kind="prose", text=prose)]
+    assert [inputs.prose for inputs in reviewer.soft_inputs] == [
+        "Just so you know, the deposit is taken when you book the visit.",
+        "You can cancel any time up until the evening before.", "Maria drives out to the whole East Bay.",
+        f"Claro. {AREA_ES}"]
 
-    # the contact isn't a rule, and an owner-only policy is no policy this session reads
-    await change_fact(app, copy, "charter:contact", claims=[
-        {"key": "contact", "kind": "text", "value": "Text the shop line and Maria calls back."}])
-    await change_fact(app, copy, "charter:policy:arrival", readers=["owner"])
-    for prose in ("Maria texts before she arrives.", "Just text the shop line and Maria calls back."):
-        assert (await checked(client, visitor, prose)).violations == [], prose
-    assert not reply_check.states_rule("contact")
 
-
-@pytest.mark.parametrize(("prose", "span", "language"), [
+@pytest.mark.parametrize(("prose", "link", "language"), [
     ("Pay for it at rivera-pay.example/checkout", "rivera-pay.example/checkout", "en"),
     ("Email maria@riverapl.example to confirm.", "maria@riverapl.example", "en"),
     ("Pague en rivera-pay.example/checkout antes de la visita.", "rivera-pay.example/checkout", "es"),
     ("Escríbale a maria@riverapl.example para confirmar la visita.", "maria@riverapl.example", "es"),
-    ("Pay for it at…rivera-pay.example/checkout", "at...rivera-pay.example/checkout", "en"),
-    ("Pague en…rivera-pay.example/checkout antes de la visita.", "en...rivera-pay.example/checkout", "es"),
+    ("Pay for it at…rivera-pay.example/checkout", "rivera-pay.example/checkout", "en"),
+    ("Pague en…rivera-pay.example/checkout antes de la visita.", "rivera-pay.example/checkout", "es"),
 ])
-async def test_a_link_beside_a_quote_card_is_blocked(app, client, reviewer, prose, span, language):
-    """A link or an email address reaches a visitor only on a card (a payment or document card's
-    `href`, the contact clause), so prose holding one is blocked even beside the quote it is about,
-    by the prose scan, before the soft-promise check is asked; the ledger names the rule, never
-    the link."""
+async def test_a_link_beside_a_quote_card_is_shown_by_the_owners_decision(app, client, reviewer, prose, link,
+                                                                          language):
+    """The owner's decision of 2026-10-30: Claude may write links and email addresses in its own
+    replies, and its prompt keeps them to the business's own. The prose scan finds nothing in one,
+    so the reply reaches the soft-promise check beside the quote card's text and, with no promise
+    found beyond the card, is shown with it; a look-alike link rests on the prompt, since that
+    check doesn't look at links. The ledger still holds no prose, so neither the link nor the
+    address is on it."""
     copy, visitor = await visitor_of(app, client)
     quote = await own_quote(client, visitor)
-    reviewer.soft_answer = NOTHING_FLAGGED
+    reviewer.soft_answer = NOTHING_BEYOND_THE_CARDS
     verdict = await checked(client, visitor, prose, [clause("quote", quote.fact_id)])
-    assert [(v.kind, v.rule_id, v.span) for v in verdict.violations] == [("promise_word", "link", span)]
-    assert_handed_off(verdict, language)
-    assert reviewer.soft_inputs == []
+    assert (verdict.ok, verdict.violations, verdict.language) == (True, [], language)
+    prose_block, card = verdict.blocks
+    assert (prose_block.text, card.template, card.fact_id) == (reply_check.shown(prose), "quote", quote.fact_id)
+    assert reviewer.soft_inputs == [SoftPromiseInput(language=language, prose=reply_check.shown(prose),
+                                                     cards=[card.text])]
     [entry] = await reply_entries(app, copy)
-    assert (entry.event.summary["violations"], entry.event.summary["rule_ids"]) == (["promise_word"], ["link"])
-    assert span not in json.dumps(entry.event.summary)
+    assert (entry.event.summary["ok"], entry.event.summary["rule_ids"]) == (True, [])
+    assert link not in json.dumps(entry.event.summary)
 
 
-LINK_TLDS = ["com", "net", "org", "io", "co", "us", "app", "dev", "info", "biz", "mx", "es", "example"]
+# The top-level domains the link scan read as a bare domain, before the owner's decision of
+# 2026-10-30 removed it.
+FORMER_LINK_TLDS = ["com", "net", "org", "io", "co", "us", "app", "dev", "info", "biz", "mx", "es", "example"]
 
 
-@pytest.mark.parametrize(("prose", "span"), [
-    ("Open https://riverapl to pay.", "https://riverapl"),                        # a scheme
-    ("Open http://localhost/pay to finish.", "http://localhost/pay"),
-    ("Try ftp://riverapl/files for the photos.", "ftp://riverapl/files"),          # any scheme before "://"
-    ("Open https:riverapl.shop to pay.", "https:riverapl.shop"),                  # no slashes, as browsers take it
-    ("Open mailto:riverapl to write to Maria.", "mailto:riverapl"),
-    ("Tap tel:riveraplumbing to call Maria.", "tel:riveraplumbing"),
-    ("See www.riveraplumbing.shop for photos.", "www.riveraplumbing.shop"),      # www.
-    ("Maria's page is rivera.shop/maria.", "rivera.shop/maria"),                  # a domain before a path
-    ("Find us at riveraplumbing.com.", "riveraplumbing.com"),                     # a bare domain
-    ("Find us at riverapl.co.uk as well.", "riverapl.co.uk"),
-    ("FIND US AT RIVERAPL.COM", "RIVERAPL.COM"),
-    ("Reach her at maria@rivera.", "maria@rivera"),                               # an @ between word characters
-    ("Write to mailto:maria@riverapl.example.", "mailto:maria@riverapl.example"),   # several shapes, one link
-    ("(See https://rivera-pay.example/checkout?visit=next.)", "https://rivera-pay.example/checkout?visi"),   # cut to 40
-    ("Pague en https://rivera-pay.example/checkout antes de la visita.", "https://rivera-pay.example/checkout"),
-    ("Visite www.riverapl.mx para ver fotos.", "www.riverapl.mx"),
-    ("Estamos en riverapl.es, con fotos.", "riverapl.es"),
-    ("¿Ya vio riverapl.org?", "riverapl.org"),
-    ("Lo tiene en «riverapl.com/visitas».", "riverapl.com/visitas"),
-    ("Llame a tel:riverapl desde su teléfono.", "tel:riverapl"),
-    ("Escriba a maria.rivera@riverapl.example y se lo confirmamos.", "maria.rivera@riverapl.example"),
-    ("Hola a tod@s, gracias por escribir.", "tod@s"),                               # fails closed: a cost
-    *((f"Find us at riverapl.{tld} any time.", f"riverapl.{tld}") for tld in LINK_TLDS),
+@pytest.mark.parametrize("prose", [
+    "Open https://riverapl to pay.",                                    # a scheme
+    "Open http://localhost/pay to finish.",
+    "Try ftp://riverapl/files for the photos.",                         # any scheme before "://"
+    "Open https:riverapl.shop to pay.",                                 # no slashes, as browsers take it
+    "Open mailto:riverapl to write to Maria.",
+    "Tap tel:riveraplumbing to call Maria.",
+    "See www.riveraplumbing.shop for photos.",                          # www.
+    "Maria's page is rivera.shop/maria.",                               # a domain before a path
+    "Find us at riveraplumbing.com.",                                   # a bare domain
+    "Find us at riverapl.co.uk as well.",
+    "FIND US AT RIVERAPL.COM",
+    "Reach her at maria@rivera.",                                       # an @ between word characters
+    "Write to mailto:maria@riverapl.example.",                          # several shapes
+    "(See https://rivera-pay.example/checkout?visit=next.)",
+    "Pague en https://rivera-pay.example/checkout antes de la visita.",
+    "Visite www.riverapl.mx para ver fotos.",
+    "Estamos en riverapl.es, con fotos.",
+    "¿Ya vio riverapl.org?",
+    "Lo tiene en «riverapl.com/visitas».",
+    "Llame a tel:riverapl desde su teléfono.",
+    "Escriba a maria.rivera@riverapl.example y se lo confirmamos.",
+    "Hola a tod@s, gracias por escribir.",                              # handed off before the decision
+    *(f"Find us at riverapl.{tld} any time." for tld in FORMER_LINK_TLDS),
     # an ellipsis, dots, a dash, a hyphen or an underscore glued to the front of a domain, or an
     # underscore after it (NFKC writes "…" as "...", and every reading writes a dash as "-")
-    ("Pay for it at…rivera-pay.example/checkout", "at...rivera-pay.example/checkout"),
-    ("Pay for it at...rivera-pay.example/checkout", "at...rivera-pay.example/checkout"),
-    ("Find us at…riverapl.com", "at...riverapl.com"),
-    ("Pay at .rivera-pay.example/checkout", ".rivera-pay.example/checkout"),
-    ("Pay at —rivera-pay.example/checkout", "—rivera-pay.example/checkout"),
-    ("Photos: —www.riverapl.shop", "—www.riverapl.shop"),
-    ("Pay at -riverapl.com", "-riverapl.com"),
-    ("Pay at _rivera-pay.example/checkout_", "_rivera-pay.example/checkout_"),
-    ("Find us at _riverapl.com_ any time.", "_riverapl.com_"),
-    ("Find us at riverapl.com_ now", "riverapl.com_"),
-    ("Email maria@-riverapl.example now", "maria@-riverapl.example"),
-    ("Open _https:riverapl.shop_ to pay.", "_https:riverapl.shop_"),
-    ("Pague en…rivera-pay.example/checkout antes de la visita.", "en...rivera-pay.example/checkout"),
-    ("Pague en...rivera-pay.example/checkout antes de la visita.", "en...rivera-pay.example/checkout"),
-    ("Estamos en…riverapl.es, con fotos.", "en...riverapl.es"),
-    ("Pague en .rivera-pay.example/checkout antes de la visita.", ".rivera-pay.example/checkout"),
-    ("Pague en —rivera-pay.example/checkout antes de la visita.", "—rivera-pay.example/checkout"),
-    ("Fotos: —www.riverapl.mx", "—www.riverapl.mx"),
-    ("Estamos en -riverapl.es, con fotos.", "-riverapl.es"),
-    ("Pague en _rivera-pay.example/checkout_ antes de la visita.", "_rivera-pay.example/checkout_"),
-    ("Estamos en _riverapl.es_ con fotos.", "_riverapl.es_"),
-    ("Estamos en riverapl.es_ con fotos.", "riverapl.es_"),
-    ("Escriba a maria@-riverapl.example y se lo confirmamos.", "maria@-riverapl.example"),
+    "Pay for it at…rivera-pay.example/checkout",
+    "Pay for it at...rivera-pay.example/checkout",
+    "Find us at…riverapl.com",
+    "Pay at .rivera-pay.example/checkout",
+    "Pay at —rivera-pay.example/checkout",
+    "Photos: —www.riverapl.shop",
+    "Pay at -riverapl.com",
+    "Pay at _rivera-pay.example/checkout_",
+    "Find us at _riverapl.com_ any time.",
+    "Find us at riverapl.com_ now",
+    "Email maria@-riverapl.example now",
+    "Open _https:riverapl.shop_ to pay.",
+    "Pague en…rivera-pay.example/checkout antes de la visita.",
+    "Pague en...rivera-pay.example/checkout antes de la visita.",
+    "Estamos en…riverapl.es, con fotos.",
+    "Pague en .rivera-pay.example/checkout antes de la visita.",
+    "Pague en —rivera-pay.example/checkout antes de la visita.",
+    "Fotos: —www.riverapl.mx",
+    "Estamos en -riverapl.es, con fotos.",
+    "Pague en _rivera-pay.example/checkout_ antes de la visita.",
+    "Estamos en _riverapl.es_ con fotos.",
+    "Estamos en riverapl.es_ con fotos.",
+    "Escriba a maria@-riverapl.example y se lo confirmamos.",
 ])
-def test_links_and_email_addresses_in_prose_are_blocked(prose, span):
-    """A URL scheme, "www.", a domain before a path, a bare domain ending in a common top-level
-    domain and an "@" between word characters are each a link in prose, in English and Spanish,
-    whatever dots, dashes or underscores are glued to them: one violation for each run of text
-    between blanks, spanning it without the punctuation around it."""
-    assert [(v.kind, v.rule_id, v.span) for v in reply_check.scan_prose(prose)] == [("promise_word", "link", span)]
+def test_links_and_email_addresses_pass_the_scan_by_the_owners_decision(prose):
+    """The owner's decision of 2026-10-30: Claude may write links and email addresses in its own
+    replies, and its prompt keeps them to the business's own, so a URL scheme, "www.", a domain
+    before a path, a bare domain and an "@" between word characters, in English and Spanish and
+    whatever dots, dashes or underscores are glued to them, are no violation of the prose scan.
+    Each case was blocked as a `link` before the decision; a look-alike link now rests on the
+    prompt, since the soft-promise check doesn't look at links."""
+    assert reply_check.scan_prose(prose) == []
 
 
-def test_each_link_in_a_reply_is_one_violation():
-    found = reply_check.scan_prose("Pay at riverapl.com/pay or write to maria@riverapl.example.")
-    assert [(v.rule_id, v.span) for v in found] == [("link", "riverapl.com/pay"), ("link", "maria@riverapl.example")]
+def test_several_links_in_a_reply_pass_the_scan_by_the_owners_decision():
+    assert reply_check.scan_prose("Pay at riverapl.com/pay or write to maria@riverapl.example.") == []
 
 
+@pytest.mark.parametrize(("prose", "found"), [
+    ("Pay at rivera-pay.example/checkout for eighty dollars.",
+     [("number_in_prose", "lex.en.number", "eighty"), ("number_in_prose", "lex.en.money", "dollars")]),
+    ("Pay at rivera-pay.example/pay?amount=180 today.",                 # a number inside the link
+     [("number_in_prose", "digit", "180"), ("number_in_prose", "lex.en.date", "today")]),
+    ("Pague en rivera-pay.example/checkout mañana.", [("number_in_prose", "lex.es.date", "mañana")]),
+    ("Write to maria@riverapl.example, it's free.", [("promise_word", "lex.en.promise", "free")]),
+    ("Escriba a maria@riverapl.example, es gratis.", [("promise_word", "lex.es.promise", "gratis")]),
+])
+def test_a_link_lets_nothing_else_through_the_scan(prose, found):
+    """Only the link or the address passes by the owner's decision of 2026-10-30: a number, an
+    amount, a date or a promise word beside one, or inside it, is blocked as before."""
+    assert [(v.kind, v.rule_id, v.span) for v in reply_check.scan_prose(prose)] == found
+
+
+# These had to pass the link scan, which the owner's decision of 2026-10-30 removed.
 @pytest.mark.parametrize("prose", [
     "Maria can look at a few options, e.g. a new valve.",
     "Turn off the main valve, i.e. the one under the sink.",
@@ -1338,44 +1406,49 @@ def test_each_link_in_a_reply_is_one_violation():
     "Maria arregla desagües—y calentadores…y lavabos.",
     "Cierre la llave —p.ej. la de paso.",
 ])
-def test_ordinary_dots_and_signs_are_no_link(prose):
+def test_ordinary_dots_and_signs_pass_the_scan(prose):
     assert reply_check.scan_prose(prose) == []
 
 
 @pytest.mark.parametrize(("prose", "found"), [
-    ("Find us at riverapl.\u0441\u043em.", [("link", "riverapl.\u0441\u043em"), ("mixed_script", "\u0441\u043em")]),
-    ("See \u051d\u051d\u051d.riverapl.shop for photos.", [("link", "\u051d\u051d\u051d.riverapl.shop")]),   # Cyrillic we
-    ("Find us at riverapl.\u0131o now.", [("link", "riverapl.\u0131o")]),                       # a dotless i
-    ("See \uff57\uff57\uff57\uff0eriverapl\uff0eshop for photos.", [("link", "www.riverapl.shop")]),   # full width
-    ("Pay at rivera-pay\u3002example/checkout before the visit.", [("link", "rivera-pay\u3002example/checkout")]),
-    ("Pay at rivera.shop\u2044checkout before the visit.", [("link", "rivera.shop\u2044checkout")]),   # a fraction slash
-    ("Pay at rivera.shop\u2215checkout before the visit.", [("link", "rivera.shop\u2215checkout")]),   # a division slash
-    ("Try ftp:\u2044\u2044riverapl/files for the photos.", [("link", "ftp:\u2044\u2044riverapl/files")]),   # in "://"
-    ("Pay at rivera-pay.ex\u200bample/checkout first.", [("link", "rivera-pay.example/checkout")]),   # a zero-width space
-    ("Pay at rivera\u2010pay.example/checkout first.", [("link", "rivera\u2010pay.example/checkout")]),   # a Unicode hyphen
-    ("Email maria\uff20riverapl.example to confirm.", [("link", "maria@riverapl.example")]),   # a full-width @
-    ("Email maria\ufe6briverapl.example to confirm.", [("link", "maria@riverapl.example")]),   # a small @
+    ("Find us at riverapl.\u0441\u043em.", [("mixed_script", "\u0441\u043em")]),   # a word mixing scripts
+    ("See \u051d\u051d\u051d.riverapl.shop for photos.", []),           # Cyrillic we
+    ("Find us at riverapl.\u0131o now.", []),                           # a dotless i
+    ("See \uff57\uff57\uff57\uff0eriverapl\uff0eshop for photos.", []),   # full width
+    ("Pay at rivera-pay\u3002example/checkout before the visit.", []),
+    ("Pay at rivera.shop\u2044checkout before the visit.", []),         # a fraction slash
+    ("Pay at rivera.shop\u2215checkout before the visit.", []),         # a division slash
+    ("Try ftp:\u2044\u2044riverapl/files for the photos.", []),         # in "://"
+    ("Pay at rivera-pay.ex\u200bample/checkout first.", []),            # a zero-width space
+    ("Pay at rivera\u2010pay.example/checkout first.", []),             # a Unicode hyphen
+    ("Email maria\uff20riverapl.example to confirm.", []),              # a full-width @
+    ("Email maria\ufe6briverapl.example to confirm.", []),              # a small @
 ])
-def test_links_read_lookalikes(prose, found):
-    """A link written with letters of another script that look like Latin ones, with full-width
-    characters, an ideographic full stop for a dot, a fraction or division slash for a slash, or an
-    invisible character inside, is a link too (and a word mixing scripts is blocked on its own)."""
+def test_links_written_with_lookalikes_pass_the_scan_by_the_owners_decision(prose, found):
+    """The owner's decision of 2026-10-30: a link written with letters of another script that look
+    like Latin ones, with full-width characters, an ideographic full stop for a dot, a fraction or
+    division slash for a slash, or an invisible character inside, is no violation either, as it
+    was a `link` before; a word mixing Latin letters with another script is still blocked on its
+    own, link or not."""
     assert [(v.rule_id, v.span) for v in reply_check.scan_prose(prose)] == found
 
 
-def test_a_long_draft_of_near_links_is_scanned_in_one_pass():
-    """Long words, dotted runs and many links in one run of text are read in one pass: a domain is
-    looked for only where no letter, digit, dot or hyphen comes before it, and the links in one run
-    of text are one violation."""
+def test_a_long_draft_of_dotted_runs_passes_the_scan_in_one_pass():
+    """Long words, dotted runs and many near-links, the draft that held the link scan to one pass
+    before the owner's decision of 2026-10-30 removed it, are read in one pass by the lexicons'
+    readings and hold no violation, so a lexicon line with dots ("a.m.", "p.ej.") can't backtrack
+    on them unnoticed."""
     started = time.perf_counter()
     found = reply_check.scan_prose("x" * 40_000 + " " + "a." * 20_000 + " " + "rivera.pay.section " * 2_000
                                    + "a.b/" * 10_000)
     assert time.perf_counter() - started < 2
-    assert [(v.rule_id, v.span) for v in found] == [("link", ("a.b/" * 10)[:40])]
+    assert found == []
 
 
-def test_a_m_and_p_m_are_no_link():
-    """"a.m." and "p.m." are time words, never a domain: each is the date word alone."""
+# This had to pass the link scan, which the owner's decision of 2026-10-30 removed.
+def test_a_m_and_p_m_are_only_date_words():
+    """"a.m." and "p.m." are time words: each is the date word alone, and the slash between them
+    adds nothing."""
     found = reply_check.scan_prose("Maria takes calls in the a.m./p.m. hours.")
     assert [(v.rule_id, v.span) for v in found] == [("lex.en.date", "a.m."), ("lex.en.date", "p.m.")]
 
@@ -1431,17 +1504,49 @@ async def test_old_generation_and_owner_mode_drafts_are_409(app, client):
     assert [entry.event.ref_id for entry in await reply_entries(app, copy)] == [verdict.message_id]
 
 
-async def test_a_paused_session_gets_only_the_handoff(app, client):
+async def test_a_take_over_during_a_reply_check_waits_for_no_model_call(app, client, reviewer, frozen_clock):
+    """The reply check writes the session row only at its end, just before its ledger entry, so it
+    holds no lock on the row while the soft-promise check runs: Maria's take-over answers at once.
+    The draft's verdict keeps the generation it was sent at, which `deliver()` then drops."""
+    copy, visitor = await visitor_of(app, client)
+    asked, answer = asyncio.Event(), asyncio.Event()
+    soft_promise = reviewer.soft_promise
+
+    async def slow_model(data):
+        asked.set()
+        await answer.wait()                                      # the model answers only once the test lets it
+        return await soft_promise(data)
+
+    reviewer.soft_promise = slow_model
+    frozen_clock.advance(60)                                     # a minute after the visitor's last call
+    checking = asyncio.create_task(checked(client, visitor, "I can help with that."))
+    try:
+        await asyncio.wait_for(asked.wait(), 5)
+        state = await asyncio.wait_for(set_mode(client, copy, visitor.session_id, "owner", 0), 5)
+    finally:
+        answer.set()                                             # never left waiting on the model
+    verdict = await asyncio.wait_for(checking, 5)
+    assert (state["mode"], state["generation"]) == ("owner", 1)
+    assert (verdict.ok, verdict.generation) == (True, 0)
+    row = await session_of(app, copy, visitor)
+    # the take-over stands, and the reply check still saw the visitor and kept the reply's language
+    assert (row.mode, row.generation, row.last_seen_at, row.last_language) == ("owner", 1, frozen_clock.now(), "en")
+    assert [entry.event.kind for entry in await ledger_rows(app, copy)][-2:] == ["takeover", "reply"]
+
+
+async def test_a_paused_session_gets_only_the_handoff(app, client, frozen_clock):
     copy, visitor = await visitor_of(app, client)
     quote = await own_quote(client, visitor)
     await set_session(app, copy, visitor.session_id, mode="paused", strikes=3)       # the breaker tripped
+    frozen_clock.advance(60)
     verdict = await checked(client, visitor, "Le hago el cincuenta por ciento, con gusto.",
                             [clause("quote", quote.fact_id)])
     # nothing is scanned or rendered: one violation, the handoff in the session's last language
     assert [(v.kind, v.rule_id) for v in verdict.violations] == [("session_paused", "session_paused")]
     assert_handed_off(verdict, "en")
     verify_verdict(await public_key(client), visitor.session_id, verdict)
-    assert (await session_of(app, copy, visitor)).last_language is None
+    row = await session_of(app, copy, visitor)
+    assert (row.last_language, row.last_seen_at) == (None, frozen_clock.now())       # seen, though nothing was read
     [entry] = await reply_entries(app, copy)
     assert (entry.seq, entry.event.summary["violations"]) == (verdict.ledger_seq, ["session_paused"])
 

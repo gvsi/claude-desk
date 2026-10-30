@@ -358,6 +358,27 @@ async def test_owner_reads_its_copys_decisions(kernel, ro_read):
 
 
 @pytest.mark.kernel_plan("01a")
+async def test_a_held_calls_free_text_is_claudes_note(kernel, ro_read):
+    """The free text in a tool call (a quote's `note`) is Claude's wording, untrusted: it may repeat what the visitor
+    said, or not. The owner reads it in the held request's `reason_plain` quoted after "Claude's note", never labelled
+    as the visitor's words, in the decision the session gets, the owner's read and the API's read-only row alike."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    view, session_id = http.session(visitor.session_token), visitor.state.session_id
+    note = "Asked whether Maria can come before lunch."
+    args = {**quote_args(item_id(ro_read, ro_schema, copy, "Drain clearing"), 1500), "note": note}
+    held = await decide(view, session_id, 0, "call-1", "native.quote", args)
+    assert held.state == "held"
+    assert f"Claude's note: “{note}”" in held.reason_plain, held.reason_plain
+    read = await read_decision(http.owner(copy.owner_token), held.decision_id)
+    stored = ro_read(ro_schema, copy.copy_id, "SELECT reason_plain FROM {ro}.decisions WHERE decision_id = %s",
+                     (held.decision_id,))
+    assert read.reason_plain == held.reason_plain and stored == [{"reason_plain": held.reason_plain}]
+    assert "From the visitor" not in held.reason_plain
+
+
+@pytest.mark.kernel_plan("01a")
 async def test_approving_after_the_rules_changed_runs_nothing(kernel, ro_read, arrange):
     """An approved hold is re-checked against the rules in force when the owner answers (step 6): once a `never`
     card covers the tool, approving it ends `refused_at_execution`, "rules changed", and nothing runs."""

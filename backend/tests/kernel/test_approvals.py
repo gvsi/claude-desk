@@ -585,6 +585,8 @@ async def test_a_person_card_decides_over_the_default_ask(app, client, registry)
     _, held = await held_on(client, rows, visitor=dana)
     assert held.policy_ids == ["H.ask.default:native.quote", f"H.twin.{dana_card.card_id}"]
     assert held.answers == ["allow_once", "deny_once", "allow_person"]
+    assert held.reason_plain == ("Dana Whitfield asked to get a quote for $153 with 15% off. "   # her card alone
+                                 f"It goes past your rule, so it waits for you: “{dana_card.reason}”")
     response = await post_answer(client, rows.owner, held.decision_id, "deny_always")
     assert (response.status_code, response.json()) == (422, {"code": "invalid"})
     assert (await read_id(client, rows.owner, held.decision_id)).state == "held"
@@ -594,6 +596,23 @@ async def test_a_person_card_decides_over_the_default_ask(app, client, registry)
                                                        ["allow_once", "deny_once", "deny_always"])
     [never] = (await answered(client, rows.owner, stranger.decision_id, "deny_always")).card_diff
     assert (never.mode, never.who, never.applies_to) == ("never", "anyone", "native.quote")
+
+
+async def test_a_mixed_hold_quotes_only_the_cards_that_decided(app, client):
+    # Dana's own ask card beside rv-quote (list price, for anyone): both hold policies match her
+    # list-price quote, since hold policies carry no exclusions, but her card is the more specific
+    # and decides. The owner reads only it under the ask lead-in, the one that offers deny_always:
+    # rv-quote's text would read as a rule that asks
+    copy = await rivera(app, client)
+    dana_id = await person_id(app, copy, "dana")
+    dana_ask = RuleCard(card_id=f"ask-{dana_id}-native.quote", applies_to="native.quote", mode="ask",
+                        who="person", person_id=dana_id, reason="Dana's quotes wait for your answer.")
+    await activate(app, copy, [*RIVERA_CARDS, dana_ask])
+    held = await decided(client, await verified_visitor(app, client, copy), "native.quote", quote_args(("drain", 1)))
+    assert (held.state, held.policy_ids) == ("held", [f"H.ask.{dana_ask.card_id}", "H.twin.rv-quote"])
+    assert held.answers == ["allow_once", "deny_once", "allow_person", "deny_always"]
+    assert held.reason_plain == ("Dana Whitfield asked to get a quote for $180. "
+                                 "Your rule asks you first: “Dana's quotes wait for your answer.”")
 
 
 async def held_booking_of_a_past_slot(app: FastAPI, client: httpx.AsyncClient, frozen_clock) -> tuple[Rivera, str]:

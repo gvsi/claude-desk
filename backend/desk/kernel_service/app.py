@@ -44,7 +44,7 @@ from desk.kernel_service import (activation, approvals, auth, context, copies, d
 from desk.kernel_service.auth import AuthError, Named
 from desk.kernel_service.clock import Clock, SystemClock
 from desk.kernel_service.decisions import DecisionsBackend, make_decisions
-from desk.kernel_service.repo import Ctx, KernelFailure, KernelRuntime, kernel_transaction, route_template
+from desk.kernel_service.repo import Ctx, KernelFailure, KernelRuntime, kernel_transaction, log_error, route_template
 
 log = logging.getLogger("desk.kernel_service")
 
@@ -110,8 +110,8 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
                 # executions a stopped kernel left behind; a read settles them too, so a failure
                 # here is logged and the kernel starts
                 await execute.reconcile_at_startup(app.state.kernel)
-            except Exception:
-                log.exception("startup_reconcile_failed")
+            except Exception as exc:
+                log_error(log, exc, "startup_reconcile_failed")
             yield
         finally:
             await engine.dispose()
@@ -220,9 +220,9 @@ async def _kernel_failure(request: Request, exc: KernelFailure) -> JSONResponse:
         try:
             async with kernel_transaction(request.app.state.kernel) as ctx:
                 await exc.persist(ctx)
-        except Exception:
-            log.exception("kernel_failure_unrecorded route=%s code=%s reason=%s", route_template(request), exc.code,
-                          exc.reason)
+        except Exception as failure:
+            log_error(log, failure, "kernel_failure_unrecorded route=%s code=%s reason=%s", route_template(request),
+                      exc.code, exc.reason)
             return error_response(500, "internal")
     if isinstance(exc, AuthError) and exc.named is None:
         # a request naming no existing session or Desk has no ledger to go on
@@ -268,9 +268,10 @@ class InternalErrors:
 
         try:
             await self.app(scope, receive, send_tracking)
-        except Exception:
+        except Exception as exc:
             route = scope.get("route")
-            log.exception("internal_error route=%s %s", scope.get("method"), getattr(route, "path", "<unmatched>"))
+            path = getattr(route, "path", "<unmatched>")
+            log_error(log, exc, "internal_error route=%s %s", scope.get("method"), path)
             if started:
                 raise
             await error_response(500, "internal")(scope, receive, send)

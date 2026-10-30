@@ -5,7 +5,8 @@
 # "next-week") and every apostrophe as "’" ("oʼclock" is "o’clock"). Categories: number, money,
 # percent and date (number_in_prose), and promise and booking (promise_word). A booking claim
 # with a condition straight before it ("once you're booked") passes (`BOOKING_CONDITION` in
-# reply_check.py). Both lexicons run on every draft, whatever its language.
+# reply_check.py), and so does every booking claim in a reply that carries the booking's card.
+# Both lexicons run on every draft, whatever its language.
 
 # Spelled-out numbers. A bare "one" counts only next to a unit or another number word, so "one
 # moment" passes.
@@ -44,10 +45,10 @@ date	same[\s-]{0,3}day
 # A time soon: "in" or "within" and up to three words before minutes or hours ("in an hour",
 # "in a couple of hours", "within the hour").
 date	(?:in|within)[\s-]+(?:[^\W\d_]+[\s-]+){0,3}(?:minutes?|mins?|hours?|hrs?)
-date	right[\s-]+away
-# "first thing in the morning" wherever it stands, and "first thing" as a time, with no
-# determiner before it ("Maria can come first thing"), so advice passes ("the first thing to check").
-date	first[\s-]+thing[\s-]+in[\s-]+the[\s-]+morning|(?<!the )(?<!a )(?<!one )(?<!your )(?<!my )(?<!our )(?<!his )(?<!her )(?<!their )first[\s-]+thing
+# "first thing in the morning" names the part of the day. The bare adverbs "right away" and "first
+# thing" are no time words (the owner's decision of 2026-10-30), so urgent advice passes ("Turn off
+# the water main right away.").
+date	first[\s-]+thing[\s-]+in[\s-]+the[\s-]+morning
 
 # Promises only the owner's rules or a card can make. "free" passes only in "feel free" and in
 # "free to" after "you're", "you are", "you'll be" or "you will be" ("you're free to ask"), where

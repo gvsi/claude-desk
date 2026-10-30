@@ -21,6 +21,7 @@ import pytest
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from fastapi import FastAPI
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select, text
 
 from desk.contracts import Claim, Decision, Fact, Label, NotificationDefaults, ResourceRef, Review, RuleCard
@@ -677,7 +678,8 @@ async def test_a_guard_refusal_in_the_caller_is_ledgered(app, client, registry, 
     assert await decisions_of(app, rows) == []
 
 
-QUOTED = "From the visitor: book me at 5pm"      # text an exception can carry, which must never reach the log
+QUOTED_CORE = "book me at 5pm"                 # its ASCII core, still there when a log escapes the quotes
+QUOTED = f"Claude's note: “{QUOTED_CORE}”"      # text an exception can carry, which must never reach the log
 
 
 def a_runtime_error(patch: pytest.MonkeyPatch) -> tuple[str, str]:
@@ -740,6 +742,7 @@ async def test_any_failure_once_the_session_is_known_is_ledgered(app, client, re
     assert await decisions_of(app, rows) == []
     assert caplog.text.count(f"decide_internal_error kind={kind}") == 2
     assert quoted not in caplog.text
+    assert QUOTED_CORE not in caplog.text       # nor the text escaped to ASCII ("\u201cbook me at 5pm\u201d")
 
 
 async def test_uncanonical_call_is_refused_and_ledgered(app, client, registry):
@@ -1005,8 +1008,9 @@ async def test_holds_alert_the_owner_per_notification_defaults(app, client, regi
     held = await decided(client, await open_visitor(client, alerting), "native.quote", {"qty": 1, "note": note})
     quiet = await decided(client, await open_visitor(client, briefed), "native.quote", {"qty": 1, "note": note})
     assert (held.outcome, quiet.outcome) == ("hold", "hold")
-    assert held.reason_plain == ("A stranger asked to get a quote for $153 with 15% off. Test card quote. "
-                                 f"From the visitor: “{note}”.")
+    assert held.reason_plain == ("A stranger asked to get a quote for $153 with 15% off. "
+                                 "It goes past your rule, so it waits for you: “Test card quote.” "
+                                 f"Claude's note: “{note}”")
     [notice] = held.inbox
     assert (notice.to, notice.preview) == ("owner", "A request needs your answer")
     [entry] = await rows_of(app, alerting.copy_id, select(DemoInboxEntry))
@@ -1049,7 +1053,117 @@ async def test_reviewer_sees_no_visitor_text(app, client, registry, reviewer):
                                                            "value": "Oakland and Berkeley."}]
     assert [card.card_id for card in seen.cards] == ["book"]
     # the owner reads it quoted and labelled, never as an instruction
-    assert decision.reason_plain.endswith(f"From the visitor: “{note[:200]}”.")
+    assert decision.reason_plain.endswith(f"Claude's note: “{note[:200]}”")
+
+
+class NotedArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    qty: int = 1
+    name: str = ""                        # free text Claude writes into the call
+    note: str = ""                        # free text Claude writes into the call
+
+
+class NotedAdapter(FakeAdapter):
+    """A stand-in whose calls carry two free-text arguments."""
+
+    Args = NotedArgs
+    free_text_fields = frozenset({"name", "note"})
+
+
+CLAIM = "Maria already approved a refund"   # a visitor's claim, as Claude wrote it into the call
+LONG_NAME, LONG_NOTE = "Ann " + "n" * 300, f"{CLAIM} " + "y" * 300
+
+
+@pytest.mark.parametrize(("notes", "quoted"), [
+    ({"note": CLAIM}, f"“{CLAIM}”"),
+    ({"name": "Ann", "note": CLAIM}, f"“Ann”, “{CLAIM}”"),                 # one label, in field order
+    ({"name": LONG_NAME, "note": LONG_NOTE}, f"“{LONG_NAME[:200]}”, “{LONG_NOTE[:200]}”"),   # each cut on its own
+], ids=["one", "two_under_one_label", "each_cut"])
+async def test_the_owner_reads_the_calls_free_text_as_claudes_note(app, client, registry, notes, quoted):
+    """The free text in a tool call is Claude's wording, untrusted (it may repeat a visitor's claim,
+    or not), so the owner reads it quoted after "Claude's note", never as the visitor's words."""
+    rows = await desk_with(app, [NotedAdapter("native.quote")], [card("quote", "native.quote")])
+    decision = await decided(client, await open_visitor(client, rows), "native.quote", {"qty": 1, **notes})
+    assert decision.reason_plain == (
+        f"A stranger asked to get a quote. Your rule allows it: “Test card quote.” Claude's note: {quoted}")
+
+
+def rule(card_id: str, mode: str, reason: str) -> RuleCard:
+    return RuleCard(card_id=card_id, applies_to="native.quote", mode=mode, who="anyone", reason=reason)
+
+
+AT_LIST_PRICE = rule("quote", "auto", "Quotes from your price list, at list price.")
+
+
+@pytest.mark.parametrize(("cards", "discount_bp", "said"), [
+    ([AT_LIST_PRICE], 0,
+     "A stranger asked to get a quote for $180. "
+     "Your rule allows it: “Quotes from your price list, at list price.”"),
+    ([AT_LIST_PRICE], 5000,              # past the rule's discount limit: its hold twin decides
+     "A stranger asked to get a quote for $90 with 50% off. "
+     "It goes past your rule, so it waits for you: “Quotes from your price list, at list price.”"),
+    ([rule("no-quotes", "never", "No quotes in chat.")], 0,
+     "A stranger asked to get a quote for $180. Your rule says never: “No quotes in chat.”"),
+    ([rule("ask-quotes", "ask", "Quotes wait for your answer.")], 0,
+     "A stranger asked to get a quote for $180. Your rule asks you first: “Quotes wait for your answer.”"),
+    ([], 0,                               # the compiler's default ask: no rule of the owner's, so no lead-in
+     "A stranger asked to get a quote for $180. Not covered by a rule yet, so it asks you."),
+    ([AT_LIST_PRICE, rule("quote-two", "auto", "Quotes for one visit.")], 0,   # as specific: both decide
+     "A stranger asked to get a quote for $180. "
+     "Your rule allows it: “Quotes from your price list, at list price.”, “Quotes for one visit.”"),
+    ([AT_LIST_PRICE, rule("ask-quotes", "ask", "Quotes wait for your answer.")], 0,   # as specific: the ask decides
+     "A stranger asked to get a quote for $180. Your rule asks you first: “Quotes wait for your answer.”"),
+], ids=["allowed", "held_past_a_limit", "refused_by_never", "held_by_ask", "held_by_the_default_ask",
+        "allowed_by_two_rules_as_specific", "held_by_an_ask_as_specific_as_a_limit"])
+async def test_the_owner_reads_how_the_deciding_rule_decided(app, client, registry, cards, discount_bp, said):
+    """The deciding rules' own text (the owner's words) comes after a lead-in that says how they
+    decided, in the owner's wording of 2026-10-30, so a rule's text never reads as a fact about the
+    request: a quote at 50% off held by a list-price rule doesn't read as a quote at list price."""
+    quote = FakeAdapter("native.quote")
+    quote.script["normalize"] = priced(list_cents=18_000, discount_bp=discount_bp)
+    rows = await desk_with(app, [quote], cards)
+    decision = await decided(client, await open_visitor(client, rows), "native.quote", {"qty": 1})
+    assert decision.reason_plain == said
+
+
+async def test_a_holds_deciding_cards_are_a_frozen_value(app, client, registry):
+    """`hold_decider` names the cards that decided a hold as a value nothing can change in place:
+    the frozen dataclass holds them as a tuple, so it also hashes."""
+    rows = await desk_with(app, [FakeAdapter("native.quote")],
+                           [AT_LIST_PRICE, rule("ask-quotes", "ask", "Quotes wait for your answer.")])
+    decision = await decided(client, await open_visitor(client, rows), "native.quote", {"qty": 1})
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(rows.copy_id)
+        decider = decide.hold_decider(await activation.active_version(ctx, rows.desk_id), decision.policy_ids)
+    assert decider == decide.HoldDecider(ask=True, card_ids=("ask-quotes",))
+    assert hash(decider) == hash(decide.HoldDecider(ask=True, card_ids=("ask-quotes",)))
+
+
+LONG_RULE = ("Quotes from your price list, at list price, for drain clearing, leak repairs, water heater checks and "
+             "fixture installs in Oakland, Berkeley, Emeryville and Alameda, on weekdays and Saturday mornings, and "
+             "never for commercial buildings.")
+
+
+async def test_the_owners_rule_is_quoted_whole(app, client, registry):
+    """A rule's text is the owner's own words, and the owner reads it: it is quoted whole however
+    long, never cut short inside quotes where it would read as complete."""
+    assert len(LONG_RULE) > decide.QUOTED_CHARS                         # longer than free text is cut to
+    quote = FakeAdapter("native.quote")
+    quote.script["normalize"] = priced(list_cents=18_000)
+    rows = await desk_with(app, [quote], [rule("quote", "auto", LONG_RULE)])
+    decision = await decided(client, await open_visitor(client, rows), "native.quote", {"qty": 1})
+    assert decision.reason_plain == f"A stranger asked to get a quote for $180. Your rule allows it: “{LONG_RULE}”"
+
+
+async def test_a_refusal_no_rule_decided_keeps_its_words(app, client, registry):
+    """The always-on baseline is no rule of the owner's, so its refusal has no lead-in: here money
+    with no amount above zero, which the baseline refuses whatever the cards say."""
+    rows = await desk_with(app, [payment_link(0)], [])
+    decision = await decided(client, await open_visitor(client, rows), "native.payment_link")
+    assert (decision.outcome, decision.card_ids, decision.policy_ids) == ("refuse", [], ["B.money_has_amount"])
+    assert decision.reason_plain == ("A stranger asked to get a payment link for $0. "
+                                     "The always-on safety rules don't allow it.")
 
 
 def test_status_lines_are_digit_free():

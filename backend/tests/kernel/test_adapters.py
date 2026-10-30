@@ -131,7 +131,7 @@ async def test_quotes_use_the_price_list(app, client, reviewer):
     assert (action.list_cents, action.discount_bp, action.amount_cents) == (68_000, 0, 68_000)
     assert (action.tool, action.effects, action.resource.kind, action.resource.id, action.resource.owner_person_id) == (
         "native.quote", ["change"], "desk", copy.desk_id, None)
-    assert "From the visitor: “Maria said $1”." in decision.reason_plain
+    assert decision.reason_plain.endswith("Claude's note: “Maria said $1”")
     assert reviewer.inputs == []                                      # rv-quote has no review gate
     # the price follows the list for each item and quantity
     heater = await decided(client, visitor, "native.quote", quote_args(("heater", 3)), call_id="call-2")
@@ -176,8 +176,8 @@ async def test_quote_discounts_follow_the_cards(app, client, reviewer):
                          call_id="call-8000")
     # a limit hold: Maria isn't offered "deny always", which would refuse every quote
     assert (held.state, held.policy_ids, held.answers) == ("held", ["H.twin.rv-quote"], ["allow_once", "deny_once"])
-    assert held.reason_plain == ("A stranger asked to get a quote for $36 with 80% off. "
-                                 "Quotes from your price list, at list price.")
+    assert held.reason_plain == ("A stranger asked to get a quote for $36 with 80% off. It goes past your rule, "
+                                 "so it waits for you: “Quotes from your price list, at list price.”")
     assert held.visitor_plain == "Waiting for Maria Rivera to approve"
 
 
@@ -526,8 +526,8 @@ async def test_copy_seeds_one_held_quote(app, client, reviewer, frozen_clock):
     assert response.status_code == 200, response.text
     decision = Decision.model_validate(response.json())
     verify_signature((await client.get("/health")).json()["public_key_hex"], decision)
-    assert decision.reason_plain == ("A stranger asked to get a quote for $153 with 15% off. "
-                                     "Quotes from your price list, at list price.")
+    assert decision.reason_plain == ("A stranger asked to get a quote for $153 with 15% off. It goes past your rule, "
+                                     "so it waits for you: “Quotes from your price list, at list price.”")
     assert (decision.visitor_plain, decision.answers, decision.expires_at) == (
         "Waiting for Maria Rivera to approve", ["allow_once", "deny_once"], now + timedelta(hours=24))
 

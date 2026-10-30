@@ -336,9 +336,9 @@ async def _run(ctx: KernelCtx, decision_id: str, action_id: str, session_id: str
     except AdapterFailure as failure:
         await ctx.db.rollback()
         return await _settle_failed(ctx, decision_id, action_id, failure)
-    except Exception:
+    except Exception as exc:
         # an outcome nobody knows, a failed commit included: never retried, left to reconciliation
-        log.exception("execution_unknown action_id=%s", action_id)
+        repo.log_error(log, exc, "execution_unknown action_id=%s", action_id)
         await ctx.db.rollback()
         return await _settle_unknown(ctx, decision_id, action_id)
     if isinstance(outcome, KernelFailure):
@@ -422,8 +422,8 @@ async def _settle_failed(ctx: KernelCtx, decision_id: str, action_id: str, failu
     try:
         async with ctx.db.begin_nested():
             await _undo(ctx, target)
-    except Exception:
-        log.exception("on_failed_failed action_id=%s", action_id)
+    except Exception as exc:
+        repo.log_error(log, exc, "on_failed_failed action_id=%s", action_id)
         await ctx.db.rollback()
         return await _settle_unknown(ctx, decision_id, action_id)
     code = failure.args[0] if failure.args and isinstance(failure.args[0], str) else "adapter_failure"
@@ -521,10 +521,10 @@ async def reconcile_orphans(ctx: KernelCtx, *, at_startup: bool, action_id: str 
                 reconciled.append(candidate)
             if at_startup:
                 await ctx.db.commit()
-        except Exception:
+        except Exception as exc:
             if not at_startup:
                 raise
-            log.exception("reconcile_failed action_id=%s", candidate)
+            repo.log_error(log, exc, "reconcile_failed action_id=%s", candidate)
             await ctx.db.rollback()
     return reconciled
 
@@ -576,8 +576,8 @@ async def _ask_adapter(ctx: KernelCtx, target: _Target, action_id: str) -> tuple
             return await _visible(ctx, target, result), "executed"
     except AdapterUnknown:
         log.info("reconcile_still_unknown action_id=%s", action_id)
-    except Exception:
-        log.exception("reconcile_error action_id=%s", action_id)       # still unknown; the next read tries again
+    except Exception as exc:                        # still unknown; the next read tries again
+        repo.log_error(log, exc, "reconcile_error action_id=%s", action_id)
     return None
 
 
@@ -591,8 +591,8 @@ async def reconcile_at_startup(runtime: KernelRuntime) -> list[str]:
             async with kernel_transaction(runtime) as ctx:
                 ctx.bind(copy_id)
                 reconciled += await reconcile_orphans(ctx, at_startup=True)
-        except Exception:
-            log.exception("startup_reconcile_failed copy_id=%s", copy_id)
+        except Exception as exc:
+            repo.log_error(log, exc, "startup_reconcile_failed copy_id=%s", copy_id)
     return reconciled
 
 

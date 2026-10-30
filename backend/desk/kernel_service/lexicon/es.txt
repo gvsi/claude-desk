@@ -5,8 +5,9 @@
 # hyphen as "-" ("fin‐de‐semana" with U+2010 is "fin-de-semana"). Categories: number, money,
 # percent and date (number_in_prose), and promise and booking (promise_word). A booking claim with
 # a condition straight before it ("cuando tu cita está confirmada") passes (`BOOKING_CONDITION`
-# in reply_check.py), but not after "sí" (yes), whose accent tells it from "si" (if). Both
-# lexicons run on every draft, whatever its language.
+# in reply_check.py), but not after "sí" (yes), whose accent tells it from "si" (if); every
+# booking claim passes in a reply that carries the booking's card. Both lexicons run on every
+# draft, whatever its language.
 
 # Spelled-out numbers. A bare "uno", "una", "once" or "medio" counts only next to a unit or another
 # number word, so "una pregunta" passes; "las once" and "la una" are clock times (below).
@@ -43,9 +44,10 @@ date	las[\s-]+once|la[\s-]+una
 date	(?:el[\s-]+)?mismo[\s-]+dia
 date	(?:el[\s-]+)?mes[\s-]+que[\s-]+viene
 # A time soon: "en" or "dentro de" and up to three words before minutes or hours ("en una
-# hora", "dentro de un par de horas", "en media hora").
+# hora", "dentro de un par de horas", "en media hora"). The bare adverb "enseguida" ("en
+# seguida") is no time word (the owner's decision of 2026-10-30), so urgent advice passes
+# ("Cierre la llave de paso enseguida.").
 date	(?:en|dentro[\s-]+de)[\s-]+(?:[^\W\d_]+[\s-]+){0,3}(?:minutos?|mins?|horas?|hrs?)
-date	en[\s-]?seguida
 date	(?:a[\s-]+)?primera[\s-]+hora
 
 # Promises only the owner's rules or a card can make ("garantía" without the accent). "libre"

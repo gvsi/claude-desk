@@ -11,7 +11,8 @@ Row locks are taken in one order, so no two kernel transactions wait on each oth
 1. the session row: `FOR UPDATE` by a decision (`auth.lock_session`, held until it commits; the
    breaker's strike writes it under that lock) and by a take-over or hand-back; `FOR SHARE` by
    an allow's execution, in T1 and T2; written by a visitor's or agent's own requests
-   (`last_seen_at`, `last_language`);
+   (`last_seen_at`, `last_language`), the reply check's only at its end, just before its ledger
+   entry, so it holds no lock on the row while the soft-promise check runs;
 2. the decision row, `FOR UPDATE`: lazy expiry, an answer, a cancel, each step of an execution,
    reconciliation;
 3. the execution row: inserted with the intent, `FOR UPDATE` in T2, T3 and reconciliation;
@@ -37,6 +38,13 @@ the first time in the strongest mode the transaction will need, since going from
 say) waits for nothing and can come at any point. Reconciliation takes the decision and the
 execution `SKIP LOCKED`, so it skips an execution that is running rather than wait for it.
 
+A decision holds the session row through its review on purpose: the closed, generation and mode
+checks then hold for the whole decision, and a take-over or hand-back comes before it (409) or
+after it commits, never during it. So a take-over that arrives while the reviewer runs waits for
+the decision to commit, up to the review's timeout (`decisions.REVIEW_TIMEOUT_S`, 4 s), then
+bumps the generation, and an allow from the old generation expires at `/execute`. No other
+kernel call holds the row across a model call.
+
 Activation (`activation.confirm`) holds no session, decision or execution row and starts at step
 4: the Desk's `versions` advisory lock, then its `policy_versions` rows `FOR UPDATE`, then the
 payment links its `ON_ACTIVATE` hooks lock and move (Plan 01c; a hook appends nothing), then the
@@ -45,14 +53,17 @@ key's advisory lock before the `versions` lock.
 
 A route refuses with `KernelFailure`. Its answer is always a `KernelError{code}`; when the refusal
 must be on record (a ledgered auth failure, an allow that expired), `persist` writes that record
-in a fresh transaction after the request's own has rolled back.
+in a fresh transaction after the request's own has rolled back. An error that isn't a refusal is
+logged with `log_error`, by its kind and the frames it rose through, never its text.
 """
 
 from __future__ import annotations
 
 import base64
+import logging
 import re
 import secrets
+import traceback
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -172,6 +183,16 @@ class KernelFailure(Exception):
         self.code = code
         self.reason = reason or code
         self.persist = persist
+
+
+def log_error(logger: logging.Logger, exc: BaseException, message: str, *args: object) -> None:
+    """Logs `exc` at ERROR as `message` (a fixed event name and kernel-built values, %-formatted
+    with `args`), then `kind=<its class>` and the frames it rose through, never its text: an
+    error's message can quote what a visitor typed (an adapter's error its arguments, a validation
+    error the input it refused, a driver error a statement's parameters). Used in place of
+    `logger.exception` wherever a request or an execution can fail."""
+    logger.error(f"{message} kind=%s\n%s", *args, type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
+                 stacklevel=2)
 
 
 def route_template(request: Request) -> str:

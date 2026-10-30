@@ -129,13 +129,17 @@ async def caller(ctx: KernelCtx, request: Request, session_id: str | None, *,
 
 
 async def require_session(ctx: KernelCtx, request: Request, session_id: str, *, generation: int | None = None,
-                          desk_id: str | None = None, copy_id: str | None = None) -> SessionRow:
+                          desk_id: str | None = None, copy_id: str | None = None, seen: bool = True) -> SessionRow:
     """The visitor or agent session `session_id`, once `X-Session-Token` proves it ("Session state
     responses", first four rows in order). Binds the request's transaction to the session's copy
-    (`copy_id`: see `authenticate_session`)."""
+    (`copy_id`: see `authenticate_session`). The session is seen now (`last_seen_at`), a write
+    the transaction's next statement sends, which locks the row until it commits; a route that
+    calls a model before it commits passes `seen=False` and writes it at its end instead
+    (`/check_reply`, in `reply_check.finalize`), so a take-over never waits for the model."""
     row = await authenticate_session(ctx, request, session_id, desk_id=desk_id, copy_id=copy_id)
     require_open(ctx, request, row, generation=generation)
-    row.last_seen_at = ctx.clock.now()
+    if seen:
+        row.last_seen_at = ctx.clock.now()
     return row
 
 

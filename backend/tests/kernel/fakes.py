@@ -64,7 +64,7 @@ class FakeAdapter:
         self.profile = ToolProfile(
             tool=tool, source="mcp" if mcp else "native", effects=list(effects), reversible=reversible,
             adapter="tests.kernel.fakes.FakeAdapter", resource_kind=resource_kind,
-            description_confirmed=f"A test stand-in for {tool}.", input_schema=FakeArgs.model_json_schema(),
+            description_confirmed=f"A test stand-in for {tool}.", input_schema=self.Args.model_json_schema(),
             definition_sha256="f" * 64 if mcp else None, status=status,
         )
         self.script: dict[str, Any] = {}
@@ -127,8 +127,8 @@ class FakeDecisions:
     def __init__(self, answer: Review | None = None):
         self.answer = answer
         self.inputs: list[ReviewInput] = []
-        self.soft_answer: SoftPromiseVerdict | None = SoftPromiseVerdict(prose_states_terms=False,
-                                                                      denies_being_ai=False)
+        self.soft_answer: SoftPromiseVerdict | None = SoftPromiseVerdict(promises_beyond_cards=False,
+                                                                         denies_being_ai=False)
         self.soft_inputs: list[SoftPromiseInput] = []
         self.soft_backend: DecisionsBackend | None = None
 
