@@ -318,7 +318,8 @@ async def post_owner_message(body: OwnerMessageRequest, ctx: Ctx, request: Reque
         raise AuthError(401, "auth", "bad_token", route=route, named=await auth.named_session(ctx, body.session_id))
     owner = await auth.require_owner(ctx, request, session_id=body.session_id)
     row = (await ctx.db.scalars(ctx.repo.scoped(select(SessionRow).where(
-        SessionRow.session_id == body.session_id).with_for_update(read=True)))).one()
+        SessionRow.session_id == body.session_id).with_for_update(read=True)
+        .execution_options(populate_existing=True)))).one()
     if row.kind == "owner":
         raise KernelFailure(422, "invalid", "owner_session")
     auth.require_open(ctx, request, row)

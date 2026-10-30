@@ -18,7 +18,7 @@ import httpx
 from sqlalchemy import select
 
 from desk.contracts import Claim, OwnerMessageResult
-from desk.db.models import Desk, Document
+from desk.db.models import ActorSession, Desk, Document
 from desk.db.models import Fact as FactRow
 from desk.kernel_service import auth, labels, render
 
@@ -244,6 +244,25 @@ async def test_owner_messages_need_the_owner_of_the_sessions_copy(app, client, f
     refusals = [(entry.event.session_id, entry.event.summary) for entry in (await ledger_rows(app, copy))[len(before):]]
     assert refusals == [(session_id, {"route": ROUTE, "reason": "closed"})
                         for session_id in (visitor.session_id, late.session_id)]
+    assert await reply_entries(app, copy) == []
+
+
+async def test_the_conversation_is_read_again_under_its_lock(app, client, frozen_clock, monkeypatch):
+    """The route reads the conversation's row afresh when it locks it: a copy read earlier in the
+    request, before the conversation closed, doesn't let the owner's message into it."""
+    copy, visitor = await visitor_of(app, client)
+    require_owner, read_earlier = auth.require_owner, []
+
+    async def read_before_it_closes(ctx, request, **kwargs):
+        owner = await require_owner(ctx, request, **kwargs)
+        read_earlier.append((await ctx.db.scalars(ctx.repo.scoped(select(ActorSession).where(
+            ActorSession.session_id == visitor.session_id)))).one())        # an earlier read, still held
+        await set_session(app, copy, visitor.session_id, closed_at=frozen_clock.now())   # then it closes
+        return owner
+
+    monkeypatch.setattr(auth, "require_owner", read_before_it_closes)
+    response = await post_message(client, copy, visitor.session_id, SAY)
+    assert (response.status_code, response.json()) == (409, {"code": "closed"})
     assert await reply_entries(app, copy) == []
 
 
