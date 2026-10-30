@@ -7,18 +7,22 @@ visitor would get, not the text.
 
 import copy
 import hashlib
+import importlib
 import itertools
 import json
+import pkgutil
 import re
 import subprocess
 import sys
 from datetime import time
 from pathlib import Path
+from types import MappingProxyType
 from typing import get_args
 
 import desk_kernel
 import pytest
 
+import desk
 from desk import always_on
 from desk.contracts import HoursWindow, ReviewThresholds, RuleCard, ToolName, ToolProfile
 from desk.kernel_service import compiler, reference, review_thresholds
@@ -753,7 +757,6 @@ def test_the_compiler_refuses_cards_with_the_shared_check(monkeypatch):
     """The compiler checks cards with `desk.always_on`'s own check, cards and ranking, never a copy
     of them, so the API's pre-check and the compiler can't disagree on a card."""
     assert compiler.changes_always_on is always_on.changes_always_on
-    assert compiler.ALWAYS_ON_TOOLS is always_on.ALWAYS_ON_TOOLS
     assert compiler.ALWAYS_ON_CARDS is always_on.ALWAYS_ON_CARDS
     assert compiler.specificity is always_on.specificity
     # validate_cards reads it when it runs: whatever the shared check names is refused with that tool
@@ -762,6 +765,22 @@ def test_the_compiler_refuses_cards_with_the_shared_check(monkeypatch):
     monkeypatch.setattr(always_on, "ALWAYS_ON_CARDS", ())
     assert compiler.validate_cards([send], people=(), agent_keys=(), auto_money_cap_cents=TEST_CAP) == [
         f"send: {ALWAYS_ON}"]
+
+
+def test_no_module_holds_the_always_on_tools_under_another_name():
+    """The always-on tools and their effects have one name each, in `desk.always_on`, the module
+    the API's owner tools (Plan 02b) import: no module of the backend holds either, or a copy of
+    it, under a name of its own, which the API might read in its place and patching the one name
+    wouldn't reach."""
+    held = []
+    for module in pkgutil.walk_packages(desk.__path__, "desk."):
+        if module.name.endswith(".__main__"):
+            continue
+        for name, value in vars(importlib.import_module(module.name)).items():
+            if ((isinstance(value, (set, frozenset)) and value == always_on.ALWAYS_ON_TOOLS)
+                    or (isinstance(value, (dict, MappingProxyType)) and value == always_on.ALWAYS_ON_EFFECTS)):
+                held.append(f"{module.name}.{name}")
+    assert sorted(held) == ["desk.always_on.ALWAYS_ON_EFFECTS", "desk.always_on.ALWAYS_ON_TOOLS"]
 
 
 def test_the_api_can_import_the_always_on_check_without_kernel_code():

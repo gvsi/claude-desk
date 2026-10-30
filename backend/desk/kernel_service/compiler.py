@@ -36,7 +36,6 @@ from typing import Any, Literal
 import desk_kernel
 
 from desk.always_on import ALWAYS_ON_CARDS, changes_always_on, same_rule, specificity
-from desk.always_on import ALWAYS_ON_TOOLS  # noqa: F401  (compiler.ALWAYS_ON_TOOLS stays importable)
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, RuleCard, ToolProfile, money_tool
 from desk.contracts import moves_money  # noqa: F401  (compiler.moves_money stays importable)
 from desk.kernel_service import review_thresholds
@@ -250,11 +249,11 @@ def with_defaults(cards: Iterable[RuleCard], profiles: Iterable[ToolProfile]) ->
 # -- Checks before compiling
 
 ABOVE_MONEY_CAP = "above_money_cap"
-# Tools of the always-on baseline (`ALWAYS_ON_TOOLS`): verification codes go only to the contact on
-# record, and no rule can make a start ask, hold it or turn it off. Which cards could change one is
-# `desk.always_on.changes_always_on`, the check the API runs on drafted cards too, and
-# `validate_cards` refuses each of them; `with_defaults` adds the presets' own card for each tool
-# (`ALWAYS_ON_CARDS`) to a set that leaves it out.
+# Tools of the always-on baseline (`desk.always_on.ALWAYS_ON_TOOLS`): verification codes go only
+# to the contact on record, and no rule can make a start ask, hold it or turn it off. Which cards
+# could change one is `desk.always_on.changes_always_on`, the check the API runs on drafted cards
+# too, and `validate_cards` refuses each of them; `with_defaults` adds the presets' own card for
+# each tool (`ALWAYS_ON_CARDS`) to a set that leaves it out.
 
 
 def above_money_cap(cards: Iterable[RuleCard], auto_money_cap_cents: int) -> list[RuleCard]:
@@ -271,8 +270,8 @@ def validate_cards(cards: Iterable[RuleCard], *, people: Collection[str], agent_
     it can. Defaults are left out (`with_defaults` drops and derives them again). A reason names a
     card by its `card_id` only when that is safe to show, and never repeats the offending value;
     an auto money card above the cap reads `<card>: above_money_cap: ...`, and a card that could
-    change a tool of the always-on baseline (`ALWAYS_ON_TOOLS`, `desk.always_on.changes_always_on`),
-    on the tool or on one of its effects, reads `<card>: <tool>: ...`."""
+    change a tool of the always-on baseline (`desk.always_on.changes_always_on`), on the tool or
+    on one of its effects, reads `<card>: <tool>: ...`."""
     cap = capped(auto_money_cap_cents)
     errors: list[str] = []
     seen: set[str] = set()
