@@ -215,8 +215,11 @@ export function MockCheckout({
               <dl className="cd-checkout__card-fields cd-type-body">
                 <div className="cd-checkout__field cd-checkout__field--number">
                   <dt className="cd-sr-only">{copy.cardNumber}</dt>
-                  <dd className="cd-checkout__value">{TEST_CARD.number}</dd>
-                  <Icon name="lock" size={14} className="cd-checkout__lock" />
+                  {/* The lock sits in the number's value, so the list holds only terms and values. */}
+                  <dd className="cd-checkout__value cd-checkout__value--number">
+                    <span className="cd-checkout__number">{TEST_CARD.number}</span>
+                    <Icon name="lock" size={14} className="cd-checkout__lock" />
+                  </dd>
                 </div>
                 <div className="cd-checkout__field">
                   <dt className="cd-sr-only">{copy.expiry}</dt>

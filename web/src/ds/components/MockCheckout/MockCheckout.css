@@ -101,7 +101,6 @@
 
 .cd-checkout__field--number {
   grid-column: 1 / -1;
-  justify-content: space-between;
   border-bottom: 1px solid var(--line-control);
 }
 
@@ -136,6 +135,21 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The number's value spans the row: the digits at its left, the lock at its right. */
+.cd-checkout__value--number {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
+}
+
+.cd-checkout__number {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .cd-checkout__lock {

@@ -177,6 +177,11 @@ export const Issued: Story = {
       'Expiry date12 / 34',
       'Security code123',
     ]);
+    // A description list holds only its terms and their values: each value's group is a dt and a
+    // dd, with the number's lock inside its dd.
+    for (const field of values) {
+      await expect([...field.children].map((child) => child.tagName)).toEqual(['DT', 'DD']);
+    }
     const [number, expiry, code] = values as [HTMLElement, HTMLElement, HTMLElement];
     for (const field of values) {
       expectComputed(field, { height: '40px', fontSize: '14px', lineHeight: '20px', color: 'rgba(250, 249, 245, 0.64)', paddingLeft: '12px' });
