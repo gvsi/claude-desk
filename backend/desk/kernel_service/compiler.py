@@ -8,13 +8,16 @@ directory, so the kernel reads the same files from a test, the repo root or the 
   member of its effect groups (`effect:*`), which every Desk's schema starts from.
 - `BASELINE`: set `B`, the always-on forbids, which `PolicyEngine(BASELINE)` adds to every
   evaluation.
-- `INVARIANTS`: the proof spec sets `desk-prove` checks every activation against
-  (`invariants/always/` for `baseline_auto` and `baseline_approvable`, `invariants/auto/` for
-  `baseline_auto`), by kind and file name.
+- `invariants(auto_money_cap_cents)`: the proof spec sets `desk-prove` checks every activation
+  against (`invariants/always/` for `baseline_auto` and `baseline_approvable`, `invariants/auto/`
+  for `baseline_auto`), by kind and file name, rendered at a version's money cap: the auto
+  invariants hold the cap as a placeholder, so no text reaches `desk-prove` unrendered.
 
 The compiler (`compile_cards`) turns the owner's rule cards into Cedar sets `F` (never cards), `A`
 (auto cards) and `H` (ask cards and hold twins) by code, never freehand: every string it writes is
-checked, and the text is deterministic, so a card set has one `cedar_sha256` in every copy.
+checked, and the text is deterministic, so a card set has one `cedar_sha256` in every copy. It
+compiles at a version's money cap (master plan, "Money cap"): every auto permit on a money tool is
+bounded by the cards' limits, the cap and `AUTO_MONEY_HARD_CAP_CENTS`, whichever is lowest.
 
 The hashes name what a proof covered, so a report proved for other inputs is never reused.
 """
@@ -54,9 +57,32 @@ _INVARIANT_BYTES: dict[Literal["always", "auto"], dict[str, bytes]] = {
     "always": _invariant_files("always"),
     "auto": _invariant_files("auto"),
 }
-INVARIANTS: dict[Literal["always", "auto"], dict[str, str]] = {
-    kind: {name: data.decode("utf-8") for name, data in files.items()} for kind, files in _INVARIANT_BYTES.items()
-}
+# What an invariant file holds where a version's money cap goes, and any placeholder at all.
+CAP_PLACEHOLDER = "{auto_money_cap_cents}"
+_PLACEHOLDER = re.compile(r"\{[A-Za-z_][A-Za-z0-9_]*\}")
+
+
+def capped(auto_money_cap_cents: int) -> int:
+    """A version's money cap as every check applies it: `min(cap, AUTO_MONEY_HARD_CAP_CENTS)`.
+    Raises ValueError for anything but a whole number of cents from 0 (a bool included)."""
+    if type(auto_money_cap_cents) is not int or auto_money_cap_cents < 0:
+        raise ValueError("a money cap is a whole number of cents from 0")
+    return min(auto_money_cap_cents, AUTO_MONEY_HARD_CAP_CENTS)
+
+
+def invariants(auto_money_cap_cents: int) -> dict[Literal["always", "auto"], dict[str, str]]:
+    """The invariant texts by kind and file name, rendered at a version's money cap (`capped`).
+    Raises ValueError for a text that still holds a placeholder, so nothing unrendered is proved."""
+    cap = str(capped(auto_money_cap_cents))
+    rendered: dict[Literal["always", "auto"], dict[str, str]] = {}
+    for kind, files in _INVARIANT_BYTES.items():
+        rendered[kind] = {}
+        for name, data in files.items():
+            text = data.decode("utf-8").replace(CAP_PLACEHOLDER, cap)
+            if _PLACEHOLDER.search(text):
+                raise ValueError(f"invariants/{kind}/{name}.cedar holds a placeholder nothing renders")
+            rendered[kind][name] = text
+    return rendered
 
 
 def _sha256_canonical(value: Any) -> str:
@@ -83,15 +109,16 @@ def baseline_sha256() -> str:
     return hashlib.sha256(_BASELINE_BYTES).hexdigest()
 
 
-def invariants_sha256(checks: Iterable[str]) -> str:
-    """sha256 of `canonical_json({files: {"<kind>/<name>.cedar": sha256 of its bytes}, checks,
-    prove_version: desk_kernel.version()})`, the check names sorted. A changed invariant file,
-    check list or prover makes every earlier report stale."""
+def invariants_sha256(checks: Iterable[str], auto_money_cap_cents: int) -> str:
+    """sha256 of `canonical_json({files: {"<kind>/<name>.cedar": sha256 of its text rendered at
+    the money cap}, checks, prove_version: desk_kernel.version()})`, the check names sorted. A
+    changed invariant file, check list, prover or cap makes a different hash, so a report proved
+    for other invariants, or at another cap, is never reused."""
     names = list(checks)
     if len(set(names)) != len(names):
         raise ValueError("each check is named once")
-    files = {f"{kind}/{name}.cedar": hashlib.sha256(data).hexdigest()
-             for kind, by_name in _INVARIANT_BYTES.items() for name, data in by_name.items()}
+    files = {f"{kind}/{name}.cedar": hashlib.sha256(text.encode("utf-8")).hexdigest()
+             for kind, by_name in invariants(auto_money_cap_cents).items() for name, text in by_name.items()}
     return _sha256_canonical({"files": files, "checks": sorted(names), "prove_version": desk_kernel.version()})
 
 
@@ -214,10 +241,29 @@ def with_defaults(cards: Iterable[RuleCard], profiles: Iterable[ToolProfile]) ->
 
 # -- Checks before compiling
 
-def validate_cards(cards: Iterable[RuleCard], *, people: Collection[str], agent_keys: Collection[str]) -> list[str]:
-    """Plain reasons a set of owner cards can't be compiled; empty means it can. Defaults are
-    left out (`with_defaults` drops and derives them again). A reason names a card by its
-    `card_id` only when that is safe to show, and never repeats the offending value."""
+ABOVE_MONEY_CAP = "above_money_cap"
+
+
+def moves_money(card: RuleCard) -> bool:
+    """Does the card take or pay out money: a money tool, or the `charge` or `pay_out` effect
+    (the rule `RuleCard` holds an auto money card's amount to)."""
+    return card.applies_to in MONEY_TOOLS or card.applies_to in ("effect:charge", "effect:pay_out")
+
+
+def above_money_cap(cards: Iterable[RuleCard], auto_money_cap_cents: int) -> list[RuleCard]:
+    """The auto money cards that would allow more than the money cap (`capped`) without asking."""
+    cap = capped(auto_money_cap_cents)
+    return [card for card in cards if card.mode == "auto" and moves_money(card)
+            and (card.max_amount_cents is None or card.max_amount_cents > cap)]
+
+
+def validate_cards(cards: Iterable[RuleCard], *, people: Collection[str], agent_keys: Collection[str],
+                   auto_money_cap_cents: int) -> list[str]:
+    """Plain reasons a set of owner cards can't be compiled at a version's money cap; empty means
+    it can. Defaults are left out (`with_defaults` drops and derives them again). A reason names a
+    card by its `card_id` only when that is safe to show, and never repeats the offending value;
+    an auto money card above the cap reads `<card>: above_money_cap: ...`."""
+    cap = capped(auto_money_cap_cents)
     errors: list[str] = []
     seen: set[str] = set()
     for number, c in enumerate(cards, start=1):
@@ -250,6 +296,9 @@ def validate_cards(cards: Iterable[RuleCard], *, people: Collection[str], agent_
                 _hours(c)
             except ValueError as e:
                 errors.append(f"{label}: {e}")
+        if above_money_cap([c], cap):
+            errors.append(f"{label}: {ABOVE_MONEY_CAP}: it would take or pay out more than the money limit without "
+                          "asking")
     return errors
 
 
@@ -377,10 +426,11 @@ def _autos(cards: Sequence[RuleCard], effects: dict[str, frozenset[str]]) -> lis
     return units
 
 
-def _limits(unit: _Auto, effects: dict[str, frozenset[str]]) -> str:
+def _limits(unit: _Auto, effects: dict[str, frozenset[str]], cap: int) -> str:
     """The tightest discount and amount limits and every card's hours. On money tools the amount
-    is required and capped at AUTO_MONEY_HARD_CAP_CENTS whatever the cards say; elsewhere a limit
-    reads an optional attribute in the `if ... then ... else true` form strict validation takes."""
+    is required and bounded by the version's money cap `cap` (already `capped`, so never above
+    AUTO_MONEY_HARD_CAP_CENTS) whatever the cards say; elsewhere a limit reads an optional
+    attribute in the `if ... then ... else true` form strict validation takes."""
     money = {tool in MONEY_TOOLS or bool(effects[tool] & _MONEY_EFFECTS) for tool in unit.tools}
     if len(money) != 1:
         raise ValueError("an auto permit covers money tools or other tools, never both")
@@ -388,8 +438,8 @@ def _limits(unit: _Auto, effects: dict[str, frozenset[str]]) -> str:
     parts = [f"(if context has discount_bp then context.discount_bp <= {discount} else true)"]
     amounts = [c.max_amount_cents for c in unit.cards if c.max_amount_cents is not None]
     if money == {True}:
-        cap = min([*amounts, AUTO_MONEY_HARD_CAP_CENTS])
-        parts.append(f"context has amount_cents && context.amount_cents <= {cap}")
+        bound = min([*amounts, cap, AUTO_MONEY_HARD_CAP_CENTS])
+        parts.append(f"context has amount_cents && context.amount_cents <= {bound}")
     elif amounts:
         parts.append(f"(if context has amount_cents then context.amount_cents <= {min(amounts)} else true)")
     parts += [_hours(c) for c in unit.cards]
@@ -422,12 +472,16 @@ def _exclusions(unit: _Auto, asks: Sequence[tuple[RuleCard, tuple[str, ...]]], a
     return " || ".join(sorted(found, key=lambda text: (found[text], text)))
 
 
-def compile_cards(cards: Iterable[RuleCard], profiles: Iterable[ToolProfile], *, review: bool = True) -> CompiledSets:
-    """Compiles rule cards over the enabled `profiles` into `F`, `A` and `H`. A card for a tool
-    that isn't enabled emits nothing. Cards are sorted by `card_id` and the text is deterministic,
-    so the same cards compile to the same hash in every copy. `review=False` leaves out every
-    review gate (`A0` for the `review_only_narrows` proof). Raises ValueError rather than emit a
-    card it can't compile exactly (run `validate_cards` first for the owner's reasons)."""
+def compile_cards(cards: Iterable[RuleCard], profiles: Iterable[ToolProfile], *, auto_money_cap_cents: int,
+                  review: bool = True) -> CompiledSets:
+    """Compiles rule cards over the enabled `profiles` into `F`, `A` and `H`, at the version's
+    money cap (required, so no caller forgets it): every auto permit on a money tool bounds the
+    amount by `min(<the cards' limits>, auto_money_cap_cents, AUTO_MONEY_HARD_CAP_CENTS)`. A card
+    for a tool that isn't enabled emits nothing. Cards are sorted by `card_id` and the text is
+    deterministic, so the same cards compile to the same hash in every copy. `review=False` leaves
+    out every review gate (`A0` for the `review_only_narrows` proof). Raises ValueError rather than
+    emit a card it can't compile exactly (run `validate_cards` first for the owner's reasons)."""
+    cap = capped(auto_money_cap_cents)
     profiles = list(profiles)
     effects = _tool_effects(profiles)
     for tool in effects:
@@ -455,7 +509,7 @@ def compile_cards(cards: Iterable[RuleCard], profiles: Iterable[ToolProfile], *,
             holds.append(_policy(f"ask.{c.card_id}", [c], "hold", scope, [("when", _who(c))]))
     autos = _autos(all_cards, effects)
     for unit in autos:
-        conditions = [("when", _conj([unit.who, _limits(unit, effects)]))]
+        conditions = [("when", _conj([unit.who, _limits(unit, effects, cap)]))]
         if review:
             conditions.append(("when", _review_gate(unit, effects)))
         conditions.append(("unless", _exclusions(unit, asks, autos)))

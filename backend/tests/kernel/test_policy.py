@@ -25,7 +25,7 @@ from desk.db.models import PolicyVersion as PolicyVersionRow
 from desk.kernel_service import activation, compiler, desks, ledger
 from desk.kernel_service.repo import new_id
 
-from .helpers import CopyRows, draft_and_confirm, kernel_ctx, make_copy_rows, rows_of
+from .helpers import TEST_CAP, CopyRows, compile_at, draft_and_confirm, kernel_ctx, make_copy_rows, rows_of
 from .test_compiler import NATIVE, card, req
 
 STUBS = Path(__file__).parent / "stubs"
@@ -47,7 +47,7 @@ STARTER = [card("slots", "native.find_slots")]   # version 1: open times for any
 
 async def desk_with_tools(app: FastAPI, profiles: list[ToolProfile] = NATIVE) -> DeskRows:
     """A Desk with the tools in `profiles` enabled, a person named Dana, and version 1 compiled
-    from `STARTER` and active, ledgered as a new Desk's first version is."""
+    from `STARTER` at a $500 money cap and active, ledgered as a new Desk's first version is."""
     rows = await make_copy_rows(app)
     dana = new_id("person")
     async with kernel_ctx(app) as ctx:
@@ -58,12 +58,12 @@ async def desk_with_tools(app: FastAPI, profiles: list[ToolProfile] = NATIVE) ->
                           masked_contact=desks.mask_contact("dana@example.com"), created_at=now))
         ctx.db.add_all(desks.tool_row(rows.copy_id, rows.desk_id, profile) for profile in profiles)
         schema = compiler.desk_schema(profiles)
-        compiled = compiler.compile_cards(STARTER, profiles)
+        compiled = compile_at(STARTER, profiles)
         ctx.db.add(activation.version_row(
             copy_id=rows.copy_id, desk_id=rows.desk_id, version=1, parent_version=None, compiled=compiled,
-            a0=compiler.compile_cards(STARTER, profiles, review=False).A, schema=schema,
-            hashes=activation.version_hashes(compiled, schema, profiles, cards=STARTER), status="active", proof=None,
-            created_at=now))
+            a0=compile_at(STARTER, profiles, review=False).A, schema=schema,
+            hashes=activation.version_hashes(compiled, schema, profiles, cards=STARTER, auto_money_cap_cents=TEST_CAP),
+            auto_money_cap_cents=TEST_CAP, status="active", proof=None, created_at=now))
         await ctx.db.flush()
         await ledger.append(ctx, copy_id=rows.copy_id, desk_id=rows.desk_id, event=LedgerEvent(
             kind="policy", origin="kernel", summary={"version": 1, "status": "active"}))
@@ -115,12 +115,14 @@ async def test_draft_is_proved_with_every_obligation(desk_prove, app, client):
         (name, True, None) for name in activation.PROOF_CHECKS]
     # what was stored: the cards with their default asks, the Cedar and what it was proved against
     [_, row] = await versions(app, desk)
-    compiled = compiler.compile_cards(BOOK_AND_ASK_CHARGES, NATIVE)
+    compiled = compile_at(BOOK_AND_ASK_CHARGES, NATIVE)                         # at the active version's cap
     assert row.cards == version.cards == compiled.cards
+    assert row.auto_money_cap_cents == version.auto_money_cap_cents == TEST_CAP
     assert any(c.is_default for c in row.cards)
-    assert row.cedar == {**compiled.sets(), "A0": compiler.compile_cards(BOOK_AND_ASK_CHARGES, NATIVE, review=False).A}
+    assert row.cedar == {**compiled.sets(), "A0": compile_at(BOOK_AND_ASK_CHARGES, NATIVE, review=False).A}
     schema = compiler.desk_schema(NATIVE)
-    assert hashes_of(row) == activation.version_hashes(compiled, schema, NATIVE, cards=BOOK_AND_ASK_CHARGES)
+    assert hashes_of(row) == activation.version_hashes(compiled, schema, NATIVE, cards=BOOK_AND_ASK_CHARGES,
+                                                       auto_money_cap_cents=TEST_CAP)
     assert row.draft_key_sha256 is not None and row.proof == proof and row.status == "proved"
     assert await policy_entries(app, desk) == [{"version": 1, "status": "active"},
                                                 {"version": 2, "status": "proved", "method": "symcc"}]
@@ -285,7 +287,8 @@ async def test_confirm_activates_and_supersedes(desk_prove, app, client):
     assert response.status_code == 200, response.text
     assert PolicyVersion.model_validate(response.json()) == draft.model_copy(update={"status": "active"})
     assert [(row.version, row.status) for row in await versions(app, desk)] == [(1, "superseded"), (2, "active")]
-    assert (await policy_entries(app, desk))[-1] == {"version": 2, "activated": True, "from": 1}
+    assert (await policy_entries(app, desk))[-1] == {"version": 2, "activated": True, "from": 1,
+                                                     "auto_money_cap_cents": TEST_CAP}
     assert await decides(app, desk, req("native.book")) == "allow"               # version 2 books without asking
     # confirming it again changes nothing
     response = await post_confirm(client, desk, draft.version)
@@ -315,7 +318,7 @@ async def test_wider_set_is_rejected_and_cannot_be_confirmed(desk_prove, app, cl
     who = compiler._who
     monkeypatch.setattr(compiler, "_who", lambda c: "principal has person_id" if c.who == "person" else who(c))
     cards = [card("dana-books", "native.book", who="person", person_id=desk.dana)]
-    assert "principal.person_id ==" not in compiler.compile_cards(cards, NATIVE).A
+    assert "principal.person_id ==" not in compile_at(cards, NATIVE).A
     version = await drafted(client, desk, cards)
     assert (version.status, version.proof.ok, version.proof.method, version.proof.timed_out) == (
         "rejected", False, "symcc", False)
@@ -351,7 +354,7 @@ async def test_or_gate_past_a_broken_lint_is_rejected_by_proof(desk_prove, app, 
     desk = await desk_with_tools(app)
     cards = [card("verified-books", "native.book", who="verified", review=True)]
     or_the_review_gate(monkeypatch)
-    compiled = compiler.compile_cards(cards, NATIVE)
+    compiled = compile_at(cards, NATIVE)
     assert ") || (context has review" in compiled.A
     assert desk_kernel.lint_policies(json.dumps(compiled.sets()))              # the lint refuses this shape,
     linted = await drafted(client, desk, [card("verified-books-too", "native.book", who="verified", review=True)])

@@ -29,6 +29,7 @@ from desk.contracts import (
     MCP_TOOLS,
     Mandate,
     NormalizedAction,
+    PolicyVersion,
     PriceItem,
     Probe,
     RenderedBlock,
@@ -55,6 +56,7 @@ from desk.kernel_api import (
     KernelError,
     LedgerAppendRequest,
     OpenStatus,
+    PolicyDraftRequest,
     PublicDesk,
     ToolsConfirmRequest,
     WhoAmI,
@@ -129,6 +131,49 @@ def test_auto_money_cards_need_a_bounded_amount():
     for applies_to, amount in (("effect:charge", None), ("payments.create_refund", AUTO_MONEY_HARD_CAP_CENTS + 1)):
         with pytest.raises(ValidationError):
             RuleCard(card_id="c5", applies_to=applies_to, mode="auto", who="anyone", reason="x", max_amount_cents=amount)
+
+
+def minimal_desk_seed(**fields) -> dict:
+    """A `DeskSeed` body with every required field and nothing in it, plus `fields`."""
+    return {"name": "Main line", "charter": [], "hours": [], "price_items": [], "calendar_slots": [], "people": [],
+            "documents": [], "notifications": {"now": [], "briefing": []}, **fields}
+
+
+def test_platform_ceiling_is_ten_thousand_dollars():
+    # the platform ceiling is the per-payment limit every money action already has
+    assert AUTO_MONEY_HARD_CAP_CENTS == 1_000_000
+    PriceItem(item_id="big", title="Big job", unit_cents=AUTO_MONEY_HARD_CAP_CENTS)
+    with pytest.raises(ValidationError):
+        PriceItem(item_id="big", title="Big job", unit_cents=AUTO_MONEY_HARD_CAP_CENTS + 1)
+    # an auto money card may allow up to the ceiling, and no more
+    RuleCard(card_id="c11", applies_to="effect:charge", mode="auto", who="anyone", reason="x",
+             max_amount_cents=1_000_000)
+    with pytest.raises(ValidationError):
+        RuleCard(card_id="c12", applies_to="effect:charge", mode="auto", who="anyone", reason="x",
+                 max_amount_cents=1_000_001)
+    # a Desk's first cap and a draft's cap: whole cents from 0 to the ceiling, never a bool, text or float
+    DeskSeed.model_validate_json(json.dumps(minimal_desk_seed(auto_money_cap_cents=1_000_000)))
+    draft = {"desk_id": "desk-1", "cards": [], "expected_parent": 1}
+    PolicyDraftRequest.model_validate_json(json.dumps({**draft, "auto_money_cap_cents": 1_000_000}))
+    for malformed in (1_000_001, -1, True, "500", 500.0):
+        with pytest.raises(ValidationError):
+            DeskSeed.model_validate_json(json.dumps(minimal_desk_seed(auto_money_cap_cents=malformed)))
+        with pytest.raises(ValidationError):
+            PolicyDraftRequest.model_validate_json(json.dumps({**draft, "auto_money_cap_cents": malformed}))
+        with pytest.raises(ValidationError):
+            DeskSeed.model_validate(minimal_desk_seed(auto_money_cap_cents=malformed))
+        with pytest.raises(ValidationError):
+            PolicyDraftRequest.model_validate({**draft, "auto_money_cap_cents": malformed})
+
+
+def test_desk_cap_defaults_to_zero():
+    # unset is 0: every charge and payout asks
+    assert DeskSeed.model_validate(minimal_desk_seed()).auto_money_cap_cents == 0
+    version = {"desk_id": "desk-1", "version": 1, "parent_version": None, "cards": [], "cedar_sha256": "c",
+               "schema_sha256": "s", "baseline_sha256": "b", "profiles_sha256": "p", "invariants_sha256": "i",
+               "review_thresholds_version": 1, "status": "active"}
+    assert PolicyVersion.model_validate(version).auto_money_cap_cents == 0
+    assert PolicyVersion.model_validate({**version, "auto_money_cap_cents": 50_000}).auto_money_cap_cents == 50_000
 
 
 def test_scoped_cards_need_their_subject():

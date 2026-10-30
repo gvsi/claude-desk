@@ -11,9 +11,9 @@ import pytest
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 
-from desk.contracts import LedgerEvent, NormalizedAction, Principal, ResourceRef, Review
+from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, LedgerEvent, NormalizedAction, Principal, ResourceRef, Review
 from desk.db.models import DemoInboxEntry, LedgerHead
-from desk.kernel_service import adapters, decide, demo_inbox, ledger
+from desk.kernel_service import adapters, compiler, decide, demo_inbox, ledger
 from desk.kernel_service.adapters.base import Adapter
 from desk.kernel_service.repo import new_id
 
@@ -71,6 +71,7 @@ async def test_fake_adapter_satisfies_the_protocol(registry):
 FIXTURES = Path(__file__).resolve().parents[3] / "kernel" / "cedar" / "fixtures"
 TUESDAY_10AM = datetime(2026, 11, 3, 10, 0, tzinfo=ZoneInfo("America/Los_Angeles"))
 NOW = datetime(2026, 10, 30, 17, 4, 5, tzinfo=UTC)   # Friday 10:04 in Oakland (daylight time)
+CAP = 50_000                                         # the money cap of the version a request is evaluated against
 
 
 def principal(kind: str, **fields) -> Principal:
@@ -93,21 +94,30 @@ def entity(request: dict, type_: str) -> dict:
 def test_cedar_request_shape():
     for kind, type_ in (("visitor", "Visitor"), ("agent", "Agent"), ("owner", "Owner")):
         extra = {"agent_key_id": "agent-1"} if kind == "agent" else {}
-        request = decide.cedar_request(principal(kind, **extra), action(), tz="America/Los_Angeles", now=NOW)
+        request = decide.cedar_request(principal(kind, **extra), action(), tz="America/Los_Angeles", now=NOW, auto_money_cap_cents=CAP)
         assert request["principal"] == {"type": type_, "id": f"session-{kind}"}
         assert entity(request, type_)["uid"] == request["principal"]
-    stranger = decide.cedar_request(principal("visitor"), action(), tz="America/Los_Angeles", now=NOW)
+    stranger = decide.cedar_request(principal("visitor"), action(), tz="America/Los_Angeles", now=NOW, auto_money_cap_cents=CAP)
     assert set(stranger) == {"principal", "action", "resource", "context", "entities"}
     assert stranger["action"] == "native.find_slots"
     assert stranger["resource"] == {"type": "Desk", "id": "desk-1"}
     assert entity(stranger, "Desk") == {"uid": {"type": "Desk", "id": "desk-1"}, "attrs": {"copy": "copy-1"},
                                         "parents": []}
     assert entity(stranger, "Visitor")["attrs"] == {"verified": False, "assurance": "none", "copy": "copy-1"}
-    # every optional attribute is absent, and owner_approved is the engine's to set
-    assert stranger["context"] == {"record_owner_match": False, "local_dow": 4, "local_minute": 604}
+    # every optional attribute is absent, and owner_approved is the engine's to set; the money cap is the
+    # version's, never above the platform ceiling
+    assert stranger["context"] == {"record_owner_match": False, "local_dow": 4, "local_minute": 604,
+                                   "auto_money_cap_cents": CAP}
+    for cap, sent in ((0, 0), (AUTO_MONEY_HARD_CAP_CENTS + 1, AUTO_MONEY_HARD_CAP_CENTS)):
+        assert decide.cedar_request(principal("visitor"), action(), tz="America/Los_Angeles", now=NOW,
+                                    auto_money_cap_cents=cap)["context"]["auto_money_cap_cents"] == sent
+    for cap in (-1, True, 500.0):
+        with pytest.raises(ValueError):
+            decide.cedar_request(principal("visitor"), action(), tz="America/Los_Angeles", now=NOW,
+                                 auto_money_cap_cents=cap)
     # a slot is judged by its own start, in the business's time zone
     booking = decide.cedar_request(principal("visitor"), action("native.book", "slot", starts_at=TUESDAY_10AM),
-                                   tz="America/Los_Angeles", now=NOW)
+                                   tz="America/Los_Angeles", now=NOW, auto_money_cap_cents=CAP)
     assert (booking["context"]["local_dow"], booking["context"]["local_minute"]) == (1, 600)
     assert booking["resource"] == {"type": "Slot", "id": "slot-1"}
     # amounts, discounts and recipients only when the action has them; review only when given
@@ -116,35 +126,41 @@ def test_cedar_request_shape():
     document = action("native.release_document", "document", recipient="verified_contact", list_cents=18_000,
                       discount_bp=0, amount_cents=18_000,
                       resource=ResourceRef(kind="document", id="doc-1", owner_person_id="person-dana"))
-    released = decide.cedar_request(dana, document, tz="America/Los_Angeles", now=NOW, review=review)
+    released = decide.cedar_request(dana, document, tz="America/Los_Angeles", now=NOW, auto_money_cap_cents=CAP, review=review)
     assert released["context"] == {"record_owner_match": True, "local_dow": 4, "local_minute": 604,
+                                   "auto_money_cap_cents": CAP,
                                    "list_cents": 18_000, "discount_bp": 0, "amount_cents": 18_000,
                                    "recipient": "verified_contact", "review": review.model_dump()}
     assert entity(released, "Visitor")["attrs"] == {"verified": True, "person_id": "person-dana",
                                                     "assurance": "demo_code", "copy": "copy-1"}
     assert entity(released, "Document")["attrs"] == {"copy": "copy-1", "owner_person_id": "person-dana"}
     bob = principal("visitor", person_id="person-bob", assurance="demo_code")
-    assert decide.cedar_request(bob, document, tz="America/Los_Angeles", now=NOW)["context"]["record_owner_match"] is False
+    assert decide.cedar_request(bob, document, tz="America/Los_Angeles", now=NOW, auto_money_cap_cents=CAP)["context"]["record_owner_match"] is False
     # a mandate's remaining room is an Agent attribute, and only when there is one
     agent = principal("agent", agent_key_id="agent-1")
-    with_room = decide.cedar_request(agent, action(), tz="America/Los_Angeles", now=NOW, mandate_remaining_cents=5_000)
+    with_room = decide.cedar_request(agent, action(), tz="America/Los_Angeles", now=NOW, auto_money_cap_cents=CAP, mandate_remaining_cents=5_000)
     assert entity(with_room, "Agent")["attrs"] == {"verified": False, "assurance": "none", "copy": "copy-1",
                                                    "agent_key_id": "agent-1", "mandate_remaining_cents": 5_000}
     assert "mandate_remaining_cents" not in entity(
-        decide.cedar_request(agent, action(), tz="America/Los_Angeles", now=NOW), "Agent")["attrs"]
+        decide.cedar_request(agent, action(), tz="America/Los_Angeles", now=NOW, auto_money_cap_cents=CAP), "Agent")["attrs"]
     assert "mandate_remaining_cents" not in entity(decide.cedar_request(
-        principal("visitor"), action(), tz="America/Los_Angeles", now=NOW, mandate_remaining_cents=5_000),
+        principal("visitor"), action(), tz="America/Los_Angeles", now=NOW, auto_money_cap_cents=CAP, mandate_remaining_cents=5_000),
         "Visitor")["attrs"]
     assert entity(decide.cedar_request(principal("owner", assurance="owner_session"), action(),
-                                       tz="America/Los_Angeles", now=NOW), "Owner")["attrs"]["verified"] is True
-    # the Rust engine takes the request as built (the spike's fixture policies)
-    engine = desk_kernel.PolicyEngine((FIXTURES / "baseline.cedar").read_text())
+                                       tz="America/Los_Angeles", now=NOW, auto_money_cap_cents=CAP), "Owner")["attrs"]["verified"] is True
+    # the Rust engine takes the request as built: the real baseline and schema, which require the money
+    # cap, with the spike's fixture policies as F, A and H
+    engine = desk_kernel.PolicyEngine(compiler.BASELINE)
     sets = {"F": "", "A": (FIXTURES / "auto.cedar").read_text(), "H": (FIXTURES / "hold.cedar").read_text()}
-    assert engine.load("desk-1:1", (FIXTURES / "schema.cedarschema.json").read_text(), json.dumps(sets)) == []
+    assert engine.load("desk-1:1", json.dumps(compiler.desk_schema([])), json.dumps(sets)) == []
     verdict = json.loads(engine.decide("desk-1:1", json.dumps(stranger), "final"))
     assert (verdict["outcome"], verdict["errors"]) == ("allow", [])
     for request in (booking, released, with_room):
         assert json.loads(engine.decide("desk-1:1", json.dumps(request), "final"))["errors"] == []
+    # a request without the money cap doesn't fit the schema: refused with an error, never decided without it
+    capless = {**stranger, "context": {k: v for k, v in stranger["context"].items() if k != "auto_money_cap_cents"}}
+    verdict = json.loads(engine.decide("desk-1:1", json.dumps(capless), "final"))
+    assert verdict["outcome"] == "refuse" and verdict["errors"], verdict
 
 
 async def test_writers_share_the_callers_transaction(app):

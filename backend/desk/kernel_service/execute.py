@@ -5,7 +5,9 @@ An execution takes up to three transactions, so that a crash leaves a record of 
 
 - T1 locks the decision (for an allow, once it holds the session row `FOR SHARE`), settles it as
   any read does (`refresh_decision`), re-checks it against the current rows (`recheck`, step 6
-  of "Evaluation"), makes sure the receipt it will end on can be written (`_receipt_ready`),
+  of "Evaluation", against the active version at its money cap, which the `execute` entries that
+  follow name as `policy_version` and `auto_money_cap_cents`), makes sure the receipt it will end
+  on can be written (`_receipt_ready`),
   runs the adapter's `prepare` and commits the `executions` row in state `intent`, with whatever
   `prepare` reserved. Nothing outside the kernel has happened yet.
 - T2 first holds the session row (`_hold_session`): for an allow `FOR SHARE`, so a take-over
@@ -37,7 +39,7 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Literal
+from typing import Any, Literal, NamedTuple
 
 import desk_kernel
 from fastapi import APIRouter, Request
@@ -80,6 +82,14 @@ async def _after_intent() -> None:
 
 # ---- The rows an execution works on --------------------------------------------------------------
 
+class Checked(NamedTuple):
+    """The rules version a re-check ran against, and its money cap: what the `execute` entries of
+    the execution it let through record ("Money cap")."""
+
+    policy_version: int
+    auto_money_cap_cents: int
+
+
 @dataclass
 class _Target:
     """A decision's action with the rows it runs on, read in the current transaction."""
@@ -92,6 +102,7 @@ class _Target:
     business: Business
     adapter: Adapter | None
     principal: Principal
+    checked: Checked | None = None       # the version and cap step 6 ran against, once it has
 
     def xctx(self, ctx: KernelCtx) -> ExecCtx:
         return ExecCtx(ctx=ctx, desk_row=self.desk_row, session_row=self.session_row, principal=self.principal)
@@ -167,8 +178,11 @@ async def _note(ctx: KernelCtx, row: DecisionRow, summary: dict[str, Any]) -> No
 
 
 def _summary(target: _Target, state: str, **extra: Any) -> dict[str, Any]:
+    """An `execute` entry's summary; once step 6 has run, with the version and money cap it ran
+    against, so each entry can be judged by its own version."""
+    checked = target.checked._asdict() if target.checked is not None else {}
     return {"decision_id": target.decision.decision_id, "action_id": target.action.action_id, "state": state,
-            **extra}
+            **checked, **extra}
 
 
 def _no_result(action_id: str, state: Literal["failed", "unknown"]) -> ExecResult:
@@ -182,8 +196,18 @@ async def recheck(ctx: KernelCtx, decision_row: DecisionRow, *, path: ExecPath) 
     the conditions `/decide` had (mode `ai` at the decision's generation, the tool given to the
     session) and the `auto` verdict with the stored review; on `approved` the approvable verdict
     and the approval's binding. Either way the Desk must stand, the tool must be registered and
-    enabled, and the adapter must normalize the stored args to exactly the stored action."""
-    return await _recheck(ctx, await _target(ctx, decision_row), path) is None
+    enabled, and the adapter must normalize the stored args to exactly the stored action. The rules
+    are the active version's, evaluated at its money cap, so a re-check after a confirm uses the
+    new version's cap."""
+    return await recheck_under(ctx, decision_row, path=path) is not None
+
+
+async def recheck_under(ctx: KernelCtx, decision_row: DecisionRow, *, path: ExecPath) -> Checked | None:
+    """`recheck`, answering with the version and money cap it passed under, or None when it fails."""
+    target = await _target(ctx, decision_row)
+    if await _recheck(ctx, target, path) is not None:
+        return None
+    return target.checked
 
 
 async def _recheck(ctx: KernelCtx, target: _Target, path: ExecPath) -> str | None:
@@ -217,11 +241,14 @@ async def _recheck(ctx: KernelCtx, target: _Target, path: ExecPath) -> str | Non
         return "args"
     if tool_row.profile_sha256 != action.profile_sha256:
         return "profile"
-    # (3) the current rules, for the principal as it stands now
+    # (3) the current rules at their money cap, for the principal as it stands now
     version_row = await activation.active_version(ctx, desk_row.desk_id)
     if version_row is None or ctx.policies.versions.use(version_row):
         return "policy"
-    request = decide.cedar_request(target.principal, action, tz=target.business.timezone, now=ctx.clock.now())
+    cap = activation.version_cap(version_row)
+    target.checked = Checked(policy_version=version_row.version, auto_money_cap_cents=cap)
+    request = decide.cedar_request(target.principal, action, tz=target.business.timezone, now=ctx.clock.now(),
+                                   auto_money_cap_cents=cap)
     if path == "allow":
         stored_review = Reviewed(review=decision.review, usage=None)
 
@@ -364,36 +391,40 @@ async def execute_allowed(ctx: KernelCtx, session_row: SessionRow, decision_id: 
     if not await _prepare_intent(ctx, target):
         raise await _refused_at_execution(ctx, target, "prepare")
     await ctx.db.commit()                                # T1: the intent row, before any side effect
-    return await _run(ctx, row.decision_id, target.action.action_id, row.session_id, path="allow")
+    return await _run(ctx, row.decision_id, target.action.action_id, row.session_id, path="allow",
+                      checked=target.checked)
 
 
-async def run_approved(ctx: KernelCtx, decision_row: DecisionRow) -> ExecResult:
+async def run_approved(ctx: KernelCtx, decision_row: DecisionRow, *, checked: Checked | None = None) -> ExecResult:
     """T2 and T3 for an approved hold whose intent row the answer has committed, as the held
-    session's principal; mode and generation aren't checked (step 6)."""
-    return await _run(ctx, decision_row.decision_id, decision_row.action_id, decision_row.session_id, path="approved")
+    session's principal; mode and generation aren't checked (step 6). `checked` is the version and
+    money cap the answer's re-check passed under (`recheck_under`), which its entries record."""
+    return await _run(ctx, decision_row.decision_id, decision_row.action_id, decision_row.session_id, path="approved",
+                      checked=checked)
 
 
 # ---- T2 and T3: the side effect and its outcome -----------------------------------------------------
 
-async def _run(ctx: KernelCtx, decision_id: str, action_id: str, session_id: str, *, path: ExecPath) -> ExecResult:
+async def _run(ctx: KernelCtx, decision_id: str, action_id: str, session_id: str, *, path: ExecPath,
+               checked: Checked | None) -> ExecResult:
     await _after_intent()
     try:
-        outcome = await _side_effect(ctx, decision_id, action_id, session_id, path)
+        outcome = await _side_effect(ctx, decision_id, action_id, session_id, path, checked)
     except AdapterFailure as failure:
         await ctx.db.rollback()
-        return await _settle_failed(ctx, decision_id, action_id, failure)
+        return await _settle_failed(ctx, decision_id, action_id, failure, checked)
     except Exception as exc:
         # an outcome nobody knows, a failed commit included: never retried, left to reconciliation
         repo.log_error(log, exc, "execution_unknown action_id=%s", action_id)
         await ctx.db.rollback()
-        return await _settle_unknown(ctx, decision_id, action_id)
+        return await _settle_unknown(ctx, decision_id, action_id, checked)
     if isinstance(outcome, KernelFailure):
         raise outcome
     return outcome
 
 
-async def _side_effect(ctx: KernelCtx, decision_id: str, action_id: str, session_id: str,
-                       path: ExecPath) -> ExecResult | KernelFailure:
+async def _side_effect(ctx: KernelCtx, decision_id: str, action_id: str, session_id: str, path: ExecPath,
+                       checked: Checked | None) -> ExecResult | KernelFailure:
     """T2: holding the decision's session row, `session_id`, taken first (`_hold_session`), then
     under the decision's and the intent row's locks, the adapter's `execute`, then `succeeded` and
     `executed`, committed. A failure answer comes back as a `KernelFailure`, already committed,
@@ -407,6 +438,7 @@ async def _side_effect(ctx: KernelCtx, decision_id: str, action_id: str, session
             return execution.result
         return KernelFailure(409, "conflict", "not_an_intent")
     target = await _target(ctx, decision)
+    target.checked = checked
     if path == "allow":
         if session is None or session.generation != target.decision.generation:
             return await _fenced(ctx, target, execution, "stale_generation")
@@ -454,7 +486,8 @@ async def _finish(ctx: KernelCtx, target: _Target, execution: Execution, result:
     await decide.set_state(ctx, target.decision, decision_state, kind="execute", summary=summary)
 
 
-async def _settle_failed(ctx: KernelCtx, decision_id: str, action_id: str, failure: AdapterFailure) -> ExecResult:
+async def _settle_failed(ctx: KernelCtx, decision_id: str, action_id: str, failure: AdapterFailure,
+                         checked: Checked | None = None) -> ExecResult:
     """T3 after `AdapterFailure`, under the decision's and the execution's locks: `on_failed`,
     then `failed`. If `on_failed` itself fails, the reservation may still stand, so the action is
     `unknown` instead."""
@@ -463,13 +496,14 @@ async def _settle_failed(ctx: KernelCtx, decision_id: str, action_id: str, failu
     if execution is None or execution.state != "intent":
         return await _settled_elsewhere(execution, action_id)
     target = await _target(ctx, decision)
+    target.checked = checked
     try:
         async with ctx.db.begin_nested():
             await _undo(ctx, target)
     except Exception as exc:
         repo.log_error(log, exc, "on_failed_failed action_id=%s", action_id)
         await ctx.db.rollback()
-        return await _settle_unknown(ctx, decision_id, action_id)
+        return await _settle_unknown(ctx, decision_id, action_id, checked)
     code = failure.args[0] if failure.args and isinstance(failure.args[0], str) else "adapter_failure"
     result = _no_result(action_id, "failed")
     await _finish(ctx, target, execution, result, "failed", _summary(target, "failed", reason=ledger.safe_ref(code)))
@@ -477,7 +511,8 @@ async def _settle_failed(ctx: KernelCtx, decision_id: str, action_id: str, failu
     return result
 
 
-async def _settle_unknown(ctx: KernelCtx, decision_id: str, action_id: str) -> ExecResult:
+async def _settle_unknown(ctx: KernelCtx, decision_id: str, action_id: str,
+                          checked: Checked | None = None) -> ExecResult:
     """T3 after any other exception, under the decision's and the execution's locks: `unknown`,
     with `prepare`'s reservation kept."""
     decision = await _lock_decision(ctx, decision_id)
@@ -485,6 +520,7 @@ async def _settle_unknown(ctx: KernelCtx, decision_id: str, action_id: str) -> E
     if execution is None or execution.state != "intent":
         return await _settled_elsewhere(execution, action_id)
     target = await _target(ctx, decision)
+    target.checked = checked
     result = _no_result(action_id, "unknown")
     await _mark_unknown(ctx, target, execution, result)
     await ctx.db.commit()
@@ -533,14 +569,16 @@ def _orphaned(cutoff: datetime) -> Any:
 
 
 async def refresh_decision(ctx: KernelCtx, decision_row: DecisionRow) -> DecisionRow:
-    """A decision as a read settles it: its orphaned execution reconciled, then lazy expiry
-    ("Decision lifecycle"), in the caller's transaction. Returns the current row."""
+    """A decision as a read settles it: its orphaned execution reconciled, then lazy expiry, then a
+    held money decision's answers recomputed at the active version's money cap
+    (`decide.refresh_answers`; "Decision lifecycle"), in the caller's transaction. Returns the
+    current row."""
     decision_id, action_id = decision_row.decision_id, decision_row.action_id
     if action_id is not None and decision_row.state in ("allowed", "approved", "unknown"):
         if await reconcile_orphans(ctx, at_startup=False, action_id=action_id):
             decision_row = await _one(ctx, select(DecisionRow).where(DecisionRow.decision_id == decision_id)
                                       .execution_options(populate_existing=True))
-    return await decide.expire_if_due(ctx, decision_row)
+    return await decide.refresh_answers(ctx, await decide.expire_if_due(ctx, decision_row))
 
 
 async def reconcile_orphans(ctx: KernelCtx, *, at_startup: bool, action_id: str | None = None) -> list[str]:

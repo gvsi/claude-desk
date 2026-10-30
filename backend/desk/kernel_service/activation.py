@@ -17,6 +17,13 @@ check reads in the owner's words (`explain.py`). `confirm` (`POST /policy/confir
 draft only in `symcc` mode, when a SymCC proof of all seven obligations holds, its parent is still
 the active version and everything it was proved against is current.
 
+Money caps (master plan, "Money cap"). Every version carries the money cap it is compiled and
+proved at (`auto_money_cap_cents`): the most an auto rule takes or pays out in one action without
+asking. The Desk's cap is its active version's (`version_cap`), so a cap changes only when the
+owner confirms a draft at another cap; a draft without one keeps the active version's. The cap is
+part of what a proof covers (`invariants_sha256` renders the auto invariants at it), so a version
+is proved at its own cap and a report proved at another is never reused.
+
 Loaded versions. A stored version loads into the policy engine on its first use
 (`LoadedVersions`), bounded to `MAX_LOADED_VERSIONS` per engine, least recently used out first.
 
@@ -161,20 +168,22 @@ class ProofInputs:
 
 
 def build_proof_inputs(cards: Sequence[RuleCard], profiles: Sequence[ToolProfile],
-                       schema: Mapping[str, Any]) -> ProofInputs:
-    """The proof inputs for `cards` over the enabled `profiles`: the compiler's `F`, `A`, `H` and
-    `A0` (its own emission without review gates), and the reference generator's sets, each
-    preceded by its never forbids (`R = never + R`, `R_hold = never + R_hold`), as the bounded
-    check loads them. Raises ValueError for cards either generator can't express."""
-    compiled = compiler.compile_cards(cards, profiles)
-    a0 = compiler.compile_cards(cards, profiles, review=False).A
+                       schema: Mapping[str, Any], *, auto_money_cap_cents: int) -> ProofInputs:
+    """The proof inputs for `cards` over the enabled `profiles` at a version's money cap: the
+    compiler's `F`, `A`, `H` and `A0` (its own emission without review gates) and the invariants,
+    all at that cap, and the reference generator's sets, each preceded by its never forbids
+    (`R = never + R`, `R_hold = never + R_hold`), as the bounded check loads them. Raises
+    ValueError for cards either generator can't express."""
+    compiled = compiler.compile_cards(cards, profiles, auto_money_cap_cents=auto_money_cap_cents)
+    a0 = compiler.compile_cards(cards, profiles, auto_money_cap_cents=auto_money_cap_cents, review=False).A
     refs = reference.reference_sets(cards, schema)
+    invariants = compiler.invariants(auto_money_cap_cents)
     return ProofInputs(
         schema_json=json.dumps(schema),
         sets={"B": compiler.BASELINE, "F": compiled.F, "A": compiled.A, "A0": a0, "H": compiled.H,
               "R": refs.never + "\n" + refs.R, "R_hold": refs.never + "\n" + refs.R_hold},
-        always=list(compiler.INVARIANTS["always"].values()),
-        auto=list(compiler.INVARIANTS["auto"].values()),
+        always=list(invariants["always"].values()),
+        auto=list(invariants["auto"].values()),
         money_uncovered=money_uncovered(cards, profiles),
         checks=list(PROOF_CHECKS),
     )
@@ -219,20 +228,21 @@ async def prove(inputs: ProofInputs) -> ProofReport:
 
 
 async def prove_or_check(engine: desk_kernel.PolicyEngine, cards: Sequence[RuleCard], profiles: Sequence[ToolProfile],
-                         *, key_prefix: str) -> ProofReport:
-    """What the process's proof mode can say about `cards` over the enabled `profiles`: in
-    `symcc` mode a `desk-prove` proof (`prove`), in `bounded` mode the bounded check (in a thread,
-    under `bounded:<key_prefix>` keys, so pass a prefix unique to the draft). Cards the compiler
-    or the reference generator can't express fail as a `prover` check: nothing is ever a pass by
-    error. Only a `symcc` report that holds may activate anything."""
+                         *, key_prefix: str, auto_money_cap_cents: int) -> ProofReport:
+    """What the process's proof mode can say about `cards` over the enabled `profiles` at a
+    version's money cap: in `symcc` mode a `desk-prove` proof (`prove`), in `bounded` mode the
+    bounded check (in a thread, under `bounded:<key_prefix>` keys, so pass a prefix unique to the
+    draft). Cards the compiler or the reference generator can't express fail as a `prover` check:
+    nothing is ever a pass by error. Only a `symcc` report that holds may activate anything."""
     mode = proof_mode()
+    cap = auto_money_cap_cents
     try:
         schema = compiler.desk_schema(profiles)
         if mode == "symcc":
-            inputs = build_proof_inputs(cards, profiles, schema)
+            inputs = build_proof_inputs(cards, profiles, schema, auto_money_cap_cents=cap)
         else:
-            compiled = compiler.compile_cards(cards, profiles)
-            a0 = compiler.compile_cards(cards, profiles, review=False).A
+            compiled = compiler.compile_cards(cards, profiles, auto_money_cap_cents=cap)
+            a0 = compiler.compile_cards(cards, profiles, auto_money_cap_cents=cap, review=False).A
             refs = reference.reference_sets(cards, schema)
     except Exception:
         log.warning("rules_uncompilable", exc_info=True)
@@ -240,7 +250,8 @@ async def prove_or_check(engine: desk_kernel.PolicyEngine, cards: Sequence[RuleC
     if mode == "symcc":
         return await prove(inputs)
     return await asyncio.to_thread(bounded_check, engine, key_prefix=key_prefix, schema_json=json.dumps(schema),
-                                   compiled=compiled, a0=a0, refs=refs, cards=cards, profiles=profiles)
+                                   compiled=compiled, a0=a0, refs=refs, cards=cards, profiles=profiles,
+                                   auto_money_cap_cents=cap)
 
 
 def _timed_out() -> ProofReport:
@@ -282,7 +293,8 @@ class VersionHashes(NamedTuple):
     """What a proof of a compiled version was proved against, all of it the proof cache's key.
 
     `desk-prove` reads the compiled Cedar (`cedar_sha256`), the schema, the baseline and the
-    invariant files (`invariants_sha256`, with the prover's version), and three things that come
+    invariants (`invariants_sha256`: rendered at the version's money cap, with the prover's
+    version, so versions at different caps never share a report), and three things that come
     from the owner's cards rather than from the Cedar: the reference generator's `R` and `R_hold`,
     the compiler's `A0` and the money tools no card covers. `cards_sha256` stands for those: it
     hashes the cards the reference generator reads, never the compiler's output, so cards that
@@ -321,16 +333,17 @@ def profiles_sha256(profiles: Iterable[ToolProfile]) -> str:
 
 
 def version_hashes(compiled: compiler.CompiledSets, schema: Mapping[str, Any], profiles: Iterable[ToolProfile],
-                   *, cards: Iterable[RuleCard]) -> VersionHashes:
-    """The hashes of `compiled`, the set compiled from `cards` over the enabled `profiles`. Pass
-    the owner's cards as given to the compiler and the reference generator, not `compiled.cards`."""
+                   *, cards: Iterable[RuleCard], auto_money_cap_cents: int) -> VersionHashes:
+    """The hashes of `compiled`, the set compiled from `cards` over the enabled `profiles` at the
+    money cap `auto_money_cap_cents`. Pass the owner's cards as given to the compiler and the
+    reference generator, not `compiled.cards`."""
     return VersionHashes(
         cedar_sha256=compiler.cedar_sha256(compiled),
         cards_sha256=cards_sha256(cards),
         schema_sha256=compiler.schema_sha256(dict(schema)),
         baseline_sha256=compiler.baseline_sha256(),
         profiles_sha256=profiles_sha256(profiles),
-        invariants_sha256=compiler.invariants_sha256(PROOF_CHECKS),
+        invariants_sha256=compiler.invariants_sha256(PROOF_CHECKS, auto_money_cap_cents),
         review_thresholds_version=review_thresholds.REVIEW_THRESHOLDS_VERSION,
     )
 
@@ -340,12 +353,20 @@ def version_hashes(compiled: compiler.CompiledSets, schema: Mapping[str, Any], p
 # The Rivera seed's cards and the starter presets are proved in CI (`make proofs` writes a report
 # per set into PROOFS_DIR, `make check-presets` re-proves and compares them). Their card IDs are
 # fixed and their scopes never name a person, so they compile to the same hashes in every copy.
+# Each is proved at one money cap (`SHIPPED_CAPS`): the seed at its $500, the presets at 0, which
+# is every new Desk's first cap. A preset drafted at another cap misses the shipped report and
+# proves live like any draft.
 
 PROOFS_DIR = compiler.CEDAR_DIR / "proofs"
 SHIPPED_PRESETS: dict[str, list[RuleCard]] = {
     "rivera": seed.RIVERA_CARDS,
     "ask_first": PRESETS["ask_first"],
     "auto": PRESETS["auto"],
+}
+SHIPPED_CAPS: dict[str, int] = {
+    "rivera": seed.RIVERA_MONEY_CAP_CENTS,
+    "ask_first": 0,
+    "auto": 0,
 }
 
 
@@ -562,15 +583,16 @@ class SeedUnproved(KernelFailure):
 
 def version_row(*, copy_id: str, desk_id: str, version: int, parent_version: int | None,
                 compiled: compiler.CompiledSets, a0: str, schema: Mapping[str, Any], hashes: VersionHashes,
-                status: str, proof: ProofReport | None, created_at: datetime,
+                auto_money_cap_cents: int, status: str, proof: ProofReport | None, created_at: datetime,
                 preset: str | None = None, draft_key_sha256: str | None = None) -> PolicyVersionRow:
     """A `policy_versions` row for a compiled version: its cards with defaults, its Cedar (`F`,
-    `A`, `H` and `A0`), its schema as loaded and the hashes its proof covers (`cards_sha256`
-    among them, from `version_hashes`); an owner's draft also carries its `draft_key_sha256`."""
+    `A`, `H` and `A0`), its schema as loaded, the money cap it was compiled at and the hashes its
+    proof covers (`cards_sha256` among them, from `version_hashes` at that cap); an owner's draft
+    also carries its `draft_key_sha256`."""
     return PolicyVersionRow(
         desk_id=desk_id, version=version, copy_id=copy_id, parent_version=parent_version, cards=compiled.cards,
-        status=status, proof=proof, **hashes._asdict(), created_at=created_at,
-        cedar={**compiled.sets(), "A0": a0}, schema_json=json.dumps(schema), preset=preset,
+        status=status, proof=proof, **hashes._asdict(), auto_money_cap_cents=auto_money_cap_cents,
+        created_at=created_at, cedar={**compiled.sets(), "A0": a0}, schema_json=json.dumps(schema), preset=preset,
         draft_key_sha256=draft_key_sha256)
 
 
@@ -579,22 +601,39 @@ def version_contract(row: PolicyVersionRow) -> PolicyVersion:
                          cards=row.cards, cedar_sha256=row.cedar_sha256, schema_sha256=row.schema_sha256,
                          baseline_sha256=row.baseline_sha256, profiles_sha256=row.profiles_sha256,
                          invariants_sha256=row.invariants_sha256,
-                         review_thresholds_version=row.review_thresholds_version, status=row.status, proof=row.proof)
+                         review_thresholds_version=row.review_thresholds_version,
+                         auto_money_cap_cents=row.auto_money_cap_cents, status=row.status, proof=row.proof)
 
 
-async def activate_shipped(ctx: KernelCtx, desk_id: str, preset: str) -> PolicyVersion:
-    """Makes a shipped rule set (`SHIPPED_PRESETS`) version 1 of a new Desk, `active`, in the
-    caller's transaction, ledgered `policy` `{version, status: "active", preset}`. The set is
-    compiled over the Desk's enabled profiles and activates only on a cache hit with a passing
-    SymCC report, in either proof mode; nothing is proved here. A miss raises `SeedUnproved` (503,
-    so the caller's transaction and everything in it roll back), lists the preset in
-    `Health.unproved_seeds` and logs `seed_unproved` with the hashes, since there may be no Desk
-    left to ledger on."""
+def version_cap(row: PolicyVersionRow | None) -> int:
+    """The money cap a version is evaluated at, `min(its cap, AUTO_MONEY_HARD_CAP_CENTS)`: what the
+    request builder sets as `context.auto_money_cap_cents` for every evaluation of that version.
+    0 for no version, or a cap that isn't a whole number of cents from 0, so nothing moves money."""
+    if row is None:
+        return 0
+    try:
+        return compiler.capped(row.auto_money_cap_cents)
+    except ValueError:
+        log.error("version_cap_unreadable desk_id=%s version=%s", row.desk_id, row.version)
+        return 0
+
+
+async def activate_shipped(ctx: KernelCtx, desk_id: str, preset: str, auto_money_cap_cents: int) -> PolicyVersion:
+    """Makes a shipped rule set (`SHIPPED_PRESETS`) version 1 of a new Desk at the money cap
+    `auto_money_cap_cents` (its `DeskSeed`'s), `active`, in the caller's transaction, ledgered
+    `policy` `{version, status: "active", preset, activated: true, from: null,
+    auto_money_cap_cents}`, so it reads like a confirm's. The set is compiled over the Desk's
+    enabled profiles at that cap and activates only on a cache hit with a passing SymCC report, in
+    either proof mode; nothing is proved here, so only the cap the set was proved at in CI
+    (`SHIPPED_CAPS`) hits. A miss raises `SeedUnproved` (503, so the caller's transaction and
+    everything in it roll back), lists the preset in `Health.unproved_seeds` and logs
+    `seed_unproved` with the hashes, since there may be no Desk left to ledger on."""
     cards = SHIPPED_PRESETS[preset]
+    cap = auto_money_cap_cents
     profiles = await desks.enabled_profiles(ctx, desk_id)
     schema = compiler.desk_schema(profiles)
-    compiled = compiler.compile_cards(cards, profiles)
-    hashes = version_hashes(compiled, schema, profiles, cards=cards)
+    compiled = compiler.compile_cards(cards, profiles, auto_money_cap_cents=cap)
+    hashes = version_hashes(compiled, schema, profiles, cards=cards, auto_money_cap_cents=cap)
     report = ctx.policies.cache.get(hashes)
     if report is None or not proved(report):
         ctx.policies.unproved_seeds.add(preset)
@@ -602,12 +641,14 @@ async def activate_shipped(ctx: KernelCtx, desk_id: str, preset: str) -> PolicyV
                   " ".join(f"{field}={value}" for field, value in hashes._asdict().items()))
         raise SeedUnproved(preset)
     row = version_row(copy_id=ctx.copy_id, desk_id=desk_id, version=1, parent_version=None, compiled=compiled,
-                      a0=compiler.compile_cards(cards, profiles, review=False).A, schema=schema, hashes=hashes,
-                      status="active", proof=report, created_at=ctx.clock.now(), preset=preset)
+                      a0=compiler.compile_cards(cards, profiles, auto_money_cap_cents=cap, review=False).A,
+                      schema=schema, hashes=hashes, auto_money_cap_cents=cap, status="active", proof=report,
+                      created_at=ctx.clock.now(), preset=preset)
     ctx.db.add(row)
     await ctx.db.flush()
     await ledger.append(ctx, copy_id=ctx.copy_id, desk_id=desk_id, event=LedgerEvent(
-        kind="policy", origin="kernel", summary={"version": 1, "status": "active", "preset": preset}))
+        kind="policy", origin="kernel", summary={"version": 1, "status": "active", "preset": preset,
+                                                 "activated": True, "from": None, "auto_money_cap_cents": cap}))
     return version_contract(row)
 
 
@@ -627,8 +668,9 @@ async def active_version(ctx: KernelCtx, desk_id: str) -> PolicyVersionRow | Non
 
 class Hashes(NamedTuple):
     """What a version is proved against besides its own cards and Cedar: the Desk's schema, the
-    baseline, the enabled profiles, the invariants (with the check list and the prover's version)
-    and the review thresholds' version. Confirm needs a version's to be the current ones."""
+    baseline, the enabled profiles, the invariants (rendered at the version's money cap, with the
+    check list and the prover's version) and the review thresholds' version. Confirm needs a
+    version's to be the current ones at its cap."""
 
     schema_sha256: str
     baseline_sha256: str
@@ -637,22 +679,25 @@ class Hashes(NamedTuple):
     review_thresholds_version: int
 
 
-def _hashes(profiles: Sequence[ToolProfile], schema: Mapping[str, Any]) -> Hashes:
+def _hashes(profiles: Sequence[ToolProfile], schema: Mapping[str, Any], auto_money_cap_cents: int) -> Hashes:
     return Hashes(schema_sha256=compiler.schema_sha256(dict(schema)), baseline_sha256=compiler.baseline_sha256(),
-                  profiles_sha256=profiles_sha256(profiles), invariants_sha256=compiler.invariants_sha256(PROOF_CHECKS),
+                  profiles_sha256=profiles_sha256(profiles),
+                  invariants_sha256=compiler.invariants_sha256(PROOF_CHECKS, auto_money_cap_cents),
                   review_thresholds_version=review_thresholds.REVIEW_THRESHOLDS_VERSION)
 
 
-async def current_hashes(ctx: KernelCtx, desk_id: str) -> Hashes:
-    """The hashes a version of the Desk would be proved against now, from its enabled profiles."""
+async def current_hashes(ctx: KernelCtx, desk_id: str, auto_money_cap_cents: int) -> Hashes:
+    """The hashes a version of the Desk at the money cap `auto_money_cap_cents` would be proved
+    against now, from its enabled profiles and the invariants rendered at that cap."""
     profiles = await desks.enabled_profiles(ctx, desk_id)
-    return _hashes(profiles, compiler.desk_schema(profiles))
+    return _hashes(profiles, compiler.desk_schema(profiles), auto_money_cap_cents)
 
 
 def draft_key_sha256(parent_version: int | None, cards: Iterable[RuleCard], hashes: Hashes) -> str:
     """sha256 of `canonical_json({parent_version, cards_sha256, schema_sha256, baseline_sha256,
     profiles_sha256, invariants_sha256, review_thresholds_version})`: the same cards on the same
-    parent, proved against the same things, are the same draft."""
+    parent, proved against the same things, are the same draft. `invariants_sha256` renders the
+    invariants at the draft's money cap, so the same cards at another cap are another draft."""
     key = {"parent_version": parent_version, "cards_sha256": cards_sha256(cards), **hashes._asdict()}
     return hashlib.sha256(desk_kernel.canonical_json(json.dumps(key)).encode()).hexdigest()
 
@@ -696,7 +741,7 @@ def load_draft(engine: desk_kernel.PolicyEngine, *, key: str, schema_json: str,
 
 async def _check_draft(ctx: KernelCtx, *, key: str, schema: Mapping[str, Any], cards: Sequence[RuleCard],
                        profiles: Sequence[ToolProfile], compiled: compiler.CompiledSets,
-                       hashes: VersionHashes) -> ProofReport:
+                       hashes: VersionHashes, auto_money_cap_cents: int) -> ProofReport:
     """What the process's proof mode says about a draft that loads; a draft that doesn't is
     rejected by its `lint` check before anything is proved. In `symcc` mode a cached report for
     exactly these hashes stands in for a run, and every conclusive run is cached."""
@@ -708,7 +753,8 @@ async def _check_draft(ctx: KernelCtx, *, key: str, schema: Mapping[str, Any], c
                            checks=[ProofCheck(name="lint", ok=False)])
     if mode == "symcc" and (cached := ctx.policies.cache.get(hashes)) is not None:
         return cached
-    report = await prove_or_check(ctx.policies.engine, cards, profiles, key_prefix=key)
+    report = await prove_or_check(ctx.policies.engine, cards, profiles, key_prefix=key,
+                                  auto_money_cap_cents=auto_money_cap_cents)
     if report.method == "symcc":
         ctx.policies.cache.put(hashes, report)
     return report
@@ -735,40 +781,49 @@ def _proves_again(row: PolicyVersionRow) -> bool:
 
 
 async def draft(ctx: KernelCtx, owner: OwnerCtx, desk_id: str, cards: Sequence[RuleCard],
-                expected_parent: int | None) -> PolicyVersion:
-    """The owner's `cards` as a new version of the Desk, proved or checked, in the caller's
+                expected_parent: int | None, auto_money_cap_cents: int | None = None) -> PolicyVersion:
+    """The owner's `cards` as a new version of the Desk at the money cap `auto_money_cap_cents`
+    (None takes the parent's, the active version's), proved or checked, in the caller's
     transaction (`POST /policy/draft`), ledgered `policy` `{version, status, method}`.
 
-    Cards `validate_cards` refuses are 422 `invalid`, and a parent that isn't the active version
-    409 `conflict`. Default asks are dropped and derived again. A draft with the same key (the
-    parent, the cards and the hashes they are proved against) is returned as it is, unless its
-    report answered nothing (`_proves_again`): then it is proved again in place. The key's advisory
-    lock is held until commit, so a re-post waits for the running proof; the version number is
-    allocated under the Desk's lock just before the insert. Every failing check of the report
-    reads in the owner's words."""
+    In order: a parent that isn't the active version is 409 `conflict`; cards `validate_cards`
+    refuses at the draft's cap (an auto money card above it among them) are 422 `invalid`, with
+    nothing written either way; then the cards are compiled and proved at that cap, and the
+    version stores it. A draft writes nothing else: the active version and its cap stay in force
+    until the owner confirms. Default asks are dropped and derived again. A draft with the same key
+    (the parent, the cards and the hashes they are proved against, the cap among them) is returned
+    as it is, unless its report answered nothing (`_proves_again`): then it is proved again in
+    place. The key's advisory lock is held until commit, so a re-post waits for the running proof;
+    the version number is allocated under the Desk's lock just before the insert. Every failing
+    check of the report reads in the owner's words."""
     owned = [card for card in cards if not card.is_default]
-    people = await desk_people(ctx, desk_id)
-    if compiler.validate_cards(owned, people=people.keys(), agent_keys=await _agent_keys(ctx)):
-        raise KernelFailure(422, "invalid", "invalid_cards")
     active = await active_version(ctx, desk_id)
     if (active.version if active is not None else None) != expected_parent:
         raise KernelFailure(409, "conflict", "parent_not_active")
+    cap = auto_money_cap_cents if auto_money_cap_cents is not None else version_cap(active)
+    if type(cap) is not int or not 0 <= cap <= AUTO_MONEY_HARD_CAP_CENTS:
+        raise KernelFailure(422, "invalid", "invalid_money_cap")
+    people = await desk_people(ctx, desk_id)
+    if errors := compiler.validate_cards(owned, people=people.keys(), agent_keys=await _agent_keys(ctx),
+                                         auto_money_cap_cents=cap):
+        above = any(f": {compiler.ABOVE_MONEY_CAP}:" in error for error in errors)
+        raise KernelFailure(422, "invalid", compiler.ABOVE_MONEY_CAP if above else "invalid_cards")
     profiles = await desks.enabled_profiles(ctx, desk_id)
     schema = compiler.desk_schema(profiles)
-    key = draft_key_sha256(expected_parent, owned, _hashes(profiles, schema))
+    key = draft_key_sha256(expected_parent, owned, _hashes(profiles, schema, cap))
     await _lock(ctx, "draft", desk_id, key)
     existing = (await ctx.db.scalars(ctx.repo.scoped(select(PolicyVersionRow).where(
         PolicyVersionRow.desk_id == desk_id, PolicyVersionRow.draft_key_sha256 == key)))).one_or_none()
     if existing is not None and not _proves_again(existing):
         return version_contract(existing)
     try:
-        compiled = compiler.compile_cards(owned, profiles)
-        a0 = compiler.compile_cards(owned, profiles, review=False).A
+        compiled = compiler.compile_cards(owned, profiles, auto_money_cap_cents=cap)
+        a0 = compiler.compile_cards(owned, profiles, auto_money_cap_cents=cap, review=False).A
     except ValueError:
         raise KernelFailure(422, "invalid", "uncompilable_cards") from None
-    hashes = version_hashes(compiled, schema, profiles, cards=owned)
+    hashes = version_hashes(compiled, schema, profiles, cards=owned, auto_money_cap_cents=cap)
     report = await _check_draft(ctx, key=f"{desk_id}:{key}", schema=schema, cards=owned, profiles=profiles,
-                                compiled=compiled, hashes=hashes)
+                                compiled=compiled, hashes=hashes, auto_money_cap_cents=cap)
     report = explain.explain_report(report, people)
     status = _draft_status(report)
     if existing is None:
@@ -777,8 +832,8 @@ async def draft(ctx: KernelCtx, owner: OwnerCtx, desk_id: str, cards: Sequence[R
     else:
         version = existing.version
     row = version_row(copy_id=owner.copy_id, desk_id=desk_id, version=version, parent_version=expected_parent,
-                      compiled=compiled, a0=a0, schema=schema, hashes=hashes, status=status, proof=report,
-                      created_at=ctx.clock.now(), draft_key_sha256=key)
+                      compiled=compiled, a0=a0, schema=schema, hashes=hashes, auto_money_cap_cents=cap, status=status,
+                      proof=report, created_at=ctx.clock.now(), draft_key_sha256=key)
     if existing is None:
         ctx.db.add(row)
     else:
@@ -802,7 +857,7 @@ async def _next_version(ctx: KernelCtx, desk_id: str) -> int:
 
 # ---- Confirm -------------------------------------------------------------------------------------
 
-ConfirmRefusal = Literal["not_proved", "parent_changed", "hash_changed"]
+ConfirmRefusal = Literal["not_proved", "parent_changed", "hash_changed", "above_money_cap"]
 
 
 class ConfirmConflict(KernelFailure):
@@ -828,18 +883,21 @@ def _proved_against(row: PolicyVersionRow) -> Hashes:
 
 async def confirm(ctx: KernelCtx, desk_id: str, version: int) -> PolicyVersion:
     """Activates a proved version (`POST /policy/confirm`) in the caller's transaction: it becomes
-    `active`, the version it replaces `superseded`, ledgered `policy` `{version, activated: true,
-    from: <old>}`. Confirms on the Desk are serialized by its `versions` lock, and the active row
-    is locked `FOR UPDATE`. A version the Desk doesn't have is 404 `not_found`, with nothing
-    ledgered; one it has is refused, in this order, with `ConfirmConflict`:
+    `active`, and with it its money cap becomes the Desk's; the version it replaces is
+    `superseded`. Ledgered `policy` `{version, activated: true, from: <old>,
+    auto_money_cap_cents}`. Confirms on the Desk are serialized by its `versions` lock, and the
+    active row is locked `FOR UPDATE`. A version the Desk doesn't have is 404 `not_found`, with
+    nothing ledgered; one it has is refused, in this order, with `ConfirmConflict`:
 
     - `not_proved`, before the other conflicts: the process runs in `bounded` mode, where no owner
       draft activates, even one SymCC proved before a restart;
     - `not_proved`: the version isn't `proved` by a SymCC proof of all seven obligations (a
       bounded check, a rejection, or a version already active or superseded);
     - `parent_changed`: the version it was drafted on is no longer the active one;
-    - `hash_changed`: the schema, baseline, enabled profiles, invariants or review thresholds it
-      was proved against aren't the current ones (`current_hashes`)."""
+    - `hash_changed`: the schema, baseline, enabled profiles, invariants (at the version's cap) or
+      review thresholds it was proved against aren't the current ones (`current_hashes`);
+    - `above_money_cap`: the version holds an auto money card above its own cap, which only a
+      draft that bypassed `validate_cards` could."""
     copy_id = ctx.copy_id
     await _lock(ctx, "versions", desk_id)
     active = (await ctx.db.scalars(ctx.repo.scoped(select(PolicyVersionRow).where(
@@ -854,8 +912,10 @@ async def confirm(ctx: KernelCtx, desk_id: str, version: int) -> PolicyVersion:
         raise ConfirmConflict(copy_id, desk_id, version, "not_proved")
     if row.parent_version != (active.version if active is not None else None):
         raise ConfirmConflict(copy_id, desk_id, version, "parent_changed")
-    if _proved_against(row) != await current_hashes(ctx, desk_id):
+    if _proved_against(row) != await current_hashes(ctx, desk_id, row.auto_money_cap_cents):
         raise ConfirmConflict(copy_id, desk_id, version, "hash_changed")
+    if compiler.above_money_cap(row.cards, row.auto_money_cap_cents):
+        raise ConfirmConflict(copy_id, desk_id, version, "above_money_cap")
     if active is not None:
         active.status = "superseded"
         await ctx.db.flush()              # one active version per Desk, even between the two updates
@@ -863,7 +923,8 @@ async def confirm(ctx: KernelCtx, desk_id: str, version: int) -> PolicyVersion:
     await ctx.db.flush()
     await ledger.append(ctx, copy_id=copy_id, desk_id=desk_id, event=LedgerEvent(
         kind="policy", origin="kernel",
-        summary={"version": version, "activated": True, "from": active.version if active is not None else None}))
+        summary={"version": version, "activated": True, "from": active.version if active is not None else None,
+                 "auto_money_cap_cents": row.auto_money_cap_cents}))
     return version_contract(row)
 
 
@@ -909,9 +970,10 @@ def money_uncovered(cards: Iterable[RuleCard], profiles: Sequence[ToolProfile]) 
 
 def bounded_check(engine: desk_kernel.PolicyEngine, *, key_prefix: str, schema_json: str,
                   compiled: compiler.CompiledSets, a0: str, refs: RefSets, cards: Sequence[RuleCard],
-                  profiles: Sequence[ToolProfile]) -> ProofReport:
-    """Checks `compiled` (with `a0`, the auto set compiled without review gates) against the
-    reference sets on the requests `bounded_cases` generates, and returns a `method="bounded"`
+                  profiles: Sequence[ToolProfile], auto_money_cap_cents: int) -> ProofReport:
+    """Checks `compiled` (with `a0`, the auto set compiled without review gates), both compiled at
+    the money cap `auto_money_cap_cents`, against the reference sets on the requests
+    `bounded_cases` generates at that cap, and returns a `method="bounded"`
     report whose `cases` is how many it evaluated. Synchronous: call it through
     `asyncio.to_thread`. It loads five keys (`bounded_keys(key_prefix)`):
 
@@ -941,7 +1003,7 @@ def bounded_check(engine: desk_kernel.PolicyEngine, *, key_prefix: str, schema_j
                 log.warning("bounded check: %s doesn't load: %s", name, errors)
                 return ProofReport(ok=False, method="bounded", cases=0, checks=[ProofCheck(name="lint", ok=False)])
         try:
-            cases = bounded_cases(cards, profiles, json.loads(schema_json))
+            cases = bounded_cases(cards, profiles, json.loads(schema_json), auto_money_cap_cents=auto_money_cap_cents)
             failures = _evaluate(engine, dict(zip(_BOUNDED_SETS, keys, strict=True)), cases,
                                  set(money_uncovered(cards, profiles)))
         except Exception:
@@ -998,7 +1060,8 @@ def _evaluate(engine: desk_kernel.PolicyEngine, keys: Mapping[str, str], cases: 
 # named in cards and one other, and on charge tools with and without mandate room; crossed with
 # amounts, discounts, times and reviews, each only where an auto card on the tool limits it:
 #
-# - amounts {each limit and limit + 1, absent, 0, 50000, 50001, 1000000} (always on money tools);
+# - amounts {each limit and limit + 1, absent, 0, the cap and cap + 1, 1000000} (always on money
+#   tools), the cap being the version's money cap, which every case carries in its context;
 # - discounts {each limit and limit + 1, absent, 10000} (every auto card has a discount limit);
 # - times {each window's start, start - 1, end - 1, end, and its start on each day outside it};
 # - reviews {the tool's thresholds and each ± 1, absent, (10000, 0), (0, 10000)}.
@@ -1038,15 +1101,18 @@ class _Principal(NamedTuple):
     mandate: int | None
 
 
-def bounded_cases(cards: Iterable[RuleCard], profiles: Iterable[ToolProfile], schema: Mapping[str, Any]) -> list[dict]:
-    """The bounded check's requests (`request_json`s) for `cards` over the enabled `profiles`,
+def bounded_cases(cards: Iterable[RuleCard], profiles: Iterable[ToolProfile], schema: Mapping[str, Any], *,
+                  auto_money_cap_cents: int) -> list[dict]:
+    """The bounded check's requests (`request_json`s) for `cards` over the enabled `profiles` at
+    the money cap `auto_money_cap_cents` (`context.auto_money_cap_cents` in every case),
     deduplicated, boundary values first and capped at `MAX_BOUNDED_CASES`. A profile whose tool
     the schema doesn't declare gets none (its policies couldn't load)."""
+    cap = compiler.capped(auto_money_cap_cents)
     owned = [card for card in cards if not card.is_default]
     persons = _named([card.person_id for card in owned if card.who == "person"], _OTHER_PERSON)
     agents = _named([card.agent_key_id for card in owned if card.who == "agent"], _OTHER_AGENT)
     actions = schema.get("", {}).get("actions", {})
-    passes = [_tool_passes(p, actions[p.tool], owned, persons, agents)
+    passes = [_tool_passes(p, actions[p.tool], owned, persons, agents, cap)
               for p in sorted(profiles, key=lambda p: p.tool) if "appliesTo" in actions.get(p.tool, {})]
     cases: list[dict] = []
     seen: set[str] = set()
@@ -1087,13 +1153,13 @@ def _dedup(values: Iterable[Any]) -> list[Any]:
 
 
 def _tool_passes(profile: ToolProfile, action: Mapping[str, Any], owned: Sequence[RuleCard], persons: Sequence[str],
-                 agents: Sequence[str]) -> tuple[Iterator[dict], Iterator[dict], Iterator[dict]]:
+                 agents: Sequence[str], cap: int) -> tuple[Iterator[dict], Iterator[dict], Iterator[dict]]:
     """The tool's cases in the three passes: boundaries, each value alone, every combination."""
     tool, effects = profile.tool, frozenset(profile.effects)
     on_tool = [card for card in owned if card.applies_to == tool
                or (card.applies_to.startswith("effect:") and card.applies_to.removeprefix("effect:") in effects)]
     autos = [card for card in on_tool if card.mode == "auto"]
-    dimensions = [_amounts(autos, money=_is_money(tool, effects)), _discounts(autos), _times(autos),
+    dimensions = [_amounts(autos, money=_is_money(tool, effects), cap=cap), _discounts(autos), _times(autos),
                   _reviews(autos, effects)]
     principals = [_Principal(kind, resource, standing, person, agent, mandate)
                   for kind in action["appliesTo"]["principalTypes"]
@@ -1108,7 +1174,7 @@ def _tool_passes(profile: ToolProfile, action: Mapping[str, Any], owned: Sequenc
         amount, discount, (dow, minute), review = values
         for principal in who:
             yield _request(tool, principal, amount=amount, discount=discount, dow=dow, minute=minute, review=review,
-                           recipient=recipient)
+                           recipient=recipient, cap=cap)
 
     def at(positions: tuple[int, ...]) -> tuple:
         return tuple(values[i] for values, i in zip(dimensions, positions, strict=True))
@@ -1203,12 +1269,12 @@ def _with_sum(level: int, sizes: Sequence[int]) -> Iterator[tuple[int, ...]]:
             yield (position, *tail)
 
 
-def _amounts(autos: Sequence[RuleCard], *, money: bool) -> list[int | None]:
+def _amounts(autos: Sequence[RuleCard], *, money: bool, cap: int) -> list[int | None]:
     limits = sorted({card.max_amount_cents for card in autos if card.max_amount_cents is not None})
     if not (money or limits):
         return [_ABSENT]
-    values = [*itertools.chain.from_iterable((limit, limit + 1) for limit in limits), _ABSENT, 0,
-              AUTO_MONEY_HARD_CAP_CENTS, AUTO_MONEY_HARD_CAP_CENTS + 1, 1_000_000]
+    values = [*itertools.chain.from_iterable((limit, limit + 1) for limit in limits), _ABSENT, 0, cap, cap + 1,
+              AUTO_MONEY_HARD_CAP_CENTS]
     return _dedup(v for v in values if v is _ABSENT or 0 <= v <= 1_000_000)
 
 
@@ -1254,7 +1320,7 @@ def _reviews(autos: Sequence[RuleCard], effects: frozenset[str]) -> list[tuple[i
 
 
 def _request(tool: str, principal: _Principal, *, amount: int | None, discount: int | None, dow: int, minute: int,
-             review: tuple[int, int] | None, recipient: str | None) -> dict:
+             review: tuple[int, int] | None, recipient: str | None, cap: int) -> dict:
     principal_type, resource_type, standing, person, agent, mandate = principal
     verified = standing != "unverified"
     attrs: dict[str, Any] = {"verified": verified, "assurance": "demo_code" if verified else "none", "copy": _COPY}
@@ -1265,7 +1331,7 @@ def _request(tool: str, principal: _Principal, *, amount: int | None, discount: 
         if mandate is not None:
             attrs["mandate_remaining_cents"] = mandate
     context: dict[str, Any] = {"record_owner_match": standing == "record_owner", "local_dow": dow,
-                               "local_minute": minute}
+                               "local_minute": minute, "auto_money_cap_cents": cap}
     if amount is not None:
         context["amount_cents"] = amount
     if discount is not None:

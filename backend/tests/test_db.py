@@ -22,6 +22,7 @@ import psycopg
 import pytest
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from psycopg.sql import SQL, Identifier
 from pydantic import ValidationError
 from sqlalchemy import cast, create_engine, exists, func, literal, literal_column, select, text, update
@@ -637,6 +638,47 @@ STATE_COLUMNS = {   # each kernel state column admits exactly its contract's val
     ("decisions", "outcome"): Outcome,
     ("decisions", "state"): DecisionState,
 }
+
+
+MONEY_CAP_REVISION = "01b_3b_money_cap"
+
+
+def alembic_config() -> Config:
+    config = Config()
+    config.set_main_option("script_location", str(Path(__file__).resolve().parents[1] / "alembic"))
+    return config
+
+
+def test_migration_keeps_existing_versions_at_five_hundred(admin):
+    """A version written before the money cap's revision keeps the $500 it was held to; one written
+    after it without a cap is at 0, so every charge and payout asks."""
+    def insert(desk_id: str) -> None:
+        admin.execute(
+            "INSERT INTO kernel.policy_versions (desk_id, version, copy_id, cards, status, cedar_sha256, schema_sha256,"
+            " baseline_sha256, profiles_sha256, invariants_sha256, review_thresholds_version)"
+            " VALUES (%s, 1, 'copy-cap', '[]', 'active', 'c', 's', 'b', 'p', 'i', 1)", (desk_id,))
+
+    def cap(desk_id: str) -> int:
+        return admin.execute("SELECT auto_money_cap_cents FROM kernel.policy_versions WHERE desk_id = %s",
+                             (desk_id,)).fetchone()[0]
+
+    config = alembic_config()
+    before = ScriptDirectory.from_config(config).get_revision(MONEY_CAP_REVISION).down_revision
+    try:
+        command.downgrade(config, before)
+        assert "auto_money_cap_cents" not in columns(admin, "kernel", "policy_versions")
+        insert("desk-before-cap")
+        command.upgrade(config, "head")
+        assert cap("desk-before-cap") == 50_000
+        insert("desk-after-cap")
+        assert cap("desk-after-cap") == 0
+        for refused in (-1, 1_000_001):
+            with pytest.raises(psycopg.errors.CheckViolation):
+                admin.execute("UPDATE kernel.policy_versions SET auto_money_cap_cents = %s WHERE desk_id = %s",
+                              (refused, "desk-after-cap"))
+    finally:
+        admin.execute("DELETE FROM kernel.policy_versions WHERE copy_id = 'copy-cap'")
+        command.upgrade(config, "head")
 
 
 def test_state_columns_admit_only_contract_values(admin):

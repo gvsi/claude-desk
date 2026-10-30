@@ -78,7 +78,8 @@ async def test_an_allow_executes_once_within_a_minute(app, client, frozen_clock)
     [entry] = [e for e in await ledger_rows(app, copy) if e.seq == decision.ledger_seq]
     assert (entry.event.kind, entry.event.session_id, entry.event.ref_id, entry.event.summary) == (
         "execute", visitor.session_id, allowed.decision_id,
-        {"decision_id": allowed.decision_id, "action_id": allowed.action.action_id, "state": "executed"})
+        {"decision_id": allowed.decision_id, "action_id": allowed.action.action_id, "state": "executed",
+         "policy_version": 1, "auto_money_cap_cents": 50_000})                # the rules step 6 checked it against
 
 
 async def test_an_allow_expires_after_sixty_seconds(app, client, frozen_clock):
@@ -182,7 +183,7 @@ async def test_rules_changed_refuses_at_execution(app, client):
     [entry] = [e.event for e in await ledger_rows(app, copy) if e.seq == decision.ledger_seq]
     assert (entry.kind, entry.summary) == ("execute", {
         "decision_id": allowed.decision_id, "action_id": allowed.action.action_id, "state": "refused_at_execution",
-        "reason": "rules_changed", "check": "policy"})
+        "reason": "rules_changed", "check": "policy", "policy_version": 2, "auto_money_cap_cents": 50_000})
     # it stays refused
     response = await post_execute(client, visitor, allowed)
     assert (response.status_code, response.json()) == (409, {"code": "conflict"})
@@ -429,7 +430,7 @@ async def test_execution_hooks_follow_the_seam(app, client, registry, frozen_clo
     [entry] = [e.event.summary for e in await ledger_rows(app, rows)
                if e.event.kind == "execute" and e.event.summary.get("state") == "failed"]
     assert entry == {"decision_id": failing.decision_id, "action_id": failing.action.action_id, "state": "failed",
-                     "reason": "slot_taken"}
+                     "reason": "slot_taken", "policy_version": 1, "auto_money_cap_cents": 50_000}
 
     # a T2 commit that fails after the side effect: unknown, then reconciled to executed, once
     effects, armed = [], []
@@ -555,7 +556,7 @@ async def test_a_take_over_after_the_intent_stops_the_allow(app, client, registr
     assert entries == [
         ("takeover", {"from": "ai", "to": "owner", "generation": 1}),
         ("execute", {"decision_id": allowed.decision_id, "action_id": allowed.action.action_id, "state": "expired",
-                     "fenced": True}),
+                     "fenced": True, "policy_version": 1, "auto_money_cap_cents": 50_000}),
         ("auth", {"route": "POST /execute", "reason": "stale_generation"}),
     ]
 

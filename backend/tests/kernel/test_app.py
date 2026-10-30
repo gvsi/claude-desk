@@ -21,7 +21,7 @@ from desk.kernel_service import compiler, ledger
 from desk.kernel_service.app import KernelSettings, create_app, serve_config
 from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure
 
-from .helpers import ledger_rows, make_copy_rows, rows_of
+from .helpers import context, ledger_rows, make_copy_rows, rows_of
 
 
 async def test_health_reports_proof_mode_and_key(app, client):
@@ -49,7 +49,7 @@ async def test_startup_loads_the_baseline_engine(app, monkeypatch):
                                                                   "copy": "copy-1"}, "parents": []}
     desk = {"uid": {"type": "Desk", "id": "d-1"}, "attrs": {"copy": "copy-2"}, "parents": []}
     other_copy = {"principal": visitor["uid"], "action": "native.find_slots", "resource": desk["uid"],
-                  "context": {"record_owner_match": False, "local_dow": 4, "local_minute": 600},
+                  "context": context(record_owner_match=False, local_dow=4, local_minute=600),
                   "entities": [visitor, desk]}
     verdict = json.loads(engine.decide("desk-test:1", json.dumps(other_copy), "final"))
     assert verdict["outcome"] == "refuse" and verdict["policy_ids"] == ["B.same_copy"]   # the real baseline

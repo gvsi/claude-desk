@@ -89,7 +89,8 @@ async def test_owner_creates_a_desk_in_its_copy(app, client):
                             .order_by(LedgerEntry.seq))
     assert [(e.event.kind, e.event.summary) for e in entries] == [
         ("desk_data", {"part": "desk", "created": True}),
-        ("policy", {"version": 1, "status": "active", "preset": "ask_first"})]
+        ("policy", {"version": 1, "status": "active", "preset": "ask_first", "activated": True, "from": None,
+                    "auto_money_cap_cents": 0})]
 
     # a second Desk for Rivera Plumbing itself, named after the stored business
     [rivera_business] = await rows_of(app, copy.copy_id, select(Business).where(Business.name == "Rivera Plumbing"))

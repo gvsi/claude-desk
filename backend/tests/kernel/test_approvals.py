@@ -28,7 +28,7 @@ from desk.kernel_service.repo import new_id
 from desk.kernel_service.seed import RIVERA_CARDS
 
 from .fakes import FakeAdapter
-from .helpers import CopyRows, activate_cards, kernel_ctx, ledger_rows, rows_of, verify_session
+from .helpers import TEST_CAP, CopyRows, activate_cards, compile_at, kernel_ctx, ledger_rows, rows_of, verify_session
 from .test_adapters import Rivera, add_slot, book, local, quote_args, rivera, visitor_of
 from .test_compiler import card
 from .test_decide import (Visitor, by_call, decided, desk_with, open_visitor, payment_link, priced, set_mode,
@@ -104,7 +104,8 @@ async def test_allow_once_executes_inside_the_answer(app, client, frozen_clock):
     base = {"decision_id": held.decision_id, "action_id": held.action_id}
     assert [(e.event.kind, e.event.session_id, e.event.ref_id, e.event.summary) for e in entries] == [
         ("approval", held.session_id, held.decision_id, {**base, "answer": "allow_once", "state": "approved"}),
-        ("execute", held.session_id, held.decision_id, {**base, "state": "executed"}),
+        ("execute", held.session_id, held.decision_id, {**base, "state": "executed", "policy_version": 1,
+                                                         "auto_money_cap_cents": 50_000}),
     ]
     assert decision.ledger_seq == entries[-1].seq
     verify_signature(await public_key(client), decision)
@@ -378,8 +379,9 @@ async def test_allow_person_drafts_a_person_card(app, client):
         ctx.bind(copy.copy_id)
         people = await activation.desk_people(ctx, copy.desk_id)
         profiles = await desks.enabled_profiles(ctx, copy.desk_id)
-    assert compiler.validate_cards([*RIVERA_CARDS, *result.card_diff], people=people, agent_keys=()) == []
-    compiler.compile_cards([*RIVERA_CARDS, *result.card_diff], profiles)
+    assert compiler.validate_cards([*RIVERA_CARDS, *result.card_diff], people=people, agent_keys=(),
+                                   auto_money_cap_cents=TEST_CAP) == []
+    compile_at([*RIVERA_CARDS, *result.card_diff], profiles)
     response = await client.post("/policy/draft", headers=copy.owner, json={
         "desk_id": copy.desk_id, "cards": [c.model_dump(mode="json") for c in [*RIVERA_CARDS, *result.card_diff]],
         "expected_parent": 1})
@@ -393,7 +395,7 @@ async def test_allow_person_drafts_a_person_card(app, client):
     # a visiting agent's key scopes the card the same way (agent sessions arrive with Plan 01c)
     agent = Principal(kind="agent", session_id="agent-session", copy_id=copy.copy_id, desk_id=copy.desk_id,
                       agent_key_id="agentkey-1", assurance="none")
-    assert approvals.person_card(held, agent) == RuleCard(
+    assert approvals.person_card(held, agent, auto_money_cap_cents=TEST_CAP) == RuleCard(
         card_id="person-agentkey-1-native.quote", applies_to="native.quote", mode="auto", who="agent",
         agent_key_id="agentkey-1", max_amount_cents=15_300, max_discount_bp=1500,
         reason="Allowed for this visiting agent after you approved a request like this.")
@@ -418,7 +420,7 @@ async def test_allow_person_is_capped_for_money(app, client, registry, monkeypat
     for language, line in (("en", "Payment link made for this quote"),
                            ("es", "Enlace de pago creado para esta cotización")):
         monkeypatch.setitem(render.EXECUTED[language], "native.payment_link", line)
-    link = payment_link(80_000)                                                # $800: past the $500 hard cap
+    link = payment_link(80_000)                                                # $800: past the version's $500 cap
     rows = await desk_with(app, [link], [])                                    # no card: money asks
     dana_id = await add_person(app, rows, "dana", "Dana Whitfield")
     dana = await open_visitor(client, rows)
@@ -439,13 +441,16 @@ async def test_allow_person_is_capped_for_money(app, client, registry, monkeypat
     assert (response.status_code, response.json()) == (422, {"code": "invalid"})
     assert "execute" not in link.calls and await approvals_of(app, rows.copy_id) == []
     assert (await read_id(client, rows.owner, held.decision_id)).state == "held"
-
-    # the cap follows the money, not the tool's name: a charge under another tool is capped too
+    # and the card it would draft is refused on its own too
     principal = Principal(kind="visitor", session_id=dana.session_id, copy_id=rows.copy_id, desk_id=rows.desk_id,
                           person_id=dana_id, assurance="demo_code")
+    with pytest.raises(ValueError, match="money cap"):
+        approvals.person_card(held, principal, auto_money_cap_cents=TEST_CAP)
+
+    # the cap follows the money, not the tool's name: a charge under another tool is capped too
     charged = held.model_copy(update={"action": held.action.model_copy(update={"tool": "native.quote"})})
-    with pytest.raises(ValueError, match="hard cap"):
-        approvals.person_card(charged, principal)
+    with pytest.raises(ValueError, match="money cap"):
+        approvals.person_card(charged, principal, auto_money_cap_cents=TEST_CAP)
 
     # within the cap, Dana can be allowed: the card is capped at what Maria approved
     link.script["normalize"] = payment_link(5_000).script["normalize"]
@@ -455,7 +460,7 @@ async def test_allow_person_is_capped_for_money(app, client, registry, monkeypat
     [drafted] = result.card_diff
     assert (drafted.who, drafted.person_id, drafted.max_amount_cents, drafted.applies_to) == (
         "person", dana_id, 5_000, "native.payment_link")
-    assert compiler.validate_cards([drafted], people={dana_id}, agent_keys=()) == []
+    assert compiler.validate_cards([drafted], people={dana_id}, agent_keys=(), auto_money_cap_cents=TEST_CAP) == []
 
 
 # Maria's drafted card: every booking asks her first, whatever the booking cards' hours say.
@@ -503,8 +508,9 @@ async def test_deny_always_drafts_a_never_card(app, client, frozen_clock):
         people = await activation.desk_people(ctx, copy.desk_id)
         profiles = await desks.enabled_profiles(ctx, copy.desk_id)
     for drafted in (result.card_diff, [never]):
-        assert compiler.validate_cards([*ASK_BOOKING_CARDS, *drafted], people=people, agent_keys=()) == []
-        compiler.compile_cards([*ASK_BOOKING_CARDS, *drafted], profiles)
+        assert compiler.validate_cards([*ASK_BOOKING_CARDS, *drafted], people=people, agent_keys=(),
+                                       auto_money_cap_cents=TEST_CAP) == []
+        compile_at([*ASK_BOOKING_CARDS, *drafted], profiles)
 
 
 async def test_a_limit_hold_offers_no_deny_always(app, client):

@@ -380,7 +380,7 @@ def cedar_local(instant: datetime) -> tuple[int, int]:
                               tool="native.quote", effects=["change"], args_sha256="a" * 64, profile_sha256="p" * 64,
                               resource=ResourceRef(kind="desk", id="desk", owner_person_id=None), list_cents=None,
                               discount_bp=None, amount_cents=None, recipient=None, starts_at=None)
-    context = decide.cedar_request(principal, action, tz=LA.key, now=instant)["context"]
+    context = decide.cedar_request(principal, action, tz=LA.key, now=instant, auto_money_cap_cents=0)["context"]
     return context["local_dow"], context["local_minute"]
 
 

@@ -4,7 +4,8 @@
     uv run python -m scripts.prove_presets --check  # make check-presets: prove each set again and compare
 
 Each set is compiled over the profiles a new Desk enables (the registered native adapters) and the
-Desk schema, twice, to show its hashes are deterministic, then proved with `desk-prove`
+Desk schema, at the money cap it ships at (`activation.SHIPPED_CAPS`: the Rivera seed at its $500,
+the presets at 0), twice, to show its hashes are deterministic, then proved with `desk-prove`
 (`DESK_PROVE`, else `desk-prove` on PATH; cvc5 through `CVC5` or PATH). A report is written only
 when all seven obligations hold. `--check` writes nothing and exits 1 unless every fresh report
 holds and equals the shipped file exactly, so a missing, stale, failing or hand-edited report fails.
@@ -20,15 +21,20 @@ from desk.contracts import RuleCard, ToolProfile
 from desk.kernel_service import activation, compiler
 
 
-async def prove_set(preset: str, cards: list[RuleCard], profiles: list[ToolProfile]) -> activation.ShippedReport:
-    """The report for one shipped set. Raises RuntimeError when compiling isn't deterministic."""
+async def prove_set(preset: str, cards: list[RuleCard], profiles: list[ToolProfile],
+                    auto_money_cap_cents: int) -> activation.ShippedReport:
+    """The report for one shipped set at its money cap. Raises RuntimeError when compiling isn't
+    deterministic."""
+    cap = auto_money_cap_cents
     schema = compiler.desk_schema(profiles)
-    hashes = activation.version_hashes(compiler.compile_cards(cards, profiles), schema, profiles, cards=cards)
-    again = activation.version_hashes(compiler.compile_cards(list(cards), list(profiles)),
-                                      compiler.desk_schema(profiles), profiles, cards=list(cards))
+    hashes = activation.version_hashes(compiler.compile_cards(cards, profiles, auto_money_cap_cents=cap), schema,
+                                       profiles, cards=cards, auto_money_cap_cents=cap)
+    again = activation.version_hashes(compiler.compile_cards(list(cards), list(profiles), auto_money_cap_cents=cap),
+                                      compiler.desk_schema(profiles), profiles, cards=list(cards),
+                                      auto_money_cap_cents=cap)
     if hashes != again:
         raise RuntimeError(f"{preset}: compiling twice gave different hashes")
-    proof = await activation.prove(activation.build_proof_inputs(cards, profiles, schema))
+    proof = await activation.prove(activation.build_proof_inputs(cards, profiles, schema, auto_money_cap_cents=cap))
     return activation.shipped_report(preset, hashes, proof)
 
 
@@ -47,7 +53,7 @@ def main(argv: list[str] | None = None) -> int:
     ok = True
     for preset, cards in activation.SHIPPED_PRESETS.items():
         path = activation.PROOFS_DIR / f"{preset}.json"
-        report = asyncio.run(prove_set(preset, cards, profiles))
+        report = asyncio.run(prove_set(preset, cards, profiles, activation.SHIPPED_CAPS[preset]))
         if not activation.proved(report.proof):           # the kernel's own activation test
             print(f"{preset}: not proved ({failing_checks(report)})", file=sys.stderr)
             ok = False

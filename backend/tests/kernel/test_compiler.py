@@ -18,6 +18,9 @@ import pytest
 from desk.contracts import HoursWindow, ReviewThresholds, RuleCard, ToolName, ToolProfile
 from desk.kernel_service import compiler, review_thresholds
 
+from .helpers import TEST_CAP, compile_at
+from .helpers import context as cedar_context
+
 KEY = "desk-test:1"
 RESOURCE_TYPES = {"quote": "Quote", "slot": "Slot", "booking": "Booking", "document": "Document",
                   "charge": "Charge", "desk": "Desk"}
@@ -60,7 +63,7 @@ def schema_for(profiles: list[ToolProfile]) -> dict:
 
 def load_compiled(cards: list[RuleCard], profiles: list[ToolProfile], *, review: bool = True,
                   sets: compiler.CompiledSets | None = None) -> desk_kernel.PolicyEngine:
-    compiled = sets or compiler.compile_cards(cards, profiles, review=review)
+    compiled = sets or compile_at(cards, profiles, review=review)
     engine = desk_kernel.PolicyEngine(compiler.BASELINE)
     errors = engine.load(KEY, json.dumps(schema_for(profiles)), json.dumps(compiled.sets()))
     assert errors == [], errors
@@ -80,8 +83,8 @@ def req(tool: str, *, kind: str = "Visitor", verified: bool = False, person_id: 
         agent_key_id: str = "agent-key-1", record_owner: bool = False, dow: int = 1, minute: int = 600,
         **context) -> dict:
     """A request_json from one principal of `kind` on the tool's resource type; a person or a
-    record owner is verified. `context` adds amount_cents, discount_bp, recipient or review. The
-    default time is Tuesday 10:00."""
+    record owner is verified. `context` adds amount_cents, discount_bp, recipient or review, or
+    another money cap than $500. The default time is Tuesday 10:00."""
     resource_type = schema_for([*NATIVE, REFUND])[""]["actions"][tool]["appliesTo"]["resourceTypes"][0]
     verified = verified or record_owner or person_id is not None
     attrs: dict = {"verified": verified, "assurance": "demo_code" if verified else "none", "copy": "copy-1"}
@@ -92,7 +95,8 @@ def req(tool: str, *, kind: str = "Visitor", verified: bool = False, person_id: 
     principal = {"type": kind, "id": "session-1"}
     resource = {"type": resource_type, "id": "record-1"}
     return {"principal": principal, "action": tool, "resource": resource,
-            "context": {"record_owner_match": record_owner, "local_dow": dow, "local_minute": minute, **context},
+            "context": cedar_context(**{"record_owner_match": record_owner, "local_dow": dow, "local_minute": minute,
+                                        **context}),
             "entities": [{"uid": principal, "attrs": attrs, "parents": []},
                          {"uid": resource, "attrs": {"copy": "copy-1"}, "parents": []}]}
 
@@ -131,7 +135,7 @@ A_MIX_OF_CARDS = [
 
 def test_every_policy_is_annotated_and_lints():
     profiles = [*NATIVE, REFUND]
-    compiled = compiler.compile_cards(A_MIX_OF_CARDS, profiles)
+    compiled = compile_at(A_MIX_OF_CARDS, profiles)
     sets = compiled.sets()
     assert set(sets) == {"F", "A", "H"}
     assert desk_kernel.lint_policies(json.dumps(sets)) == []
@@ -157,13 +161,13 @@ def test_every_policy_is_annotated_and_lints():
         assert shape in sets["A"], shape
 
     # deterministic: the same cards in any order compile to the same text and hash
-    again = compiler.compile_cards(list(reversed(A_MIX_OF_CARDS)), list(reversed(profiles)))
+    again = compile_at(list(reversed(A_MIX_OF_CARDS)), list(reversed(profiles)))
     assert again.sets() == sets
     assert [c.card_id for c in compiled.cards] == sorted(c.card_id for c in compiled.cards)
     jcs = desk_kernel.canonical_json(json.dumps(sets))
     assert compiler.cedar_sha256(compiled) == compiler.cedar_sha256(again) == hashlib.sha256(jcs.encode()).hexdigest()
     assert compiler.cedar_sha256(sets) == compiler.cedar_sha256(compiled)
-    fewer = compiler.compile_cards(A_MIX_OF_CARDS[1:], profiles)
+    fewer = compile_at(A_MIX_OF_CARDS[1:], profiles)
     assert compiler.cedar_sha256(fewer) != compiler.cedar_sha256(compiled)
 
 
@@ -176,7 +180,7 @@ def test_uncovered_tools_get_a_default_ask():
         card_id="default:native.book", applies_to="native.book", mode="ask", who="anyone", is_default=True,
         reason="Not covered by a rule yet, so it asks you.")
     assert [c.card_id for c in with_defaults] == sorted(c.card_id for c in with_defaults)
-    assert compiler.compile_cards(cards, NATIVE).cards == with_defaults
+    assert compile_at(cards, NATIVE).cards == with_defaults
     assert decide_with(cards, NATIVE, req("native.book")) == "hold"
     assert decide_with(cards, NATIVE, req("native.find_slots")) == "allow"
 
@@ -309,7 +313,7 @@ def test_joint_effect_autos_take_the_tightest_limits():
     assert decide_with(cards, profiles, req("payments.create_refund", amount_cents=5001, **owner)) == "hold"
     assert decide_with(cards, profiles, req("payments.create_refund", amount_cents=40_000, **owner)) == "hold"
 
-    compiled = compiler.compile_cards(cards, profiles)
+    compiled = compile_at(cards, profiles)
     autos = policies(compiled.A)
     assert [(p[0], p[1], p[3]) for p in autos] == [
         ("auto.private-verified+refunds", "private-verified,refunds", "effect:private_data,effect:pay_out")]
@@ -337,7 +341,7 @@ def test_money_without_an_owner_card_holds():
     profiles = [*NATIVE, REFUND]
     no_money_cards = [card("changes", "effect:change"), card("private", "effect:private_data", who="record_owner"),
                       card("send", "effect:send_message")]
-    compiled = compiler.compile_cards(no_money_cards, profiles)
+    compiled = compile_at(no_money_cards, profiles)
     for tool in ("native.payment_link", "native.charge_mandate", "payments.create_refund"):
         assert tool not in compiled.A                                       # no auto permit names it
         assert f"default:{tool}" in {c.card_id for c in compiled.cards}
@@ -379,7 +383,7 @@ def test_change_card_with_a_discount_limit_allows_a_booking():
     assert decide_with(cards, NATIVE, req("native.quote", discount_bp=1000, amount_cents=30_000)) == "allow"
     assert decide_with(cards, NATIVE, req("native.quote", discount_bp=1001)) == "hold"
     assert decide_with(cards, NATIVE, req("native.quote", amount_cents=30_001)) == "hold"
-    compiled = compiler.compile_cards(cards, NATIVE)
+    compiled = compile_at(cards, NATIVE)
     assert "(if context has discount_bp then context.discount_bp <= 1000 else true)" in compiled.A
     assert "(if context has amount_cents then context.amount_cents <= 30000 else true)" in compiled.A
 
@@ -387,7 +391,7 @@ def test_change_card_with_a_discount_limit_allows_a_booking():
 def test_review_gate_only_narrows():
     cards = [card("book", "native.book", hours=WEEKDAYS, review=True), card("quote", "native.quote", review=True),
              card("ask-dana", "native.book", mode="ask", who="person", **DANA)]
-    gated, ungated = compiler.compile_cards(cards, NATIVE), compiler.compile_cards(cards, NATIVE, review=False)
+    gated, ungated = compile_at(cards, NATIVE), compile_at(cards, NATIVE, review=False)
     assert "context.review" in gated.A and "context.review" not in ungated.A
     assert (gated.F, gated.H, gated.cards) == (ungated.F, ungated.H, ungated.cards)
     assert [p[0] for p in policies(gated.A)] == [p[0] for p in policies(ungated.A)]
@@ -422,10 +426,10 @@ def gate(compiled: compiler.CompiledSets) -> tuple[int, int]:
 
 def test_review_thresholds_follow_the_strictest_effect(monkeypatch):
     docs = [card("docs", "native.release_document", who="record_owner", review=True)]
-    assert gate(compiler.compile_cards(docs, NATIVE)) == (8500, 1500)      # private_data over send_message
-    assert gate(compiler.compile_cards([card("book", "native.book", review=True)], NATIVE)) == (7500, 2500)
+    assert gate(compile_at(docs, NATIVE)) == (8500, 1500)      # private_data over send_message
+    assert gate(compile_at([card("book", "native.book", review=True)], NATIVE)) == (7500, 2500)
     link = [card("link", "native.payment_link", max_amount_cents=2000, review=True)]
-    assert gate(compiler.compile_cards(link, NATIVE)) == (9000, 1000)
+    assert gate(compile_at(link, NATIVE)) == (9000, 1000)
 
     owner = {"record_owner": True, "recipient": "verified_contact"}
     for review, outcome in (((8500, 1500), "allow"), ((8499, 1500), "hold"), ((8500, 1501), "hold")):
@@ -436,21 +440,22 @@ def test_review_thresholds_follow_the_strictest_effect(monkeypatch):
     stricter = {**review_thresholds.THRESHOLDS,
                 "send_message": ReviewThresholds(min_within_charter_bp=9900, max_manipulation_bp=1800)}
     monkeypatch.setattr(review_thresholds, "THRESHOLDS", stricter)
-    assert gate(compiler.compile_cards(docs, NATIVE)) == (9900, 1500)
+    assert gate(compile_at(docs, NATIVE)) == (9900, 1500)
 
 
 def test_auto_money_limit_is_capped():
-    # cards that skipped their contract checks: over the cap, or with no amount at all
+    # cards that skipped their contract checks: over the platform ceiling, or with no amount at all;
+    # compiled at a $500 money cap, as validation at that cap would also have refused the first
     over = RuleCard.model_construct(card_id="big-link", applies_to="native.payment_link", mode="auto", who="anyone",
-                                    person_id=None, agent_key_id=None, max_amount_cents=1_000_000, max_discount_bp=0,
+                                    person_id=None, agent_key_id=None, max_amount_cents=1_000_001, max_discount_bp=0,
                                     hours=None, review=False, is_default=False, reason="Too big.")
     unset = RuleCard.model_construct(card_id="charges", applies_to="effect:charge", mode="auto", who="verified",
                                      person_id=None, agent_key_id=None, max_amount_cents=None, max_discount_bp=0,
                                      hours=None, review=False, is_default=False, reason="No amount.")
     for cards in ([over], [unset]):
-        compiled = compiler.compile_cards(cards, NATIVE)
+        compiled = compile_at(cards, NATIVE)
         assert compiled.A.count("context has amount_cents && context.amount_cents <= 50000") == 1, compiled.A
-        # without the baseline, the compiled permit alone stops at the hard cap
+        # without the baseline, the compiled permit alone stops at the version's cap
         engine = desk_kernel.PolicyEngine("")
         assert engine.load(KEY, json.dumps(schema_for(NATIVE)), json.dumps(compiled.sets())) == []
         for amount, outcome in ((50_000, "allow"), (50_001, "hold")):
@@ -459,7 +464,7 @@ def test_auto_money_limit_is_capped():
         assert decide_with(cards, NATIVE, req("native.payment_link", verified=True, amount_cents=50_001)) == "hold"
 
     # a money permit always needs an amount, and takes the card's own limit when it is lower
-    small = compiler.compile_cards([card("deposit", "native.payment_link", max_amount_cents=2000)], NATIVE)
+    small = compile_at([card("deposit", "native.payment_link", max_amount_cents=2000)], NATIVE)
     assert "context has amount_cents && context.amount_cents <= 2000" in small.A
     engine = desk_kernel.PolicyEngine("")
     assert engine.load(KEY, json.dumps(schema_for(NATIVE)), json.dumps(small.sets())) == []
@@ -474,10 +479,10 @@ def test_invalid_cards_are_rejected():
                   max_amount_cents=2000),
              card("late", "native.book", hours=HoursWindow(days=["fri"], start=time(22), end=time(0))),
              card("default:native.book", "native.book", mode="ask", is_default=True)]   # a default: dropped, unchecked
-    assert compiler.validate_cards(valid, people=people, agent_keys=agent_keys) == []
+    assert compiler.validate_cards(valid, people=people, agent_keys=agent_keys, auto_money_cap_cents=TEST_CAP) == []
 
-    def errors(*cards: RuleCard) -> list[str]:
-        return compiler.validate_cards(list(cards), people=people, agent_keys=agent_keys)
+    def errors(*cards: RuleCard, cap: int = TEST_CAP) -> list[str]:
+        return compiler.validate_cards(list(cards), people=people, agent_keys=agent_keys, auto_money_cap_cents=cap)
 
     assert errors(card("Quote", "native.quote"))                                # IDs are lower case
     assert errors(card("-quote", "native.quote"))
@@ -493,11 +498,16 @@ def test_invalid_cards_are_rejected():
     assert errors(RuleCard.model_construct(**{**card("backwards", "native.book").model_dump(), "hours": backwards}))
     assert errors(card("seconds", "native.book", hours=HoursWindow(days=["mon"], start=time(8, 0, 30), end=time(9))))
     over = RuleCard.model_construct(**{**card("link", "native.payment_link", max_amount_cents=2000).model_dump(),
-                                       "max_amount_cents": 50_001})
+                                       "max_amount_cents": 1_000_001})
     assert errors(over)                                                         # the card's own contract, again
+    # an auto money card above the version's money cap, named by the code the API words for the owner
+    link = card("link", "native.payment_link", max_amount_cents=50_001)
+    assert errors(link) == ["link: above_money_cap: it would take or pay out more than the money limit without asking"]
+    assert errors(link, cap=50_001) == [] and errors(card("refunds", "effect:pay_out", max_amount_cents=1), cap=0)
+    assert errors(card("asks", "effect:charge", mode="ask"), cap=0) == []      # an ask card moves nothing on its own
 
     # the compiler itself never writes such a string into Cedar
     with pytest.raises(ValueError):
-        compiler.compile_cards([card("inject", "native.book", who="person", person_id='dana" || true || "')], NATIVE)
+        compile_at([card("inject", "native.book", who="person", person_id='dana" || true || "')], NATIVE)
     with pytest.raises(ValueError):
-        compiler.compile_cards([card("quote", "native.quote"), card("quote", "native.book")], NATIVE)
+        compile_at([card("quote", "native.quote"), card("quote", "native.book")], NATIVE)

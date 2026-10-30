@@ -139,7 +139,8 @@ async def test_known_outcomes_skip_the_reviewer(app, client, registry, reviewer)
     decides = [event for event in entries if event.kind == "decide"]
     assert [(event.session_id, event.summary) for event in decides] == [
         (visitor.session_id, {"decision_id": d.decision_id, "action_id": d.action.action_id, "tool": d.action.tool,
-                              "outcome": d.outcome, "card_ids": d.card_ids, "policy_version": 1, "reviewed": False})
+                              "outcome": d.outcome, "card_ids": d.card_ids, "policy_version": 1,
+                              "auto_money_cap_cents": 50_000, "reviewed": False})
         for d in (allowed, held, refused)]
 
     # a session that last spoke Spanish reads its status lines in Spanish
@@ -344,7 +345,8 @@ STRAY_PERMIT = ('@id("auto.stray") @card("stray") @tier("auto") @applies_to("nat
 
 
 async def activate_sets(app: FastAPI, rows: CopyRows, *, A: str) -> None:
-    """Test only: the Desk's default asks as `F` and `H`, with `A` as written, as its active version."""
+    """Test only: the Desk's default asks as `F` and `H`, with `A` as written, as its active version, at
+    the money cap of the version it replaces."""
     async with kernel_ctx(app) as ctx:
         ctx.bind(rows.copy_id)
         current = await activation.active_version(ctx, rows.desk_id)
@@ -352,11 +354,13 @@ async def activate_sets(app: FastAPI, rows: CopyRows, *, A: str) -> None:
         await ctx.db.flush()
         profiles = await desks.enabled_profiles(ctx, rows.desk_id)
         schema = compiler.desk_schema(profiles)
-        defaults = compiler.compile_cards([], profiles)
+        cap = current.auto_money_cap_cents
+        defaults = compiler.compile_cards([], profiles, auto_money_cap_cents=cap)
         sets = compiler.CompiledSets(F=defaults.F, A=A, H=defaults.H, cards=defaults.cards)
         ctx.db.add(activation.version_row(
             copy_id=rows.copy_id, desk_id=rows.desk_id, version=current.version + 1, parent_version=current.version,
-            compiled=sets, a0=A, schema=schema, hashes=activation.version_hashes(sets, schema, profiles, cards=[]),
+            compiled=sets, a0=A, schema=schema, auto_money_cap_cents=cap,
+            hashes=activation.version_hashes(sets, schema, profiles, cards=[], auto_money_cap_cents=cap),
             status="active", proof=None, created_at=ctx.clock.now()))
 
 

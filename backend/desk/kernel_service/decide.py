@@ -1,7 +1,9 @@
 """Decisions: deciding a proposed tool call (`POST /decide`) and reading decisions back.
 
 `cedar_request` builds the master plan's `request_json` ("Cedar request shape") from kernel-built
-values only: the principal from the session's rows, the action as its adapter normalized it.
+values only: the principal from the session's rows, the action as its adapter normalized it, and
+the money cap of the version it will be evaluated against (`context.auto_money_cap_cents`, which
+the baseline's `auto_money_cap` reads; `evaluate` refuses a request whose cap isn't its version's).
 Optional attributes appear only when set, since the schema reads them behind `has`.
 `owner_approved` is never sent: the engine sets it for each evaluation, over any value sent.
 
@@ -53,7 +55,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.attributes import set_committed_value
 
 from desk.contracts import (
-    AUTO_MONEY_HARD_CAP_CENTS,
     MONEY_TOOLS,
     ApprovalAnswer,
     Decision,
@@ -73,8 +74,7 @@ from desk.db.models import Decision as DecisionRow
 from desk.db.models import Fact as FactRow
 from desk.db.models import PolicyVersion as PolicyVersionRow
 from desk.kernel_api import DecideRequest
-from desk.kernel_service import (activation, adapters, auth, clock, compiler, demo_inbox, explain, ledger, render,
-                                 repo)
+from desk.kernel_service import activation, adapters, auth, clock, compiler, demo_inbox, explain, ledger, render, repo
 from desk.kernel_service.adapters.base import Adapter, AdapterRefusal, NormalizeCtx, quoted
 from desk.kernel_service.auth import AuthError, Named, SessionRow
 from desk.kernel_service.decisions import CallUsage, ReviewAction, ReviewCard, ReviewFact, ReviewInput, Reviewed
@@ -89,13 +89,17 @@ RESOURCE_TYPES = {"quote": "Quote", "slot": "Slot", "booking": "Booking", "docum
 
 
 def cedar_request(principal: Principal, action: NormalizedAction, *, tz: str, now: datetime,
-                  review: Review | None = None, mandate_remaining_cents: int | None = None) -> dict[str, Any]:
+                  auto_money_cap_cents: int, review: Review | None = None,
+                  mandate_remaining_cents: int | None = None) -> dict[str, Any]:
     """The request for `PolicyEngine.decide`. `local_dow` (0 = Monday) and `local_minute` are taken in
-    the business's time zone `tz` for the action's `starts_at`, else for `now`. `review` is the
+    the business's time zone `tz` for the action's `starts_at`, else for `now`.
+    `auto_money_cap_cents` is the money cap of the version the request is evaluated against
+    (`activation.version_cap`), never above `AUTO_MONEY_HARD_CAP_CENTS`. `review` is the
     reviewer's whole `Review` (the engine keeps its scores only on an "allow" recommendation);
     `mandate_remaining_cents` is an `Agent` attribute and is ignored for any other principal."""
     if now.tzinfo is None:
         raise ValueError("now must be an aware datetime")
+    cap = compiler.capped(auto_money_cap_cents)
     local_dow, local_minute = clock.local_dow_minute(action.starts_at or now, ZoneInfo(tz))
 
     principal_type = PRINCIPAL_TYPES[principal.kind]
@@ -124,6 +128,7 @@ def cedar_request(principal: Principal, action: NormalizedAction, *, tz: str, no
         "record_owner_match": principal.person_id is not None and resource.owner_person_id == principal.person_id,
         "local_dow": local_dow,
         "local_minute": local_minute,
+        "auto_money_cap_cents": cap,
     }
     for name in ("list_cents", "discount_bp", "amount_cents", "recipient"):
         value = getattr(action, name)
@@ -268,8 +273,12 @@ async def evaluate(ctx: KernelCtx, version_row: PolicyVersionRow, request: dict[
     the outcome is `review_source` called, with the review-gated cards still pending (at `/decide`
     it asks the reviewer; at execution it returns the stored review); a review that recommends
     anything but "allow" can't keep an auto allow, which goes on to `approvable`. Every outcome
-    comes from a full evaluation, and any evaluation error refuses."""
+    comes from a full evaluation, and any evaluation error refuses, as does a request whose money
+    cap isn't the version's (`activation.version_cap`)."""
     key = activation.version_key(version_row.desk_id, version_row.version)
+    if request.get("context", {}).get("auto_money_cap_cents") != activation.version_cap(version_row):
+        log.error("decide_cap_mismatch key=%s", key)
+        return Evaluation("refuse", [], [], None, None, strike=False, needed_review=False, errored=True)
     by_policy = policy_cards(version_row)
     pre = _engine(ctx, key, request, "pre")
     if pre["errors"]:
@@ -375,6 +384,51 @@ async def expire_if_due(ctx: KernelCtx, row: DecisionRow) -> DecisionRow:
         .execution_options(populate_existing=True)))).one()
     if await _expiry_due(ctx, locked):
         await set_state(ctx, locked, "expired", summary={"decision_id": locked.decision_id, "state": "expired"})
+    return locked
+
+
+async def _answers_now(ctx: KernelCtx, row: DecisionRow) -> tuple[list[ApprovalAnswer], dict[str, Any]]:
+    """What a held decision offers the owner now: `held_answers` for its action and session as they
+    stand, at the active version's money cap, and the version and cap it was judged under.
+    `deny_always` stays as the decision was offered it, since whether an `ask` card decided the
+    hold (`held_by_ask`) belongs to the version that decided it, whatever the active one is now."""
+    action = normalized_action((await ctx.db.scalars(ctx.repo.scoped(
+        select(ActionRow).where(ActionRow.action_id == row.action_id)))).one())
+    session = (await ctx.db.scalars(ctx.repo.scoped(
+        select(SessionRow).where(SessionRow.session_id == row.session_id)))).one()
+    version_row = await activation.active_version(ctx, row.desk_id)
+    cap = activation.version_cap(version_row)
+    answers = held_answers(principal_for(session, desk_id=row.desk_id), action,
+                           ask_held="deny_always" in row.answers, auto_money_cap_cents=cap)
+    return answers, {"policy_version": version_row.version if version_row is not None else 0,
+                     "auto_money_cap_cents": cap}
+
+
+async def refresh_answers(ctx: KernelCtx, row: DecisionRow) -> DecisionRow:
+    """A held money decision's answers as the active version's money cap offers them now, on every
+    read ("Decision lifecycle"): `allow_person` drops out while the action's amount is above the
+    active cap and comes back when a later version's cap covers it. A change is persisted, ledgered
+    `decide` `{decision_id, answers, policy_version, auto_money_cap_cents}` and re-signed, as lazy
+    expiry is: the row is locked and checked again first, so two readers change it once."""
+    if row.state != "held" or row.action_id is None or not is_money(row.tool, row.effects):
+        return row
+    answers, _ = await _answers_now(ctx, row)
+    if answers == list(row.answers):
+        return row
+    locked = (await ctx.db.scalars(ctx.repo.scoped(
+        select(DecisionRow).where(DecisionRow.decision_id == row.decision_id).with_for_update()
+        .execution_options(populate_existing=True)))).one()
+    if locked.state != "held":
+        return locked
+    answers, judged = await _answers_now(ctx, locked)
+    if answers == list(locked.answers):
+        return locked
+    locked.answers = answers
+    locked.updated_at = ctx.clock.now()
+    locked.ledger_seq = (await _append(ctx, locked, "decide",
+                                       {"decision_id": locked.decision_id, "answers": answers, **judged})).seq
+    _sign(ctx, locked)
+    await ctx.db.flush()
     return locked
 
 
@@ -553,15 +607,18 @@ def held_by_ask(version_row: PolicyVersionRow | None, policy_ids: Iterable[str])
     return decider is not None and decider.ask
 
 
-def held_answers(principal: Principal, action: NormalizedAction | None, *, ask_held: bool) -> list[ApprovalAnswer]:
+def held_answers(principal: Principal, action: NormalizedAction | None, *, ask_held: bool,
+                 auto_money_cap_cents: int) -> list[ApprovalAnswer]:
     """The owner's answers to a hold ("Decision lifecycle"): `allow_person` only for a verified
-    person or an agent key and, on a money tool, an amount within the hard cap; `deny_always` only
-    when an `ask` card decided the hold (`held_by_ask`). A session that names a person without
-    having confirmed it's them is no person to allow."""
+    person or an agent key and, on a money tool, an amount within the active version's money cap
+    `auto_money_cap_cents` (so never above `AUTO_MONEY_HARD_CAP_CENTS`, and never with the cap
+    unset); `deny_always` only when an `ask` card decided the hold (`held_by_ask`). A session that
+    names a person without having confirmed it's them is no person to allow."""
     person = principal.person_id is not None and verified(principal.kind, principal.assurance, principal.person_id)
     scoped = person or principal.agent_key_id is not None
     if action is not None and is_money(action.tool, action.effects):
-        scoped = scoped and action.amount_cents is not None and action.amount_cents <= AUTO_MONEY_HARD_CAP_CENTS
+        cap = compiler.capped(auto_money_cap_cents)
+        scoped = scoped and action.amount_cents is not None and action.amount_cents <= cap
     offered = {"allow_person": scoped, "deny_always": ask_held}
     return [answer for answer in get_args(ApprovalAnswer) if offered.get(answer, True)]
 
@@ -620,6 +677,11 @@ class _Call:
     @property
     def policy_version(self) -> int:
         return self.version_row.version if self.version_row is not None else 0
+
+    @property
+    def auto_money_cap_cents(self) -> int:
+        """The money cap the call is decided under: its version's, 0 without one."""
+        return activation.version_cap(self.version_row)
 
 
 async def _subject(ctx: KernelCtx, principal: Principal) -> str:
@@ -687,7 +749,8 @@ async def decide_call(ctx: KernelCtx, principal: Principal, session_row: Session
         return await _refuse(ctx, call, "no_active_version", args_json=args_json)
     if ctx.policies.versions.use(call.version_row):
         return await _refuse(ctx, call, "version_unloadable", args_json=args_json)
-    request = cedar_request(principal, call.action, tz=call.business.timezone, now=ctx.clock.now())
+    request = cedar_request(principal, call.action, tz=call.business.timezone, now=ctx.clock.now(),
+                            auto_money_cap_cents=call.auto_money_cap_cents)
     evaluation = await evaluate(ctx, call.version_row, request,
                                 review_source=lambda pending: _review(ctx, call, pending))
     if evaluation.errored:
@@ -752,7 +815,7 @@ async def _repeat(ctx: KernelCtx, row: DecisionRow, sha: str) -> Decision:
     if row.call_sha256 != sha:
         raise AuthError(409, "conflict", "call_conflict", route=DECIDE_ROUTE,
                         named=Named(copy_id=row.copy_id, desk_id=row.desk_id, session_id=row.session_id))
-    return await decision_contract(ctx, await expire_if_due(ctx, row))
+    return await decision_contract(ctx, await refresh_answers(ctx, await expire_if_due(ctx, row)))
 
 
 def _rules_decided(call: _Call, outcome: str, evaluation: Evaluation) -> tuple[str, Sequence[str]]:
@@ -816,7 +879,7 @@ async def _store(ctx: KernelCtx, call: _Call, outcome: Outcome, *, reason: str |
     answers: list[ApprovalAnswer] = []
     if outcome == "hold":
         answers = held_answers(principal, action, ask_held=evaluation is not None and held_by_ask(
-            call.version_row, evaluation.policy_ids))
+            call.version_row, evaluation.policy_ids), auto_money_cap_cents=call.auto_money_cap_cents)
     row = DecisionRow(
         decision_id=new_id("dec"), copy_id=principal.copy_id, desk_id=principal.desk_id,
         session_id=session_row.session_id, generation=session_row.generation, call_id=call.req.call.call_id,
@@ -852,6 +915,7 @@ async def _store(ctx: KernelCtx, call: _Call, outcome: Outcome, *, reason: str |
     else:
         summary = {"decision_id": row.decision_id, "action_id": action.action_id, "tool": action.tool,
                    "outcome": outcome, "card_ids": row.card_ids, "policy_version": row.policy_version,
+                   "auto_money_cap_cents": call.auto_money_cap_cents,
                    "reviewed": bool(evaluation and evaluation.needed_review)}
         if reason is not None:
             summary["reason"] = reason

@@ -539,7 +539,7 @@ async def test_copy_seeds_one_held_quote(app, client, reviewer, frozen_clock):
     assert (entries[3].seq, entries[3].event.session_id, entries[3].event.summary) == (decision.ledger_seq,
                                                                                        seeded.session_id, {
         "decision_id": row.decision_id, "action_id": action.action_id, "tool": "native.quote", "outcome": "hold",
-        "card_ids": ["rv-quote"], "policy_version": 1, "reviewed": False})
+        "card_ids": ["rv-quote"], "policy_version": 1, "auto_money_cap_cents": 50_000, "reviewed": False})
     [alert] = await rows_of(app, copy.copy_id, select(DemoInboxEntry))
     assert (alert.kind, alert.to, alert.preview, alert.body) == (
         "alert", "owner", "A request needs your answer", decision.reason_plain)

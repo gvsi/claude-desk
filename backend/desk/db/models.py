@@ -267,6 +267,8 @@ class PolicyVersion(Base):
     profiles_sha256: Mapped[str] = mapped_column(Text)
     invariants_sha256: Mapped[str] = mapped_column(Text)
     review_thresholds_version: Mapped[int] = mapped_column(Integer)
+    # the money cap this version is compiled and proved at; the active version's is the Desk's cap
+    auto_money_cap_cents: Mapped[int] = mapped_column(Cents, server_default=text("0"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
     cards_sha256: Mapped[str | None] = mapped_column(Text)
     draft_key_sha256: Mapped[str | None] = mapped_column(Text)        # what makes /policy/draft idempotent

@@ -190,13 +190,18 @@ desk_router = APIRouter()
 @desk_router.post("/desks", response_model=DeskCreated)
 async def post_desk(body: CreateDeskRequest, ctx: Ctx, request: Request) -> DeskCreated:
     """A new Desk in the owner's copy, with the starter preset (`ask_first`) active from its shipped
-    report, in one transaction: a preset with no report for the Desk's tools is 503
-    `seed_unproved` and creates nothing. A new Desk connects no MCP server (`/tools/connect` does)."""
+    report at a money cap of 0, in one transaction: a preset with no report for the Desk's tools is
+    503 `seed_unproved` and creates nothing. A new Desk connects no MCP server (`/tools/connect`
+    does), and its first cap is 0, every charge and payout asking ("Money cap"): a nonzero
+    `auto_money_cap_cents` is 422 `invalid`, since the presets are proved at 0; the owner raises it
+    with a draft they confirm."""
     owner = await desks.owner_alone(ctx, request)
     if body.desk.connections:
         raise KernelFailure(422, "invalid", "desk_connections")
+    if body.desk.auto_money_cap_cents != 0:
+        raise KernelFailure(422, "invalid", "desk_money_cap")
     created = await desks.create_desk(ctx, owner.copy_id, body.business, body.desk)
-    await activation.activate_shipped(ctx, created.desk_id, "ask_first")
+    await activation.activate_shipped(ctx, created.desk_id, "ask_first", 0)
     return created
 
 
@@ -374,11 +379,13 @@ policy_router = APIRouter()
 
 @policy_router.post("/policy/draft", response_model=PolicyVersion)
 async def post_policy_draft(body: PolicyDraftRequest, ctx: Ctx, request: Request) -> PolicyVersion:
-    """The owner's cards as a draft version, proved (or, in `bounded` mode, checked) before it
-    answers; idempotent, so a re-post waits for the running proof and gets the same version."""
+    """The owner's cards as a draft version at a money cap (absent: the active version's), proved
+    (or, in `bounded` mode, checked) before it answers; idempotent, so a re-post waits for the
+    running proof and gets the same version. Nothing changes until the owner confirms it."""
     owner = await auth.require_owner(ctx, request, desk_id=body.desk_id)
     await _open_desk(ctx, request, body.desk_id)
-    return await activation.draft(ctx, owner, body.desk_id, body.cards, body.expected_parent)
+    return await activation.draft(ctx, owner, body.desk_id, body.cards, body.expected_parent,
+                                  body.auto_money_cap_cents)
 
 
 @policy_router.post("/policy/confirm", response_model=PolicyVersion)

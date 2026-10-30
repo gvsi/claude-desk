@@ -1,12 +1,12 @@
 """Approvals: the owner's answer to a held request, and the visitor's cancel.
 
 `POST /approvals/{decision_id}/answer` ("Decision lifecycle"). The answer locks the decision and
-settles it as any read does (`execute.refresh_decision`: lazy expiry first), so it answers only a
-request still `held`; anything else is 409, and an answer the request wasn't offered (`allow_person`
-for a stranger, or past the money cap; `deny_always` on a hold no `ask` card decided, see
-`decide.held_by_ask`) is 422. Either refusal is ledgered `approval`, and nothing runs. Then one
-`approvals` row records the answer, its single use enforced by the unique index on `decision_id`
-too:
+settles it as any read does (`execute.refresh_decision`: lazy expiry first, then the answers the
+active version's money cap offers), so it answers only a request still `held`; anything else is
+409, and an answer the request wasn't offered (`allow_person` for a stranger, or above the active
+version's money cap; `deny_always` on a hold no `ask` card decided, see `decide.held_by_ask`) is
+422. Either refusal is ledgered `approval`, and nothing runs. Then one `approvals` row records the
+answer, its single use enforced by the unique index on `decision_id` too:
 
 - `deny_once`, `deny_always`: the decision is `denied`. A denial is bound to nothing, so it can
   never run anything.
@@ -35,7 +35,6 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from desk.contracts import (
-    AUTO_MONEY_HARD_CAP_CENTS,
     ApprovalAnswer,
     ApprovalResult,
     Decision,
@@ -47,7 +46,7 @@ from desk.db.models import Action as ActionRow
 from desk.db.models import Approval, Person
 from desk.db.models import Decision as DecisionRow
 from desk.kernel_api import AnswerRequest, CancelRequest
-from desk.kernel_service import auth, decide, execute, ledger
+from desk.kernel_service import activation, auth, compiler, decide, execute, ledger
 from desk.kernel_service.auth import AuthError, Named, OwnerCtx, SessionRow
 from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, new_id
 from desk.kernel_service.sessions import principal_for, verified
@@ -69,19 +68,21 @@ def _scope(principal: Principal) -> tuple[str, str | None, str | None] | None:
     return None
 
 
-def person_card(decision: Decision, principal: Principal, *, name: str | None = None) -> RuleCard:
+def person_card(decision: Decision, principal: Principal, *, auto_money_cap_cents: int,
+                name: str | None = None) -> RuleCard:
     """`allow_person`'s draft ("Decision lifecycle"): an `auto` card for the decision's tool,
     scoped to the verified person or agent key that asked, whose limits are the action's own amount
     and discount, with no hours and no review, so it is no wider than what the owner just approved.
     `name` is how the owner knows them. Raises ValueError when there is no one to scope it to, or
-    when the action moves money past the hard cap (or without an amount)."""
+    when the action moves money above the active version's money cap `auto_money_cap_cents` (or
+    without an amount), so the draft fits the cap it will be drafted at."""
     action = decision.action
     scope = _scope(principal)
     if action is None or scope is None:
         raise ValueError("allow_person needs a verified person or an agent key")
     if decide.is_money(action.tool, action.effects) and (
-            action.amount_cents is None or action.amount_cents > AUTO_MONEY_HARD_CAP_CENTS):
-        raise ValueError("allow_person on money stops at the hard cap")
+            action.amount_cents is None or action.amount_cents > compiler.capped(auto_money_cap_cents)):
+        raise ValueError("allow_person on money stops at the money cap")
     who, person_id, agent_key_id = scope
     fallback = "this visiting agent" if who == "agent" else "this customer"
     return RuleCard(card_id=f"person-{person_id or agent_key_id}-{action.tool}", applies_to=action.tool, mode="auto",
@@ -161,8 +162,10 @@ async def answer(ctx: KernelCtx, owner: OwnerCtx, decision_id: str, answer: Appr
         if principal.person_id is not None:
             name = (await ctx.db.execute(ctx.repo.scoped(select(Person.display_name).where(
                 Person.person_id == principal.person_id)))).scalar_one_or_none()
+        cap = activation.version_cap(await activation.active_version(ctx, row.desk_id))
         try:
-            card_diff = [person_card(await decide.decision_contract(ctx, row), principal, name=name)]
+            card_diff = [person_card(await decide.decision_contract(ctx, row), principal, auto_money_cap_cents=cap,
+                                     name=name)]
         except ValueError:
             raise await _refused(ctx, row, answer, "not_offered", status=422) from None
     elif answer == "deny_always":
@@ -188,14 +191,15 @@ async def answer(ctx: KernelCtx, owner: OwnerCtx, decision_id: str, answer: Appr
         await decide.set_state(ctx, row, "denied", kind="approval", summary={
             "decision_id": row.decision_id, "action_id": row.action_id, "answer": answer, "state": "denied"})
         return ApprovalResult(decision=await decide.decision_contract(ctx, row), execution=None, card_diff=card_diff)
-    if not await execute.recheck(ctx, row, path="approved"):
+    checked = await execute.recheck_under(ctx, row, path="approved")
+    if checked is None:
         return await _refused_at_execution(ctx, row, answer, "recheck")
     if not await execute.prepare_intent(ctx, row):
         return await _refused_at_execution(ctx, row, answer, "prepare")
     await decide.set_state(ctx, row, "approved", kind="approval", summary={
         "decision_id": row.decision_id, "action_id": row.action_id, "answer": answer, "state": "approved"})
     await ctx.db.commit()
-    execution = await execute.run_approved(ctx, row)
+    execution = await execute.run_approved(ctx, row, checked=checked)
     final = (await ctx.db.scalars(ctx.repo.scoped(select(DecisionRow).where(
         DecisionRow.decision_id == row.decision_id).execution_options(populate_existing=True)))).one()
     return ApprovalResult(decision=await decide.decision_contract(ctx, final), execution=execution, card_diff=card_diff)
