@@ -9,22 +9,16 @@ import {
   type StatusEvent,
 } from '../../../api/contracts.ts';
 import { rivera } from '../../fixtures/index.ts';
+import type { OwnerReasonState } from '../../index.ts';
 import type { StatusTone } from '../StatusDot/StatusDot.tsx';
-import { OWNER_STATE_WORDS, receiptFromEvent, receiptLine, receiptTone } from './receiptTone.ts';
+import { OWNER_REASON_STATES, OWNER_STATE_WORDS, receiptFromEvent, receiptLine, receiptTone } from './receiptTone.ts';
 
-/** The owner's signed outcome words, written out here as the oracle the implementation is held to. */
-const EXPECTED_WORDS: Record<DecisionState, string> = {
+/** The owner's words for the receipt that reports what the kernel decided, written out here as the oracle. */
+const EXPECTED_WORDS: Record<OwnerReasonState, string> = {
   held: 'Held for you',
   refused: 'Stopped',
   executed: 'Automatic',
   allowed: 'Running',
-  approved: 'You allowed it',
-  denied: 'You denied it',
-  expired: 'Expired',
-  cancelled: 'They cancelled it',
-  failed: "Didn't run",
-  refused_at_execution: "Didn't run",
-  unknown: 'Still checking what happened',
 };
 
 /** The plan's tone table, written out here as the oracle the implementation is held to. */
@@ -50,9 +44,15 @@ function only<T extends SseEvent['type']>(events: readonly SseEvent[], type: T):
 }
 
 describe('OWNER_STATE_WORDS', () => {
-  it('every_state_has_its_words', () => {
-    expect(Object.keys(OWNER_STATE_WORDS).sort()).toEqual([...DECISION_STATES].sort());
-    for (const state of DECISION_STATES) expect(OWNER_STATE_WORDS[state], state).toBe(EXPECTED_WORDS[state]);
+  it('reason_states_are_the_decide_outcomes', () => {
+    expect(OWNER_REASON_STATES).toEqual(['held', 'refused', 'executed', 'allowed']);
+  });
+
+  it('words_cover_only_the_reason_states', () => {
+    // Words for the receipt that reports what the kernel decided, not general outcome words: a
+    // later state keeps the kernel's line, so it has none here.
+    expect(Object.keys(OWNER_STATE_WORDS).sort()).toEqual([...OWNER_REASON_STATES].sort());
+    for (const state of OWNER_REASON_STATES) expect(OWNER_STATE_WORDS[state], state).toBe(EXPECTED_WORDS[state]);
   });
 
   // Importing the index transforms every component, which takes longer than the default 5 s when
@@ -60,6 +60,7 @@ describe('OWNER_STATE_WORDS', () => {
   it('exported_from_the_design_system', { timeout: 60_000 }, async () => {
     const index: Record<string, unknown> = await import('../../index.ts');
     expect(index.OWNER_STATE_WORDS).toBe(OWNER_STATE_WORDS);
+    expect(index.OWNER_REASON_STATES).toBe(OWNER_REASON_STATES);
   });
 });
 
@@ -70,15 +71,34 @@ function ownerInput(decision: Decision) {
 
 describe('receiptLine', () => {
   it('owner_reason_follows_the_state_words', () => {
-    // "{words}. {reason}": the period after the words belongs to the lead.
-    for (const state of DECISION_STATES) {
-      const decision = rivera.decisions[state];
-      expect(receiptLine(ownerInput(decision)), state).toEqual({ lead: `${EXPECTED_WORDS[state]}.`, text: decision.reason_plain });
+    // "{words}. {reason}" on the receipt that reports what the kernel decided; the period after the
+    // words belongs to the lead. Each decision is one whose first receipt reads that state: the
+    // held quote, the refused document and Dana's quote, which the rules allowed and which then ran.
+    const firstReceipts = [rivera.decisions.held, rivera.decisions.refused, { ...rivera.decisions.allowed, state: 'executed' as const }, rivera.decisions.allowed];
+    expect(firstReceipts.map((decision) => decision.state)).toEqual([...OWNER_REASON_STATES]);
+    for (const decision of firstReceipts) {
+      expect(receiptLine(ownerInput(decision)), decision.state).toEqual({ lead: `${EXPECTED_WORDS[decision.state]}.`, text: decision.reason_plain });
     }
     expect(receiptLine(ownerInput(rivera.decisions.refused))).toEqual({
       lead: 'Stopped.',
       text: "A visitor not on record asked for Bob Okafor's warranty. Documents go only to their own verified customer, so nothing was shared.",
     });
+  });
+
+  it('reason_on_a_later_state_keeps_plain', () => {
+    // reason_plain is written once, at decide time, so it explains only the receipt that reports
+    // what the kernel decided. On any later state ("Automatic" for a hold the owner later allowed)
+    // it would say something false, so the line stays the kernel's.
+    const later = ['approved', 'denied', 'expired', 'cancelled', 'failed', 'unknown', 'refused_at_execution'] as const;
+    expect([...later, 'held', 'refused', 'executed', 'allowed'].sort()).toEqual([...DECISION_STATES].sort());
+    for (const state of later) {
+      const input = ownerInput(rivera.decisions[state]);
+      for (const cardBelow of [false, true]) {
+        expect(receiptLine({ ...input, cardBelow }), `${state} ${String(cardBelow)}`).toEqual({ text: input.plain });
+      }
+    }
+    // The fixture's executed decision is the held discount after it was allowed: the case the rule exists for.
+    expect(rivera.decisions.executed.reason_plain).toBe(rivera.decisions.held.reason_plain);
   });
 
   it('no_reason_keeps_plain', () => {

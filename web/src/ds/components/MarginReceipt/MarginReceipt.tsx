@@ -9,8 +9,10 @@ export interface MarginReceiptProps {
   /** The ledger entry the event was signed with. */
   ledgerSeq: number;
   /**
-   * Owner screens only: the decision's `reason_plain`. A `decision` receipt then reads "{words}.
-   * {reason}", its state's `OWNER_STATE_WORDS` first. A `reply` ignores it, and an empty one keeps `plain`.
+   * Owner screens only: the decision's `reason_plain`, for the receipt that reports what the kernel
+   * decided. On a `decision` in `OWNER_REASON_STATES` (`held`, `refused`, `executed`, `allowed`) the
+   * line reads "{words}. {reason}", its state's `OWNER_STATE_WORDS` first. Any other state keeps
+   * `plain`, since the reason was written at decide time; so do a `reply` and an empty reason.
    */
   reason?: string;
   /**

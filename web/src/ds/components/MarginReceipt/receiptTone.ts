@@ -30,22 +30,32 @@ export function receiptTone(source: ReceiptSource): StatusTone {
 }
 
 /**
- * The owner's words for each decision state, which lead a decision's receipt on owner screens so
- * the line, not only the dot's color, names the state. A state missing here is a compile error.
+ * The states of the receipt that reports what the kernel decided: a decision's first receipt when
+ * it reads one of these. Only that receipt takes the decision's `reason_plain`, which is written
+ * once, at decide time; every later receipt keeps the kernel's line.
+ */
+export const OWNER_REASON_STATES = ['held', 'refused', 'executed', 'allowed'] as const;
+
+/** A state in `OWNER_REASON_STATES`. */
+export type OwnerReasonState = (typeof OWNER_REASON_STATES)[number];
+
+/** Whether `state` is one the decision's reason explains. A state this build doesn't know isn't. */
+function isOwnerReasonState(state: DecisionState): state is OwnerReasonState {
+  return (OWNER_REASON_STATES as readonly string[]).includes(state);
+}
+
+/**
+ * The owner's words for the receipt that reports what the kernel decided, which lead its line on
+ * owner screens so the line, not only the dot's color, names the state. They are not general
+ * outcome words: "Automatic" is true only of an action the rules ran on their own, so a later
+ * state has no words here and keeps the kernel's line. A reason state missing here is a compile error.
  */
 export const OWNER_STATE_WORDS = {
   held: 'Held for you',
   refused: 'Stopped',
   executed: 'Automatic',
   allowed: 'Running',
-  approved: 'You allowed it',
-  denied: 'You denied it',
-  expired: 'Expired',
-  cancelled: 'They cancelled it',
-  failed: "Didn't run",
-  refused_at_execution: "Didn't run",
-  unknown: 'Still checking what happened',
-} as const satisfies Record<DecisionState, string>;
+} as const satisfies Record<OwnerReasonState, string>;
 
 /** What `receiptLine` reads: a receipt's source and line, and the owner screen's two extras. */
 export interface ReceiptLineInput {
@@ -67,14 +77,14 @@ export interface ReceiptLine {
 }
 
 /**
- * What a receipt's line shows. A reply's line is always `plain`. A decision's is, in order:
+ * What a receipt's line shows. A reply's line is always `plain`, and so is a decision's on any state
+ * outside `OWNER_REASON_STATES`, even with a `reason`. On those four states it is, in order:
  * - with `cardBelow` and state `held`, the words alone, "Held for you": the card's headline gives the reason;
  * - with a `reason` that isn't empty after trimming, "{words}. {reason}";
  * - otherwise `plain`, unchanged.
- * A state this build has no words for keeps `plain`, which names its state.
  */
 export function receiptLine({ source, plain, reason, cardBelow = false }: ReceiptLineInput): ReceiptLine {
-  if (source.kind !== 'decision' || !Object.hasOwn(OWNER_STATE_WORDS, source.state)) return { text: plain };
+  if (source.kind !== 'decision' || !isOwnerReasonState(source.state)) return { text: plain };
   const words = OWNER_STATE_WORDS[source.state];
   if (cardBelow && source.state === 'held') return { lead: words, text: '' };
   if (reason !== undefined && reason.trim() !== '') return { lead: `${words}.`, text: reason };
