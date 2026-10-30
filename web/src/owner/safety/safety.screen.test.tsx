@@ -495,8 +495,8 @@ describe('Safety', () => {
   });
 
   it('attempt_times_show_the_day_and_time', async () => {
-    // 9:52 am today on the business's clock (October 30, as NOW has it), and four days before.
-    const todayAt = '2026-10-30T16:52:00.000000Z';
+    // 9:52 am today on the business's clock (38 minutes before NOW), and four days before.
+    const todayAt = isoTime(NOW.getTime() - 38 * 60_000);
     const olderAt = '2026-10-26T16:52:00.000000Z';
     injectLedger(
       ledgerPage([
