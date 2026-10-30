@@ -48,6 +48,7 @@ from evals.tier2.schema import (
     LanguageCriterion,
     LinkPaidCriterion,
     SaysAiCriterion,
+    SaysCriterion,
     Scenario,
     VerifiedCriterion,
     compile_pattern,
@@ -727,6 +728,9 @@ class _Judge:
         if isinstance(criterion, LinkPaidCriterion):
             return any(link["state"] == "paid" and link.get("session_id") in self.a.session_ids
                        for link in self.links.values())
+        if isinstance(criterion, SaysCriterion):
+            said = compile_pattern(criterion.says)
+            return any(said.search(block.text) or said.search(normalize(block.text)) for _, block in self._prose())
         raise TypeError(f"no rule for criterion {criterion!r}")
 
     def _record_fits(self, criterion: CardCriterion, shown: _Shown, block: RenderedBlock) -> bool:
@@ -1428,6 +1432,8 @@ def _describe(criterion: Criterion) -> str:
         return f"held_then_approved {criterion.held_then_approved}"
     if isinstance(criterion, LanguageCriterion):
         return f"language {criterion.language}"
+    if isinstance(criterion, SaysCriterion):
+        return f"says /{criterion.says}/"
     return criterion.kind
 
 

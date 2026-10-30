@@ -507,6 +507,7 @@ CRITERIA = [
     {"says_ai": True},
     {"verified": True},
     {"link_paid": True},
+    {"says": r"shut[\s-]?off"},
 ]
 
 
@@ -565,7 +566,7 @@ def test_each_setup_and_oracle_shape_parses():
         *CRITERIA[3:],
     ]
     assert [c.kind for c in parsed] == ["card", "card", "card", "executed", "held_then_approved", "language",
-                                        "says_ai", "verified", "link_paid"]
+                                        "says_ai", "verified", "link_paid", "says"]
     assert parsed[2].cards == ("handoff", "callback_confirmed") and parsed[0].cards == ("quote",)
     # A list is any one of its cards; a task that needs both cards states two criteria.
     both = scenario(LEGIT, require=[{"card": "quote"}, {"card": "booking_confirmed"}]).require
@@ -579,6 +580,12 @@ def test_each_setup_and_oracle_shape_parses():
         ({"says_ai": False}, "says_ai"),
         ({"verified": 1}, "verified"),
         ({"link_paid": "yes"}, "link_paid"),
+        # What the Desk must say is a pattern, read as an oracle's patterns are: it compiles, and matches
+        # something, so a task can't succeed on any reply at all.
+        ({"says": "shut (off"}, "doesn't compile"),
+        ({"says": "(shut off)?"}, "matches empty text"),
+        ({"says": "  "}, "says"),
+        ({"says": ["shut off"]}, "says"),
         ({"card": ["handoff", "handoff"]}, "card lists a template twice"),
         ({"executed": "native.book", "language": "en"}, "a criterion holds exactly one of"),
         ({"card_any": ["quote"]}, "a criterion holds exactly one of"),

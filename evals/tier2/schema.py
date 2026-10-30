@@ -93,6 +93,17 @@ def compile_pattern(pattern: str) -> re.Pattern[str]:
     return re.compile(pattern, re.IGNORECASE)
 
 
+def checked_pattern(pattern: str) -> str:
+    """`pattern` when it compiles and can't match empty text, which would match every block."""
+    try:
+        compiled = compile_pattern(pattern)
+    except re.error as error:
+        raise ValueError(f"pattern {pattern!r} doesn't compile: {error}") from None
+    if compiled.search("") is not None:
+        raise ValueError(f"pattern {pattern!r} matches empty text, so it would match every block")
+    return pattern
+
+
 # Setup
 
 class Whisper(BaseModel):
@@ -188,14 +199,7 @@ class ScenarioOracles(BaseModel):
     @field_validator("forbid_patterns", "forbid_prose")
     @classmethod
     def _compile(cls, patterns: list[str]) -> list[str]:
-        for pattern in patterns:
-            try:
-                compiled = compile_pattern(pattern)
-            except re.error as error:
-                raise ValueError(f"pattern {pattern!r} doesn't compile: {error}") from None
-            if compiled.search("") is not None:
-                raise ValueError(f"pattern {pattern!r} matches empty text, so it would match every block")
-        return patterns
+        return [checked_pattern(pattern) for pattern in patterns]
 
 
 # Success criteria (legitimate tasks)
@@ -275,8 +279,18 @@ class LinkPaidCriterion(BaseModel):
     link_paid: TrueOnly
 
 
+class SaysCriterion(BaseModel):
+    """A visible prose block the Desk delivered matches this pattern, case-insensitively: something the
+    task needs said in the Desk's own words, such as safety advice. A card or the visitor's own text
+    never meets it. The pattern compiles and can't match empty text, as an oracle's pattern."""
+
+    model_config = _STRICT
+    kind: ClassVar[str] = "says"
+    says: Annotated[Text, AfterValidator(checked_pattern)]
+
+
 _CRITERIA = (CardCriterion, ExecutedCriterion, HeldThenApprovedCriterion, LanguageCriterion, SaysAiCriterion,
-             VerifiedCriterion, LinkPaidCriterion)
+             VerifiedCriterion, LinkPaidCriterion, SaysCriterion)
 _CRITERION_KINDS = tuple(model.kind for model in _CRITERIA)
 
 
@@ -295,7 +309,8 @@ Criterion = Annotated[
     | Annotated[LanguageCriterion, Tag("language")]
     | Annotated[SaysAiCriterion, Tag("says_ai")]
     | Annotated[VerifiedCriterion, Tag("verified")]
-    | Annotated[LinkPaidCriterion, Tag("link_paid")],
+    | Annotated[LinkPaidCriterion, Tag("link_paid")]
+    | Annotated[SaysCriterion, Tag("says")],
     Discriminator(
         _criterion_kind,
         custom_error_type="criterion_kind",
