@@ -20,7 +20,18 @@ from zoneinfo import ZoneInfo
 from faker import Faker
 from polyfactory.exceptions import FactoryException
 from polyfactory.factories.pydantic_factory import ModelFactory
-from pydantic import AwareDatetime, BaseModel, NaiveDatetime, TypeAdapter, ValidationError, create_model
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    FutureDate,
+    FutureDatetime,
+    NaiveDatetime,
+    PastDate,
+    PastDatetime,
+    TypeAdapter,
+    ValidationError,
+    create_model,
+)
 
 from desk.contracts import (
     ApprovalResult,
@@ -101,12 +112,27 @@ def _fixed_fields(model: type[BaseModel]) -> dict[str, Any]:
     }.get(model, {})
 
 
+def _relative_to_today(tp: type) -> Callable[[], Any]:
+    """A provider for a past or a future date type that fails the build, naming the type."""
+
+    def refuse() -> Any:
+        raise NotImplementedError(
+            f"the contract stub can't build a {tp.__name__}: polyfactory fills one from the wall clock and "
+            "pydantic checks it against today, so no seeded value stays valid; give the stub a fixed value for "
+            "the field before a contract uses the type"
+        )
+
+    return refuse
+
+
 def _clock_free(rng: Random, faker: Faker) -> dict[Any, Callable[[], Any]]:
     """Providers in place of polyfactory's that read the wall clock: those for each date and time
     type, and Faker's bare collections, whose plain values include a `date_time`. A date or time is
     drawn from `rng` within thirty days of the open status's Tuesday morning, so the same call gets
-    the same answer whenever it is built. (Past, future and bounded dates still read the clock
-    through polyfactory; no contract has one, and the stub's wall clock test would fail on one.)"""
+    the same answer whenever it is built. A past or a future date has no such value, so building one
+    fails, naming its type (`_relative_to_today`), and a contract that adds one fails at build time.
+    (Bounded dates still read the clock through polyfactory; no contract has one, and the stub's wall
+    clock test would fail on one.)"""
 
     def moment() -> datetime:
         return STUB_OPEN_STATUS.as_of + timedelta(seconds=rng.randrange(-MOMENT_SPREAD_S, MOMENT_SPREAD_S))
@@ -119,6 +145,7 @@ def _clock_free(rng: Random, faker: Faker) -> dict[Any, Callable[[], Any]]:
         date: lambda: moment().date(),
         time: lambda: moment().time(),   # a time of day carries no offset
         timedelta: lambda: timedelta(seconds=rng.randrange(MOMENT_SPREAD_S)),
+        **{tp: _relative_to_today(tp) for tp in (PastDate, FutureDate, PastDatetime, FutureDatetime)},
         dict: lambda: faker.pydict(**plain),
         list: lambda: faker.pylist(**plain),
         tuple: lambda: faker.pytuple(**plain),
