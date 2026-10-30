@@ -7,7 +7,6 @@ import { userEvent } from 'vitest/browser';
 
 import {
   SPEC,
-  expectCards,
   expectConversationType,
   expectFooter,
   expectOwnerFrame,
@@ -38,6 +37,12 @@ const IN_A_CHANGE_REVIEW = '.cd-change-review';
 /** The change review's cards: the card look at the compact 16 px padding the design system gives them. */
 const CHANGE_REVIEW_CARD = { ...SPEC.card, paddingTop: '16px', paddingLeft: '16px' } as const;
 
+/** A card of rows that pad themselves (`Card` `padding={0}`, such as a `DetailList` or an `AlertList`). */
+const CARD_OF_ROWS = 'cd-card--padding-0';
+
+/** Such a card's look: the card's, with no padding of its own. */
+const ROWS_CARD = { ...SPEC.card, paddingTop: '0px', paddingLeft: '0px' } as const;
+
 /**
  * An owner page as its signed board draws it: the frame with `current` as the current page, the
  * concept footer, every card in the card look, a conversation's type and receipts, and the order
@@ -46,7 +51,8 @@ const CHANGE_REVIEW_CARD = { ...SPEC.card, paddingTop: '16px', paddingLeft: '16p
  * In a conversation, the cards in Claude's messages are the chat's reply cards, in their own look
  * (`ReplyCard`, as the design system's conversation boards draw and check them), so the card look
  * is checked on every other card there, such as a held request's. On a rules change's review, the
- * change review's own two cards are checked at the compact padding `ChangeReview` gives them.
+ * change review's own two cards are checked at the compact padding `ChangeReview` gives them. A card
+ * of rows has the card look with no padding of its own, since each of its rows pads itself.
  */
 export async function expectOwnerBoard(root: HTMLElement, { current, fill = false, transcript = false, tabStops, user }: OwnerBoardOptions): Promise<void> {
   await expectOwnerFrame(root, current, { fill });
@@ -65,7 +71,9 @@ export async function expectOwnerBoard(root: HTMLElement, { current, fill = fals
       expectComputed(card, card.closest(IN_A_CHANGE_REVIEW) === null ? SPEC.card : CHANGE_REVIEW_CARD);
     }
   } else {
-    expectCards(root);
+    const cards = [...root.querySelectorAll<HTMLElement>('.cd-card')];
+    if (cards.length === 0) throw new Error('expected at least one .cd-card');
+    for (const card of cards) expectComputed(card, card.classList.contains(CARD_OF_ROWS) ? ROWS_CARD : SPEC.card);
   }
   if (tabStops !== undefined) await expectTabOrderFromTop(tabStops, user);
 }
