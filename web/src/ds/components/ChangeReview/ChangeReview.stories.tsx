@@ -103,6 +103,21 @@ const turnBackOnRefund: ChangeRowView[] = [
   },
 ];
 
+const BOOK_REASON = 'Books a visit in your open times.';
+
+/** Book a visit moved from Ask me first to Automatic: only the outcome changed. */
+const bookAutomatically: ChangeRowView[] = [
+  {
+    key: 'rv-book',
+    change: 'changed',
+    title: 'Book a visit',
+    connector: rivera.connectors.views.bookings,
+    before: { mode: 'ask', reason: BOOK_REASON, words: [{ field: 'who', text: 'Anyone' }] },
+    after: { mode: 'auto', reason: BOOK_REASON, words: [{ field: 'who', text: 'Anyone' }] },
+    changed: ['mode'],
+  },
+];
+
 const CHECKED = {
   status: 'checked',
   lines: ['No conflict with your other rules.', 'Always-on rules still hold.', 'Nothing here can move money without your answer.'],
@@ -179,7 +194,7 @@ export const TurnOnPayments: Story = {
 export const RaiseDiscount: Story = {
   args: { rows: raiseDiscount, confirmLabel: undefined, cancelLabel: undefined },
   parameters: {
-    canvasNote: 'The board shows only the after side of a changed row; a changed rule shows both, because the owner confirms what is enforced.',
+    canvasNote: "The board's changed row changes a reason; this one changes a limit, drafted from the Rules page.",
   },
   play: async ({ args, canvas, canvasElement }) => {
     await expect(tags(canvasElement)).toEqual(['Changed']);
@@ -206,6 +221,24 @@ export const RaiseDiscount: Story = {
     await expect(canvas.getByRole('button', { name: 'Confirm change' })).toBeEnabled();
     await canvas.getByRole('button', { name: 'Keep my rules' }).click();
     await expect(args.onCancel).toHaveBeenCalledTimes(1);
+  },
+};
+
+export const OutcomeChanged: Story = {
+  args: { rows: bookAutomatically, confirmLabel: undefined, cancelLabel: undefined },
+  parameters: {
+    canvasNote: "The board's changed row changes a reason; this one changes only the outcome, drafted from the Rules page.",
+  },
+  play: async ({ canvas }) => {
+    const before = canvas.getByRole('group', { name: 'Before' });
+    const after = canvas.getByRole('group', { name: 'After' });
+    // changed_outcome_is_strong: the after side's outcome is in weight 520 and says "Changed"; the
+    // before side's, and the lines that didn't change, stay at their own weight.
+    expectComputed(within(after).getByText('Automatic'), { fontWeight: '520' });
+    expectComputed(within(before).getByText('Ask me first'), { fontWeight: '380' });
+    expectComputed(within(after).getByText(BOOK_REASON, { exact: false }), { fontWeight: '380' });
+    await expect(within(after).getAllByText('Changed')).toHaveLength(1);
+    await expect(within(before).queryByText('Changed')).toBeNull();
   },
 };
 

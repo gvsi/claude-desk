@@ -88,10 +88,10 @@ function ChangedTag() {
   return <span className="cd-change-review__changed cd-type-caption">Changed</span>;
 }
 
-/** A side's outcome: the dot and the phrase. */
-function Outcome({ side }: { side: ChangeSide }) {
+/** A side's outcome: the dot and the phrase, in weight 520 when it is what changed. */
+function Outcome({ side, strong = false }: { side: ChangeSide; strong?: boolean }) {
   return (
-    <span className="cd-change-review__outcome cd-type-meta">
+    <span className={`cd-change-review__outcome cd-type-meta${strong ? ' cd-change-review__strong' : ''}`}>
       <StatusLabel tone={OUTCOME_TONE[side.mode]}>{outcomePhrase(side.mode, side.limit)}</StatusLabel>
     </span>
   );
@@ -136,7 +136,7 @@ function MetaLine({
 /**
  * One side of a rule, Before or After, under its label beside a 2 px bar: the refused tone for what
  * goes, the handled tone for what applies. The words stay neutral; on the after side of a changed
- * rule, each line whose field changed is in weight 520 and tagged "Changed".
+ * rule, each line whose field changed, the outcome included, is in weight 520 and tagged "Changed".
  */
 function Side({ label, side, changed }: { label: 'Before' | 'After'; side: ChangeSide; changed: readonly RuleField[] | null }) {
   const has = (field: RuleField) => changed?.includes(field) === true;
@@ -169,7 +169,7 @@ function Side({ label, side, changed }: { label: 'Before' | 'After'; side: Chang
           </p>
         </div>
         <span className="cd-change-review__side-outcome">
-          <Outcome side={side} />
+          <Outcome side={side} strong={has('mode')} />
           {has('mode') ? <ChangedTag /> : null}
         </span>
       </div>
