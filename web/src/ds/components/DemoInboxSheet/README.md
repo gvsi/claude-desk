@@ -12,6 +12,8 @@
 
 - What `DemoInboxPanel` takes: `viewer`, `items` in the order they arrived, `language` and `onRetry`. The sheet passes them on unchanged, so its rules hold here too: codes come only from fetched `DemoInboxEntry` bodies, and a visitor never sees the owner's alerts or checkpoints, nor counts them.
 - Where the button goes. The sheet opens over the page wherever the button is.
+- `notice`, when the screen has something to say about the inbox itself, such as that the latest read failed: an error `Notice` with its own Try again. It sits inside the sheet under the subtitle and above the entries, so the owner doesn't take the entries for the current ones while the page behind is inert. The screen keeps drawing it outside the sheet too when the sheet is closed.
+- `onOpenChange`, to hear the sheet open and close, whatever did it (the button, the sheet opening itself, Escape, Close, a link inside, or the screen taking an open sheet away), instead of watching the page for an open dialog. It is called on each change only, not when the sheet first draws closed.
 
 ## What it shows
 
@@ -25,7 +27,7 @@
 
 - A visitor's sheet opens itself once, when the first entry the visitor may see arrives (the count goes from nothing to something). A later entry only raises the count. An owner's alert in the items opens nothing, and isn't counted. Opening and closing the empty sheet before anything arrives doesn't use up that one opening.
 - The button opens it at any time.
-- Opened from the button, focus moves to Close. Opened by itself, focus moves to the sheet's heading (`tabIndex={-1}`), so the visitor's next keystroke, perhaps meant for the chat, doesn't press Close. Either way it stays inside the sheet; the page behind is inert (`showModal()`). Escape, Close, or the browser's own close request (a back gesture) closes it, and focus goes back to what had it: the button, or, when the sheet opened itself, where the visitor was typing. Following a link inside, such as "Open the request" under an owner's alert, closes it too, so it isn't left over the page the link opens.
+- Opened from the button, focus moves to Close. Opened by itself, focus moves to the sheet's heading (`tabIndex={-1}`), so the visitor's next keystroke, perhaps meant for the chat, doesn't press Close. Either way it stays inside the sheet; the page behind is inert (`showModal()`). Escape, Close, or the browser's own close request (a back gesture) closes it, and focus goes back to what had it: the button, or, when the sheet opened itself, where the visitor was typing. Following a link inside, such as "Open the request" under an owner's alert, closes it too, so it isn't left over the page the link opens. If what had focus inside goes while the sheet stays open, such as the notice's Try again once a read works, focus moves to the sheet's heading rather than out of the sheet.
 - The open and close behavior is Dialog's `useModalDialog`, the same modal mechanism the Connectors change's picker and sign-in use.
 
 ## Copy (`inboxCopy.ts`)
@@ -45,3 +47,5 @@ The button and the sheet's name use the panel's title. Everything else is the pa
 | `items` | `DemoInboxItem[]` | Required. Oldest first. |
 | `language` | `'en' \| 'es'` | Required. |
 | `onRetry` | `(entryId: string) => void` | Required. |
+| `notice` | `ReactNode` | A line inside the sheet, under the subtitle and above the entries. |
+| `onOpenChange` | `(open: boolean) => void` | Called when the sheet opens (`true`) or closes (`false`). |

@@ -4,7 +4,9 @@ import { expect, fn, waitFor, within } from 'storybook/test';
 
 import type { DemoInboxEntry } from '../../../api/contracts.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { Button } from '../Button/Button.tsx';
 import type { DemoInboxItem } from '../DemoInboxPanel/DemoInboxPanel.tsx';
+import { Notice } from '../Notice/Notice.tsx';
 import { DemoInboxSheet, type DemoInboxSheetProps } from './DemoInboxSheet.tsx';
 
 /** Dana's code, as the kernel sends it to her number on record. */
@@ -34,15 +36,31 @@ const ALERT: DemoInboxItem = {
 /** The event a story sends the screen below, carrying the items as they now stand. */
 const SCREEN_ITEMS = 'cd-story-inbox-sheet-items';
 
+/** The event a story sends to take the sheet off the screen, as a screen swaps it for another view. */
+const SCREEN_REMOVE = 'cd-story-inbox-sheet-remove';
+
+/** The event a story sends to clear the sheet's notice, as a screen does once a read works. */
+const SCREEN_CLEAR_NOTICE = 'cd-story-inbox-sheet-clear-notice';
+
 /** A page with something to type in, the sheet's button, and whatever items the story sends. */
 function Screen(args: DemoInboxSheetProps) {
   const [items, setItems] = useState(args.items);
+  const [shown, setShown] = useState(true);
+  const [notice, setNotice] = useState(args.notice);
   useEffect(() => {
     const onItems = (event: Event) => {
       if (event instanceof CustomEvent) setItems(event.detail as DemoInboxItem[]);
     };
+    const onRemove = () => setShown(false);
+    const onClearNotice = () => setNotice(undefined);
     window.addEventListener(SCREEN_ITEMS, onItems);
-    return () => window.removeEventListener(SCREEN_ITEMS, onItems);
+    window.addEventListener(SCREEN_REMOVE, onRemove);
+    window.addEventListener(SCREEN_CLEAR_NOTICE, onClearNotice);
+    return () => {
+      window.removeEventListener(SCREEN_ITEMS, onItems);
+      window.removeEventListener(SCREEN_REMOVE, onRemove);
+      window.removeEventListener(SCREEN_CLEAR_NOTICE, onClearNotice);
+    };
   }, []);
   return (
     <div style={{ display: 'grid', gap: 'var(--space-16)', padding: 'var(--space-16)' }}>
@@ -50,9 +68,7 @@ function Screen(args: DemoInboxSheetProps) {
         Code
         <input className="cd-type-body" style={{ height: 'var(--size-control-main)' }} />
       </label>
-      <div>
-        <DemoInboxSheet {...args} items={items} />
-      </div>
+      <div>{shown ? <DemoInboxSheet {...args} items={items} notice={notice} /> : null}</div>
     </div>
   );
 }
@@ -64,7 +80,7 @@ function send(root: HTMLElement, items: DemoInboxItem[]): void {
 const meta = {
   title: 'Verification/DemoInboxSheet',
   component: DemoInboxSheet,
-  args: { viewer: 'visitor', language: 'en', items: [], onRetry: fn() },
+  args: { viewer: 'visitor', language: 'en', items: [], onRetry: fn(), onOpenChange: fn() },
   render: (args) => <Screen {...args} />,
   globals: { viewport: { value: 'phone', isRotated: false } },
   parameters: { layout: 'fullscreen', canvas: 'N-R2-Inbox-Sheet-Public' },
@@ -76,7 +92,7 @@ type Story = StoryObj<typeof meta>;
 
 export const OpensOnTheFirstCode: Story = {
   parameters: { canvasNote: 'On a phone: the code arrives while the visitor types, and the sheet opens itself from the bottom, over a dimmed, inert page.' },
-  play: async ({ canvas, canvasElement, userEvent }) => {
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
     const field = canvas.getByRole('textbox', { name: 'Code' });
     await userEvent.click(field);
     const button = canvas.getByRole('button', { name: 'Demo inbox' });
@@ -85,6 +101,7 @@ export const OpensOnTheFirstCode: Story = {
     // inbox_sheet_opens_on_the_first_code: the first entry a visitor may see opens the sheet.
     send(canvasElement, [{ notice: CODE_NOTICE, entry: null }]);
     const sheet = await canvas.findByRole('dialog', { name: 'Demo inbox' });
+    await waitFor(() => expect(args.onOpenChange).toHaveBeenLastCalledWith(true));
     await expect(sheet).toHaveAttribute('aria-modal', 'true');
     await expect(sheet.matches(':modal')).toBe(true);
     // The count says how many entries wait in it.
@@ -111,6 +128,7 @@ export const OpensOnTheFirstCode: Story = {
     await userEvent.keyboard('{Escape}');
     await expect(canvas.queryByRole('dialog')).toBeNull();
     await expect(field).toHaveFocus();
+    await expect(args.onOpenChange).toHaveBeenLastCalledWith(false);
 
     // It opens itself once: a later entry doesn't open it again.
     send(canvasElement, [CODE, { notice: { ...CODE_NOTICE, entry_id: 'inbox-code-dana-2' }, entry: null }]);
@@ -126,6 +144,8 @@ export const OpensOnTheFirstCode: Story = {
     await userEvent.click(close);
     await expect(canvas.queryByRole('dialog')).toBeNull();
     await expect(button).toHaveFocus();
+    await expect(args.onOpenChange).toHaveBeenLastCalledWith(false);
+    await expect(args.onOpenChange).toHaveBeenCalledTimes(4);
   },
 };
 
@@ -177,11 +197,14 @@ export const Owner: Story = {
   args: { viewer: 'owner', items: [ALERT] },
   globals: { viewport: { value: 'laptop', isRotated: false } },
   parameters: { canvas: 'N-R2-Inbox-Sheet-Owner', canvasNote: 'The owner’s Demo inbox on Today: a side sheet at the right, 400 px, opened from its button.' },
-  play: async ({ canvas, userEvent }) => {
+  play: async ({ args, canvas, userEvent }) => {
     // The owner's sheet doesn't open itself: the owner opens it.
     await expect(canvas.queryByRole('dialog')).toBeNull();
+    await expect(args.onOpenChange).not.toHaveBeenCalled();
     const button = canvas.getByRole('button', { name: 'Demo inbox 1 entry' });
     await userEvent.click(button);
+    // sheet_says_when_it_opens_and_closes: the screen hears each change, and only changes.
+    await expect(args.onOpenChange).toHaveBeenLastCalledWith(true);
     const sheet = canvas.getByRole('dialog', { name: 'Demo inbox' });
     const box = sheet.getBoundingClientRect();
     await expect([Math.round(box.width), Math.round(box.right), Math.round(box.top), Math.round(box.bottom)]).toEqual([400, 1512, 0, 982]);
@@ -190,6 +213,8 @@ export const Owner: Story = {
     await expect(within(sheet).getByText(ALERT.entry!.body)).toBeVisible();
     await userEvent.keyboard('{Escape}');
     await expect(button).toHaveFocus();
+    await expect(args.onOpenChange).toHaveBeenLastCalledWith(false);
+    await expect(args.onOpenChange).toHaveBeenCalledTimes(2);
   },
 };
 
@@ -200,7 +225,7 @@ export const OwnerOpensTheRequest: Story = {
     canvas: 'N-R2-Inbox-Sheet-Owner',
     canvasNote: 'The owner follows “Open the request” under an alert, which the board draws but doesn’t act out: the sheet closes, so the request isn’t left under it.',
   },
-  play: async ({ canvas, userEvent }) => {
+  play: async ({ args, canvas, userEvent }) => {
     // following_a_link_closes_the_sheet: the link goes where it says, and the sheet doesn't stay
     // over the page it opens.
     await userEvent.click(canvas.getByRole('button', { name: 'Demo inbox 1 entry' }));
@@ -229,7 +254,64 @@ export const OwnerOpensTheRequest: Story = {
     }
     await expect(followed).toBe('#request-dec-dana-discount');
     await expect(canvas.queryByRole('dialog')).toBeNull();
+    await expect(args.onOpenChange).toHaveBeenLastCalledWith(false);
     // Closing returns focus to the sheet's button; the screen then moves it to the request.
     await expect(canvas.getByRole('button', { name: 'Demo inbox 1 entry' })).toHaveFocus();
+  },
+};
+
+
+export const OwnerReadFailed: Story = {
+  args: {
+    viewer: 'owner',
+    items: [ALERT],
+    notice: (
+      <Notice tone="error" action={<Button variant="secondary">Try again</Button>}>
+        Couldn’t open your Demo inbox. Something went wrong on our side. Try again in a moment.
+      </Notice>
+    ),
+  },
+  globals: { viewport: { value: 'laptop', isRotated: false } },
+  parameters: {
+    canvas: 'none',
+    canvasNote: 'Built against N-R2-Inbox-Sheet-Owner-ReadFailed, in review: the owner’s sheet when the latest read failed, with the screen’s error Notice under the subtitle and above the entries as last read.',
+  },
+  play: async ({ canvas, userEvent }) => {
+    await userEvent.click(canvas.getByRole('button', { name: 'Demo inbox 1 entry' }));
+    const sheet = canvas.getByRole('dialog', { name: 'Demo inbox' });
+    // read_failure_shows_in_the_sheet: the line the screen passes sits inside the sheet, under its
+    // subtitle and above the entries, so the owner doesn't take the last read for the current one.
+    const line = within(sheet).getByRole('alert');
+    await expect(line).toHaveTextContent('Couldn’t open your Demo inbox.');
+    const subtitle = within(sheet).getByText('What Claude would have sent you by text or email. Nothing is really sent.');
+    const [entry] = within(sheet).getAllByRole('listitem') as [HTMLElement];
+    const notice = line.getBoundingClientRect();
+    await expect(Math.round(notice.top - subtitle.getBoundingClientRect().bottom)).toBe(10);
+    await expect(Math.round(entry.getBoundingClientRect().top - notice.bottom)).toBe(10);
+    const retry = within(sheet).getByRole('button', { name: 'Try again' });
+    await expect(retry).toBeVisible();
+    await expect(within(entry).getByText(ALERT.entry!.body)).toBeVisible();
+
+    // focus_stays_in_the_sheet_when_the_notice_goes: once a read works the screen clears the
+    // notice; focus on its Try again moves to the sheet's heading, not out of the sheet.
+    retry.focus();
+    window.dispatchEvent(new CustomEvent(SCREEN_CLEAR_NOTICE));
+    await waitFor(() => expect(within(sheet).queryByRole('alert')).toBeNull());
+    await waitFor(() => expect(within(sheet).getByRole('heading', { level: 2, name: 'Demo inbox' })).toHaveFocus());
+  },
+};
+
+export const RemovedWhileOpen: Story = {
+  args: { viewer: 'owner', items: [ALERT] },
+  globals: { viewport: { value: 'laptop', isRotated: false } },
+  parameters: { canvas: 'none', canvasNote: 'N-R2-Inbox-Sheet-Owner’s sheet taken off the screen while it is open, as a screen swaps it for another view, which no board shows.' },
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
+    // sheet_says_it_closed_when_removed: a screen that takes an open sheet away still hears it close.
+    await userEvent.click(canvas.getByRole('button', { name: 'Demo inbox 1 entry' }));
+    await expect(args.onOpenChange).toHaveBeenLastCalledWith(true);
+    canvasElement.ownerDocument.defaultView?.dispatchEvent(new CustomEvent(SCREEN_REMOVE));
+    await waitFor(() => expect(canvas.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(args.onOpenChange).toHaveBeenLastCalledWith(false));
+    await expect(args.onOpenChange).toHaveBeenCalledTimes(2);
   },
 };

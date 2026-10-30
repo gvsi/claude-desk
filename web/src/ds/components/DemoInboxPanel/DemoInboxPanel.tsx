@@ -38,6 +38,11 @@ export interface DemoInboxPanelProps {
   action?: ReactNode;
   /** The title can take focus from a script (`tabIndex={-1}`), as a sheet that opens itself moves it there. */
   titleFocusable?: boolean;
+  /**
+   * A line the screen draws under the subtitle and above the entries, such as a `Notice` that the
+   * latest read failed, so the entries below read as the last ones read.
+   */
+  notice?: ReactNode;
 }
 
 /** What an item shows: its entry, that it is opening, or that it failed to open. */
@@ -120,7 +125,7 @@ export function shownItems(viewer: DemoInboxPanelProps['viewer'], items: readonl
  * a polite live region, each entry's body shown word for word once it is fetched. Nothing fetches
  * here; codes come only from the entries the screen passes in.
  */
-export function DemoInboxPanel({ viewer, items, language, onRetry, action, titleFocusable = false }: DemoInboxPanelProps) {
+export function DemoInboxPanel({ viewer, items, language, onRetry, action, titleFocusable = false, notice }: DemoInboxPanelProps) {
   const copy = INBOX_COPY[language];
   const titleId = `${useId()}-title`;
   // Newest first, one row per entry: the screen keeps them in the order they arrived.
@@ -142,6 +147,7 @@ export function DemoInboxPanel({ viewer, items, language, onRetry, action, title
         </div>
       )}
       <p className="cd-demo-inbox__subtitle cd-type-meta">{viewer === 'owner' ? copy.ownerSubtitle : copy.subtitle}</p>
+      {notice ?? null}
       {/* Always present, so an entry that arrives later is read out. */}
       <div className="cd-demo-inbox__entries" aria-live="polite">
         {shown.length === 0 ? (

@@ -8,7 +8,10 @@ import { useModalDialog } from '../Dialog/useModalDialog.ts';
 
 import './DemoInboxSheet.css';
 
-export type DemoInboxSheetProps = Omit<DemoInboxPanelProps, 'action'>;
+export interface DemoInboxSheetProps extends Omit<DemoInboxPanelProps, 'action' | 'titleFocusable'> {
+  /** Hears the sheet open (`true`) and close (`false`), whatever opened or closed it. */
+  onOpenChange?: (open: boolean) => void;
+}
 
 /**
  * The Demo inbox as a sheet, where there is no room for it beside the page: a "Demo inbox" button
@@ -17,11 +20,32 @@ export type DemoInboxSheetProps = Omit<DemoInboxPanelProps, 'action'>;
  * sheet opens itself on the first entry they may see. Focus moves in, stays in, Escape or Close
  * closes it, and focus goes back to whatever had it; the page behind is inert.
  */
-export function DemoInboxSheet({ viewer, items, language, onRetry }: DemoInboxSheetProps) {
+export function DemoInboxSheet({ viewer, items, language, onRetry, notice, onOpenChange }: DemoInboxSheetProps) {
   const copy = INBOX_COPY[language] ?? INBOX_COPY.en;
   // Closed, or open and how: from the button, or by itself on the first entry.
   const [open, setOpen] = useState<false | 'button' | 'itself'>(false);
   const count = shownItems(viewer, items).length;
+
+  // The screen hears each time the sheet opens or closes, and nothing while it stays as it is.
+  const isOpen = open !== false;
+  const told = useRef(false);
+  const tell = useRef(onOpenChange);
+  tell.current = onOpenChange;
+  useEffect(() => {
+    if (told.current === isOpen) return;
+    told.current = isOpen;
+    tell.current?.(isOpen);
+  }, [isOpen]);
+  // Taken off the screen while open, it has closed too. It always draws closed first, so a remount
+  // under StrictMode tells nothing.
+  useEffect(
+    () => () => {
+      if (!told.current) return;
+      told.current = false;
+      tell.current?.(false);
+    },
+    [],
+  );
 
   // A visitor's sheet opens itself once, when the first entry they may see arrives.
   const seen = useRef(count);
@@ -49,6 +73,7 @@ export function DemoInboxSheet({ viewer, items, language, onRetry }: DemoInboxSh
           items={items}
           language={language}
           onRetry={onRetry}
+          notice={notice}
           onClose={() => {
             // Closing a sheet that showed something uses up its one opening by itself; closing an
             // empty one, opened to look before anything arrived, doesn't.
@@ -67,7 +92,7 @@ interface SheetProps extends DemoInboxSheetProps {
   onClose: () => void;
 }
 
-function Sheet({ openedBy, viewer, items, language, onRetry, onClose }: SheetProps) {
+function Sheet({ openedBy, viewer, items, language, onRetry, notice, onClose }: SheetProps) {
   const copy = INBOX_COPY[language] ?? INBOX_COPY.en;
   const modal = useModalDialog(onClose, (dialog) =>
     dialog.querySelector<HTMLElement>(openedBy === 'itself' ? '.cd-demo-inbox__title' : '.cd-demo-inbox-sheet__close button'),
@@ -75,6 +100,16 @@ function Sheet({ openedBy, viewer, items, language, onRetry, onClose }: SheetPro
   // Following a link inside, such as an alert's "Open the request", closes the sheet, so it isn't
   // left over the page the link opens. A click that opens a new tab or window leaves this page, and
   // the sheet, as they are.
+  // Something inside that had focus can go while the sheet stays open, such as a notice's Try again
+  // once a read works. Focus then falls to the page behind, which is inert, so it moves back to the
+  // sheet's heading.
+  const dialogRef = modal.ref;
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (dialog?.open && dialog.ownerDocument.activeElement === dialog.ownerDocument.body) {
+      dialog.querySelector<HTMLElement>('.cd-demo-inbox__title')?.focus();
+    }
+  });
   const onLinkClick = (event: MouseEvent<HTMLDialogElement>) => {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     const link = event.target instanceof Element ? event.target.closest('a[href]') : null;
@@ -93,6 +128,7 @@ function Sheet({ openedBy, viewer, items, language, onRetry, onClose }: SheetPro
         items={items}
         language={language}
         onRetry={onRetry}
+        notice={notice}
         titleFocusable
         action={
           <span className="cd-demo-inbox-sheet__close">

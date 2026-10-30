@@ -24,7 +24,7 @@
 | `viewer="visitor"` and its own `entry` of any kind but `verification_code`, or one the kernel addressed to `owner` | Nothing. |
 | `viewer="visitor"`, its own entry not yet fetched, and a recipient that isn't clearly a contact (blank, or the owner's word written another way) | Nothing, until the fetched entry proves it is a verification code. |
 
-- A visitor never sees the owner's alerts or checkpoints, whatever the screen passes in: before its own entry arrives, a row shows (opening or failed to open) only for a notice to a masked contact on record, the legitimate state of a code on its way.
+- A visitor never sees the owner's alerts or checkpoints, whatever `items` the screen passes in: before its own entry arrives, a row shows (opening or failed to open) only for a notice to a masked contact on record, the legitimate state of a code on its way.
 - Each entry shows once. Replaying events after a reconnect can append a notice the screen already holds, so the panel keeps only the item that arrived last for each `entry_id`, in that item's place, before it decides what a visitor may see. An earlier copy never shows, even when the latest one doesn't.
 - With nothing to show: "Nothing here yet. Codes and alerts you’d get by text or email show up here."
 - No time ever shows on a visitor's panel, even when an item carries one, and no request link either.
@@ -60,7 +60,7 @@
 
 ## Layout
 
-- The panel fills the width it is given, padded 24 px top and bottom and 16 px at the sides, with 10 px between the title, the subtitle and the entries. The screen places it, as a column beside the chat or in a sheet, and draws any edge it needs.
+- The panel fills the width it is given, padded 24 px top and bottom and 16 px at the sides, with 10 px between the title, the subtitle, the screen's notice and the entries. The screen places it, as a column beside the chat or in a sheet, and draws any edge it needs.
 - The title is `section` type, the subtitle and the empty line `meta` in `text-secondary`.
 - Each entry is padded 12 px by 14 px on `fill-card`, in a 1 px `line-card` border at `radius-card`, 10 px apart. The recipient line is `caption` in `text-secondary`, the kind `meta` at weight 520 4 px under it, and the body `body` type 2 px under that. An owner's alert puts "Open the request" in `meta` type 8 px under the body. Long words and hashes wrap.
 - Nothing moves.
@@ -75,6 +75,7 @@
 | `onRetry` | `(entryId: string) => void` | Required. |
 | `action` | `ReactNode` | A control at the right of the title's line. |
 | `titleFocusable` | `boolean` | The title takes focus from a script (`tabIndex={-1}`), as `DemoInboxSheet` moves it there when it opens itself. |
+| `notice` | `ReactNode` | A line under the subtitle and above the entries, such as a `Notice` that the latest read failed. It is drawn as given, to either viewer, so it holds only the screen's own words about the inbox, never text from an entry or an `InboxNotice`. |
 
 `shownItems(viewer, items)`, exported beside the panel, gives the items the panel would show, newest first and one per entry; `DemoInboxSheet` counts them.
 
