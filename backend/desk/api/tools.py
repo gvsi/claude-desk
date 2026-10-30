@@ -7,10 +7,11 @@ once, as the kernel signed it (`Status`, through `deliver()`). `send_reply` goes
 the kernel passed, or its handoff, reaches the visitor, through `deliver()`.
 
 Failures fail closed ("Fail-closed behavior"): nothing is decided twice (a lost `/decide` answer is found by call
-ID, a lost `/execute` answer by polling the decision), nothing unchecked is shown, and each `ToolOutcome` says
-how the turn goes on: `fenced` (a take-over or a stale generation: stop, silently), `session_ended`
-(`error{code: "session"}`), `unavailable` (`error{code: "kernel_unavailable"}`) or `turn_over` (stop: an agent's
-turn already answered, or a reply the kernel refused).
+ID, a lost `/execute` answer by polling the decision), an `/execute` answered 409 `conflict` (the kernel has no
+result to give yet) is never sent again but answered from the decision as it stands, nothing unchecked is shown,
+and each `ToolOutcome` says how the turn goes on: `fenced` (a take-over or a stale generation: stop, silently),
+`session_ended` (`error{code: "session"}`), `unavailable` (`error{code: "kernel_unavailable"}`) or `turn_over`
+(stop: an agent's turn already answered, or a reply the kernel refused).
 
 `route_call`, `recover_call`, `send_reply` and `hand_off` take the call's own connection and commit each
 publication on it at once, so a receipt reaches the visitor while sibling calls still run.
@@ -273,6 +274,35 @@ async def _poll(caller: Caller, decision_id: str) -> Decision | ToolOutcome | No
     return None
 
 
+def _from_state(decision: Decision, status: Status | None) -> ToolOutcome:
+    """A decision that ran, or may have, answered from its state alone (no stored result): what it ended as, or
+    `unknown` while it isn't final."""
+    message = {"decision_id": decision.decision_id, "message": decision.visitor_plain}
+    if decision.state in NOT_FINAL:
+        return ToolOutcome({"outcome": "unknown", **message}, True, status=status)
+    if decision.state not in EXECUTED:                  # refused, at the decision or at execution, or expired
+        return ToolOutcome({"outcome": "refused", **message}, True, status=status)
+    ran = "done" if decision.state == "executed" else decision.state
+    return ToolOutcome({"outcome": ran, **message}, ran != "done", status=status)
+
+
+async def _not_known_yet(conn: AsyncConnection, caller: Caller, decision_id: str) -> ToolOutcome:
+    """`/execute` answered 409 `conflict`: the kernel has no result to give for this decision now. Its execution is
+    under way or its outcome `unknown` (no stored result yet), or it can't run (expired, refused at execution).
+    That is never answered `refused` on its own, and /execute is never sent again for the decision: it is read by
+    its ID and shown as the kernel signed it, and Claude gets what it ended as, or `unknown` while it isn't final,
+    when `_publish` leaves it as a `decision_pending` row for the visitor's next request, which publishes its final
+    state. An unreadable decision is left that way too, answered `unknown`, and a read that failed stops the turn as
+    its failure says."""
+    try:
+        decision = await _read(caller, decision_id)
+    except (KernelFailed, KernelUnavailable) as failure:
+        await _pending(conn, caller, decision_id)
+        stopped = _unavailable() if isinstance(failure, KernelUnavailable) else _refusal(failure)
+        return replace(stopped, result={"outcome": "unknown", "decision_id": decision_id})
+    return _from_state(decision, await _publish(conn, caller, Status(decision, "receipt")))
+
+
 def _executed(decision: Decision | None, decision_id: str, result: ExecResult) -> dict:
     if result.state == "succeeded":
         return {"outcome": "done", "decision_id": decision_id, "result": result.model_view,
@@ -282,19 +312,14 @@ def _executed(decision: Decision | None, decision_id: str, result: ExecResult) -
 
 
 async def _execute(conn: AsyncConnection, caller: Caller, generation: int, decision: Decision) -> ToolOutcome:
-    """Run an allow, then show the decision as the kernel signed it once it ran."""
+    """Run an allow, then show the decision as the kernel signed it once it ran. A 409 `conflict` (the execution under
+    way or in doubt, or the allow no longer runnable) is answered from the decision as it stands (`_not_known_yet`)."""
     try:
         result = await caller.kernel.call("POST /execute", ExecuteRequest(
             decision_id=decision.decision_id, session_id=caller.session_id, generation=generation))
     except KernelFailed as failure:
-        if failure.refuses_call:                        # re-decided at execution and refused, or expired
-            try:
-                final = await _read(caller, decision.decision_id)
-            except (KernelFailed, KernelUnavailable):
-                return ToolOutcome(dict(REFUSED), True)
-            if final.state != "allowed":
-                return await _settle(conn, caller, generation, final)
-            return ToolOutcome(dict(REFUSED), True)
+        if failure.code == "conflict":                  # under way, in doubt, expired or refused at execution
+            return await _not_known_yet(conn, caller, decision.decision_id)
         return _refusal(failure)
     except KernelUnavailable:
         final = await _poll(caller, decision.decision_id)
@@ -327,27 +352,25 @@ async def _settle(conn: AsyncConnection, caller: Caller, generation: int | None,
     the kernel refuses to repeat one whose outcome isn't known (409 `conflict`), so an `unknown` decision is answered
     from its state, as its receipt shows it, and left for the visitor's next request. A finished one whose repeat the
     kernel refuses silently (the session moved on since: a take-over or a pause came between the turn's look at the
-    decision and the repeat) is answered from its state too, never `not_run`, and stops the turn as fenced."""
-    message = {"decision_id": decision.decision_id, "message": decision.visitor_plain}
+    decision and the repeat) is answered from its state too, never `not_run`, and stops the turn as fenced; one whose
+    repeat answers 409 `conflict` (no stored result to give) is read again and answered from its state, never
+    `refused` (`_not_known_yet`)."""
     if decision.outcome == "hold":
         status = None
         if decision.state == "held":
             status = await _publish(conn, caller, Status(decision, "held"))
         # an answered hold reaches the visitor through the owner's answer (Task 8), as resolved
+        message = {"decision_id": decision.decision_id, "message": decision.visitor_plain}
         return ToolOutcome({"outcome": "held_for_owner", **message}, False, status=status)
     if decision.state == "allowed":
         if generation is None:
             await _pending(conn, caller, decision.decision_id)
-            return ToolOutcome({"outcome": "unknown", **message}, True)
+            return _from_state(decision, None)
         return await _execute(conn, caller, generation, decision)
-    status = await _publish(conn, caller, Status(decision, "receipt"))
-    if decision.state not in EXECUTED:                  # refused, at the decision or at execution, or expired
-        return ToolOutcome({"outcome": "refused", **message}, True, status=status)
-    ran = "done" if decision.state == "executed" else decision.state
-    from_state = ToolOutcome({"outcome": ran, **message}, ran != "done", status=status)
-    if generation is None or decision.state == "unknown":
-        # ran at a generation the session has left, or its outcome isn't known yet (a repeat of an execution in
-        # doubt is refused): answered from the decision, and an `unknown` one is left pending by `_publish`
+    from_state = _from_state(decision, await _publish(conn, caller, Status(decision, "receipt")))
+    if generation is None or decision.state not in ("executed", "failed"):
+        # refused or expired; ran at a generation the session has left; or its outcome isn't known yet (a repeat of an
+        # execution in doubt is refused): answered from the decision, and an `unknown` one is left pending by `_publish`
         return from_state
     try:                                                # finished: a repeat returns the stored result
         result = await caller.kernel.call("POST /execute", ExecuteRequest(
@@ -355,10 +378,13 @@ async def _settle(conn: AsyncConnection, caller: Caller, generation: int | None,
     except KernelFailed as failure:
         if failure.silent:                              # the session moved on since: what ran, and the turn stops
             return replace(from_state, fenced=True)
-        return replace(_refusal(failure), status=status)
+        if failure.code == "conflict":                  # no stored result to give: answered from the decision
+            return await _not_known_yet(conn, caller, decision.decision_id)
+        return replace(_refusal(failure), status=from_state.status)
     except KernelUnavailable:
-        return replace(_unavailable(), status=status)
-    return ToolOutcome(_executed(decision, decision.decision_id, result), result.state != "succeeded", status=status)
+        return replace(_unavailable(), status=from_state.status)
+    return ToolOutcome(_executed(decision, decision.decision_id, result), result.state != "succeeded",
+                       status=from_state.status)
 
 
 def tool_call(block: dict) -> ToolCall:
@@ -393,7 +419,8 @@ async def recover_call(conn: AsyncConnection, caller: Caller, generation: int, b
                        made_at: int) -> ToolOutcome:
     """A `tool_use` block a turn left unanswered (it stopped after the call): found by call ID at `made_at`, the
     session generation that turn ran at, never decided again. No decision means it never ran; an allow runs now (a
-    repeat returns the stored result); a final decision answers with what it ended as. When the session has left
+    repeat returns the stored result, and a 409 `conflict`, an execution already under way, answers `unknown` from the
+    decision); a final decision answers with what it ended as. When the session has left
     that generation since (`generation` is the session's now), the decision is only shown and answered from its
     state (`_settle`). If settling it raises (a publication that failed), a decision that isn't final is left as a
     `decision_pending` row before the error goes on, so its final state is still shown once it has one."""

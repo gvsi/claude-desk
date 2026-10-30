@@ -3,6 +3,7 @@
 
 import json
 import re
+from datetime import timedelta
 from typing import get_args
 
 import httpx
@@ -14,6 +15,7 @@ from desk.api import tools
 from desk.api.deliver import Status
 from desk.api.kernel_client import KernelHttp
 from desk.api.prompts import REWRITE_INSTRUCTION, SEND_REPLY_TOOL
+from desk.api.runner import TurnRunner
 from desk.api.tools import (
     TOOL_CHANGE_MODE,
     Caller,
@@ -33,7 +35,7 @@ from desk.contracts import ClauseTemplate, Decision, ToolCall, ToolName
 from desk.events import EvHeld, EvReceipt, SseEvent
 from desk.kernel_api import DecideRequest, ExecuteRequest, SessionContext
 from tests.api.conftest import new_visitor
-from tests.api.fakes import tool_use
+from tests.api.fakes import ScriptedModel, tool_use
 from tests.kernel_contract.fake_kernel import fake_kernel_app, route_keys
 
 EVENT = TypeAdapter(SseEvent)
@@ -373,6 +375,128 @@ async def test_an_unknown_execution_is_answered_from_its_decision(api_conn, call
     assert (recovered.result, recovered.is_error) == (unknown, True)
     assert routes(fake, "/decide", "/execute") == []
     assert len(await events(api_conn, caller.session_id)) == 1
+
+
+async def test_an_execute_conflict_means_the_outcome_is_not_known_yet(api_conn, engine, caller, fake):
+    """The kernel answers /execute with 409 `conflict` while the decision's execution is under way (or its outcome is
+    `unknown`): it has no stored result to give. That is never `refused`. The decision is read by its ID and shown as
+    the kernel signed it, Claude is told `unknown` while it isn't final, a `decision_pending` row leaves its outcome for
+    the visitor's next request, and /execute is never sent again for it."""
+    fake.in_flight("native.quote")                              # another request began running it a moment ago
+    outcome = await route_call(api_conn, caller, 0, tool_use("native__quote", DRAIN, id="toolu_quote"))
+
+    (decision,) = session_decisions(fake, caller.session_id)
+    assert decision.state == "allowed"
+    assert (outcome.result, outcome.is_error) == (
+        {"outcome": "unknown", "decision_id": decision.decision_id, "message": decision.visitor_plain}, True)
+    assert not (outcome.fenced or outcome.unavailable or outcome.session_ended or outcome.turn_over)
+    assert outcome.status == Status(decision, "receipt")
+    assert routes(fake, "/decide", "/decisions/by_call", "/execute", "GET /decisions/{id}") == [
+        "POST /decide", "POST /execute", "GET /decisions/{id}"]
+    assert await events(api_conn, caller.session_id) == [receipt(decision)]
+    assert await control_rows(api_conn, caller.session_id) == [("decision_pending",
+                                                                {"decision_id": decision.decision_id})]
+
+    # The kernel's execution ends; the session's next request shows its outcome, with no /execute of its own.
+    executed = fake.finish(decision.decision_id)
+    fake.calls.clear()
+    runner = TurnRunner(ScriptedModel(), engine=engine, lock_engine=engine, production=False, clock=lambda: fake.now)
+    await api_conn.commit()
+    await runner.handle_controls(api_conn, caller)
+    assert await events(api_conn, caller.session_id) == [receipt(decision), receipt(executed)]
+    assert routes(fake, "/decide", "/decisions/by_call", "/execute", "GET /decisions/{id}") == ["GET /decisions/{id}"]
+
+
+async def test_an_execute_conflict_is_answered_from_what_the_read_shows(api_conn, caller, fake, monkeypatch):
+    """After a 409 `conflict` the decision is read by its ID, and Claude is told what that read shows: `unknown` while
+    it isn't final (an `unknown` execution's receipt is the kernel's "still confirming" line), else what it ended as,
+    with nothing left pending. /execute is sent once each time."""
+    read = tools._read
+    ends_as: list[str | None] = []
+
+    async def read_after(reader: Caller, decision_id: str) -> Decision:
+        """The read, once the running execution ended as the test says (or the allow ran out of time)."""
+        state = ends_as.pop(0)
+        if state == "expired":
+            fake.now += timedelta(seconds=61)
+        else:
+            fake.finish(decision_id, state)
+        return await read(reader, decision_id)
+
+    monkeypatch.setattr(tools, "_read", read_after)
+    found = {}
+    for state in ("unknown", "succeeded"):
+        fake.in_flight("native.quote")
+        ends_as.append(state)
+        found[state] = await route_call(api_conn, caller, 0, tool_use("native__quote", DRAIN))
+    fake.fail("/execute", "409", times=1)                      # refused before it ran, and then it ran out of time
+    ends_as.append("expired")
+    found["expired"] = await route_call(api_conn, caller, 0, tool_use("native__quote", DRAIN))
+
+    decisions = {state: outcome.status.decision for state, outcome in found.items()}
+    assert {state: decision.state for state, decision in decisions.items()} == {
+        "unknown": "unknown", "succeeded": "executed", "expired": "expired"}
+    said = {state: {"decision_id": decision.decision_id, "message": decision.visitor_plain}
+            for state, decision in decisions.items()}
+    assert {state: (outcome.result, outcome.is_error) for state, outcome in found.items()} == {
+        "unknown": ({"outcome": "unknown", **said["unknown"]}, True),
+        "succeeded": ({"outcome": "done", **said["succeeded"]}, False),       # no stored result: never repeated
+        "expired": ({"outcome": "refused", **said["expired"]}, True)}
+    assert said["unknown"]["message"] == "I'm still checking whether that went through."
+    assert routes(fake, "/execute") == ["POST /execute"] * 3
+    assert await events(api_conn, caller.session_id) == [receipt(decision) for decision in decisions.values()]
+    assert await control_rows(api_conn, caller.session_id) == [("decision_pending",
+                                                                {"decision_id": decisions["unknown"].decision_id})]
+
+
+async def test_recovering_a_call_whose_execute_is_a_conflict(api_conn, caller, visitor, fake):
+    """A turn stopped after its call was decided allowed, and the kernel's execution of it is under way. Recovery finds
+    it by call ID, and its /execute answers 409 `conflict`: answered `unknown` from the decision, shown, left pending,
+    and never sent to /execute or /decide again."""
+    block = tool_use("native__quote", DRAIN, id="toolu_interrupted")
+    allowed = await visitor.kernel.call("POST /decide", DecideRequest(
+        session_id=caller.session_id, generation=0, call=tools.tool_call(block)))
+    fake.in_flight("native.quote")
+    fake.calls.clear()
+
+    recovered = await recover_call(api_conn, caller, 0, block, made_at=0)
+
+    decision = fake.decisions[allowed.decision_id].decision
+    assert decision.state == "allowed" and recovered.status == Status(decision, "receipt")
+    assert (recovered.result, recovered.is_error) == (
+        {"outcome": "unknown", "decision_id": decision.decision_id, "message": decision.visitor_plain}, True)
+    assert not (recovered.fenced or recovered.unavailable or recovered.session_ended or recovered.turn_over)
+    assert routes(fake, "/decide", "/decisions/by_call", "/execute", "GET /decisions/{id}") == [
+        "GET /decisions/by_call?session_id=&generation=&call_id=", "POST /execute", "GET /decisions/{id}"]
+    assert await events(api_conn, caller.session_id) == [receipt(decision)]
+    assert await control_rows(api_conn, caller.session_id) == [("decision_pending",
+                                                                {"decision_id": decision.decision_id})]
+
+
+async def test_a_repeat_answered_conflict_is_answered_from_the_decision(api_conn, caller, fake, monkeypatch):
+    """After a lost /execute answer the poll finds the call executed, and the repeat that would return its stored
+    result answers 409 `conflict` (the kernel has none to give, as for an execution it reconciled). The call ran: it
+    is answered from its decision, never `refused`, and /execute isn't sent a third time."""
+    monkeypatch.setattr(tools, "EXECUTE_POLL_S", 0)
+    poll = tools._poll
+
+    async def poll_then_refuse_the_repeat(polled_for: Caller, decision_id: str):
+        found = await poll(polled_for, decision_id)
+        fake.fail("/execute", "409", times=1)
+        return found
+
+    monkeypatch.setattr(tools, "_poll", poll_then_refuse_the_repeat)
+    fake.drop_response("/execute")                             # it ran, and the answer was lost
+    ran = await route_call(api_conn, caller, 0, tool_use("native__quote", DRAIN))
+
+    (decision,) = session_decisions(fake, caller.session_id)
+    assert decision.state == "executed" and ran.status == Status(decision, "receipt")
+    assert (ran.result, ran.is_error) == (
+        {"outcome": "done", "decision_id": decision.decision_id, "message": decision.visitor_plain}, False)
+    assert not (ran.fenced or ran.unavailable or ran.session_ended or ran.turn_over)
+    assert routes(fake, "/execute") == ["POST /execute", "POST /execute"]
+    assert await events(api_conn, caller.session_id) == [receipt(decision)]
+    assert await control_rows(api_conn, caller.session_id) == []
 
 
 def check_drafts(fake) -> list[dict]:
