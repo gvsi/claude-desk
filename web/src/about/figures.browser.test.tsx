@@ -196,8 +196,8 @@ describe('Tau3Chart', () => {
       const caption = screen.container.querySelector('figcaption')?.textContent?.replace(/\s+/g, ' ').trim();
       expect(caption).toBe(
         compact
-          ? 'Figure 1 Seven Claude releases on Sierra’s τ³-Banking leaderboard, from 24.7% to 48.7% in eight months. The dashed line is a straight-line fit in log-odds through all seven; the band is where the fits in the text cross 80%. Source: taubench.com.'
-          : 'Figure 1 Seven Claude releases on Sierra’s τ³-Banking leaderboard, from 24.7% to 48.7% in eight months. The dashed line is a straight-line fit in log-odds through all seven; the shaded band is where the fits in the text cross 80%. Source: taubench.com, pass^1 as listed.',
+          ? 'Figure 1 Seven Claude releases on Sierra’s τ³-Banking leaderboard; Opus 4.5 to Opus 5 rose from 24.7% to 48.7% in eight months. The dashed line is a straight-line fit in log-odds through all seven; the band is where the fits in the text cross 80%. Source: taubench.com.'
+          : 'Figure 1 Seven Claude releases on Sierra’s τ³-Banking leaderboard; Opus 4.5 to Opus 5 rose from 24.7% to 48.7% in eight months. The dashed line is a straight-line fit in log-odds through all seven; the shaded band is where the fits in the text cross 80%. Source: taubench.com, pass^1 as listed.',
       );
       await screen.unmount();
     }

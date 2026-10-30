@@ -300,8 +300,9 @@ export function Tau3Chart({ compact = false }: Tau3ChartProps) {
       <figcaption id={captionId} className={`cd-about-figcaption ${compact ? 'cd-type-caption' : 'cd-type-article-caption'}`}>
         <span className="cd-about-fignum">Figure 1</span>{' '}
         <span>
-          Seven Claude releases on Sierra’s τ³-Banking leaderboard, from {percent(LOWEST.score)} to{' '}
-          {percent(LATEST.score)} in eight months. The dashed line is a straight-line fit in log-odds through all seven;{' '}
+          {`Seven Claude releases on Sierra’s τ³-Banking leaderboard; ${shortName(LOWEST)} to ${shortName(LATEST)} `}
+          {`rose from ${percent(LOWEST.score)} to ${percent(LATEST.score)} in eight months. `}
+          The dashed line is a straight-line fit in log-odds through all seven;{' '}
           {compact ? 'the band' : 'the shaded band'} is where the fits in the text cross 80%. Source:{' '}
           <TextLink href={TAU3_SOURCE.url} external>
             taubench.com
