@@ -17,6 +17,7 @@ import {
   SwitcherMenu,
   Wordmark,
   type NavKey,
+  type SidebarHrefs,
   type SidebarLinkProps,
   type SwitcherPick,
 } from '../ds/index.ts';
@@ -44,9 +45,10 @@ function currentNav(pathname: string): NavKey {
   return NAV_KEYS.find((key) => key === segment) ?? 'today';
 }
 
-function hrefsFor(deskId: string): Record<NavKey, string> {
+/** No Connectors href yet: the Connectors page comes with run 2, so its row stays hidden. */
+function hrefsFor(deskId: string): SidebarHrefs {
   const base = `/app/${encodeURIComponent(deskId)}`;
-  return Object.fromEntries(NAV_KEYS.map((key) => [key, `${base}/${key}`])) as Record<NavKey, string>;
+  return Object.fromEntries(NAV_KEYS.map((key) => [key, `${base}/${key}`])) as SidebarHrefs;
 }
 
 /** The sidebar's rows as router links, so moving between pages keeps the app loaded. */
