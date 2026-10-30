@@ -297,6 +297,21 @@ describe('design tokens', () => {
     expect(connectorColors.filter((name) => paired.has(name))).toEqual([]);
   });
 
+  test('connector_page_measures_are_tokens', () => {
+    // The connector pages' measures, read off their signed boards, as tokens the components use.
+    const expected = {
+      'space-18': '18px',
+      'size-connector-title-tile': '44px',
+      'size-connection-term': '200px',
+      'size-recent-when': '120px',
+    };
+    const actual = Object.fromEntries(Object.keys(expected).map((name) => [name, tokenValue(name)]));
+    expect(actual).toEqual(expected);
+    // A connector's quoted definition is mono at 12 px, a size smaller than the full trace's values.
+    const mono = tokens.type.groups.find((group) => group.family === 'mono');
+    expect(mono?.styles.find((style) => style.name === 'quote')).toMatchObject({ fontSize: '12px', lineHeight: '18px', fontWeight: 400 });
+  });
+
   test('every_color_token_is_classified', () => {
     expect(Object.keys(DECORATIVE_COLORS).sort()).toEqual([
       'connector-google-blue',

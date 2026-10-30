@@ -23,7 +23,7 @@
 .cd-connector-sign-in[open] {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: var(--space-18);
 }
 
 .cd-connector-sign-in::backdrop {
@@ -39,8 +39,8 @@
 }
 
 .cd-connector-sign-in__header > .cd-connector-icon {
-  width: 44px;
-  height: 44px;
+  width: var(--size-connector-title-tile);
+  height: var(--size-connector-title-tile);
 }
 
 /* The promise card is padded 14 px 16 px here, as the sign-in board draws it. */

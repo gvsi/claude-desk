@@ -25,7 +25,7 @@
 .cd-recent-requests__row {
   position: relative;
   display: grid;
-  grid-template-columns: 120px minmax(0, 1fr) auto;
+  grid-template-columns: var(--size-recent-when) minmax(0, 1fr) auto;
   grid-template-areas:
     'when what outcome'
     'when why outcome';

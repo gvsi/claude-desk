@@ -50,7 +50,7 @@
 
 /* 18 px between groups, as the picker boards set them. */
 .cd-connector-picker__group {
-  margin-top: 18px;
+  margin-top: var(--space-18);
 }
 
 .cd-connector-picker__group-heading {

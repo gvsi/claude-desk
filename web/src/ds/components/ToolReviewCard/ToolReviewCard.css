@@ -1,7 +1,7 @@
 /* ToolReviewCard: "Needs your review" with its held dot and when it was noticed at the right; the
    summary in serif; what was confirmed before; the connector's new words quoted in a box on the
-   app background (10 px 12 px, a hairline border), labelled as a quote, in mono type that wraps
-   anywhere; then the line about turning it back on and the two answers. A compact card (16 px), its
+   app background (10 px 12 px, a hairline border), labelled as a quote, in the mono quote type
+   (`.cd-type-quote`) that wraps anywhere; then the line about turning it back on and the two answers. A compact card (16 px), its
    parts 12 px apart and each label 2 px over its words, as the changed-tool board draws it. */
 
 .cd-tool-review {
@@ -79,12 +79,6 @@
 .cd-tool-review__quote-label {
   margin: 0;
   color: var(--text-secondary);
-}
-
-/* Trace type at 12 px, as the changed-tool board quotes a definition (the trace style itself is
-   12.5 px); two classes, so the size wins over .cd-type-trace whatever order the sheets load in. */
-.cd-tool-review__quote .cd-tool-review__quote-text {
-  font-size: 12px;
 }
 
 .cd-tool-review__quote-text {

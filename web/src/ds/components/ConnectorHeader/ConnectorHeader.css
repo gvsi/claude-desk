@@ -44,10 +44,11 @@
   min-width: 0;
 }
 
-/* The 14 px lock sits on the middle of the title's 20 px first line. */
+/* The 14 px lock sits on the middle of the title's first line: its box is the line's height, and
+   the icon is drawn centered in it. */
 .cd-connector-promise__icon {
   flex: none;
-  margin-top: 3px;
+  height: 1lh;
   color: var(--text-secondary);
 }
 

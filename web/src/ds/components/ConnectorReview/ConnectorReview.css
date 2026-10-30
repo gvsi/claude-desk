@@ -18,8 +18,8 @@
 }
 
 .cd-connector-review__header > .cd-connector-icon {
-  width: 44px;
-  height: 44px;
+  width: var(--size-connector-title-tile);
+  height: var(--size-connector-title-tile);
 }
 
 /* On a phone the title wraps over several lines, so the tile stays at its top. */

@@ -95,7 +95,7 @@ export function ToolReviewCard({ title, connector, profile, noticed, onTurnBackO
                 Quoted from the connector. Claude never sees this text; it sees only the description you confirmed.
               </p>
               {/* The connector's words exactly as sent, as text: never parsed, never markup. */}
-              <p className="cd-tool-review__quote-text cd-type-trace" data-copy="user">
+              <p className="cd-tool-review__quote-text cd-type-quote" data-copy="user">
                 {definition}
               </p>
             </blockquote>

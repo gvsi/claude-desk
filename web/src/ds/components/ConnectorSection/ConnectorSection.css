@@ -169,7 +169,8 @@
 
   .cd-connector-section__tool-summary {
     max-width: none;
-    margin-top: 1px;
+    /* Half the smallest step, as the phone board sets the words under the name. */
+    margin-top: calc(var(--space-2) / 2);
     text-align: left;
     overflow-wrap: anywhere;
   }
