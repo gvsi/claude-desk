@@ -2461,7 +2461,11 @@ def test_emergency_advice_needs_the_shut_off_words_and_no_promise():
                     "Maria is heading over now.", "Maria will be over as soon as possible.",
                     "We'll have someone call you right away.", "Maria can give you a call right away.",
                     "We're sending someone over right away.", "Help is coming right now.",
-                    "A plumber will be there immediately."):
+                    "A plumber will be there immediately.",
+                    # "her" after the verb's subject is Maria, not a possessive, and sending Maria
+                    # needs no "out" or "over".
+                    "We'll have her call you right away.", "We can have her come out immediately.",
+                    "We can send Maria right away.", "We'll send her right now."):
         assert replies(task, promise) == {"commitment.pattern"}, promise
     # A promise of what it costs, in prose: free, nothing extra, or a statement that an extra, emergency
     # or after-hours fee applies (or doesn't).
