@@ -133,6 +133,9 @@ export {
 } from './components/MarginReceipt/receiptTone.ts';
 export { MarginNote, type MarginNoteProps } from './components/MarginNote/MarginNote.tsx';
 
+// Recorded history
+export { RecordedTag, type RecordedTagProps } from './components/RecordedTag/RecordedTag.tsx';
+
 // Owner decisions
 export { ApprovalCard, type ApprovalCardProps } from './components/ApprovalCard/ApprovalCard.tsx';
 export { TakeOverBar, type TakeOverBarProps } from './components/TakeOverBar/TakeOverBar.tsx';
