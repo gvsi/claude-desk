@@ -12,7 +12,7 @@ from collections.abc import Mapping
 from fastapi import FastAPI
 from sqlalchemy import select
 
-from desk.contracts import SeedDocument
+from desk.contracts import Label, SeedDocument
 from desk.db.models import Document
 from desk.db.models import KnowledgeItem as KnowledgeRow
 from desk.kernel_api import DeskCreated
@@ -22,7 +22,7 @@ from .helpers import kernel_ctx, rows_of
 from .test_adapters import Rivera, rivera, visitor_of
 from .test_context import context_of
 from .test_desk_writes import LOPEZ_DESK, desks_of, entries_of, new_desk, post_desk, upload
-from .test_labels_hardening import disguises, knowledge, post_knowledge, stored
+from .test_labels_hardening import disguises, documents, knowledge, knowledge_entries, post_knowledge, stored
 
 
 def test_a_scan_with_no_canaries_reads_nothing(monkeypatch):
@@ -225,3 +225,16 @@ async def test_knowledge_found_clean_is_not_read_again_until_a_document_is_added
     assert (await context_of(client, visitor.session_id, visitor.headers)).knowledge == []
     assert any(planted in each for each in scanned)
 
+
+
+async def test_a_canary_split_between_a_knowledge_items_id_and_title_keeps_it_the_owners(app, client):
+    """The owner's write scans a knowledge item as a visitor's context reads it, its ID, title and
+    text one after another, so a canary begun in the ID and ended in the title is found there too:
+    the item is stored the owner's alone, and the API's view shows none of its text."""
+    copy, visitor = await visitor_of(app, client)
+    dana = (await documents(app, copy))["dana-invoice"]
+    split = knowledge(f"kb-{dana.canary[:10]}", f"{dana.canary[10:]} invoice", "Paid in full.", ["public"])
+    assert (await stored(client, copy, split)).label == Label(readers=["owner"])
+    assert await knowledge_entries(app, copy) == [
+        {"part": "knowledge", "item_id": split["item_id"], "owner_only_forced": True}]
+    assert (await context_of(client, visitor.session_id, visitor.headers)).knowledge == []
