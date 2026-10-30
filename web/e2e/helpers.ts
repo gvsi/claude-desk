@@ -19,6 +19,10 @@ const MOCK = {
   quoteReceipt: "Quoted from Maria Rivera's price list",
   heldReceipt: 'Waiting for Maria Rivera to approve',
   allowedLine: "You allowed this. It's done.",
+  /** Claude's reply once the discount is allowed: its words, the discounted quote's price, and the reply's check. */
+  allowedReply: "Here's the price for clearing a drain, from Maria's price list.",
+  allowedPrice: '$153.00',
+  replyReceipt: "Reply checked against Maria Rivera's rules",
 };
 
 /** The failure when the discount isn't held, in the chat or on Today: never retried, since a live turn is Claude's call. */
@@ -128,16 +132,26 @@ export async function demoPath(page: Page, { passcode, live }: DemoPathOptions):
     liveOnArrival = new Set(await liveChats(liveNow));
   });
 
-  const publicTab = await test.step('"Chat as a customer" opens the public page in a new tab', async () => {
+  const { publicTab, turnEnds } = await test.step('"Chat as a customer" opens the public page in a new tab', async () => {
     const [tab] = await Promise.all([context.waitForEvent('page'), publicPageSection(page).getByRole('link', { name: 'Chat as a customer' }).click()]);
+    // Counted from as soon as the tab opens, before it has loaded. A turn end missed would fail
+    // the waits on the count, never pass them.
+    const ended = await countTurnEnds(tab);
     await tab.waitForLoadState();
     expect(new URL(tab.url()).pathname).toBe(`/d/${encodeURIComponent(slug)}`);
     await expect(tab.getByRole('textbox', { name: /^Message / })).toBeEnabled({ timeout: wait.update });
-    return tab;
+    return { publicTab: tab, turnEnds: ended };
   });
 
+  // The visitor's messages from the public tab, counted: each starts a turn that ends with a turn_end of its own.
+  let sent = 0;
+  const ask = async (text: string) => {
+    await send(publicTab, text);
+    sent += 1;
+  };
+
   await test.step('a price question gets a checked quote card with its receipt', async () => {
-    await send(publicTab, QUOTE_QUESTION);
+    await ask(QUOTE_QUESTION);
     const quote = publicTab.getByRole('article', { name: 'Quote' });
     await expect(quote.first()).toBeVisible({ timeout: wait.reply });
     const receipts = rowOf(publicTab, quote.first()).locator('.cd-transcript-row__margin .cd-margin-receipt');
@@ -147,12 +161,13 @@ export async function demoPath(page: Page, { passcode, live }: DemoPathOptions):
   });
 
   const cancel = publicTab.getByRole('button', { name: 'Cancel this request' });
+  // The public tab's rows. They only ever join at the end, so a row's place in the chat names it.
+  const rows = publicTab.locator('.cd-transcript-row');
   const heldRow = await test.step('a discount ask is held, with a way to cancel it', async () => {
-    await send(publicTab, DISCOUNT_ASK);
+    await ask(DISCOUNT_ASK);
     await expect(cancel, NOT_HELD).toBeVisible({ timeout: wait.reply });
-    // The held request's row, the one its cancel sits under. Rows only ever join at the end, so
-    // its place in the chat names it from here on, after its cancel has gone.
-    const rows = publicTab.locator('.cd-transcript-row');
+    // The held request's row, the one its cancel sits under: its place names it from here on,
+    // after its cancel has gone.
     const at = await rows.evaluateAll((els) =>
       els.findIndex((el) => [...el.querySelectorAll('button')].some((b) => b.textContent?.trim() === 'Cancel this request')),
     );
@@ -178,7 +193,14 @@ export async function demoPath(page: Page, { passcode, live }: DemoPathOptions):
     }
   });
 
-  await test.step('"Allow this time" shows its final line, and the public tab its resolved receipt', async () => {
+  await test.step('"Allow this time" shows its final line, and the public tab its resolved receipt and Claude\'s reply', async () => {
+    // A visitor's turn can go on after its reply, so the discount turn may not be over, and a late
+    // message of its own would take the place of the reply to the answer. Every turn sent so far
+    // ends first.
+    await expect.poll(turnEnds, { message: 'the discount turn ended', timeout: wait.reply }).toBeGreaterThanOrEqual(sent);
+    // Claude answers the allowed request in a turn of its own, so its reply is the first row to
+    // join after the answer, below the held row.
+    const reply = rows.nth(await rows.count());
     await newCard.getByRole('button', { name: 'Allow this time' }).click();
     await expect(newCard.getByText(live ? /^You allowed this\./ : MOCK.allowedLine)).toBeVisible({ timeout: wait.update });
     await expect(newCard.getByRole('button', { name: /^(Allow|Deny)/ })).toHaveCount(0);
@@ -189,7 +211,18 @@ export async function demoPath(page: Page, { passcode, live }: DemoPathOptions):
     await expect(last.locator('.cd-status-dot--handled'), 'the held request resolved in the chat').toHaveCount(1, { timeout: wait.update });
     if (!live) await expect(last).toHaveText(MOCK.quoteReceipt);
     await expect(cancel).toHaveCount(0);
-    await expect(publicTab.getByText('Claude is writing')).toHaveCount(0, { timeout: wait.reply });
+    // The reply to the allowed request, with its receipt.
+    await expect(reply.locator('.cd-claude-message'), 'Claude replied to the allowed request').toBeVisible({ timeout: wait.reply });
+    const replyReceipts = reply.locator('.cd-transcript-row__margin .cd-margin-receipt');
+    await expect(replyReceipts.first()).toBeVisible();
+    if (!live) {
+      await expect(reply.locator('.cd-claude-message__prose')).toHaveText([MOCK.allowedReply]);
+      await expect(reply.getByRole('article', { name: 'Quote' })).toContainText(MOCK.allowedPrice);
+      await expect(replyReceipts).toHaveText([MOCK.replyReceipt]);
+    }
+    // Then the reply's turn ends, and the page no longer says "Claude is writing".
+    await expect.poll(turnEnds, { message: "the reply's turn ended", timeout: wait.reply }).toBeGreaterThanOrEqual(sent + 1);
+    await expect(publicTab.getByText('Claude is writing')).toHaveCount(0, { timeout: wait.update });
     await expectNoAxeViolations(publicTab, 'the public page');
   });
 
@@ -210,6 +243,22 @@ function publicPageSection(page: Page): Locator {
 /** The links under Live now that show, by the conversation each opens; none while it isn't there. */
 function liveChats(liveNow: Locator): Promise<string[]> {
   return liveNow.getByRole('link').evaluateAll((links) => links.filter((a) => a.checkVisibility()).map((a) => a.getAttribute('href') ?? ''));
+}
+
+/**
+ * Counts the turns that have ended in `tab`'s chat, from the `turn_end` events on its event stream,
+ * as Chromium's DevTools protocol sees them. The page itself shows no sign of a turn's end: a
+ * message clears "Claude is writing", and a visitor's turn can go on after its reply. Only each
+ * event's name is read, never its data.
+ */
+async function countTurnEnds(tab: Page): Promise<() => number> {
+  const cdp = await tab.context().newCDPSession(tab);
+  let ended = 0;
+  cdp.on('Network.eventSourceMessageReceived', ({ eventName }) => {
+    if (eventName === 'turn_end') ended += 1;
+  });
+  await cdp.send('Network.enable');
+  return () => ended;
 }
 
 /** Types `text` into the public page's composer and sends it. */
