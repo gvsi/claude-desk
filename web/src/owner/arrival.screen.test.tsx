@@ -354,6 +354,42 @@ describe('OwnerLayout', () => {
     expect(one.screen.getByRole('button', { name: /^Switch Desk/ }).elements()).toHaveLength(0);
   });
 
+  it('owner_shell_links_the_about_pages', async () => {
+    const ABOUT = [
+      ['Product proposal', '/about/proposal'],
+      ['Capability prediction', '/about/prediction'],
+    ];
+    const rows = (nav: Element) => [...nav.querySelectorAll('a')].map((a) => [a.textContent.trim(), a.getAttribute('href')]);
+
+    // The group sits between the pages and the Answering switch, and marks no row: the owner is on Today.
+    const { screen, router } = await renderRoute(TODAY);
+    const main = screen.getByRole('navigation', { name: 'Main' });
+    const about = screen.getByRole('navigation', { name: 'About this prototype' });
+    await expect.element(about).toBeVisible();
+    expect(rows(about.element())).toEqual(ABOUT);
+    expect(about.element().querySelector('[aria-current]')).toBeNull();
+    await expect.element(main.getByRole('link', { name: 'Today' })).toHaveAttribute('aria-current', 'page');
+    const box = about.element().getBoundingClientRect();
+    expect(box.top).toBeGreaterThanOrEqual(main.element().getBoundingClientRect().bottom);
+    expect(box.bottom).toBeLessThanOrEqual(screen.getByRole('switch', { name: 'Answering' }).element().getBoundingClientRect().top);
+
+    // A router link: the app stays loaded and the route changes.
+    await about.getByRole('link', { name: 'Product proposal' }).click();
+    await expect.poll(() => router.state.location.pathname).toBe('/about/proposal');
+
+    // On a phone, the menu sheet carries the same group, and a link in it closes the sheet.
+    const phone = await renderRoute(TODAY, { viewport: 'phone' });
+    await phone.screen.getByRole('button', { name: 'Menu' }).click();
+    const sheet = phone.screen.getByRole('dialog', { name: 'Menu' });
+    await expect.element(sheet).toBeVisible();
+    const inSheet = sheet.getByRole('navigation', { name: 'About this prototype' });
+    await expect.element(inSheet).toBeVisible();
+    expect(rows(inSheet.element())).toEqual(ABOUT);
+    await inSheet.getByRole('link', { name: 'Capability prediction' }).click();
+    await expect.poll(() => phone.router.state.location.pathname).toBe('/about/prediction');
+    await expect.element(phone.screen.getByRole('dialog', { name: 'Menu' })).not.toBeInTheDocument();
+  });
+
   it('answering_switch_reverts_on_error', async () => {
     const { screen } = await renderRoute(TODAY);
     const answering = screen.getByRole('switch', { name: 'Answering' });
