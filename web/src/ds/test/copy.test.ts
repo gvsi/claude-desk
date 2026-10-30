@@ -45,7 +45,7 @@ describe('assertCleanCopy', () => {
     );
     expect(check('<p>Recibido, ÁREA lista</p>')).toThrow(/all caps "ÁREA"/);
     expect(check('<p>A McDONALD visit</p>')).toThrow(/all caps "DONALD"/);
-    for (const acronym of ['I', 'AI', 'PDF', 'QR', 'CPA', 'ZIP', 'SMS', 'USD']) {
+    for (const acronym of ['I', 'AI', 'PDF', 'QR', 'CPA', 'ZIP', 'SMS', 'USD', 'RFC', 'JSON']) {
       expect(check(`<p>About the ${acronym} here</p>`)).not.toThrow();
     }
     expect(check('<p>I can send both PDFs by SMS.</p>')).not.toThrow();
@@ -53,6 +53,29 @@ describe('assertCleanCopy', () => {
     expect(check('<p lang="es">Estás hablando con Claude, una IA que responde por Rivera Plumbing.</p>')).not.toThrow();
     // Someone else's words are shown as they wrote them.
     expect(check('<p data-copy="user">PLEASE CALL ME</p>')).not.toThrow();
+  });
+
+  it('allows_the_reading_pages_acronyms', () => {
+    // The acronyms the About this prototype documents use, each as they write it.
+    for (const word of ['AP2', 'API', 'SymCC', 'CEO', 'CI', 'MCP', 'URL', 'US']) {
+      expect(check(`<p>About the ${word} here</p>`), word).not.toThrow();
+    }
+    // The words on their own, as a label or a heading would show them.
+    for (const word of ['AP2', 'SymCC', 'APIs']) expect(check(`<span>${word}</span>`), word).not.toThrow();
+    // A plural passes, as "PDFs" does: only the run of capitals is looked up.
+    expect(check('<p>Two APIs, three URLs and the CEOs</p>')).not.toThrow();
+    expect(check('<p>The SymCC proofs, AP2’s mandates and an MCP server</p>')).not.toThrow();
+    // An unlisted run, or a word shouted in capitals, still fails.
+    expect(check('<p>The XYZ plan</p>')).toThrow(/all caps "XYZ"/);
+    expect(check('<p>WARNING: the API is down</p>')).toThrow(/all caps "WARNING" in text/);
+    // AP2 and SymCC pass as whole words, never by their runs: "AP" and "CC" fail on their own or
+    // inside any other word.
+    expect(check('<p>Ask the AP desk</p>')).toThrow(/all caps "AP"/);
+    expect(check('<p>CC the owner</p>')).toThrow(/all caps "CC"/);
+    expect(check('<p>The AP3 draft</p>')).toThrow(/all caps "AP"/);
+    expect(check('<p>A SymCCC run</p>')).toThrow(/all caps "CCC"/);
+    expect(check('<p>The NotSymCC tool</p>')).toThrow(/all caps "CC"/);
+    expect(check('<p>Two AP2s</p>')).toThrow(/all caps "AP"/);
   });
 
   it('flags_exclamation_outside_user_text', () => {
@@ -64,6 +87,17 @@ describe('assertCleanCopy', () => {
     expect(check('<div data-copy="user"><span>¡Hola!</span></div>')).not.toThrow();
     // The exemption covers only the marked words, not the interface around them.
     expect(check('<div><p data-copy="user">Thanks!</p><p>Sent!</p></div>')).toThrow(/"Sent!"/);
+  });
+
+  it('code_is_shown_as_written', () => {
+    // An address, a request or a key is machine text: it reads as it is, capitals and all.
+    expect(check('<pre data-copy="code">POST /api/a2a/rivera\nX-Agent-Key-Id: demo-7f3a2c</pre>')).not.toThrow();
+    expect(check('<code data-copy="code">POST /api/a2a/rivera HTTP/1.1</code>')).not.toThrow();
+    // The same words outside code are interface copy, and their capitals fail.
+    expect(check('<p>POST /api/a2a/rivera HTTP/1.1</p>')).toThrow(/all caps "POST", "HTTP"/);
+    // Arrows are a design rule, so code gets no pass for them, and the label around it none at all.
+    expect(check('<code data-copy="code">a -> b</code>')).toThrow(/arrow in text/);
+    expect(check('<div><code data-copy="code">POST</code><p>COPY KEY</p></div>')).toThrow(/all caps "COPY", "KEY"/);
   });
 
   it('ignores_aria_hidden_subtrees', () => {

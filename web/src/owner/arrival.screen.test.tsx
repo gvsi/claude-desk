@@ -340,7 +340,8 @@ describe('OwnerLayout', () => {
     await screen.getByRole('button', { name: 'Emergencies' }).click();
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
     await expect.element(screen.getByRole('button', { name: 'Switch Desk, current: Emergencies' })).toBeVisible();
-    expect(readLocal('lastDesk')).toBe(RIVERA.emergenciesDeskId);
+    // The layout saves the last Desk in an effect after it renders, so wait for it.
+    await expect.poll(() => readLocal('lastDesk')).toBe(RIVERA.emergenciesDeskId);
 
     // New business goes to setup.
     await screen.getByRole('button', { name: 'Switch business, current: Rivera Plumbing' }).click();

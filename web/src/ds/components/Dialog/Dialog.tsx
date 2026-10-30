@@ -123,10 +123,10 @@ export function Dialog({ title, body, confirmLabel, cancelLabel, tone = 'default
       </div>
       {/* While the confirmation is sent, only its button spins; cancel waits, unpressable. */}
       <div className="cd-dialog__actions">
-        <Button variant="secondary" waiting={pending} onClick={onCancel}>
+        <Button variant="secondary" size="main" waiting={pending} onClick={onCancel}>
           {cancelLabel}
         </Button>
-        <Button variant="primary" busy={pending} onClick={onConfirm}>
+        <Button variant="primary" size="main" busy={pending} onClick={onConfirm}>
           {confirmLabel}
         </Button>
       </div>

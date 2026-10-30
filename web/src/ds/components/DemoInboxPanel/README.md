@@ -10,7 +10,8 @@
 
 ## What it shows
 
-- On `bg-panel`: the title "Demo inbox" (a level-2 heading that names the panel's region) and "Stands in for a phone or email inbox. Nothing is really sent."
+- On `bg-panel`: the title "Demo inbox" (a level-2 heading that names the panel's region) and "Stands in for a phone or email inbox. Nothing is really sent." For the owner the line under the title is "What Claude would have sent you by text or email. Nothing is really sent."
+- With `action`, a control at the right of the title's line, centered on it: the sheet's "Close" (`DemoInboxSheet`).
 - The entries, newest first, each in a quiet box: who it went to ("To •••• 0142"), and for the owner only the time the screen passes in, at the right of that line. Then:
 
 | Item | Shows |
@@ -45,6 +46,7 @@
 | --- | --- | --- |
 | Title | Demo inbox | Bandeja de demostración |
 | Subtitle | Stands in for a phone or email inbox. Nothing is really sent. | Hace de bandeja de teléfono o correo. No se envía nada de verdad. |
+| Owner's subtitle | What Claude would have sent you by text or email. Nothing is really sent. | Lo que Claude te habría enviado por mensaje o correo. No se envía nada de verdad. |
 | Recipient | To {to} | Para {to} |
 | Kinds | Verification code, Alert, Ledger checkpoint | Código de verificación, Aviso, Punto de control del registro |
 | Opening | Opening | Abriendo |
@@ -67,5 +69,9 @@
 | `items` | `DemoInboxItem[]` | Required. Oldest first. |
 | `language` | `'en' \| 'es'` | Required. |
 | `onRetry` | `(entryId: string) => void` | Required. |
+| `action` | `ReactNode` | A control at the right of the title's line. |
+| `titleFocusable` | `boolean` | The title takes focus from a script (`tabIndex={-1}`), as `DemoInboxSheet` moves it there when it opens itself. |
+
+`shownItems(viewer, items)`, exported beside the panel, gives the items the panel would show, newest first and one per entry; `DemoInboxSheet` counts them.
 
 `DemoInboxItem` is `{ notice: InboxNotice; time?: string; entry: DemoInboxEntry | null; failed?: boolean }`.

@@ -590,6 +590,38 @@ describe('planted faults', () => {
   });
 });
 
+describe('epochs', () => {
+  it('request_from_an_earlier_epoch_is_dropped', async () => {
+    // Sent in the last epoch (the last screen test), it reaches the store after this one began:
+    // dropped like a lost connection, unrecorded, and the copy is unchanged.
+    const sentIn = mockStore.epoch;
+    mockStore.nextEpoch();
+    expect(mockStore.admits(sentIn)).toBe(false);
+    expect(await mockStore.dispatch('openSession', { params: { slug }, epoch: sentIn })).toEqual({ network: true });
+    expect(mockStore.requests).toEqual([]);
+    expect(mockStore.visitorSession(slug)).toBeNull();
+
+    // Sent in this epoch, or with none as unit tests and the dev server send them: answered and recorded.
+    expect(mockStore.admits(mockStore.epoch)).toBe(true);
+    expect(mockStore.admits(undefined)).toBe(true);
+    expect((await call('openSession', { params: { slug }, epoch: mockStore.epoch })).status).toBe(200);
+    expect((await call('visitorSession', { params: { slug } })).status).toBe(200);
+    expect(mockStore.requests.map((r) => r.key)).toEqual(['openSession', 'visitorSession']);
+  });
+
+  it('request_still_waiting_when_its_epoch_ends_changes_nothing', async () => {
+    // A planted delay holds the answer past the end of its epoch; the route would otherwise apply it
+    // to the next test's copy.
+    mockStore.inject({ route: 'openSession', status: 200, delayMs: 1_000, afterCommit: true });
+    const answer = mockStore.dispatch('openSession', { params: { slug } });
+    mockStore.nextEpoch();
+    mockStore.reset('rivera');
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await answer).toEqual({ network: true });
+    expect(mockStore.visitorSession(slug)).toBeNull();
+  });
+});
+
 describe("Today's windows", () => {
   /** Thursday, October 29, 10:30 am in Los Angeles. */
   const NOW = new Date('2026-10-29T17:30:00Z');

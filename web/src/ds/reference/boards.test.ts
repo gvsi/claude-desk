@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { isExportStory } from 'storybook/internal/csf';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 import { BOARD_VIEWPORTS, REFERENCE_BOARDS, boardViewport, capturedAtFullHeight, isReferenceBoard, type ReferenceBoard } from './boards.ts';
 
@@ -81,6 +81,13 @@ async function boardStories(): Promise<BoardStory[]> {
 }
 
 describe('reference boards', () => {
+  // Imported once for the checks below. The first import transforms every board story, which can
+  // take longer than one test's 5 s while the browser projects run beside this one.
+  let stories: BoardStory[] = [];
+  beforeAll(async () => {
+    stories = await boardStories();
+  }, 60_000);
+
   it('every_reference_board_has_a_render', (context) => {
     const dir = process.env.DS_REFERENCE_DIR;
     if (!dir) {
@@ -98,15 +105,13 @@ describe('reference boards', () => {
     expect(problems).toEqual([]);
   });
 
-  it('board_stories_name_reference_boards', async () => {
-    const stories = await boardStories();
+  it('board_stories_name_reference_boards', () => {
     expect(stories.length).toBeGreaterThan(0);
     const unnamed = stories.filter(({ canvas }) => !(REFERENCE_BOARDS as readonly unknown[]).includes(canvas));
     expect(unnamed.map(({ id, canvas }) => `${id}: ${JSON.stringify(canvas)}`)).toEqual([]);
   }, STORY_IMPORT_TIMEOUT);
 
-  it('every_reference_board_has_a_board_story', async () => {
-    const stories = await boardStories();
+  it('every_reference_board_has_a_board_story', () => {
     // Exactly one: a board rebuilt twice would be checked against itself twice, and differ.
     const counts = REFERENCE_BOARDS.map((board) => {
       const naming = stories.filter(({ canvas }) => canvas === board).map(({ id }) => id);
@@ -115,9 +120,8 @@ describe('reference boards', () => {
     expect(counts).toEqual(REFERENCE_BOARDS.map((board) => `${board}: one story`));
   }, STORY_IMPORT_TIMEOUT);
 
-  it('board_stories_run_at_their_boards_window', async () => {
+  it('board_stories_run_at_their_boards_window', () => {
     // The plays measure the board as drawn, so each runs in the window its board was rendered at.
-    const stories = await boardStories();
     const wrong = stories.flatMap(({ id, canvas, viewport }) =>
       isReferenceBoard(canvas) && viewport !== boardViewport(canvas)
         ? [`${id}: runs at ${JSON.stringify(viewport)}, drawn at ${boardViewport(canvas)}`]

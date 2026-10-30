@@ -22,6 +22,7 @@ export {
 
 export { Notice, type NoticeProps, type NoticeTone } from './components/Notice/Notice.tsx';
 export {
+  CHANGED_REFRESHED,
   CHAT_ENDED_COPY,
   NEW_CHAT_LABEL,
   RATE_LIMITED_COPY,
@@ -33,6 +34,7 @@ export {
 } from './components/Notice/errorCopy.ts';
 export { EmptyState, type EmptyStateProps } from './components/EmptyState/EmptyState.tsx';
 export { DisclosureLine, type DisclosureLineProps } from './components/DisclosureLine/DisclosureLine.tsx';
+export { LoadingLine, type LoadingLineProps } from './components/LoadingLine/LoadingLine.tsx';
 
 // Controls
 export { Switch, type SwitchProps } from './components/Switch/Switch.tsx';
@@ -58,6 +60,7 @@ export {
   type NavKey,
   type SidebarAbout,
   type SidebarAboutLink,
+  type SidebarHrefs,
   type SidebarLinkProps,
   type SidebarProps,
 } from './components/Sidebar/Sidebar.tsx';
@@ -65,6 +68,7 @@ export { PageHeader, type PageHeaderProps } from './components/PageHeader/PageHe
 export { Greeting, type GreetingProps, type PresenceGlyph } from './components/Greeting/Greeting.tsx';
 export { ReviewerBar, type ReviewerBarProps } from './components/ReviewerBar/ReviewerBar.tsx';
 export { PublicShell, type PublicBrand, type PublicOpenStatus, type PublicShellProps } from './components/PublicShell/PublicShell.tsx';
+export { PublicBrandHeader, type PublicBrandHeaderProps } from './components/PublicShell/PublicBrandHeader.tsx';
 export { Dialog, type DialogProps } from './components/Dialog/Dialog.tsx';
 
 // Navigation
@@ -81,6 +85,12 @@ export {
 export { Breadcrumb, type BreadcrumbItem, type BreadcrumbProps } from './components/Breadcrumb/Breadcrumb.tsx';
 export { Steps, type StepsProps } from './components/Steps/Steps.tsx';
 export { SubNav, type SubNavItem, type SubNavProps } from './components/SubNav/SubNav.tsx';
+export {
+  LeadRow,
+  PersonRow,
+  type LeadRowProps,
+  type PersonRowProps,
+} from './components/PersonRow/PersonRow.tsx';
 
 // First visit
 export {
@@ -100,9 +110,24 @@ export {
 export { VerifiedLine, type VerifiedLineProps } from './components/VerifyCodeForm/VerifiedLine.tsx';
 export {
   DemoInboxPanel,
+  shownItems,
   type DemoInboxItem,
   type DemoInboxPanelProps,
 } from './components/DemoInboxPanel/DemoInboxPanel.tsx';
+export { DemoInboxSheet, type DemoInboxSheetProps } from './components/DemoInboxSheet/DemoInboxSheet.tsx';
+
+// Setup
+export { SituationRow, type SituationRowProps } from './components/SituationRow/SituationRow.tsx';
+export { SafetyCheckRow, type SafetyCheckRowProps } from './components/SafetyCheckRow/SafetyCheckRow.tsx';
+
+// Agents
+export { CodeBlock, type CodeBlockProps } from './components/CodeBlock/CodeBlock.tsx';
+export { CopyField, type CopyFieldProps } from './components/CopyField/CopyField.tsx';
+export { COPY_RESULT_COPY, useCopyText, type CopyState } from './components/CopyField/useCopyText.ts';
+
+// Share
+export { ShareCard, type ShareCardProps } from './components/ShareCard/ShareCard.tsx';
+export { CopyList, type CopyListItem, type CopyListProps } from './components/CopyList/CopyList.tsx';
 
 // Payments
 export { MockCheckout, type MockCheckoutProps } from './components/MockCheckout/MockCheckout.tsx';
@@ -110,7 +135,8 @@ export { MockCheckout, type MockCheckoutProps } from './components/MockCheckout/
 // Reply cards
 export { ReplyCard, type ReplyCardProps } from './components/ReplyCard/ReplyCard.tsx';
 export { cardView, type CardView } from './components/ReplyCard/cardView.ts';
-export { CARD_CHROME, MONEY_TEMPLATES, type CardChrome } from './components/ReplyCard/chrome.ts';
+export { CARD_CHROME, LINK_CANCELLED_CHROME, MONEY_TEMPLATES, type CardChrome } from './components/ReplyCard/chrome.ts';
+export { LinkCancelledCard, type LinkCancelledCardProps } from './components/ReplyCard/LinkCancelledCard.tsx';
 
 // Conversation
 export { Transcript, type TranscriptProps } from './components/Transcript/Transcript.tsx';

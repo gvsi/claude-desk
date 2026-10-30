@@ -13,6 +13,11 @@ const CHECKPOINT_NAMES = {
 
 const CHECKPOINT_ORDER = Object.keys(CHECKPOINT_NAMES) as readonly Checkpoint[];
 
+/** A checkpoint's name, as the owner reads it: "Action checkpoint". */
+export function checkpointName(checkpoint: Checkpoint): string {
+  return CHECKPOINT_NAMES[checkpoint];
+}
+
 export interface CheckpointMeterProps {
   /** The checkpoint that stopped the attempt. */
   stoppedBy: Checkpoint;

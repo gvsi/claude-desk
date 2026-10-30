@@ -76,7 +76,16 @@ export const Danger: Story = {
       borderTopColor: 'rgba(250, 249, 245, 0.14)',
       borderTopLeftRadius: '12px',
       boxShadow: 'none',
+      // dialog_fits_the_delete_desk_board: padded 24 px, as N-Run2-Settings-DeleteDesk draws it.
+      paddingTop: '24px',
+      paddingLeft: '24px',
     });
+    // 440 px wide, the body 12 px under the title, and the answers at a screen's main size.
+    await expect(dialog.getBoundingClientRect().width).toBe(440);
+    const heading = within(dialog).getByRole('heading', { name: TITLE });
+    const body = dialog.querySelector('.cd-dialog__body')!;
+    await expect(Math.round(body.getBoundingClientRect().top - heading.getBoundingClientRect().bottom)).toBe(12);
+    for (const button of within(dialog).getAllByRole('button')) expectComputed(button, { height: '40px' });
 
     // Danger adds a refused dot beside the title; the buttons stay neutral.
     const title = within(dialog).getByRole('heading', { name: TITLE });

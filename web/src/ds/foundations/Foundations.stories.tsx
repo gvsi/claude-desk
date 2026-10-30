@@ -1,6 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import type { CSSProperties, ReactNode } from 'react';
+import { expect, within } from 'storybook/test';
 
+import { expectComputed } from '../test/expectComputed.ts';
 import tokens from '../tokens.json' with { type: 'json' };
 
 const STEMS: Record<string, string> = {
@@ -38,6 +40,13 @@ const SAMPLES: Record<string, string> = {
   amount: '$20.00',
   figure: '$1,860',
   'figure-small': '14',
+  'article-title': 'Product proposal',
+  'article-body': 'A public, always-on Claude that strangers and their agents can talk to.',
+  'article-body-phone': 'A public, always-on Claude that strangers and their agents can talk to.',
+  'article-heading': 'Rules decide, models advise',
+  'article-heading-phone': 'Rules decide, models advise',
+  'article-quote': 'Claude only proposes; code decides what runs.',
+  'article-caption': 'Every MCP tool is pinned by the hash of its definition.',
   trace: 'prev_hash 9f2c41d07a',
 };
 
@@ -153,15 +162,20 @@ function TypeSheet() {
   return (
     <Sheet
       title="Type"
-      intro="Claude speaks in serif. The interface is sans. Mono appears only inside a full trace."
+      intro="Claude speaks in serif. The interface is sans. The reading pages set their body in serif too. Mono appears only inside a full trace."
     >
       {tokens.type.groups.map((group) => (
         <Group key={group.name} title={group.name} note={tokens.type.families[group.family as keyof typeof tokens.type.families]}>
           <ul style={{ ...list, gap: 'var(--space-20)' }}>
             {group.styles.map((style) => {
               const spec = [
+                // A style set in another family than its group's names its own: "Hanken Grotesk".
+                'family' in style
+                  ? tokens.type.families[style.family as keyof typeof tokens.type.families].split(',')[0]?.replaceAll('"', '')
+                  : null,
                 `${style.fontSize} on ${style.lineHeight}`,
                 `weight ${style.fontWeight}`,
+                'fontStyle' in style ? style.fontStyle : null,
                 'opticalSize' in style ? `optical size ${style.opticalSize}` : null,
                 'letterSpacing' in style ? `tracking ${style.letterSpacing}` : null,
                 'fontVariantNumeric' in style ? 'tabular figures' : null,
@@ -180,6 +194,62 @@ function TypeSheet() {
           </ul>
         </Group>
       ))}
+    </Sheet>
+  );
+}
+
+// The reading page's flow: the title over its summary, then each part of the text a step apart.
+const flow: CSSProperties = { display: 'grid', gap: 'var(--space-24)', margin: 0 };
+const flush: CSSProperties = { margin: 0 };
+
+/** The About this prototype documents' type, set as a reading page sets it, in its text column. */
+function ReadingSheet() {
+  return (
+    <Sheet
+      title="Reading pages"
+      intro="The About this prototype documents read in serif, with sans headings and captions, in a column size-article-measure wide."
+    >
+      <article aria-labelledby="reading-title" style={{ ...flow, maxWidth: 'var(--size-article-measure)' }}>
+        <header style={{ display: 'grid', gap: 'var(--space-16)' }}>
+          <h2 id="reading-title" className="cd-type-article-title" style={flush}>
+            Product proposal
+          </h2>
+          <p className="cd-type-article-body" style={flush}>
+            A public, always-on Claude for a person or small business. Strangers and their agents can talk to it, and it
+            answers, books, quotes and takes payments under the owner’s rules.
+          </p>
+        </header>
+        <h3 className="cd-type-article-heading" style={flush}>
+          Rules decide, models advise
+        </h3>
+        <p className="cd-type-article-body" style={flush}>
+          Every tool call is checked against the owner’s rules before it runs. The rules compile to Cedar policies, and SymCC
+          proves what they allow, so a clever message can’t talk Claude into something the owner never allowed.
+        </p>
+        <figure style={{ ...flow, gap: 'var(--space-8)' }}>
+          <blockquote className="cd-type-article-quote" style={flush}>
+            Claude only proposes; code decides what runs and what gets said.
+          </blockquote>
+          <figcaption className="cd-type-article-caption" style={secondary}>
+            From the design: each MCP tool is pinned by the hash of its definition, and the reply check reads every answer.
+          </figcaption>
+        </figure>
+      </article>
+      <section aria-labelledby="reading-phone" style={{ ...flow, gap: 'var(--space-12)', maxWidth: 'var(--size-article-measure)' }}>
+        <h2 id="reading-phone" className="cd-type-section" style={flush}>
+          On a phone
+        </h2>
+        <p className="cd-type-meta" style={secondary}>
+          Below the reading page’s breakpoint, article-heading-phone and article-body-phone take the headings’ and the
+          body’s places.
+        </p>
+        <h3 className="cd-type-article-heading-phone" style={flush}>
+          Rules decide, models advise
+        </h3>
+        <p className="cd-type-article-body-phone" style={flush}>
+          Every tool call is checked against the owner’s rules before it runs, and nothing runs that they don’t allow.
+        </p>
+      </section>
     </Sheet>
   );
 }
@@ -261,3 +331,44 @@ export const Colors: Story = { render: () => <ColorSheet /> };
 export const Type: Story = { render: () => <TypeSheet /> };
 
 export const Spacing: Story = { render: () => <SpacingSheet /> };
+
+export const Reading: Story = {
+  render: () => <ReadingSheet />,
+  parameters: {
+    canvasNote:
+      'The About this prototype reading pages’ type, in their text column. Their boards (page 9 of the canvas) are not reference boards here; the reading page itself is built with the web app.',
+  },
+  play: async ({ canvas, canvasElement }) => {
+    const serif = /^"Source Serif 4"/;
+    const sans = /^"Hanken Grotesk"/;
+    const article = canvas.getByRole('article', { name: 'Product proposal' });
+    // The text column is the reading measure.
+    expectComputed(article, { maxWidth: '648px' });
+
+    // Serif reading text, sans headings and captions, italic only on the quote.
+    const title = canvas.getByRole('heading', { level: 2, name: 'Product proposal' });
+    expectComputed(title, { fontFamily: serif, fontSize: '72px', lineHeight: '78px', fontWeight: '300', fontStyle: 'normal' });
+    for (const paragraph of article.querySelectorAll<HTMLElement>('.cd-type-article-body')) {
+      expectComputed(paragraph, { fontFamily: serif, fontSize: '18px', lineHeight: '30px', fontWeight: '380', fontStyle: 'normal' });
+    }
+    const heading = within(article).getByRole('heading', { level: 3 });
+    expectComputed(heading, { fontFamily: sans, fontSize: '30px', lineHeight: '36px', fontWeight: '620' });
+    const quote = article.querySelector('blockquote') as HTMLElement;
+    expectComputed(quote, { fontFamily: serif, fontSize: '32px', lineHeight: '42px', fontWeight: '300', fontStyle: 'italic' });
+    const caption = article.querySelector('figcaption') as HTMLElement;
+    expectComputed(caption, { fontFamily: sans, fontSize: '13px', lineHeight: '19px', fontWeight: '380', fontStyle: 'normal' });
+
+    // On a phone the body and headings step down.
+    const phone = canvas.getByRole('region', { name: 'On a phone' });
+    expectComputed(within(phone).getByRole('heading', { level: 3 }), { fontFamily: sans, fontSize: '25px', lineHeight: '31px', fontWeight: '620' });
+    expectComputed(phone.querySelector('.cd-type-article-body-phone') as HTMLElement, {
+      fontFamily: serif,
+      fontSize: '17px',
+      lineHeight: '28px',
+      fontWeight: '380',
+    });
+
+    // Nothing reaches past the page, at any width the story is checked at.
+    await expect(canvasElement.scrollWidth).toBeLessThanOrEqual(canvasElement.clientWidth);
+  },
+};

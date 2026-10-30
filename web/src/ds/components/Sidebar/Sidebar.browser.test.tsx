@@ -6,7 +6,7 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, it } from 'vitest';
 
-import { Sidebar, type NavKey, type SidebarProps } from './Sidebar.tsx';
+import { Sidebar, type SidebarHrefs, type SidebarProps } from './Sidebar.tsx';
 
 declare global {
   // Tells React this test drives its updates inside act().
@@ -15,7 +15,7 @@ declare global {
 
 const HREFS = Object.fromEntries(
   (['today', 'conversations', 'people', 'rules', 'safety', 'share', 'settings'] as const).map((key) => [key, `#${key}`]),
-) as Record<NavKey, string>;
+) as SidebarHrefs;
 
 const PROPS: SidebarProps = {
   business: 'Rivera Plumbing',
@@ -81,4 +81,66 @@ it('about_group_moves_nothing_else', () => {
 
   act(() => roots.forEach((root) => root.unmount()));
   columns.forEach((column) => column.remove());
+});
+
+it('connectors_row_only_with_its_href', () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const columns = [false, true].map(() => {
+    const column = document.createElement('div');
+    column.style.cssText = 'display: flex; width: 264px; height: 982px;';
+    document.body.append(column);
+    return column;
+  });
+  const roots = columns.map((column) => createRoot(column));
+  act(() => {
+    roots[0]?.render(<Sidebar {...PROPS} />);
+    roots[1]?.render(<Sidebar {...PROPS} hrefs={{ ...HREFS, connectors: '#connectors' }} />);
+  });
+
+  const without = columns[0] as HTMLElement;
+  const withConnectors = columns[1] as HTMLElement;
+  const labels = (column: HTMLElement) => [...column.querySelectorAll('.cd-sidebar__nav .cd-sidebar__label')].map((label) => label.textContent);
+  // Without its href there is no Connectors row, and no link without a destination.
+  expect(labels(without)).toEqual(['Today', 'Conversations', 'Customers', 'Rules', 'Safety', 'Share', 'Settings']);
+  expect([...without.querySelectorAll('.cd-sidebar__nav > a')].every((link) => link.getAttribute('href'))).toBe(true);
+  // With it, the eighth row, fifth.
+  expect(labels(withConnectors)).toEqual(['Today', 'Conversations', 'Customers', 'Rules', 'Connectors', 'Safety', 'Share', 'Settings']);
+
+  // Nothing else moves: the top, the rows down to Rules and the pinned foot are where they were,
+  // and the rows after Rules close up, one 38 px row apart as always, with no gap where it was.
+  const boxes = (column: HTMLElement, selector: string) =>
+    [...column.querySelectorAll<HTMLElement>(selector)].map((part) => {
+      const box = part.getBoundingClientRect();
+      const origin = column.getBoundingClientRect();
+      return [box.left - origin.left, box.top - origin.top, box.width, box.height];
+    });
+  const fixed = '.cd-sidebar__brand, .cd-sidebar__business, .cd-sidebar__footer, .cd-sidebar__footer > *';
+  expect(boxes(without, fixed)).toEqual(boxes(withConnectors, fixed));
+  const rowsWithout = boxes(without, '.cd-sidebar__nav > a');
+  const rowsWith = boxes(withConnectors, '.cd-sidebar__nav > a');
+  expect(rowsWithout.slice(0, 4)).toEqual(rowsWith.slice(0, 4));
+  expect(rowsWithout.slice(4)).toEqual(rowsWith.slice(4, 7));
+  const tops = rowsWithout.map((box) => box[1] ?? 0);
+  expect(tops.slice(1).map((top, index) => top - (tops[index] ?? 0))).toEqual([38, 38, 38, 38, 38, 38]);
+
+  act(() => roots.forEach((root) => root.unmount()));
+  columns.forEach((column) => column.remove());
+});
+
+it('only_connectors_may_be_left_out', () => {
+  // Every other page's href is required. One missing anyway, past the types, still draws its row,
+  // so a page never disappears from the nav by accident.
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const column = document.createElement('div');
+  column.style.cssText = 'display: flex; width: 264px; height: 982px;';
+  document.body.append(column);
+  const root = createRoot(column);
+  const { safety: _missing, ...withoutSafety } = HREFS;
+  act(() => root.render(<Sidebar {...PROPS} hrefs={withoutSafety as SidebarHrefs} />));
+
+  const labels = [...column.querySelectorAll('.cd-sidebar__nav .cd-sidebar__label')].map((label) => label.textContent);
+  expect(labels).toEqual(['Today', 'Conversations', 'Customers', 'Rules', 'Safety', 'Share', 'Settings']);
+
+  act(() => root.unmount());
+  column.remove();
 });
