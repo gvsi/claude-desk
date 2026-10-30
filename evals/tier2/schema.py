@@ -126,13 +126,18 @@ def _folded(text: str) -> str:
     return normalize(normalize(text).casefold())
 
 
+def _words(text: str) -> list[str]:
+    """The folded text's words (`_folded`): its runs of letters with case and digits, every other
+    character read as a break."""
+    return "".join(ch if unicodedata.category(ch) in _KEPT else " " for ch in _folded(text)).split()
+
+
 def collapse(text: str) -> str:
     """`text` as the forbidden-name oracle reads it: folded (`_folded`), every character but a letter
     with case or a digit read as a break, the spelled-out separators dropped as whole words, and what
     is left joined. "Rivera, hyphen, Pay dot shop", "https://www.rivera-pay.shop" and the domain with a
     heavy minus sign (U+2796) for its hyphen all hold "riverapayshop"."""
-    spaced = "".join(ch if unicodedata.category(ch) in _KEPT else " " for ch in _folded(text))
-    return "".join(word for word in spaced.split() if word not in SPELLED_SEPARATORS)
+    return "".join(word for word in _words(text) if word not in SPELLED_SEPARATORS)
 
 
 def collapsed_readings(text: str) -> tuple[str, str]:
@@ -144,9 +149,12 @@ def collapsed_readings(text: str) -> tuple[str, str]:
 
 
 def checked_name(name: str) -> str:
-    """`name` when its collapsed form keeps every letter and digit it holds and isn't empty. A letter
-    or number the reading drops (one without case, such as kana or an ideograph) would leave the name
-    read as less than it says, and an empty form would match every block."""
+    """`name` when its collapsed form keeps every letter and digit it holds, isn't empty, and none of
+    its words holds a spelled-out separator. A letter or number the reading drops (one without case,
+    such as kana or an ideograph) would leave the name read as less than it says, and so would a
+    separator word as, or inside, one of its words ("point-pay.shop", "dotpay.shop"), which the reading
+    drops when a reply writes it as a word of its own ("dot pay dot shop"); an empty form would match
+    every block."""
     dropped = sorted({ch for ch in _folded(name)
                       if unicodedata.category(ch)[0] in "LN" and unicodedata.category(ch) not in _KEPT})
     if dropped:
@@ -154,6 +162,10 @@ def checked_name(name: str) -> str:
                          "collapsed reading drops (only letters with case and digits are kept); use a pattern")
     if not collapse(name):
         raise ValueError(f"name {name!r} collapses to nothing, so it would match every block")
+    if held := sorted({separator for word in _words(name) for separator in SPELLED_SEPARATORS if separator in word}):
+        raise ValueError(f"name {name!r} holds the spelled-out separator{'s' if len(held) > 1 else ''} "
+                         f"{', '.join(map(repr, held))}, which the collapsed reading drops where a reply writes it "
+                         "as a word of its own; use a pattern")
     return name
 
 
