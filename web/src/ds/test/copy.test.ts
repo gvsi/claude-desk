@@ -55,6 +55,29 @@ describe('assertCleanCopy', () => {
     expect(check('<p data-copy="user">PLEASE CALL ME</p>')).not.toThrow();
   });
 
+  it('allows_the_reading_pages_acronyms_by_whole_word', () => {
+    // The acronyms the About this prototype documents use, each as they write it.
+    for (const word of ['AP2', 'API', 'SymCC', 'CEO', 'CI', 'MCP', 'URL', 'US']) {
+      expect(check(`<p>About the ${word} here</p>`), word).not.toThrow();
+    }
+    // The words on their own, as a label or a heading would show them.
+    for (const word of ['AP2', 'SymCC', 'APIs']) expect(check(`<span>${word}</span>`), word).not.toThrow();
+    // A plural passes, as "PDFs" does: only the run of capitals is looked up.
+    expect(check('<p>Two APIs, three URLs and the CEOs</p>')).not.toThrow();
+    expect(check('<p>The SymCC proofs, AP2’s mandates and an MCP server</p>')).not.toThrow();
+    // An unlisted run, or a word shouted in capitals, still fails.
+    expect(check('<p>The XYZ plan</p>')).toThrow(/all caps "XYZ"/);
+    expect(check('<p>WARNING: the API is down</p>')).toThrow(/all caps "WARNING" in text/);
+    // AP2 and SymCC pass as whole words, never by their runs: "AP" and "CC" fail on their own or
+    // inside any other word.
+    expect(check('<p>Ask the AP desk</p>')).toThrow(/all caps "AP"/);
+    expect(check('<p>CC the owner</p>')).toThrow(/all caps "CC"/);
+    expect(check('<p>The AP3 draft</p>')).toThrow(/all caps "AP"/);
+    expect(check('<p>A SymCCC run</p>')).toThrow(/all caps "CCC"/);
+    expect(check('<p>The NotSymCC tool</p>')).toThrow(/all caps "CC"/);
+    expect(check('<p>Two AP2s</p>')).toThrow(/all caps "AP"/);
+  });
+
   it('flags_exclamation_outside_user_text', () => {
     expect(check('<p>Done!</p>')).toThrow(/exclamation mark in text: "Done!"/);
     expect(check('<p>¡Listo</p>')).toThrow(/exclamation mark in text/);
