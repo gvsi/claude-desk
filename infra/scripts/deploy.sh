@@ -60,9 +60,16 @@ INFRA=$ROOT/infra
 REGION=us-west-2
 OUT=${DESK_DEPLOY_OUT:-$INFRA/out}
 
+# Unattended: no terminal to retype the account ID or approve a change on, so DESK_DEPLOY_ACCOUNT
+# must name the account.
+unattended=
 if [[ ! -t 0 || ! -t 1 ]]; then
-  echo "deploy: run this in your own terminal: cdk deploy asks for approval there, and you retype the account ID" >&2
-  exit 2
+  if [[ -z ${DESK_DEPLOY_ACCOUNT:-} ]]; then
+    echo "deploy: run this in your own terminal: cdk deploy asks for approval there, and you retype the account ID" >&2
+    echo "deploy: or set DESK_DEPLOY_ACCOUNT=<account ID> to deploy unattended" >&2
+    exit 2
+  fi
+  unattended=1
 fi
 for name in DESK_IMAGE_DIR DESK_IMAGE_FILE DESK_KERNEL_IMAGE; do
   if [[ -n ${!name:-} ]]; then
@@ -116,12 +123,29 @@ if [[ -z $data_only ]]; then
   web_dist=$ROOT/web/dist
 fi
 
-cdk_deploy() {  # cdk_deploy <stack> [cdk options...]: the pinned CLI, its output on the terminal
+# cdk_deploy <stack> [cdk options...]: the pinned CLI, its stack outputs on the terminal (fd 3). At a
+# terminal, cdk asks for approval there before any change that broadens IAM permissions or security
+# group access. Unattended, it first logs those changes with a read-only diff of the same stack and
+# context (stopping if the diff fails), then deploys with --require-approval never.
+cdk_deploy() {
   local stack=$1
   shift
-  (cd "$INFRA" && npx --no-install cdk deploy "$stack" --exclusively --require-approval broadening \
-    --progress events -c "compute=$compute" -c "git_sha=$sha" ${web_dist:+-c} ${web_dist:+"web_dist=$web_dist"} \
-    -c "kernel_image=desk-kernel:$sha" -c "image_dir=$ROOT" -c "image_file=infra/app.Dockerfile" "$@") >&3
+  local options=(--exclusively -c "compute=$compute" -c "git_sha=$sha" ${web_dist:+-c} ${web_dist:+"web_dist=$web_dist"}
+    -c "kernel_image=desk-kernel:$sha" -c "image_dir=$ROOT" -c "image_file=infra/app.Dockerfile" "$@")
+  if [[ -z $unattended ]]; then
+    (cd "$INFRA" && npx --no-install cdk deploy "$stack" --require-approval broadening --progress events \
+      "${options[@]}") >&3
+    return
+  fi
+  echo "deploy: $stack's security-relevant changes (cdk diff --security-only); with no terminal to approve"
+  echo "deploy: them on, $stack is deployed with --require-approval never"
+  if ! (cd "$INFRA" && npx --no-install cdk diff "$stack" --security-only --method template --fail-on never \
+    "${options[@]}"); then
+    echo "deploy: cdk diff $stack failed, so $stack wasn't deployed" >&2
+    return 1
+  fi
+  (cd "$INFRA" && npx --no-install cdk deploy "$stack" --require-approval never --progress events \
+    "${options[@]}") >&3
 }
 
 sha=$(git -C "$ROOT" rev-parse HEAD)

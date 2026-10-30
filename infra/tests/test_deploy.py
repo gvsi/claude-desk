@@ -456,11 +456,51 @@ def test_needs_the_passcode_exported(deploy):
     assert run.calls == []
 
 
-def test_needs_a_terminal(deploy):
+def test_unattended_without_the_deploy_account_is_refused(deploy):
+    """Without a terminal nobody can retype the account ID, so DESK_DEPLOY_ACCOUNT must name it."""
     run = deploy(terminal=False)
     assert run.status == 2
-    assert "terminal" in run.output
+    assert "run this in your own terminal: cdk deploy asks for approval there, and you retype the account ID" \
+        in run.output
+    assert "DESK_DEPLOY_ACCOUNT" in run.output
     assert run.calls == []
+
+
+def test_unattended_with_the_deploy_account_deploys_to_the_end(deploy):
+    run = deploy(terminal=False, DESK_DEPLOY_ACCOUNT=ACCOUNT)
+    assert run.status == 0, run.output
+    assert len(run.cdk("DeskData")) == 1 and len(run.cdk("DeskApp")) == 2
+    assert _smoke_ran(run)
+    assert f"deploy: done. {_head()} serves at {DISTRIBUTION_URL}" in run.log
+
+
+def test_unattended_deploys_log_each_security_diff_then_deploy_without_a_prompt(deploy):
+    """With no terminal for cdk's approval prompt, each `cdk deploy` is preceded by a read-only diff
+    of that stack's broadened security changes, given the same stack and context, which the log
+    keeps; the deploy then runs with --require-approval never."""
+    run = deploy(terminal=False, DESK_DEPLOY_ACCOUNT=ACCOUNT)
+    assert run.status == 0, run.output
+    cdk_steps = [step for step in run.steps() if step.startswith("cdk ")]
+    assert cdk_steps == ["cdk diff DeskData", "cdk deploy DeskData", "cdk diff DeskApp", "cdk deploy DeskApp",
+                         "cdk diff DeskApp", "cdk deploy DeskApp"]
+    calls = [call for call in run.calls if call["tool"] == "npx"]
+    for diff, deployed in zip(calls[::2], calls[1::2]):
+        diff_argv, deploy_argv = diff["argv"], deployed["argv"]
+        assert {"--security-only", "--exclusively"} <= set(diff_argv)
+        assert diff_argv[diff_argv.index("--method") + 1] == "template"      # read-only: no change set
+        assert diff_argv[diff_argv.index("--fail-on") + 1] == "never"        # a diff isn't an error
+        assert diff["cwd"] == str(INFRA) and _context(diff) == _context(deployed)
+        assert deploy_argv[deploy_argv.index("--require-approval") + 1] == "never"
+    for stack in ("DeskData", "DeskApp"):
+        assert f"stub: cdk security diff for {stack}" in run.log
+    assert "--require-approval never" in run.log                             # said where it applies
+
+
+def test_a_failed_security_diff_stops_before_that_deploy(deploy):
+    run = deploy(terminal=False, DESK_DEPLOY_ACCOUNT=ACCOUNT, FAIL_DIFF="1")
+    assert run.status == 1
+    assert run.cdk("DeskData", "diff") and not run.cdk("DeskData")
+    assert "cdk diff DeskData failed" in run.log
 
 
 def test_data_only_deploys_desk_data_behind_the_account_check(deploy):
