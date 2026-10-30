@@ -1284,8 +1284,9 @@ async def test_a_link_beside_a_quote_card_is_shown_by_the_owners_decision(app, c
     """The owner's decision of 2026-10-30: Claude may write links and email addresses in its own
     replies, and its prompt keeps them to the business's own. The prose scan finds nothing in one,
     so the reply reaches the soft-promise check beside the quote card's text and, with no promise
-    found beyond the card, is shown with it; a look-alike link rests on the prompt and that check.
-    The ledger still holds no prose, so neither the link nor the address is on it."""
+    found beyond the card, is shown with it; a look-alike link rests on the prompt, since that
+    check looks only for promises the cards don't back, not at links. The ledger still holds no
+    prose, so neither the link nor the address is on it."""
     copy, visitor = await visitor_of(app, client)
     quote = await own_quote(client, visitor)
     reviewer.soft_answer = NOTHING_BEYOND_THE_CARDS
@@ -1302,7 +1303,7 @@ async def test_a_link_beside_a_quote_card_is_shown_by_the_owners_decision(app, c
 
 # The top-level domains the link scan read as a bare domain, before the owner's decision of
 # 2026-10-30 removed it.
-LINK_TLDS = ["com", "net", "org", "io", "co", "us", "app", "dev", "info", "biz", "mx", "es", "example"]
+FORMER_LINK_TLDS = ["com", "net", "org", "io", "co", "us", "app", "dev", "info", "biz", "mx", "es", "example"]
 
 
 @pytest.mark.parametrize("prose", [
@@ -1328,7 +1329,7 @@ LINK_TLDS = ["com", "net", "org", "io", "co", "us", "app", "dev", "info", "biz",
     "Llame a tel:riverapl desde su teléfono.",
     "Escriba a maria.rivera@riverapl.example y se lo confirmamos.",
     "Hola a tod@s, gracias por escribir.",                              # handed off before the decision
-    *(f"Find us at riverapl.{tld} any time." for tld in LINK_TLDS),
+    *(f"Find us at riverapl.{tld} any time." for tld in FORMER_LINK_TLDS),
     # an ellipsis, dots, a dash, a hyphen or an underscore glued to the front of a domain, or an
     # underscore after it (NFKC writes "…" as "...", and every reading writes a dash as "-")
     "Pay for it at…rivera-pay.example/checkout",
@@ -1361,7 +1362,7 @@ def test_links_and_email_addresses_pass_the_scan_by_the_owners_decision(prose):
     before a path, a bare domain and an "@" between word characters, in English and Spanish and
     whatever dots, dashes or underscores are glued to them, are no violation of the prose scan.
     Each case was blocked as a `link` before the decision; a look-alike link now rests on the
-    prompt and the soft-promise check."""
+    prompt, since the soft-promise check looks only for promises the cards don't back."""
     assert reply_check.scan_prose(prose) == []
 
 
@@ -1384,6 +1385,7 @@ def test_a_link_lets_nothing_else_through_the_scan(prose, found):
     assert [(v.kind, v.rule_id, v.span) for v in reply_check.scan_prose(prose)] == found
 
 
+# These had to pass the link scan, which the owner's decision of 2026-10-30 removed.
 @pytest.mark.parametrize("prose", [
     "Maria can look at a few options, e.g. a new valve.",
     "Turn off the main valve, i.e. the one under the sink.",
@@ -1404,7 +1406,7 @@ def test_a_link_lets_nothing_else_through_the_scan(prose, found):
     "Maria arregla desagües—y calentadores…y lavabos.",
     "Cierre la llave —p.ej. la de paso.",
 ])
-def test_ordinary_dots_and_signs_are_no_link(prose):
+def test_ordinary_dots_and_signs_pass_the_scan(prose):
     assert reply_check.scan_prose(prose) == []
 
 
@@ -1443,8 +1445,10 @@ def test_a_long_draft_of_dotted_runs_passes_the_scan_in_one_pass():
     assert found == []
 
 
-def test_a_m_and_p_m_are_no_link():
-    """"a.m." and "p.m." are time words, never a domain: each is the date word alone."""
+# This had to pass the link scan, which the owner's decision of 2026-10-30 removed.
+def test_a_m_and_p_m_are_only_date_words():
+    """"a.m." and "p.m." are time words: each is the date word alone, and the slash between them
+    adds nothing."""
     found = reply_check.scan_prose("Maria takes calls in the a.m./p.m. hours.")
     assert [(v.rule_id, v.span) for v in found] == [("lex.en.date", "a.m."), ("lex.en.date", "p.m.")]
 
