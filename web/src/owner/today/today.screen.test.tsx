@@ -962,6 +962,38 @@ describe("Today's Demo inbox", () => {
     await expect.element(region(screen, 'Needs you')).toBeVisible();
   });
 
+  it('inbox_read_that_fails_while_open_says_so_in_the_sheet', async () => {
+    // The page behind an open sheet is out of reach, so a read that fails while it is open says so
+    // inside it, under its subtitle and above the entries, with its own Try again.
+    const { screen } = await renderRoute(TODAY, { pollScale: 100 });
+    const open = inboxButton(screen);
+    await expect.element(open).toBeVisible();
+    const read = await mockStore.dispatch('ownerInbox');
+    if ('network' in read || read.status !== 200) throw new Error('the mock reads the Demo inbox');
+    // The read as it opens fails, and so does its one retry.
+    mockStore.inject({ route: 'ownerInbox', status: 500, times: 2 });
+    await open.click();
+    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
+    const line = sheet.getByText(`Couldn't open your Demo inbox. ${UNAVAILABLE}`, { exact: true });
+    await expect.element(line, { timeout: 4_000 }).toBeVisible();
+    const subtitle = sheet.getByText('What Claude would have sent you by text or email. Nothing is really sent.').element();
+    const entries = sheet.getByRole('list').element();
+    expect(subtitle.compareDocumentPosition(line.element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(line.element().compareDocumentPosition(entries) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await expectScreenBasics(screen.container, { owner: true });
+
+    // Its Try again is busy while it reads; once a read works the line goes and the sheet stays open.
+    mockStore.inject({ route: 'ownerInbox', status: 200, body: read.body, delayMs: 400 });
+    const again = sheet.getByRole('button', { name: 'Try again', exact: true });
+    await again.click();
+    await expect.element(again).toHaveAttribute('aria-busy', 'true');
+    await expect.element(line).not.toBeInTheDocument();
+    await expect.element(sheet).toBeVisible();
+    await sheet.getByRole('button', { name: 'Close' }).click();
+    await expect.element(sheet).not.toBeInTheDocument();
+    expect(screen.getByText(`Couldn't open your Demo inbox. ${UNAVAILABLE}`, { exact: true }).elements()).toHaveLength(0);
+  });
+
   it('request_link_lands_on_the_card_once_needs_you_reads', async () => {
     // Opened fresh (a reload, or the link from elsewhere), the page lands on the held request once
     // Needs you has read, here slowly, at the phone's size where the card starts below the fold.

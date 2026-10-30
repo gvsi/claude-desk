@@ -10,7 +10,8 @@
  * the sheet opens and every few seconds while it is open, and not while it is closed. While that
  * first read is out, the button's place says the inbox is opening; if it fails, the inbox's title
  * says it couldn't be opened, with "Try again". A later read that fails says the same under the
- * sheet's button, so the entries read before never pass for current.
+ * sheet's button, and inside the sheet while it is open, where the page behind is out of reach, so
+ * the entries read before never pass for current.
  */
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useId, useState } from 'react';
@@ -89,10 +90,18 @@ export function OwnerInbox({ deskId, timezone, onOpenChange }: OwnerInboxProps) 
   let content;
   if (inbox.data !== undefined) {
     // Every entry here is read whole, so nothing waits to open; a retry reads them all again. The
-    // sheet stays first, so a failed read's line coming or going never closes it.
+    // sheet stays first, so a failed read's line coming or going never closes it. The line shows
+    // inside the open sheet, and here under its button for when it is closed.
     content = (
       <>
-        <DemoInboxSheet viewer="owner" items={items} language="en" onRetry={() => void refetch()} onOpenChange={openChanged} />
+        <DemoInboxSheet
+          viewer="owner"
+          items={items}
+          language="en"
+          onRetry={() => void refetch()}
+          notice={failed}
+          onOpenChange={openChanged}
+        />
         {failed}
       </>
     );
