@@ -3,10 +3,11 @@
  * opens from a payment link card, with the AI disclosure and the test-payment label in every
  * state, the amount from the kernel's cents, one payment at most, and the chat told what happened.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { RenderResult } from 'vitest-browser-react';
 
-import type { VisitorEvent } from '../../api/views.ts';
+import type { PaymentLinkOut, VisitorEvent } from '../../api/views.ts';
+import { rivera } from '../../ds/fixtures/index.ts';
 import { LINK_CANCELLED, type Language } from '../../mocks/script.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
@@ -104,6 +105,46 @@ describe('mock checkout', () => {
     await expect.element(odd.screen.getByText('$40.50', { exact: true })).toBeVisible();
     await expect.element(odd.screen.getByRole('button', { name: 'Pagar $40.50' })).toBeVisible();
     expect(requests('paymentLink')).toHaveLength(2);
+  });
+
+  it('checkout_names_the_business_and_customer', async () => {
+    // A link from Dana's chat once she confirmed it's her: the business at the card's top, and her
+    // name on the test card as the kernel gives it, read-only.
+    const { world } = mockStore;
+    const desk = world.desk(RIVERA.deskId);
+    if (!desk) throw new Error("the copy has Rivera's main Desk");
+    const danasChat = world.addSession(desk);
+    world.verify(danasChat, rivera.people.dana);
+    const named = world.issueLink(danasChat, { title: 'Service call deposit', amountCents: 2000, language: 'en' });
+    const { screen } = await renderRoute(`/pay/${named}`);
+    const merchant = screen.getByText('Rivera Plumbing', { exact: true });
+    await expect.element(merchant).toBeVisible();
+    expect(merchant.element().closest('.cd-checkout__top')).not.toBeNull();
+    await expect.element(screen.getByRole('group', { name: 'Name on card' }).getByText('Dana W.', { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('textbox', { name: 'Name on card' })).not.toBeInTheDocument();
+    // The business's name is the kernel's, never one the page makes up: a view without it isn't one
+    // the page takes.
+    // @ts-expect-error `business_name` is required on the checkout's view of a link
+    const unnamed: PaymentLinkOut = { title: 'Service call deposit', amount_cents: 2000, state: 'issued', language: 'en' };
+    void unnamed;
+
+    // A link from a chat with no one on record: an empty name field to fill in, and what is typed
+    // there never leaves the page, not with the payment and not in any other request.
+    const fetches = vi.spyOn(window, 'fetch');
+    const open = await renderRoute(`/pay/${issueLink()}`);
+    const field = open.screen.getByRole('textbox', { name: 'Name on card' });
+    await expect.element(field).toHaveValue('');
+    await field.fill('Sam Ortiz');
+    await expect.element(field).toHaveValue('Sam Ortiz');
+    await open.screen.getByRole('button', { name: 'Pay $20.00' }).click();
+    await expect.element(open.screen.getByText('Paid. Go back to the chat to see it there.')).toBeVisible();
+    const paid = requests('completePayment');
+    expect(paid).toHaveLength(1);
+    expect(JSON.stringify(paid[0]?.body ?? null)).not.toMatch(/name|Sam Ortiz/i);
+    for (const request of mockStore.requests) expect(JSON.stringify(request)).not.toContain('Sam Ortiz');
+    expect(fetches).toHaveBeenCalled();
+    for (const call of fetches.mock.calls) expect(JSON.stringify(call)).not.toContain('Sam Ortiz');
+    fetches.mockRestore();
   });
 
   it('checkout_pays_once', async () => {

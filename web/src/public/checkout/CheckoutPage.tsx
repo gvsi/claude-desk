@@ -107,7 +107,7 @@ export function CheckoutPage() {
     return (
       <main className="cd-checkout-page">
         <MockCheckout
-          merchant={link.business_name ?? ''}
+          merchant={link.business_name}
           title={link.title}
           amount={formatMoneyExact(link.amount_cents)}
           state={link.state}

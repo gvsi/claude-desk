@@ -485,15 +485,17 @@ export type CancelReason = 'rules_changed';
 
 /**
  * `GET /api/pay/{token}`: the kernel's `PaymentLinkView` with the fields the kernel payments,
- * agents and setup plan (plan 01c) adds to it, typed here, optional, until the generated contracts
- * have them. `cancel_reason` is `rules_changed` for a link a rule change cancelled, else null;
- * `business_name` is the Desk's business; `customer_name` is the kernel's first name and last
- * initial for a link from a verified session ("Dana W."), present only while the link is open.
+ * agents and setup plan (plan 01c) adds to it, typed here until the generated contracts have them.
+ * `business_name` is the Desk's business, required: the checkout names the business only as the
+ * kernel does, so it waits for plan 01c against the live API and is built on the mock until then.
+ * `cancel_reason` is `rules_changed` for a link a rule change cancelled, else null; `customer_name`
+ * is the kernel's first name and last initial for a link from a verified session ("Dana W."),
+ * present only while the link is open. Both are optional until the regenerated types have them.
  * Names are someone's own words and render as text.
  */
 export interface PaymentLinkOut extends PaymentLinkView {
+  business_name: string;
   cancel_reason?: CancelReason | null;
-  business_name?: string;
   customer_name?: string | null;
 }
 
