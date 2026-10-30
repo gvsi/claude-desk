@@ -92,7 +92,7 @@ async def test_http_error_raises_status_error(fake: FakeAnthropic, client: Async
 
 
 async def test_sleep_delays_the_reply(fake: FakeAnthropic, client: AsyncAnthropic):
-    passing = {"promises_beyond_cards": False, "denies_being_ai": False}
+    passing = {"prose_states_terms": False, "denies_being_ai": False}
     fake.script("claude-haiku-5-5", Sleep(0.4, Json(passing)), Sleep(0.4, Text("Late anyway")), Sleep(2, Json(passing)))
 
     started = time.monotonic()
@@ -155,7 +155,7 @@ async def test_check_reports_scripted_replies_left_unused(fake: FakeAnthropic, c
 
 async def test_calls_are_recorded_by_model(fake: FakeAnthropic, client: AsyncAnthropic):
     fake.default("claude-sonnet-5-5", Json(REVIEW_PASS))
-    fake.default("claude-haiku-5-5", Json({"promises_beyond_cards": False, "denies_being_ai": False}))
+    fake.default("claude-haiku-5-5", Json({"prose_states_terms": False, "denies_being_ai": False}))
     for model, text in [("claude-sonnet-5-5", "one"), ("claude-haiku-5-5", "two"), ("claude-sonnet-5-5", "three")]:
         await client.messages.create(model=model, max_tokens=64, messages=[{"role": "user", "content": text}])
 
@@ -183,8 +183,8 @@ REVIEW_SCHEMA = {
 SOFT_PROMISE_SCHEMA = {
     "title": "SoftPromiseVerdict",
     "type": "object",
-    "properties": {"promises_beyond_cards": {"type": "boolean"}, "denies_being_ai": {"type": "boolean"}},
-    "required": ["promises_beyond_cards", "denies_being_ai"],
+    "properties": {"prose_states_terms": {"type": "boolean"}, "denies_being_ai": {"type": "boolean"}},
+    "required": ["prose_states_terms", "denies_being_ai"],
     "additionalProperties": False,
 }
 
@@ -192,7 +192,7 @@ SOFT_PROMISE_SCHEMA = {
 async def test_reviewer_and_soft_promise_request_shapes_are_accepted(fake: FakeAnthropic, client: AsyncAnthropic):
     """The kernel's two checks, called as Plan 01a calls them, and the API's betas and fallbacks."""
     fake.default("claude-sonnet-5-5", Json(REVIEW_PASS))
-    fake.default("claude-haiku-5-5", Json({"promises_beyond_cards": False, "denies_being_ai": False}))
+    fake.default("claude-haiku-5-5", Json({"prose_states_terms": False, "denies_being_ai": False}))
     review = {
         "model": "claude-sonnet-5-5", "max_tokens": 2048, "system": "You review one proposed action.",
         "messages": [{"role": "user", "content": '{"action": {"tool": "native.quote"}}'}],
@@ -213,7 +213,7 @@ async def test_reviewer_and_soft_promise_request_shapes_are_accepted(fake: FakeA
     )
 
     assert json.loads(reviewed.content[0].text)["recommendation"] == "allow"
-    assert json.loads(verdict.content[0].text) == {"promises_beyond_cards": False, "denies_being_ai": False}
+    assert json.loads(verdict.content[0].text) == {"prose_states_terms": False, "denies_being_ai": False}
     assert beta.model == "claude-sonnet-5-5"
     assert fake.calls("claude-sonnet-5-5") == [review, {**review, "fallbacks": [{"model": "claude-opus-5-5"}]}]
     assert fake.calls("claude-haiku-5-5") == [soft_promise]
@@ -272,8 +272,8 @@ async def test_scripts_are_matched_by_schema(fake: FakeAnthropic, client: AsyncA
     def structured(schema: dict) -> dict:
         return {"output_config": {"effort": "low", "format": {"type": "json_schema", "schema": schema}}}
 
-    passing = {"promises_beyond_cards": False, "denies_being_ai": False}
-    flagged = {"promises_beyond_cards": True, "denies_being_ai": False}
+    passing = {"prose_states_terms": False, "denies_being_ai": False}
+    flagged = {"prose_states_terms": True, "denies_being_ai": False}
     fake.default("claude-haiku-5-5", Json(passing))                                # the model's schema-less script
     fake.script("claude-haiku-5-5", Json(flagged), schema="SoftPromiseVerdict")   # then its script for one schema
     fake.script("claude-sonnet-5-5", Text("Reviewed"), repeat_last=True, schema="Review")

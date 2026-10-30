@@ -1,0 +1,118 @@
+# English words free prose may not use: amounts, percentages, dates, promises and bookings reach a
+# visitor only in cards rendered from the business's records. One `<category>\t<regex>` per line,
+# matched case-insensitively as whole words on the prose with accents and other marks dropped, each
+# run of whitespace read as one space, every dash and hyphen as "-" ("next‐week" with U+2010 is
+# "next-week") and every apostrophe as "’" ("oʼclock" is "o’clock"). Categories: number, money,
+# percent and date (number_in_prose), and promise and booking (promise_word). A booking claim
+# with a condition straight before it ("once you're booked") passes (`BOOKING_CONDITION` in
+# reply_check.py). Both lexicons run on every draft, whatever its language.
+
+# Spelled-out numbers. A bare "one" counts only next to a unit or another number word, so "one
+# moment" passes.
+number	two|three|four|five|six|seven|eight|nine|ten|eleven|twelve
+number	(?:thir|four|fif|six|seven|eigh|nine)teen
+number	(?:twen|thir|for|four|fif|six|seven|eigh|nine)ty
+number	hundreds?|thousands?|millions?|billions?|dozens?|half|halves
+number	zeros?|zeroes
+# A quarter is an amount, a fraction and a time ("a quarter past"), blocked whichever it is.
+number	quarters?
+number	thirds?
+# Ordinals from the fourth on, which are fractions ("a fifth off") and days ("on the twelfth").
+# "first" and "second" pass ("first, let me check", "one second").
+number	(?:four|fif|six|seven|eigh|nin|ten|eleven|twelf)ths?
+number	(?:thir|four|fif|six|seven|eigh|nine)teenths?|(?:twen|thir)tieths?
+number	one(?:[\s-]+and)?[\s-]+(?:hundreds?|thousands?|millions?|billions?|dozens?|half|dollars?|bucks?|cents?|euros?|pesos?|usd|per[\s-]?cent|percent)
+
+# Money. "grand" is a thousand dollars ("a couple grand"), and is blocked in every sense ("Grand
+# Avenue" too).
+money	dollars?|bucks?|cents?|usd|eur|euros?|pesos?|mxn
+money	grand
+
+# Percentages
+percent	percent(?:age)?s?|per[\s-]?cent|pct
+
+# Days, months and times. "May" counts only capitalized after a word in the same sentence or after
+# in, on, by, until, till, next, this, early, late, mid or last, so the modal "may" passes. "Same
+# day" is a date too ("same-day", "same day"), but not across a sentence break ("the same. Day").
+date	mondays?|tuesdays?|wednesdays?|thursdays?|fridays?|saturdays?|sundays?
+date	january|february|march|april|june|july|august|september|october|november|december
+date	(?:(?<=[^\W\d_] )|(?<=[^\W\d_], )|(?:in|on|by|until|till|next|this|early|late|mid|last)[\s-]+)(?-i:May)
+date	today|tonight|tomorrow|yesterday|weekends?|noon|midnight|o['’]?clock
+date	(?:next|this|last)[\s-]+(?:week|month|year)|this[\s-]+(?:morning|afternoon|evening)
+date	[ap]\.\s?m\.?|pm
+date	same[\s-]{0,3}day
+# A time soon: "in" or "within" and up to three words before minutes or hours ("in an hour",
+# "in a couple of hours", "within the hour").
+date	(?:in|within)[\s-]+(?:[^\W\d_]+[\s-]+){0,3}(?:minutes?|mins?|hours?|hrs?)
+date	right[\s-]+away
+# "first thing in the morning" wherever it stands, and "first thing" as a time, with no
+# determiner before it ("Maria can come first thing"), so advice passes ("the first thing to check").
+date	first[\s-]+thing[\s-]+in[\s-]+the[\s-]+morning|(?<!the )(?<!a )(?<!one )(?<!your )(?<!my )(?<!our )(?<!his )(?<!her )(?<!their )first[\s-]+thing
+
+# Promises only the owner's rules or a card can make. "free" passes only in "feel free" and in
+# "free to" after "you're", "you are", "you'll be" or "you will be" ("you're free to ask"), where
+# it can't be a price. Anywhere else "free to" may state one: "free to everyone", "free to all
+# customers", "inspections are free to members". So does "free to" before a quantifier ("most"),
+# determiner ("these"), pronoun, a word that starts an audience ("new", "first-time") or an audience,
+# whatever comes before it: "as a member you are free to all classes", "you're free to new members".
+# A verb after "you're free to" passes: "you're free to choose any day".
+promise	guarant(?:ee|ees|eed|eeing|y)|promis(?:e|es|ed|ing)
+promise	(?<!feel )free(?! to\b)
+promise	(?<!feel )(?<!you['’]re )(?<!you are )(?<!you['’]ll be )(?<!you will be )free(?= to\b)
+promise	free(?=[\s-]+to[\s-]+(?:all|any(?:one|body)?|every(?:one|body)?|each|both|some|most|several|many|no|unlimited)\b)
+promise	free(?=[\s-]+to[\s-]+(?:the|an?|this|that|these|those|our|your|my|his|her|its|their|you|them)\b)
+promise	free(?=[\s-]+to[\s-]+(?:new|existing|first[\s-]?time|current|returning|regular|local)\b)
+promise	free(?=[\s-]+to[\s-]+(?:members?|customers?|clients?|guests?|patrons?|subscribers?|visitors?|locals|residents?)\b)
+promise	free(?=[\s-]+to[\s-]+(?:students?|seniors?|kids|children|famil(?:y|ies)|patients?)\b)
+promise	discount(?:s|ed|ing)?|refund(?:s|ed|ing|able)?|waiv(?:e|es|ed|er|ing)|complimentary
+promise	no[\s-]+charge|on[\s-]+the[\s-]+house|warrant(?:y|ies)|money[\s-]+back
+promise	(?:at[\s-]+)?no[\s-]+(?:extra[\s-]+|additional[\s-]+)?cost
+# "on us" is a price of nothing ("it's on us"), but not after "count", "rely" or "depend"
+# ("you can count on us").
+promise	(?<!count )(?<!counts )(?<!counted )(?<!counting )(?<!rely )(?<!relies )(?<!relied )(?<!relying )(?<!depend )(?<!depends )(?<!depended )(?<!depending )on[\s-]+us
+promise	no[\s-]+(?:[^\W\d_]+[\s-]+){0,2}fees?
+
+# Booking confirmations, which only a booking card makes, written from a claim's parts rather than
+# sample phrasings. A claim is a booking noun (booking, appointment, visit, reservation, slot,
+# spot) or a subject, a form of "be" ("is", "are", "was", "were", "has been", "have been",
+# "'s", "'re", "'s been", with an adverb before "been": "has already been"), up to two adverbs
+# (all, now, already, just, also, officially, successfully, finally), and a participle (booked,
+# confirmed, scheduled, reserved, set): "your reservation is confirmed", "the spot's been set",
+# "your appointment has been successfully booked". The noun takes a determiner, a possessive
+# ("Ana's visit") or nothing ("Reservation's confirmed."), with up to three words between the
+# determiner and the noun ("your water heater visit"), so a condition before the whole claim is
+# seen ("once your next visit is confirmed"). None of those words is a condition, a preposition or
+# a conjunction standing alone, so a condition among them keeps its claim ("the day after your
+# visit is booked") and a phrase is no part of the noun ("the cost of visits is set"), while a
+# hyphenated one is ("your drop-in visit"). With no determiner, no word comes straight before the
+# noun, so "most visits are booked ahead" passes. Anything of yours booked, scheduled or reserved
+# is a claim too, up to three words after "your" but not past a condition ("your appointment with
+# Maria is booked", not "your reminder after it is booked").
+booking	(?:(?:your|the|this|that|my|our|[^\W\d_]+['’]s)[\s-]+(?:(?:(?<=-)|(?!(?:once|whenever|when|[il]f|after|before|unt[il]l|t[il]ll|unless|as|of|for|with|to|at|on|in|from|about|by|and|or|but)\s))[^\W\d_]+[\s-]+){0,3}|(?<![^\W_] ))(?:booking|appointment|visit|reservation|slot|spot)s?(?:['’]s(?:[\s-]+(?:(?:all|now|already|just|also|officially|successfully|finally)[\s-]+)?been)?|['’]re|[\s-]+(?:is|are|was|were|ha(?:s|ve)[\s-]+(?:(?:all|now|already|just|also|officially|successfully|finally)[\s-]+)?been))[\s-]+(?:(?:all|now|already|just|also|officially|successfully|finally)[\s-]+){0,2}(?:booked|confirmed|scheduled|reserved|set)
+booking	your(?:[\s-]+(?:(?<=-)|(?!(?:once|whenever|when|[il]f|after|before|unt[il]l|t[il]ll|unless|as)\s))[^\W\d_]+){1,3}(?:['’]s(?:[\s-]+(?:(?:all|now|already|just|also|officially|successfully|finally)[\s-]+)?been)?|['’]re|[\s-]+(?:is|are|was|were|ha(?:s|ve)[\s-]+(?:(?:all|now|already|just|also|officially|successfully|finally)[\s-]+)?been))[\s-]+(?:(?:all|now|already|just|also|officially|successfully|finally)[\s-]+){0,2}(?:booked|scheduled|reserved)
+# The subjects are you, it, that and everything ("you were booked", "it's all booked",
+# "everything's been reserved"), and "we have you" ("we've got you booked", "I have you down for
+# that time"), with an adverb before "have" or "got" too ("we already have you booked", "we've
+# already got you booked"); "I" may be an l, as the capital-I reading writes it.
+booking	you(?:['’]?re|[\s-]+(?:are|were)|(?:['’]ve|[\s-]+have)[\s-]+(?:(?:all|now|already|just|also|officially|successfully|finally)[\s-]+)?been)[\s-]+(?:(?:all|now|already|just|also|officially|successfully|finally)[\s-]+){0,2}(?:booked|confirmed|scheduled|reserved|set)
+booking	(?:it|that|everything)(?:['’]s(?:[\s-]+(?:(?:all|now|already|just|also|officially|successfully|finally)[\s-]+)?been)?|[\s-]+(?:is|was|has[\s-]+(?:(?:all|now|already|just|also|officially|successfully|finally)[\s-]+)?been))[\s-]+(?:(?:all|now|already|just|also|officially|successfully|finally)[\s-]+){0,2}(?:booked|confirmed|scheduled|reserved|set)
+booking	(?:[il]|we)(?:[\s-]+(?:all|now|already|just|also|officially|successfully|finally))?(?:(?:['’]ve|[\s-]+have)(?:[\s-]+(?:all|now|already|just|also|officially|successfully|finally))?(?:[\s-]+got)?|[\s-]+got)[\s-]+you[\s-]+(?:(?:all|now|already|just|also|officially|successfully|finally)[\s-]+){0,2}(?:booked|confirmed|scheduled|reserved|set|down)
+# The verb with an object claims it as well: "I've booked you", "we reserved it", "she's confirmed
+# your reservation", "I've already reserved a time slot", and with no subject the line names
+# ("Booked you in.", "Maria booked you", "Maria booked your drain cleaning visit"), but "you" not
+# before "you're" or "it's" ("Maria confirmed you're in our area", "I've confirmed it's covered"),
+# where the object starts a clause of its own, and a booking noun not after "you", "who" or a
+# negation, where the booking is the visitor's own or none ("Have you booked your appointment
+# yet?", "Customers who booked a visit got a reminder.", "We haven't booked your visit yet.").
+booking	(?:[il]|we|she|he|they)(?:['’]ve|['’]s|[\s-]+ha(?:ve|s))?(?:[\s-]+(?:now|already|just|also|officially|successfully|finally))?[\s-]+(?:booked|scheduled|confirmed|reserved)[\s-]+(?:you|it(?!['’][^\W\d_])|(?:your|the|a)[\s-]+(?:(?:(?<=-)|(?!(?:once|whenever|when|[il]f|after|before|unt[il]l|t[il]ll|unless|as|of|for|with|to|at|on|in|from|about|by|and|or|but)\s))[^\W\d_]+[\s-]+){0,3}(?:booking|appointment|visit|reservation|slot|spot)s?)
+booking	(?:booked|scheduled|confirmed|reserved)[\s-]+you(?!['’][^\W\d_])
+booking	(?<!you )(?<!you['’]ve )(?<!you have )(?<!you already )(?<!you['’]ve already )(?<!you ever )(?<!you['’]ve ever )(?<!who )(?<!who['’]ve )(?<!n['’]t )(?<!not )(?<!never )(?:booked|scheduled|confirmed|reserved)[\s-]+(?:your|the|a)[\s-]+(?:(?:(?<=-)|(?!(?:once|whenever|when|[il]f|after|before|unt[il]l|t[il]ll|unless|as|of|for|with|to|at|on|in|from|about|by|and|or|but)\s))[^\W\d_]+[\s-]+){0,3}(?:booking|appointment|visit|reservation|slot|spot)s?
+# The headline, with the noun first and a blank or a colon before the participle ("Booking
+# confirmed.", "Visit: scheduled."), where no word comes straight before it, so "is your booking
+# confirmed?" passes; after a determiner, with a colon or a dash ("Your booking: confirmed.",
+# "Your appointment — confirmed."); or with "all" first ("All booked."), but not before a booking
+# noun ("all scheduled visits include a call ahead"), and not before "set", which says something
+# is done ("All set, I've passed your message on.").
+booking	(?<![^\W_] )(?:booking|appointment|visit|reservation|slot|spot)s?(?:[\s-]+|[\s-]*:[\s-]*)(?:(?:all|now|already|just|also|officially|successfully|finally)[\s-]+){0,2}(?:booked|confirmed|scheduled|reserved|set)
+booking	(?:your|the|this|that|my|our|[^\W\d_]+['’]s)[\s-]+(?:(?:(?<=-)|(?!(?:once|whenever|when|[il]f|after|before|unt[il]l|t[il]ll|unless|as|of|for|with|to|at|on|in|from|about|by|and|or|but)\s))[^\W\d_]+[\s-]+){0,3}(?:booking|appointment|visit|reservation|slot|spot)s?[\s-]*[:-][\s-]*(?:(?:all|now|already|just|also|officially|successfully|finally)[\s-]+){0,2}(?:booked|confirmed|scheduled|reserved|set)
+booking	(?<![^\W_] )all[\s-]+(?:booked|confirmed|scheduled|reserved)(?![\s-]+(?:[^\W\d_]+[\s-]+)?(?:booking|appointment|visit|reservation|slot|spot)s?(?!\w))

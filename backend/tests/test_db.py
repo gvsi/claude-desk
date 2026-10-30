@@ -24,6 +24,8 @@ from sqlalchemy.dialects.postgresql import REGCLASS
 from sqlalchemy.exc import DBAPIError, IntegrityError, StatementError
 from sqlalchemy.orm import DeclarativeBase, Session, aliased, column_property, defer, with_expression
 from sqlalchemy.pool import NullPool
+from sqlalchemy.sql.elements import quoted_name
+from sqlalchemy.sql.functions import Function
 
 import desk.db
 from desk.contracts import ActorKind, Assurance, Claim, DecisionState, Outcome, RenderedBlock, Review, SessionMode
@@ -405,6 +407,113 @@ def test_kernel_repo_refuses_what_it_cannot_scope():
             repo.scoped(unscopable)
 
 
+# The built-ins that would let a SELECT change desk.copy_id: set_config itself, and every function
+# that runs query text it is given (pg_proc on Postgres 16), since that text could call set_config.
+COPY_SWITCHERS = ("set_config", "query_to_xml", "query_to_xmlschema", "query_to_xml_and_xmlschema", "cursor_to_xml",
+                  "cursor_to_xmlschema", "ts_stat", "ts_rewrite")
+
+
+def calling(n: int, call) -> type:
+    """A Desk model whose mapped column makes `call`: the statement hides it, only its SQL shows it."""
+    return type(f"DeskCalling{n}", (LeakyBase,), {"__table__": Desk.__table__, "called": column_property(call)})
+
+
+def test_guard_refuses_set_config_calls():
+    repo = KernelRepo(f"copy-{uuid4().hex}")
+    calls = []
+    for name in COPY_SWITCHERS:
+        args = (COPY_SETTING, "copy-b", True) if name == "set_config" else ("select 1", True, False, "")
+        calls += [
+            getattr(func, name)(*args),                                       # plain
+            getattr(func.pg_catalog, name)(*args),                            # schema-qualified
+            Function(quoted_name(name, True), *args),                         # quoted, any case
+            Function(quoted_name(name.upper(), True), *args),
+            Function(quoted_name(name.title(), True), *args, packagenames=("pg_catalog",)),
+        ]
+    statements = [select(Desk.desk_id, call) for call in calls]
+    statements += [select(calling(n, call)) for n, call in enumerate(calls)]
+    admitted = []
+    for statement in statements:
+        try:
+            repo.scoped(statement)
+        except ValueError:
+            continue
+        admitted.append(str(statement).split(" FROM")[0])
+    assert admitted == []
+
+
+def test_guard_refuses_unicode_escape_identifiers():
+    """`U&"\\0073et_config"` names set_config through a Unicode escape, which no name check reads,
+    and `U&'...'` spells a string the same way. SQLAlchemy never spells either, so the guard refuses
+    the spelling itself, in any case, wherever it appears: inside a string literal too, since the
+    guard refuses what it would have to lex to tell apart."""
+    repo = KernelRepo(f"copy-{uuid4().hex}")
+    escaped = ('U&"\\0073et_config"', 'u&"\\0073et_config"', 'U&"\\0073ET_CONFIG"', 'u&"\\0073ET_CONFIG"',
+               'pg_catalog.U&"\\0073et_config"')
+    calls = [literal_column(f"{name}('{COPY_SETTING}', 'copy-b', true)") for name in escaped]
+    calls.append(literal_column("U&'\\0073et_config'"))                                  # a string spelled that way
+    statements = [select(calling(n, call)) for n, call in enumerate(calls, start=1000)]   # hidden from layer 1
+    admitted = []
+    for statement in statements:
+        try:
+            repo.scoped(statement)
+        except ValueError:
+            continue
+        admitted.append(str(statement).split(" FROM")[0])
+    assert admitted == []
+    # the spelling inside a string literal is refused too: the guard doesn't read through quoting
+    with pytest.raises(ValueError):
+        repo.scoped(select(calling(2000, literal_column("'U&\"\\0073et_config\"'"))))
+
+
+# SQL text SQLAlchemy never compiles a kernel statement to. Each can hide a call, a nested SELECT or a
+# table from a check that reads the SQL as text: dollar quoting and escape strings swallow the text
+# after a quote they hold, a quoted identifier or a comment can hold a quote, and a separator starts
+# a second statement. A shape that hides a nested SELECT inside a dollar quote, an escape string or a
+# comment is refused only by the check for that spelling, so a narrower check admits it; a
+# Unicode-escaped call is refused by the escape check wherever it stands.
+UNREADABLE_SHAPES = (
+    "$$'$$ || U&\"\\0073et_config\"('desk.copy_id', 'copy-b', true) || $$'$$",
+    "$q$'$q$ || (select coalesce(max(seq), 0) from kernel.ledger_entries)::text || $q$'$q$",
+    "E'\\'' || U&\"\\0073et_config\"('desk.copy_id', 'copy-b', true) || E'\\''",
+    "e'\\'' || (select coalesce(max(seq), 0) from kernel.ledger_entries)::text || e'\\''",
+    "$$'$$ || (select coalesce(max(seq), 0) from kernel.ledger_entries)::text || $$'$$",
+    "E'\\'' || (select coalesce(max(seq), 0) from kernel.ledger_entries)::text || E'\\''",
+    "\"a'b\", U&\"\\0073et_config\"('desk.copy_id', 'copy-b', true)",
+    "\"a'b\", (select coalesce(max(seq), 0) from kernel.ledger_entries), \"c'd\"",
+    "1; set desk.copy_id = 'copy-b'",
+    "1 /* ' */, (select coalesce(max(seq), 0) from kernel.ledger_entries) /* ' */",
+    "1 -- '\n, (select coalesce(max(seq), 0) from kernel.ledger_entries) -- '\n",
+)
+
+
+def test_guard_refuses_quoting_it_cannot_read():
+    """The guard refuses the spellings in `UNREADABLE_SHAPES` themselves, before it reads anything
+    else, instead of trying to lex them: each would otherwise hide text from the checks that run on
+    the SQL with its string literals dropped."""
+    repo = KernelRepo(f"copy-{uuid4().hex}")
+    statements = [select(calling(n, literal_column(sql))) for n, sql in enumerate(UNREADABLE_SHAPES, start=3000)]
+    admitted = []
+    for statement in statements:
+        try:
+            repo.scoped(statement)
+        except ValueError:
+            continue
+        admitted.append(str(statement).split(" FROM")[0])
+    assert admitted == []
+
+
+async def test_guard_treats_bound_text_as_data(kernel_db):
+    repo = KernelRepo(f"copy-{uuid4().hex}")
+    repo.bind(kernel_db)
+    hostile = ("set_config", "x SET_CONFIG y", "query_to_xml('select 1', true, true, '')",
+               "x'; select set_config('desk.copy_id','other',false); --")
+    for value in hostile:
+        found = await kernel_db.execute(repo.scoped(select(Desk.desk_id).where(Desk.desk_id == value)))
+        assert found.all() == [], value
+    assert (await kernel_db.execute(select(func.current_setting(COPY_SETTING)))).scalar_one() == repo.copy_id
+
+
 def test_kernel_role_cannot_rewrite_the_ledger():
     entry = ledger_entry("desk-a", 1)
     with connect("KERNEL") as kernel, kernel.transaction(force_rollback=True):
@@ -637,7 +746,8 @@ def test_visitor_payloads_validate_against_contracts(api_tx):
 
 COPY_POLICY = "(copy_id = NULLIF(current_setting('desk.copy_id'::text, true), ''::text))"
 # What the copy resolvers' role may read: the copy and the lookup key of each table, in every copy.
-RESOLVER_READS = {"copies": {"copy_id"}, "sessions": {"copy_id", "secret_hash"}, "desks": {"copy_id", "slug"}}
+RESOLVER_READS = {"copies": {"copy_id"}, "sessions": {"copy_id", "secret_hash", "session_id"},
+                  "desks": {"copy_id", "slug"}, "decisions": {"copy_id", "decision_id"}}
 
 
 def test_every_kernel_table_forces_copy_row_security(admin):
@@ -725,7 +835,8 @@ def test_kernel_ro_reads_need_no_role_that_bypasses_row_security(admin):
 
 
 async def test_sql_functions_read_only_the_copy(kernel_db):
-    # the reviewer's probe: query text inside a function call passes KernelRepo.scoped()'s statement checks
+    # the reviewer's probe: functions that read tables by themselves. KernelRepo.scoped() refuses one that runs
+    # query text, and row-level security alone keeps copy B out of it, run as it is, and out of table_to_xml
     copy_a, copy_b = f"copy-{uuid4().hex}", f"copy-{uuid4().hex}"
     repo = KernelRepo(copy_a)
     repo.bind(kernel_db)
@@ -737,13 +848,17 @@ async def test_sql_functions_read_only_the_copy(kernel_db):
     kernel_db.add(Desk(desk_id=f"desk-{copy_a}", copy_id=copy_a, business_id="biz", name="Main line",
                        slug=f"slug-{copy_a}"))
     await kernel_db.flush()
+    query_text = select(Desk.desk_id, func.query_to_xml(
+        f"select title, body from kernel.documents where copy_id = '{copy_b}'", True, False, ""))
+    with pytest.raises(ValueError):
+        repo.scoped(query_text)
     leaks = (
-        select(Desk.desk_id, func.query_to_xml(
-            f"select title, body from kernel.documents where copy_id = '{copy_b}'", True, False, "")),
-        select(Desk.desk_id, func.table_to_xml(cast(literal("kernel.documents"), REGCLASS), True, False, "")),
+        query_text,
+        repo.scoped(select(Desk.desk_id, func.table_to_xml(cast(literal("kernel.documents"), REGCLASS), True, False,
+                                                            ""))),
     )
     for leak in leaks:
-        rows = (await kernel_db.execute(repo.scoped(leak))).all()
+        rows = (await kernel_db.execute(leak)).all()
         assert [desk_id for desk_id, _ in rows] == [f"desk-{copy_a}"]
         assert "copy B private body" not in rows[0][1] and "Bob's warranty" not in rows[0][1]
 
@@ -853,7 +968,7 @@ def committed_copies(admin):
                           (f"doc-{copy_id}", copy_id, f"desk-{copy_id}"))
         yield copies
     finally:
-        for table in ("documents", "sessions", "desks", "copies"):
+        for table in ("decisions", "documents", "sessions", "desks", "copies"):
             admin.execute(f"DELETE FROM kernel.{table} WHERE copy_id = ANY(%s)", (list(copies),))
 
 
@@ -903,7 +1018,8 @@ def test_api_reads_kernel_ro_for_its_copy_only(committed_copies, api):
 # go through narrow SECURITY DEFINER resolvers that return only copy ids, and only the kernel
 # may call them.
 
-COPY_RESOLVERS = ("kernel.copy_of_session(text)", "kernel.copy_of_desk_slug(text)", "kernel.copy_ids()")
+COPY_RESOLVERS = ("kernel.copy_of_session(text)", "kernel.copy_of_session_id(text)",
+                  "kernel.copy_of_desk_slug(text)", "kernel.copy_of_decision_id(text)", "kernel.copy_ids()")
 
 
 def test_copy_resolvers_are_narrow(admin):
@@ -927,13 +1043,23 @@ def test_copy_resolvers_are_narrow(admin):
     assert column_readers(admin, "desk_resolver") == RESOLVER_READS
 
 
-async def test_copy_resolvers_find_a_copy_before_it_is_bound(committed_copies):
+async def test_copy_resolvers_find_a_copy_before_it_is_bound(admin, committed_copies):
+    for copy_id in committed_copies:   # a decision of each copy's visitor session
+        admin.execute(
+            "INSERT INTO kernel.decisions (decision_id, copy_id, desk_id, session_id, generation, call_id,"
+            " call_sha256, tool, outcome, state, policy_version, reason_plain, visitor_plain, expires_at, ledger_seq)"
+            " VALUES (%s, %s, %s, %s, 0, 'call-1', '', 'native.quote', 'refuse', 'refused', 1, '', '', now(), 1)",
+            (f"dec-{copy_id}", copy_id, f"desk-{copy_id}", f"session-{copy_id}"))
     try:
         for copy_id in committed_copies:
             assert await resolve_copy("copy_of_session", token_hash(copy_id)) == copy_id
+            assert await resolve_copy("copy_of_session_id", f"session-{copy_id}") == copy_id
             assert await resolve_copy("copy_of_desk_slug", f"slug-{copy_id}") == copy_id
+            assert await resolve_copy("copy_of_decision_id", f"dec-{copy_id}") == copy_id
         assert await resolve_copy("copy_of_session", "0" * 64) is None
+        assert await resolve_copy("copy_of_session_id", "no-such-session") is None
         assert await resolve_copy("copy_of_desk_slug", "no-such-desk") is None
+        assert await resolve_copy("copy_of_decision_id", "no-such-decision") is None
         assert set(committed_copies) <= set(await copy_ids())
         with pytest.raises(ValueError):
             await resolve_copy("copy_of_anything", "x")
@@ -950,7 +1076,8 @@ async def test_copy_resolvers_find_a_copy_before_it_is_bound(committed_copies):
 def test_only_the_kernel_runs_the_copy_resolvers(committed_copies):
     for prefix in ("API", "MOCKPAY"):
         with connect(prefix) as conn:
-            for call in ("kernel.copy_of_session(%s)", "kernel.copy_of_desk_slug(%s)"):
+            for call in ("kernel.copy_of_session(%s)", "kernel.copy_of_session_id(%s)",
+                         "kernel.copy_of_desk_slug(%s)", "kernel.copy_of_decision_id(%s)"):
                 with pytest.raises(psycopg.errors.InsufficientPrivilege):
                     conn.execute(f"SELECT {call}", (token_hash(committed_copies[0]),))
             with pytest.raises(psycopg.errors.InsufficientPrivilege):
