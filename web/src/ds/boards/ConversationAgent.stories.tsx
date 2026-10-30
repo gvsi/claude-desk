@@ -70,7 +70,7 @@ const meta = {
       'Its receipts are the kernel’s status lines from the fixture, attached under each message on its side; the board writes some in owner wording.',
       'The limit card is page layout the web app (plan 04) owns, composed on the card tokens, padded 12 px 16 px as on the board, in the screen’s words from the mandate; it says “for an hour” where the board writes the clock time it ends.',
       'The list column and the conversation head are composed as on the live conversation board (AppShell fill).',
-      'The sidebar is the panel with its seam and the Answering switch at its foot, as on Today (owner decision 2026-10-29: one sidebar look on every page; the conversation boards are being redrawn to match).',
+      'The sidebar is the panel with its seam and the Answering switch at its foot, as on Today (owner decision 2026-10-29: one sidebar look on every page; the conversation boards are drawn with the one sidebar).',
     ].join(' '),
   },
 } satisfies Meta;

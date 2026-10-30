@@ -165,7 +165,7 @@ export const FillsTheMain: Story = {
   parameters: {
     canvas: 'N-Conv-Run1',
     canvasNote:
-      'Only the page’s frame: the board’s conversation list starts where the sidebar ends and runs the window’s height, with the conversation beside it (fill). The sidebar is the panel, as on every page (owner decision 2026-10-29: one sidebar look on every page; the conversation boards are being redrawn to match).',
+      'Only the page’s frame: the board’s conversation list starts where the sidebar ends and runs the window’s height, with the conversation beside it (fill). The sidebar is the panel, as on every page (owner decision 2026-10-29: one sidebar look on every page; the conversation boards are drawn with the one sidebar).',
   },
   play: async ({ canvas }) => {
     // One sidebar look on every page (owner decision 2026-10-29): beside a filled page too, it is

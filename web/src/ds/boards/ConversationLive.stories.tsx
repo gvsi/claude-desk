@@ -71,7 +71,7 @@ const meta = {
       'Its receipts are the kernel’s status lines from the fixture, attached under each message on its side; the board writes some in owner wording.',
       '"Dana is typing" is the signed typing bubble (N-Typing-Bubble-Run1) where the board writes a line.',
       'The list column, the conversation head and its "Latest" line are page layout the web app (plan 04) owns, composed here from ConversationListItem, Pill and the tokens; the page fills the main area (AppShell fill), so the list starts where the sidebar ends.',
-      'The sidebar is the panel with its seam and the Answering switch at its foot, as on Today (owner decision 2026-10-29: one sidebar look on every page; the conversation boards are being redrawn to match).',
+      'The sidebar is the panel with its seam and the Answering switch at its foot, as on Today (owner decision 2026-10-29: one sidebar look on every page; the conversation boards are drawn with the one sidebar).',
     ].join(' '),
   },
 } satisfies Meta;
