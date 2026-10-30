@@ -327,6 +327,9 @@ class Decision(Base):
     policy_ids: Mapped[list[str]] = mapped_column(ContractJSON(list[str]), server_default=EMPTY_LIST)
     signature: Mapped[str | None] = mapped_column(Text)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # whether the asker could be given allow_person when it was decided (a verified person or an
+    # agent key); a hold's answers follow the active money cap, never a later change of standing
+    allow_person_eligible: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
 
 
 class Approval(Base):

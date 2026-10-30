@@ -681,6 +681,32 @@ def test_migration_keeps_existing_versions_at_five_hundred(admin):
         command.upgrade(config, "head")
 
 
+MONEY_CAP_EDGES_REVISION = "01b_3e_money_cap_edges"
+
+
+def test_a_decision_from_before_the_cap_edges_offers_no_allow_person(admin):
+    """A decision written before the money cap's edges revision is taken as one whose asker could
+    not be given allow_person, since its standing then wasn't recorded: it fails closed."""
+    config = alembic_config()
+    before = ScriptDirectory.from_config(config).get_revision(MONEY_CAP_EDGES_REVISION).down_revision
+    try:
+        command.downgrade(config, before)
+        assert "allow_person_eligible" not in columns(admin, "kernel", "decisions")
+        admin.execute(
+            "INSERT INTO kernel.decisions (decision_id, copy_id, desk_id, session_id, generation, call_id, call_sha256,"
+            " tool, outcome, state, answers, policy_version, reason_plain, visitor_plain, expires_at, ledger_seq)"
+            " VALUES ('dec-before-edges', 'copy-edges', 'desk-edges', 'session-edges', 0, 'call-1', 'c',"
+            " 'native.payment_link', 'hold', 'held', '[\"allow_once\", \"deny_once\", \"allow_person\"]', 1, 'r',"
+            " 'v', now() + interval '1 day', 1)")
+        command.upgrade(config, "head")
+        assert admin.execute("SELECT allow_person_eligible FROM kernel.decisions"
+                             " WHERE decision_id = 'dec-before-edges'").fetchone() == (False,)
+        assert nullable_columns(admin, "kernel", "decisions")["allow_person_eligible"] is False
+    finally:
+        admin.execute("DELETE FROM kernel.decisions WHERE copy_id = 'copy-edges'")
+        command.upgrade(config, "head")
+
+
 DOCUMENT_LINKS_REVISION = "01b_6_document_links"
 
 

@@ -3,10 +3,11 @@
 `POST /approvals/{decision_id}/answer` ("Decision lifecycle"). The answer locks the decision and
 settles it as any read does (`execute.refresh_decision`: lazy expiry first, then the answers the
 active version's money cap offers), so it answers only a request still `held`; anything else is
-409, and an answer the request wasn't offered (`allow_person` for a stranger, or above the active
-version's money cap; `deny_always` on a hold no `ask` card decided, see `decide.held_by_ask`) is
-422. Either refusal is ledgered `approval`, and nothing runs. Then one `approvals` row records the
-answer, its single use enforced by the unique index on `decision_id` too:
+409, and an answer the request wasn't offered (`allow_person` for a request a stranger made, even
+once the session has confirmed who it is, or above the active version's money cap; `deny_always`
+on a hold no `ask` card decided, see `decide.held_by_ask`) is 422. Either refusal is ledgered
+`approval`, and nothing runs. Then one `approvals` row records the answer, its single use enforced
+by the unique index on `decision_id` too:
 
 - `deny_once`, `deny_always`: the decision is `denied`. A denial is bound to nothing, so it can
   never run anything.

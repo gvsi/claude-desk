@@ -388,18 +388,17 @@ async def expire_if_due(ctx: KernelCtx, row: DecisionRow) -> DecisionRow:
 
 
 async def _answers_now(ctx: KernelCtx, row: DecisionRow) -> tuple[list[ApprovalAnswer], dict[str, Any]]:
-    """What a held decision offers the owner now: `held_answers` for its action and session as they
-    stand, at the active version's money cap, and the version and cap it was judged under.
-    `deny_always` stays as the decision was offered it, since whether an `ask` card decided the
-    hold (`held_by_ask`) belongs to the version that decided it, whatever the active one is now."""
+    """What a held decision offers the owner now: `answers_for` its action and the standing it was
+    decided with (`allow_person_eligible`), at the active version's money cap, and the version and
+    cap it was judged under. `deny_always` stays as the decision was offered it, since whether an
+    `ask` card decided the hold (`held_by_ask`) belongs to the version that decided it, whatever
+    the active one is now."""
     action = normalized_action((await ctx.db.scalars(ctx.repo.scoped(
         select(ActionRow).where(ActionRow.action_id == row.action_id)))).one())
-    session = (await ctx.db.scalars(ctx.repo.scoped(
-        select(SessionRow).where(SessionRow.session_id == row.session_id)))).one()
     version_row = await activation.active_version(ctx, row.desk_id)
     cap = activation.version_cap(version_row)
-    answers = held_answers(principal_for(session, desk_id=row.desk_id), action,
-                           ask_held="deny_always" in row.answers, auto_money_cap_cents=cap)
+    answers = answers_for(row.allow_person_eligible, action, ask_held="deny_always" in row.answers,
+                          auto_money_cap_cents=cap)
     return answers, {"policy_version": version_row.version if version_row is not None else 0,
                      "auto_money_cap_cents": cap}
 
@@ -407,9 +406,12 @@ async def _answers_now(ctx: KernelCtx, row: DecisionRow) -> tuple[list[ApprovalA
 async def refresh_answers(ctx: KernelCtx, row: DecisionRow) -> DecisionRow:
     """A held money decision's answers as the active version's money cap offers them now, on every
     read ("Decision lifecycle"): `allow_person` drops out while the action's amount is above the
-    active cap and comes back when a later version's cap covers it. A change is persisted, ledgered
-    `decide` `{decision_id, answers, policy_version, auto_money_cap_cents}` and re-signed, as lazy
-    expiry is: the row is locked and checked again first, so two readers change it once."""
+    active cap and comes back when a later version's cap covers it. Only the cap is read again:
+    whether the asker could be given `allow_person` at all stays what it was when the hold was made
+    (`allow_person_eligible`), so a hold a stranger asked for never gains it when the session
+    confirms who it is later. A change is persisted, ledgered `decide` `{decision_id, answers,
+    policy_version, auto_money_cap_cents}` and re-signed, as lazy expiry is: the row is locked and
+    checked again first, so two readers change it once."""
     if row.state != "held" or row.action_id is None or not is_money(row.tool, row.effects):
         return row
     answers, _ = await _answers_now(ctx, row)
@@ -599,20 +601,34 @@ def held_by_ask(version_row: PolicyVersionRow | None, policy_ids: Iterable[str])
     return decider is not None and decider.ask
 
 
-def held_answers(principal: Principal, action: NormalizedAction | None, *, ask_held: bool,
-                 auto_money_cap_cents: int) -> list[ApprovalAnswer]:
-    """The owner's answers to a hold ("Decision lifecycle"): `allow_person` only for a verified
-    person or an agent key and, on a money tool, an amount within the active version's money cap
-    `auto_money_cap_cents` (so never above `AUTO_MONEY_HARD_CAP_CENTS`, and never with the cap
-    unset); `deny_always` only when an `ask` card decided the hold (`held_by_ask`). A session that
-    names a person without having confirmed it's them is no person to allow."""
+def allow_person_eligible(principal: Principal) -> bool:
+    """Could `allow_person` name this principal: a verified person or an agent key. A session that
+    names a person without having confirmed it's them is no person to allow. A decision stores
+    this as it was when it was made (its row's `allow_person_eligible`)."""
     person = principal.person_id is not None and verified(principal.kind, principal.assurance, principal.person_id)
-    scoped = person or principal.agent_key_id is not None
+    return person or principal.agent_key_id is not None
+
+
+def answers_for(eligible: bool, action: NormalizedAction | None, *, ask_held: bool,
+                auto_money_cap_cents: int) -> list[ApprovalAnswer]:
+    """The owner's answers to a hold ("Decision lifecycle"): `allow_person` only when the asker is
+    `eligible` (`allow_person_eligible`) and, on a money tool, the amount is within the active
+    version's money cap `auto_money_cap_cents` (so never above `AUTO_MONEY_HARD_CAP_CENTS`, and
+    never with the cap unset); `deny_always` only when an `ask` card decided the hold
+    (`held_by_ask`)."""
+    scoped = eligible
     if action is not None and is_money(action.tool, action.effects):
         cap = compiler.capped(auto_money_cap_cents)
         scoped = scoped and action.amount_cents is not None and action.amount_cents <= cap
     offered = {"allow_person": scoped, "deny_always": ask_held}
     return [answer for answer in get_args(ApprovalAnswer) if offered.get(answer, True)]
+
+
+def held_answers(principal: Principal, action: NormalizedAction | None, *, ask_held: bool,
+                 auto_money_cap_cents: int) -> list[ApprovalAnswer]:
+    """The owner's answers to a hold `principal` asks for now (`answers_for` its standing)."""
+    return answers_for(allow_person_eligible(principal), action, ask_held=ask_held,
+                       auto_money_cap_cents=auto_money_cap_cents)
 
 
 def free_text(adapter: Adapter, args: BaseModel) -> dict[str, str]:
@@ -877,7 +893,7 @@ async def _store(ctx: KernelCtx, call: _Call, outcome: Outcome, *, reason: str |
         session_id=session_row.session_id, generation=session_row.generation, call_id=call.req.call.call_id,
         call_sha256=call.call_sha256, tool=action.tool if action else stored_name(call.req.call.tool),
         effects=action.effects if action else [], outcome=outcome, state=state,
-        answers=answers, policy_version=call.policy_version,
+        answers=answers, allow_person_eligible=allow_person_eligible(principal), policy_version=call.policy_version,
         card_ids=evaluation.card_ids if evaluation and reason is None else [],
         policy_ids=evaluation.policy_ids if evaluation and reason is None else [],
         review=evaluation.review if evaluation else None,

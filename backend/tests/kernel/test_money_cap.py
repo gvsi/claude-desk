@@ -36,9 +36,11 @@ from desk.kernel_service.seed import RIVERA_CARDS
 from desk.money_cap import lower_to_cap
 
 from .fakes import FakeAdapter
-from .helpers import compile_at, context, draft_and_confirm, kernel_ctx, rows_of, verify_session
+from .helpers import (CopyRows, activate_cards, compile_at, context, draft_and_confirm, kernel_ctx, rows_of,
+                      verify_session)
 from .test_adapters import Rivera, quote_args, rivera
-from .test_decide import Visitor, activate_sets, decided, open_visitor, payment_link, verify_signature
+from .test_approvals import add_person
+from .test_decide import Visitor, activate_sets, decided, desk_with, open_visitor, payment_link, verify_signature
 from .test_desk_writes import new_desk, post_desk
 from .test_verification import api_rows
 
@@ -595,6 +597,39 @@ async def test_allow_person_follows_the_active_cap(desk_prove, app, client, regi
     response = await answer(client, copy, waiting.decision_id, "allow_person")
     assert response.status_code == 200, response.text
     assert response.json()["decision"]["state"] == "executed"
+
+
+async def activate_at(app: FastAPI, rows: CopyRows, cap: int) -> None:
+    """Test only: a version with no cards (every link asks) at the money cap `cap`, made active."""
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(rows.copy_id)
+        await activate_cards(ctx, rows.desk_id, [], auto_money_cap_cents=cap)
+
+
+async def test_allow_person_keeps_the_standing_it_was_decided_with(app, client, registry):
+    rows = await desk_with(app, [payment_link(20_000)], [])                 # no card: every link asks, at $500
+    dana_id = await add_person(app, rows, "dana", "Dana Whitfield")
+    visitor = await open_visitor(client, rows)
+    early = await decided(client, visitor, "native.payment_link")          # asked before confirming who she is
+    assert early.outcome == "hold" and "allow_person" not in early.answers
+    # once the session confirms it's Dana, that hold still has no person to allow: it was asked by a stranger
+    await verify_session(app, rows.copy_id, visitor.session_id, dana_id)
+    reread = await read_decision(client, rows, early.decision_id)
+    assert (reread.answers, reread.ledger_seq) == (early.answers, early.ledger_seq)    # nothing changed or ledgered
+    response = await answer(client, rows, early.decision_id, "allow_person")
+    assert (response.status_code, response.json()) == (422, {"code": "invalid"})
+    later = await decided(client, visitor, "native.payment_link", call_id="call-2")    # asked as Dana
+    assert later.outcome == "hold" and "allow_person" in later.answers
+
+    # a cap change still moves allow_person on a hold that could have it, and never on one that couldn't
+    await activate_at(app, rows, 10_000)
+    assert "allow_person" not in (await read_decision(client, rows, later.decision_id)).answers
+    assert (await read_decision(client, rows, early.decision_id)).answers == early.answers
+    await activate_at(app, rows, 50_000)
+    assert "allow_person" in (await read_decision(client, rows, later.decision_id)).answers
+    assert (await read_decision(client, rows, early.decision_id)).answers == early.answers
+    response = await answer(client, rows, early.decision_id, "allow_person")
+    assert (response.status_code, response.json()) == (422, {"code": "invalid"})
 
 
 async def test_new_desks_start_at_zero_and_rivera_at_five_hundred(app, client):
