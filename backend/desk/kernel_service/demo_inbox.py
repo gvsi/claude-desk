@@ -22,10 +22,12 @@ KINDS = frozenset(get_args(DemoInboxEntry.model_fields["kind"].annotation))
 async def deliver(ctx: KernelCtx, *, copy_id: str, desk_id: str, to: str, person_id: str | None, kind: str,
                   body: str, preview: str, decision_id: str | None = None) -> InboxNotice:
     """Write one entry in the caller's transaction. `to` is "owner" or the masked contact on record;
-    `body` may hold a code, `preview` never does. `decision_id` is only for an owner alert (the
-    table's check refuses it anywhere else)."""
+    `body` may hold a code, `preview` never does. `decision_id` is only for an owner alert: anywhere
+    else it raises ValueError here, before the table's check would refuse the row."""
     if kind not in KINDS:
         raise ValueError(f"{kind!r} is not a Demo inbox kind")
+    if decision_id is not None and (kind != "alert" or to != "owner"):
+        raise ValueError(f"only an owner alert names a decision, not this {kind!r} entry")
     ctx.bind(copy_id)
     notice = InboxNotice(entry_id=new_id("inbox"), to=to, preview=preview)
     await ctx.db.execute(insert(DemoInboxRow).values(
@@ -42,7 +44,10 @@ async def alert_owner(ctx: KernelCtx, desk_id: str, event_kind: str, preview: st
     transaction, which must already be bound to the Desk's copy. `body` may carry `reason_plain`
     and masked contacts, never a code. `decision_id` is the held decision the alert is about, the
     id the kernel gave the decision it just stored (never text from the model or a visitor), so the
-    owner's Demo inbox can link to the request; every other alert has none."""
+    owner's Demo inbox can link to the request; every other alert has none, and one given with any
+    other `event_kind` raises ValueError before the Desk's preferences are read."""
+    if decision_id is not None and event_kind != "approval":
+        raise ValueError(f"only an approval alert names a decision, not a {event_kind!r} alert")
     prefs = select(NotificationPref.now).where(NotificationPref.desk_id == desk_id)
     alert_now = (await ctx.db.execute(ctx.repo.scoped(prefs))).scalar_one_or_none()
     if not alert_now or event_kind not in alert_now:
