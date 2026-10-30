@@ -14,6 +14,7 @@ import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 import desk_kernel
 import httpx
@@ -475,7 +476,8 @@ def test_prove_latency_writes_its_inputs_at_the_rivera_cap(monkeypatch, capsys):
         times = {"rivera": [2.0, 1.0], "cards_30": [3.0, 4.0]}
         return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(times), stderr="")
 
-    monkeypatch.setattr(prove_latency.subprocess, "run", docker)
+    monkeypatch.setattr(prove_latency, "subprocess", SimpleNamespace(run=docker))
+    assert subprocess.run is not docker                  # the stub reaches the script alone
     assert prove_latency.main(["--json", "--runs", "2"]) == 0
     assert json.loads(capsys.readouterr().out) == {"rivera": {"p50_ms": 1.0, "p95_ms": 2.0},
                                                    "cards_30": {"p50_ms": 3.0, "p95_ms": 4.0}}
