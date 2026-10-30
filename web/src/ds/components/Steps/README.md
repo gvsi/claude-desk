@@ -15,7 +15,7 @@
   - Before `current`: a 14 px `check` on `fill-secondary`, and the name in `text-secondary`, read "{name}, done".
   - `current`: the primary button's fill (`button-primary`) with its number in `button-primary-text`, the name in `text-primary`, and `aria-current="step"` on the item.
   - After `current`: its number in `text-secondary` on `fill-secondary`, and the name in `text-secondary`.
-- It lays out by its own width (a container query on its frame). Under 480 px, as on a phone (N-R2-Setup-16-Phone-Questions, in review), the list is read but not drawn, and one line in `.cd-type-meta` says where the person is: "Step 1 of 5 · " in `text-secondary`, then the current step's name in `text-primary`. The line is `aria-hidden`, since the list says the same to screen readers, every step's name and `aria-current` included. Nothing scrolls sideways. This narrow layout is built against the setup board on a phone, which is in review; sign-off pending.
+- It lays out by its own width (a container query on its frame). Under 480 px, as on a phone (N-R2-Setup-16-Phone-Questions), the list is read but not drawn, and one line in `.cd-type-meta` says where the person is: "Step 1 of 5: " in `text-secondary`, then the current step's name in `text-primary`. The line is `aria-hidden`, since the list says the same to screen readers, every step's name and `aria-current` included. Nothing scrolls sideways. This narrow layout follows the setup board on a phone, signed on 2026-10-30. The count ends in a colon, not a "·", following the brand book's rule against "·" separators.
 
 ## Props
 

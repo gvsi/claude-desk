@@ -1,7 +1,7 @@
 /* Steps: a row of 22 px circles with their names, joined by 28 px hairlines. Done: a check on the
    secondary fill. Current: the primary button's fill with its number, and its name in primary
    text. Later: the number on the secondary fill. It lays out by its own width: under 480 px the
-   list stays for screen readers but isn't drawn, and one line says "Step 1 of 5 · Questions", its
+   list stays for screen readers but isn't drawn, and one line says "Step 1 of 5: Questions", its
    count in secondary text and the current step's name in primary. */
 
 .cd-steps-frame {

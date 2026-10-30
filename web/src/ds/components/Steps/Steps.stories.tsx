@@ -76,9 +76,9 @@ export const SetupThirdOfFive: Story = {
   },
 };
 
-/** In review: drawn on N-R2-Setup-16-Phone-Questions, which isn't in the reference set until it's signed. */
+/** Drawn on N-R2-Setup-16-Phone-Questions, signed on 2026-10-30 and not yet in the reference set. */
 const PHONE_NOTE =
-  'Drawn on N-R2-Setup-16-Phone-Questions, built against boards in review; sign-off pending. Under 480 px the steps are one line, "Step 1 of 5 · Questions", and screen readers still hear the list.';
+  'Drawn on N-R2-Setup-16-Phone-Questions, signed on 2026-10-30. Under 480 px the steps are one line, "Step 1 of 5: Questions", and screen readers still hear the list.';
 
 /** The line drawn in place of the circles under 480 px; screen readers hear the list instead. */
 function compactLine(root: HTMLElement): HTMLElement {
@@ -111,7 +111,7 @@ export const Phone: Story = {
     // phone_steps_one_line: the steps are drawn as one line, its count in secondary ink and the
     // current step's name in primary, hidden from screen readers, which hear the list.
     const line = compactLine(canvasElement);
-    await expect(line.textContent).toBe('Step 3 of 4 · Review tools');
+    await expect(line.textContent).toBe('Step 3 of 4: Review tools');
     await expect(line).toHaveAttribute('aria-hidden', 'true');
     await expect(line).toBeVisible();
     expectComputed(line, { color: 'rgba(250, 249, 245, 0.64)', fontSize: '13px', lineHeight: '18px' });
@@ -126,7 +126,7 @@ export const SetupPhone: Story = {
   play: async ({ canvasElement }) => {
     const items = await expectPhoneSteps(canvasElement, 'Set up your Desk');
     await expect(items[0]).toHaveAttribute('aria-current', 'step');
-    await expect(compactLine(canvasElement).textContent).toBe('Step 1 of 5 · Questions');
+    await expect(compactLine(canvasElement).textContent).toBe('Step 1 of 5: Questions');
   },
 };
 
@@ -148,7 +148,7 @@ export const PastTheEnd: Story = {
     // steps_clamped_alike: the list marks the step the line names, so both say the same.
     const items = await expectPhoneSteps(canvasElement, 'Set up your Desk');
     await expect(items.map((item) => item.getAttribute('aria-current'))).toEqual([null, null, 'step']);
-    await expect(compactLine(canvasElement).textContent).toBe('Step 3 of 3 · Live');
+    await expect(compactLine(canvasElement).textContent).toBe('Step 3 of 3: Live');
   },
 };
 

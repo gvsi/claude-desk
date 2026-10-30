@@ -15,7 +15,7 @@ export interface StepsProps {
  * Where a person is in a flow of a few steps: an ordered list in a row, joined by hairlines. Done
  * steps show a check and read "{name}, done"; the current one is a filled circle with its number
  * and `aria-current="step"`; later ones are quiet numbered circles. Under 480 px of its own width
- * the list is read but not drawn, and one line says where the person is: "Step 1 of 5 · Questions".
+ * the list is read but not drawn, and one line says where the person is: "Step 1 of 5: Questions".
  */
 export function Steps({ label, steps, current }: StepsProps) {
   // The step the list marks and the line names: `current`, kept within the steps, so both say the same.
@@ -46,7 +46,7 @@ export function Steps({ label, steps, current }: StepsProps) {
       {/* The list says the same to screen readers, so the line is drawn only. */}
       {steps.length > 0 ? (
         <p className="cd-steps__compact cd-type-meta" aria-hidden="true">
-          {`Step ${at + 1} of ${steps.length} · `}
+          {`Step ${at + 1} of ${steps.length}: `}
           <span className="cd-steps__compact-name">{steps[at]}</span>
         </p>
       ) : null}
