@@ -13,7 +13,7 @@ import { request } from '../../api/http.ts';
 import type { TranscriptItem } from '../../api/views.ts';
 import { AgentMessage, ClaudeMessage, FullTrace, MarginReceipt, PersonMessage, TranscriptRow, VisitorMessage, Whisper } from '../../ds/index.ts';
 import { formatClock } from '../../lib/format.ts';
-import { groupRows, type GroupedRow, type RowPart } from '../../lib/transcript.ts';
+import { groupRows, opensAReply, type GroupedRow, type RowPart } from '../../lib/transcript.ts';
 import { useOwnerReceipt } from './ownerReceipt.ts';
 
 /** One receipt as the owner's transcript keeps it: its signed event, and whether it is the first for its decision. */
@@ -93,7 +93,9 @@ function rowsOf(items: readonly TranscriptItem[]) {
         return null;
     }
   };
-  return groupRows(sorted, partOf);
+  // A turn Claude started on its own (after the visitor confirmed it's them) explains its reply, as
+  // in the visitor's chat: a stored conversation finds it by what follows a decision's status.
+  return groupRows(sorted, partOf, { writingBefore: opensAReply });
 }
 
 /** The decisions held under `receipts`: the ones whose hold is among them. */

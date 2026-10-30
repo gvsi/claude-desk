@@ -25,7 +25,7 @@ import type {
 import type { StreamState } from '../api/stream.ts';
 import type { TranscriptItem, VisitorTranscript } from '../api/views.ts';
 import { receiptFromEvent, type ReceiptView } from '../ds/index.ts';
-import { addPart, emptyGroups, settle, type GroupedRow, type RowGroups, type RowPart } from '../lib/transcript.ts';
+import { addPart, emptyGroups, groupRows, opensAReply, settle, type GroupedRow, type RowGroups, type RowPart } from '../lib/transcript.ts';
 
 /** The visitor's own message: `sent`, being checked after an answer was lost, or `failed`. */
 export type VisitorStatus = 'sent' | 'checking' | 'failed';
@@ -172,27 +172,10 @@ function fromHistory(transcript: VisitorTranscript): ChatState {
     // Whispers and agents' text never reach a visitor's transcript; anything else is left out.
     return null;
   };
-  // A stored conversation has no writing events, so a turn Claude started on its own is found by
-  // what follows a decision's status: Claude's reply, before anyone else's words.
-  let groups = emptyGroups<ChatItem, ReceiptView>();
-  items.forEach((item, index) => {
-    const part = partOf(item);
-    if (part === null) return;
-    if (part.kind === 'receipt' && opensAReply(items, index)) groups = addPart(groups, { kind: 'writing' });
-    groups = addPart(groups, part);
-  });
-  return { ...initialChatState(), ...settle(groups), lastSeq: transcript.last_seq, openHolds, holds, seen };
-}
-
-/**
- * Whether the decision's status at `index` (an action's outcome or a hold, not a later answer)
- * comes before a reply of Claude's with no one's words between them: it is that reply's turn.
- */
-function opensAReply(items: readonly TranscriptItem[], index: number): boolean {
-  const type = items[index]?.event?.type;
-  if (type !== 'receipt' && type !== 'held') return false;
-  const next = items.slice(index + 1).find((item) => item.kind !== 'status');
-  return next?.kind === 'delivered' && next.event?.type === 'message' && next.event.author !== 'owner';
+  // A stored conversation has no writing events: a turn Claude started on its own is found by what
+  // follows a decision's status, as the owner's view finds it.
+  const groups = groupRows(items, partOf, { writingBefore: opensAReply });
+  return { ...initialChatState(), ...groups, lastSeq: transcript.last_seq, openHolds, holds, seen };
 }
 
 function onEvent(state: ChatState, seq: number, ev: SseEvent): ChatState {

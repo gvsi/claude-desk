@@ -13,7 +13,7 @@ import type { ConversationSummary, NeedsYouItem, OwnerTranscript } from '../../a
 import { rivera } from '../../ds/fixtures/index.ts';
 import { setPollScale } from '../../app/poll.ts';
 import { formatClock } from '../../lib/format.ts';
-import { DECISIONS, VISITOR_PLAIN, writing } from '../../mocks/script.ts';
+import { AFTER_VERIFY, DECISIONS, DEMO_CODE, SCRIPT, VISITOR_PLAIN, turnEnd, writing } from '../../mocks/script.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { MINUTE, type SessionRecord } from '../../mocks/world.ts';
@@ -559,6 +559,36 @@ describe('Conversations', () => {
     await expect.element(receipt(again.screen, refund.visitor_plain)).toBeVisible();
     await expect.element(receipt(again.screen, quote.visitor_plain)).toBeVisible();
     expect(log(again.screen).getByText(REFUND_REASON, { exact: false }).elements()).toHaveLength(0);
+  });
+  it('a_turn_claude_starts_explains_its_reply', async () => {
+    // Dana asked for her invoice and got the verify card; she then confirmed it's her with the demo
+    // code, and the API woke Claude, which released the invoice. No words of hers began that turn.
+    const world = mockStore.world;
+    const desk = world.desk(RIVERA.deskId);
+    const invoiceRule = SCRIPT.find((rule) => rule.name === 'invoice');
+    if (!desk || !invoiceRule) throw new Error("the copy has Rivera's main Desk and the script its invoice row");
+    const chat = world.addSession(desk);
+    world.replay(chat, world.now() - MINUTE, [{ text: 'Can you send my invoice?', steps: invoiceRule.steps }]);
+    expect(world.checkCode(chat, DEMO_CODE)).toBe(true);
+    const woke = world.context(chat, 'en', '');
+    for (const step of [...AFTER_VERIFY, turnEnd]) world.emit(chat, step(woke));
+
+    const { screen } = await renderRoute(conversation(chat.state.session_id));
+    const verifyCard = log(screen).getByRole('article', { name: "Confirm it's you" });
+    const invoice = log(screen).getByRole('article', { name: 'Document, only for you' });
+    await expect.element(invoice).toBeVisible();
+    const rowOf = (card: typeof invoice) => card.element().closest('.cd-transcript-row');
+
+    // The release's receipt, in the owner's words, sits under the invoice it explains, never under
+    // the card that asked for the code, which keeps the receipt of the code it sent.
+    const released = receipt(screen, DECISIONS.releaseInvoice.reasonPlain);
+    const started = receipt(screen, DECISIONS.startVerification.reasonPlain);
+    await expect.element(released).toBeVisible();
+    await expect.element(started).toBeVisible();
+    expect(rowOf(invoice)?.contains(released.element())).toBe(true);
+    expect(rowOf(verifyCard)?.contains(released.element())).toBe(false);
+    expect(rowOf(verifyCard)?.contains(started.element())).toBe(true);
+    await expectScreenBasics(screen.container, { owner: true });
   });
   it('answer_row_follows_the_decided_look', async () => {
     // The seeded 15% hold, from a visitor not on record, held by a limit: two plain answers.
