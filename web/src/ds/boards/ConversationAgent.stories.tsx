@@ -1,7 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn, within } from 'storybook/test';
 
-import { Card } from '../components/Card/Card.tsx';
 import { Composer } from '../components/Composer/Composer.tsx';
 import { ConceptFooter } from '../components/ConceptFooter/ConceptFooter.tsx';
 import { Pill } from '../components/Pill/Pill.tsx';
@@ -29,7 +28,7 @@ function ConversationAgent() {
       <ConversationsPage open={alex.name}>
         <div className="board-conversation">
           <header className="board-conversation-head">
-            <h2 className="board-conversation-head__name cd-type-control" data-copy="user">
+            <h2 className="board-conversation-head__name cd-type-section" data-copy="user">
               {alex.name}
             </h2>
             <Pill>Agent</Pill>
@@ -40,10 +39,10 @@ function ConversationAgent() {
             <p className="board-conversation-head__latest cd-type-meta">Latest: Deposit paid</p>
           </header>
           {/* The signed limit, in the screen's words from the mandate; nothing here computes it. */}
-          <Card as="section" label="Signed limit" padding={16}>
+          <section className="board-limit" aria-label="Signed limit">
             <p className="board-limit__title cd-type-control">Can pay up to $20 a charge, $100 in total, for an hour.</p>
             <p className="board-quiet cd-type-meta">$20 of $100 used. Limit signed by the demo wallet for Alex Kim.</p>
-          </Card>
+          </section>
           <Transcript label={`Conversation with ${alex.name}`}>
             <TranscriptHeader
               left={`Today at 11:42 am, signed requests from ${alex.name}`}
@@ -69,8 +68,8 @@ const meta = {
     canvasNote: [
       "The conversation is the Rivera fixture's agent chat: a quote for the deposit, then the charge to the signed limit, where the board adds a request for open times and a booking between them.",
       'Its receipts are the kernel’s status lines from the fixture, attached under each message on its side; the board writes some in owner wording.',
-      'The limit card is page layout the web app (plan 04) owns, composed from Card in the screen’s words from the mandate; it says “for an hour” where the board writes the clock time it ends.',
-      'The list column and the conversation head are composed as on the live conversation board; the board is drawn tall, so its sidebar ends under Settings.',
+      'The limit card is page layout the web app (plan 04) owns, composed on the card tokens, padded 12 px 16 px as on the board, in the screen’s words from the mandate; it says “for an hour” where the board writes the clock time it ends.',
+      'The list column and the conversation head are composed as on the live conversation board, the sidebar on the app ground at its own height.',
     ].join(' '),
   },
 } satisfies Meta;
@@ -83,12 +82,14 @@ export const Board: Story = {
   play: async ({ canvas, canvasElement, userEvent }) => {
     await expectOwnerFrame(canvasElement, 'Conversations', { fill: true });
     expectComputed(canvas.getByRole('heading', { level: 1, name: 'Conversations' }), SPEC.pageTitle);
+    // The open conversation's name, in the section style the board sets it in.
+    expectComputed(canvas.getByRole('heading', { level: 2, name: alex.name }), { fontSize: '15px', lineHeight: '20px', fontWeight: '520' });
     const list = canvas.getByRole('navigation', { name: 'Conversations' });
     await expect(within(list).getByRole('link', { current: true })).toHaveTextContent(alex.name);
 
-    // The signed limit sits above the requests, in the card look.
+    // The signed limit sits above the requests, in the card look, padded 12 px 16 px as the board draws it.
     const limit = canvas.getByRole('region', { name: 'Signed limit' });
-    expectComputed(limit, { ...SPEC.card, paddingTop: '16px', paddingLeft: '16px' });
+    expectComputed(limit, { ...SPEC.card, paddingTop: '12px', paddingBottom: '12px', paddingLeft: '16px', paddingRight: '16px' });
 
     // Each signed request is on the right, its receipts under it ending at its edge; Claude's replies on the left.
     const log = canvas.getByRole('log', { name: `Conversation with ${alex.name}` });

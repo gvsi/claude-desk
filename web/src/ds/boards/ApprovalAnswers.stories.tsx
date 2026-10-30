@@ -16,8 +16,8 @@ const PANELS = {
 
 function ApprovalAnswers() {
   return (
-    <Sheet title="Approval answers">
-      <Panel label={PANELS.limit} bare>
+    <Sheet title="Approval answers" gap={24}>
+      <Panel label={PANELS.limit} width={588} bare>
         <ApprovalCard
           decision={rivera.decisions.held}
           heldBy={rivera.ruleCards['rv-quote'].reason}
@@ -30,10 +30,10 @@ function ApprovalAnswers() {
           onAnswer={fn()}
         />
       </Panel>
-      <Panel label={PANELS.askCard} bare>
+      <Panel label={PANELS.askCard} width={588} bare>
         <ApprovalCard decision={chen.heldConsultation} heldBy={chen.ruleCards['cc-consult'].reason} waiting="Web chat, 5 min ago" onAnswer={fn()} />
       </Panel>
-      <Panel label={PANELS.verified} bare>
+      <Panel label={PANELS.verified} width={588} bare>
         <ApprovalCard
           decision={rivera.heldRefund}
           heldBy={rivera.ruleCards['rv-refund'].reason}

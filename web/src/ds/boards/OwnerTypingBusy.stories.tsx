@@ -42,14 +42,14 @@ const BUSY_ROWS = [
 
 function OwnerTypingBusy() {
   return (
-    <Sheet title="Owner typing and busy buttons">
-      <Panel label="Dana’s view on the public page, while Maria types">
+    <Sheet title="Owner typing and busy buttons" gap={32}>
+      <Panel label="Dana’s view on the public page, while Maria types" width={380} compact>
         <DanaSeesMaria landed={false} />
       </Panel>
-      <Panel label="Maria’s message lands: same left edge, nothing jumps">
+      <Panel label="Maria’s message lands: same left edge, nothing jumps" width={380} compact>
         <DanaSeesMaria landed />
       </Panel>
-      <Panel label="Maria’s own screen, Dana typing: the signed bubble, for contrast">
+      <Panel label="Maria’s own screen, Dana typing: the signed bubble, for contrast" width={376} compact>
         <Transcript label={`Conversation with ${rivera.people.dana.name}`}>
           <TranscriptRow>
             <VisitorMessage text="Yes please. Anything sooner though?" />
@@ -59,7 +59,7 @@ function OwnerTypingBusy() {
           </TranscriptRow>
         </Transcript>
       </Panel>
-      <Panel label="Dana’s view on a phone, 390" phone>
+      <Panel label="Dana’s view on a phone, 390" width={390} phone>
         <DanaSeesMaria landed={false} />
       </Panel>
       <Panel label="Busy buttons: a spinner in place of the label, at the same width">

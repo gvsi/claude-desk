@@ -1,68 +1,94 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn, within } from 'storybook/test';
 
+import { Button } from '../components/Button/Button.tsx';
 import { Composer } from '../components/Composer/Composer.tsx';
 import { ConceptFooter } from '../components/ConceptFooter/ConceptFooter.tsx';
+import { ConversationListItem } from '../components/ConversationListItem/ConversationListItem.tsx';
+import { PageHeader } from '../components/PageHeader/PageHeader.tsx';
 import { Pill } from '../components/Pill/Pill.tsx';
+import { StatusLabel } from '../components/StatusDot/StatusDot.tsx';
 import { TakeOverBar } from '../components/TakeOverBar/TakeOverBar.tsx';
+import { TextLink } from '../components/TextLink/TextLink.tsx';
 import { Transcript } from '../components/Transcript/Transcript.tsx';
-import { TranscriptHeader } from '../components/TranscriptRow/TranscriptRow.tsx';
 import { rivera } from '../fixtures/index.ts';
 import { expectComputed } from '../test/expectComputed.ts';
-import { CONVERSATION_LIST, ConversationsPage, PUBLIC_LINK, RiveraFrame, TurnRows, type ListedConversation } from './parts.tsx';
+import { RiveraFrame, TurnRows, type ListedConversation } from './parts.tsx';
 import { SPEC, expectConversationType, expectFooter, expectOwnerFrame, expectReceiptsUnderMessages, expectTabOrder, one } from './spec.ts';
 
 const lucia = rivera.conversations.lucia;
 const OWNER = rivera.business.ownerName;
+/** From Lucía asking for Maria on; her question and the quote before it fold into one line. */
+const FROM = lucia.turns.findIndex((turn) => turn.kind === 'visitor' && turn.text.startsWith('¿Puedo hablar con Maria?'));
+const shown = lucia.turns.slice(FROM);
 
 /** Claude's translations of what Lucía wrote, as the owner's screen shows them under her words. */
+const ENGLISH: Record<string, string> = {
+  '¿Puedo hablar con Maria? También gotea la llave de paso.': 'Can I talk to Maria? The shut-off valve is dripping too.',
+  'Perfecto. ¿Cuándo pueden venir?': 'Perfect. When can you come?',
+};
 const TRANSLATIONS = Object.fromEntries(
-  lucia.turns.flatMap((turn, index) => {
-    const english: Record<string, string> = {
-      '¿Cuánto cuesta destapar el desagüe del fregadero?': 'How much to unclog the sink drain?',
-      '¿Puedo hablar con Maria? También gotea la llave de paso.': 'Can I talk to Maria? The shut-off valve is dripping too.',
-      'Perfecto. ¿Cuándo pueden venir?': 'Perfect. When can you come?',
-    };
-    return turn.kind === 'visitor' && english[turn.text] ? [[index, english[turn.text]]] : [];
-  }),
+  shown.flatMap((turn, index) => (turn.kind === 'visitor' && ENGLISH[turn.text] ? [[index, ENGLISH[turn.text]]] : [])),
 ) as Record<number, string>;
 
-/** The list with Lucía's chat open: Maria is in it. */
-const LIST: ListedConversation[] = [
-  { name: lucia.name, time: '12:22 pm', status: { tone: 'info', text: 'You’re in this chat' } },
-  ...CONVERSATION_LIST.filter((item) => item.name !== lucia.name),
+/** Today's conversations across the top, as the board lists them, Lucía's open. */
+const STRIP: ListedConversation[] = [
+  { name: lucia.name, time: '12:22', status: { tone: 'info', text: 'You’re in this chat' } },
+  { name: rivera.people.dana.name, time: '12:04', status: { tone: 'handled', text: 'Booked Thu 10:30' } },
+  { name: 'Visitor in Berkeley', time: '10:58', status: { tone: 'held', text: 'Needs you, 50% off for cash' } },
+  { name: rivera.conversations.alexAgent.name, time: '11:42', status: { tone: 'handled', text: 'Agent, booked Thu 9:00' } },
 ];
 
-/** Lucía's chat after Maria took it over: her own message, the bar to hand back, her composer. */
+/** Lucía's chat after Maria took it over: her own messages as "You", the bar to hand back, her composer. */
 function ConversationTakeOver() {
   return (
     <RiveraFrame
       current="conversations"
-      fill
       twoDesks
       counts={{ conversations: { n: 1, label: '1 live conversation' }, safety: { n: 2, label: '2 blocked' } }}
     >
-      <ConversationsPage open={lucia.name} items={LIST}>
-        <div className="board-conversation">
+      <div className="board-takeover">
+        <PageHeader title="Conversations" actions={<p className="board-takeover__count board-quiet cd-type-meta">10 today, 1 live</p>} />
+        <nav className="board-takeover__strip" aria-label="Today’s conversations">
+          <ul>
+            {STRIP.map((item) => (
+              <li key={item.name}>
+                <ConversationListItem {...item} href={`#conversation-${item.time}`} current={item.name === lucia.name} />
+              </li>
+            ))}
+          </ul>
+          <span className="cd-type-meta">
+            <TextLink href="#conversations-today">All 10 today</TextLink>
+          </span>
+        </nav>
+        <div className="board-takeover__chat">
           <header className="board-conversation-head">
-            <h2 className="board-conversation-head__name cd-type-control" data-copy="user">
+            <h2 className="board-conversation-head__name cd-type-section" data-copy="user">
               {lucia.name}
             </h2>
             <Pill>Public</Pill>
-            <p className="board-conversation-head__latest cd-type-meta">In Spanish. You took over at 12:31 pm.</p>
+            <span className="board-conversation-head__latest cd-type-caption">
+              <StatusLabel tone="info">In Spanish, you took over at 12:31</StatusLabel>
+            </span>
+            <span className="board-conversation-head__end">
+              <Button variant="ghost" onClick={fn()}>
+                Hide translations
+              </Button>
+            </span>
           </header>
-          <Transcript label={`Conversation with ${lucia.name}`}>
-            <TranscriptHeader
-              left={`Today at 12:20 pm, web chat from ${PUBLIC_LINK}`}
-              right="Notes from the checks sit under each message. Select one for the full trace."
-            />
-            <TurnRows turns={lucia.turns} onOpenTrace={fn()} translations={TRANSLATIONS} />
-          </Transcript>
-          <TakeOverBar mode="owner" visitorName={lucia.name} ownerName={OWNER} onTakeOver={fn()} onHandBack={fn()} onResume={fn()} />
-          <Composer variant="owner" label={`Message ${lucia.name}`} placeholder="Write to Lucía" onSend={fn()} />
-          <ConceptFooter />
+          <p className="board-quiet cd-type-meta">
+            Earlier, Claude quoted a drain clearing. <TextLink href="#earlier">Show 2 messages</TextLink>
+          </p>
+          <div className="board-takeover__reading">
+            <Transcript label={`Conversation with ${lucia.name}`}>
+              <TurnRows turns={shown} onOpenTrace={fn()} translations={TRANSLATIONS} ownersOwnScreen />
+            </Transcript>
+            <TakeOverBar mode="owner" visitorName={lucia.name} ownerName={OWNER} onTakeOver={fn()} onHandBack={fn()} onResume={fn()} />
+            <Composer variant="owner" label={`Message ${lucia.name}`} placeholder="Write to Lucía" onSend={fn()} />
+            <ConceptFooter />
+          </div>
         </div>
-      </ConversationsPage>
+      </div>
     </RiveraFrame>
   );
 }
@@ -74,10 +100,9 @@ const meta = {
     layout: 'fullscreen',
     canvas: 'N-Conv-TakeOver',
     canvasNote: [
-      'The page follows the signed conversation boards (N-Conv-Run1): the list in its column at the sidebar’s seam and receipts under each message, where this earlier board draws a row of conversations across the top and a margin column.',
-      'The conversation is the Rivera fixture’s chat with Lucía, from her question through the callback to Maria’s message, where the board starts at her ask for Maria and folds the quote into a line.',
-      'Maria’s own message shows as it was delivered, in Spanish, under her name and initials, where the board labels it “You” with no initials: PersonMessage draws initials from the name it is given, so “You” would draw a “Y”. The board’s English original with “Lucía saw:” under it, and the translated composer line, are static vision. So is “Claude suggests”, with its reply to use.',
-      'Maria joining is a status line with her initials and no time, as no contract carries one; Hand back to Claude sits above the composer, where the board puts it beside the composer.',
+      'The board’s page: the title with the day’s count, today’s conversations across the top, the open chat’s head across the page, then its messages in the reading column. Receipts sit under each message, signed after this board, where it draws a margin column.',
+      'The chat is the Rivera fixture’s with Lucía from her ask for Maria: a callback, then Maria’s message, shown as it was delivered, in Spanish, under “You” beside her initials. The board’s folded line names a garbage disposal quote; the board’s English original with “Lucía saw:”, the translated composer line and “Claude suggests” with its reply to use are static vision.',
+      'Maria joining is a status line with her initials and no time, as no contract carries one; Hand back to Claude sits above the composer, as TakeOverBar places it, where the board puts it beside the composer, in the margin column.',
     ].join(' '),
   },
 } satisfies Meta;
@@ -88,9 +113,17 @@ type Story = StoryObj<typeof meta>;
 
 export const Board: Story = {
   play: async ({ canvas, canvasElement, userEvent }) => {
-    await expectOwnerFrame(canvasElement, 'Conversations', { fill: true });
-    const list = canvas.getByRole('navigation', { name: 'Conversations' });
-    await expect(within(list).getByRole('link', { current: true })).toHaveTextContent(lucia.name);
+    // The padded page, its sidebar on the panel, as this board draws it.
+    await expectOwnerFrame(canvasElement, 'Conversations');
+    expectComputed(canvas.getByRole('heading', { level: 1, name: 'Conversations' }), SPEC.pageTitle);
+    // The open conversation's name, in the section style the board sets it in.
+    expectComputed(canvas.getByRole('heading', { level: 2, name: lucia.name }), { fontSize: '15px', lineHeight: '20px', fontWeight: '520' });
+
+    // Today's conversations in one row across the top, Lucía's open.
+    const strip = canvas.getByRole('navigation', { name: 'Today’s conversations' });
+    const items = within(strip).getAllByRole('link');
+    await expect(new Set(items.slice(0, STRIP.length).map((item) => Math.round(item.getBoundingClientRect().top))).size).toBe(1);
+    await expect(within(strip).getByRole('link', { current: true })).toHaveTextContent(lucia.name);
 
     // The conversation: receipts under their messages, Lucía's words with Claude's translation.
     const log = canvas.getByRole('log', { name: `Conversation with ${lucia.name}` });
@@ -105,9 +138,12 @@ export const Board: Story = {
     await expect(joined).toBeDefined();
     await expect(joined?.textContent).not.toMatch(/\d/);
 
-    // Her own message, in a person's frame, under her name.
+    // Her own message reads "You", beside her own initials, hidden from screen readers.
     const mine = one(log, '.cd-person-message');
-    await expect(within(mine).getByText(OWNER, { exact: true })).toBeVisible();
+    await expect(within(mine).getByText('You', { exact: true })).toBeVisible();
+    const avatar = one(mine, '.cd-person-message__avatar');
+    await expect(avatar).toHaveAttribute('aria-hidden', 'true');
+    await expect(avatar.textContent).toBe('MR');
 
     // Owner mode: Hand back to Claude, then her composer.
     const handBack = canvas.getByRole('button', { name: 'Hand back to Claude' });
@@ -116,12 +152,15 @@ export const Board: Story = {
     expectComputed(one(canvasElement, '.cd-composer__box'), SPEC.composer);
     await expectFooter(canvasElement);
 
-    // focus_order_is_logical: the sidebar, the list, the receipts, Hand back to Claude, then the composer.
+    // focus_order_is_logical: the sidebar, the strip, the chat's controls, the receipts, Hand back, the composer.
     const column = canvas.getByRole('complementary', { name: 'Claude Desk' });
     await expectTabOrder(userEvent, [
       within(column).getByRole('button', { name: `Switch business, current: ${rivera.business.name}` }),
+      within(column).getByRole('button', { name: 'Switch Desk, current: Main line' }),
       ...within(within(column).getByRole('navigation', { name: 'Main' })).getAllByRole('link'),
-      ...within(list).getAllByRole('link'),
+      ...items,
+      canvas.getByRole('button', { name: 'Hide translations' }),
+      canvas.getByRole('link', { name: 'Show 2 messages' }),
       ...within(log).getAllByRole('button', { name: /Open the full trace/ }),
       handBack,
       composer,

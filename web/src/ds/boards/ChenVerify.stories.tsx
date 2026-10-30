@@ -39,7 +39,14 @@ function ChenPage({ label, children, after }: { label: string; children: React.R
         language="en"
         onAskForOwner={fn()}
         footer={false}
-        composer={<Composer variant="visitor" label="Message Chen & Co. CPA" placeholder="Message Chen & Co. CPA" maxLength={2000} onSend={fn()} />}
+        composer={
+          // Embedded, the shell leaves out its footer and landmarks, so two pages can share one
+          // document; the footer goes where the whole page has it, under the composer.
+          <>
+            <Composer variant="visitor" label="Message Chen & Co. CPA" placeholder="Message Chen & Co. CPA" maxLength={2000} onSend={fn()} />
+            <ConceptFooter poweredBy />
+          </>
+        }
       >
         <Transcript label="Conversation with Chen & Co. CPA">{children}</Transcript>
         {after}
@@ -70,9 +77,6 @@ function ChenVerify() {
         <VerifiedLine text={VERIFIED} assurance="demo_code" language="en" />
         <TurnRows turns={afterTheCode} />
       </ChenPage>
-      <div className="board-verify__footer">
-        <ConceptFooter poweredBy />
-      </div>
     </main>
   );
 }
@@ -85,8 +89,8 @@ const meta = {
     canvas: 'N-Public-Verify-Run1',
     canvasNote: [
       'Both states and the Demo inbox between them, as on the board: VerifyCodeForm under the verify card while the code is on its way, then VerifiedLine with “Simulated verification” and the document_link card after it.',
-      'The form starts empty where the board shows the code typed in; the inbox entry’s body is the kernel’s code message, longer than the board’s.',
-      'Each page is embedded and the concept footer shows once under all three columns, since one document can’t hold two pages’ landmarks; the board draws the footer under each page.',
+      'The play types the code from the Demo inbox, as the board shows it; the inbox entry’s body is the kernel’s code message, longer than the board’s.',
+      'Each page is embedded, since one document can’t hold two pages’ landmarks, and as tall as the window, with its concept footer under its composer, as the page draws it.',
       'The receipts are the fixture’s: the reply check under the verify card, and the release and reply check under the return, where the board adds “Verification started”.',
     ].join(' '),
   },
@@ -106,6 +110,12 @@ export const Board: Story = {
       await expectReceiptsUnderMessages(log);
       await expect(page).toHaveTextContent('Claude, an AI answering for Chen & Co. CPA');
       expectComputed(one(page, '.cd-composer__box'), SPEC.composer);
+      // The window's height, the composer and then the page's own footer at its foot.
+      await expect(page.getBoundingClientRect().height).toBe(window.innerHeight);
+      const composer = one(page, '.cd-composer__box').getBoundingClientRect();
+      const footer = one(page, '[data-ds="concept-footer"]').getBoundingClientRect();
+      await expect(footer.top).toBeGreaterThan(composer.bottom);
+      await expect(page.getBoundingClientRect().bottom - footer.bottom).toBeLessThanOrEqual(48);
     }
 
     // While the code is on its way: the form under the verify card, its Confirm the primary button.
@@ -135,5 +145,10 @@ export const Board: Story = {
       download,
       within(verified).getByRole('textbox', { name: 'Message Chen & Co. CPA' }),
     ]);
+
+    // As on the board, Raj has typed the code from his Demo inbox, so Confirm is ready.
+    await userEvent.type(field, '482913');
+    await expect(field).toHaveValue('482913');
+    await expect(within(waiting).getByRole('button', { name: 'Confirm' })).toBeEnabled();
   },
 };

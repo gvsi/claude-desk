@@ -9,13 +9,20 @@ import { expectComputed, type ComputedExpectation } from '../test/expectComputed
 
 const SERIF = /^"Source Serif 4"/;
 
-/** Each spec row, as computed styles. */
+/** Each spec row, as computed styles. Rows that differ by board say which boards they are for. */
 export const SPEC = {
+  /** Today, Safety, the switcher and the take-over: the sidebar on the panel, a hairline seam at its right. */
   sidebar: {
     width: '264px',
     backgroundColor: 'rgb(34, 34, 32)',
     borderRightWidth: '1px',
     borderRightColor: 'rgba(250, 249, 245, 0.12)',
+  },
+  /** The signed conversation boards (N-Conv-Run1, N-Conv-Agent-Run1): the sidebar on the app ground, no seam. */
+  sidebarFilled: {
+    width: '264px',
+    backgroundColor: 'rgb(28, 27, 25)',
+    borderRightWidth: '0px',
   },
   activeNavRow: {
     height: '36px',
@@ -84,12 +91,18 @@ export function some<T extends Element = HTMLElement>(root: ParentNode, selector
 }
 
 /**
- * The owner app's frame: the sidebar column, its current row, and the padded page, or with `fill`
- * the page that fills the main area (the conversation boards).
+ * The owner app's frame: the sidebar column, its current row, and the padded page; or, with
+ * `fill`, as the signed conversation boards draw it: the page filling the main area, and the
+ * sidebar on the app ground at its own height, its Answering switch 4 px under the pages.
  */
 export async function expectOwnerFrame(root: HTMLElement, current: string, { fill = false } = {}): Promise<void> {
   const column = within(root).getByRole('complementary', { name: 'Claude Desk' });
-  expectComputed(column, SPEC.sidebar);
+  expectComputed(column, fill ? SPEC.sidebarFilled : SPEC.sidebar);
+  if (fill) {
+    const nav = within(column).getByRole('navigation', { name: 'Main' });
+    const foot = one(column, '.cd-sidebar__footer');
+    await expect(foot.getBoundingClientRect().top - nav.getBoundingClientRect().bottom, 'the sidebar foot under the pages').toBe(4);
+  }
   const row = within(column).getByRole('link', { name: new RegExp(`^${current}`) });
   await expect(row).toHaveAttribute('aria-current', 'page');
   expectComputed(row, SPEC.activeNavRow);

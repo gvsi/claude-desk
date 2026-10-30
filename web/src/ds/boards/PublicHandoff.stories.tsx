@@ -58,7 +58,14 @@ function State({ label, turns }: { label: string; turns: readonly TranscriptTurn
         openStatus={OPEN_NOW}
         onAskForOwner={fn()}
         footer={false}
-        composer={<Composer variant="visitor" label="Message Rivera Plumbing" placeholder="Message Rivera Plumbing" maxLength={2000} onSend={fn()} />}
+        composer={
+          // Embedded, the shell leaves out its footer and landmarks, so two pages can share one
+          // document; the footer goes where the whole page has it, under the composer.
+          <>
+            <Composer variant="visitor" label="Message Rivera Plumbing" placeholder="Message Rivera Plumbing" maxLength={2000} onSend={fn()} />
+            <ConceptFooter poweredBy />
+          </>
+        }
       >
         <Transcript label="Conversation with Rivera Plumbing">
           <TurnRows turns={turns} />
@@ -74,9 +81,6 @@ function PublicHandoff() {
       <h1 className="cd-sr-only">Ask for Maria</h1>
       <State {...STATES.joins} />
       <State {...STATES.busy} />
-      <div className="board-handoff__footer">
-        <ConceptFooter poweredBy />
-      </div>
     </main>
   );
 }
@@ -89,10 +93,9 @@ const meta = {
     canvas: 'N-Public-Handoff-Run1',
     canvasNote: [
       'Both states side by side, as on the board: Maria joins and answers, or she is busy and Claude sets a callback.',
-      'One document can’t hold two pages’ landmarks, so each state is the public page embedded (PublicShell footer={false}) and the concept footer shows once under both, where the board draws it under each.',
+      'One document can’t hold two pages’ landmarks, so each state is the public page embedded (PublicShell footer={false}), each as tall as the window, with its concept footer under its composer, as the page draws it.',
       'The board’s first exchange about the water heater is left out; each state starts with Dana asking for Maria, and the handoff card is the kernel’s, with its receipt. Maria’s message is the fixture’s, where the board has her greet Dana first.',
       'The board labels each state in its header; here each is a region named for its state, and the header keeps the kernel’s open status.',
-      'At 640 px each state keeps the shell’s 40 px sides, where the board draws 16 px: the shell takes 16 px gutters below 640 px, where the open status also moves under the name, as the signed open-status board draws a phone.',
     ].join(' '),
   },
 } satisfies Meta;
@@ -107,9 +110,16 @@ export const Board: Story = {
       const page = canvas.getByRole('region', { name: state.label });
       // The disclosure, the brand header's height, and the visitor's read-only receipts under each message.
       await expect(page).toHaveTextContent('Claude, an AI answering for Rivera Plumbing');
-      // Each state is the board's 640 px: the shell's wide header, 76 px high, 40 px in at the sides.
+      // Each state is the board's 640 px and the window's height: the header 76 px high with 16 px
+      // gutters and the open status at the right, then the chat, the composer and the footer at its foot.
       await expect(page.getBoundingClientRect().width).toBe(640);
-      expectComputed(one(page, '.cd-public-shell__brand'), { height: '76px', paddingLeft: '40px', paddingRight: '40px' });
+      await expect(page.getBoundingClientRect().height).toBe(window.innerHeight);
+      expectComputed(one(page, '.cd-public-shell__brand'), { height: '76px', paddingLeft: '16px', paddingRight: '16px' });
+      const composer = one(page, '.cd-composer__box').getBoundingClientRect();
+      const footer = one(page, '[data-ds="concept-footer"]').getBoundingClientRect();
+      await expect(composer.left - page.getBoundingClientRect().left).toBe(16);
+      await expect(footer.top).toBeGreaterThan(composer.bottom);
+      await expect(page.getBoundingClientRect().bottom - footer.bottom).toBeLessThanOrEqual(24);
       const log = within(page).getByRole('log', { name: 'Conversation with Rivera Plumbing' });
       expectConversationType(log);
       await expect(await expectReceiptsUnderMessages(log)).toBeGreaterThanOrEqual(1);
@@ -129,7 +139,7 @@ export const Board: Story = {
     // She is busy: Claude asks for a name and number, and the callback arrives as its card.
     const busy = canvas.getByRole('region', { name: STATES.busy.label });
     await expect(busy).toHaveTextContent(rivera.blocks.callback_confirmed.en.title ?? '');
-    await expect(canvasElement.querySelectorAll('[data-ds="concept-footer"]')).toHaveLength(1);
+    await expect(canvasElement.querySelectorAll('[data-ds="concept-footer"]')).toHaveLength(2);
 
     // focus_order_is_logical: in each state, Ask for Maria Rivera, then the composer.
     await expectTabOrder(userEvent, [

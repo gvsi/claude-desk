@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { expect, fn, within } from 'storybook/test';
+import { useState } from 'react';
+import { expect, within } from 'storybook/test';
 
 import { AttemptRow, type AttemptRowProps } from '../components/AttemptRow/AttemptRow.tsx';
 import { CheckpointMeter } from '../components/AttemptRow/CheckpointMeter.tsx';
@@ -25,6 +26,20 @@ const ATTEMPTS: Omit<AttemptRowProps, 'href'>[] = [
   { time: 'Yesterday, 2:05 pm', title: 'Hid instructions in a work order', who: 'From chat', stoppedBy: 'reply' },
   { time: 'Oct 26, 9:52 am', title: 'Asked to send Dana’s code elsewhere', who: 'From chat', stoppedBy: 'action' },
 ];
+
+/** The kinds as the screen holds them: "All" chosen at first, and the choice follows each pick. */
+function KindChips() {
+  const [kind, setKind] = useState<(typeof KINDS)[number]>('All');
+  return (
+    <div className="board-chips" role="radiogroup" aria-label="Kind of attempt">
+      {KINDS.map((option) => (
+        <Chip key={option} asRadio selected={option === kind} onClick={() => setKind(option)}>
+          {option}
+        </Chip>
+      ))}
+    </div>
+  );
+}
 
 /** The attempt opened beside the list: what happened in Claude's words, and how it was stopped. */
 function AttemptDetail() {
@@ -76,13 +91,7 @@ function Safety() {
       entries={48}
       list={
         <>
-          <div className="board-chips" role="radiogroup" aria-label="Kind of attempt">
-            {KINDS.map((kind) => (
-              <Chip key={kind} asRadio selected={kind === 'All'} onClick={fn()}>
-                {kind}
-              </Chip>
-            ))}
-          </div>
+          <KindChips />
           <ul className="board-attempts" aria-label="Attempts this week">
             {ATTEMPTS.map((attempt) => (
               <li key={attempt.time}>
@@ -104,9 +113,9 @@ const meta = {
     layout: 'fullscreen',
     canvas: 'N-Safety-Run1',
     canvasNote: [
-      'The attempts list and the opened attempt are page layout the web app (plan 04) owns, composed from PageHeader, ChainStatus, SegmentedControl, Chip, AttemptRow, CheckpointMeter, Card, StatusLabel and TextLink.',
+      'The attempts list and the opened attempt are page layout the web app (plan 04) owns, composed from PageHeader, ChainStatus, SegmentedControl, Chip, AttemptRow, CheckpointMeter, Card, StatusLabel and TextLink. The kinds are one radio group, one tab stop, with the arrow keys.',
       'Signed at sign-off: “All” first and chosen; older attempts carry their date with the time, “Oct 26, 9:52 am”, where the board shows the date alone; entries are “Recorded by the checkpoint”. The times are the screen’s strings.',
-      'The checkpoint meter follows the order the checks run (who’s asking, the action checkpoint, the auto reviewer, the reply checkpoint), where the board puts the reply checkpoint before the reviewer. Full trace, closed here, opens under Every entry (N-Safety-Record-Run1).',
+      'Full trace, closed here as on the board, opens under Every entry (N-Safety-Record-Run1).',
       'The board’s open questions are canvas notes.',
     ].join(' '),
   },
@@ -141,17 +150,33 @@ export const Board: Story = {
     await expect(within(detail).getByText('Action checkpoint')).toBeVisible();
     await expect(canvas.getByText('Signed with a development key')).toBeVisible();
 
-    // focus_order_is_logical: the sidebar, the held request, the view switch, the kinds, the attempts, the opened one.
+    // focus_order_is_logical: the sidebar, the held request, the view switch, the kinds as one tab
+    // stop, the attempts, the opened one.
     const column = canvas.getByRole('complementary', { name: 'Claude Desk' });
-    await expectTabOrder(userEvent, [
+    const all = kinds[0] as HTMLElement;
+    const reached = await expectTabOrder(userEvent, [
       within(column).getByRole('button', { name: `Switch business, current: ${rivera.business.name}` }),
       ...within(within(column).getByRole('navigation', { name: 'Main' })).getAllByRole('link'),
       canvas.getByRole('link', { name: '1 held for you, in Today' }),
       canvas.getByRole('radio', { name: 'Attempts' }),
-      kinds[0] as HTMLElement,
+      all,
       ...rows,
       within(detail).getByText('See how it was stopped'),
       within(detail).getByRole('link', { name: 'Open conversation' }),
     ]);
+    await expect(reached.filter((stop) => kinds.includes(stop))).toEqual([all]);
+
+    // The kinds take the radio group's keys: the arrows move and choose, Home and End jump.
+    all.focus();
+    await userEvent.keyboard('{ArrowRight}');
+    await expect(kinds[1]).toHaveFocus();
+    await expect(kinds[1]).toHaveAttribute('aria-checked', 'true');
+    await expect(all).toHaveAttribute('aria-checked', 'false');
+    await userEvent.keyboard('{End}');
+    await expect(kinds[kinds.length - 1]).toHaveFocus();
+    await userEvent.keyboard('{ArrowRight}');
+    await expect(all).toHaveFocus();
+    await expect(all).toHaveAttribute('aria-checked', 'true');
+    await expect(kinds.map((chip) => chip.tabIndex)).toEqual(kinds.map((chip) => (chip === all ? 0 : -1)));
   },
 };

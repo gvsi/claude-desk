@@ -4,7 +4,7 @@
  * its "Last 7 days" column and briefing, and the conversation page's columns. They are composed
  * here from the components and tokens, only for the `Boards/*` stories, and exported nowhere else.
  */
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { fn } from 'storybook/test';
 
 import type { EvMessage, PublicDesk, RenderedBlock, StatusEvent } from '../../api/contracts.ts';
@@ -462,6 +462,8 @@ export interface TurnRowsProps {
   checks?: readonly string[];
   /** Claude's translations for the owner of what the visitor wrote, by the turn's index. */
   translations?: Record<number, string>;
+  /** On the owner's own screen her messages read "You", beside her own initials. */
+  ownersOwnScreen?: boolean;
 }
 
 /**
@@ -476,6 +478,7 @@ export function TurnRows({
   agentName,
   checks = [],
   translations = {},
+  ownersOwnScreen = false,
 }: TurnRowsProps) {
   const rows: ReactNode[] = [];
   let pending: StatusEvent[] = [];
@@ -518,7 +521,12 @@ export function TurnRows({
         if (event.type === 'message') {
           const words =
             event.author === 'owner' ? (
-              <PersonMessage name={rivera.business.ownerName} blocks={event.blocks} language={event.language} />
+              <PersonMessage
+                name={ownersOwnScreen ? 'You' : rivera.business.ownerName}
+                initials={ownersOwnScreen ? initialsOf(rivera.business.ownerName) : undefined}
+                blocks={event.blocks}
+                language={event.language}
+              />
             ) : (
               <ClaudeMessage blocks={event.blocks} language={event.language} ownerName={rivera.business.ownerName} />
             );
@@ -550,9 +558,9 @@ export function TurnRows({
  * own title, explanations and "How it behaves" notes are sign-off notes, not product, so they stay
  * in the canvas; each panel keeps its short label.
  */
-export function Sheet({ title, children }: { title: string; children: ReactNode }) {
+export function Sheet({ title, gap = 40, children }: { title: string; gap?: 24 | 32 | 40; children: ReactNode }) {
   return (
-    <main className="board-sheet">
+    <main className={`board-sheet board-sheet--gap-${gap}`}>
       <h1 className="cd-sr-only">{title}</h1>
       {children}
     </main>
@@ -560,12 +568,32 @@ export function Sheet({ title, children }: { title: string; children: ReactNode 
 }
 
 /**
- * One labelled panel of a sheet: a phone's is 390 px wide. A `bare` panel holds a card, which is
- * its own frame.
+ * One labelled panel of a sheet, as wide as the board draws it (`width`, its border included) or
+ * the sheet's full width. A `phone` panel is padded 16 px, a `compact` one 20 px 24 px, the others
+ * 20 px 28 px; a `bare` panel holds a card, which is its own frame.
  */
-export function Panel({ label, phone = false, bare = false, children }: { label: string; phone?: boolean; bare?: boolean; children: ReactNode }) {
+export function Panel({
+  label,
+  width,
+  phone = false,
+  compact = false,
+  bare = false,
+  children,
+}: {
+  label: string;
+  width?: number;
+  phone?: boolean;
+  compact?: boolean;
+  bare?: boolean;
+  children: ReactNode;
+}) {
+  const kind = phone ? ' board-panel--phone' : compact ? ' board-panel--compact' : '';
   return (
-    <section className={`board-panel${phone ? ' board-panel--phone' : ''}${bare ? ' board-panel--bare' : ''}`} aria-label={label}>
+    <section
+      className={`board-panel${kind}${bare ? ' board-panel--bare' : ''}${width === undefined ? ' board-panel--full' : ' board-panel--sized'}`}
+      style={width === undefined ? undefined : ({ '--board-panel-width': `${width}px` } as CSSProperties)}
+      aria-label={label}
+    >
       <h2 className="board-panel__label cd-type-caption">{label}</h2>
       <div className="board-panel__frame">{children}</div>
     </section>

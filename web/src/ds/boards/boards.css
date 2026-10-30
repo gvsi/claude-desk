@@ -382,6 +382,16 @@
   min-width: 0;
 }
 
+/* An agent's signed limit: the card look, compact as the board draws it, 12 px 16 px, and 10 px
+   under the conversation's head where the page's rows are 16 px apart. */
+.board-limit {
+  margin-top: calc(var(--space-10) - var(--space-16));
+  padding: var(--space-12) var(--space-16);
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-card);
+  background: var(--fill-card);
+}
+
 .board-limit__title {
   margin: 0;
   font-weight: 520;
@@ -391,12 +401,12 @@
   margin: var(--space-2) 0 0;
 }
 
-/* Sign-off sheets: labelled panels on the app ground, each a screen or a part of one. */
+/* Sign-off sheets: labelled panels on the app ground, each a screen or a part of one, at the
+   widths and paddings the boards draw them. */
 .board-sheet {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
-  gap: var(--space-40) var(--space-40);
   box-sizing: border-box;
   min-height: 100dvh;
   padding: var(--space-40);
@@ -404,16 +414,33 @@
   color: var(--text-primary);
 }
 
-.board-panel {
-  display: grid;
-  flex: 1 1 560px;
-  gap: var(--space-10);
-  min-width: 0;
-  max-width: 720px;
+.board-sheet--gap-40 {
+  gap: var(--space-40);
 }
 
-.board-panel--phone {
-  flex: 0 1 390px;
+.board-sheet--gap-32 {
+  gap: var(--space-32);
+}
+
+.board-sheet--gap-24 {
+  gap: var(--space-24);
+}
+
+.board-panel {
+  display: grid;
+  flex: 0 1 auto;
+  gap: var(--space-10);
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+.board-panel--full {
+  flex: 1 1 100%;
+}
+
+.board-panel--sized {
+  flex-basis: var(--board-panel-width);
+  max-width: var(--board-panel-width);
 }
 
 .board-panel__label {
@@ -425,9 +452,13 @@
 .board-panel__frame {
   box-sizing: border-box;
   min-width: 0;
-  padding: var(--space-24) var(--space-28);
+  padding: var(--space-20) var(--space-28);
   border: 1px solid var(--line-hairline);
   border-radius: var(--radius-card);
+}
+
+.board-panel--compact .board-panel__frame {
+  padding: var(--space-20) var(--space-24);
 }
 
 .board-panel--bare .board-panel__frame {
@@ -436,12 +467,17 @@
 }
 
 .board-panel--phone .board-panel__frame {
-  padding: var(--space-24) var(--space-16);
+  padding: var(--space-16);
 }
 
 @media (max-width: 559.98px) {
   .board-sheet {
     padding: var(--space-24) var(--space-16);
+  }
+
+  .board-panel--sized {
+    flex-basis: 100%;
+    max-width: none;
   }
 
   .board-panel__frame {
@@ -478,27 +514,24 @@
 }
 
 .board-handoff__state {
+  height: 100dvh;
   min-width: 0;
+  overflow-y: auto;
 }
 
 .board-handoff__state {
   position: relative;
 }
 
-/* The hairline between the states takes no width, so each state keeps the board's 640 px. */
+/* The hairline between the states takes no width, so each state keeps the board's 640 px. It is
+   the hairline on the app ground, drawn over the headers too, as the board draws it. */
 .board-handoff__state + .board-handoff__state::before {
   position: absolute;
   inset: 0 auto 0 0;
   z-index: 1;
   width: 1px;
-  background: var(--line-hairline);
+  background: linear-gradient(var(--line-hairline), var(--line-hairline)), var(--bg-app);
   content: '';
-}
-
-.board-handoff__footer {
-  grid-column: 1 / -1;
-  padding: var(--space-16) var(--space-16) var(--space-20);
-  border-top: 1px solid var(--line-hairline);
 }
 
 @media (max-width: 899.98px) {
@@ -521,24 +554,21 @@
 }
 
 .board-verify__page {
+  height: 100dvh;
   min-width: 0;
+  overflow-y: auto;
 }
 
 .board-verify__inbox {
   display: grid;
   min-width: 0;
+  min-height: 100dvh;
   border-right: 1px solid var(--line-hairline);
   border-left: 1px solid var(--line-hairline);
 }
 
 .board-verify__form {
   margin-top: var(--space-16);
-}
-
-.board-verify__footer {
-  grid-column: 1 / -1;
-  padding: var(--space-16) var(--space-16) var(--space-20);
-  border-top: 1px solid var(--line-hairline);
 }
 
 @media (max-width: 899.98px) {
@@ -749,5 +779,85 @@
     top: calc(var(--space-40) * 2 + var(--space-20));
     right: var(--space-16);
     left: var(--space-16);
+  }
+}
+
+/* The take-over board's page: today's conversations across the top, then the open chat. */
+.board-takeover {
+  display: grid;
+  gap: var(--space-16);
+  min-width: 0;
+}
+
+.board-takeover__strip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  min-width: 0;
+  /* The items' fill reaches 10 px past the page's edge, so their words line up with it. */
+  margin: 0 0 0 calc(-1 * var(--space-10));
+  padding-bottom: var(--space-12);
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+.board-takeover__strip > ul {
+  display: flex;
+  flex: 1 1 auto;
+  gap: var(--space-6);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.board-takeover__strip li {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.board-takeover__strip > span {
+  flex: none;
+}
+
+.board-takeover__count {
+  margin: 0;
+}
+
+/* The open chat: its head and the folded line across the page, its messages, the bar and the
+   composer in the reading column. */
+.board-takeover__chat {
+  display: grid;
+  gap: var(--space-16);
+  min-width: 0;
+}
+
+.board-takeover__chat > p {
+  margin: 0;
+}
+
+.board-takeover__reading {
+  display: grid;
+  gap: var(--space-16);
+  min-width: 0;
+  max-width: var(--size-reading);
+  padding-top: var(--space-12);
+}
+
+.board-conversation-head__end {
+  margin-left: auto;
+}
+
+@media (max-width: 1023.98px) {
+  .board-takeover__strip {
+    flex-wrap: wrap;
+    margin-left: 0;
+  }
+
+  .board-takeover__strip > ul {
+    flex-wrap: wrap;
+  }
+
+  .board-takeover__strip li {
+    flex: 1 1 200px;
   }
 }

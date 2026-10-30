@@ -30,13 +30,13 @@ function DanaTyping() {
 function TypingBoard() {
   return (
     <Sheet title="Typing">
-      <Panel label="Owner’s conversation, 1280: Dana is typing">
+      <Panel label="Owner’s conversation, 1280: Dana is typing" width={720}>
         <DanaTyping />
       </Panel>
-      <Panel label="Phone, 390" phone>
+      <Panel label="Phone, 390" width={390} phone>
         <DanaTyping />
       </Panel>
-      <Panel label="Public page, unchanged: Claude writing stays a line on Claude’s side">
+      <Panel label="Public page, unchanged: Claude writing stays a line on Claude’s side" width={520}>
         <Transcript label="Conversation with Rivera Plumbing">
           <TranscriptRow>
             <VisitorMessage text="Can someone come Tuesday afternoon?" />
