@@ -342,7 +342,7 @@ export const PhonePresets: Story = {
     canvas: 'N-Conn-22-Phone-Presets',
     canvasNote: [
       'The page as the web app composes it: PageHeader with the preset menu as its action, actionsBelowOnPhone and hideSubtitleOnPhone, so on a phone the menu takes its own line under the title and there is no subtitle, as the board draws it.',
-      'The composer keeps one placeholder at every width, where the board shortens it.',
+      'The composer reads “Ask Claude to change a rule” at every width, as the board does.',
       'The play opens the menu by keyboard, as the board draws it open.',
     ].join(' '),
   },
