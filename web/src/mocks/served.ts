@@ -14,10 +14,10 @@ import type {
   CancelAccepted,
   CancelReason,
   MessageAccepted,
+  ToolConfirmEntry,
   VerifyChecked,
   VisitorSession,
 } from '../api/views.ts';
-import { RIVERA_MONEY_CAP_CENTS } from '../ds/fixtures/index.ts';
 import { AgentRuns, agentCardOut, demoAgentIssued, isDemoAgentTask } from './agents.ts';
 import {
   attempts,
@@ -30,8 +30,10 @@ import {
   needsYou,
   ownerTranscript,
   paymentLinkOut,
+  peopleOut,
   publicDesk,
   reports,
+  rulesView,
   today,
   visitorTranscript,
 } from './readModels.ts';
@@ -150,6 +152,21 @@ function isRuleCard(value: unknown): value is RuleCard {
     typeof value.reason === 'string' &&
     (cap === undefined || cap === null || (Number.isSafeInteger(cap) && (cap as number) >= 0))
   );
+}
+
+/**
+ * A `confirmTool` batch as the API takes one (plan 02b Task 7): one or more tools, each named once
+ * with the hash of the definition the owner confirms, and whether to turn them on.
+ */
+function toolBatch(body: unknown): { entries: ToolConfirmEntry[]; enable: boolean } | null {
+  if (!isRecord(body) || typeof body.enable !== 'boolean' || !Array.isArray(body.tools) || body.tools.length === 0) return null;
+  const entries: ToolConfirmEntry[] = [];
+  for (const entry of body.tools as unknown[]) {
+    if (!isRecord(entry) || typeof entry.tool !== 'string' || typeof entry.definition_sha256 !== 'string' || entry.definition_sha256 === '') return null;
+    if (entries.some((seen) => seen.tool === entry.tool)) return null;
+    entries.push({ tool: entry.tool as ToolConfirmEntry['tool'], definition_sha256: entry.definition_sha256 });
+  }
+  return { entries, enable: body.enable };
 }
 
 /** A turn's step as queued, with the session's generation then: a take-over since fences it off (`Server.tick`). */
@@ -432,11 +449,50 @@ const SERVED: ServedRoutes = {
     if (isFailure(desk)) return desk;
     const add = isRecord(req.body) ? req.body.add : undefined;
     if (req.malformed || !Array.isArray(add) || add.length === 0 || !add.every(isRuleCard)) return INVALID;
-    // The kernel won't draft a card that takes more money on its own than the Desk's limit allows.
-    if (add.some((card) => card.mode === 'auto' && (card.max_amount_cents ?? 0) > RIVERA_MONEY_CAP_CENTS)) {
-      return failWith(422, 'above_money_cap', { cap_cents: RIVERA_MONEY_CAP_CENTS });
+    // The kernel won't draft a card that takes more money on its own than the active version's limit allows.
+    const cap = desk.policy.auto_money_cap_cents ?? 0;
+    if (add.some((card) => card.mode === 'auto' && (card.max_amount_cents ?? 0) > cap)) {
+      return failWith(422, 'above_money_cap', { cap_cents: cap });
     }
     return ok(sv.world.draft(desk, add));
+  },
+  rules(sv, req) {
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
+    return isFailure(desk) ? desk : ok(rulesView(desk));
+  },
+  ruleDraft(sv, req) {
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
+    if (isFailure(desk)) return desk;
+    // Only an open draft of this Desk: an active, superseded or unknown version is not a draft.
+    const version = req.params.version ?? '';
+    const record = /^\d{1,9}$/.test(version) ? desk.drafts.get(Number(version)) : undefined;
+    return record ? ok(record.draft) : NOT_FOUND;
+  },
+  people(sv, req) {
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
+    return isFailure(desk) ? desk : ok(peopleOut(sv.world, desk));
+  },
+  confirmRules(sv, req) {
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
+    if (isFailure(desk)) return desk;
+    const version = isRecord(req.body) ? req.body.version : undefined;
+    if (req.malformed || !Number.isSafeInteger(version)) return INVALID;
+    const confirmed = sv.world.confirmDraft(desk, version as number);
+    if (confirmed === 'not_found') return NOT_FOUND;
+    // Drafted from rules that have changed since: the owner asks for the change again.
+    if (confirmed === 'stale') return failWith(409, 'rules_changed_since_draft');
+    return ok(confirmed);
+  },
+  confirmTool(sv, req) {
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
+    if (isFailure(desk)) return desk;
+    const batch = req.malformed ? null : toolBatch(req.body);
+    if (batch === null) return INVALID;
+    const confirmed = sv.world.confirmTools(desk, batch.entries, batch.enable);
+    if (confirmed === 'not_found') return NOT_FOUND;
+    // Another hash than the one listed, or turning verification off: the kernel refuses, and nothing changes.
+    if (confirmed === 'conflict') return failWith(409, 'kernel', { code: 'conflict' });
+    return ok(confirmed);
   },
   publicDesk(sv, req) {
     const desk = sv.world.deskBySlug(req.params.slug);

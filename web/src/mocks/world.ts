@@ -21,10 +21,21 @@ import type {
   SessionState,
   SseEvent,
   StatusEvent,
+  ToolProfile,
 } from '../api/contracts.ts';
-import type { CancelReason, DeskSummary, Handoff, PolicyVersionOut, RulesDraft, TranscriptItem, TranscriptKind } from '../api/views.ts';
+import type {
+  CancelReason,
+  DeskSummary,
+  Handoff,
+  PolicyVersionOut,
+  RulesDraft,
+  ToolConfirmEntry,
+  ToolConfirmedOut,
+  TranscriptItem,
+  TranscriptKind,
+} from '../api/views.ts';
 import { cardBlock, placeholderHex, rivera } from '../ds/fixtures/index.ts';
-import { BUSINESS, activePolicy, copyIds, type CopyIds, type MockSeed } from './seed.ts';
+import { BUSINESS, activePolicy, copyIds, riveraTools, type CopyIds, type MockSeed } from './seed.ts';
 import {
   DECISIONS,
   EVENT_GAP_MS,
@@ -94,7 +105,39 @@ export interface DeskRecord {
   /** The kernel's open status for the Desk's public page, by language; null when it makes no claim. */
   openStatus: Record<Language, OpenStatus> | null;
   /** Rule drafts made from the active rules, by version; none is active until the owner confirms it. */
-  drafts: Map<number, RulesDraft>;
+  drafts: Map<number, DraftRecord>;
+  /** The highest rules version made for the Desk: versions are never reused. */
+  lastVersion: number;
+  /** The Desk's tools, as the kernel's tool rows have them. */
+  tools: ToolProfile[];
+}
+
+/** A rules draft as the kernel keeps one until the owner confirms it. */
+export interface DraftRecord {
+  /** What `ruleDraft` answers. */
+  draft: RulesDraft;
+  /** The version it was drafted from: once another is active, confirming it is refused. */
+  parent: number;
+  /** The tools a tool confirm's draft turns on, each at the hash the owner confirmed. */
+  enables: ToolConfirmEntry[];
+}
+
+/** Why the kernel refuses a tool confirm: a tool the Desk doesn't have, or a hash or a change it won't take. */
+export type ToolConfirmRefusal = 'not_found' | 'conflict';
+
+/** A card with every optional field at its default, so two cards compare by what they enforce. */
+function canonicalCard(card: RuleCard): string {
+  const full: Record<string, unknown> = {
+    person_id: null,
+    agent_key_id: null,
+    max_amount_cents: null,
+    max_discount_bp: 0,
+    hours: null,
+    review: false,
+    is_default: false,
+    ...card,
+  };
+  return JSON.stringify(Object.keys(full).sort().map((key) => [key, full[key]]));
 }
 
 export interface DecisionRecord {
@@ -222,12 +265,15 @@ export class MockWorld {
 
   addDesk(fields: Pick<DeskSummary, 'desk_id' | 'slug' | 'name' | 'hours'> & Pick<DeskRecord, 'openStatus'>): DeskRecord {
     const { openStatus, ...summary } = fields;
+    const policy = activePolicy(fields.desk_id);
     const desk: DeskRecord = {
       summary: { ...summary, business_name: BUSINESS.name, answering: true },
-      policy: activePolicy(fields.desk_id),
+      policy,
       ledger: [],
       openStatus,
       drafts: new Map(),
+      lastVersion: policy.version,
+      tools: riveraTools(),
     };
     this.desks.push(desk);
     return desk;
@@ -876,28 +922,39 @@ export class MockWorld {
    * Default cards are left out of what it shows.
    */
   draft(desk: DeskRecord, add: readonly RuleCard[]): RulesDraft {
-    const before = desk.policy.cards.filter((card) => !card.is_default);
-    const cards = before.map((card) => ({ ...card }));
-    const added: RuleCard[] = [];
-    const changed: [RuleCard, RuleCard][] = [];
+    const cards = desk.policy.cards.filter((card) => !card.is_default).map((card) => ({ ...card }));
     for (const card of add) {
       const at = cards.findIndex((c) => c.card_id === card.card_id);
-      const copy = { ...card };
-      if (at === -1) {
-        cards.push(copy);
-        added.push(copy);
-      } else {
-        const old = cards[at];
-        if (old) changed.push([old, copy]);
-        cards[at] = copy;
-      }
+      if (at === -1) cards.push({ ...card });
+      else cards[at] = { ...card };
     }
-    const reasons = (mode: RuleCard['mode']) => cards.filter((c) => c.mode === mode).map((c) => c.reason);
+    return this.draftCards(desk, cards);
+  }
+
+  /**
+   * A draft of the Desk's rules as `cards`, at the money cap `cap` (the active version's when left
+   * out), turning on `enables`: the next version, its diff with the active rules by `card_id`,
+   * checked, and stored until the owner confirms it. Default cards are left out.
+   */
+  draftCards(desk: DeskRecord, cards: readonly RuleCard[], opts: { cap?: number; enables?: readonly ToolConfirmEntry[] } = {}): RulesDraft {
+    const active = desk.policy.cards.filter((card) => !card.is_default);
+    const next = cards.filter((card) => !card.is_default).map((card) => ({ ...card }));
+    const was = new Map(active.map((card) => [card.card_id, card]));
+    const now = new Set(next.map((card) => card.card_id));
+    const added = next.filter((card) => !was.has(card.card_id));
+    const removed = active.filter((card) => !now.has(card.card_id)).map((card) => ({ ...card }));
+    const changed = next.flatMap((card): [RuleCard, RuleCard][] => {
+      const old = was.get(card.card_id);
+      return old !== undefined && canonicalCard(old) !== canonicalCard(card) ? [[{ ...old }, card]] : [];
+    });
+    const reasons = (mode: RuleCard['mode']) => next.filter((c) => c.mode === mode).map((c) => c.reason);
     const proof = desk.policy.proof;
+    desk.lastVersion += 1;
     const draft: RulesDraft = {
-      version: desk.policy.version + desk.drafts.size + 1,
-      cards,
-      diff: { added, removed: [], changed },
+      version: desk.lastVersion,
+      cards: next,
+      diff: { added, removed, changed },
+      auto_money_cap_cents: opts.cap ?? desk.policy.auto_money_cap_cents ?? 0,
       proof: {
         ok: true,
         method: 'symcc',
@@ -907,8 +964,94 @@ export class MockWorld {
       },
       summary: { on_its_own: reasons('auto'), asks_you: reasons('ask'), never: reasons('never') },
     };
-    desk.drafts.set(draft.version, draft);
+    desk.drafts.set(draft.version, { draft, parent: desk.policy.version, enables: [...(opts.enables ?? [])] });
     return draft;
+  }
+
+  /** A stored draft as a rules version with `status`, as the kernel keeps its versions. */
+  private versionOf(desk: DeskRecord, record: DraftRecord, status: PolicyVersionOut['status']): PolicyVersionOut {
+    const { draft } = record;
+    const sha = (part: string) => placeholderHex(`sha256:${desk.summary.desk_id}:${draft.version}:${part}`, 32);
+    return {
+      desk_id: desk.summary.desk_id,
+      version: draft.version,
+      parent_version: record.parent,
+      cards: draft.cards.map((card) => ({ ...card })),
+      cedar_sha256: sha('cedar'),
+      schema_sha256: sha('schema'),
+      baseline_sha256: desk.policy.baseline_sha256,
+      profiles_sha256: sha('profiles'),
+      invariants_sha256: desk.policy.invariants_sha256,
+      review_thresholds_version: desk.policy.review_thresholds_version,
+      status,
+      proof: { ...draft.proof, checks: draft.proof.checks.map((check) => ({ ...check })) },
+      auto_money_cap_cents: draft.auto_money_cap_cents ?? 0,
+    };
+  }
+
+  /**
+   * Activates a draft, as the kernel's confirm does: the draft becomes the active version, its
+   * tools turn on at the hashes the owner confirmed, and the record says so. A draft that isn't open
+   * is not found, and one made from a version no longer active is stale.
+   */
+  confirmDraft(desk: DeskRecord, version: number): PolicyVersionOut | 'not_found' | 'stale' {
+    const record = desk.drafts.get(version);
+    if (record === undefined) return 'not_found';
+    if (record.parent !== desk.policy.version) return 'stale';
+    desk.policy = this.versionOf(desk, record, 'active');
+    desk.drafts.delete(version);
+    for (const entry of record.enables) {
+      desk.tools = desk.tools.map((tool) =>
+        tool.tool === entry.tool
+          ? { ...tool, status: 'enabled', definition_sha256: entry.definition_sha256, pending_definition_text: null, pending_sha256: null }
+          : tool,
+      );
+    }
+    this.appendLedger(desk, {
+      kind: 'policy',
+      origin: 'kernel',
+      session_id: null,
+      ref_id: String(version),
+      summary: { version, parent_version: record.parent },
+    });
+    return { ...desk.policy, cards: desk.policy.cards.map((card) => ({ ...card })) };
+  }
+
+  /**
+   * A tool confirm, as the kernel takes its batch: a whole connector in one action. Turning off
+   * applies at once with no draft, except that verification can't be turned off. Turning on names
+   * each tool's listed hash (or a changed one's pending hash) and drafts one version for the tools
+   * not yet on, at the active rules and cap, which applies only when the owner confirms it.
+   */
+  confirmTools(desk: DeskRecord, entries: readonly ToolConfirmEntry[], enable: boolean): ToolConfirmedOut | ToolConfirmRefusal {
+    const tools = entries.map((entry) => desk.tools.find((tool) => tool.tool === entry.tool));
+    if (tools.some((tool) => tool === undefined)) return 'not_found';
+    const profileOf = (name: string) => desk.tools.find((tool) => tool.tool === name) as ToolProfile;
+    const [first] = entries;
+    if (first === undefined) return 'not_found';
+    if (!enable) {
+      if (entries.some((entry) => entry.tool === 'native.start_verification')) return 'conflict';
+      const off = new Set(entries.map((entry) => entry.tool));
+      desk.tools = desk.tools.map((tool) => (off.has(tool.tool) ? { ...tool, status: 'disabled' } : tool));
+      for (const entry of entries) {
+        this.appendLedger(desk, { kind: 'tool_pin', origin: 'kernel', session_id: null, ref_id: entry.tool, summary: { tool: entry.tool, enabled: false } });
+      }
+      return { profile: { ...profileOf(first.tool) }, draft: null };
+    }
+    const hashed = entries.every((entry, i) => {
+      const tool = tools[i];
+      return tool !== undefined && entry.definition_sha256 !== '' && (entry.definition_sha256 === tool.definition_sha256 || entry.definition_sha256 === tool.pending_sha256);
+    });
+    if (!hashed) return 'conflict';
+    const enables = entries.filter((entry) => {
+      const tool = profileOf(entry.tool);
+      return !(tool.status === 'enabled' && tool.definition_sha256 === entry.definition_sha256);
+    });
+    if (enables.length === 0) return { profile: { ...profileOf(first.tool) }, draft: null };
+    const draft = this.draftCards(desk, desk.policy.cards, { enables });
+    const record = desk.drafts.get(draft.version);
+    if (record === undefined) throw new Error(`draft ${draft.version} was not stored`);
+    return { profile: { ...profileOf(first.tool) }, draft: this.versionOf(desk, record, 'proved') };
   }
 
   /** Writes seeded turns into history from `from`, each step `EVENT_GAP_MS` apart and turns `gap` apart. */

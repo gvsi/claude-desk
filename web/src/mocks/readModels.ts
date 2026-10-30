@@ -19,9 +19,12 @@ import type {
   NeedsYouSession,
   OwnerTranscript,
   PaymentLinkOut,
+  PeopleOut,
   Reports,
+  RulesView,
   ThisWeek,
   Today,
+  ToolRow,
   TranscriptKind,
   VisitorTranscript,
 } from '../api/views.ts';
@@ -535,3 +538,36 @@ export const HEALTH: HealthOut = {
     unproved_seeds: [],
   },
 };
+
+/**
+ * The Desk's rules as the owner reads them: the active version with its money cap, every tool row
+ * (the kernel's tool columns, without the adapter's own), and the preset the owner cards came from,
+ * which Rivera's own rules match neither of.
+ */
+export function rulesView(desk: DeskRecord): RulesView {
+  const tools = desk.tools.map(
+    (tool): ToolRow => ({
+      tool: tool.tool,
+      source: tool.source,
+      effects: [...tool.effects],
+      reversible: tool.reversible,
+      status: tool.status,
+      description_confirmed: tool.description_confirmed,
+      definition_sha256: tool.definition_sha256 ?? null,
+      pending_definition_text: tool.pending_definition_text ?? null,
+      pending_sha256: tool.pending_sha256 ?? null,
+    }),
+  );
+  return { active: { ...desk.policy, cards: desk.policy.cards.map((card) => ({ ...card })) }, tools, preset: null };
+}
+
+/** The business's people on record (Dana and Bob, as the seed has them) and the Desk's leads, oldest first. */
+export function peopleOut(world: MockWorld, desk: DeskRecord): PeopleOut {
+  const { dana, bob } = rivera.people;
+  return {
+    people: [dana, bob].map((person) => ({ person_id: person.personId, display_name: person.name, masked_contact: person.maskedContact })),
+    leads: world.leads
+      .filter((lead) => lead.deskId === desk.summary.desk_id)
+      .map((lead) => ({ lead_id: lead.leadId, display_name: lead.displayName, note: lead.note, created_at: isoTime(lead.createdAt) })),
+  };
+}

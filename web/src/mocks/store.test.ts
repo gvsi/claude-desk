@@ -12,7 +12,12 @@ import type {
   CopyOut,
   NeedsYouItem,
   OwnerTranscript,
+  PeopleOut,
+  PolicyVersionOut,
+  RulesDraft,
+  RulesView,
   Today,
+  ToolConfirmedOut,
   VisitorSession,
   VisitorTranscript,
 } from '../api/views.ts';
@@ -792,6 +797,103 @@ describe('the owner in the chat', () => {
     expect((await call('decision', { params: { decision_id: 'dec-elsewhere' } })).status).toBe(404);
     mockStore.reset('rivera', { signedIn: false });
     expect((await call('decision', { params: { decision_id: held.decision_id } })).status).toBe(401);
+  });
+});
+
+describe('rules and tools', () => {
+  const rules = async () => (await call('rules', { params: { desk_id: deskId } })).body as RulesView;
+  const draftOf = async (version: number) => call('ruleDraft', { params: { desk_id: deskId, version: String(version) } });
+  const confirm = (version: unknown) => call('confirmRules', { params: { desk_id: deskId }, body: { version } });
+  const confirmTools = (body: unknown) => call('confirmTool', { params: { desk_id: deskId }, body });
+  const statusOf = async (tool: string) => (await rules()).tools.find((row) => row.tool === tool)?.status;
+  const hashOf = async (tool: string) => (await rules()).tools.find((row) => row.tool === tool)?.definition_sha256 ?? '';
+
+  it('rule_drafts_read_and_confirm', async () => {
+    // The active rules: version 7, Rivera's $500 limit, every tool on, from no preset.
+    const before = await rules();
+    expect(before.active).toMatchObject({ version: 7, status: 'active', auto_money_cap_cents: 50_000 });
+    expect(before.preset).toBeNull();
+    expect(before.tools.map((row) => row.tool)).toContain('payments.create_refund');
+    expect(before.tools.every((row) => row.status === 'enabled')).toBe(true);
+    expect(Object.keys(before.tools[0] ?? {}).sort()).toEqual(
+      ['definition_sha256', 'description_confirmed', 'effects', 'pending_definition_text', 'pending_sha256', 'reversible', 'source', 'status', 'tool'],
+    );
+
+    // A draft reads back by its version until it is confirmed; nothing applies before then.
+    const quoteAsks = { ...rivera.ruleCards['rv-quote'], mode: 'ask' as const };
+    const drafted = (await call('draftRules', { params: { desk_id: deskId }, body: { add: [quoteAsks] } })).body as RulesDraft;
+    expect(drafted).toMatchObject({ version: 8, auto_money_cap_cents: 50_000, diff: { changed: [[rivera.ruleCards['rv-quote'], quoteAsks]] } });
+    expect(await draftOf(8)).toEqual({ status: 200, body: drafted });
+    expect((await draftOf(99)).status).toBe(404);
+    expect((await rules()).active.version).toBe(7);
+
+    // A second draft from version 7, then the first confirmed: the second is out of date.
+    const stale = (await call('draftRules', { params: { desk_id: deskId }, body: { add: [{ ...quoteAsks, reason: 'Quotes wait.' }] } })).body as RulesDraft;
+    expect(stale.version).toBe(9);
+    expect((await confirm('8')).status).toBe(422);
+    const confirmed = await confirm(8);
+    expect(confirmed.status).toBe(200);
+    expect(confirmed.body as PolicyVersionOut).toMatchObject({ version: 8, parent_version: 7, status: 'active', auto_money_cap_cents: 50_000 });
+    const after = await rules();
+    expect(after.active.version).toBe(8);
+    expect(after.active.cards.find((card) => card.card_id === 'rv-quote')?.mode).toBe('ask');
+    expect((await draftOf(8)).status).toBe(404);
+    expect(await confirm(9)).toEqual({ status: 409, body: { error: 'rules_changed_since_draft' } });
+    expect((await confirm(8)).status).toBe(404);
+    expect(mockStore.world.desks[0]?.ledger.at(-1)?.event).toMatchObject({ kind: 'policy', summary: { version: 8, parent_version: 7 } });
+
+    // The business's people, by name, and its leads.
+    const people = (await call('people', { params: { desk_id: deskId } })).body as PeopleOut;
+    expect(people.people).toContainEqual({ person_id: rivera.people.dana.personId, display_name: rivera.people.dana.name, masked_contact: rivera.people.dana.maskedContact });
+
+    // Another copy's owner reaches none of it.
+    mockStore.reset('rivera', { signedIn: false });
+    for (const key of ['rules', 'people'] as const) expect((await call(key, { params: { desk_id: deskId } })).status).toBe(401);
+    expect((await draftOf(8)).status).toBe(401);
+    expect((await confirm(8)).status).toBe(401);
+  });
+
+  it('confirm_tool_takes_the_batch_body', async () => {
+    const stripe = ['payments.list_charges', 'payments.create_refund'];
+    const entries = async () => Promise.all(stripe.map(async (tool) => ({ tool, definition_sha256: await hashOf(tool) })));
+
+    // The old one-tool body, an empty list or a tool named twice is not a batch.
+    expect((await confirmTools({ tool: 'payments.create_refund', enable: false, definition_sha256: await hashOf('payments.create_refund') })).status).toBe(422);
+    expect((await confirmTools({ tools: [], enable: false })).status).toBe(422);
+    const [charges] = await entries();
+    expect((await confirmTools({ tools: [charges, charges], enable: false })).status).toBe(422);
+    expect((await confirmTools({ tools: [{ tool: 'calendar.free_busy', definition_sha256: 'x' }], enable: false })).status).toBe(404);
+
+    // Turning a connector off applies at once, with no draft.
+    const listed = await entries();
+    const off = await confirmTools({ tools: listed, enable: false });
+    expect(off.status).toBe(200);
+    expect((off.body as ToolConfirmedOut).draft).toBeNull();
+    expect((off.body as ToolConfirmedOut).profile).toMatchObject({ tool: 'payments.list_charges', status: 'disabled' });
+    for (const tool of stripe) expect(await statusOf(tool)).toBe('disabled');
+    expect((await rules()).active.version).toBe(7);
+
+    // Verification can't be turned off: the kernel refuses it, and nothing changes.
+    const verify = { tool: 'native.start_verification', definition_sha256: await hashOf('native.start_verification') };
+    expect(await confirmTools({ tools: [verify], enable: false })).toEqual({ status: 409, body: { error: 'kernel', code: 'conflict' } });
+    expect(await statusOf('native.start_verification')).toBe('enabled');
+
+    // Turning it back on names the listed hashes and drafts one version for the group, which applies
+    // only when that draft is confirmed. Another hash is refused.
+    expect((await confirmTools({ tools: [{ ...listed[0], definition_sha256: 'f'.repeat(64) }], enable: true })).status).toBe(409);
+    const on = await confirmTools({ tools: listed, enable: true });
+    expect(on.status).toBe(200);
+    const draft = (on.body as ToolConfirmedOut).draft;
+    expect(draft).toMatchObject({ version: 8, parent_version: 7, status: 'proved', auto_money_cap_cents: 50_000, proof: { ok: true, method: 'symcc' } });
+    expect(draft?.cards).toEqual((await rules()).active.cards);
+    for (const tool of stripe) expect(await statusOf(tool)).toBe('disabled');
+    expect((await confirm(8)).status).toBe(200);
+    for (const tool of stripe) expect(await statusOf(tool)).toBe('enabled');
+
+    // A tool already on at its hash needs no draft.
+    const again = await confirmTools({ tools: [verify], enable: true });
+    expect(again.status).toBe(200);
+    expect((again.body as ToolConfirmedOut).draft).toBeNull();
   });
 });
 

@@ -7,7 +7,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { SessionState } from '../api/contracts.ts';
 import type { RouteKey } from '../api/routes.ts';
-import type { ApprovalAnswerOut, HealthOut, NeedsYouItem, OwnerTranscript, VisitorSession, VisitorTranscript } from '../api/views.ts';
+import type {
+  ApprovalAnswerOut,
+  HealthOut,
+  NeedsYouItem,
+  OwnerTranscript,
+  RulesDraft,
+  RulesView,
+  ToolConfirmedOut,
+  VisitorSession,
+  VisitorTranscript,
+} from '../api/views.ts';
 import { EVENT_GAP_MS, SCRIPT, type RuleName } from './script.ts';
 import { RIVERA } from './seed.ts';
 import { mockStore, type MockRequestInit } from './store.ts';
@@ -140,9 +150,22 @@ describe('mock payloads', () => {
     }
     checks.push(['Health', ((await body('health')) as HealthOut).kernel]);
 
+    // Rules: the active version, a draft's cards and check, its confirm, and a connector turned off and back on.
+    const owner = { params: { desk_id: RIVERA.deskId } };
+    const rules = (await body('rules', owner)) as RulesView;
+    checks.push(['PolicyVersion', rules.active]);
+    const drafted = (await body('draftRules', { ...owner, body: { add: [{ ...rules.active.cards[0], mode: 'ask' }] } })) as RulesDraft;
+    checks.push(['ProofReport', drafted.proof], ...drafted.cards.map((card): [string, unknown] => ['RuleCard', card]));
+    checks.push(['PolicyVersion', await body('confirmRules', { ...owner, body: { version: drafted.version } })]);
+    const stripe = rules.tools.filter((row) => row.source === 'mcp').map((row) => ({ tool: row.tool, definition_sha256: row.definition_sha256 }));
+    checks.push(['ToolConfirmed', await body('confirmTool', { ...owner, body: { tools: stripe, enable: false } })]);
+    const turnedOn = (await body('confirmTool', { ...owner, body: { tools: stripe, enable: true } })) as ToolConfirmedOut;
+    expect(turnedOn.draft).not.toBeNull();
+    checks.push(['ToolConfirmed', turnedOn]);
+
     // Every model the plan names was produced, and the script's events reach every event type it uses.
     const models = new Set(checks.map(([model]) => model));
-    for (const model of ['SseEvent', 'Decision', 'SessionState', 'LedgerPage', 'Health', 'PublicDesk', 'RuleCard', 'PolicyVersion']) {
+    for (const model of ['SseEvent', 'Decision', 'SessionState', 'LedgerPage', 'Health', 'PublicDesk', 'RuleCard', 'PolicyVersion', 'ProofReport', 'ToolConfirmed']) {
       expect(models, model).toContain(model);
     }
     const types = new Set(checks.filter(([model]) => model === 'SseEvent').map(([, ev]) => (ev as { type: string }).type));

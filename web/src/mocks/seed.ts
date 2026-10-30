@@ -6,7 +6,7 @@
  * script's own steps, so their ledger entries, receipts and transcript items line up the way the
  * live ones do.
  */
-import type { HoursWindow, OpenStatus, RuleCard } from '../api/contracts.ts';
+import type { HoursWindow, OpenStatus, RuleCard, ToolName, ToolProfile } from '../api/contracts.ts';
 import type { PolicyVersionOut, RulesPreset } from '../api/views.ts';
 import { RIVERA_MONEY_CAP_CENTS, placeholderHex, rivera } from '../ds/fixtures/index.ts';
 import { seedAgentChat } from './agents.ts';
@@ -193,6 +193,62 @@ export function activePolicy(deskId: string): PolicyVersionOut {
     },
     auto_money_cap_cents: RIVERA_MONEY_CAP_CENTS,
   };
+}
+
+/** A built-in tool's profile: its adapter's, pinned at the adapter profile's hash, enabled. */
+function nativeTool(
+  tool: ToolName,
+  fields: Pick<ToolProfile, 'effects' | 'reversible' | 'resource_kind' | 'description_confirmed'>,
+): ToolProfile {
+  return {
+    tool,
+    source: 'native',
+    adapter: tool.slice('native.'.length),
+    input_schema: { type: 'object', properties: {}, additionalProperties: false },
+    definition_sha256: placeholderHex(`sha256:profile:${tool}`, 32),
+    pending_definition_text: null,
+    pending_sha256: null,
+    status: 'enabled',
+    ...fields,
+  };
+}
+
+/**
+ * The tools a Rivera copy starts with, as the kernel's tool rows have them: every built-in tool,
+ * with the effects the master plan's tool table gives each, and both of the mock payments server's,
+ * connected and pinned (the fixtures' profiles). Every one is on.
+ */
+export function riveraTools(): ToolProfile[] {
+  return [
+    nativeTool('native.quote', { effects: ['change'], reversible: true, resource_kind: 'desk', description_confirmed: "Price a job from the business's price list." }),
+    nativeTool('native.find_slots', { effects: ['read'], reversible: true, resource_kind: 'desk', description_confirmed: 'Find open times on the calendar.' }),
+    nativeTool('native.book', { effects: ['change'], reversible: true, resource_kind: 'slot', description_confirmed: 'Book a visit in an open time.' }),
+    nativeTool('native.release_document', {
+      effects: ['private_data', 'send_message'],
+      reversible: false,
+      resource_kind: 'document',
+      description_confirmed: 'Send a verified customer a link to one of their own documents.',
+    }),
+    nativeTool('native.payment_link', { effects: ['charge'], reversible: true, resource_kind: 'quote', description_confirmed: 'Make a one-time payment link for a quote.' }),
+    nativeTool('native.charge_mandate', {
+      effects: ['charge'],
+      reversible: true,
+      resource_kind: 'quote',
+      description_confirmed: "Charge a visiting agent within its owner's signed limit.",
+    }),
+    nativeTool('native.capture_lead', { effects: ['change'], reversible: true, resource_kind: 'desk', description_confirmed: "Save a visitor's name and how to reach them." }),
+    nativeTool('native.request_callback', { effects: ['change'], reversible: true, resource_kind: 'desk', description_confirmed: 'Ask the owner to call a visitor back.' }),
+    nativeTool('native.start_verification', {
+      effects: ['send_message'],
+      reversible: false,
+      resource_kind: 'desk',
+      description_confirmed: 'Send a code to the contact on record.',
+    }),
+    nativeTool('native.fetch_website', { effects: ['read'], reversible: true, resource_kind: 'desk', description_confirmed: "Read the business's website." }),
+    nativeTool('native.read_memory', { effects: ['read'], reversible: true, resource_kind: 'desk', description_confirmed: 'Read the notes the owner brought in.' }),
+    { ...rivera.toolProfiles.listCharges },
+    { ...rivera.toolProfiles.createRefund },
+  ];
 }
 
 const MINUTE = 60_000;
