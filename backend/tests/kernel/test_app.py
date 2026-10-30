@@ -64,6 +64,7 @@ async def test_production_without_seed_refuses_to_start(monkeypatch):
     for hook in ("DESK_DECISIONS", "ANTHROPIC_BASE_URL", "DESK_PROVE"):   # test hooks a shell may export
         monkeypatch.delenv(hook, raising=False)
     monkeypatch.setenv("KERNEL_DATABASE_URL", url)   # outside development there is no .env fallback
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "key-for-tests")   # production needs the model key too
     monkeypatch.setenv("DESK_ENV", "production")
     kernel = create_app()
     assert kernel.state.proof_mode == "bounded"

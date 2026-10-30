@@ -17,11 +17,16 @@ texts of the cards rendered for it, never the visitor's words. It answers whethe
 commits the business to more than the cards hold and whether it says or suggests the writer is a
 human. Every failure is the same answer as for the reviewer, `None`, which the reply check counts
 as a violation: a reply the check couldn't read isn't shown.
+
+Both run on one SDK client (`make_client`), given its key and host explicitly so it never sends
+a credential or reaches a host the kernel didn't choose.
 """
 
 import asyncio
 import json
 import logging
+import os
+import re
 import time
 from typing import TYPE_CHECKING, Any, Literal, Protocol, Self, TypeVar
 from zoneinfo import ZoneInfo
@@ -30,6 +35,7 @@ import anthropic
 from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt, ValidationError, field_validator
 
 from desk.contracts import Effect, NormalizedAction, Review, RuleCard, ToolName
+from desk.env import is_development
 
 if TYPE_CHECKING:
     from desk.kernel_service.app import KernelSettings
@@ -60,6 +66,13 @@ REVIEW_SCHEMA: dict[str, Any] = {
     "required": ["within_charter_bp", "manipulation_bp", "recommendation"],
     "additionalProperties": False,
 }
+
+ANTHROPIC_API_URL = "https://api.anthropic.com"
+# The development placeholder key: the Claude API answers it 401, and a fake model server at the
+# ANTHROPIC_BASE_URL test hook ignores it. Given a key, the SDK reads no ambient credential.
+NO_API_KEY = "no-key"
+# A key is one run of printable ASCII, so a malformed one never reaches a header, an error or a log.
+_KEY = re.compile(r"[!-~]+")
 
 SOFT_PROMISE_MODEL = "claude-haiku-5-5"
 SOFT_PROMISE_TIMEOUT_S = 2.0
@@ -211,10 +224,38 @@ class DecisionsBackend(Protocol):
 def make_decisions(settings: "KernelSettings") -> DecisionsBackend:
     """The backend `DESK_DECISIONS` names. `create_app` refuses `offline` outside development."""
     if settings.decisions == "anthropic":
-        return AnthropicDecisions(anthropic.AsyncAnthropic())   # reads ANTHROPIC_API_KEY and ANTHROPIC_BASE_URL
+        return AnthropicDecisions(make_client(settings))
     if settings.decisions == "offline":
         return OfflineDecisions()
     raise ValueError(f"DESK_DECISIONS is anthropic or offline, not {settings.decisions!r}")
+
+
+def make_client(settings: "KernelSettings") -> anthropic.AsyncAnthropic:
+    """The SDK client the reviewer and the soft-promise check share, with its key and host passed
+    explicitly, so the SDK reads no credential or host of its own: not `ANTHROPIC_AUTH_TOKEN`,
+    `ANTHROPIC_PROFILE`, workload identity or an on-disk profile, and not `ANTHROPIC_BASE_URL`.
+
+    - `ANTHROPIC_CUSTOM_HEADERS` set to anything but empty is refused: the SDK sends its lines with
+      every request, where an `Authorization` or `X-Api-Key` line replaces or joins the key.
+    - The key is `ANTHROPIC_API_KEY`, one run of printable ASCII. Outside development it is
+      required; in development a missing or empty one is `NO_API_KEY`, never "".
+    - The host is the `ANTHROPIC_BASE_URL` test hook in development, else the Claude API.
+
+    Development is the settings' and the process's `DESK_ENV` both naming it, as for the other test
+    hooks. Each refusal is a `RuntimeError` naming the variable, never its value, raised before any
+    client exists, so the kernel doesn't start."""
+    if os.environ.get("ANTHROPIC_CUSTOM_HEADERS"):
+        raise RuntimeError("ANTHROPIC_CUSTOM_HEADERS is set; the kernel sends no custom headers, which could "
+                           "replace or join its key")
+    development = is_development(settings.env) and is_development()
+    api_key = os.environ.get("ANTHROPIC_API_KEY") or None
+    if api_key is None and not development:
+        raise RuntimeError("ANTHROPIC_API_KEY is required outside development")
+    api_key = api_key or NO_API_KEY
+    if not _KEY.fullmatch(api_key):
+        raise RuntimeError("ANTHROPIC_API_KEY must be one API key: printable ASCII with no spaces")
+    base_url = (os.environ.get("ANTHROPIC_BASE_URL") if development else None) or ANTHROPIC_API_URL
+    return anthropic.AsyncAnthropic(api_key=api_key, base_url=base_url)
 
 
 class OfflineDecisions:
@@ -234,8 +275,8 @@ Answer = TypeVar("Answer", bound=BaseModel)
 
 class AnthropicDecisions:
     """The reviewer and the soft-promise check on the Anthropic API. `client` is an
-    `anthropic.AsyncAnthropic`. Each timeout is read when the call is made, so a test can shorten
-    it."""
+    `anthropic.AsyncAnthropic`, which the kernel builds with `make_client`. Each timeout is read
+    when the call is made, so a test can shorten it."""
 
     def __init__(self, client: Any):
         self._client = client

@@ -3,8 +3,9 @@
 The kernel binds 127.0.0.1:8701 and nothing changes that: the API process in the same task is
 its only client. The lifespan first refuses the test hooks outside development (a fake model
 server, a stand-in prover, an offline reviewer, a frozen clock), then builds the reviewer
-(`app.state.kernel.decisions`) and the signer, so a production kernel without
-`DESK_SIGNING_SEED` refuses to start, then the policy engine over the always-on baseline
+(`app.state.kernel.decisions`), so `ANTHROPIC_CUSTOM_HEADERS`, or a production kernel without
+`ANTHROPIC_API_KEY`, refuses to start (`decisions.make_client`), and the signer, so a production
+kernel without `DESK_SIGNING_SEED` refuses to start, then the policy engine over the always-on baseline
 (`app.state.engine`; a baseline it can't take stops the start too) with the shipped proof reports
 in its cache, then runs `desk-prove --selftest` once to pick the proof mode for the whole process
 (`symcc` or `bounded`, which `/health` reports), then the database engine (role desk_kernel), and
