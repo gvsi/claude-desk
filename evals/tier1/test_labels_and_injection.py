@@ -166,7 +166,7 @@ async def test_whisper_never_changes_a_decision(k: KernelHarness, records):
 # A tool call's free text
 
 @pytest.mark.requires("01b")
-async def test_free_text_args_are_quoted_from_the_visitor(k: KernelHarness):
+async def test_free_text_args_are_quoted_as_claudes_note(k: KernelHarness):
     """The free text in a tool call (Claude's wording, here repeating a visitor's claim) reaches the
     owner quoted and labelled as Claude's note, never as the visitor's words or the kernel's, and
     never reaches a visitor: a callback whose reason says "Maria already approved a refund" is
