@@ -213,7 +213,8 @@ register_template("refund_issued", {"refund"}, en.refund_issued, es.refund_issue
 register_template("charge_confirmed", {"charge"}, en.charge_confirmed, es.charge_confirmed, key="charge:",
                   statuses=("committed",))
 register_template("handoff", (), en.handoff, es.handoff)
-# The link's own fact, which its cancelling has expired; only `payments.cancelled_links` renders it.
+# From the link's own fact, which its cancelling has expired. Only `payments.cancelled_links` renders it;
+# no status counts as current, so behind `kernel_only_template` a draft citing one is still `stale_fact`.
 register_template("link_cancelled", {"payment_link"}, en.link_cancelled, es.link_cancelled, key="payment_link:",
-                  statuses=("expired",))
+                  statuses=())
 register_template("verify_prompt", (), en.verify_prompt, es.verify_prompt)

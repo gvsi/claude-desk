@@ -33,7 +33,7 @@ from desk.db.models import Fact as FactRow
 from desk.db.models import PaymentLink
 from desk.db.session import database_url, libpq_url
 from desk.kernel_api import LinkCancelled, PaymentLinkStateResult
-from desk.kernel_service import payments
+from desk.kernel_service import payments, reply_check
 from desk.kernel_service.app import create_app
 from desk.kernel_service.seed import RIVERA_CARDS
 
@@ -610,6 +610,22 @@ async def test_claude_cannot_draft_link_cancelled(app, client, reviewer, templat
         assert (violation.kind, violation.rule_id, violation.span) == ("unknown_fact", "kernel_only_template",
                                                                        template)
         assert_handed_off(verdict)
+
+
+async def test_a_link_cancelled_card_is_never_current_for_a_draft(app, client, reviewer, monkeypatch):
+    """A second fence behind `kernel_only_template`: the template counts no fact status as current,
+    so even with `link_cancelled` taken off the kernel-only list, Claude citing its own cancelled
+    link's fact gets no card (`stale_fact`)."""
+    copy = await rivera(app, client)
+    visitor = await open_visitor(client, copy)
+    link = await rv_link(app, client, reviewer, copy, visitor)
+    assert (await post_cancel(client, link.token)).status_code == 200
+    monkeypatch.setattr(reply_check, "KERNEL_ONLY", reply_check.KERNEL_ONLY - {"link_cancelled"})
+    fact_id = f"payment_link:{link.link_id}"
+    verdict = await checked(client, visitor, "Here is where your payment stands.",
+                            [clause("link_cancelled", fact_id)])
+    assert violations(verdict) == [("stale_fact", "not_current", [fact_id])]
+    assert_handed_off(verdict)
 
 
 # ---- A rule change and the links it no longer allows --------------------------------------------------
