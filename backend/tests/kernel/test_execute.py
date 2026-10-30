@@ -19,14 +19,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from desk.contracts import Claim, Decision, ExecResult, Fact, InboxNotice, Label, Review
 from desk.db import logs
 from desk.db.models import Decision as DecisionRow
-from desk.db.models import DemoInboxEntry, Document, Execution, NotificationPref, PriceItem, Quote, Tool
+from desk.db.models import DemoInboxEntry, Document, Execution, NotificationPref, Person, PriceItem, Quote, Tool
 from desk.kernel_service import demo_inbox, execute, ledger
 from desk.kernel_service.adapters.base import AdapterFailure, AdapterRefusal, AdapterResult, AdapterUnknown
 from desk.kernel_service.app import create_app
 from desk.kernel_service.seed import RIVERA_CARDS
 
 from .fakes import FakeAdapter
-from .helpers import CopyRows, activate_cards, kernel_ctx, ledger_rows, make_copy_rows, rows_of
+from .helpers import CopyRows, activate_cards, kernel_ctx, ledger_rows, make_copy_rows, rows_of, verify_session
 from .test_adapters import Rivera, book, quote_args, visitor_of
 from .test_compiler import card
 from .test_decide import PASS, Visitor, decided, desk_with, open_visitor, owner_decide, set_mode, verify_signature
@@ -656,6 +656,46 @@ async def test_a_take_over_after_the_intent_stops_the_allow(app, client, registr
         ("execute", {"decision_id": allowed.decision_id, "action_id": allowed.action.action_id, "state": "expired",
                      "fenced": True, "policy_version": 1, "auto_money_cap_cents": 50_000}),
         ("auth", {"route": "POST /execute", "reason": "stale_generation"}),
+    ]
+
+
+async def put_people(client: httpx.AsyncClient, rows: CopyRows, body: dict) -> None:
+    response = await client.put(f"/desks/{rows.desk_id}/people", headers=rows.owner, json=body)
+    assert response.status_code == 200, response.text
+
+
+async def test_a_session_closed_after_the_intent_runs_nothing(app, client, registry, monkeypatch):
+    """Maria removes Dana after an allow's intent commits in a session verified as her, and before
+    its side effect: the removal closes that session, and the Desk still stands. T2 reads the
+    session afresh once it holds the row and finds it closed, so nothing runs: the decision ends
+    `refused_at_execution`, its intent `failed` after `on_failed`, and its `execute` entry names
+    the closed session as the check that failed, with the version and cap T1 checked under."""
+    quote = FakeAdapter("native.quote")
+    rows = await desk_with(app, [quote], [card("quote", "native.quote")])
+    await put_people(client, rows, {"upsert": [{"ref": "dana", "display_name": "Dana Whitfield",
+                                                "contact": "dana@example.com"}]})
+    [dana] = await rows_of(app, rows.copy_id, select(Person).where(Person.ref == "dana"))
+    visitor = await open_visitor(client, rows)
+    await verify_session(app, rows.copy_id, visitor.session_id, dana.person_id)
+    allowed = await decided(client, visitor, "native.quote", {"qty": 1})
+    assert allowed.outcome == "allow", allowed.reason_plain
+
+    async def remove_dana() -> None:                                # Maria removes Dana as the intent commits
+        await put_people(client, rows, {"remove": ["dana"]})
+
+    monkeypatch.setattr(execute, "_after_intent", remove_dana)
+    response = await post_execute(client, visitor, allowed)
+    assert (response.status_code, response.json()) == (409, {"code": "conflict"})
+    assert "execute" not in quote.calls and quote.calls[-1] == "on_failed"     # prepare undone, nothing run
+    assert await committed(app, rows.copy_id, allowed.action.action_id) == ("failed", "refused_at_execution")
+    entries = [(e.event.kind, e.event.summary) for e in await ledger_rows(app, rows)
+               if e.event.kind in ("session", "execute", "auth")]
+    assert entries == [
+        ("session", {"kind": "visitor", "session_id": visitor.session_id}),
+        ("session", {"session_id": visitor.session_id, "closed": True, "reason": "person_removed"}),
+        ("execute", {"decision_id": allowed.decision_id, "action_id": allowed.action.action_id,
+                     "state": "refused_at_execution", "reason": "rules_changed", "check": "closed",
+                     "policy_version": 1, "auto_money_cap_cents": 50_000}),
     ]
 
 
