@@ -173,6 +173,16 @@ async def test_numbers_and_dates_in_prose_are_blocked(app, client, prose, rule_i
     ("Le prometo.", "lex.es.promise", "prometo", "en"),      # too few words to tell: English
     ("There is no\u2014charge for that.", "lex.en.promise", "no\u2014charge", "en"),   # an em dash
     ("Es sin\u2212costo.", "lex.es.promise", "sin\u2212costo", "es"),                 # a minus sign
+    ("Entrada libre.", "lex.es.promise", "Entrada libre", "en"),                      # free admission
+    ("La clase tiene entrada libre.", "lex.es.promise", "entrada libre", "es"),
+    ("Hay entradas libres para el concierto.", "lex.es.promise", "entradas libres", "es"),
+    ("Todo es libre de impuestos.", "lex.es.promise", "libre de impuestos", "es"),     # tax-free
+    ("La clase es libre para usted.", "lex.es.promise", "libre", "es"),               # free for you
+    ("Las clases son libres para ustedes.", "lex.es.promise", "libres", "es"),
+    ("El taller es libre para ti.", "lex.es.promise", "libre", "es"),
+    ("La visita es libre para vos.", "lex.es.promise", "libre", "es"),
+    ("La visita es libre para vosotros.", "lex.es.promise", "libre", "es"),
+    ("¿Tiene un horario libre para usted?", "lex.es.promise", "libre", "es"),   # "libre para usted" whatever is free
 ])
 async def test_promise_words_are_blocked(app, client, prose, rule_id, span, language):
     copy, visitor = await visitor_of(app, client)
@@ -255,6 +265,7 @@ HYPHENATED = [                       # lexicon phrases whose words a dash may jo
     ("money-back", "lex.en.promise"), ("on-the-house", "lex.en.promise"), ("last-year", "lex.en.date"),
     ("same-day", "lex.en.date"), ("fin-de-semana", "lex.es.date"), ("la-próxima-semana", "lex.es.date"),
     ("sin-costo", "lex.es.promise"), ("de-regalo", "lex.es.promise"), ("el-mismo-día", "lex.es.date"),
+    ("entrada-libre", "lex.es.promise"), ("libre-de-impuestos", "lex.es.promise"),
 ]
 
 
@@ -307,7 +318,9 @@ def test_an_acute_accent_between_words_still_reads_as_a_space(prose, rule_id):
     ("You\u02bcre free to ask me anything.", "en"),          # a modifier letter apostrophe
     ("You\u2018re free to call me anytime.", "en"),          # a left single quote
     ("Usted es libre de preguntarme lo que quiera.", "es"),   # free to ask, not a price
-    ("¿Tiene un horario libre para usted?", "es"),           # a time that is open, not a price
+    ("¿Tiene usted un horario libre?", "es"),               # a time that is open, not a price
+    ("Hay un hueco libre.", "es"),
+    ("Tengo la tarde libre.", "es"),
     ("¿Está libre para la cita?", "es"),
     ("Hay un espacio libre al lado de la entrada.", "es"),
     ("BILLING IS IN ILLINOIS.", "en"),                      # capitals with I, which is read as l too
