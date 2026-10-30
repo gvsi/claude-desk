@@ -210,11 +210,15 @@ async def test_only_the_desks_own_names_may_mix_scripts(app, client):
     assert_handed_off(verdict)
 
 
-@pytest.mark.parametrize("prose", ["l" * 20_000, "I l O " * 4_000, "\u041e" * 20_000])
-def test_a_long_draft_is_scanned_in_one_pass(prose):
-    """Letters shaped like 0 or 1 that make no number are passed over once, not once per letter."""
+@pytest.mark.parametrize(("prose", "names"), [
+    ("l" * 20_000, ()), ("I l O " * 4_000, ()), ("\u041e" * 20_000, ()),
+    ("\u03a3a " * 12_000, ("\u03a3a",)),                  # a Desk's own name, mixing scripts, over and over
+])
+def test_a_long_draft_is_scanned_in_one_pass(prose, names):
+    """Letters shaped like 0 or 1 that make no number are passed over once, not once per letter,
+    and each mixed-script word is looked up once among the Desk's names, not once per mention."""
     started = time.perf_counter()
-    reply_check.scan_prose(prose)
+    reply_check.scan_prose(prose, names=names)
     assert time.perf_counter() - started < 2
 
 

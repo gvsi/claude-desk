@@ -210,15 +210,19 @@ LEXICONS: dict[str, list[tuple[str, re.Pattern[str]]]] = {
     language: _load_lexicon(language) for language in ("en", "es")}
 
 
-def _occurrences(text: str, names: Iterable[str]) -> list[tuple[int, int]]:
-    """Where each of `names`, as `shown` reads it, appears in `text`: `(start, end)` pairs."""
-    found = []
+def _named_reach(text: str, names: Iterable[str]) -> list[int]:
+    """For each index of `text`, where the furthest-reaching mention of one of `names` (as `shown`
+    reads it) that starts there or before ends, or 0: a word at `[start, end)` lies inside one
+    mention when `reach[start] >= end`."""
+    reach = [0] * (len(text) + 1)
     for name in (shown(name).strip() for name in names):
         start = text.find(name) if name else -1
         while start != -1:
-            found.append((start, start + len(name)))
+            reach[start] = max(reach[start], start + len(name))
             start = text.find(name, start + 1)
-    return found
+    for i in range(1, len(reach)):
+        reach[i] = max(reach[i], reach[i - 1])
+    return reach
 
 
 def _span(text: str) -> str:
@@ -265,10 +269,9 @@ def scan_prose(text: str, canaries: Iterable[str] = (), names: Iterable[str] = (
         if category == "Sc":
             hits.append((i, "currency", Violation(kind="number_in_prose", span=text[i], rule_id="currency")))
         i += 1
-    named = _occurrences(text, names)
+    reach = _named_reach(text, names)
     hits += [(start, "mixed_script", Violation(kind="unsupported_language", span=_span(word), rule_id="mixed_script"))
-             for start, word in _words(text) if _mixes_scripts(word)
-             and not any(low <= start and start + len(word) <= high for low, high in named)]
+             for start, word in _words(text) if _mixes_scripts(word) and reach[start] < start + len(word)]
     folded, origin = _fold(text)
     # three readings: a bare stroke as l, as I, and an ASCII capital I as l too ("doIIars")
     readings = dict.fromkeys((folded, _fold(text, stroke="i")[0], _fold(text, strokes=STROKES_AND_I)[0]))
