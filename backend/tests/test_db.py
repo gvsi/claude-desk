@@ -696,7 +696,7 @@ def test_inbox_decision_id_migration_goes_down_and_up(admin):
 
     assert migrated() == (True, True)
     try:
-        command.downgrade(config, "api_tables")
+        command.downgrade(config, "0012_inbox_decision_id-1")   # to whatever 0012 revises
         assert migrated() == (False, False)
     finally:
         command.upgrade(config, "head")
