@@ -345,6 +345,48 @@ async def test_returning_visitor_resumes_the_session(app, browser, fake, kernel_
     assert (await browser(app, ip="198.51.100.4").post(f"/api/public/desks/{slug}/sessions")).status_code == 200
 
 
+async def test_a_resume_is_ledgered_at_most_once_every_ten_minutes(app, browser, fake, kernel_http, clock):
+    """Resuming is never limited, and each ledger append takes the Desk's ledger lock, so a resume's `session` entry
+    is written at most once per session every ten minutes: a loop of resumes answers 200 each time without a ledger
+    write each time. Each session keeps its own ten minutes, and a new session is ledgered as before."""
+    slug = await new_slug(kernel_http, fake)
+    client, _, opened = await open_session(app, browser, slug)
+    session_id = opened["state"]["session_id"]
+    desk = fake.desks[fake.sessions[session_id].desk_id]
+
+    def resumes() -> list[str]:
+        """The sessions of the Desk's `session` ledger entries for a resume, in order."""
+        return [entry.event.session_id for entry in desk.ledger
+                if (entry.event.kind, entry.event.origin, entry.event.summary) == ("session", "api", {"resumed": True})]
+
+    # 200 resumes within ten minutes, three seconds apart: each answers 200, and one is ledgered.
+    for n in range(200):
+        if n:
+            clock.advance(3)
+        resumed = await client.post(f"/api/public/desks/{slug}/sessions")
+        assert (resumed.status_code, resumed.json()["resumed"]) == (200, True)
+    assert resumes() == [session_id]
+    assert len(fake.called("POST /ledger/append")) == 1
+
+    # Ten minutes after the ledgered one, the next resume is ledgered again, and starts the next ten minutes.
+    clock.advance(3)
+    assert (await client.post(f"/api/public/desks/{slug}/sessions")).json()["resumed"] is True
+    assert resumes() == [session_id] * 2
+    assert (await client.post(f"/api/public/desks/{slug}/sessions")).json()["resumed"] is True
+    assert resumes() == [session_id] * 2
+
+    # A new session within those ten minutes: the kernel ledgers it as it is opened, and its own first resume is
+    # ledgered too.
+    other, _, created = await open_session(app, browser, slug)
+    other_id = created["state"]["session_id"]
+    assert [entry.event.summary for entry in desk.ledger if entry.event.session_id == other_id] == [
+        {"session_id": other_id, "kind": "visitor", "preview": False}]
+    assert (await other.post(f"/api/public/desks/{slug}/sessions")).json()["resumed"] is True
+    assert resumes() == [session_id, session_id, other_id]
+    assert (await client.post(f"/api/public/desks/{slug}/sessions")).json()["resumed"] is True
+    assert resumes() == [session_id, session_id, other_id]
+
+
 async def test_a_session_the_kernel_closed_clears_its_cookie(app, browser, fake, kernel_http):
     """Once the cookie's session is gone (closed after a day idle, unknown, or another Desk's), a visitor route answers
     401 `no_session` and clears the cookie on its Desk's path, so the browser stops sending a dead token."""

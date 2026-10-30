@@ -82,21 +82,26 @@ async def agent_card(slug: str, request: Request) -> AgentCardOut:
 
 # Sessions ----------------------------------------------------------------------------------------------------
 
+# Resuming is never limited and each ledger append takes the Desk's ledger lock, so a resume's `session` entry is
+# written at most once per session in this long: a loop of resumes can't queue writes on that lock without bound.
+RESUME_LEDGERED_EVERY_S = 600
+
 
 @router.post("/desks/{slug}/sessions", response_model=VisitorSession, responses=error_responses(404, 422, 429, 503))
 async def open_session(slug: str, request: Request, response: Response) -> VisitorSession:
     """The visitor's session on the slug's Desk: the one the cookie holds while the kernel says it is open there (a
-    returning visitor, ledgered as a `session` event), else a new one, whose token only the cookie holds. Resuming is
-    never limited, however often a page reloads (it creates nothing); a new chat counts toward `new_chat`."""
+    returning visitor), else a new one, whose token only the cookie holds. Resuming is never limited, however often a
+    page reloads (it creates nothing), and is ledgered as a `session` event at most once per session every ten
+    minutes; a new chat counts toward `new_chat`."""
     state = runtime(request).started()
     token = request.cookies.get(VISITOR_COOKIE)
     if token:
         try:
             async with visitor_context(state, token, slug) as ctx:
-                await ctx.caller.kernel.call("POST /ledger/append", LedgerAppendRequest(
-                    desk_id=ctx.ids.desk_id, event=LedgerEvent(kind="session", origin="api",
-                                                               session_id=ctx.ids.session_id,
-                                                               summary={"resumed": True})))
+                append = LedgerAppendRequest(desk_id=ctx.ids.desk_id, event=LedgerEvent(
+                    kind="session", origin="api", session_id=ctx.ids.session_id, summary={"resumed": True}))
+                await state.limiter.once_per_window(("resumed", ctx.ids.session_id), RESUME_LEDGERED_EVERY_S,
+                                                    lambda: ctx.caller.kernel.call("POST /ledger/append", append))
                 set_visitor_cookie(response, slug, token)
                 return VisitorSession(state=ctx.state, resumed=True)
         except ApiProblem as problem:

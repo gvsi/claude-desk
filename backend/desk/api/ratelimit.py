@@ -17,12 +17,16 @@ other requests kept it open, so the memory it holds stays bounded.
 
 Per-IP limits take the key from `deps.client_ip`, which answers None for a caller exempt from them (a
 loopback peer: the built-in agent, and any loopback peer outside production); every other limit needs a key.
+
+`once_per_window(key, window_s, write)` bounds a write rather than a request: it awaits `write` unless it was awaited
+for `key` less than `window_s` ago, and the request goes on either way. A resumed chat's `session` ledger entry is
+written this way (routes/public.py), since resuming is never limited.
 """
 
 import logging
 import math
 from collections import deque
-from collections.abc import Callable, Hashable
+from collections.abc import Awaitable, Callable, Hashable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
@@ -113,6 +117,7 @@ class RateLimiter:
         self._clock = clock
         self._windows: dict[Hashable, _Window] = {}
         self._ledgered: dict[Hashable, float] = {}      # (name, key) -> when its window's refusal was ledgered
+        self._written: dict[Hashable, float] = {}       # once_per_window's key -> when its window ends
         self._since_sweep = 0
 
     def _now(self) -> float:
@@ -144,6 +149,26 @@ class RateLimiter:
         for key, at in list(self._ledgered.items()):
             if at <= now - _span(LIMITS[key[0]].window_s):
                 del self._ledgered[key]
+        for key, until in list(self._written.items()):
+            if until <= now:
+                del self._written[key]
+
+    async def once_per_window(self, key: Hashable, window_s: float, write: Callable[[], Awaitable[object]]) -> None:
+        """Await `write()` unless it was awaited for `key` less than `window_s` ago, in which case nothing is done. The
+        key is marked before the await, so callers at the same moment write once; a `write` that raises unmarks it, so
+        the next caller writes, and the exception goes on to the caller."""
+        now = self._now()
+        self._sweep(now)
+        until = self._written.get(key)
+        if until is not None and until > now:
+            return
+        self._written[key] = until = now + window_s
+        try:
+            await write()
+        except BaseException:
+            if self._written.get(key) == until:
+                del self._written[key]
+            raise
 
     def forget(self, name: str, key: Hashable | None) -> None:
         """Take back the latest hit counted on limit `name` for `key` (a passcode that turned out right)."""

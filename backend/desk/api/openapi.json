@@ -1282,7 +1282,7 @@
     "/api/public/desks/{slug}/sessions": {
       "post": {
         "summary": "Open Session",
-        "description": "The visitor's session on the slug's Desk: the one the cookie holds while the kernel says it is open there (a\nreturning visitor, ledgered as a `session` event), else a new one, whose token only the cookie holds. Resuming is\nnever limited, however often a page reloads (it creates nothing); a new chat counts toward `new_chat`.",
+        "description": "The visitor's session on the slug's Desk: the one the cookie holds while the kernel says it is open there (a\nreturning visitor), else a new one, whose token only the cookie holds. Resuming is never limited, however often a\npage reloads (it creates nothing), and is ledgered as a `session` event at most once per session every ten\nminutes; a new chat counts toward `new_chat`.",
         "operationId": "public_open_session",
         "parameters": [
           {

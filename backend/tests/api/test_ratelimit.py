@@ -1,7 +1,12 @@
-"""The API's in-memory rate limits: sliding windows, one ledger entry per window's first refusal, open streams."""
+"""The API's in-memory rate limits: sliding windows, one ledger entry per window's first refusal, a write bounded to
+once a window, open streams."""
+
+import asyncio
+from collections.abc import Awaitable, Callable
 
 import pytest
 
+from desk.api.kernel_client import KernelUnavailable
 from desk.api.ratelimit import (
     CONVERSATION_IDLE_S,
     LIMITS,
@@ -149,6 +154,53 @@ async def test_a_ledger_failure_still_refuses(visitor, fake, clock):
         await limiter.enforce("verify", visitor.ids.session_id, ledger=ledger)
     assert len(fake.called("POST /ledger/append")) == 2
     assert fake.desks[visitor.ids.desk_id].ledger[-1].event.summary == {"limit": "verify"}
+
+
+async def test_once_per_window_writes_once_a_window_and_tries_a_failed_write_again(clock):
+    """A write bounded to once per key in each window, the window starting at the write; the caller goes on either
+    way."""
+    limiter = RateLimiter(clock)
+    writes: list[str] = []
+
+    def write(name: str) -> Callable[[], Awaitable[None]]:
+        async def run() -> None:
+            writes.append(name)
+        return run
+
+    await limiter.once_per_window("a", 600, write("a"))
+    clock.advance(599)
+    await limiter.once_per_window("a", 600, write("a"))         # within the window: nothing written
+    await limiter.once_per_window("b", 600, write("b"))         # keys count apart
+    clock.advance(1)
+    await limiter.once_per_window("a", 600, write("a"))         # the window has ended: written, and a new one starts
+    await limiter.once_per_window("a", 600, write("a"))
+    assert writes == ["a", "b", "a"]
+
+    # Callers at the same moment write once: the key is marked before the write is awaited.
+    started, finish = asyncio.Event(), asyncio.Event()
+
+    async def slow() -> None:
+        writes.append("c")
+        started.set()
+        await finish.wait()
+
+    first = asyncio.create_task(limiter.once_per_window("c", 600, slow))
+    await started.wait()
+    await limiter.once_per_window("c", 600, slow)
+    finish.set()
+    await first
+    assert writes.count("c") == 1
+
+    # A write that fails marks nothing: the failure reaches the caller, and the next caller writes.
+    async def failing() -> None:
+        writes.append("d")
+        raise KernelUnavailable("POST /ledger/append")
+
+    with pytest.raises(KernelUnavailable):
+        await limiter.once_per_window("d", 600, failing)
+    await limiter.once_per_window("d", 600, write("d"))
+    await limiter.once_per_window("d", 600, write("d"))
+    assert writes.count("d") == 2
 
 
 def test_stream_slots_cap_each_session_and_address():
