@@ -4,14 +4,14 @@
  * words, held requests answered in place, take-over with the owner's own words, whispers, the
  * typing both ways, and recorded history.
  */
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import type { Decision, StatusEvent } from '../../api/contracts.ts';
 import type { ConversationSummary, NeedsYouItem, OwnerTranscript } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
-import { setPollScale } from '../../app/poll.ts';
+import { typingPingMs } from '../../app/poll.ts';
 import { formatClock } from '../../lib/format.ts';
 import { AFTER_VERIFY, DECISIONS, DEMO_CODE, SCRIPT, VISITOR_PLAIN, turnEnd, writing } from '../../mocks/script.ts';
 import { RIVERA } from '../../mocks/seed.ts';
@@ -827,8 +827,15 @@ describe('Conversations', () => {
 
   it('owner_typing_is_sent_after_take_over', async () => {
     const chat = named(DANA_LIVE, DANA);
-    // Pings go at most every 2 s, scaled to a second here.
-    const { screen } = await renderRoute(conversation(DANA_LIVE), { pollScale: 0.5 });
+    // Pings go at most every 2 s, scaled. No poll lands, and the clock the pings are timed by moves
+    // only when the test moves it, so how long typing takes in the browser never changes how many go.
+    const { screen } = await renderRoute(conversation(DANA_LIVE), { pollScale: 100 });
+    vi.useFakeTimers({ toFake: ['Date'] });
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    /** Moves the clock past the interval between pings. */
+    const intervalPasses = () => vi.advanceTimersByTime(typingPingMs());
     const pings = () => requests('ownerTyping');
     const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -850,12 +857,14 @@ describe('Conversations', () => {
     // More keystrokes within the interval send no more; after it, one more.
     await userEvent.type(box, ' way');
     expect(pings()).toHaveLength(1);
-    await wait(1_100);
+    intervalPasses();
     await userEvent.type(box, ' now');
     await expect.poll(() => pings().length).toBe(2);
+    await wait(200);
+    expect(pings()).toHaveLength(2);
 
     // An emptied composer sends nothing.
-    await wait(1_100);
+    intervalPasses();
     await box.clear();
     await wait(200);
     expect(pings()).toHaveLength(2);
@@ -865,7 +874,8 @@ describe('Conversations', () => {
     await expect.poll(() => pings().length).toBe(3);
     await userEvent.keyboard('{Enter}');
     await expect.element(log(screen).getByText('Be there soon', { exact: true })).toBeVisible();
-    await wait(1_100);
+    intervalPasses();
+    await wait(200);
     expect(pings()).toHaveLength(3);
 
     // Words the screen puts back in the box (the reply check stopped them) aren't typing.
@@ -874,6 +884,7 @@ describe('Conversations', () => {
     await expect.poll(() => pings().length).toBe(4);
     await userEvent.keyboard('{Enter}');
     await expect.element(box).toHaveValue('It is $89.');
+    intervalPasses();
     await wait(300);
     expect(pings()).toHaveLength(4);
     await box.clear();
@@ -888,8 +899,7 @@ describe('Conversations', () => {
     await userEvent.type(write, 'Still');
     await expect.poll(() => pings().length).toBe(5);
     await expect.poll(() => requests('conversation').length).toBe(reads + 1);
-    setPollScale(0.05);
-    await wait(300);
+    intervalPasses();
     await userEvent.type(write, ' there');
     await wait(300);
     expect(pings()).toHaveLength(5);
