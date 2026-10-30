@@ -14,7 +14,6 @@ import type {
   LedgerEvent,
   OpenStatus,
   PaymentLinkView,
-  PolicyVersion,
   RenderedBlock,
   ReplyVerdict,
   RuleCard,
@@ -23,7 +22,7 @@ import type {
   SseEvent,
   StatusEvent,
 } from '../api/contracts.ts';
-import type { CancelReason, DeskSummary, Handoff, RulesDraft, TranscriptItem, TranscriptKind } from '../api/views.ts';
+import type { CancelReason, DeskSummary, Handoff, PolicyVersionOut, RulesDraft, TranscriptItem, TranscriptKind } from '../api/views.ts';
 import { cardBlock, placeholderHex, rivera } from '../ds/fixtures/index.ts';
 import { BUSINESS, activePolicy, copyIds, type CopyIds, type MockSeed } from './seed.ts';
 import {
@@ -89,7 +88,8 @@ export interface SessionRecord {
 
 export interface DeskRecord {
   summary: DeskSummary;
-  policy: PolicyVersion;
+  /** The active rules version, with its money cap. */
+  policy: PolicyVersionOut;
   ledger: LedgerEntry[];
   /** The kernel's open status for the Desk's public page, by language; null when it makes no claim. */
   openStatus: Record<Language, OpenStatus> | null;

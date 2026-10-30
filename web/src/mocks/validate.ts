@@ -41,10 +41,33 @@ function closed(node: unknown): unknown {
   return out;
 }
 
+/**
+ * Fields the web types by hand ahead of the contracts (`api/views.ts`), by model, each with its own
+ * shape: the mock sends them, so they are checked here until `contracts.schema.json` has them, and
+ * then their entry goes (`pending_fields_wait_for_the_contracts`).
+ */
+export const PENDING_FIELDS: Readonly<Record<string, Readonly<Record<string, object>>>> = {
+  // Each rules version's money cap, at most the $10,000 platform ceiling (kernel verification plan
+  // 01b Task 3b; master "Money cap").
+  PolicyVersion: { auto_money_cap_cents: { type: 'integer', minimum: 0, maximum: 1_000_000 } },
+};
+
+/** The schema with each pending field added to its model; a field the schema already has is left as the schema says. */
+function withPending(contracts: typeof schema): unknown {
+  const defs: Record<string, unknown> = { ...contracts.$defs };
+  for (const [model, fields] of Object.entries(PENDING_FIELDS)) {
+    const def = defs[model];
+    if (!isRecord(def)) throw new Error(`a pending field names ${model}, which the contracts don't have`);
+    const properties = isRecord(def.properties) ? def.properties : {};
+    defs[model] = { ...def, properties: { ...fields, ...properties } };
+  }
+  return { ...contracts, $defs: defs };
+}
+
 const ajv = new Ajv2020({ strict: false, allErrors: true });
 ajv.addFormat('date-time', DATE_TIME);
 ajv.addFormat('time', TIME);
-ajv.addSchema(closed(schema) as object, SCHEMA_ID);
+ajv.addSchema(closed(withPending(schema)) as object, SCHEMA_ID);
 
 /** Every way `value` breaks the contract `model` (a `$defs` key), one line each; empty when it fits. */
 export function validateContract(model: string, value: unknown): string[] {
