@@ -1431,6 +1431,18 @@ def test_links_written_with_lookalikes_pass_the_scan_by_the_owners_decision(pros
     assert [(v.rule_id, v.span) for v in reply_check.scan_prose(prose)] == found
 
 
+def test_a_long_draft_of_dotted_runs_passes_the_scan_in_one_pass():
+    """Long words, dotted runs and many near-links, the draft that held the link scan to one pass
+    before the owner's decision of 2026-10-30 removed it, are read in one pass by the lexicons'
+    readings and hold no violation, so a lexicon line with dots ("a.m.", "p.ej.") can't backtrack
+    on them unnoticed."""
+    started = time.perf_counter()
+    found = reply_check.scan_prose("x" * 40_000 + " " + "a." * 20_000 + " " + "rivera.pay.section " * 2_000
+                                   + "a.b/" * 10_000)
+    assert time.perf_counter() - started < 2
+    assert found == []
+
+
 def test_a_m_and_p_m_are_no_link():
     """"a.m." and "p.m." are time words, never a domain: each is the date word alone."""
     found = reply_check.scan_prose("Maria takes calls in the a.m./p.m. hours.")
