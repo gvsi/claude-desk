@@ -300,8 +300,9 @@ def test_a_mismatch_never_prints_what_a_list_or_object_held():
 def test_a_mismatch_tells_a_string_by_its_size_unless_the_expectation_names_it():
     """A string the response held is shown only when the expectation itself names it and it is
     short and shaped like a field name or an enum value; any other is told by its length, since it
-    may be a contact, a code or a token. A code or token the expectation names is still hidden:
-    a code starts with a digit, and a token is longer than any field name or enum value."""
+    may be a contact, a code or a token. A code or token the expectation names is still hidden on
+    the got side (the expected side is the case's own text, printed as written): a code starts
+    with a digit, and a token is longer than any field name or enum value."""
     session_token = secrets.token_urlsafe(32)   # tokens made fresh each run, so none is in the source
     named_token = "tok_" + secrets.token_hex(16)
     hex_token = "e" + secrets.token_hex(15)     # 31 characters, one over the longest shown
