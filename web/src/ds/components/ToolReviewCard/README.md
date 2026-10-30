@@ -22,7 +22,7 @@
 ## Fails closed
 
 - Both answers call back with `profile.pending_sha256`, the hash of the definition the owner is looking at, never `definition_sha256`.
-- Without `pending_sha256`, or without `pending_definition_text` to review, both answers are disabled under an info `Notice`: "This change can't be reviewed right now. Reload the page." The quote shows only when there is text.
+- Without `pending_sha256`, or without `pending_definition_text` to review (missing, empty, or only spaces and line breaks), both answers are disabled under an info `Notice`: "This change can't be reviewed right now. Reload the page." The quote shows only when there is text, and then exactly as sent, blank space included.
 - One answer at a time (`useSendOnce`): a press calls back once, its button shows the busy spinner and the other waits, until the screen's `pending` has come and gone or an error is delivered. `pending` from the screen alone makes both wait. The card is `aria-busy` while it waits.
 
 ## Types

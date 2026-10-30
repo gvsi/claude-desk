@@ -166,6 +166,44 @@ export const NoDefinitionText: Story = {
   },
 };
 
+/** no_text_no_confirm: a definition with nothing in it is nothing to review, so nothing can be answered. */
+async function expectNothingToReview(canvas: Parameters<NonNullable<Story['play']>>[0]['canvas'], canvasElement: HTMLElement) {
+  await expect(canvas.getByText(NO_HASH)).toBeVisible();
+  await expect(canvas.queryByText(TRUST_LINE)).toBeNull();
+  await expect(canvasElement.querySelector('blockquote')).toBeNull();
+  for (const name of ['Turn back on', 'Keep off']) await expect(canvas.getByRole('button', { name })).toBeDisabled();
+}
+
+export const EmptyDefinitionText: Story = {
+  args: { profile: { ...changed, pending_definition_text: '' } },
+  parameters: { canvasNote: 'A changed tool whose new definition came back empty; no board draws it. With nothing to review, nothing can be confirmed.' },
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
+    await expectNothingToReview(canvas, canvasElement);
+    await userEvent.click(canvas.getByRole('button', { name: 'Turn back on' }));
+    await expect(args.onTurnBackOn).not.toHaveBeenCalled();
+  },
+};
+
+export const BlankDefinitionText: Story = {
+  args: { profile: { ...changed, pending_definition_text: '  \n\t ' } },
+  parameters: { canvasNote: 'A changed tool whose new definition is only spaces and line breaks; no board draws it. With nothing to review, nothing can be confirmed.' },
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
+    await expectNothingToReview(canvas, canvasElement);
+    await userEvent.click(canvas.getByRole('button', { name: 'Keep off' }));
+    await expect(args.onKeepOff).not.toHaveBeenCalled();
+  },
+};
+
+export const IndentedDefinition: Story = {
+  args: { profile: { ...changed, pending_definition_text: `\n  ${changed.pending_definition_text}\n` } },
+  parameters: { canvasNote: 'A changed definition that starts and ends with blank space; no board draws it. The quote keeps the text exactly as sent.' },
+  play: async ({ args, canvasElement }) => {
+    // The quote is the connector's words exactly as sent, leading and trailing space included.
+    const text = canvasElement.querySelector('blockquote [data-copy="user"]');
+    await expect(text?.textContent).toBe(args.profile.pending_definition_text);
+  },
+};
+
 export const Phone: Story = {
   globals: { viewport: { value: 'phone', isRotated: false } },
   parameters: { canvasNote: 'The review on a phone; no board draws it. The quoted definition wraps inside its box.' },

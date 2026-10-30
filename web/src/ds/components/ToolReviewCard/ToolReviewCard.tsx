@@ -57,7 +57,10 @@ export function ToolReviewCard({ title, connector, profile, noticed, onTurnBackO
   const failed = error !== undefined && error.trim() !== '';
 
   const hash = typeof profile.pending_sha256 === 'string' && profile.pending_sha256.trim() !== '' ? profile.pending_sha256 : null;
-  const definition = typeof profile.pending_definition_text === 'string' ? profile.pending_definition_text : null;
+  // The definition exactly as sent, quoted untouched; text that is empty or only blank space is
+  // nothing to review.
+  const definition =
+    typeof profile.pending_definition_text === 'string' && profile.pending_definition_text.trim() !== '' ? profile.pending_definition_text : null;
   // Fail closed: an answer needs both the reviewed definition and its hash.
   const reviewable = hash !== null && definition !== null;
 
