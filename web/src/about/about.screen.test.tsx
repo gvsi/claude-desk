@@ -4,7 +4,7 @@
  * an owner whose browser has opened a Desk. Expected words are written out here, never read from the page's
  * code.
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { userEvent } from 'vitest/browser';
 
 import { writeLocal } from '../lib/storage.ts';
@@ -25,6 +25,14 @@ afterEach(() => {
 describe('About pages', () => {
   it('about_pages_render_at_their_routes', async () => {
     writeLocal('lastDesk', null);
+    // Nothing is logged on the way, such as React Router's warning, given once, for a page whose code is
+    // still loading on a first visit and has nothing to show meanwhile.
+    const warn = vi.spyOn(console, 'warn');
+    const error = vi.spyOn(console, 'error');
+    onTestFinished(() => {
+      warn.mockRestore();
+      error.mockRestore();
+    });
     for (const [i, { path, title }] of PAGES.entries()) {
       const { screen, router } = await renderRoute(path);
       // The page is drawn once its code has loaded: its title, its article and the way back.
@@ -41,6 +49,9 @@ describe('About pages', () => {
       await expect.poll(() => router.state.location.pathname).toBe(other.path);
       await expect.element(screen.getByRole('heading', { level: 1, name: other.title, exact: true })).toBeVisible();
     }
+    const logged = (spy: typeof warn) => spy.mock.calls.map((call) => String(call[0]));
+    expect(logged(warn)).toEqual([]);
+    expect(logged(error)).toEqual([]);
 
     // Any other address under /about is a page that doesn't exist.
     for (const path of ['/about', '/about/', '/about/proposal/more', '/about/readme']) {
