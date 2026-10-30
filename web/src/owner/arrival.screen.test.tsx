@@ -9,6 +9,7 @@ import { userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import { observeRequests } from '../api/http.ts';
+import { rivera } from '../ds/fixtures/index.ts';
 import { ROUTES, type RouteKey } from '../api/routes.ts';
 import { readLocal } from '../lib/storage.ts';
 import { RIVERA } from '../mocks/seed.ts';
@@ -77,6 +78,32 @@ describe('Arrival', () => {
     await expect.element(screen.getByRole('dialog', { name: TITLE })).not.toBeInTheDocument();
     await expect.element(screen.getByText(/^You're Maria Rivera today\. This is a concept prototype\.$/)).toBeVisible();
     await expect.element(screen.getByRole('heading', { level: 1, name: /^Good (morning|afternoon|evening), Maria$/ })).toBeVisible();
+  });
+
+  it('start_the_demo_opens_today_drawn', async () => {
+    const { screen, router } = await renderRoute('/', { seed: { name: 'rivera', signedIn: false } });
+    await expect.element(introDialog(screen)).toBeVisible();
+
+    // Every page the browser draws on the way to Today: never the owner's loading page, and once the
+    // preview has gone, Today already holds its held request.
+    const held = `article[aria-label="Held for you: ${rivera.decisions.held.reason_plain}"]`;
+    const seen: string[] = [];
+    const look = () => {
+      const preview = document.querySelector('.cd-today-preview') !== null;
+      if (document.querySelector('.cd-owner-state') !== null) seen.push('loading');
+      else if (!preview && document.querySelector('.cd-today') !== null)
+        seen.push(document.querySelector(held) !== null ? 'today' : 'today without its held request');
+      else if (preview) seen.push('preview');
+    };
+    const watch = new MutationObserver(look);
+    watch.observe(document.body, { childList: true, subtree: true });
+    onTestFinished(() => watch.disconnect());
+
+    await startTheDemo(screen);
+    await expect.poll(() => router.state.location.pathname).toBe(TODAY);
+    await expect.element(screen.getByRole('dialog', { name: TITLE })).not.toBeInTheDocument();
+    await expect.element(screen.getByRole('article', { name: `Held for you: ${rivera.decisions.held.reason_plain}`, exact: true })).toBeVisible();
+    expect([...new Set(seen)]).toEqual(['preview', 'today']);
   });
 
   it('intro_dialog_cannot_be_dismissed', async () => {
