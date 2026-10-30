@@ -14,11 +14,12 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    `lexicon/lookalikes.txt`, every dash as "-" and every apostrophe as "’"; booking claims such
    as "you're booked" among them, unless the reply carries a booking card that step 4 passed), and
    the copy's document canaries, even split by spaces or accented letters, in another case or
-   width, accented, or with letters of other scripts drawn like its own, or all of these at once
-   (`labels.canary_spans`, which reads the same lookalike table). Since the owner's decisions of
-   2026-10-30, a booking claim passes beside the booking's card, which says the same, a policy's
-   words are left to the soft-promise check, which reads the prose with the cards, and Claude may
-   write links and email addresses, which its prompt keeps to the business's own.
+   width, accented, or with letters or digits of other scripts drawn like its own, or all of these
+   at once (`labels.canary_spans`, which reads the same lookalike table, its letters and its
+   digits). Since the owner's decisions of 2026-10-30, a booking claim passes beside the booking's
+   card, which says the same, a policy's words are left to the soft-promise check, which reads the
+   prose with the cards, and Claude may write links and email addresses, which its prompt keeps to
+   the business's own.
 4. Each clause renders from a fact this session may read, current, of the template's kind and ID,
    with no canary in any field it renders or in the fact ID it names. The Desk's catalog
    (`context.catalog_fact`) is cited like a stored fact, and no template renders it, so it backs

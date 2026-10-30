@@ -5,7 +5,7 @@ Data put together from several sources is readable only by the readers they all 
 could carry a private document out (Claude's prose and every field of the cards it cites, the
 owner's say, what a tool shows Claude), a canary blocks it, even split by spaces or accented
 letters, written in another case or character width, with accents on its letters, or with letters
-of other scripts drawn like its own. Knowledge
+or digits of other scripts drawn like its own. Knowledge
 the owner adds is untrusted text: it is the owner's alone unless marked public, it stays the
 owner's when it carries a canary, and it never changes what a session may do.
 
@@ -205,6 +205,9 @@ def full_width(text: str) -> str:
 ACCENTED = str.maketrans("abcdef", "áḃćďéḟ")      # each hex letter with an accent, precomposed
 CYRILLIC = str.maketrans("ace", "\u0430\u0441\u0435")                        # Cyrillic а, с and е
 CAPITAL_LOOKALIKES = str.maketrans("ABCEK", "\u0391\u0412\u0421\u0395\u041a")   # Greek Α, Ε; Cyrillic В, С, К
+# Drawn as the digits 2 to 9 (the lookalike table's digit rows): Latin Ƨ, Cyrillic З, Cherokee Ꮞ,
+# Latin Ƽ, Cyrillic б and ᲄ, Latin Ȣ and Ꝯ. 0 and 1 have none: theirs are the letters O and l.
+DIGIT_SHAPES = str.maketrans("23456789", "\u01a7\u0417\u13ce\u01bc\u0431\u1c84\u0222\ua76e")
 
 
 def disguises(canary: str) -> list[str]:
@@ -213,7 +216,8 @@ def disguises(canary: str) -> list[str]:
     split by accented letters ("cdk-0123é4567ñ…"), and with accented letters on it and between its
     characters at once ("çdk-0123é4567…", "cdk-0123é4567 89áb cdef"); with letters of other scripts
     drawn like its own in their place, Cyrillic а, с and е ("сdk-…") or capitals of Greek and
-    Cyrillic, and with one between its characters too."""
+    Cyrillic, and with one between its characters too; and with characters drawn as digits in
+    place of its digits 2 to 9 (a Cyrillic З for 3), and with one between its characters too."""
     body = canary.removeprefix("cdk-")
     spaced = f"cdk {body[:4]} {body[4:8]} {body[8:12]} {body[12:]}"
     return [spaced, canary.upper(), full_width(canary),
@@ -222,7 +226,9 @@ def disguises(canary: str) -> list[str]:
             f"cdk-{body[:4]}é{body[4:8]}ñ{body[8:12]}Ç{body[12:]}", f"çdk-{body[:4]}é{body[4:]}",
             f"cdk-{body[:4]}é{body[4:8]} {body[8:12].translate(ACCENTED)} {body[12:]}",
             canary.translate(CYRILLIC), canary.upper().translate(CAPITAL_LOOKALIKES),
-            f"{canary[:8].translate(CYRILLIC)}\u0430{canary[8:].translate(CYRILLIC)}"]
+            f"{canary[:8].translate(CYRILLIC)}\u0430{canary[8:].translate(CYRILLIC)}",
+            canary.translate(DIGIT_SHAPES),
+            f"{canary[:8].translate(DIGIT_SHAPES)}\u0417{canary[8:].translate(CYRILLIC)}"]
 
 
 def test_one_reading_folds_accents_on_a_canary_and_between_its_characters():
@@ -250,13 +256,42 @@ def test_lookalike_letters_on_a_canary_and_between_its_characters_are_read_as_la
     assert labels.canary_key("\u0441dk-01 \u0430\u0412") == "cdk01ab"
 
 
+def test_digit_lookalikes_on_a_canary_and_between_its_characters_are_read_as_digits():
+    """A character drawn as a digit is read as it, through the same lookalike table the reply
+    check reads numerals with, and may also be passed over between the canary's characters, like
+    a lookalike letter: a Cyrillic З for 3, any of the table's digit shapes in place of the
+    canary's digits (an Oriya visarga, a spacing mark, for 8 among them), or one between them, hide
+    it neither alone nor with lookalike letters, and the match maps onto the text as written."""
+    canaries = {"doc-1": "cdk-0123456789abcdef"}
+    for disguised in ("cdk-012\u0417456789abcdef", f"cdk-01{'23456789'.translate(DIGIT_SHAPES)}abcdef",
+                      "cdk-0123\u0417456789abcdef", "cdk-0123\u0431456789abcdef", "cdk-01234567\u0b039abcdef",
+                      f"\u0441dk-01{'23'.translate(DIGIT_SHAPES)}\u0417{'456789'.translate(DIGIT_SHAPES)}"
+                      "\u0430b\u0441d\u0435f"):
+        text = f"Reference: {disguised}."
+        assert labels.canary_spans(text, canaries) == [("doc-1", len("Reference: "), len(text) - 1)], disguised
+    assert labels.canary_key("cdk-012\u0417 \u0431\u0222") == "cdk012368"
+
+
+def test_a_character_listed_twice_in_the_lookalike_table_stops_the_kernel(tmp_path, monkeypatch):
+    """The canary reading reads the table's letter rows and digit rows as one, so a character
+    listed twice, even once as a letter and once as a digit, stops the kernel from starting, as a
+    malformed line does, rather than be read as whichever row came last."""
+    table = tmp_path / "lookalikes.txt"
+    table.write_text("0417\t3\t# CYRILLIC CAPITAL LETTER ZE\n0417\tE\t# CYRILLIC CAPITAL LETTER ZE\n",
+                     encoding="utf-8")
+    monkeypatch.setattr(labels, "LOOKALIKES_TXT", table)
+    with pytest.raises(ValueError, match="lookalikes.txt:2 lists 0417 a second time"):
+        labels._load_lookalikes()
+
+
 def test_the_one_reading_keeps_whatever_either_form_kept():
     """For every character up to the third plane, the reading keeps what NFKD and NFKC each kept,
-    and reads each part of its NFKD form the lookalike table holds as that letter: a character
-    that is neither accented nor a lookalike gives the same letters in both forms; an accented or
-    lookalike one is skippable, and gives its NFKD and its NFKC letters each in order among its
-    own (so passing over the rest leaves either); a combining mark gives none. A canary either
-    form found, the one reading finds."""
+    and reads each part of its NFKD form the lookalike table holds as that letter or digit (its
+    letter rows and its digit rows alike): a character that is neither accented nor a lookalike
+    gives the same letters in both forms; an accented or lookalike one is skippable, and gives its
+    NFKD and its NFKC letters each in order among its own (so passing over the rest leaves
+    either); a combining mark gives none, but for one the table draws as a digit, which gives that
+    digit. A canary either form found, the one reading finds."""
     def letters(text: str) -> str:
         return "".join(part for part in text.casefold() if part.isascii() and part.isalnum())
 
@@ -264,6 +299,7 @@ def test_the_one_reading_keeps_whatever_either_form_kept():
         rest = iter(whole)
         return all(letter in rest for letter in part)
 
+    drawn_as = {**labels.LOOKALIKES, **labels.DIGIT_LOOKALIKES}
     for point in range(0x30000):
         ch = chr(point)
         if 0xD800 <= point <= 0xDFFF:
@@ -271,8 +307,8 @@ def test_the_one_reading_keeps_whatever_either_form_kept():
         read, skippable, mark = labels._read(ch)
         decomposed = unicodedata.normalize("NFKD", ch)
         full, bare = letters(decomposed), letters(unicodedata.normalize("NFKC", ch))
-        looked = letters("".join(labels.LOOKALIKES.get(part, part) for part in decomposed))
-        assert read == looked and (not mark or read == ""), hex(point)
+        looked = letters("".join(drawn_as.get(part, part) for part in decomposed))
+        assert read == looked and (not mark or read == letters(drawn_as.get(ch, ""))), hex(point)
         assert within(full, read) and within(bare, read) if skippable else bare == full == read, hex(point)
 
 
@@ -477,6 +513,31 @@ async def test_knowledge_carrying_a_canary_stays_owner_only(app, client):
     assert await seen_by(client, copy, visitor) == []
     assert {("kb-older", ("public",)), (dana.canary, ("public",))} <= {
         (item_id, tuple(readers)) for item_id, readers in await seen_by(client, copy, None)}
+
+
+async def test_every_disguise_keeps_knowledge_and_facts_out_of_a_visitors_context(app, client):
+    """Knowledge and facts are read for canaries as replies are, in every disguise (`disguises`):
+    knowledge posted public holding one is stored the owner's alone, and a public knowledge item
+    or fact holding one that came some other way is left out of a visitor's context. The owner
+    still reads them all."""
+    copy, visitor = await visitor_of(app, client)
+    disguised = disguises((await documents(app, copy))["dana-invoice"].canary)
+    for number, text in enumerate(disguised):
+        item = knowledge(f"kb-posted-{number}", "Last invoice", f"Paid in full. Reference {text}", ["public"])
+        assert (await stored(client, copy, item)).label == Label(readers=["owner"]), text
+    notes = [f"charter:policy:note-{number}" for number in range(len(disguised))]
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        for number, (fact_id, text) in enumerate(zip(notes, disguised, strict=True)):
+            ctx.db.add(KnowledgeRow(desk_id=copy.desk_id, item_id=f"kb-older-{number}", copy_id=copy.copy_id,
+                                    source="setup", title="Older note", text=f"Ref {text}", readers=["public"]))
+            ctx.db.add(labels.fact_row(copy.copy_id, copy.desk_id, Fact(
+                fact_id=fact_id, kind="charter", status="available", source="kernel", label=Label(readers=["public"]),
+                claims=[Claim(key="policy:note", kind="text", value=f"See invoice {text}.")]), ctx.clock.now()))
+    given = await context_of(client, visitor.session_id, visitor.headers)
+    assert given.knowledge == [] and not set(notes) & set(fact_ids(given.facts))
+    owner = await context_of(client, await owner_session_id(client, copy.owner), copy.owner, desk_id=copy.desk_id)
+    assert len(owner.knowledge) == 2 * len(disguised) and set(notes) <= set(fact_ids(owner.facts))
 
 
 def knowledge_view(copy: Rivera) -> list[tuple]:
