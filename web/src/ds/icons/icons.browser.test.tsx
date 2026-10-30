@@ -16,7 +16,7 @@ declare global {
 }
 
 /** Drawn for Claude Desk in Lucide's style, as the icon module's header says. */
-const OWN_ICONS: readonly IconName[] = ['agent', 'person', 'clock', 'menu'];
+const OWN_ICONS: readonly IconName[] = ['agent', 'person', 'clock', 'menu', 'shared', 'quote'];
 
 /** The union of an icon's shapes' boxes, in grid units. */
 function drawnBox(svg: SVGSVGElement): { left: number; top: number; right: number; bottom: number } {

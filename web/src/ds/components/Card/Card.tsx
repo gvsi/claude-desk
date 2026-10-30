@@ -10,8 +10,11 @@ export interface CardProps {
   as?: 'div' | 'article' | 'section' | 'li';
   /** The card's accessible name (`aria-label`): its heading's words, or what it is about. */
   label?: string;
-  /** `20` (the default) for a card a screen is about; `16` for compact cards in a grid. */
-  padding?: 16 | 20;
+  /**
+   * `20` (the default) for a card a screen is about; `16` for compact cards in a grid; `0` for a
+   * card of rows that pad themselves, so their hairlines run edge to edge.
+   */
+  padding?: 0 | 16 | 20;
   children: ReactNode;
 }
 

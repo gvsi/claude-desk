@@ -38,7 +38,7 @@ const ALERTS: DemoInboxItem[] = [
 function InboxSheetOwner() {
   return (
     <RiveraFrame current="today" fill counts={{ conversations: { n: 2, label: '2 need you' }, safety: { n: 2, label: '2 blocked' } }}>
-      <div className="board-page board-inbox-today">
+      <div className="board-filled-page board-inbox-today">
         <PageHeader title="Good morning, Maria" subtitle="2 requests need you." />
         <DemoInboxSheet viewer="owner" items={ALERTS} language="en" onRetry={fn()} />
       </div>

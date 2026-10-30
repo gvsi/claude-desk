@@ -1,0 +1,100 @@
+/* ToolReviewCard: "Needs your review" with its held dot and when it was noticed at the right; the
+   summary in serif; what was confirmed before; the connector's new words quoted in a box on the
+   app background (10 px 12 px, a hairline border), labelled as a quote, in the mono quote type
+   (`.cd-type-quote`) that wraps anywhere; then the line about turning it back on and the two answers. A compact card (16 px), its
+   parts 12 px apart and each label 2 px over its words, as the changed-tool board draws it. */
+
+.cd-tool-review {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  min-width: 0;
+}
+
+.cd-tool-review__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  column-gap: var(--space-16);
+  row-gap: var(--space-2);
+}
+
+.cd-tool-review__status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin: 0;
+  color: var(--text-primary);
+  font-weight: 420;
+}
+
+.cd-tool-review__noticed {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cd-tool-review__summary {
+  margin: 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.cd-tool-review__part {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.cd-tool-review__label {
+  margin: 0;
+  color: var(--text-secondary);
+  font-weight: 380;
+}
+
+.cd-tool-review__confirmed {
+  margin: 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.cd-tool-review__effects {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cd-tool-review__quote {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-10) var(--space-12);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--radius-control);
+  background: var(--bg-app);
+}
+
+.cd-tool-review__quote-label {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cd-tool-review__quote-text {
+  margin: 0;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.cd-tool-review__trust {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cd-tool-review__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}

@@ -4,7 +4,7 @@
 
 ## When to use
 
-- Two to four short options that are all worth seeing at once: the Desk's mode ("Ask me first", "Auto", "Custom"), or a view of the Safety page ("Attempts", "Every entry").
+- Two to four short options that are all worth seeing at once: a view of the Safety page ("Attempts", "Every entry", N-Safety-Run1).
 - Not for an on/off setting (use `Switch`), and not for long lists (use a menu).
 
 ## What the consumer provides

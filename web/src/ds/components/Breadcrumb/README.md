@@ -1,0 +1,23 @@
+# Breadcrumb
+
+`Breadcrumb` shows where a connector's or a tool's page sits under Connectors, and links back up: "Connectors / Stripe / Refund".
+
+## When to use
+
+- At the top of a connector's page ("Connectors / Payments"), a tool's page ("Connectors / Stripe / Refund") and the add-a-connector pages ("Connectors / Google Calendar"), as the Connectors tab boards draw them.
+- Not on the Connectors page itself, which is the top of the trail, and not on Rules or in Settings.
+
+## What it shows
+
+- A `nav` named "Breadcrumb" holding an ordered list, in `.cd-type-meta`.
+- Every item but the last is a link back up, in `accent-blue` with the quiet underline `TextLink` draws.
+- The last item is the page itself: plain `text-primary` text with `aria-current="page"`.
+- Between items, the boards' "/" in `text-tertiary`, 8 px from each side, `aria-hidden`, so a screen reader hears only the names.
+- A long trail wraps onto a second line rather than scrolling sideways.
+
+## Props
+
+| Prop | Type | Notes |
+| --- | --- | --- |
+| `items` | `{ label: string; href?: string }[]` | Required, from the top down, ending with the page. An item before the last with no `href` shows as plain text. |
+| `linkComponent` | `ComponentType<RulesLinkProps>` | The app's router link; a plain `<a>` by default. |

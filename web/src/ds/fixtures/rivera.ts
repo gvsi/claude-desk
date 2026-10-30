@@ -28,6 +28,14 @@ import type {
   VerifyStarted,
 } from '../../api/contracts';
 import type { Bilingual, ConversationFixture, ProseBlock } from './index';
+import type { ConnectorView } from '../components/ConnectorName/ConnectorName';
+import type { ChangeReviewProps, ChangeRowView } from '../components/ChangeReview/ChangeReview';
+import type { ConnectorPickerProps } from '../components/ConnectorPicker/ConnectorPicker';
+import type { ReviewToolView } from '../components/ConnectorReview/ConnectorReview';
+import type { ConnectorSectionProps } from '../components/ConnectorSection/ConnectorSection';
+import type { DirectoryRowView } from '../components/ConnectorDirectory/ConnectorDirectory';
+import type { RecentRequestView } from '../components/RecentRequests/RecentRequests';
+import type { RuleWord } from '../components/RuleRow/RuleRow';
 import { executedLine, type ExecutedTool } from './receipts';
 
 /**
@@ -53,6 +61,8 @@ const sha256 = (label: string) => placeholderHex(`sha256:${label}`, 32);
 const COPY_ID = 'copy-demo-7f3a';
 const DESK_ID = 'desk-rivera-main';
 const OWNER = 'Maria Rivera';
+/** The built-in visiting agent's key: Alex Kim's assistant. */
+const DEMO_AGENT_KEY_ID = 'demo-agent';
 
 /**
  * Rivera Plumbing's money cap, $500: the most its active rules version lets an auto card take or pay
@@ -966,6 +976,534 @@ const ruleCards = {
   }),
 } satisfies Record<string, RuleCard>;
 
+/**
+ * A rule shared by every tool that charges money, for the stories of a shared rule. It is not in
+ * the seed (the board's example is illustrative), so it stays out of `ruleCards`. It is for one
+ * visiting agent, Alex Kim's assistant, so under "Coverage and overlap" it outranks each tool's own
+ * card for everyone (`rv-link`, `rv-mandate`) and governs Payment link and Charge within a signed
+ * limit for that agent. It agrees with the seed: the assistant's $20 deposit is still automatic.
+ */
+const sharedChargeCard = rule({
+  card_id: 'rv-agent-charges',
+  applies_to: 'effect:charge',
+  mode: 'auto',
+  who: 'agent',
+  agent_key_id: DEMO_AGENT_KEY_ID,
+  max_amount_cents: 2000,
+  reason: "Alex Kim's assistant can pay up to $20 from its signed limit.",
+});
+
+/** The screen's words for what the shared rule covers, shown under each tool it governs. */
+const sharedChargeAppliesTo = 'Applies to every tool that charges money: Payment link and Charge within a signed limit.';
+
+const word = (field: RuleWord['field'], text: string): RuleWord => ({ field, text });
+
+/** Each card's words as the web app's `ruleWords` renders what it enforces, in the boards' words. */
+const ruleWords = {
+  'rv-quote': [word('who', 'Anyone'), word('limits', 'No discounts')],
+  'rv-book-wk': [word('who', 'Anyone'), word('hours', 'Weekdays, 8:00 am to 6:00 pm'), word('review', 'Checked by the reviewer')],
+  'rv-book-sat': [word('who', 'Anyone'), word('hours', 'Saturdays, 9:00 am to 1:00 pm'), word('review', 'Checked by the reviewer')],
+  'rv-docs': [word('who', "The record's owner, verified")],
+  'rv-link': [word('who', 'Anyone'), word('limits', 'Up to $300'), word('review', 'Checked by the reviewer')],
+  'rv-charges': [word('who', "The record's owner, verified")],
+  'rv-refund': [word('who', 'The customer who paid, verified')],
+  'rv-mandate': [word('who', 'Signed agents'), word('limits', 'Up to $20')],
+  'rv-agent-charges': [word('who', "Alex Kim's assistant"), word('limits', 'Up to $20')],
+} satisfies Record<keyof typeof ruleCards | 'rv-agent-charges', RuleWord[]>;
+
+/** The amount limit of each auto card that has one, formatted as the screen formats it. */
+const ruleLimits = {
+  'rv-link': '$300',
+  'rv-mandate': '$20',
+  'rv-agent-charges': '$20',
+} satisfies Partial<Record<keyof typeof ruleWords, string>>;
+
+// ---------------------------------------------------------------------------------------------
+// Connectors on the Rules page (N-Conn-12-Chat) and the Connectors page (N-Conn-23-Connectors)
+
+const connectorViews = {
+  quotes: {
+    id: 'quotes',
+    name: 'Quotes',
+    icon: 'quotes',
+    description: 'Prices jobs from your price list.',
+    source: { kind: 'built_in' },
+  },
+  bookings: {
+    id: 'bookings',
+    name: 'Bookings',
+    icon: 'bookings',
+    description: 'Finds open times and books visits.',
+    source: { kind: 'built_in' },
+  },
+  leads: {
+    id: 'leads',
+    name: 'Leads and callbacks',
+    icon: 'leads',
+    description: "Saves visitors' details and asks you to call back.",
+    source: { kind: 'built_in' },
+  },
+  verification: {
+    id: 'verification',
+    name: 'Verification',
+    icon: 'verification',
+    description: 'Confirms a customer is who they say.',
+    source: { kind: 'built_in' },
+  },
+  documents: {
+    id: 'documents',
+    name: 'Documents',
+    icon: 'documents',
+    description: "Sends customers their own documents after they confirm it's them.",
+    source: { kind: 'built_in' },
+  },
+  payments: {
+    id: 'payments',
+    name: 'Payments',
+    icon: 'payments',
+    description: 'Payment links and charges within a signed limit. Test payments, no money moves.',
+    source: { kind: 'built_in' },
+  },
+  stripe: {
+    id: 'stripe',
+    name: 'Stripe',
+    icon: 'stripe',
+    description: "Your customers' charges and refunds. Test mode, no money moves.",
+    source: { kind: 'external', mock: true },
+  },
+} satisfies Record<string, ConnectorView>;
+
+/** One connector's section on the hub: its page and its tools, each with its line, rule words and outcome. */
+type HubSection = Pick<ConnectorSectionProps, 'connector' | 'href' | 'tools'>;
+
+const hubSections = [
+  {
+    connector: connectorViews.quotes,
+    href: '/connectors/quotes',
+    tools: [
+      {
+        key: 'native.quote',
+        name: 'Quote',
+        description: 'Prices a job from your price list. Changes something. Can be undone.',
+        summary: 'Anyone · No discounts',
+        mode: 'auto',
+        status: 'enabled',
+        href: '/connectors/quotes/quote',
+      },
+    ],
+  },
+  {
+    connector: connectorViews.bookings,
+    href: '/connectors/bookings',
+    tools: [
+      {
+        key: 'native.find_slots',
+        name: 'Find open times',
+        description: "Reads the times you're free. Changes nothing.",
+        summary: 'Anyone',
+        mode: 'auto',
+        status: 'enabled',
+        href: '/connectors/bookings/find-open-times',
+      },
+      {
+        key: 'native.book',
+        name: 'Book a visit',
+        description: 'Puts a visit on your calendar. Can be undone.',
+        summary: '2 rules',
+        mode: 'auto',
+        status: 'enabled',
+        href: '/connectors/bookings/book-a-visit',
+      },
+    ],
+  },
+  {
+    connector: connectorViews.leads,
+    href: '/connectors/leads',
+    tools: [
+      {
+        key: 'native.capture_lead',
+        name: 'Save a lead',
+        description: "Keeps a visitor's details for you. Can be undone.",
+        summary: 'Anyone',
+        mode: 'auto',
+        status: 'enabled',
+        href: '/connectors/leads/save-a-lead',
+      },
+      {
+        key: 'native.request_callback',
+        name: 'Request a callback',
+        description: 'Asks you to call someone back. Can be undone.',
+        summary: 'Anyone',
+        mode: 'auto',
+        status: 'enabled',
+        href: '/connectors/leads/request-a-callback',
+      },
+    ],
+  },
+  {
+    connector: connectorViews.verification,
+    href: '/connectors/verification',
+    tools: [
+      {
+        key: 'native.start_verification',
+        name: "Confirm it's them",
+        description: 'Sends a code to the contact on record.',
+        summary: 'Always on',
+        mode: 'auto',
+        status: 'enabled',
+        href: '/connectors/verification/confirm-its-them',
+      },
+    ],
+  },
+  {
+    connector: connectorViews.documents,
+    href: '/connectors/documents',
+    tools: [
+      {
+        key: 'native.release_document',
+        name: 'Share a document',
+        description: "Sends customers their own documents. Touches private data. Can't be undone.",
+        summary: "The record's owner, verified",
+        mode: 'auto',
+        status: 'enabled',
+        href: '/connectors/documents/share-a-document',
+      },
+    ],
+  },
+  {
+    connector: connectorViews.payments,
+    href: '/connectors/payments',
+    tools: [
+      {
+        key: 'native.payment_link',
+        name: 'Payment link',
+        description: 'Makes a one-time link for a quote. Charges money. Can be undone.',
+        summary: '2 rules · 1 shared',
+        mode: 'auto',
+        limit: '$300',
+        status: 'enabled',
+        href: '/connectors/payments/payment-link',
+      },
+      {
+        key: 'native.charge_mandate',
+        name: 'Charge within a signed limit',
+        description: "Lets a visiting agent pay from its owner's signed limit. Charges money. Can be undone.",
+        summary: '2 rules · 1 shared',
+        mode: 'auto',
+        limit: '$20',
+        status: 'enabled',
+        href: '/connectors/payments/charge-within-a-signed-limit',
+      },
+    ],
+  },
+  {
+    connector: connectorViews.stripe,
+    href: '/connectors/stripe',
+    tools: [
+      {
+        key: 'payments.list_charges',
+        name: 'See charges',
+        description: 'Shows customers their own charges. Touches private data.',
+        summary: "The record's owner, verified",
+        mode: 'auto',
+        status: 'enabled',
+        href: '/connectors/stripe/see-charges',
+      },
+      {
+        key: 'payments.create_refund',
+        name: 'Refund',
+        description: "Refunds a payment to the card it came from. Moves money out. Can't be undone.",
+        summary: 'The customer who paid, verified',
+        mode: 'ask',
+        status: 'enabled',
+        href: '/connectors/stripe/refund',
+      },
+    ],
+  },
+] satisfies HubSection[];
+
+/** Rivera Plumbing's Rules hub: six built-in connectors and Stripe, in the hub's order. */
+const connectors = {
+  views: connectorViews,
+  summary: '6 built-in connectors and 1 you connected · Version 7, checked against the always-on rules',
+  sections: hubSections,
+};
+
+// ---------------------------------------------------------------------------------------------
+// A tool's page (N-Conn-05-Refund, N-Conn-06-Quote): the header's strings, as the screen passes them.
+
+const toolPages = {
+  refund: {
+    name: 'Refund',
+    description: "Refunds a payment to the card it came from. Moves money out. Can't be undone.",
+    connector: connectorViews.stripe,
+    definitionNote: 'Definition unchanged',
+  },
+  /** A built-in tool has no pinned definition, so no definition note. */
+  quote: {
+    name: 'Quote',
+    description: 'Prices a job from your price list. Changes something. Can be undone.',
+    connector: connectorViews.quotes,
+  },
+};
+
+/**
+ * The recent requests under a tool's rules, as the screen words them: when (formatted by the
+ * screen), the decision's `reason_plain`, the rule or result that decided it, and the outcome.
+ * Each links to its Safety record.
+ */
+const recentRequests = {
+  refund: [
+    {
+      key: heldRefund.decision_id,
+      when: 'Today, 9:41 am',
+      what: heldRefund.reason_plain,
+      why: `Held by your rule: ${ruleCards['rv-refund'].reason}`,
+      tone: 'held',
+      outcome: 'Waiting for your answer',
+      href: `/safety/${heldRefund.decision_id}`,
+    },
+    {
+      key: 'dec-refund-not-on-record',
+      when: 'Yesterday',
+      what: "A visitor not on record asked for a refund of someone else's payment.",
+      why: 'Refunds go only to the customer who paid.',
+      tone: 'refused',
+      outcome: 'Stopped',
+      href: '/safety/dec-refund-not-on-record',
+    },
+    {
+      key: 'dec-lucia-refund',
+      when: 'Oct 26',
+      what: 'Lucía Herrera asked for a refund of a $20.00 deposit.',
+      why: 'Refunded to the original payment.',
+      tone: 'handled',
+      outcome: 'You allowed it',
+      href: '/safety/dec-lucia-refund',
+    },
+  ],
+  quote: [
+    {
+      key: 'dec-dana-quote',
+      when: 'Today, 8:12 am',
+      what: 'Dana Whitfield asked how much drain clearing costs.',
+      why: "Quoted from Maria Rivera's price list.",
+      tone: 'handled',
+      outcome: 'Automatic',
+      href: '/safety/dec-dana-quote',
+    },
+    {
+      key: heldQuote.decision_id,
+      when: 'Today, 7:55 am',
+      what: heldQuote.reason_plain,
+      why: `Held by your rule: ${ruleCards['rv-quote'].reason}`,
+      tone: 'held',
+      outcome: 'Waiting for your answer',
+      href: `/safety/${heldQuote.decision_id}`,
+    },
+    {
+      key: 'dec-alex-quote',
+      when: 'Yesterday',
+      what: "Alex Kim's assistant asked for a water heater install quote.",
+      why: "Quoted from Maria Rivera's price list.",
+      tone: 'handled',
+      outcome: 'Automatic',
+      href: '/safety/dec-alex-quote',
+    },
+  ],
+} satisfies Record<string, RecentRequestView[]>;
+
+/**
+ * Stripe's refund tool after its definition changed on the mock server (N-Conn-13 to N-Conn-15):
+ * Today's item, the review's words, and the screen's lines around it.
+ */
+const changedRefund = {
+  connector: connectorViews.stripe,
+  tool: 'Refund',
+  /** When it was noticed, as Today words it. */
+  noticedToday: 'Noticed today at 9:14',
+  consequence: "Refunds can't run until you decide.",
+  /** When it was noticed, as the review words it. */
+  noticedReview: 'Noticed today at 9:14, when the tools were listed again',
+  /** The screen's message when the definition changed again during the review (`conflict`). */
+  conflict: 'The tool changed again while you were reviewing. Review the newest version.',
+  /** The screen's notice once the reviewed definition is confirmed (N-Conn-15). */
+  backOn: 'Refund is back on. Your rules were checked against its new definition, and refunds still wait for your answer.',
+};
+
+// ---------------------------------------------------------------------------------------------
+// The end of each connector's page (N-Conn-02, N-Conn-03): what turning it off stops, read by the
+// screen from the Desk's tools and active rules.
+
+/** Payments, built in: turning it off stops both tools and every rule that only they use. */
+const paymentsConnection = {
+  consequence: 'Claude stops offering payment links and charges.',
+  stops: {
+    tools: ['Payment link', 'Charge within a signed limit'],
+    rules: [ruleCards['rv-link'].reason, ruleCards['rv-mandate'].reason, sharedChargeCard.reason],
+  },
+};
+
+/** Stripe, connected: the connection's details as the screen words them, and what disconnecting stops. */
+const stripeConnection = {
+  details: [
+    { label: 'Account', value: 'Rivera Plumbing, test mode (mock)' },
+    { label: 'Connected', value: 'Oct 28 by Maria Rivera' },
+    { label: 'Customers it can see', value: 'Only the verified person Claude is talking to' },
+    { label: 'Tool definitions', value: 'Unchanged since you confirmed them. A change turns that tool off until you review it.' },
+  ],
+  consequence: 'Disconnecting removes its tools from your Desk.',
+  stops: {
+    tools: ['See charges', 'Refund'],
+    rules: [ruleCards['rv-charges'].reason, ruleCards['rv-refund'].reason],
+  },
+};
+
+/** Verification is always on: the owner's words for why. */
+const verificationConnection = {
+  reason: "It's how Claude confirms a customer before sharing anything private.",
+};
+
+// ---------------------------------------------------------------------------------------------
+// Google Calendar, catalog-only in the demo (N-Conn-04, N-Conn-07 to N-Conn-11): what the
+// connector pieces show once it works. It reads busy times only, never what an event is.
+
+const googleCalendarView = {
+  id: 'google_calendar',
+  name: 'Google Calendar',
+  icon: 'google_calendar',
+  description: "When you're busy, so Claude only offers free times.",
+  source: { kind: 'external', mock: true },
+} satisfies ConnectorView;
+
+const googleCalendar = {
+  view: googleCalendarView,
+  /** Its promise, under its page's header and in its sign-in. */
+  promise: {
+    title: "Claude sees only when you're busy, never what the event is: no titles, guests or notes.",
+    detail:
+      'It reads busy time ranges from Rivera Plumbing jobs, so open times never clash with a visit you already have. Nothing is ever added to or changed on your calendar.',
+  },
+  /** The end of its page (N-Conn-04): the connection's details and what disconnecting stops. */
+  connection: {
+    details: [
+      { label: 'Calendar', value: 'Rivera Plumbing jobs (mock)' },
+      { label: 'Connected', value: 'Today by Maria Rivera' },
+      { label: 'Tool definitions', value: 'Unchanged since you confirmed them.' },
+    ],
+    consequence: 'Disconnecting stops Claude from checking your calendar. It then offers only the open times you set on Bookings.',
+    stops: {
+      tools: ["See when you're free"],
+      rules: ["Claude checks when you're busy before offering open times."],
+    },
+  },
+  /** The mock sign-in (N-Conn-08): which calendar shows when Maria is busy. Nothing is typed. */
+  signIn: {
+    provider: 'Google',
+    question: "Which calendar shows when you're busy?",
+    choices: [
+      { id: 'rivera-jobs', label: 'Rivera Plumbing jobs', detail: 'maria@riveraplumbing.example' },
+      { id: 'personal', label: 'Personal', detail: 'Busy times only, like the other' },
+    ],
+    value: 'rivera-jobs',
+    steps: { label: 'Connect Google Calendar', steps: ['Choose', 'Sign in', 'Review tools', 'Confirm'], current: 1 },
+  },
+  /** Reviewing its one tool before it turns on (N-Conn-09): no rule of Maria's covers it yet. */
+  review: {
+    intro: "Claude sees only when you're busy, never what the event is: no titles, guests or notes.",
+    tools: [
+      {
+        key: 'calendar.free_busy',
+        name: "See when you're free",
+        description: "Reads only when you're busy. Never sees what an event is.",
+        mode: 'ask',
+        coveredBy: [],
+      },
+    ],
+  } satisfies { intro: string; tools: ReviewToolView[] },
+  /**
+   * The proved change before it turns on (N-Conn-10), as `ChangeReview` rows: its tool is added at
+   * Ask me first, and open times start skipping busy times.
+   */
+  changes: {
+    rows: [
+      {
+        key: 'calendar.free_busy',
+        change: 'added',
+        title: "See when you're free",
+        connector: googleCalendarView,
+        before: null,
+        after: {
+          mode: 'ask',
+          reason: "Claude checks when you're busy before offering open times. It never sees what an event is.",
+          words: [word('who', 'Claude only'), word('limits', 'Busy times only')],
+        },
+        changed: [],
+      },
+      {
+        key: 'native.find_slots',
+        change: 'changed',
+        title: 'Find open times',
+        connector: connectorViews.bookings,
+        before: { mode: 'auto', reason: 'Open times from your opening hours.', words: [word('who', 'Anyone')] },
+        after: { mode: 'auto', reason: 'Open times from your opening hours, skipping anything already on your calendar.', words: [word('who', 'Anyone')] },
+        changed: ['reason'],
+      },
+    ],
+    checks: {
+      status: 'checked',
+      lines: [
+        'No conflict with your other rules.',
+        'Always-on rules still hold.',
+        'Nothing here can move money or change your calendar.',
+        'Event titles, guests and notes never reach Claude.',
+      ],
+    },
+  } satisfies { rows: ChangeRowView[]; checks: ChangeReviewProps['checks'] },
+  /**
+   * "Add a connector" on Rivera's Connectors page (N-Conn-07): every built-in connector is added and
+   * Stripe is connected, so Google Calendar is the one to connect. Verification is never listed.
+   */
+  picker: {
+    business: business.name,
+    builtIn: [
+      connectorViews.quotes,
+      connectorViews.bookings,
+      connectorViews.leads,
+      connectorViews.documents,
+      connectorViews.payments,
+    ].map((connector) => ({ connector, state: 'added' as const })),
+    external: [
+      {
+        connector: { ...googleCalendarView, description: "Lets Claude see when you're busy, never what the event is." },
+        state: 'available',
+      },
+      { connector: connectorViews.stripe, state: 'connected' },
+    ],
+  } satisfies Pick<ConnectorPickerProps, 'business' | 'builtIn' | 'external'>,
+};
+
+/** A hub section as a row on the Connectors page: the connector, its tool count and its page. */
+function directoryRow(section: HubSection): DirectoryRowView {
+  return { connector: section.connector, tools: section.tools.length, href: section.href };
+}
+
+/**
+ * Rivera Plumbing's Connectors page (N-Conn-23-Connectors): the six built-in connectors, Stripe
+ * connected with its test account, and Google Calendar, catalog-only in the demo, so coming soon
+ * with no "Connect".
+ */
+const directory = {
+  builtInCaption: 'Part of Claude Desk. Remove one from this Desk on its own page; Verification is always on.',
+  builtIn: hubSections
+    .filter((section) => section.connector.source.kind === 'built_in')
+    .map((section) => (section.connector.id === 'verification' ? { ...directoryRow(section), note: 'Always on' } : directoryRow(section))),
+  connected: hubSections
+    .filter((section) => section.connector.source.kind === 'external')
+    .map((section) => ({ ...directoryRow(section), connection: 'Rivera Plumbing, test mode (mock)' })),
+  available: [{ connector: googleCalendarView, tools: 1, note: 'Coming soon in this demo' }] as DirectoryRowView[],
+};
+
 const listChargesProfile = {
   tool: 'payments.list_charges',
   source: 'mcp',
@@ -1167,8 +1705,6 @@ const paymentLinks = {
   unknown: paymentLink('unknown'),
 } satisfies Record<PaymentLinkState, PaymentLinkView>;
 
-const DEMO_AGENT_KEY_ID = 'demo-agent';
-
 /**
  * The built-in agent's credentials and mandate, as `POST /agents/demo` returns them: $20 per
  * charge, $100 in total, for one hour (issued 17:04:05 UTC). The private key is a dummy that
@@ -1207,6 +1743,19 @@ export const rivera = {
   heldVerified,
   heldRefund,
   ruleCards,
+  sharedChargeCard,
+  sharedChargeAppliesTo,
+  ruleWords,
+  ruleLimits,
+  connectors,
+  directory,
+  toolPages,
+  recentRequests,
+  changedRefund,
+  paymentsConnection,
+  stripeConnection,
+  verificationConnection,
+  googleCalendar,
   toolProfiles,
   ledger,
   verifyStarted,

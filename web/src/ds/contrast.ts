@@ -154,6 +154,7 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = Object.freeze([
   ...pairs(['text-secondary'], ['fill-count'], 4.5, "Count pills on the sidebar's nav rows.", 'bg-panel'),
   ...pairs(['text-secondary'], ['fill-count'], 4.5, "A count pill on the sidebar's current nav row.", 'bg-selected'),
   ...pairs(['text-primary'], ['fill-hover'], 4.5, "The reviewer bar's Start over button while it is hovered.", 'bg-muted'),
+  ...pairs(['text-primary'], ['fill-bubble'], 4.5, "The owner's words in a bubble in the Ask Claude panel.", 'bg-panel'),
   ...pairs(['clay'], ['bg-surface'], 3, 'The Claude Desk mark at the top of the first-visit intro dialog.'),
   ...pairs(['text-primary'], ['fill-card'], 4.5, "The passcode typed into the intro dialog's field.", 'bg-surface'),
   ...pairs(['illustration-ink', 'illustration-ink-secondary'], ['illustration-card'], 4.5, "Names, messages and meta lines on the intro illustration's light cards."),
@@ -190,4 +191,7 @@ export const DECORATIVE_COLORS: Readonly<Record<string, string>> = Object.freeze
   scrim: 'It dims the page behind a dialog that blocks it; no text or control sits on it.',
   'illustration-line': "The booked box's outline on an intro illustration card; the words inside it say what it is.",
   'illustration-arc': "Two soft arcs on the intro illustration's clay field, behind the cards; they carry nothing.",
+  'connector-tile-brand': 'A third-party brand mark beside its name; nothing is read on it.',
+  'connector-stripe': 'A third-party brand mark beside its name; nothing is read on it.',
+  'connector-google-blue': 'A third-party brand mark beside its name; nothing is read on it.',
 });

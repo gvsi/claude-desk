@@ -137,7 +137,7 @@ export const Board: Story = {
     await expectOwnerFrame(canvasElement, 'Safety', { fill: true });
     expectComputed(canvas.getByRole('heading', { level: 1, name: 'Safety' }), SPEC.pageTitle);
     const main = canvas.getByRole('main');
-    expectComputed(one(main, '.board-page'), SPEC.main);
+    expectComputed(one(main, '.board-filled-page'), SPEC.main);
 
     // The caption on the summary's baseline, 14 px after it.
     const summary = canvas.getByText('5 attempts to talk me around were stopped this week.');

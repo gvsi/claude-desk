@@ -13,6 +13,12 @@ describe('Card', () => {
     expect(() => renderToStaticMarkup(nested)).toThrow(/A Card is inside another Card/);
   });
 
+  it('padding_zero_for_rows_that_reach_the_edge', () => {
+    // A card of link rows pads each row itself, so its hairlines run edge to edge.
+    expect(renderToStaticMarkup(createElement(Card, { padding: 0, children: 'Rows' }))).toMatch(/^<div class="cd-card cd-card--padding-0">/);
+    expect(renderToStaticMarkup(createElement(Card, null, 'One'))).toMatch(/^<div class="cd-card cd-card--padding-20">/);
+  });
+
   it('named_div_card_is_a_group', () => {
     // A plain div can't carry a name, so a named div card is a group; an article keeps its own role.
     expect(renderToStaticMarkup(createElement(Card, { label: 'Rivera Plumbing', children: 'One' }))).toMatch(

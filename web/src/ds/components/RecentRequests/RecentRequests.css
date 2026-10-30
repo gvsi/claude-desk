@@ -1,0 +1,106 @@
+/* RecentRequests: the section heading, then 20 px under it a row per request under a hairline
+   (12 px 0): when in a 120 px column of secondary meta, what was asked in body type over why in
+   secondary caption type, and the outcome at the right. It lays out by its own width: under 640 px each part sits on its own
+   line, the outcome last. */
+
+.cd-recent-requests {
+  container: cd-recent-requests / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20);
+  min-width: 0;
+}
+
+.cd-recent-requests__empty {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cd-recent-requests__rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cd-recent-requests__row {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--size-recent-when) minmax(0, 1fr) auto;
+  grid-template-areas:
+    'when what outcome'
+    'when why outcome';
+  align-items: baseline;
+  column-gap: var(--space-16);
+  row-gap: var(--space-2);
+  padding: var(--space-12) 0;
+  border-top: 1px solid var(--line-hairline);
+}
+
+.cd-recent-requests__when {
+  grid-area: when;
+  color: var(--text-secondary);
+}
+
+.cd-recent-requests__what {
+  grid-area: what;
+  min-width: 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.cd-recent-requests__link {
+  text-decoration: none;
+}
+
+.cd-recent-requests__link:hover {
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+  text-underline-offset: 3px;
+}
+
+.cd-recent-requests__link::after {
+  position: absolute;
+  inset: 0;
+  content: '';
+}
+
+.cd-recent-requests__link:focus-visible {
+  outline: none;
+}
+
+/* The row's focus ring: the base 2 px ring at its 2 px offset, drawn around the whole row. */
+.cd-recent-requests__link:focus-visible::after {
+  border-radius: var(--radius-control);
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 2px;
+}
+
+.cd-recent-requests__why {
+  grid-area: why;
+  min-width: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.cd-recent-requests__outcome {
+  grid-area: outcome;
+  justify-self: end;
+  min-width: 0;
+  color: var(--text-primary);
+}
+
+@container cd-recent-requests (max-width: 639.98px) {
+  .cd-recent-requests__row {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'when'
+      'what'
+      'why'
+      'outcome';
+  }
+
+  .cd-recent-requests__outcome {
+    justify-self: start;
+    margin-top: var(--space-4);
+  }
+}

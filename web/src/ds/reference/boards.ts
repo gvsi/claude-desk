@@ -1,9 +1,9 @@
 /**
  * The design canvas boards the design system is checked against: the N- boards on the "Claude
  * Desk ·" pages that the project owner signed off, and run 2's boards while they are in review,
- * each listed once. Each is rebuilt by one
- * `Boards/*` story and compared by eye with its render at the board's own size, 1280×820 or a
- * 14-inch laptop's 1512×982 (`reference/README.md`). A story names its board in
+ * each listed once. Each is rebuilt by one `Boards/*` story and compared by eye with its render at
+ * the board's own size: 1280×820, a 14-inch laptop's 1512×982 or a phone's 390×844, a tall
+ * connectors board at its full height (`reference/README.md`). A story names its board in
  * `parameters.canvas`, or says `'none'` and explains in `parameters.canvasNote` (usually naming the
  * nearest board).
  */
@@ -27,6 +27,27 @@ export const REFERENCE_BOARDS = [
   'N-Answers-TwoButtons',
   // The first visit.
   'N-Intro-D',
+  // The Connectors tab and the Rules page, which replace the Rules and Integrations boards. The
+  // first Rules boards (N-Conn-01-Rules, N-Conn-16-Phone-Rules) are archived; the Rules page's
+  // presets and payment limit (N-Conn-17 to N-Conn-22) are checked where they are built.
+  'N-Conn-02-Payments',
+  'N-Conn-03-Stripe',
+  'N-Conn-04-GoogleCalendar',
+  'N-Conn-05-Refund',
+  'N-Conn-06-Quote',
+  'N-Conn-07-Add-Picker',
+  'N-Conn-07b-Add-Picker-ComingSoon',
+  'N-Conn-08-GCal-SignIn',
+  'N-Conn-09-GCal-Review',
+  'N-Conn-10-GCal-Confirm',
+  'N-Conn-11-GCal-Done',
+  'N-Conn-11b-Payments-Review',
+  'N-Conn-12-Chat',
+  'N-Conn-13-Changed-Today',
+  'N-Conn-14-Changed-Review',
+  'N-Conn-15-Changed-After',
+  'N-Conn-23-Connectors',
+  'N-Conn-24-Phone-Connectors',
   // Recorded history, replayed into each copy: the pages that list it, at a 14-inch laptop's window.
   'N-History-Conversations',
   'N-History-People',
@@ -59,7 +80,7 @@ export type ReferenceBoard = (typeof REFERENCE_BOARDS)[number];
 /**
  * The windows the boards are drawn and rendered at, as Storybook viewports (`.storybook/preview.tsx`
  * builds its options from these): most at the canvas's 1280×820, some at a 14-inch laptop's
- * 1512×982, the sidebar alone at its own 264 px, the laptop's height, and run 2's phone boards at
+ * 1512×982, the sidebar alone at its own 264 px, the laptop's height, and the phone boards at
  * 390×844. A run 2 board whose page runs longer than the window is drawn at the laptop's width and
  * the page's own height. A board story runs at its board's window.
  */
@@ -75,12 +96,16 @@ export const BOARD_VIEWPORTS = {
 
 export type BoardViewport = keyof typeof BOARD_VIEWPORTS;
 
-/** The boards drawn at another window than the canvas's, and which. */
+/**
+ * The boards drawn at another window than the canvas's, and which. Every Connectors tab and Rules
+ * board (`N-Conn-*`) is drawn at the laptop's, but for its phone board.
+ */
 const BOARD_WINDOWS: Readonly<Partial<Record<ReferenceBoard, Exclude<BoardViewport, 'canvas'>>>> = {
   'N-History-Conversations': 'laptop',
   'N-History-People': 'laptop',
   'N-History-Safety': 'laptop',
   'N-Docs-Sidebar': 'sidebar',
+  'N-Conn-24-Phone-Connectors': 'phone',
   'N-Run2-People-Loading': 'laptop',
   'N-Run2-People-Phone': 'phone',
   'N-R2-Setup-09-Situations': 'laptop-1100',
@@ -96,7 +121,15 @@ const BOARD_WINDOWS: Readonly<Partial<Record<ReferenceBoard, Exclude<BoardViewpo
 
 /** The window `board` is drawn at, so its render's size and its story's viewport. */
 export function boardViewport(board: ReferenceBoard): BoardViewport {
-  return BOARD_WINDOWS[board] ?? 'canvas';
+  return BOARD_WINDOWS[board] ?? (board.startsWith('N-Conn-') ? 'laptop' : 'canvas');
+}
+
+/**
+ * Whether `board`'s render is captured at its full height: the Connectors tab and Rules boards are,
+ * so a tall one is as wide as its window and at least as tall. Every other render is its window's size.
+ */
+export function capturedAtFullHeight(board: ReferenceBoard): boolean {
+  return board.startsWith('N-Conn-');
 }
 
 export function isReferenceBoard(value: unknown): value is ReferenceBoard {

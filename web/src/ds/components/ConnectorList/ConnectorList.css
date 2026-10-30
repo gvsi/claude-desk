@@ -1,0 +1,48 @@
+/* ConnectorList: the summary, the sections 20 px apart, and "Add a connector" after the last one when the page passes it.
+   It lays out by its own width: under 640 px (the phone board) the sections are 16 px apart, and
+   the summary and the last button go. */
+
+.cd-connector-list {
+  container: cd-connector-list / inline-size;
+  min-width: 0;
+}
+
+.cd-connector-list__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20);
+}
+
+.cd-connector-list__summary {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cd-connector-list__items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cd-connector-list__item {
+  min-width: 0;
+}
+
+.cd-connector-list__add {
+  display: flex;
+}
+
+@container cd-connector-list (max-width: 639.98px) {
+  .cd-connector-list__body,
+  .cd-connector-list__items {
+    gap: var(--space-16);
+  }
+
+  .cd-connector-list__summary,
+  .cd-connector-list__add {
+    display: none;
+  }
+}

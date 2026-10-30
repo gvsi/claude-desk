@@ -7,7 +7,7 @@
  * on a card reads as heavy as a 20 px icon in the sidebar.
  *
  * Most shapes are the design canvas's, which come from Lucide (https://lucide.dev); `agent`,
- * `person`, `clock` and `menu` are drawn for Claude Desk in the same style. Lucide's license:
+ * `person`, `clock`, `menu`, `shared` and `quote` are drawn for Claude Desk in the same style. Lucide's license:
  *
  *   ISC License
  *
@@ -38,6 +38,7 @@ export const ICON_NAMES = [
   'settings',
   'chevrons',
   'chevron-down',
+  'chevron-right',
   'plus',
   'mic',
   'send',
@@ -56,6 +57,8 @@ export const ICON_NAMES = [
   'history',
   'close',
   'menu',
+  'shared',
+  'quote',
 ] as const;
 
 export type IconName = (typeof ICON_NAMES)[number];
@@ -120,6 +123,7 @@ const SHAPES = {
     </>
   ),
   'chevron-down': <path d="m6 9 6 6 6-6" />,
+  'chevron-right': <path d="m9 6 6 6-6 6" />,
   plus: (
     <>
       <path d="M12 5v14" />
@@ -238,6 +242,23 @@ const SHAPES = {
       <path d="M4 6h16" />
       <path d="M4 12h16" />
       <path d="M4 18h16" />
+    </>
+  ),
+  // A rule shared by several tools: one point joined to two, as the boards draw it.
+  shared: (
+    <>
+      <circle cx="6" cy="12" r="2.5" />
+      <circle cx="18" cy="6" r="2.5" />
+      <circle cx="18" cy="18" r="2.5" />
+      <path d="M8.2 11l7.6-4M8.2 13l7.6 4" />
+    </>
+  ),
+  // A priced job: a page with a folded corner and two lines, the Quotes connector's icon. The
+  // boards' shape, half a unit to the left so it sits on the grid's center.
+  quote: (
+    <>
+      <path d="M6.5 3h7l4 4v14h-11z" />
+      <path d="M13.5 3v4h4M9.5 12h5M9.5 16h5" />
     </>
   ),
 } satisfies Record<IconName, ReactElement>;

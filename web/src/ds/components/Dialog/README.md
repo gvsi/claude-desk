@@ -45,3 +45,7 @@
 | `pending` | `boolean` | Confirm spins, cancel waits without a spinner; neither can be pressed, and Escape does nothing. |
 | `onConfirm` | `() => void` | Required. |
 | `onCancel` | `() => void` | Required. The cancel button, Escape, and a close by the browser. |
+
+## The modal hook
+
+`useModalDialog(onDismiss, firstFocus)` in `useModalDialog.ts` gives a native `<dialog>` the same behavior for components that draw their own modal, such as `ConnectorPicker` and `ConnectorSignIn`: it opens with `showModal()`, focuses what `firstFocus` returns, keeps Tab and Shift+Tab inside (a radio group is one stop, at its checked radio), and calls `onDismiss` for Escape, the browser's own close request and a close the screen didn't make. When the screen removes the dialog, focus returns to whatever opened it. It is used inside the design system and is not exported from the package.

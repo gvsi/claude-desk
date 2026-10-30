@@ -1,0 +1,176 @@
+/* ChangeReview: the changes card, the checks card and the controls, 20 px apart. Each change is a
+   row under a hairline: its tag in an outlined pill, then its title and meta line, and the rule's
+   side: Before for a rule that goes, After for one that applies, both for a changed rule, each
+   with its outcome at the right. */
+
+.cd-change-review {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20);
+  min-width: 0;
+}
+
+.cd-change-review__heading {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.cd-change-review__rows {
+  margin: var(--space-8) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cd-change-review__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  column-gap: var(--space-16);
+  row-gap: var(--space-8);
+  padding: var(--space-14) 0;
+  border-top: 1px solid var(--line-hairline);
+}
+
+.cd-change-review__row:last-child {
+  padding-bottom: 0;
+}
+
+/* The change in words, in an outlined pill as wide as the widest word. */
+.cd-change-review__tag {
+  flex: none;
+  box-sizing: border-box;
+  min-width: 64px;
+  padding: var(--space-2) var(--space-6);
+  border: 1px solid var(--line-control);
+  border-radius: var(--radius-full);
+  color: var(--text-primary);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.cd-change-review__body {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+
+.cd-change-review__title {
+  margin: 0;
+  color: var(--text-primary);
+  font-weight: 520;
+  overflow-wrap: anywhere;
+}
+
+.cd-change-review__meta {
+  margin: var(--space-2) 0 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.cd-change-review__meta .cd-connector-name {
+  vertical-align: middle;
+}
+
+.cd-change-review__reason {
+  margin: var(--space-6) 0 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.cd-change-review__outcome {
+  flex: 0 1 auto;
+  min-width: 0;
+  color: var(--text-primary);
+}
+
+.cd-change-review__sides {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+  margin-top: var(--space-10);
+}
+
+/* A side: its label and words beside a 2 px bar, the refused tone for what goes and the handled
+   tone for what applies (a status color only as a thin bar beside the words that say the same),
+   and its outcome at the right of its first line under the label. */
+.cd-change-review__side {
+  padding-left: var(--space-12);
+  border-left: 2px solid var(--line-hairline);
+}
+
+.cd-change-review__side-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  column-gap: var(--space-16);
+  row-gap: var(--space-6);
+}
+
+.cd-change-review__side--before {
+  border-left-color: var(--status-refused);
+}
+
+.cd-change-review__side--after {
+  border-left-color: var(--status-handled);
+}
+
+.cd-change-review__side-label {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cd-change-review__side-text {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.cd-change-review__side-text > .cd-change-review__meta {
+  margin-top: var(--space-2);
+}
+
+.cd-change-review__side-text > .cd-change-review__reason {
+  margin-top: var(--space-2);
+}
+
+/* A line whose value changed, on the after side: in weight 520, its color unchanged. */
+.cd-change-review__strong {
+  font-weight: 520;
+}
+
+.cd-change-review__side-outcome {
+  display: inline-flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+/* "Changed" beside a line whose value changed: words in a quiet outline, never a color. */
+.cd-change-review__changed {
+  display: inline-block;
+  padding: 0 var(--space-6);
+  border: 1px solid var(--line-control);
+  border-radius: var(--radius-full);
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.cd-change-review__empty {
+  margin: var(--space-8) 0 0;
+  color: var(--text-secondary);
+}
+
+.cd-change-review__checks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin: var(--space-6) 0 0;
+  padding-left: 18px;
+  color: var(--text-secondary);
+}
+
+.cd-change-review__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}

@@ -1,6 +1,7 @@
 /* PageHeader: the serif page title at the left with its subtitle beneath, and the page's actions
    at the right of the title's line. The title's 32 px line is a control's height, so a button
-   there sits level with it. On a narrow line the actions wrap under the text. */
+   there sits level with it. On a narrow line the actions wrap under the text; on a phone they stay
+   on the title's line and the subtitle runs under both. */
 
 .cd-page-header {
   display: flex;
@@ -40,4 +41,27 @@
   align-items: center;
   gap: var(--space-8);
   min-height: var(--size-control);
+}
+
+/* On a phone the title keeps its action on its own line, and the subtitle runs under both, as the
+   phone Connectors board draws it: the text's parts and the actions share one grid. */
+@media (max-width: 639.98px) {
+  .cd-page-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: var(--space-8);
+  }
+
+  .cd-page-header__text {
+    display: contents;
+  }
+
+  .cd-page-header__subtitle {
+    grid-column: 1 / -1;
+  }
+
+  .cd-page-header__actions {
+    grid-row: 1;
+    grid-column: 2;
+  }
 }

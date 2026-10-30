@@ -46,7 +46,7 @@ const LEADS: Lead[] = [
 function HistoryPeople() {
   return (
     <RiveraFrame current="people" fill counts={{ conversations: { n: 2, label: '2 need you' }, safety: { n: 3, label: '3 blocked' } }}>
-      <div className="board-page">
+      <div className="board-filled-page">
         <div className="board-people">
           <PageHeader title="Customers" subtitle="Leads and customers on this Desk. Verified means a code reached their contact on record." />
           <section className="board-people__section" aria-labelledby="board-contacts">
@@ -113,7 +113,7 @@ export const Board: Story = {
 
     // The page pads itself as the main area pads a page; its one column is 760 px, centered.
     const main = canvas.getByRole('main');
-    expectComputed(one(main, '.board-page'), SPEC.main);
+    expectComputed(one(main, '.board-filled-page'), SPEC.main);
     const page = one(main, '.board-people');
     const mainBox = main.getBoundingClientRect();
     const pageBox = page.getBoundingClientRect();

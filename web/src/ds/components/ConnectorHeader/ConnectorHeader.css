@@ -1,0 +1,70 @@
+/* ConnectorHeader: the 48 px tile, 16 px from the name and description, and the status at the
+   right, centered on the tile. On a narrow line the status drops under them. The promise card
+   sits 20 px under the header. */
+
+.cd-connector-header-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20);
+  min-width: 0;
+}
+
+.cd-connector-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--space-16);
+  row-gap: var(--space-8);
+  min-width: 0;
+}
+
+.cd-connector-header__text {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+/* 4 px under the name, as the connector boards set it. */
+.cd-connector-header__description {
+  margin: var(--space-4) 0 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.cd-connector-header__status {
+  flex: none;
+  margin: 0;
+  color: var(--text-primary);
+}
+
+/* ConnectorPromise: the lock on the title's first line, 12 px from the words. */
+.cd-connector-promise {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-12);
+  min-width: 0;
+}
+
+/* The 14 px lock sits on the middle of the title's first line: its box is the line's height, and
+   the icon is drawn centered in it. */
+.cd-connector-promise__icon {
+  flex: none;
+  height: 1lh;
+  color: var(--text-secondary);
+}
+
+.cd-connector-promise__text {
+  min-width: 0;
+}
+
+.cd-connector-promise__title {
+  margin: 0;
+  color: var(--text-primary);
+  font-weight: 520;
+  overflow-wrap: anywhere;
+}
+
+.cd-connector-promise__detail {
+  margin: var(--space-4) 0 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}

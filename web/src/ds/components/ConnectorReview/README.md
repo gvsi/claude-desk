@@ -1,0 +1,39 @@
+# ConnectorReview
+
+`ConnectorReview` is the review before a connector turns on: each tool it would add, what already covers it, and the outcome it starts at.
+
+## When to use
+
+- In the add-a-connector flow, after the owner chooses a built-in connector, or after the mock sign-in for an app: the "Review tools" step.
+- Nothing turns on here. "Turn it on" asks the screen to draft the change (one `POST /tools/confirm {tools, enable: true}` for the connector's tools), and the proved change shows in `ChangeReview` before anything runs.
+
+## What it shows
+
+- The connector's `ConnectorIcon`, drawn 44 px here and centered on the title and its lead line, beside the page's `h1`, "Review what Claude could do with {name}" in serif `.cd-type-page-title`, with "Built in" or the Mock badge (`ConnectorName`).
+- Under the title, in secondary body type: "A built-in connector, so there's nothing to sign in to. Nothing runs until you turn it on." for a built-in connector, or "Nothing runs until you turn it on." followed by `intro` (the connector's promise) for an app.
+- A `Card` named "Tools" with a row per tool, each under a hairline (the first too) and padded 14 px above and below: its name at weight 520, its `description` in secondary meta, then a line per rule that covers it, in secondary meta:
+  - the owner's rule: "Covered by your rule: {text} · {outcomePhrase(mode, limit)}" ("… · Automatic up to $300; over $300, ask me first");
+  - an always-on rule: "Covered by your always-on rule: {text}";
+  - none: "No rule of yours covers this yet, so it starts at Ask me first." (or "No rule of yours covers this yet." once the owner picked another outcome).
+- Each tool's outcome at the right, an `OutcomeMenu` at `mode`. The screen starts every new tool at "Ask me first"; with `onChangeOutcome` each outcome is a menu, and without it, words and a dot. Each row lays out by its own width: under 640 px the outcome sits on its own line under its words.
+- A primary "Turn it on", a secondary "Cancel", and "You'll see the change to your rules before anything runs." in secondary meta.
+- `error`, in an error `Notice` under them.
+
+## States
+
+- "Turn it on" calls `onTurnOn` once however often it is pressed (`useSendOnce`). It then waits until the screen's `pending` has come and gone or an error is delivered: it shows the busy spinner in place of its label, at the same width, Cancel waits beside it, the outcome menus are disabled and the review is `aria-busy`.
+- `pending` from the screen alone (a draft already in flight) shows the same waiting state.
+- An error releases the button, so the owner can try again.
+
+## Props
+
+| Prop | Type | Notes |
+| --- | --- | --- |
+| `connector` | `ConnectorView` | Required. |
+| `intro` | `string` | An app's promise, after "Nothing runs until you turn it on." |
+| `tools` | `ReviewToolView[]` | Required. `{ key; name; description; mode: RuleMode; coveredBy: { text; mode: RuleMode \| 'always_on'; limit? }[] }`. |
+| `onChangeOutcome` | `(key: string, mode: RuleMode) => void` | Makes each outcome a menu. |
+| `onTurnOn` | `() => void` | Required. |
+| `onCancel` | `() => void` | Required. |
+| `pending` | `boolean` | The screen is drafting the change. |
+| `error` | `string` | The screen's message; "Turn it on" works again. |

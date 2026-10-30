@@ -1,7 +1,7 @@
 /**
- * Ties the reference boards to what checks them: each board's render at its own size (when the
- * renders are on this machine) and the `Boards/*` stories that rebuild the boards from the
- * components, each run at its board's size.
+ * Ties the reference boards to what checks them: each board's render at its own size, a connectors
+ * board at its full height (when the renders are on this machine), and the `Boards/*` stories that
+ * rebuild the boards from the components, each run at its board's size.
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -11,7 +11,21 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { isExportStory } from 'storybook/internal/csf';
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import { BOARD_VIEWPORTS, REFERENCE_BOARDS, boardViewport, isReferenceBoard } from './boards.ts';
+import { BOARD_VIEWPORTS, REFERENCE_BOARDS, boardViewport, capturedAtFullHeight, isReferenceBoard, type ReferenceBoard } from './boards.ts';
+
+/**
+ * The problem with a render's size, or null when it is the size its board is drawn at: its window's
+ * size, or for a board captured at its full height, its window's width and at least its height.
+ */
+function sizeProblem(board: ReferenceBoard, size: { width: number; height: number }): string | null {
+  const want = BOARD_VIEWPORTS[boardViewport(board)];
+  if (capturedAtFullHeight(board)) {
+    return size.width === want.width && size.height >= want.height
+      ? null
+      : `${board}: ${size.width}×${size.height}, not ${want.width} wide and at least ${want.height} tall`;
+  }
+  return size.width === want.width && size.height === want.height ? null : `${board}: ${size.width}×${size.height}, not ${want.width}×${want.height}`;
+}
 
 /** A PNG's width and height, read from its IHDR chunk, or null when the bytes aren't a PNG. */
 function pngSize(bytes: Uint8Array): { width: number; height: number } | null {
@@ -21,6 +35,12 @@ function pngSize(bytes: Uint8Array): { width: number; height: number } | null {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   return { width: view.getUint32(16), height: view.getUint32(20) };
 }
+
+/**
+ * The tests that import every board story get more than the default 5 s: the first import
+ * transforms each story and its components, and the browser projects run beside them.
+ */
+const STORY_IMPORT_TIMEOUT = 30_000;
 
 /**
  * The board stories' folder, read when the test runs. (An `import.meta.glob` here would be expanded
@@ -79,9 +99,8 @@ describe('reference boards', () => {
       if (!existsSync(file)) return [`${board}: no ${board}.png`];
       const size = pngSize(readFileSync(file));
       if (!size) return [`${board}: ${board}.png is not a PNG`];
-      // Each board at the one size it is drawn at: 1280×820, 1512×982 for the laptop boards, or the sidebar's 264×982.
-      const want = BOARD_VIEWPORTS[boardViewport(board)];
-      return size.width === want.width && size.height === want.height ? [] : [`${board}: ${size.width}×${size.height}, not ${want.width}×${want.height}`];
+      const problem = sizeProblem(board, size);
+      return problem === null ? [] : [problem];
     });
     expect(problems).toEqual([]);
   });
@@ -90,7 +109,7 @@ describe('reference boards', () => {
     expect(stories.length).toBeGreaterThan(0);
     const unnamed = stories.filter(({ canvas }) => !(REFERENCE_BOARDS as readonly unknown[]).includes(canvas));
     expect(unnamed.map(({ id, canvas }) => `${id}: ${JSON.stringify(canvas)}`)).toEqual([]);
-  });
+  }, STORY_IMPORT_TIMEOUT);
 
   it('every_reference_board_has_a_board_story', () => {
     // Exactly one: a board rebuilt twice would be checked against itself twice, and differ.
@@ -99,7 +118,7 @@ describe('reference boards', () => {
       return `${board}: ${naming.length === 1 ? 'one story' : `${naming.length} stories${naming.length > 1 ? ` (${naming.join('; ')})` : ''}`}`;
     });
     expect(counts).toEqual(REFERENCE_BOARDS.map((board) => `${board}: one story`));
-  });
+  }, STORY_IMPORT_TIMEOUT);
 
   it('board_stories_run_at_their_boards_window', () => {
     // The plays measure the board as drawn, so each runs in the window its board was rendered at.
@@ -109,7 +128,7 @@ describe('reference boards', () => {
         : [],
     );
     expect(wrong).toEqual([]);
-    // Both windows are in use, so the check reads the stories' globals as they are written.
+    // Every window is in use, so the check reads the stories' globals as they are written.
     expect(new Set(stories.map(({ viewport }) => viewport))).toEqual(new Set(Object.keys(BOARD_VIEWPORTS)));
-  });
+  }, STORY_IMPORT_TIMEOUT);
 });
