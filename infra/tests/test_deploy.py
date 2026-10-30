@@ -39,8 +39,10 @@ REPLACE_IT = 'security add-generic-password -U -s claude-desk-passcode -a "$USER
 # print_buffer, which never set a locale): -w writes the password alone, as lowercase hex when any
 # byte fails isprint() in the C locale (space to ~); -g writes the attributes to stdout and
 # `password: ` to stderr, then 0x<HEX> when any byte is outside space to ~ or is a backslash, then
-# "<value>" with those bytes as octal escapes when any byte is not. A watched tool (WATCHED) writes
-# the same record, then runs the real tool.
+# "<value>" with those bytes as octal escapes when any byte is not; with KEYCHAIN_PROBE_WARNING, -g
+# writes a warning line to stderr before that one, and with KEYCHAIN_RAW both write the stored bytes
+# as they are (-g as `password: "<bytes>"`), as no `security` known does. A watched tool (WATCHED)
+# writes the same record, then runs the real tool.
 RECORD = """import hashlib, json, os, re, sys
 tool, args = os.path.basename(sys.argv[0]), sys.argv[1:]
 passcode = os.environ.get("DESK_PASSCODE")
@@ -64,9 +66,10 @@ STUB = """#!{python}
               file=sys.stderr)
         sys.exit(44)
     stored = open(os.environ["KEYCHAIN"], "rb").read()
+    raw = os.environ.get("KEYCHAIN_RAW")
     if args == {lookup}:
         printable = all(0x20 <= byte <= 0x7E for byte in stored)
-        sys.stdout.buffer.write((stored if printable else stored.hex().encode()) + b"\\n")
+        sys.stdout.buffer.write((stored if printable or raw else stored.hex().encode()) + b"\\n")
         sys.exit(0)
     print('keychain: "/Users/owner/Library/Keychains/login.keychain-db"\\nclass: "genp"\\nattributes:\\n'
           '    "svce"<blob>="claude-desk-passcode"')
@@ -76,7 +79,11 @@ STUB = """#!{python}
         shown += b"0x" + stored.hex().upper().encode() + (b"  " if any(quoted) else b" ")
     if any(quoted):
         shown += b'"' + b"".join(bytes([byte]) if ok else b"\\\\%03o" % byte for byte, ok in zip(stored, quoted)) + b'"'
+    if raw:
+        shown = b'"' + stored + b'"'
     sys.stdout.flush()
+    if os.environ.get("KEYCHAIN_PROBE_WARNING"):
+        sys.stderr.buffer.write(b"security: a warning, on a line of its own\\n")
     sys.stderr.buffer.write(b"password: " + shown + b"\\n")
     sys.exit(0)
 stacks_path = os.environ["STACKS"]
@@ -660,6 +667,37 @@ def test_a_keychain_passcode_that_isnt_printable_ascii_is_refused_unshown_before
     secret = "keychain-passcode"
     for form in (secret, secret.encode().hex(), secret.encode().hex().upper()):
         assert form not in run.text()
+
+
+@pytest.mark.parametrize("item", ["café-keychain-passcode", "printable-keychain-passcode"])
+def test_a_stored_form_shown_any_other_way_is_refused_unshown_before_any_step(deploy, item):
+    """deploy.sh accepts only `password: "<the value -w gave>"` from -g, and refuses any other answer,
+    failing closed: here a warning line before the password line, which hid a `password: 0x…` from
+    a check on how the answer starts, and would hide it before a printable one just the same."""
+    run = deploy(keychain_item=item, DESK_PASSCODE=None, DESK_DEPLOY_ACCOUNT=ACCOUNT, KEYCHAIN_PROBE_WARNING="1",
+                 LANG="en_US.UTF-8", LC_ALL="en_US.UTF-8")
+    assert run.status == 2
+    assert [call["argv"] for call in run.calls] == [KEYCHAIN_LOOKUP, KEYCHAIN_PROBE]
+    assert ("the macOS Keychain item claude-desk-passcode couldn't be checked: `security -g` showed it in a form "
+            "deploy.sh doesn't accept (it isn't shown)") in run.output
+    assert REPLACE_IT in run.output and STORE_IT not in run.output
+    secret = "keychain-passcode"
+    for form in (secret, secret.encode().hex(), secret.encode().hex().upper()):
+        assert form not in run.text()
+
+
+@pytest.mark.parametrize("item", ["café-keychain-passcode", "back\\slash-keychain-passcode"])
+def test_a_passcode_that_isnt_printable_ascii_is_refused_even_when_security_gives_it_as_is(deploy, item):
+    """The one line deploy.sh accepts must also hold printable ASCII with no backslash, so the rule
+    holds whatever `security` does with such a value: here one that hands it back as it's stored,
+    in the quotes of a well-formed answer, which the hex check alone would let through."""
+    run = deploy(keychain_item=item, DESK_PASSCODE=None, DESK_DEPLOY_ACCOUNT=ACCOUNT, KEYCHAIN_RAW="1",
+                 LANG="en_US.UTF-8", LC_ALL="en_US.UTF-8")
+    assert run.status == 2
+    assert [call["argv"] for call in run.calls] == [KEYCHAIN_LOOKUP, KEYCHAIN_PROBE]
+    assert ("the macOS Keychain item claude-desk-passcode has a character outside printable ASCII, "
+            "or a backslash (it isn't shown)") in run.output
+    assert "keychain-passcode" not in run.text()
 
 
 def test_every_printable_ascii_character_but_the_backslash_reaches_smoke_as_stored(deploy):

@@ -26,8 +26,10 @@
 #
 # which asks for it twice without echo (-w goes last); it must be printable ASCII with no backslash.
 # `security` hands any other passcode back as hex, so deploy.sh checks how the item is stored, which
-# shows a backslash as it shows those, and refuses one that breaks the rule. Only smoke.py is given
-# the passcode, in its environment; it never reaches a command line, the output or the log.
+# shows a backslash as it shows those, and refuses one that breaks the rule, or any answer but the
+# one line showing the plain value. Only smoke.py is given the passcode, in its environment; it never
+# reaches a command line, the output or the log. Under bash's xtrace or allexport, which would print
+# it or give it to every step, deploy.sh doesn't start.
 #
 # The first deploy creates DeskData alone first, so the owner can set the two secrets it creates:
 # `deploy.sh --data-only` runs steps 1 to 4 (preflight without the owner secrets or the web build)
@@ -143,12 +145,16 @@ if [[ -z $data_only ]]; then
     # in and is itself printable, so the stored form is checked. -g writes the password to stderr as
     # `password: 0x<HEX>...` when any byte is outside space to ~ or is a backslash, else as
     # `password: "<value>"`. Only that stderr is kept (the attributes on stdout are dropped); it holds
-    # the passcode too, so it's never shown and is unset once checked.
+    # the passcode too, so it's never shown and is unset once checked. The one answer accepted is that
+    # last line alone, holding the value -w gave, and that value is itself checked byte by byte (a C
+    # locale, in a subshell); any other answer can't be checked, so it's refused.
     probe=$(security find-generic-password -s claude-desk-passcode -g 2>&1 >/dev/null) ||
       no_passcode replace "the macOS Keychain item claude-desk-passcode couldn't be read a second time, to check how it's stored (is the login Keychain unlocked?)"
-    if [[ $probe == 'password: 0x'* ]]; then
+    if [[ $probe == 'password: 0x'* ]] || (LC_ALL=C; [[ $passcode == *[![:print:]]* || $passcode == *\\* ]]); then
       no_passcode replace "the macOS Keychain item claude-desk-passcode has a character outside printable ASCII, or a backslash (it isn't shown)"
     fi
+    [[ $probe == "password: \"$passcode\"" ]] ||
+      no_passcode replace "the macOS Keychain item claude-desk-passcode couldn't be checked: \`security -g\` showed it in a form deploy.sh doesn't accept (it isn't shown)"
     unset probe
   fi
 fi

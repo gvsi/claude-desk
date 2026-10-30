@@ -134,6 +134,7 @@ def test_the_passcode_is_asked_for_in_printable_ascii():
     assert "The passcode must be printable ASCII with no backslash" in first
     assert "`security` hands any other back as hex" in first
     assert "`security find-generic-password -g`" in first
+    assert "any other answer from `security -g` is refused too" in first      # it accepts one form alone
     assert "can't catch" not in first and "hex is itself printable ASCII" not in first
     script = " ".join((INFRA / "scripts" / "deploy.sh").read_text().replace("#", " ").split())
     assert "it must be printable ASCII with no backslash" in script
