@@ -21,13 +21,47 @@ const ARROW = new RegExp(`${ARROW_CHARACTERS.source}|->`, 'u');
 
 /**
  * Words written in capitals that stay in capitals, among them the agents page's "RFC 8785 JSON".
- * Plurals of these ("PDFs") pass too, because only the run of two or more capitals is looked up.
- * "IA" is AI in Spanish, as the public page's disclosure says it ("una IA que responde por …").
+ * Plurals of these ("PDFs", "APIs") pass too, because only the run of two or more capitals is looked
+ * up. "IA" is AI in Spanish, as the public page's disclosure says it ("una IA que responde por …").
  */
-export const COPY_ACRONYMS: ReadonlySet<string> = new Set(['I', 'AI', 'IA', 'PDF', 'QR', 'CPA', 'ZIP', 'SMS', 'USD', 'RFC', 'JSON']);
+export const COPY_ACRONYMS: ReadonlySet<string> = new Set([
+  'I',
+  'AI',
+  'IA',
+  'PDF',
+  'QR',
+  'CPA',
+  'ZIP',
+  'SMS',
+  'USD',
+  'API',
+  'CEO',
+  'CI',
+  'MCP',
+  'URL',
+  'US',
+  'RFC',
+  'JSON',
+]);
+
+/**
+ * Names whose capitals sit beside a digit or lower case, allowed only as the whole word: "AP2" and
+ * "SymCC" pass, while the runs inside them ("AP", "CC") still fail on their own or in another word.
+ */
+export const COPY_WHOLE_WORDS: ReadonlySet<string> = new Set(['AP2', 'SymCC']);
+
+/** A word: letters, marks and digits, so "AP2" is one word and "AP2’s" is "AP2" then "s". */
+const WORD = /[\p{L}\p{M}\p{N}]+/gu;
 
 /** Two or more capitals in a row: "SEND", the "DONALD" in "McDONALD", the "PDF" in "PDFs". */
 const CAPS_RUN = /\p{Lu}{2,}/gu;
+
+/** The runs of capitals in `text` that no allowlist covers, each once, in the order they appear. */
+function shoutedRuns(text: string): string[] {
+  const words = (text.match(WORD) ?? []).filter((word) => !COPY_WHOLE_WORDS.has(word));
+  const runs = words.flatMap((word) => word.match(CAPS_RUN) ?? []);
+  return [...new Set(runs)].filter((run) => !COPY_ACRONYMS.has(run));
+}
 
 /** Exclamation marks, Spanish opening marks and the emoji forms. NFKC folds the fullwidth one. */
 const EXCLAMATION = /[!\u00A1\u2755\u2757]/u;
@@ -56,7 +90,7 @@ function checkText(raw: string, source: string, ctx: Context): void {
   const text = raw.normalize('NFKC');
   if (ARROW.test(text)) ctx.problems.push(`arrow in ${source}: "${sample(raw)}"`);
   if (ctx.user) return;
-  const caps = [...new Set(text.match(CAPS_RUN) ?? [])].filter((run) => !COPY_ACRONYMS.has(run));
+  const caps = shoutedRuns(text);
   if (caps.length > 0) {
     ctx.problems.push(`all caps ${caps.map((run) => `"${run}"`).join(', ')} in ${source}: "${sample(raw)}"`);
   }

@@ -37,7 +37,7 @@ import { ConversationListItem } from '../components/ConversationListItem/Convers
 import { PublicBrandHeader } from '../components/PublicShell/PublicBrandHeader.tsx';
 import type { PublicBrand, PublicOpenStatus } from '../components/PublicShell/PublicShell.tsx';
 import { ReviewerBar } from '../components/ReviewerBar/ReviewerBar.tsx';
-import { Sidebar, initialsOf, type NavCount, type NavKey } from '../components/Sidebar/Sidebar.tsx';
+import { Sidebar, initialsOf, type NavCount, type NavKey, type SidebarHrefs } from '../components/Sidebar/Sidebar.tsx';
 import { StatusDot, StatusLabel, type StatusTone } from '../components/StatusDot/StatusDot.tsx';
 import { TextLink } from '../components/TextLink/TextLink.tsx';
 import { placeholderHex, rivera } from '../fixtures/index.ts';
@@ -45,7 +45,11 @@ import { Icon, type IconName } from '../icons/index.tsx';
 
 import './boards.css';
 
-/** Where the sidebar's rows go: in-page anchors, so nothing leaves the story. */
+/**
+ * Where the sidebar's rows go: in-page anchors, so nothing leaves the story. No Connectors href, so
+ * no Connectors row: the boards drawn before that page (Run 1 and the recorded history) draw seven
+ * pages, as the web app's first run will. A board that draws Connectors adds its href.
+ */
 export const OWNER_HREFS = {
   today: '#today',
   conversations: '#conversations',
@@ -54,7 +58,7 @@ export const OWNER_HREFS = {
   safety: '#safety',
   share: '#share',
   settings: '#settings',
-} satisfies Record<NavKey, string>;
+} satisfies SidebarHrefs;
 
 export const MAIN_LINE = { id: 'desk-rivera-main', name: rivera.business.deskName };
 export const EMERGENCIES = { id: 'desk-rivera-emergencies', name: 'Emergencies' };

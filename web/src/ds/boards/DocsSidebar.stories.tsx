@@ -27,7 +27,7 @@ function DocsSidebar() {
         currentDeskId={MAIN_LINE.id}
         onSwitchDesk={fn()}
         current="today"
-        hrefs={OWNER_HREFS}
+        hrefs={{ ...OWNER_HREFS, connectors: '#connectors' }}
         peopleLabel="Customers"
         counts={{ conversations: { n: 2, label: '2 need you' }, safety: { n: 2, label: '2 blocked' } }}
         answering
@@ -49,7 +49,7 @@ const meta = {
     canvas: 'N-Docs-Sidebar',
     canvasNote: [
       'The sidebar with the “About this prototype” group just above the Answering block, behind its hairline: “Product proposal” and “Capability prediction”, nav rows with the document icon.',
-      'The board’s nav has a Connectors row after Rules, which another change adds; here the nav is today’s seven rows, so it ends 38 px higher, while the group and the foot sit where the board draws them.',
+      'The nav’s eight pages, Connectors after Rules, sit where the board draws them, as do the group and the foot.',
       'The board marks no row current; here the owner is reading the product proposal, so its row is the current page, on the selected fill, and the main nav marks none.',
       'The board draws the mark 1 px and every row’s icon 2 px higher than the other signed boards do; the sidebar keeps their placement, so all its icons, the group’s included, sit as on Today and the recorded-history boards.',
     ].join(' '),
@@ -90,6 +90,21 @@ export const Board: Story = {
     await expect(links[1]).not.toHaveAttribute('aria-current');
     const nav = within(column).getByRole('navigation', { name: 'Main' });
     await expect(within(nav).queryAllByRole('link', { current: 'page' })).toEqual([]);
+
+    // The board's eight pages, Connectors fifth, its row 270 px down the column as the board draws it.
+    const pages = within(nav).getAllByRole('link');
+    await expect(pages.map((page) => page.querySelector('.cd-sidebar__label')?.textContent)).toEqual([
+      'Today',
+      'Conversations',
+      'Customers',
+      'Rules',
+      'Connectors',
+      'Safety',
+      'Share',
+      'Settings',
+    ]);
+    const connectors = pages[4] as HTMLElement;
+    await expect(Math.round(connectors.getBoundingClientRect().top - column.getBoundingClientRect().top)).toBe(270);
 
     // focus_order_is_logical: the business, the main nav, the about links, then Answering.
     await expectTabOrder(userEvent, [

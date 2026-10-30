@@ -1,13 +1,13 @@
 import { useLayoutEffect, useRef } from 'react';
 
-import { ApprovalCard, AppShell, Greeting, SectionHeader, Sidebar, type NavKey } from '../../ds/index.ts';
+import { ApprovalCard, AppShell, Greeting, SectionHeader, Sidebar, type SidebarHrefs } from '../../ds/index.ts';
 import { greetingFor } from '../../lib/format.ts';
 import { TODAY_PREVIEW } from './preview.ts';
 
 import '../today/Today.css';
 
 /** Every nav row points nowhere: the preview can't be used. */
-const NOWHERE: Record<NavKey, string> = {
+const NOWHERE: SidebarHrefs = {
   today: '/',
   conversations: '/',
   people: '/',

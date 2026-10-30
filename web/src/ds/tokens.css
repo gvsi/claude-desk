@@ -81,6 +81,8 @@
   --size-intro: 880px;
   --size-intro-illustration: 400px;
   --size-checkout: 420px;
+  --size-article-measure: 648px;
+  --size-article-side: 200px;
   --motion-instant: 60ms;
   --motion-fast: 120ms;
   --motion-base: 200ms;
@@ -247,6 +249,56 @@
   line-height: 32px;
   font-weight: 420;
   font-variant-numeric: tabular-nums;
+}
+
+.cd-type-article-title {
+  font-family: var(--font-serif);
+  font-size: 72px;
+  line-height: 78px;
+  font-weight: 300;
+}
+
+.cd-type-article-body {
+  font-family: var(--font-serif);
+  font-size: 18px;
+  line-height: 30px;
+  font-weight: 380;
+}
+
+.cd-type-article-body-phone {
+  font-family: var(--font-serif);
+  font-size: 17px;
+  line-height: 28px;
+  font-weight: 380;
+}
+
+.cd-type-article-heading {
+  font-family: var(--font-sans);
+  font-size: 30px;
+  line-height: 36px;
+  font-weight: 620;
+}
+
+.cd-type-article-heading-phone {
+  font-family: var(--font-sans);
+  font-size: 25px;
+  line-height: 31px;
+  font-weight: 620;
+}
+
+.cd-type-article-quote {
+  font-family: var(--font-serif);
+  font-size: 32px;
+  line-height: 42px;
+  font-weight: 300;
+  font-style: italic;
+}
+
+.cd-type-article-caption {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 19px;
+  font-weight: 380;
 }
 
 .cd-type-trace {

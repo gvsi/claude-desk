@@ -7,7 +7,7 @@ import { ApprovalCard } from '../ApprovalCard/ApprovalCard.tsx';
 import { Greeting } from '../Greeting/Greeting.tsx';
 import { ReviewerBar } from '../ReviewerBar/ReviewerBar.tsx';
 import { SectionHeader } from '../SectionHeader/SectionHeader.tsx';
-import { Sidebar, type NavKey, type SidebarLinkProps } from '../Sidebar/Sidebar.tsx';
+import { Sidebar, type SidebarHrefs, type SidebarLinkProps } from '../Sidebar/Sidebar.tsx';
 import { AppShell } from './AppShell.tsx';
 
 const navigate = fn();
@@ -36,7 +36,10 @@ const hrefs = {
   safety: '/app/desk-rivera-main/safety',
   share: '/app/desk-rivera-main/share',
   settings: '/app/desk-rivera-main/settings',
-} satisfies Record<NavKey, string>;
+} satisfies SidebarHrefs;
+
+/** The same app once it has a Connectors page, as N-Docs-Sidebar draws it. */
+const hrefsWithConnectors = { ...hrefs, connectors: '/app/desk-rivera-main/connectors' } satisfies SidebarHrefs;
 
 /** The documents behind the prototype, linked from the sidebar's "About this prototype" group. */
 const ABOUT = {
@@ -67,6 +70,20 @@ const sidebar = (
     linkComponent={RouterLink}
   />
 );
+
+/** The eight pages, in the sidebar's fixed order. */
+/** The seven pages Today's board draws, before Connectors. */
+const PAGES = ['Today', 'Conversations', 'Customers', 'Rules', 'Safety', 'Share', 'Settings'];
+
+/** The eight pages N-Docs-Sidebar draws, Connectors after Rules. */
+const PAGES_WITH_CONNECTORS = ['Today', 'Conversations', 'Customers', 'Rules', 'Connectors', 'Safety', 'Share', 'Settings'];
+
+/** The words of each page row in a nav, in order (a row's count is read separately). */
+function pageNames(nav: HTMLElement): string[] {
+  return within(nav)
+    .getAllByRole('link')
+    .map((link) => link.querySelector('.cd-sidebar__label')?.textContent ?? '');
+}
 
 const today = (
   <>
@@ -127,7 +144,11 @@ export const OwnerToday: Story = {
       borderRightColor: 'rgba(250, 249, 245, 0.12)',
     });
     await expect(column.getBoundingClientRect().top).toBe(banner.getBoundingClientRect().bottom);
-    await expect(within(column).getByRole('navigation', { name: 'Main' })).toBeVisible();
+    const nav = within(column).getByRole('navigation', { name: 'Main' });
+    await expect(nav).toBeVisible();
+    // nav_order_is_fixed: the board's seven pages, each to its own route (no Connectors page here).
+    await expect(pageNames(nav)).toEqual(PAGES);
+    await expect(within(nav).getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual(Object.values(hrefs));
     // It runs to the bottom of the window, so the Answering switch sits at the foot.
     await expect(column.getBoundingClientRect().bottom).toBe(window.innerHeight);
 
@@ -214,6 +235,7 @@ export const Compact: Story = {
     await expect(sheet).toBeVisible();
     await expect(menu).toHaveAttribute('aria-expanded', 'true');
     await expect(within(sheet).getByRole('navigation', { name: 'Main' })).toBeVisible();
+    await expect(pageNames(within(sheet).getByRole('navigation', { name: 'Main' }))).toEqual(PAGES);
     await expect(sheet.contains(document.activeElement)).toBe(true);
     await userEvent.keyboard('{Escape}');
     await expect(canvas.queryByRole('dialog', { name: 'Menu' })).toBeNull();
@@ -255,7 +277,7 @@ export const CompactAbout: Story = {
         currentDeskId="desk-rivera-main"
         onSwitchDesk={fn()}
         current="today"
-        hrefs={hrefs}
+        hrefs={hrefsWithConnectors}
         peopleLabel="Customers"
         answering
         onAnsweringChange={fn()}
@@ -268,7 +290,7 @@ export const CompactAbout: Story = {
   parameters: {
     canvas: 'N-Docs-Sidebar',
     canvasNote:
-      'The board draws the sidebar in its column; on a phone, Menu opens the same sidebar as a sheet, with the about group above the Answering block. The board’s Connectors row is another change’s.',
+      'The board draws the sidebar in its column; on a phone, Menu opens the same sidebar as a sheet, with the about group above the Answering block.',
   },
   play: async ({ canvas, userEvent }) => {
     // compact_sheet_shows_the_about_group: the sheet holds the same group, between the main nav
@@ -308,7 +330,7 @@ export const ShortWindow: Story = {
         currentDeskId="desk-rivera-main"
         onSwitchDesk={fn()}
         current="today"
-        hrefs={hrefs}
+        hrefs={hrefsWithConnectors}
         peopleLabel="Customers"
         counts={{ conversations: { n: 1, label: '1 needs you' }, safety: { n: 2, label: '2 blocked' } }}
         answering
@@ -324,7 +346,7 @@ export const ShortWindow: Story = {
   parameters: {
     canvas: 'N-Docs-Sidebar',
     canvasNote:
-      'The board draws the sidebar at 982 px; in a window 657 px tall, under the reviewer bar and with two Desks, the nav and the about group scroll between the pinned top and the pinned foot. The board’s Connectors row is another change’s.',
+      'The board draws the sidebar at 982 px; in a window 657 px tall, under the reviewer bar and with two Desks, the nav’s eight pages and the about group scroll between the pinned top and the pinned foot.',
   },
   play: async ({ canvas, userEvent }) => {
     await expect([window.innerWidth, window.innerHeight]).toEqual([1366, 657]);
@@ -332,6 +354,8 @@ export const ShortWindow: Story = {
     const sidebar = column.querySelector('.cd-sidebar') as HTMLElement;
     const foot = sidebar.querySelector('.cd-sidebar__footer') as HTMLElement;
     const middle = sidebar.querySelector('.cd-sidebar__middle') as HTMLElement | null;
+    // All eight pages, Connectors included, and the foot still wholly in the window.
+    await expect(pageNames(within(column).getByRole('navigation', { name: 'Main' }))).toEqual(PAGES_WITH_CONNECTORS);
 
     // sidebar_foot_stays_in_view: the column itself never scrolls; the foot sits 12 px over its
     // bottom, wholly in the window.
