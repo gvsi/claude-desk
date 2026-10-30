@@ -6,10 +6,12 @@ The Desk's payments tools are pinned to the definitions the owner reviewed. A ch
 the rules are proved and confirmed again; an operation the server lists that no adapter pins is
 given to no one and refused when called; and a refund resolves only its own copy's charges. A
 payment link pays once, within a day, and a completion whose outcome is unknown settles at the
-provider once. A quote is paid once. A demo agent's mandate allows five $20 charges and no more,
-nothing above $20 at once, nothing after its hour and no refund; two calls racing for its last $20
-leave one spend; and a charge whose kernel died after the provider charged, or whose provider
-answered late, is committed once on reconciliation. Every agent call is signed by the session's own key, with a fresh
+provider once; a rule change that no longer allows an open link cancels it, and the kernel's chat
+line names that link from its own fact. A quote is paid once. A demo agent's mandate allows five
+$20 charges and no more, nothing above $20 at once, nothing after its hour and no refund; two
+calls racing for its last $20 leave one spend; and a charge whose kernel died after the provider
+charged, or whose provider answered late, is committed once on reconciliation. Every agent call is
+signed by the session's own key, with a fresh
 timestamp, under a nonce that lasts one turn. An owner's setup call reaches only its own copy.
 
 On the real kernel each case also reads what the kernel stored (`kernel_ro`: tools, facts,
@@ -33,11 +35,11 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from desk.contracts import Decision, DemoAgentIssued, ExecResult, LedgerEntry, ToolName, ToolProfile
+from desk.contracts import Decision, DemoAgentIssued, ExecResult, LedgerEntry, RuleCard, ToolName, ToolProfile
 from desk.db.session import database_url
 from desk.kernel_api import PaymentLinkView, SessionContext
 from evals.fakes import FakeAnthropic, Json
-from evals.oracles import find_markers, verify_verdict_sig
+from evals.oracles import card_amount_problems, find_markers, verify_verdict_sig
 from evals.tier1.args import charge_mandate_args, fetch_website_args, payment_link_args, refund_args
 from evals.tier1.golden_desk import (
     CUSTOM_ITEMS,
@@ -47,6 +49,7 @@ from evals.tier1.golden_desk import (
     Caller,
     GoldenDesk,
     check_args_schema,
+    confirm_cards,
     decide,
     demo_agent,
     desk_of,
@@ -67,7 +70,7 @@ from evals.tier1.test_labels_and_injection import (
     stored_charges,
     viewed_charges,
 )
-from evals.tier1.test_reply_golden import CLEAN_EN, check_reply, passes, shown_blocks, signing_key
+from evals.tier1.test_reply_golden import CLEAN_EN, check_reply, handed_off, passes, shown_blocks, signing_key
 from evals.tier1.test_restart_and_ledger import ORPHAN_AFTER_S, execute_body
 from evals.tier1.test_sessions import (
     NOT_FOUND,
@@ -564,6 +567,51 @@ async def test_payment_link_expires_after_a_day(k: KernelHarness, fake: FakeAnth
         assert await session_charges(records, desk, visitor) == [], "a late completion charged the session"
         await assert_store_gained(desk, store, 0, P, visitor.name)
         assert (await link_row(records, desk, link))["state"] == "expired"
+
+
+# Rules without the seed's rv-link: a payment link now falls to the compiler's default ask
+QUOTES_ONLY = RuleCard(card_id="g-auto-quote", applies_to="native.quote", mode="auto", who="anyone",
+                       reason="Quotes at list price.")
+
+
+@pytest.mark.requires("01c")
+async def test_cancelled_link_card_names_its_own_link(k: KernelHarness, fake: FakeAnthropic, records):
+    """A confirmed rule change that no longer allows an open link cancels it, and the kernel's chat
+    line for it says which link: one `link_cancelled` card citing the link's own `payment_link` fact,
+    its title the link's amount and nothing else, what the link was for in its lines, signed with the
+    card, for the link's session alone (another visitor's gets none). Claude drafting
+    `link_cancelled`, even citing that same fact, is refused as `unknown_fact`."""
+    desk = await golden_desk(k)
+    visitor = await open_caller(k, desk, "visitor")
+    stranger = await open_caller(k, desk, "visitor")
+    link = await issue_link(k, fake, desk, visitor)
+    version = await confirm_cards(k, desk, [QUOTES_ONLY])
+    link_id = link.fact_id.removeprefix("payment_link:")
+    lines = await k.call(
+        "GET /policy/{version}/cancelled_links?desk_id=", path={"version": version.version},
+        query={"desk_id": desk.desk_id}, auth=desk.owner, expect=Expect(fields={
+            "0.link_id": link_id, "0.session_id": visitor.state.session_id, "0.verdict.ok": True,
+            "0.verdict.violations": [], "0.verdict.generation": visitor.state.generation,
+            **{f"0.verdict.{path}": value for path, value in shown_blocks(["link_cancelled"]).items()},
+            "0.verdict.blocks.0.fact_id": link.fact_id, "0.verdict.blocks.0.lines": {"$len": 2},
+        }))
+    await check_reply(k, visitor, "Your payment link was cancelled.",
+                      [{"template": "link_cancelled", "fact_id": link.fact_id}],
+                      expect=handed_off(visitor, "unknown_fact"))
+
+    if k.is_real:
+        sessions = [line.session_id for line in lines]
+        assert sessions == [visitor.state.session_id], (
+            f"{len(sessions)} lines, the stranger's session among them: {stranger.state.session_id in sessions}")
+        verdict = lines[0].verdict
+        assert verify_verdict_sig(visitor.state.session_id, verdict, await signing_key(k)), "the card's signature"
+        [fact] = [row for row in await records.facts(desk.copy.copy_id) if row["fact_id"] == link.fact_id]
+        stated = {claim["key"]: claim["value"] for claim in fact["claims"]}
+        assert f"session:{visitor.state.session_id}" in fact["readers"], "the card's fact isn't the session's"
+        [block] = verdict.blocks
+        problems = card_amount_problems(block, {stated["total"]}, headline=stated["total"])
+        assert stated["total"] == P and not problems, f"the card doesn't show its link's amount: {problems}"
+        assert block.lines[0] == stated["title"], "the card's first line isn't what its link was for"
 
 
 # The provider answering late: Plan 01c's provider deadline is 2 s, and `k.mockpay.delay` is the one
