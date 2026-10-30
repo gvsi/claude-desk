@@ -206,7 +206,11 @@ it('the_name_comes_only_from_the_link', () => {
     expect(nameOn(page.container)).toBeNull();
   }
   page.update({ language: 'es', customerName: undefined });
-  expect(page.container.querySelector('input')?.labels?.[0]?.textContent).toBe('Nombre en la tarjeta');
+  const field = page.container.querySelector('input');
+  expect(field?.labels?.[0]?.textContent).toBe('Nombre en la tarjeta');
+  // The field's own hint, in the page's language, describes it.
+  const hintId = field?.getAttribute('aria-describedby') ?? '';
+  expect(document.getElementById(hintId)?.textContent).toBe('Cualquier nombre sirve. Se queda en esta página.');
 });
 
 it('a_typed_name_reaches_no_callback', async () => {

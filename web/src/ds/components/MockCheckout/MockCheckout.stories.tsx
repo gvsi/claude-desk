@@ -276,9 +276,15 @@ export const IssuedEs: Story = {
   },
 };
 
+/** The line under the name to type, when the link carries no customer's name. */
+const NAME_HINT = {
+  en: 'Any name works. It stays on this page.',
+  es: 'Cualquier nombre sirve. Se queda en esta página.',
+} as const;
+
 export const IssuedUnverified: Story = {
   parameters: {
-    canvasNote: `${BOARD}'s "Issued" for a link from a session that hasn't verified, which the board doesn't draw: the link carries no customer's name, so "Name on card" is an empty field to type in, in the field outline every editable field has.`,
+    canvasNote: `${BOARD}'s "Issued" for a link from a session that hasn't verified, which the board doesn't draw: the link carries no customer's name, so "Name on card" is an empty field to type in, in the field outline every editable field has. Its own line says any name works and stays on the page, and the lock's "Test card, filled in for you" moves up under the card, so it doesn't sit under the one field the visitor fills.`,
   },
   play: async ({ args, canvas, canvasElement, userEvent }) => {
     await expectChrome(canvasElement, 'en');
@@ -301,8 +307,21 @@ export const IssuedUnverified: Story = {
       color: 'rgba(250, 249, 245, 0.92)',
       backgroundColor: 'rgba(0, 0, 0, 0)',
     });
-    const hint = canvas.getByText(CARD_WORDS.en.hint);
-    await expect(box(hint).top - box(field).bottom).toBe(6);
+    // The field the visitor fills says any name works and stays here, 6 px under it; that line
+    // describes the field. The locked card's hint says the card is filled in, under the card, not
+    // under the one field that isn't.
+    const nameHint = canvas.getByText(NAME_HINT.en);
+    await expect(box(nameHint).top - box(field).bottom).toBe(6);
+    expectComputed(nameHint, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' });
+    await expect(nameHint.querySelector('svg')).toBeNull();
+    await expect(field).toHaveAccessibleDescription(NAME_HINT.en);
+    const information = canvas.getByRole('group', { name: CARD_WORDS.en.information });
+    const fields = information.querySelector('.cd-checkout__card-fields') as HTMLElement;
+    const hint = within(information).getByText(CARD_WORDS.en.hint);
+    await expect(hint.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+    await expect(box(hint).top - box(fields).bottom).toBe(6);
+    await expect(box(label).top - box(hint).bottom).toBe(14);
+    await expect(canvas.getAllByText(CARD_WORDS.en.hint)).toHaveLength(1);
 
     // typed_name_stays_on_the_page: Enter sends nothing, and Pay says only that it was pressed.
     await userEvent.type(field, 'Ana López{Enter}');

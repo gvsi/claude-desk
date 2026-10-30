@@ -26,11 +26,14 @@ function isFinal(state: string): state is FinalPaymentState {
   return Object.hasOwn(FINAL_DOT, state);
 }
 
-/** The line under the name: the test card needs nothing typed but the name, if that. */
-function Hint({ text }: { text: string }) {
+/**
+ * A line under a value or a field. With the lock, it says the test card is filled in: under the
+ * customer's name, or under the card when the name is the field to fill.
+ */
+function Hint({ text, id, lock = false }: { text: string; id?: string; lock?: boolean }) {
   return (
-    <p className="cd-checkout__hint cd-type-caption">
-      <Icon name="lock" size={14} />
+    <p id={id} className="cd-checkout__hint cd-type-caption">
+      {lock ? <Icon name="lock" size={14} /> : null}
       {text}
     </p>
   );
@@ -92,6 +95,7 @@ export function MockCheckout({
   const cardLabelId = `${id}-card`;
   const nameLabelId = `${id}-name`;
   const nameFieldId = `${id}-name-field`;
+  const nameHintId = `${id}-name-hint`;
 
   // The button pressed here, until the request ends: the link's state changes, or a new error
   // shows. Clearing an old error, as a screen does when a retry starts, ends nothing. The ref is
@@ -223,6 +227,8 @@ export function MockCheckout({
                   <dd className="cd-checkout__value">{TEST_CARD.securityCode}</dd>
                 </div>
               </dl>
+              {/* With the name to fill, the lock's line moves here, off the one field that isn't filled in. */}
+              {nameOnCard ? null : <Hint text={copy.filledIn} lock />}
             </div>
             {nameOnCard ? (
               <div className="cd-checkout__group" role="group" aria-labelledby={nameLabelId}>
@@ -235,7 +241,7 @@ export function MockCheckout({
                     {nameOnCard}
                   </span>
                 </p>
-                <Hint text={copy.filledIn} />
+                <Hint text={copy.filledIn} lock />
               </div>
             ) : (
               <div className="cd-checkout__group">
@@ -250,9 +256,10 @@ export function MockCheckout({
                   autoComplete="off"
                   spellCheck={false}
                   value={typedName}
+                  aria-describedby={nameHintId}
                   onChange={(event) => setTypedName(event.target.value)}
                 />
-                <Hint text={copy.filledIn} />
+                <Hint id={nameHintId} text={copy.anyName} />
               </div>
             )}
             <div className="cd-checkout__actions">
