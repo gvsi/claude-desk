@@ -1100,7 +1100,8 @@ class FakeKernelState:
     @staticmethod
     def _reason(session: Session, desk: Desk, call: ToolCall, action: NormalizedAction | None,
                 card_ids: list[str]) -> str:
-        """The owner-facing reason: who asked for what, the deciding card's reason, free text quoted."""
+        """The owner-facing reason: who asked for what, the deciding card's reason, then the call's free text quoted
+        after "Claude's note", as the real kernel labels it (Claude wrote it into the call, the visitor didn't)."""
         who = next((person.display_name for person in desk.people.values() if person.person_id == session.person_id),
                    "A visitor")
         reason = f"{who} asked to use {call.tool[:64]}."
@@ -1109,7 +1110,7 @@ class FakeKernelState:
             reason += " " + cards[0]
         note = call.args.get("note") if action is not None else None
         if isinstance(note, str) and note:
-            reason += f" From the visitor: “{note[:200]}”"
+            reason += f" Claude's note: “{note[:200]}”"
         return reason
 
     @staticmethod
