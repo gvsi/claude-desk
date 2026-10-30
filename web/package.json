@@ -10,6 +10,7 @@
     "dev": "vite",
     "dev:mock": "vite --mode mock",
     "build": "tsc --noEmit && vite build",
+    "check:build": "node scripts/check-build.mjs",
     "preview": "vite preview",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build",
