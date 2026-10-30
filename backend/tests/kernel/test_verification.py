@@ -589,6 +589,36 @@ async def test_sessions_never_see_alerts_or_checkpoints(app, client):
     assert [entry for entry in everything if entry.kind == "verification_code"] == seen
 
 
+async def test_only_the_owners_inbox_names_a_held_decision(app, client):
+    """A visitor's own request is held, so the owner's alert for it names that decision, and the
+    same visitor starts Dana's verification, so their own inbox holds her code. The owner reads the
+    link to the held request; every entry the session reads says it names no decision."""
+    copy = await rivera_copy(app, client)
+    visitor = await open_visitor(client, copy)
+    held = await decided(client, visitor, "native.quote", quote_args(("drain", 1), discount_bp=8000))
+    assert held.state == "held", held.reason_plain                   # rv-quote allows no discount
+    await started(client, visitor, DANA_PHONE)
+    naming = [(entry.kind, entry.to) for entry in await owner_inbox(client, copy)
+              if entry.decision_id == held.decision_id]
+    assert naming == [("alert", "owner")]
+    response = await client.get("/demo_inbox", params={"session_id": visitor.session_id}, headers=visitor.headers)
+    assert response.status_code == 200, response.text
+    shown = response.json()
+    assert [entry["kind"] for entry in shown] == ["verification_code"]
+    assert all("decision_id" in entry and entry["decision_id"] is None for entry in shown)
+
+
+def test_a_sessions_read_never_copies_a_decision_id(frozen_clock):
+    """The session's read builds its entries without the column, so even a row that named a
+    decision (which the table's check refuses for anything but an owner alert) reads as naming
+    none; the owner's read carries it."""
+    row = DemoInboxRow(entry_id="inbox-1", copy_id="copy-1", desk_id="desk-1", to="owner", person_id=None,
+                       kind="alert", body="A request is waiting for you.", preview="A request is waiting for you.",
+                       created_at=frozen_clock.now(), decision_id="dec-1")
+    assert demo_inbox.owner_entry(row).decision_id == "dec-1"
+    assert demo_inbox.session_entry(row).decision_id is None
+
+
 def holds(text: str, code: str) -> bool:
     """Whether `code` appears in `text` as a token of its own. Views and log lines carry hex digests
     (hashes, signatures), which hold any six digits by chance inside a longer run of hex."""

@@ -9,7 +9,8 @@ commit, so an entry exists only if the record that caused it does.
 Two reads serve those routes. A session reads only the verification codes of the people whose
 challenges it started: the Demo inbox stands in for each person's own inbox, and in the demo
 whoever typed a person's contact is shown it. A session never reads an owner alert or a head
-checkpoint. The owner reads every entry of the copy.
+checkpoint, and no entry it reads names a decision (`session_entry`). The owner reads every entry
+of the copy, a held request's alert with the decision it is about (`owner_entry`).
 """
 
 from typing import get_args
@@ -63,8 +64,17 @@ async def alert_owner(ctx: KernelCtx, desk_id: str, event_kind: str, preview: st
                          body=body, preview=preview, decision_id=decision_id)
 
 
-def _entry(row: DemoInboxRow) -> DemoInboxEntry:
-    return DemoInboxEntry(entry_id=row.entry_id, to=row.to, kind=row.kind, body=row.body, created_at=row.created_at)
+def owner_entry(row: DemoInboxRow) -> DemoInboxEntry:
+    """An entry as the owner reads it: a held request's alert names its decision."""
+    return DemoInboxEntry(entry_id=row.entry_id, to=row.to, kind=row.kind, body=row.body, created_at=row.created_at,
+                          decision_id=row.decision_id)
+
+
+def session_entry(row: DemoInboxRow) -> DemoInboxEntry:
+    """An entry as a session reads it: naming no decision, whatever the row holds, since the link to
+    a held request is the owner's alone."""
+    return DemoInboxEntry(entry_id=row.entry_id, to=row.to, kind=row.kind, body=row.body, created_at=row.created_at,
+                          decision_id=None)
 
 
 def _ordered(stmt):
@@ -82,9 +92,10 @@ async def session_entries(ctx: KernelCtx, session_row: ActorSession) -> list[Dem
     rows = await ctx.db.scalars(ctx.repo.scoped(_ordered(select(DemoInboxRow).where(
         DemoInboxRow.desk_id == session_row.desk_id, DemoInboxRow.kind == "verification_code",
         DemoInboxRow.person_id.in_(person_ids)))))
-    return [_entry(row) for row in rows]
+    return [session_entry(row) for row in rows]
 
 
 async def owner_entries(ctx: KernelCtx) -> list[DemoInboxEntry]:
-    """Every entry of the copy the context is bound to: codes, alerts and head checkpoints."""
-    return [_entry(row) for row in await ctx.db.scalars(ctx.repo.scoped(_ordered(select(DemoInboxRow))))]
+    """Every entry of the copy the context is bound to: codes, alerts and head checkpoints, each
+    held request's alert naming its decision."""
+    return [owner_entry(row) for row in await ctx.db.scalars(ctx.repo.scoped(_ordered(select(DemoInboxRow))))]
