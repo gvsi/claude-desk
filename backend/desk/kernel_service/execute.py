@@ -155,7 +155,8 @@ async def _hold_session(ctx: KernelCtx, session_id: str, action_id: str, path: E
     (`locks_session`: a verification start) holds it `FOR UPDATE` on either path, so two such
     executions in one session take turns: each holding it shared and then asking for it outright,
     they would wait on each other until Postgres ended one. None for an approved hold whose adapter
-    doesn't. The action's tool is read without a lock, which waits for nothing."""
+    doesn't; never None for an allow, since a missing row raises (and the action ends `unknown`,
+    never fenced). The action's tool is read without a lock, which waits for nothing."""
     tool = await _one(ctx, select(ActionRow.tool).where(ActionRow.action_id == action_id))
     if getattr(adapters.ADAPTERS.get(tool), "locks_session", False):
         return await _share_session(ctx, session_id, exclusive=True)
@@ -442,7 +443,8 @@ async def _side_effect(ctx: KernelCtx, decision_id: str, action_id: str, session
     target = await _target(ctx, decision)
     target.checked = checked
     if path == "allow":
-        if session is None or session.generation != target.decision.generation:
+        assert session is not None                          # an allow's session row is always held
+        if session.generation != target.decision.generation:
             return await _fenced(ctx, target, execution, "stale_generation")
         if session.mode != "ai":
             return await _fenced(ctx, target, execution, f"mode_{session.mode}")
