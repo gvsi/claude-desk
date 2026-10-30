@@ -454,11 +454,9 @@
   column-gap: var(--space-8);
 }
 
-/* The figure in the interface's face at the greeting's size. */
-.cd-week .cd-week__number {
+/* A figure's type is the design system's (`cd-type-figure`, `cd-type-figure-small`); only its color is set here. */
+.cd-week__number {
   color: var(--text-primary);
-  font-family: var(--font-sans);
-  font-variant-numeric: tabular-nums;
 }
 
 .cd-week__unit {

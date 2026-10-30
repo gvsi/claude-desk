@@ -1,6 +1,7 @@
 /**
  * The scripted Desk: how Rivera Plumbing's Claude answers in the mock API. A visitor's message
- * picks the first rule with one of its words in the lowercased text, and that rule's steps run
+ * picks the first rule with one of its words, as a word of its own, in the lowercased text (so
+ * "offer" never reads as "off"), and that rule's steps run
  * 150 ms apart, each turn ending with `turn_end`. Cards, prose and status lines are the design
  * system's Rivera fixtures and the kernel's visitor templates, in the turn's language. Nothing here
  * is a model; it stands in for the API's turn runner so screens can be built and tested.
@@ -164,6 +165,16 @@ const bookedCard: Record<Language, CardBlock> = {
 const helpProse: Record<Language, RenderedBlock> = {
   en: proseBlock('Maria can tell you once she sees it. You can ask for her here anytime.'),
   es: proseBlock('Maria te lo puede decir cuando lo vea. Puedes pedir hablar con ella aquí cuando quieras.'),
+};
+
+/**
+ * Claude's checked words after a request is held for Maria, as the signed board writes them: she
+ * decides, and her answer comes back into this chat. No amount, discount or date, and no promise
+ * of what she'll say.
+ */
+export const HELD_PROSE: Record<Language, string> = {
+  en: "That's for Maria to decide, so I've asked her. Her answer will show up here.",
+  es: 'Eso lo decide Maria, así que ya le pregunté. Su respuesta aparecerá aquí.',
 };
 
 const inboxPreview: Record<Language, string> = {
@@ -344,7 +355,7 @@ export type RuleName = 'discount' | 'invoice' | 'deposit' | 'booked' | 'book' | 
 
 export interface ScriptRule {
   name: RuleName;
-  /** Lowercase words, any one of which picks the rule. Empty for the last rule, which takes anything. */
+  /** Lowercase words or phrases, any one of which, found whole, picks the rule. Empty for the last rule, which takes anything. */
   words: readonly string[];
   steps: readonly Step[];
 }
@@ -368,8 +379,8 @@ export const SCRIPT: readonly ScriptRule[] = [
     steps: [
       (ctx) => ctx.status('held', ctx.decide(DECISIONS.heldQuote)),
       writing,
-      // Claude's draft named the discount in its own words, so the visitor gets the handoff card.
-      (ctx) => ctx.reply([blocks.handoff[ctx.language]], { blocked: true }),
+      // Claude's checked words say Maria decides; the held receipt under them says what waits.
+      (ctx) => ctx.reply([proseBlock(HELD_PROSE[ctx.language])]),
     ],
   },
   {
@@ -462,17 +473,32 @@ export const SCRIPT: readonly ScriptRule[] = [
   },
 ];
 
-/** The first rule with one of its words in the lowercased text, else the last rule. */
-export function matchRule(text: string): ScriptRule {
-  const lower = text.toLowerCase();
-  const rule = SCRIPT.find((r) => r.words.some((word) => lower.includes(word))) ?? SCRIPT[SCRIPT.length - 1];
-  if (!rule) throw new Error('the script has no rules');
-  return rule;
+/**
+ * The seeded hold's turn, as the design system's fixtures have it (`rivera.conversations.visitor`):
+ * the 15% quote is held, and Claude's draft named the discount in its own words, so the reply was
+ * stopped and the visitor got the handoff card. A fresh copy keeps that stopped reply, which
+ * Safety and the briefing show; a discount asked in a live chat gets the discount row's reply.
+ */
+export const SEEDED_HOLD_STEPS: readonly Step[] = [
+  (ctx) => ctx.status('held', ctx.decide(DECISIONS.heldQuote)),
+  writing,
+  (ctx) => ctx.reply([blocks.handoff[ctx.language]], { blocked: true }),
+];
+
+/**
+ * Whether `lower` has `word` (or a phrase of words) as words of their own, with no letter or digit
+ * either side: "off" is in "15% off", never in "offer".
+ */
+function hasWord(lower: string, word: string): boolean {
+  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'u').test(lower);
 }
 
-export function ruleNamed(name: RuleName): ScriptRule {
-  const rule = SCRIPT.find((r) => r.name === name);
-  if (!rule) throw new Error(`the script has no rule named ${name}`);
+/** The first rule with one of its words, whole, in the lowercased text, else the last rule. */
+export function matchRule(text: string): ScriptRule {
+  const lower = text.toLowerCase();
+  const rule = SCRIPT.find((r) => r.words.some((word) => hasWord(lower, word))) ?? SCRIPT[SCRIPT.length - 1];
+  if (!rule) throw new Error('the script has no rules');
   return rule;
 }
 

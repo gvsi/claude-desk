@@ -12,7 +12,7 @@ import type { EvMessage, OpenStatus, PublicDesk, SseEvent } from '../api/contrac
 import { rivera } from '../ds/fixtures/index.ts';
 import { CHAT_ENDED_COPY, NEW_CHAT_LABEL, RATE_LIMITED_COPY, UNREACHABLE_COPY } from '../ds/index.ts';
 import { worker } from '../mocks/browser.ts';
-import { SCRIPT, matchRule, type RuleName } from '../mocks/script.ts';
+import { HELD_PROSE, SCRIPT, matchRule, type RuleName } from '../mocks/script.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
 import { VIEWPORTS, renderRoute } from '../test/renderRoute.tsx';
@@ -203,10 +203,12 @@ describe('public chat page', () => {
     await say(screen, 'Can I get 15% off if I pay cash?');
     const held = screen.getByText(rivera.decisions.held.visitor_plain, { exact: true });
     await expect.element(held).toBeVisible();
-    // Under Claude's handoff reply, after its own line, and the ghost cancel under that.
+    // Under Claude's checked reply, which says Maria decides (no card), after the reply's own
+    // line, and the ghost cancel under that.
     const row = rowOf(held.element());
-    expect(row.querySelector('[aria-label="Handed to a person"]')).not.toBeNull();
-    expect(receiptsOf(row)).toEqual(['Passed to Maria Rivera to answer', rivera.decisions.held.visitor_plain]);
+    expect([...row.querySelectorAll('.cd-claude-message__prose')].map((p) => p.textContent)).toEqual([HELD_PROSE.en]);
+    expect(row.querySelectorAll('article')).toHaveLength(0);
+    expect(receiptsOf(row)).toEqual(["Reply checked against Maria Rivera's rules", rivera.decisions.held.visitor_plain]);
     const cancel = screen.getByRole('button', { name: 'Cancel this request' });
     await expect.element(cancel).toBeVisible();
     expect(cancel.element().getBoundingClientRect().top).toBeGreaterThanOrEqual(held.element().getBoundingClientRect().bottom);
@@ -233,7 +235,7 @@ describe('public chat page', () => {
     const line = resolved?.type === 'resolved' ? resolved.visitor_plain : '';
     await expect.element(screen.getByText(line, { exact: true })).toBeVisible();
     expect(receiptsOf(rowOf(screen.getByText(line, { exact: true }).element()))).toEqual([
-      'Passed to Maria Rivera to answer',
+      "Reply checked against Maria Rivera's rules",
       held.visitor_plain,
       line,
     ]);
@@ -258,11 +260,12 @@ describe('public chat page', () => {
 
     await cancel.click();
     await expect.element(second.screen.getByRole('button', { name: 'Cancel this request' })).not.toBeInTheDocument();
-    await vi.waitFor(() => expect(receiptsOf(heldRow)).toEqual(['Passed to Maria Rivera to answer', held.visitor_plain, 'Cancelled']));
+    await vi.waitFor(() => expect(receiptsOf(heldRow)).toEqual(["Reply checked against Maria Rivera's rules", held.visitor_plain, 'Cancelled']));
     expect(receiptsOf(bookedRow)).toEqual(booked);
 
     // In a third chat two requests are held. While the first one's cancel is out, the other
-    // request's button can't be pressed, so no click is lost; once it is back, that one cancels too.
+    // request's button waits: its words shown with no spinner, still in the tab order, and a click
+    // on it sends nothing, so no click is lost. Once the first is back, that one cancels too.
     const third = await renderRoute(PAGE, { seed: 'rivera' });
     await ready(third.screen);
     await say(third.screen, 'Can I get 15% off if I pay cash?');
@@ -277,9 +280,18 @@ describe('public chat page', () => {
     const before = requests('cancelRequest').length;
     await cancels.first().click();
     await expect.element(cancels.first()).toHaveAttribute('aria-busy', 'true');
-    await expect.element(cancels.last()).toBeDisabled();
-    expect(secondHold?.getAttribute('aria-busy')).toBeNull();
+    await expect.element(cancels.last()).toHaveAttribute('aria-disabled', 'true');
+    const waiting = secondHold as HTMLButtonElement;
+    expect(waiting.disabled).toBe(false);
+    expect(waiting.tabIndex).toBe(0);
+    expect(waiting.textContent).toBe('Cancel this request');
+    expect(waiting.getAttribute('aria-busy')).toBeNull();
+    expect(waiting.querySelector('.cd-button__spinner')).toBeNull();
+    // The click on the waiting one sends nothing: the paths at the end are each hold's once.
+    await expect.poll(() => requests('cancelRequest').length).toBe(before + 1);
+    waiting.click();
     await vi.waitFor(() => expect(firstHold?.isConnected).toBe(false), { timeout: 3_000 });
+    await expect.element(cancels).not.toHaveAttribute('aria-disabled');
     await expect.element(cancels).toBeEnabled();
     await cancels.click();
     await expect.element(cancels).not.toBeInTheDocument();
@@ -806,6 +818,32 @@ describe('public chat page', () => {
     await sleep(100);
     expect(`${stranger.router.state.location.pathname}${stranger.router.state.location.search}`).toBe(preview);
     await expect.element(stranger.screen.getByRole('main')).toBeVisible();
+  });
+
+  it('preview_reload_resumes_its_chat', async () => {
+    // The owner's chat as a customer, from Today's link: one exchange, then a new page load.
+    const preview = `${PAGE}?preview=${RIVERA.deskId}`;
+    const first = await renderRoute(preview);
+    await ready(first.screen);
+    await say(first.screen, 'How much is drain clearing?');
+    const conversation = () => document.querySelector('[role="log"]')?.textContent ?? '';
+    const before = conversation();
+    const session = mockStore.visitorSession(RIVERA.slug)?.state.session_id;
+    expect(mockStore.visitorSession(RIVERA.slug)?.ownerPreview).toBe(true);
+    expect(document.querySelectorAll('.cd-transcript-row')).toHaveLength(2);
+
+    // The browser's visitor cookie still names that chat, so the page reads it and resumes it,
+    // rather than asking for a new preview, which would start an empty chat.
+    const second = await renderRoute(preview);
+    await ready(second.screen);
+    await vi.waitFor(() => expect(conversation()).toBe(before));
+    expect(document.querySelectorAll('.cd-transcript-row')).toHaveLength(2);
+    expect(mockStore.visitorSession(RIVERA.slug)?.state.session_id).toBe(session);
+    expect(requests('openPreview')).toHaveLength(1);
+    expect(requests('openSession')).toEqual([]);
+    // Each load reads the chat first; only the first, which had none, asked for a preview.
+    const opening = mockStore.requests.filter((r) => ['visitorSession', 'openPreview', 'openSession'].includes(r.key)).map((r) => r.key);
+    expect(opening).toEqual(['visitorSession', 'openPreview', 'visitorSession', 'visitorSession']);
   });
 
   it('open_status_shows_the_kernel_text', async () => {

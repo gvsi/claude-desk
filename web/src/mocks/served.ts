@@ -47,6 +47,11 @@ export interface Cookies {
   visitor(slug: string): string | undefined;
   /** Answers with the owner cookie for the copy the request reached. */
   setOwner(): void;
+  /**
+   * Answers with a new owner cookie for the copy the request reached, which a start over has just
+   * replaced, as the API issues one for a new copy: the cookie the request carried names nothing now.
+   */
+  renewOwner(): void;
   /** Answers with the visitor cookie for `slug`, naming `sessionId`. */
   setVisitor(slug: string, sessionId: string): void;
 }
@@ -234,6 +239,7 @@ const SERVED: ServedRoutes = {
   startOver(sv, req) {
     if (!req.cookies.owner) return NO_OWNER;
     sv.startOver();
+    req.cookies.renewOwner();
     return ok(copyOut(sv.world));
   },
   me(sv, req) {
@@ -251,13 +257,12 @@ const SERVED: ServedRoutes = {
     return ok({ desk_id: desk.summary.desk_id, updated_at: isoTime(sv.world.now()) } satisfies DeskUpdated);
   },
   openPreview(sv, req) {
+    // Always a new preview chat, as the API's is (plan 02b): its owner-path request never carries
+    // the visitor cookie, which is scoped to the Desk's public path, so the page reads the chat it
+    // has (`visitorSession`) before it asks for one.
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
     if (isFailure(desk)) return desk;
     const slug = desk.summary.slug;
-    const current = sv.visitor(slug, req.cookies);
-    if (!isFailure(current) && current.session.ownerPreview) {
-      return ok({ state: current.session.state, resumed: true } satisfies VisitorSession);
-    }
     const session = sv.world.addSession(desk, { ownerPreview: true });
     req.cookies.setVisitor(slug, session.state.session_id);
     return ok({ state: session.state, resumed: false } satisfies VisitorSession);

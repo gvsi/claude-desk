@@ -71,9 +71,12 @@ export interface VisitorChatActions {
 export type VisitorChatView = VisitorChatSnapshot & VisitorChatActions;
 
 /**
- * The visitor's session with `slug`'s Desk: the browser's own when it has one, else a new one. With
- * `previewDeskId`, the owner's preview of that Desk, which the API grants only to the owner of its
- * copy; for anyone else it fails, and a plain chat opens instead.
+ * Opens a session with `slug`'s Desk. Without `previewDeskId`, the API resumes the chat the browser's
+ * visitor cookie names, or opens a new one when there is none. With `previewDeskId`, it always opens a
+ * new owner's preview of that Desk (`openPreview` never resumes one), which the API grants only to
+ * the owner of its copy; for anyone else it fails, and a plain chat opens instead. So a caller with a
+ * preview reads `visitorSession` first and comes here only when the browser has no chat yet, as
+ * `openChat` does; otherwise each load would start another preview.
  */
 export async function ensureSession(slug: string, previewDeskId?: string): Promise<VisitorSession> {
   if (previewDeskId !== undefined && previewDeskId !== '') {
@@ -87,6 +90,37 @@ export async function ensureSession(slug: string, previewDeskId?: string): Promi
 }
 
 const sessionGone = (err: unknown) => err instanceof ApiError && err.kind === 'unauthorized';
+
+/** A chat as it opened: its session, and its stored conversation, or null when the session was gone before it could be read. */
+export interface OpenedChat {
+  session: SessionState;
+  transcript: VisitorTranscript | null;
+}
+
+/**
+ * Opens the chat with `slug`'s Desk (`ensureSession`) and reads its stored conversation. The
+ * owner's preview reads first: `openPreview` mints a new preview session every time, and it can't
+ * see the chat this browser already has, since the visitor cookie is scoped to the Desk's public
+ * path. So a reload, or a second tab from "Chat as a customer", resumes the chat the cookie names,
+ * and only a 401 (no chat yet) asks for a preview.
+ */
+export async function openChat(slug: string, previewDeskId?: string): Promise<OpenedChat> {
+  if (previewDeskId !== undefined && previewDeskId !== '') {
+    try {
+      const transcript = await request('visitorSession', { params: { slug } });
+      return { session: transcript.state, transcript };
+    } catch (err) {
+      if (!sessionGone(err)) throw err;
+    }
+  }
+  const opened = await ensureSession(slug, previewDeskId);
+  try {
+    return { session: opened.state, transcript: await request('visitorSession', { params: { slug } }) };
+  } catch (err) {
+    if (!sessionGone(err)) throw err;
+    return { session: opened.state, transcript: null };
+  }
+}
 
 /** Why a send was refused. Only a 422 is the length (Plan 02's limit); any other refusal didn't send. */
 function failureOf(err: unknown): SendFailure {
@@ -207,20 +241,15 @@ class VisitorChat {
 
   /** Opens the session, reads its conversation and follows its stream from the last seq. */
   private async open(epoch: number): Promise<void> {
-    const opened = await ensureSession(this.slug, this.previewDeskId);
+    const { session, transcript } = await openChat(this.slug, this.previewDeskId);
     if (epoch !== this.epoch) return;
-    this.set({ session: opened.state });
-    let transcript: VisitorTranscript;
-    try {
-      transcript = await request('visitorSession', { params: { slug: this.slug } });
-    } catch (err) {
-      if (epoch !== this.epoch || !sessionGone(err)) throw err;
+    this.set({ session });
+    if (transcript === null) {
       this.loaded = true;
       this.dispatch({ type: 'ended' });
       this.set({ status: 'ready' });
       return;
     }
-    if (epoch !== this.epoch) return;
     this.dispatch({ type: 'history', transcript });
     this.knownN = transcript.items.reduce((max, item) => Math.max(max, item.n), 0);
     this.loaded = true;

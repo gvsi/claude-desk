@@ -54,6 +54,21 @@ const RAW_COLOR = /#(?:[0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{3,4})\b|\b(?:rgba?|hsla?
 const RAW_MS = /\b\d+(?:\.\d+)?ms\b/;
 const RAW_CSS_SECONDS = /(?<![\w.-])\d*\.?\d+s\b/;
 
+// A label swapped for a waiting one ("Starting…", "Sending your answer..."): a busy button keeps its words and spins.
+const BUSY_LABEL = /['"`>]\s*[A-Z][a-z]+ing\b[^'"`<>{}\n]*(?:…|\.{3})\s*(?=['"`<])/;
+
+// One part of a JSX opening tag: a character outside braces, or a braced expression (braces nest
+// two deep), so an arrow's `>` inside `onClick={() => …}` doesn't end the tag.
+const TAG_PART = String.raw`(?:[^<>{}]|\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*\})`;
+// A Button busy for its own request and disabled for another's. The buttons beside a busy one wait
+// (`waiting`: words shown, clicks ignored, still in the tab order); `disabled` is only for an
+// action that can't be taken at all, which a button that can be pressed and spin isn't.
+const BUSY_AND_DISABLED = new RegExp(String.raw`<Button\b(?=${TAG_PART}*?\sbusy=)(?=${TAG_PART}*?\sdisabled=)${TAG_PART}*>`);
+
+// The owner sidebar's look. AppShell has had no sidebar look since #26; this keeps any page from
+// passing one, even in a spread.
+const SIDEBAR_LOOK = /\bsidebarLook\b/;
+
 // Formatting money or dates: the visitor's page shows only what the kernel rendered.
 const FORMATS = /\blib\/format\b|\bIntl\.|\btoLocale\w*|\bnew\s+Date\b|\btoFixed\(/;
 
@@ -188,6 +203,49 @@ describe('app source guards', () => {
     expect(hits(RAW_COLOR)).toEqual([]);
     expect(hits(RAW_MS)).toEqual([]);
     expect(hits(RAW_CSS_SECONDS, sources.filter((s) => s.file.endsWith('.css')))).toEqual([]);
+  });
+
+  it('busy_buttons_keep_their_words', () => {
+    const bad = [
+      "<Button busy={busy}>{busy ? 'Starting…' : 'Start the demo'}</Button>",
+      '<Button variant="primary">Sending...</Button>',
+      'const label = pending ? `Sending your answer…` : `Allow this time`;',
+    ];
+    for (const text of bad) expect(hits(BUSY_LABEL, sample(text)), text).toHaveLength(1);
+    const fine = "<Button {...props} busy={busy}>Start the demo</Button>; const rows = [...all]; // GET …/briefing\n<TextField placeholder='Type a message…' />";
+    expect(hits(BUSY_LABEL, sample(fine))).toEqual([]);
+    expect(hits(BUSY_LABEL)).toEqual([]);
+  });
+
+  it('buttons_beside_a_busy_one_wait', () => {
+    const bad = [
+      '<Button variant="secondary" busy={joining} disabled={closing} onClick={() => void join()}>',
+      '<Button\n  variant="ghost"\n  busy={chat.cancelling === id}\n  disabled={chat.cancelling !== null && chat.cancelling !== id}\n  onClick={() => chat.cancel(id)}\n>',
+      '<Button disabled={saving} variant="ghost" onClick={() => run({ x: { y: 1 } })} busy={sending}>',
+    ];
+    for (const text of bad) expect(hits(BUSY_AND_DISABLED, sample(text)), text).toHaveLength(1);
+    const fine = [
+      '<Button variant="secondary" busy={joining} waiting={closing} onClick={() => void join()}>Join the chat</Button>',
+      '<Button variant="ghost" disabled={!ready}>Send</Button>',
+      '<Composer busy={sending} disabled={!ready} />',
+      '<Button variant="ghost" busy={busy} onClick={() => setOptions({ x: { disabled: true } })}>Review</Button>\n<TextField disabled={locked} />',
+    ].join('\n');
+    expect(hits(BUSY_AND_DISABLED, sample(fine))).toEqual([]);
+    expect(hits(BUSY_AND_DISABLED)).toEqual([]);
+  });
+
+  it('no_page_sets_the_sidebar_look', () => {
+    // The owner's decision: the sidebar looks the same on every owner page. AppShell has taken no
+    // `sidebarLook` since #26, and no file outside the design system passes one, tests and the mock
+    // included, even in a spread.
+    expect(hits(SIDEBAR_LOOK, sample('<AppShell sidebar={sidebar} sidebarLook="ground">'))).toHaveLength(1);
+    expect(hits(SIDEBAR_LOOK, sample("<AppShell {...{ sidebarLook: 'panel' }} />"))).toHaveLength(1);
+    expect(hits(SIDEBAR_LOOK, sample('<AppShell sidebar={sidebar} business={name}>'))).toEqual([]);
+    const outsideTheDs = everyFileButThisOne()
+      .filter((file) => /\.(tsx?|css)$/.test(file) && !file.startsWith('ds/'))
+      .map((file) => ({ file, text: readFileSync(path.join(SRC, file), 'utf8') }));
+    expect(outsideTheDs.map((s) => s.file)).toContain('owner/OwnerLayout.tsx');
+    expect(hits(SIDEBAR_LOOK, outsideTheDs)).toEqual([]);
   });
 
   it('visitor_code_never_formats_money_or_dates', () => {
