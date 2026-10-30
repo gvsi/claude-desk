@@ -762,8 +762,8 @@ REPLY_RULE = (
 )
 REPLY_CHECK_HOW = (
     "The code check scans Claude's prose in English and Spanish for digits, money, dates, discount and promise words, "
-    "and booking claims without their card; a model check on Haiku 5.5 flags promises the cards don't back, and its "
-    "errors count as violations."
+    "and booking claims without their card; a model check on Haiku 5.5 flags promises the cards don't back and prose "
+    "that denies being an AI, and its errors count as violations."
 )
 REPLY_CHECK_DELIVERY = (
     "A blocked reply is regenerated once with feedback, then replaced with a handoff to the owner. Every "
