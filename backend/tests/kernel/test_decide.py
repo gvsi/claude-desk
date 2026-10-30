@@ -1107,9 +1107,8 @@ AT_LIST_PRICE = rule("quote", "auto", "Quotes from your price list, at list pric
      "A stranger asked to get a quote for $180. Your rule says never: “No quotes in chat.”"),
     ([rule("ask-quotes", "ask", "Quotes wait for your answer.")], 0,
      "A stranger asked to get a quote for $180. Your rule asks you first: “Quotes wait for your answer.”"),
-    ([], 0,                               # the compiler's default ask, for a tool no card covers
-     "A stranger asked to get a quote for $180. "
-     "Your rule asks you first: “Not covered by a rule yet, so it asks you.”"),
+    ([], 0,                               # the compiler's default ask: no rule of the owner's, so no lead-in
+     "A stranger asked to get a quote for $180. Not covered by a rule yet, so it asks you."),
     ([AT_LIST_PRICE, rule("quote-two", "auto", "Quotes for one visit.")], 0,   # as specific: both decide
      "A stranger asked to get a quote for $180. "
      "Your rule allows it: “Quotes from your price list, at list price.”, “Quotes for one visit.”"),

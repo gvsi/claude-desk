@@ -122,7 +122,8 @@ How the deciding rules decided (the owner's wording, 2026-10-30): in `reason_pla
 | Outcome | Lead-in |
 |---|---|
 | allowed by a rule | Your rule allows it: “…” |
-| held by an `ask` card, the owner's or the default ask (`held_by_ask`, the test that offers `deny_always`) | Your rule asks you first: “…” |
+| held by an owner's `ask` card (`held_by_ask`, the test that offers `deny_always`) | Your rule asks you first: “…” |
+| held only by the compiler's default ask, so no rule of the owner's decided (`deny_always` is still offered; a coordinator accuracy fix, Review Ledger) | none: the line reads "Not covered by a rule yet, so it asks you.", unquoted |
 | held past a limit: an `auto` card's hold twin, whose amount, discount, hours window or review gate failed | It goes past your rule, so it waits for you: “…” |
 | refused by a `never` card | Your rule says never: “…” |
 
@@ -768,3 +769,5 @@ Owner decision, 2026-10-30, links and email addresses: Claude may write any link
 What it costs: a look-alike link or address planted by a malicious website, tool result or message isn't blocked by code. It rests on the prompt and the soft-promise check, whose question is about promises the cards don't back and names no links, so the check flags one only when the prose around it reads as such a promise. Tier 1 runs on a fake model and passes; tier 2, which would measure how often a planted link gets through, isn't on main yet.
 
 Cross-plan follow-ups (2026-10-30), from the owner's two decisions above: the API core's (plan 02a) system prompt tells Claude to let the cards carry prices, dates, bookings and policies, and to give only the business's own website and addresses. The reply check's `link` and `policy_echo` rule ids no longer exist; both were `promise_word` violations, a kind that stays, so the API's regenerate rule doesn't change. The records now say what the code does: the master plan's Prose row and its `Decision.reason_plain` comment ("Claude's note", open question 9), the reply check's architecture decision, and the threat model's reply check control and residual risks, which gain one for links and addresses.
+
+Follow-up PR (#70) round 1, 2026-10-30, the default ask (a coordinator accuracy fix, reversible, for the owner to see): a hold only the compiler's default ask decided read "Your rule asks you first: “Not covered by a rule yet, so it asks you.”", but the owner's lead-ins say "your rule", and no rule of the owner's decided it. When every card a hold quotes is the default ask (`is_default`), `reason_plain` now reads "A stranger asked to get a quote for $180. Not covered by a rule yet, so it asks you.", with no lead-in and no quotes (`DEFAULT_ASK_PLAIN`, the compiler's `DEFAULT_REASON`). A hold that quotes an owner's card keeps its lead-in exactly, and the default ask still offers "deny always" (`held_by_ask`). The `held_by_the_default_ask` case pins the new text.

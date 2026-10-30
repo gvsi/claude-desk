@@ -433,10 +433,13 @@ BASELINE_PLAIN = "The always-on safety rules don't allow it."
 # How the deciding rules decided, said before their own text (the owner's wording, 2026-10-30).
 RULE_LEAD_INS: dict[str, str] = {
     "allow": "Your rule allows it",
-    "ask": "Your rule asks you first",    # a hold an `ask` card decided, the owner's or the default ask
+    "ask": "Your rule asks you first",    # a hold an owner's `ask` card decided (the default ask has none)
     "limit": "It goes past your rule, so it waits for you",   # any other hold: an `auto` card's hold twin
     "refuse": "Your rule says never",     # a refusal's deciding rules are `never` cards; the baseline has none
 }
+# A hold only the compiler's default ask decided: no rule of the owner's decided, so it takes no
+# lead-in and no quotes, only the default ask's own words.
+DEFAULT_ASK_PLAIN = compiler.DEFAULT_REASON
 REVIEW_PLAIN: dict[str, str] = {
     "absent": "The reviewer couldn't check it.",
     "block": "The reviewer flagged it as an attempt to get around your rules.",
@@ -759,7 +762,9 @@ def _reason_plain(call: _Call, outcome: str, reason: str | None, evaluation: Eva
     """The owner's account of a decision: who asked for what, why it went this way (the reasons of
     the cards that decided, each quoted after one lead-in that says how they decided; the reviewer;
     or why it was refused with no card deciding), then the call's free-text arguments, each
-    quoted, under one "Claude's note" label: Claude wrote them into the call, the visitor didn't."""
+    quoted, under one "Claude's note" label: Claude wrote them into the call, the visitor didn't.
+    A hold only the compiler's default ask decided quotes no rule: the lead-ins say "your rule",
+    and no rule of the owner's decided it (`DEFAULT_ASK_PLAIN`)."""
     parts = [_asked(call.subject, call.req.call.tool, call.action)]
     if reason is not None:
         parts.append(REFUSED_PLAIN[reason])
@@ -767,9 +772,11 @@ def _reason_plain(call: _Call, outcome: str, reason: str | None, evaluation: Eva
         assert evaluation is not None and call.version_row is not None
         cards = {card.card_id: card for card in call.version_row.cards}
         lead_in, card_ids = _rules_decided(call, outcome, evaluation)
-        reasons = [cards[card_id].reason for card_id in card_ids if card_id in cards]
-        if reasons:
-            parts.append(f"{lead_in}: " + ", ".join(_quoted(text, cut=False) for text in reasons))
+        deciding = [cards[card_id] for card_id in card_ids if card_id in cards]
+        if outcome == "hold" and deciding and all(card.is_default for card in deciding):
+            parts.append(DEFAULT_ASK_PLAIN)
+        elif deciding:
+            parts.append(f"{lead_in}: " + ", ".join(_quoted(card.reason, cut=False) for card in deciding))
         elif outcome == "refuse":
             parts.append(BASELINE_PLAIN)
     if evaluation is not None and evaluation.needed_review:
