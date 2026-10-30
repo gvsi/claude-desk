@@ -126,3 +126,21 @@ it('connectors_row_only_with_its_href', () => {
   act(() => roots.forEach((root) => root.unmount()));
   columns.forEach((column) => column.remove());
 });
+
+it('only_connectors_may_be_left_out', () => {
+  // Every other page's href is required. One missing anyway, past the types, still draws its row,
+  // so a page never disappears from the nav by accident.
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const column = document.createElement('div');
+  column.style.cssText = 'display: flex; width: 264px; height: 982px;';
+  document.body.append(column);
+  const root = createRoot(column);
+  const { safety: _missing, ...withoutSafety } = HREFS;
+  act(() => root.render(<Sidebar {...PROPS} hrefs={withoutSafety as SidebarHrefs} />));
+
+  const labels = [...column.querySelectorAll('.cd-sidebar__nav .cd-sidebar__label')].map((label) => label.textContent);
+  expect(labels).toEqual(['Today', 'Conversations', 'Customers', 'Rules', 'Safety', 'Share', 'Settings']);
+
+  act(() => root.unmount());
+  column.remove();
+});

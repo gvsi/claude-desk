@@ -148,14 +148,15 @@ export function Sidebar({
         <nav className="cd-sidebar__nav" aria-label="Main">
           {NAV_ROWS.map((row) => {
             const href = hrefs[row.key];
-            // Only Connectors' href may be left out, and then its row isn't drawn.
-            if (href === undefined) return null;
+            // Only Connectors' href may be left out, and then its row isn't drawn. Every other page
+            // keeps its row even if its href goes missing past the types, as it always has.
+            if (row.key === 'connectors' && href === undefined) return null;
             const count = row.key === 'conversations' ? counts?.conversations : row.key === 'safety' ? counts?.safety : undefined;
             const attention = row.key === 'safety' && counts?.safety?.attention === true;
             return (
               <Link
                 key={row.key}
-                href={href}
+                href={href as string}
                 className="cd-sidebar__row cd-type-control"
                 {...(row.key === mainCurrent ? { 'aria-current': 'page' as const } : {})}
               >
