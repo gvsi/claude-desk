@@ -33,19 +33,13 @@ export const REFERENCE_BOARDS = [
   'N-Conn-14-Changed-Review',
   'N-Conn-15-Changed-After',
   'N-Conn-16-Phone-Rules',
-  // How Claude works, the money limit and the demo's simulate strip, on the same page.
-  'N-Conn-17-Mode',
-  'N-Conn-18-Mode-Review',
-  'N-Conn-19-Money-Cap',
-  'N-Conn-20-Money-Cap-Review',
-  'N-Conn-21-Simulate',
-  'N-Conn-22-Phone-Mode',
-  // Their signed redraw: the preset menu, the payment limit in the payment groups and its review.
+  // The preset menu, the payment limit in the payment groups, its review, and the demo's simulate strip.
   'N-Conn-17-Presets',
   'N-Conn-18-Preset-Review',
   'N-Conn-19-Ceiling',
   'N-Conn-19b-Ceiling-Edit',
   'N-Conn-20-Ceiling-Review',
+  'N-Conn-21-Simulate',
   'N-Conn-22-Phone-Presets',
 ] as const;
 

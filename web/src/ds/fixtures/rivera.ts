@@ -33,7 +33,6 @@ import type { ChangeReviewProps, ChangeRowView } from '../components/ChangeRevie
 import type { ConnectorPickerProps } from '../components/ConnectorPicker/ConnectorPicker';
 import type { ReviewToolView } from '../components/ConnectorReview/ConnectorReview';
 import type { ConnectorSectionProps } from '../components/ConnectorSection/ConnectorSection';
-import type { RulesPreset } from '../components/OutcomeMenu/outcomeWords';
 import type { RecentRequestView } from '../components/RecentRequests/RecentRequests';
 import type { RuleWord } from '../components/RuleRow/RuleRow';
 import { executedLine, type ExecutedTool } from './receipts';
@@ -1484,18 +1483,17 @@ const googleCalendar = {
 };
 
 // ---------------------------------------------------------------------------------------------
-// How Claude works and the money limit (N-Conn-17 to N-Conn-20), as the Rules page words them.
+// The payment limit and the preset review (N-Conn-17 to N-Conn-20), as the Rules page words them.
 
 /**
- * The mode card on Rivera's Rules page: the Desk's own rules (Custom), and its money limit
- * (`RIVERA_MONEY_CAP_CENTS`, $500) in the screen's words. The screen formats the amounts.
+ * Rivera's payment limit (`RIVERA_MONEY_CAP_CENTS`, $500), as the Payments and Stripe groups show
+ * it, and the words for a Desk with none set. The screen formats the amounts.
  */
-const rulesMode = {
-  preset: 'custom',
-  capLine: 'Most I take without asking: $500',
-  capHelp: 'The most Claude takes or pays out in one payment without asking you. Above it, Claude always asks.',
-  capHint: 'Whole dollars, from 0 to 10,000. Now $500.',
-} satisfies { preset: RulesPreset; capLine: string; capHelp: string; capHint: string };
+const paymentLimit = {
+  line: 'No payment over $500 goes through without asking you, whatever the rules below say.',
+  unset: 'Every payment asks you first.',
+  hint: 'Whole dollars, from 0 to 10,000. Now $500.',
+};
 
 /** The default side a rule falls to when a preset drops it: the house rules' words for a default ask. */
 const defaultAsk = {
@@ -1512,10 +1510,10 @@ function cardSide(id: keyof typeof ruleCards): NonNullable<ChangeRowView['before
 }
 
 /**
- * Switching to Ask me first (N-Conn-18-Mode-Review): each of Rivera's own cards goes, and its tool
- * falls to the default ask. The after side replaces the whole rule, which the row's "Changed" tag
- * says; within it only a new outcome is tagged, as the board draws it, so Refund, which already
- * asks, has no tag beside its outcome.
+ * Choosing "Ask me first for everything" (N-Conn-18-Preset-Review): each of Rivera's own cards
+ * goes, and its tool falls to the default ask. The after side replaces the whole rule, which the
+ * row's "Changed" tag says; within it only a new outcome is tagged, as the board draws it, so
+ * Refund, which already asks, has no tag beside its outcome.
  */
 const askFirstReview = (
   [
@@ -1541,9 +1539,9 @@ const askFirstReview = (
   };
 });
 
-/** Raising the money limit to $1,000 (N-Conn-20-Money-Cap-Review), in the web app's `moneyCapWords`. */
+/** Raising the payment limit to $1,000 (N-Conn-20-Ceiling-Review), in the web app's words. */
 const limitRaise = {
-  now: 'New limit: up to $1,000 without asking you.',
+  now: 'New limit: no payment over $1,000 without asking you.',
   was: 'Was $500',
 };
 
@@ -1798,7 +1796,7 @@ export const rivera = {
   stripeConnection,
   verificationConnection,
   googleCalendar,
-  rulesMode,
+  paymentLimit,
   askFirstReview,
   limitRaise,
   toolProfiles,

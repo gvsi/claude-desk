@@ -6,13 +6,14 @@ import { TextField } from '../TextField/TextField.tsx';
 import './MoneyLimit.css';
 
 export interface MoneyLimitProps {
-  /** The limit in the screen's words: "Most I take without asking: $500", or "Nothing: every charge and payout asks you" at 0. */
+  /**
+   * The payment limit in the screen's words: "No payment over $500 goes through without asking
+   * you, whatever the rules below say.", or "Every payment asks you first." when none is set.
+   */
   line: string;
-  /** What the limit means: "The most Claude takes or pays out in one payment without asking you. Above it, Claude always asks." */
-  help: string;
   /** The field is open. */
   editing: boolean;
-  /** The field's label; "Most I take without asking, in dollars" by default. */
+  /** The field's label; "Most a payment can be without asking you, in dollars" by default. */
   label?: string;
   /** What the owner typed, as typed. */
   value: string;
@@ -33,15 +34,15 @@ export interface MoneyLimitProps {
 }
 
 /**
- * The Desk's money limit on the Rules page: the limit in words with "Change", or, while editing,
- * a field with "Review change" and "Cancel". It never reads the value: the screen checks it,
- * shows `error`, and drafts the change, which applies only after its review.
+ * The Desk's payment limit, a row at the top of a group of payment tools on the Rules page: the
+ * limit in words with "Change", or, while editing, a field with "Review change" and "Cancel". It
+ * never reads the value: the screen checks it, shows `error`, and drafts the change, which applies
+ * only after its review.
  */
 export function MoneyLimit({
   line,
-  help,
   editing,
-  label = 'Most I take without asking, in dollars',
+  label = 'Most a payment can be without asking you, in dollars',
   value,
   hint,
   error,
@@ -70,31 +71,30 @@ export function MoneyLimit({
 
   return (
     <div ref={root} className="cd-money-limit">
-      {editing ? (
-        <form className="cd-money-limit__form" noValidate onSubmit={review}>
-          <div className="cd-money-limit__field">
-            <TextField label={label} value={value} hint={hint} error={error} autoComplete="off" onChange={(next) => onChange(next)} />
-          </div>
-          <div className="cd-money-limit__controls">
-            <Button variant="primary" type="submit" waiting={disabled}>
-              Review change
-            </Button>
-            <Button variant="secondary" waiting={disabled} onClick={() => onCancel()}>
-              Cancel
-            </Button>
-          </div>
-        </form>
-      ) : (
-        <div className="cd-money-limit__reading">
-          <div className="cd-money-limit__text">
+      <div className={`cd-money-limit__body${editing ? ' cd-money-limit__body--editing' : ''}`}>
+        {editing ? (
+          <form className="cd-money-limit__form" noValidate onSubmit={review}>
+            <div className="cd-money-limit__field">
+              <TextField label={label} value={value} hint={hint} error={error} autoComplete="off" onChange={(next) => onChange(next)} />
+            </div>
+            <div className="cd-money-limit__controls">
+              <Button variant="primary" type="submit" waiting={disabled}>
+                Review change
+              </Button>
+              <Button variant="secondary" waiting={disabled} onClick={() => onCancel()}>
+                Cancel
+              </Button>
+            </div>
+          </form>
+        ) : (
+          <div className="cd-money-limit__reading">
             <p className="cd-money-limit__line cd-type-body">{line}</p>
-            <p className="cd-money-limit__help cd-type-meta">{help}</p>
+            <Button variant="secondary" waiting={disabled} onClick={() => onEdit()}>
+              Change
+            </Button>
           </div>
-          <Button variant="secondary" waiting={disabled} onClick={() => onEdit()}>
-            Change
-          </Button>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

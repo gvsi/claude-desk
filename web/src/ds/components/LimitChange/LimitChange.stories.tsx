@@ -16,7 +16,7 @@ const meta = {
   ),
   parameters: {
     layout: 'padded',
-    canvas: 'N-Conn-20-Money-Cap-Review',
+    canvas: 'N-Conn-20-Ceiling-Review',
     canvasNote:
       "The board sets the new limit at the serif's optical size 18; the summary style is optical size 20 on every summary line, so the line is 7 px narrower.",
   },
@@ -29,7 +29,7 @@ type Story = StoryObj<typeof meta>;
 export const Raise: Story = {
   play: async ({ args, canvas }) => {
     // limit_change_reads_both_amounts: one card says the new limit, then what it was.
-    const card = canvas.getByRole('region', { name: 'Money limit' });
+    const card = canvas.getByRole('region', { name: 'Payment limit' });
     expectComputed(card, { paddingTop: '20px', paddingLeft: '20px', borderTopLeftRadius: '12px' });
     await expect(card.textContent).toBe(`${args.now}${args.was}`);
     const now = within(card).getByText(args.now);

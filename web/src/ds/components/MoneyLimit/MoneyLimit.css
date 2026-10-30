@@ -1,11 +1,25 @@
-/* MoneyLimit: the limit at body weight 520 with its help under it, and "Change" at the right,
-   centered on them. Editing, the field (at most 360 px wide) with its hint, then "Review change"
-   and "Cancel" 12 px under it. It lays out by its own width: under 640 px (a phone) "Change" sits
-   under the help, at its own width. */
+/* MoneyLimit: a row at the top of a group of payment tools, under the group's head. A hairline
+   above it, as above each tool row, when anything comes before it in the group. Reading, padded
+   12 px 16 px: the limit in body type and a secondary "Change" at the right, centered on it.
+   Editing, padded 12 px 16 px 16 px: the field (at most 360 px wide) with its hint, then "Review
+   change" and "Cancel" 12 px under it. It lays out by its own width: under 640 px (a phone) it
+   pads 12 px 14 px and "Change" sits 10 px under the limit, at its own width. */
 
 .cd-money-limit {
   container: cd-money-limit / inline-size;
   min-width: 0;
+}
+
+.cd-money-limit__body {
+  padding: var(--space-12) var(--space-16);
+}
+
+* + .cd-money-limit {
+  border-top: 1px solid var(--line-hairline);
+}
+
+.cd-money-limit__body--editing {
+  padding-bottom: var(--space-16);
 }
 
 .cd-money-limit__reading {
@@ -15,22 +29,11 @@
   min-width: 0;
 }
 
-.cd-money-limit__text {
+.cd-money-limit__line {
   flex: 1 1 auto;
   min-width: 0;
-}
-
-/* Two classes, so the weight wins over .cd-type-body whatever order the stylesheets load in. */
-.cd-money-limit .cd-money-limit__line {
   margin: 0;
   color: var(--text-primary);
-  font-weight: 520;
-  overflow-wrap: anywhere;
-}
-
-.cd-money-limit__help {
-  margin: var(--space-2) 0 0;
-  color: var(--text-secondary);
   overflow-wrap: anywhere;
 }
 
@@ -54,13 +57,17 @@
 }
 
 @container cd-money-limit (max-width: 639.98px) {
+  .cd-money-limit__body {
+    padding-inline: var(--space-14);
+  }
+
   .cd-money-limit__reading {
     flex-direction: column;
     align-items: flex-start;
     gap: var(--space-10);
   }
 
-  .cd-money-limit__text {
+  .cd-money-limit__line {
     flex: none;
     width: 100%;
   }
