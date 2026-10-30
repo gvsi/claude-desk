@@ -48,16 +48,19 @@ def principal_for(row: SessionRow, *, desk_id: str | None = None) -> Principal:
 async def create_session(body: CreateSessionRequest, ctx: Ctx, request: Request) -> SessionCreated:
     """A visitor session on the Desk the slug names. A preview (`preview: true`) is the owner trying
     the Desk as a customer, so it needs `X-Owner-Session` of the slug's copy (else 401 `auth`,
-    ledgered on the Desk); it gets a visitor's tools even while Answering is off."""
+    ledgered on the Desk); it gets a visitor's tools even while Answering is off. The owner's token
+    is resolved with the slug, before the transaction reads the Desk (`repo.py`), and refused only
+    where an owner check always is, after the agent check."""
     copy_id = await repo.copy_of_desk_slug(ctx, body.desk_slug)
     if copy_id is None:
         raise KernelFailure(404, "not_found", "unknown_desk")
+    owner = await auth.owner_session(ctx, request, copy_id) if body.preview else None
     copy = ctx.bind(copy_id)
     desk = (await ctx.db.scalars(copy.scoped(select(Desk).where(Desk.slug == body.desk_slug)))).one()
     named = Named(copy_id=copy_id, desk_id=desk.desk_id)
     if body.kind == "agent":
         raise AuthError(401, "auth", "agent_auth_unavailable", route=route_template(request), named=named)
-    if body.preview and await auth.owner_session(ctx, request, copy_id) is None:
+    if body.preview and owner is None:
         raise AuthError(401, "auth", "preview_unavailable", route=route_template(request), named=named)
     if desk.deleted_at is not None:
         raise AuthError(409, "closed", "closed", route=route_template(request), named=named)
