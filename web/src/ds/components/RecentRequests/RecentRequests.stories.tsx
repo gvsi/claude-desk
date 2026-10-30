@@ -27,7 +27,7 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Refund: Story = {
-  play: async ({ args, canvas }) => {
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
     const section = canvas.getByRole('region', { name: 'Recent requests under these rules' });
     await expect(within(section).getByRole('heading', { level: 2, name: 'Recent requests under these rules' })).toBeVisible();
     const items = within(section).getAllByRole('listitem');
@@ -62,6 +62,16 @@ export const Refund: Story = {
     // The outcome sits at the right of the request's words.
     const outcome = within(first).getByText(row.outcome);
     await expect(outcome.getBoundingClientRect().left).toBeGreaterThan(within(first).getByRole('link').getBoundingClientRect().right);
+    // By keyboard, the row's overlay draws the focus ring: 2 px of accent blue, 2 px outside the row.
+    await userEvent.tab();
+    const firstLink = within(first).getByRole('link');
+    await expect(firstLink).toHaveFocus();
+    const ring = getComputedStyle(firstLink, '::after');
+    await expect([ring.outlineStyle, ring.outlineWidth, ring.outlineColor, ring.outlineOffset]).toEqual(['solid', '2px', 'rgb(126, 174, 218)', '2px']);
+    // Nothing between the row and the page clips the ring.
+    for (let el: HTMLElement | null = first; el !== null && el !== canvasElement; el = el.parentElement) {
+      await expect([getComputedStyle(el).overflowX, getComputedStyle(el).overflowY]).toEqual(['visible', 'visible']);
+    }
   },
 };
 
