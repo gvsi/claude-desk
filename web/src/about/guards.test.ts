@@ -71,6 +71,8 @@ const READER_ONLY = ['about/documents.ts', 'about/markdown.ts', 'about/ReaderPag
 const READER = (file: string) => file === 'about/ReaderPage.tsx' || /^about\/figures\/[^/]+\.tsx$/.test(file);
 // The page's chrome, which renders when the reader can't: never the registry or the page, even on demand.
 const CHROME = ['about/ReaderError.tsx', 'about/BackLink.tsx', 'about/links.ts'];
+// The one `import()` that may load the reader: the router's, of the page itself.
+const ON_DEMAND = { from: 'app/routes.tsx', to: 'about/ReaderPage.tsx' };
 
 /** Each way the sources break the reader's import rules, as "file: what". Tests are exempt. */
 function importProblems(sources: Record<string, string>): string[] {
@@ -94,7 +96,7 @@ function importProblems(sources: Record<string, string>): string[] {
   };
   const problems: string[] = [];
   for (const [file, imports] of graph) {
-    for (const { spec, to } of imports) {
+    for (const { spec, to, dynamic } of imports) {
       const document = to === 'about/markdown.ts' || /\.md(?:\?|$)/.test(spec);
       if (document && file !== 'about/documents.ts') problems.push(`${file}: imports ${spec}, which only documents.ts may`);
       if (CHROME.includes(file) && (to === 'about/documents.ts' || to === 'about/ReaderPage.tsx')) {
@@ -103,9 +105,17 @@ function importProblems(sources: Record<string, string>): string[] {
       if (file.startsWith('about/') && (/^(?:api|owner|mocks)\//.test(to) || spec.startsWith('@tanstack/'))) {
         problems.push(`${file}: imports ${spec}, and the About pages make no requests`);
       }
+      // On demand, the registry, the parser and the page load only from the router, by the page itself, so
+      // a document that can't be parsed fails on its own page and nowhere else.
+      if (dynamic && !(file === ON_DEMAND.from && to === ON_DEMAND.to)) {
+        const brings = READER_ONLY.filter((name) => name === to || loadsWith(to).has(name));
+        if (brings.length > 0) {
+          problems.push(`${file}: loads ${brings.join(', ')} through import(${spec}); only routes.tsx may, and only ReaderPage.tsx`);
+        }
+      }
     }
     // Outside the reader, the registry, the parser and the page load only through `import()`: this covers
-    // the router (Task 4b's routes.tsx) and the owner shell, which imports only links.ts.
+    // the router and the owner shell, which imports only links.ts.
     const loaded = READER_ONLY.filter((name) => name !== file && loadsWith(file).has(name));
     if (loaded.length > 0 && !READER(file) && file !== 'about/documents.ts') {
       problems.push(`${file}: loads ${loaded.join(', ')} with itself, not through import()`);
@@ -159,7 +169,11 @@ describe('About page source guards', () => {
       'lib/storage.ts': 'export function readLocal() {}',
       'app/routes.tsx': [
         "import { ReaderError } from '../about/ReaderError.tsx';",
-        "const reader = { lazy: () => import('../about/ReaderPage.tsx'), errorElement: ReaderError };",
+        "import { ABOUT_PAGES, type AboutId } from '../about/links.ts';",
+        'const lazy = async () => {',
+        "  const { ReaderPage } = await import('../about/ReaderPage.tsx');",
+        '  return { element: ReaderPage, errorElement: ReaderError };',
+        '};',
       ].join('\n'),
       'owner/OwnerLayout.tsx': "import { ABOUT_LINKS } from '../about/links.ts';",
       'main.tsx': "import { routes } from './app/routes.tsx';\nimport.meta.env.MODE;",
@@ -178,6 +192,12 @@ describe('About page source guards', () => {
       ['app/routes.tsx', "import { ReaderPage } from '../about/ReaderPage.tsx';", 'not through import()'],
       ['app/routes.tsx', "import { ReaderPage } from './about.ts';", 'not through import()'],
       ['main.tsx', "import { ABOUT_LINKS } from './about/links.ts';\nimport './about/documents.ts';", 'not through import()'],
+      // On demand, only the router may load the reader, and only by its page.
+      ['owner/OwnerLayout.tsx', "const docs = () => import('../about/documents.ts');", 'only routes.tsx may'],
+      ['owner/OwnerLayout.tsx', "const reader = () => import('../about/ReaderPage.tsx');", 'only routes.tsx may'],
+      ['owner/OwnerLayout.tsx', "const chart = () => import('../about/figures/Tau3Chart.tsx');", 'only routes.tsx may'],
+      ['app/routes.tsx', "const docs = () => import('../about/documents.ts');", 'only routes.tsx may'],
+      ['app/routes.tsx', "const reader = () => import('./about.ts');", 'only routes.tsx may'],
       ['about/BackLink.tsx', "import { request } from '../api/http.ts';", 'make no requests'],
       ['about/ReaderPage.tsx', "import { useQuery } from '@tanstack/react-query';", 'make no requests'],
       ['about/BackLink.tsx', "import { useDesks } from '../owner/useDesks.ts';", 'make no requests'],
@@ -191,6 +211,12 @@ describe('About page source guards', () => {
 
     const real = sources();
     expect(Object.keys(real)).toEqual(expect.arrayContaining(['about/documents.ts', 'about/links.ts', 'about/markdown.ts']));
+    // The router does load the page on demand, so the one exception above is the path the app takes.
+    expect(importsOf('app/routes.tsx', real['app/routes.tsx'] ?? '', new Set(Object.keys(real)))).toContainEqual({
+      spec: '../about/ReaderPage.tsx',
+      to: 'about/ReaderPage.tsx',
+      dynamic: true,
+    });
     expect(importProblems(real)).toEqual([]);
   });
 });
