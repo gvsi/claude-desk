@@ -1218,8 +1218,6 @@ describe("Today's Demo inbox", () => {
     const { screen } = await renderRoute(TODAY, { pollScale: 100 });
     const open = inboxButton(screen);
     await expect.element(open).toBeVisible();
-    const read = await mockStore.dispatch('ownerInbox');
-    if ('network' in read || read.status !== 200) throw new Error('the mock reads the Demo inbox');
     // The read as it opens fails, and so does its one retry.
     mockStore.inject({ route: 'ownerInbox', status: 500, times: 2 });
     await open.click();
@@ -1233,10 +1231,13 @@ describe("Today's Demo inbox", () => {
     await expectScreenBasics(screen.container, { owner: true });
 
     // Its Try again is busy while it reads; once a read works the line goes and the sheet stays open.
-    mockStore.inject({ route: 'ownerInbox', status: 200, body: read.body, delayMs: 400 });
+    const retry = holdReads(ROUTES.ownerInbox.path);
     const again = sheet.getByRole('button', { name: 'Try again', exact: true });
     await again.click();
+    await vi.waitFor(() => expect(retry.held()).toBe(1));
     await expect.element(again).toHaveAttribute('aria-busy', 'true');
+    await expect.element(line).toBeVisible();
+    retry.release();
     await expect.element(line).not.toBeInTheDocument();
     await expect.element(sheet).toBeVisible();
     await sheet.getByRole('button', { name: 'Close' }).click();
@@ -1248,15 +1249,16 @@ describe("Today's Demo inbox", () => {
     // Opened fresh (a reload, or the link from elsewhere), the page lands on the held request once
     // Needs you has read, here slowly, at the phone's size where the card starts below the fold.
     const held = seededHold();
-    const read = await mockStore.dispatch('needsYou', { params: { desk_id: RIVERA.deskId } });
-    if ('network' in read || read.status !== 200) throw new Error('the mock reads Needs you');
-    mockStore.inject({ route: 'needsYou', status: 200, body: read.body, delayMs: 600 });
+    const needsYouRead = holdReads(needsYouPath);
     const { screen, router } = await renderRoute(requestLink(held.decision_id), { viewport: 'phone' });
     await expect.element(region(screen, 'Things to try')).toBeVisible();
+    await vi.waitFor(() => expect(needsYouRead.held()).toBeGreaterThanOrEqual(1));
     // Nothing to land on yet: focus stays where it was.
+    const card = heldCard(screen, SEEDED_REASON);
+    expect(card.elements()).toHaveLength(0);
     expect(document.activeElement).toBe(document.body);
 
-    const card = heldCard(screen, SEEDED_REASON);
+    needsYouRead.release();
     await expect.element(card).toBeInTheDocument();
     await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
     expectInView(card.element());
