@@ -29,7 +29,7 @@ import { CONNECTORS_SPEC, SPEC, expectFooter, expectOwnerFrame, expectRulesPage,
 const COUNTS = { conversations: { n: 2, label: '2 live conversations' }, safety: { n: 2, label: '2 blocked' } };
 
 /** The Rules page's suggestions on Rivera Plumbing's Desk, as the presets board words them. */
-const RIVERA_CHIPS = ['Turn off Payments', 'Quote water heater installs up to $600', 'Why was Dana’s refund held?'];
+const RIVERA_CHIPS = ['Stop quoting on weekends', 'Quote water heater installs up to $600', 'Why was Dana’s refund held?'];
 
 /** Rivera Plumbing's Rules page: its six built-in connectors and Stripe. */
 const RIVERA_HUB: RulesHub = { summary: 'Version 7 of your rules, checked against the always-on rules', sections: rivera.connectors.sections };

@@ -336,7 +336,7 @@ export async function expectRulesPage(root: HTMLElement, chips: readonly string[
   expectComputed(within(main).getByRole('heading', { level: 1, name: 'Rules' }), SPEC.pageTitle);
   await expect(within(main).getByText('What Claude can do on this Desk, where each tool comes from, and your rules for it.')).toBeVisible();
   await expect(within(main).queryByRole('button', { name: 'Add a connector' })).toBeNull();
-  const ask = await expectRulesComposer(main, 'Ask Claude to change a rule or a connector', chips);
+  const ask = await expectRulesComposer(main, 'Ask Claude to change a rule', chips);
   // As the board spaces them: the composer 20 px under the header (or the notice under it), its
   // suggestions 10 px under it, and the connectors' summary 20 px under them.
   const top = (el: Element) => Math.round(el.getBoundingClientRect().top);

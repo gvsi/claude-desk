@@ -4,7 +4,7 @@
 
 ## When to use
 
-- Once on the Rules page, under the "Ask Claude to change a rule or a connector" composer and above `AlwaysOnList` (N-Conn-12-Chat). Connectors are added from the Connectors page, so the Rules page passes no `onAddConnector`.
+- Once on the Rules page, under the "Ask Claude to change a rule" composer and above `AlwaysOnList` (N-Conn-12-Chat). Connectors are added from the Connectors page, so the Rules page passes no `onAddConnector`.
 - Its children are `ConnectorSection`s, one per connector the Desk has: built in first, then the ones it connected.
 
 ## What it shows

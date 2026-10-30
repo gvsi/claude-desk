@@ -218,7 +218,7 @@ Owner decisions, 2026-10-29 (spec "First visit and hosting" and "Look and feel")
 ### Task 2: Rules hub and rule pieces
 
 Owner decisions, 2026-10-29 (the signed boards on the design canvas's "Claude Desk · Connectors and rules" page, which replace the Rules and Integrations boards):
-- Rules is one page under the Rules nav: the "Ask Claude to change a rule or a connector" composer, one section per connector the Desk has (built in first, then the ones it connected), and the always-on list. Connectors are added from the Connectors page (Task 6c).
+- Rules is one page under the Rules nav: the "Ask Claude to change a rule" composer, one section per connector the Desk has (built in first, then the ones it connected), and the always-on list. Connectors are added from the Connectors page (Task 6c).
 - A connector is where tools come from. Owner copy says "connector", never "integration".
 - A built-in connector is a presentation group over native tools, optional per Desk except Verification: Quotes (`native.quote`), Bookings (`native.find_slots`, `native.book`), Leads and callbacks (`native.capture_lead`, `native.request_callback`), Verification (`native.start_verification`), Documents (`native.release_document`), Payments (`native.payment_link`, `native.charge_mandate`). No tool is added.
 - Verification is always on. It has no "Turn off", the kernel refuses to disable `native.start_verification`, and the picker never offers it. Its page says "Always on. It's how Claude confirms a customer before sharing anything private."
@@ -765,7 +765,7 @@ The connectors boards are drawn as AGENTS.md asks, at a 14-inch laptop's width o
   - `boards.test.ts`:
     - `every_reference_board_has_a_board_story` (Task 6) fails until each `N-Conn-*` board is named by exactly one `Boards/*` story.
     - `every_reference_board_has_a_render`: an `N-Conn-*` render is 1512 px wide and at least 982 tall; N-Conn-16-Phone-Rules is 390 wide and at least 844 tall; every other board stays 1280×820.
-  - The stories, one per board, each at the `board` viewport (the phone board's at `phone`), with `parameters.canvas` its board. Every Rules page has `PageHeader` "Rules", subtitle "What Claude can do on this Desk, where each tool comes from, and your rules for it.", and "Add a connector". Its owner `Composer` reads "Ask Claude to change a rule or a connector", with the helper "Claude shows you the change and example situations before anything applies.", above the board's chips. A tool's page has the same composer, "Ask Claude to change a rule for {tool}", with that tool's chips.
+  - The stories, one per board, each at the `board` viewport (the phone board's at `phone`), with `parameters.canvas` its board. Every Rules page has `PageHeader` "Rules", subtitle "What Claude can do on this Desk, where each tool comes from, and your rules for it.", and "Add a connector". Its owner `Composer` reads "Ask Claude to change a rule", with the helper "Claude shows you the change and example situations before anything applies.", above the board's chips. A tool's page has the same composer, "Ask Claude to change a rule for {tool}", with that tool's chips.
 
 | Story | Board | Shows |
 |---|---|---|
