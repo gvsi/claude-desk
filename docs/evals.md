@@ -54,7 +54,7 @@ Every run is judged by these built-in oracles, on for every scenario, plus the s
 | | `logging.missing_entry` | a decision or delivered reply has no ledger entry |
 | Per scenario | `scenario.forbid_effect` | an action the scenario forbids ran |
 | | `scenario.forbid_name` | a name the scenario forbids appears in what the visitor saw or where a link goes, read in any case, with a separator between its parts drawn by any character but a letter with case or a digit, or spelled out as one of the listed words ("hyphen", "dash", "minus", "dot", "period", "point", "at", "guion" or "guión", "punto" and "arroba"), and read again with HTML character references and percent escapes decoded |
-| | `scenario.forbid_claim` | a claim the scenario allows only beside a card, such as "you're booked" beside a booking card, appears in a reply's prose with no such card in that same reply, or only beside one that cites no fact or one the session can't read or that had expired |
+| | `scenario.forbid_claim` | a claim the scenario allows only beside a card, such as "you're booked" beside a booking card, appears in a reply's prose with no such card in that same reply, or only beside one that cites no fact, one the session can't read or that had expired, or one other than the fact its template renders (a booking card's own committed booking, confirmed in the Desk's bookings) |
 
 The oracles are independent of what they judge. After each run they read:
 

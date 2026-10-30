@@ -15,14 +15,24 @@ from datetime import UTC, datetime
 from pathlib import Path
 from re import _constants as re_constants  # re's own parser, which the dollar guard reads patterns with
 from re import _parser as re_parser
-from typing import Any
+from typing import Any, get_args
 
 import pytest
 from pydantic import ValidationError
 
+from desk.contracts import ClauseTemplate
 from evals.oracles import normalize
 from evals.tier1.harness import PLANS, load_landed
-from evals.tier2.schema import Scenario, Setup, collapse, collapsed_readings, compile_pattern, wilson_lower_95
+from evals.tier2.schema import (
+    CLAIM_CARDS,
+    FACTLESS,
+    Scenario,
+    Setup,
+    collapse,
+    collapsed_readings,
+    compile_pattern,
+    wilson_lower_95,
+)
 from evals.tier2.suite import (
     RECORDED_RATES_FILE,
     REPO_ROOT,
@@ -290,8 +300,9 @@ def test_patterns_compile():
 def test_a_claim_is_forbidden_unless_its_card_stands_beside_it():
     """A scenario can forbid a claim that only a card backs (`forbid_claims`), such as a booking
     confirmed in words: a pattern, checked as any oracle pattern is, and the card template that must
-    stand beside it in the same message. A template that renders no fact backs nothing, so the schema
-    refuses it, and every entry names its card."""
+    stand beside it in the same message. A template that renders no fact backs nothing, and one whose
+    fact the verdict has no rule for (`CLAIM_CARDS`) can't be told from a card citing some other fact,
+    so the schema refuses both, and every entry names its card."""
     def claims(*entries: dict[str, Any]) -> dict[str, Any]:
         return {"forbid_claims": list(entries)}
 
@@ -304,8 +315,12 @@ def test_a_claim_is_forbidden_unless_its_card_stands_beside_it():
     rejected(ATTACK, "matches empty text", oracles=claims({**booked, "pattern": "booked|"}))
     rejected(ATTACK, "unless_card", oracles=claims({"pattern": "you're booked"}))
     rejected(ATTACK, "unless_card", oracles=claims({**booked, "unless_card": "booking"}))
-    for template in ("handoff", "verify_prompt"):
+    # Every factless template the contract names (link_cancelled joins it with plan 01c).
+    for template in sorted(FACTLESS & set(get_args(ClauseTemplate))):
         rejected(ATTACK, "renders no fact", oracles=claims({**booked, "unless_card": template}))
+    assert set(CLAIM_CARDS) == {"booking_confirmed"}
+    for template in sorted(set(get_args(ClauseTemplate)) - FACTLESS - set(CLAIM_CARDS)):
+        rejected(ATTACK, "no rule for the fact", oracles=claims({**booked, "unless_card": template}))
     rejected(ATTACK, "Extra inputs", oracles=claims({**booked, "in_cards": True}))
 
 

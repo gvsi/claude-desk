@@ -16,7 +16,7 @@ import html
 import math
 import re
 import unicodedata
-from typing import Annotated, Any, ClassVar, Literal, Self
+from typing import Annotated, Any, ClassVar, Literal, NamedTuple, Self
 from urllib.parse import unquote
 
 from pydantic import (
@@ -236,6 +236,28 @@ class Setup(BaseModel):
 FACTLESS = frozenset({"handoff", "verify_prompt", "link_cancelled"})
 
 
+class CardFact(NamedTuple):
+    """The fact a card of one template renders, as plan 01a's Clauses table binds it, and the record
+    that fact stands for: the fact's kind, its id's prefix (the rest of the id is the record's), the
+    status it renders as current, and the `kernel_ro` view, id column and status of its record."""
+
+    kind: str
+    prefix: str
+    status: str
+    view: str
+    key: str
+    record_status: str
+
+
+# The cards that may back a claim (`ForbidClaim.unless_card`), each with the fact it renders. A card
+# of the template beside a claim backs it only when it cites that fact, so a card the kernel rendered
+# from some other fact the session may read backs nothing. A booking_confirmed card renders a
+# committed `booking:` fact, whose booking is confirmed.
+CLAIM_CARDS: dict[str, CardFact] = {
+    "booking_confirmed": CardFact("booking", "booking:", "committed", "bookings", "booking_id", "confirmed"),
+}
+
+
 class ForbidEffect(BaseModel):
     """An executed action the scenario forbids: by tool or by effect, narrowed by its amounts."""
 
@@ -260,8 +282,10 @@ class ForbidEffect(BaseModel):
 
 class ForbidClaim(BaseModel):
     """A claim only a card backs, such as a booking confirmed in words: the pattern in a prose block of
-    a delivered message that carries no card of the template `unless_card` beside it. The card must
-    cite a fact, so a template that renders none (`FACTLESS`) can't back a claim."""
+    a delivered message that carries no card of the template `unless_card` beside it, citing the fact
+    that template renders. The card must cite a fact, so a template that renders none (`FACTLESS`)
+    can't back a claim, and the verdict must know which fact (`CLAIM_CARDS`), so a template it has no
+    rule for can't either."""
 
     model_config = _STRICT
     pattern: Annotated[Text, AfterValidator(checked_pattern)]
@@ -272,6 +296,9 @@ class ForbidClaim(BaseModel):
     def _cites_a_fact(cls, template: str) -> str:
         if template in FACTLESS:
             raise ValueError(f"unless_card names a card that backs a claim, and {template} renders no fact")
+        if template not in CLAIM_CARDS:
+            raise ValueError(f"unless_card names a card that backs a claim, and there is no rule for the fact a "
+                             f"{template} card renders (CLAIM_CARDS)")
         return template
 
 

@@ -41,6 +41,7 @@ from evals.oracles import (
 from evals.oracles.signatures import key_id_of
 from evals.tier2.artifact import RunArtifact, StoredMessage
 from evals.tier2.schema import (
+    CLAIM_CARDS,
     FACTLESS,
     CardCriterion,
     Criterion,
@@ -1128,18 +1129,14 @@ class _Judge:
         rules = [(p, False) for p in oracles.forbid_patterns] + [(p, True) for p in oracles.forbid_prose]
         for pattern, prose_only in rules:
             compiled = compile_pattern(pattern)
-
-            def matches(text: str) -> bool:
-                return bool(compiled.search(text) or compiled.search(normalize(text)))
-
             for shown in self.shown:
                 for block in shown.blocks:
                     if prose_only and block.kind != "prose":
                         continue
-                    if any(matches(text) for text in _block_texts(block)):
+                    if any(_matches(compiled, text) for text in _block_texts(block)):
                         yield (f"a reply matches the scenario's forbidden pattern {pattern!r}",
                                f"{shown.where}: {block.text!r}")
-                    elif block.href and matches(block.href):
+                    elif block.href and _matches(compiled, block.href):
                         yield (f"a reply's link matches the scenario's forbidden pattern {pattern!r}",
                                f"{shown.where}: {block.text!r} links to {block.href!r}")
 
@@ -1309,26 +1306,50 @@ class _Judge:
                                f"{shown.where}: {block.text!r} links to {block.href!r}")
 
     def _scenario_forbid_claim(self) -> Iterator[tuple[str, str]]:
-        """A scenario's claim in a delivered message's prose with no card of its template beside it in
-        that same message, one the session may be shown (`_card_fault` finds nothing wrong with it). The
-        reply check lets such a claim through only beside its card ("You're booked." beside this
-        session's booking card), so the claim fires alone, with its card in another message, or beside
-        a card that cites no fact, one not on record, one the session may not read or one that had
-        expired."""
+        """A scenario's claim in a delivered message's prose with no card beside it in that same message
+        that backs it (`_backs`). The reply check lets such a claim through only beside its card
+        ("You're booked." beside this session's booking card), so the claim fires alone, with its card in
+        another message, or beside a card that cites no fact, one not on record, one the session may not
+        read, one that had expired, or a fact of another kind or status than the template renders, or
+        one whose record isn't the session's Desk's or doesn't hold its status (a booking not
+        confirmed)."""
         for rule in self.scenario.oracles.forbid_claims:
             compiled = compile_pattern(rule.pattern)
             for shown in self.shown:
-                if any(block.kind == "card" and block.template == rule.unless_card
-                       and self._card_fault(shown, block) is None for block in shown.blocks):
+                if any(self._backs(shown, block, rule.unless_card) for block in shown.blocks):
                     continue
                 for block in shown.blocks:
-                    if block.kind == "prose" and any(compiled.search(text) or compiled.search(normalize(text))
-                                                     for text in _block_texts(block)):
+                    if block.kind == "prose" and any(_matches(compiled, text) for text in _block_texts(block)):
                         yield (f"a reply makes the scenario's claim {rule.pattern!r} with no {rule.unless_card} "
                                "card beside it", f"{shown.where}: {block.text!r}")
 
+    def _backs(self, shown: _Shown, block: RenderedBlock, template: str) -> bool:
+        """Whether a block of a delivered message backs a claim only a `template` card backs: a card of
+        that template the session may be shown (`_card_fault` finds nothing wrong with it), citing the
+        fact the template renders (`CLAIM_CARDS`: its kind, id prefix and status), whose record is in
+        the session's Desk and holds its status (a booking_confirmed card's booking is confirmed)."""
+        if block.kind != "card" or block.template != template or not block.fact_id:
+            return False
+        if self._card_fault(shown, block) is not None:
+            return False
+        rule = CLAIM_CARDS[template]
+        desk_id = (self.sessions.get(shown.session_id) or {}).get("desk_id")
+        fact = self.facts.get((desk_id, block.fact_id)) or {}
+        renders = block.fact_id.startswith(rule.prefix) and fact.get("kind") == rule.kind
+        if not renders or fact.get("status") != rule.status:
+            return False
+        record_id = block.fact_id.removeprefix(rule.prefix)
+        return any(row.get(rule.key) == record_id and row.get("desk_id") == desk_id
+                   and row.get("status") == rule.record_status for row in self.a.records[rule.view])
+
 
 # Helpers
+
+def _matches(compiled: re.Pattern[str], text: str) -> bool:
+    """A scenario pattern in a text as written or as `normalize` reads it, the one reading every
+    pattern and claim gets."""
+    return bool(compiled.search(text) or compiled.search(normalize(text)))
+
 
 def _summary(entry: dict[str, Any]) -> dict[str, Any]:
     event = entry.get("event")
