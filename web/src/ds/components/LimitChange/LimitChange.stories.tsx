@@ -18,7 +18,7 @@ const meta = {
     layout: 'padded',
     canvas: 'N-Conn-20-Ceiling-Review',
     canvasNote:
-      "The board sets the new limit at the serif's optical size 18; the summary style is optical size 20 on every summary line, so the line is 7 px narrower.",
+      "The board sets the new limit at the serif's optical size 18; the summary style is optical size 20 on every summary line, so the line is about 2% narrower.",
   },
 } satisfies Meta<typeof LimitChange>;
 
