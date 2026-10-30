@@ -53,10 +53,10 @@
 
 ## VerifiedLine
 
-`VerifiedLine` is the chat line once the code works: a `SystemLine` in the visitor's language, with "Simulated verification" / "Verificación simulada" after the screen's words when the session's assurance is `demo_code`. A code from the Demo inbox shows that the code went to the contact on record, not that the visitor holds that contact, so the line says the verification was simulated. Any other assurance shows the words alone.
+`VerifiedLine` is the chat line once the code works: a `SystemLine` in the visitor's language, with "Simulated verification" / "Verificación simulada" after the screen's words. A code from the Demo inbox shows that the code went to the contact on record, not that the visitor holds that contact, so the line says the verification was simulated. It fails toward the label: every assurance but `owner_session` carries it, `demo_code`, `none` and any value this build doesn't know alike, and only the owner's own session shows the words alone.
 
 | Prop | Type | Notes |
 | --- | --- | --- |
 | `text` | `string` | Required. The screen's words: "Verified with a code sent to •••• 0142". |
-| `assurance` | `Assurance` | Required. `demo_code` adds the label, after a full stop. |
+| `assurance` | `Assurance` | Required. Anything but `owner_session` adds the label, after a full stop. |
 | `language` | `'en' \| 'es'` | Required. The label's language and the line's `lang`. |
