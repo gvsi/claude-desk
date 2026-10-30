@@ -200,8 +200,14 @@ dev:
 # Tier 1 evals: the kernel's boundary cases, with no model calls, no network and no key.
 # evals-tier1 is the one tier 1 target CI runs: the harness's own tests, every case against the
 # contract stub, then the real kernel in-process (the API over it once landed.toml lists 02a or
-# 02). The kernel and API runs need the database, `make kernel` and cvc5.
+# 02). The kernel and API runs need the database, `make kernel` and cvc5. The kernel they start
+# proves with the desk-prove DESK_PROVE names, else the one on PATH; when DESK_PROVE isn't set in
+# the environment or on make's command line, they pass the release build (`make kernel`) as
+# DESK_PROVE if it exists, so a local run finds the prover with nothing on PATH. A DESK_PROVE that is
+# set is left as it is, and CI, which puts the same build on PATH, proves with the same binary.
 EVALS = uv run --project backend --group evals
+DESK_PROVE ?= $(CURDIR)/kernel/target/release/desk-prove
+TIER1_PROVE = $(if $(filter file,$(origin DESK_PROVE)),$(if $(wildcard $(DESK_PROVE)),DESK_PROVE="$(DESK_PROVE)" ))
 
 evals-unit:
 	$(EVALS) pytest evals/tests -q
@@ -210,10 +216,10 @@ evals-tier1-stub:
 	$(EVALS) python -m evals.run tier1 --target stub
 
 evals-tier1-kernel:
-	$(EVALS) python -m evals.run tier1 --target kernel
+	$(TIER1_PROVE)$(EVALS) python -m evals.run tier1 --target kernel
 
 evals-tier1-api:
-	$(EVALS) python -m evals.run tier1 --target api
+	$(TIER1_PROVE)$(EVALS) python -m evals.run tier1 --target api
 
 evals-tier1:
 	$(MAKE) evals-unit
