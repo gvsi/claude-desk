@@ -81,7 +81,9 @@ key's advisory lock before the `versions` lock. The startup rebuild of a version
 stored (`activation.rebuild_version`) takes the same `versions` lock and active row `FOR UPDATE`,
 then the ledger head; the owner alert it writes when it can't rebuild is an insert under a fresh
 key. An owner write refused for a document canary (`desks.refuse_public_canaries`) appends in its
-`persist` alone, holding nothing else, to each Desk it names in ID order; the public page's owner
+`persist` alone, holding nothing else, to each Desk it names in ID order, and one refused past a
+Desk's cap of documents or knowledge items (`labels.refuse_past_cap`, counted without a lock under
+the Desk row's) to its Desk likewise; the public page's owner
 alert when it withholds a field is an insert under a fresh key, in a read that locks nothing.
 
 A route refuses with `KernelFailure`. Its answer is always a `KernelError{code}`; when the refusal

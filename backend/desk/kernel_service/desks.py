@@ -42,7 +42,7 @@ from zoneinfo import available_timezones
 
 import desk_kernel
 from fastapi import Request
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 
 from desk.contracts import (BusinessSeed, Claim, DeskSeed, Fact, HoursWindow, Label, LedgerEvent, SeedDocument,
@@ -74,6 +74,7 @@ DAY_END = 24 * 60                         # an hours window ending at 00:00 ends
 HOURS_FACT = "charter:hours"
 TIMEZONES = frozenset(available_timezones())   # the IANA names the time zone database lists
 MAX_DOCUMENT_BYTES = 200 * 1024
+MAX_DOCUMENTS = 50                        # on one Desk, each a canary every scan looks for
 MAX_CONTACT = 120                         # characters of a contact on record
 MASKING = frozenset("•*")                 # what a masked contact holds and a real one never does
 EMAIL = re.compile(r"[^\s@]+@[^\s@]+\.[^\s@]+")
@@ -105,6 +106,8 @@ def validate_desk(desk: DeskSeed) -> None:
         raise InvalidSeed("contact")
     one_person_per_contact(person.contact for person in desk.people)
     refs = {person.ref for person in desk.people}
+    if len(desk.documents) > MAX_DOCUMENTS:
+        raise InvalidSeed("documents_cap")
     for document in desk.documents:
         check_document(document, refs)
 
@@ -685,10 +688,14 @@ async def put_part(ctx: KernelCtx, request: Request, desk_id: str, part: str, bo
 async def upload_document(ctx: KernelCtx, desk_row: Desk, document: SeedDocument) -> DocumentCreated:
     """`POST /documents`: a document on the Desk, which the caller has locked, written as a seed's
     are (a fresh canary, a title-only fact) and ledgered `desk_data` `{part: "documents", refs:
-    [document_id]}`. Its record owner must be one of the Desk's live people."""
+    [document_id]}`. Its record owner must be one of the Desk's live people, and a Desk holds at most
+    `MAX_DOCUMENTS` (`labels.refuse_past_cap`)."""
     live = {row.ref: row.person_id for row in await ctx.db.scalars(ctx.repo.scoped(select(Person).where(
         Person.desk_id == desk_row.desk_id, Person.removed_at.is_(None))))}
     check_document(document, live)
+    held = (await ctx.db.execute(ctx.repo.scoped(select(func.count(Document.document_id)).where(
+        Document.desk_id == desk_row.desk_id)))).scalar_one()
+    await labels.refuse_past_cap(ctx, desk_row.desk_id, "documents", held, MAX_DOCUMENTS)
     owner_person_id = live[document.record_owner_ref] if document.record_owner_ref is not None else None
     document_id = write_document(ctx, desk_row.copy_id, desk_row.desk_id, document, owner_person_id, ctx.clock.now())
     await ctx.db.flush()

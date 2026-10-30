@@ -9,9 +9,19 @@ import random
 import time
 from collections.abc import Mapping
 
-from desk.kernel_service import labels, reply_check
+from fastapi import FastAPI
+from sqlalchemy import select
 
-from .test_labels_hardening import disguises
+from desk.contracts import SeedDocument
+from desk.db.models import Document
+from desk.db.models import KnowledgeItem as KnowledgeRow
+from desk.kernel_api import DeskCreated
+from desk.kernel_service import desks, labels, reply_check
+
+from .helpers import kernel_ctx, rows_of
+from .test_adapters import Rivera, rivera
+from .test_desk_writes import LOPEZ_DESK, desks_of, entries_of, new_desk, post_desk, upload
+from .test_labels_hardening import disguises, knowledge, post_knowledge, stored
 
 
 def test_a_scan_with_no_canaries_reads_nothing(monkeypatch):
@@ -128,3 +138,64 @@ def test_a_hundred_canaries_cost_about_what_one_does():
     one = dict(list(canaries.items())[:1])
     assert labels.canary_spans(text, canaries) == []
     assert fastest(lambda: labels.canary_spans(text, canaries)) < 3 * fastest(lambda: labels.canary_spans(text, one))
+
+
+async def add_documents(app: FastAPI, copy: Rivera, count: int) -> None:
+    """Test only: `count` more documents on the Desk, written as an upload writes them."""
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        for number in range(count):
+            desks.write_document(ctx, copy.copy_id, copy.desk_id, SeedDocument(
+                ref=f"note-{number}", title="Job note", body="Checked the shutoff valve."), None, ctx.clock.now())
+
+
+async def test_a_desk_holds_at_most_fifty_documents(app, client):
+    """Each document's canary is looked for in every scan, so a Desk holds at most 50 documents: the
+    51st is refused (422 `invalid`), written nowhere and ledgered `desk_data` `{part: "documents",
+    refused: "cap"}`. Another Desk of the copy has its own 50, and a new Desk's seed is held to the
+    same number."""
+    copy = await rivera(app, client)                                  # with Dana's invoice and Bob's warranty
+    await add_documents(app, copy, desks.MAX_DOCUMENTS - 3)
+    response = await upload(client, copy, {"ref": "price-sheet", "title": "Price sheet", "body": "Rates."})
+    assert response.status_code == 200, response.text                 # the 50th
+    before = len(await entries_of(app, copy))
+    response = await upload(client, copy, {"ref": "one-more", "title": "One more", "body": "Rates."})
+    assert (response.status_code, response.json()) == (422, {"code": "invalid"})
+    assert len(await rows_of(app, copy.copy_id, select(Document))) == desks.MAX_DOCUMENTS == 50
+    [entry] = (await entries_of(app, copy))[before:]
+    assert (entry.event.kind, entry.event.summary) == ("desk_data", {"part": "documents", "refused": "cap"})
+
+    # another Desk of the copy starts with its own, and a new Desk brings at most 50
+    seeded = [SeedDocument(ref=f"estimate-{n}", title="Estimate", body="Panel upgrade.") for n in range(50)]
+    response = await post_desk(client, copy, new_desk(desk=LOPEZ_DESK.model_copy(update={"documents": seeded})))
+    assert response.status_code == 200, response.text
+    lopez = DeskCreated.model_validate(response.json()).desk_id
+    assert len(await rows_of(app, copy.copy_id, select(Document).where(Document.desk_id == lopez))) == 50
+    many = [*seeded, SeedDocument(ref="estimate-50", title="Estimate", body="Panel upgrade.")]
+    response = await post_desk(client, copy, new_desk(desk=LOPEZ_DESK.model_copy(update={"documents": many})))
+    assert (response.status_code, response.json()) == (422, {"code": "invalid"})
+    assert len(await desks_of(app, copy)) == 2
+
+
+async def test_a_desk_holds_at_most_two_hundred_knowledge_items(app, client):
+    """A visitor's context scans each knowledge item, so a Desk holds at most 200: a new item past
+    them is refused (422 `invalid`), written nowhere and ledgered `desk_data` `{part: "knowledge",
+    refused: "cap"}`, while an item already there may still be replaced."""
+    copy = await rivera(app, client)
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        ctx.db.add_all(KnowledgeRow(desk_id=copy.desk_id, item_id=f"kb-{number}", copy_id=copy.copy_id, source="upload",
+                                    title="Note", text="Street parking is fine.", readers=["owner"])
+                       for number in range(labels.MAX_KNOWLEDGE_ITEMS - 1))
+    await stored(client, copy, knowledge("kb-tools", "Tools", "Maria brings a drain camera.", ["public"]))   # the 200th
+    before = len(await entries_of(app, copy))
+    response = await post_knowledge(client, copy, knowledge("kb-one-more", "One more", "A note.", ["public"]))
+    assert (response.status_code, response.json()) == (422, {"code": "invalid"})
+    assert len(await rows_of(app, copy.copy_id, select(KnowledgeRow))) == labels.MAX_KNOWLEDGE_ITEMS == 200
+    [entry] = (await entries_of(app, copy))[before:]
+    assert (entry.event.kind, entry.event.summary) == ("desk_data", {"part": "knowledge", "refused": "cap"})
+    # replacing one already there adds none
+    replaced = await stored(client, copy, knowledge("kb-tools", "Tools", "Maria brings a drain camera and a jetter.",
+                                                    ["public"]))
+    assert replaced.text.endswith("a jetter.")
+    assert len(await rows_of(app, copy.copy_id, select(KnowledgeRow))) == 200

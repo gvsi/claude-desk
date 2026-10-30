@@ -46,7 +46,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import NamedTuple
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from desk.contracts import Fact, KnowledgeItem, Label, LedgerEvent
@@ -410,10 +410,34 @@ def fact_of(row: FactRow) -> Fact:
                 expires_at=row.expires_at)
 
 
+# ---- Caps -----------------------------------------------------------------------------------------
+#
+# Every scan looks for each of the copy's canaries, and a visitor's context is scanned item by item,
+# so a Desk holds at most `desks.MAX_DOCUMENTS` documents and `MAX_KNOWLEDGE_ITEMS` knowledge items.
+
+
+async def refuse_past_cap(ctx: KernelCtx, desk_id: str, part: str, held: int, cap: int) -> None:
+    """Refuses a write that would put more than `cap` rows of `part` on the Desk, which holds `held`
+    and which the caller has locked: 422 `invalid`, ledgered `desk_data` `{part, refused: "cap"}` on
+    the Desk after the request's transaction has rolled back, as other refused owner input is."""
+    if held >= cap:
+        raise KernelFailure(422, "invalid", f"{part}_cap", persist=functools.partial(
+            _ledger_past_cap, copy_id=ctx.copy_id, desk_id=desk_id, part=part))
+
+
+async def _ledger_past_cap(ctx: KernelCtx, *, copy_id: str, desk_id: str, part: str) -> None:
+    """A write refused past its cap, on the Desk's ledger, in the fresh transaction
+    `KernelFailure.persist` runs in."""
+    ctx.bind(copy_id)
+    await ledger.append(ctx, copy_id=copy_id, desk_id=desk_id, event=LedgerEvent(
+        kind="desk_data", origin="kernel", summary={"part": part, "refused": "cap"}))
+
+
 # ---- Knowledge ------------------------------------------------------------------------------------
 
 KNOWLEDGE_READERS = (["owner"], ["public"])
 MAX_KNOWLEDGE_BYTES = 100 * 1024
+MAX_KNOWLEDGE_ITEMS = 200                             # on one Desk
 MAX_KNOWLEDGE_TITLE = 200
 KNOWLEDGE_ID = REF                                     # as `desk_data` entries carry refs
 
@@ -443,11 +467,15 @@ async def store_knowledge(ctx: KernelCtx, desk_id: str, item: KnowledgeItem) -> 
     everyone's (`["owner"]` or `["public"]`, with no record owner), the text at most 100 KiB and
     the title at most 200 characters, both text Postgres can hold, and the ID one the ledger can
     name (`^[A-Za-z0-9_-]{1,64}$`) holding no canary, since the ledger and every reader of the
-    item see its ID as it is."""
+    item see its ID as it is. A new item on a Desk that holds `MAX_KNOWLEDGE_ITEMS` already is
+    refused too (`refuse_past_cap`); one replacing an item there is not."""
     _check_knowledge(item)
     canaries = await copy_canaries(ctx)
     if find_canaries(item.item_id, canaries):
         raise KernelFailure(422, "invalid", "knowledge_id_canary")
+    others = (await ctx.db.execute(ctx.repo.scoped(select(func.count(KnowledgeRow.item_id)).where(
+        KnowledgeRow.desk_id == desk_id, KnowledgeRow.item_id != item.item_id)))).scalar_one()
+    await refuse_past_cap(ctx, desk_id, "knowledge", others, MAX_KNOWLEDGE_ITEMS)
     forced = bool(find_canaries_in([item.title, item.text], canaries))
     readers = list(OWNER_ONLY) if forced else list(item.label.readers)
     insert = pg_insert(KnowledgeRow).values(desk_id=desk_id, item_id=item.item_id, copy_id=ctx.copy_id,
