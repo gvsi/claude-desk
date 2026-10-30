@@ -1,10 +1,11 @@
-# Spanish words free prose may not use: amounts, percentages, dates and promises reach a visitor
-# only in cards rendered from the business's records. One `<category>\t<regex>` per line, matched
-# case-insensitively as whole words on the prose with accents and other marks dropped ("dólares"
-# is matched as "dolares"), each run of whitespace read as one space and every dash and hyphen as
-# "-" ("fin‐de‐semana" with U+2010 is "fin-de-semana"). Categories: number, money, percent and
-# date (number_in_prose), and promise (promise_word). Both lexicons run on every draft, whatever
-# its language.
+# Spanish words free prose may not use: amounts, percentages, dates, promises and bookings reach a
+# visitor only in cards rendered from the business's records. One `<category>\t<regex>` per line,
+# matched case-insensitively as whole words on the prose with accents and other marks dropped
+# ("dólares" is matched as "dolares"), each run of whitespace read as one space and every dash and
+# hyphen as "-" ("fin‐de‐semana" with U+2010 is "fin-de-semana"). Categories: number, money,
+# percent and date (number_in_prose), and promise and booking (promise_word). A booking claim with
+# a condition straight before it ("cuando tu cita está confirmada") passes (`BOOKING_CONDITION`
+# in reply_check.py). Both lexicons run on every draft, whatever its language.
 
 # Spelled-out numbers. A bare "uno", "una", "once" or "medio" counts only next to a unit or another
 # number word, so "una pregunta" passes; "las once" and "la una" are clock times (below).
@@ -45,3 +46,10 @@ promise	entradas?[\s-]+libres?
 promise	libres?[\s-]+de[\s-]+(?:costos?|costes?|cargos?|pagos?|impuestos?)
 promise	libres?(?=[\s-]+(?:para|a)[\s-]+(?:tod[oa]s|todo[\s-]+el[\s-]+mundo|cualquiera)\b)
 promise	libres?(?=[\s-]+(?:(?:para|a)[\s-]+(?:(?:el|la|l[oa]s|nuestr[oa]s?|sus?|tus?)[\s-]+)?|al[\s-]+)(?:soci[oa]s?|miembros?|clientes?|publico|usted(?:es)?|ti|vos(?:otros|otras)?)\b)
+
+# Booking confirmations, which only a booking card makes ("está" and "estás" without the accent):
+# "tu cita está confirmada", "su visita queda agendada", "ya estás reservado". The second line
+# starts at "ya" when it is there and leaves "cita está confirmada" to the first, so one claim is
+# one match.
+booking	(?:tu|su|la)[\s-]+(?:cita|reserva|visita)[\s-]+(?:ya[\s-]+)?(?:esta|queda|ha[\s-]+quedado|ha[\s-]+sido)[\s-]+(?:confirmad|reservad|agendad)a
+booking	(?<!ya[\s-])(?<!cita[\s-])(?<!reserva[\s-])(?<!visita[\s-])(?:ya[\s-]+)?(?:estas|esta)[\s-]+(?:reservad|confirmad|agendad)[oa]

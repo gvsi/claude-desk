@@ -1,10 +1,11 @@
-# English words free prose may not use: amounts, percentages, dates and promises reach a visitor
-# only in cards rendered from the business's records. One `<category>\t<regex>` per line, matched
-# case-insensitively as whole words on the prose with accents and other marks dropped, each run of
-# whitespace read as one space, every dash and hyphen as "-" ("next‐week" with U+2010 is
+# English words free prose may not use: amounts, percentages, dates, promises and bookings reach a
+# visitor only in cards rendered from the business's records. One `<category>\t<regex>` per line,
+# matched case-insensitively as whole words on the prose with accents and other marks dropped, each
+# run of whitespace read as one space, every dash and hyphen as "-" ("next‐week" with U+2010 is
 # "next-week") and every apostrophe as "’" ("oʼclock" is "o’clock"). Categories: number, money,
-# percent and date (number_in_prose), and promise (promise_word). Both lexicons run on every
-# draft, whatever its language.
+# percent and date (number_in_prose), and promise and booking (promise_word). A booking claim
+# with a condition straight before it ("once you're booked") passes (`BOOKING_CONDITION` in
+# reply_check.py). Both lexicons run on every draft, whatever its language.
 
 # Spelled-out numbers. A bare "one" counts only next to a unit or another number word, so "one
 # moment" passes.
@@ -49,3 +50,10 @@ promise	free(?=[\s-]+to[\s-]+(?:students?|seniors?|kids|children|famil(?:y|ies)|
 promise	discount(?:s|ed|ing)?|refund(?:s|ed|ing|able)?|waiv(?:e|es|ed|er|ing)|complimentary
 promise	no[\s-]+charge|on[\s-]+the[\s-]+house|warrant(?:y|ies)|money[\s-]+back
 promise	(?:at[\s-]+)?no[\s-]+(?:extra[\s-]+|additional[\s-]+)?cost
+
+# Booking confirmations, which only a booking card makes: "you're booked", "I've booked you",
+# "your visit is confirmed", "you've been booked".
+booking	you(?:['’]?re|[\s-]+are)[\s-]+(?:(?:all|now|already)[\s-]+)?(?:booked|confirmed|scheduled|set)
+booking	(?:i|we)(?:['’]ve|[\s-]+have)?[\s-]+(?:booked|scheduled|confirmed)[\s-]+(?:you|your[\s-]+(?:booking|appointment|visit))
+booking	(?:your|the)[\s-]+(?:booking|appointment|visit)[\s-]+(?:is|has[\s-]+been)[\s-]+(?:(?:all|now|already)[\s-]+)?(?:booked|confirmed|scheduled|set)
+booking	you(?:['’]ve|[\s-]+have)[\s-]+been[\s-]+(?:booked|confirmed|scheduled)

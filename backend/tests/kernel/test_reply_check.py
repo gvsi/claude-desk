@@ -29,6 +29,7 @@ from desk.db.models import ActorSession, Business, Desk, Document
 from desk.db.models import Fact as FactRow
 from desk.kernel_api import PublicDesk
 from desk.kernel_service import lang, ledger, reply_check
+from desk.kernel_service.decisions import SoftPromiseVerdict
 from scripts import lookalikes
 
 from .fakes import FakeDecisions
@@ -266,6 +267,8 @@ HYPHENATED = [                       # lexicon phrases whose words a dash may jo
     ("same-day", "lex.en.date"), ("fin-de-semana", "lex.es.date"), ("la-próxima-semana", "lex.es.date"),
     ("sin-costo", "lex.es.promise"), ("de-regalo", "lex.es.promise"), ("el-mismo-día", "lex.es.date"),
     ("entrada-libre", "lex.es.promise"), ("libre-de-impuestos", "lex.es.promise"),
+    ("you're-booked", "lex.en.booking"), ("your-visit-is-confirmed", "lex.en.booking"),
+    ("tu-cita-está-confirmada", "lex.es.booking"), ("ya-estás-reservado", "lex.es.booking"),
 ]
 
 
@@ -296,6 +299,9 @@ def test_every_apostrophe_reads_as_the_plain_one(apostrophe):
         assert [(v.rule_id, v.span) for v in reply_check.scan_prose(prose)] == exempt, prose
     found = reply_check.scan_prose(f"As a member you{apostrophe}re free to all classes.")
     assert [(v.rule_id, v.span) for v in found] == [("lex.en.promise", "free")]
+    booked = f"You{apostrophe}re booked"
+    found = reply_check.scan_prose(f"{booked}.")
+    assert [(v.rule_id, v.span) for v in found] == [("lex.en.booking", reply_check.shown(booked))]
 
 
 @pytest.mark.parametrize(("prose", "rule_id"), [
@@ -526,6 +532,94 @@ async def test_card_text_is_headline_then_details(app, client, reviewer):
                             [clause("booking_confirmed", booking.fact_id)])
     assert (spanish.blocks[1].title, spanish.blocks[1].lines) == (
         "lunes 2 de noviembre", ["Llegada de 10:00 a 12:00", "Con Maria Rivera"])
+
+
+# The soft-promise check finding nothing beyond the cards, so a block below is the code's own.
+NOTHING_BEYOND_THE_CARDS = SoftPromiseVerdict(promises_beyond_cards=False, denies_being_ai=False)
+
+
+async def test_a_booking_claim_beside_its_card_is_blocked(app, client, reviewer):
+    """A booking appears only in its card: "You're booked." is blocked even beside the booking card
+    it repeats, by the prose scan, before the soft-promise check is asked."""
+    copy, visitor = await visitor_of(app, client)
+    booking = await own_booking(client, reviewer, visitor)
+    reviewer.soft_answer = NOTHING_BEYOND_THE_CARDS
+    verdict = await checked(client, visitor, "You're booked.", [clause("booking_confirmed", booking.fact_id)])
+    assert [(v.kind, v.rule_id, v.span) for v in verdict.violations] == [
+        ("promise_word", "lex.en.booking", "You're booked")]
+    assert_handed_off(verdict)
+    assert reviewer.soft_inputs == []
+
+
+async def test_a_reply_naming_only_the_card_passes(app, client, reviewer):
+    """Prose that points at the booking card, and claims nothing itself, is shown with it."""
+    copy, visitor = await visitor_of(app, client)
+    booking = await own_booking(client, reviewer, visitor)
+    reviewer.soft_answer = NOTHING_BEYOND_THE_CARDS
+    for prose, language in (("The booking is below.", "en"), ("Abajo tiene los datos de su reserva.", "es")):
+        verdict = await checked(client, visitor, prose, [clause("booking_confirmed", booking.fact_id)])
+        assert (verdict.ok, verdict.violations, verdict.language) == (True, [], language)
+        assert [(block.kind, block.template) for block in verdict.blocks] == [("prose", None),
+                                                                              ("card", "booking_confirmed")]
+
+
+@pytest.mark.parametrize(("prose", "rule_id", "span"), [
+    ("You're booked.", "lex.en.booking", "You're booked"),
+    ("You are all set.", "lex.en.booking", "You are all set"),
+    ("You’re now confirmed for that time.", "lex.en.booking", "You’re now confirmed"),
+    ("You're already scheduled.", "lex.en.booking", "You're already scheduled"),
+    ("I've booked you in.", "lex.en.booking", "I've booked you"),
+    ("We have scheduled you with Maria.", "lex.en.booking", "We have scheduled you"),
+    ("We've confirmed you.", "lex.en.booking", "We've confirmed you"),
+    ("I booked you with Maria.", "lex.en.booking", "I booked you"),
+    ("I've confirmed your appointment.", "lex.en.booking", "I've confirmed your appointment"),
+    ("Your booking is confirmed.", "lex.en.booking", "Your booking is confirmed"),
+    ("Your appointment is set.", "lex.en.booking", "Your appointment is set"),
+    ("Your visit is now scheduled.", "lex.en.booking", "Your visit is now scheduled"),
+    ("The appointment has been confirmed.", "lex.en.booking", "The appointment has been confirmed"),
+    ("You've been booked.", "lex.en.booking", "You've been booked"),
+    ("Your booking is aIready confirmed.", "lex.en.booking", "Your booking is aIready confirmed"),   # I for l
+    ("Tu cita está confirmada.", "lex.es.booking", "Tu cita está confirmada"),
+    ("Su visita queda agendada.", "lex.es.booking", "Su visita queda agendada"),
+    ("Su reserva ya está confirmada.", "lex.es.booking", "Su reserva ya está confirmada"),
+    ("La cita ha quedado reservada.", "lex.es.booking", "La cita ha quedado reservada"),
+    ("Ya estás reservado.", "lex.es.booking", "Ya estás reservado"),
+    ("Está confirmada.", "lex.es.booking", "Está confirmada"),
+    ("Usted ya está agendado con Maria.", "lex.es.booking", "ya está agendado"),
+])
+def test_booking_claims_in_prose_are_blocked(prose, rule_id, span):
+    """Only a booking card says a visit is booked: the claim in prose is a promise word, in English
+    and Spanish, whatever card is beside it."""
+    assert [(v.kind, v.rule_id, v.span) for v in reply_check.scan_prose(prose)] == [("promise_word", rule_id, span)]
+
+
+def test_booking_claims_read_lookalike_letters():
+    """Letters of another script that look like Latin ones are read as them in a booking claim too
+    (and the word mixing scripts is blocked on its own)."""
+    found = [(v.rule_id, v.span) for v in reply_check.scan_prose("You're bооked.")]   # Cyrillic o
+    assert found == [("lex.en.booking", "You're bооked"), ("mixed_script", "bооked")]
+    found = [(v.rule_id, v.span) for v in reply_check.scan_prose("Tu citа está confirmada.")]   # Cyrillic a
+    assert found == [("lex.es.booking", "Tu citа está confirmada"), ("mixed_script", "citа")]
+
+
+@pytest.mark.parametrize("prose", [
+    "Once you're booked, Maria will text you.",
+    "When your visit is confirmed, you'll get a message.",
+    "If you're booked already, I can look it up.",
+    "IF YOU'RE BOOKED, MARIA WILL CALL.",                   # a capital I is read as l too
+    "As soon as you are scheduled, Maria will reach out.",
+    "After we've booked you, Maria will reach out.",
+    "Until your appointment is confirmed, the time isn't held.",
+    "Cuando tu cita esté confirmada, te escribimos.",
+    "Cuando tu cita está confirmada, Maria te escribe.",
+    "Si ya está confirmada, Maria le avisa.",
+    "SI YA ESTÁ CONFIRMADA, MARIA LE AVISA.",
+    "Una vez que su reserva queda confirmada, le llega un mensaje.",
+])
+def test_a_condition_before_a_booking_claim_passes(prose):
+    """A condition straight before the claim says what happens once a booking exists, which claims
+    none: "once you're booked", "cuando tu cita esté confirmada"."""
+    assert reply_check.scan_prose(prose) == []
 
 
 def verify_verdict(public_key_hex: str, session_id: str, verdict: ReplyVerdict) -> None:

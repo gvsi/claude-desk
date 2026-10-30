@@ -65,7 +65,14 @@ NUMBER_SEPARATORS = frozenset(".,:'’ ")                        # inside one nu
 
 LEXICON_DIR = Path(__file__).resolve().parent / "lexicon"
 CATEGORIES = {"number": "number_in_prose", "money": "number_in_prose", "percent": "number_in_prose",
-              "date": "number_in_prose", "promise": "promise_word"}
+              "date": "number_in_prose", "promise": "promise_word", "booking": "promise_word"}
+# A condition straight before a booking claim, on folded text in either language: "once you're
+# booked", "cuando tu cita está confirmada" say what happens once a booking exists and claim none.
+# Each i may be an l, as the capital-I reading writes it ("IF" is read as "lF" too).
+BOOKING_CONDITION = re.compile(
+    r"(?<!\w)(?:once|whenever|when|[il]f|after|before|unt[il]l|t[il]ll|unless|as soon as"
+    r"|cuando|s[il]|una vez que|en cuanto|apenas|tan pronto como|despues de que|antes de que|hasta que) \Z",
+    re.IGNORECASE)
 
 
 # Default-ignorable code points beyond category Cf (Unicode's DerivedCoreProperties): the combining
@@ -266,9 +273,10 @@ def scan_prose(text: str, canaries: Iterable[str] = (), names: Iterable[str] = (
     letters shaped like 0 or 1 next to it in the same span, and a word made only of such letters
     unless it is plain ASCII), currency sign (`currency`) or percent sign (`percent_sign`) and
     every match of both lexicons (`lex.<lang>.<category>`) is `number_in_prose`, or `promise_word`
-    for the promise category; a word mixing Latin letters with another script is
-    `unsupported_language` (`mixed_script`), unless it lies inside one of `names` (the Desk's own
-    names) as it is written there; a canary verbatim is `canary`. The lexicons read lookalike
+    for the promise and booking categories, but for a booking claim with a condition straight
+    before it (`BOOKING_CONDITION`: "once you're booked"); a word mixing Latin letters with another
+    script is `unsupported_language` (`mixed_script`), unless it lies inside one of `names` (the
+    Desk's own names) as it is written there; a canary verbatim is `canary`. The lexicons read lookalike
     letters as the Latin ones, a bare stroke both as l and as I, an ASCII capital I as l too, every
     dash and hyphen as "-" and every apostrophe as "’", an acute accent (a space and a combining
     acute after NFKC) both as that space and as "’". Canaries come first, then the rest in the
@@ -306,9 +314,11 @@ def scan_prose(text: str, canaries: Iterable[str] = (), names: Iterable[str] = (
     for language, entries in LEXICONS.items():
         for category, pattern in entries:
             rule_id = f"lex.{language}.{category}"
-            for origin, match in ((origin, match) for reading, origin in readings.items()
-                                  for match in pattern.finditer(reading)):
+            for reading, origin, match in ((reading, origin, match) for reading, origin in readings.items()
+                                           for match in pattern.finditer(reading)):
                 if match.end() == match.start():
+                    continue
+                if category == "booking" and BOOKING_CONDITION.search(reading, 0, match.start()):
                     continue
                 start, end = origin[match.start()], origin[match.end() - 1] + 1
                 if (rule_id, start, end) in seen:
