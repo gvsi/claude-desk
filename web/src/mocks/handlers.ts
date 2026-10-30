@@ -33,7 +33,7 @@ export const EPOCH_PARAM = 'mock_epoch';
 const EPOCH_IN_QUERY = new RegExp(`[?&]${EPOCH_PARAM}=(\\d+)$`);
 
 /** The request's URL as the app sent it, with any epoch parameter taken off, and the epoch it was stamped with. */
-function unstamped(request: Request): { url: URL; epoch: number | undefined } {
+export function unstamped(request: Request): { url: URL; epoch: number | undefined } {
   const url = new URL(request.url);
   const inQuery = EPOCH_IN_QUERY.exec(url.search);
   if (inQuery) url.search = url.search.slice(0, inQuery.index);

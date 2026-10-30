@@ -16,8 +16,9 @@
  * every request with the epoch it was sent in, because the service worker hands a request to the
  * store a few milliseconds after the page sends it: one the last test's page sent just before it
  * ended would otherwise be recorded in the next test and applied to its copy. The store drops a
- * request from an earlier epoch like a lost connection, unrecorded and unapplied. A `reset` inside
- * a test keeps the epoch, so a page still on screen goes on reaching the new copy.
+ * request from an earlier epoch like a lost connection, unrecorded and unapplied. A bare `reset`
+ * keeps the epoch, so a page still on screen goes on reaching the new copy; a render from a seed
+ * (renderRoute) unmounts the page first and starts a new epoch, as a new test does.
  *
  * The mock ships in no build: it runs under `npm run dev:mock` and in tests only.
  */

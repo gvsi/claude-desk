@@ -1,10 +1,11 @@
 /**
  * Setup for the `screens` project: the app's styles, as `main.tsx` loads them; the mock API's
- * service worker, started once, with every `/api/` request stamped with the test it was sent in; a
- * fresh Rivera copy before every test, which nothing the last test's page sent late can reach; and
- * after it, a clean slate (the app unmounted, handlers a test added dropped, poll intervals at real
- * time, the browser's own languages) and no request to an `/api/` path the mock doesn't serve,
- * unless the test took it as expected with `mockStore.takeUnhandled`.
+ * service worker, started once, with every fetch and EventSource request to `/api/` stamped with
+ * the test it was sent in; a fresh Rivera copy before every test, which none of those the last
+ * test's page sent late can reach; and after it, a clean slate (the app unmounted, handlers a test
+ * added dropped, poll intervals at real time, the browser's own languages) and no request to an
+ * `/api/` path the mock doesn't serve, unless the test took it as expected with
+ * `mockStore.takeUnhandled`.
  */
 import { afterEach, beforeAll, beforeEach, expect } from 'vitest';
 import { cleanup } from 'vitest-browser-react';
