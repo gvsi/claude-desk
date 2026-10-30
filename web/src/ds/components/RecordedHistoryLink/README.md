@@ -4,7 +4,7 @@
 
 ## When to use
 
-- Once on each page that lists replayed rows, and only when some are listed:
+- Once in each section that lists replayed rows, and only when some are listed:
   - under the Conversations title;
   - beside Safety's summary line, when replayed attempts count in it;
   - under People's Leads header;
