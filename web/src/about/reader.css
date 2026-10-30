@@ -600,3 +600,437 @@
 .cd-about-nowrap {
   white-space: nowrap;
 }
+
+/* The reading page, as the reader boards draw it. On a desktop: a top bar, the centered title, summary and
+   lead figure, then the contents list, the article and its details in three columns, the article
+   size-article-measure wide and the columns beside it size-article-side. Below the page's breakpoint
+   (ReaderPage's NARROW), one column: the contents list folds into a row and the details into a line under
+   the summary. Every space is a token or a sum of tokens; the only raw lengths are hairlines. A rule that
+   changes what a type class sets (a weight, a line height) is scoped under .cd-about-page, so it holds
+   whichever stylesheet loads first. */
+
+.cd-about-page {
+  /* The page's side gutter and the gap between its columns. */
+  --about-gutter: calc(var(--space-40) * 2);
+  --about-gap: calc(var(--space-32) * 2);
+  /* The space between the hero and the body, and above the hero. */
+  --about-step: calc(var(--space-16) * 7);
+  min-height: 100dvh;
+  background: var(--bg-app);
+  color: var(--text-primary);
+}
+
+@media (max-width: 1335.98px) {
+  .cd-about-page {
+    --about-gutter: var(--space-40);
+    --about-gap: var(--space-40);
+  }
+}
+
+/* The top bar: the product's name, the document switch and the way back (BackLink.css). */
+
+.cd-about-top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-24);
+  height: calc(var(--space-32) * 2);
+  padding: 0 var(--about-gutter);
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+.cd-about-brand {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-10);
+}
+
+.cd-about-brand .cd-mark {
+  margin-top: var(--space-2);
+}
+
+.cd-about-switch {
+  display: flex;
+  gap: var(--space-4);
+  margin-left: auto;
+}
+
+.cd-about-switch__link {
+  display: inline-flex;
+  align-items: center;
+  height: var(--size-control);
+  padding: 0 var(--space-12);
+  border-radius: var(--radius-full);
+  color: var(--text-secondary);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.cd-about-switch__link:hover {
+  background: var(--fill-hover);
+  color: var(--text-primary);
+}
+
+.cd-about-switch__link[aria-current='page'] {
+  background: var(--fill-secondary);
+  color: var(--text-primary);
+}
+
+/* The hero: "About this prototype", the title, the summary and the lead figure, centered. */
+
+.cd-about-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--about-step) var(--about-gutter) 0;
+  text-align: center;
+}
+
+.cd-about-hero__kicker {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cd-about-page .cd-about-hero__title {
+  max-width: calc(var(--size-content) + var(--space-20));
+  margin: calc(var(--space-20) + var(--space-2)) 0 0;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+
+.cd-about-hero__summary {
+  max-width: calc(var(--size-reading) - var(--space-20));
+  margin: var(--space-24) 0 0;
+  color: var(--text-secondary);
+  text-wrap: balance;
+}
+
+.cd-about-hero__figure {
+  width: 100%;
+  max-width: calc(var(--size-article-measure) + 2 * var(--size-article-side) - var(--space-8));
+  margin-top: calc(var(--space-24) * 3);
+}
+
+/* The body: the contents list, the article and its details. The side columns grow with the window, so the
+   article stays centered with the contents list and the details at the gutters. */
+
+.cd-about-body {
+  display: grid;
+  grid-template-columns:
+    minmax(var(--size-article-side), 1fr) minmax(0, var(--size-article-measure))
+    minmax(var(--size-article-side), 1fr);
+  column-gap: var(--about-gap);
+  max-width: calc(var(--size-article-measure) + 4 * var(--size-article-side) + 2 * var(--about-gutter));
+  margin: 0 auto;
+  padding: var(--about-step) var(--about-gutter) 0;
+}
+
+.cd-about-page .cd-about-side-label {
+  margin: 0 0 var(--space-14);
+  font-weight: 520;
+  color: var(--text-secondary);
+}
+
+.cd-about-contents {
+  position: sticky;
+  top: var(--space-24);
+  align-self: start;
+  width: var(--size-article-side);
+}
+
+.cd-about-contents__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+.cd-about-contents__list li {
+  border-top: 1px solid var(--line-hairline);
+}
+
+.cd-about-contents__link {
+  display: flex;
+  gap: var(--space-14);
+  padding: var(--space-10) 0;
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.cd-about-contents__link:hover {
+  color: var(--accent-blue);
+}
+
+.cd-about-page .cd-about-contents__number {
+  flex: none;
+  width: var(--space-20);
+  font-family: var(--font-mono);
+  line-height: var(--space-20);
+  color: var(--text-secondary);
+}
+
+.cd-about-meta {
+  align-self: start;
+  justify-self: end;
+  width: var(--size-article-side);
+}
+
+.cd-about-meta dl {
+  margin: 0;
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+.cd-about-meta dl > div {
+  display: grid;
+  grid-template-columns: calc(var(--space-40) * 2 + var(--space-4)) minmax(0, 1fr);
+  gap: var(--space-12);
+  padding: var(--space-10) 0;
+  border-top: 1px solid var(--line-hairline);
+}
+
+.cd-about-meta dt {
+  font-weight: 520;
+  color: var(--text-primary);
+}
+
+.cd-about-meta dd {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+/* The article: the document in serif, its headings in sans. Only the article's own blocks: a figure inside
+   it lays out its paragraphs and lists itself. */
+
+.cd-about-column {
+  min-width: 0;
+}
+
+.cd-about-article > p {
+  margin: 0 0 var(--space-24);
+  text-wrap: pretty;
+}
+
+.cd-about-article > h2 {
+  margin: calc(var(--space-32) * 2) 0 calc(var(--space-16) + var(--space-2));
+  letter-spacing: -0.013em;
+  scroll-margin-top: var(--space-24);
+}
+
+.cd-about-article > h2:first-child {
+  margin-top: 0;
+}
+
+.cd-about-article strong {
+  font-weight: 640;
+}
+
+.cd-about-article > ul {
+  margin: 0 0 var(--space-24);
+  padding-left: calc(var(--space-20) + var(--space-2));
+}
+
+.cd-about-article > ul > li {
+  margin: var(--space-6) 0;
+  padding-left: var(--space-4);
+}
+
+/* A figure or table inside the article. */
+.cd-about-article .cd-about-figure,
+.cd-about-article .cd-about-measures,
+.cd-about-article .cd-about-measures-list {
+  margin: var(--space-8) 0 var(--space-32);
+}
+
+/* The pull quote, after the first section. */
+.cd-about-pull {
+  margin: calc(var(--space-28) * 2) 0;
+  padding-top: var(--space-28);
+  border-top: 1px solid var(--line-control);
+}
+
+.cd-about-pull p {
+  margin: 0;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+/* "Read next": the other document, the whole card one link. */
+
+.cd-about-next {
+  position: relative;
+  margin-top: calc(var(--space-24) * 3);
+}
+
+.cd-about-next .cd-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  transition: border-color var(--motion-instant) var(--motion-ease);
+}
+
+.cd-about-next:hover .cd-card {
+  border-color: var(--line-control-hover);
+}
+
+.cd-about-page .cd-about-next__label {
+  margin: 0;
+}
+
+.cd-about-next__link {
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.cd-about-next__link::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-card);
+}
+
+.cd-about-next__link:focus-visible {
+  outline: none;
+}
+
+.cd-about-next__link:focus-visible::after {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 2px;
+}
+
+.cd-about-next__summary {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cd-about-footer {
+  display: flex;
+  justify-content: center;
+  padding: calc(var(--space-32) * 3) var(--about-gutter) calc(var(--space-24) * 2);
+  text-align: center;
+}
+
+/* The phone layout. */
+
+.cd-about-page--compact {
+  --about-gutter: var(--space-20);
+}
+
+.cd-about-top--compact {
+  gap: var(--space-12);
+  height: calc(var(--space-28) * 2);
+  padding: 0 var(--space-16);
+}
+
+.cd-about-top--compact .cd-about-brand {
+  margin-left: auto;
+}
+
+.cd-about-switch--compact {
+  flex-wrap: wrap;
+  gap: var(--space-6);
+  margin: 0;
+  padding: var(--space-12) var(--space-16) 0;
+}
+
+.cd-about-page--compact .cd-about-hero {
+  padding-top: calc(var(--space-24) * 2);
+}
+
+.cd-about-page--compact .cd-about-hero__title {
+  margin-top: var(--space-14);
+}
+
+.cd-about-page--compact .cd-about-hero__summary {
+  margin-top: var(--space-16);
+}
+
+.cd-about-hero__byline {
+  margin: var(--space-20) 0 0;
+  color: var(--text-secondary);
+}
+
+.cd-about-page--compact .cd-about-hero__figure {
+  max-width: var(--size-article-measure);
+  margin-top: calc(var(--space-32) + var(--space-4));
+}
+
+.cd-about-page--compact .cd-about-body {
+  display: block;
+  max-width: calc(var(--size-article-measure) + 2 * var(--about-gutter));
+  padding-top: calc(var(--space-40));
+}
+
+.cd-about-contents--compact {
+  position: static;
+  width: auto;
+  border-top: 1px solid var(--line-hairline);
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+.cd-about-page .cd-about-contents__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  min-height: calc(var(--space-24) * 2);
+  font-weight: 520;
+  color: var(--text-primary);
+  list-style: none;
+  cursor: pointer;
+}
+
+.cd-about-contents__row::-webkit-details-marker {
+  display: none;
+}
+
+.cd-about-contents__count {
+  margin-left: auto;
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.cd-about-contents__chevron {
+  flex: none;
+  color: var(--text-secondary);
+}
+
+.cd-about-contents__fold[open] .cd-about-contents__chevron {
+  transform: rotate(180deg);
+}
+
+.cd-about-contents--compact .cd-about-contents__list {
+  border-bottom: 0;
+}
+
+.cd-about-page--compact .cd-about-article {
+  padding-top: var(--space-32);
+}
+
+.cd-about-page--compact .cd-about-article > p {
+  margin-bottom: var(--space-20);
+}
+
+.cd-about-page--compact .cd-about-article > h2 {
+  margin: calc(var(--space-24) * 2) 0 var(--space-14);
+}
+
+.cd-about-page--compact .cd-about-article > h2:first-child {
+  margin-top: 0;
+}
+
+.cd-about-page--compact .cd-about-pull {
+  margin: var(--space-40) 0;
+}
+
+.cd-about-page--compact .cd-about-next {
+  margin-top: calc(var(--space-24) * 2);
+}
+
+.cd-about-page--compact .cd-about-footer {
+  padding: calc(var(--space-32) * 2) var(--space-20) calc(var(--space-32) + var(--space-4));
+}
+
+/* Between a phone and a desktop the phone chart would scale its words up with its width; its plot stops
+   growing at three quarters of the reading column, centered in its frame. */
+.cd-about-page--compact .cd-about-chart__plot {
+  max-width: calc(var(--size-article-measure) * 0.75);
+  margin: 0 auto;
+}
