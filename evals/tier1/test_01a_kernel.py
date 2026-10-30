@@ -237,35 +237,37 @@ async def test_seeds_activate_only_from_cached_proofs_in_either_mode(k: KernelHa
     assert isinstance(k, KernelTarget)
     from desk.kernel_service import activation   # Plan 01a: where the kernel reads the shipped reports
 
-    with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(activation, "PROOFS_DIR", tmp_path)   # an empty directory: no report
-        for mode, prover in (("symcc", None), ("bounded", NO_PROVER)):
-            if prover is not None:
-                patch.setenv("DESK_PROVE", prover)
+    try:
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(activation, "PROOFS_DIR", tmp_path)   # an empty directory: no report
+            for mode, prover in (("symcc", None), ("bounded", NO_PROVER)):
+                if prover is not None:
+                    patch.setenv("DESK_PROVE", prover)
+                await restart_kernel(k)
+                await k.call("GET /health", auth=Auth.none(), expect=Expect(fields={"proof_mode": mode}))
+                await k.call("POST /copies", body={}, auth=Auth.none(), expect=UNPROVED)
+                await k.call("GET /health", auth=Auth.none(), expect=Expect(fields={
+                    "proof_mode": mode, "unproved_seeds": ["rivera"]}))
+            patch.undo()
+            patch.setenv("DESK_PROVE", NO_PROVER)
             await restart_kernel(k)
-            await k.call("GET /health", auth=Auth.none(), expect=Expect(fields={"proof_mode": mode}))
-            await k.call("POST /copies", body={}, auth=Auth.none(), expect=UNPROVED)
-            await k.call("GET /health", auth=Auth.none(), expect=Expect(fields={
-                "proof_mode": mode, "unproved_seeds": ["rivera"]}))
-        patch.undo()
-        patch.setenv("DESK_PROVE", NO_PROVER)
-        await restart_kernel(k)
-        await k.call("GET /health", auth=Auth.none(), expect=Expect(fields={"proof_mode": "bounded",
-                                                                           "unproved_seeds": []}))
-        desk = await golden_desk(k)   # the cached seed activates in bounded mode
-        assert await active_version(k, desk) == 1
-        checked = await k.call(
-            "POST /policy/draft",
-            body={"desk_id": desk.desk_id, "expected_parent": 1, "cards": [RuleCard(
-                card_id="t18-auto-find-slots", applies_to="native.find_slots", mode="auto", who="anyone",
-                reason="Anyone can see open times.").model_dump(mode="json")]},
-            auth=desk.owner, expect=Expect(fields={"status": "draft", "proof.method": "bounded"}),
-        )
-        assert (checked.proof.cases or 0) > 0, f"a bounded check ran on {checked.proof.cases} cases"
-        await k.call("POST /policy/confirm", body={"desk_id": desk.desk_id, "version": checked.version},
-                     auth=desk.owner, expect=CONFLICT)
-        assert await active_version(k, desk) == 1
-    await restart_kernel(k)   # the prover back, as the target started
+            await k.call("GET /health", auth=Auth.none(), expect=Expect(fields={"proof_mode": "bounded",
+                                                                               "unproved_seeds": []}))
+            desk = await golden_desk(k)   # the cached seed activates in bounded mode
+            assert await active_version(k, desk) == 1
+            checked = await k.call(
+                "POST /policy/draft",
+                body={"desk_id": desk.desk_id, "expected_parent": 1, "cards": [RuleCard(
+                    card_id="t18-auto-find-slots", applies_to="native.find_slots", mode="auto", who="anyone",
+                    reason="Anyone can see open times.").model_dump(mode="json")]},
+                auth=desk.owner, expect=Expect(fields={"status": "draft", "proof.method": "bounded"}),
+            )
+            assert (checked.proof.cases or 0) > 0, f"a bounded check ran on {checked.proof.cases} cases"
+            await k.call("POST /policy/confirm", body={"desk_id": desk.desk_id, "version": checked.version},
+                         auth=desk.owner, expect=CONFLICT)
+            assert await active_version(k, desk) == 1
+    finally:
+        await restart_kernel(k)   # the reports and the prover back, as the target started, even after a failure
     await k.call("GET /health", auth=Auth.none(), expect=Expect(fields={"proof_mode": "symcc"}))
 
 
