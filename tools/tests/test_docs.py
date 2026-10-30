@@ -803,3 +803,21 @@ SAFETY_RULE_TWO = {
 @pytest.mark.parametrize("path", SAFETY_RULE_TWO)
 def test_safety_rule_two_reads_in_the_owners_wording(path):
     assert safety_rule_two(path) == SAFETY_RULE_TWO[path]
+
+
+# The design system's README and the reply card's README follow their list of what reaches a visitor only in cards
+# with the rule's clause on Claude's own words. Claude's prose may restate a policy since the owner's decision of
+# 2026-10-30, so neither list names policies.
+DS_READMES = ("web/src/ds/README.md", "web/src/ds/components/ReplyCard/README.md")
+CLAUDES_OWN_WORDS = REPLY_RULE.split(": ", 1)[1]
+
+
+@pytest.mark.parametrize("path", DS_READMES)
+def test_design_system_readmes_state_the_rule_and_leave_policies_out_of_cards(path):
+    lines = [" ".join(line.split()) for line in (REPO / path).read_text().splitlines()]
+    stating = [line for line in lines if CLAUDES_OWN_WORDS in line]
+    assert stating, f"{path} must carry safety rule 2's clause on Claude's own words"
+    before = stating[0].split(CLAUDES_OWN_WORDS, 1)[0].strip()
+    only_in_cards = re.split(r"(?<=[.!?])\s+", before)[-1].casefold()   # the sentence just before the clause
+    assert "prices" in only_in_cards, f"{path}: the clause must follow the list of what reaches a visitor only in cards"
+    assert "polic" not in only_in_cards, f"{path} lists policies among what reaches a visitor only in cards"

@@ -269,10 +269,10 @@ function claimProblems(text: string): string[] {
   return CLAIM_RULES.filter(([, rule]) => rule.test(normalized)).map(([name]) => name);
 }
 
-// Cards whose text is a statement only the card may make: the charter's hours, contact and
-// policies, the kernel's handoff, verification and callback commitments, and the owner's own
-// words. Prose that restates one carries a policy or a promise outside its card, which invariant 2
-// and the soft-promise check block even when the words hold no number.
+// Cards whose text is a statement: the charter's hours, contact and policies, the kernel's
+// handoff, verification and callback commitments, and the owner's own words. Fixture prose
+// restates no card's statement, so the stories show prose that adds nothing the cards don't
+// already carry.
 const STATEMENT_TEMPLATES: readonly ClauseTemplate[] = [
   'hours', 'contact', 'policy', 'handoff', 'verify_prompt', 'callback_confirmed', 'owner_said',
 ];

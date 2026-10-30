@@ -28,6 +28,7 @@ Talking Claude around can't make it act past the owner's rules, because the kern
 - Keeping secret what a verified session's model context already holds.
 - Within what the owner's rules allow, Claude can still be talked into the actions those rules permit, and into free text that is wrong or unflattering but carries no price, date or promise.
 - Promises without numbers or words like "guarantee" rely on a model check, which can miss.
+- Beside a booking card, the code check lets any booking claim through, since prose doesn't name which booking it means; a claim about another booking, or one that says more than the card, rests on the model check, which can miss.
 - That Claude never writes a look-alike link: links and email addresses in Claude's own replies rest on its prompt.
 - Isolation from a compromised host or container: the kernel is a separate process in the same task, not a separate machine.
 - Denial of service beyond per-visitor rate limits and the hosted demo's daily model budget.
@@ -77,6 +78,7 @@ Talking Claude around can't make it act past the owner's rules, because the kern
 - Within what a verified person is entitled to, Claude can still be talked into unflattering free text.
 - The checks depend on rules being compiled correctly. The proofs compare the compiled policies with a second generator written independently of the compiler, so a compiler bug that widens access goes unnoticed only if the second generator has the same bug.
 - Claims written without numbers or promise words get past the code checks and rely on the model check, which can miss.
+- Beside a booking card, the code check lets any booking claim through, since prose doesn't name which booking it means; a claim about another booking, or one that says more than the card, rests on the model check, which can miss.
 - Claude may write links and email addresses in its own replies. Its prompt tells it to use only the business's own; a look-alike link planted by a malicious website or message isn't blocked by code and rests on the prompt, since the model check doesn't look at links.
 - The attack suite is written by the people who built the defenses. It covers the attacks we thought of; a clean run means none of those got through, not that no attack can.
 - Reviewer thresholds are tuned on one split of the scenarios and reported on another, held out; a new kind of request can still be judged wrongly, and the reviewer can only hold it, never allow it.
