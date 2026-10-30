@@ -66,6 +66,7 @@ export function Arrival() {
     asked.current ??= request('me');
     asked.current.then(
       async (copy) => {
+        // Gone from this page: its reads, Desks included, belong to the page the owner went to.
         if (!live) return;
         // The last Desk opened when it is still the copy's, else its first.
         const deskId = lastOrFirst(copy.desks);
@@ -87,12 +88,16 @@ export function Arrival() {
 
   /**
    * The new copy's first Today, which takes the dialog away. The dialog stays up, busy over the
-   * preview, until Today is read ahead, so it closes onto the page already drawn.
+   * preview, until Today is read ahead, so it closes onto the page already drawn. When the owner has
+   * left this page while the copy was made, the reads are left to the page they went to, which
+   * already shows them: dropping its Desks would leave it watching a read nothing updates.
    */
   const openCopy = async (copy: CopyOut): Promise<boolean> => {
     const first = copy.desks[0];
     if (!first) return false;
+    if (!shown.current) return true;
     await invalidateCopy(queryClient);
+    if (!shown.current) return true;
     await readAhead(queryClient, first.desk_id);
     if (shown.current) void navigate(todayPath(first.desk_id), { replace: true });
     return true;

@@ -12,6 +12,7 @@ import { observeRequests } from '../api/http.ts';
 import { rivera } from '../ds/fixtures/index.ts';
 import { ROUTES, type RouteKey } from '../api/routes.ts';
 import { readLocal } from '../lib/storage.ts';
+import { copyOut } from '../mocks/readModels.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
@@ -196,6 +197,33 @@ describe('Arrival', () => {
     // Past the read-ahead's 3 s cap, by when the dialog would have gone on to Today.
     await new Promise((resolve) => setTimeout(resolve, 3_500));
     expect(router.state.location.pathname).toBe('/about/proposal');
+  });
+
+  it('leaving_before_the_copy_opens_leaves_its_reads_alone', async () => {
+    const { screen, router } = await renderRoute('/', { seed: { name: 'rivera', signedIn: false } });
+    await expect.element(introDialog(screen)).toBeVisible();
+    // The copy is made but its answer is lost, so the page asks for the copy this browser now has,
+    // which answers slowly.
+    mockStore.inject({ route: 'copies', status: 'network', afterCommit: true });
+    mockStore.inject({ route: 'me', status: 200, body: copyOut(mockStore.world), delayMs: 1_000 });
+    const late = nextAnswerTo('me');
+    await startTheDemo(screen);
+    await expect.poll(() => requests('me')).toHaveLength(2);
+
+    // The owner goes on to Today before it answers, and the answer comes while they are there.
+    await router.navigate(TODAY);
+    const answering = screen.getByRole('switch', { name: 'Answering' });
+    await expect.element(answering).toHaveAttribute('aria-checked', 'true');
+    await late.settled;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(router.state.location.pathname).toBe(TODAY);
+
+    // Today's reads are still the ones it shows: the switch follows a change, and the change saves.
+    await answering.click();
+    await expect.element(answering).toHaveAttribute('aria-checked', 'false');
+    await expect.poll(() => mockStore.world.desk(RIVERA.deskId)?.summary.answering).toBe(false);
+    await expect.poll(() => requests('desks').length).toBeGreaterThan(1);
+    await expect.element(answering).toHaveAttribute('aria-checked', 'false');
   });
 
   it('intro_dialog_cannot_be_dismissed', async () => {
