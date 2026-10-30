@@ -97,7 +97,7 @@ LINK = re.compile(
     rf":{SLASH}{SLASH}|(?<!\w)(?:https?|mailto|tel):"   # a scheme: "https://", any other before "://", "https:", "tel:"
     rf"|{DOMAIN_START}www{DOT}"                      # "www."
     rf"|{DOMAIN_START}{LABEL}(?:{DOT}{LABEL})+{SLASH}"   # a domain before a path: "rivera-pay.example/checkout"
-    rf"|{DOMAIN_START}{LABEL}(?:{DOT}{LABEL})*{DOT}(?:{'|'.join(LINK_TLDS)})(?![^\W_]|-)"   # a bare domain: "riverapl.com"
+    rf"|{DOMAIN_START}{LABEL}(?:{DOT}{LABEL})*{DOT}(?:{'|'.join(LINK_TLDS)})(?![^\W_])"   # a bare domain: "riverapl.com"
     r"|(?<=\w)@(?=\w)",                              # an email address: "maria@riverapl.example"
     re.IGNORECASE)
 # Glued to the front of a link, hiding it from `DOMAIN_START` and the schemes' word start: a run of
@@ -392,14 +392,16 @@ def _booking_claims(text: str, readings: dict[str, list[int]]) -> list[tuple[int
 
 def _links(text: str, readings: dict[str, list[int]]) -> list[tuple[int, str, Violation]]:
     """A `promise_word` (`link`) for each run of `text` between blanks holding a link shape
-    (`LINK`) in any reading with the dots, dashes and underscores glued to its front blanked
-    (`LINK_GLUE`), spanning that run without the punctuation around it."""
+    (`LINK`) in any reading, as it is or with the dots, dashes and underscores glued to its front
+    blanked (`LINK_GLUE`): the blanked copy finds "…rivera-pay.example/checkout", the reading as it
+    is "maria@_rivera", whose underscore the blanking turns into a blank. Each violation spans its
+    run without the punctuation around it."""
     runs = [(run.start(), run.end()) for run in BLANKS.finditer(text)]
     starts = [start for start, _ in runs]
     found: dict[int, tuple[int, int]] = {}      # a run's index: where its first link shape starts, its last ends
-    unglued = ((LINK_GLUE.sub(lambda glue: " " * len(glue.group()), reading), origin)
-               for reading, origin in readings.items())
-    for reading, origin, match in ((reading, origin, match) for reading, origin in unglued
+    scanned = ((scan, origin) for reading, origin in readings.items()
+               for scan in (reading, LINK_GLUE.sub(lambda glue: " " * len(glue.group()), reading)))
+    for reading, origin, match in ((reading, origin, match) for reading, origin in scanned
                                    for match in LINK.finditer(reading)):
         start, end = origin[match.start()], origin[match.end() - 1] + 1
         index = bisect.bisect_right(starts, start) - 1
