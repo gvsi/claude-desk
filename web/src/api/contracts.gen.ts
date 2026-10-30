@@ -398,6 +398,7 @@ export interface CreateDeskRequest {
 export interface DeskSeed {
   name: string;
   charter: Claim[];
+  auto_money_cap_cents?: number;
   hours: HoursWindow[];
   price_items: PriceItem[];
   calendar_slots: CalendarSlot[];
@@ -682,6 +683,7 @@ export interface PolicyDraftRequest {
   desk_id: string;
   cards: RuleCard[];
   expected_parent: number | null;
+  auto_money_cap_cents?: number | null;
 }
 export interface PolicyProbeRequest {
   desk_id: string;
@@ -709,6 +711,7 @@ export interface PolicyVersion {
   profiles_sha256: string;
   invariants_sha256: string;
   review_thresholds_version: number;
+  auto_money_cap_cents?: number;
   status: "draft" | "proved" | "rejected" | "active" | "superseded";
   proof?: ProofReport | null;
 }
