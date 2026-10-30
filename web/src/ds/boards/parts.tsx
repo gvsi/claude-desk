@@ -884,14 +884,10 @@ export interface RulesPageProps {
   chips: readonly string[];
   /** A line under the page's title about what just changed. */
   notice?: ReactNode;
-  /** The header's actions: the "Start from a preset" menu. */
+  /** The header's actions: the "Start from a preset" menu, on a line of its own on a phone. */
   actions?: ReactNode;
-  /** A line of its own under the header, where a phone puts the preset menu. */
-  under?: ReactNode;
   /** Each section's line above its tools, by connector id: the payment limit on Payments and Stripe. */
   aboveTools?: Readonly<Record<string, ReactNode>>;
-  /** The line under the title; the phone presets board leaves it out. */
-  subtitle?: boolean;
 }
 
 /**
@@ -900,17 +896,18 @@ export interface RulesPageProps {
  * payment limit above the tools of the money groups when given, and the always-on rules.
  * Connectors are added from the Connectors page, so it has no "Add a connector".
  */
-export function RulesPage({ hub, chips, notice, actions, under, aboveTools = {}, subtitle = true }: RulesPageProps) {
+export function RulesPage({ hub, chips, notice, actions, aboveTools = {} }: RulesPageProps) {
   return (
     <BoardPage>
       <div className="board-rules__header">
         <PageHeader
           title="Rules"
-          subtitle={subtitle ? 'What Claude can do on this Desk, where each tool comes from, and your rules for it.' : undefined}
+          subtitle="What Claude can do on this Desk, where each tool comes from, and your rules for it."
           actions={actions}
+          actionsBelowOnPhone
+          hideSubtitleOnPhone
         />
       </div>
-      {under ? <div className="board-rules__under">{under}</div> : null}
       {notice ? <div className="board-rules__notice">{notice}</div> : null}
       <AskAboutRules placeholder="Ask Claude to change a rule or a connector" chips={chips} />
       <ConnectorList summary={hub.summary}>

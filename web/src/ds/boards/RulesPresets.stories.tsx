@@ -327,14 +327,14 @@ export const PhonePresets: Story = {
   globals: { viewport: { value: 'phone', isRotated: false } },
   render: () => (
     <RiveraFrame current="rules" counts={COUNTS}>
-      <RulesPage hub={RIVERA_HUB} chips={RIVERA_CHIPS} subtitle={false} under={<PresetMenu onPick={fn()} />} aboveTools={{ payments: limit(), stripe: limit() }} />
+      <RulesPage hub={RIVERA_HUB} chips={RIVERA_CHIPS} actions={<PresetMenu onPick={fn()} />} aboveTools={{ payments: limit(), stripe: limit() }} />
     </RiveraFrame>
   ),
   parameters: {
     canvas: 'N-Conn-22-Phone-Presets',
     canvasNote: [
-      'On a phone the menu takes its own line under the title, as the board draws it, so the page passes it there rather than to the header’s actions.',
-      'As on the board, a phone shows no subtitle; the composer keeps one placeholder at every width, where the board shortens it.',
+      'The page as the web app composes it: PageHeader with the preset menu as its action, actionsBelowOnPhone and hideSubtitleOnPhone, so on a phone the menu takes its own line under the title and there is no subtitle, as the board draws it.',
+      'The composer keeps one placeholder at every width, where the board shortens it.',
       'The play opens the menu by keyboard, as the board draws it open.',
     ].join(' '),
   },
@@ -345,7 +345,7 @@ export const PhonePresets: Story = {
     const menuButton = within(main).getByRole('button', { name: 'Start from a preset' });
     // The button on its own line 16 px under the title, with no subtitle on a phone, as wide as the
     // page's column.
-    await expect(within(main).queryByText('What Claude can do on this Desk, where each tool comes from, and your rules for it.')).toBeNull();
+    await expect(within(main).getByText('What Claude can do on this Desk, where each tool comes from, and your rules for it.')).not.toBeVisible();
     await expect(menuButton.getBoundingClientRect().top - title.getBoundingClientRect().bottom).toBe(16);
     const column = one(main, '.cd-app-shell__content');
     await expect(Math.round(menuButton.getBoundingClientRect().width)).toBe(Math.round(column.getBoundingClientRect().width));

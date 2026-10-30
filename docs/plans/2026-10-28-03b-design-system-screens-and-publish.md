@@ -546,7 +546,7 @@ Every string here is owner-facing (no Spanish). Components display what the scre
   - Its menu, 6 px under it, 360 px wide, its right edge on the button's: two `menuitem`s from `PRESET_WORDS`, each named by its label and described by its description. Nothing in it is checked or current.
   - Choosing an item closes the menu, puts focus back on the button and calls `onPick` once with its preset. The keys are the approval answers' menus': Enter, Space or Down opens on the first item, Up on the last; the arrows move and wrap; Escape or Tab closes.
   - `pending` (the picked preset's draft in flight) keeps the button's label under the busy spinner, and the menu stays shut.
-  - Under 640 px of the window the button fills its line, its words at the left and the chevron at the right, and the menu opens under it at the same width.
+  - Under 640 px of the window the button fills its line, its words at the left and the chevron at the right, and the menu opens under it at the same width. On the Rules page that line is the header's own: `PageHeader` `actionsBelowOnPhone` puts its actions 16 px under the title at its full width, and `hideSubtitleOnPhone` leaves the subtitle out there, as N-Conn-22 draws it (stories `Layout/PageHeader` `RulesOnAPhone` and `RulesOnALaptop`, plays `actions_below_on_phone` and `subtitle_hidden_on_phone`).
 
 - **`MoneyLimit({ line: string; editing: boolean; label?: string; value: string; hint: string; error?: string; onEdit: () => void; onChange: (value: string) => void; onReview: () => void; onCancel: () => void; disabled?: boolean })`** (N-Conn-19-Ceiling, N-Conn-19b-Ceiling-Edit), a row the consumer places at the top of each money group's `ConnectorSection`, with a hairline above it like the tool rows:
   - Reading: `line` in body type ("No payment over $500 goes through without asking you, whatever the rules below say.", or "Every payment asks you first." at 0) and a secondary "Change" → `onEdit` at the right.
@@ -653,7 +653,7 @@ Every string here is owner-facing (no Spanish). Components display what the scre
 - Play tests: `phone_steps_one_line`, `outcome_groups_in_order`, `outcome_groups_geometry`, `money_line_leads`, `person_rules_named`, `person_rules_read_only`, `no_rules_says_so`, `just_added_is_quiet`, `just_added_built_in`, `just_added_never_on_available`. The outcome groups and a person's rules match their renders to the pixel, but for one curly apostrophe in the person page's sample words.
 
 **For plan 04** (consumers, not built here):
-- `RulesPage` puts `PresetMenu` in its `PageHeader` actions in place of a mode switch, and a `MoneyLimit` line at the top of the Payments and Stripe groups.
+- `RulesPage` puts `PresetMenu` in its `PageHeader` actions, with `actionsBelowOnPhone` and `hideSubtitleOnPhone` (N-Conn-22-Phone-Presets), and a `MoneyLimit` line at the top of the Payments and Stripe groups.
 - `draftPreset` opens the review page (N-Conn-18), titled with the preset's name, with `cancelsLinks`. A lowered limit's review sets it too.
 - `RuleDraftReview` uses `LimitChange` when `moneyCap` is set, on "Change your payment limit".
 - The tool page passes `onSimulateChange` → `simulateToolChange`, `simulatePending` while it runs.
