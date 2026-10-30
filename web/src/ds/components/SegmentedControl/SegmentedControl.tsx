@@ -15,12 +15,6 @@ export interface SegmentedControlProps<T extends string> {
   value: T;
   /** Called with the newly chosen value; the control shows whatever `value` the screen passes back. */
   onChange: (value: T) => void;
-  /**
-   * Takes no choice for now, such as while a choice is being drafted: every option says it is
-   * disabled (`aria-disabled`, so focus stays where it is), clicks and keys do nothing, and the
-   * control is dimmed.
-   */
-  disabled?: boolean;
 }
 
 /** Where each key moves from option `i` of `n`, wrapping at both ends; null for other keys. */
@@ -45,18 +39,17 @@ function target(key: string, i: number, n: number): number | null {
  * One choice out of a few, as a radio group on a faint track: one tab stop (the chosen option), and
  * the arrow keys move to the next option and choose it.
  */
-export function SegmentedControl<T extends string>({ label, options, value, onChange, disabled = false }: SegmentedControlProps<T>) {
+export function SegmentedControl<T extends string>({ label, options, value, onChange }: SegmentedControlProps<T>) {
   const buttons = useRef<(HTMLButtonElement | null)[]>([]);
   const chosen = options.findIndex((option) => option.value === value);
   // With no option chosen, the first one is the group's tab stop.
   const tabStop = chosen === -1 ? 0 : chosen;
 
   const choose = (option: SegmentedOption<T>) => {
-    if (!disabled && option.value !== value) onChange(option.value);
+    if (option.value !== value) onChange(option.value);
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>, i: number) => {
-    if (disabled) return;
     const next = target(event.key, i, options.length);
     const option = next === null ? undefined : options[next];
     if (next === null || option === undefined) return;
@@ -66,7 +59,7 @@ export function SegmentedControl<T extends string>({ label, options, value, onCh
   };
 
   return (
-    <div role="radiogroup" aria-label={label} aria-disabled={disabled || undefined} className="cd-segmented">
+    <div role="radiogroup" aria-label={label} className="cd-segmented">
       {options.map((option, i) => (
         <button
           key={option.value}
@@ -76,7 +69,6 @@ export function SegmentedControl<T extends string>({ label, options, value, onCh
           type="button"
           role="radio"
           aria-checked={option.value === value}
-          aria-disabled={disabled || undefined}
           tabIndex={i === tabStop ? 0 : -1}
           className="cd-segmented__option cd-type-meta"
           onClick={() => choose(option)}

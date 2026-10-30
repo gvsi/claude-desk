@@ -37,7 +37,7 @@ As on `ApprovalCard`'s menus:
 - `OUTCOME_TONE`: `auto` handled, `ask` held, `never` refused.
 - `outcomePhrase(mode, limit?)`.
 - `RulesPreset = 'ask_first' | 'auto' | 'custom'` and `PRESET_WORDS`, in that order "Ask me first", "Automatic", "Custom", the options of the Desk's mode switch (a `SegmentedControl`).
-- `PRESET_CAPTIONS`, what each mode means, shown under "How Claude works" (`HowClaudeWorks`). The two presets' captions describe the master plan's preset cards (`desk.presets.PRESETS`), and `preset_captions_match_the_presets` checks every claim they make against those cards, read from the generated presets export, `web/src/api/presets.gen.json`. Until that export exists the check is skipped and says what it waits for.
+- `PRESET_ITEMS`, the two presets the Rules page's "Start from a preset" menu offers (`PresetMenu`), each with its title and a one-line description. The descriptions describe the master plan's preset cards (`desk.presets.PRESETS`); `preset_descriptions_match_the_presets` checks each claim against those cards, read from the generated presets export, `web/src/api/presets.gen.json`, and is skipped until that export exists.
 
 ## Props
 

@@ -40,21 +40,6 @@ export const PRESET_WORDS = [
 ] as const satisfies readonly { value: RulesPreset; label: string }[];
 
 /**
- * What each mode means, under the mode switch. The two presets' captions describe the master
- * plan's preset cards (`desk.presets.PRESETS`): Automatic adds quotes at list price, weekday
- * bookings in opening hours and customers' own documents to what Ask me first already runs on its
- * own, and both ask before any payment. Custom is the owner's own rules. `outcomeWords.test.ts`
- * checks each caption against those cards, read from their generated export
- * (`web/src/api/presets.gen.json`).
- */
-export const PRESET_CAPTIONS = {
-  ask_first:
-    'Claude asks you before it quotes, books, shares a document or takes a payment. It still finds open times, saves leads and confirms who people are.',
-  auto: 'Claude quotes at list price, books weekdays in your hours and sends verified customers their own documents. Payments ask you first.',
-  custom: 'Your own rules, tool by tool. Change any of them below.',
-} as const satisfies Record<RulesPreset, string>;
-
-/**
  * The two presets the Rules page's "Start from a preset" menu offers, in order: each with its title
  * and a one-line description of what it does. The descriptions describe the master plan's preset
  * cards (`desk.presets.PRESETS`); `outcomeWords.test.ts` checks each claim against those cards, read
