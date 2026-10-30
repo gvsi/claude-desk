@@ -9,7 +9,7 @@ import { Switch } from '../Switch/Switch.tsx';
 import './Sidebar.css';
 
 /** The owner app's pages, in the sidebar's fixed order. */
-export type NavKey = 'today' | 'conversations' | 'people' | 'rules' | 'safety' | 'share' | 'settings';
+export type NavKey = 'today' | 'conversations' | 'people' | 'rules' | 'connectors' | 'safety' | 'share' | 'settings';
 
 /** What a nav row's link receives: a router's link component takes the same props as `<a>`. */
 export interface SidebarLinkProps {
@@ -56,6 +56,7 @@ const NAV_ROWS = [
   { key: 'conversations', icon: 'conversations', label: 'Conversations' },
   { key: 'people', icon: 'people', label: null },
   { key: 'rules', icon: 'rules', label: 'Rules' },
+  { key: 'connectors', icon: 'connectors', label: 'Connectors' },
   { key: 'safety', icon: 'safety', label: 'Safety' },
   { key: 'share', icon: 'share', label: 'Share' },
   { key: 'settings', icon: 'settings', label: 'Settings' },
@@ -74,7 +75,7 @@ export function initialsOf(name: string): string {
 }
 
 /**
- * The owner app's sidebar: the Claude Desk mark, the business and Desk switchers, the seven pages
+ * The owner app's sidebar: the Claude Desk mark, the business and Desk switchers, the eight pages
  * in a fixed order, and at the bottom the Answering switch and the owner. It fills the column the
  * `AppShell` gives it.
  */

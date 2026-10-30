@@ -48,6 +48,10 @@ The owner signed these boards on 2026-10-29, after the design system screens pla
 | Brand header | Padding 0px 40px | 12px 40px, still 76px high when its content fits on one line | The signed open-status board grows the header by that padding when a closed status takes two lines or a phone wraps it under the name; on one line it reads the same. |
 | Focus order on Today | The switcher, the nav, then the composer, then the first approval answer after the chips | The reviewer bar, the switcher, the nav, Answering, the public link, the things to try, then the first approval answer | Today has no "Ask Claude" composer: N-Today-Run1 signs that asking Claude to change a rule happens on Rules. |
 
+### The sidebar's eighth page
+
+The project owner signed Connectors as its own page on 2026-10-29, after the owner boards above. Each of them draws seven pages in the sidebar; every story draws eight, Connectors after Rules with its plug icon, as the Connectors boards (N-Conn-23-Connectors, N-Conn-17-Presets) draw it. The rows keep the boards' 36px height and 2px gap, so on the two Run 1 conversation boards the Answering switch still sits 4px under the pages, 38px lower than the render's y 386. This applies to every owner board, so the board stories' notes don't repeat it.
+
 ### Where a story keeps a value the signed render doesn't draw
 
 An accessibility requirement wins over a render. Each value below is asserted as the story draws it, and the board story's `canvasNote` names both.

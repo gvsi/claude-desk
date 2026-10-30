@@ -14,6 +14,7 @@ const hrefs = {
   conversations: '#conversations',
   people: '#customers',
   rules: '#rules',
+  connectors: '#connectors',
   safety: '#safety',
   share: '#share',
   settings: '#settings',
@@ -90,12 +91,12 @@ function navRows(root: HTMLElement): { link: HTMLElement; text: string }[] {
 export const TwoDesks: Story = {
   parameters: {
     canvasNote:
-      "The board's Desk picker opens a popover list with a green dot beside the Desk's name; here it opens the list under itself, with no dot, since no words say what it means. The owner row isn't a button, because it opens nothing yet.",
+      "The board draws seven pages; Connectors, signed after it as its own page (N-Conn-23-Connectors), is the fifth of eight. The board's Desk picker opens a popover list with a green dot beside the Desk's name; here it opens the list under itself, with no dot, since no words say what it means. The owner row isn't a button, because it opens nothing yet.",
   },
   play: async ({ args, canvas, canvasElement, userEvent }) => {
-    // nav_order_is_fixed: the seven rows in their fixed order, the people row third.
+    // nav_order_is_fixed: the eight rows in their fixed order, the people row third and Connectors after Rules.
     const rows = navRows(canvasElement);
-    await expect(rows.map((row) => row.text)).toEqual(['Today', 'Conversations', 'Customers', 'Rules', 'Safety', 'Share', 'Settings']);
+    await expect(rows.map((row) => row.text)).toEqual(['Today', 'Conversations', 'Customers', 'Rules', 'Connectors', 'Safety', 'Share', 'Settings']);
     await expect(rows.map((row) => row.link.getAttribute('href'))).toEqual(Object.values(hrefs));
 
     // current_page_marked: only Today is the current page, on the selected fill, with no accent bar.
@@ -108,7 +109,7 @@ export const TwoDesks: Story = {
     // Counts only on Conversations and Safety, read as what they mean; Safety's held dot asks for attention.
     await expect(canvas.getAllByRole('img').map((pill) => pill.getAttribute('aria-label'))).toEqual(['2 need you', '2 blocked']);
     await expect(within(rows[1]?.link as HTMLElement).getByRole('img', { name: '2 need you' })).toBeVisible();
-    const safety = rows[4]?.link as HTMLElement;
+    const safety = rows[5]?.link as HTMLElement;
     await expect(within(safety).getByRole('img', { name: '2 blocked' })).toBeVisible();
     await expect(safety.querySelectorAll('.cd-status-dot--held')).toHaveLength(1);
     await expect(canvasElement.querySelectorAll('.cd-status-dot')).toHaveLength(1);
@@ -170,7 +171,8 @@ export const OneDesk: Story = {
     counts: { safety: { n: 1, label: '1 blocked' } },
   },
   parameters: {
-    canvasNote: 'The board shows two Desks; with one there is nothing to switch to, so the picker is left out.',
+    canvasNote:
+      'The board shows two Desks; with one there is nothing to switch to, so the picker is left out. The board draws seven pages, from before Connectors was signed as the fifth.',
   },
   play: async ({ canvas, canvasElement }) => {
     // desk_picker_only_with_two_desks
@@ -179,10 +181,46 @@ export const OneDesk: Story = {
 
     // The people row takes the business's word for them, and only Safety is current.
     const rows = navRows(canvasElement);
-    await expect(rows.map((row) => row.text)).toEqual(['Today', 'Conversations', 'Clients', 'Rules', 'Safety', 'Share', 'Settings']);
+    await expect(rows.map((row) => row.text)).toEqual(['Today', 'Conversations', 'Clients', 'Rules', 'Connectors', 'Safety', 'Share', 'Settings']);
     await expect(rows.filter((row) => row.link.hasAttribute('aria-current')).map((row) => row.text)).toEqual(['Safety']);
     // A count without attention has no dot; Conversations has no count to show.
     await expect(canvas.getAllByRole('img').map((pill) => pill.getAttribute('aria-label'))).toEqual(['1 blocked']);
     await expect(canvasElement.querySelectorAll('.cd-status-dot')).toHaveLength(0);
+  },
+};
+
+export const OnConnectors: Story = {
+  // As the Connectors page draws it: one Desk, and Safety's count without the held dot.
+  args: {
+    current: 'connectors',
+    desks: [MAIN_LINE],
+    counts: { conversations: { n: 2, label: '2 need you' }, safety: { n: 2, label: '2 blocked' } },
+  },
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      'The Connectors page draws this sidebar (N-Conn-23-Connectors, at 1512 px, not yet a reference board): Connectors after Rules with a plug icon, the current row on the selected fill. Nearest reference board: N-Today-Run1.',
+  },
+  play: async ({ canvasElement }) => {
+    // Connectors is the fifth of eight rows, and the only current page.
+    const rows = navRows(canvasElement);
+    await expect(rows.map((row) => row.text)).toEqual(['Today', 'Conversations', 'Customers', 'Rules', 'Connectors', 'Safety', 'Share', 'Settings']);
+    await expect(rows.filter((row) => row.link.hasAttribute('aria-current')).map((row) => [row.text, row.link.getAttribute('aria-current')])).toEqual([
+      ['Connectors', 'page'],
+    ]);
+    const connectors = rows[4]?.link as HTMLElement;
+    await expect(connectors).toHaveAttribute('href', '#connectors');
+    expectComputed(connectors, { height: '36px', backgroundColor: 'rgb(60, 57, 47)', borderLeftWidth: '0px', borderRadius: '8px' });
+    expectComputed(rows[3]?.link as HTMLElement, { backgroundColor: 'rgba(0, 0, 0, 0)' });
+
+    // Its icon is a 20 px line icon like the other rows', hidden beside the word.
+    const icon = connectors.querySelector('svg');
+    await expect(icon).toHaveAttribute('aria-hidden', 'true');
+    await expect(icon).toHaveAttribute('width', '20');
+    await expect(icon).toHaveAttribute('fill', 'none');
+
+    // The rows keep the board's spacing: 36 px tall, 2 px apart, so a row every 38 px.
+    const tops = rows.map((row) => row.link.getBoundingClientRect().top);
+    await expect(tops.slice(1).map((top, index) => Math.round(top - (tops[index] ?? 0)))).toEqual([38, 38, 38, 38, 38, 38, 38]);
   },
 };

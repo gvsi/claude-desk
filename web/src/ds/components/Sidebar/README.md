@@ -1,6 +1,6 @@
 # Sidebar
 
-`Sidebar` is the owner app's navigation: the Claude Desk mark, the business and Desk switchers, the seven pages in a fixed order, the Answering switch and the owner.
+`Sidebar` is the owner app's navigation: the Claude Desk mark, the business and Desk switchers, the eight pages in a fixed order, the Answering switch and the owner.
 
 ## When to use
 
@@ -12,7 +12,7 @@
 - The mark and the "Claude Desk" wordmark with "Beta" beneath. They are not a link.
 - The business row, "Switch business, current: {business}", which calls `onSwitchBusiness` (the screen opens `SwitcherMenu`, which lists businesses and "New business").
 - The Desk picker, "Switch Desk, current: {name}", only when the business has two or more Desks. It is where the owner picks a Desk; `SwitcherMenu` lists none. It opens the business's Desks under it ("Desks in {business}"), the current one marked with a check and `aria-current`. Picking a Desk calls `onSwitchDesk(id)`; picking it, or Escape, closes the list and returns focus to the picker. Escape stops there, so a sheet the sidebar sits in stays open.
-- The pages, always in this order: Today, Conversations, {peopleLabel}, Rules, Safety, Share, Settings. Each row is `size-nav-row` tall with a 20 px line icon. The current page is on `bg-selected` with `aria-current="page"`; there are no accent bars.
+- The pages, always in this order: Today, Conversations, {peopleLabel}, Rules, Connectors, Safety, Share, Settings. Each row is `size-nav-row` tall, `space-2` apart, with a 20 px line icon named for its page (Connectors' is a plug). The current page is on `bg-selected` with `aria-current="page"`; there are no accent bars.
 - Counts only on Conversations and Safety, as `CountPill`s read by their `label` ("2 need you", "2 blocked"). Safety's `attention` adds a held dot beside its count.
 - At the foot, above a hairline: the "Answering" `Switch` ("Claude answers under your rules"), then the owner: an initials avatar (`aria-hidden`, the first letters of the first and last words of the name, as written) beside the name and a status line. The owner row isn't a control.
 
@@ -33,7 +33,7 @@
 | `desks` | `{ id: string; name: string }[]` | Required. The picker shows with two or more. |
 | `currentDeskId` | `string` | Required. |
 | `onSwitchDesk` | `(deskId: string) => void` | Required. Not called for the current Desk. |
-| `current` | `NavKey` | Required. `'today' \| 'conversations' \| 'people' \| 'rules' \| 'safety' \| 'share' \| 'settings'`. |
+| `current` | `NavKey` | Required. `'today' \| 'conversations' \| 'people' \| 'rules' \| 'connectors' \| 'safety' \| 'share' \| 'settings'`. |
 | `hrefs` | `Record<NavKey, string>` | Required. |
 | `peopleLabel` | `string` | Required. The third row. |
 | `counts` | `{ conversations?: NavCount; safety?: NavCount & { attention?: boolean } }` | `NavCount` is `{ n: number; label: string }`. |

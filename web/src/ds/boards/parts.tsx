@@ -47,6 +47,7 @@ export const OWNER_HREFS = {
   conversations: '#conversations',
   people: '#customers',
   rules: '#rules',
+  connectors: '#connectors',
   safety: '#safety',
   share: '#share',
   settings: '#settings',

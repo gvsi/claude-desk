@@ -1,5 +1,5 @@
 /* Sidebar: the owner app's column contents, top to bottom: the mark and wordmark, the business
-   row, the Desk picker, the seven nav rows, then the Answering switch and the owner at the foot.
+   row, the Desk picker, the eight nav rows, then the Answering switch and the owner at the foot.
    The AppShell gives it the column (size-sidebar on bg-panel, with the seam); rows are
    size-nav-row tall, the current one on bg-selected with no accent bar. Hover fills change at
    motion-instant; nothing moves under reduced motion. */

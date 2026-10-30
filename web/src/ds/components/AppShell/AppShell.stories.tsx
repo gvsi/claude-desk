@@ -33,6 +33,7 @@ const hrefs = {
   conversations: '/app/desk-rivera-main/conversations',
   people: '/app/desk-rivera-main/people',
   rules: '/app/desk-rivera-main/rules',
+  connectors: '/app/desk-rivera-main/connectors',
   safety: '/app/desk-rivera-main/safety',
   share: '/app/desk-rivera-main/share',
   settings: '/app/desk-rivera-main/settings',
@@ -58,6 +59,16 @@ const sidebar = (
     linkComponent={RouterLink}
   />
 );
+
+/** The eight pages, in the sidebar's fixed order. */
+const PAGES = ['Today', 'Conversations', 'Customers', 'Rules', 'Connectors', 'Safety', 'Share', 'Settings'];
+
+/** The words of each page row in a nav, in order (a row's count is read separately). */
+function pageNames(nav: HTMLElement): string[] {
+  return within(nav)
+    .getAllByRole('link')
+    .map((link) => link.querySelector('.cd-sidebar__label')?.textContent ?? '');
+}
 
 const today = (
   <>
@@ -118,7 +129,11 @@ export const OwnerToday: Story = {
       borderRightColor: 'rgba(250, 249, 245, 0.12)',
     });
     await expect(column.getBoundingClientRect().top).toBe(banner.getBoundingClientRect().bottom);
-    await expect(within(column).getByRole('navigation', { name: 'Main' })).toBeVisible();
+    const nav = within(column).getByRole('navigation', { name: 'Main' });
+    await expect(nav).toBeVisible();
+    // nav_order_is_fixed: the eight pages, Connectors after Rules, each to its own route.
+    await expect(pageNames(nav)).toEqual(PAGES);
+    await expect(within(nav).getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual(Object.values(hrefs));
     // It runs to the bottom of the window, so the Answering switch sits at the foot.
     await expect(column.getBoundingClientRect().bottom).toBe(window.innerHeight);
 
@@ -207,6 +222,7 @@ export const Compact: Story = {
     await expect(sheet).toBeVisible();
     await expect(menu).toHaveAttribute('aria-expanded', 'true');
     await expect(within(sheet).getByRole('navigation', { name: 'Main' })).toBeVisible();
+    await expect(pageNames(within(sheet).getByRole('navigation', { name: 'Main' }))).toEqual(PAGES);
     await expect(sheet.contains(document.activeElement)).toBe(true);
     await userEvent.keyboard('{Escape}');
     await expect(canvas.queryByRole('dialog', { name: 'Menu' })).toBeNull();

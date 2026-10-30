@@ -21,6 +21,7 @@ const hrefs = {
   conversations: '#conversations',
   people: '#customers',
   rules: '#rules',
+  connectors: '#connectors',
   safety: '#safety',
   share: '#share',
   settings: '#settings',
