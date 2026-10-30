@@ -82,6 +82,19 @@ function cardProblem(card: unknown): string | null {
     // The end is after the start, or 00:00 for midnight at the end of the day (`HoursWindow`).
     if (seconds(window.end) <= seconds(window.start) && seconds(window.end) !== 0) return 'hours end before start';
   }
+  // Who the card is for, which `rulesForTool` ranks by: a person's id exactly when it is for one
+  // person, an agent's key exactly when it is for one agent.
+  for (const field of ['person_id', 'agent_key_id']) {
+    if (field in card && card[field] !== null && typeof card[field] !== 'string') return `${field} ${String(card[field])}`;
+  }
+  if ((card.who === 'person') !== (typeof card.person_id === 'string')) return 'person_id exactly when who is person';
+  if ((card.who === 'agent') !== (typeof card.agent_key_id === 'string')) return 'agent_key_id exactly when who is agent';
+  // A default, which `rulesForTool` passes over, is only ever the compiler's ask for anyone.
+  if ('is_default' in card && typeof card.is_default !== 'boolean') return `is_default ${String(card.is_default)}`;
+  if (card.is_default === true && (card.mode !== 'ask' || card.who !== 'anyone')) return 'a default that is not an ask for anyone';
+  // Limits apply only to automatic cards: the discount and hours the check reads.
+  const limited = ('max_discount_bp' in card && card.max_discount_bp !== 0) || ('hours' in card && card.hours !== null);
+  if (card.mode !== 'auto' && limited) return 'limits on a card that is not automatic';
   return null;
 }
 
@@ -98,6 +111,17 @@ function parsePresetCards(value: unknown): PresetCards {
     });
   };
   return { ask_first: read('ask_first'), auto: read('auto') };
+}
+
+/** True when the presets, written out and read back as the export is, are refused or break a claim. */
+function exportFails(cards: PresetCards): boolean {
+  let read: PresetCards;
+  try {
+    read = parsePresetCards(JSON.parse(JSON.stringify(cards)));
+  } catch {
+    return true;
+  }
+  return descriptionProblems(read).length > 0;
 }
 
 /** True when `read` throws. */
@@ -322,6 +346,13 @@ describe('outcome words', () => {
       ['Ask me first saves leads on its own', changed(good, 'ask_first', { add: extra('native.capture_lead', 'auto') })],
     ];
     for (const [what, cards] of fine) expect({ what, problems: descriptionProblems(cards) }).toEqual({ what, problems: [] });
+    // Read as the export is read, a card marked as the compiler's default can't hide what it does.
+    const flagged = (applies_to: string, mode: RuleCard['mode']): RuleCard => ({ ...extra(applies_to, mode), is_default: true });
+    const hiding: [string, PresetCards][] = [
+      ['Ask me first books on its own under a default flag', changed(good, 'ask_first', { add: flagged('native.book', 'auto') })],
+      ['Ask me first refuses documents under a default flag', changed(good, 'ask_first', { add: flagged('native.release_document', 'never') })],
+    ];
+    for (const [what, cards] of hiding) expect({ what, fails: exportFails(cards) }).toEqual({ what, fails: true });
   });
 
   test('a_malformed_presets_export_is_refused', () => {
@@ -352,11 +383,31 @@ describe('outcome words', () => {
       ['an unknown effect', withCard({ applies_to: 'effect:refund' })],
       ['hours that end before they start', withCard({ applies_to: 'native.find_slots', hours: { days: ['mon'], start: '17:00:00', end: '09:00:00' } })],
       ['hours that end as they start', withCard({ applies_to: 'native.find_slots', hours: { days: ['mon'], start: '09:00:00', end: '09:00:00' } })],
+      // A default card is the compiler's ask for anyone, and `rulesForTool` passes over it, so it must be one.
+      ['an automatic booking marked as a default', withCard({ applies_to: 'native.book', mode: 'auto', is_default: true })],
+      ['a document refusal marked as a default', withCard({ applies_to: 'native.release_document', mode: 'never', is_default: true })],
+      ['a default card for a narrower group', withCard({ applies_to: 'native.book', mode: 'ask', who: 'record_owner', is_default: true })],
+      ['a default flag that is not true or false', withCard({ is_default: 'yes' })],
+      // Who a card is for decides which card outranks which.
+      ['a card for one person without the person', withCard({ who: 'person' })],
+      ['a person on a card for anyone', withCard({ person_id: 'per-dana' })],
+      ['a person who is not named by text', withCard({ who: 'person', person_id: 7 })],
+      ['a card for one agent without its key', withCard({ who: 'agent' })],
+      ['an agent key on a card for anyone', withCard({ agent_key_id: 'demo-agent' })],
+      // Limits apply only to automatic cards.
+      ['a discount on a card that asks', withCard({ mode: 'ask', max_discount_bp: 1000 })],
+      ['hours on a card that refuses', withCard({ applies_to: 'native.book', mode: 'never', hours: { days: ['mon'], start: '09:00:00', end: '17:00:00' } })],
     ];
     for (const [what, value] of malformed) expect({ what, refused: refuses(() => parsePresetCards(value)) }).toEqual({ what, refused: true });
-    // A window that ends at midnight, 00:00, is the contract's one end that isn't after its start.
-    const untilMidnight = withCard({ applies_to: 'native.find_slots', hours: { days: ['fri'], start: '22:00:00', end: '00:00:00' } });
-    expect(refuses(() => parsePresetCards(untilMidnight))).toBe(false);
+    // Well-formed cards the contract allows are read: a window that ends at midnight, 00:00, the
+    // compiler's default ask for anyone, and a card for one person or one agent.
+    const allowed: [string, unknown][] = [
+      ['hours until midnight', withCard({ applies_to: 'native.find_slots', hours: { days: ['fri'], start: '22:00:00', end: '00:00:00' } })],
+      ['a default ask for anyone', withCard({ applies_to: 'native.book', mode: 'ask', is_default: true })],
+      ['a card for one person', withCard({ who: 'person', person_id: 'per-dana' })],
+      ['a card for one agent', withCard({ who: 'agent', agent_key_id: 'demo-agent', person_id: null })],
+    ];
+    for (const [what, value] of allowed) expect({ what, refused: refuses(() => parsePresetCards(value)) }).toEqual({ what, refused: false });
   });
 
   test('preset_descriptions_are_the_owner_words', () => {
