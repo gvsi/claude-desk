@@ -99,27 +99,53 @@ def shown(text: str) -> str:
     return _drawn(unicodedata.normalize("NFKC", _drawn(text)))
 
 
-def _load_lookalikes() -> dict[str, str]:
-    """`lexicon/lookalikes.txt`: the letters of other scripts, and the rarer Latin ones, that look
-    like one ASCII letter (Unicode's confusables.txt), one `<code point>\\t<letter>` per line. A
-    malformed line stops the kernel from starting."""
+def _load_lookalikes() -> tuple[dict[str, str], dict[str, str]]:
+    """`lexicon/lookalikes.txt` (made by `scripts/lookalikes.py` from Unicode's confusables.txt):
+    the letters of other scripts, and the rarer Latin ones, that look like one ASCII letter, and
+    the characters drawn as one ASCII digit, one `<code point>\\t<letter or digit>` per line: the
+    letters and the digit lookalikes apart, each with what it looks like. A malformed line stops
+    the kernel from starting."""
     path = LEXICON_DIR / "lookalikes.txt"
-    table = {}
+    letters, digits = {}, {}
     for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         if not line.strip() or line.startswith("#"):
             continue
         code, tab, rest = line.partition("\t")
-        letter = rest.split("#", 1)[0].strip()
+        looks_like = rest.split("#", 1)[0].strip()
         if (not tab or not re.fullmatch(r"[0-9A-F]{4,6}", code) or int(code, 16) < 0x80
-                or not re.fullmatch(r"[A-Za-z]", letter)):
-            raise ValueError(f"{path.name}:{number} is not a <code point>\\t<letter> line")
-        table[chr(int(code, 16))] = letter
-    return table
+                or not re.fullmatch(r"[A-Za-z0-9]", looks_like)):
+            raise ValueError(f"{path.name}:{number} is not a <code point>\\t<letter or digit> line")
+        (digits if looks_like.isdigit() else letters)[chr(int(code, 16))] = looks_like
+    return letters, digits
 
 
-LOOKALIKES = _load_lookalikes()
+LOOKALIKES, DIGIT_LOOKALIKES = _load_lookalikes()
 STROKES = frozenset(ch for ch, letter in LOOKALIKES.items() if letter == "l")   # drawn as a bare stroke: l or I
+# Shaped like 0 or 1, the prototype of 0 being O and of 1 being l: read as digits next to a digit
+# ("ЗОО"), or in a word made only of them that isn't plain ASCII ("ІОО"; "I" and "OK" stay words).
+ZERO_OR_ONE = frozenset("OlI") | frozenset(ch for ch, letter in LOOKALIKES.items() if letter in ("O", "l"))
 SCRIPT_LETTERS = frozenset(("Lu", "Ll", "Lt", "Lo"))     # modifier letters (Lm), such as ʼ, belong to no script
+
+
+def _numeral(ch: str) -> bool:
+    """A Unicode numeral, or a character drawn as a digit (a Cyrillic З for 3)."""
+    return unicodedata.category(ch)[0] == "N" or ch in DIGIT_LOOKALIKES
+
+
+def _number_end(text: str, start: int) -> int:
+    """Where the number starting at `start` ends: numerals, digit lookalikes and the letters shaped
+    like 0 or 1, with a separator between two numerals ("1.234,56", "10:30")."""
+    end = start
+    while end < len(text) and (_numeral(text[end]) or text[end] in ZERO_OR_ONE or (
+            text[end] in NUMBER_SEPARATORS and end > start and _numeral(text[end - 1])
+            and end + 1 < len(text) and _numeral(text[end + 1]))):
+        end += 1
+    return end
+
+
+def _alone(text: str, start: int, end: int) -> bool:
+    """Whether `text[start:end]` is a word of its own: no letter or mark right before or after it."""
+    return all(unicodedata.category(text[j])[0] not in "LM" for j in (start - 1, end) if 0 <= j < len(text))
 
 
 def _words(text: str) -> Iterable[tuple[int, str]]:
@@ -214,15 +240,12 @@ def scan_prose(text: str, canaries: Iterable[str] = ()) -> list[Violation]:
             hits.append((i, "percent_sign", Violation(kind="number_in_prose", span=text[i], rule_id="percent_sign")))
         elif text[i] == KEYCAP_TEN:
             hits.append((i, "digit", Violation(kind="number_in_prose", span=text[i], rule_id="digit")))
-        if category[0] == "N":
-            end = i + 1
-            while end < len(text) and (unicodedata.category(text[end])[0] == "N" or (
-                    text[end] in NUMBER_SEPARATORS and end + 1 < len(text)
-                    and unicodedata.category(text[end + 1])[0] == "N")):
-                end += 1
-            hits.append((i, "digit", Violation(kind="number_in_prose", span=_span(text[i:end]), rule_id="digit")))
-            i = end
-            continue
+        if _numeral(text[i]) or text[i] in ZERO_OR_ONE:
+            end = _number_end(text, i)
+            if any(_numeral(ch) for ch in text[i:end]) or (_alone(text, i, end) and not text[i:end].isascii()):
+                hits.append((i, "digit", Violation(kind="number_in_prose", span=_span(text[i:end]), rule_id="digit")))
+                i = end
+                continue
         if category == "Sc":
             hits.append((i, "currency", Violation(kind="number_in_prose", span=text[i], rule_id="currency")))
         i += 1

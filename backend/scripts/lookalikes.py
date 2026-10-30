@@ -13,12 +13,15 @@ scripts/unicode/confusables-18.0.0-kept.txt holds that file's header and the map
 table is made from, each as it is there, so the table can be remade and checked without the
 download, and each kept line can be found in the published file with `grep -F`.
 
-A line is kept when its source is one character outside ASCII that NFKD leaves as it is, its
-prototype is one ASCII letter, and the character is a letter: general category L in Python's
-Unicode database or, for a code point newer than that database, a name that says LETTER. The
-table has one `<code point>\\t<prototype>\\t# <name>` line per kept line, in code point order,
-under a header that states the source and this filter. A test checks that the committed table is
-exactly what this makes.
+A line is kept when its source is one character outside ASCII that NFKD leaves as it is and its
+prototype is one ASCII letter or digit. For a letter, the character must be a letter too: general
+category L in Python's Unicode database or, for a code point newer than that database, a name that
+says LETTER or DIGIT (a digit newer than the database whose prototype is O or l, such as OUTLINED
+DIGIT ZERO). For a digit, it may be anything that database doesn't already count as a numeral
+(category N), since the scan reads numerals as they are. The table has one
+`<code point>\\t<prototype>\\t# <name>` line per kept line, in code point order, under a header that
+states the source and this filter. A test checks that the committed table is exactly what this
+makes.
 """
 
 import argparse
@@ -50,14 +53,18 @@ KEPT_NOTE = """\
 """
 
 HEADER = """\
-# Letters that look like one Latin letter, made by backend/scripts/lookalikes.py from Unicode's
-# confusables.txt (version {version}, {date}): every character outside ASCII whose prototype there
-# is a single ASCII letter, that NFKD leaves as it is, and that is a letter: general category L in
-# Python's Unicode database ({unidata}) or, for a code point newer than that, a name that says LETTER.
-# The prose scan reads each as that letter before the lexicons run, so "Tuеsday" with a Cyrillic е
-# is read as Tuesday. Letters drawn as a bare stroke have the prototype l, and the scan also reads
-# them as i, since they stand for I as readily as for l ("ΝΙΝΕ").
-# One `<code point>\\t<letter>` per line, the letter's name after a `#`.
+# Characters that look like one ASCII letter or digit, made by backend/scripts/lookalikes.py from
+# Unicode's confusables.txt (version {version}, {date}): every character outside ASCII that NFKD
+# leaves as it is and whose prototype there is a single ASCII letter or digit. For a letter, the
+# character is a letter: general category L in Python's Unicode database ({unidata}) or, for a code
+# point newer than that, a name that says LETTER or DIGIT. For a digit, it is anything that database
+# doesn't count as a numeral.
+# The prose scan reads each letter as its Latin letter before the lexicons run, so "Tuеsday" with a
+# Cyrillic е is read as Tuesday. Letters drawn as a bare stroke have the prototype l, and the scan
+# also reads them as i, since they stand for I as readily as for l ("ΝΙΝΕ"). It reads each digit
+# lookalike as a digit, and the letters shaped like O and l next to one as 0 and 1, so "ЗОО" with
+# a Cyrillic З and О is a number.
+# One `<code point>\\t<letter or digit>` per line, the character's name after a `#`.
 
 """
 
@@ -72,10 +79,13 @@ def published(path: Path) -> str:
 
 def _kept(ch: str, prototype: str, name: str) -> bool:
     """Whether the table holds `ch`, whose prototype is `prototype` and whose name is `name`."""
-    if ord(ch) < 0x80 or unicodedata.normalize("NFKD", ch) != ch or prototype not in string.ascii_letters:
+    if ord(ch) < 0x80 or unicodedata.normalize("NFKD", ch) != ch:
         return False
     category = unicodedata.category(ch)
-    return category[0] == "L" or (category == "Cn" and "LETTER" in name.split())
+    if prototype in string.digits:
+        return category[0] != "N"
+    newer = category == "Cn" and not {"LETTER", "DIGIT"}.isdisjoint(name.split())
+    return prototype in string.ascii_letters and (category[0] == "L" or newer)
 
 
 def _mappings(text: str) -> list[tuple[str, str, str, str]]:
