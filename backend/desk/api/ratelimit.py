@@ -8,12 +8,12 @@ When the request holds a credential, `ledger` names it, and the first refusal in
 reported to the kernel as an `api`-origin `rate_limit` entry naming only the limit. A ledger append that fails is
 logged without values and tried again at the next refusal; the request is refused either way.
 
-The money guard is on model turns and the daily model budget, never on page loads (owner decision, 2026-10-29):
-loading or resuming a chat is never limited, a new chat counts toward `new_chat`, and a visitor message that starts
-a model turn counts toward `visitor_turn` (per address, by the hour) and `visitor_turn_conversation` (per session,
-with no window). A limit with no window keeps its count for the conversation: hits never leave it one by one, and
-the count is let go only once a day has passed since its last hit (`CONVERSATION_IDLE_S`), when the kernel has
-closed a session that was idle all along, so the memory it holds stays bounded.
+The money guard is on model turns and the daily model budget, never on page loads: loading or resuming a chat is
+never limited, a new chat counts toward `new_chat`, and a visitor message that starts a model turn counts toward
+`visitor_turn` (per address, by the hour) and `visitor_turn_conversation` (per session, with no window). A limit
+with no window keeps its count for the conversation: hits never leave it one by one, and the count is let go only
+once a day has passed since its last hit (`CONVERSATION_IDLE_S`), by when the kernel has closed the session unless
+other requests kept it open, so the memory it holds stays bounded.
 
 Per-IP limits take the key from `deps.client_ip`, which answers None for a caller exempt from them (a
 loopback peer: the built-in agent, and any loopback peer outside production); every other limit needs a key.

@@ -289,11 +289,11 @@ def _from_state(decision: Decision, status: Status | None) -> ToolOutcome:
 async def _not_known_yet(conn: AsyncConnection, caller: Caller, decision_id: str) -> ToolOutcome:
     """`/execute` answered 409 `conflict`: the kernel has no result to give for this decision now. Its execution is
     under way or its outcome `unknown` (no stored result yet), or it can't run (expired, refused at execution).
-    That is never answered `refused` on its own, and /execute is never sent again for the decision: it is read by
-    its ID and shown as the kernel signed it, and Claude gets what it ended as, or `unknown` while it isn't final,
-    when `_publish` leaves it as a `decision_pending` row for the visitor's next request, which publishes its final
-    state. An unreadable decision is left that way too, answered `unknown`, and a read that failed stops the turn as
-    its failure says."""
+    That alone is never answered `refused`, and /execute is never sent again for the decision. It is read by its ID
+    and shown as the kernel signed it, and Claude gets what it ended as, or `unknown` while it isn't final (then
+    `_publish` has left a `decision_pending` row, so the visitor's next request publishes its final state). A
+    decision that can't be read is left pending too and answered `unknown`, and the turn stops as that read's
+    failure says."""
     try:
         decision = await _read(caller, decision_id)
     except (KernelFailed, KernelUnavailable) as failure:
@@ -419,9 +419,9 @@ async def recover_call(conn: AsyncConnection, caller: Caller, generation: int, b
                        made_at: int) -> ToolOutcome:
     """A `tool_use` block a turn left unanswered (it stopped after the call): found by call ID at `made_at`, the
     session generation that turn ran at, never decided again. No decision means it never ran; an allow runs now (a
-    repeat returns the stored result, and a 409 `conflict`, an execution already under way, answers `unknown` from the
-    decision); a final decision answers with what it ended as. When the session has left
-    that generation since (`generation` is the session's now), the decision is only shown and answered from its
+    repeat returns the stored result, and a 409 `conflict`, its execution already under way, answers from the
+    decision: `unknown` while it isn't final); a final decision answers with what it ended as. When the session has
+    left that generation since (`generation` is the session's now), the decision is only shown and answered from its
     state (`_settle`). If settling it raises (a publication that failed), a decision that isn't final is left as a
     `decision_pending` row before the error goes on, so its final state is still shown once it has one."""
     call = tool_call(block)

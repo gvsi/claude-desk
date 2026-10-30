@@ -449,6 +449,24 @@ async def test_an_execute_conflict_is_answered_from_what_the_read_shows(api_conn
                                                                 {"decision_id": decisions["unknown"].decision_id})]
 
 
+async def test_an_execute_conflict_whose_decision_cant_be_read_is_left_pending(api_conn, caller, fake):
+    """After a 409 `conflict` the kernel stops answering: the decision can't be read, so nothing is shown, Claude is
+    told `unknown` (never `refused`), the decision is left pending for the visitor's next request, and the turn ends
+    with the kernel unavailable."""
+    fake.in_flight("native.quote")
+    fake.fail("GET /decisions/{id}", "connect", times=1)
+    outcome = await route_call(api_conn, caller, 0, tool_use("native__quote", DRAIN))
+
+    (decision,) = session_decisions(fake, caller.session_id)
+    assert (outcome.result, outcome.is_error, outcome.status) == (
+        {"outcome": "unknown", "decision_id": decision.decision_id}, True, None)
+    assert outcome.unavailable and not (outcome.fenced or outcome.session_ended or outcome.turn_over)
+    assert routes(fake, "/execute") == ["POST /execute"]
+    assert await events(api_conn, caller.session_id) == []
+    assert await control_rows(api_conn, caller.session_id) == [("decision_pending",
+                                                                {"decision_id": decision.decision_id})]
+
+
 async def test_recovering_a_call_whose_execute_is_a_conflict(api_conn, caller, visitor, fake):
     """A turn stopped after its call was decided allowed, and the kernel's execution of it is under way. Recovery finds
     it by call ID, and its /execute answers 409 `conflict`: answered `unknown` from the decision, shown, left pending,

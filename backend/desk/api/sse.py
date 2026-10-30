@@ -17,7 +17,8 @@ streams of the session each notification names. `event_stream` replays the sessi
 client's `Last-Event-ID`, calls `on_open`, then sends each new event as it is committed (a wake-up, or a
 poll every 2 s when a notification is missed) and hands each control row that appears unhandled while it is
 open to `on_control`, once per stream; an idle stream gets a `keep-alive` comment every `ping_s`. A hang-up
-ends the stream wherever it is, as a cancellation, even when a database read reports it as an error of its own.
+ends the stream wherever it is, as a cancellation, even when a database read reports it as an error of its own; a
+stream whose `Wakeup` is closed (a newer stream of its session took its place) ends at its next look.
 """
 
 import asyncio
