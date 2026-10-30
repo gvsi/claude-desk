@@ -162,7 +162,14 @@ class RateLimiter:
         key is marked before the await, so callers at the same moment write once; a `write` that raises unmarks it, so
         the next caller writes, and the exception goes on to the caller. It fails toward writing: a clock that can't be
         read means `write()` is awaited and nothing is marked, and a mark that ends further off than `window_s` (the
-        clock was stepped back) is stale, so the write runs."""
+        clock was stepped back) is stale, so the write runs.
+
+        A known gap: a caller that comes while another's `write` is still under way finds the key marked and skips its
+        own, and if that write then fails, the skipped caller's is never made; only callers after the failure find the
+        key unmarked. A resumed chat's `session` ledger entry, written this way, can be missed so: a resume that runs
+        alongside another resume whose ledger append fails is not ledgered. That is accepted, since a resume is not an
+        attempt (Plan 02a's ruling): the kernel still checks the session on every resume, and the ledger loses no
+        attempt."""
         try:
             now = self._now()
         except Exception:
