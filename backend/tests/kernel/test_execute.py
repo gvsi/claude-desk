@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from desk.contracts import Claim, Decision, ExecResult, Fact, Label, Review
 from desk.db.models import Decision as DecisionRow
 from desk.db.models import DemoInboxEntry, Document, Execution, PriceItem, Quote, Tool
-from desk.kernel_service import demo_inbox, execute
+from desk.kernel_service import demo_inbox, execute, ledger
 from desk.kernel_service.adapters.base import AdapterFailure, AdapterRefusal, AdapterResult, AdapterUnknown
 from desk.kernel_service.app import create_app
 from desk.kernel_service.seed import RIVERA_CARDS
@@ -438,6 +438,53 @@ async def test_execution_hooks_follow_the_seam(app, client, registry, frozen_clo
         assert (await read(client, visitor.headers, lost)).state == "executed"
     assert effects == [lost.action.action_id] and quote.calls.count("reconcile") == 1
     assert (await executed(client, visitor, lost)).model_view == {"ok": True}
+
+
+@pytest.mark.parametrize("how", ["read", "startup"])
+async def test_on_failed_is_never_kept_without_its_failed_record(app, client, registry, frozen_clock, monkeypatch,
+                                                                 caplog, how):
+    # Reconciliation asks the adapter first: an orphan that never ran is undone (`on_failed`), then
+    # recorded `failed`. When the record fails, the rollback takes back `on_failed` with it, and
+    # the orphan's `unknown` mark too, so the next read finds the orphan as it was and settles it once.
+    quote, rows, visitor, allowed = await fake_quote_desk(app, client)
+    copy_id, action_id = rows.copy_id, allowed.action.action_id
+
+    async def undo(xctx, action) -> None:
+        await demo_inbox.deliver(xctx.ctx, copy_id=action.copy_id, desk_id=action.desk_id, to="owner", person_id=None,
+                                 kind="alert", body=action.action_id, preview="Undone")
+
+    async def undone() -> list[str]:
+        return [row.body for row in await rows_of(app, copy_id, select(DemoInboxEntry).where(
+            DemoInboxEntry.preview == "Undone"))]
+
+    quote.script["on_failed"] = undo                             # `reconcile` answers None: it never ran
+    await store_intent(app, copy_id, allowed)                    # a kernel died after T1
+    frozen_clock.advance(31)
+    append = ledger.append
+
+    async def the_record_fails(ctx, *, copy_id: str, desk_id: str, event):
+        if event.kind == "execute" and event.summary.get("reconciled"):
+            raise RuntimeError("the ledger went away")
+        return await append(ctx, copy_id=copy_id, desk_id=desk_id, event=event)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(ledger, "append", the_record_fails)
+        if how == "read":
+            response = await client.get(f"/decisions/{allowed.decision_id}", headers=visitor.headers)
+            assert (response.status_code, response.json()) == (500, {"code": "internal"})
+        else:
+            assert await execute.reconcile_at_startup(app.state.kernel) == []
+            assert f"reconcile_failed action_id={action_id}" in caplog.text
+    assert quote.calls[-2:] == ["reconcile", "on_failed"]
+    assert await undone() == []                                  # on_failed rolled back with the record
+    assert await committed(app, copy_id, action_id) == ("intent", "allowed")
+    assert [e for e in await ledger_rows(app, rows) if e.event.kind == "execute"] == []
+
+    assert (await read(client, visitor.headers, allowed)).state == "failed"
+    assert await undone() == [action_id]                         # undone once, with its record
+    base = {"decision_id": allowed.decision_id, "action_id": action_id}
+    assert [e.event.summary for e in await ledger_rows(app, rows) if e.event.kind == "execute"] == [
+        {**base, "state": "unknown", "orphaned": True}, {**base, "state": "failed", "reconciled": True}]
 
 
 async def test_a_take_over_after_the_intent_stops_the_allow(app, client, registry, monkeypatch):
