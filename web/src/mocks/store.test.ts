@@ -110,6 +110,29 @@ describe('the scripted Desk', () => {
     ]);
   });
 
+  it('script_matches_whole_words', async () => {
+    // A rule's word picks it only as a word of its own, never inside another one.
+    const cases: [text: string, rule: RuleName][] = [
+      ['Do you offer weekend service?', 'other'],
+      ['Is the office open on Saturday?', 'other'],
+      ['Can I get 15% off?', 'discount'],
+      ['Off-peak discount?', 'discount'],
+      ['Who is Mariana?', 'other'],
+      ['¿Cuánto?', 'price'],
+      ['Llámame.', 'callback'],
+    ];
+    for (const [text, rule] of cases) expect(matchRule(text).name, text).toBe(rule);
+
+    // So asking about an offer starts no held discount: nothing new for Maria, and a plain answer.
+    const before = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
+    const { events } = await openChat();
+    await send('Do you offer weekend service?');
+    await drain();
+    expect(typesOf(events)).toEqual(['writing', 'message', 'turn_end']);
+    expect((await call('needsYou', { params: { desk_id: deskId } })).body).toEqual(before);
+    expect([...mockStore.world.decisions.values()].filter((d) => d.decision.state === 'held')).toHaveLength(before.length);
+  });
+
   it('discount_holds_and_reaches_needs_you', async () => {
     // Rivera's Today greets Maria, counts the seeded hold, and has Dana's chat live (the held
     // visitor's last word was twelve minutes ago).

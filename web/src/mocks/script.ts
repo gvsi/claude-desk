@@ -1,6 +1,7 @@
 /**
  * The scripted Desk: how Rivera Plumbing's Claude answers in the mock API. A visitor's message
- * picks the first rule with one of its words in the lowercased text, and that rule's steps run
+ * picks the first rule with one of its words, as a word of its own, in the lowercased text (so
+ * "offer" never reads as "off"), and that rule's steps run
  * 150 ms apart, each turn ending with `turn_end`. Cards, prose and status lines are the design
  * system's Rivera fixtures and the kernel's visitor templates, in the turn's language. Nothing here
  * is a model; it stands in for the API's turn runner so screens can be built and tested.
@@ -344,7 +345,7 @@ export type RuleName = 'discount' | 'invoice' | 'deposit' | 'booked' | 'book' | 
 
 export interface ScriptRule {
   name: RuleName;
-  /** Lowercase words, any one of which picks the rule. Empty for the last rule, which takes anything. */
+  /** Lowercase words or phrases, any one of which, found whole, picks the rule. Empty for the last rule, which takes anything. */
   words: readonly string[];
   steps: readonly Step[];
 }
@@ -462,10 +463,19 @@ export const SCRIPT: readonly ScriptRule[] = [
   },
 ];
 
-/** The first rule with one of its words in the lowercased text, else the last rule. */
+/**
+ * Whether `lower` has `word` (or a phrase of words) as words of their own, with no letter or digit
+ * either side: "off" is in "15% off", never in "offer".
+ */
+function hasWord(lower: string, word: string): boolean {
+  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'u').test(lower);
+}
+
+/** The first rule with one of its words, whole, in the lowercased text, else the last rule. */
 export function matchRule(text: string): ScriptRule {
   const lower = text.toLowerCase();
-  const rule = SCRIPT.find((r) => r.words.some((word) => lower.includes(word))) ?? SCRIPT[SCRIPT.length - 1];
+  const rule = SCRIPT.find((r) => r.words.some((word) => hasWord(lower, word))) ?? SCRIPT[SCRIPT.length - 1];
   if (!rule) throw new Error('the script has no rules');
   return rule;
 }
