@@ -10,6 +10,7 @@ which its carried cards already fit.
 
 Which cards the cap bounds is decided here alone (`auto_money`), and the kernel's compiler holds
 cards to the cap with this same predicate, so the draft check and the lowering can't drift apart.
+Which cards move money at all is `desk.contracts.moves_money`, the one `RuleCard` checks with.
 
 Both processes may import this module, so it imports nothing but `desk.contracts`, like
 `desk.presets`.
@@ -17,15 +18,7 @@ Both processes may import this module, so it imports nothing but `desk.contracts
 
 from collections.abc import Iterable
 
-from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, MONEY_TOOLS, RuleCard
-
-_MONEY_EFFECTS = ("effect:charge", "effect:pay_out")
-
-
-def moves_money(card: RuleCard) -> bool:
-    """Does the card take or pay out money: a money tool, or the `charge` or `pay_out` effect
-    (the rule `RuleCard` holds an auto money card's amount to)."""
-    return card.applies_to in MONEY_TOOLS or card.applies_to in _MONEY_EFFECTS
+from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, RuleCard, moves_money
 
 
 def auto_money(card: RuleCard) -> bool:

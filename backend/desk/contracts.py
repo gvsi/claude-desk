@@ -267,8 +267,7 @@ class RuleCard(BaseModel):                # Claude drafts, code compiles, the ow
         limited = self.max_amount_cents is not None or self.max_discount_bp != 0 or self.hours is not None
         if self.mode != "auto" and (self.review or limited):
             raise ValueError("review and limits apply only to auto cards")
-        moves_money = self.applies_to in MONEY_TOOLS or self.applies_to in ("effect:charge", "effect:pay_out")
-        if self.mode == "auto" and moves_money and (
+        if self.mode == "auto" and moves_money(self) and (
             self.max_amount_cents is None or self.max_amount_cents > AUTO_MONEY_HARD_CAP_CENTS
         ):
             raise ValueError(f"an auto money card needs max_amount_cents of at most {AUTO_MONEY_HARD_CAP_CENTS}")
@@ -279,6 +278,14 @@ class RuleCard(BaseModel):                # Claude drafts, code compiles, the ow
         if self.is_default and (self.mode != "ask" or self.who != "anyone"):
             raise ValueError('a default card is the compiler\'s "ask" card for anyone')
         return self
+
+_MONEY_EFFECTS = frozenset({"effect:charge", "effect:pay_out"})
+
+def moves_money(card: RuleCard) -> bool:
+    """Does the card take or pay out money: on a money tool, or on the `charge` or `pay_out` effect.
+    Defined here alone: `RuleCard` holds an auto money card to an amount with it, and the money cap
+    (`desk.money_cap`) and the kernel's compiler read it too."""
+    return card.applies_to in MONEY_TOOLS or card.applies_to in _MONEY_EFFECTS
 
 class ProofCheck(BaseModel):
     name: str                             # see "Proof obligations"

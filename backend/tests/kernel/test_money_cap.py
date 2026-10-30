@@ -24,9 +24,10 @@ import httpx
 import psycopg
 import pytest
 from fastapi import FastAPI
+from pydantic import ValidationError
 from sqlalchemy import select
 
-from desk import money_cap
+from desk import contracts, money_cap
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, Decision, HoursWindow, RuleCard
 from desk.contracts import PolicyVersion as PolicyVersionContract
 from desk.db.models import Desk, Person, PolicyVersion
@@ -428,9 +429,21 @@ def test_lower_to_cap_touches_only_carried_money_cards():
 
 
 def test_one_predicate_says_which_cards_the_cap_bounds():
-    # the compiler holds cards to the money cap with desk.money_cap's own predicate, never a copy of it
+    # the compiler holds cards to the money cap with desk.money_cap's own predicate, never a copy of
+    # it, and which cards move money is defined once, in the contracts, for both and for RuleCard
     assert compiler.auto_money is money_cap.auto_money
-    assert compiler.moves_money is money_cap.moves_money
+    assert compiler.moves_money is money_cap.moves_money is contracts.moves_money
+    # RuleCard's own check reads it: an auto card with no amount is refused on every target that
+    # moves money, and on no other
+    for target in sorted(contracts._RULE_TARGETS):
+        priced = RuleCard(card_id="c", applies_to=target, mode="auto", who="anyone", max_amount_cents=100,
+                          reason="A card.")
+        try:
+            RuleCard.model_validate({**priced.model_dump(), "max_amount_cents": None})
+            refused = False
+        except ValidationError:
+            refused = True
+        assert refused == contracts.moves_money(priced), target
     # so the draft check and the lowering agree on every card: a carried card comes down exactly
     # when the check would refuse it
     asks = RuleCard(card_id="ask-links", applies_to="native.payment_link", mode="ask", who="anyone",

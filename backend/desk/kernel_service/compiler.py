@@ -36,8 +36,9 @@ from typing import Any, Literal
 import desk_kernel
 
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, MONEY_TOOLS, RuleCard, ToolProfile
+from desk.contracts import moves_money  # noqa: F401  (compiler.moves_money stays importable)
 from desk.kernel_service import review_thresholds
-from desk.money_cap import auto_money, moves_money  # noqa: F401  (compiler.moves_money stays importable)
+from desk.money_cap import auto_money
 from desk.presets import PRESETS
 
 CEDAR_DIR = Path(__file__).resolve().parents[3] / "kernel" / "cedar"
