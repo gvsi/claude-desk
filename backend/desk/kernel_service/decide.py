@@ -492,32 +492,50 @@ def is_money(tool: str, effects: Iterable[str]) -> bool:
     return tool in MONEY_TOOLS or bool(MONEY_EFFECTS & set(effects))
 
 
-def held_by_ask(version_row: PolicyVersionRow | None, policy_ids: Iterable[str]) -> bool:
-    """Was a hold decided by an `ask` card, the owner's or the compiler's default ask, rather than
-    by an `auto` card's hold twin, whose amount, discount, hours or review gate failed (a limit
-    hold)? ("Decision lifecycle".) Read from the deciding policies' `@tier` and the cards their
-    `@card` names in the version that decided it.
+@dataclass(frozen=True)
+class HoldDecider:
+    """The cards that decided a hold, and whether they are `ask` cards."""
+
+    ask: bool                             # an ask card decided it; otherwise an auto card's hold twin did
+    card_ids: list[str]                   # the cards that decided, by `card_id`
+
+
+def hold_decider(version_row: PolicyVersionRow | None, policy_ids: Iterable[str]) -> HoldDecider | None:
+    """Which cards decided a hold, read from the deciding policies' `@tier` and the cards their
+    `@card` names in the version that decided it ("Decision lifecycle").
 
     A hold's deciding policies are the `@tier("hold")` permits of `H` that matched: ask cards' own
-    and the twins of auto cards. Several can match, so "Coverage and overlap" settles which card
-    decided: the most specific, an ask card winning a tie. A person's own auto card thus decides
-    over the default ask that matches them too. Any deciding policy that is no hold permit of a
-    known card (step 5's money hold, decided by an auto permit) makes it no ask hold."""
+    and the twins of auto cards. Hold permits carry no exclusions, so every matching one is listed,
+    and "Coverage and overlap" settles which cards decided: the most specific, the ask cards among
+    them when there are any (an ask card wins a tie). A person's own auto card thus decides over
+    the default ask that matches them too. None when there is no deciding policy, or any is no hold
+    permit of a known card (step 5's money hold, decided by an auto permit)."""
     if version_row is None:
-        return False
+        return None
     heads = policy_heads(version_row)
     cards = {card.card_id: card for card in version_row.cards}
-    ranked: list[tuple[tuple[int, int], bool]] = []
+    ranked: list[tuple[tuple[int, int], bool, tuple[str, ...]]] = []
     for policy_id in policy_ids:
         head = heads.get(policy_id)
         if head is None or head.tier != "hold" or not head.cards or not set(head.cards) <= cards.keys():
-            return False
+            return None
         behind = [cards[card_id] for card_id in head.cards]
-        ranked.append((max(compiler.specificity(card) for card in behind), all(card.mode == "ask" for card in behind)))
+        ranked.append((max(compiler.specificity(card) for card in behind), all(card.mode == "ask" for card in behind),
+                       head.cards))
     if not ranked:
-        return False
-    top = max(rank for rank, _ in ranked)
-    return any(ask for rank, ask in ranked if rank == top)
+        return None
+    top = max(rank for rank, _, _ in ranked)
+    ask = any(is_ask for rank, is_ask, _ in ranked if rank == top)
+    return HoldDecider(ask, sorted({card_id for rank, is_ask, ids in ranked if rank == top and is_ask == ask
+                                    for card_id in ids}))
+
+
+def held_by_ask(version_row: PolicyVersionRow | None, policy_ids: Iterable[str]) -> bool:
+    """Was a hold decided by an `ask` card, the owner's or the compiler's default ask, rather than
+    by an `auto` card's hold twin, whose amount, discount, hours or review gate failed (a limit
+    hold)? (`hold_decider`; a hold it can't read is no ask hold.)"""
+    decider = hold_decider(version_row, policy_ids)
+    return decider is not None and decider.ask
 
 
 def held_answers(principal: Principal, action: NormalizedAction | None, *, ask_held: bool) -> list[ApprovalAnswer]:
@@ -718,29 +736,37 @@ async def _repeat(ctx: KernelCtx, row: DecisionRow, sha: str) -> Decision:
     return await decision_contract(ctx, await expire_if_due(ctx, row))
 
 
-def _lead_in(call: _Call, outcome: str, evaluation: Evaluation) -> str:
-    """How the deciding rules decided (`RULE_LEAD_INS`). A hold is an ask hold when an `ask` card
-    decided it, by the same test that offers `deny_always` (`held_by_ask`); any other hold went past
-    an `auto` card's amount, discount, hours window or review gate."""
-    if outcome == "hold":
-        return RULE_LEAD_INS["ask" if held_by_ask(call.version_row, evaluation.policy_ids) else "limit"]
-    return RULE_LEAD_INS[outcome]
+def _rules_decided(call: _Call, outcome: str, evaluation: Evaluation) -> tuple[str, list[str]]:
+    """How the deciding rules decided (`RULE_LEAD_INS`), and the cards to quote after it. A hold is
+    an ask hold when an `ask` card decided it, by the same test that offers `deny_always`
+    (`hold_decider`, as `held_by_ask` reads it); any other hold went past an `auto` card's amount,
+    discount, hours window or review gate. Only the cards that decided a hold are quoted, so the
+    lead-in and the quotes agree. An allow's permits already leave out every less specific card
+    (their `unless` exclusions), and every matching `never` card refuses on its own, so those quote
+    every deciding card."""
+    if outcome != "hold":
+        return RULE_LEAD_INS[outcome], evaluation.card_ids
+    decider = hold_decider(call.version_row, evaluation.policy_ids)
+    if decider is None:
+        return RULE_LEAD_INS["limit"], evaluation.card_ids
+    return RULE_LEAD_INS["ask" if decider.ask else "limit"], decider.card_ids
 
 
 def _reason_plain(call: _Call, outcome: str, reason: str | None, evaluation: Evaluation | None) -> str:
-    """The owner's account of a decision: who asked for what, why it went this way (the deciding
-    cards' reasons, each quoted after one lead-in that says how they decided; the reviewer; or why
-    it was refused with no card deciding), then the call's free-text arguments, each quoted, under
-    one "Claude's note" label: Claude wrote them into the call, the visitor didn't."""
+    """The owner's account of a decision: who asked for what, why it went this way (the reasons of
+    the cards that decided, each quoted after one lead-in that says how they decided; the reviewer;
+    or why it was refused with no card deciding), then the call's free-text arguments, each
+    quoted, under one "Claude's note" label: Claude wrote them into the call, the visitor didn't."""
     parts = [_asked(call.subject, call.req.call.tool, call.action)]
     if reason is not None:
         parts.append(REFUSED_PLAIN[reason])
     else:
         assert evaluation is not None and call.version_row is not None
         cards = {card.card_id: card for card in call.version_row.cards}
-        reasons = [cards[card_id].reason for card_id in evaluation.card_ids if card_id in cards]
+        lead_in, card_ids = _rules_decided(call, outcome, evaluation)
+        reasons = [cards[card_id].reason for card_id in card_ids if card_id in cards]
         if reasons:
-            parts.append(f"{_lead_in(call, outcome, evaluation)}: " + ", ".join(_quoted(text) for text in reasons))
+            parts.append(f"{lead_in}: " + ", ".join(_quoted(text) for text in reasons))
         elif outcome == "refuse":
             parts.append(BASELINE_PLAIN)
     if evaluation is not None and evaluation.needed_review:

@@ -1110,11 +1110,13 @@ AT_LIST_PRICE = rule("quote", "auto", "Quotes from your price list, at list pric
     ([], 0,                               # the compiler's default ask, for a tool no card covers
      "A stranger asked to get a quote for $180. "
      "Your rule asks you first: “Not covered by a rule yet, so it asks you.”"),
-    ([AT_LIST_PRICE, rule("quote-two", "auto", "Quotes for one visit.")], 0,   # both decide: one lead-in
+    ([AT_LIST_PRICE, rule("quote-two", "auto", "Quotes for one visit.")], 0,   # as specific: both decide
      "A stranger asked to get a quote for $180. "
      "Your rule allows it: “Quotes from your price list, at list price.”, “Quotes for one visit.”"),
+    ([AT_LIST_PRICE, rule("ask-quotes", "ask", "Quotes wait for your answer.")], 0,   # as specific: the ask decides
+     "A stranger asked to get a quote for $180. Your rule asks you first: “Quotes wait for your answer.”"),
 ], ids=["allowed", "held_past_a_limit", "refused_by_never", "held_by_ask", "held_by_the_default_ask",
-        "several_rules"])
+        "allowed_by_two_rules_as_specific", "held_by_an_ask_as_specific_as_a_limit"])
 async def test_the_owner_reads_how_the_deciding_rule_decided(app, client, registry, cards, discount_bp, said):
     """The deciding rules' own text (the owner's words) comes after a lead-in that says how they
     decided, in the owner's wording of 2026-10-30, so a rule's text never reads as a fact about the
