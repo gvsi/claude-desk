@@ -12,6 +12,7 @@ executed through `/decide` and `/execute`.
 
 import hashlib
 import json
+import time
 
 import desk_kernel
 import httpx
@@ -207,6 +208,14 @@ async def test_only_the_desks_own_names_may_mix_scripts(app, client):
     assert [(v.kind, v.rule_id, v.span) for v in verdict.violations] == [
         ("unsupported_language", "mixed_script", "\u03a3igma"), ("unsupported_language", "mixed_script", "h\u0435llo")]
     assert_handed_off(verdict)
+
+
+@pytest.mark.parametrize("prose", ["l" * 20_000, "I l O " * 4_000, "\u041e" * 20_000])
+def test_a_long_draft_is_scanned_in_one_pass(prose):
+    """Letters shaped like 0 or 1 that make no number are passed over once, not once per letter."""
+    started = time.perf_counter()
+    reply_check.scan_prose(prose)
+    assert time.perf_counter() - started < 2
 
 
 def test_the_lookalike_table_is_what_its_script_makes():

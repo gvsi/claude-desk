@@ -257,11 +257,11 @@ def scan_prose(text: str, canaries: Iterable[str] = (), names: Iterable[str] = (
         elif text[i] == KEYCAP_TEN:
             hits.append((i, "digit", Violation(kind="number_in_prose", span=text[i], rule_id="digit")))
         if _numeral(text[i]) or text[i] in ZERO_OR_ONE:
-            end = _number_end(text, i)
+            end = _number_end(text, i)          # no currency or percent sign inside, so passed over once
             if any(_numeral(ch) for ch in text[i:end]) or (_alone(text, i, end) and not text[i:end].isascii()):
                 hits.append((i, "digit", Violation(kind="number_in_prose", span=_span(text[i:end]), rule_id="digit")))
-                i = end
-                continue
+            i = end
+            continue
         if category == "Sc":
             hits.append((i, "currency", Violation(kind="number_in_prose", span=text[i], rule_id="currency")))
         i += 1
