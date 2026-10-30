@@ -13,7 +13,7 @@
 #                  visitor's; other-session-owner-statement, an owner say in another visitor's session,
 #                  Plan 01b); fact_id is sent as written
 #   soft_promise   the soft-promise check's reply (claude-haiku-5-5): pass, the default; flag
-#                  (promises_beyond_cards true); error (HTTP 500); timeout (3 s, past the check's 2 s);
+#                  (prose_states_terms true); error (HTTP 500); timeout (3 s, past the check's 2 s);
 #                  unparsable (the text "maybe")
 #   expect         ok; language, where the row pins it; violations, the kinds the verdict has, exactly;
 #                  violations_any, kinds it may have, one or more and nothing else; blocks, what it shows

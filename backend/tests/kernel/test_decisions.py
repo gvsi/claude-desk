@@ -204,7 +204,7 @@ async def test_offline_backend_reviews_nothing(monkeypatch):
     # and passes every reply's soft-promise check, without a call (production refuses this backend)
     reply = SoftPromiseInput(language="en", prose="I'm a real person, not a bot.", cards=[])
     assert await OfflineDecisions().soft_promise(reply) == (
-        SoftPromiseVerdict(promises_beyond_cards=False, denies_being_ai=False), None)
+        SoftPromiseVerdict(prose_states_terms=False, denies_being_ai=False), None)
 
     # DESK_DECISIONS=offline reaches every request's context in development; a backend passed in wins
     monkeypatch.setenv("DESK_DECISIONS", "offline")

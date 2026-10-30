@@ -66,7 +66,7 @@ DUMMY_KEY = "tier1-dummy"   # the only model key tier 1 holds
 SYMCC_REQUIRED = "tier 1 needs symcc mode (cvc5 not found)"
 SOFT_PROMISE_MODEL = "claude-haiku-5-5"
 # A passing soft-promise check (Plan 01a's `SoftPromiseVerdict`), the fake's default for its model.
-SOFT_PROMISE_PASS = {"promises_beyond_cards": False, "denies_being_ai": False}
+SOFT_PROMISE_PASS = {"prose_states_terms": False, "denies_being_ai": False}
 CALL_TIMEOUT_S = 30.0
 # The client timeout the master plan gives proving calls (the kernel proves within its 45 s budget).
 PROVING_TIMEOUT_S = 60.0

@@ -127,8 +127,8 @@ class FakeDecisions:
     def __init__(self, answer: Review | None = None):
         self.answer = answer
         self.inputs: list[ReviewInput] = []
-        self.soft_answer: SoftPromiseVerdict | None = SoftPromiseVerdict(promises_beyond_cards=False,
-                                                                         denies_being_ai=False)
+        self.soft_answer: SoftPromiseVerdict | None = SoftPromiseVerdict(prose_states_terms=False,
+                                                                      denies_being_ai=False)
         self.soft_inputs: list[SoftPromiseInput] = []
         self.soft_backend: DecisionsBackend | None = None
 
