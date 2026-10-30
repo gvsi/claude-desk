@@ -53,7 +53,8 @@ def upgrade() -> None:
         op.execute(f"ALTER TABLE kernel.{table} {additions}")
     for table, checks in CHECKS.items():
         for name, condition in checks.items():
-            op.execute(f"ALTER TABLE kernel.{table} ADD CONSTRAINT {name} CHECK ({condition})")
+            op.execute(f"ALTER TABLE kernel.{table} DROP CONSTRAINT IF EXISTS {name},"
+                       f" ADD CONSTRAINT {name} CHECK ({condition})")
 
 
 def downgrade() -> None:

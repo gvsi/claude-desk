@@ -759,6 +759,26 @@ def test_rows_from_before_the_cap_edges_claim_nothing(scratch):
         scratch.migrate(command.upgrade, "head")
 
 
+def test_the_cap_edges_revision_runs_again_over_what_it_added(scratch):
+    """Like the revisions before it, the money cap's edges revision runs again on a database that
+    already has what it adds: its columns are added only if missing, and its check is dropped if
+    there and added again, so it is never added twice and still holds."""
+    before = ScriptDirectory.from_config(alembic_config()).get_revision(MONEY_CAP_EDGES_REVISION).down_revision
+    scratch.migrate(command.downgrade, MONEY_CAP_EDGES_REVISION)   # nothing to do while it is the head
+    scratch.migrate(command.stamp, before)
+    try:
+        scratch.migrate(command.upgrade, MONEY_CAP_EDGES_REVISION)  # again, over its own columns
+    finally:
+        scratch.migrate(command.stamp, MONEY_CAP_EDGES_REVISION)
+        scratch.migrate(command.upgrade, "head")
+    admin = scratch.conn
+    assert admin.execute("SELECT count(*) FROM pg_constraint WHERE conname = 'executions_checked_pair'"
+                         " AND conrelid = 'kernel.executions'::regclass").fetchone() == (1,)
+    with pytest.raises(psycopg.errors.CheckViolation):
+        admin.execute("INSERT INTO kernel.executions (action_id, copy_id, decision_id, state, started_at,"
+                      " policy_version) VALUES ('act-again', 'copy-again', 'dec-again', 'intent', now(), 1)")
+
+
 DOCUMENT_LINKS_REVISION = "01b_6_document_links"
 
 
