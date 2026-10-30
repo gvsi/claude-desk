@@ -16,7 +16,7 @@ export const todayKey = (deskId: string) => ['today', deskId] as const;
 export const needsYouKey = (deskId: string) => ['needsYou', deskId] as const;
 
 // The reads, which go out whenever they are asked for (a read ahead, a `fetchQuery`); only the hooks wait out `FRESH_MS`.
-const desksQuery = () => queryOptions({ queryKey: DESKS_KEY, queryFn: () => request('desks') });
+export const desksQuery = () => queryOptions({ queryKey: DESKS_KEY, queryFn: () => request('desks') });
 const todayQuery = (deskId: string) =>
   queryOptions({ queryKey: todayKey(deskId), queryFn: () => request('today', { params: { desk_id: deskId } }) });
 const needsYouQuery = (deskId: string) =>
