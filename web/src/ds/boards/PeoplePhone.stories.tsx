@@ -24,7 +24,7 @@ const LEADS = [
 function PeoplePhone() {
   return (
     <RiveraFrame current="people" fill counts={{ conversations: { n: 2, label: '2 need you' }, safety: { n: 2, label: '2 blocked' } }}>
-      <div className="board-page">
+      <div className="board-filled-page">
         <div className="board-people">
           <PageHeader title="Customers" subtitle="Leads and customers on this Desk. Verified means a code reached their contact on record." />
           <section className="board-people__section" aria-labelledby="board-contacts">
