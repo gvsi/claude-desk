@@ -23,7 +23,7 @@ import {
   type SwitcherPick,
 } from '../ds/index.ts';
 import { writeLocal } from '../lib/storage.ts';
-import { DESKS_KEY, findDesk, invalidateCopy, lastOrFirst, todayPath, useDesks, useToday } from './useDesks.ts';
+import { DESKS_KEY, desksQuery, findDesk, invalidateCopy, lastOrFirst, todayPath, useDesks, useToday } from './useDesks.ts';
 
 import './OwnerLayout.css';
 
@@ -86,7 +86,7 @@ export function OwnerLayout() {
  * say the Desk isn't the owner's.
  */
 function DeskGate({ deskId }: { deskId: string }) {
-  const desks = useDesks();
+  const desks = useDesks(deskId);
   const found = desks.data ? findDesk(desks.data, deskId) : null;
 
   if (found) return <DeskFrame businesses={desks.data ?? []} business={found.business} desk={found.desk} />;
@@ -139,7 +139,7 @@ function DeskFrame({ businesses, business, desk }: DeskFrameProps) {
         return;
       }
       // The change may have been applied with its answer lost: the switch shows what the Desk reads now.
-      const read = await queryClient.fetchQuery({ queryKey: DESKS_KEY, queryFn: () => request('desks') }).catch(() => null);
+      const read = await queryClient.fetchQuery(desksQuery()).catch(() => null);
       if (read === null) {
         // Nor could the Desk be read: the switch stays where it was put, and the next read settles it.
         setNotice(`We couldn't confirm that Answering is now ${onOff(on)}. Reload to see where it stands.`);

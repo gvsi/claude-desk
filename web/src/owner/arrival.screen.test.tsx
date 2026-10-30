@@ -12,10 +12,12 @@ import { observeRequests } from '../api/http.ts';
 import { rivera } from '../ds/fixtures/index.ts';
 import { ROUTES, type RouteKey } from '../api/routes.ts';
 import { readLocal } from '../lib/storage.ts';
+import { copyOut } from '../mocks/readModels.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
+import { FRESH_MS } from './useDesks.ts';
 
 const TITLE = 'A Claude front desk for your business';
 const INTRO =
@@ -34,6 +36,8 @@ const RATE_LIMITED = 'That’s a lot of tries. Wait a while, then try again.';
 const UNREACHABLE = 'We couldn’t reach the demo. Try again in a moment.';
 
 const TODAY = `/app/${RIVERA.deskId}/today`;
+/** Rivera's public page, a route that loads with the app. */
+const PUBLIC_PAGE = `/d/${RIVERA.slug}`;
 
 /** The requests a route got, by key. */
 const requests = (key: string) => mockStore.requests.filter((r) => r.key === key);
@@ -86,26 +90,142 @@ describe('Arrival', () => {
 
     // Every page the browser draws on the way to Today: never the owner's loading page, and once the
     // preview has gone, Today already holds its held request.
-    const held = `article[aria-label="Held for you: ${rivera.decisions.held.reason_plain}"]`;
-    const seen: string[] = [];
-    const look = () => {
-      const preview = document.querySelector('.cd-today-preview') !== null;
-      if (document.querySelector('.cd-owner-state') !== null) seen.push('loading');
-      else if (!preview && document.querySelector('.cd-today') !== null) {
-        if (document.querySelector(held) === null) seen.push('today without its held request');
-        else if (document.querySelector('.cd-today__loading') !== null) seen.push('today still reading its briefing');
-        else seen.push('today');
-      } else if (preview) seen.push('preview');
-    };
-    const watch = new MutationObserver(look);
-    watch.observe(document.body, { childList: true, subtree: true });
-    onTestFinished(() => watch.disconnect());
+    const pages = watchPages();
 
     await startTheDemo(screen);
     await expect.poll(() => router.state.location.pathname).toBe(TODAY);
     await expect.element(screen.getByRole('dialog', { name: TITLE })).not.toBeInTheDocument();
-    await expect.element(screen.getByRole('article', { name: `Held for you: ${rivera.decisions.held.reason_plain}`, exact: true })).toBeVisible();
-    expect([...new Set(seen)]).toEqual(['preview', 'today']);
+    await expect.element(heldCard(screen)).toBeVisible();
+    expect(pages()).toEqual(['preview', 'today']);
+  });
+
+  it('returning_owner_opens_today_drawn', async () => {
+    // From the first page drawn: the preview, then Today already holding its held request and its
+    // briefing, never the owner's loading page or a Today still reading.
+    const pages = watchPages();
+    const { screen, router } = await renderRoute('/', { seed: 'rivera' });
+    await expect.poll(() => router.state.location.pathname).toBe(TODAY);
+    await expect.element(heldCard(screen)).toBeVisible();
+    expect(pages()).toEqual(['preview', 'today']);
+    expect(document.querySelector('dialog.cd-intro')).toBeNull();
+  });
+
+  it('returning_owner_hears_their_desk_opening', async () => {
+    // The test's copy is signed in from the start. Needs you fails slowly and is read again, so Today
+    // is read ahead for a while over the preview, which assistive technology doesn't see.
+    mockStore.inject({ route: 'needsYou', status: 500, delayMs: 600 });
+    const { screen, router } = await renderRoute('/');
+    const opening = screen.getByText('Opening your Desk', { exact: true });
+    await expect.element(opening).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe('/');
+    // A status of its own, outside the hidden preview, that shows nothing on the page.
+    const line = opening.element();
+    expect(line.closest('[role="status"]')).not.toBeNull();
+    expect(line.closest('[aria-hidden="true"], [inert]')).toBeNull();
+    expect(line.getBoundingClientRect().width).toBeLessThanOrEqual(1);
+
+    // Gone once Today opens.
+    await expect.poll(() => router.state.location.pathname, { timeout: 5_000 }).toBe(TODAY);
+    await expect.element(heldCard(screen)).toBeVisible();
+    expect(document.body.textContent).not.toContain('Opening your Desk');
+  });
+
+  it('returning_owner_leaving_while_today_is_read_stays', async () => {
+    // The test's copy is signed in from the start. Needs you answers slowly, so Today is still being
+    // read ahead when the owner leaves the page.
+    mockStore.inject({ route: 'needsYou', status: 500, delayMs: 600 });
+    const { router } = await renderRoute('/');
+    await expect.poll(() => requests('needsYou').length).toBeGreaterThan(0);
+    // To a page that loads at once (not a lazy one), so this one is gone while Today is still read.
+    await router.navigate(PUBLIC_PAGE);
+    await expect.poll(() => document.querySelector('.cd-today-preview')).toBeNull();
+    // Gone before Needs you was tried again, which the read ahead waits for.
+    expect(requests('needsYou')).toHaveLength(1);
+    // Past the read-ahead's 3 s cap, by when the page would have gone on to Today.
+    await new Promise((resolve) => setTimeout(resolve, 3_500));
+    expect(router.state.location.pathname).toBe(PUBLIC_PAGE);
+  });
+
+  it('start_the_demo_reads_today_once', async () => {
+    // Polls far apart, so none lands while the reads are counted.
+    const { screen, router } = await renderRoute('/', { seed: { name: 'rivera', signedIn: false }, pollScale: 100 });
+    await expect.element(introDialog(screen)).toBeVisible();
+
+    await startTheDemo(screen);
+    await expect.poll(() => router.state.location.pathname).toBe(TODAY);
+    await expect.element(heldCard(screen)).toBeVisible();
+    // Time for a read on mount to go out, had Today sent one.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    // Read once each, ahead of Today, and not again when it mounts.
+    const reads = (['desks', 'today', 'needsYou'] as const).map((key) => [key, requests(key).length]);
+    expect(Object.fromEntries(reads)).toEqual({ desks: 1, today: 1, needsYou: 1 });
+  });
+
+  it('start_the_demo_reads_a_slow_today_once', async () => {
+    const { screen, router } = await renderRoute('/', { seed: { name: 'rivera', signedIn: false }, pollScale: 100 });
+    await expect.element(introDialog(screen)).toBeVisible();
+    // Needs you fails slowly and is read again, so the Desks and Today, in at once, wait about 2.5 s
+    // for it before Today opens.
+    mockStore.inject({ route: 'needsYou', status: 500, delayMs: 1_500 });
+
+    await startTheDemo(screen);
+    await expect.poll(() => router.state.location.pathname, { timeout: 5_000 }).toBe(TODAY);
+    await expect.element(heldCard(screen)).toBeVisible();
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    // Still fresh when Today opens: none read again.
+    const reads = (['desks', 'today', 'needsYou'] as const).map((key) => [key, requests(key).length]);
+    expect(Object.fromEntries(reads)).toEqual({ desks: 1, today: 1, needsYou: 2 });
+  });
+
+  it('starting_again_opens_as_a_first_visit_does', { timeout: 30_000 }, async () => {
+    const { screen, router } = await renderRoute('/', { seed: { name: 'rivera', signedIn: false } });
+    await expect.element(introDialog(screen)).toBeVisible();
+    const heading = screen.getByRole('heading', { level: 1, name: /, Maria$/ });
+    const tryAgain = screen.getByRole('button', { name: 'Try again' });
+
+    /** Starts the demo with the copy's Desks lost on the network `lost` times, and watches the way to Today. */
+    const startWithDesksLost = async (lost: number) => {
+      mockStore.inject({ route: 'desks', status: 'network', times: lost });
+      const pages = watchPages();
+      await startTheDemo(screen);
+      await expect.poll(() => router.state.location.pathname, { timeout: 5_000 }).toBe(TODAY);
+      return pages;
+    };
+    /** Start over, then the session ends: the app holds copy 2's Desks, and the passcode opens copy 1, which they don't list. */
+    const startOverThenEnd = async () => {
+      await screen.getByRole('button', { name: 'Start over' }).click();
+      await screen.getByRole('dialog', { name: 'Start over with a fresh copy?' }).getByRole('button', { name: 'Start over' }).click();
+      await expect.poll(() => router.state.location.pathname).not.toBe(TODAY);
+      await expect.element(heading).toBeVisible();
+      mockStore.reset('rivera', { signedIn: false });
+      await expect.poll(() => router.state.location.pathname).toBe('/');
+      await expect.element(introDialog(screen)).toBeVisible();
+    };
+
+    // A first visit whose Desks can't be read, ahead or on Today (two tries each): the owner's
+    // loading page, then its error, and Try again opens Today.
+    let pages = await startWithDesksLost(4);
+    await expect.element(tryAgain, { timeout: 5_000 }).toBeVisible();
+    await tryAgain.click();
+    await expect.element(heldCard(screen)).toBeVisible();
+    const firstVisit = pages();
+    expect(firstVisit).toEqual(['preview', 'loading', 'error', 'loading', 'today']);
+
+    // Starting again after the session ends, with the read ahead lost: the loading page, never the
+    // error the old copy's Desks were left in, and Today once its own read is in.
+    await startOverThenEnd();
+    pages = await startWithDesksLost(2);
+    await expect.element(heldCard(screen)).toBeVisible();
+    expect(pages()).toEqual(['preview', 'loading', 'today']);
+    expect(requests('desks')).toHaveLength(3);
+
+    // And with every read lost, just what the first visit showed.
+    await startOverThenEnd();
+    pages = await startWithDesksLost(4);
+    await expect.element(tryAgain, { timeout: 5_000 }).toBeVisible();
+    await tryAgain.click();
+    await expect.element(heldCard(screen)).toBeVisible();
+    expect(pages()).toEqual(firstVisit);
   });
 
   it('leaving_while_today_is_read_stays_where_you_went', async () => {
@@ -116,10 +236,41 @@ describe('Arrival', () => {
 
     await startTheDemo(screen);
     await expect.poll(() => requests('needsYou').length).toBeGreaterThan(0);
-    await router.navigate('/about/proposal');
+    // To a page that loads at once (not a lazy one), so this one is gone while Today is still read.
+    await router.navigate(PUBLIC_PAGE);
+    await expect.poll(() => document.querySelector('.cd-today-preview')).toBeNull();
+    // Gone before Needs you was tried again, which the read ahead waits for.
+    expect(requests('needsYou')).toHaveLength(1);
     // Past the read-ahead's 3 s cap, by when the dialog would have gone on to Today.
     await new Promise((resolve) => setTimeout(resolve, 3_500));
-    expect(router.state.location.pathname).toBe('/about/proposal');
+    expect(router.state.location.pathname).toBe(PUBLIC_PAGE);
+  });
+
+  it('leaving_before_the_copy_opens_leaves_its_reads_alone', async () => {
+    const { screen, router } = await renderRoute('/', { seed: { name: 'rivera', signedIn: false } });
+    await expect.element(introDialog(screen)).toBeVisible();
+    // The copy is made but its answer is lost, so the page asks for the copy this browser now has,
+    // which answers slowly.
+    mockStore.inject({ route: 'copies', status: 'network', afterCommit: true });
+    mockStore.inject({ route: 'me', status: 200, body: copyOut(mockStore.world), delayMs: 1_000 });
+    const late = nextAnswerTo('me');
+    await startTheDemo(screen);
+    await expect.poll(() => requests('me')).toHaveLength(2);
+
+    // The owner goes on to Today before it answers, and the answer comes while they are there.
+    await router.navigate(TODAY);
+    const answering = screen.getByRole('switch', { name: 'Answering' });
+    await expect.element(answering).toHaveAttribute('aria-checked', 'true');
+    await late.settled;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(router.state.location.pathname).toBe(TODAY);
+
+    // Today's reads are still the ones it shows: the switch follows a change, and the change saves.
+    await answering.click();
+    await expect.element(answering).toHaveAttribute('aria-checked', 'false');
+    await expect.poll(() => mockStore.world.desk(RIVERA.deskId)?.summary.answering).toBe(false);
+    await expect.poll(() => requests('desks').length).toBeGreaterThan(1);
+    await expect.element(answering).toHaveAttribute('aria-checked', 'false');
   });
 
   it('intro_dialog_cannot_be_dismissed', async () => {
@@ -433,6 +584,31 @@ describe('OwnerLayout', () => {
     await expect.element(phone.screen.getByRole('dialog', { name: 'Menu' })).not.toBeInTheDocument();
   });
 
+  it('desk_the_list_lacks_is_read_again', async () => {
+    // When the Desks were last read, so the test can tell they are still fresh when it moves on.
+    let desksReadAt = Number.NaN;
+    const stop = observeRequests((outcome) => {
+      if (outcome.key === 'desks' && outcome.ok) desksReadAt = performance.now();
+    });
+    onTestFinished(stop);
+    const { screen, router } = await renderRoute(TODAY);
+    await expect.element(screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
+    const sawNotFound = watchFor("This page doesn't exist");
+
+    // A Desk made since the Desks were just read (in another tab, say), opened at once: the list in
+    // hand doesn't hold it, and only a read made now can say whether it is the owner's.
+    const main = mockStore.world.desk(RIVERA.deskId);
+    if (!main) throw new Error('the copy has its Desk');
+    mockStore.world.addDesk({ desk_id: 'desk-rivera-new', slug: 'rivera-new', name: 'Weekends', hours: main.summary.hours, openStatus: main.openStatus });
+    const reads = requests('desks').length;
+    // Still fresh, so it is the missing Desk, not the list's age, that has them read again.
+    expect(performance.now() - desksReadAt).toBeLessThan(FRESH_MS);
+    await router.navigate('/app/desk-rivera-new/today');
+    await expect.element(screen.getByRole('button', { name: 'Switch Desk, current: Weekends' })).toBeVisible();
+    expect(requests('desks')).toHaveLength(reads + 1);
+    expect(sawNotFound()).toBe(false);
+  });
+
   it('answering_switch_reverts_on_error', async () => {
     const { screen } = await renderRoute(TODAY);
     const answering = screen.getByRole('switch', { name: 'Answering' });
@@ -689,6 +865,41 @@ describe('Today', () => {
     await expectScreenBasics(arrival.screen.container, { owner: true });
   });
 });
+
+/** Rivera's held request on Today. */
+function heldCard(screen: RenderResult) {
+  return screen.getByRole('article', { name: `Held for you: ${rivera.decisions.held.reason_plain}`, exact: true });
+}
+
+/**
+ * Every page the browser draws from now until the test ends, in order, a page drawn many times in a
+ * row named once: the preview behind the intro dialog, the owner's loading page or its error, and
+ * Today, which is named for what it lacks until it holds its held request and its briefing.
+ */
+function watchPages(): () => string[] {
+  const held = `article[aria-label="Held for you: ${rivera.decisions.held.reason_plain}"]`;
+  const seen: string[] = [];
+  const pageNow = (): string | null => {
+    const state = document.querySelector('.cd-owner-state');
+    const preview = document.querySelector('.cd-today-preview') !== null;
+    if (state !== null) return state.querySelector('[role="alert"]') === null ? 'loading' : 'error';
+    if (!preview && document.querySelector('.cd-today') !== null) {
+      if (document.querySelector(held) === null) return 'today without its held request';
+      if (document.querySelector('.cd-today__loading') !== null) return 'today still reading its briefing';
+      return 'today';
+    }
+    return preview ? 'preview' : null;
+  };
+  const look = () => {
+    const page = pageNow();
+    if (page !== null && seen.at(-1) !== page) seen.push(page);
+  };
+  look();
+  const watch = new MutationObserver(look);
+  watch.observe(document.body, { childList: true, subtree: true });
+  onTestFinished(() => watch.disconnect());
+  return () => [...seen];
+}
 
 /** Whether `text` showed anywhere on the page, even for a moment, from now until the test ends. */
 function watchFor(text: string): () => boolean {

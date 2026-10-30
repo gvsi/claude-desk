@@ -6,7 +6,7 @@
 import { queryOptions, useQuery, type QueryClient } from '@tanstack/react-query';
 
 import { request } from '../api/http.ts';
-import type { BusinessOut, CopyOut, DeskSummary, NeedsYouItem } from '../api/views.ts';
+import type { BusinessOut, DeskSummary, NeedsYouItem } from '../api/views.ts';
 import { pollMs } from '../app/poll.ts';
 import { readLocal } from '../lib/storage.ts';
 
@@ -15,25 +15,43 @@ export const ME_KEY = ['me'] as const;
 export const todayKey = (deskId: string) => ['today', deskId] as const;
 export const needsYouKey = (deskId: string) => ['needsYou', deskId] as const;
 
-const desksQuery = () => queryOptions({ queryKey: DESKS_KEY, queryFn: () => request('desks') });
+// The reads, which go out whenever they are asked for (a read ahead, a `fetchQuery`); only the hooks wait out `FRESH_MS`.
+export const desksQuery = () => queryOptions({ queryKey: DESKS_KEY, queryFn: () => request('desks') });
 const todayQuery = (deskId: string) =>
   queryOptions({ queryKey: todayKey(deskId), queryFn: () => request('today', { params: { desk_id: deskId } }) });
 const needsYouQuery = (deskId: string) =>
   queryOptions({ queryKey: needsYouKey(deskId), queryFn: () => request('needsYou', { params: { desk_id: deskId } }) });
 
-/** The copy's businesses, each with its Desks. */
-export function useDesks() {
-  return useQuery(desksQuery());
+/** How long a page waits for a Desk's Today to be read ahead before it opens Today anyway, still loading. */
+export const READ_AHEAD_MS = 3_000;
+
+/**
+ * How long a page's own reads count as fresh, so a page opened just after a read ahead doesn't send
+ * them again. Each read is fresh from when it came in, and a read ahead waits for its slowest, so
+ * this outlasts the read ahead's cap: the first read in is still fresh when Today opens.
+ */
+export const FRESH_MS = READ_AHEAD_MS + 2_000;
+
+/**
+ * The copy's businesses, each with its Desks, for a page of `deskId`. A list that doesn't hold that
+ * Desk is read again on mount however fresh it is: only a read made now can say it isn't the owner's.
+ */
+export function useDesks(deskId: string) {
+  return useQuery({
+    ...desksQuery(),
+    staleTime: FRESH_MS,
+    refetchOnMount: (query) => (query.state.data !== undefined && findDesk(query.state.data, deskId) !== null ? true : 'always'),
+  });
 }
 
 /** A Desk's Today, polled while the tab is shown. */
 export function useToday(deskId: string) {
-  return useQuery({ ...todayQuery(deskId), refetchInterval: pollMs('today') });
+  return useQuery({ ...todayQuery(deskId), staleTime: FRESH_MS, refetchInterval: pollMs('today') });
 }
 
 /** What waits for the owner on a Desk: held requests and open callbacks, polled. */
 export function useNeedsYou(deskId: string) {
-  return useQuery({ ...needsYouQuery(deskId), refetchInterval: pollMs('needsYou') });
+  return useQuery({ ...needsYouQuery(deskId), staleTime: FRESH_MS, refetchInterval: pollMs('needsYou') });
 }
 
 /**
@@ -79,12 +97,6 @@ export function lastOrFirst(desks: readonly { desk_id: string }[]): string | nul
   const last = readLocal('lastDesk');
   if (last !== null && desks.some((d) => d.desk_id === last)) return last;
   return desks[0]?.desk_id ?? null;
-}
-
-/** Where a copy opens: the last Desk's Today when it is in the copy, else its first Desk's; null when it has none. */
-export function copyTodayPath(copy: CopyOut): string | null {
-  const deskId = lastOrFirst(copy.desks);
-  return deskId === null ? null : todayPath(deskId);
 }
 
 /** The first word of the owner's name, as the API writes `Today.greeting_name`. */
