@@ -533,71 +533,84 @@ describe('Today', () => {
   });
 
   it('held_conflict_shows_the_owner_line', async () => {
-    const { screen } = await renderRoute(TODAY);
-    // The kernel's own conflict, with no decision: the request is still held, so the owner line for
-    // it shows under the card with "Try again", which sends the owner's last answer again, and the
-    // card keeps its answers. A decision in that body isn't the final state (only `already_resolved`
-    // carries one), so it's never shown.
-    const held = seededHold();
-    const stray = { ...held, state: 'executed', answers: [] };
-    mockStore.inject({ route: 'answer', status: 409, body: { error: 'kernel', code: 'conflict' } });
-    mockStore.inject({ route: 'answer', status: 409, delayMs: 1_000, body: { error: 'kernel', code: 'conflict', decision: stray } });
-    mockStore.inject({ route: 'answer', status: 409, delayMs: 1_000, body: { error: 'kernel', code: 'conflict' } });
+    // The kernel's own conflict, with no decision: the request is still held, but it changed while
+    // the owner was looking, so Today never sends the answer again. It reads Needs you once and
+    // shows the request as it stands now, with the owner line above it and only the answers that
+    // read offers. Polls stay out of the way, so the one read counted is the conflict's.
+    const { screen } = await renderRoute(TODAY, { pollScale: 100 });
     const needsYou = region(screen, 'Needs you');
     const card = heldCard(screen, SEEDED_REASON);
     const allow = card.getByRole('button', { name: 'Allow this time' });
     const deny = card.getByRole('button', { name: 'Deny this time' });
-    const line = needsYou.getByRole('alert');
-    const tryAgain = needsYou.getByRole('button', { name: 'Try again', exact: true });
+    await expect.element(allow).toBeVisible();
 
-    /** The line, once, under the card and outside it, with "Try again" beside it; the card still held and answerable. */
-    const stillHeld = async () => {
-      await expect.element(line.getByText(CHANGED, { exact: true })).toBeVisible();
-      expect(line.elements()).toHaveLength(1);
-      expect(card.getByRole('alert').elements()).toHaveLength(0);
-      expect(line.element().closest('li')).toBe(card.element().closest('li'));
-      expect(line.element().contains(tryAgain.element())).toBe(true);
-      expect(card.getByText("You allowed this. It's done.", { exact: true }).elements()).toHaveLength(0);
-      await expect.element(card.getByText('Waiting for your answer', { exact: true })).toBeVisible();
-      await expect.element(allow).not.toHaveAttribute('aria-disabled');
-      await expect.element(deny).not.toHaveAttribute('aria-disabled');
-    };
+    // Where it stands now: still held, and Allow is no longer offered. A decision in the conflict's
+    // body isn't the final state (only `already_resolved` carries one), so it's never shown.
+    const held = seededHold();
+    const changed = (await heldItems()).map((item) =>
+      item.decision?.decision_id === held.decision_id ? { ...item, decision: { ...item.decision, answers: ['deny_once'] } } : item,
+    );
+    mockStore.inject({ route: 'answer', status: 409, body: { error: 'kernel', code: 'conflict', decision: { ...held, state: 'executed', answers: [] } } });
+    mockStore.inject({ route: 'needsYou', status: 200, delayMs: 1_000, body: changed });
+    const reads = requests('needsYou').length;
 
-    await deny.click();
-    await expect.poll(() => requests('answer').length).toBe(1);
-    await stillHeld();
-
-    // "Try again" sends the same answer. While it's out it spins with its words kept, the line
-    // stays, and the card's answers wait without a spinner of their own.
-    await tryAgain.click();
-    await expect.element(tryAgain).toHaveAttribute('aria-busy', 'true');
-    await expect.element(allow).toHaveAttribute('aria-disabled', 'true');
-    await expect.element(deny).toHaveAttribute('aria-disabled', 'true');
-    expect(allow.element().getAttribute('aria-busy')).toBeNull();
-    expect(deny.element().getAttribute('aria-busy')).toBeNull();
-    await expect.element(line.getByText(CHANGED, { exact: true })).toBeVisible();
-    await expect.element(tryAgain, { timeout: 3_000 }).not.toHaveAttribute('aria-busy');
-    expect(requests('answer')).toHaveLength(2);
-    await stillHeld();
-    expect(document.activeElement).toBe(tryAgain.element());
-
-    // An answer from the card sends that one instead, and the line waits for its result, as the
-    // card's own lines do.
+    // While the request is read again, the answer the owner chose still spins and the other waits.
     await allow.click();
     await expect.element(allow).toHaveAttribute('aria-busy', 'true');
-    expect(line.elements()).toHaveLength(0);
-    expect(tryAgain.elements()).toHaveLength(0);
-    await expect.element(allow, { timeout: 3_000 }).not.toHaveAttribute('aria-busy');
-    expect(requests('answer')).toHaveLength(3);
-    await stillHeld();
+    await expect.element(deny).toHaveAttribute('aria-disabled', 'true');
+    await expect.poll(() => requests('needsYou').length).toBe(reads + 1);
+    await expect.element(allow).toHaveAttribute('aria-busy', 'true');
 
-    // Trying again goes through, with the owner's last answer, and focus follows the answered card.
-    await tryAgain.click();
-    await expect.element(card.getByText("You allowed this. It's done.", { exact: true })).toBeVisible();
-    expect(requests('answer').map((r) => r.body)).toEqual([{ answer: 'deny_once' }, { answer: 'deny_once' }, { answer: 'allow_once' }, { answer: 'allow_once' }]);
-    expect(line.elements()).toHaveLength(0);
-    expect(tryAgain.elements()).toHaveLength(0);
-    await expect.poll(() => document.activeElement?.contains(card.element()) === true).toBe(true);
+    // Then the card shows the read: still waiting, with Deny only, and the line above the request.
+    await expect.element(allow, { timeout: 3_000 }).not.toBeInTheDocument();
+    await expect.element(deny).not.toHaveAttribute('aria-disabled');
+    await expect.element(card.getByText('Waiting for your answer', { exact: true })).toBeVisible();
+    const line = needsYou.getByRole('alert');
+    await expect.element(line.getByText(CHANGED, { exact: true })).toBeVisible();
+    expect(line.elements()).toHaveLength(1);
+    expect(card.getByRole('alert').elements()).toHaveLength(0);
+    expect(line.element().closest('li')).toBe(card.element().closest('li'));
+    expect(line.element().compareDocumentPosition(card.element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(card.getByText("You allowed this. It's done.", { exact: true }).elements()).toHaveLength(0);
+    // Nothing offers to send the answer again, nothing sent it, and the read was the only one.
+    expect(needsYou.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(0);
+    expect(requests('answer').map((r) => r.body)).toEqual([{ answer: 'allow_once' }]);
+    expect(requests('needsYou')).toHaveLength(reads + 1);
+    // Allow had focus, and it went with Allow: it lands on the request.
+    expect(document.activeElement?.contains(card.element())).toBe(true);
+
+    // The owner answers what they can see, and it goes through.
+    await deny.click();
+    await expect.element(card.getByText('You denied this.', { exact: true })).toBeVisible();
+    expect(requests('answer').map((r) => r.body)).toEqual([{ answer: 'allow_once' }, { answer: 'deny_once' }]);
+    expect(needsYou.getByRole('alert').elements()).toHaveLength(0);
+  });
+
+  it('held_conflict_waits_for_a_fresh_read', async () => {
+    // After the kernel's conflict, the read of the request fails (and its one retry): what it would
+    // offer isn't known, so the card offers no answers until a read works.
+    const { screen } = await renderRoute(TODAY, { pollScale: 100 });
+    const needsYou = region(screen, 'Needs you');
+    const card = heldCard(screen, SEEDED_REASON);
+    const deny = card.getByRole('button', { name: 'Deny this time' });
+    await expect.element(deny).toBeVisible();
+    mockStore.inject({ route: 'answer', status: 409, body: { error: 'kernel', code: 'conflict' } });
+    mockStore.inject({ route: 'needsYou', status: 503, times: 2 });
+
+    await deny.click();
+    await expect.element(needsYou.getByText(UNAVAILABLE, { exact: true }), { timeout: 4_000 }).toBeVisible();
+    await expect.element(needsYou.getByText(CHANGED, { exact: true })).toBeVisible();
+    await expect.element(card.getByText('Waiting for your answer', { exact: true })).toBeVisible();
+    expect(card.getByRole('button').elements()).toHaveLength(0);
+    expect(card.element().contains(document.activeElement)).toBe(true);
+    expect(requests('answer')).toHaveLength(1);
+
+    // Reading again works, and the answers come back as that read offers them, still unsent.
+    await needsYou.getByRole('button', { name: 'Try again', exact: true }).click();
+    await expect.element(card.getByRole('button', { name: 'Allow this time' })).toBeVisible();
+    await expect.element(deny).not.toHaveAttribute('aria-disabled');
+    await expect.element(needsYou.getByText(UNAVAILABLE, { exact: true })).not.toBeInTheDocument();
+    expect(requests('answer')).toHaveLength(1);
   });
 
   it('lost_answer_is_not_called_held', async () => {

@@ -2,12 +2,12 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 
-import type { ApprovalAnswer } from '../../api/contracts.ts';
+import type { Decision } from '../../api/contracts.ts';
 import { ApiError, ownerErrorCopy, request } from '../../api/http.ts';
 import type { NeedsYouItem } from '../../api/views.ts';
 import { ApprovalCard, Button, Card, Notice, SectionHeader, StatusLabel } from '../../ds/index.ts';
 import { aboveMoneyCapCopy, callbackLine, relativeWait } from '../../lib/format.ts';
-import type { AnswerDraftState, Answered, AnswerRetry, HeldItem, UseAnswer } from '../approvals/useAnswer.ts';
+import type { AnswerDraftState, Answered, HeldItem, UseAnswer } from '../approvals/useAnswer.ts';
 import { conversationPath, type ConversationArrival } from '../conversations/status.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { needsYouKey, todayKey } from '../useDesks.ts';
@@ -28,6 +28,11 @@ const DRAFTED = 'Your answer also drafted a rule. Review it before it applies.';
 /** "1 needs you", "2 need you". */
 function countLabel(n: number): string {
   return `${n} ${n === 1 ? 'needs' : 'need'} you`;
+}
+
+/** The request with nothing offered: what the owner sees until it is read again. */
+function withNoAnswers(decision: Decision): Decision {
+  return { ...decision, answers: [] };
 }
 
 /** What the approval card shows about a held request beyond the decision itself. */
@@ -54,6 +59,8 @@ export interface NeedsYouProps {
   /** Open callbacks, in the order Needs you lists them. */
   callbacks: readonly CallbackItem[];
   answers: UseAnswer;
+  /** When Needs you was last read (its `dataUpdatedAt`), which tells whether `held` shows a request as it stands since a conflict. */
+  readAt: number;
   /** Called with each held request's card as it mounts and unmounts, so "Open the request" can focus it. */
   registerCard: (decisionId: string, el: HTMLElement | null) => void;
   /** The latest read failed: said first, over whatever was read before it. */
@@ -65,7 +72,7 @@ export interface NeedsYouProps {
  * an approval card answered in place, then each open callback, then what was answered here with
  * its final line until the owner dismisses it.
  */
-export function NeedsYou({ held, callbacks, answers, registerCard, readFailure }: NeedsYouProps) {
+export function NeedsYou({ held, callbacks, answers, readAt, registerCard, readFailure }: NeedsYouProps) {
   const titleId = useId();
   const now = new Date();
   const open = held.length + callbacks.length;
@@ -83,6 +90,21 @@ export function NeedsYou({ held, callbacks, answers, registerCard, readFailure }
       if (active === null || active === document.body) answeredCards.current.get(id)?.focus();
     }
   }, [answers.answered]);
+
+  // After a conflict, the card shows the request as Needs you read it again. Focus that fell to the
+  // page as its answers changed (the one pressed may no longer be offered) goes to the request, once.
+  const heldCards = useRef(new Map<string, HTMLElement>());
+  const conflictsSeen = useRef(new Set<number>());
+  useLayoutEffect(() => {
+    for (const item of held) {
+      const id = item.decision.decision_id;
+      const conflict = answers.conflictFor(id);
+      if (conflict === undefined || answers.pending.has(id) || conflictsSeen.current.has(conflict.at)) continue;
+      conflictsSeen.current.add(conflict.at);
+      const active = document.activeElement;
+      if (active === null || active === document.body) heldCards.current.get(id)?.focus();
+    }
+  });
 
   const dismiss = (id: string) => {
     // Focus goes to the next answered card, else the one before, else the section.
@@ -115,19 +137,30 @@ export function NeedsYou({ held, callbacks, answers, registerCard, readFailure }
           {held.map((item) => {
             const id = item.decision.decision_id;
             const pending = answers.pending.has(id);
-            const retry = answers.retryFor(id);
+            // The request changed while the owner was looking: its line sits above it, and its
+            // answers are the ones a read since then offers. Until one lands, it offers none.
+            const conflict = answers.conflictFor(id);
+            const asItStands = conflict === undefined || pending || readAt > conflict.at;
             return (
               <li key={id} className="cd-needs-you__item">
-                <div ref={(el) => registerCard(id, el)} className="cd-needs-you__card" tabIndex={-1}>
+                {conflict !== undefined ? <Notice tone="error">{conflict.line}</Notice> : null}
+                <div
+                  ref={(el) => {
+                    registerCard(id, el);
+                    if (el) heldCards.current.set(id, el);
+                    else heldCards.current.delete(id);
+                  }}
+                  className="cd-needs-you__card"
+                  tabIndex={-1}
+                >
                   <ApprovalCard
-                    decision={item.decision}
+                    decision={asItStands ? item.decision : withNoAnswers(item.decision)}
                     {...aboutTheRequest(item, now)}
                     onAnswer={(a) => answers.answer(item, a)}
                     pending={pending}
-                    error={retry === undefined ? answers.errorFor(id) : undefined}
+                    error={answers.errorFor(id)}
                   />
                 </div>
-                {retry !== undefined ? <AnswerAgain retry={retry} pending={pending} send={(a) => answers.answer(item, a)} /> : null}
               </li>
             );
           })}
@@ -169,38 +202,6 @@ export function NeedsYou({ held, callbacks, answers, registerCard, readFailure }
         </div>
       ) : null}
     </section>
-  );
-}
-
-/**
- * The kernel turned the owner's answer back and still holds the request: its line under the card,
- * and "Try again", which sends that answer again. A repeat can't run the action twice, since the
- * kernel resolves a request once. While "Try again" is out it spins and the card's answers wait; an
- * answer chosen on the card hides the line until its own result, as the card's lines do.
- */
-function AnswerAgain({ retry, pending, send }: { retry: AnswerRetry; pending: boolean; send: (a: ApprovalAnswer) => Promise<void> }) {
-  const [sending, setSending] = useState(false);
-  if (pending && !sending) return null;
-
-  const again = () => {
-    setSending(true);
-    // A failure says why in the line it leaves.
-    void send(retry.answer)
-      .catch(() => undefined)
-      .finally(() => setSending(false));
-  };
-
-  return (
-    <Notice
-      tone="error"
-      action={
-        <Button variant="secondary" busy={sending} onClick={again}>
-          Try again
-        </Button>
-      }
-    >
-      {retry.line}
-    </Notice>
   );
 }
 
