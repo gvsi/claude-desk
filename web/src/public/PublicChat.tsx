@@ -349,9 +349,10 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
   }, [chat.session, onSession]);
 
   // On its own page the tab names the business, as the kernel serves it; the app's name comes back
-  // when the page closes. Inside an owner screen the tab is the owner's.
+  // when the page closes. Inside an owner screen the tab is the owner's. A layout effect, as every page that
+  // names the tab uses, so each hands the title back in the commit that leaves it.
   const tabTitle = embedded ? null : (desk?.business_name ?? null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (tabTitle === null) return undefined;
     const before = document.title;
     document.title = tabTitle;
