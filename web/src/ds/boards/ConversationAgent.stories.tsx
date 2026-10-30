@@ -23,6 +23,7 @@ function ConversationAgent() {
     <RiveraFrame
       current="conversations"
       fill
+      sidebarLook="ground"
       counts={{ conversations: { n: 2, label: '2 need you' }, safety: { n: 2, label: '2 blocked' } }}
     >
       <ConversationsPage open={alex.name}>
@@ -69,7 +70,7 @@ const meta = {
       "The conversation is the Rivera fixture's agent chat: a quote for the deposit, then the charge to the signed limit, where the board adds a request for open times and a booking between them.",
       'Its receipts are the kernel’s status lines from the fixture, attached under each message on its side; the board writes some in owner wording.',
       'The limit card is page layout the web app (plan 04) owns, composed on the card tokens, padded 12 px 16 px as on the board, in the screen’s words from the mandate; it says “for an hour” where the board writes the clock time it ends.',
-      'The list column and the conversation head are composed as on the live conversation board, the sidebar on the app ground at its own height.',
+      'The list column and the conversation head are composed as on the live conversation board, the sidebar on the app ground at its own height (AppShell fill and sidebarLook ground).',
     ].join(' '),
   },
 } satisfies Meta;
@@ -80,7 +81,7 @@ type Story = StoryObj<typeof meta>;
 
 export const Board: Story = {
   play: async ({ canvas, canvasElement, userEvent }) => {
-    await expectOwnerFrame(canvasElement, 'Conversations', { fill: true });
+    await expectOwnerFrame(canvasElement, 'Conversations', { fill: true, sidebarLook: 'ground' });
     expectComputed(canvas.getByRole('heading', { level: 1, name: 'Conversations' }), SPEC.pageTitle);
     // The open conversation's name, in the section style the board sets it in.
     expectComputed(canvas.getByRole('heading', { level: 2, name: alex.name }), { fontSize: '15px', lineHeight: '20px', fontWeight: '520' });

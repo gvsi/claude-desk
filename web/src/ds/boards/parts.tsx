@@ -63,18 +63,30 @@ export interface RiveraFrameProps {
   twoDesks?: boolean;
   /** The reviewer bar across the top, as on the arrival boards. */
   reviewer?: boolean;
-  /** The page lays out its own columns from the sidebar's seam (`AppShell` `fill`). */
+  /** The page lays out its own columns from the sidebar's edge (`AppShell` `fill`). */
   fill?: boolean;
+  /** The sidebar's look (`AppShell` `sidebarLook`): the panel, or the app ground the Run 1 conversation boards draw. */
+  sidebarLook?: 'panel' | 'ground';
   onSwitchBusiness?: () => void;
   children: ReactNode;
 }
 
 /** The owner app for Maria Rivera: the shell, the sidebar on `current`, and the page. */
-export function RiveraFrame({ current, counts, twoDesks = false, reviewer = false, fill = false, onSwitchBusiness, children }: RiveraFrameProps) {
+export function RiveraFrame({
+  current,
+  counts,
+  twoDesks = false,
+  reviewer = false,
+  fill = false,
+  sidebarLook = 'panel',
+  onSwitchBusiness,
+  children,
+}: RiveraFrameProps) {
   return (
     <AppShell
       business={rivera.business.name}
       fill={fill}
+      sidebarLook={sidebarLook}
       banner={reviewer ? <ReviewerBar ownerName={rivera.business.ownerName} onStartOver={fn()} /> : undefined}
       sidebar={
         <Sidebar

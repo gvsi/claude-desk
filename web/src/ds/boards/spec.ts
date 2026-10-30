@@ -19,7 +19,7 @@ export const SPEC = {
     borderRightColor: 'rgba(250, 249, 245, 0.12)',
   },
   /** The signed conversation boards (N-Conv-Run1, N-Conv-Agent-Run1): the sidebar on the app ground, no seam. */
-  sidebarFilled: {
+  sidebarGround: {
     width: '264px',
     backgroundColor: 'rgb(28, 27, 25)',
     borderRightWidth: '0px',
@@ -91,14 +91,18 @@ export function some<T extends Element = HTMLElement>(root: ParentNode, selector
 }
 
 /**
- * The owner app's frame: the sidebar column, its current row, and the padded page; or, with
- * `fill`, as the signed conversation boards draw it: the page filling the main area, and the
- * sidebar on the app ground at its own height, its Answering switch 4 px under the pages.
+ * The owner app's frame: the sidebar column, its current row, and the padded page. As the signed
+ * conversation boards draw it, `fill` has the page fill the main area, and `sidebarLook: 'ground'`
+ * puts the sidebar on the app ground at its own height, its Answering switch 4 px under the pages.
  */
-export async function expectOwnerFrame(root: HTMLElement, current: string, { fill = false } = {}): Promise<void> {
+export async function expectOwnerFrame(
+  root: HTMLElement,
+  current: string,
+  { fill = false, sidebarLook = 'panel' }: { fill?: boolean; sidebarLook?: 'panel' | 'ground' } = {},
+): Promise<void> {
   const column = within(root).getByRole('complementary', { name: 'Claude Desk' });
-  expectComputed(column, fill ? SPEC.sidebarFilled : SPEC.sidebar);
-  if (fill) {
+  expectComputed(column, sidebarLook === 'ground' ? SPEC.sidebarGround : SPEC.sidebar);
+  if (sidebarLook === 'ground') {
     const nav = within(column).getByRole('navigation', { name: 'Main' });
     const foot = one(column, '.cd-sidebar__footer');
     await expect(foot.getBoundingClientRect().top - nav.getBoundingClientRect().bottom, 'the sidebar foot under the pages').toBe(4);
