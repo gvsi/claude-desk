@@ -7,15 +7,16 @@
  * The copy's inbox is read once as Today opens, so the button counts what is there and the sheet
  * opens onto entries already read, never onto an inbox that only looks empty. It is read again as
  * the sheet opens and every few seconds while it is open, and not while it is closed. While that
- * first read is out, the button's place says the inbox is opening; if it fails, it says the inbox
- * couldn't be opened, with "Try again".
+ * first read is out, the button's place says the inbox is opening; if it fails, the inbox's title
+ * says it couldn't be opened, with "Try again". A later read that fails says the same under the
+ * sheet's button, so the entries read before never pass for current.
  */
 import { useQuery } from '@tanstack/react-query';
-import { useCallback, useEffect, useRef, useSyncExternalStore, type RefObject } from 'react';
+import { useCallback, useEffect, useId, useRef, useSyncExternalStore, type RefObject } from 'react';
 
 import { request } from '../../api/http.ts';
 import { pollMs } from '../../app/poll.ts';
-import { Button, DemoInboxSheet, LoadingLine, Notice, type DemoInboxItem } from '../../ds/index.ts';
+import { Button, DemoInboxSheet, LoadingLine, Notice, SectionHeader, type DemoInboxItem } from '../../ds/index.ts';
 import { formatWhen } from '../../lib/format.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 
@@ -48,6 +49,7 @@ function useSheetOpen(box: RefObject<HTMLElement | null>): boolean {
 
 export function OwnerInbox({ timezone }: OwnerInboxProps) {
   const box = useRef<HTMLDivElement>(null);
+  const titleId = `${useId()}-title`;
   const open = useSheetOpen(box);
   const inbox = useQuery({
     queryKey: OWNER_INBOX_KEY,
@@ -75,12 +77,9 @@ export function OwnerInbox({ timezone }: OwnerInboxProps) {
       time: formatWhen(entry.created_at, timezone, now),
     }));
 
-  let content;
-  if (inbox.data !== undefined) {
-    // Every entry here is read whole, so nothing waits to open; a retry reads them all again.
-    content = <DemoInboxSheet viewer="owner" items={items} language="en" onRetry={() => void refetch()} />;
-  } else if (failure !== null) {
-    content = (
+  // The latest read failed, whether or not one worked before.
+  const failed =
+    failure === null ? null : (
       <Notice
         tone="error"
         action={
@@ -91,6 +90,25 @@ export function OwnerInbox({ timezone }: OwnerInboxProps) {
       >
         {`Couldn't open your Demo inbox. ${failure.line}`}
       </Notice>
+    );
+
+  let content;
+  if (inbox.data !== undefined) {
+    // Every entry here is read whole, so nothing waits to open; a retry reads them all again. The
+    // sheet stays first, so a failed read's line coming or going never closes it.
+    content = (
+      <>
+        <DemoInboxSheet viewer="owner" items={items} language="en" onRetry={() => void refetch()} />
+        {failed}
+      </>
+    );
+  } else if (failed !== null) {
+    // Nothing read yet, so no sheet, which would say the inbox is empty: its title over the line.
+    content = (
+      <section className="cd-owner-inbox__failed" aria-labelledby={titleId}>
+        <SectionHeader id={titleId} title="Demo inbox" />
+        {failed}
+      </section>
     );
   } else {
     content = <LoadingLine>Opening your Demo inbox</LoadingLine>;

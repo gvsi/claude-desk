@@ -402,10 +402,50 @@ describe('Demo inbox', () => {
     const line = screen.getByText(`Couldn't open your Demo inbox. ${UNAVAILABLE}`, { exact: true });
     await expect.element(line, { timeout: 4_000 }).toBeVisible();
     expect(screen.getByRole('button', { name: /^Demo inbox/ }).elements()).toHaveLength(0);
+    // The place names itself over the line, as the visitor's does.
+    const place = screen.getByRole('region', { name: 'Demo inbox' });
+    await expect.element(place.getByRole('heading', { level: 2, name: 'Demo inbox' })).toBeVisible();
+    expect(place.element().contains(line.element())).toBe(true);
+    expect(place.element().closest('.cd-today-aside')).not.toBeNull();
     await expectScreenBasics(screen.container, { owner: true });
 
     await screen.getByRole('button', { name: 'Try again', exact: true }).click();
     await expect.element(screen.getByRole('button', { name: /^Demo inbox \d+ entr(?:y|ies)$/ })).toBeVisible();
     await expect.element(line).not.toBeInTheDocument();
+    await expect.element(place).not.toBeInTheDocument();
+  });
+
+  it('owner_inbox_refresh_that_fails_says_so', async () => {
+    // Once the inbox has been read, a later read that fails says so beside the sheet's button, with
+    // "Try again", so the entries read before never pass for current.
+    const { screen } = await renderRoute(`/app/${RIVERA.deskId}/today`);
+    const open = screen.getByRole('button', { name: /^Demo inbox \d+ entr(?:y|ies)$/ });
+    await expect.element(open).toBeVisible();
+    expect(requests('ownerInbox')).toHaveLength(1);
+
+    // The read as the sheet opens fails, and so does its retry; the owner closes the sheet while
+    // the retry waits.
+    mockStore.inject({ route: 'ownerInbox', status: 500, times: 2 });
+    await open.click();
+    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
+    await expect.element(sheet).toBeVisible();
+    await vi.waitFor(() => expect(requests('ownerInbox')).toHaveLength(2));
+    await userEvent.keyboard('{Escape}');
+    await expect.element(sheet).not.toBeInTheDocument();
+
+    const line = screen.getByText(`Couldn't open your Demo inbox. ${UNAVAILABLE}`, { exact: true });
+    await expect.element(line, { timeout: 4_000 }).toBeVisible();
+    expect(requests('ownerInbox')).toHaveLength(3);
+    // Beside the button, which still opens what was read before.
+    await expect.element(open).toBeVisible();
+    expect(line.element().closest('.cd-owner-inbox')?.contains(open.element())).toBe(true);
+    expect(open.element().compareDocumentPosition(line.element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await expectScreenBasics(screen.container, { owner: true });
+
+    // "Try again" reads it again, and the line goes.
+    await screen.getByRole('button', { name: 'Try again', exact: true }).click();
+    await expect.element(line).not.toBeInTheDocument();
+    await expect.element(open).toBeVisible();
+    expect(requests('ownerInbox')).toHaveLength(4);
   });
 });
