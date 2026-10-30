@@ -5,6 +5,7 @@
  * page's code.
  */
 import axe from 'axe-core';
+import { useLayoutEffect } from 'react';
 import { MemoryRouter, Route, Routes, useLocation, useNavigate, type NavigateFunction } from 'react-router';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
@@ -646,5 +647,35 @@ describe('ReaderPage', () => {
     expect(robots()).toEqual(['noindex']);
     await screen.unmount();
     expect(robots()).toEqual([]);
+  });
+
+  it('leaving_takes_noindex_and_the_title_away_at_once', async () => {
+    // The next page finds neither the request to search engines nor the document's title in the commit that
+    // draws it, however long the browser takes to paint.
+    const robots = () => [...document.head.querySelectorAll('meta[name="robots"]')].map((meta) => meta.getAttribute('content'));
+    const seen: { robots: (string | null)[]; title: string }[] = [];
+    function NextPage() {
+      useLayoutEffect(() => {
+        seen.push({ robots: robots(), title: document.title });
+      }, []);
+      return <p>The next page</p>;
+    }
+    const before = document.title;
+    const screen = await render(
+      <MemoryRouter initialEntries={['/about/proposal']}>
+        <Routes>
+          <Route path="/about/proposal" element={<ReaderPage id="proposal" />} />
+          <Route path="/next" element={<NextPage />} />
+        </Routes>
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+    await expect.poll(robots).toEqual(['noindex']);
+    await expect.poll(() => document.title).toBe('Product proposal · Claude Desk');
+
+    at.navigate?.('/next');
+    await expect.poll(() => seen.length).toBe(1);
+    expect(seen[0]).toEqual({ robots: [], title: before });
+    await screen.unmount();
   });
 });
