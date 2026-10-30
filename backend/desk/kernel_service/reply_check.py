@@ -94,12 +94,18 @@ LABEL = r"[^\W_][\w-]*"            # one label of a domain name
 DOMAIN_START = r"(?<![\w.\u3002-])"
 LINK_TLDS = ("com", "net", "org", "io", "co", "us", "app", "dev", "info", "biz", "mx", "es", "example")
 LINK = re.compile(
-    r"://|(?<!\w)(?:https?|mailto|tel):"            # a scheme: "https://", any other before "://", "https:", "tel:"
+    rf":{SLASH}{SLASH}|(?<!\w)(?:https?|mailto|tel):"   # a scheme: "https://", any other before "://", "https:", "tel:"
     rf"|{DOMAIN_START}www{DOT}"                      # "www."
     rf"|{DOMAIN_START}{LABEL}(?:{DOT}{LABEL})+{SLASH}"   # a domain before a path: "rivera-pay.example/checkout"
-    rf"|{DOMAIN_START}{LABEL}(?:{DOT}{LABEL})*{DOT}(?:{'|'.join(LINK_TLDS)})(?![\w-])"   # a bare domain: "riverapl.com"
+    rf"|{DOMAIN_START}{LABEL}(?:{DOT}{LABEL})*{DOT}(?:{'|'.join(LINK_TLDS)})(?![^\W_]|-)"   # a bare domain: "riverapl.com"
     r"|(?<=\w)@(?=\w)",                              # an email address: "maria@riverapl.example"
     re.IGNORECASE)
+# Glued to the front of a link, hiding it from `DOMAIN_START` and the schemes' word start: a run of
+# two or more dots (an ellipsis, which NFKC writes as "...") and a run of dots, hyphens (every dash,
+# as the readings write it) and underscores with no word character before it. `_links` blanks them
+# before `LINK` reads a reading, keeping indexes, so "at…rivera-pay.example/checkout",
+# "—www.riverapl.shop" and "_riverapl.com_" are links.
+LINK_GLUE = re.compile(r"[.\u3002]{2,}|(?<!\w)[._\u3002-]+")
 BLANKS = re.compile(r"\S+")        # a run of text between blanks, which a link's span takes in
 LINK_OPENERS = frozenset("([{<«‹\"'“‘¿¡")             # around a link, left out of its span
 LINK_CLOSERS = frozenset(".,;:!?…)]}>»›\"'”’")
@@ -386,11 +392,14 @@ def _booking_claims(text: str, readings: dict[str, list[int]]) -> list[tuple[int
 
 def _links(text: str, readings: dict[str, list[int]]) -> list[tuple[int, str, Violation]]:
     """A `promise_word` (`link`) for each run of `text` between blanks holding a link shape
-    (`LINK`) in any reading, spanning that run without the punctuation around it."""
+    (`LINK`) in any reading with the dots, dashes and underscores glued to its front blanked
+    (`LINK_GLUE`), spanning that run without the punctuation around it."""
     runs = [(run.start(), run.end()) for run in BLANKS.finditer(text)]
     starts = [start for start, _ in runs]
     found: dict[int, tuple[int, int]] = {}      # a run's index: where its first link shape starts, its last ends
-    for reading, origin, match in ((reading, origin, match) for reading, origin in readings.items()
+    unglued = ((LINK_GLUE.sub(lambda glue: " " * len(glue.group()), reading), origin)
+               for reading, origin in readings.items())
+    for reading, origin, match in ((reading, origin, match) for reading, origin in unglued
                                    for match in LINK.finditer(reading)):
         start, end = origin[match.start()], origin[match.end() - 1] + 1
         index = bisect.bisect_right(starts, start) - 1
@@ -420,7 +429,8 @@ def scan_prose(text: str, canaries: Iterable[str] = (), names: Iterable[str] = (
     of `ECHO_WORDS` or more words shared with the text of one of `policies` (`(fact_id, text)`
     pairs) is `promise_word` (`policy_echo`, naming the fact); a run of text between blanks holding
     a URL scheme, "www.", a domain before a path, a bare domain ending in one of `LINK_TLDS` or an
-    "@" between word characters is `promise_word` (`link`); a word mixing Latin letters with another
+    "@" between word characters, whatever dots, dashes and underscores are glued to its front
+    (`LINK_GLUE`), is `promise_word` (`link`); a word mixing Latin letters with another
     script is `unsupported_language` (`mixed_script`), unless it lies inside one of `names` (the
     Desk's own names) as it is written there; a canary verbatim is `canary`. The lexicons, the
     policy-echo scan and the link scan read lookalike letters as the Latin ones, a bare stroke both

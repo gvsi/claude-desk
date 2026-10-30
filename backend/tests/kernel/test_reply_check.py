@@ -972,6 +972,8 @@ async def test_policy_echoes_cover_the_rules_the_session_reads(app, client, revi
     ("Email maria@riverapl.example to confirm.", "maria@riverapl.example", "en"),
     ("Pague en rivera-pay.example/checkout antes de la visita.", "rivera-pay.example/checkout", "es"),
     ("Escríbale a maria@riverapl.example para confirmar la visita.", "maria@riverapl.example", "es"),
+    ("Pay for it at…rivera-pay.example/checkout", "at...rivera-pay.example/checkout", "en"),
+    ("Pague en…rivera-pay.example/checkout antes de la visita.", "en...rivera-pay.example/checkout", "es"),
 ])
 async def test_a_link_beside_a_quote_card_is_blocked(app, client, reviewer, prose, span, language):
     """A link or an email address reaches a visitor only on a card (a payment or document card's
@@ -1015,12 +1017,39 @@ LINK_TLDS = ["com", "net", "org", "io", "co", "us", "app", "dev", "info", "biz",
     ("Lo tiene en «riverapl.com/visitas».", "riverapl.com/visitas"),
     ("Llame a tel:riverapl desde su teléfono.", "tel:riverapl"),
     ("Escriba a maria.rivera@riverapl.example y se lo confirmamos.", "maria.rivera@riverapl.example"),
+    ("Hola a tod@s, gracias por escribir.", "tod@s"),                               # fails closed: a cost
     *((f"Find us at riverapl.{tld} any time.", f"riverapl.{tld}") for tld in LINK_TLDS),
+    # an ellipsis, dots, a dash, a hyphen or an underscore glued to the front of a domain, or an
+    # underscore after it (NFKC writes "…" as "...", and every reading writes a dash as "-")
+    ("Pay for it at…rivera-pay.example/checkout", "at...rivera-pay.example/checkout"),
+    ("Pay for it at...rivera-pay.example/checkout", "at...rivera-pay.example/checkout"),
+    ("Find us at…riverapl.com", "at...riverapl.com"),
+    ("Pay at .rivera-pay.example/checkout", ".rivera-pay.example/checkout"),
+    ("Pay at —rivera-pay.example/checkout", "—rivera-pay.example/checkout"),
+    ("Photos: —www.riverapl.shop", "—www.riverapl.shop"),
+    ("Pay at -riverapl.com", "-riverapl.com"),
+    ("Pay at _rivera-pay.example/checkout_", "_rivera-pay.example/checkout_"),
+    ("Find us at _riverapl.com_ any time.", "_riverapl.com_"),
+    ("Find us at riverapl.com_ now", "riverapl.com_"),
+    ("Email maria@-riverapl.example now", "maria@-riverapl.example"),
+    ("Open _https:riverapl.shop_ to pay.", "_https:riverapl.shop_"),
+    ("Pague en…rivera-pay.example/checkout antes de la visita.", "en...rivera-pay.example/checkout"),
+    ("Pague en...rivera-pay.example/checkout antes de la visita.", "en...rivera-pay.example/checkout"),
+    ("Estamos en…riverapl.es, con fotos.", "en...riverapl.es"),
+    ("Pague en .rivera-pay.example/checkout antes de la visita.", ".rivera-pay.example/checkout"),
+    ("Pague en —rivera-pay.example/checkout antes de la visita.", "—rivera-pay.example/checkout"),
+    ("Fotos: —www.riverapl.mx", "—www.riverapl.mx"),
+    ("Estamos en -riverapl.es, con fotos.", "-riverapl.es"),
+    ("Pague en _rivera-pay.example/checkout_ antes de la visita.", "_rivera-pay.example/checkout_"),
+    ("Estamos en _riverapl.es_ con fotos.", "_riverapl.es_"),
+    ("Estamos en riverapl.es_ con fotos.", "riverapl.es_"),
+    ("Escriba a maria@-riverapl.example y se lo confirmamos.", "maria@-riverapl.example"),
 ])
 def test_links_and_email_addresses_in_prose_are_blocked(prose, span):
     """A URL scheme, "www.", a domain before a path, a bare domain ending in a common top-level
-    domain and an "@" between word characters are each a link in prose, in English and Spanish:
-    one violation for each run of text between blanks, spanning it without the punctuation around it."""
+    domain and an "@" between word characters are each a link in prose, in English and Spanish,
+    whatever dots, dashes or underscores are glued to them: one violation for each run of text
+    between blanks, spanning it without the punctuation around it."""
     assert [(v.kind, v.rule_id, v.span) for v in reply_check.scan_prose(prose)] == [("promise_word", "link", span)]
 
 
@@ -1042,6 +1071,12 @@ def test_each_link_in_a_reply_is_one_violation():
     "Gracias. Maria le llama de vuelta.",
     "Puede ser una llave nueva, p.ej. la de paso.",
     "Hay talleres en EE.UU. y en México.",
+    "Maria fixes drains—and water heaters…and sinks.",   # dashes, ellipses and underscores glued on
+    "Turn off the valve —i.e. the one under the sink.",
+    "Wait...e.g. the valve under the sink.",
+    "_Maria_ will call you back about the __valve__.",
+    "Maria arregla desagües—y calentadores…y lavabos.",
+    "Cierre la llave —p.ej. la de paso.",
 ])
 def test_ordinary_dots_and_signs_are_no_link(prose):
     assert reply_check.scan_prose(prose) == []
@@ -1055,6 +1090,7 @@ def test_ordinary_dots_and_signs_are_no_link(prose):
     ("Pay at rivera-pay\u3002example/checkout before the visit.", [("link", "rivera-pay\u3002example/checkout")]),
     ("Pay at rivera.shop\u2044checkout before the visit.", [("link", "rivera.shop\u2044checkout")]),   # a fraction slash
     ("Pay at rivera.shop\u2215checkout before the visit.", [("link", "rivera.shop\u2215checkout")]),   # a division slash
+    ("Try ftp:\u2044\u2044riverapl/files for the photos.", [("link", "ftp:\u2044\u2044riverapl/files")]),   # in "://"
     ("Pay at rivera-pay.ex\u200bample/checkout first.", [("link", "rivera-pay.example/checkout")]),   # a zero-width space
     ("Pay at rivera\u2010pay.example/checkout first.", [("link", "rivera\u2010pay.example/checkout")]),   # a Unicode hyphen
     ("Email maria\uff20riverapl.example to confirm.", [("link", "maria@riverapl.example")]),   # a full-width @
