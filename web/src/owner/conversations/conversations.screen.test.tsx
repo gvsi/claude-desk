@@ -9,7 +9,7 @@ import { page, userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import type { Decision, StatusEvent } from '../../api/contracts.ts';
-import type { ConversationSummary, OwnerTranscript } from '../../api/views.ts';
+import type { ConversationSummary, NeedsYouItem, OwnerTranscript } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { formatClock } from '../../lib/format.ts';
 import { DECISIONS, VISITOR_PLAIN, writing } from '../../mocks/script.ts';
@@ -18,7 +18,7 @@ import { mockStore } from '../../mocks/store.ts';
 import { MINUTE, type SessionRecord } from '../../mocks/world.ts';
 import { expectOwnerBoard } from '../../test/boards.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
-import { expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.ts';
+import { expectNoHorizontalScroll, expectScreenBasics, focusIsOn } from '../../test/screen.ts';
 
 const DESK = `/app/${RIVERA.deskId}`;
 const LIST = `${DESK}/conversations`;
@@ -37,6 +37,8 @@ const conversation = (sessionId: string) => `${LIST}/${sessionId}`;
 
 /** The owner's line for a read the server failed. */
 const UNAVAILABLE = 'Something went wrong on our side. Try again in a moment.';
+/** The owner's line for an answer to a request that changed while they were looking. */
+const CHANGED = 'This changed while you were looking. Reload to see where it stands.';
 
 /** The requests a route got, by key. */
 const requests = (key: string) => mockStore.requests.filter((r) => r.key === key);
@@ -126,8 +128,8 @@ function danasChatWithThreeDecisions() {
   return { chat, refund, refunded, quote: quote as Decision, booking: booking as Decision };
 }
 
-/** The owner's reads of the Desk's conversations and of one chat, as the mock answers them now. */
-async function served<T>(key: 'conversations' | 'conversation', params: Record<string, string>): Promise<T> {
+/** The owner's reads of the Desk's conversations, of one chat and of Needs you, as the mock answers them now. */
+async function served<T>(key: 'conversations' | 'conversation' | 'needsYou', params: Record<string, string>): Promise<T> {
   const answer = await mockStore.dispatch(key, { params });
   if ('network' in answer || answer.status !== 200) throw new Error(`the mock reads ${key}`);
   return answer.body as T;
@@ -375,6 +377,34 @@ describe('Conversations', () => {
     expect(requests('answer').map((r) => r.body)).toEqual([{ answer: 'allow_once' }]);
     expect(chat.state.mode).toBe('owner');
     await expect.element(screen.getByRole('button', { name: 'Hand back to Claude' })).toBeVisible();
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('held_request_keeps_focus', async () => {
+    // The kernel's own conflict: the request changed while the owner was looking. The chat reads
+    // Needs you once, and that read no longer offers Allow. Polls stay out of the way.
+    const { screen } = await renderRoute(conversation(SEEDED_HOLD), { pollScale: 100 });
+    const card = heldCard(screen, SEEDED_REASON);
+    const allow = card.getByRole('button', { name: 'Allow this time' });
+    const deny = card.getByRole('button', { name: 'Deny this time' });
+    await expect.element(allow).toBeVisible();
+    const items = await served<NeedsYouItem[]>('needsYou', { desk_id: RIVERA.deskId });
+    const changed = items.map((item) => (item.decision != null ? { ...item, decision: { ...item.decision, answers: ['deny_once'] } } : item));
+    mockStore.inject({ route: 'answer', status: 409, body: { error: 'kernel', code: 'conflict' } });
+    mockStore.inject({ route: 'needsYou', status: 200, body: changed });
+
+    // Allow had focus, and it went with Allow: focus lands on the request, under the conflict's line.
+    await allow.click();
+    await expect.element(allow).not.toBeInTheDocument();
+    await expect.element(screen.getByRole('alert').getByText(CHANGED, { exact: true })).toBeVisible();
+    await expect.element(deny).not.toHaveAttribute('aria-disabled');
+    expect(focusIsOn(card.element())).toBe(true);
+
+    // Deny goes through: the answered request keeps focus as Deny leaves.
+    await deny.click();
+    await expect.element(card.getByText('You denied this.', { exact: true })).toBeVisible();
+    expect(requests('answer').map((r) => r.body)).toEqual([{ answer: 'allow_once' }, { answer: 'deny_once' }]);
+    await expect.poll(() => focusIsOn(heldCard(screen, SEEDED_REASON).element())).toBe(true);
     await expectScreenBasics(screen.container, { owner: true });
   });
 

@@ -16,7 +16,7 @@ import { CALLBACK_REASON } from '../../mocks/script.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
-import { expectNoWindowScroll, expectScreenBasics } from '../../test/screen.ts';
+import { expectNoWindowScroll, expectScreenBasics, focusIsOn } from '../../test/screen.ts';
 
 const TODAY = `/app/${RIVERA.deskId}/today`;
 const DESK = `/app/${RIVERA.deskId}`;
@@ -182,7 +182,7 @@ describe('Today', () => {
     // "Open the request" brings that card into focus.
     const things = region(screen, 'Things to try');
     await things.getByRole('button', { name: 'Open the request' }).click();
-    expect(document.activeElement?.contains(card.element())).toBe(true);
+    expect(focusIsOn(card.element())).toBe(true);
 
     // A newer hold the API lists first still comes after the oldest one, here and in Things to try.
     const [seeded] = await heldItems();
@@ -203,7 +203,7 @@ describe('Today', () => {
       .toBeVisible();
     (document.activeElement as HTMLElement | null)?.blur();
     await things.getByRole('button', { name: 'Open the request' }).click();
-    expect(document.activeElement?.contains(heldCard(screen, SEEDED_REASON).element())).toBe(true);
+    expect(focusIsOn(heldCard(screen, SEEDED_REASON).element())).toBe(true);
   });
 
   it('needs_you_read_failure_says_so', async () => {
@@ -607,7 +607,7 @@ describe('Today', () => {
     expect(requests('answer').map((r) => r.body)).toEqual([{ answer: 'allow_once' }]);
     expect(requests('needsYou')).toHaveLength(reads + 1);
     // Allow had focus, and it went with Allow: it lands on the request.
-    expect(document.activeElement?.contains(card.element())).toBe(true);
+    expect(focusIsOn(card.element())).toBe(true);
 
     // The owner answers what they can see, and it goes through.
     await deny.click();
@@ -632,7 +632,7 @@ describe('Today', () => {
     await expect.element(needsYou.getByText(CHANGED, { exact: true })).toBeVisible();
     await expect.element(card.getByText('Waiting for your answer', { exact: true })).toBeVisible();
     expect(card.getByRole('button').elements()).toHaveLength(0);
-    expect(card.element().contains(document.activeElement)).toBe(true);
+    expect(focusIsOn(card.element())).toBe(true);
     expect(requests('answer')).toHaveLength(1);
 
     // Reading again works, and the answers come back as that read offers them, still unsent.

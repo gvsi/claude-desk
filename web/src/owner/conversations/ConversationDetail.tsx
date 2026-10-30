@@ -12,7 +12,6 @@ import { ApiError, request } from '../../api/http.ts';
 import type { ConversationSummary, OwnerTranscript as OwnerTranscriptRead } from '../../api/views.ts';
 import { pollMs } from '../../app/poll.ts';
 import {
-  ApprovalCard,
   Button,
   Composer,
   EmptyState,
@@ -28,11 +27,11 @@ import {
 import { fillComposer } from '../../lib/composer.ts';
 import { formatStarted } from '../../lib/format.ts';
 import { useStillTyping } from '../../lib/typing.ts';
+import { AnsweredRequest, HeldRequest, useAnsweredFocus } from '../approvals/HeldRequest.tsx';
 import { useAnswer, type HeldItem } from '../approvals/useAnswer.ts';
 import { publicLink } from '../customerLink.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { REPLAYED_LABEL } from '../safety/copy.ts';
-import { DraftedRule, aboutTheRequest, withNoAnswers } from '../today/NeedsYou.tsx';
 import { heldOldestFirst, useNeedsYou } from '../useDesks.ts';
 import { useReadFailure, type ReadFailure } from '../useReadFailure.ts';
 import { OwnerTranscript } from './OwnerTranscript.tsx';
@@ -134,6 +133,8 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
   // The requests held here come from Needs you: a failed read says so, rather than a hold with nothing to answer.
   const heldFailure = useReadFailure(needsYou);
   const answers = useAnswer(deskId);
+  // A request answered here keeps focus as the button pressed goes.
+  const answeredFocus = useAnsweredFocus(answers.answered);
   const controls = useTakeOver(sessionId);
   const typing = useVisitorTyping(chat.data);
   const mode = chat.data?.state.mode;
@@ -180,32 +181,21 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
   const heldIds = [...new Set([...held, ...kept].map((item) => item.decision.decision_id).concat(answered.map((a) => a.decision.decision_id)))];
   const readAt = needsYou.dataUpdatedAt;
 
+  // Each held request answered in place, as Today answers it; once answered, it stays with its final line.
   const renderHeld = (decisionId: string) => {
     const done = answers.answered.get(decisionId);
     if (done !== undefined) {
       return (
         <div className="cd-conversation__held">
-          <ApprovalCard decision={done.decision} {...aboutTheRequest(done.item, now)} onAnswer={() => undefined} />
-          {done.card_diff !== null && done.card_diff.length > 0 ? <DraftedRule entry={done} /> : null}
+          <AnsweredRequest entry={done} now={now} registerCard={answeredFocus.register} />
         </div>
       );
     }
     const item = held.find((h) => h.decision.decision_id === decisionId) ?? answers.kept.get(decisionId);
     if (item === undefined) return null;
-    const pending = answers.pending.has(decisionId);
-    // The request changed while the owner was looking: its answers are the ones a read since offers.
-    const conflict = answers.conflictFor(decisionId);
-    const asItStands = conflict === undefined || pending || readAt > conflict.at;
     return (
       <div className="cd-conversation__held">
-        {conflict !== undefined ? <Notice tone="error">{conflict.line}</Notice> : null}
-        <ApprovalCard
-          decision={asItStands ? item.decision : withNoAnswers(item.decision)}
-          {...aboutTheRequest(item, now)}
-          onAnswer={(a) => answers.answer(item, a)}
-          pending={pending}
-          error={answers.errorFor(decisionId)}
-        />
+        <HeldRequest item={item} answers={answers} readAt={readAt} now={now} />
       </div>
     );
   };
