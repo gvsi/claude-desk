@@ -3,15 +3,18 @@
  * place, callbacks to join), who is live now, what happened since last night with its full list,
  * and the last 7 days, every figure as the API reads it.
  */
+import { http, HttpResponse } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { page, userEvent, type Locator } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import type { Decision, DemoInboxEntry } from '../../api/contracts.ts';
+import { ROUTES } from '../../api/routes.ts';
 import type { BriefingItem, BriefingList, NeedsYouItem, ThisWeek, Today } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { expectComputed } from '../../ds/test/expectComputed.ts';
 import { formatWhen } from '../../lib/format.ts';
+import { worker } from '../../mocks/browser.ts';
 import { CALLBACK_REASON } from '../../mocks/script.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
@@ -871,6 +874,29 @@ describe("Today's Demo inbox", () => {
   /** Where a held request's alert links to: its card on Today. */
   const requestLink = (decisionId: string) => `${TODAY}#request-${encodeURIComponent(decisionId)}`;
 
+  /** The owner's read of one decision, as the app sends it. */
+  const decisionPath = (decisionId: string) => ROUTES.decision.path.replace('{decision_id}', encodeURIComponent(decisionId));
+
+  /**
+   * Holds every read of `path` until the test lets them through to the mock: `held()` counts the
+   * reads waiting, and `release()` sends them on.
+   */
+  function holdReads(path: string): { held: () => number; release: () => void } {
+    let waiting = 0;
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    worker.use(
+      http.get(path, async () => {
+        waiting += 1;
+        await released;
+        return undefined;
+      }),
+    );
+    return { held: () => waiting, release };
+  }
+
   /** The top of `el` is inside the window, where the owner can see it. */
   function expectInView(el: Element): void {
     const box = el.getBoundingClientRect();
@@ -913,8 +939,9 @@ describe("Today's Demo inbox", () => {
     const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
     await expect.element(sheet.getByText(alert.body)).toBeVisible();
     await expect.element(sheet.getByText(others[0]?.body ?? '')).toBeVisible();
-    // "Open the request" under the hold's alert only.
+    // "Open the request" under the hold's alert only, once its request is read.
     const links = sheet.getByRole('link', { name: 'Open the request' });
+    await expect.element(links.first()).toBeVisible();
     expect(links.elements()).toHaveLength(1);
     const link = links.first();
     expect(link.element().closest('li')?.textContent).toContain(alert.body);
@@ -933,6 +960,68 @@ describe("Today's Demo inbox", () => {
     await new Promise((resolve) => setTimeout(resolve, 600));
     expect(focusIsOn(card.element())).toBe(true);
     expect(requests('ownerInbox')).toHaveLength(reads);
+  });
+
+  it('inbox_alert_links_to_its_own_desk', async () => {
+    // The Demo inbox is the whole copy's. On Emergencies, Main line's hold alert links to Main
+    // line's Today, as the held decision itself says, and following it lands on that card.
+    const { screen, router } = await renderRoute(`/app/${RIVERA.emergenciesDeskId}/today`, { seed: 'rivera_two_desks' });
+    const held = seededHold();
+    const open = inboxButton(screen);
+    await expect.element(open).toBeVisible();
+    // Nothing is read about the alert's request while the sheet is closed.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(requests('decision')).toEqual([]);
+
+    await open.click();
+    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
+    const link = sheet.getByRole('link', { name: 'Open the request' });
+    await expect.element(link).toHaveAttribute('href', requestLink(held.decision_id));
+    expect(requests('decision').map((r) => r.path)).toEqual([decisionPath(held.decision_id)]);
+
+    await link.click();
+    await expect.element(sheet).not.toBeInTheDocument();
+    expect(router.state.location.pathname).toBe(TODAY);
+    const card = heldCard(screen, SEEDED_REASON);
+    await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
+    expectInView(card.element());
+  });
+
+  it('inbox_alert_links_only_once_its_request_is_read', async () => {
+    const held = seededHold();
+    const alert = mockStore.world.inbox.find((record) => record.entry.decision_id === held.decision_id)?.entry;
+    if (!alert) throw new Error('the seeded hold alerted the owner, naming it');
+    const openSheet = async (screen: RenderResult) => {
+      await inboxButton(screen).click();
+      const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
+      await expect.element(sheet.getByText(alert.body)).toBeVisible();
+      return sheet;
+    };
+
+    // While the request is read, the alert shows no link; once it answers, it does.
+    const read = holdReads(decisionPath(held.decision_id));
+    const first = await renderRoute(TODAY);
+    let sheet = await openSheet(first.screen);
+    await vi.waitFor(() => expect(read.held()).toBe(1));
+    expect(sheet.getByRole('link').elements()).toHaveLength(0);
+    read.release();
+    await expect.element(sheet.getByRole('link', { name: 'Open the request' })).toBeVisible();
+
+    // A read that fails shows none.
+    const second = await renderRoute(TODAY, { seed: 'rivera' });
+    mockStore.inject({ route: 'decision', status: 503 });
+    sheet = await openSheet(second.screen);
+    await vi.waitFor(() => expect(requests('decision')).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(sheet.getByRole('link').elements()).toHaveLength(0);
+
+    // Nor does a decision that names no action, so no Desk.
+    const third = await renderRoute(TODAY, { seed: 'rivera' });
+    mockStore.inject({ route: 'decision', status: 200, body: { ...seededHold(), action: null } });
+    sheet = await openSheet(third.screen);
+    await vi.waitFor(() => expect(requests('decision')).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(sheet.getByRole('link').elements()).toHaveLength(0);
   });
 
   it('request_link_without_its_card_leaves_focus_alone', async () => {

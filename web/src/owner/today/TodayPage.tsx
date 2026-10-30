@@ -138,7 +138,7 @@ export function TodayPage() {
         {live.length > 0 ? <LiveNow live={live} /> : null}
         <SinceLastNight />
       </div>
-      <TodayAside deskId={deskId} slug={desk.slug} inbox={<OwnerInbox deskId={deskId} timezone={business.timezone} onOpenChange={setInboxOpen} />} />
+      <TodayAside deskId={deskId} slug={desk.slug} inbox={<OwnerInbox timezone={business.timezone} onOpenChange={setInboxOpen} />} />
     </div>
   );
 }

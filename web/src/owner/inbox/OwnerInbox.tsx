@@ -3,7 +3,9 @@
  * for each held request, the copy's codes and ledger checkpoints), in the design system's
  * `DemoInboxSheet` with `viewer="owner"`: a "Demo inbox" button with a count, which opens the
  * entries in a sheet at the right, each with when it came on the business's clock. An alert about a
- * held request links to that request's card on this Desk's Today ("Open the request").
+ * held request links to that request's card on its own Desk's Today ("Open the request"): the inbox
+ * is the whole copy's, so while the sheet is open each such request is read for the Desk it was
+ * held on, and its alert links only once that read has answered.
  *
  * The copy's inbox is read once as Today opens, so the button counts what is there and the sheet
  * opens onto entries already read, never onto an inbox that only looks empty. It is read again as
@@ -13,13 +15,14 @@
  * sheet's button, and inside the sheet while it is open, where the page behind is out of reach, so
  * the entries read before never pass for current.
  */
-import { useQuery } from '@tanstack/react-query';
+import { useQueries, useQuery } from '@tanstack/react-query';
 import { useEffect, useId, useState } from 'react';
 
 import { request } from '../../api/http.ts';
 import { pollMs } from '../../app/poll.ts';
 import { Button, DemoInboxSheet, LoadingLine, Notice, SectionHeader, type DemoInboxItem } from '../../ds/index.ts';
 import { formatWhen } from '../../lib/format.ts';
+import { decisionQuery } from '../conversations/ownerReceipt.ts';
 import { requestPath } from '../today/requestLink.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 
@@ -28,15 +31,13 @@ import './OwnerInbox.css';
 export const OWNER_INBOX_KEY = ['ownerInbox'] as const;
 
 export interface OwnerInboxProps {
-  /** The Desk whose Today the inbox is on: an alert's request opens there. */
-  deskId: string;
   /** The business's IANA time zone: each entry's time is on its clock. */
   timezone: string;
   /** Hears the sheet open (`true`) and close (`false`), after the sheet has handed focus back. */
   onOpenChange?: (open: boolean) => void;
 }
 
-export function OwnerInbox({ deskId, timezone, onOpenChange }: OwnerInboxProps) {
+export function OwnerInbox({ timezone, onOpenChange }: OwnerInboxProps) {
   const titleId = `${useId()}-title`;
   // Whether the sheet is open, as the sheet says each time it opens or closes.
   const [open, setOpen] = useState(false);
@@ -60,6 +61,20 @@ export function OwnerInbox({ deskId, timezone, onOpenChange }: OwnerInboxProps) 
     if (open) void refetch();
   }, [open, refetch]);
 
+  // The held requests the alerts name, each read for its Desk while the sheet is open. A read that
+  // hasn't answered, failed, or names no action draws no link.
+  const decisionIds = [...new Set((inbox.data ?? []).flatMap((entry) => (entry.decision_id ? [entry.decision_id] : [])))];
+  const decisions = useQueries({ queries: decisionIds.map((id) => ({ ...decisionQuery(id), enabled: open })) });
+  const deskOf = new Map<string, string>();
+  decisions.forEach(({ data }, index) => {
+    const id = decisionIds[index];
+    if (id !== undefined && data?.decision_id === id && data.action) deskOf.set(id, data.action.desk_id);
+  });
+  const hrefFor = (decisionId: string | null | undefined): string | undefined => {
+    const deskId = decisionId ? deskOf.get(decisionId) : undefined;
+    return decisionId && deskId !== undefined ? requestPath(deskId, decisionId) : undefined;
+  };
+
   const now = new Date();
   // Oldest first, as the sheet takes them; it shows the newest at the top.
   const items: DemoInboxItem[] = [...(inbox.data ?? [])]
@@ -69,7 +84,7 @@ export function OwnerInbox({ deskId, timezone, onOpenChange }: OwnerInboxProps) 
       entry,
       time: formatWhen(entry.created_at, timezone, now),
       // The held request the kernel's alert names, by its id, never by anything the entry says.
-      requestHref: entry.decision_id ? requestPath(deskId, entry.decision_id) : undefined,
+      requestHref: hrefFor(entry.decision_id),
     }));
 
   // The latest read failed, whether or not one worked before.
