@@ -10,7 +10,7 @@ Claude Desk is tested in two tiers. Tier 1 checks the kernel's boundary cases on
 
 Each scenario is in one of two splits, listed in [`evals/splits.yaml`](../evals/splits.yaml):
 
-- The calibration split sets the reviewer's thresholds.
+- The calibration split sets the reviewer's thresholds. Only a whole calibration pass writes them: every calibration scenario, each run judged, not stopped by its budget, started with every gated path committed.
 - The held-out split is what the gate and the report judge, so the thresholds are never scored on the runs that tuned them.
 
 ## Scenarios and oracles

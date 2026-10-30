@@ -24,8 +24,13 @@ report already there. A rehearsal (a dry-run or null-baseline pass) takes no ver
 its report stays under `evals/out/reports/`, never committed. So does an exploratory pass, one that
 isn't gating evidence by the check a results file, a recorded rate and the final gate use
 (`results.gating_refusal`: every part on the Claude API, the production 5.5 model ids and only
-production models serving), such as a pass on Bedrock. `write` refuses a rehearsal and an
-exploratory pass before anything is written. With `write`, when a row changes, it
+production models serving), such as a pass on Bedrock. So does a pass that doesn't stand for the
+whole calibration split at its commit (`_partial`): one made with `--only` or a `--suite` other than
+`all`, stopped by its budget, whose `pass.json` doesn't record its start or that started with
+uncommitted changes under the gated paths, or whose rows don't hold one judged run of every
+calibration scenario and repetition its commit doesn't leave pending, reconciled row by row with the
+suite at its commit (`results.selection_problems`). `write` refuses a rehearsal, an exploratory pass
+and such a partial pass before anything is written, with the reason. With `write`, when a row changes, it
 rewrites only the lines between the file's `# calibration: begin` and `# calibration: end` lines:
 the new rows, `REVIEW_THRESHOLDS_VERSION` + 1 and `CALIBRATION` (version, pass id, split, date,
 report and the owner's approval). The rewrite is checked by executing it before it replaces the
@@ -46,7 +51,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from desk.contracts import Effect, ReviewThresholds
-from evals.results import gating_refusal
+from evals.results import gating_refusal, selection_problems
 from evals.tier2.passes import REPO_ROOT, PassRefused, PassResult, load_pass, pass_dir
 from evals.tier2.verdict import Reviewed, RunVerdict
 
@@ -199,16 +204,23 @@ def calibrate(pass_id: str, *, root: Path = REPO_ROOT, thresholds_file: Path | N
         raise CalibrationRefused(f"{explores}. The reviewer's thresholds are written only from a calibration pass on "
                                  "the Claude API with the production 5.5 models, so nothing was written; without "
                                  f"--write, its proposal is reported under {OUT_REPORTS_PATH}/")
+    partial = _partial(result, root)
+    if write and partial:
+        raise CalibrationRefused(f"pass {pass_id} {partial}. The reviewer's thresholds are written only from a whole "
+                                 "calibration pass (tier2 --suite all --split calibration, no --only) that started "
+                                 "with every gated path committed, wasn't stopped by its budget and judged every run "
+                                 "of every calibration scenario, so nothing was written; without --write, its "
+                                 f"proposal is reported under {OUT_REPORTS_PATH}/")
     current = load_thresholds(thresholds_file)
     if write:   # before anything is written, whether or not a row changes
         marked_block(thresholds_file.read_text().splitlines(keepends=True))
     proposal = propose_thresholds(reviewed_decisions(result, root), current.table)
     changed = proposal.table != current.table
     # A real calibration that changes a row proposes (or writes) the next version, and its report takes that
-    # version's name. One that changes none, a rehearsal or an exploratory pass takes no version: its report is
-    # named by its pass and never overwrites one already there, and a rehearsal's or an exploratory pass's stays
-    # under evals/out/, never committed.
-    kept_back = rehearsal or explores
+    # version's name. One that changes none, a rehearsal, an exploratory pass or one that doesn't stand for the
+    # whole calibration split takes no version: its report is named by its pass and never overwrites one already
+    # there, and a rehearsal's, an exploratory pass's or a partial pass's stays under evals/out/, never committed.
+    kept_back = rehearsal or explores or partial
     versioned = changed and not kept_back
     version = current.version + 1 if versioned else current.version
     report = root / (REPORTS_PATH if not kept_back else OUT_REPORTS_PATH) / (
@@ -226,7 +238,7 @@ def calibrate(pass_id: str, *, root: Path = REPO_ROOT, thresholds_file: Path | N
         raise CalibrationRefused("--owner-approved approves writing a charge or pay_out row looser than its initial "
                                  "values, and this calibration writes no such row")
     text = render_calibration(result, proposal, current, version=version, today=today, written=written,
-                              owner_approved=owner_approved)
+                              owner_approved=owner_approved, partial=partial)
     # The report is staged beside its place first, then the thresholds are written, then the report moves
     # into place, so the thresholds file never names a report that isn't there.
     staged = report.with_name(f".{report.name}.staging")
@@ -291,6 +303,31 @@ def _exploratory(result: PassResult) -> str | None:
     gate use (`results.gating_refusal`: every part on the Claude API, the production 5.5 model ids and
     only production models serving), or None when it is or when it rehearses (`_rehearsal` says why)."""
     return None if _rehearsal(result) else gating_refusal(result)
+
+
+def _partial(result: PassResult, root: Path) -> str | None:
+    """Why a calibration pass doesn't stand for the whole calibration split at its commit, or None when it
+    does, first reason first: it ran with `--only` (even naming every calibration scenario) or a `--suite`
+    other than `all`, its budget stopped it, its `pass.json` doesn't record its start or it started with
+    uncommitted changes under the gated paths (`PassResult.start`), or its rows don't hold one judged run of
+    every calibration scenario and repetition its commit doesn't leave pending (`results.selection_problems`,
+    reconciled row by row with the suite at its commit). Reads as "pass <id> <reason>"."""
+    config, start = result.config, result.start
+    if config.only:
+        return f"ran with --only {','.join(config.only)}"
+    if config.suite != "all":
+        return f"ran with --suite {config.suite}"
+    if result.stopped_by_budget:
+        return "was stopped by its --max-usd budget before every run started"
+    if start is None:
+        return "doesn't record what it checked before its runs"
+    if start.uncommitted:
+        shown = "; ".join(start.uncommitted[:10]) + (f"; and {len(start.uncommitted) - 10} more"
+                                                     if len(start.uncommitted) > 10 else "")
+        return f"started with uncommitted changes under the gated paths: {shown}"
+    if problems := selection_problems(result, root):
+        return f"doesn't hold a judged run of every calibration scenario and repetition: {'; '.join(problems)}"
+    return None
 
 
 def reviewed_decisions(result: PassResult, root: Path = REPO_ROOT) -> list[Reviewed]:
@@ -401,9 +438,10 @@ def _row(row: ReviewThresholds) -> str:
 
 
 def render_calibration(result: PassResult, proposal: Proposal, current: Thresholds, *, version: int,
-                       today: date, written: bool, owner_approved: str | None = None) -> str:
+                       today: date, written: bool, partial: str | None, owner_approved: str | None = None) -> str:
     """The calibration report: the pass, whether the thresholds changed, the rule, and each effect's
-    counts before and after."""
+    counts before and after. `partial` is why the pass doesn't stand for the whole calibration split
+    (`_partial`), or None when it does; whoever renders one states it."""
     scored = sum(r.status == "scored" for r in result.runs)
     scenarios = len({r.scenario_id for r in result.runs})
     looser = looser_money_rows(proposal.table, current.initial)
@@ -420,6 +458,9 @@ def render_calibration(result: PassResult, proposal: Proposal, current: Threshol
     elif _exploratory(result):
         status = ("Some rows would change, but an exploratory pass takes no version, so nothing here is written to "
                   "the thresholds file.")
+    elif partial:
+        status = ("Some rows would change, but a pass that doesn't stand for the whole calibration split takes no "
+                  "version, so nothing here is written to the thresholds file.")
     elif looser:
         rows = "row is" if len(looser) == 1 else "rows are"
         status = (f"Proposed as version {version}; its {' and '.join(looser)} {rows} looser than the kernel's "
@@ -441,6 +482,9 @@ def render_calibration(result: PassResult, proposal: Proposal, current: Threshol
         lines += [f"This pass {rehearsal}, so these numbers rehearse a calibration and can't be written.", ""]
     elif explores := _exploratory(result):
         lines += [f"This pass explores, so its proposal can't be written: {explores}.", ""]
+    elif partial:
+        lines += [f"This pass doesn't stand for the whole calibration split, so its proposal can't be written: it "
+                  f"{partial}.", ""]
     lines += [
         status,
         "",

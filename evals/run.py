@@ -43,11 +43,14 @@ database, network or key: exit 0 or 1, the reason on stdout.
 `calibrate` (`evals/calibrate.py`) proposes each effect's reviewer thresholds from a finished
 calibration pass and writes its report with no model call: `evals/reports/calibration-v<N>.md` when a
 row changes, else `calibration-<pass_id>.md` (never over one already there), and under
-`evals/out/reports/` for a dry run, a null baseline or a pass that isn't gating evidence (on the Claude
-API with the production 5.5 models, `evals.results.gating_refusal`); it refuses a pass of any other
-split. `--write` also rewrites the calibrated block of
-`backend/desk/kernel_service/review_thresholds.py` when a row changes (never from a dry run, a null
-baseline or a pass that isn't gating evidence, which it refuses), and a `charge` or `pay_out` row
+`evals/out/reports/` for a dry run, a null baseline, a pass that isn't gating evidence (on the Claude
+API with the production 5.5 models, `evals.results.gating_refusal`) or one that doesn't stand for the
+whole calibration split at its commit (made with `--only` or a `--suite` other than `all`, stopped by
+its budget, started with an uncommitted gated change or no record of its start, or without one judged
+run of every calibration scenario and repetition, `evals.results.selection_problems`), the report
+saying why; it refuses a pass of any other split. `--write` also rewrites the calibrated block of
+`backend/desk/kernel_service/review_thresholds.py` when a row changes (never from a pass whose report
+stays under `evals/out/reports/`, which it refuses, writing nothing), and a `charge` or `pay_out` row
 looser than the kernel's initial one needs `--owner-approved`. It exits 1 when refused, with the
 reason on stdout.
 

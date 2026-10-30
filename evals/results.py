@@ -94,7 +94,7 @@ from pydantic import (
     field_validator,
 )
 
-from evals.gate import GateInput, GateResult, RunRow, Target, coverage_problems
+from evals.gate import SHOWN, GateInput, GateResult, RunRow, Target, coverage_problems
 from evals.gate import gate as gate_of
 from evals.oracles.canonical import sha256_hex
 from evals.tier1.harness import load_landed
@@ -475,6 +475,31 @@ def pass_target(p: Any, root: Path = REPO_ROOT) -> Target:
     return Target.of(suite, splits, landed)
 
 
+def selection_problems(p: Any, root: Path = REPO_ROOT) -> list[str]:
+    """Why a finished pass (`PassResult`) doesn't hold one judged run of every scenario and repetition
+    its config selected, or an empty list when it does. Its rows and pending scenarios are reconciled
+    (`coverage_problems`) with the suite at its commit, read from git (`pass_target`), narrowed to what its
+    `--suite`, `--split` and `--only` select: one row per selected scenario and run `1..runs`, none for
+    anything else, each selected scenario waiting for an unlanded plan listed in `pending` with no rows;
+    and every row is scored, never incomplete. The rows are reconciled one by one, never counted, so a row
+    removed from `runs.jsonl` or written twice is named. A commit or suite that can't be read is a problem,
+    never a pass. Calibration and the latest report rely on it."""
+    try:
+        target = pass_target(p, root)
+    except ResultsRefused as refused:
+        return [str(refused)]
+    config = p.config
+    selected = Target(scenarios={sid: scenario for sid, scenario in target.scenarios.items()
+                                 if config.suite in ("all", scenario.suite) and config.split in ("all", scenario.split)
+                                 and (not config.only or sid in config.only)}, landed=target.landed)
+    problems = coverage_problems(p.gate_input(), selected)
+    if unjudged := [f"{r.scenario_id} run {r.rep}" for r in p.runs if r.status != "scored"]:
+        shown = ", ".join(unjudged[:SHOWN]) + (f" and {len(unjudged) - SHOWN} more" if len(unjudged) > SHOWN else "")
+        problems.append(f"{len(unjudged)} runs weren't judged (an error, or records the verdict couldn't read): "
+                        f"{shown}")
+    return problems
+
+
 # Reconciling a results file with a commit
 
 class CheckFailed(Exception):
@@ -702,6 +727,6 @@ __all__ = [
     "RATE_MODEL_IDS", "RESULTS_DIR", "SIMULATOR_ROUTES", "CheckFailed", "RateRef", "Reconciled", "ResultsFile",
     "ResultsProviders", "ResultsRefused", "dirty_gated", "final_gate", "gated_from_pairs", "gated_map", "gated_pairs",
     "gating_refusal", "inputs_key", "history_refusal", "is_gated", "key_of", "lowered_notice", "pass_target",
-    "rate_refusal", "reconcile", "reconcile_pass", "results_check", "results_file", "unchecked_refusal",
-    "write_results",
+    "rate_refusal", "reconcile", "reconcile_pass", "results_check", "results_file", "selection_problems",
+    "unchecked_refusal", "write_results",
 ]

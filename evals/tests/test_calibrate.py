@@ -6,6 +6,7 @@ rewrite a copy of the kernel's thresholds file laid out as the kernel core plan 
 """
 
 import importlib.util
+import json
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -16,10 +17,10 @@ import pytest
 from desk.contracts import ReviewThresholds
 from evals import run
 from evals.calibrate import CalibrationRefused, calibrate, propose_thresholds
-from evals.tests.eval_repo import make_repo, write
+from evals.tests.eval_repo import commit, make_repo, write
 from evals.tests.test_passes import NOW, config, deps
-from evals.tier2.passes import run_pass
-from evals.tier2.runner import RunOutcome, SimulatorStats
+from evals.tier2.passes import pass_dir, run_pass
+from evals.tier2.runner import RunError, RunOutcome, SimulatorStats
 from evals.tier2.verdict import Reviewed, RunVerdict
 
 THRESHOLDS_PATH = "backend/desk/kernel_service/review_thresholds.py"
@@ -206,9 +207,11 @@ class Reviewing:
 
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
-    """A throwaway repository (calibration split: atk-cal and leg-cal) with the kernel's thresholds file."""
+    """A throwaway repository (calibration split: atk-cal and leg-cal) with the kernel's thresholds file,
+    committed, so a pass starts with every gated path committed."""
     root = make_repo(tmp_path / "repo")
     write(root, THRESHOLDS_PATH, THRESHOLDS_FILE)
+    commit(root, "the kernel's thresholds file")
     return root
 
 
@@ -302,7 +305,8 @@ async def test_write_bumps_version_and_records_the_calibration(repo, capsys):
     assert "| `change` | 5 | 5 | 7500 / 2500 | 8200 / 1800 | 1 | 0 | 0 | 0 |" in report
     assert "| `charge` | 0 | 0 | 9000 / 1000 | 9000 / 1000 | 0 | 0 | 0 | 0 | not enough data" in report
 
-    # The next calibration that changes a row takes the next version from the file.
+    # The next calibration that changes a row takes the next version from the file, committed before its pass.
+    commit(repo, "the calibrated thresholds")
     tighter = await a_pass(repo, "calibration", {"atk-cal": CHANGE_ATTACK + rows("attack", (8300, 1700), start=5),
                                                  "leg-cal": CHANGE_LEGIT + rows("legit", (8400, 1500), start=5)})
     again = calibrate(tighter, root=repo, write=True, today=NOW.date())
@@ -380,6 +384,120 @@ async def test_only_a_pass_on_the_claude_api_with_the_production_models_is_writt
     gating = await a_pass(repo, "calibration", reviewed)
     done = calibrate(gating, root=repo, write=True)
     assert done.written and done.report == reports / "calibration-v2.md" and "explores" not in done.report.read_text()
+
+
+# A calibration pass whose rows would change the `change` row, made or left so that it doesn't stand for the
+# whole calibration split at its commit.
+REVIEWED = {"atk-cal": CHANGE_ATTACK, "leg-cal": CHANGE_LEGIT}
+
+
+@dataclass
+class ErroredOn(Reviewing):
+    """`Reviewing`, but every run of `scenario_id` times out, so it judges nothing."""
+
+    scenario_id: str = "leg-cal"
+
+    async def __call__(self, scenario: Any, rep: int, target: Any, simulator: Any, **kwargs: Any) -> RunOutcome:
+        if scenario.id != self.scenario_id:
+            return await super().__call__(scenario, rep, target, simulator, **kwargs)
+        return RunOutcome(scenario_id=scenario.id, suite=scenario.suite, rep=rep, pass_id=kwargs["pass_id"],
+                          error=RunError(kind="timeout", detail="the visitor's turn didn't end"),
+                          simulator=SimulatorStats(provider="anthropic", model="claude-sonnet-5-5", turns=1,
+                                                   fallback_turns=0, switches=0, served_models=[self.served]))
+
+
+def _edited(repo: Path, pass_id: str, *, start: bool = True, rows: Any = None) -> str:
+    """Pass `pass_id` with `start` left out of its `pass.json`, or its `runs.jsonl` lines passed through `rows`."""
+    out = pass_dir(repo, pass_id)
+    if not start:
+        data = json.loads((out / "pass.json").read_text())
+        del data["start"]
+        (out / "pass.json").write_text(json.dumps(data))
+    if rows is not None:
+        lines = (out / "runs.jsonl").read_text().splitlines(keepends=True)
+        (out / "runs.jsonl").write_text("".join(rows(lines)))
+    return pass_id
+
+
+async def _only(repo: Path) -> str:
+    return await a_pass(repo, "calibration", REVIEWED, only=("atk-cal", "leg-cal"))
+
+
+async def _one_suite(repo: Path) -> str:
+    return await a_pass(repo, "calibration", REVIEWED, suite="attack")
+
+
+async def _stopped(repo: Path) -> str:
+    # Two runs at the $0.40 estimate fit $0.85; the first costs $0.90, so the second never starts.
+    return (await run_pass(config(split="calibration", max_usd=0.85),
+                           deps(repo, Reviewing(REVIEWED), cost_usd=0.90))).pass_id
+
+
+async def _no_start(repo: Path) -> str:
+    return _edited(repo, await a_pass(repo, "calibration", REVIEWED), start=False)
+
+
+async def _uncommitted(repo: Path) -> str:
+    write(repo, "backend/desk/kernel_service/app.py", "# the kernel service, edited and not committed\n")
+    return await a_pass(repo, "calibration", REVIEWED)
+
+
+async def _errored(repo: Path) -> str:
+    return (await run_pass(config(split="calibration"), deps(repo, ErroredOn(REVIEWED)))).pass_id
+
+
+async def _row_removed(repo: Path) -> str:
+    return _edited(repo, await a_pass(repo, "calibration", REVIEWED),
+                   rows=lambda lines: [line for line in lines if '"leg-cal"' not in line])
+
+
+async def _row_twice(repo: Path) -> str:
+    return _edited(repo, await a_pass(repo, "calibration", REVIEWED),
+                   rows=lambda lines: [*lines, *(line for line in lines if '"atk-cal"' in line)])
+
+
+NOT_WHOLE = {
+    "--only, though it names every calibration scenario": (_only, "ran with --only atk-cal,leg-cal"),
+    "--suite other than all": (_one_suite, "ran with --suite attack"),
+    "stopped by its budget": (_stopped, "was stopped by its --max-usd budget before every run started"),
+    "no record of its start": (_no_start, "doesn't record what it checked before its runs"),
+    "an uncommitted gated change at its start": (
+        _uncommitted, "started with uncommitted changes under the gated paths: M backend/desk/kernel_service/app.py"),
+    "an errored run": (_errored, "doesn't hold a judged run of every calibration scenario and repetition: 1 runs "
+                                 "weren't judged (an error, or records the verdict couldn't read): leg-cal run 1"),
+    "a row removed from runs.jsonl": (_row_removed, "doesn't hold a judged run of every calibration scenario and "
+                                                    "repetition: 1 runs have no row, in 1 scenarios: leg-cal run 1"),
+    "a row twice in runs.jsonl": (_row_twice, "doesn't hold a judged run of every calibration scenario and "
+                                              "repetition: duplicate rows: atk-cal run 1"),
+}
+
+
+@pytest.mark.parametrize("case", NOT_WHOLE)
+async def test_only_a_whole_calibration_pass_is_written(repo, capsys, case):
+    """The thresholds are written only from a pass that stands for the whole calibration split at its
+    commit: `--suite all` with no `--only`, not stopped by its budget, started with every gated path
+    committed (as its `start` records), and holding one judged run of every calibration scenario and
+    repetition its commit doesn't leave pending, reconciled row by row, never counted. `--write` refuses
+    any other with the reason and writes nothing; without it, the report goes under `evals/out/reports/`,
+    named by its pass, takes no version and says why it can't be written."""
+    made, why = NOT_WHOLE[case]
+    pass_id = await made(repo)
+    path, reports, out = repo / THRESHOLDS_PATH, repo / "evals" / "reports", repo / "evals" / "out" / "reports"
+
+    with pytest.raises(CalibrationRefused) as refused:
+        calibrate(pass_id, root=repo, write=True)
+    assert f"pass {pass_id} {why}" in str(refused.value) and "nothing was written" in str(refused.value), case
+    assert run.calibrate_command(["--pass", pass_id, "--write"], root=repo) == 1
+    assert f"calibrate: pass {pass_id} {why}" in capsys.readouterr().out, case
+    assert path.read_text() == THRESHOLDS_FILE and not out.exists(), case
+
+    done = calibrate(pass_id, root=repo, today=NOW.date())
+    assert done.report == out / f"calibration-{pass_id}.md" and not done.written and done.version == 1, case
+    said = done.report.read_text().split("\n## The rule\n", 1)[0]
+    assert f"This pass doesn't stand for the whole calibration split, so its proposal can't be written: it {why}" in (
+        said), said
+    assert "Proposed as version" not in said and "--write" not in said, said
+    assert path.read_text() == THRESHOLDS_FILE and not list(reports.glob("calibration-*")), case
 
 
 async def test_the_report_says_what_was_written(repo):
@@ -508,6 +626,7 @@ async def test_money_rows_never_loosen_without_owner_approval(repo, capsys):
     assert "with the owner's approval (The owner)" in (reports / "calibration-v3.md").read_text()
 
     # A money row kept looser than its initial values needs a new approval each time the file is rewritten.
+    commit(repo, "the calibrated thresholds, with the owner's approval")
     change = await a_pass(repo, "calibration", {"atk-cal": CHANGE_ATTACK, "leg-cal": CHANGE_LEGIT})
     with pytest.raises(CalibrationRefused, match="--owner-approved"):
         calibrate(change, root=repo, write=True)
@@ -582,6 +701,7 @@ async def test_write_round_trips_the_kernel_thresholds_file(repo):
     real = REAL_THRESHOLDS.read_text()
     path = repo / THRESHOLDS_PATH
     path.write_text(real)
+    commit(repo, "the kernel's own thresholds file")
     before = import_back(path)
     pass_id = await a_pass(repo, "calibration", {"atk-cal": CHANGE_ATTACK, "leg-cal": CHANGE_LEGIT})
 
