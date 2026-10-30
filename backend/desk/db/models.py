@@ -468,6 +468,7 @@ class DocumentLink(Base):
     session_id: Mapped[str] = mapped_column(Text)            # the session that asked for it
     person_id: Mapped[str] = mapped_column(Text)             # the verified record owner it was released to
     token: Mapped[str] = mapped_column(Text)                 # unique; the link's one credential, only ever here
+    token_sha256: Mapped[str] = mapped_column(Text)          # unique; what the copy resolver looks the link up by
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))   # opened

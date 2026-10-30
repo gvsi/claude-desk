@@ -6,12 +6,13 @@ read from the row, never from args. Who may have it is Cedar's: the baseline let
 only to a verified principal who is the record owner.
 
 `execute` writes a `document_links` row whose token (`secrets.token_urlsafe(32)`) opens the
-document once within `LINK_TTL`, and a `document_link:<link_id>` fact holding the title and the
-link's ID, readable only by the readers the document and the session share (the owner and the
-record owner), so any session verified as the record owner may cite it and no other. Claude is
-told only that the link is ready; the token stays in its row, never in a fact, `model_view`, a
-ledger summary or a log line. The release is ledgered `document_link` `{link_id, document_id,
-issued}`.
+document once within `LINK_TTL`, beside the token's sha256 (`token_sha256`, hashed as a session's
+token is), the one thing the copy resolver may read, and a `document_link:<link_id>` fact holding
+the title and the link's ID, readable only by the readers the document and the session share (the
+owner and the record owner), so any session verified as the record owner may cite it and no other.
+Claude is told only that the link is ready; the token stays in its row, never in a fact,
+`model_view`, a ledger summary or a log line. The release is ledgered `document_link` `{link_id,
+document_id, issued}`.
 
 A link opens once (`open_document_link`, `GET /document_links/{token}`, which the API proxies at
 `/api/d/{token}`): one UPDATE marks it opened if it is unopened, not voided and unexpired, and its
@@ -34,7 +35,7 @@ from sqlalchemy.sql import ColumnElement
 from desk.contracts import Claim, Fact, LedgerEvent, NormalizedAction, ResourceRef, ToolProfile
 from desk.db.models import Desk, Document, DocumentLink
 from desk.db.models import Fact as FactRow
-from desk.kernel_service import labels, ledger, render, repo
+from desk.kernel_service import auth, labels, ledger, render, repo
 from desk.kernel_service.adapters import register
 from desk.kernel_service.adapters.base import (AdapterFailure, AdapterRefusal, AdapterResult, ExecCtx, Normalized,
                                                NormalizeCtx)
@@ -44,6 +45,12 @@ LINK_TTL = timedelta(hours=24)
 FACT_PREFIX = "document_link:"
 TOKEN = re.compile(r"[A-Za-z0-9_-]{43}")          # secrets.token_urlsafe(32)
 MEDIA_TYPE = "text/plain; charset=utf-8"
+
+
+def token_sha256(token: str) -> str:
+    """What a link is looked up by before its copy is known (`repo.copy_of_document_link`): the
+    token's sha256, as a session's token is stored (`auth.hash_token`)."""
+    return auth.hash_token(token)
 
 
 class ReleaseDocumentArgs(BaseModel):
@@ -107,9 +114,10 @@ class ReleaseDocumentAdapter:
         if (document is None or document_fact is None or person_id is None
                 or document.record_owner_person_id != person_id or action.resource.owner_person_id != person_id):
             raise AdapterFailure("document_changed")
+        token = secrets.token_urlsafe(32)
         link = DocumentLink(link_id=new_id("doclink"), copy_id=action.copy_id, desk_id=action.desk_id,
                             document_id=document.document_id, session_id=session.session_id, person_id=person_id,
-                            token=secrets.token_urlsafe(32), created_at=now, expires_at=now + LINK_TTL)
+                            token=token, token_sha256=token_sha256(token), created_at=now, expires_at=now + LINK_TTL)
         fact = Fact(fact_id=f"{FACT_PREFIX}{link.link_id}", kind="document", status="available", source="kernel",
                     claims=[Claim(key="title", kind="text", value=document.title),
                             Claim(key="ref", kind="ref", value=link.link_id)],
@@ -171,25 +179,28 @@ async def _ledger_link(ctx: KernelCtx, *, copy_id: str, desk_id: str, session_id
 
 async def open_document_link(ctx: KernelCtx, token: str) -> tuple[bytes, str]:
     """`GET /document_links/{token}`: the document's bytes and media type, on the link's first open
-    within `LINK_TTL`, in the request's transaction (unbound until the token names a copy). The
-    link is marked opened by one UPDATE, its fact expired and the open ledgered `{link_id, opened}`,
-    all in that transaction. Any other link is 404 `not_found`, the same for all: one opened,
-    expired or voided is ledgered `{link_id, refused}` on its Desk, and a token no link has is
-    logged by the failure's reason alone. The token goes in no ledger entry or log line."""
-    copy_id = await repo.copy_of_document_link(ctx, token) if TOKEN.fullmatch(token) else None
+    within `LINK_TTL`, in the request's transaction (unbound until the token's sha256 names a copy).
+    The link is found by that hash alone, marked opened by one UPDATE, its fact expired and the open
+    ledgered `{link_id, opened}`, all in that transaction. Any other link is 404 `not_found`, the
+    same for all: one opened, expired or voided is ledgered `{link_id, refused}` on its Desk, and a
+    token no link has is logged by the failure's reason alone. The token goes in no ledger entry or
+    log line."""
+    digest = token_sha256(token) if TOKEN.fullmatch(token) else None
+    copy_id = await repo.copy_of_document_link(ctx, digest) if digest is not None else None
     if copy_id is None:
         raise KernelFailure(404, "not_found", "unknown_document_link")
     copy = ctx.bind(copy_id)
     now = ctx.clock.now()
     opened = (await ctx.db.execute(
-        update(DocumentLink).where(DocumentLink.copy_id == copy_id, DocumentLink.token == token, *_openable(now))
+        update(DocumentLink).where(DocumentLink.copy_id == copy_id, DocumentLink.token_sha256 == digest,
+                                   *_openable(now))
         .values(consumed_at=now)
         .returning(DocumentLink.link_id, DocumentLink.desk_id, DocumentLink.session_id, Document.body)
         .execution_options(synchronize_session=False))).one_or_none()
     if opened is None:
         known = (await ctx.db.execute(copy.scoped(select(DocumentLink.link_id, DocumentLink.desk_id,
                                                          DocumentLink.session_id).where(
-            DocumentLink.token == token)))).one_or_none()
+            DocumentLink.token_sha256 == digest)))).one_or_none()
         if known is None:
             raise KernelFailure(404, "not_found", "unknown_document_link")
         link_id, desk_id, session_id = known

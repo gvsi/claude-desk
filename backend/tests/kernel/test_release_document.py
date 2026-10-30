@@ -13,6 +13,7 @@ from their Demo inbox, as the verify card does.
 """
 
 import asyncio
+import hashlib
 import logging
 import re
 import secrets
@@ -134,6 +135,8 @@ async def test_record_owner_gets_one_link(app, client, frozen_clock):
     assert (link.created_at, link.expires_at, link.consumed_at, link.voided_at) == (
         now, now + release_document.LINK_TTL, None, None)
     assert re.fullmatch(r"[A-Za-z0-9_-]{43}", link.token)               # secrets.token_urlsafe(32)
+    # looked up by its sha256 before the copy is known, as a session's token is
+    assert link.token_sha256 == hashlib.sha256(link.token.encode()).hexdigest()
 
     # the fact names the link by its ID and holds the title: Dana's and the owner's to read, from any
     # session Dana confirms in, and no one else's
@@ -465,10 +468,10 @@ async def test_tokens_never_leave_kernel_tables(app, client, caplog):
     verdict = await checked(client, dana, "Here is your invoice.", [clause("document_link", fact.fact_id)])
     assert verdict.blocks[-1].href == f"/api/d/{link.token}"           # the one place it leaves the kernel
 
-    # no view the API reads has a token column, and the API can't read the links themselves
+    # no view the API reads has a token or token hash column, and the API can't read the links themselves
     assert api_rows(copy.copy_id, "SELECT c.relname FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid"
-                                  " WHERE c.relnamespace = 'kernel_ro'::regnamespace AND a.attname = 'token'"
-                                  " AND NOT a.attisdropped") == []
+                                  " WHERE c.relnamespace = 'kernel_ro'::regnamespace"
+                                  " AND a.attname IN ('token', 'token_sha256') AND NOT a.attisdropped") == []
     with pytest.raises(psycopg.errors.InsufficientPrivilege):
         api_rows(copy.copy_id, "SELECT count(*) FROM kernel.document_links")
 
@@ -499,7 +502,7 @@ async def test_tokens_never_leave_kernel_tables(app, client, caplog):
     exposed = logged + [entry.event.model_dump_json() for entry in await ledger_rows(app, copy)]
     for view in KERNEL_RO_VIEWS:
         exposed += [text for (text,) in api_rows(copy.copy_id, f"SELECT row_to_json(v)::text FROM kernel_ro.{view} v")]
-    for token in (link.token, unknown):
+    for token in (link.token, link.token_sha256, unknown):
         assert not [text for text in exposed if token in text], token
 
 

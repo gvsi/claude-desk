@@ -218,9 +218,10 @@ def route_template(request: Request) -> str:
 
 # Credential lookups. A request names a session token, a session ID, a decision ID (whose session
 # `GET /decisions/{id}` names), a public slug or a document link's token, not a copy; these find
-# the copy it belongs to through the database's copy resolvers (SECURITY DEFINER functions that
-# return only a copy id), on their own connection, so the caller can bind the request's transaction
-# to that copy and read the rows through KernelRepo as usual. Only auth.py, GET /whoami,
+# the copy it belongs to (a token by its sha256, never the token itself) through the database's
+# copy resolvers (SECURITY DEFINER functions that return only a copy id), on their own connection,
+# so the caller can bind the request's transaction to that copy and read the rows through
+# KernelRepo as usual. Only auth.py, GET /whoami,
 # GET /decisions/{id}, POST /sessions, GET /public/{desk_slug} and GET /document_links/{token} use
 # them, and they run before the request's transaction has run anything: a request that held its
 # transaction's connection while it waited for a resolver's would, with as many such requests at
@@ -250,9 +251,10 @@ async def copy_of_decision_id(ctx: KernelCtx, decision_id: str) -> str | None:
     return await _resolve(ctx, "copy_of_decision_id", decision_id)
 
 
-async def copy_of_document_link(ctx: KernelCtx, token: str) -> str | None:
-    """The copy of the document link with this token, the link's one credential."""
-    return await _resolve(ctx, "copy_of_document_link", token)
+async def copy_of_document_link(ctx: KernelCtx, token_sha256: str) -> str | None:
+    """The copy of the document link whose token has this sha256 (`release_document.token_sha256`):
+    the resolver reads hashes, never a link's token."""
+    return await _resolve(ctx, "copy_of_document_link", token_sha256)
 
 
 # Startup reconciliation's one lookup across copies: which copies hold an execution to settle.

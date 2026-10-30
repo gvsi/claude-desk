@@ -681,6 +681,36 @@ def test_migration_keeps_existing_versions_at_five_hundred(admin):
         command.upgrade(config, "head")
 
 
+DOCUMENT_LINKS_REVISION = "01b_6_document_links"
+
+
+def test_a_downgrade_below_document_links_leaves_no_link_behind(admin, committed_copies):
+    """Below the document links' revision a link would keep only its key and copy, and the upgrade
+    couldn't add its NOT NULL columns back: the downgrade empties the table first. Back at head,
+    a link's token hash is 64 lowercase hex digits."""
+    def insert(link_id: str, token: str, digest: str) -> None:
+        copy_id = committed_copies[0]
+        admin.execute(
+            "INSERT INTO kernel.document_links (link_id, copy_id, desk_id, document_id, session_id, person_id, token,"
+            " token_sha256, created_at, expires_at)"
+            " VALUES (%s, %s, %s, %s, %s, 'person-1', %s, %s, now(), now() + interval '1 day')",
+            (link_id, copy_id, f"desk-{copy_id}", f"doc-{copy_id}", f"session-{copy_id}", token, digest))
+
+    insert("link-downgraded", "token-downgraded", hashlib.sha256(b"token-downgraded").hexdigest())
+    config = alembic_config()
+    before = ScriptDirectory.from_config(config).get_revision(DOCUMENT_LINKS_REVISION).down_revision
+    try:
+        command.downgrade(config, before)
+        assert columns(admin, "kernel", "document_links") == ["link_id", "copy_id"]
+        assert admin.execute("SELECT count(*) FROM kernel.document_links").fetchone() == (0,)
+    finally:
+        command.upgrade(config, "head")
+    assert "token_sha256" in columns(admin, "kernel", "document_links")
+    for digest in ("A" * 64, "0" * 63, "token-upgraded"):
+        with pytest.raises(psycopg.errors.CheckViolation):
+            insert("link-upgraded", "token-upgraded", digest)
+
+
 def test_state_columns_admit_only_contract_values(admin):
     for (table, column), literal in STATE_COLUMNS.items():
         checks = admin.execute(
@@ -876,10 +906,11 @@ def test_visitor_payloads_validate_against_contracts(api_tx):
 COPY_POLICY = "(copy_id = NULLIF(current_setting('desk.copy_id'::text, true), ''::text))"
 # What each kernel_ro view's owner reads beyond its copy: kernel_ro.people skips removed people (01b_3_people)
 COPY_READ_POLICY = {"people": f"({COPY_POLICY} AND (removed_at IS NULL))"}
-# What the copy resolvers' role may read: the copy and the lookup key of each table, in every copy.
+# What the copy resolvers' role may read: the copy and the lookup key of each table, in every copy,
+# each key a hash or an ID that is no secret, never a token.
 RESOLVER_READS = {"copies": {"copy_id"}, "sessions": {"copy_id", "secret_hash", "session_id"},
                   "desks": {"copy_id", "slug"}, "decisions": {"copy_id", "decision_id"},
-                  "document_links": {"copy_id", "token"}}
+                  "document_links": {"copy_id", "token_sha256"}}
 
 
 def test_every_kernel_table_forces_copy_row_security(admin):
@@ -1082,6 +1113,11 @@ def token_hash(copy_id: str) -> str:
     return hashlib.sha256(f"token-{copy_id}".encode()).hexdigest()
 
 
+def link_token(copy_id: str) -> str:
+    """The token of the document link a test writes in a copy."""
+    return f"link-token-{copy_id}"
+
+
 @pytest.fixture
 def committed_copies(admin):
     """Two new copies, each with a Desk, a visitor session and a document, removed afterwards.
@@ -1186,20 +1222,25 @@ async def test_copy_resolvers_find_a_copy_before_it_is_bound(admin, committed_co
             (f"dec-{copy_id}", copy_id, f"desk-{copy_id}", f"session-{copy_id}"))
         admin.execute(   # and a link that released its document
             "INSERT INTO kernel.document_links (link_id, copy_id, desk_id, document_id, session_id, person_id, token,"
-            " created_at, expires_at) VALUES (%s, %s, %s, %s, %s, 'person-1', %s, now(), now() + interval '1 day')",
-            (f"link-{copy_id}", copy_id, f"desk-{copy_id}", f"doc-{copy_id}", f"session-{copy_id}", f"token-{copy_id}"))
+            " token_sha256, created_at, expires_at)"
+            " VALUES (%s, %s, %s, %s, %s, 'person-1', %s, %s, now(), now() + interval '1 day')",
+            (f"link-{copy_id}", copy_id, f"desk-{copy_id}", f"doc-{copy_id}", f"session-{copy_id}",
+             link_token(copy_id), hashlib.sha256(link_token(copy_id).encode()).hexdigest()))
     try:
         for copy_id in committed_copies:
             assert await resolve_copy("copy_of_session", token_hash(copy_id)) == copy_id
             assert await resolve_copy("copy_of_session_id", f"session-{copy_id}") == copy_id
             assert await resolve_copy("copy_of_desk_slug", f"slug-{copy_id}") == copy_id
             assert await resolve_copy("copy_of_decision_id", f"dec-{copy_id}") == copy_id
-            assert await resolve_copy("copy_of_document_link", f"token-{copy_id}") == copy_id
+            # a link by its token's sha256, never by the token itself
+            assert await resolve_copy("copy_of_document_link",
+                                      hashlib.sha256(link_token(copy_id).encode()).hexdigest()) == copy_id
+            assert await resolve_copy("copy_of_document_link", link_token(copy_id)) is None
         assert await resolve_copy("copy_of_session", "0" * 64) is None
         assert await resolve_copy("copy_of_session_id", "no-such-session") is None
         assert await resolve_copy("copy_of_desk_slug", "no-such-desk") is None
         assert await resolve_copy("copy_of_decision_id", "no-such-decision") is None
-        assert await resolve_copy("copy_of_document_link", "no-such-token") is None
+        assert await resolve_copy("copy_of_document_link", "0" * 64) is None
         assert set(committed_copies) <= set(await copy_ids())
         with pytest.raises(ValueError):
             await resolve_copy("copy_of_anything", "x")
