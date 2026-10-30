@@ -339,15 +339,21 @@ async def owner_alone(ctx: KernelCtx, request: Request) -> auth.OwnerCtx:
 
 
 async def owner_desk(ctx: KernelCtx, request: Request, desk_id: str) -> Desk:
-    """The Desk `desk_id` of the copy the owner's credential proves (`owner_alone`), locked `FOR
-    UPDATE` until the transaction ends. Another copy's Desk, or none, is 404; a deleted one is 409
-    `closed`, ledgered on it."""
+    """The Desk `desk_id` of the copy the owner's credential proves (`owner_alone`), locked as
+    `held_desk` locks it."""
+    return await held_desk(ctx, request, await owner_alone(ctx, request), desk_id)
+
+
+async def held_desk(ctx: KernelCtx, request: Request, owner: auth.OwnerCtx, desk_id: str) -> Desk:
+    """The Desk `desk_id` of the owner's copy, locked `FOR UPDATE` until the transaction ends and
+    read afresh, so a deletion that committed first is seen and one that comes later waits.
+    Another copy's Desk, or none, is 404; a deleted one is 409 `closed`, ledgered on it."""
     route = route_template(request)
-    owner = await owner_alone(ctx, request)
     desk_row = None
     if storable(desk_id):
         desk_row = (await ctx.db.scalars(ctx.repo.scoped(select(Desk).where(Desk.desk_id == desk_id)
-                                                         .with_for_update()))).one_or_none()
+                                                         .with_for_update()
+                                                         .execution_options(populate_existing=True)))).one_or_none()
     if desk_row is None:   # row-level security hides every other copy's Desks
         raise AuthError(404, "not_found", "wrong_copy", route=route)
     if desk_row.deleted_at is not None:

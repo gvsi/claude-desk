@@ -40,11 +40,10 @@ Row locks are taken in one order, so no two kernel transactions wait on each oth
 12. the Desk's ledger head (`ledger.append`, `FOR UPDATE`, where every entry ends; `ledger.page`
     reads it `FOR SHARE`).
 
-An owner's write to a Desk's data holds the Desk row `FOR UPDATE` (`desks.owner_desk`) before any
-of these, and a write to the business its row after the Desk's; nothing that holds one of the
-rows above asks for a Desk or business row. Closing a handoff (`app.close_handoff`), which names
-the handoff and not its Desk, is the one owner write that holds no Desk row: it takes the handoff
-(step 10), then its fact and the ledger head, and asks for nothing earlier.
+An owner's write to a Desk's data holds the Desk row `FOR UPDATE` (`desks.owner_desk`, or
+`desks.held_desk` once closing a handoff has read which Desk it is on) before any of these, and a
+write to the business its row after the Desk's; nothing that holds one of the rows above asks for
+a Desk or business row.
 
 A transaction that holds a later lock never asks for an earlier one: a refusal's `persist` locks
 the decision before it appends, nothing holds a payment link and then asks for the policy row,

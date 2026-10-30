@@ -640,3 +640,52 @@ async def test_handoff_done_is_copy_scoped(app, client, caplog):
     unattributed = [r.getMessage() for r in caplog.records if r.getMessage().startswith("auth_unattributed")]
     assert unattributed == [f"auth_unattributed route=POST /handoffs/{{handoff_id}}/done reason={reason}"
                             for reason in ("unknown_handoff",) * 3 + ("bad_owner_token",)]
+
+
+async def test_a_deleted_desks_handoff_is_closed(app, client):
+    """A deleted Desk's handoffs don't change: closing one, open or already done, is 409 `closed`,
+    an `auth` entry on the Desk's ledger, as on every other route that names the Desk."""
+    copy, visitor = await visitor_of(app, client)
+    handoff_ids = [(await callback(client, visitor, call_id)).model_view["handoff_id"]
+                   for call_id in ("call-1", "call-2")]
+    assert (await handoff_done(client, handoff_ids[1], copy.owner)).status_code == 200
+    response = await client.delete(f"/desks/{copy.desk_id}", headers=copy.owner)
+    assert response.status_code == 204, response.text
+    before = len(await ledger_rows(app, copy))
+
+    for handoff_id in handoff_ids:
+        response = await handoff_done(client, handoff_id, copy.owner)
+        assert (response.status_code, response.json()) == (409, {"code": "closed"}), handoff_id
+    statuses = dict(api_rows(copy.copy_id, "SELECT handoff_id, status FROM kernel_ro.handoffs"))
+    assert statuses == {handoff_ids[0]: "open", handoff_ids[1]: "done"}
+    [fact] = await rows_of(app, copy.copy_id, select(Fact).where(Fact.fact_id == f"handoff:{handoff_ids[0]}"))
+    assert fact.status == "committed"
+    assert [(entry.event.kind, entry.event.session_id, entry.event.summary)
+            for entry in (await ledger_rows(app, copy))[before:]] == [
+        ("auth", None, {"route": "POST /handoffs/{handoff_id}/done", "reason": "closed"})] * 2
+
+
+async def test_a_close_waits_for_the_desks_deletion(app, client, monkeypatch):
+    """A close sent while the Desk is being deleted waits for the Desk row the deletion holds, then
+    sees the Desk deleted: 409 `closed`, and the handoff stays as it was."""
+    copy, visitor = await visitor_of(app, client)
+    handoff_id = (await callback(client, visitor)).model_view["handoff_id"]
+    delete, deleted, go_on = desks.delete_desk, asyncio.Event(), asyncio.Event()
+
+    async def delete_then_wait(ctx, desk_row):
+        await delete(ctx, desk_row)
+        deleted.set()
+        await go_on.wait()
+
+    monkeypatch.setattr(desks, "delete_desk", delete_then_wait)
+    deletion = asyncio.create_task(client.delete(f"/desks/{copy.desk_id}", headers=copy.owner))
+    await asyncio.wait_for(deleted.wait(), timeout=5)
+    with connections_of(app) as pids:
+        closing = asyncio.create_task(handoff_done(client, handoff_id, copy.owner))
+        await until_waiting(app, closing, pids, "kernel.desks")
+    go_on.set()
+    answers = await asyncio.gather(deletion, closing)
+
+    assert [(r.status_code, r.content if r.status_code == 204 else r.json()) for r in answers] == [
+        (204, b""), (409, {"code": "closed"})]
+    assert api_rows(copy.copy_id, "SELECT status FROM kernel_ro.handoffs") == [("open",)]

@@ -295,17 +295,23 @@ async def close_handoff(handoff_id: str, ctx: Ctx, request: Request) -> DeskUpda
     promised again), ledgered `desk_data` `{part: "handoffs", refs: [handoff_id]}` in the same
     transaction, with the owner's credential alone. One already done is 409 `conflict`, changing
     nothing. One the owner's copy doesn't have, unknown or another copy's (row-level security
-    hides those), is 404 `not_found`, logged, since there is no Desk of the copy to ledger it on."""
+    hides those), is 404 `not_found`, logged, since there is no Desk of the copy to ledger it on.
+    One on a deleted Desk, open or done, is 409 `closed`, ledgered on that Desk, as on the Desk's
+    other routes: a deletion leaves its handoffs as they were.
+
+    It is an owner's write to the Desk's data, so it holds the Desk row first (`desks.held_desk`,
+    read afresh, which a deletion holds too), then the handoff, its fact and the ledger head."""
     route = route_template(request)
-    if auth.SESSION_HEADER in request.headers:
-        raise AuthError(401, "auth", "bad_token", route=route)
-    await auth.require_owner(ctx, request)
-    handoff = None
+    owner = await desks.owner_alone(ctx, request)
+    desk_id = None
     if storable(handoff_id):                          # text Postgres can't hold names no handoff
-        handoff = (await ctx.db.scalars(ctx.repo.scoped(select(Handoff).where(Handoff.handoff_id == handoff_id)
-                                                        .with_for_update()))).one_or_none()
-    if handoff is None:
+        desk_id = (await ctx.db.execute(ctx.repo.scoped(select(Handoff.desk_id).where(
+            Handoff.handoff_id == handoff_id)))).scalar_one_or_none()
+    if desk_id is None:
         raise AuthError(404, "not_found", "unknown_handoff", route=route)
+    await desks.held_desk(ctx, request, owner, desk_id)
+    handoff = (await ctx.db.scalars(ctx.repo.scoped(select(Handoff).where(Handoff.handoff_id == handoff_id)
+                                                    .with_for_update()))).one()
     if handoff.status != "open":
         raise KernelFailure(409, "conflict", "handoff_done")
     handoff.status = "done"
