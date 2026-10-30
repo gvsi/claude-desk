@@ -127,7 +127,7 @@ def conversation_metrics(runs: Iterable[RunArtifact]) -> Metrics | None:
                                                         p95=percentile(costs, 95)),
                    setup_cost_usd=sum(setup) if setup else None,
                    tokens_per_call={route: _tokens_per_call(calls) for route, calls in sorted(by_route.items())},
-                   reviewer_calls=len(by_route["reviewer"]), decide_calls=decide_calls)
+                   reviewer_calls=len(by_route.get("reviewer", ())), decide_calls=decide_calls)
 
 
 def reviewer_calls_per_conversation(metrics: Metrics) -> float:

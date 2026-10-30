@@ -263,6 +263,9 @@ def latency_config(argv: list[str]) -> "LatencyConfig":
 
 
 async def latency_command(argv: list[str], deps: "LatencyDeps | None" = None) -> int:
+    import httpx
+
+    from evals.client import ApiCallFailed
     from evals.latency import LatencyDeps, LatencyMismatch, LatencyRefused, run_latency
     from evals.tier2.passes import PassRefused
 
@@ -272,6 +275,12 @@ async def latency_command(argv: list[str], deps: "LatencyDeps | None" = None) ->
         run, written = await run_latency(config, deps)
     except (LatencyRefused, LatencyMismatch, PassRefused) as refused:
         print(f"latency: {refused}")
+        return 1
+    except ApiCallFailed as failed:   # the call and its status, never the body the API sent
+        print(f"latency: {failed.op} answered {failed.status}")
+        return 1
+    except httpx.HTTPError as failed:
+        print(f"latency: the request failed ({type(failed).__name__})")
         return 1
     part = run.latency.hosted if run.where == "hosted" else run.latency.local
     measured = len(run.samples) - part.errored_turns

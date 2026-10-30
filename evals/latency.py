@@ -70,7 +70,7 @@ TURN_TIMEOUT_S = 90.0
 # a reviewer call and a soft-promise check ($0.031, "Model cost and latency budget"), rounded up for cold
 # caches and a conversation that grows. Twenty turns of each kind come to $3.00.
 PER_TURN_USD = 0.05
-PROVE_RUNS = 20   # the timings `scripts.prove_latency` makes of each card set (Plan 01a)
+PROVE_RUNS = 20   # the timings `scripts.prove_latency --runs` makes of each card set (Plan 01a)
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FAILED_TURNS = frozenset({"kernel_unavailable", "internal"})   # `TurnMetric.outcome`s of a turn that failed
 _SSE = TypeAdapter(SseEvent)
@@ -510,14 +510,18 @@ async def run_latency(config: LatencyConfig, deps: LatencyDeps | None = None) ->
                                                     api_provider=api_provider)
         finally:
             # Recorded before the numbers are read, so a run whose numbers disagree still counts; a run that
-            # broke off before its calls were read is charged its estimate, all of it to the Claude API.
+            # broke off before its calls were read, or whose calls can't all be priced, is charged its
+            # estimate, all of it to the Claude API.
             if real and started:
+                spend = claude_api = estimate
                 if measured is not None:
-                    spent = spend_usd(measured.usage, config.provider)
-                    spend = spent.total_usd
-                    claude_api = spent.kernel_usd + (spent.api_usd if config.provider == "anthropic" else 0.0)
-                else:
-                    spend = claude_api = estimate
+                    try:
+                        spent = spend_usd(measured.usage, config.provider)
+                    except (LookupError, ValueError):   # no list price for a model, or a count that isn't one
+                        pass
+                    else:
+                        spend = spent.total_usd
+                        claude_api = spent.kernel_usd + (spent.api_usd if config.provider == "anthropic" else 0.0)
                 passes.append_spend(deps.spend_file, {
                     "pass_id": f"latency-{latency_id}", "date": now.astimezone(UTC).date().isoformat(),
                     "provider": config.provider, "runs": 0, "desk_usd": f"{spend:.4f}",
@@ -544,8 +548,8 @@ async def run_latency(config: LatencyConfig, deps: LatencyDeps | None = None) ->
 def prove_latency(root: Path) -> dict[str, Any]:
     """`scripts.prove_latency --json` (Plan 01a), run from `backend/`: `{rivera: {p50_ms, p95_ms},
     cards_30: {p50_ms, p95_ms}}` over its timings of each card set."""
-    done = subprocess.run([sys.executable, "-m", "scripts.prove_latency", "--json"], cwd=root / "backend",
-                          capture_output=True, text=True, timeout=1800)
+    done = subprocess.run([sys.executable, "-m", "scripts.prove_latency", "--json", "--runs", str(PROVE_RUNS)],
+                          cwd=root / "backend", capture_output=True, text=True, timeout=1800)
     if done.returncode != 0:
         raise RuntimeError(f"it exited {done.returncode}")
     return json.loads(done.stdout)

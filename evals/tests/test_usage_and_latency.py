@@ -96,6 +96,15 @@ def test_cost_matches_the_master_plan_examples():
                                                                       "anthropic") == pytest.approx(0.0216)
 
 
+def test_claude_api_prices_are_the_apis():
+    """The evals price the Claude API as the API's own budget does (`desk.api.metrics.PRICES_PER_MTOK`:
+    input, cache read, 5-minute cache write and output)."""
+    from desk.api.metrics import PRICES_PER_MTOK
+
+    assert {model: (price.input, price.cache_read, price.cache_write, price.output)
+            for model, price in PRICES["anthropic"].items()} == PRICES_PER_MTOK
+
+
 def test_cost_uses_the_providers_prices():
     """The same usage costs what its provider's row says, whichever name the provider gives the model;
     a provider with no row for the model can't price it."""
@@ -640,3 +649,59 @@ async def test_in_process_target_builds_the_kernel_and_api_a_pass_builds():
         async with in_process_target(latency_config(), **{**stand_ins, "check": refuses}):
             events.append("measured")
     assert "measured" not in events and events[-2:] == ["api stopped", "kernel stopped"]
+
+
+def test_proving_is_timed_as_many_times_as_reported(tmp_path, monkeypatch):
+    """`prove_latency` asks `scripts.prove_latency` for the number of timings the report gives as proving's n."""
+    import subprocess
+
+    from evals import latency
+
+    asked: list[tuple[list[str], Path]] = []
+
+    def run(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        asked.append((args, kwargs["cwd"]))
+        return subprocess.CompletedProcess(args, 0, stdout=json.dumps(PROVED), stderr="")
+
+    monkeypatch.setattr(latency.subprocess, "run", run)
+    assert latency.prove_latency(tmp_path) == PROVED
+    [(args, cwd)] = asked
+    assert args[1:] == ["-m", "scripts.prove_latency", "--json", "--runs", str(latency.PROVE_RUNS)]
+    assert cwd == tmp_path / "backend" and latency.proving_spread(PROVED).n == latency.PROVE_RUNS
+
+
+async def test_latency_spend_that_cant_be_priced_is_charged_the_estimate(tmp_path):
+    """A local run whose calls can't all be priced at the end (a model with no list price, first seen in
+    the last turn) still appends its spend row, at the run's estimate, so the monthly guard counts it."""
+    root = make_repo(tmp_path / "repo")
+    unlisted = UsageRecord(route="conversation", model="claude-unlisted-1", session_id="s-q", input_tokens=900,
+                           cached_tokens=0, cache_write_tokens=0, output_tokens=40, ms=700)
+    measured = Measured(samples=[turn("question", 1, ("m-1", 9_000.0))], session_ids=["s-q"], usage=[unlisted])
+
+    run, _ = await run_latency(latency_config(turns=2), Stands(root, measured).deps())
+
+    [row] = read_spend(root / "spend.csv")
+    assert row["pass_id"] == f"latency-{run.latency_id}" and row["runs"] == "0"
+    assert float(row["total_usd"]) == float(row["claude_api_usd"]) == pytest.approx(0.30)
+    assert run.spend_usd == pytest.approx(0.30)
+
+
+async def test_latency_command_names_a_failed_call_without_its_body(tmp_path, capsys):
+    """A call that fails outside a turn (entering a copy, opening a chat, reading the owner's ledger) ends
+    the command with exit 1 and says which call and its status, never the body the API sent."""
+    import httpx
+
+    from evals import run
+
+    root = make_repo(tmp_path / "repo")
+    for failure, said in ((ApiCallFailed("enter", 429, {"detail": "too many copies from this address"}),
+                           "latency: enter answered 429\n"),
+                          (httpx.ConnectError("connection refused"), "latency: the request failed (ConnectError)\n")):
+        async def fails(base_url: str, passcode: str, failure: Exception = failure, **kwargs: Any) -> Measured:
+            raise failure
+
+        deps = Stands(root).deps()
+        deps.measure_hosted = fails
+        assert await run.latency_command(["--max-usd", "3", "--base-url", "https://desk.example.com"], deps) == 1
+        out = capsys.readouterr().out
+        assert out == said
