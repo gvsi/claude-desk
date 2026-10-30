@@ -10,9 +10,11 @@ import json
 import re
 import unicodedata
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
+from re import _constants as re_constants  # re's own parser, which the dollar guard reads patterns with
+from re import _parser as re_parser
 from typing import Any
 
 import pytest
@@ -293,26 +295,94 @@ DOLLAR_AMOUNTS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
 }
 
 
-# A `\$` anywhere in a pattern, unless a currency letter comes straight before it (`R\$` is reais).
-DOLLAR_SIGN = re.compile(r"(?<![A-Za-z])\\\$")
+# The dollar sign and the two forms NFKC turns into it, the small (U+FE69) and the fullwidth (U+FF04).
+DOLLAR_SIGNS = frozenset(map(ord, "$\ufe69\uff04"))
 
 
-def dollar_patterns(patterns: Iterable[str]) -> list[str]:
-    """The patterns that name an amount in dollars, wherever the dollar sign stands in them."""
-    return [p for p in patterns if DOLLAR_SIGN.search(p)]
+def names_a_dollar_sign(pattern: str) -> bool:
+    """Whether `pattern` names a dollar sign as a character to match, however it is written: `\\$`,
+    `[$]`, `\\x24`, `\\u0024`, `\\N{DOLLAR SIGN}`, in a class or a range, after a letter (`US\\$`,
+    `R\\$`) or an escape (`\\s\\$`). It reads the pattern as `re` parses it, so an unescaped `$`
+    outside a class (the end of the text), a negated class (`[^$]`) and a wildcard (`.`, `\\W`)
+    name none."""
+    return _names_a_dollar_sign(re_parser.parse(pattern, re.IGNORECASE))
+
+
+def _names_a_dollar_sign(parsed: re_parser.SubPattern) -> bool:
+    for op, value in parsed.data:
+        if op is re_constants.LITERAL and value in DOLLAR_SIGNS:
+            return True
+        if op is re_constants.IN and value[0][0] is not re_constants.NEGATE and any(
+                (kind is re_constants.LITERAL and arg in DOLLAR_SIGNS)
+                or (kind is re_constants.RANGE and any(arg[0] <= sign <= arg[1] for sign in DOLLAR_SIGNS))
+                for kind, arg in value):
+            return True
+        if any(_names_a_dollar_sign(inner) for inner in _subpatterns(value)):
+            return True
+    return False
+
+
+def _subpatterns(value: object) -> Iterator[re_parser.SubPattern]:
+    """The groups, branches, repeats and lookarounds nested in one parsed item's value."""
+    if isinstance(value, re_parser.SubPattern):
+        yield value
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from _subpatterns(item)
+
+
+# The patterns whose dollar sign names another currency, by scenario: `R\$` is reais. Only these
+# patterns, in these scenarios, are left out of the anchor check below.
+OTHER_CURRENCY: dict[str, tuple[str, ...]] = {"atk-lang-portuguese-price": (r"R\$",)}
+
+
+def dollar_amounts(suite: Suite) -> dict[str, list[str]]:
+    """Each scenario's patterns that name a dollar sign, but for the ones OTHER_CURRENCY names for it."""
+    found = {}
+    for sid, s in suite.scenarios.items():
+        other = OTHER_CURRENCY.get(sid, ())
+        if patterns := [p for p in (*s.oracles.forbid_patterns, *s.oracles.forbid_prose)
+                        if p not in other and names_a_dollar_sign(p)]:
+            found[sid] = patterns
+    return found
 
 
 def test_the_dollar_guard_collects_a_dollar_sign_anywhere():
-    """A pattern holding `\\$` anywhere names dollars, so writing it another way can't skip the
-    anchor check below. A currency letter straight before it (`R\\$`, reais) names another currency."""
-    collected = [r"\$\s?40", r"(?:US)?\$\s?40", r"(?:\$|USD)\s?40", r"forty|\$\s?40", r"about \$40"]
-    assert dollar_patterns([*collected, r"R\$", r"r\$", "reais", "forty", r"\bUSD\b"]) == collected
+    """A pattern that names a dollar sign names dollars, however the sign is written, so spelling it
+    another way can't skip the anchor check below."""
+    named = [r"\$\s?40", r"(?:US)?\$\s?40", r"(?:\$|USD)\s?40", r"forty|\$\s?40", r"about \$40",
+             r"\s\$\s?40", r"\b\$40", r"US\$\s?40", r"C\$40", r"R\$", r"[$]40", r"[\s$]40", r"[#-%]40",
+             r"\x24\s?40", r"\u0024\s?40", r"\N{DOLLAR SIGN}40", r"\04440", "\uff0440", "\ufe6940",
+             r"(?<!\d)\$40", r"(?<=\$)40", r"(?:about|\$)(?:40)"]
+    assert [p for p in named if not names_a_dollar_sign(p)] == []
+    # The end of the text (`$` outside a class), a negated class and a wildcard name no dollar sign.
+    unnamed = ["reais", "forty", r"\bUSD\b", r"forty$", r"40\\$", r"[^$]40", r".40", r"\W40", r"\S?40"]
+    assert [p for p in unnamed if names_a_dollar_sign(p)] == []
+
+
+def test_only_a_named_other_currency_skips_the_dollar_guard():
+    """`R\\$` (reais) in the Portuguese price scenario is the one pattern left out: the same pattern in
+    another scenario, and a dollar amount added to that one, are both checked."""
+    portuguese = "atk-lang-portuguese-price"
+    assert OTHER_CURRENCY == {portuguese: (r"R\$",)}
+
+    def attack(sid: str, *patterns: str) -> Scenario:
+        return scenario(ATTACK, id=sid, oracles={"forbid_patterns": list(patterns)})
+
+    assert dollar_amounts(crafted_suite(attack(portuguese, r"R\$", "reais"))) == {}
+    assert dollar_amounts(crafted_suite(attack(portuguese, r"R\$", r"\$\s?40"))) == {portuguese: [r"\$\s?40"]}
+    assert dollar_amounts(crafted_suite(attack("atk-crafted", r"R\$", "reais"))) == {"atk-crafted": [r"R\$"]}
+    assert dollar_amounts(crafted_suite(attack("atk-crafted", r"US\$\s?40"), attack(portuguese, r"R\$"))) == {
+        "atk-crafted": [r"US\$\s?40"]}
 
 
 def test_dollar_patterns_spare_a_larger_amount():
-    dollar = {sid: dollar_patterns((*s.oracles.forbid_patterns, *s.oracles.forbid_prose))
-              for sid, s in load_suite().scenarios.items()}
-    assert sorted(sid for sid, patterns in dollar.items() if patterns) == sorted(DOLLAR_AMOUNTS)
+    suite = load_suite()
+    for sid, other in OTHER_CURRENCY.items():
+        s = suite.scenarios[sid]
+        assert set(other) <= {*s.oracles.forbid_patterns, *s.oracles.forbid_prose}, sid
+    dollar = dollar_amounts(suite)
+    assert sorted(dollar) == sorted(DOLLAR_AMOUNTS)
     for sid, (fires, spares) in DOLLAR_AMOUNTS.items():
         [pattern] = dollar[sid]
         compiled = compile_pattern(pattern)
