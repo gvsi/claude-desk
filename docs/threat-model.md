@@ -77,7 +77,7 @@ Talking Claude around can't make it act past the owner's rules, because the kern
 - Within what a verified person is entitled to, Claude can still be talked into unflattering free text.
 - The checks depend on rules being compiled correctly. The proofs compare the compiled policies with a second generator written independently of the compiler, so a compiler bug that widens access goes unnoticed only if the second generator has the same bug.
 - Claims written without numbers or promise words get past the code checks and rely on the model check, which can miss.
-- Claude may write links and email addresses in its own replies. Its prompt tells it to use only the business's own; a look-alike link planted by a malicious website or message isn't blocked by code and rests on the prompt; the model check looks only for promises the cards don't back, not at links.
+- Claude may write links and email addresses in its own replies. Its prompt tells it to use only the business's own; a look-alike link planted by a malicious website or message isn't blocked by code and rests on the prompt, since the model check doesn't look at links.
 - The attack suite is written by the people who built the defenses. It covers the attacks we thought of; a clean run means none of those got through, not that no attack can.
 - Reviewer thresholds are tuned on one split of the scenarios and reported on another, held out; a new kind of request can still be judged wrongly, and the reviewer can only hold it, never allow it.
 - The kernel shares a task with the API. A container escape or a compromised host would reach both.

@@ -40,7 +40,7 @@ The choices that shape Claude Desk, each with the alternatives considered and wh
 
 ## 4. Typed cards, guarded prose and check then reveal
 
-**Status.** Accepted on 2026-10-28 (the spec's "Replies: typed cards plus guarded prose" and "Reply timing" decisions); the owner's decisions of 2026-10-30 let a booking claim stand beside its card, asked the model check only about promises the cards don't back, and let Claude write links and email addresses.
+**Status.** Accepted on 2026-10-28 (the spec's "Replies: typed cards plus guarded prose" and "Reply timing" decisions); the owner's decisions of 2026-10-30 let a booking claim stand beside its card, asked the model check only about promises the cards don't back and prose that denies being an AI, and let Claude write links and email addresses.
 
 **Context.** Much of what goes wrong with a public assistant is in what it says: a price it made up, a date it can't keep, a discount nobody approved, someone else's details. Judging free text for meaning is a model's call, and a model can miss.
 
@@ -48,7 +48,7 @@ The choices that shape Claude Desk, each with the alternatives considered and wh
 
 **Alternatives.** Streaming tokens and checking afterwards: the visitor would see what the check then retracts. A model-only output filter: probabilistic exactly where it matters most. Letting Claude write prices in prose and matching them against records: brittle, and still a model choosing the number.
 
-**Consequences.** Harmless numbers in Claude's own words are blocked too, so Claude is prompted to put them in cards. The reveal adds a delay after Claude finishes, which the evals measure and report. Claims with no number or promise word rely on the model check, which can miss, and a look-alike link planted in what Claude reads rests on its prompt; the model check looks only for promises the cards don't back, not at links. The [threat model](threat-model.md) lists both as residual risks.
+**Consequences.** Harmless numbers in Claude's own words are blocked too, so Claude is prompted to put them in cards. The reveal adds a delay after Claude finishes, which the evals measure and report. Claims with no number or promise word rely on the model check, which can miss, and a look-alike link planted in what Claude reads rests on its prompt, since the model check doesn't look at links. The [threat model](threat-model.md) lists both as residual risks.
 
 ## 5. Our own tool-use loop on the Messages API, with Postgres and Procrastinate
 

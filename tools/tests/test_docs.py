@@ -735,3 +735,19 @@ def test_architecture_decisions_have_required_parts():
     assert [topic for topic in ADR_TOPICS if topic.casefold() not in titles] == []
     assert "](specs/2026-10-28-claude-desk-design.md#decisions-log)" in text
     assert "](research/stack-options.md)" in text
+
+
+def test_no_shipped_doc_says_the_model_check_asks_only_about_promises():
+    # The kernel's model check (backend/desk/kernel_service/decisions.py) asks two questions: whether the prose
+    # promises what the cards don't back, and whether it denies being an AI. The second backs the threat model's
+    # AI disclosure row, so a sentence saying the check asks only about promises must name it too.
+    only_promises = re.compile(r"\bonly (?:for|about) promises\b")
+    wrong = []
+    for path in SHIPPED_DOCS:
+        if not (REPO / path).is_file():   # path-to-mvp and the evals guide land with later plans
+            continue
+        text = " ".join((REPO / path).read_text().casefold().split())
+        for sentence in re.split(r"(?<=[.!?])\s+", text):
+            if only_promises.search(sentence) and "denies being an ai" not in sentence:
+                wrong.append(f"{path}: {sentence}")
+    assert wrong == []

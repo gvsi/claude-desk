@@ -1285,8 +1285,8 @@ async def test_a_link_beside_a_quote_card_is_shown_by_the_owners_decision(app, c
     replies, and its prompt keeps them to the business's own. The prose scan finds nothing in one,
     so the reply reaches the soft-promise check beside the quote card's text and, with no promise
     found beyond the card, is shown with it; a look-alike link rests on the prompt, since that
-    check looks only for promises the cards don't back, not at links. The ledger still holds no
-    prose, so neither the link nor the address is on it."""
+    check doesn't look at links. The ledger still holds no prose, so neither the link nor the
+    address is on it."""
     copy, visitor = await visitor_of(app, client)
     quote = await own_quote(client, visitor)
     reviewer.soft_answer = NOTHING_BEYOND_THE_CARDS
@@ -1362,7 +1362,7 @@ def test_links_and_email_addresses_pass_the_scan_by_the_owners_decision(prose):
     before a path, a bare domain and an "@" between word characters, in English and Spanish and
     whatever dots, dashes or underscores are glued to them, are no violation of the prose scan.
     Each case was blocked as a `link` before the decision; a look-alike link now rests on the
-    prompt, since the soft-promise check looks only for promises the cards don't back."""
+    prompt, since the soft-promise check doesn't look at links."""
     assert reply_check.scan_prose(prose) == []
 
 
