@@ -94,14 +94,23 @@ done
 # The owner passcode the smoke checks sign in with: DESK_PASSCODE when it's set, else the macOS
 # Keychain's claude-desk-passcode item. It stays in this shell, unexported, and only smoke.py is
 # given it, in its environment: never on a command line, in the output or in the log.
-no_passcode() {
+no_passcode() {  # no_passcode store|replace|export <why>: the Keychain commands that apply, if any
+  local fix=$1
+  shift
   echo "deploy: DESK_PASSCODE isn't set and $*; the smoke checks sign in with the passcode" >&2
   # shellcheck disable=SC2016  # the commands to paste, $USER and all
-  {
-    echo 'deploy: store it once in the Keychain with: security add-generic-password -s claude-desk-passcode -a "$USER" -w'
-    echo 'deploy: or replace the item already there with: security add-generic-password -U -s claude-desk-passcode -a "$USER" -w'
-  } >&2
-  echo "deploy: (each asks for the passcode twice, without echo), or export DESK_PASSCODE for this run" >&2
+  case $fix in
+    store)
+      echo 'deploy: store it once in the Keychain with: security add-generic-password -s claude-desk-passcode -a "$USER" -w'
+      echo 'deploy: or replace the item already there with: security add-generic-password -U -s claude-desk-passcode -a "$USER" -w'
+      echo "deploy: (each asks for the passcode twice, without echo), or export DESK_PASSCODE for this run"
+      ;;
+    replace)
+      echo 'deploy: replace it in the Keychain with: security add-generic-password -U -s claude-desk-passcode -a "$USER" -w'
+      echo "deploy: (it asks for the passcode twice, without echo), or export DESK_PASSCODE for this run"
+      ;;
+    *) echo "deploy: export DESK_PASSCODE for this run" ;;
+  esac >&2
   exit 2
 }
 unset passcode  # a caller's exported passcode would carry the Keychain value to every step
@@ -109,20 +118,21 @@ passcode=
 if [[ -z $data_only ]]; then
   passcode=${DESK_PASSCODE:-}
   if [[ -z $passcode ]]; then
-    command -v security >/dev/null || no_passcode "there's no \`security\` command here to read the macOS Keychain with"
+    command -v security >/dev/null ||
+      no_passcode export "there's no \`security\` command here to read the macOS Keychain with"
     # `security` fails alike for a missing item, a locked login Keychain and denied access.
     passcode=$(security find-generic-password -s claude-desk-passcode -w) ||
-      no_passcode "the macOS Keychain item claude-desk-passcode couldn't be read (is it stored, and is the login Keychain unlocked?)"
-    [[ -n $passcode ]] || no_passcode "the macOS Keychain item claude-desk-passcode is empty"
+      no_passcode store "the macOS Keychain item claude-desk-passcode couldn't be read (is it stored, and is the login Keychain unlocked?)"
+    [[ -n $passcode ]] || no_passcode replace "the macOS Keychain item claude-desk-passcode is empty"
     # Printable ASCII with no backslash: -w hands back any other passcode as hex, which wouldn't sign
     # in and is itself printable, so the stored form is checked. -g writes the password to stderr as
     # `password: 0x<HEX>...` when any byte is outside space to ~ or is a backslash, else as
     # `password: "<value>"`. Only that stderr is kept (the attributes on stdout are dropped); it holds
     # the passcode too, so it's never shown and is unset once checked.
     probe=$(security find-generic-password -s claude-desk-passcode -g 2>&1 >/dev/null) ||
-      no_passcode "the macOS Keychain item claude-desk-passcode couldn't be read (is it stored, and is the login Keychain unlocked?)"
+      no_passcode replace "the macOS Keychain item claude-desk-passcode couldn't be read a second time, to check how it's stored (is the login Keychain unlocked?)"
     if [[ $probe == 'password: 0x'* ]]; then
-      no_passcode "the macOS Keychain item claude-desk-passcode has a character outside printable ASCII, or a backslash (it isn't shown)"
+      no_passcode replace "the macOS Keychain item claude-desk-passcode has a character outside printable ASCII, or a backslash (it isn't shown)"
     fi
     unset probe
   fi

@@ -555,11 +555,13 @@ def test_a_keychain_item_that_cant_be_read_says_so_before_any_step(deploy, locke
 
 
 def test_an_empty_keychain_item_says_so_before_any_step(deploy):
+    """The item is there, so only the command that replaces it applies: storing it again would fail
+    with "already exists"."""
     run = deploy(keychain_item="", DESK_PASSCODE=None, DESK_DEPLOY_ACCOUNT=ACCOUNT)
     assert run.status == 2
     assert run.steps() == ["security find-generic-password"]
     assert "the macOS Keychain item claude-desk-passcode is empty" in run.output
-    assert REPLACE_IT in run.output and "DESK_PASSCODE" in run.output
+    assert REPLACE_IT in run.output and STORE_IT not in run.output and "DESK_PASSCODE" in run.output
 
 
 def test_the_stub_security_answers_as_apples_does(tmp_path):
@@ -600,7 +602,7 @@ def test_a_keychain_passcode_that_isnt_printable_ascii_is_refused_unshown_before
     assert [call["argv"] for call in run.calls] == [KEYCHAIN_LOOKUP, KEYCHAIN_PROBE]
     assert ("the macOS Keychain item claude-desk-passcode has a character outside printable ASCII, "
             "or a backslash (it isn't shown)") in run.output
-    assert REPLACE_IT in run.output
+    assert REPLACE_IT in run.output and STORE_IT not in run.output     # the item is there: replace it
     secret = "keychain-passcode"
     for form in (secret, secret.encode().hex(), secret.encode().hex().upper()):
         assert form not in run.text()
@@ -617,22 +619,27 @@ def test_every_printable_ascii_character_but_the_backslash_reaches_smoke_as_stor
 
 def test_a_keychain_item_whose_stored_form_cant_be_read_is_refused_before_any_step(deploy):
     """The second lookup (-g), which shows how the item is stored, can fail on its own, as when access
-    is denied the second time: deploy.sh then says the item couldn't be read, before any step."""
+    is denied the second time: deploy.sh then says so, before any step. The item is there, so only
+    the command that replaces it applies."""
     run = deploy(keychain_item="keychain-test-passcode", DESK_PASSCODE=None, DESK_DEPLOY_ACCOUNT=ACCOUNT,
                  KEYCHAIN_PROBE_DENIED="1")
     assert run.status == 2
     assert [call["argv"] for call in run.calls] == [KEYCHAIN_LOOKUP, KEYCHAIN_PROBE]
-    assert "the macOS Keychain item claude-desk-passcode couldn't be read" in run.output
+    assert ("the macOS Keychain item claude-desk-passcode couldn't be read a second time, to check how "
+            "it's stored (is the login Keychain unlocked?)") in run.output
+    assert REPLACE_IT in run.output and STORE_IT not in run.output
     assert "keychain-test-passcode" not in run.text()
 
 
-def test_no_security_command_says_how_to_store_the_passcode_before_any_step(deploy):
-    """Off macOS, or with `security` missing, there's no Keychain to read: deploy.sh says so."""
+def test_no_security_command_says_to_export_the_passcode_before_any_step(deploy):
+    """Off macOS, or with `security` missing, there's no Keychain to read: deploy.sh says so, and
+    gives no Keychain command, since neither could run; DESK_PASSCODE is the way left."""
     run = deploy(security=False, DESK_PASSCODE=None, DESK_DEPLOY_ACCOUNT=ACCOUNT)
     assert run.status == 2
     assert run.calls == []
     assert "no `security` command" in run.output
-    assert STORE_IT in run.output and "DESK_PASSCODE" in run.output
+    assert STORE_IT not in run.output and REPLACE_IT not in run.output
+    assert "export DESK_PASSCODE for this run" in run.output
 
 
 def test_unattended_without_the_deploy_account_is_refused(deploy):
