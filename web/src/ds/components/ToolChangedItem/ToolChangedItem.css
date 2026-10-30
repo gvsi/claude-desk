@@ -1,11 +1,12 @@
 /* ToolChangedItem: the held dot on the title's first line, the title in body type over the meta
    line, and Review at the right. On a narrow line the button drops under the words. */
 
+/* The words 14 px from the dot, as Today's board sets them. */
 .cd-tool-changed {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  column-gap: var(--space-12);
+  column-gap: var(--space-14);
   row-gap: var(--space-12);
   min-width: 0;
 }

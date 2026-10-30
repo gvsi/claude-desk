@@ -70,7 +70,7 @@ export function ToolReviewCard({ title, connector, profile, noticed, onTurnBackO
   };
 
   return (
-    <Card as="section" label="Needs your review">
+    <Card as="section" label="Needs your review" padding={16}>
       <div className="cd-tool-review" aria-busy={waiting || undefined}>
         <div className="cd-tool-review__top">
           <h2 className="cd-tool-review__status cd-type-meta">

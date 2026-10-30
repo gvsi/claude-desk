@@ -142,9 +142,12 @@ export const Review: Story = {
     // Stripe is named with its Mock badge in the source line; the trail names it as the board does.
     await expect(expectMockBesideExternalNames(one(main, '.cd-tool-page-header'))).toBe(1);
     // quoted_definition_is_text: the changed definition quoted exactly, in the quote's look, no image.
+    // A compact card, as the board draws it.
+    expectComputed(within(main).getByRole('region', { name: 'Needs your review' }), { ...SPEC.card, paddingTop: '16px', paddingLeft: '16px' });
     const quote = one(main, '.cd-tool-review__quote');
     expectComputed(quote, CONNECTORS_SPEC.quotedDefinition);
     const text = one(quote, '.cd-tool-review__quote-text');
+    expectComputed(text, CONNECTORS_SPEC.quotedDefinitionText);
     await expect(text.textContent).toBe(changed.pending_definition_text);
     await expect(main.querySelector('img')).toBeNull();
     const ask = await expectRulesComposer(main, 'Ask Claude to change a rule for refund', REFUND_CHIPS);
