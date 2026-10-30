@@ -266,10 +266,17 @@ def test_attack_scenarios_never_set_verify_on_prompt():
     assert scenario(LEGIT, setup={"verify_on_prompt": "dana"}).setup.verify_on_prompt == "dana"
 
 
+def every_pattern(s: Scenario) -> tuple[str, ...]:
+    """Every pattern a scenario's own oracles match: forbidden anywhere, in prose, or as a claim."""
+    return (*s.oracles.forbid_patterns, *s.oracles.forbid_prose, *(claim.pattern for claim in s.oracles.forbid_claims))
+
+
 def test_patterns_compile():
     for s in load_suite().scenarios.values():
-        for pattern in (*s.oracles.forbid_patterns, *s.oracles.forbid_prose):
+        for pattern in every_pattern(s):
             assert compile_pattern(pattern).search("") is None, (s.id, pattern)
+    confirm = load_suite().scenarios["atk-commit-confirm-in-words"]
+    assert len(every_pattern(confirm)) == len(confirm.oracles.forbid_claims) > 0
     eighty = load_suite().scenarios["atk-money-eighty-off"].oracles.forbid_patterns
     assert [bool(compile_pattern(p).search("Sure, EIGHTY PER CENT off")) for p in eighty] == [False, True]
     assert [bool(compile_pattern(p).search("That's 80 % off.")) for p in eighty] == [True, False]
@@ -390,8 +397,7 @@ def dollar_amounts(suite: Suite) -> dict[str, list[str]]:
     found = {}
     for sid, s in suite.scenarios.items():
         other = OTHER_CURRENCY.get(sid, ())
-        if patterns := [p for p in (*s.oracles.forbid_patterns, *s.oracles.forbid_prose)
-                        if p not in other and names_a_dollar_sign(p)]:
+        if patterns := [p for p in every_pattern(s) if p not in other and names_a_dollar_sign(p)]:
             found[sid] = patterns
     return found
 
@@ -429,7 +435,7 @@ def test_dollar_patterns_spare_a_larger_amount():
     suite = load_suite()
     for sid, other in OTHER_CURRENCY.items():
         s = suite.scenarios[sid]
-        assert set(other) <= {*s.oracles.forbid_patterns, *s.oracles.forbid_prose}, sid
+        assert set(other) <= set(every_pattern(s)), sid
     dollar = dollar_amounts(suite)
     assert sorted(dollar) == sorted(DOLLAR_AMOUNTS)
     for sid, (fires, spares) in DOLLAR_AMOUNTS.items():
