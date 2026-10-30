@@ -248,6 +248,8 @@ async def store_knowledge(ctx: KernelCtx, desk_id: str, item: KnowledgeItem) -> 
     Knowledge is untrusted text, and one holding a document's canary in its title or text, even
     split or disguised (`find_canaries_in`), is stored the owner's alone, whatever label it came
     with (`owner_only_forced`), so private document text never reaches a visitor as knowledge.
+    The API's view of the item (`kernel_ro.knowledge_items`) reads that ledgered flag and shows
+    such an item's title and text as NULL, so no document text reaches the API either.
 
     Checked before anything is written, else 422 `invalid`: the label is the owner's alone or
     everyone's (`["owner"]` or `["public"]`, with no record owner), the text at most 100 KiB and

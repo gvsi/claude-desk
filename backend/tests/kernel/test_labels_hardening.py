@@ -31,6 +31,7 @@ from .test_adapters import Rivera, rivera, visitor_of
 from .test_approvals import add_person, answered
 from .test_compiler import card
 from .test_context import context_of, fact_ids, owner_session_id, tools
+from .test_copies import api_rows
 from .test_decide import decided, desk_with, open_visitor, set_session
 from .test_desk_writes import put_part
 from .test_execute import Crash, executed, post_execute, read
@@ -385,6 +386,43 @@ async def test_knowledge_carrying_a_canary_stays_owner_only(app, client):
     assert await seen_by(client, copy, visitor) == []
     assert {("kb-older", ("public",)), (dana.canary, ("public",))} <= {
         (item_id, tuple(readers)) for item_id, readers in await seen_by(client, copy, None)}
+
+
+def knowledge_view(copy: Rivera) -> list[tuple]:
+    """What the API process reads of the copy's knowledge (`kernel_ro.knowledge_items`, as desk_api)."""
+    return api_rows(copy.copy_id, "SELECT item_id, source, title, text, readers FROM kernel_ro.knowledge_items"
+                                  " ORDER BY item_id")
+
+
+async def test_the_knowledge_view_shows_no_document_text(app, client):
+    copy = await rivera(app, client)
+    dana = (await documents(app, copy))["dana-invoice"]
+    pasted = knowledge("kb-invoice", f"Invoice {dana.canary}", f"Drain clearing, paid in full. Reference {dana.canary}",
+                       ["public"])
+    for item in (PARKING, TOOLS, pasted):
+        await stored(client, copy, item)
+    # the item forced owner-only shows neither its title nor its text, so no document text or canary
+    # reaches the API; the owner's own owner-only item and the public one read as stored
+    assert knowledge_view(copy) == [
+        ("kb-a-tools", "upload", TOOLS["title"], TOOLS["text"], ["public"]),
+        ("kb-invoice", "upload", None, None, ["owner"]),
+        ("kb-parking", "upload", PARKING["title"], PARKING["text"], ["owner"]),
+    ]
+    assert dana.canary[4:] not in repr(knowledge_view(copy)).lower()
+    # replaced without the canary it reads again, and pasted back it is hidden again
+    clean = {**pasted, "title": "Last invoice", "text": "Drain clearing, paid in full."}
+    await stored(client, copy, clean)
+    assert ("kb-invoice", "upload", "Last invoice", clean["text"], ["public"]) in knowledge_view(copy)
+    await stored(client, copy, pasted)
+    assert ("kb-invoice", "upload", None, None, ["owner"]) in knowledge_view(copy)
+    # an item the kernel's writer didn't store, and so never ledgered, shows nothing either
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        ctx.db.add(KnowledgeRow(desk_id=copy.desk_id, item_id="kb-older", copy_id=copy.copy_id, source="setup",
+                                title="Older note", text=f"Ref {dana.canary.upper()}", readers=["public"]))
+    assert ("kb-older", "setup", None, None, ["public"]) in knowledge_view(copy)
+    # another copy's view holds none of these
+    assert knowledge_view(await rivera(app, client)) == []
 
 
 async def test_knowledge_input_is_bounded(app, client):
