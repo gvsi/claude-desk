@@ -6,7 +6,7 @@
 import { queryOptions, useQuery, type QueryClient } from '@tanstack/react-query';
 
 import { request } from '../api/http.ts';
-import type { BusinessOut, CopyOut, DeskSummary, NeedsYouItem } from '../api/views.ts';
+import type { BusinessOut, DeskSummary, NeedsYouItem } from '../api/views.ts';
 import { pollMs } from '../app/poll.ts';
 import { readLocal } from '../lib/storage.ts';
 
@@ -90,12 +90,6 @@ export function lastOrFirst(desks: readonly { desk_id: string }[]): string | nul
   const last = readLocal('lastDesk');
   if (last !== null && desks.some((d) => d.desk_id === last)) return last;
   return desks[0]?.desk_id ?? null;
-}
-
-/** Where a copy opens: the last Desk's Today when it is in the copy, else its first Desk's; null when it has none. */
-export function copyTodayPath(copy: CopyOut): string | null {
-  const deskId = lastOrFirst(copy.desks);
-  return deskId === null ? null : todayPath(deskId);
 }
 
 /** The first word of the owner's name, as the API writes `Today.greeting_name`. */

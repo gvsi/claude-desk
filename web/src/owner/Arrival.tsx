@@ -1,4 +1,4 @@
-import { useQueryClient } from '@tanstack/react-query';
+import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 
@@ -8,7 +8,7 @@ import type { SessionEndedState } from '../app/providers.tsx';
 import { IntroDialog, type IntroErrorCode } from '../ds/index.ts';
 import { THINGS_TO_TRY } from './arrival/ideas.ts';
 import { TodayPreview } from './arrival/TodayPreview.tsx';
-import { copyTodayPath, DESKS_KEY, invalidateCopy, readTodayAhead, todayPath } from './useDesks.ts';
+import { DESKS_KEY, invalidateCopy, lastOrFirst, readTodayAhead, todayPath } from './useDesks.ts';
 
 const TITLE = 'A Claude front desk for your business';
 const INTRO =
@@ -25,10 +25,21 @@ function introErrorFor(err: unknown): IntroErrorCode {
 }
 
 /**
+ * Reads ahead what `deskId`'s Today first shows, for up to `READ_AHEAD_MS`, so the page opens onto
+ * Today already drawn rather than onto the owner's loading page and then an empty Today. Never from
+ * Desks read before: a read ahead that failed would keep them, in error, and Today would show that
+ * error until its own read came in, where a first visit shows its loading page.
+ */
+async function readAhead(queryClient: QueryClient, deskId: string): Promise<void> {
+  queryClient.removeQueries({ queryKey: DESKS_KEY });
+  await readTodayAhead(queryClient, deskId, READ_AHEAD_MS);
+}
+
+/**
  * `/`, the first visit (spec "First visit and hosting"): a still preview of Rivera's Today at once,
- * then the copy this browser already has. A copy opens its Today and the dialog never shows; no
- * copy (401), or any other answer, opens the intro dialog over the preview, which only the
- * passcode gets past. After an owner session ends the dialog opens with that news first.
+ * then the copy this browser already has. A copy opens its Today, read ahead, and the dialog never
+ * shows; no copy (401), or any other answer, opens the intro dialog over the preview, which only
+ * the passcode gets past. After an owner session ends the dialog opens with that news first.
  */
 export function Arrival() {
   const navigate = useNavigate();
@@ -54,11 +65,16 @@ export function Arrival() {
     let live = true;
     asked.current ??= request('me');
     asked.current.then(
-      (copy) => {
+      async (copy) => {
         if (!live) return;
-        const path = copyTodayPath(copy);
-        if (path === null) setOpen(true);
-        else void navigate(path, { replace: true });
+        // The last Desk opened when it is still the copy's, else its first.
+        const deskId = lastOrFirst(copy.desks);
+        if (deskId === null) {
+          setOpen(true);
+          return;
+        }
+        await readAhead(queryClient, deskId);
+        if (live) void navigate(todayPath(deskId), { replace: true });
       },
       () => {
         if (live) setOpen(true);
@@ -67,21 +83,17 @@ export function Arrival() {
     return () => {
       live = false;
     };
-  }, [navigate]);
+  }, [navigate, queryClient]);
 
   /**
    * The new copy's first Today, which takes the dialog away. The dialog stays up, busy over the
-   * preview, until Today's first reads are in, so it closes onto the page already drawn rather than
-   * onto the owner's loading page and then an empty Today.
+   * preview, until Today is read ahead, so it closes onto the page already drawn.
    */
   const openCopy = async (copy: CopyOut): Promise<boolean> => {
     const first = copy.desks[0];
     if (!first) return false;
-    // Never the last copy's Desks: a read ahead that failed would keep them, in error, and Today
-    // would show that error until its own read came in, where a first visit shows its loading page.
-    queryClient.removeQueries({ queryKey: DESKS_KEY });
     await invalidateCopy(queryClient);
-    await readTodayAhead(queryClient, first.desk_id, READ_AHEAD_MS);
+    await readAhead(queryClient, first.desk_id);
     if (shown.current) void navigate(todayPath(first.desk_id), { replace: true });
     return true;
   };

@@ -95,6 +95,29 @@ describe('Arrival', () => {
     expect(pages()).toEqual(['preview', 'today']);
   });
 
+  it('returning_owner_opens_today_drawn', async () => {
+    // From the first page drawn: the preview, then Today already holding its held request and its
+    // briefing, never the owner's loading page or a Today still reading.
+    const pages = watchPages();
+    const { screen, router } = await renderRoute('/', { seed: 'rivera' });
+    await expect.poll(() => router.state.location.pathname).toBe(TODAY);
+    await expect.element(heldCard(screen)).toBeVisible();
+    expect(pages()).toEqual(['preview', 'today']);
+    expect(document.querySelector('dialog.cd-intro')).toBeNull();
+  });
+
+  it('returning_owner_leaving_while_today_is_read_stays', async () => {
+    // The test's copy is signed in from the start. Needs you answers slowly, so Today is still being
+    // read ahead when the owner leaves the page.
+    mockStore.inject({ route: 'needsYou', status: 500, delayMs: 600 });
+    const { router } = await renderRoute('/');
+    await expect.poll(() => requests('needsYou').length).toBeGreaterThan(0);
+    await router.navigate('/about/proposal');
+    // Past the read-ahead's 3 s cap, by when the page would have gone on to Today.
+    await new Promise((resolve) => setTimeout(resolve, 3_500));
+    expect(router.state.location.pathname).toBe('/about/proposal');
+  });
+
   it('start_the_demo_reads_today_once', async () => {
     // Polls far apart, so none lands while the reads are counted.
     const { screen, router } = await renderRoute('/', { seed: { name: 'rivera', signedIn: false }, pollScale: 100 });
