@@ -23,8 +23,14 @@ const VERIFIED = 'Verified with a code. Simulated verification';
 /** The form's one line for a code that didn't work, whatever the reason. */
 const FAILED = 'That code didn’t work. Check the newest code, or ask me for a new one.';
 
-/** What the Demo inbox entry for the invoice row's code says, word for word. */
-const CODE_BODY = `Your Rivera Plumbing verification code is ${DEMO_CODE}.`;
+/** What the Demo inbox entry for the invoice row's code says, word for word: the kernel's `inbox_code_body`. */
+const CODE_BODY = `Your Rivera Plumbing code is ${DEMO_CODE}. It expires in ten minutes. If you didn't ask for it, ignore this message.`;
+
+/** The inbox's place when it couldn't be read at all, so no entry can say it failed. */
+const INBOX_FAILED = 'Couldn’t open the Demo inbox, where your code arrives.';
+
+/** Claude's checked line before the verify card, as the signed verify board writes it. */
+const VERIFY_FIRST = "I can send that after you confirm it's you.";
 
 /** The kernel's verify card, as the script's invoice row sends it. */
 const VERIFY_CARD = rivera.blocks.verify_prompt.en.title ?? '';
@@ -69,8 +75,13 @@ describe('verification', () => {
     await expect.element(screen.getByRole('button', { name: 'Confirm' })).toBeDisabled();
     await expect.element(screen.getByRole('button', { name: 'I can’t get the code' })).toBeVisible();
     expect(screen.getByText(VERIFY_CARD).elements()).toHaveLength(1);
-    // The form sits with the message that asked for the code, under its receipts, as the board draws them.
+    // Claude's own line comes first in the same message, then the card, as the board draws them.
     const row = card.element().closest('.cd-transcript-row');
+    const said = screen.getByText(VERIFY_FIRST, { exact: true });
+    await expect.element(said).toBeVisible();
+    expect(row?.contains(said.element())).toBe(true);
+    expect(said.element().compareDocumentPosition(card.element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The form sits with the message that asked for the code, under its receipts.
     expect(row?.querySelector('.cd-transcript-row__margin input[autocomplete="one-time-code"]')).not.toBeNull();
     const receipts = [...(row?.querySelectorAll('.cd-transcript-row__margin .cd-margin-receipt') ?? [])].map((el) => el.textContent?.trim());
     expect(receipts).toEqual(["Reply checked against Maria Rivera's rules", 'Verification started']);
@@ -222,6 +233,32 @@ describe('Demo inbox', () => {
     await expect.element(inbox.getByText(CODE_BODY)).toBeVisible();
     await expect.element(inbox.getByText('Couldn’t open this entry.')).not.toBeInTheDocument();
     expect(requests('visitorInbox')).toHaveLength(3);
+
+    // The page reloads while the code is still awaited, and the read on load fails: no notice names
+    // an entry, but the inbox's place still says it couldn't open, with "Try again", never blank.
+    mockStore.inject({ route: 'visitorInbox', status: 500 });
+    const reloaded = await renderRoute(PAGE);
+    await ready(reloaded.screen);
+    const place = reloaded.screen.getByRole('region', { name: 'Demo inbox' });
+    await expect.element(place.getByText(INBOX_FAILED)).toBeVisible();
+    expect(place.element().textContent).not.toMatch(/\d{6}/);
+    expect(place.element().closest('.cd-public-chat__inbox-column')).not.toBeNull();
+    await expectScreenBasics(reloaded.screen.container, { owner: false });
+    await place.getByRole('button', { name: 'Try again' }).click();
+    const opened = reloaded.screen.getByRole('region', { name: 'Demo inbox' });
+    await expect.element(opened.getByText(CODE_BODY)).toBeVisible();
+    await expect.element(reloaded.screen.getByText(INBOX_FAILED)).not.toBeInTheDocument();
+    expect(requests('visitorInbox')).toHaveLength(5);
+
+    // Once she has confirmed it's her, a failed read on load has nothing awaited to say: no place.
+    await reloaded.screen.getByRole('textbox', { name: '6-digit code' }).fill(DEMO_CODE);
+    await reloaded.screen.getByRole('button', { name: 'Confirm' }).click();
+    await expect.element(reloaded.screen.getByText(VERIFIED)).toBeVisible();
+    mockStore.inject({ route: 'visitorInbox', status: 500 });
+    const after = await renderRoute(PAGE);
+    await expect.element(after.screen.getByText(VERIFIED)).toBeVisible();
+    await vi.waitFor(() => expect(requests('visitorInbox')).toHaveLength(6));
+    await expect.element(after.screen.getByRole('region', { name: 'Demo inbox' })).not.toBeInTheDocument();
   });
 
   it('owner_inbox_shows_alerts', async () => {

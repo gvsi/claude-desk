@@ -19,7 +19,7 @@ import type {
 } from '../api/views.ts';
 import { rivera } from '../ds/fixtures/index.ts';
 import { executedLine } from '../ds/fixtures/receipts.ts';
-import { DECISIONS, EVENT_GAP_MS, HELD_PROSE, VISITOR_PLAIN, matchRule, turnLanguage, type RuleName } from './script.ts';
+import { DECISIONS, DEMO_CODE, EVENT_GAP_MS, HELD_PROSE, VISITOR_PLAIN, matchRule, turnLanguage, type RuleName } from './script.ts';
 import { RIVERA } from './seed.ts';
 import { mockStore, streamAfter, type MockAnswer, type MockRequestInit } from './store.ts';
 
@@ -133,6 +133,28 @@ describe('the scripted Desk', () => {
     expect(replies.map((e) => e.event.summary)).toEqual([
       { author: 'claude', ok: true, language: 'en', violations: [] },
       { author: 'claude', ok: true, language: 'es', violations: [] },
+    ]);
+  });
+
+  it('invoice_asks_to_confirm_first', async () => {
+    // As the signed verify board has it: Claude's checked line, with no digits, then the kernel's
+    // verify card, in the turn's language. The code reaches the Demo inbox in the kernel's own
+    // words (its `inbox_code_body`), in that language too, with the expiry and what to do if the
+    // visitor didn't ask.
+    const { session, events } = await openChat();
+    await send('Can you send my invoice?');
+    await drain();
+    await send('Necesito mi factura');
+    await drain();
+    const replies = events.flatMap(([, ev]) => (ev.type === 'message' ? [[ev.language, ev.blocks.map((b) => [b.kind, b.template, b.text])]] : []));
+    expect(replies).toEqual([
+      ['en', [['prose', null, "I can send that after you confirm it's you."], ['card', 'verify_prompt', rivera.blocks.verify_prompt.en.text]]],
+      ['es', [['prose', null, 'Puedo enviarlo cuando confirmes que eres tú.'], ['card', 'verify_prompt', rivera.blocks.verify_prompt.es.text]]],
+    ]);
+    const codes = mockStore.world.inbox.filter((record) => record.sessionId === session.session_id).map((record) => record.entry.body);
+    expect(codes).toEqual([
+      `Your Rivera Plumbing code is ${DEMO_CODE}. It expires in ten minutes. If you didn't ask for it, ignore this message.`,
+      `Tu código de Rivera Plumbing es ${DEMO_CODE}. Vence en diez minutos. Si no lo pediste, ignora este mensaje.`,
     ]);
   });
 

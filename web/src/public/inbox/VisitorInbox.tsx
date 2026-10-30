@@ -4,7 +4,8 @@
  * chat's codes and no times). The stream's notices carry no code: the entries come only from the
  * visitor's own Demo inbox read, made once when the chat opens and again for each new notice, and
  * matched to the notices by `entry_id`. A read that fails marks the entries it should have brought
- * as failed to open, and "Try again" reads again.
+ * as failed to open, and "Try again" reads again; one with no entry to mark, while a code is
+ * awaited, says so in the inbox's place.
  *
  * It shows once there is something in it: a column beside the chat on a window at least 1280 px
  * wide, else in the chat under the conversation. The design system's Demo inbox sheet takes the
@@ -14,7 +15,8 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 
 import type { DemoInboxEntry, EvDemoInbox } from '../../api/contracts.ts';
 import { ApiError, request } from '../../api/http.ts';
-import { DemoInboxPanel, type CopyLanguage, type DemoInboxItem } from '../../ds/index.ts';
+import { Button, DemoInboxPanel, Notice, type CopyLanguage, type DemoInboxItem } from '../../ds/index.ts';
+import { PUBLIC_COPY } from '../copy.ts';
 
 import './VisitorInbox.css';
 
@@ -42,6 +44,8 @@ interface Read {
 
 export interface VisitorInboxView {
   items: DemoInboxItem[];
+  /** The last read failed. With no items it names no entry, as after a reload whose read failed. */
+  failed: boolean;
   retry: () => void;
 }
 
@@ -94,21 +98,58 @@ export function useVisitorInbox(slug: string, sessionId: string | null, notices:
     return { notice: { entry_id, to, preview }, entry, failed: entry === null && index < read.covers };
   });
   const retry = useCallback(() => void readInbox(), [readInbox]);
-  return { items: [...earlier, ...arrived], retry };
+  return { items: [...earlier, ...arrived], failed: read.failed, retry };
+}
+
+/**
+ * Whether the inbox has a place on the page: once it has something in it, or, while the visitor
+ * waits for a code (`awaitingCode`), when it couldn't be read at all, so the place says so.
+ */
+export function inboxShown(view: VisitorInboxView, awaitingCode: boolean): boolean {
+  return view.items.length > 0 || (view.failed && awaitingCode);
 }
 
 export interface VisitorInboxProps {
   view: VisitorInboxView;
+  /** The chat asked for a code that hasn't been confirmed: the inbox is where it arrives. */
+  awaitingCode: boolean;
   /** `column` beside the chat on a wide window, `inline` under the conversation otherwise. */
   placement: 'column' | 'inline';
   /** Page chrome's language: the browser's. */
   language: CopyLanguage;
 }
 
-/** The panel in its place; nothing until the inbox has something in it. */
-export function VisitorInbox({ view, placement, language }: VisitorInboxProps) {
-  if (view.items.length === 0) return null;
-  const panel = <DemoInboxPanel viewer="visitor" items={view.items} language={language} onRetry={view.retry} />;
+/**
+ * The panel in its place; nothing until the inbox has something in it. A read that failed with no
+ * entry to mark (a reload mid-verification whose read on load failed) shows the place with that
+ * line and "Try again" while a code is awaited, so the code never just isn't there.
+ */
+export function VisitorInbox({ view, awaitingCode, placement, language }: VisitorInboxProps) {
+  if (!inboxShown(view, awaitingCode)) return null;
+  const place = placement === 'column' ? 'cd-public-chat__inbox-column' : 'cd-public-chat__inbox';
+  if (view.items.length === 0) {
+    const copy = PUBLIC_COPY[language];
+    return (
+      <div className={place}>
+        <section className="cd-public-chat__inbox-failed" aria-label={copy.demoInbox} lang={language}>
+          <Notice
+            tone="error"
+            action={
+              <Button variant="secondary" onClick={view.retry}>
+                {copy.tryAgain}
+              </Button>
+            }
+          >
+            {copy.inboxFailed}
+          </Notice>
+        </section>
+      </div>
+    );
+  }
   // The panel is a region named by its own title, so the place around it is a plain block.
-  return <div className={placement === 'column' ? 'cd-public-chat__inbox-column' : 'cd-public-chat__inbox'}>{panel}</div>;
+  return (
+    <div className={place}>
+      <DemoInboxPanel viewer="visitor" items={view.items} language={language} onRetry={view.retry} />
+    </div>
+  );
 }

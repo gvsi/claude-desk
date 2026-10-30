@@ -37,7 +37,7 @@ import { browserLanguage } from '../lib/language.ts';
 import { brandFrom } from './brand.ts';
 import type { ChatRow, SendFailure } from './chatReducer.ts';
 import { PUBLIC_COPY, type PublicCopy } from './copy.ts';
-import { VisitorInbox, useVisitorInbox, useWideWindow } from './inbox/VisitorInbox.tsx';
+import { VisitorInbox, inboxShown, useVisitorInbox, useWideWindow } from './inbox/VisitorInbox.tsx';
 import { useVisitorChat } from './PublicChatProvider.tsx';
 import { useOpenStatus } from './useOpenStatus.ts';
 import { useVisitorTyping } from './useVisitorTyping.ts';
@@ -515,7 +515,9 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
     chat.resend(id);
   };
 
-  const inboxColumn = inboxPlacement === 'column' && inbox.items.length > 0;
+  // The code the chat asked for hasn't been confirmed yet: the inbox is where it arrives.
+  const awaitingCode = verifyRow !== null && !verified;
+  const inboxColumn = inboxPlacement === 'column' && inboxShown(inbox, awaitingCode);
   return (
     // One wrapper whatever the inbox does, so the shell (and what is typed in it) never remounts.
     <div className={`cd-public-chat-page${inboxColumn ? ' cd-public-chat-page--with-inbox' : ''}`}>
@@ -572,7 +574,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
             </TranscriptRow>
           ) : null}
         </Transcript>
-        {inboxPlacement === 'inline' ? <VisitorInbox view={inbox} placement="inline" language={language} /> : null}
+        {inboxPlacement === 'inline' ? <VisitorInbox view={inbox} awaitingCode={awaitingCode} placement="inline" language={language} /> : null}
         {connectionNotice || turnNotice ? (
           <div className="cd-public-chat__notices">
             {turnNotice}
@@ -583,7 +585,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
         <div ref={endRef} />
         <BeforeEachChange before={newest.beforeChange} />
       </PublicShell>
-      {inboxPlacement === 'column' ? <VisitorInbox view={inbox} placement="column" language={language} /> : null}
+      {inboxPlacement === 'column' ? <VisitorInbox view={inbox} awaitingCode={awaitingCode} placement="column" language={language} /> : null}
     </div>
   );
 }

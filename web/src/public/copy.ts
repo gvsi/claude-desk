@@ -25,6 +25,10 @@ export interface PublicCopy {
   cancelRequest: string;
   /** The line once a demo code worked; the design system adds that the verification was simulated. */
   verified: string;
+  /** The Demo inbox's place, named as the design system's panel titles it. */
+  demoInbox: string;
+  /** When the Demo inbox couldn't be read at all while a code is awaited; shown with "Try again". */
+  inboxFailed: string;
   /** While the Desk and the chat load. */
   opening: string;
   deskUnavailableTitle: string;
@@ -45,6 +49,8 @@ export const PUBLIC_COPY: Readonly<Record<CopyLanguage, PublicCopy>> = {
     tryAgain: 'Try again',
     cancelRequest: 'Cancel this request',
     verified: 'Verified with a code',
+    demoInbox: 'Demo inbox',
+    inboxFailed: 'Couldn’t open the Demo inbox, where your code arrives.',
     opening: 'Opening the chat',
     deskUnavailableTitle: "This Desk isn't available",
     deskUnavailableBody: 'Check the link, or contact the business another way.',
@@ -62,6 +68,8 @@ export const PUBLIC_COPY: Readonly<Record<CopyLanguage, PublicCopy>> = {
     tryAgain: 'Intentar de nuevo',
     cancelRequest: 'Cancelar esta solicitud',
     verified: 'Verificado con un código',
+    demoInbox: 'Bandeja de demostración',
+    inboxFailed: 'No se pudo abrir la bandeja de demostración, donde llega tu código.',
     opening: 'Abriendo el chat',
     deskUnavailableTitle: 'Este Desk no está disponible',
     deskUnavailableBody: 'Revisa el enlace o comunícate con el negocio de otra forma.',

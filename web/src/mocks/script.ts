@@ -208,6 +208,26 @@ const inboxPreview: Record<Language, string> = {
   es: 'Nuevo código de verificación',
 };
 
+/**
+ * Claude's checked words before the kernel's verify card, as the signed verify board writes them:
+ * what was asked waits until the visitor confirms it's them. No digits, amounts or dates.
+ */
+const verifyFirstProse: Record<Language, RenderedBlock> = {
+  en: proseBlock("I can send that after you confirm it's you."),
+  es: proseBlock('Puedo enviarlo cuando confirmes que eres tú.'),
+};
+
+/**
+ * The kernel's Demo inbox message for a verification code (`inbox_code_body`, kernel verification,
+ * plan 01b), rendered from the business's name and the code in the chat's language.
+ */
+function codeBody(language: Language, code: string): string {
+  const business = rivera.business.name;
+  return language === 'es'
+    ? `Tu código de ${business} es ${code}. Vence en diez minutos. Si no lo pediste, ignora este mensaje.`
+    : `Your ${business} code is ${code}. It expires in ten minutes. If you didn't ask for it, ignore this message.`;
+}
+
 // ---------------------------------------------------------------------------------------------
 // Decisions the script asks the kernel for
 
@@ -445,12 +465,12 @@ export const SCRIPT: readonly ScriptRule[] = [
       // The code goes to the contact on record, never to the visitor: the kernel decides that first.
       (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.startVerification)),
       writing,
-      (ctx) => ctx.reply([blocks.verify_prompt[ctx.language]]),
+      (ctx) => ctx.reply([verifyFirstProse[ctx.language], blocks.verify_prompt[ctx.language]]),
       (ctx) =>
         ctx.startVerification({
           person: rivera.people.dana,
           code: DEMO_CODE,
-          body: `Your Rivera Plumbing verification code is ${DEMO_CODE}.`,
+          body: codeBody(ctx.language, DEMO_CODE),
           preview: inboxPreview[ctx.language],
         }),
     ],
