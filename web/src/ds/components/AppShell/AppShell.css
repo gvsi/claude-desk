@@ -27,6 +27,7 @@
 }
 
 .cd-app-shell__column {
+  position: relative;
   display: flex;
   flex: 0 0 var(--size-sidebar);
   box-sizing: border-box;
@@ -36,7 +37,14 @@
   background: var(--bg-panel);
 }
 
+/* The main area scrolls, and it is positioned so that anything absolutely placed in a page, such
+   as a receipt's screen-reader label, is placed in it and scrolls with it, instead of stretching
+   the document behind the shell. The column is positioned for the same reason. Being positioned,
+   the main area paints over earlier positioned parts that leave z-index at auto, so anything from
+   the banner, the column or the top bar that reaches over the page sets z-index: 1, as the
+   business switcher does. */
 .cd-app-shell__main {
+  position: relative;
   flex: 1 1 auto;
   box-sizing: border-box;
   min-width: 0;

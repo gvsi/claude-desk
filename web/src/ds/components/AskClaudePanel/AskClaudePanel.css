@@ -28,8 +28,11 @@
   color: var(--text-primary);
 }
 
-/* The conversation scrolls; a little room on every side keeps the focus rings of its cards inside. */
+/* The conversation scrolls; a little room on every side keeps the focus rings of its cards inside.
+   It is positioned, so a receipt's screen-reader label in it scrolls with it instead of stretching
+   the document. */
 .cd-ask-claude__log {
+  position: relative;
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;

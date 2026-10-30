@@ -8,6 +8,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 
+import { AskClaudePanel } from '../AskClaudePanel/AskClaudePanel.tsx';
 import { Composer } from '../Composer/Composer.tsx';
 import { AppShell } from './AppShell.tsx';
 
@@ -92,4 +93,85 @@ it('page_state_survives_the_breakpoint', async () => {
   await vi.waitFor(() => expect(isCompact()).toBe(false));
   expect(box.element()).toBe(textarea);
   expect(textarea.value).toBe('Keep this draft');
+});
+
+it('long_pages_scroll_inside_the_shell', async () => {
+  // The shell is the window's height and its main area scrolls. A long page, with the
+  // screen-reader-only labels receipts carry, must not stretch the document behind it: the page
+  // itself never scrolls, on a laptop or a phone, padded or filled.
+  const longPage = (
+    <div>
+      {Array.from({ length: 80 }, (_, index) => (
+        <p key={index}>
+          Message {index + 1}
+          <span className="cd-sr-only">Reply checked before the visitor saw it.</span>
+        </p>
+      ))}
+    </div>
+  );
+  for (const [width, height] of [
+    [1440, 900],
+    [390, 844],
+  ] as const) {
+    await page.viewport(width, height);
+    for (const fill of [false, true]) {
+      act(() =>
+        root.render(
+          <AppShell sidebar={<nav aria-label="Main">Today</nav>} business="Rivera Plumbing" fill={fill}>
+            {longPage}
+          </AppShell>,
+        ),
+      );
+      const main = container.querySelector('main') as HTMLElement;
+      // The page is longer than the window, so the main area scrolls...
+      await vi.waitFor(() => expect(main.scrollHeight).toBeGreaterThan(main.clientHeight));
+      // ...and the document doesn't.
+      expect([width, fill, document.documentElement.scrollHeight]).toEqual([width, fill, height]);
+    }
+  }
+});
+
+it('long_sidebars_and_panels_scroll_inside_the_shell', async () => {
+  // The shell's other scroll regions hold their own long content the same way: a sidebar taller
+  // than a short window, and the Ask Claude panel's conversation beside the page.
+  const longList = (
+    <div>
+      {Array.from({ length: 80 }, (_, index) => (
+        <p key={index}>
+          Line {index + 1}
+          <span className="cd-sr-only">Checked before it was shown.</span>
+        </p>
+      ))}
+    </div>
+  );
+  const noop = () => {};
+  await page.viewport(1440, 400);
+  act(() =>
+    root.render(
+      <AppShell sidebar={longList} business="Rivera Plumbing">
+        <p>Page</p>
+      </AppShell>,
+    ),
+  );
+  await vi.waitFor(() => expect(container.querySelector('.cd-app-shell__column')!.scrollHeight).toBeGreaterThan(400));
+  expect(['sidebar', document.documentElement.scrollHeight]).toEqual(['sidebar', 400]);
+
+  await page.viewport(1440, 900);
+  act(() =>
+    root.render(
+      <AppShell
+        sidebar={<nav aria-label="Main">Today</nav>}
+        business="Rivera Plumbing"
+        panel={
+          <AskClaudePanel onClose={noop} onSend={noop}>
+            {longList}
+          </AskClaudePanel>
+        }
+      >
+        <p>Page</p>
+      </AppShell>,
+    ),
+  );
+  await vi.waitFor(() => expect(container.querySelector('.cd-ask-claude__log')!.scrollHeight).toBeGreaterThan(900));
+  expect(['panel', document.documentElement.scrollHeight]).toEqual(['panel', 900]);
 });

@@ -8,7 +8,7 @@
 
 ## Layout
 
-- The shell is the height of the window. The `banner` runs full width across the top. Under it, the sidebar column and the page scroll on their own.
+- The shell is the height of the window. The `banner` runs full width across the top. Under it, the sidebar column and the page scroll on their own. The document itself never scrolls: the main area and the column are positioned, as is the Ask Claude panel's conversation, so anything absolutely placed in them, such as a receipt's screen-reader label, scrolls with them instead of stretching the document behind the shell. Because the main area is positioned, anything from the banner, the column or the top bar that reaches over the page sets `z-index: 1`, as the business switcher does.
 - The column is `size-sidebar` wide on `bg-panel`, with a `line-hairline` seam at its right. It is an `aside` named "Claude Desk", holding the `Sidebar`.
 - The page is a `main`, padded 24 px at the top, 40 px at the sides and 20 px at the bottom (16 px at the top and sides on a phone). Its content is at most `size-content` wide, centered.
 - With `fill`, the page takes the whole main area instead: no padding and no content width, so a page with its own columns, such as Conversations' list beside the open conversation, starts where the sidebar ends and runs the window's height. Such a page pads its own columns and draws its own dividers. `fill` changes only the main area, so moving between a padded page and a filled one never restyles the sidebar.
