@@ -78,7 +78,7 @@ Specific to this plan:
   - A `ToolRulesCard` per tool, with `RuleRow`s (`words` from `ruleWords`; `shared` with the covered tools' names for an effect-group card; `onChangeOutcome` opens the drafted change in `ChangeReview`).
   - `ConnectionPanel`: `consequence`, the connection details for Stripe, and what stops: the connector's tools and the rules that stop applying, read from `RulesView`. "Turn off" or "Disconnect" opens the panel's plain confirm, which lists them, then sends one `POST /tools/confirm {tools, enable: false}`, which applies at once. Verification passes `alwaysOn` instead and has no "Turn off".
 - **A tool's page** (`rules/:connector/:tool`, N-Conn-05, N-Conn-06, N-Conn-14, N-Conn-15):
-  - `ToolPageHeader`: `status` from the profile; `definitionNote` for a connected tool only. The demo's "Simulate a tool change" (`POST /tools/simulate_change`) is built later, with the mode switch and the money-limit line.
+  - `ToolPageHeader`: `status` from the profile; `definitionNote` for a connected tool only. The demo's "Simulate a tool change" (`POST /tools/simulate_change`) is built later, with the "Start from a preset" menu and the payment ceiling lines.
   - `ToolReviewCard` while `needs_review`. "Turn back on" sends `POST /tools/confirm {tools: [{tool, definition_sha256: pending_sha256}], enable: true}`, and the drafted version shows in `ChangeReview`.
   - `ToolRulesCard`, and the owner `Composer` with the tool's chips.
   - `RecentRequests`: rows from the tool's recent decisions (`reason_plain`, the deciding card's reason, the state in words, the time formatted by the web app), each linking to its Safety record.
@@ -88,8 +88,8 @@ Specific to this plan:
   - External: `ConnectorSignIn` (a mock that asks for no account details) → `POST /tools/connect`, then the same review and confirm.
   - `Steps` across the pages.
 - **Today** (N-Conn-13): a `ToolChangedItem` per `needs_review` tool, first under "Needs you".
-- **Settings**: connectors live only under Rules, so Settings' `SubNav` drops its Integrations entry and gains no Connectors entry.
-- **Words**: `OUTCOME_WORDS` and `outcomePhrase` for every outcome, `PRESET_WORDS` for the mode switch, and `describeEffects` for a connected tool's line.
+- **Settings**: Connectors have their own tab; Settings names none, so Settings' `SubNav` drops its Integrations entry and gains no Connectors entry.
+- **Words**: `OUTCOME_WORDS` and `outcomePhrase` for every outcome, `PRESET_WORDS` for the Rules page's "Start from a preset" menu, and `describeEffects` for a connected tool's line.
 
 **Produced** (for Plan 04 and the artifact): `IntroDialog`, `IntroThing`, `IntroErrorCode` and `INTRO_ERROR_COPY` with the tokens `scrim`, `shadow-dialog` and `intro-title` (Task 0, shipped early by its own design PR); the components of Tasks 1–3, exported with their `<Comp>Props` from `web/src/ds/index.ts`; `describeEffects`, `ruleDiff`, `RuleWord`, `RuleField`, `RuleMode`, `OUTCOME_WORDS`, `OUTCOME_TONE`, `outcomePhrase`, `RulesPreset`, `PRESET_WORDS` and the view types `ConnectorView`, `ToolSummaryView`, `ChangeSide` and `ChangeRowView` (Task 2); `RecentRequestView`, `PickerItem`, `ReviewToolView` and `ToolRowView` (Task 3); `Boards/*` stories as Plan 04's reference compositions and `web/src/ds/reference/README.md` (Tasks 4–6); `build-ds-artifact.mjs` and the published artifact (Task 7).
 
@@ -207,13 +207,13 @@ Owner decisions, 2026-10-29 (spec "First visit and hosting" and "Look and feel")
 ### Task 2: Rules hub and rule pieces
 
 Owner decisions, 2026-10-29 (the signed boards on the design canvas's "Claude Desk · Connectors and rules" page, which replace the Rules and Integrations boards):
-- Rules is one page under the Rules nav: the "Ask Claude to change a rule or a connector" composer, one section per connector the Desk has (built in first, then the ones it connected), "Add a connector" at the top and at the end, and the always-on list.
-- A connector is where tools come from. People read "Connectors", never "Integrations".
+- Rules is one page under the Rules nav: the "Ask Claude to change a rule or a connector" composer, one section per connector the Desk has (built in first, then the ones it connected), and the always-on list. Connectors are added from the Connectors page (Task 6c).
+- A connector is where tools come from. Owner copy says "connector", never "integration".
 - A built-in connector is a presentation group over native tools, optional per Desk except Verification: Quotes (`native.quote`), Bookings (`native.find_slots`, `native.book`), Leads and callbacks (`native.capture_lead`, `native.request_callback`), Verification (`native.start_verification`), Documents (`native.release_document`), Payments (`native.payment_link`, `native.charge_mandate`). No tool is added.
 - Verification is always on. It has no "Turn off", the kernel refuses to disable `native.start_verification`, and the picker never offers it. Its page says "Always on. It's how Claude confirms a customer before sharing anything private."
-- Connectors live only under Rules. No Settings menu names them.
-- External connectors: Stripe, the mock payments server's `payments.*` tools, with the Mock badge beside its name everywhere and its real brand icon; Google Calendar, catalog-only in the demo ("Coming soon in this demo"), free/busy only when it works.
-- Outcome words: "Automatic", "Ask me first", "Never" (replacing "Do it", "Ask me", "Never"). The mode switch reads "Ask me first", "Automatic", "Custom".
+- Connectors have their own tab; Settings names none (Task 6c).
+- External connectors: Stripe, the mock payments server's owner-facing name for its `payments.*` tools, always with the Mock badge beside it and its real brand icon; Google Calendar, catalog-only in the demo ("Coming soon in this demo"), free/busy only when it works.
+- Outcome words: "Automatic", "Ask me first", "Never" (replacing "Do it", "Ask me", "Never").
 - Rivera Plumbing's hub has all six built-in connectors and Stripe. The add-a-built-in example (the picker, the review and the chat) is Chen & Co. CPA adding Payments.
 
 Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, so none has Spanish. Components display what the screen passes; nothing here decides an outcome or formats money, dates or times.
@@ -225,9 +225,9 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
   - `web/src/ds/icons/index.tsx`: `chevron-right`, `shared` and `quote` join `ICON_NAMES`, drawn as the boards draw them.
   - `web/src/ds/tokens.json`, `web/src/ds/tokens.css` (`npm run tokens`), `web/src/ds/contrast.ts`: the connector tokens below.
   - `web/src/ds/README.md`: the brand book says a connector's brand tile is the one light surface besides the intro illustration's cards.
-  - `web/src/ds/reference/boards.ts`: `REFERENCE_BOARDS` drops N-Rules-Rivera, N-Rules-ChatChange, N-Settings-Integrations and N-Settings-ToolChanged, which these boards replace, and gains the eighteen `N-Conn-*` boards (N-Conn-01-Rules to N-Conn-16-Phone-Rules, with N-Conn-07b and N-Conn-11b), so the stories here can cite them before Task 6.
+  - `web/src/ds/reference/boards.ts`: `REFERENCE_BOARDS` drops N-Rules-Rivera, N-Rules-ChatChange, N-Settings-Integrations and N-Settings-ToolChanged, which these boards replace (the Rules and Connectors pages supersede the two settings boards), and gains the eighteen `N-Conn-*` boards (N-Conn-01-Rules to N-Conn-16-Phone-Rules, with N-Conn-07b and N-Conn-11b), so the stories here can cite them before Task 6.
   - `web/src/ds/components/Card/Card.stories.tsx`: canvas N-Conn-01-Rules.
-  - `web/src/ds/components/SegmentedControl/SegmentedControl.stories.tsx`: labels from `PRESET_WORDS`, so its play reads "Automatic" where it read "Auto"; canvas `'none'`, naming N-Conn-01-Rules, since no signed board draws the mode switch.
+  - `web/src/ds/components/SegmentedControl/SegmentedControl.stories.tsx`: the Safety page's view switch ("Attempts", "Every entry"), citing N-Safety-Run1, since the Rules page's presets are a menu, not a switch (Task 6c).
   - `web/src/ds/fixtures/{rivera.ts,chen.ts}`: below.
 - Test: `web/src/ds/components/ConnectorSection/describeEffects.test.ts`, `web/src/ds/components/ChangeReview/ruleDiff.test.ts`, `web/src/ds/tokens.test.ts`, the stories
 
@@ -238,7 +238,7 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
     - `OUTCOME_WORDS` (`satisfies Record<RuleMode, string>`): `auto` "Automatic", `ask` "Ask me first", `never` "Never".
     - `OUTCOME_TONE`: `auto` handled, `ask` held, `never` refused.
     - `outcomePhrase(mode, limit?)`: `OUTCOME_WORDS[mode]`, except that an `auto` rule with a `limit` reads "Automatic up to {limit}; over {limit}, ask me first". `limit` is the screen's formatted amount ("$100"). An auto card with `max_amount_cents` holds anything above it for the owner through its hold twin. No mode asks with a limit.
-    - `RulesPreset = 'ask_first' | 'auto' | 'custom'` (the master's presets) and `PRESET_WORDS`, in that order: "Ask me first", "Automatic", "Custom", for the screen's `SegmentedControl`.
+    - `RulesPreset = 'ask_first' | 'auto'` and `PRESET_WORDS`, in that order: "Ask me first", "Automatic", for the Rules page's "Start from a preset" menu. A preset is a bulk edit of the rules, not a mode, so there is no "Custom".
   - **Rule words.** `RuleWord = { field: 'who' | 'limits' | 'hours' | 'review'; text: string }`: the consumer's code-rendered words for what a card enforces (Plan 04's `ruleWords(card, people)`: "Anyone", "Up to $300", "Checked by the reviewer"). The design system formats none.
   - **Connectors.** `ConnectorView = { id: string; name: string; icon: ConnectorIconName; description: string; source: { kind: 'built_in' } | { kind: 'external'; mock: true } }`, the screen's view of one connector. Plan 04 owns which tools each connector groups. Every external connector in the demo is a mock, and `mock: true` is required, so the badge can't be left out.
   - `ConnectorIcon({ icon: ConnectorIconName; size: 'page' | 'section' | 'inline' })`: a 48, 36 or 24 px tile with an 8 px radius, `aria-hidden`.
@@ -292,7 +292,7 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
       - `title`, then a meta line: the `connector`'s name and badge, then the side's `words`, joined by " · ".
       - The side's `reason`, and the outcome with its dot at the right (`outcomePhrase(mode, limit)`).
       - A `changed` row shows "Before" and "After", and each line whose field is in `changed` is tagged "Changed" in text.
-    - No rows → "No rules change." and no confirm button. With `hasOtherChanges` (the draft changes something the screen shows above it, such as the money limit), no rows reads "Your rules stay the same." instead, and the controls stay.
+    - No rows → "No rules change." and no confirm button. With `hasOtherChanges` (the draft changes something the screen shows above it, such as a payment ceiling), no rows reads "Your rules stay the same." instead, and the controls stay.
     - A card for the checks, headed by `status`: "Checked before you confirm", "This change can't be applied" or "Rules can't be checked right now", with `lines` as a list (the screen's words from the proof report, Plan 04's `checkStatus`).
     - The primary `confirmLabel` ("Confirm change" by default; "Confirm and turn on") is enabled only when `status` is `checked`. After one click it waits until `pending` clears. While it waits it keeps its label under the busy spinner, at the same width, with `aria-busy`, and only it spins.
     - The secondary `cancelLabel` ("Keep my rules" by default; "Back").
@@ -382,7 +382,7 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
   - `ToolPageHeader({ name; description; connector; status: ToolStatus; definitionNote?: string })`, the top of a tool's page:
     - `name` as the page's serif `h1`, then `description` (what the tool does and its effects).
     - The source line: `ConnectorIcon` at `inline` size, "From {name}" with its badge (`ConnectorName` at `inline` size), and the status in words with its dot. `enabled`: handled "On", followed by " · {definitionNote}" when given ("Definition unchanged", "Definition reviewed today"). `needs_review`: info "Off until you review a change". `disabled`: info "Off".
-    - The master's owner-side demo action ("Connected integration"), "Simulate a tool change", which changes a connected tool's definition on its mock server, is built later, with the mode switch and the money-limit line. The header has no control for it.
+    - The master's owner-side demo action ("Connected integration"), "Simulate a tool change", which changes a connected tool's definition on its mock server, is built later, with the "Start from a preset" menu and the payment ceiling lines. The header has no control for it.
   - `RecentRequestView = { key: string; when: string; what: string; why: string; tone: StatusTone; outcome: string; href?: string }` and `RecentRequests({ rows: RecentRequestView[]; linkComponent? })`:
     - "Recent requests under these rules", then a row per request: `when` in meta; `what` (the decision's `reason_plain`); `why` in meta (the rule that decided it, or what happened); and at the right the outcome in words with its dot ("Automatic", "Waiting for your answer", "Stopped", "You allowed it").
     - Each row is a link to its record when `href` is given.
@@ -452,7 +452,7 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
   - `Connectors/ToolChangedItem`: `StripeRefund`, `Phone`.
   - `Connectors/ToolReviewCard`: `CreateRefundChanged`, `KeepOff`, `Sending`, `ChangedAgain`, `NoHash`, `NoDefinitionText`, `EmptyDefinitionText`, `BlankDefinitionText`, `IndentedDefinition`, `Phone`.
   - `Navigation/Steps`: `ReviewToolsOfFour`, `SetupThirdOfFive`, `Phone`.
-  - `Navigation/SubNav`: `Settings` (General, Knowledge, Notifications, Channels, Billing; connectors live only under Rules), `Phone`.
+  - `Navigation/SubNav`: `Settings` (General, Knowledge, Notifications, Channels, Billing; Connectors have their own tab, so Settings names none), `Phone`.
   - `Conversation/ToolLabel`: `Memory`, `Website`, `CouldNotRead`.
   - Plays:
     - `breadcrumb_marks_the_page`: two links, then "Refund" with `aria-current="page"`; the separators are hidden from screen readers.
@@ -560,7 +560,7 @@ The Connectors and rules boards, which replace the earlier rules and settings bo
 
 ### Task 6b: Visual check of the rules and connectors boards
 
-The same method as Tasks 4–6 for the eighteen Connectors and rules boards (N-Conn-01-Rules to N-Conn-16-Phone-Rules, with N-Conn-07b and N-Conn-11b), each rebuilt from the components and fixtures of Tasks 2 and 3. Where a render differs from this plan or a spec row, the render wins: the story asserts the render's value, and `web/src/ds/reference/README.md` records both and why. Contracts still win over board copy, as each story's `canvasNote` says. The mode switch, money-limit and simulated-change boards are checked when those pieces are built.
+The same method as Tasks 4–6 for the eighteen Connectors and rules boards (N-Conn-01-Rules to N-Conn-16-Phone-Rules, with N-Conn-07b and N-Conn-11b), each rebuilt from the components and fixtures of Tasks 2 and 3. Where a render differs from this plan or a spec row, the render wins: the story asserts the render's value, and `web/src/ds/reference/README.md` records both and why. Contracts still win over board copy, as each story's `canvasNote` says. The presets, payment ceiling and simulated-change boards are checked when those pieces are built. Task 6c moves these boards to the Connectors tab boards the owner signed later the same day; where the two differ, Task 6c wins.
 
 The connectors boards are drawn as AGENTS.md asks, at a 14-inch laptop's width or a phone's: they are rendered 1512 px wide (N-Conn-16-Phone-Rules 390 px wide) and captured at full height. The other boards stay at 1280×820.
 
@@ -619,6 +619,57 @@ The connectors boards are drawn as AGENTS.md asks, at a 14-inch laptop's width o
 - [ ] **Step 4: Record** in the README the connectors board spec, where the renders differ from this plan, and a line per board (18 lines).
 - [ ] **Step 5: Run** `cd web && npm test && npm run typecheck && npm run check:ds` → PASS.
 - [ ] **Step 6: Commit** `git add web && git commit -m "test(ds): check the rules and connectors boards against the design canvas"`.
+
+### Task 6c: The Connectors tab boards
+
+The project owner signed a new set of connector boards on 2026-10-29, after Task 6b, in which connectors have their own tab. This task brings the design system and its board stories to them. The method is Task 6b's: each board is rebuilt from the components and fixtures, compared with its render at the size it is drawn at, and checked at 1440×900 and 390×844 with a keyboard walk; where a render differs from this plan, the render wins and `web/src/ds/reference/README.md` records both.
+
+Owner decisions, 2026-10-29 (the signed Connectors tab boards):
+- **Connectors have their own tab**, an eighth sidebar row after Rules. The Connectors page lists every connector on the Desk by where it comes from ("Built in", "Connected", "Available"), with "Add a connector" in its header. A connector's, a tool's and the add flow's trails start at Connectors: "Connectors / Stripe / Refund". Settings names none.
+- **The Rules page** has its title and line, the composer right under them, one `ConnectorSection` per connector and the always-on list, and no "Add a connector". A section's name carries no "Built in", since the page groups connectors, and its header links to the connector's page (`connectors/<id>`).
+- **What sat at the top of Rules moves.** The "How Claude works" switch and the money limit (plan 04's `RulesPage`) become a "Start from a preset" menu in the Rules page's header, which applies a preset as a bulk edit (`RulesPreset = 'ask_first' | 'auto'`), and a ceiling line inside the Payments and Stripe sections ("No payment over $500 goes through without asking you, whatever the rules below say.", with "Change"), drawn in `ConnectorSection`'s `aboveTools` slot.
+- **Outcome words** stay "Automatic", "Ask me first", "Never". Owner copy says "connector", never "integration". "Stripe" is the mock payments server's owner-facing name, always with its Mock badge. N-Settings-Integrations and N-Settings-ToolChanged stay superseded by the Rules and Connectors pages.
+- **A change's review** shows each side beside a 2 px status bar, refused for "Before" and handled for "After", its words in the neutral text colors. A changed field is in weight 520 with "Changed". A row with one side shows "After" when something is added or turned on, and "Before" when it is removed. A rule for one person replaced by another reads as that rule changed.
+- **Boards.** N-Conn-23-Connectors and N-Conn-24-Phone-Connectors join `REFERENCE_BOARDS`. N-Conn-01-Rules and N-Conn-16-Phone-Rules are archived and leave it. N-Conn-17 to N-Conn-22 (the presets, the payment ceiling and the simulated tool change) are built and checked in a follow-up, with those pieces.
+- **The sidebar's Connectors row** comes with its own change to the Sidebar on main. Until it lands, the board stories keep seven rows, mark Rules current on the Connectors, connector, tool and add pages, and each `canvasNote` says so. Once it merges, this branch merges main again and the stories assert eight rows with Connectors current.
+
+**Files:**
+- Create: `web/src/ds/components/ConnectorDirectory/` (component, CSS, README, stories), `web/src/ds/boards/ConnectorsPage.stories.tsx`
+- Modify:
+  - `web/src/ds/components/{ConnectorName,ConnectorSection,ConnectorList,ChangeReview,PageHeader,OutcomeMenu}/` and their READMEs, as below; `web/src/ds/index.ts`.
+  - `web/src/ds/fixtures/{rivera.ts,chen.ts}`: connector and tool hrefs under `/connectors/`; `rivera.directory`, the Connectors page's rows; the Google Calendar change's reasons in the confirm board's words.
+  - `web/src/ds/boards/{parts.tsx,spec.ts,boards.css,ConnectorsHub,ConnectorPages,AddConnector,ToolChanged}.stories.tsx`, `web/src/ds/reference/{boards.ts,boards.test.ts,README.md}`, and the component stories that cited the archived boards.
+
+**Interfaces produced:**
+- `ConnectorDirectory({ builtIn; builtInCaption?; connected; available; linkComponent? })` with `DirectoryRowView = { connector: ConnectorView; tools: number; href?: string; note?: string; connection?: string; onConnect?: () => void }`. It is its own component rather than a mode of `ConnectorList`: the Rules page's list is a section per connector with its tools and their outcomes, while this is a row per connector with its state.
+  - Up to three groups 20 px apart, each a `section` named by its `SectionHeader`, 20 px over one card of rows; a group with no rows is left out.
+  - A row, padded 14 px 16 px under a hairline: the 36 px tile, the name with no "Built in" (the Mock badge for an app), the description, for a connected app "Connected · {connection}", and at the right the note and the tool count. A built-in or connected row is one link to its page, ending in `chevron-right`; an available app has a secondary "Connect {name}" calling `onConnect`.
+  - Under 640 px of its own width: a 32 px tile, each count under its line after its note, "Connect" under the count.
+- `ConnectorName` `hideBuiltIn?`: leaves "Built in" off where the page groups connectors; the Mock badge always stays.
+- `ConnectorSection` `aboveTools?: ReactNode`: a line between the header and the tool rows, padded 12 px 16 px (12 px 14 px on a phone) under a hairline, for the payment ceiling. The section uses `hideBuiltIn`.
+- `ConnectorList` `onAddConnector?`: without it, no "Add a connector" at the end.
+- `PageHeader` under 640 px: the actions stay on the title's line, at its right, and the subtitle runs under both, 8 px under the title.
+- `RulesPreset = 'ask_first' | 'auto'`, `PRESET_WORDS` two entries.
+- `ChangeReview`: the bars and words above; the connector line under a title carries no "Built in".
+
+**Stories** (the rest keep Task 6b's, with their trails starting at Connectors):
+
+| Story | Board | Shows |
+|---|---|---|
+| `Boards/Connectors` › Connectors | N-Conn-23-Connectors | Rivera's Connectors page: "Add a connector" in the header; six built-in connectors, Verification "Always on"; Stripe connected with its test account; Google Calendar available with "Connect" |
+| `Boards/Connectors` › Connectors on a phone | N-Conn-24-Phone-Connectors | the same at 390 px, "Add a connector" beside the title at control height |
+| `Boards/Connectors` › Google Calendar added | N-Conn-11-GCal-Done | the Connectors page with the info `Notice` under the title, and Google Calendar connected, "Added just now" |
+| `Boards/Rules` › Ask Claude to add a connector | N-Conn-12-Chat | Chen & Co. CPA's Rules page with three connectors (Bookings, Verification and Documents), the composer under the title, and `AskClaudePanel` offering Payments |
+| `Boards/Add a connector` › Add a connector, and Add a connector, coming soon | N-Conn-07-Add-Picker, N-Conn-07b-Add-Picker-ComingSoon | Chen's picker over Chen's own Connectors page |
+| `Boards/Add a connector` › Connect Google Calendar | N-Conn-08-GCal-SignIn | the sign-in over Rivera's Connectors page |
+
+- [ ] **Step 1: Write the failing tests.** The stories above; `ConnectorList`'s `OnTheRulesPage` (no "Add a connector"); `PageHeader`'s `Phone`; `ConnectorName`'s `WithoutBuiltIn`; `ConnectorSection`'s `LineAboveTools`; `ChangeReview`'s `PersonalRuleReplaced` and the bars on every story; the confirm board's Before and After reasons; `expectRulesPage` checks the Rules page has no "Add a connector" and the composer sits 20 px under the header; `boards.test.ts` names N-Conn-24-Phone-Connectors as the phone board.
+- [ ] **Step 2: Run** `cd web && npx vitest run --project storybook src/ds` → FAIL until the components and stories land.
+- [ ] **Step 3: Implement**, tokens only in components (board CSS may keep a measured value), and fix a delta in its component unless that would change another signed board, which waits for the project owner.
+- [ ] **Step 4: Compare by eye** each changed board against its render at the render's size, then at 1440×900 and 390×844 with a keyboard walk.
+- [ ] **Step 5: Record** in the reference README the Connectors page's spec rows, the differences and a line per changed board.
+- [ ] **Step 6: Run** `cd web && npm test && npm run typecheck && npm run check:ds`, and `make docs-check` → PASS.
+- [ ] **Step 7: Commit** each piece on its own: the components, the board stories, the reference README and this plan.
 
 ### Task 7: Publish to the Design System artifact (first to cut)
 
@@ -781,3 +832,5 @@ PR panel round 1, 2026-10-29: the review panel's findings on this plan's design 
 - Task 1's text now matches: Confirm keeps its label while checking (Button `busy`), the board is N-Public-Verify-Run1, and the Demo inbox is no longer a part without a board.
 
 Deferred: master contract fields for the payment link view, a master plan change; and page layouts, which plan 04's page stories check. The figure type styles, first deferred until plan 04 builds Today, landed in this round instead.
+
+Task 6c, 2026-10-29: the project owner signed the Connectors tab boards. Connectors get their own tab and page (`ConnectorDirectory`, N-Conn-23 and N-Conn-24); the Rules page drops "Add a connector" and keeps the composer under its title; the trails start at Connectors; a change's review shows its sides beside status bars; the presets become a two-word "Start from a preset" menu and the money limit a ceiling line inside the Payments and Stripe sections, both built with N-Conn-17 to N-Conn-22 in a follow-up. N-Conn-01-Rules and N-Conn-16-Phone-Rules are archived. The sidebar's Connectors row lands in its own change to the Sidebar on main; until then the board stories keep seven rows and say so.
