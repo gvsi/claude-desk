@@ -26,6 +26,9 @@ export function followInAppLinks(navigate: NavigateFunction) {
       return;
     }
     if (url.origin !== window.location.origin) return;
+    // A path on this site that reads as starting with "//" (from "/.//host", say) would look like
+    // another site's address to the router, which refuses it: the browser follows it instead.
+    if (url.pathname.startsWith('//')) return;
     event.preventDefault();
     void navigate(`${url.pathname}${url.search}${url.hash}`);
   };

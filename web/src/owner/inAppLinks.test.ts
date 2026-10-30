@@ -33,8 +33,19 @@ describe('followInAppLinks', () => {
     expect(preventDefault).toHaveBeenCalled();
   });
 
+  it('leaves_a_path_the_router_reads_as_another_site_to_the_browser', () => {
+    // Each of these reads as a path on this site that starts with "//", which the router would
+    // take for another site's address and refuse.
+    for (const href of ['/.//evil.example/x', '/./\\evil.example/x', '/%2e//evil.example/x']) {
+      const { navigate, preventDefault } = clickOn(href);
+      expect(navigate, href).not.toHaveBeenCalled();
+      expect(preventDefault, href).not.toHaveBeenCalled();
+    }
+  });
+
   it('leaves_other_sites_to_the_browser', () => {
-    for (const href of ['//evil.example/x', '/\\evil.example/x', '/\\/evil.example', 'https://evil.example/x', 'mailto:a@b.example']) {
+    // "\t" is dropped when the href is read, and "//[" can't be read at all.
+    for (const href of ['//evil.example/x', '/\\evil.example/x', '/\\/evil.example', '/\t/evil.example', '//[', 'https://evil.example/x', 'mailto:a@b.example']) {
       const { navigate, preventDefault } = clickOn(href);
       expect(navigate, href).not.toHaveBeenCalled();
       expect(preventDefault, href).not.toHaveBeenCalled();
