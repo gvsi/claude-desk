@@ -16,6 +16,7 @@ import { DECISIONS, VISITOR_PLAIN, writing } from '../../mocks/script.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { MINUTE, type SessionRecord } from '../../mocks/world.ts';
+import { expectOwnerBoard } from '../../test/boards.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.ts';
 
@@ -139,6 +140,26 @@ afterEach(() => {
 });
 
 describe('Conversations', () => {
+  it('conversation_matches_its_board', async () => {
+    named(DANA_LIVE, DANA);
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    const takeOver = screen.getByRole('button', { name: 'Take over' });
+    await expect.element(takeOver).toBeVisible();
+    const receipts = log(screen).getByRole('button', { name: /Open the full trace\.$/ });
+    await expect.poll(() => receipts.elements().length).toBeGreaterThanOrEqual(6);
+    const rows = screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link').elements() as HTMLElement[];
+    expect(rows).toHaveLength(2);
+
+    // Dana's live conversation as N-Conv-Run1 and N-Conv-TakeOver draw it, at 1440 px: the page
+    // fills the main area, and Tab goes through the list, then the receipts, then the take-over bar.
+    await expectOwnerBoard(screen.container, {
+      current: 'Conversations',
+      fill: true,
+      transcript: true,
+      tabStops: [...rows, ...(receipts.elements() as HTMLElement[]), takeOver.element() as HTMLElement],
+    });
+  });
+
   it('list_and_detail', async () => {
     named(DANA_LIVE, DANA);
     const { screen, router } = await renderRoute(LIST);
