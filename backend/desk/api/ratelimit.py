@@ -19,8 +19,9 @@ Per-IP limits take the key from `deps.client_ip`, which answers None for a calle
 loopback peer: the built-in agent, and any loopback peer outside production); every other limit needs a key.
 
 `once_per_window(key, window_s, write)` bounds a write rather than a request: it awaits `write` unless it was awaited
-for `key` less than `window_s` ago, and the request goes on either way. A resumed chat's `session` ledger entry is
-written this way (routes/public.py), since resuming is never limited.
+for `key` less than `window_s` ago, and a skipped write lets the request go on without it. It fails toward writing: a
+clock that can't be read, or a mark from before the clock was stepped back, means the write runs. A resumed chat's
+`session` ledger entry is written this way (routes/public.py), since resuming is never limited.
 """
 
 import logging
@@ -156,11 +157,18 @@ class RateLimiter:
     async def once_per_window(self, key: Hashable, window_s: float, write: Callable[[], Awaitable[object]]) -> None:
         """Await `write()` unless it was awaited for `key` less than `window_s` ago, in which case nothing is done. The
         key is marked before the await, so callers at the same moment write once; a `write` that raises unmarks it, so
-        the next caller writes, and the exception goes on to the caller."""
-        now = self._now()
+        the next caller writes, and the exception goes on to the caller. It fails toward writing: a clock that can't be
+        read means `write()` is awaited and nothing is marked, and a mark that ends further off than `window_s` (the
+        clock was stepped back) is stale, so the write runs."""
+        try:
+            now = self._now()
+        except Exception:
+            logger.warning("the clock could not be read, so a write bounded to once a window runs anyway")
+            await write()
+            return
         self._sweep(now)
         until = self._written.get(key)
-        if until is not None and until > now:
+        if until is not None and now < until <= now + window_s:
             return
         self._written[key] = until = now + window_s
         try:

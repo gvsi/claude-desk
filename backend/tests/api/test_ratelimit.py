@@ -3,6 +3,7 @@ once a window, open streams."""
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from datetime import datetime
 
 import pytest
 
@@ -27,7 +28,7 @@ def test_sliding_window(clock):
     clock.advance(30)
     assert limiter.hit("k", 3, 60) is None             # at 60 s the hit at 0 s has left the window
     clock.advance(1)
-    assert limiter.hit("k", 3, 60) == 9                # at 61 s: hits at 10, 20 and 60 s; the one at 10 s leaves at 70 s
+    assert limiter.hit("k", 3, 60) == 9                # at 61 s: hits at 10, 20 and 60 s; the one at 10 s leaves at 70
     assert limiter.hit("other", 3, 60) is None         # keys count apart
     clock.advance(0.5)
     assert limiter.hit("k", 3, 60) == 9                # retry_after is whole seconds, rounded up, never 0
@@ -157,8 +158,8 @@ async def test_a_ledger_failure_still_refuses(visitor, fake, clock):
 
 
 async def test_once_per_window_writes_once_a_window_and_tries_a_failed_write_again(clock):
-    """A write bounded to once per key in each window, the window starting at the write; the caller goes on either
-    way."""
+    """A write bounded to once per key in each window, the window starting at the write; a skipped write lets the
+    caller go on without it."""
     limiter = RateLimiter(clock)
     writes: list[str] = []
 
@@ -201,6 +202,58 @@ async def test_once_per_window_writes_once_a_window_and_tries_a_failed_write_aga
     await limiter.once_per_window("d", 600, write("d"))
     await limiter.once_per_window("d", 600, write("d"))
     assert writes.count("d") == 2
+
+
+async def test_once_per_window_writes_each_time_the_clock_cannot_be_read(clock):
+    """The window fails toward writing: while the clock can't be read, every call writes and marks nothing, and a
+    failing write's exception still reaches the caller. Once the clock reads again, the next call writes."""
+    broken = True
+
+    def unreadable() -> datetime:
+        if broken:
+            raise OSError("the clock can't be read")
+        return clock()
+
+    limiter = RateLimiter(unreadable)
+    writes: list[str] = []
+
+    async def write() -> None:
+        writes.append("a")
+
+    async def failing() -> None:
+        writes.append("failed")
+        raise KernelUnavailable("POST /ledger/append")
+
+    for _ in range(3):
+        await limiter.once_per_window("a", 600, write)
+    assert writes == ["a"] * 3
+    with pytest.raises(KernelUnavailable):
+        await limiter.once_per_window("a", 600, failing)
+    assert writes[-1] == "failed"
+
+    broken = False                                      # nothing was marked: the first call with a clock writes
+    await limiter.once_per_window("a", 600, write)
+    await limiter.once_per_window("a", 600, write)
+    assert writes == ["a"] * 3 + ["failed", "a"]
+
+
+async def test_once_per_window_writes_after_the_clock_steps_back(clock):
+    """A mark that ends further off than one window (the clock was stepped back) is stale, so the window fails toward
+    writing: the write runs, and the next window starts from the clock as it now reads."""
+    limiter = RateLimiter(clock)
+    writes: list[str] = []
+
+    async def write() -> None:
+        writes.append("a")
+
+    await limiter.once_per_window("a", 600, write)
+    clock.advance(-3600)
+    await limiter.once_per_window("a", 600, write)         # the mark ends 4200 s off: stale, so written
+    clock.advance(599)
+    await limiter.once_per_window("a", 600, write)         # within the new window: nothing written
+    clock.advance(1)
+    await limiter.once_per_window("a", 600, write)
+    assert writes == ["a"] * 3
 
 
 def test_stream_slots_cap_each_session_and_address():
