@@ -176,6 +176,14 @@ export const ConnectGoogleCalendar: Story = {
   },
 };
 
+/** The review's header and tools as the boards draw them: a 44 px tile, and every tool under a hairline, 14 px above and below. */
+function expectReviewLook(main: HTMLElement): void {
+  expectComputed(one(main, '.cd-connector-review__header > .cd-connector-icon'), { width: '44px', height: '44px' });
+  for (const tool of some(main, '.cd-connector-review__tool')) {
+    expectComputed(tool, { paddingTop: '14px', paddingBottom: '14px', borderTopWidth: '1px', borderTopColor: 'rgba(250, 249, 245, 0.12)' });
+  }
+}
+
 /** A review page's frame: the trail and the steps above the review. */
 async function expectAddStep(root: HTMLElement, trail: string[], steps: string[], current: string): Promise<HTMLElement> {
   await expect(window.innerWidth).toBe(1512);
@@ -222,6 +230,7 @@ export const ReviewGoogleCalendar: Story = {
     const main = await expectAddStep(canvasElement, ['Rules', 'Google Calendar'], APP_STEPS, 'Review tools');
     // Google Calendar is named with its Mock badge on the page; the trail names it as the board does.
     await expect(expectMockBesideExternalNames(one(main, '.cd-connector-review'))).toBe(1);
+    expectReviewLook(main);
     const [menu] = expectOutcomeMenus(main);
     await expect(menu).toHaveTextContent('Ask me first');
     await expect(within(main).getByText('No rule of yours covers this yet, so it starts at Ask me first.')).toBeVisible();
@@ -297,6 +306,7 @@ export const ReviewPayments: Story = {
   play: async ({ canvasElement, userEvent }) => {
     const main = await expectAddStep(canvasElement, ['Rules', 'Payments'], BUILT_IN_STEPS, 'Review tools');
     await expect(within(main).getByText("A built-in connector, so there's nothing to sign in to. Nothing runs until you turn it on.")).toBeVisible();
+    expectReviewLook(main);
     // review_starts_at_ask_me_first: both tools at Ask me first.
     const menus = expectOutcomeMenus(main);
     await expect(menus.map((menu) => menu.textContent)).toEqual(['Ask me first', 'Ask me first']);
