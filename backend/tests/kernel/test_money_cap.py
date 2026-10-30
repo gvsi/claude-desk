@@ -14,6 +14,7 @@ A test that proves or confirms a draft needs the solver (`solver`).
 """
 
 import json
+import logging
 import re
 from datetime import time
 from pathlib import Path
@@ -110,6 +111,33 @@ async def test_unset_cap_holds_every_money_action(app, client, registry):
     response = await post_draft(client, desk, [charge_card("links", 2_000)], parent)
     assert (response.status_code, response.json()) == (422, {"code": "invalid"})
     assert sorted(await versions_of(app, desk)) == [1, parent]
+
+
+def draft_refusals(caplog: pytest.LogCaptureFixture) -> list[str]:
+    """The reasons the kernel logged for the drafts it refused, in order."""
+    return [match.group(1) for record in caplog.records
+            if (match := re.fullmatch(r"kernel_failure route=POST /policy/draft status=422 code=invalid reason=(\S+)",
+                                      record.getMessage()))]
+
+
+async def test_a_draft_refused_for_the_cap_is_named_by_its_cards(app, client, registry, monkeypatch, caplog):
+    caplog.set_level(logging.INFO, logger="desk.kernel_service")
+    desk = await lopez_desk(app, client, payment_link(1))                      # version 1, at a cap of 0
+    above = [charge_card("links", 2_000)]
+    asks = [RuleCard(card_id="links", applies_to="effect:charge", mode="ask", who="anyone", reason="Links ask.")]
+    response = await post_draft(client, desk, above, 1)
+    assert (response.status_code, response.json()) == (422, {"code": "invalid"})
+    # the reason comes from the cards themselves, never from the wording of the check's errors
+    worded = {"words that name the cap": [f"card 1: {compiler.ABOVE_MONEY_CAP}: some other reason"],
+              "words that don't": ["links: the card doesn't meet the rule card checks"]}
+    for words in worded.values():
+        monkeypatch.setattr(compiler, "validate_cards", lambda *args, words=words, **kwargs: words)
+        for cards in (asks, above):
+            response = await post_draft(client, desk, cards, 1)
+            assert (response.status_code, response.json()) == (422, {"code": "invalid"})
+    assert draft_refusals(caplog) == ["above_money_cap", "invalid_cards", "above_money_cap", "invalid_cards",
+                                      "above_money_cap"]
+    assert sorted(await versions_of(app, desk)) == [1]
 
 
 @pytest.mark.solver

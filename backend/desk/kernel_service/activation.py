@@ -804,9 +804,10 @@ async def draft(ctx: KernelCtx, owner: OwnerCtx, desk_id: str, cards: Sequence[R
     if type(cap) is not int or not 0 <= cap <= AUTO_MONEY_HARD_CAP_CENTS:
         raise KernelFailure(422, "invalid", "invalid_money_cap")
     people = await desk_people(ctx, desk_id)
-    if errors := compiler.validate_cards(owned, people=people.keys(), agent_keys=await _agent_keys(ctx),
-                                         auto_money_cap_cents=cap):
-        above = any(f": {compiler.ABOVE_MONEY_CAP}:" in error for error in errors)
+    if compiler.validate_cards(owned, people=people.keys(), agent_keys=await _agent_keys(ctx),
+                               auto_money_cap_cents=cap):
+        # the log's reason is read from the cards, never from the wording of the errors
+        above = bool(compiler.above_money_cap(owned, cap))
         raise KernelFailure(422, "invalid", compiler.ABOVE_MONEY_CAP if above else "invalid_cards")
     profiles = await desks.enabled_profiles(ctx, desk_id)
     schema = compiler.desk_schema(profiles)
