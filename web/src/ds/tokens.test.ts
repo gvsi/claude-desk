@@ -327,6 +327,8 @@ describe('design tokens', () => {
     add(['text-primary', 'text-secondary'], ['fill-card'], 4.5, 'fill-card', 'bg-app');
     // A text field's outline is its boundary, so it needs 3:1 on every ground a field sits on.
     add(['line-field'], ['bg-surface', 'bg-app'], 3);
+    // The outlined value of an inline CopyField, in a card on the agents page.
+    add(['line-field'], ['fill-card'], 3, 'bg-app');
     // The deny answers in a held request's card: danger at rest and on hover, then danger-ghost,
     // whose ground is the card itself, at rest and on hover.
     add(['button-danger-text'], ['button-danger-fill', 'button-danger-fill-hover'], 4.5, 'fill-card', 'bg-app');

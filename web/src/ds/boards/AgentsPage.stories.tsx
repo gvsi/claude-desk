@@ -104,6 +104,13 @@ export const Board: Story = {
     expectComputed(address, { fontFamily: /^"JetBrains Mono"/, fontSize: '13px' });
     const copy = within(connect).getByRole('button', { name: 'Copy address' });
     await expect(Math.round(copy.getBoundingClientRect().right)).toBe(1119);
+    // The address in its outlined box, where the render draws it: from 393 px, 32 px tall at 654,
+    // ending 8 px before the button (603 px wide once the interface font has loaded).
+    await document.fonts.ready;
+    const addressBox = address.getBoundingClientRect();
+    await expect([Math.round(addressBox.left), Math.round(addressBox.top), Math.round(addressBox.height)]).toEqual([393, 654, 32]);
+    await expect(Math.round(copy.getBoundingClientRect().left - addressBox.right)).toBe(8);
+    expectComputed(address, { borderTopColor: 'rgba(250, 249, 245, 0.36)', borderTopLeftRadius: '8px' });
     const request = one(connect, 'pre');
     await expect(request.textContent).toBe(REQUEST);
     // request_follows_the_a2a_contract: the API's endpoint, the four AgentAuth headers, then an

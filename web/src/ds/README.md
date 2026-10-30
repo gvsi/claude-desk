@@ -132,7 +132,7 @@ Focus rings and status dots, 3:1 (`ring-composer` is `accent-blue`):
 
 The mark's tile, `mark-tile`, reads 17.2 on `bg-app`, 15.9 on `bg-panel` and 14.5 on `bg-surface` (the intro dialog). On the tile, `mark-ink` reads 18.4 and `mark-clay` 3.1, and the ink reads 5.9 where it crosses the clay.
 
-`line-field`, a text field's outline, reads 3.1 on `bg-surface` and 3.2 on `bg-app` (3:1).
+`line-field`, a text field's outline, reads 3.1 on `bg-surface` and 3.2 on `bg-app` (3:1), and 3.2 on `fill-card` over `bg-app`, where it outlines an inline `CopyField`'s value in a card.
 
 On the intro illustration's light cards, `illustration-ink` reads 16.3 and `illustration-ink-secondary` 5.4 on `illustration-card`, and `illustration-ink` reads 13.1 on `illustration-avatar`. The check and the receipt dots in `illustration-handled` read 4.9 (3:1).
 
