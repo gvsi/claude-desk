@@ -180,7 +180,7 @@ export const DECORATIVE_COLORS: Readonly<Record<string, string>> = Object.freeze
   'line-hairline': 'A seam between regions that already differ in fill; it carries no meaning of its own.',
   'line-card': "A card's edge; the card's content, not its border, is what a person reads.",
   'line-control':
-    "A chip or outlined pill's outline, 2.0:1 on the app background: flagged, because the control's own text identifies it.",
+    "A chip or outlined pill's outline, or the recorded-history link's underline, 2.0:1 on the app background: flagged, because the control's own text identifies it.",
   'line-control-hover': 'The hover state of those outlines; the pointer is already on the control.',
   scrim: 'It dims the page behind a dialog that blocks it; no text or control sits on it.',
   'illustration-line': "The booked box's outline on an intro illustration card; the words inside it say what it is.",

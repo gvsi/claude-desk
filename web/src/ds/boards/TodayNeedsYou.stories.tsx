@@ -3,7 +3,7 @@ import { expect, within } from 'storybook/test';
 
 import { rivera } from '../fixtures/index.ts';
 import { expectComputed } from '../test/expectComputed.ts';
-import { TodayNeedsYou } from './parts.tsx';
+import { RECORDED_HISTORY_HREF, TodayNeedsYou } from './parts.tsx';
 import { SPEC, expectFooter, expectOwnerFrame, expectTabOrder, one } from './spec.ts';
 
 const meta = {
@@ -14,7 +14,7 @@ const meta = {
     canvas: 'N-Today-Run1',
     canvasNote: [
       "The reviewer's first visit and Today in one board: the reviewer bar, the sidebar and the greeting, after the first-visit dialog (N-Intro-D) closes.",
-      'Things to try, Last 7 days, Live now and the short briefing are page layout the web app (plan 04) owns, composed here from Card, Button, StatusDot, StatusLabel, TextLink, ConversationListItem and the tokens.',
+      'Things to try, Last 7 days, Live now and the short briefing are page layout the web app (plan 04) owns, composed here from Card, Button, StatusDot, StatusLabel, TextLink, RecordedHistoryLink, ConversationListItem and the tokens.',
       'The held quote is held by its card’s discount limit, not by the tool, so its answers are the two plain buttons of the signed answer board (N-Answers-TwoButtons), with no Deny always; the board draws three neutral answers from before that sign-off.',
       'The public link reads desk.example/rivera where the board writes “[prototype-domain]/rivera”; the board’s numbered pins are canvas notes.',
     ].join(' '),
@@ -41,10 +41,15 @@ export const Board: Story = {
     ).toBeVisible();
 
     // The right column is "Last 7 days"; recorded history is named there and at Since last night.
+    // Both are the one caption link, in its quiet look, to the ledger's explanation.
     const week = canvas.getByRole('region', { name: 'Last 7 days' });
-    await expect(within(week).getByRole('link', { name: 'Includes recorded history' })).toBeVisible();
     const since = canvas.getByRole('region', { name: 'Since last night' });
-    await expect(within(since).getByRole('link', { name: 'Includes recorded history' })).toBeVisible();
+    for (const region of [week, since]) {
+      const caption = within(region).getByRole('link', { name: 'Includes recorded history' });
+      await expect(caption).toBeVisible();
+      await expect(caption).toHaveAttribute('href', RECORDED_HISTORY_HREF);
+      expectComputed(caption, SPEC.recordedLink);
+    }
     await expect(week.getBoundingClientRect().left).toBeGreaterThan(canvas.getByRole('heading', { level: 1 }).getBoundingClientRect().right);
     // Its figures, at the two sizes the board draws: the booked total in the figure style, the
     // stopped count in the smaller one, both with tabular figures.

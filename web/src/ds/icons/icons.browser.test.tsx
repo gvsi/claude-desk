@@ -61,3 +61,28 @@ it('own_icons_sit_on_the_grid_center', () => {
   act(() => root.unmount());
   container.remove();
 });
+
+/** Lucide's "history": a clock's face drawn as an arrow turning back, with its hands. */
+const LUCIDE_HISTORY = ['M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8', 'M3 3v5h5', 'M12 7v5l4 2'];
+
+it('history_is_lucides_history_at_the_effective_stroke', () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  // The Recorded tag draws it at 14 px, beside caption text.
+  act(() => root.render(<Icon name="history" size={14} />));
+
+  const svg = container.querySelector('svg');
+  expect(svg?.getAttribute('aria-hidden')).toBe('true');
+  expect([...(svg?.querySelectorAll('path') ?? [])].map((path) => path.getAttribute('d'))).toEqual(LUCIDE_HISTORY);
+  // 1.5 px at 14 px is 24 × 1.5 / 14 units of the grid.
+  expect(Number(svg?.getAttribute('stroke-width'))).toBeCloseTo((1.5 * 24) / 14, 6);
+  // Lucide's shape is centered on the grid too, so beside a line of text it looks centered.
+  const box = drawnBox(svg as SVGSVGElement);
+  expect(Math.abs((box.left + box.right) / 2 - 12)).toBeLessThanOrEqual(0.25);
+  expect(Math.abs((box.top + box.bottom) / 2 - 12)).toBeLessThanOrEqual(0.25);
+
+  act(() => root.unmount());
+  container.remove();
+});

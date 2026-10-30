@@ -12,18 +12,12 @@ const SANS = /^"Hanken Grotesk"/;
 
 /** Each spec row, as computed styles. Rows that differ by board say which boards they are for. */
 export const SPEC = {
-  /** Today, Safety, the switcher and the take-over: the sidebar on the panel, a hairline seam at its right. */
+  /** Every owner page (owner decision 2026-10-29): the sidebar on the panel, a hairline seam at its right. */
   sidebar: {
     width: '264px',
     backgroundColor: 'rgb(34, 34, 32)',
     borderRightWidth: '1px',
     borderRightColor: 'rgba(250, 249, 245, 0.12)',
-  },
-  /** The signed conversation boards (N-Conv-Run1, N-Conv-Agent-Run1): the sidebar on the app ground, no seam. */
-  sidebarGround: {
-    width: '264px',
-    backgroundColor: 'rgb(28, 27, 25)',
-    borderRightWidth: '0px',
   },
   activeNavRow: {
     height: '36px',
@@ -75,6 +69,19 @@ export const SPEC = {
   primary: { backgroundColor: 'rgb(239, 236, 228)', color: 'rgb(28, 27, 25)' },
   composer: { backgroundColor: 'rgb(42, 41, 39)', borderTopLeftRadius: '16px', boxShadow: /0px 4px 20px/ },
   footer: { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' },
+  /** The Recorded tag (RecordedTag): caption type in secondary ink, the icon 4 px before the word, on one line. */
+  recordedTag: { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)', columnGap: '4px', whiteSpace: 'nowrap' },
+  /** The line on an opened replayed item (RecordedNote): caption type in secondary ink, the words 6 px after the icon. */
+  recordedNote: { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)', columnGap: '6px' },
+  /** "Includes recorded history" (RecordedHistoryLink): caption type in secondary ink, underlined in line-control 3 px down. */
+  recordedLink: {
+    fontSize: '12px',
+    lineHeight: '17px',
+    color: 'rgba(250, 249, 245, 0.64)',
+    textDecorationLine: 'underline',
+    textDecorationColor: 'rgba(250, 249, 245, 0.22)',
+    textUnderlineOffset: '3px',
+  },
 } as const satisfies Record<string, ComputedExpectation>;
 
 /** The concept footer, word for word. */
@@ -95,22 +102,15 @@ export function some<T extends Element = HTMLElement>(root: ParentNode, selector
 }
 
 /**
- * The owner app's frame: the sidebar column, its current row, and the padded page. As the signed
- * conversation boards draw it, `fill` has the page fill the main area, and `sidebarLook: 'ground'`
- * puts the sidebar on the app ground at its own height, its Answering switch 4 px under the pages.
+ * The owner app's frame: the sidebar column in its one look on every page, its current row, and
+ * the page: padded, or with `fill` filling the main area, as the conversation pages do.
  */
-export async function expectOwnerFrame(
-  root: HTMLElement,
-  current: string,
-  { fill = false, sidebarLook = 'panel' }: { fill?: boolean; sidebarLook?: 'panel' | 'ground' } = {},
-): Promise<void> {
+export async function expectOwnerFrame(root: HTMLElement, current: string, { fill = false } = {}): Promise<void> {
   const column = within(root).getByRole('complementary', { name: 'Claude Desk' });
-  expectComputed(column, sidebarLook === 'ground' ? SPEC.sidebarGround : SPEC.sidebar);
-  if (sidebarLook === 'ground') {
-    const nav = within(column).getByRole('navigation', { name: 'Main' });
-    const foot = one(column, '.cd-sidebar__footer');
-    await expect(foot.getBoundingClientRect().top - nav.getBoundingClientRect().bottom, 'the sidebar foot under the pages').toBe(4);
-  }
+  expectComputed(column, SPEC.sidebar);
+  // The Answering switch and the owner sit at the column's foot, inside the sidebar's 12 px.
+  const foot = one(column, '.cd-sidebar__footer');
+  await expect(column.getBoundingClientRect().bottom - foot.getBoundingClientRect().bottom, 'the sidebar foot at the bottom').toBe(12);
   const row = within(column).getByRole('link', { name: new RegExp(`^${current}`) });
   await expect(row).toHaveAttribute('aria-current', 'page');
   expectComputed(row, SPEC.activeNavRow);
@@ -124,6 +124,52 @@ export async function expectFooter(root: HTMLElement): Promise<void> {
   const footer = one(root, '[data-ds="concept-footer"]');
   await expect(footer.textContent?.replace(/\s+/g, ' ').trim()).toBe(FOOTER);
   expectComputed(footer, SPEC.footer);
+}
+
+/** The words of the line on an opened replayed item, word for word. */
+export const RECORDED_NOTE = 'Recorded history, replayed into your copy. It happened before you arrived.';
+
+/**
+ * recorded_rows_are_tagged: each of `rows` carries the Recorded tag exactly when `recorded` says so,
+ * in its look, with the 14 px history icon hidden from screen readers. Returns the tags, in order.
+ */
+export async function expectRecordedTags(rows: HTMLElement[], recorded: (row: HTMLElement) => boolean): Promise<HTMLElement[]> {
+  const tags: HTMLElement[] = [];
+  for (const row of rows) {
+    const found = [...row.querySelectorAll<HTMLElement>('.cd-recorded-tag')];
+    await expect(found, `${describe(row)}: its Recorded tag`).toHaveLength(recorded(row) ? 1 : 0);
+    for (const tag of found) {
+      await expect(tag).toHaveTextContent(/^Recorded$/);
+      expectComputed(tag, SPEC.recordedTag);
+      const icon = one<SVGSVGElement>(tag, 'svg');
+      await expect(icon).toHaveAttribute('aria-hidden', 'true');
+      await expect(icon.getBoundingClientRect().height).toBe(14);
+      tags.push(tag);
+    }
+  }
+  return tags;
+}
+
+/** The line on an opened replayed item: there once, word for word, in its look, its icon hidden. */
+export async function expectRecordedNote(root: HTMLElement): Promise<HTMLElement> {
+  const note = one(root, '.cd-recorded-note');
+  await expect(note).toHaveTextContent(RECORDED_NOTE);
+  expectComputed(note, SPEC.recordedNote);
+  await expect(one(note, 'svg')).toHaveAttribute('aria-hidden', 'true');
+  return note;
+}
+
+/** "Includes recorded history": a link to the ledger's explanation, in its quiet look. */
+export async function expectRecordedLink(link: HTMLElement, href: string): Promise<void> {
+  await expect(link).toHaveAccessibleName('Includes recorded history');
+  await expect(link).toHaveAttribute('href', href);
+  expectComputed(link, SPEC.recordedLink);
+}
+
+/** The footer at the window's foot, 20 px up, as the recorded-history boards draw it on a short page. */
+export async function expectFooterAtFoot(root: HTMLElement): Promise<void> {
+  const footer = one(root, '[data-ds="concept-footer"]');
+  await expect(Math.round(window.innerHeight - footer.getBoundingClientRect().bottom), 'the footer 20 px over the window foot').toBe(20);
 }
 
 /** Claude's words in serif, every visitor bubble in its fill, every card in its look. */
