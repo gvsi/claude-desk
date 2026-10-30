@@ -41,7 +41,8 @@ export const LEADERBOARD: readonly Tau3Row[] = [
   { model: 'Grok 4 fast', released: '2025-09-19', score: 15.7 },
   { model: 'Gemini 2.5 Pro', released: '2025-06-17', score: 13.7 },
   { model: 'Grok 4.1 fast', released: '2025-11-19', score: 13.1 },
-  { model: 'GPT-5.2 (a second configuration)', released: '2025-12-11', score: 12.6 },
+  // The leaderboard lists GPT-5.2 twice, in two configurations, under the same name.
+  { model: 'GPT-5.2', released: '2025-12-11', score: 12.6 },
   { model: 'GLM-5', released: '2026-02-11', score: 9.8 },
   { model: 'Qwen3.5-397B-A17B', released: '2026-02-16', score: 9.8 },
 ];

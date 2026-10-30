@@ -31,6 +31,40 @@ function daysFrom(date: Date, iso: string): number {
 }
 
 describe('the τ³-Banking chart data', () => {
+  it('leaderboard_rows_keep_their_listed_names', () => {
+    // Every pass^1 row, in the leaderboard's order, under the name it lists: GPT-5.2 appears twice, once per
+    // configuration, under the same name.
+    expect(LEADERBOARD.map((row) => `${row.model} ${row.score}`)).toEqual([
+      'Qwen 3.8 Max 55.2',
+      'Claude Opus 5 48.7',
+      'Grok 4.5 47.9',
+      'GPT-5.6-sol 46.9',
+      'GPT-5.5 44.6',
+      'Muse Spark 1.1 40.5',
+      'Claude Opus 4.7 40.2',
+      'Claude Opus 4.8 39.7',
+      'Claude Fable 5 39.7',
+      'GPT-5.4 39.4',
+      'Kimi K3 37.1',
+      'GLM-5.2 37.1',
+      'GPT-5.2 32.2',
+      'Gemini 3 Flash 27.3',
+      'Claude Opus 4.6 27.3',
+      'Gemini 3.1 Pro Preview 26',
+      'Claude Sonnet 4.5 25.3',
+      'Inkling 25',
+      'Claude Opus 4.5 24.7',
+      'Gemini 3 Pro 18',
+      'Grok 4.2 18',
+      'Grok 4 fast 15.7',
+      'Gemini 2.5 Pro 13.7',
+      'Grok 4.1 fast 13.1',
+      'GPT-5.2 12.6',
+      'GLM-5 9.8',
+      'Qwen3.5-397B-A17B 9.8',
+    ]);
+  });
+
   it('fits_cross_the_bar_when_the_text_says', () => {
     const claude = LEADERBOARD.filter((row) => row.model.startsWith('Claude '));
     const opus = claude.filter((row) => row.model.startsWith('Claude Opus '));
