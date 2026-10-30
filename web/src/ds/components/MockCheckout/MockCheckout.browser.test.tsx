@@ -153,16 +153,36 @@ it('a_page_that_opens_closed_leaves_focus_alone', () => {
   expect(container.contains(document.activeElement)).toBe(false);
 });
 
-it('focus_elsewhere_on_the_page_stays_there', () => {
+it('focus_elsewhere_on_the_page_stays_there', async () => {
   // The link expires while the visitor is somewhere else on the page: focus stays where it is.
   const elsewhere = document.createElement('button');
   elsewhere.textContent = 'Elsewhere';
   document.body.append(elsewhere);
   try {
-    const { update } = render();
+    const { container, update } = render();
+    const title = () => container.querySelector('h1');
     elsewhere.focus();
     update({ state: 'expired' });
     expect(document.activeElement).toBe(elsewhere);
+
+    // Nothing has focus when the link expires: focus stays with the page, and the title doesn't
+    // take it, since focus was never in the card.
+    update({ state: 'issued' });
+    elsewhere.blur();
+    expect(document.activeElement).toBe(document.body);
+    update({ state: 'expired' });
+    expect(document.activeElement).toBe(document.body);
+    expect(title()).not.toBe(document.activeElement);
+
+    // Focus was in the card, then left it for nothing before the link expired: the same.
+    update({ state: 'issued' });
+    const pay = button(container, `Pay ${AMOUNT}`);
+    pay.focus();
+    pay.blur();
+    await Promise.resolve();
+    expect(document.activeElement).toBe(document.body);
+    update({ state: 'expired' });
+    expect(document.activeElement).toBe(document.body);
   } finally {
     elsewhere.remove();
   }

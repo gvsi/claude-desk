@@ -132,11 +132,44 @@ export function MockCheckout({
   const nameOnCard = customerName?.trim();
   const finalLine = final === 'cancelled' && cancelReason === 'rules_changed' ? copy.cancelledRulesChanged : copy.final[final];
 
-  // When the link closes while the page is open, the buttons go with it. If focus was in the
-  // card, it would fall to the page, so the card's title takes it instead; the result region
-  // reads the new line out, so focus doesn't read it a second time. Focus anywhere else on the
-  // page stays where it is.
+  // Whether focus is in the checkout, kept from its own focus events. Focus that leaves for
+  // another element is out, and so is focus that leaves for nothing while the element it left stays
+  // on the page. A focused button that the closing link takes away leaves for nothing too, but it
+  // is off the page by the time that is checked, so focus still counts as in; so does focus whose
+  // window went to the background, as the element keeps it.
   const rootRef = useRef<HTMLDivElement>(null);
+  const focusInside = useRef(false);
+  useEffect(() => {
+    const page = rootRef.current;
+    if (!page) return;
+    const onFocusIn = () => {
+      focusInside.current = true;
+    };
+    const onFocusOut = (event: FocusEvent) => {
+      const next = event.relatedTarget;
+      if (next instanceof Node) {
+        focusInside.current = page.contains(next);
+        return;
+      }
+      const left = event.target;
+      queueMicrotask(() => {
+        if (left instanceof Node && left.isConnected && !page.contains(page.ownerDocument.activeElement)) {
+          focusInside.current = false;
+        }
+      });
+    };
+    page.addEventListener('focusin', onFocusIn);
+    page.addEventListener('focusout', onFocusOut);
+    return () => {
+      page.removeEventListener('focusin', onFocusIn);
+      page.removeEventListener('focusout', onFocusOut);
+    };
+  }, []);
+
+  // When the link closes while the page is open, the buttons go with it. If focus was in the
+  // checkout, it would fall to the page, so the card's title takes it instead; the result region
+  // reads the new line out, so focus doesn't read it a second time. Focus anywhere else, or on
+  // nothing when it wasn't in the checkout, stays where it is.
   const titleRef = useRef<HTMLHeadingElement>(null);
   const wasOpen = useRef(open);
   useEffect(() => {
@@ -145,7 +178,8 @@ export function MockCheckout({
     const page = rootRef.current;
     if (!closedHere || !page) return;
     const active = page.ownerDocument.activeElement;
-    if (active === null || active === page.ownerDocument.body || page.contains(active)) titleRef.current?.focus();
+    const fellToThePage = active === null || active === page.ownerDocument.body;
+    if (page.contains(active) || (fellToThePage && focusInside.current)) titleRef.current?.focus();
   }, [open]);
 
   return (
