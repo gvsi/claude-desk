@@ -184,6 +184,8 @@ export const Default: Story = {
 
     // things_to_try_in_order: four items under their heading, each title with its detail.
     await expect(within(dialog).getByRole('heading', { level: 3, name: 'Things to try' })).toBeVisible();
+    // list_role_survives_unstyled_markers: Safari announces the list only with role="list".
+    await expect(within(dialog).getByRole('list')).toHaveAttribute('role', 'list');
     const items = within(within(dialog).getByRole('list')).getAllByRole('listitem');
     await expect(items.map((item) => within(item).getByText(/./, { selector: '.cd-intro__thing-title' }).textContent)).toEqual(
       args.thingsToTry.map((thing) => thing.title),

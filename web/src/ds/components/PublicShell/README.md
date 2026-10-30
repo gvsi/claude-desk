@@ -52,6 +52,15 @@ The shell is an inline-size container, so it lays out by its own width, not the 
 - Standalone (the default), the shell is the page: the header is the `banner`, the chat is the `main` region, the about column is a `complementary` region, and the business's name is the page's `h1`.
 - With `footer={false}` the shell sits inside an owner screen that has its own landmarks and footer. The footer is left out, the header and chat are plain blocks, the business's name is a paragraph, and the about column is a region named "About {name}".
 
+## The brand header on its own
+
+`PublicBrandHeader`, in this folder and exported from the package, is the shell's brand header as a component of its own: the shell draws it, and a public page without a chat, such as `/d/:slug/agents`, draws it over its own title.
+
+- It takes `brand`, `language` and `openStatus` as the shell does, and maps the brand to its `--brand-*` properties with the same checks.
+- `landmark` (default `true`) makes it the page's `banner`; `false` inside an owner screen.
+- `nameAsHeading` (default `true`) makes the business's name the page's `h1`. A page with its own title passes `false`, so the name is a line and the page keeps one `h1`.
+- It is its own inline-size container, so its 16 px gutters below 720 px and its status line under the name below 640 px follow its own width, inside the shell or on a page of its own.
+
 ## What the consumer provides
 
 - `brand` from the kernel-served `PublicDesk`, through the screen's mapping:

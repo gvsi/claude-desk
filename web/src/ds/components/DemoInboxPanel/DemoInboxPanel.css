@@ -18,6 +18,14 @@
   margin: 0;
 }
 
+/* The title with a control at the right of its line, such as a sheet's Close, centered on it. */
+.cd-demo-inbox__head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-12);
+}
+
 .cd-demo-inbox__subtitle,
 .cd-demo-inbox__empty {
   color: var(--text-secondary);

@@ -45,7 +45,7 @@ describe('assertCleanCopy', () => {
     );
     expect(check('<p>Recibido, ÁREA lista</p>')).toThrow(/all caps "ÁREA"/);
     expect(check('<p>A McDONALD visit</p>')).toThrow(/all caps "DONALD"/);
-    for (const acronym of ['I', 'AI', 'PDF', 'QR', 'CPA', 'ZIP', 'SMS', 'USD']) {
+    for (const acronym of ['I', 'AI', 'PDF', 'QR', 'CPA', 'ZIP', 'SMS', 'USD', 'RFC', 'JSON']) {
       expect(check(`<p>About the ${acronym} here</p>`)).not.toThrow();
     }
     expect(check('<p>I can send both PDFs by SMS.</p>')).not.toThrow();
@@ -87,6 +87,17 @@ describe('assertCleanCopy', () => {
     expect(check('<div data-copy="user"><span>¡Hola!</span></div>')).not.toThrow();
     // The exemption covers only the marked words, not the interface around them.
     expect(check('<div><p data-copy="user">Thanks!</p><p>Sent!</p></div>')).toThrow(/"Sent!"/);
+  });
+
+  it('code_is_shown_as_written', () => {
+    // An address, a request or a key is machine text: it reads as it is, capitals and all.
+    expect(check('<pre data-copy="code">POST /api/a2a/rivera\nX-Agent-Key-Id: demo-7f3a2c</pre>')).not.toThrow();
+    expect(check('<code data-copy="code">POST /api/a2a/rivera HTTP/1.1</code>')).not.toThrow();
+    // The same words outside code are interface copy, and their capitals fail.
+    expect(check('<p>POST /api/a2a/rivera HTTP/1.1</p>')).toThrow(/all caps "POST", "HTTP"/);
+    // Arrows are a design rule, so code gets no pass for them, and the label around it none at all.
+    expect(check('<code data-copy="code">a -> b</code>')).toThrow(/arrow in text/);
+    expect(check('<div><code data-copy="code">POST</code><p>COPY KEY</p></div>')).toThrow(/all caps "COPY", "KEY"/);
   });
 
   it('ignores_aria_hidden_subtrees', () => {

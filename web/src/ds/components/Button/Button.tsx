@@ -1,6 +1,7 @@
 import type { KeyboardEvent, MouseEvent, ReactNode } from 'react';
 
 import { Icon } from '../../icons/index.tsx';
+import { Spinner } from './Spinner.tsx';
 
 import './Button.css';
 
@@ -10,12 +11,7 @@ export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'dang
  * A spinner in place of the label while busy, drawn only: the label still names the button. A
  * faint ring with a quarter arc on it, both in the busy label color, turned by the stylesheet.
  */
-const BUSY_SPINNER = (
-  <svg className="cd-button__spinner" viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false">
-    <circle cx="8" cy="8" r="6" stroke="currentColor" strokeOpacity="0.3" strokeWidth="2" />
-    <path d="M8 2a6 6 0 0 1 6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-  </svg>
-);
+const BUSY_SPINNER = <Spinner className="cd-button__spinner" />;
 
 interface ButtonBaseProps {
   /**

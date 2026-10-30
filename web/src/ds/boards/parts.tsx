@@ -12,6 +12,7 @@ import { AgentMessage } from '../components/AgentMessage/AgentMessage.tsx';
 import { ApprovalCard } from '../components/ApprovalCard/ApprovalCard.tsx';
 import { ClaudeMessage } from '../components/ClaudeMessage/ClaudeMessage.tsx';
 import { ConceptFooter } from '../components/ConceptFooter/ConceptFooter.tsx';
+import { Mark, Wordmark } from '../components/Mark/Mark.tsx';
 import { Greeting } from '../components/Greeting/Greeting.tsx';
 import { SectionHeader } from '../components/SectionHeader/SectionHeader.tsx';
 import { MarginNote } from '../components/MarginNote/MarginNote.tsx';
@@ -33,6 +34,7 @@ import { Chip } from '../components/Chip/Chip.tsx';
 import { PageHeader } from '../components/PageHeader/PageHeader.tsx';
 import { SegmentedControl } from '../components/SegmentedControl/SegmentedControl.tsx';
 import { ConversationListItem } from '../components/ConversationListItem/ConversationListItem.tsx';
+import { PublicBrandHeader } from '../components/PublicShell/PublicBrandHeader.tsx';
 import type { PublicBrand, PublicOpenStatus } from '../components/PublicShell/PublicShell.tsx';
 import { ReviewerBar } from '../components/ReviewerBar/ReviewerBar.tsx';
 import { Sidebar, initialsOf, type NavCount, type NavKey, type SidebarHrefs } from '../components/Sidebar/Sidebar.tsx';
@@ -789,5 +791,79 @@ export function SafetyPage({
     <RiveraFrame current="safety" counts={counts} fill={history}>
       {history ? <div className="board-page">{page}</div> : page}
     </RiveraFrame>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Setup
+
+/**
+ * The setup interview's page (plan 04, Task 12): a bar with the mark, the wordmark and the business,
+ * "Save and exit" at its right, then one 720 px column and the footer at the window's foot. The
+ * step list in the bar is `Steps`, which comes with the Connectors and rules change, so it is left
+ * out here.
+ */
+export function SetupFrame({ business, children }: { business: string; children: ReactNode }) {
+  return (
+    <div className="board-setup">
+      <header className="board-setup__bar">
+        <span className="board-setup__brand">
+          <Mark size={16} />
+          <Wordmark beta />
+        </span>
+        <span className="board-setup__business cd-type-control" data-copy="user">
+          {business}
+        </span>
+        <span className="board-setup__end">
+          <Button variant="ghost" onClick={fn()}>
+            Save and exit
+          </Button>
+        </span>
+      </header>
+      <main className="board-setup__main">
+        <div className="board-setup__column">{children}</div>
+        <ConceptFooter />
+      </main>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// The agents page
+
+/**
+ * `/d/:slug/agents` (plan 04, Task 11): the public page's brand header on its own, then one 760 px
+ * column with the way back to the chat, the page's title, its line about who answers, the page's
+ * cards, and the footer at the window's foot.
+ */
+export function AgentsFrame({ brand, children }: { brand: PublicBrand; children: ReactNode }) {
+  return (
+    <div className="board-agents">
+      <PublicBrandHeader brand={brand} language="en" nameAsHeading={false} />
+      <main className="board-agents__main">
+        <p className="board-agents__back cd-type-body">
+          <TextLink href="#chat">Back to the chat</TextLink>
+        </p>
+        <h1 className="board-agents__title cd-type-page-title">
+          <span data-copy="user">{brand.name}</span> for AI agents
+        </h1>
+        <p className="board-agents__disclosure cd-type-caption">
+          Every answer here comes from Claude, an AI, working under <span data-copy="user">{brand.name}</span>’s rules.
+        </p>
+        <div className="board-agents__cards">{children}</div>
+        <ConceptFooter />
+      </main>
+    </div>
+  );
+}
+
+/** A card on the agents page: its title, an optional line under it, then what it holds. */
+export function AgentsCard({ title, lead, children }: { title: string; lead?: string; children: ReactNode }) {
+  return (
+    <Card as="section" label={title} padding={16}>
+      <h2 className="board-agents__card-title cd-type-section">{title}</h2>
+      {lead === undefined ? null : <p className="board-agents__card-lead cd-type-meta">{lead}</p>}
+      <div className="board-agents__card-body">{children}</div>
+    </Card>
   );
 }

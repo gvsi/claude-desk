@@ -1,0 +1,83 @@
+/* SafetyCheckRow: laid out as a SituationRow is. A hairline over each row, padded 14 px top and
+   bottom; the trick at the left, the outcome and its reason in a 300 px column at the right.
+   Narrow, the outcome drops under the trick. Each row is revealed motion-stagger after the one
+   before it. */
+
+.cd-safety-check-row {
+  container: cd-safety-check-row / inline-size;
+  box-sizing: border-box;
+  min-width: 0;
+  padding: var(--space-14) 0;
+  border-top: 1px solid var(--line-hairline);
+  animation: cd-safety-check-reveal var(--motion-base) var(--motion-ease) both;
+  animation-delay: calc(var(--motion-stagger) * var(--cd-safety-check-index, 0));
+}
+
+.cd-safety-check-row p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.cd-safety-check-row__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  column-gap: var(--space-24);
+  row-gap: var(--space-8);
+  align-items: start;
+}
+
+.cd-safety-check-row__trick,
+.cd-safety-check-row__result {
+  min-width: 0;
+}
+
+/* Two classes, so the weight wins over .cd-type-control whatever order the stylesheets load in. */
+.cd-safety-check-row .cd-safety-check-row__label {
+  color: var(--text-primary);
+  font-weight: 520;
+}
+
+.cd-safety-check-row__attempt,
+.cd-safety-check-row__checkpoint,
+.cd-safety-check-row__reason {
+  color: var(--text-secondary);
+}
+
+.cd-safety-check-row .cd-safety-check-row__attempt,
+.cd-safety-check-row .cd-safety-check-row__reason {
+  margin-top: var(--space-2);
+}
+
+.cd-safety-check-row .cd-safety-check-row__checkpoint {
+  margin-top: var(--space-4);
+}
+
+.cd-safety-check-row__outcome {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  color: var(--text-primary);
+}
+
+.cd-safety-check-row__outcome > .cd-status-dot {
+  flex: none;
+}
+
+@keyframes cd-safety-check-reveal {
+  from {
+    opacity: 0;
+  }
+}
+
+@container cd-safety-check-row (max-width: 559.98px) {
+  .cd-safety-check-row__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Reduced motion: every row is there at once. */
+@media (prefers-reduced-motion: reduce) {
+  .cd-safety-check-row {
+    animation: none;
+  }
+}
