@@ -542,7 +542,7 @@ The stories show the decisions signed with the boards: receipts attached 8px und
 
 ### Task 6: Visual check of the verification, safety and switcher boards
 
-The Connectors and rules boards, which replace the earlier rules and settings boards, are checked with Tasks 2 and 3, from their own signed boards.
+The Connectors and rules boards, which replace the earlier rules and settings boards, are checked in Task 6b, from their own signed boards.
 
 **Files:**
 - Create: `web/src/ds/boards/ChenVerify.stories.tsx`, `Safety.stories.tsx`, `SafetyRecord.stories.tsx`, `Switcher.stories.tsx`
@@ -560,72 +560,65 @@ The Connectors and rules boards, which replace the earlier rules and settings bo
 
 ### Task 6b: Visual check of the rules and connectors boards
 
-The same method as Tasks 4–6 for the `N-Conn-*` boards; the verification, safety and switcher boards are checked in Task 6. The text below predates that split and is trimmed to the rules and connectors boards when this task runs.
+The same method as Tasks 4–6 for the eighteen Connectors and rules boards (N-Conn-01-Rules to N-Conn-16-Phone-Rules, with N-Conn-07b and N-Conn-11b), each rebuilt from the components and fixtures of Tasks 2 and 3. Where a render differs from this plan or a spec row, the render wins: the story asserts the render's value, and `web/src/ds/reference/README.md` records both and why. Contracts still win over board copy, as each story's `canvasNote` says. The mode switch, money-limit and simulated-change boards are checked when those pieces are built.
 
-
-The connectors boards are drawn as AGENTS.md asks, at a 14-inch laptop's width or a phone's. They are rendered at a 1512×982 viewport (N-Conn-16-Phone-Rules at 390×844), and a board taller than one screen is captured at full height. The Chen verify, Safety and Switcher boards stay at 1280×820.
+The connectors boards are drawn as AGENTS.md asks, at a 14-inch laptop's width or a phone's: they are rendered 1512 px wide (N-Conn-16-Phone-Rules 390 px wide) and captured at full height. The other boards stay at 1280×820.
 
 **Files:**
-- Create: `web/src/ds/boards/ChenVerify.stories.tsx`, `Safety.stories.tsx`, `Switcher.stories.tsx`, `ConnectorsHub.stories.tsx`, `ConnectorPages.stories.tsx`, `AddConnector.stories.tsx`, `ToolChanged.stories.tsx`
-- Modify: `web/src/ds/reference/README.md`, `web/src/ds/reference/boards.test.ts`, `web/.storybook/preview.tsx` (a `board` viewport, 1512×982)
+- Create: `web/src/ds/boards/{ConnectorsHub,ConnectorPages,AddConnector,ToolChanged}.stories.tsx`
+- Modify: `web/src/ds/reference/README.md`, `web/src/ds/reference/boards.test.ts`, `web/src/ds/boards/{parts.tsx,spec.ts,boards.css}`, `web/.storybook/preview.tsx` (a `board` viewport, 1512×982), and the components whose spacing a render corrects, each README saying what changed. `AppShell`'s phone top bar is among them: N-Conn-16-Phone-Rules is the first signed board to draw it.
 
-**Connectors board spec** (from the board sources; each connectors board story's play asserts the rows that apply with `expectComputed`, with Task 4's spec rows):
+**Connectors board spec** (read off the renders; each connectors board story's play asserts the rows that apply with `expectComputed`, with Task 4's spec rows):
 
 | Element | Expected |
 |---|---|
-| Connector section | Task 4's card background, border and radius 12px; no padding of its own (`overflow: hidden`) |
+| Connector section | Task 4's card background, border and radius 12px; no padding of its own (the header and the last row round their own corners, so nothing is clipped) |
 | Section header link | padding 14px 16px; icon tile 36px, radius 8px, background `rgba(250, 249, 245, 0.1)`, or `rgb(255, 255, 255)` behind a brand mark |
 | Tool row | padding 12px 16px; top border 1px `rgba(250, 249, 245, 0.12)`; name weight 520 |
 | Outcome menu button | height 32px; border 1px `rgba(250, 249, 245, 0.22)`; radius 8px; background `rgba(0, 0, 0, 0)` |
 | Change tag | width 64px; border 1px `rgba(250, 249, 245, 0.22)`; fully rounded |
 | Steps | circle 22px; the current one `rgb(239, 236, 228)` |
 | Quoted definition | padding 10px 12px; border 1px `rgba(250, 249, 245, 0.12)`; radius 8px; background `rgb(28, 27, 25)`; 12px/18px mono; `white-space: pre-wrap` |
-| Ask Claude panel | width 400px; left border 1px `rgba(250, 249, 245, 0.12)` |
+| Ask Claude panel | width 400px; left border 1px `rgba(250, 249, 245, 0.12)`; at the window's right edge, the page narrowed by its width |
 
 - [ ] **Step 1: Write the failing tests and the board stories.**
   - `boards.test.ts`:
-    - Adds `every_reference_board_has_a_board_story`: each `REFERENCE_BOARDS` entry is named by a `Boards/*` story.
-    - Changes `every_reference_board_has_a_render`: an `N-Conn-*` render is 1512 px wide and at least 982 tall; N-Conn-16-Phone-Rules is 390 wide and at least 844 tall; every other board stays 1280×820.
-  - Stories, with the applicable Task 4 spec rows:
-    - Chen verify shows `VerifiedLine` with "Simulated verification" and a `document_link` card.
-    - Safety shows the attempts list and one `FullTrace`.
-    - Switcher shows the menu open over Today, listing only businesses and "New business" (`canvasNote`: the board's two columns become one menu of businesses; its Desks, New Desk and their status dots are in the sidebar's Desk picker or left out).
-  - The connectors stories, each at the `board` viewport (the phone board's at `phone`), with `parameters.canvas` its board. Every Rules page has `PageHeader` "Rules", subtitle "What Claude can do on this Desk, where each tool comes from, and your rules for it.", and "Add a connector". Its owner `Composer` reads "Ask Claude to change a rule or a connector", with the helper "Claude shows you the change and example situations before anything applies.", above the board's chips.
+    - `every_reference_board_has_a_board_story` (Task 6) fails until each `N-Conn-*` board is named by exactly one `Boards/*` story.
+    - `every_reference_board_has_a_render`: an `N-Conn-*` render is 1512 px wide and at least 982 tall; N-Conn-16-Phone-Rules is 390 wide and at least 844 tall; every other board stays 1280×820.
+  - The stories, one per board, each at the `board` viewport (the phone board's at `phone`), with `parameters.canvas` its board. Every Rules page has `PageHeader` "Rules", subtitle "What Claude can do on this Desk, where each tool comes from, and your rules for it.", and "Add a connector". Its owner `Composer` reads "Ask Claude to change a rule or a connector", with the helper "Claude shows you the change and example situations before anything applies.", above the board's chips. A tool's page has the same composer, "Ask Claude to change a rule for {tool}", with that tool's chips.
 
 | Story | Board | Shows |
 |---|---|---|
-| `Boards/Rules and connectors` (`ConnectorsHub`) | N-Conn-01-Rules | Rivera's Rules page: `ConnectorList` with six built-in sections and Stripe, then `AlwaysOnList` |
-| `Boards/Rules on a phone` (`ConnectorsHub`) | N-Conn-16-Phone-Rules | the same at 390 px: sections stacked, each tool's outcome kept, the composer on top (`canvasNote`: the board's placeholder is shorter; the composer keeps one placeholder at every width) |
-| `Boards/Google Calendar added` (`ConnectorsHub`) | N-Conn-11-GCal-Done | Rivera's Rules page with an info `Notice` ("Google Calendar is on. Claude now checks when you're busy before offering times, and never sees what an event is.") and Google Calendar's section with "Added just now" |
-| `Boards/Ask Claude to add a connector` (`ConnectorsHub`) | N-Conn-12-Chat | Chen's Rules page with `AskClaudePanel`: the owner's words, Claude's serif reply and `ConnectorOfferCard` "Review and add" for Payments |
-| `Boards/Payments` (`ConnectorPages`) | N-Conn-02-Payments | `Breadcrumb` Rules / Payments; `ConnectorHeader` "On"; "Tools" with the caption "Each tool with every rule that covers it. Open a tool for its own page."; a `ToolRulesCard` per tool, the shared card under both; `ConnectionPanel` "Turn off Payments" |
-| `Boards/Stripe` (`ConnectorPages`) | N-Conn-03-Stripe | `ConnectorHeader` "Connected"; a `ToolRulesCard` per tool; `ConnectionPanel` with the connection details and "Disconnect" |
-| `Boards/Google Calendar` (`ConnectorPages`) | N-Conn-04-GoogleCalendar | `ConnectorHeader` with its promise; one tool; the connection and "Disconnect" (`canvasNote`: catalog-only in the demo) |
-| `Boards/Refund` (`ConnectorPages`) | N-Conn-05-Refund | `Breadcrumb` Rules / Stripe / Refund; `ToolPageHeader` "On · Definition unchanged"; "Your rules for refund" (`ToolRulesCard`, no header); the composer "Ask Claude to change a rule for refund" with its chips; `RecentRequests` |
-| `Boards/Quote` (`ConnectorPages`) | N-Conn-06-Quote | the same for Quote, with no definition note (`canvasNote`: a built-in tool has no pinned definition; the board's chips repeat the Refund page's, so the story's are the Quote page's own) |
-| `Boards/Add a connector, coming soon` (`AddConnector`) | N-Conn-07b-Add-Picker-ComingSoon | Chen's Rules page under `ConnectorPicker`: Payments to add, Google Calendar coming soon, Stripe to connect |
-| `Boards/Add a connector` (`AddConnector`) | N-Conn-07-Add-Picker | Rivera's Rules page under the picker, every built-in added and Google Calendar to connect (`canvasNote`: catalog-only in the demo) |
-| `Boards/Connect Google Calendar` (`AddConnector`) | N-Conn-08-GCal-SignIn | `ConnectorSignIn` over Rivera's Rules page, step 2 of 4 |
-| `Boards/Review Google Calendar` (`AddConnector`) | N-Conn-09-GCal-Review | `Breadcrumb`, `Steps` at 3 of 4, `ConnectorReview` with "See when you're free" at "Ask me first", covered by the Bookings rule |
-| `Boards/Turn on Google Calendar` (`AddConnector`) | N-Conn-10-GCal-Confirm | `Steps` at 4 of 4, `PageHeader` "Turn on Google Calendar" ("Here's exactly what changes on your Desk. Nothing changes until you confirm."), `ChangeReview` with "Confirm and turn on" and "Back" |
-| `Boards/Review Payments` (`AddConnector`) | N-Conn-11b-Documents-Review | Chen adding Payments: `Breadcrumb` Rules / Payments, `Steps` "Choose", "Review tools", "Confirm" at 2 of 3, `ConnectorReview` with both tools at "Ask me first" (the board keeps its name from when it showed Documents) |
-| `Boards/A tool changed, Today` (`ToolChanged`) | N-Conn-13-Changed-Today | Today with `ToolChangedItem` first under "Needs you", then the seeded held quote as its `ApprovalCard` (`canvasNote`: the board draws the hold as a short row; held requests keep the signed Today's `ApprovalCard`) |
-| `Boards/A tool changed, review` (`ToolChanged`) | N-Conn-14-Changed-Review | the Refund page with `ToolPageHeader` "Off until you review a change" and `ToolReviewCard` above its rules |
-| `Boards/A tool changed, after` (`ToolChanged`) | N-Conn-15-Changed-After | "On · Definition reviewed today" and the info `Notice` |
+| `Boards/Rules` › Rules and connectors | N-Conn-01-Rules | Rivera's Rules page: `ConnectorList` with six built-in sections and Stripe, then `AlwaysOnList` |
+| `Boards/Rules` › Rules on a phone | N-Conn-16-Phone-Rules | the same at 390 px: the title with "Add a connector" beside it, the composer alone on top (no subtitle, helper or chips), sections stacked, each tool's outcome on its own line (`canvasNote`: the board's placeholder is shorter; the composer keeps one placeholder at every width) |
+| `Boards/Rules` › Google Calendar added | N-Conn-11-GCal-Done | Rivera's Rules page with an info `Notice` ("Google Calendar is on. Claude asks you first before it checks when you're busy, and never sees what an event is.") and Google Calendar's section last, with "Added just now" |
+| `Boards/Rules` › Ask Claude to add a connector | N-Conn-12-Chat | Chen's Rules page with `AskClaudePanel`: the owner's words, Claude's serif reply and `ConnectorOfferCard` "Review and add" for Payments |
+| `Boards/Connector and tool pages` › Payments | N-Conn-02-Payments | `Breadcrumb` Rules / Payments; `ConnectorHeader` "On"; "Tools" with the caption "Each tool with every rule that covers it. Open a tool for its own page."; a `ToolRulesCard` per tool, the shared rule first under both; `ConnectionPanel` "Turn off Payments" |
+| `Boards/Connector and tool pages` › Stripe | N-Conn-03-Stripe | `ConnectorHeader` "Connected"; a `ToolRulesCard` per tool; `ConnectionPanel` with the connection details and "Disconnect" |
+| `Boards/Connector and tool pages` › Google Calendar | N-Conn-04-GoogleCalendar | `ConnectorHeader` with its promise; one tool; the connection and "Disconnect" (`canvasNote`: catalog-only in the demo) |
+| `Boards/Connector and tool pages` › Refund | N-Conn-05-Refund | `Breadcrumb` Rules / Stripe / Refund; `ToolPageHeader` "On · Definition unchanged"; "Your rules for refund" (`ToolRulesCard`, no header); the composer with its chips; `RecentRequests` |
+| `Boards/Connector and tool pages` › Quote | N-Conn-06-Quote | the same for Quote, with no definition note (`canvasNote`: a built-in tool has no pinned definition; the board's chips repeat the Refund page's, so the story's are the Quote page's own) |
+| `Boards/Add a connector` › Add a connector, coming soon | N-Conn-07b-Add-Picker-ComingSoon | Chen's Rules page under `ConnectorPicker`: Payments to add, Google Calendar coming soon, Stripe to connect |
+| `Boards/Add a connector` › Add a connector | N-Conn-07-Add-Picker | Rivera's Rules page under the picker, every built-in added and Google Calendar to connect (`canvasNote`: catalog-only in the demo; the board draws Chen's picker, and the Google Calendar flow is Rivera's) |
+| `Boards/Add a connector` › Connect Google Calendar | N-Conn-08-GCal-SignIn | `ConnectorSignIn` over Rivera's Rules page, step 2 of 4 |
+| `Boards/Add a connector` › Review Google Calendar | N-Conn-09-GCal-Review | `Breadcrumb`, `Steps` at 3 of 4, `ConnectorReview` with "See when you're free" at "Ask me first" |
+| `Boards/Add a connector` › Turn on Google Calendar | N-Conn-10-GCal-Confirm | `Steps` at 4 of 4, `PageHeader` "Turn on Google Calendar" ("Here's exactly what changes on your Desk. Nothing changes until you confirm."), `ChangeReview` with "Confirm and turn on" and "Back" |
+| `Boards/Add a connector` › Review Payments | N-Conn-11b-Payments-Review | Chen adding Payments: `Breadcrumb` Rules / Payments, `Steps` "Choose", "Review tools", "Confirm" at 2 of 3, `ConnectorReview` with both tools at "Ask me first" |
+| `Boards/A tool changed` › A tool changed, Today | N-Conn-13-Changed-Today | Today with `ToolChangedItem` first under "Needs you", then the seeded held quote as its `ApprovalCard` (`canvasNote`: the board draws the hold as a short row; held requests keep the signed Today's `ApprovalCard`) |
+| `Boards/A tool changed` › A tool changed, review | N-Conn-14-Changed-Review | the Refund page with `ToolPageHeader` "Off until you review a change" and `ToolReviewCard` above its rules |
+| `Boards/A tool changed` › A tool changed, after | N-Conn-15-Changed-After | "On · Definition reviewed today" and the info `Notice` |
 
   - Each board story has `focus_order_is_logical`:
     - Rules pages: "Add a connector", the composer, its chips, then each section's header and rows in order, then the last "Add a connector".
-    - A board with a dialog: only the dialog's controls.
+    - A board with a dialog: only the dialog's controls, and Tab stays inside.
+    - A connector's or tool's page: the trail, each tool's link, its outcome menus and "Add a rule", then the composer and its chips, the recent requests, or the panel's button.
     - The review boards: the outcome menus, then "Turn it on".
     - The changed tool's review: "Turn back on", "Keep off", then the rules.
-- [ ] **Step 2: Run** `cd web && npx vitest run --project unit src/ds/reference && npx vitest run --project storybook src/ds/boards` → FAIL until the stories and fixes land.
-- [ ] **Step 3: Compare by eye** as in Task 4 Step 4.
-  - The Chen verify, Safety and Switcher boards at 1280×820.
-  - The connectors boards at `set viewport 1512 982` (N-Conn-16-Phone-Rules at `390 844`), with a full-page screenshot for a board taller than one screen, against `$DS_REFERENCE_DIR/<board>.png`.
-  - Then every board at 1440×900 and 390×844, with a keyboard walk.
-- [ ] **Step 4: Record** a README line per board (21 lines).
-- [ ] **Step 5: Run** `cd web && npm test && npm run typecheck` → PASS.
-- [ ] **Step 6: Commit** `git add web && git commit -m "test(ds): check the verification, safety, switcher, rules and connectors boards against the design canvas"`.
+- [ ] **Step 2: Run** `cd web && npx vitest run --project unit src/ds/reference && npx vitest run --project storybook src/ds/boards` → FAIL until the stories land.
+- [ ] **Step 3: Compare by eye** as in Task 4 Step 4, against `$DS_REFERENCE_DIR/<board>.png` at the render's size (`set viewport 1512 <height>`, N-Conn-16-Phone-Rules at 390), row by row and pixel by pixel; then at 1440×900 and 390×844, with a keyboard walk. Fix a delta in its component unless that would change another signed board, which waits for the project owner.
+- [ ] **Step 4: Record** in the README the connectors board spec, where the renders differ from this plan, and a line per board (18 lines).
+- [ ] **Step 5: Run** `cd web && npm test && npm run typecheck && npm run check:ds` → PASS.
+- [ ] **Step 6: Commit** `git add web && git commit -m "test(ds): check the rules and connectors boards against the design canvas"`.
 
 ### Task 7: Publish to the Design System artifact (first to cut)
 
