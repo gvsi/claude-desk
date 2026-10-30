@@ -233,6 +233,11 @@ export const Compact: Story = {
     await userEvent.click(menu);
     const sheet = canvas.getByRole('dialog', { name: 'Menu' });
     await expect(sheet).toBeVisible();
+    // menu_sheet_backdrop_is_the_scrim: the page behind the sheet is dimmed by the scrim at full
+    // strength, as it is behind Dialog and the Demo inbox sheet.
+    const backdrop = getComputedStyle(sheet, '::backdrop');
+    await expect(backdrop.backgroundColor).toBe('rgba(0, 0, 0, 0.5)');
+    await expect(backdrop.opacity).toBe('1');
     await expect(menu).toHaveAttribute('aria-expanded', 'true');
     await expect(within(sheet).getByRole('navigation', { name: 'Main' })).toBeVisible();
     await expect(pageNames(within(sheet).getByRole('navigation', { name: 'Main' }))).toEqual(PAGES);
