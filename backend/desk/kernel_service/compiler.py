@@ -245,11 +245,17 @@ def with_defaults(cards: Iterable[RuleCard], profiles: Iterable[ToolProfile]) ->
 
 ABOVE_MONEY_CAP = "above_money_cap"
 # Tools of the always-on baseline: verification codes go only to the contact on record, and no
-# rule can make a start ask, hold it or turn it off, so `validate_cards` refuses a card on one. The
-# presets' own card for it (auto, for anyone) is that behaviour itself; every preset and the seed
-# carry it and the API drafts it back with the rest, so that card is the one allowed (`_always_on`).
+# rule can make a start ask, hold it or turn it off, so `validate_cards` refuses a card that could
+# change one, on the tool or on one of its effects (`_changes_always_on`). The presets' own card
+# for it (auto, for anyone) is that behaviour itself; every preset and the seed carry it and the
+# API drafts it back with the rest, so that card is the one allowed on the tool (`_always_on`).
 ALWAYS_ON_TOOLS: frozenset[str] = frozenset({"native.start_verification"})
 ALWAYS_ON_CARDS: tuple[RuleCard, ...] = tuple(c for c in PRESETS["ask_first"] if c.applies_to in ALWAYS_ON_TOOLS)
+# Each always-on tool's effects, from its effect groups in the base schema: a card on one of them
+# covers the tool too.
+_ALWAYS_ON_EFFECTS: dict[str, frozenset[str]] = {
+    tool: frozenset(group["id"].removeprefix("effect:") for group in BASE_SCHEMA[""]["actions"][tool]["memberOf"])
+    for tool in sorted(ALWAYS_ON_TOOLS)}
 
 
 def _always_on(card: RuleCard) -> bool:
@@ -257,6 +263,25 @@ def _always_on(card: RuleCard) -> bool:
     the reason is the owner's words, which compile to nothing, and a carried card may come back
     reworded (as `desk.money_cap.lower_to_cap` allows)."""
     return any(card.model_copy(update={"reason": shipped.reason}) == shipped for shipped in ALWAYS_ON_CARDS)
+
+
+def _changes_always_on(card: RuleCard) -> str | None:
+    """The always-on tool `card` could change, if any: a card on the tool other than the presets'
+    own (`_always_on`), or a card on one of its effects that isn't an `auto` card ranked below
+    every one of the presets' own cards for it. A `never` or `ask` effect card would refuse or hold
+    the tool, and an `auto` one that outranks the presets' card (for a person or an agent) would
+    replace it for its principals with its own hours and review gate; one at the same rank is
+    refused too, to fail closed. With no preset card for the tool, every effect card on it is
+    refused."""
+    for tool in sorted(ALWAYS_ON_TOOLS):
+        if card.applies_to == tool:
+            if not _always_on(card):
+                return tool
+        elif _effect_of(card) in _ALWAYS_ON_EFFECTS[tool]:
+            shipped = [c for c in ALWAYS_ON_CARDS if c.applies_to == tool]
+            if card.mode != "auto" or not shipped or any(specificity(card) >= specificity(c) for c in shipped):
+                return tool
+    return None
 
 
 def above_money_cap(cards: Iterable[RuleCard], auto_money_cap_cents: int) -> list[RuleCard]:
@@ -272,9 +297,9 @@ def validate_cards(cards: Iterable[RuleCard], *, people: Collection[str], agent_
     """Plain reasons a set of owner cards can't be compiled at a version's money cap; empty means
     it can. Defaults are left out (`with_defaults` drops and derives them again). A reason names a
     card by its `card_id` only when that is safe to show, and never repeats the offending value;
-    an auto money card above the cap reads `<card>: above_money_cap: ...`, and a card on a tool
-    of the always-on baseline (`ALWAYS_ON_TOOLS`), other than the presets' own card for it, reads
-    `<card>: <tool>: ...`."""
+    an auto money card above the cap reads `<card>: above_money_cap: ...`, and a card that could
+    change a tool of the always-on baseline (`ALWAYS_ON_TOOLS`, `_changes_always_on`), on the tool
+    or on one of its effects, reads `<card>: <tool>: ...`."""
     cap = capped(auto_money_cap_cents)
     errors: list[str] = []
     seen: set[str] = set()
@@ -295,8 +320,8 @@ def validate_cards(cards: Iterable[RuleCard], *, people: Collection[str], agent_
         except ValueError:
             errors.append(f"{label}: the card doesn't meet the rule card checks")
             continue
-        if c.applies_to in ALWAYS_ON_TOOLS and not _always_on(c):
-            errors.append(f"{label}: {c.applies_to}: verification is always on, so no rule can change it")
+        if (tool := _changes_always_on(c)) is not None:
+            errors.append(f"{label}: {tool}: verification is always on, so no rule can change it")
         for field in ("applies_to", "person_id", "agent_key_id"):
             value = getattr(c, field)
             if value is not None and not CEDAR_STRING.fullmatch(value):

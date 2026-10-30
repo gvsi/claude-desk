@@ -7,6 +7,7 @@ visitor would get, not the text.
 
 import copy
 import hashlib
+import itertools
 import json
 import re
 from datetime import time
@@ -555,3 +556,65 @@ def test_the_shipped_verification_card_stays_as_it_is():
         changed = RuleCard.model_validate({**shipped.model_dump(), **change})
         assert errors(changed) == [f"{changed.card_id}: {ALWAYS_ON}"], change
         assert errors(*PRESETS["ask_first"], changed) != [], change
+
+
+AGENT = {"agent_key_id": "agent-key-1"}
+
+
+def test_no_effect_card_can_change_verification():
+    """`native.start_verification` has one effect, `send_message`, so a card on
+    `effect:send_message` covers it too. A `never` or `ask` one, in any scope, would refuse or
+    hold starts, and an `auto` one for a person or an agent outranks the presets' own card for
+    that principal, so its hours or review gate would hold their starts: each is refused with the
+    reason that names the tool, alone and beside the presets. An `auto` one for a wider group
+    ranks below the presets' card and stays, as the master plan's joint-coverage cards use it."""
+    def errors(*cards: RuleCard) -> list[str]:
+        return compiler.validate_cards(list(cards), people={"dana"}, agent_keys={AGENT["agent_key_id"]},
+                                       auto_money_cap_cents=TEST_CAP)
+
+    refused = [card("send", "effect:send_message", mode="never"),
+               card("send", "effect:send_message", mode="never", who="person", **DANA),
+               card("send", "effect:send_message", mode="ask"),
+               card("send", "effect:send_message", mode="ask", who="person", **DANA),
+               card("send", "effect:send_message", mode="ask", who="agent", **AGENT),
+               card("send", "effect:send_message", who="person", review=True, **DANA),
+               card("send", "effect:send_message", who="agent", hours=WEEKDAYS, **AGENT),
+               card("send", "effect:send_message", who="person", **DANA)]
+    for send in refused:
+        assert errors(send) == [f"send: {ALWAYS_ON}"], send
+        assert errors(*PRESETS["ask_first"], send) == [f"send: {ALWAYS_ON}"], send
+    kept = [card("send", "effect:send_message"),
+            card("send", "effect:send_message", who="verified", review=True),
+            card("send", "effect:send_message", who="record_owner", hours=WEEKDAYS),
+            card("private", "effect:private_data", mode="never", who="person", **DANA)]
+    for other in kept:
+        assert errors(*PRESETS["ask_first"], other) == [], other
+
+
+def test_an_effect_card_a_draft_may_hold_leaves_every_start_allowed():
+    """Over every mode, scope and gate of an `effect:send_message` card beside the presets, with
+    the real baseline: a card `validate_cards` accepts leaves every verification start allowed
+    (an anonymous or verified visitor, Dana, an agent; in and out of hours; the review passing,
+    failing or absent), and one it refuses is refused with the reason that names the tool."""
+    presets = list(PRESETS["ask_first"])
+    principals = ({}, {"verified": True}, DANA, {"kind": "Agent", **AGENT})
+    times = ({"dow": 1, "minute": 600}, {"dow": 6, "minute": 1320})
+    reviews = ({}, {"review": {"within_charter_bp": 10_000, "manipulation_bp": 0}},
+               {"review": {"within_charter_bp": 0, "manipulation_bp": 10_000}})
+    scopes = ({"who": "anyone"}, {"who": "verified"}, {"who": "record_owner"}, {"who": "person", **DANA},
+              {"who": "agent", **AGENT})
+    gates = ({}, {"review": True}, {"hours": WEEKDAYS})
+    sends = [card("send", "effect:send_message", mode="auto", **scope, **gate) for scope in scopes for gate in gates]
+    sends += [card("send", "effect:send_message", mode=mode, **scope) for mode in ("ask", "never") for scope in scopes]
+    accepted = 0
+    for send in sends:
+        errors = compiler.validate_cards([*presets, send], people={"dana"}, agent_keys={AGENT["agent_key_id"]},
+                                         auto_money_cap_cents=TEST_CAP)
+        if errors:
+            assert errors == [f"send: {ALWAYS_ON}"], send
+            continue
+        accepted += 1
+        for who, when, review in itertools.product(principals, times, reviews):
+            request = req("native.start_verification", recipient="verified_contact", **who, **when, **review)
+            assert decide_with([*presets, send], NATIVE, request) == "allow", (send, who, when, review)
+    assert accepted == 9      # auto for anyone, verified people or record owners, each plain, reviewed or in hours

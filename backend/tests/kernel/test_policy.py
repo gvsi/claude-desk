@@ -289,6 +289,29 @@ async def test_a_draft_with_a_card_on_verification_is_422(app, client, monkeypat
     assert (await drafted(client, desk, [*BOOK_AND_ASK_CHARGES, shipped])).version == 2
 
 
+async def test_a_draft_with_an_effect_card_over_verification_is_422(app, client, monkeypatch, caplog):
+    """A card on `effect:send_message` covers `native.start_verification` too: a `never` one for
+    anyone, an `ask` one for Dana, or an `auto` one for Dana behind the reviewer would refuse or
+    hold starts, so a draft holding one beside the presets' own card is refused whole as
+    `invalid_cards` before anything is proved or written. An `auto` one for anyone drafts."""
+    caplog.set_level(logging.INFO, logger="desk.kernel_service")
+    desk = await desk_with_tools(app)
+    runs = count_prover_runs(monkeypatch)
+    use_prover(monkeypatch, "desk_prove_slow_ok.sh")
+    [shipped] = compiler.ALWAYS_ON_CARDS
+    dana = {"who": "person", "person_id": desk.dana}
+    for send in (card("send", "effect:send_message", mode="never"),
+                 card("send", "effect:send_message", mode="ask", **dana),
+                 card("send", "effect:send_message", review=True, **dana)):
+        response = await post_draft(client, desk, [*BOOK_AND_ASK_CHARGES, shipped, send])
+        assert (response.status_code, response.json()) == (422, {"code": "invalid"}), send
+    assert draft_refusals(caplog) == ["invalid_cards"] * 3
+    assert runs == [] and [row.version for row in await versions(app, desk)] == [1]
+    assert await policy_entries(app, desk) == [{"version": 1, "status": "active"}]
+    send = card("send", "effect:send_message", review=True)
+    assert (await drafted(client, desk, [*BOOK_AND_ASK_CHARGES, shipped, send])).version == 2
+
+
 async def post_confirm(client: httpx.AsyncClient, desk: DeskRows, version: int) -> httpx.Response:
     return await client.post("/policy/confirm", headers=desk.rows.owner,
                              json={"desk_id": desk.desk_id, "version": version})
