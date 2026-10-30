@@ -72,7 +72,7 @@ async def test_an_allow_executes_once_within_a_minute(app, client, frozen_clock)
 
     # the decision is executed, ledgered and signed again
     decision = await read(client, visitor.headers, allowed)
-    assert (decision.state, decision.visitor_plain) == ("executed", "Done")
+    assert (decision.state, decision.visitor_plain) == ("executed", "Quoted from Maria Rivera's price list")
     assert decision.ledger_seq > allowed.ledger_seq
     verify_signature((await client.get("/health")).json()["public_key_hex"], decision)
     [entry] = [e for e in await ledger_rows(app, copy) if e.seq == decision.ledger_seq]
@@ -302,7 +302,7 @@ async def test_an_orphan_with_its_side_effect_reconciles_to_executed(app, client
     assert await committed(app, rows.copy_id, allowed.action.action_id) == ("intent", "allowed")
     frozen_clock.advance(31)
     decision = await read(client, visitor.headers, allowed)
-    assert (decision.state, decision.visitor_plain) == ("executed", "Done")
+    assert (decision.state, decision.visitor_plain) == ("executed", "Quoted from Maria Rivera's price list")
     expected = ExecResult(action_id=allowed.action.action_id, state="succeeded", facts=[], model_view={"ok": True})
     assert await executed(client, visitor, allowed) == expected                 # rebuilt as the session may see it
     assert effects == [allowed.action.action_id] and "on_failed" not in quote.calls

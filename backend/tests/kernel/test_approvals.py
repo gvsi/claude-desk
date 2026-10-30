@@ -22,7 +22,7 @@ from desk.contracts import (ApprovalResult, Decision, DecisionState, ExecResult,
                             RuleCard)
 from desk.db.models import Action, ActorSession, Approval, Booking, Execution, Person, Quote
 from desk.db.models import Decision as DecisionRow
-from desk.kernel_service import activation, adapters, approvals, compiler, demo_inbox, desks, execute
+from desk.kernel_service import activation, adapters, approvals, compiler, demo_inbox, desks, execute, render
 from desk.kernel_service.adapters.base import AdapterFailure, AdapterRefusal, AdapterResult, AdapterUnknown
 from desk.kernel_service.repo import new_id
 from desk.kernel_service.seed import RIVERA_CARDS
@@ -75,7 +75,8 @@ async def test_allow_once_executes_inside_the_answer(app, client, frozen_clock):
     result = await answered(client, copy.owner, held.decision_id, "allow_once")
 
     decision, execution = result.decision, result.execution
-    assert (decision.decision_id, decision.state, decision.visitor_plain) == (held.decision_id, "executed", "Done")
+    assert (decision.decision_id, decision.state, decision.visitor_plain) == (
+        held.decision_id, "executed", "Quoted from Maria Rivera's price list")
     assert result.card_diff is None                                       # allow_once drafts no rule
     [quote] = await rows_of(app, copy.copy_id, select(Quote))
     assert (quote.action_id, quote.session_id, quote.discount_bp, quote.amount_cents) == (
@@ -412,7 +413,11 @@ async def add_person(app: FastAPI, rows: CopyRows, ref: str, name: str) -> str:
     return person
 
 
-async def test_allow_person_is_capped_for_money(app, client, registry):
+async def test_allow_person_is_capped_for_money(app, client, registry, monkeypatch):
+    # the stand-in runs with the receipt line the payments plan gives this tool, as every tool must
+    for language, line in (("en", "Payment link made for this quote"),
+                           ("es", "Enlace de pago creado para esta cotización")):
+        monkeypatch.setitem(render.EXECUTED[language], "native.payment_link", line)
     link = payment_link(80_000)                                                # $800: past the $500 hard cap
     rows = await desk_with(app, [link], [])                                    # no card: money asks
     dana_id = await add_person(app, rows, "dana", "Dana Whitfield")

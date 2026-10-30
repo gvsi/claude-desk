@@ -73,7 +73,8 @@ from desk.db.models import Decision as DecisionRow
 from desk.db.models import Fact as FactRow
 from desk.db.models import PolicyVersion as PolicyVersionRow
 from desk.kernel_api import DecideRequest
-from desk.kernel_service import activation, adapters, auth, compiler, demo_inbox, explain, ledger, render, repo
+from desk.kernel_service import (activation, adapters, auth, clock, compiler, demo_inbox, explain, ledger, render,
+                                 repo)
 from desk.kernel_service.adapters.base import Adapter, AdapterRefusal, NormalizeCtx, quoted
 from desk.kernel_service.auth import AuthError, Named, SessionRow
 from desk.kernel_service.decisions import CallUsage, ReviewAction, ReviewCard, ReviewFact, ReviewInput, Reviewed
@@ -95,7 +96,7 @@ def cedar_request(principal: Principal, action: NormalizedAction, *, tz: str, no
     `mandate_remaining_cents` is an `Agent` attribute and is ignored for any other principal."""
     if now.tzinfo is None:
         raise ValueError("now must be an aware datetime")
-    local = (action.starts_at or now).astimezone(ZoneInfo(tz))
+    local_dow, local_minute = clock.local_dow_minute(action.starts_at or now, ZoneInfo(tz))
 
     principal_type = PRINCIPAL_TYPES[principal.kind]
     attrs: dict[str, Any] = {
@@ -121,8 +122,8 @@ def cedar_request(principal: Principal, action: NormalizedAction, *, tz: str, no
 
     context: dict[str, Any] = {
         "record_owner_match": principal.person_id is not None and resource.owner_person_id == principal.person_id,
-        "local_dow": local.weekday(),
-        "local_minute": local.hour * 60 + local.minute,
+        "local_dow": local_dow,
+        "local_minute": local_minute,
     }
     for name in ("list_cents", "discount_bp", "amount_cents", "recipient"):
         value = getattr(action, name)
@@ -322,16 +323,27 @@ def _sign(ctx: KernelCtx, row: DecisionRow) -> None:
                                   visitor_plain=row.visitor_plain, ledger_seq=row.ledger_seq)
 
 
+def status_line(state: str, *, tool: str, session: SessionRow, owner: str) -> str:
+    """A decision's status line in `state`, in the session's language: once a visitor's or an
+    agent's action has run, what was done (`render.executed_status`, which raises KeyError for a
+    tool without a line); in any other state, or for an owner session's own setup action, the
+    state's template."""
+    lang = render.language(session.last_language)
+    if state == "executed" and session.kind != "owner":
+        return render.executed_status(tool, lang, owner=owner)
+    return render.status(state, lang, owner=owner)
+
+
 async def set_state(ctx: KernelCtx, row: DecisionRow, state: str, *, kind: str = "decide",
                     summary: dict[str, Any]) -> LedgerEntry:
-    """Moves a decision to `state` in the caller's transaction: the status line for the new state,
-    a ledger entry (`kind`, `summary`, kernel-built values only) and a signature over both. Lock
-    the row first."""
+    """Moves a decision to `state` in the caller's transaction: the status line for the new state
+    (`status_line`), a ledger entry (`kind`, `summary`, kernel-built values only) and a signature
+    over both. Lock the row first."""
     session = (await ctx.db.scalars(ctx.repo.scoped(
         select(SessionRow).where(SessionRow.session_id == row.session_id)))).one()
     row.state = state
-    row.visitor_plain = render.status(state, render.language(session.last_language),
-                                      owner=(await _business(ctx, row.desk_id)).owner_display_name)
+    row.visitor_plain = status_line(state, tool=row.tool, session=session,
+                                    owner=(await _business(ctx, row.desk_id)).owner_display_name)
     row.updated_at = ctx.clock.now()
     entry = await _append(ctx, row, kind, summary)
     row.ledger_seq = entry.seq

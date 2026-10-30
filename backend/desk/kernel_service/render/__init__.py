@@ -3,7 +3,9 @@
 Status lines (`status`) are fixed templates, one per decision state plus the reply receipts
 (an owner's say has its own two: written by the owner, or not sent, which only the owner sees);
 they name the business's owner and nothing else, so they never carry an amount, a date or a
-limit. `status` also serves the kernel's other visitor texts (`MESSAGES`): the verify card's
+limit. An action a visitor or agent asked for that ran says what was done, one line per tool
+(`executed_status`), in place of the generic executed line, which only the owner's own setup
+actions keep. `status` also serves the kernel's other visitor texts (`MESSAGES`): the verify card's
 messages and the Demo inbox's code entry, the one text that carries a code. A session reads them
 in its `last_language`, else English (`language`). Owner alert previews (`owner_preview`) are
 English and owner-only.
@@ -27,7 +29,7 @@ and the `href` is the only field of the card that carries it.
 
 from collections.abc import Awaitable, Callable, Collection
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, tzinfo
 from typing import TYPE_CHECKING, Literal
 
 from desk.contracts import CardOption, Clause, ClauseTemplate, Fact, RenderedBlock
@@ -42,11 +44,17 @@ LANGUAGES: dict[str, dict[str, str]] = {"en": en.STATUS, "es": es.STATUS}
 STATUS_KEYS = frozenset(en.STATUS)
 MESSAGES: dict[str, dict[str, str]] = {"en": en.MESSAGES, "es": es.MESSAGES}
 MESSAGE_KEYS = frozenset(en.MESSAGES)
+EXECUTED: dict[str, dict[str, str]] = {"en": en.EXECUTED, "es": es.EXECUTED}
+OPEN_STATUS: dict[str, Callable[[bool, datetime | None, datetime], str]] = {"en": en.open_status,
+                                                                            "es": es.open_status}
 
 if any(set(templates) != STATUS_KEYS for templates in LANGUAGES.values()):
     raise RuntimeError("every language has a template for every status line")
 if any(set(templates) != MESSAGE_KEYS for templates in MESSAGES.values()) or MESSAGE_KEYS & STATUS_KEYS:
     raise RuntimeError("every language has every message, and no message shares a status line's key")
+if any(set(lines) != set(en.EXECUTED) for lines in EXECUTED.values()):
+    # so a tool with a line has one in whatever language the session reads by the time it runs
+    raise RuntimeError("every language has an executed line for the same tools")
 
 
 def language(last_language: str | None) -> Language:
@@ -62,6 +70,21 @@ def status(key: str, lang: str, *, owner: str | None = None, **fields: str) -> s
     no free-text fallback."""
     template = LANGUAGES[lang][key] if key in STATUS_KEYS else MESSAGES[lang][key]
     return template.format(**fields, **({"owner": owner} if owner is not None else {}))
+
+
+def executed_status(tool: str, lang: str, *, owner: str) -> str:
+    """What an executed `tool` did, in `lang`, naming `owner`: the receipt a visitor or agent sees
+    for an action that ran ("Quoted from Maria Rivera's price list"). A tool without a line raises
+    KeyError: there is no generic fallback, so execution checks for the line before anything runs."""
+    return EXECUTED[lang][tool].format(owner=owner)
+
+
+def open_status_text(is_open: bool, boundary: datetime | None, as_of: datetime, lang: str, tz: tzinfo) -> str:
+    """The public header's open-now line in `lang` ("Open status"), shown verbatim: `boundary` is
+    when an open business closes (None: open through the week ahead) or a closed one opens, both it
+    and `as_of` read in the business's time zone `tz`, with the cards' time formats."""
+    local = boundary.astimezone(tz) if boundary is not None else None
+    return OPEN_STATUS[lang](is_open, local, as_of.astimezone(tz))
 
 
 def owner_preview(kind: str) -> str:

@@ -5,8 +5,9 @@ An execution takes up to three transactions, so that a crash leaves a record of 
 
 - T1 locks the decision (for an allow, once it holds the session row `FOR SHARE`), settles it as
   any read does (`refresh_decision`), re-checks it against the current rows (`recheck`, step 6
-  of "Evaluation"), runs the adapter's `prepare` and commits the `executions` row in state
-  `intent`, with whatever `prepare` reserved. Nothing outside the kernel has happened yet.
+  of "Evaluation"), makes sure the receipt it will end on can be written (`_receipt_ready`),
+  runs the adapter's `prepare` and commits the `executions` row in state `intent`, with whatever
+  `prepare` reserved. Nothing outside the kernel has happened yet.
 - T2 first holds the session row (`_hold_session`): for an allow `FOR SHARE`, so a take-over
   waits for a running execution and one that came first stops it (the fence); `FOR UPDATE`, on
   either path, for an adapter that writes the session's own rows (`locks_session`). Then it locks
@@ -247,11 +248,37 @@ async def _recheck(ctx: KernelCtx, target: _Target, path: ExecPath) -> str | Non
 
 async def prepare_intent(ctx: KernelCtx, decision_row: DecisionRow) -> bool:
     """The adapter's `prepare`, then the intent row, in the caller's transaction, which commits them
-    together. False, with nothing written, when `prepare` refuses."""
+    together. False, with nothing written, when `prepare` refuses. Either path that runs an action
+    comes through here, so a tool whose receipt can't be written fails first (`_receipt_ready`)."""
     return await _prepare_intent(ctx, await _target(ctx, decision_row))
 
 
+def _receipt_ready(target: _Target) -> None:
+    """The status line the decision will end on once its action has run, made before anything is
+    written. A tool with no executed line ("Receipts") is 500 `internal`, ledgered on the decision,
+    with no intent row and no side effect, never the generic line and never an error after the
+    side effect: every language has a line for the same tools, so one that has a line now still
+    has one when the session's language has changed by the end."""
+    try:
+        decide.status_line("executed", tool=target.action.tool, session=target.session_row,
+                           owner=target.business.owner_display_name)
+    except KeyError:
+        decision = target.decision
+        copy_id, desk_id, session_id = decision.copy_id, decision.desk_id, decision.session_id
+        summary = {"decision_id": decision.decision_id, "action_id": target.action.action_id,
+                   "refused": "no_receipt_line"}
+
+        async def persist(ctx: KernelCtx) -> None:
+            ctx.bind(copy_id)                            # the request's transaction has rolled back
+            await ledger.append(ctx, copy_id=copy_id, desk_id=desk_id, event=LedgerEvent(
+                kind="execute", origin="kernel", session_id=session_id, ref_id=summary["decision_id"],
+                summary=summary))
+
+        raise KernelFailure(500, "internal", "no_receipt_line", persist=persist) from None
+
+
 async def _prepare_intent(ctx: KernelCtx, target: _Target) -> bool:
+    _receipt_ready(target)
     prepare = getattr(target.adapter, "prepare", None)
     if prepare is not None:
         try:

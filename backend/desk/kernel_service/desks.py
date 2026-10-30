@@ -18,15 +18,19 @@ Contacts on record are kept three ways: `contact` as given (verification codes g
 `contact_norm` for lookups, and `masked_contact`, the only form any view, notice or owner alert
 shows. A removed person (`removed_at`) is on record for no one.
 
-A callback's window comes from the Desk's hours (`next_open_window`), never from a tool call.
+A callback's window comes from the Desk's hours (`next_open_window`), never from a tool call, and
+the public page's open-now line from them too (`open_window_status`), on the local day and minute
+Cedar's hours checks read.
 """
 
 import json
 import logging
+import math
 import re
 import secrets
 import unicodedata
 from collections.abc import Awaitable, Callable, Collection, Iterable, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta, tzinfo
 from typing import Any
 from zoneinfo import available_timezones
@@ -46,7 +50,7 @@ from desk.db.models import Fact as FactRow
 from desk.kernel_api import (DeskAnsweringRequest, DeskBusinessRequest, DeskCalendarRequest, DeskCharterRequest,
                              DeskCreated, DeskHoursRequest, DeskNotificationsRequest, DeskPeopleRequest,
                              DeskPricesRequest, DeskUpdated, DocumentCreated, KernelRequest)
-from desk.kernel_service import adapters, auth, ledger
+from desk.kernel_service import adapters, auth, clock, ledger
 from desk.kernel_service.auth import AuthError, Named
 from desk.kernel_service.labels import fact_row
 from desk.kernel_service.repo import KernelCtx, KernelFailure, new_id, route_template
@@ -661,6 +665,117 @@ def next_open_window(hours: Sequence[HoursWindow], tz: tzinfo, after: datetime) 
         # names, 3:00 am, so every reader of the window shows the same end
         return start, (wall + timedelta(hours=1)).replace(tzinfo=tz).astimezone(UTC).astimezone(tz)
     return None
+
+
+# ---- Open now -------------------------------------------------------------------------------------
+
+OPEN_STATUS_DAYS = 7                      # local calendar days ahead that the open-now line looks
+REFRESH_WITHIN = timedelta(hours=25)      # the latest the line is asked for again (a fall-back day lasts 25 hours)
+OFFSET_PROBE = timedelta(hours=1)         # the step that finds the clock changes ahead
+
+
+@dataclass(frozen=True)
+class OpenWindow:
+    """Whether the business is open at an instant, from its weekly hours, as instants in UTC."""
+
+    open: bool
+    until: datetime | None                # open: when it closes; None when it stays open through the 7 days
+    opens_at: datetime | None             # closed: when it opens next; None when nothing opens in the 7 days
+    refresh_at: datetime                  # the earliest of the boundary, the next local midnight and 25 hours on
+
+
+def _spans(hours: Sequence[HoursWindow]) -> list[tuple[frozenset[int], int, int]]:
+    """Each window as (its weekdays, 0 = Monday; its start and end minute), an end of 00:00 at
+    `DAY_END`, as Cedar's hours conditions read it."""
+    return [(frozenset(WEEK.index(day) for day in window.days), window.start.hour * 60 + window.start.minute,
+             DAY_END if window.end == time(0) else window.end.hour * 60 + window.end.minute) for window in hours]
+
+
+def _inside(spans: list[tuple[frozenset[int], int, int]], instant: datetime, tz: tzinfo) -> bool:
+    """Whether `instant` falls inside a window, on the local day and minute Cedar reads."""
+    dow, minute = clock.local_dow_minute(instant, tz)
+    return any(dow in days and start <= minute < end for days, start, end in spans)
+
+
+def _offset_changes(tz: tzinfo, after: datetime, through: datetime) -> list[datetime]:
+    """The instants in `(after, through]` at which the zone's offset changes (a clock change), to
+    the second: found by probing every hour, then halving the hour that holds one."""
+    changes = []
+    probe, offset = after, after.astimezone(tz).utcoffset()
+    while probe < through:
+        step = min(probe + OFFSET_PROBE, through)
+        step_offset = step.astimezone(tz).utcoffset()
+        if step_offset != offset:
+            low, high = math.floor(probe.timestamp()), math.ceil(step.timestamp())
+            while high - low > 1:
+                middle = (low + high) // 2
+                if datetime.fromtimestamp(middle, UTC).astimezone(tz).utcoffset() == offset:
+                    low = middle
+                else:
+                    high = middle
+            changes.append(datetime.fromtimestamp(high, UTC))
+        probe, offset = step, step_offset
+    return [change for change in changes if after < change <= through]
+
+
+def _candidates(spans: list[tuple[frozenset[int], int, int]], tz: tzinfo, after: datetime,
+                through: datetime) -> list[datetime]:
+    """Every instant in `(after, through]` at which being open can change, in order: each window's
+    start and end on each local date, at both readings of a wall time the clocks repeat, and each
+    clock change, which moves the wall clock past a start or an end the clocks skip. Between two of
+    them the local minute moves on without crossing a start or an end, so being open stays as it
+    was at the earlier one."""
+    first, last = after.astimezone(tz).date() - timedelta(days=1), through.astimezone(tz).date() + timedelta(days=1)
+    found = set(_offset_changes(tz, after, through))
+    day = first
+    while day <= last:
+        midnight = datetime.combine(day, time(0))
+        for days, start, end in spans:
+            if day.weekday() not in days:
+                continue
+            for minute in (start, end):
+                wall = midnight + timedelta(minutes=minute)
+                found.update(wall.replace(tzinfo=tz, fold=fold).astimezone(UTC) for fold in (0, 1))
+        day += timedelta(days=1)
+    return sorted(instant for instant in found if after < instant <= through)
+
+
+def _next_local_midnight(now: datetime, tz: tzinfo) -> datetime | None:
+    """The first instant after `now` on the next local date: its 00:00, or, when the clocks skip
+    that 00:00, the clock change itself."""
+    tomorrow = now.astimezone(tz).date() + timedelta(days=1)
+    wall = datetime.combine(tomorrow, time(0))
+    readings = (wall.replace(tzinfo=tz, fold=fold).astimezone(UTC) for fold in (0, 1))
+    return min((instant for instant in readings if instant > now and instant.astimezone(tz).date() == tomorrow),
+               default=None)
+
+
+def open_window_status(hours: Sequence[HoursWindow], tz: tzinfo, now: datetime) -> OpenWindow | None:
+    """Whether the business is open at `now`, from its weekly `hours` in its time zone `tz` ("Open
+    status"): open when the local day and minute Cedar's hours checks read (`clock.local_dow_minute`)
+    fall inside a window, its end exclusive. Overlapping or touching windows are one span, across
+    midnight too: `until` is the first instant after `now` that is closed, or None when every
+    instant through the same local time 7 days on is open; when closed, `opens_at` is the first
+    instant that is open, or None when none is within those days. `refresh_at` is the earliest of
+    that boundary, the next local midnight (so "today" and "tomorrow" stay true) and 25 hours on (a
+    local day can be longer). None without windows. Every instant is compared in UTC, since two
+    times sharing a zone compare by wall clock across a repeated hour."""
+    if now.tzinfo is None:
+        raise ValueError("now must be an aware datetime")
+    spans = _spans(hours)
+    if not spans:
+        return None
+    now = now.astimezone(UTC)
+    local_now = now.astimezone(tz)
+    week_on = (local_now.replace(tzinfo=None) + timedelta(days=OPEN_STATUS_DAYS)).replace(
+        tzinfo=tz, fold=local_now.fold).astimezone(UTC)
+    is_open = _inside(spans, now, tz)
+    boundary = next((instant for instant in _candidates(spans, tz, now, week_on)
+                     if _inside(spans, instant, tz) != is_open), None)
+    refresh_at = min(instant for instant in (boundary, _next_local_midnight(now, tz), now + REFRESH_WITHIN)
+                     if instant is not None)
+    return OpenWindow(open=is_open, until=boundary if is_open else None, opens_at=None if is_open else boundary,
+                      refresh_at=refresh_at)
 
 
 async def enabled_profiles(ctx: KernelCtx, desk_id: str) -> list[ToolProfile]:

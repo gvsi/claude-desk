@@ -5,7 +5,7 @@ percentages: only clause cards rendered from facts do. Cards read datetimes in t
 time zone ("Tuesday, November 3, 2:00 pm"), money as `$1,234.56` and percentages as "10%".
 """
 
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 
 from desk.contracts import Fact, HoursWindow
 from desk.kernel_service.render.cards import (Card, DeskInfo, booking_window, callback_window, claims, day_groups,
@@ -28,6 +28,19 @@ STATUS: dict[str, str] = {
     "reply_handed_off": "Passed to {owner} to answer",
     "owner_said": "Written by {owner}",
     "owner_say_blocked": "Not sent: it included text from a private document",   # shown to the owner alone
+}
+
+# What an executed action did, one line per tool, key for key with `es.EXECUTED`: the receipt a
+# visitor or another agent sees instead of the generic "executed" line. Like the status lines they
+# name the owner and nothing else, so they never carry an amount, a time or a date.
+EXECUTED: dict[str, str] = {
+    "native.quote": "Quoted from {owner}'s price list",
+    "native.find_slots": "Times read from {owner}'s calendar",
+    "native.book": "Booked on {owner}'s calendar",
+    "native.capture_lead": "Details saved for {owner}",
+    "native.request_callback": "Callback request saved for {owner}",
+    "native.start_verification": "Verification started",
+    "native.release_document": "Document shared from {owner}'s records",
 }
 
 # The kernel's other visitor texts, key for key with `es.MESSAGES`: the verify card's messages,
@@ -158,3 +171,43 @@ def owner_said(fact: Fact | None, desk: DeskInfo) -> Card:
 def document_link(fact: Fact | None, desk: DeskInfo) -> Card:
     """The document's title; the link itself is the card's `href`, which the reply check fills."""
     return Card(title=title_claim(fact))
+
+
+# ---- The public header's open-now line ("Open status") ----------------------------------------------
+
+def _day(moment: datetime, as_of: datetime) -> str:
+    """`moment`'s date as `as_of` reads it: "today", "tomorrow", "next Monday" for today's weekday a
+    week ahead, else the weekday. Both are in the business's time zone; a date more than a week
+    ahead, or already past, has no word and raises ValueError."""
+    ahead = (moment.date() - as_of.date()).days
+    if ahead == 0:
+        return "today"
+    if ahead == 1:
+        return "tomorrow"
+    if 2 <= ahead <= 7:
+        return f"next {WEEKDAYS[moment.weekday()]}" if ahead == 7 else WEEKDAYS[moment.weekday()]
+    raise ValueError("an open-now day is within the week ahead")
+
+
+def _until(moment: datetime, as_of: datetime) -> str:
+    """When an open business closes: "6:00 pm", "2:00 am tomorrow", "Saturday at 2:00 am". A close
+    at 00:00 is midnight at the end of the day before, which takes the day word: "midnight",
+    "tomorrow at midnight", "Friday at midnight"."""
+    if (moment.hour, moment.minute) == (0, 0):
+        day = _day(moment - timedelta(days=1), as_of)
+        return "midnight" if day == "today" else f"{day} at midnight"
+    day = _day(moment, as_of)
+    if day == "today":
+        return clock(moment)
+    return f"{clock(moment)} tomorrow" if day == "tomorrow" else f"{day} at {clock(moment)}"
+
+
+def open_status(is_open: bool, boundary: datetime | None, as_of: datetime) -> str:
+    """"Open now, until 6:00 pm", "Open now" (open through the week ahead), "Closed now. Opens
+    Monday at 8:00 am": `boundary` is when it closes or opens, and it and `as_of` are in the
+    business's time zone. An opening at 00:00 is on its own date ("Opens Monday at 12:00 am")."""
+    if is_open:
+        return "Open now" if boundary is None else f"Open now, until {_until(boundary, as_of)}"
+    if boundary is None:
+        raise ValueError("a closed business names when it opens")
+    return f"Closed now. Opens {_day(boundary, as_of)} at {clock(boundary)}"
