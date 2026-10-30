@@ -1,0 +1,197 @@
+/* ConnectorSection: a card of link rows that reach its edges. The header (14 px 16 px) names the
+   connector; each tool row (12 px 16 px) sits under a hairline: its name and line on the left, its
+   rule words and outcome at the right. It lays itself out by its own width: under 640 px (the
+   phone board) the lines and the count go, the tile is 32 px, and each tool's words and then its
+   outcome sit under its name. */
+
+.cd-connector-section {
+  container: cd-connector-section / inline-size;
+}
+
+.cd-connector-section__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-14);
+  padding: var(--space-14) var(--space-16);
+  border-radius: calc(var(--radius-card) - 1px) calc(var(--radius-card) - 1px) 0 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+/* The header fills the card to its edges, so its focus ring sits just inside it. */
+.cd-connector-section__header:focus-visible {
+  outline-offset: -2px;
+}
+
+.cd-connector-section__identity {
+  flex: 1;
+  min-width: 0;
+}
+
+.cd-connector-section__identity > .cd-connector-name {
+  display: flex;
+}
+
+.cd-connector-section__description {
+  display: block;
+  margin-top: var(--space-2);
+  color: var(--text-secondary);
+}
+
+.cd-connector-section__added {
+  flex: none;
+  color: var(--text-secondary);
+}
+
+.cd-connector-section__count {
+  flex: none;
+  color: var(--text-secondary);
+}
+
+.cd-connector-section__chevron {
+  flex: none;
+  color: var(--text-secondary);
+  transition: color var(--motion-instant) var(--motion-ease);
+}
+
+.cd-connector-section__header:hover .cd-connector-section__chevron,
+.cd-connector-section__tool:hover > .cd-connector-section__chevron {
+  color: var(--text-primary);
+}
+
+/* The screen's line above the tools (the payment limit), padded as a tool row under a hairline. */
+.cd-connector-section__above {
+  padding: var(--space-12) var(--space-16);
+  border-top: 1px solid var(--line-hairline);
+}
+
+.cd-connector-section__tools {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* A tool: its name over its line, then its words, its outcome and a chevron, each centered across
+   both lines. The name is the link, and its overlay covers the row, with the row's focus ring. */
+.cd-connector-section__tool {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  grid-template-areas:
+    'name summary outcome chevron'
+    'description summary outcome chevron';
+  align-items: center;
+  column-gap: var(--space-16);
+  padding: var(--space-12) var(--space-16);
+  border-top: 1px solid var(--line-hairline);
+}
+
+.cd-connector-section__tool-link {
+  grid-area: name;
+  min-width: 0;
+  color: var(--text-primary);
+  font-weight: 520;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.cd-connector-section__tool-link::after {
+  position: absolute;
+  inset: 0;
+  content: '';
+}
+
+.cd-connector-section__tool:last-child > .cd-connector-section__tool-link::after {
+  border-radius: 0 0 calc(var(--radius-card) - 1px) calc(var(--radius-card) - 1px);
+}
+
+.cd-connector-section__tool-link:focus-visible {
+  outline: none;
+}
+
+.cd-connector-section__tool-link:focus-visible::after {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: -2px;
+}
+
+.cd-connector-section__tool-description {
+  grid-area: description;
+  min-width: 0;
+  margin-top: var(--space-2);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.cd-connector-section__tool-summary {
+  grid-area: summary;
+  max-width: 280px;
+  color: var(--text-secondary);
+  text-align: right;
+}
+
+.cd-connector-section__tool-outcome {
+  grid-area: outcome;
+  min-width: 0;
+  color: var(--text-primary);
+}
+
+.cd-connector-section__tool > .cd-connector-section__chevron {
+  grid-area: chevron;
+}
+
+@container cd-connector-section (max-width: 639.98px) {
+  .cd-connector-section__header {
+    gap: var(--space-12);
+    padding: var(--space-12) var(--space-14);
+  }
+
+  .cd-connector-section__above {
+    padding: var(--space-12) var(--space-14);
+  }
+
+  .cd-connector-section__header > .cd-connector-icon {
+    width: 32px;
+    height: 32px;
+  }
+
+  .cd-connector-section__header .cd-connector-icon__mark {
+    width: 17px;
+    height: 17px;
+  }
+
+  .cd-connector-section__description,
+  .cd-connector-section__count,
+  .cd-connector-section__tool-description {
+    display: none;
+  }
+
+  /* The outcome takes its own line under the name and words, as the phone board draws it, so a
+     long limit phrase wraps there instead of crowding the name. */
+  .cd-connector-section__tool {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'name chevron'
+      'summary chevron'
+      'outcome chevron';
+    column-gap: var(--space-12);
+    padding: var(--space-12) var(--space-14);
+  }
+
+  .cd-connector-section__tool-summary {
+    max-width: none;
+    /* Half the smallest step, as the phone board sets the words under the name. */
+    margin-top: calc(var(--space-2) / 2);
+    text-align: left;
+    overflow-wrap: anywhere;
+  }
+
+  .cd-connector-section__tool-outcome {
+    margin-top: var(--space-4);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cd-connector-section__chevron {
+    transition: none;
+  }
+}

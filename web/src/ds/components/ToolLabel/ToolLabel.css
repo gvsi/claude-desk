@@ -1,0 +1,22 @@
+/* ToolLabel: one line of secondary meta with a 14 px icon on its first line. A long label wraps
+   under its words, and a word with no break in it (an address) breaks rather than leaving the line. */
+
+.cd-tool-label {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-6);
+  min-width: 0;
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+/* The 14 px icon sits on the middle of the meta type's 18 px first line. */
+.cd-tool-label__icon {
+  flex: none;
+  margin-top: var(--space-2);
+}
+
+.cd-tool-label__text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

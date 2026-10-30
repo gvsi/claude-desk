@@ -1,0 +1,46 @@
+/* ToolPageHeader: the serif title, its description in secondary body type 4 px under it, then the
+   source line 8 px under that: the 24 px tile, "From {connector}" with its badge, and 16 px on,
+   the status. On a narrow line the status wraps under the source. */
+
+.cd-tool-page-header {
+  min-width: 0;
+}
+
+.cd-tool-page-header__title {
+  margin: 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.cd-tool-page-header__description {
+  margin: var(--space-4) 0 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.cd-tool-page-header__source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--space-16);
+  row-gap: var(--space-4);
+  margin: var(--space-8) 0 0;
+  color: var(--text-primary);
+}
+
+.cd-tool-page-header__from {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-10);
+  min-width: 0;
+}
+
+/* The badge sits 10 px from "From {name}", as the boards set it. */
+.cd-tool-page-header__from .cd-connector-name > .cd-pill,
+.cd-tool-page-header__from .cd-connector-name__built-in {
+  margin-left: var(--space-6);
+}
+
+.cd-tool-page-header__status {
+  min-width: 0;
+}

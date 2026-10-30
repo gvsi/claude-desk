@@ -7,7 +7,16 @@
 import { useState, type CSSProperties, type ReactNode } from 'react';
 import { fn } from 'storybook/test';
 
-import type { EvMessage, PublicDesk, RenderedBlock, StatusEvent } from '../../api/contracts.ts';
+import type { Effect, EvMessage, PublicDesk, RenderedBlock, RuleCard, StatusEvent, ToolName } from '../../api/contracts.ts';
+import { AlwaysOnList } from '../components/AlwaysOnList/AlwaysOnList.tsx';
+import { Breadcrumb } from '../components/Breadcrumb/Breadcrumb.tsx';
+import { Composer } from '../components/Composer/Composer.tsx';
+import { ConnectorDirectory, type ConnectorDirectoryProps } from '../components/ConnectorDirectory/ConnectorDirectory.tsx';
+import { ConnectorList } from '../components/ConnectorList/ConnectorList.tsx';
+import { ConnectorSection, type ConnectorSectionProps } from '../components/ConnectorSection/ConnectorSection.tsx';
+import type { RuleRowProps } from '../components/RuleRow/RuleRow.tsx';
+import { SuggestionChips } from '../components/SuggestionChips/SuggestionChips.tsx';
+import { rulesForTool } from '../components/ToolRulesCard/toolRules.ts';
 import { AgentMessage } from '../components/AgentMessage/AgentMessage.tsx';
 import { ApprovalCard } from '../components/ApprovalCard/ApprovalCard.tsx';
 import { ClaudeMessage } from '../components/ClaudeMessage/ClaudeMessage.tsx';
@@ -40,7 +49,7 @@ import { ReviewerBar } from '../components/ReviewerBar/ReviewerBar.tsx';
 import { Sidebar, initialsOf, type NavCount, type NavKey, type SidebarHrefs } from '../components/Sidebar/Sidebar.tsx';
 import { StatusDot, StatusLabel, type StatusTone } from '../components/StatusDot/StatusDot.tsx';
 import { TextLink } from '../components/TextLink/TextLink.tsx';
-import { placeholderHex, rivera } from '../fixtures/index.ts';
+import { chen, placeholderHex, rivera } from '../fixtures/index.ts';
 import { Icon, type IconName } from '../icons/index.tsx';
 
 import './boards.css';
@@ -73,31 +82,62 @@ export interface RiveraFrameProps {
   reviewer?: boolean;
   /** The page lays out its own columns from the sidebar's edge (`AppShell` `fill`). */
   fill?: boolean;
+  /** A panel beside the page, such as Ask Claude (`AppShell` `panel`). */
+  panel?: ReactNode;
   onSwitchBusiness?: () => void;
   children: ReactNode;
 }
 
 /** The owner app for Maria Rivera: the shell, the sidebar on `current`, and the page. */
-export function RiveraFrame({
+export function RiveraFrame({ twoDesks = false, ...props }: RiveraFrameProps) {
+  return (
+    <OwnerFrame
+      business={rivera.business.name}
+      ownerName={rivera.business.ownerName}
+      desks={twoDesks ? [MAIN_LINE, EMERGENCIES] : [MAIN_LINE]}
+      {...props}
+    />
+  );
+}
+
+/** Chen & Co. CPA's one Desk. */
+export const CHEN_LINE = { id: 'desk-chen-main', name: chen.business.deskName };
+
+/** The owner app for Linda Chen, on Chen & Co. CPA's one Desk: the shell, the sidebar on `current`, and the page. */
+export function ChenFrame(props: Omit<RiveraFrameProps, 'twoDesks' | 'reviewer'>) {
+  return <OwnerFrame business={chen.business.name} ownerName={chen.business.ownerName} desks={[CHEN_LINE]} {...props} />;
+}
+
+interface OwnerFrameProps extends Omit<RiveraFrameProps, 'twoDesks'> {
+  business: string;
+  ownerName: string;
+  desks: { id: string; name: string }[];
+}
+
+function OwnerFrame({
+  business,
+  ownerName,
+  desks,
   current,
   counts,
-  twoDesks = false,
   reviewer = false,
   fill = false,
+  panel,
   onSwitchBusiness,
   children,
-}: RiveraFrameProps) {
+}: OwnerFrameProps) {
   return (
     <AppShell
-      business={rivera.business.name}
+      business={business}
       fill={fill}
-      banner={reviewer ? <ReviewerBar ownerName={rivera.business.ownerName} onStartOver={fn()} /> : undefined}
+      panel={panel}
+      banner={reviewer ? <ReviewerBar ownerName={ownerName} onStartOver={fn()} /> : undefined}
       sidebar={
         <Sidebar
-          business={rivera.business.name}
+          business={business}
           onSwitchBusiness={onSwitchBusiness ?? fn()}
-          desks={twoDesks ? [MAIN_LINE, EMERGENCIES] : [MAIN_LINE]}
-          currentDeskId={MAIN_LINE.id}
+          desks={desks}
+          currentDeskId={desks[0]?.id ?? ''}
           onSwitchDesk={fn()}
           current={current}
           hrefs={OWNER_HREFS}
@@ -105,7 +145,7 @@ export function RiveraFrame({
           counts={counts}
           answering
           onAnsweringChange={fn()}
-          owner={{ name: rivera.business.ownerName, status: 'Available for chats' }}
+          owner={{ name: ownerName, status: 'Available for chats' }}
         />
       }
     >
@@ -113,6 +153,16 @@ export function RiveraFrame({
     </AppShell>
   );
 }
+
+/**
+ * The Connectors tab boards draw an eighth sidebar row, Connectors, current on the Connectors,
+ * connector and tool pages. That row comes with its own change to the Sidebar on main; until then
+ * these boards' stories mark Rules current, the pages' earlier home, and say so.
+ */
+export const SIDEBAR_NOTE = 'The Connectors row lands with the Sidebar change on main; until then the sidebar has seven rows and these pages mark Rules current.';
+
+/** The same, for a board whose current page is in the seven rows (Today, Rules). */
+export const SIDEBAR_ROW_NOTE = 'The Connectors row lands with the Sidebar change on main; until then the sidebar has seven rows.';
 
 /** The public link as Today shows it beside the greeting. */
 export const PUBLIC_LINK = 'desk.example/rivera';
@@ -789,8 +839,153 @@ export function SafetyPage({
   );
   return (
     <RiveraFrame current="safety" counts={counts} fill={history}>
-      {history ? <div className="board-page">{page}</div> : page}
+      {history ? <div className="board-filled-page">{page}</div> : page}
     </RiveraFrame>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Rules and connectors
+
+/**
+ * An owner page at least the window's height, with the concept footer at its foot: after the
+ * content on a long page, at the bottom of the window on a short one, as the connectors boards
+ * draw it.
+ */
+export function BoardPage({ children }: { children: ReactNode }) {
+  return (
+    <div className="board-page">
+      <div className="board-page__body">{children}</div>
+      <ConceptFooter />
+    </div>
+  );
+}
+
+/** The helper under every Rules composer, as the boards word it. */
+export const RULES_HELPER = 'Claude shows you the change and example situations before anything applies.';
+
+/**
+ * The owner composer of the Rules page and a tool's page: the box named by its placeholder, the
+ * helper under the words, and the page's suggestions under the box. On a phone the board draws the
+ * box alone.
+ */
+export function AskAboutRules({ placeholder, chips }: { placeholder: string; chips: readonly string[] }) {
+  return (
+    <div className="board-ask">
+      <Composer variant="owner" label={placeholder} placeholder={placeholder} helper={RULES_HELPER} onSend={fn()} />
+      <SuggestionChips label="Suggestions" suggestions={chips} onPick={fn()} />
+    </div>
+  );
+}
+
+/** The Desk's connectors as the hub lists them: the summary line and a section per connector. */
+export interface RulesHub {
+  summary: string;
+  sections: readonly Pick<ConnectorSectionProps, 'connector' | 'href' | 'tools' | 'addedNote'>[];
+}
+
+export interface RulesPageProps {
+  hub: RulesHub;
+  /** The suggestions under the composer, in the owner's words. */
+  chips: readonly string[];
+  /** A line under the page's title about what just changed. */
+  notice?: ReactNode;
+}
+
+/**
+ * The Rules page: its title and line, the composer that asks Claude for a change right under
+ * them, the Desk's connectors, a section each, and the always-on rules. Connectors are added from
+ * the Connectors page, so it has no "Add a connector".
+ */
+export function RulesPage({ hub, chips, notice }: RulesPageProps) {
+  return (
+    <BoardPage>
+      <PageHeader title="Rules" subtitle="What Claude can do on this Desk, where each tool comes from, and your rules for it." />
+      {notice ? <div className="board-rules__notice">{notice}</div> : null}
+      <AskAboutRules placeholder="Ask Claude to change a rule or a connector" chips={chips} />
+      <ConnectorList summary={hub.summary}>
+        {hub.sections.map((section) => (
+          <ConnectorSection key={section.connector.id} {...section} href={`#${section.href}`} tools={section.tools.map((tool) => ({ ...tool, href: `#${tool.href}` }))} />
+        ))}
+      </ConnectorList>
+      <AlwaysOnList />
+    </BoardPage>
+  );
+}
+
+export interface ConnectorsPageProps {
+  /** The Desk's connectors, as the Connectors page groups them. */
+  directory: Omit<ConnectorDirectoryProps, 'linkComponent'>;
+  /** A line under the page's title about what just changed. */
+  notice?: ReactNode;
+}
+
+/**
+ * The Connectors page: its title with "Add a connector", a line about what just changed when there
+ * is one, and the Desk's connectors grouped by where they come from.
+ */
+export function ConnectorsPage({ directory, notice }: ConnectorsPageProps) {
+  return (
+    <BoardPage>
+      <div className="board-connectors__header">
+        <PageHeader
+          title="Connectors"
+          subtitle="What Claude can reach, and the accounts behind it."
+          actions={
+            <Button variant="secondary" size="main" onClick={fn()}>
+              Add a connector
+            </Button>
+          }
+        />
+      </div>
+      {notice ? <div className="board-connectors__notice">{notice}</div> : null}
+      <ConnectorDirectory
+        {...directory}
+        builtIn={directory.builtIn.map((row) => ({ ...row, href: row.href ? `#${row.href}` : undefined }))}
+        connected={directory.connected.map((row) => ({ ...row, href: row.href ? `#${row.href}` : undefined }))}
+      />
+    </BoardPage>
+  );
+}
+
+/** A rule row as the screen builds it from one of Rivera's cards: its words, its limit and, for an effect card, the shared line. */
+export function riveraRuleRow(card: RuleCard): RuleRowProps {
+  const id = card.card_id as keyof typeof rivera.ruleWords;
+  const limits: Partial<Record<keyof typeof rivera.ruleWords, string>> = rivera.ruleLimits;
+  return {
+    rule: card,
+    words: rivera.ruleWords[id],
+    limit: limits[id],
+    shared: card.applies_to.startsWith('effect:') ? { appliesTo: rivera.sharedChargeAppliesTo } : undefined,
+    onChangeOutcome: fn(),
+  };
+}
+
+/** Rivera's cards, with the shared rule for every tool that charges money. */
+const RIVERA_CARDS: RuleCard[] = [...Object.values(rivera.ruleCards), rivera.sharedChargeCard];
+
+/** The rules that govern one of Rivera's tools, as rows, most specific first. */
+export function riveraRulesFor(tool: ToolName, effects: Effect[]): RuleRowProps[] {
+  return rulesForTool({ tool, effects }, RIVERA_CARDS).map(riveraRuleRow);
+}
+
+/** A trail to an owner page, its links in-page anchors so nothing leaves the story. */
+export function Trail({ items }: { items: string[] }) {
+  return (
+    <Breadcrumb items={items.map((label, index) => (index === items.length - 1 ? { label } : { label, href: `#${label.toLowerCase()}` }))} />
+  );
+}
+
+/**
+ * A part of an owner page under its section header, with an optional caption at the right. The
+ * cards under it are named regions of their own, so the part is a group, not a second landmark.
+ */
+export function PageSection({ title, caption, children }: { title: string; caption?: string; children: ReactNode }) {
+  return (
+    <div className="board-page-section">
+      <SectionHeader title={title} caption={caption} />
+      {children}
+    </div>
   );
 }
 

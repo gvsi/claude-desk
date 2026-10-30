@@ -9,11 +9,7 @@ const meta = {
   title: 'Layout/Card',
   component: Card,
   args: { children: null },
-  parameters: {
-    layout: 'padded',
-    canvas: 'none',
-    canvasNote: 'The Connectors and rules boards replace the earlier Rules board this card came from; the nearest reference board with cards is N-Today-Run1.',
-  },
+  parameters: { layout: 'padded', canvas: 'N-Conn-23-Connectors' },
 } satisfies Meta<typeof Card>;
 
 export default meta;
@@ -32,15 +28,15 @@ const CARD_LOOK = {
 export const Default: Story = {
   args: {
     as: 'article',
-    label: 'Quotes',
+    label: 'Quote',
     padding: 16,
     children: (
       <>
         <h3 className="cd-type-section" style={{ margin: 0 }}>
-          Quotes
+          Quote
         </h3>
         <p className="cd-type-caption" style={{ margin: 'var(--space-2) 0 0', color: 'var(--text-secondary)' }}>
-          Commits to a price. Can be revised.
+          Prices a job from your price list. Changes something. Can be undone.
         </p>
         <p className="cd-type-caption" style={{ margin: 'var(--space-12) 0 0', color: 'var(--text-secondary)' }}>
           Anything else here: ask me.
@@ -53,12 +49,9 @@ export const Default: Story = {
       <Card {...args} />
     </div>
   ),
-  parameters: {
-    canvasNote:
-      'A capability card from the earlier Rules board, with its rule rows left out. The Connectors and rules boards replace that board; the nearest reference board with cards is N-Today-Run1.',
-  },
+  parameters: { canvasNote: "A tool's rules card with its rule rows left out; ToolRulesCard draws them." },
   play: async ({ canvas }) => {
-    const card = canvas.getByRole('article', { name: 'Quotes' });
+    const card = canvas.getByRole('article', { name: 'Quote' });
     expectComputed(card, { ...CARD_LOOK, paddingTop: '16px', paddingLeft: '16px' });
   },
 };

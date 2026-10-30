@@ -1,0 +1,150 @@
+/* ConnectorSignIn: a raised surface 600 px wide, 48 px from the top of the window over the scrim,
+   with the dialog shadow. The steps, then the 44 px tile beside the serif title and the mock line,
+   the promise card, the question and a bordered box per choice (the checked one on the accent
+   border), and Cancel and Continue at the right. */
+
+.cd-connector-sign-in {
+  box-sizing: border-box;
+  width: min(600px, calc(100% - var(--space-32)));
+  max-width: none;
+  max-height: calc(100% - var(--space-24) * 4);
+  margin: calc(var(--space-24) * 2) auto auto;
+  padding: var(--space-28);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-card);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-dialog);
+  color: var(--text-primary);
+}
+
+/* Its parts 18 px apart, as the sign-in board sets them. */
+.cd-connector-sign-in[open] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-18);
+}
+
+.cd-connector-sign-in::backdrop {
+  background: var(--scrim);
+}
+
+/* The tile is 44 px here, centered on the title and the mock line, as the sign-in board draws it. */
+.cd-connector-sign-in__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-14);
+  min-width: 0;
+}
+
+.cd-connector-sign-in__header > .cd-connector-icon {
+  width: var(--size-connector-title-tile);
+  height: var(--size-connector-title-tile);
+}
+
+/* The promise card is padded 14 px 16 px here, as the sign-in board draws it. */
+.cd-connector-sign-in .cd-card--padding-16 {
+  padding-top: var(--space-14);
+  padding-bottom: var(--space-14);
+}
+
+.cd-connector-sign-in__heading {
+  min-width: 0;
+}
+
+.cd-connector-sign-in__title {
+  margin: 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.cd-connector-sign-in__title .cd-pill {
+  margin-left: var(--space-4);
+}
+
+.cd-connector-sign-in__mock {
+  margin: var(--space-4) 0 0;
+  color: var(--text-secondary);
+}
+
+.cd-connector-sign-in__choices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.cd-connector-sign-in__question {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.cd-connector-sign-in__choice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-12);
+  padding: var(--space-12) var(--space-16);
+  border: 1px solid var(--line-control);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  transition: border-color var(--motion-instant) var(--motion-ease);
+}
+
+.cd-connector-sign-in__choice:hover {
+  border-color: var(--line-control-hover);
+}
+
+.cd-connector-sign-in__choice:has(.cd-connector-sign-in__radio:checked) {
+  border-color: var(--accent-blue);
+}
+
+/* The native radio, in the accent color, on the label's first line. */
+.cd-connector-sign-in__radio {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin: 3px 0 0;
+  accent-color: var(--accent-blue);
+}
+
+.cd-connector-sign-in__choice-text {
+  min-width: 0;
+}
+
+.cd-connector-sign-in__choice-label {
+  display: block;
+  color: var(--text-primary);
+}
+
+.cd-connector-sign-in__choice-detail {
+  display: block;
+  margin-top: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.cd-connector-sign-in__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-8);
+}
+
+@media (max-width: 719.98px) {
+  /* The title wraps here, so the tile stays at its top. */
+  .cd-connector-sign-in__header {
+    align-items: flex-start;
+  }
+
+  .cd-connector-sign-in {
+    max-height: calc(100% - var(--space-32));
+    margin-top: var(--space-16);
+    padding: var(--space-20);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cd-connector-sign-in__choice {
+    transition: none;
+  }
+}

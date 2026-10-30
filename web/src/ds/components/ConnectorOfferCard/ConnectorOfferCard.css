@@ -1,0 +1,47 @@
+/* ConnectorOfferCard: a compact card. The 36 px tile beside the name (weight 520, with its badge)
+   and the tools line, then what covers them in secondary meta, then the one button or the
+   coming-soon line, 12 px apart. */
+
+.cd-connector-offer {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-12);
+  min-width: 0;
+}
+
+.cd-connector-offer__identity {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-12);
+  min-width: 0;
+}
+
+.cd-connector-offer__text {
+  min-width: 0;
+}
+
+.cd-connector-offer__name {
+  display: block;
+  color: var(--text-primary);
+  font-weight: 520;
+}
+
+/* The badge sits 8 px from the name, as the board sets it. */
+.cd-connector-offer__name .cd-connector-name > .cd-pill,
+.cd-connector-offer__name .cd-connector-name__built-in {
+  margin-left: var(--space-4);
+}
+
+.cd-connector-offer__tools {
+  margin: var(--space-2) 0 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.cd-connector-offer__coverage,
+.cd-connector-offer__coming {
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}

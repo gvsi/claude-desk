@@ -238,3 +238,117 @@ export async function expectTabOrder(user: { tab: () => Promise<void> }, stops: 
 function describe(el: HTMLElement): string {
   return el.getAttribute('aria-label') ?? el.textContent?.replace(/\s+/g, ' ').trim() ?? el.tagName;
 }
+
+/**
+ * The connectors board spec (design system screens plan, Task 6b): the Connectors and rules boards'
+ * own rows, read off their renders, with the rows above.
+ */
+export const CONNECTORS_SPEC = {
+  /** A connector's section: the card's look, with no padding of its own. */
+  section: {
+    backgroundColor: 'rgba(250, 249, 245, 0.03)',
+    borderTopWidth: '1px',
+    borderTopColor: 'rgba(250, 249, 245, 0.14)',
+    borderTopLeftRadius: '12px',
+    paddingTop: '0px',
+    paddingLeft: '0px',
+  },
+  sectionHeader: { paddingTop: '14px', paddingRight: '16px', paddingBottom: '14px', paddingLeft: '16px' },
+  iconTile: { width: '36px', height: '36px', borderTopLeftRadius: '8px', backgroundColor: 'rgba(250, 249, 245, 0.1)' },
+  brandTile: { width: '36px', height: '36px', borderTopLeftRadius: '8px', backgroundColor: 'rgb(255, 255, 255)' },
+  toolRow: {
+    paddingTop: '12px',
+    paddingRight: '16px',
+    paddingBottom: '12px',
+    paddingLeft: '16px',
+    borderTopWidth: '1px',
+    borderTopColor: 'rgba(250, 249, 245, 0.12)',
+  },
+  toolName: { fontWeight: '520' },
+  outcomeMenu: {
+    height: '32px',
+    borderTopWidth: '1px',
+    borderTopColor: 'rgba(250, 249, 245, 0.22)',
+    borderTopLeftRadius: '8px',
+    backgroundColor: 'rgba(0, 0, 0, 0)',
+  },
+  changeTag: { width: '64px', borderTopWidth: '1px', borderTopColor: 'rgba(250, 249, 245, 0.22)', borderTopLeftRadius: '999px' },
+  stepCircle: { width: '22px', height: '22px' },
+  currentStep: { backgroundColor: 'rgb(239, 236, 228)' },
+  quotedDefinition: {
+    paddingTop: '10px',
+    paddingRight: '12px',
+    paddingBottom: '10px',
+    paddingLeft: '12px',
+    borderTopWidth: '1px',
+    borderTopColor: 'rgba(250, 249, 245, 0.12)',
+    borderTopLeftRadius: '8px',
+    backgroundColor: 'rgb(28, 27, 25)',
+  },
+  quotedDefinitionText: { fontSize: '12px', lineHeight: '18px', fontFamily: /mono/i, whiteSpace: 'pre-wrap' },
+  askClaudePanel: { width: '400px', borderLeftWidth: '1px', borderLeftColor: 'rgba(250, 249, 245, 0.12)' },
+} as const satisfies Record<string, ComputedExpectation>;
+
+/** Every connector section on the page in its look: the card, its header link and its icon tile, and each tool row. */
+export function expectConnectorSections(root: HTMLElement): void {
+  for (const section of some(root, '.cd-connector-section')) {
+    expectComputed(section.closest<HTMLElement>('.cd-card') as HTMLElement, CONNECTORS_SPEC.section);
+    expectComputed(one(section, ':scope > .cd-connector-section__header'), CONNECTORS_SPEC.sectionHeader);
+    const tile = one(section, '.cd-connector-icon');
+    expectComputed(tile, tile.classList.contains('cd-connector-icon--brand') ? CONNECTORS_SPEC.brandTile : CONNECTORS_SPEC.iconTile);
+    for (const row of section.querySelectorAll<HTMLElement>('.cd-connector-section__tool')) {
+      expectComputed(row, CONNECTORS_SPEC.toolRow);
+      expectComputed(one(row, '.cd-connector-section__tool-link'), CONNECTORS_SPEC.toolName);
+    }
+  }
+}
+
+/** Every outcome menu button on the page, in its look. */
+export function expectOutcomeMenus(root: HTMLElement): HTMLElement[] {
+  const buttons = some(root, '.cd-outcome-menu__button');
+  for (const button of buttons) expectComputed(button, CONNECTORS_SPEC.outcomeMenu);
+  return buttons;
+}
+
+/** The owner composer of a Rules page or a tool's page, in the composer's look, with its helper and its chips. */
+export async function expectRulesComposer(
+  root: HTMLElement,
+  placeholder: string,
+  chips: readonly string[],
+): Promise<{ composer: HTMLElement; chips: HTMLElement[] }> {
+  const composer = within(root).getByRole('textbox', { name: placeholder });
+  await expect(composer).toHaveAttribute('placeholder', placeholder);
+  expectComputed(composer.closest<HTMLElement>('.cd-composer__box') as HTMLElement, SPEC.composer);
+  await expect(within(root).getByText('Claude shows you the change and example situations before anything applies.')).toBeVisible();
+  const group = within(root).getByRole('group', { name: 'Suggestions' });
+  const buttons = within(group).getAllByRole('button');
+  await expect(buttons.map((chip) => chip.textContent)).toEqual([...chips]);
+  return { composer, chips: buttons };
+}
+
+/**
+ * A Rules page: the serif title and its line; the composer and its chips right under them; each
+ * connector's section; the always-on rules, with no controls. Connectors are added from the
+ * Connectors page, so the Rules page has no "Add a connector".
+ */
+export async function expectRulesPage(root: HTMLElement, chips: readonly string[]): Promise<{ composer: HTMLElement; chips: HTMLElement[] }> {
+  const main = within(root).getByRole('main');
+  expectComputed(within(main).getByRole('heading', { level: 1, name: 'Rules' }), SPEC.pageTitle);
+  await expect(within(main).getByText('What Claude can do on this Desk, where each tool comes from, and your rules for it.')).toBeVisible();
+  await expect(within(main).queryByRole('button', { name: 'Add a connector' })).toBeNull();
+  const ask = await expectRulesComposer(main, 'Ask Claude to change a rule or a connector', chips);
+  // As the board spaces them: the composer 20 px under the header (or the notice under it), its
+  // suggestions 10 px under it, and the connectors' summary 20 px under them.
+  const top = (el: Element) => Math.round(el.getBoundingClientRect().top);
+  const bottom = (el: Element) => Math.round(el.getBoundingClientRect().bottom);
+  const box = ask.composer.closest('.cd-composer__box') as HTMLElement;
+  const above = one(main, '.board-ask').previousElementSibling as HTMLElement;
+  await expect(top(box) - bottom(above), 'the composer under the header').toBe(20);
+  const group = one(main, '.cd-suggestion-chips');
+  await expect(top(group) - bottom(box), 'the suggestions under the composer').toBe(10);
+  await expect(top(one(main, '.cd-connector-list__summary')) - bottom(group), 'the summary under the suggestions').toBe(20);
+  expectConnectorSections(main);
+  const alwaysOn = one(main, '.cd-always-on');
+  await expect(alwaysOn.querySelectorAll('button, input, select, textarea')).toHaveLength(0);
+  return ask;
+}

@@ -26,7 +26,7 @@ const SECTIONS = ['General', 'Knowledge', 'Notifications', 'Channels', 'Billing'
 function SettingsDeleteDesk() {
   return (
     <RiveraFrame current="settings" fill counts={{ conversations: { n: 2, label: '2 need you' }, safety: { n: 2, label: '2 blocked' } }}>
-      <div className="board-page">
+      <div className="board-filled-page">
         <div className="board-settings">
           <PageHeader title="Settings" />
           <div className="board-settings__columns">

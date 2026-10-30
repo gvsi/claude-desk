@@ -5,16 +5,16 @@ import { expect, fn } from 'storybook/test';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { SegmentedControl, type SegmentedControlProps } from './SegmentedControl.tsx';
 
-type Preset = 'ask_first' | 'auto' | 'custom';
+type View = 'attempts' | 'entries';
 
-const PRESETS = [
-  { value: 'ask_first', label: 'Ask me first' },
-  { value: 'auto', label: 'Auto' },
-  { value: 'custom', label: 'Custom' },
-] as const satisfies readonly { value: Preset; label: string }[];
+/** The Safety page's view switch, as the signed Safety board draws it. */
+const VIEWS = [
+  { value: 'attempts', label: 'Attempts' },
+  { value: 'entries', label: 'Every entry' },
+] as const satisfies readonly { value: View; label: string }[];
 
 /** The control as a screen holds it: it shows the new choice, and reports each change. */
-function Controlled(props: SegmentedControlProps<Preset>) {
+function Controlled(props: SegmentedControlProps<View>) {
   const [value, setValue] = useState(props.value);
   return (
     <SegmentedControl
@@ -30,28 +30,23 @@ function Controlled(props: SegmentedControlProps<Preset>) {
 
 const meta = {
   title: 'Controls/SegmentedControl',
-  component: SegmentedControl<Preset>,
-  args: { label: 'Mode for this Desk', options: PRESETS, value: 'custom', onChange: fn() },
+  component: SegmentedControl<View>,
+  args: { label: 'Show', options: VIEWS, value: 'attempts', onChange: fn() },
   render: (args) => <Controlled {...args} />,
-  parameters: {
-    layout: 'padded',
-    canvas: 'none',
-    canvasNote:
-      'The Connectors and rules boards replace the earlier Rules board this mode control came from; the nearest reference board, N-Safety-Run1, draws the same control for Attempts and Every entry.',
-  },
-} satisfies Meta<typeof SegmentedControl<Preset>>;
+  parameters: { layout: 'padded', canvas: 'N-Safety-Run1' },
+} satisfies Meta<typeof SegmentedControl<View>>;
 
 export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-export const Mode: Story = {
+export const SafetyView: Story = {
   play: async ({ args, canvas, userEvent }) => {
-    const group = canvas.getByRole('radiogroup', { name: 'Mode for this Desk' });
+    const group = canvas.getByRole('radiogroup', { name: 'Show' });
     const option = (name: string) => canvas.getByRole('radio', { name });
-    await expect(canvas.getAllByRole('radio').map((radio) => radio.textContent)).toEqual(['Ask me first', 'Auto', 'Custom']);
+    await expect(canvas.getAllByRole('radio').map((radio) => radio.textContent)).toEqual(['Attempts', 'Every entry']);
     expectComputed(group, { backgroundColor: 'rgba(250, 249, 245, 0.05)', borderTopLeftRadius: '8px' });
-    expectComputed(option('Custom'), {
+    expectComputed(option('Attempts'), {
       height: '28px',
       fontSize: '13px',
       lineHeight: '18px',
@@ -59,33 +54,30 @@ export const Mode: Story = {
       backgroundColor: 'rgb(60, 57, 47)',
       color: 'rgba(250, 249, 245, 0.92)',
     });
-    expectComputed(option('Auto'), { backgroundColor: 'rgba(0, 0, 0, 0)', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(option('Every entry'), { backgroundColor: 'rgba(0, 0, 0, 0)', color: 'rgba(250, 249, 245, 0.64)' });
 
     // One tab stop: Tab lands on the chosen option.
     await userEvent.tab();
-    await expect(option('Custom')).toHaveFocus();
-    await expect(option('Custom')).toHaveAttribute('aria-checked', 'true');
+    await expect(option('Attempts')).toHaveFocus();
+    await expect(option('Attempts')).toHaveAttribute('aria-checked', 'true');
 
     // segments_follow_arrow_keys
+    await userEvent.keyboard('{ArrowRight}');
+    await expect(option('Every entry')).toHaveFocus();
+    await expect(option('Every entry')).toHaveAttribute('aria-checked', 'true');
+    await expect(option('Attempts')).toHaveAttribute('aria-checked', 'false');
+    await expect(args.onChange).toHaveBeenLastCalledWith('entries');
+
+    // From the last option, the next one is the first; from the first, the previous is the last.
+    await userEvent.keyboard('{ArrowRight}');
+    await expect(option('Attempts')).toHaveFocus();
+    await expect(args.onChange).toHaveBeenLastCalledWith('attempts');
     await userEvent.keyboard('{ArrowLeft}');
-    await expect(option('Auto')).toHaveFocus();
-    await expect(option('Auto')).toHaveAttribute('aria-checked', 'true');
-    await expect(args.onChange).toHaveBeenLastCalledWith('auto');
-
-    await userEvent.keyboard('{ArrowRight}');
-    await expect(option('Custom')).toHaveFocus();
-    await expect(option('Custom')).toHaveAttribute('aria-checked', 'true');
-    await expect(option('Auto')).toHaveAttribute('aria-checked', 'false');
-    await expect(args.onChange).toHaveBeenLastCalledWith('custom');
-
-    // From the last option, the next one is the first.
-    await userEvent.keyboard('{ArrowRight}');
-    await expect(option('Ask me first')).toHaveFocus();
-    await expect(option('Ask me first')).toHaveAttribute('aria-checked', 'true');
-    await expect(args.onChange).toHaveBeenLastCalledWith('ask_first');
+    await expect(option('Every entry')).toHaveFocus();
+    await expect(args.onChange).toHaveBeenLastCalledWith('entries');
     await expect(args.onChange).toHaveBeenCalledTimes(3);
 
     // Still one tab stop, now on the new choice.
-    await expect(canvas.getAllByRole('radio').map((radio) => radio.tabIndex)).toEqual([0, -1, -1]);
+    await expect(canvas.getAllByRole('radio').map((radio) => radio.tabIndex)).toEqual([-1, 0]);
   },
 };

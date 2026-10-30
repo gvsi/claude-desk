@@ -82,6 +82,9 @@ export {
   ConversationListItem,
   type ConversationListItemProps,
 } from './components/ConversationListItem/ConversationListItem.tsx';
+export { Breadcrumb, type BreadcrumbItem, type BreadcrumbProps } from './components/Breadcrumb/Breadcrumb.tsx';
+export { Steps, type StepsProps } from './components/Steps/Steps.tsx';
+export { SubNav, type SubNavItem, type SubNavProps } from './components/SubNav/SubNav.tsx';
 export {
   LeadRow,
   PersonRow,
@@ -144,6 +147,7 @@ export { AgentMessage, type AgentMessageProps } from './components/AgentMessage/
 export { Whisper, type WhisperProps } from './components/Whisper/Whisper.tsx';
 export { SystemLine, type SystemLineProps } from './components/SystemLine/SystemLine.tsx';
 export { WritingIndicator, type WritingIndicatorProps } from './components/WritingIndicator/WritingIndicator.tsx';
+export { ToolLabel, type ToolLabelProps } from './components/ToolLabel/ToolLabel.tsx';
 
 // Margin receipts
 export {
@@ -175,6 +179,79 @@ export {
 // Owner decisions
 export { ApprovalCard, type ApprovalCardProps } from './components/ApprovalCard/ApprovalCard.tsx';
 export { TakeOverBar, type TakeOverBarProps } from './components/TakeOverBar/TakeOverBar.tsx';
+
+// Rules and connectors
+export {
+  OUTCOME_TONE,
+  OUTCOME_WORDS,
+  PRESET_WORDS,
+  outcomePhrase,
+  type RuleMode,
+  type RulesPreset,
+} from './components/OutcomeMenu/outcomeWords.ts';
+export { OutcomeMenu, type OutcomeMenuProps } from './components/OutcomeMenu/OutcomeMenu.tsx';
+export { RuleRow, type RuleRowProps, type RuleWord } from './components/RuleRow/RuleRow.tsx';
+export { ToolRulesCard, type RulesLinkProps, type ToolRulesCardProps } from './components/ToolRulesCard/ToolRulesCard.tsx';
+export { rulesForTool, type RulesTool } from './components/ToolRulesCard/toolRules.ts';
+export { ConnectorIcon, type ConnectorIconName, type ConnectorIconProps } from './components/ConnectorIcon/ConnectorIcon.tsx';
+export { ConnectorName, type ConnectorNameProps, type ConnectorView } from './components/ConnectorName/ConnectorName.tsx';
+export {
+  ConnectorSection,
+  type ConnectorSectionProps,
+  type ToolSummaryView,
+} from './components/ConnectorSection/ConnectorSection.tsx';
+export { describeEffects } from './components/ConnectorSection/describeEffects.ts';
+export { ConnectorList, type ConnectorListProps } from './components/ConnectorList/ConnectorList.tsx';
+export {
+  ConnectorDirectory,
+  type ConnectorDirectoryProps,
+  type DirectoryRowView,
+} from './components/ConnectorDirectory/ConnectorDirectory.tsx';
+export { AlwaysOnList, type AlwaysOnListProps } from './components/AlwaysOnList/AlwaysOnList.tsx';
+export {
+  ChangeReview,
+  type ChangeReviewProps,
+  type ChangeRowView,
+  type ChangeSide,
+} from './components/ChangeReview/ChangeReview.tsx';
+export { ruleDiff, type RuleDiffRow, type RuleField } from './components/ChangeReview/ruleDiff.ts';
+export { AskClaudePanel, type AskClaudePanelProps } from './components/AskClaudePanel/AskClaudePanel.tsx';
+
+// Connector and tool pages, adding a connector, and a changed tool
+export {
+  ConnectorHeader,
+  type ConnectorHeaderProps,
+  type ConnectorStatus,
+} from './components/ConnectorHeader/ConnectorHeader.tsx';
+export { ConnectorPromise, type ConnectorPromiseProps } from './components/ConnectorHeader/ConnectorPromise.tsx';
+export {
+  ConnectionPanel,
+  type ConnectionAlwaysOn,
+  type ConnectionDetail,
+  type ConnectionPanelProps,
+  type ConnectionTurnOff,
+} from './components/ConnectionPanel/ConnectionPanel.tsx';
+export { ToolPageHeader, type ToolPageHeaderProps } from './components/ToolPageHeader/ToolPageHeader.tsx';
+export {
+  RecentRequests,
+  type RecentRequestView,
+  type RecentRequestsProps,
+} from './components/RecentRequests/RecentRequests.tsx';
+export { ConnectorPicker, type ConnectorPickerProps, type PickerItem } from './components/ConnectorPicker/ConnectorPicker.tsx';
+export { ConnectorSignIn, type ConnectorSignInProps, type SignInChoice } from './components/ConnectorSignIn/ConnectorSignIn.tsx';
+export {
+  ConnectorReview,
+  type ConnectorReviewProps,
+  type ReviewCoverage,
+  type ReviewToolView,
+} from './components/ConnectorReview/ConnectorReview.tsx';
+export {
+  ConnectorOfferCard,
+  type ConnectorOfferAction,
+  type ConnectorOfferCardProps,
+} from './components/ConnectorOfferCard/ConnectorOfferCard.tsx';
+export { ToolChangedItem, type ToolChangedItemProps } from './components/ToolChangedItem/ToolChangedItem.tsx';
+export { ToolReviewCard, type ToolReviewCardProps, type ToolRowView } from './components/ToolReviewCard/ToolReviewCard.tsx';
 
 // Safety
 export { FullTrace, type FullTraceProps } from './components/FullTrace/FullTrace.tsx';

@@ -1,0 +1,161 @@
+/* ConnectorDirectory: the Connectors page's groups, 20 px apart, each a section header and, 20 px
+   under it, one card of rows that reach its edges under hairlines. A row (14 px 16 px) is the
+   connector's 36 px tile, its name and line (and a connected app's account), its count at the
+   right, and a chevron or "Connect". It lays out by its own width: under 640 px the count goes
+   under the line, after its note and a dot, and "Connect" under the count. */
+
+.cd-connector-directory {
+  container: cd-connector-directory / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20);
+  min-width: 0;
+}
+
+.cd-connector-directory__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20);
+  min-width: 0;
+}
+
+.cd-connector-directory__rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cd-connector-directory__row + .cd-connector-directory__row {
+  border-top: 1px solid var(--line-hairline);
+}
+
+.cd-connector-directory__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-14);
+  padding: var(--space-14) var(--space-16);
+  color: inherit;
+  text-decoration: none;
+}
+
+/* A row fills the card to its edges, so its focus ring sits just inside it, and the first and last
+   rows keep the card's corners. */
+.cd-connector-directory__link:focus-visible {
+  outline-offset: -2px;
+}
+
+.cd-connector-directory__row:first-child > .cd-connector-directory__item {
+  border-top-left-radius: calc(var(--radius-card) - 1px);
+  border-top-right-radius: calc(var(--radius-card) - 1px);
+}
+
+.cd-connector-directory__row:last-child > .cd-connector-directory__item {
+  border-bottom-right-radius: calc(var(--radius-card) - 1px);
+  border-bottom-left-radius: calc(var(--radius-card) - 1px);
+}
+
+.cd-connector-directory__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.cd-connector-directory__text > .cd-connector-name {
+  display: flex;
+}
+
+.cd-connector-directory__description {
+  display: block;
+  margin-top: var(--space-2);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* A connected app's account: "Connected" beside its dot, then the account in secondary meta,
+   flowing on and wrapping as one line of text. */
+.cd-connector-directory__connection {
+  display: block;
+  margin-top: var(--space-4);
+  color: var(--text-primary);
+}
+
+.cd-connector-directory__account {
+  margin-left: var(--space-4);
+  color: var(--text-secondary);
+}
+
+.cd-connector-directory__meta {
+  display: flex;
+  flex: none;
+  align-items: baseline;
+  gap: var(--space-14);
+  color: var(--text-secondary);
+}
+
+.cd-connector-directory__dot {
+  display: none;
+}
+
+.cd-connector-directory__chevron {
+  flex: none;
+  color: var(--text-secondary);
+  transition: color var(--motion-instant) var(--motion-ease);
+}
+
+.cd-connector-directory__link:hover .cd-connector-directory__chevron {
+  color: var(--text-primary);
+}
+
+.cd-connector-directory__action {
+  flex: none;
+}
+
+@container cd-connector-directory (max-width: 639.98px) {
+  .cd-connector-directory__item {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      'icon text chevron'
+      'icon meta chevron'
+      'icon action chevron';
+    align-items: start;
+    gap: 0 var(--space-12);
+    padding: var(--space-12) var(--space-14);
+  }
+
+  /* The phone's 32 px tile, as on the Rules page's sections. */
+  .cd-connector-directory__item > .cd-connector-icon {
+    grid-area: icon;
+    width: var(--size-control);
+    height: var(--size-control);
+  }
+
+  .cd-connector-directory__text {
+    grid-area: text;
+  }
+
+  .cd-connector-directory__meta {
+    display: block;
+    grid-area: meta;
+    margin-top: var(--space-4);
+  }
+
+  .cd-connector-directory__dot {
+    display: inline;
+  }
+
+  .cd-connector-directory__chevron {
+    grid-area: chevron;
+    margin-top: var(--space-2);
+  }
+
+  .cd-connector-directory__action {
+    grid-area: action;
+    margin-top: var(--space-10);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cd-connector-directory__chevron {
+    transition: none;
+  }
+}
