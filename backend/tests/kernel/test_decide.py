@@ -227,6 +227,10 @@ async def test_three_blocks_pause_the_session(app, client, registry, reviewer, b
     assert [d.outcome for d in (first, second, third)] == ["hold"] * 3
     assert [notice.preview for notice in first.inbox] == ["A request needs your answer"]
     assert [notice.preview for notice in third.inbox] == ["A conversation was paused", "A request needs your answer"]
+    # each hold's alert names its own decision; the breaker's is about the conversation and names none
+    named = {entry.entry_id: entry.decision_id for entry in await rows_of(app, rows.copy_id, select(DemoInboxEntry))}
+    assert [[named[notice.entry_id] for notice in d.inbox] for d in (first, second, third)] == [
+        [first.decision_id], [second.decision_id], [None, third.decision_id]]
     assert "The reviewer flagged it as an attempt to get around your rules." in third.reason_plain
     breaker = [(e.event.session_id, e.event.summary) for e in await ledger_rows(app, rows) if e.event.kind == "breaker"]
     assert breaker == [(visitor.session_id, {"strike": 1}), (visitor.session_id, {"strike": 2}),
@@ -1015,6 +1019,7 @@ async def test_holds_alert_the_owner_per_notification_defaults(app, client, regi
     assert (notice.to, notice.preview) == ("owner", "A request needs your answer")
     [entry] = await rows_of(app, alerting.copy_id, select(DemoInboxEntry))
     assert (entry.entry_id, entry.kind, entry.to, entry.body) == (notice.entry_id, "alert", "owner", held.reason_plain)
+    assert entry.decision_id == held.decision_id                          # the owner's alert links to the request
     assert quiet.inbox == [] and await rows_of(app, briefed.copy_id, select(DemoInboxEntry)) == []
     # an allow or a refusal alerts no one
     quote.script["normalize"] = priced(list_cents=18_000)

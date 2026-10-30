@@ -388,6 +388,7 @@ async def test_weekday_booking_is_auto_allowed_and_confirmed(app, client, review
     [entry] = await rows_of(app, copy.copy_id, select(DemoInboxEntry).where(
         DemoInboxEntry.entry_id == notice.entry_id))
     assert entry.body == "A stranger booked Monday, November 2, from 12:00 pm to 2:00 pm."
+    assert entry.decision_id is None                           # only a held request's alert names its decision
 
     # a slot that isn't this Desk's, or has started, is refused before any action exists
     await add_slot(app, copy, "S-20261030-0800")                                # this morning

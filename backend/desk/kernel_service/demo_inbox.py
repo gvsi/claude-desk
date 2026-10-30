@@ -20,28 +20,32 @@ KINDS = frozenset(get_args(DemoInboxEntry.model_fields["kind"].annotation))
 
 
 async def deliver(ctx: KernelCtx, *, copy_id: str, desk_id: str, to: str, person_id: str | None, kind: str,
-                  body: str, preview: str) -> InboxNotice:
+                  body: str, preview: str, decision_id: str | None = None) -> InboxNotice:
     """Write one entry in the caller's transaction. `to` is "owner" or the masked contact on record;
-    `body` may hold a code, `preview` never does."""
+    `body` may hold a code, `preview` never does. `decision_id` is only for an owner alert (the
+    table's check refuses it anywhere else)."""
     if kind not in KINDS:
         raise ValueError(f"{kind!r} is not a Demo inbox kind")
     ctx.bind(copy_id)
     notice = InboxNotice(entry_id=new_id("inbox"), to=to, preview=preview)
     await ctx.db.execute(insert(DemoInboxRow).values(
         entry_id=notice.entry_id, copy_id=copy_id, desk_id=desk_id, to=to, person_id=person_id, kind=kind,
-        body=body, preview=preview, created_at=ctx.clock.now(),
+        body=body, preview=preview, created_at=ctx.clock.now(), decision_id=decision_id,
     ))
     return notice
 
 
-async def alert_owner(ctx: KernelCtx, desk_id: str, event_kind: str, preview: str, body: str) -> InboxNotice | None:
+async def alert_owner(ctx: KernelCtx, desk_id: str, event_kind: str, preview: str, body: str, *,
+                      decision_id: str | None = None) -> InboxNotice | None:
     """Alert the owner at once when `event_kind` is in the Desk's `notification_prefs.now`; otherwise
     (a briefing kind, or no preferences) write nothing and return None. Runs in the caller's
     transaction, which must already be bound to the Desk's copy. `body` may carry `reason_plain`
-    and masked contacts, never a code."""
+    and masked contacts, never a code. `decision_id` is the held decision the alert is about, the
+    id the kernel gave the decision it just stored (never text from the model or a visitor), so the
+    owner's Demo inbox can link to the request; every other alert has none."""
     prefs = select(NotificationPref.now).where(NotificationPref.desk_id == desk_id)
     alert_now = (await ctx.db.execute(ctx.repo.scoped(prefs))).scalar_one_or_none()
     if not alert_now or event_kind not in alert_now:
         return None
     return await deliver(ctx, copy_id=ctx.copy_id, desk_id=desk_id, to="owner", person_id=None, kind="alert",
-                         body=body, preview=preview)
+                         body=body, preview=preview, decision_id=decision_id)
