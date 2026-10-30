@@ -59,8 +59,8 @@ describe('ReaderError', () => {
     await expect(import('./ReaderPage.tsx')).rejects.toThrow(/raw HTML/);
 
     for (const [lastDesk, words, to] of [
-      ['desk-rivera', 'Back to your Desk', '/app/desk-rivera/today'],
-      [null, 'Back to the prototype', '/'],
+      ['desk-rivera', 'Try Desk prototype', '/app/desk-rivera/today'],
+      [null, 'Try Desk prototype', '/'],
     ] as const) {
       for (const size of [DESKTOP, PHONE]) {
         const where = `${size.width}, last Desk ${lastDesk}`;

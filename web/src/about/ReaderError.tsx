@@ -7,7 +7,7 @@ import { useId } from 'react';
 
 import { StandalonePage } from '../app/StandalonePage.tsx';
 import { Notice } from '../ds/index.ts';
-import { BackLink } from './BackLink.tsx';
+import { PrototypeLink } from './PrototypeLink.tsx';
 
 export function ReaderError() {
   const titleId = useId();
@@ -16,7 +16,7 @@ export function ReaderError() {
       <h1 id={titleId} className="cd-sr-only">
         About this prototype
       </h1>
-      <Notice tone="error" action={<BackLink />}>
+      <Notice tone="error" action={<PrototypeLink />}>
         This document can’t be shown right now. You can go back and try again later.
       </Notice>
     </StandalonePage>

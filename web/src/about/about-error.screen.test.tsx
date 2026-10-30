@@ -57,7 +57,7 @@ describe('A document that cannot be parsed', () => {
         await expectScreenBasics(screen.container, { owner: true });
         expectNoHorizontalScroll();
 
-        const back = screen.getByRole('link', { name: 'Back to the prototype', exact: true });
+        const back = screen.getByRole('link', { name: 'Try Desk prototype', exact: true });
         await expect.element(back, { message: where }).toHaveAttribute('href', '/');
       }
     }
@@ -65,7 +65,7 @@ describe('A document that cannot be parsed', () => {
     // With a Desk in this browser, the way back is to it.
     writeLocal('lastDesk', RIVERA.deskId);
     const withDesk = await renderRoute('/about/proposal');
-    const back = withDesk.screen.getByRole('link', { name: 'Back to your Desk', exact: true });
+    const back = withDesk.screen.getByRole('link', { name: 'Try Desk prototype', exact: true });
     await expect.element(back).toHaveAttribute('href', `/app/${RIVERA.deskId}/today`);
     writeLocal('lastDesk', null);
 
@@ -81,7 +81,7 @@ describe('A document that cannot be parsed', () => {
 
     // And from an About page that failed, the way back opens it.
     const again = await renderRoute('/about/proposal', { seed: { name: 'rivera', signedIn: false } });
-    await userEvent.click(again.screen.getByRole('link', { name: 'Back to the prototype', exact: true }));
+    await userEvent.click(again.screen.getByRole('link', { name: 'Try Desk prototype', exact: true }));
     await expect.poll(() => again.router.state.location.pathname).toBe('/');
     await expect.element(again.screen.getByRole('dialog', { name: 'A Claude front desk for your business' })).toBeVisible();
   });

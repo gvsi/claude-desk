@@ -71,7 +71,7 @@ describe('A document that cannot be parsed, from the owner app', () => {
     const text = document.body.textContent ?? '';
     expect(text).not.toContain(PARSE_ERROR);
     expect(text).not.toContain('Unexpected Application Error');
-    const back = screen.getByRole('link', { name: 'Back to your Desk', exact: true });
+    const back = screen.getByRole('link', { name: 'Try Desk prototype', exact: true });
     await expect.element(back).toHaveAttribute('href', TODAY);
     await back.click();
     await expect.poll(() => router.state.location.pathname).toBe(TODAY);
