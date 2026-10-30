@@ -455,6 +455,27 @@ async def test_owner_alerts_never_reach_a_visitor_inbox(k: KernelHarness, fake: 
             assert_addressed(shown, [], f"a visitor who typed {what} reads {{}} in their Demo inbox")
 
 
+@pytest.mark.requires("01b")
+async def test_a_visitor_inbox_never_names_a_decision(k: KernelHarness, fake: FakeAnthropic, records):
+    """A visitor's own request is held, so the owner's alert for it names that decision, and the same
+    visitor starts Dana's verification, so their own inbox holds her code. No entry the visitor reads
+    names a decision: the link to a held request is in the owner's Demo inbox alone."""
+    desk = await golden_desk(k)
+    masked = (await masked_on_record(k, records, desk))[desk.people["dana"]]
+    fake.default(REVIEWER_MODEL, Json(REVIEW_PASS))   # the reviewer passes, if the kernel asks it
+    visitor = await open_caller(k, desk, "visitor")
+    held = await decide(k, visitor, "native.quote", quote_args("drain", requested_discount_bp=8000),
+                        expect=Expect(fields={"outcome": "hold", "state": "held"}))   # rv-quote allows no discount
+    await start(k, visitor, DANA, expect=code_sent_to(masked))
+    named = {entry.decision_id for entry in await owner_inbox(k, desk) if entry.kind == "alert"}
+    shown = await own_inbox(k, visitor)
+    if k.is_real:
+        assert held.decision_id in named, "the owner's alert for the held request doesn't name its decision"
+        assert_addressed(addressed(shown), [("verification_code", masked)], "the visitor's Demo inbox holds {}")
+        naming = sum(entry.decision_id is not None for entry in shown)
+        assert naming == 0, f"{naming} of the visitor's Demo inbox entries name a decision"
+
+
 # Limits
 
 @pytest.mark.requires("01b")
