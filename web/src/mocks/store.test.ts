@@ -268,6 +268,30 @@ describe('the scripted Desk', () => {
     ]);
   });
 
+  it('owner_inbox_alerts_carry_their_held_request', async () => {
+    // As the kernel writes them: a hold's alert says the held decision's own reason_plain and names
+    // that decision; every other entry, in the copy as seeded and after a chat, names none.
+    mockStore.reset('rivera_two_desks');
+    await openChat();
+    await send('Can I get 50% off if I pay cash?');
+    await drain();
+    await send('Can you send my invoice?');
+    await drain();
+    const read = await call('ownerInbox');
+    expect(read.status).toBe(200);
+    const entries = read.body as { entry_id: string; kind: string; to: string; body: string; decision_id?: string | null }[];
+    const holds = [...mockStore.world.decisions.values()].map((d) => d.decision).filter((d) => d.outcome === 'hold');
+    expect(holds.length).toBeGreaterThanOrEqual(2);
+    for (const held of holds) {
+      const alert = entries.find((entry) => entry.entry_id === held.inbox?.[0]?.entry_id);
+      expect(alert, held.decision_id).toMatchObject({ to: 'owner', kind: 'alert', body: held.reason_plain, decision_id: held.decision_id });
+    }
+    const alertIds = new Set(holds.map((held) => held.inbox?.[0]?.entry_id));
+    const others = entries.filter((entry) => !alertIds.has(entry.entry_id));
+    expect(others.length).toBeGreaterThan(0);
+    for (const entry of others) expect(entry.decision_id, entry.entry_id).toBeNull();
+  });
+
   it('answer_resolves_and_follows_up', async () => {
     const { events } = await openChat();
     await send('Can I get 15% off?');
