@@ -28,7 +28,7 @@ const REQUESTS_BEFORE = rivera.recentRequests.refund.slice(1).map((row) => ({ ..
 
 const meta = {
   title: 'Boards/A tool changed',
-  globals: { viewport: { value: 'board', isRotated: false } },
+  globals: { viewport: { value: 'laptop', isRotated: false } },
   parameters: { layout: 'fullscreen' },
 } satisfies Meta;
 

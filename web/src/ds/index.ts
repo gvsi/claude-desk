@@ -56,6 +56,8 @@ export {
   Sidebar,
   type NavCount,
   type NavKey,
+  type SidebarAbout,
+  type SidebarAboutLink,
   type SidebarLinkProps,
   type SidebarProps,
 } from './components/Sidebar/Sidebar.tsx';
@@ -136,6 +138,14 @@ export {
   type ReceiptView,
 } from './components/MarginReceipt/receiptTone.ts';
 export { MarginNote, type MarginNoteProps } from './components/MarginNote/MarginNote.tsx';
+
+// Recorded history
+export { RecordedTag, type RecordedTagProps } from './components/RecordedTag/RecordedTag.tsx';
+export { RecordedNote, type RecordedNoteProps } from './components/RecordedNote/RecordedNote.tsx';
+export {
+  RecordedHistoryLink,
+  type RecordedHistoryLinkProps,
+} from './components/RecordedHistoryLink/RecordedHistoryLink.tsx';
 
 // Owner decisions
 export { ApprovalCard, type ApprovalCardProps } from './components/ApprovalCard/ApprovalCard.tsx';

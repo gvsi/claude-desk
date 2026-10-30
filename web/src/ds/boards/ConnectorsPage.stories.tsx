@@ -65,7 +65,7 @@ async function expectConnectorsPage(root: HTMLElement): Promise<{ main: HTMLElem
 
 export const Page: Story = {
   name: 'Connectors',
-  globals: { viewport: { value: 'board', isRotated: false } },
+  globals: { viewport: { value: 'laptop', isRotated: false } },
   render: () => (
     <RiveraFrame current="rules" counts={COUNTS}>
       <ConnectorsPage directory={RIVERA} />
@@ -135,7 +135,7 @@ export const Phone: Story = {
 
 export const GoogleCalendarAdded: Story = {
   name: 'Google Calendar added',
-  globals: { viewport: { value: 'board', isRotated: false } },
+  globals: { viewport: { value: 'laptop', isRotated: false } },
   render: () => (
     <RiveraFrame current="rules" counts={COUNTS}>
       <ConnectorsPage

@@ -1,0 +1,102 @@
+import type { Meta, StoryObj } from '@storybook/react-vite';
+import { expect, fn, within } from 'storybook/test';
+
+import { Sidebar } from '../components/Sidebar/Sidebar.tsx';
+import { rivera } from '../fixtures/index.ts';
+import { expectComputed } from '../test/expectComputed.ts';
+import { MAIN_LINE, OWNER_HREFS } from './parts.tsx';
+import { SPEC, expectTabOrder, one } from './spec.ts';
+
+/** The documents behind the prototype, the owner reading the first. */
+const ABOUT = {
+  title: 'About this prototype',
+  links: [
+    { id: 'proposal', label: 'Product proposal', href: '#docs/product-proposal', current: true },
+    { id: 'prediction', label: 'Capability prediction', href: '#docs/capability-prediction' },
+  ],
+};
+
+/** The sidebar alone, in the column the AppShell gives it, with the "About this prototype" group. */
+function DocsSidebar() {
+  return (
+    <aside className="board-sidebar-column" aria-label="Claude Desk">
+      <Sidebar
+        business={rivera.business.name}
+        onSwitchBusiness={fn()}
+        desks={[MAIN_LINE]}
+        currentDeskId={MAIN_LINE.id}
+        onSwitchDesk={fn()}
+        current="today"
+        hrefs={OWNER_HREFS}
+        peopleLabel="Customers"
+        counts={{ conversations: { n: 2, label: '2 need you' }, safety: { n: 2, label: '2 blocked' } }}
+        answering
+        onAnsweringChange={fn()}
+        owner={{ name: rivera.business.ownerName, status: 'Available for chats' }}
+        about={ABOUT}
+      />
+    </aside>
+  );
+}
+
+const meta = {
+  title: 'Boards/Sidebar, about this prototype',
+  render: () => <DocsSidebar />,
+  // Drawn as the sidebar alone, 264 px wide and a 14-inch laptop's height.
+  globals: { viewport: { value: 'sidebar', isRotated: false } },
+  parameters: {
+    layout: 'fullscreen',
+    canvas: 'N-Docs-Sidebar',
+    canvasNote: [
+      'The sidebar with the “About this prototype” group just above the Answering block, behind its hairline: “Product proposal” and “Capability prediction”, nav rows with the document icon.',
+      'The board’s nav has a Connectors row after Rules, which another change adds; here the nav is today’s seven rows, so it ends 38 px higher, while the group and the foot sit where the board draws them.',
+      'The board marks no row current; here the owner is reading the product proposal, so its row is the current page, on the selected fill, and the main nav marks none.',
+      'The board draws the mark 1 px and every row’s icon 2 px higher than the other signed boards do; the sidebar keeps their placement, so all its icons, the group’s included, sit as on Today and the recorded-history boards.',
+    ].join(' '),
+  },
+} satisfies Meta;
+
+export default meta;
+
+type Story = StoryObj<typeof meta>;
+
+export const Board: Story = {
+  play: async ({ canvas, userEvent }) => {
+    // The board's own window: the sidebar's width, a 14-inch laptop's height.
+    await expect([window.innerWidth, window.innerHeight]).toEqual([264, 982]);
+    const column = canvas.getByRole('complementary', { name: 'Claude Desk' });
+    expectComputed(column, SPEC.sidebar);
+    const foot = one(column, '.cd-sidebar__footer');
+    await expect(column.getBoundingClientRect().bottom - foot.getBoundingClientRect().bottom, 'the sidebar foot at the bottom').toBe(12);
+
+    // The group: its caption title in secondary ink, behind a hairline, just above the foot.
+    const about = canvas.getByRole('navigation', { name: 'About this prototype' });
+    const group = about.closest('.cd-sidebar__about') as HTMLElement;
+    expectComputed(within(about).getByText('About this prototype'), { fontSize: '12px', lineHeight: '17px', fontWeight: '380', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(group, { borderTopWidth: '1px', borderTopColor: 'rgba(250, 249, 245, 0.12)', paddingTop: '14px' });
+    await expect(Math.round(foot.getBoundingClientRect().top - group.getBoundingClientRect().bottom)).toBe(4);
+
+    // Its rows: nav rows like the main ones, the document icon, the open document current.
+    const links = within(about).getAllByRole('link');
+    await expect(links.map((link) => link.textContent)).toEqual(['Product proposal', 'Capability prediction']);
+    const { height, borderTopLeftRadius, fontSize, lineHeight, fontWeight } = SPEC.activeNavRow;
+    const row = { height, borderTopLeftRadius, fontSize, lineHeight, fontWeight };
+    for (const link of links) {
+      expectComputed(link, row);
+      await expect(link.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+    }
+    await expect(links[0]).toHaveAttribute('aria-current', 'page');
+    expectComputed(links[0] as HTMLElement, SPEC.activeNavRow);
+    await expect(links[1]).not.toHaveAttribute('aria-current');
+    const nav = within(column).getByRole('navigation', { name: 'Main' });
+    await expect(within(nav).queryAllByRole('link', { current: 'page' })).toEqual([]);
+
+    // focus_order_is_logical: the business, the main nav, the about links, then Answering.
+    await expectTabOrder(userEvent, [
+      within(column).getByRole('button', { name: `Switch business, current: ${rivera.business.name}` }),
+      ...within(nav).getAllByRole('link'),
+      ...links,
+      within(column).getByRole('switch', { name: 'Answering' }),
+    ]);
+  },
+};

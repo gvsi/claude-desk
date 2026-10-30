@@ -1,6 +1,7 @@
 /**
- * Ties the reference boards to what checks them: each board's render at the size its board is drawn
- * at (when the renders are on this machine) and the `Boards/*` stories that rebuild the boards from the components.
+ * Ties the reference boards to what checks them: each board's render at its own size, a connectors
+ * board at its full height (when the renders are on this machine), and the `Boards/*` stories that
+ * rebuild the boards from the components, each run at its board's size.
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -10,30 +11,20 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { isExportStory } from 'storybook/internal/csf';
 import { describe, expect, it } from 'vitest';
 
-import { REFERENCE_BOARDS } from './boards.ts';
-
-/** The size the signed owner, public and first-visit boards are rendered at, as the Storybook "Canvas" viewport. */
-const RENDER_SIZE = { width: 1280, height: 820 };
+import { BOARD_VIEWPORTS, REFERENCE_BOARDS, boardViewport, capturedAtFullHeight, isReferenceBoard, type ReferenceBoard } from './boards.ts';
 
 /**
- * The Connectors and rules boards are drawn at a 14-inch laptop's width, or a phone's, and a board
- * taller than one screen is captured at its full height: so the width is exact and the height is at
- * least one screen (the Storybook "Board" and "Phone" viewports).
+ * The problem with a render's size, or null when it is the size its board is drawn at: its window's
+ * size, or for a board captured at its full height, its window's width and at least its height.
  */
-const CONNECTORS_SIZE = { width: 1512, minHeight: 982 };
-const CONNECTORS_PHONE_SIZE = { width: 390, minHeight: 844 };
-
-/** The problem with a render's size, or null when it is the size its board is drawn at. */
-function sizeProblem(board: string, size: { width: number; height: number }): string | null {
-  if (board.startsWith('N-Conn-')) {
-    const expected = board === 'N-Conn-24-Phone-Connectors' ? CONNECTORS_PHONE_SIZE : CONNECTORS_SIZE;
-    return size.width === expected.width && size.height >= expected.minHeight
+function sizeProblem(board: ReferenceBoard, size: { width: number; height: number }): string | null {
+  const want = BOARD_VIEWPORTS[boardViewport(board)];
+  if (capturedAtFullHeight(board)) {
+    return size.width === want.width && size.height >= want.height
       ? null
-      : `${board}: ${size.width}×${size.height}, not ${expected.width} wide and at least ${expected.minHeight} tall`;
+      : `${board}: ${size.width}×${size.height}, not ${want.width} wide and at least ${want.height} tall`;
   }
-  return size.width === RENDER_SIZE.width && size.height === RENDER_SIZE.height
-    ? null
-    : `${board}: ${size.width}×${size.height}, not ${RENDER_SIZE.width}×${RENDER_SIZE.height}`;
+  return size.width === want.width && size.height === want.height ? null : `${board}: ${size.width}×${size.height}, not ${want.width}×${want.height}`;
 }
 
 /** A PNG's width and height, read from its IHDR chunk, or null when the bytes aren't a PNG. */
@@ -62,6 +53,14 @@ interface BoardStory {
   id: string;
   /** The story's `parameters.canvas`, its own or its meta's. */
   canvas: unknown;
+  /** The Storybook viewport it runs at: its own or its meta's `globals.viewport`, else the preview's "canvas". */
+  viewport: unknown;
+}
+
+/** The viewport a story or meta's `globals` picks, if any. */
+function viewportOf(globals: Record<string, unknown> | undefined): unknown {
+  const viewport = globals?.viewport as { value?: unknown } | undefined;
+  return viewport?.value;
 }
 
 /** Every story in `boards/`, with the board it names. */
@@ -76,6 +75,7 @@ async function boardStories(): Promise<BoardStory[]> {
       .map(([name, story]) => ({
         id: `${meta.title} › ${name}`,
         canvas: story.parameters?.canvas ?? meta.parameters?.canvas,
+        viewport: viewportOf(story.globals) ?? viewportOf(meta.globals) ?? 'canvas',
       }));
   });
 }
@@ -113,5 +113,18 @@ describe('reference boards', () => {
       return `${board}: ${naming.length === 1 ? 'one story' : `${naming.length} stories${naming.length > 1 ? ` (${naming.join('; ')})` : ''}`}`;
     });
     expect(counts).toEqual(REFERENCE_BOARDS.map((board) => `${board}: one story`));
+  }, STORY_IMPORT_TIMEOUT);
+
+  it('board_stories_run_at_their_boards_window', async () => {
+    // The plays measure the board as drawn, so each runs in the window its board was rendered at.
+    const stories = await boardStories();
+    const wrong = stories.flatMap(({ id, canvas, viewport }) =>
+      isReferenceBoard(canvas) && viewport !== boardViewport(canvas)
+        ? [`${id}: runs at ${JSON.stringify(viewport)}, drawn at ${boardViewport(canvas)}`]
+        : [],
+    );
+    expect(wrong).toEqual([]);
+    // Every window is in use, so the check reads the stories' globals as they are written.
+    expect(new Set(stories.map(({ viewport }) => viewport))).toEqual(new Set(Object.keys(BOARD_VIEWPORTS)));
   }, STORY_IMPORT_TIMEOUT);
 });

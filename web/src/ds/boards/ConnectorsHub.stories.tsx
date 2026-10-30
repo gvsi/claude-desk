@@ -48,7 +48,7 @@ function AskClaudeConversation() {
 
 export const AskClaude: Story = {
   name: 'Ask Claude to add a connector',
-  globals: { viewport: { value: 'board', isRotated: false } },
+  globals: { viewport: { value: 'laptop', isRotated: false } },
   render: () => (
     <ChenFrame
       current="rules"

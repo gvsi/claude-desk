@@ -35,7 +35,7 @@ const QUOTE_CHIPS = ['Quote water heater installs up to $600', 'Why was the drai
 
 const meta = {
   title: 'Boards/Connector and tool pages',
-  globals: { viewport: { value: 'board', isRotated: false } },
+  globals: { viewport: { value: 'laptop', isRotated: false } },
   parameters: { layout: 'fullscreen' },
 } satisfies Meta;
 

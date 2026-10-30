@@ -73,7 +73,7 @@ const CHEN_PICKER_TO_CONNECT = {
 
 const meta = {
   title: 'Boards/Add a connector',
-  globals: { viewport: { value: 'board', isRotated: false } },
+  globals: { viewport: { value: 'laptop', isRotated: false } },
   parameters: { layout: 'fullscreen' },
 } satisfies Meta;
 

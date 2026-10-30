@@ -4,7 +4,7 @@
  * its "Last 7 days" column and briefing, and the conversation page's columns. They are composed
  * here from the components and tokens, only for the `Boards/*` stories, and exported nowhere else.
  */
-import type { CSSProperties, ReactNode } from 'react';
+import { useState, type CSSProperties, type ReactNode } from 'react';
 import { fn } from 'storybook/test';
 
 import type { Effect, EvMessage, PublicDesk, RenderedBlock, RuleCard, StatusEvent, ToolName } from '../../api/contracts.ts';
@@ -27,6 +27,7 @@ import { MarginNote } from '../components/MarginNote/MarginNote.tsx';
 import { MarginReceipt } from '../components/MarginReceipt/MarginReceipt.tsx';
 import { receiptFromEvent } from '../components/MarginReceipt/receiptTone.ts';
 import { PersonMessage } from '../components/PersonMessage/PersonMessage.tsx';
+import { RecordedHistoryLink } from '../components/RecordedHistoryLink/RecordedHistoryLink.tsx';
 import { SystemLine } from '../components/SystemLine/SystemLine.tsx';
 import { TranscriptRow } from '../components/TranscriptRow/TranscriptRow.tsx';
 import { VisitorMessage } from '../components/VisitorMessage/VisitorMessage.tsx';
@@ -37,6 +38,7 @@ import { AppShell } from '../components/AppShell/AppShell.tsx';
 import { Button } from '../components/Button/Button.tsx';
 import { Card } from '../components/Card/Card.tsx';
 import { ChainStatus } from '../components/ChainStatus/ChainStatus.tsx';
+import { Chip } from '../components/Chip/Chip.tsx';
 import { PageHeader } from '../components/PageHeader/PageHeader.tsx';
 import { SegmentedControl } from '../components/SegmentedControl/SegmentedControl.tsx';
 import { ConversationListItem } from '../components/ConversationListItem/ConversationListItem.tsx';
@@ -74,8 +76,6 @@ export interface RiveraFrameProps {
   reviewer?: boolean;
   /** The page lays out its own columns from the sidebar's edge (`AppShell` `fill`). */
   fill?: boolean;
-  /** The sidebar's look (`AppShell` `sidebarLook`): the panel, or the app ground the Run 1 conversation boards draw. */
-  sidebarLook?: 'panel' | 'ground';
   /** A panel beside the page, such as Ask Claude (`AppShell` `panel`). */
   panel?: ReactNode;
   onSwitchBusiness?: () => void;
@@ -116,7 +116,6 @@ function OwnerFrame({
   counts,
   reviewer = false,
   fill = false,
-  sidebarLook = 'panel',
   panel,
   onSwitchBusiness,
   children,
@@ -125,7 +124,6 @@ function OwnerFrame({
     <AppShell
       business={business}
       fill={fill}
-      sidebarLook={sidebarLook}
       panel={panel}
       banner={reviewer ? <ReviewerBar ownerName={ownerName} onStartOver={fn()} /> : undefined}
       sidebar={
@@ -266,14 +264,8 @@ function PublicPagePanel() {
 /** The day letters under the bookings chart: the seven dates ending today, today last. */
 const DAYS = ['F', 'S', 'S', 'M', 'T', 'W', 'T'] as const;
 
-/** "Includes recorded history": the link to the ledger's explanation of the replayed night. */
-function RecordedHistoryLink() {
-  return (
-    <span className="board-recorded cd-type-caption">
-      <TextLink href="#recorded-history">Includes recorded history</TextLink>
-    </span>
-  );
-}
+/** Where "Includes recorded history" goes: the ledger's explanation of the replayed history. */
+export const RECORDED_HISTORY_HREF = '#recorded-history';
 
 export interface LastSevenDaysProps {
   /** Each day's bar, as a share of the week's busiest day; null for the empty copy. */
@@ -294,7 +286,7 @@ export function LastSevenDays({ bars }: LastSevenDaysProps) {
         <h2 id="board-week-title" className="board-week__title cd-type-section">
           Last 7 days
         </h2>
-        {empty ? null : <RecordedHistoryLink />}
+        {empty ? null : <RecordedHistoryLink href={RECORDED_HISTORY_HREF} />}
       </div>
       {empty ? (
         <div className="board-week__block">
@@ -449,7 +441,7 @@ export function TodayNeedsYou({
             </ul>
           </section>
           <section className="board-section" aria-labelledby="board-since-last-night">
-            <SectionHeader id="board-since-last-night" title="Since last night" caption={<RecordedHistoryLink />} />
+            <SectionHeader id="board-since-last-night" title="Since last night" caption={<RecordedHistoryLink href={RECORDED_HISTORY_HREF} />} />
             <SinceLastNight
               summary="All 7 conversations stayed inside your rules. I booked three visits, answered a question and stopped two attempts. Nothing was shared."
               rows={[
@@ -475,6 +467,14 @@ export interface ListedConversation {
   name: string;
   time: string;
   status: { tone: StatusTone; text: string };
+  /** Replayed into this copy: the row carries the Recorded tag. */
+  recorded?: boolean;
+}
+
+/** The list under one day's label: "Today", "Yesterday", "Earlier this week". */
+export interface ConversationGroup {
+  label: string;
+  items: ListedConversation[];
 }
 
 /** The conversations the Run 1 boards list beside the open one. */
@@ -485,25 +485,51 @@ export const CONVERSATION_LIST: ListedConversation[] = [
   { name: 'Visitor in Berkeley', time: '10:58 am', status: { tone: 'held', text: 'Needs you' } },
 ];
 
+export interface ConversationsPageProps {
+  /** The open conversation, by the name the list shows. */
+  open: string;
+  /** Its time too, where the list repeats a name ("Visitor"). */
+  openTime?: string;
+  /** Today's conversations, under one "Today" label, unless `groups` is given. */
+  items?: ListedConversation[];
+  /** The list by day, each under its own label. */
+  groups?: ConversationGroup[];
+  /** A line under the title: "Includes recorded history". */
+  caption?: ReactNode;
+  /**
+   * The recorded-history board's page, at a 14-inch laptop's window: a 312 px list with its days
+   * spaced as that board draws them, and the footer at the open column's foot.
+   */
+  history?: boolean;
+  children: ReactNode;
+}
+
 /**
- * The conversations page: the list of today's conversations in its own column at the left, and the
- * open conversation in the reading column beside it.
+ * The conversations page: the list of conversations in its own column at the left, under their
+ * days, and the open conversation in the reading column beside it.
  */
-export function ConversationsPage({ open, items = CONVERSATION_LIST, children }: { open: string; items?: ListedConversation[]; children: ReactNode }) {
+export function ConversationsPage({ open, openTime, items = CONVERSATION_LIST, groups, caption, history = false, children }: ConversationsPageProps) {
+  const days = groups ?? [{ label: 'Today', items }];
+  const isOpen = (item: ListedConversation) => item.name === open && (openTime === undefined || item.time === openTime);
   return (
-    <div className="board-conversations">
+    <div className={`board-conversations${history ? ' board-conversations--history' : ''}`}>
       <nav className="board-conversations__list" aria-labelledby="board-conversations-title">
         <h1 id="board-conversations-title" className="board-conversations__title cd-type-page-title">
           Conversations
         </h1>
-        <p className="board-quiet cd-type-meta">Today</p>
-        <ul className="board-conversations__items">
-          {items.map((item) => (
-            <li key={item.name}>
-              <ConversationListItem {...item} href={`#conversation-${item.time}`} current={item.name === open} />
-            </li>
-          ))}
-        </ul>
+        {caption ? <p className="board-conversations__caption cd-type-caption">{caption}</p> : null}
+        {days.map((day) => (
+          <div key={day.label} className="board-conversations__day">
+            <p className="board-quiet cd-type-meta">{day.label}</p>
+            <ul className="board-conversations__items">
+              {day.items.map((item) => (
+                <li key={`${item.name} ${item.time}`}>
+                  <ConversationListItem {...item} href={`#conversation-${item.time}`} current={isOpen(item)} />
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
       </nav>
       <div className="board-conversations__open">{children}</div>
     </div>
@@ -716,40 +742,98 @@ export function checkedReply(id: string, blocks: RenderedBlock[], ledgerSeq: num
 
 export type SafetyView = 'attempts' | 'entries';
 
+/** The kinds an attempt is sorted into, "All" first and chosen. */
+export const KINDS = ['All', 'Posing as you', 'Money', 'Private data', 'Codes', 'Hidden instructions', 'Other', 'Not sorted yet'] as const;
+
+/** The kinds as the screen holds them: "All" chosen at first, and the choice follows each pick. */
+export function KindChips() {
+  const [kind, setKind] = useState<(typeof KINDS)[number]>('All');
+  return (
+    <div className="board-chips" role="radiogroup" aria-label="Kind of attempt">
+      {KINDS.map((option) => (
+        <Chip key={option} asRadio selected={option === kind} onClick={() => setKind(option)}>
+          {option}
+        </Chip>
+      ))}
+    </div>
+  );
+}
+
+export interface SafetyPageProps {
+  view: SafetyView;
+  entries: number;
+  list: ReactNode;
+  detail: ReactNode;
+  /** Claude's line about the week. */
+  summary?: string;
+  /** A caption beside the summary: "Includes recorded history". */
+  caption?: ReactNode;
+  /** The counts beside Conversations and Safety in the sidebar. */
+  counts?: RiveraFrameProps['counts'];
+  /**
+   * The recorded-history board's page, at a 14-inch laptop's window: the page fills the main area
+   * with its own 24/40/20 padding, the opened attempt is 400 px wide, 32 px from the list, and the
+   * footer sits at the page's foot.
+   */
+  history?: boolean;
+}
+
 /**
  * The Safety page: its title and Claude's line about the week, the held request waiting on Today,
  * the ledger's chain check beside the view switch, and the page's two columns.
  */
-export function SafetyPage({ view, entries, list, detail }: { view: SafetyView; entries: number; list: ReactNode; detail: ReactNode }) {
-  return (
-    <RiveraFrame current="safety" counts={{ conversations: { n: 3, label: '3 live conversations' }, safety: { n: 2, label: '2 blocked' } }}>
-      <div className="board-safety">
-        <PageHeader
-          title="Safety"
-          subtitle={<span className="board-safety__week cd-type-summary">6 attempts to talk me around were stopped this week.</span>}
-          actions={
-            <Button variant="secondary" href="#today">
-              <StatusLabel tone="held">1 held for you, in Today</StatusLabel>
-            </Button>
-          }
+export function SafetyPage({
+  view,
+  entries,
+  list,
+  detail,
+  summary = '6 attempts to talk me around were stopped this week.',
+  caption,
+  counts = { conversations: { n: 3, label: '3 live conversations' }, safety: { n: 2, label: '2 blocked' } },
+  history = false,
+}: SafetyPageProps) {
+  const page = (
+    <div className={`board-safety${history ? ' board-safety--history' : ''}`}>
+      <PageHeader
+        title="Safety"
+        subtitle={
+          caption ? (
+            <span className="board-safety__summary">
+              <span className="board-safety__week cd-type-summary">{summary}</span>
+              {caption}
+            </span>
+          ) : (
+            <span className="board-safety__week cd-type-summary">{summary}</span>
+          )
+        }
+        actions={
+          <Button variant="secondary" href="#today">
+            <StatusLabel tone="held">1 held for you, in Today</StatusLabel>
+          </Button>
+        }
+      />
+      <div className="board-safety__bar">
+        <ChainStatus chainOk firstBadSeq={null} entries={entries} devKey />
+        <SegmentedControl
+          label="Show"
+          options={[
+            { value: 'attempts', label: 'Attempts' },
+            { value: 'entries', label: 'Every entry' },
+          ]}
+          value={view}
+          onChange={fn()}
         />
-        <div className="board-safety__bar">
-          <ChainStatus chainOk firstBadSeq={null} entries={entries} devKey />
-          <SegmentedControl
-            label="Show"
-            options={[
-              { value: 'attempts', label: 'Attempts' },
-              { value: 'entries', label: 'Every entry' },
-            ]}
-            value={view}
-            onChange={fn()}
-          />
-        </div>
-        <div className={`board-safety__columns board-safety__columns--${view}`}>
-          <div className="board-safety__list">{list}</div>
-          <div className="board-safety__detail">{detail}</div>
-        </div>
       </div>
+      <div className={`board-safety__columns board-safety__columns--${view}`}>
+        <div className="board-safety__list">{list}</div>
+        <div className="board-safety__detail">{detail}</div>
+      </div>
+      {history ? <ConceptFooter /> : null}
+    </div>
+  );
+  return (
+    <RiveraFrame current="safety" counts={counts} fill={history}>
+      {history ? <div className="board-filled-page">{page}</div> : page}
     </RiveraFrame>
   );
 }

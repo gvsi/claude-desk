@@ -159,6 +159,10 @@ export const TwoDesks: Story = {
     // Nothing reaches past the 264 px column.
     const column = canvasElement.querySelector<HTMLElement>('.cd-sidebar');
     await expect(column?.scrollWidth).toBeLessThanOrEqual(column?.clientWidth ?? 0);
+
+    // about_group_only_when_given: without `about`, no group and no extra hairline.
+    await expect(canvas.queryByRole('navigation', { name: 'About this prototype' })).toBeNull();
+    await expect(canvasElement.querySelector('.cd-sidebar__about')).toBeNull();
   },
 };
 
@@ -184,5 +188,94 @@ export const OneDesk: Story = {
     // A count without attention has no dot; Conversations has no count to show.
     await expect(canvas.getAllByRole('img').map((pill) => pill.getAttribute('aria-label'))).toEqual(['1 blocked']);
     await expect(canvasElement.querySelectorAll('.cd-status-dot')).toHaveLength(0);
+  },
+};
+
+/** The two documents behind the prototype, as the docs pages link them. */
+const ABOUT = {
+  title: 'About this prototype',
+  links: [
+    { id: 'proposal', label: 'Product proposal', href: '#docs/product-proposal' },
+    { id: 'prediction', label: 'Capability prediction', href: '#docs/capability-prediction' },
+  ],
+};
+
+/** The about group's links, each by its words. */
+function aboutRows(root: HTMLElement): { link: HTMLElement; text: string }[] {
+  const nav = within(root).getByRole('navigation', { name: 'About this prototype' });
+  return within(nav)
+    .getAllByRole('link')
+    .map((link) => ({ link, text: link.querySelector('.cd-sidebar__label')?.textContent ?? '' }));
+}
+
+export const AboutThisPrototype: Story = {
+  args: { about: ABOUT },
+  parameters: {
+    canvas: 'N-Docs-Sidebar',
+    canvasNote:
+      "The board's nav has a Connectors row, which another change adds; here the nav is today's seven rows, so it ends 38 px higher, while the group and the foot sit where the board draws them.",
+  },
+  play: async ({ canvas, canvasElement, userEvent }) => {
+    // The group: its own navigation, named by its caption title, with one row per link.
+    const nav = canvas.getByRole('navigation', { name: 'About this prototype' });
+    const title = within(nav).getByText('About this prototype');
+    expectComputed(title, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' });
+    const rows = aboutRows(canvasElement);
+    await expect(rows.map((row) => row.text)).toEqual(['Product proposal', 'Capability prediction']);
+    await expect(rows.map((row) => row.link.getAttribute('href'))).toEqual(ABOUT.links.map((link) => link.href));
+
+    // Each row is a nav row like the main ones, with the document icon, and none is current.
+    const today = navRows(canvasElement)[0]?.link as HTMLElement;
+    for (const { link } of rows) {
+      await expect(link).toHaveClass('cd-sidebar__row');
+      await expect(link).not.toHaveAttribute('aria-current');
+      expectComputed(link, { height: '36px', fontSize: '14px', lineHeight: '20px', fontWeight: '420', backgroundColor: 'rgba(0, 0, 0, 0)' });
+      const icon = link.querySelector('svg');
+      await expect(icon).toHaveAttribute('aria-hidden', 'true');
+      await expect(icon?.getBoundingClientRect().width).toBe(20);
+      await expect(Math.round(link.getBoundingClientRect().left)).toBe(Math.round(today.getBoundingClientRect().left));
+    }
+
+    // Just above the Answering block, behind a hairline that spans the column's inner width.
+    const group = nav.closest('.cd-sidebar__about') as HTMLElement;
+    const footer = canvasElement.querySelector('.cd-sidebar__footer') as HTMLElement;
+    expectComputed(group, { borderTopWidth: '1px', borderTopStyle: 'solid', borderTopColor: 'rgba(250, 249, 245, 0.12)' });
+    await expect(group.getBoundingClientRect().bottom).toBeLessThanOrEqual(footer.getBoundingClientRect().top);
+    await expect(Math.round(group.getBoundingClientRect().width)).toBe(Math.round(footer.getBoundingClientRect().width));
+    // The main page stays current in the main nav.
+    await expect(navRows(canvasElement).filter((row) => row.link.hasAttribute('aria-current')).map((row) => row.text)).toEqual(['Today']);
+
+    // about_links_in_tab_order: the main nav, then the about links, then Answering.
+    (document.activeElement as HTMLElement | null)?.blur();
+    const main = navRows(canvasElement).map((row) => row.link);
+    const answering = canvas.getByRole('switch', { name: 'Answering' });
+    main[main.length - 1]?.focus();
+    await userEvent.tab();
+    await expect(rows[0]?.link).toHaveFocus();
+    await userEvent.tab();
+    await expect(rows[1]?.link).toHaveFocus();
+    await userEvent.tab();
+    await expect(answering).toHaveFocus();
+  },
+};
+
+export const AboutCurrent: Story = {
+  args: {
+    about: { ...ABOUT, links: ABOUT.links.map((link) => (link.id === 'proposal' ? { ...link, current: true } : link)) },
+  },
+  parameters: {
+    canvas: 'N-Docs-Sidebar',
+    canvasNote:
+      "The owner reading the product proposal: its row is the current page, where the board marks no row. The board's Connectors row is another change's.",
+  },
+  play: async ({ canvasElement }) => {
+    // about_link_marks_the_current_page: the current link is the page, on the selected fill.
+    const rows = aboutRows(canvasElement);
+    const [proposal, prediction] = rows.map((row) => row.link) as [HTMLElement, HTMLElement];
+    await expect(proposal).toHaveAttribute('aria-current', 'page');
+    expectComputed(proposal, { backgroundColor: 'rgb(60, 57, 47)' });
+    await expect(prediction).not.toHaveAttribute('aria-current');
+    // One current page: the main nav marks none while a document is open.
+    await expect(navRows(canvasElement).filter((row) => row.link.hasAttribute('aria-current'))).toEqual([]);
   },
 };

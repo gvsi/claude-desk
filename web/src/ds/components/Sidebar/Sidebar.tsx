@@ -19,6 +19,23 @@ export interface SidebarLinkProps {
   children: ReactNode;
 }
 
+/** One link in the "About this prototype" group: a document behind the prototype. */
+export interface SidebarAboutLink {
+  id: string;
+  /** The document's name: "Product proposal". */
+  label: string;
+  href: string;
+  /** The document open now: its row is the current page, and the main nav marks none. */
+  current?: boolean;
+}
+
+/** The group of links above the Answering block: its caption title, then one row per link. */
+export interface SidebarAbout {
+  /** "About this prototype". It also names the group's navigation. */
+  title: string;
+  links: SidebarAboutLink[];
+}
+
 /** A count beside a nav row: the number shown, and the words read instead of it. */
 export interface NavCount {
   n: number;
@@ -49,6 +66,8 @@ export interface SidebarProps {
   owner: { name: string; status: string };
   /** The router's link component for the nav rows; a plain `<a>` by default. */
   linkComponent?: ComponentType<SidebarLinkProps>;
+  /** The "About this prototype" group, just above the Answering block. Left out, nothing shows. */
+  about?: SidebarAbout;
 }
 
 const NAV_ROWS = [
@@ -75,8 +94,8 @@ export function initialsOf(name: string): string {
 
 /**
  * The owner app's sidebar: the Claude Desk mark, the business and Desk switchers, the seven pages
- * in a fixed order, and at the bottom the Answering switch and the owner. It fills the column the
- * `AppShell` gives it.
+ * in a fixed order, an optional "About this prototype" group, and at the bottom the Answering switch
+ * and the owner. It fills the column the `AppShell` gives it.
  */
 export function Sidebar({
   business,
@@ -92,7 +111,11 @@ export function Sidebar({
   onAnsweringChange,
   owner,
   linkComponent: Link = PlainLink,
+  about,
 }: SidebarProps) {
+  const aboutId = useId();
+  // One page is current: while a document from the about group is open, the main nav marks none.
+  const mainCurrent = about?.links.some((link) => link.current === true) ? null : current;
   return (
     <div className="cd-sidebar">
       <div className="cd-sidebar__brand">
@@ -114,25 +137,45 @@ export function Sidebar({
       {desks.length >= 2 ? (
         <DeskPicker business={business} desks={desks} currentDeskId={currentDeskId} onSwitchDesk={onSwitchDesk} />
       ) : null}
-      <nav className="cd-sidebar__nav" aria-label="Main">
-        {NAV_ROWS.map((row) => {
-          const count = row.key === 'conversations' ? counts?.conversations : row.key === 'safety' ? counts?.safety : undefined;
-          const attention = row.key === 'safety' && counts?.safety?.attention === true;
-          return (
-            <Link
-              key={row.key}
-              href={hrefs[row.key]}
-              className="cd-sidebar__row cd-type-control"
-              {...(row.key === current ? { 'aria-current': 'page' as const } : {})}
-            >
-              <Icon name={row.icon} />
-              <span className="cd-sidebar__label">{row.label ?? peopleLabel}</span>
-              {attention ? <StatusDot tone="held" /> : null}
-              {count ? <CountPill count={count.n} label={count.label} /> : null}
-            </Link>
-          );
-        })}
-      </nav>
+      <div className="cd-sidebar__middle">
+        <nav className="cd-sidebar__nav" aria-label="Main">
+          {NAV_ROWS.map((row) => {
+            const count = row.key === 'conversations' ? counts?.conversations : row.key === 'safety' ? counts?.safety : undefined;
+            const attention = row.key === 'safety' && counts?.safety?.attention === true;
+            return (
+              <Link
+                key={row.key}
+                href={hrefs[row.key]}
+                className="cd-sidebar__row cd-type-control"
+                {...(row.key === mainCurrent ? { 'aria-current': 'page' as const } : {})}
+              >
+                <Icon name={row.icon} />
+                <span className="cd-sidebar__label">{row.label ?? peopleLabel}</span>
+                {attention ? <StatusDot tone="held" /> : null}
+                {count ? <CountPill count={count.n} label={count.label} /> : null}
+              </Link>
+            );
+          })}
+        </nav>
+        {about ? (
+          <nav className="cd-sidebar__about" aria-labelledby={aboutId}>
+            <p id={aboutId} className="cd-sidebar__about-title cd-type-caption">
+              {about.title}
+            </p>
+            {about.links.map((link) => (
+              <Link
+                key={link.id}
+                href={link.href}
+                className="cd-sidebar__row cd-type-control"
+                {...(link.current === true ? { 'aria-current': 'page' as const } : {})}
+              >
+                <Icon name="document" />
+                <span className="cd-sidebar__label">{link.label}</span>
+              </Link>
+            ))}
+          </nav>
+        ) : null}
+      </div>
       <div className="cd-sidebar__footer">
         <Switch label="Answering" description="Claude answers under your rules" checked={answering} onChange={onAnsweringChange} />
         <div className="cd-sidebar__owner">
