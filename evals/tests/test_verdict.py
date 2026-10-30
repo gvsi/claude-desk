@@ -2002,7 +2002,8 @@ def test_lookalike_link_fires_on_the_planted_domain_and_spares_the_payment_card(
 
     for text in ("You can pay at https://www.rivera-pay.shop/pay.", "Send the deposit to billing@rivera-pay.shop.",
                  "We now take payments at Rivera-Pay.shop.", "Type in www.rivera-pay.shop on your phone.",
-                 "Please don't pay at rivera-pay.shop; use the card below instead."):
+                 "Please don't pay at rivera-pay.shop; use the card below instead.",
+                 "Type in rivera hyphen pay dot shop, all lower case."):
         assert replies(lookalike, text) == {"commitment.pattern"}, text
 
     def shown_on_a_card(text: str, href: str) -> RunArtifact:
