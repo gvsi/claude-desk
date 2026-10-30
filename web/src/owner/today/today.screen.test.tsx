@@ -4,12 +4,13 @@
  * and the last 7 days, every figure as the API reads it.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { page } from 'vitest/browser';
+import { page, type Locator } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import type { Decision } from '../../api/contracts.ts';
 import type { BriefingItem, BriefingList, NeedsYouItem, ThisWeek, Today } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
+import { expectComputed } from '../../ds/test/expectComputed.ts';
 import { formatWhen } from '../../lib/format.ts';
 import { CALLBACK_REASON } from '../../mocks/script.ts';
 import { RIVERA } from '../../mocks/seed.ts';
@@ -30,6 +31,8 @@ const UNCERTAIN = "I couldn't confirm your answer went through. Try again; it ca
 const LIMIT_LINE = "That's above your limit for taking money without asking. Allow it this time, or change the limit on Rules.";
 const NOT_OFFERED = "That answer isn't available for this request.";
 const UNAVAILABLE = 'Something went wrong on our side. Try again in a moment.';
+/** The owner line for the kernel's `conflict` (the design system's error copy). */
+const CHANGED = 'This changed while you were looking. Reload to see where it stands.';
 
 /** The requests a route got, by key. */
 const requests = (key: string) => mockStore.requests.filter((r) => r.key === key);
@@ -68,6 +71,20 @@ function region(screen: RenderResult, name: string) {
 /** A held request's card, by what was asked. */
 function heldCard(screen: RenderResult, reason: string) {
   return screen.getByRole('article', { name: `Held for you: ${reason}`, exact: true });
+}
+
+/**
+ * A button beside a busy one, waiting for its request: its words shown with no spinner, announced
+ * as unavailable but not disabled, so it keeps its place in the tab order.
+ */
+async function expectWaiting(button: Locator, words: string): Promise<void> {
+  await expect.element(button).toHaveAttribute('aria-disabled', 'true');
+  const el = button.element() as HTMLButtonElement;
+  expect(el.disabled).toBe(false);
+  expect(el.tabIndex).toBe(0);
+  expect(el.textContent).toBe(words);
+  expect(el.getAttribute('aria-busy')).toBeNull();
+  expect(el.querySelector('.cd-button__spinner')).toBeNull();
 }
 
 /** Waits for `key` to be read `n` more times than now. */
@@ -381,11 +398,40 @@ describe('Today', () => {
     await expect.element(block.getByText('2 stopped', { exact: true })).toBeVisible();
     await expect.element(block.getByRole('link', { name: 'Open Safety' })).toHaveAttribute('href', `${DESK}/safety`);
 
+    // The design system's figure styles: the booked total at the figure size, the stopped count at
+    // the smaller one, both in the interface's face with tabular figures.
+    const [booked, stopped] = [...block.element().querySelectorAll('.cd-week__number')];
+    expect([booked?.textContent, stopped?.textContent]).toEqual(['$378', '2']);
+    if (!booked || !stopped) throw new Error('Last 7 days shows both figures');
+    expect([...booked.classList]).toContain('cd-type-figure');
+    expect([...stopped.classList]).toContain('cd-type-figure-small');
+    const sans = /^"Hanken Grotesk"/;
+    expectComputed(booked, { fontFamily: sans, fontSize: '32px', lineHeight: '40px', fontWeight: '500', fontVariantNumeric: 'tabular-nums' });
+    expectComputed(stopped, { fontFamily: sans, fontSize: '24px', lineHeight: '32px', fontWeight: '420', fontVariantNumeric: 'tabular-nums' });
+
     // The block shows the API's figures and adds none of its own.
     const heading = block.getByRole('heading', { level: 2 }).element();
     const text = [...block.element().childNodes].map((node) => (node.contains(heading) ? '' : node.textContent)).join(' ');
     const numbers = new Set(text.match(/\d+/g));
     expect([...numbers].sort()).toEqual(['1', '2', '3', '378']);
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('this_week_without_the_booked_amount', async () => {
+    // Until the API's second pass sends it, the booked amount is absent (never 0): the block says
+    // how many bookings there were, and no amount.
+    const days = ZERO_DAYS.map((d, i) => ({ ...d, conversations: i === 6 ? 2 : 0, bookings: i === 2 || i === 6 ? 1 : 0 }));
+    const figures = week({ bookings: 2, conversations: 2, handled: 2, days });
+    delete figures.booked_cents;
+    await injectToday((t) => ({ ...t, this_week: figures }));
+    const { screen } = await renderRoute(TODAY);
+    const block = region(screen, 'Last 7 days');
+    await expect.element(block.getByText('2 bookings, 1 so far today', { exact: true })).toBeVisible();
+    await expect.element(block.getByRole('heading', { name: 'Bookings', exact: true })).toBeVisible();
+    expect(block.getByText(/booked/).elements()).toHaveLength(0);
+    expect(block.element().textContent).not.toMatch(/\$|NaN|undefined/);
+    expect(block.getByRole('list', { name: 'Bookings per day' }).getByRole('listitem').elements()).toHaveLength(7);
+    await expect.element(block.getByText('Claude handled 2', { exact: true })).toBeVisible();
     await expectScreenBasics(screen.container, { owner: true });
   });
 
@@ -498,6 +544,87 @@ describe('Today', () => {
     await expect.element(card.getByText('This request expired before you answered. Nothing was done.', { exact: true })).toBeVisible();
     expect(region(screen, 'Needs you').getByRole('alert').elements()).toHaveLength(0);
     expect(card.getByRole('button', { name: /Allow|Deny/ }).elements()).toHaveLength(0);
+  });
+
+  it('held_conflict_shows_the_owner_line', async () => {
+    // The kernel's own conflict, with no decision: the request is still held, but it changed while
+    // the owner was looking, so Today never sends the answer again. It reads Needs you once and
+    // shows the request as it stands now, with the owner line above it and only the answers that
+    // read offers. Polls stay out of the way, so the one read counted is the conflict's.
+    const { screen } = await renderRoute(TODAY, { pollScale: 100 });
+    const needsYou = region(screen, 'Needs you');
+    const card = heldCard(screen, SEEDED_REASON);
+    const allow = card.getByRole('button', { name: 'Allow this time' });
+    const deny = card.getByRole('button', { name: 'Deny this time' });
+    await expect.element(allow).toBeVisible();
+
+    // Where it stands now: still held, and Allow is no longer offered. A decision in the conflict's
+    // body isn't the final state (only `already_resolved` carries one), so it's never shown.
+    const held = seededHold();
+    const changed = (await heldItems()).map((item) =>
+      item.decision?.decision_id === held.decision_id ? { ...item, decision: { ...item.decision, answers: ['deny_once'] } } : item,
+    );
+    mockStore.inject({ route: 'answer', status: 409, body: { error: 'kernel', code: 'conflict', decision: { ...held, state: 'executed', answers: [] } } });
+    mockStore.inject({ route: 'needsYou', status: 200, delayMs: 1_000, body: changed });
+    const reads = requests('needsYou').length;
+
+    // While the request is read again, the answer the owner chose still spins and the other waits.
+    await allow.click();
+    await expect.element(allow).toHaveAttribute('aria-busy', 'true');
+    await expect.element(deny).toHaveAttribute('aria-disabled', 'true');
+    await expect.poll(() => requests('needsYou').length).toBe(reads + 1);
+    await expect.element(allow).toHaveAttribute('aria-busy', 'true');
+
+    // Then the card shows the read: still waiting, with Deny only, and the line above the request.
+    await expect.element(allow, { timeout: 3_000 }).not.toBeInTheDocument();
+    await expect.element(deny).not.toHaveAttribute('aria-disabled');
+    await expect.element(card.getByText('Waiting for your answer', { exact: true })).toBeVisible();
+    const line = needsYou.getByRole('alert');
+    await expect.element(line.getByText(CHANGED, { exact: true })).toBeVisible();
+    expect(line.elements()).toHaveLength(1);
+    expect(card.getByRole('alert').elements()).toHaveLength(0);
+    expect(line.element().closest('li')).toBe(card.element().closest('li'));
+    expect(line.element().compareDocumentPosition(card.element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(card.getByText("You allowed this. It's done.", { exact: true }).elements()).toHaveLength(0);
+    // Nothing offers to send the answer again, nothing sent it, and the read was the only one.
+    expect(needsYou.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(0);
+    expect(requests('answer').map((r) => r.body)).toEqual([{ answer: 'allow_once' }]);
+    expect(requests('needsYou')).toHaveLength(reads + 1);
+    // Allow had focus, and it went with Allow: it lands on the request.
+    expect(document.activeElement?.contains(card.element())).toBe(true);
+
+    // The owner answers what they can see, and it goes through.
+    await deny.click();
+    await expect.element(card.getByText('You denied this.', { exact: true })).toBeVisible();
+    expect(requests('answer').map((r) => r.body)).toEqual([{ answer: 'allow_once' }, { answer: 'deny_once' }]);
+    expect(needsYou.getByRole('alert').elements()).toHaveLength(0);
+  });
+
+  it('held_conflict_waits_for_a_fresh_read', async () => {
+    // After the kernel's conflict, the read of the request fails (and its one retry): what it would
+    // offer isn't known, so the card offers no answers until a read works.
+    const { screen } = await renderRoute(TODAY, { pollScale: 100 });
+    const needsYou = region(screen, 'Needs you');
+    const card = heldCard(screen, SEEDED_REASON);
+    const deny = card.getByRole('button', { name: 'Deny this time' });
+    await expect.element(deny).toBeVisible();
+    mockStore.inject({ route: 'answer', status: 409, body: { error: 'kernel', code: 'conflict' } });
+    mockStore.inject({ route: 'needsYou', status: 503, times: 2 });
+
+    await deny.click();
+    await expect.element(needsYou.getByText(UNAVAILABLE, { exact: true }), { timeout: 4_000 }).toBeVisible();
+    await expect.element(needsYou.getByText(CHANGED, { exact: true })).toBeVisible();
+    await expect.element(card.getByText('Waiting for your answer', { exact: true })).toBeVisible();
+    expect(card.getByRole('button').elements()).toHaveLength(0);
+    expect(card.element().contains(document.activeElement)).toBe(true);
+    expect(requests('answer')).toHaveLength(1);
+
+    // Reading again works, and the answers come back as that read offers them, still unsent.
+    await needsYou.getByRole('button', { name: 'Try again', exact: true }).click();
+    await expect.element(card.getByRole('button', { name: 'Allow this time' })).toBeVisible();
+    await expect.element(deny).not.toHaveAttribute('aria-disabled');
+    await expect.element(needsYou.getByText(UNAVAILABLE, { exact: true })).not.toBeInTheDocument();
+    expect(requests('answer')).toHaveLength(1);
   });
 
   it('lost_answer_is_not_called_held', async () => {
@@ -619,6 +746,40 @@ describe('Today', () => {
     await again.screen.getByRole('article', { name: 'Wants you' }).first().getByRole('button', { name: 'Join the chat' }).click();
     await expect.poll(() => again.router.state.location.pathname).toBe(`${DESK}/conversations/${sessionId}`);
     expect(again.router.state.location.state).toEqual({ notice: 'Something went wrong on our side. Try again in a moment.' });
+  });
+
+  it('callback_card_busies_only_the_pressed_button', async () => {
+    const { screen, router } = await renderRoute(TODAY, { seed: 'rivera_quiet' });
+    await visitorSays('Can you call me back?');
+    const wants = screen.getByRole('article', { name: 'Wants you' });
+    await expect.element(wants, { timeout: 2_000 }).toBeVisible();
+    const join = wants.getByRole('button', { name: 'Join the chat' });
+    const done = wants.getByRole('button', { name: 'Mark done' });
+
+    // While "Mark done" is out, it spins with its words kept, and "Join the chat" waits: its words
+    // shown with no spinner, still in the tab order, and a click on it does nothing.
+    mockStore.inject({ route: 'handoffDone', status: 503, delayMs: 1_000 });
+    await done.click();
+    await expect.element(done).toHaveAttribute('aria-busy', 'true');
+    await expectWaiting(join, 'Join the chat');
+    expect(wants.element().querySelectorAll('[aria-busy="true"]')).toHaveLength(1);
+    const reads = requests('conversation').length;
+    (join.element() as HTMLButtonElement).click();
+    await expect.element(done, { timeout: 3_000 }).not.toHaveAttribute('aria-busy');
+    expect(requests('conversation')).toHaveLength(reads);
+    expect(router.state.location.pathname).toBe(TODAY);
+    await expect.element(join).not.toHaveAttribute('aria-disabled');
+    await expect.element(join).toBeEnabled();
+
+    // And the other way round, while joining reads the chat.
+    mockStore.inject({ route: 'conversation', status: 503, delayMs: 1_000 });
+    await join.click();
+    await expect.element(join).toHaveAttribute('aria-busy', 'true');
+    await expectWaiting(done, 'Mark done');
+    expect(wants.element().querySelectorAll('[aria-busy="true"]')).toHaveLength(1);
+    (done.element() as HTMLButtonElement).click();
+    await expect.poll(() => router.state.location.pathname, { timeout: 3_000 }).not.toBe(TODAY);
+    expect(requests('handoffDone')).toHaveLength(1);
   });
 
   it('handoff_done_clears_the_card', async () => {

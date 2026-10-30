@@ -419,7 +419,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
   const ended = state.error === 'session';
   // "Cancel this request" under each message that holds an open hold's receipt, once it is there,
   // so it stays with the request however far the chat goes on. One cancel is out at a time: while
-  // it is, the others can't be pressed, so no click on them goes unanswered.
+  // it is, the others wait, their words shown and their clicks ignored, so none goes unanswered.
   const cancelsUnder = (receipts: readonly ReceiptView[]): ReactNode[] => {
     if (!ready) return [];
     return state.openHolds
@@ -432,7 +432,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
           <Button
             variant="ghost"
             busy={chat.cancelling === id}
-            disabled={chat.cancelling !== null && chat.cancelling !== id}
+            waiting={chat.cancelling !== null && chat.cancelling !== id}
             onClick={() => chat.cancel(id)}
           >
             {copy.cancelRequest}

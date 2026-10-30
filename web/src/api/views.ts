@@ -136,7 +136,8 @@ export interface ThisWeek {
   /** Today, local `YYYY-MM-DD`. */
   end: string;
   bookings: number;
-  booked_cents: number;
+  /** Absent (never 0) until the API core's second pass sends it. */
+  booked_cents?: number;
   conversations: number;
   handled: number;
   stepped_in: number;

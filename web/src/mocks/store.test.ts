@@ -18,7 +18,7 @@ import type {
 } from '../api/views.ts';
 import { rivera } from '../ds/fixtures/index.ts';
 import { executedLine } from '../ds/fixtures/receipts.ts';
-import { DECISIONS, EVENT_GAP_MS, VISITOR_PLAIN, matchRule, turnLanguage, type RuleName } from './script.ts';
+import { DECISIONS, EVENT_GAP_MS, HELD_PROSE, VISITOR_PLAIN, matchRule, turnLanguage, type RuleName } from './script.ts';
 import { RIVERA } from './seed.ts';
 import { mockStore, streamAfter, type MockAnswer, type MockRequestInit } from './store.ts';
 
@@ -110,6 +110,54 @@ describe('the scripted Desk', () => {
     ]);
   });
 
+  it('held_discount_says_maria_decides', async () => {
+    // A discount past the quote card's limit is held, and Claude's checked reply says Maria decides,
+    // in the turn's language, with the reply's own receipt and the held one: no handoff card.
+    const { session, events } = await openChat();
+    await send('Can I get 15% off if I pay cash?');
+    await drain();
+    await send('¿Me hacen un descuento?');
+    await drain();
+    const turns = events.flatMap(([, ev]) =>
+      ev.type === 'message' ? [[ev.language, ev.handoff, ev.visitor_plain, ev.blocks.map((b) => [b.kind, b.template, b.text])]] : [],
+    );
+    expect(turns).toEqual([
+      ['en', false, VISITOR_PLAIN.en.reply_checked, [['prose', null, HELD_PROSE.en]]],
+      ['es', false, VISITOR_PLAIN.es.reply_checked, [['prose', null, HELD_PROSE.es]]],
+    ]);
+    const held = events.flatMap(([, ev]) => (ev.type === 'held' ? [ev.visitor_plain] : []));
+    expect(held).toEqual([VISITOR_PLAIN.en.held, VISITOR_PLAIN.es.held]);
+    // Each reply passed its check: no reply of this chat was stopped.
+    const replies = (mockStore.world.desks[0]?.ledger ?? []).filter((e) => e.event.kind === 'reply' && e.event.session_id === session.session_id);
+    expect(replies.map((e) => e.event.summary)).toEqual([
+      { author: 'claude', ok: true, language: 'en', violations: [] },
+      { author: 'claude', ok: true, language: 'es', violations: [] },
+    ]);
+  });
+
+  it('script_matches_whole_words', async () => {
+    // A rule's word picks it only as a word of its own, never inside another one.
+    const cases: [text: string, rule: RuleName][] = [
+      ['Do you offer weekend service?', 'other'],
+      ['Is the office open on Saturday?', 'other'],
+      ['Can I get 15% off?', 'discount'],
+      ['Off-peak discount?', 'discount'],
+      ['Who is Mariana?', 'other'],
+      ['¿Cuánto?', 'price'],
+      ['Llámame.', 'callback'],
+    ];
+    for (const [text, rule] of cases) expect(matchRule(text).name, text).toBe(rule);
+
+    // So asking about an offer starts no held discount: nothing new for Maria, and a plain answer.
+    const before = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
+    const { events } = await openChat();
+    await send('Do you offer weekend service?');
+    await drain();
+    expect(typesOf(events)).toEqual(['writing', 'message', 'turn_end']);
+    expect((await call('needsYou', { params: { desk_id: deskId } })).body).toEqual(before);
+    expect([...mockStore.world.decisions.values()].filter((d) => d.decision.state === 'held')).toHaveLength(before.length);
+  });
+
   it('discount_holds_and_reaches_needs_you', async () => {
     // Rivera's Today greets Maria, counts the seeded hold, and has Dana's chat live (the held
     // visitor's last word was twelve minutes ago).
@@ -142,9 +190,10 @@ describe('the scripted Desk', () => {
     expect(events.map(([seq]) => seq)).toEqual([1, 2, 3, 4]);
     const [, held] = events[0] ?? [];
     expect(held).toMatchObject({ type: 'held', state: 'held', visitor_plain: 'Waiting for Maria Rivera to approve' });
+    // Claude says, in checked words, that Maria decides and her answer will show up in the chat.
     const [, reply] = events[2] ?? [];
-    expect(reply).toMatchObject({ type: 'message', handoff: true, language: 'en' });
-    expect(reply?.type === 'message' && reply.blocks.map((b) => b.template)).toEqual(['handoff']);
+    expect(reply).toMatchObject({ type: 'message', handoff: false, language: 'en', visitor_plain: VISITOR_PLAIN.en.reply_checked });
+    expect(reply?.type === 'message' && reply.blocks.map((b) => [b.kind, b.text])).toEqual([['prose', HELD_PROSE.en]]);
 
     const needsYou = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
     expect(needsYou).toHaveLength(1);
@@ -489,14 +538,21 @@ describe('the scripted Desk', () => {
     const danaOwner = (await call('conversation', { params: { session_id: 'ses-dana-web' } })).body as OwnerTranscript;
     expect(danaOwner.items.filter((item) => item.kind === 'whisper').map((item) => item.text)).toEqual(['offer Thursday morning too']);
 
-    // The owner's preview of her Desk is a chat of its own, flagged as hers, and opening it again
-    // resumes it rather than starting another.
+    // The owner's preview of her Desk is a chat of its own, flagged as hers, and the browser's
+    // visitor cookie names it. Asking for a preview again starts another, as the API's preview
+    // route does (the page reads the chat it has first, so it doesn't ask twice).
     const preview = (await call('openPreview', { params: { desk_id: deskId } })).body as VisitorSession;
     expect(preview.resumed).toBe(false);
     expect(preview.state.session_id).not.toBe(session.session_id);
-    expect((await call('openPreview', { params: { desk_id: deskId } })).body).toEqual({ state: preview.state, resumed: true });
+    expect(((await call('visitorSession', { params: { slug } })).body as VisitorTranscript).state.session_id).toBe(preview.state.session_id);
+    const again = (await call('openPreview', { params: { desk_id: deskId } })).body as VisitorSession;
+    expect(again.resumed).toBe(false);
+    expect(again.state.session_id).not.toBe(preview.state.session_id);
+    expect(mockStore.visitorSession(slug)?.state.session_id).toBe(again.state.session_id);
     const listed = (await call('conversations', { params: { desk_id: deskId } })).body as ConversationSummary[];
-    expect(listed.filter((c) => c.owner_preview).map((c) => c.session_id)).toEqual([preview.state.session_id]);
+    expect(listed.filter((c) => c.owner_preview).map((c) => c.session_id).sort()).toEqual(
+      [preview.state.session_id, again.state.session_id].sort(),
+    );
   });
 });
 

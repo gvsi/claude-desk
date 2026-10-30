@@ -8,7 +8,7 @@
  */
 import type { HoursWindow, OpenStatus, PolicyVersion } from '../api/contracts.ts';
 import { placeholderHex, rivera } from '../ds/fixtures/index.ts';
-import { DECISIONS, ruleNamed, writing, type Language, type Step } from './script.ts';
+import { DECISIONS, SEEDED_HOLD_STEPS, writing, type Language, type Step } from './script.ts';
 import type { MockWorld, ReplayTurn } from './world.ts';
 
 export type MockSeed = 'rivera' | 'rivera_quiet' | 'rivera_two_desks';
@@ -191,7 +191,7 @@ export function seedWorld(world: MockWorld): void {
   // The seeded hold: a visitor not on record asked for 15% off, longer ago than "live".
   const heldAt = opened - 12 * MINUTE;
   const visitor = world.at(heldAt, () => world.addSession(main, { sessionId: world.scoped('ses-visitor-web') }));
-  world.replay(visitor, heldAt, [{ text: seededHoldText(), steps: ruleNamed('discount').steps }]);
+  world.replay(visitor, heldAt, [{ text: seededHoldText(), steps: SEEDED_HOLD_STEPS }]);
 
   // Dana's chat, her last message a minute before the copy opened: live on Today.
   const danaFrom = opened - 5 * MINUTE;
