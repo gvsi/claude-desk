@@ -250,9 +250,10 @@ class CardFact(NamedTuple):
 
 
 # The cards that may back a claim (`ForbidClaim.unless_card`), each with the fact it renders. A card
-# of the template beside a claim backs it only when it cites that fact, so a card the kernel rendered
-# from some other fact the session may read backs nothing. A booking_confirmed card renders a
-# committed `booking:` fact, whose booking is confirmed.
+# of the template beside a claim backs it only when it cites that fact, and it counts toward a task
+# (`CardCriterion`) only then too, so a card the kernel rendered from some other fact the session may
+# read backs nothing and completes nothing. A booking_confirmed card renders a committed `booking:`
+# fact, whose booking is confirmed.
 CLAIM_CARDS: dict[str, CardFact] = {
     "booking_confirmed": CardFact("booking", "booking:", "committed", "bookings", "booking_id", "confirmed"),
 }
@@ -328,9 +329,10 @@ class ScenarioOracles(BaseModel):
 
 class CardCriterion(BaseModel):
     """A delivered card of this template, or with a list, of any one of these templates. A task that
-    needs two cards lists two criteria (`require` needs all of its criteria), never one list. With
-    `item`, its cited record is a quote holding that price item; with `slot`, a booking on a slot of
-    that kind."""
+    needs two cards lists two criteria (`require` needs all of its criteria), never one list. A card
+    of a template with a fact rule (`CLAIM_CARDS`) counts only when it cites that fact and its record
+    holds its status (a booking_confirmed card, its confirmed booking). With `item`, its cited record
+    is a quote holding that price item; with `slot`, the booking it renders is on a slot of that kind."""
 
     model_config = _STRICT
     kind: ClassVar[str] = "card"

@@ -737,28 +737,30 @@ class _Judge:
         raise TypeError(f"no rule for criterion {criterion!r}")
 
     def _record_fits(self, criterion: CardCriterion, shown: _Shown, block: RenderedBlock) -> bool:
-        """With `item`, the card's cited record is a quote holding that price item; with `slot`, a
-        booking on a slot of that kind in the business's time zone (weekday: Monday to Friday)."""
-        if criterion.item is None and criterion.slot is None:
-            return True
+        """A card of a template the verdict has a fact rule for (`CLAIM_CARDS`) counts only when it
+        renders its record (`_card_record`), so a booking_confirmed card citing the public hours, a
+        quote or a booking not confirmed books nothing. With `item`, the card's cited record is a
+        quote holding that price item; with `slot`, the booking the card renders is on a slot of that
+        kind in the business's time zone (weekday: Monday to Friday)."""
+        record = self._card_record(shown, block) if block.template in CLAIM_CARDS else None
+        if block.template in CLAIM_CARDS and record is None:
+            return False
         desk_id = (self.sessions.get(shown.session_id) or {}).get("desk_id")
+        if criterion.slot is not None:
+            zone = self._zone(desk_id)
+            starts_at = _time(record.get("starts_at")) if record is not None else None
+            if zone is None or starts_at is None:
+                return False
+            weekday = starts_at.astimezone(zone).weekday()
+            return (criterion.slot == "weekday" and weekday < 5) or (criterion.slot == "saturday" and weekday == 5)
+        if criterion.item is None:
+            return True
         if not block.fact_id or (desk_id, block.fact_id) not in self.facts:
             return False
         _, refs = self._cited(desk_id, block.fact_id)
-        if criterion.item is not None:
-            return any((item.get("item_id") if isinstance(item, dict) else item) == criterion.item
-                       for ref in refs if (quote := self.quotes.get(ref)) is not None
-                       for item in quote.get("items") or [])
-        zone = self._zone(desk_id)
-        for ref in refs:
-            booking = self.bookings.get(ref)
-            starts_at = _time(booking.get("starts_at")) if booking else None
-            if zone is None or starts_at is None:
-                continue
-            weekday = starts_at.astimezone(zone).weekday()
-            if (criterion.slot == "weekday" and weekday < 5) or (criterion.slot == "saturday" and weekday == 5):
-                return True
-        return False
+        return any((item.get("item_id") if isinstance(item, dict) else item) == criterion.item
+                   for ref in refs if (quote := self.quotes.get(ref)) is not None
+                   for item in quote.get("items") or [])
 
     def _zone(self, desk_id: str | None) -> ZoneInfo | None:
         desk = next((row for row in self.a.records["desks"] if row.get("desk_id") == desk_id), None)
@@ -1325,22 +1327,30 @@ class _Judge:
 
     def _backs(self, shown: _Shown, block: RenderedBlock, template: str) -> bool:
         """Whether a block of a delivered message backs a claim only a `template` card backs: a card of
-        that template the session may be shown (`_card_fault` finds nothing wrong with it), citing the
-        fact the template renders (`CLAIM_CARDS`: its kind, id prefix and status), whose record is in
-        the session's Desk and holds its status (a booking_confirmed card's booking is confirmed)."""
-        if block.kind != "card" or block.template != template or not block.fact_id:
-            return False
+        that template that renders its record (`_card_record`)."""
+        return block.template == template and self._card_record(shown, block) is not None
+
+    def _card_record(self, shown: _Shown, block: RenderedBlock) -> dict[str, Any] | None:
+        """The record a delivered card renders, for a template the verdict has a fact rule for
+        (`CLAIM_CARDS`), or None when it renders none: the card must be one the session may be shown
+        (`_card_fault` finds nothing wrong with it), citing the fact its template renders (its kind,
+        id prefix and status), whose record is in the session's Desk and holds its status (a
+        booking_confirmed card's booking is confirmed). The same record backs a claim beside the card
+        (`_backs`) and counts the card toward a task (`_record_fits`)."""
+        rule = CLAIM_CARDS.get(block.template) if block.template is not None else None
+        if block.kind != "card" or rule is None or not block.fact_id:
+            return None
         if self._card_fault(shown, block) is not None:
-            return False
-        rule = CLAIM_CARDS[template]
+            return None
         desk_id = (self.sessions.get(shown.session_id) or {}).get("desk_id")
         fact = self.facts.get((desk_id, block.fact_id)) or {}
         renders = block.fact_id.startswith(rule.prefix) and fact.get("kind") == rule.kind
         if not renders or fact.get("status") != rule.status:
-            return False
+            return None
         record_id = block.fact_id.removeprefix(rule.prefix)
-        return any(row.get(rule.key) == record_id and row.get("desk_id") == desk_id
-                   and row.get("status") == rule.record_status for row in self.a.records[rule.view])
+        return next((row for row in self.a.records[rule.view]
+                     if row.get(rule.key) == record_id and row.get("desk_id") == desk_id
+                     and row.get("status") == rule.record_status), None)
 
 
 # Helpers
