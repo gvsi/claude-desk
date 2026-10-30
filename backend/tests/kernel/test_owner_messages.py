@@ -20,7 +20,7 @@ from sqlalchemy import select
 from desk.contracts import Claim, OwnerMessageResult
 from desk.db.models import ActorSession, Desk, Document
 from desk.db.models import Fact as FactRow
-from desk.kernel_service import auth, labels, render
+from desk.kernel_service import auth, labels, render, reply_check
 
 from .helpers import kernel_ctx, ledger_rows, rows_of
 from .test_adapters import Rivera, rivera, visitor_of
@@ -287,3 +287,19 @@ async def test_owner_message_text_is_bounded(app, client):
     whispered = await sent(client, copy, visitor.session_id, longest, "whisper")
     [entry] = [entry for entry in await ledger_rows(app, copy) if entry.event.kind == "whisper"]
     assert (entry.seq, entry.event.summary["chars"]) == (whispered.ledger_seq, 2000)
+
+
+async def test_owner_text_is_measured_before_it_is_read(app, client, monkeypatch):
+    copy, visitor = await visitor_of(app, client)
+    read, shown = [], reply_check.shown
+
+    def reading(text: str) -> str:
+        read.append(len(text))
+        return shown(text)
+
+    monkeypatch.setattr(reply_check, "shown", reading)
+    # over two thousand characters is refused by its length alone, before any of it is normalized
+    for kind in ("say", "whisper"):
+        response = await post_message(client, copy, visitor.session_id, "½" * 2001, kind)
+        assert (response.status_code, response.json()) == (422, {"code": "invalid"}), kind
+    assert read == []

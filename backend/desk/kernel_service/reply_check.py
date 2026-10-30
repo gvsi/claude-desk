@@ -682,8 +682,10 @@ async def owner_message(ctx: KernelCtx, owner: OwnerCtx, session_row: SessionRow
     kernel ledgers it (`whisper` `{message_id, chars}`, never the text) and keeps nothing else."""
     if session_row.copy_id != owner.copy_id or session_row.kind == "owner":
         raise ValueError("the owner writes only in the conversations of its own copy")
+    if len(req.text) > OWNER_TEXT_CHARS:                # measured before any of it is normalized
+        raise KernelFailure(422, "invalid", "owner_message_text")
     text = shown(req.text)
-    if len(req.text) > OWNER_TEXT_CHARS or not text.strip():
+    if not text.strip():
         raise KernelFailure(422, "invalid", "owner_message_text")
     copy_id, desk_id, session_id = session_row.copy_id, session_row.desk_id, session_row.session_id
     message_id = new_id("msg")
