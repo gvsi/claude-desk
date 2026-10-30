@@ -14,6 +14,14 @@ import { needsYouKey, todayKey } from '../useDesks.ts';
 /** An open callback as Needs you lists it. */
 export type CallbackItem = Extract<NeedsYouItem, { handoff: object }>;
 
+/** Why the latest read of what needs the owner failed, in owner words, and a way to read it again. */
+export interface ReadFailure {
+  line: string;
+  /** "Try again" is reading. */
+  retrying: boolean;
+  retry: () => void;
+}
+
 const DRAFTED = 'Your answer also drafted a rule. Review it before it applies.';
 
 /** "1 needs you", "2 need you". */
@@ -47,13 +55,16 @@ export interface NeedsYouProps {
   answers: UseAnswer;
   /** Called with each held request's card as it mounts and unmounts, so "Open the request" can focus it. */
   registerCard: (decisionId: string, el: HTMLElement | null) => void;
+  /** The latest read failed: said first, over whatever was read before it. */
+  readFailure: ReadFailure | null;
 }
 
 /**
- * Today's "Needs you": each held request as an approval card answered in place, then each open
- * callback, then what was answered here with its final line until the owner dismisses it.
+ * Today's "Needs you": a failed read first, when the latest one failed; then each held request as
+ * an approval card answered in place, then each open callback, then what was answered here with
+ * its final line until the owner dismisses it.
  */
-export function NeedsYou({ held, callbacks, answers, registerCard }: NeedsYouProps) {
+export function NeedsYou({ held, callbacks, answers, registerCard, readFailure }: NeedsYouProps) {
   const titleId = useId();
   const now = new Date();
   const open = held.length + callbacks.length;
@@ -86,6 +97,18 @@ export function NeedsYou({ held, callbacks, answers, registerCard }: NeedsYouPro
   return (
     <section className="cd-today__section" aria-labelledby={titleId} tabIndex={-1}>
       <SectionHeader id={titleId} title="Needs you" count={open > 0 ? { n: open, label: countLabel(open) } : undefined} />
+      {readFailure !== null ? (
+        <Notice
+          tone="error"
+          action={
+            <Button variant="secondary" busy={readFailure.retrying} onClick={readFailure.retry}>
+              Try again
+            </Button>
+          }
+        >
+          {readFailure.line}
+        </Notice>
+      ) : null}
       {open > 0 ? (
         <ul className="cd-needs-you">
           {held.map((item) => {

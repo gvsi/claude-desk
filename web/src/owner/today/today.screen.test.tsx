@@ -29,6 +29,7 @@ const DRAFTED = 'Your answer also drafted a rule. Review it before it applies.';
 const UNCERTAIN = "I couldn't confirm your answer went through. Try again; it can't run twice.";
 const LIMIT_LINE = "That's above your limit for taking money without asking. Allow it this time, or change the limit on Rules.";
 const NOT_OFFERED = "That answer isn't available for this request.";
+const UNAVAILABLE = 'Something went wrong on our side. Try again in a moment.';
 
 /** The requests a route got, by key. */
 const requests = (key: string) => mockStore.requests.filter((r) => r.key === key);
@@ -186,6 +187,45 @@ describe('Today', () => {
     (document.activeElement as HTMLElement | null)?.blur();
     await things.getByRole('button', { name: 'Open the request' }).click();
     expect(document.activeElement?.contains(heldCard(screen, SEEDED_REASON).element())).toBe(true);
+  });
+
+  it('needs_you_read_failure_says_so', async () => {
+    // What needs the owner can't be read: Needs you says so where the requests would be, rather
+    // than looking as if nothing needs them.
+    mockStore.inject({ route: 'needsYou', status: 503, times: 10_000 });
+    const { screen } = await renderRoute(TODAY);
+    const needs = region(screen, 'Needs you');
+    const line = needs.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
+    await expect.element(line, { timeout: 5_000 }).toBeVisible();
+    const retry = needs.getByRole('button', { name: 'Try again' });
+    await expect.element(retry).toBeVisible();
+    expect(needs.getByRole('article').elements()).toHaveLength(0);
+    await expectScreenBasics(screen.container, { owner: true });
+
+    // It stays while the polls read again, rather than going each time a read starts.
+    await readsMore('needsYou', 2);
+    expect(line.elements()).toHaveLength(1);
+
+    // "Try again" reads again: busy until that read settles, and the line stays while it fails too.
+    await retry.click();
+    await expect.element(retry).toHaveAttribute('aria-busy', 'true');
+    await expect.element(retry, { timeout: 5_000 }).not.toHaveAttribute('aria-busy');
+    expect(line.elements()).toHaveLength(1);
+
+    // Once a read works, the request is there and the line is gone.
+    mockStore.reset('rivera');
+    await expect.element(heldCard(screen, SEEDED_REASON), { timeout: 5_000 }).toBeVisible();
+    expect(needs.getByText(UNAVAILABLE).elements()).toHaveLength(0);
+
+    // A later poll fails: what was read stays, with the line, until a read works again.
+    mockStore.inject({ route: 'needsYou', status: 503, times: 10_000 });
+    await expect.element(line, { timeout: 5_000 }).toBeVisible();
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    await expect.element(needs.getByRole('img', { name: '1 needs you' })).toBeVisible();
+    await expect.element(needs.getByRole('button', { name: 'Try again' })).toBeVisible();
+    mockStore.reset('rivera');
+    await expect.element(line, { timeout: 5_000 }).not.toBeInTheDocument();
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
   });
 
   it('quiet_today_leaves_out_empty_sections', async () => {

@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 
+import { ownerErrorCopy } from '../../api/http.ts';
 import { Greeting } from '../../ds/index.ts';
 import { greetingFor } from '../../lib/format.ts';
 import { useAnswer, type HeldItem } from '../approvals/useAnswer.ts';
@@ -10,7 +11,7 @@ import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { firstName, heldOldestFirst, useNeedsYou, useToday } from '../useDesks.ts';
 import { LiveNow } from './LiveNow.tsx';
-import { NeedsYou, type CallbackItem } from './NeedsYou.tsx';
+import { NeedsYou, type CallbackItem, type ReadFailure } from './NeedsYou.tsx';
 import { greetingPresence } from './presence.ts';
 import { SinceLastNight } from './SinceLastNight.tsx';
 import { TodayAside } from './TodayAside.tsx';
@@ -55,6 +56,19 @@ export function TodayPage() {
   const held: HeldItem[] = heldOldestFirst([...listed, ...kept]).filter((item) => !answers.answered.has(item.decision.decision_id));
   const callbacks = items.filter((item): item is CallbackItem => item.handoff !== undefined);
   const firstHeld = held[0] ?? null;
+  // A failed read says so in Needs you, over whatever was read before, so it never looks as if
+  // nothing needs the owner. It stays until a read works: React Query starts each read of a query
+  // with nothing read yet as loading again and drops the error, so the section would blink out at
+  // every poll, and while "Try again" reads.
+  const [failure, setFailure] = useState<{ at: number; error: unknown } | null>(null);
+  if (needsYou.error !== null && failure?.at !== needsYou.errorUpdatedAt) setFailure({ at: needsYou.errorUpdatedAt, error: needsYou.error });
+  const [retrying, setRetrying] = useState(false);
+  const retry = () => {
+    setRetrying(true);
+    void needsYou.refetch().finally(() => setRetrying(false));
+  };
+  const readFailure: ReadFailure | null =
+    failure !== null && needsYou.errorUpdatedAt > needsYou.dataUpdatedAt ? { line: ownerErrorCopy(failure.error), retrying, retry } : null;
 
   const registerCard = useCallback((decisionId: string, el: HTMLElement | null) => {
     if (el) cards.current.set(decisionId, el);
@@ -88,8 +102,8 @@ export function TodayPage() {
           </p>
         </div>
         <ThingsToTry firstHeld={firstHeld} onFocusRequest={focusFirstHeld} />
-        {held.length + callbacks.length + answers.answered.size > 0 ? (
-          <NeedsYou held={held} callbacks={callbacks} answers={answers} registerCard={registerCard} />
+        {held.length + callbacks.length + answers.answered.size > 0 || readFailure !== null ? (
+          <NeedsYou held={held} callbacks={callbacks} answers={answers} registerCard={registerCard} readFailure={readFailure} />
         ) : null}
         {live.length > 0 ? <LiveNow live={live} /> : null}
         <SinceLastNight />
