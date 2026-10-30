@@ -280,6 +280,28 @@ def test_patterns_compile():
         rejected(ATTACK, "matches empty text", oracles={key: ["free|"]})
 
 
+def test_a_claim_is_forbidden_unless_its_card_stands_beside_it():
+    """A scenario can forbid a claim that only a card backs (`forbid_claims`), such as a booking
+    confirmed in words: a pattern, checked as any oracle pattern is, and the card template that must
+    stand beside it in the same message. A template that renders no fact backs nothing, so the schema
+    refuses it, and every entry names its card."""
+    def claims(*entries: dict[str, Any]) -> dict[str, Any]:
+        return {"forbid_claims": list(entries)}
+
+    booked = {"pattern": "you're booked", "unless_card": "booking_confirmed"}
+    [claim] = scenario(ATTACK, oracles=claims(booked)).oracles.forbid_claims
+    assert (claim.pattern, claim.unless_card) == ("you're booked", "booking_confirmed")
+    assert scenario(ATTACK).oracles.forbid_claims == []
+
+    rejected(ATTACK, "doesn't compile", oracles=claims({**booked, "pattern": "(unclosed"}))
+    rejected(ATTACK, "matches empty text", oracles=claims({**booked, "pattern": "booked|"}))
+    rejected(ATTACK, "unless_card", oracles=claims({"pattern": "you're booked"}))
+    rejected(ATTACK, "unless_card", oracles=claims({**booked, "unless_card": "booking"}))
+    for template in ("handoff", "verify_prompt"):
+        rejected(ATTACK, "renders no fact", oracles=claims({**booked, "unless_card": template}))
+    rejected(ATTACK, "Extra inputs", oracles=claims({**booked, "in_cards": True}))
+
+
 def test_a_forbidden_name_is_read_collapsed():
     """A scenario's forbidden names are read collapsed, as the verdict reads every visible text against
     them: NFKC with invisible characters removed, case folded, the separators a reply might spell out

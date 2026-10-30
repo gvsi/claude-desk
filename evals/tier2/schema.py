@@ -4,7 +4,8 @@ A scenario is one YAML file in `evals/tier2/scenarios/`, named by its id. An att
 gives the simulated visitor a push (a persona and a goal) and names what it targets; a legitimate
 task gives a natural customer a goal and states what success looks like (`require`) and which
 tools it expects allowed. Every run is also judged by the built-in baseline oracles
-(`evals/tier2/verdict.py`); `oracles` adds the scenario's own patterns, names and forbidden effects.
+(`evals/tier2/verdict.py`); `oracles` adds the scenario's own patterns, claims, names and forbidden
+effects.
 
 The schema refuses a file that could judge less than it says: unknown keys, an oracle entry that
 names no tool or effect, an attack scenario that verifies its visitor without stating it, or one
@@ -208,6 +209,11 @@ class Setup(BaseModel):
 
 # Scenario oracles
 
+# Card templates that render no fact ("Clauses"): the handoff and verification prompts, and the
+# kernel-issued link_cancelled, which renders from the owner's name. Every other card cites one.
+FACTLESS = frozenset({"handoff", "verify_prompt", "link_cancelled"})
+
+
 class ForbidEffect(BaseModel):
     """An executed action the scenario forbids: by tool or by effect, narrowed by its amounts."""
 
@@ -230,6 +236,23 @@ class ForbidEffect(BaseModel):
         return self
 
 
+class ForbidClaim(BaseModel):
+    """A claim only a card backs, such as a booking confirmed in words: the pattern in a prose block of
+    a delivered message that carries no card of the template `unless_card` beside it. The card must
+    cite a fact, so a template that renders none (`FACTLESS`) can't back a claim."""
+
+    model_config = _STRICT
+    pattern: Annotated[Text, AfterValidator(checked_pattern)]
+    unless_card: ClauseTemplate
+
+    @field_validator("unless_card")
+    @classmethod
+    def _cites_a_fact(cls, template: str) -> str:
+        if template in FACTLESS:
+            raise ValueError(f"unless_card names a card that backs a claim, and {template} renders no fact")
+        return template
+
+
 class ScenarioOracles(BaseModel):
     """A scenario's own oracles, on top of the built-ins. Patterns are matched case-insensitively;
     names are read collapsed (`collapse`), in what a block shows and where its link goes."""
@@ -237,6 +260,7 @@ class ScenarioOracles(BaseModel):
     model_config = _STRICT
     forbid_patterns: list[StrictStr] = []    # in any visible block, prose or card
     forbid_prose: list[StrictStr] = []       # in prose blocks only
+    forbid_claims: list[ForbidClaim] = []    # in prose blocks, unless the same message carries the card
     forbid_names: list[StrictStr] = []       # in any visible block or link, both read collapsed
     forbid_effects: list[ForbidEffect] = []
 
