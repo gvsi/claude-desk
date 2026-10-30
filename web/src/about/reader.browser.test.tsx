@@ -5,7 +5,7 @@
  * page's code.
  */
 import axe from 'axe-core';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate, type NavigateFunction } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 import { render } from 'vitest-browser-react';
@@ -46,12 +46,13 @@ const PAGES = {
   },
 } as const;
 
-/** Where the memory router is, for the link tests. */
-const at = { path: '' };
+/** Where the memory router is, for the link tests, and a way to move it. */
+const at: { path: string; navigate: NavigateFunction | null } = { path: '', navigate: null };
 
 function LocationProbe() {
   const location = useLocation();
   at.path = `${location.pathname}${location.hash}`;
+  at.navigate = useNavigate();
   return null;
 }
 
@@ -59,14 +60,16 @@ interface RenderOptions {
   size?: { width: number; height: number };
   /** The last Desk the owner opened, as the owner app stores it; null for a browser that has none. */
   lastDesk?: string | null;
+  /** The address's fragment, with its `#`. */
+  hash?: string;
 }
 
 /** The reader at its route, in a memory router that knows both pages. */
-async function renderReader(id: AboutId, { size = DESKTOP, lastDesk = null }: RenderOptions = {}) {
+async function renderReader(id: AboutId, { size = DESKTOP, lastDesk = null, hash = '' }: RenderOptions = {}) {
   await page.viewport(size.width, size.height);
   writeLocal('lastDesk', lastDesk);
   return render(
-    <MemoryRouter initialEntries={[PAGES[id].route]}>
+    <MemoryRouter initialEntries={[`${PAGES[id].route}${hash}`]}>
       <Routes>
         <Route path="/about/proposal" element={<ReaderPage id="proposal" />} />
         <Route path="/about/prediction" element={<ReaderPage id="prediction" />} />
@@ -412,6 +415,52 @@ describe('ReaderPage', () => {
     expect(flat(current?.textContent)).toBe('Capability prediction');
     await userEvent.click(screen.container.querySelector('nav[aria-label="Documents"] a[href="/about/proposal"]') as HTMLElement);
     await expect.poll(title).toBe('Product proposal');
+    await screen.unmount();
+  });
+
+  it('an_address_opens_at_its_section_or_the_top', async () => {
+    const title = () => flat(document.querySelector('h1')?.textContent);
+    /** Whether the section sits at the top of the window, below its scroll margin. */
+    const atTop = (anchor: string) => {
+      const section = document.getElementById(anchor);
+      if (!section) return false;
+      const margin = parseFloat(getComputedStyle(section).scrollMarginTop);
+      return Math.abs(section.getBoundingClientRect().top - margin) <= 1;
+    };
+
+    // A fragment that isn't valid percent-encoding names no section: the page opens at its top.
+    const screen = await renderReader('proposal', { hash: '#100%' });
+    await expect.poll(title).toBe('Product proposal');
+    expect(window.scrollY).toBe(0);
+
+    // Coming from the other document, a section the address names, as written or percent-encoded, opens
+    // there; from it, the other document, its address naming no section it has or a malformed one, opens at
+    // its top.
+    for (const { path, anchor, other, others } of [
+      {
+        path: '/about/prediction#characteristics',
+        anchor: 'characteristics',
+        other: { route: '/about/proposal', title: 'Product proposal' },
+        others: ['/about/proposal#no-such-section', '/about/proposal#%E0%A4%A'],
+      },
+      {
+        path: '/about/proposal#why%2Danthropic',
+        anchor: 'why-anthropic',
+        other: { route: '/about/prediction', title: 'Capability prediction' },
+        others: ['/about/prediction#no-such-section', '/about/prediction#100%'],
+      },
+    ]) {
+      for (const next of others) {
+        at.navigate?.(other.route);
+        await expect.poll(title, { message: other.route }).toBe(other.title);
+        at.navigate?.(path);
+        await expect.poll(() => atTop(anchor), { message: path }).toBe(true);
+        expect(window.scrollY, path).toBeGreaterThan(0);
+        at.navigate?.(next);
+        await expect.poll(title, { message: next }).toBe(other.title);
+        await expect.poll(() => window.scrollY, { message: next }).toBe(0);
+      }
+    }
     await screen.unmount();
   });
 

@@ -66,6 +66,20 @@ function bylineOf(blocks: Block[]): { author: string; date: string; day?: string
   };
 }
 
+/**
+ * The section an address's fragment names, decoded, or null when it names none. A fragment that isn't valid
+ * percent-encoding, such as a percent sign with no two hex digits after it, names no section, so the page
+ * opens at its top.
+ */
+function sectionAnchor(hash: string): string | null {
+  if (hash.length <= 1) return null;
+  try {
+    return decodeURIComponent(hash.slice(1));
+  } catch {
+    return null;
+  }
+}
+
 /** A figure by its marker's name. */
 function Figure({ name, compact }: { name: FigureName; compact: boolean }) {
   if (name === 'architecture') return <ArchitectureFigure compact={compact} />;
@@ -349,7 +363,8 @@ export function ReaderPage({ id }: ReaderPageProps) {
   // A page opens at its top, or at the section its address names: the window keeps its place when the
   // router swaps one document for the other, and a section's anchor is drawn only after the page loads.
   useLayoutEffect(() => {
-    const section = hash ? document.getElementById(decodeURIComponent(hash.slice(1))) : null;
+    const anchor = sectionAnchor(hash);
+    const section = anchor ? document.getElementById(anchor) : null;
     if (section) section.scrollIntoView();
     else window.scrollTo(0, 0);
     // Only when a document opens, not on every hash: the contents list's links move within the page by
