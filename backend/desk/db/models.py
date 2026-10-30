@@ -495,6 +495,7 @@ class DemoInboxEntry(Base):
     body: Mapped[str] = mapped_column(Text)                  # may hold a code
     preview: Mapped[str] = mapped_column(Text)               # code-free kernel template
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    decision_id: Mapped[str | None] = mapped_column(Text)    # only on an owner alert: the held decision's own id
 
 
 class LedgerHead(Base):

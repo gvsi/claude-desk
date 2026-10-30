@@ -420,6 +420,7 @@ export interface DemoInboxEntry {
   kind: "verification_code" | "alert" | "head_checkpoint";
   body: string;
   created_at: string;
+  decision_id?: string | null;
 }
 export interface DeskAnsweringRequest {
   on: boolean;

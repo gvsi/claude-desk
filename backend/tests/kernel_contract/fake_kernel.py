@@ -1061,7 +1061,7 @@ class FakeKernelState:
             answers = [answer for answer in HELD_ANSWERS
                        if (answer != "allow_person" or (session.person_id is not None and not money))
                        and (answer != "deny_always" or not limit_hold)]
-            inbox = [self._alert_owner(desk, "A request is waiting for you.")]
+            inbox = [self._alert_owner(desk, "A request is waiting for you.", decision_id=decision_id)]
         tier = {"allow": "A", "hold": "H", "refuse": "B"}[outcome]
         decision = self._signed(Decision(
             decision_id=decision_id, session_id=session.session_id, call_id=call.call_id, action=action,
@@ -1085,10 +1085,11 @@ class FakeKernelState:
                 "resource_kind": action.resource.kind, "created_at": self.now})
         return decision.model_copy(update={"inbox": inbox})
 
-    def _alert_owner(self, desk: Desk, preview: str) -> InboxNotice:
+    def _alert_owner(self, desk: Desk, preview: str, *, decision_id: str | None = None) -> InboxNotice:
         """An owner alert in the copy's Demo inbox ("approval" alerts at once by the seed's defaults), and its
-        code-free notice."""
-        entry = DemoInboxEntry(entry_id=new_id("inbox"), to="owner", kind="alert", body=preview, created_at=self.now)
+        code-free notice. A held request's alert names its decision, as the kernel's does."""
+        entry = DemoInboxEntry(entry_id=new_id("inbox"), to="owner", kind="alert", body=preview, created_at=self.now,
+                               decision_id=decision_id)
         self.inbox.append((desk.copy_id, entry))
         return InboxNotice(entry_id=entry.entry_id, to=entry.to, preview=preview)
 

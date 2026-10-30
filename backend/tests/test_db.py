@@ -4,12 +4,14 @@ These tests run against the local Postgres (`docker compose up -d db`) after
 `cd backend && uv run alembic upgrade head && cd .. && make db-roles`. Introspection runs as
 desk_admin; privilege checks connect as the role under test. Every write is rolled back, except
 the rows `committed_copies` commits as desk_admin (another role sees only committed rows) and
-removes afterwards.
+removes afterwards. A migration taken down and up runs in a scratch database of its own, dropped
+afterwards; the suite's database is never downgraded.
 """
 
 import hashlib
 import re
 import warnings
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import get_args
@@ -18,9 +20,13 @@ from uuid import uuid4
 import procrastinate
 import psycopg
 import pytest
+from alembic import command
+from alembic.config import Config
+from psycopg.sql import SQL, Identifier
 from pydantic import ValidationError
 from sqlalchemy import cast, create_engine, exists, func, literal, literal_column, select, text, update
 from sqlalchemy.dialects.postgresql import REGCLASS
+from sqlalchemy.engine import URL, make_url
 from sqlalchemy.exc import DBAPIError, IntegrityError, StatementError
 from sqlalchemy.orm import DeclarativeBase, Session, aliased, column_property, defer, with_expression
 from sqlalchemy.pool import NullPool
@@ -51,6 +57,7 @@ from desk.db.models import (
     Quote,
     Tool,
 )
+from desk.db.models import DemoInboxEntry as DemoInboxRow
 from desk.db.session import (
     COPY_SETTING,
     CopySession,
@@ -655,6 +662,85 @@ def test_one_active_policy_version_per_desk(kernel_tx):
     kernel_tx.add(version("desk-a", 3, "active"))
     with pytest.raises(IntegrityError):
         kernel_tx.flush()
+
+
+def test_only_an_owner_alert_names_a_decision(kernel_tx):
+    # a held request's alert links to its decision; a code, a checkpoint or an alert to anyone but the owner never
+    # names one, so no session's own Demo inbox can show a decision
+    def entry(entry_id: str, kind: str, to: str, decision_id: str | None) -> DemoInboxRow:
+        return DemoInboxRow(entry_id=entry_id, copy_id="copy-a", desk_id="desk-a", to=to, person_id=None, kind=kind,
+                            body="-", preview="-", created_at=SLOT_TIME, decision_id=decision_id)
+
+    masked = "d•••@example.com"
+    kernel_tx.add_all([entry("inbox-1", "alert", "owner", "decision-1"), entry("inbox-2", "alert", "owner", None),
+                       entry("inbox-3", "verification_code", masked, None), entry("inbox-4", "head_checkpoint",
+                                                                                   "owner", None)])
+    kernel_tx.flush()
+    for n, (kind, to) in enumerate((("verification_code", masked), ("head_checkpoint", "owner"), ("alert", masked))):
+        savepoint = kernel_tx.begin_nested()
+        kernel_tx.add(entry(f"inbox-named-{n}", kind, to, "decision-1"))
+        with pytest.raises(IntegrityError):
+            kernel_tx.flush()
+        savepoint.rollback()
+        kernel_tx.expunge_all()
+
+
+ALEMBIC_DIR = Path(__file__).resolve().parents[1] / "alembic"
+
+
+@pytest.fixture
+def scratch_database(admin) -> Iterator[URL]:
+    """An empty database next to the suite's, for a migration test to take up and down; its admin URL.
+
+    The suite's own database is the one a local kernel and API run on, so no test ever downgrades it.
+    Dropped afterwards, with any connection still open to it. The URL stays a `URL`, whose repr masks
+    the password, and is rendered with it only where it is used, so a failure under `--showlocals`
+    never prints it.
+    """
+    suite = make_url(database_url("ADMIN"))
+    name = f"{suite.database}_migrate_{uuid4().hex[:8]}"
+    admin.execute(SQL("CREATE DATABASE {}").format(Identifier(name)))
+    try:
+        yield suite.set(database=name)
+    finally:
+        admin.execute(SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(Identifier(name)))
+
+
+def migrated(conn: psycopg.Connection) -> tuple[bool, bool]:
+    """Whether the database behind `conn` has kernel.demo_inbox.decision_id, and whether it has its check."""
+    (checks,) = conn.execute("SELECT count(*) FROM pg_constraint WHERE conrelid = 'kernel.demo_inbox'::regclass"
+                             " AND conname = 'demo_inbox_decision_id_check'").fetchone()
+    return "decision_id" in columns(conn, "kernel", "demo_inbox"), checks == 1
+
+
+def test_inbox_decision_id_migration_goes_down_and_up(admin, scratch_database):
+    # 0012_inbox_decision_id adds the column and its check; its downgrade takes both away, and head brings them back.
+    # It all happens in a scratch database: the suite's own stays at head throughout
+    config = Config()                                     # no file, so alembic's env.py leaves logging alone
+    config.set_main_option("script_location", str(ALEMBIC_DIR))
+    engine = create_engine(scratch_database, poolclass=NullPool)
+    try:
+        with (engine.connect() as connection,
+              psycopg.connect(libpq_url(scratch_database.render_as_string(hide_password=False)),
+                              autocommit=True) as scratch):
+            connection.execute(text("SET lock_timeout = '5s'"))     # a lock it can't get fails the test, never hangs it
+            connection.commit()
+            config.attributes["connection"] = connection             # env.py migrates on this connection
+
+            def migrate(step, revision: str) -> None:
+                with connection.begin():                              # alembic runs inside it; it commits here
+                    step(config, revision)
+
+            migrate(command.upgrade, "head")
+            assert migrated(scratch) == (True, True)
+            migrate(command.downgrade, "0012_inbox_decision_id-1")   # to whatever 0012 revises
+            assert migrated(scratch) == (False, False)
+            assert migrated(admin) == (True, True)                   # the suite's own database never went down
+            migrate(command.upgrade, "head")
+            assert migrated(scratch) == (True, True)
+            assert nullable_columns(scratch, "kernel", "demo_inbox")["decision_id"] is True
+    finally:
+        engine.dispose()
 
 
 def assert_refused_before_the_database(session: Session, row: Base) -> None:

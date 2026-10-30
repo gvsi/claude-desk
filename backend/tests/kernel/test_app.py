@@ -121,7 +121,8 @@ KERNEL_COLUMNS = {
     "quotes": {"action_id", "created_at"},
     "bookings": {"action_id", "session_id"},
     "documents": {"ref", "body", "canary"},
-    "demo_inbox": {"entry_id", "copy_id", "desk_id", "to", "person_id", "kind", "body", "preview", "created_at"},
+    "demo_inbox": {"entry_id", "copy_id", "desk_id", "to", "person_id", "kind", "body", "preview", "created_at",
+                   "decision_id"},
     "ledger_heads": {"desk_id", "copy_id", "seq", "head"},
     "ledger_entries": {"envelope_jcs"},
 }

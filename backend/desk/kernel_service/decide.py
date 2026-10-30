@@ -849,7 +849,7 @@ async def _store(ctx: KernelCtx, call: _Call, outcome: Outcome, *, reason: str |
         inbox += await _strike(ctx, row, session_row)
     if outcome == "hold":
         notice = await demo_inbox.alert_owner(ctx, row.desk_id, "approval", render.owner_preview("approval"),
-                                              row.reason_plain)
+                                              row.reason_plain, decision_id=row.decision_id)
         inbox += [notice] if notice is not None else []
     await ctx.db.flush()
     return await decision_contract(ctx, row, inbox=inbox)

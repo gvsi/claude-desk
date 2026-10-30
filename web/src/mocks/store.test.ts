@@ -229,6 +229,23 @@ describe('the scripted Desk', () => {
     expect(answersFor({ ...DECISIONS.heldRefund, amountCents: 50_000 })).toContain('allow_person');
   });
 
+  it('owner_alert_names_the_held_request', async () => {
+    // Maria's Demo inbox alert for a hold names that held request; the code sent to a visitor names none.
+    const before = mockStore.world.inbox.length;
+    const { session } = await openChat();
+    await send('Can I get 50% off if I pay cash?');
+    await drain();
+    await send('Can you send my invoice?');
+    await drain();
+    const held = [...mockStore.world.decisions.values()].find((d) => d.decision.session_id === session.session_id)?.decision;
+    if (!held) throw new Error('the discount is held');
+    const entries = mockStore.world.inbox.slice(before).map(({ entry }) => [entry.entry_id, entry.to, entry.kind, entry.decision_id]);
+    expect(entries).toEqual([
+      [held.inbox?.[0]?.entry_id, 'owner', 'alert', held.decision_id],
+      [expect.any(String), rivera.people.dana.maskedContact, 'verification_code', null],
+    ]);
+  });
+
   it('answer_resolves_and_follows_up', async () => {
     const { events } = await openChat();
     await send('Can I get 15% off?');
