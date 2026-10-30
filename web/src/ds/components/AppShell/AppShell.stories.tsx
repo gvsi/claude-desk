@@ -152,21 +152,19 @@ const columns = (
 );
 
 export const FillsTheMain: Story = {
-  args: { banner: undefined, fill: true, sidebarLook: 'ground', children: columns },
+  args: { banner: undefined, fill: true, children: columns },
   parameters: {
     canvas: 'N-Conv-Run1',
     canvasNote:
-      'Only the page’s frame: the board’s conversation list starts where the sidebar ends and runs the window’s height, with the conversation beside it (fill), and the sidebar on the app ground at its own height (sidebarLook ground), as the board draws it.',
+      'Only the page’s frame: the board’s conversation list starts where the sidebar ends and runs the window’s height, with the conversation beside it (fill). The sidebar is the panel, as on every page (owner decision 2026-10-29: one sidebar look on every page; the conversation boards are being redrawn to match).',
   },
   play: async ({ canvas }) => {
-    // The signed conversation boards draw the sidebar on the app ground with no seam, at its own
-    // height (sidebarLook ground): its Answering switch and owner sit under the pages, not at the
-    // window's foot.
+    // One sidebar look on every page (owner decision 2026-10-29): beside a filled page too, it is
+    // the panel with its seam, as tall as the window, its Answering switch and owner at the foot.
     const sidebarColumn = canvas.getByRole('complementary', { name: 'Claude Desk' });
-    expectComputed(sidebarColumn, { backgroundColor: 'rgb(28, 27, 25)', borderRightWidth: '0px' });
-    const nav = within(sidebarColumn).getByRole('navigation', { name: 'Main' });
+    expectComputed(sidebarColumn, { backgroundColor: 'rgb(34, 34, 32)', borderRightWidth: '1px' });
     const foot = sidebarColumn.querySelector('.cd-sidebar__footer') as HTMLElement;
-    await expect(foot.getBoundingClientRect().top - nav.getBoundingClientRect().bottom).toBe(4);
+    await expect(sidebarColumn.getBoundingClientRect().bottom - foot.getBoundingClientRect().bottom).toBe(12);
 
     // The page fills the main area edge to edge: no padding and no content width, so its first
     // column starts at the sidebar's seam and runs the height of the window.

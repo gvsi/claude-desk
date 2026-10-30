@@ -12,18 +12,12 @@ const SANS = /^"Hanken Grotesk"/;
 
 /** Each spec row, as computed styles. Rows that differ by board say which boards they are for. */
 export const SPEC = {
-  /** Today, Safety, the switcher and the take-over: the sidebar on the panel, a hairline seam at its right. */
+  /** Every owner page (owner decision 2026-10-29): the sidebar on the panel, a hairline seam at its right. */
   sidebar: {
     width: '264px',
     backgroundColor: 'rgb(34, 34, 32)',
     borderRightWidth: '1px',
     borderRightColor: 'rgba(250, 249, 245, 0.12)',
-  },
-  /** The signed conversation boards (N-Conv-Run1, N-Conv-Agent-Run1): the sidebar on the app ground, no seam. */
-  sidebarGround: {
-    width: '264px',
-    backgroundColor: 'rgb(28, 27, 25)',
-    borderRightWidth: '0px',
   },
   activeNavRow: {
     height: '36px',
@@ -95,22 +89,15 @@ export function some<T extends Element = HTMLElement>(root: ParentNode, selector
 }
 
 /**
- * The owner app's frame: the sidebar column, its current row, and the padded page. As the signed
- * conversation boards draw it, `fill` has the page fill the main area, and `sidebarLook: 'ground'`
- * puts the sidebar on the app ground at its own height, its Answering switch 4 px under the pages.
+ * The owner app's frame: the sidebar column in its one look on every page, its current row, and
+ * the page: padded, or with `fill` filling the main area, as the conversation pages do.
  */
-export async function expectOwnerFrame(
-  root: HTMLElement,
-  current: string,
-  { fill = false, sidebarLook = 'panel' }: { fill?: boolean; sidebarLook?: 'panel' | 'ground' } = {},
-): Promise<void> {
+export async function expectOwnerFrame(root: HTMLElement, current: string, { fill = false } = {}): Promise<void> {
   const column = within(root).getByRole('complementary', { name: 'Claude Desk' });
-  expectComputed(column, sidebarLook === 'ground' ? SPEC.sidebarGround : SPEC.sidebar);
-  if (sidebarLook === 'ground') {
-    const nav = within(column).getByRole('navigation', { name: 'Main' });
-    const foot = one(column, '.cd-sidebar__footer');
-    await expect(foot.getBoundingClientRect().top - nav.getBoundingClientRect().bottom, 'the sidebar foot under the pages').toBe(4);
-  }
+  expectComputed(column, SPEC.sidebar);
+  // The Answering switch and the owner sit at the column's foot, inside the sidebar's 12 px.
+  const foot = one(column, '.cd-sidebar__footer');
+  await expect(column.getBoundingClientRect().bottom - foot.getBoundingClientRect().bottom, 'the sidebar foot at the bottom').toBe(12);
   const row = within(column).getByRole('link', { name: new RegExp(`^${current}`) });
   await expect(row).toHaveAttribute('aria-current', 'page');
   expectComputed(row, SPEC.activeNavRow);

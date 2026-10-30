@@ -24,7 +24,6 @@ function ConversationLive() {
     <RiveraFrame
       current="conversations"
       fill
-      sidebarLook="ground"
       counts={{ conversations: { n: 2, label: '2 need you' }, safety: { n: 2, label: '2 blocked' } }}
     >
       <ConversationsPage open={DANA}>
@@ -71,7 +70,8 @@ const meta = {
       "The conversation is the Rivera fixture's live chat with Dana: a drain, a quote, a whisper, open times and a booking, where the board has a water heater, a leak repair quote, a booking with a sooner time, and then a discount held for Maria's answer in the chat.",
       'Its receipts are the kernel’s status lines from the fixture, attached under each message on its side; the board writes some in owner wording.',
       '"Dana is typing" is the signed typing bubble (N-Typing-Bubble-Run1) where the board writes a line.',
-      'The list column, the conversation head and its "Latest" line are page layout the web app (plan 04) owns, composed here from ConversationListItem, Pill and the tokens; the page fills the main area (AppShell fill), so the list starts where the sidebar ends, and the sidebar sits on the app ground at its own height (AppShell sidebarLook ground), as on the board. Which sidebar look the app uses on every page is the owner’s decision; the board story passes the one its render draws.',
+      'The list column, the conversation head and its "Latest" line are page layout the web app (plan 04) owns, composed here from ConversationListItem, Pill and the tokens; the page fills the main area (AppShell fill), so the list starts where the sidebar ends.',
+      'The sidebar is the panel with its seam and the Answering switch at its foot, as on Today (owner decision 2026-10-29: one sidebar look on every page; the conversation boards are being redrawn to match).',
     ].join(' '),
   },
 } satisfies Meta;
@@ -82,7 +82,7 @@ type Story = StoryObj<typeof meta>;
 
 export const Board: Story = {
   play: async ({ canvas, canvasElement, userEvent }) => {
-    await expectOwnerFrame(canvasElement, 'Conversations', { fill: true, sidebarLook: 'ground' });
+    await expectOwnerFrame(canvasElement, 'Conversations', { fill: true });
     expectComputed(canvas.getByRole('heading', { level: 1, name: 'Conversations' }), SPEC.pageTitle);
     // The open conversation's name, in the section style the board sets it in.
     expectComputed(canvas.getByRole('heading', { level: 2, name: DANA }), { fontSize: '15px', lineHeight: '20px', fontWeight: '520' });

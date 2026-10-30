@@ -65,8 +65,6 @@ export interface RiveraFrameProps {
   reviewer?: boolean;
   /** The page lays out its own columns from the sidebar's edge (`AppShell` `fill`). */
   fill?: boolean;
-  /** The sidebar's look (`AppShell` `sidebarLook`): the panel, or the app ground the Run 1 conversation boards draw. */
-  sidebarLook?: 'panel' | 'ground';
   onSwitchBusiness?: () => void;
   children: ReactNode;
 }
@@ -78,7 +76,6 @@ export function RiveraFrame({
   twoDesks = false,
   reviewer = false,
   fill = false,
-  sidebarLook = 'panel',
   onSwitchBusiness,
   children,
 }: RiveraFrameProps) {
@@ -86,7 +83,6 @@ export function RiveraFrame({
     <AppShell
       business={rivera.business.name}
       fill={fill}
-      sidebarLook={sidebarLook}
       banner={reviewer ? <ReviewerBar ownerName={rivera.business.ownerName} onStartOver={fn()} /> : undefined}
       sidebar={
         <Sidebar
