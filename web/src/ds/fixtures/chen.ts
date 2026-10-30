@@ -519,8 +519,8 @@ const entries = [
     decision_id: null,
   },
   {
-    // The held consultation's alert, as the kernel writes it: the decision's reason and its id,
-    // written when the hold was made, 24 hours before it expires.
+    // The held consultation's alert: the decision's reason_plain and its id, as the kernel pairs
+    // them, written when the hold was made, 24 hours before it expires.
     entry_id: 'inbox-hold-consultation',
     to: 'owner',
     kind: 'alert',

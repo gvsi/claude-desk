@@ -783,7 +783,11 @@ describe('fixtures', () => {
     }
     for (const entry of entries.filter((entry) => entry.kind !== 'alert')) {
       expect(requestHrefOf(entry), entry.entry_id).toBeUndefined();
+      // Only the owner's alert names a request, as the kernel rules: a code or a checkpoint that
+      // carries a decision_id anyway still has no link.
+      expect(requestHrefOf({ ...entry, decision_id: alert.decision_id }), `${entry.entry_id} with a decision_id`).toBeUndefined();
     }
+    expect(requestHrefOf({ ...alert, to: '•••• 0142' }), 'an alert not to the owner').toBeUndefined();
     expect(requestHrefOf(null)).toBeUndefined();
   });
 

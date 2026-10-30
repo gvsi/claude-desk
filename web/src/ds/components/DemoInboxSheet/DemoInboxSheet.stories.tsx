@@ -31,7 +31,7 @@ const ALERT: DemoInboxItem = {
     kind: 'alert',
     body: 'Dana Whitfield asked for 10% off a drain clearing. Held by your rule: Quotes from your price list, at list price.',
     created_at: '2026-10-30T10:46:00Z',
-    decision_id: 'dec-dana-discount',
+    decision_id: 'dec-rivera-discount',
   },
   time: 'Today, 10:46 am',
 };
@@ -255,7 +255,7 @@ export const OwnerOpensTheRequest: Story = {
     } finally {
       window.removeEventListener('click', keep, true);
     }
-    await expect(followed).toBe('#request-dec-dana-discount');
+    await expect(followed).toBe('#request-dec-rivera-discount');
     await expect(canvas.queryByRole('dialog')).toBeNull();
     await expect(args.onOpenChange).toHaveBeenLastCalledWith(false);
     // Closing returns focus to the sheet's button; the screen then moves it to the request.

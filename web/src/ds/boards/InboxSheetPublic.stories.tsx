@@ -115,7 +115,8 @@ export const Board: Story = {
     await expect(Math.round(box.right - close.getBoundingClientRect().right)).toBe(16);
     await expect(within(sheet).getByText(ENTRY.body)).toBeVisible();
     await expect(within(sheet).getByText('To •••• 0143')).toBeVisible();
-    // A request link is the owner's: the visitor's sheet shows none.
-    await expect(within(sheet).queryByRole('link', { name: 'Open the request' })).toBeNull();
+    // The visitor's code names no decision, so nothing builds a request link.
+    await expect(ENTRY.decision_id).toBeNull();
+    await expect(within(sheet).queryByRole('link')).toBeNull();
   },
 };
