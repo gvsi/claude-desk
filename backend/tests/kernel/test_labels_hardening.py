@@ -25,7 +25,7 @@ from desk.contracts import Claim, Fact, KnowledgeItem, Label, ReplyVerdict
 from desk.db.models import Document, Execution
 from desk.db.models import Fact as FactRow
 from desk.db.models import KnowledgeItem as KnowledgeRow
-from desk.kernel_service import labels, ledger
+from desk.kernel_service import desks, labels, ledger
 from desk.kernel_service.adapters.base import AdapterResult
 
 from .fakes import FakeAdapter
@@ -36,7 +36,6 @@ from .test_compiler import card
 from .test_context import add_price_item, catalog_of, context_of, fact_ids, owner_session_id, tools
 from .test_copies import api_rows
 from .test_decide import decided, desk_with, open_visitor, set_session
-from .test_desk_writes import put_part
 from .test_execute import Crash, executed, post_execute, read
 from .test_owner_messages import sent
 from .test_reply_check import assert_handed_off, checked, clause, reply_entries
@@ -50,6 +49,20 @@ DANA_SAYS = {"en": "Here is your invoice reference: {}. Anything else I can help
 async def documents(app: FastAPI, copy: Rivera) -> dict[str, Document]:
     """The copy's documents by ref: Dana's invoice and Bob's warranty, each with its canary."""
     return {row.ref: row for row in await rows_of(app, copy.copy_id, select(Document))}
+
+
+async def store_charter(app: FastAPI, copy: Rivera, claims: list[Claim]) -> None:
+    """Test only: the Desk's charter replaced by `claims` as they are (`charter:hours` stays), as a
+    kernel without the owner write's canary check (`desks.refuse_public_canaries`) could have
+    stored it."""
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        for row in await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
+                FactRow.desk_id == copy.desk_id, FactRow.kind == "charter", FactRow.fact_id != desks.HOURS_FACT))):
+            await ctx.db.delete(row)
+        await ctx.db.flush()
+        for claim in claims:
+            ctx.db.add(labels.fact_row(copy.copy_id, copy.desk_id, desks.charter_fact(claim), ctx.clock.now()))
 
 
 def blocked_by(*documents: Document) -> list[tuple]:
@@ -118,11 +131,11 @@ async def test_canary_in_a_rendered_card_is_blocked(app, client, language):
     copy, visitor = await visitor_of(app, client)
     await set_session(app, copy, visitor.session_id, last_language=language)
     dana = (await documents(app, copy))["dana-invoice"]
-    # the owner pastes Dana's invoice reference into a public policy
-    response = await put_part(client, copy, "charter", {"charter": [
-        {"key": "contact", "kind": "text", "value": "(510) 555-0142"},
-        {"key": "policy:refunds", "kind": "text", "value": f"Refunds go back to the card used (ref {dana.canary})."}]})
-    assert response.status_code == 200, response.text
+    # a public policy holding Dana's invoice reference (an owner write of it is refused, so it is
+    # stored as it is: see test_public_header)
+    await store_charter(app, copy, [
+        Claim(key="contact", kind="text", value="(510) 555-0142"),
+        Claim(key="policy:refunds", kind="text", value=f"Refunds go back to the card used (ref {dana.canary}).")])
     verdict = await checked(client, visitor, POLICY_DRAFT[language], [clause("policy", REFUNDS)])
     assert violations(verdict) == blocked_by(dana)
     assert_handed_off(verdict, language)
@@ -153,10 +166,9 @@ async def test_a_canary_in_a_fact_id_or_claim_key_stays_out_of_context(app, clie
     # the owner names a public policy after Dana's invoice reference: its fact ID and its claim's
     # key hold the canary, though the policy's text doesn't
     named = f"charter:policy:{dana.canary}"
-    response = await put_part(client, copy, "charter", {"charter": [
-        {"key": "contact", "kind": "text", "value": "(510) 555-0142"},
-        {"key": f"policy:{dana.canary}", "kind": "text", "value": "Refunds go back to the card used."}]})
-    assert response.status_code == 200, response.text
+    await store_charter(app, copy, [
+        Claim(key="contact", kind="text", value="(510) 555-0142"),
+        Claim(key=f"policy:{dana.canary}", kind="text", value="Refunds go back to the card used.")])
     # and a public fact whose ID is plain carries it in a claim's key alone
     keyed = Fact(fact_id="charter:policy:notes", kind="charter", status="available", source="kernel",
                  claims=[Claim(key=f"ref {dana.canary.upper()}", kind="text", value="See the invoice.")],

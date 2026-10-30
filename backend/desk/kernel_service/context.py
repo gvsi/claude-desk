@@ -17,9 +17,10 @@
   takes. A visitor's or agent's session is never given a row holding one of the copy's document
   canaries (`labels.find_canaries_in`) anywhere Claude would read it, whatever its label: in a
   fact's ID or a claim's key or value, or in a knowledge item's ID, title or text. Knowledge
-  holding one in its title or text is stored owner-only (and one in its ID is refused), and a
-  public charter policy the owner pasted one into, or named after one, is left out, as on the
-  public page, and so is the catalog when an item's ID or title holds one.
+  holding one in its title or text is stored owner-only (and one in its ID is refused). Owner
+  writes of charter policies and price items refuse one (`desks.refuse_public_canaries`); a
+  policy stored holding one before that check, in its text or its key, is left out, as on the
+  public page, and so is the catalog when such an item's ID or title holds one.
 
 A profile carries what Claude is given, the confirmed description and the adapter's input
 schema, and never the text of a changed MCP definition, which only the owner reviews.

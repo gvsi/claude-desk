@@ -13,6 +13,10 @@ only; the time zone is one the time zone database lists; hours live in `DeskSeed
 charter claim; refs, which `desk_data` entries carry, are plain identifiers; a document's body is
 at most 200 KiB and its record owner a live person; and a contact on record is an email address or
 a phone number, never a masked one. Two live people never share a contact (409 `conflict`).
+Before those checks, what strangers are shown of the input (the business's and the Desk's names,
+the owner's display name, the brand, the charter, the price list's IDs and titles, and a new
+Desk's slug) is checked for the copy's document canaries (`refuse_public_canaries`): 422
+`invalid`, ledgered.
 
 Contacts on record are kept three ways: `contact` as given (verification codes go only there),
 `contact_norm` for lookups, and `masked_contact`, the only form any view, notice or owner alert
@@ -43,6 +47,7 @@ from sqlalchemy.exc import IntegrityError
 
 from desk.contracts import (BusinessSeed, Claim, DeskSeed, Fact, HoursWindow, Label, LedgerEvent, SeedDocument,
                             ToolProfile)
+from desk.contracts import PriceItem as PriceItemSeed
 from desk.db.models import Action as ActionRow
 from desk.db.models import (ActorSession, Booking, Business, CalendarSlot, Desk, Document, NotificationPref, Person,
                              PriceItem, Tool, VerificationChallenge)
@@ -256,7 +261,10 @@ async def create_desk(ctx: KernelCtx, copy_id: str, business: BusinessSeed, desk
     What the public page and the Desk's public address (its slug, made from the business's name)
     would show is checked for the copy's document canaries first (`refuse_public_canaries`, part
     `desk`): the new business's name, display name and brand, or an existing business's stored
-    name, and the Desk's name.
+    name, and the Desk's name, charter and price list. The name is checked as typed and as the
+    slug that will be written, suffix and all, since making it a slug drops what isn't ASCII (a
+    sharp s inside a canary leaves the canary); either holding a canary refuses field
+    `business.name`.
     """
     copy = ctx.bind(copy_id)
     now = ctx.clock.now()
@@ -266,21 +274,25 @@ async def create_desk(ctx: KernelCtx, copy_id: str, business: BusinessSeed, desk
             Business.business_id == business.existing_business_id)))).one_or_none()
         if existing is None:   # row-level security hides every other copy's businesses
             raise KernelFailure(404, "not_found", "unknown_business")
-    shown: dict[str, object] = {"business.name": existing.name} if existing is not None else {
-        "business.name": business.name, "business.owner_display_name": business.owner_display_name,
-        "business.brand": business.brand}
-    await refuse_public_canaries(ctx, "desk", shown | {"desk.name": desk.name})
+    business_name = existing.name if existing is not None else business.name
+    slug = new_slug(business_name)
+    # the name as the page shows it and as the slug writes it, which drops what isn't ASCII
+    shown: dict[str, object] = {"business.name": [business_name, slug]}
+    if existing is None:
+        shown |= {"business.owner_display_name": business.owner_display_name, "business.brand": business.brand}
+    shown |= {"desk.name": desk.name, "desk.charter": charter_shown(desk.charter),
+              "desk.price_items": prices_shown(desk.price_items)}
+    await refuse_public_canaries(ctx, "desk", shown)
     validate_business(business)
     validate_desk(desk)
     if existing is not None:
-        business_id, business_name = existing
+        business_id = existing.business_id
     else:
-        business_id, business_name = new_id("biz"), business.name
+        business_id = new_id("biz")
         ctx.db.add(Business(business_id=business_id, copy_id=copy_id, name=business.name,
                             owner_display_name=business.owner_display_name, timezone=business.timezone,
                             brand=business.brand))
     desk_id = new_id("desk")
-    slug = new_slug(business_name)
     ctx.db.add(Desk(desk_id=desk_id, copy_id=copy_id, business_id=business_id, name=desk.name, slug=slug,
                     hours=desk.hours, answering=answering, created_at=now))
     person_ids: dict[str, str] = {}
@@ -387,8 +399,23 @@ async def put_business(ctx: KernelCtx, desk_row: Desk, body: DeskBusinessRequest
     return [business.business_id]
 
 
+def charter_shown(charter: Sequence[Claim]) -> list[tuple[str, object]]:
+    """What the public page shows of charter claims, one after another: each `charter:<key>`
+    fact's key (its ID names it) and value."""
+    return [(claim.key, claim.value) for claim in charter]
+
+
+def prices_shown(price_items: Sequence[PriceItemSeed]) -> list[tuple[str, str]]:
+    """What a stranger is shown of price items (the catalog's claims, a quote's lines), one after
+    another: each item's ID and title."""
+    return [(item.item_id, item.title) for item in price_items]
+
+
 async def put_charter(ctx: KernelCtx, desk_row: Desk, body: DeskCharterRequest) -> list[str]:
-    """The Desk's public `charter:<key>` facts, replaced; `charter:hours` comes only from its hours."""
+    """The Desk's public `charter:<key>` facts, replaced; `charter:hours` comes only from its hours.
+    The public page shows them, so a document's canary in a key or a value is refused first
+    (`refuse_public_canaries`)."""
+    await refuse_public_canaries(ctx, "charter", {"charter": charter_shown(body.charter)}, desk_row.desk_id)
     check_charter(body.charter)
     now = ctx.clock.now()
     rows = {row.fact_id: row for row in await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
@@ -419,7 +446,10 @@ async def put_hours(ctx: KernelCtx, desk_row: Desk, body: DeskHoursRequest) -> l
 
 
 async def put_prices(ctx: KernelCtx, desk_row: Desk, body: DeskPricesRequest) -> list[str]:
-    """The Desk's price list, replaced. Quotes already made keep their amounts."""
+    """The Desk's price list, replaced. Quotes already made keep their amounts. Strangers are
+    shown its IDs and titles, so a document's canary in them is refused first
+    (`refuse_public_canaries`)."""
+    await refuse_public_canaries(ctx, "prices", {"price_items": prices_shown(body.price_items)}, desk_row.desk_id)
     unique(item.item_id for item in body.price_items)
     rows = {row.item_id: row for row in await ctx.db.scalars(ctx.repo.scoped(select(PriceItem).where(
         PriceItem.desk_id == desk_row.desk_id)))}

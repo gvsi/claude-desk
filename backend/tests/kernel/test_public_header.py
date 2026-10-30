@@ -1,12 +1,14 @@
-"""No document canary in the public page's header.
+"""No document canary in what strangers are shown of a Desk.
 
 Anyone may read a Desk's public page (`GET /public/{slug}`) with no session, and its header shows
 the owner's words as they were typed: the business's name, the Desk's name, the owner's display
-name and the brand colors. So an owner write of one of them that carries a document's canary, even
-split or disguised, is refused (422 `invalid`) and ledgered `desk_data` `{part, refused: "canary",
-fields, fact_ids}`, naming the fields and the documents, never the text. A value stored before
-that check is withheld from the page, which shows the field's safe fallback instead, and the
-owner is alerted in the Demo inbox. Tests run on Rivera Plumbing copies as `POST /copies` seeds
+name and the brand colors. Its address is a slug made from the business's name, its charter cards
+show the owner's policies, and strangers are quoted from the price list's IDs and titles. So an
+owner write of any of them that carries a document's canary, even split or disguised, or one a
+new Desk's slug would carry, is refused (422 `invalid`) and ledgered `desk_data` `{part, refused:
+"canary", fields, fact_ids}`, naming the fields and the documents, never the text. A header value
+stored before that check is withheld from the page, which shows the field's safe fallback
+instead, and the owner is alerted in the Demo inbox. Tests run on Rivera Plumbing copies as `POST /copies` seeds
 them (Friday 10:04 in Oakland).
 """
 
@@ -14,13 +16,17 @@ import httpx
 from fastapi import FastAPI
 from sqlalchemy import select
 
+from desk.contracts import Claim, PriceItem
 from desk.db.models import Business, Desk
 from desk.db.models import DemoInboxEntry as InboxRow
-from desk.kernel_api import PublicDesk
+from desk.db.models import Fact as FactRow
+from desk.db.models import PriceItem as PriceRow
+from desk.kernel_api import DeskCreated, PublicDesk
+from desk.kernel_service import desks
 
 from .helpers import kernel_ctx, rows_of
 from .test_adapters import Rivera, rivera
-from .test_desk_writes import LOPEZ_DESK, desks_of, entries_of, new_desk, post_desk, put_part
+from .test_desk_writes import LOPEZ_DESK, desks_of, entries_of, new_desk, post_desk, put_part, updated
 from .test_labels_hardening import assert_no_canary_on_record, disguises, documents, full_width
 
 RIVERA_BRAND = {"primary": "#1F4E4A", "accent": "#B87333"}
@@ -123,6 +129,127 @@ async def test_a_new_desk_is_held_to_the_same(app, client):
         "part": "desk", "refused": "canary", "fields": ["business.name"],
         "fact_ids": [f"document:{dana.document_id}"]}
     await assert_no_canary_on_record(app, copy, dana.canary)
+
+
+async def test_a_new_desk_holding_two_desks_documents_is_ledgered_on_both(app, client):
+    copy = await rivera(app, client)
+    response = await post_desk(client, copy, new_desk())
+    assert response.status_code == 200, response.text
+    lopez = DeskCreated.model_validate(response.json())
+    seeded = await documents(app, copy)
+    dana, kim = seeded["dana-invoice"], seeded["kim-estimate"]
+    before = {desk_id: len(await entries_of(app, copy, desk_id)) for desk_id in (copy.desk_id, lopez.desk_id)}
+    # Dana's invoice (on Rivera's Desk) in the business's name, Kim's estimate (on Lopez's) in the Desk's
+    line_2 = LOPEZ_DESK.model_copy(update={"name": f"Line 2 {kim.canary}"})
+    response = await post_desk(client, copy, new_desk(name=f"Lopez Electric {dana.canary}", desk=line_2))
+    assert (response.status_code, response.json()) == (422, {"code": "invalid"})
+    # with no new Desk, the refusal goes on each Desk whose document it held
+    refused = {"part": "desk", "refused": "canary", "fields": ["business.name", "desk.name"],
+               "fact_ids": [f"document:{document_id}" for document_id in sorted((dana.document_id, kim.document_id))]}
+    for desk_id, count in before.items():
+        assert [entry.event.summary for entry in (await entries_of(app, copy, desk_id))[count:]] == [refused]
+    assert set(await desks_of(app, copy)) == {copy.desk_id, lopez.desk_id}
+    assert not [entry for desk_id in before for entry in await entries_of(app, copy, desk_id)
+                if dana.canary in entry.envelope_jcs or kim.canary in entry.envelope_jcs]
+
+
+SHARP_S = ("ß", "ẞ")                       # a small and a capital sharp s
+
+
+def sharp_s(canary: str, ch: str) -> str:
+    """`canary` with `ch` (a sharp s) inside it: "cdk-aa72cbeec5ße3a2fd". Read on the page, it
+    gives "ss"; made into a slug, it is dropped, which leaves the canary itself."""
+    return f"{canary[:14]}{ch}{canary[14:]}"
+
+
+async def test_a_canary_the_public_address_would_carry_is_refused(app, client):
+    """The new Desk's slug, its public address, is checked as it would be written: a name that
+    holds a canary only once made into a slug is refused like one that holds it as typed."""
+    copy = await rivera(app, client)
+    dana = (await documents(app, copy))["dana-invoice"]
+    [rivera_business] = await rows_of(app, copy.copy_id, select(Business))
+    refused = {"part": "desk", "refused": "canary", "fields": ["business.name"],
+               "fact_ids": [f"document:{dana.document_id}"]}
+    for ch in SHARP_S:
+        name = f"Lopez Electric {sharp_s(dana.canary, ch)}"
+        assert dana.canary in desks.slugify(name)
+        response = await post_desk(client, copy, new_desk(name=name))
+        assert (response.status_code, response.json()) == (422, {"code": "invalid"}), name
+        assert (await entries_of(app, copy))[-1].event.summary == refused
+        # and a new Desk of a business whose stored name would make the same slug
+        await store_business(app, copy, name=f"Rivera Plumbing {sharp_s(dana.canary, ch)}")
+        response = await post_desk(client, copy, new_desk(existing_business_id=rivera_business.business_id))
+        assert (response.status_code, response.json()) == (422, {"code": "invalid"}), ch
+        assert (await entries_of(app, copy))[-1].event.summary == refused
+    assert set(await desks_of(app, copy)) == {copy.desk_id}
+    assert [row.slug for row in (await desks_of(app, copy)).values()] == [copy.slug]
+    await assert_no_canary_on_record(app, copy, dana.canary)
+
+
+RIVERA_CONTACT = {"key": "contact", "kind": "text", "value": "(510) 555-0142"}
+
+
+def policy(key: str, text: str) -> dict:
+    """A charter claim: the public policy `policy:<key>`."""
+    return {"key": f"policy:{key}", "kind": "text", "value": text}
+
+
+def price(item_id: str, title: str, unit_cents: int = 5_000) -> dict:
+    return {"item_id": item_id, "title": title, "unit_cents": unit_cents}
+
+
+async def charter_and_prices(app: FastAPI, copy: Rivera) -> tuple[list, list]:
+    """The Desk's charter facts and price items, as stored."""
+    facts = await rows_of(app, copy.copy_id, select(FactRow).where(
+        FactRow.desk_id == copy.desk_id, FactRow.kind == "charter").order_by(FactRow.fact_id))
+    items = await rows_of(app, copy.copy_id, select(PriceRow).where(
+        PriceRow.desk_id == copy.desk_id).order_by(PriceRow.item_id))
+    return ([(row.fact_id, row.claims) for row in facts], [(row.item_id, row.title, row.unit_cents) for row in items])
+
+
+async def test_a_canary_in_a_public_policy_or_a_price_is_refused(app, client):
+    """The public page shows the charter's policies, and strangers are quoted from the price
+    list's titles, so a write of either holding a canary is refused like a header field's, its
+    keys and IDs (which name the facts) as well as its text."""
+    copy = await rivera(app, client)
+    seeded = await documents(app, copy)
+    dana, bob = seeded["dana-invoice"], seeded["bob-warranty"]
+    stored, charter = await charter_and_prices(app, copy), (await public_page(client, copy)).charter
+    refused = [
+        # the owner pastes Dana's invoice reference into a public policy
+        ("charter", [RIVERA_CONTACT, policy("refunds", f"Refunds go to the card used (ref {dana.canary}).")], dana),
+        # split by a space, half of it in full width
+        ("charter", [policy("refunds", f"Refunds: ref {full_width(dana.canary[:10])} {dana.canary[10:]}.")], dana),
+        # or names a policy after it, which is its fact's ID
+        ("charter", [RIVERA_CONTACT, policy(bob.canary, "See the warranty.")], bob),
+        # a price item's title, disguised, or its ID
+        ("price_items", [price("lookup", f"Invoice {disguises(dana.canary)[-1]}")], dana),
+        ("price_items", [price("visit", "Service visit"), price(bob.canary, "Warranty check")], bob),
+    ]
+    before = len(await entries_of(app, copy))
+    for field, value, _ in refused:
+        response = await put_part(client, copy, "charter" if field == "charter" else "prices", {field: value})
+        assert (response.status_code, response.json()) == (422, {"code": "invalid"}), value
+    assert [entry.event.summary for entry in (await entries_of(app, copy))[before:]] == [
+        {"part": "charter" if field == "charter" else "prices", "refused": "canary", "fields": [field],
+         "fact_ids": [f"document:{document.document_id}"]} for field, _, document in refused]
+    assert await charter_and_prices(app, copy) == stored
+    assert (await public_page(client, copy)).charter == charter
+    # a new Desk is held to the same
+    for update, field in (({"charter": [Claim(key="policy:refunds", kind="text", value=f"Ref {dana.canary}")]},
+                           "desk.charter"),
+                          ({"price_items": [PriceItem(item_id="visit", title=f"Visit {dana.canary}", unit_cents=1)]},
+                           "desk.price_items")):
+        response = await post_desk(client, copy, new_desk(desk=LOPEZ_DESK.model_copy(update=update)))
+        assert (response.status_code, response.json()) == (422, {"code": "invalid"}), field
+        assert (await entries_of(app, copy))[-1].event.summary == {
+            "part": "desk", "refused": "canary", "fields": [field], "fact_ids": [f"document:{dana.document_id}"]}
+    assert set(await desks_of(app, copy)) == {copy.desk_id}
+    await assert_no_canary_on_record(app, copy, dana.canary, bob.canary)
+    # ordinary policies and prices, digits and all, and one a character away from a canary, pass
+    near = dana.canary[:-1] + ("1" if dana.canary.endswith("0") else "0")
+    await updated(client, copy, "charter", {"charter": [RIVERA_CONTACT, policy("refunds", f"5-7 days, {near}.")]})
+    await updated(client, copy, "prices", {"price_items": [price("drain-24-7", "Drain clearing, 24/7", 18_000)]})
 
 
 async def withheld_alerts(app: FastAPI, copy: Rivera) -> list[str]:

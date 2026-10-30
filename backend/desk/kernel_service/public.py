@@ -4,8 +4,9 @@ The public page's header and charter: the business and Desk names, the owner's d
 brand colors, and the Desk's `public`-labelled charter facts rendered by the clause templates in
 the language asked for (`?lang=es`, else English): its hours, its contact, then its policies. A
 charter fact with nothing to show (hours with no windows) or carrying a document canary is left
-out. Nothing else is read: no people, prices, quotes, bookings or documents. `agent_card` stays
-empty until Plan 01c.
+out; owner writes of the charter refuse a canary (`desks.refuse_public_canaries`), so only one
+stored before that check could carry it. Nothing else is read: no people, prices, quotes,
+bookings or documents. `agent_card` stays empty until Plan 01c.
 
 `open_status` is the header's open-now line ("Open status"), computed from the same `charter:hours`
 fact in the business's time zone on the kernel's clock (`desks.open_window_status`), with its text
@@ -15,10 +16,11 @@ with nothing of the Desk's, when computing it fails or it can't name its boundar
 page is still served.
 
 The header's names and brand colors are the owner's words as typed, which owner writes check for
-document canaries (`desks.refuse_public_canaries`). One stored before that check and holding a
-canary of the copy's documents, even split or disguised (`labels.canary_fields`), is withheld: the
-page shows the field's fallback (an empty name, the default brand) and the owner is alerted in the
-Demo inbox, whatever their notification defaults, at most once an hour per Desk.
+document canaries (`desks.refuse_public_canaries`), as they check the slug a new Desk's address is
+made from. One stored before that check and holding a canary of the copy's documents, even split
+or disguised (`labels.canary_fields`), is withheld: the page shows the field's fallback (an empty
+name, the default brand) and the owner is alerted in the Demo inbox, whatever their notification
+defaults, at most once an hour per Desk.
 
 The slug is the only key, found through the copy resolver (`repo.copy_of_desk_slug`); a slug no
 Desk could have, an unknown one or a deleted Desk's is 404 `not_found`. The read writes nothing
