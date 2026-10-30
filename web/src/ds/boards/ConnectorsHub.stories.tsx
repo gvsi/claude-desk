@@ -117,16 +117,18 @@ export const Phone: Story = {
     canvasNote: [
       'The board’s placeholder is shorter, “Ask Claude to change a rule”; the composer keeps one placeholder at every width.',
       'Signed after the board: each tool’s outcome sits on its own line under its words.',
-      'The subtitle, the helper and the suggestions go on a phone, as the board draws it.',
+      'The subtitle, the helper and the suggestions go on a phone, as the board draws it; the top bar’s menu button is its icon alone, its name kept for screen readers.',
     ].join(' '),
   },
   play: async ({ canvas, canvasElement, userEvent }) => {
     const width = window.innerWidth;
     await expect(width).toBe(390);
-    // The top bar replaces the sidebar.
+    // The top bar replaces the sidebar, 56 px high, its menu button the icon alone.
     await expect(canvas.queryByRole('complementary', { name: 'Claude Desk' })).toBeNull();
     const menu = canvas.getByRole('button', { name: 'Menu' });
     await expect(menu).toBeVisible();
+    expectComputed(menu, { width: '32px', height: '32px' });
+    expectComputed(one(canvasElement, '.cd-app-shell__topbar'), { height: '56px' });
     // The title with "Add a connector" at control height beside it, and no subtitle.
     const title = canvas.getByRole('heading', { level: 1, name: 'Rules' });
     expectComputed(title, SPEC.pageTitle);

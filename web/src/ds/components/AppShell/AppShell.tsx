@@ -138,7 +138,8 @@ function CompactNav({ sidebar, business }: { sidebar: ReactNode; business: strin
           onClick={() => setOpen(true)}
         >
           <Icon name="menu" size={18} />
-          Menu
+          {/* The phone board draws the icon alone; the button keeps its name. */}
+          <span className="cd-sr-only">Menu</span>
         </button>
       </div>
       {open ? (
