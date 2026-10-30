@@ -94,9 +94,12 @@ done
 # given it, in its environment: never on a command line, in the output or in the log.
 no_passcode() {
   echo "deploy: DESK_PASSCODE isn't set and $*; the smoke checks sign in with the passcode" >&2
-  # shellcheck disable=SC2016  # the command to paste, $USER and all
-  echo 'deploy: store it once in the Keychain with: security add-generic-password -s claude-desk-passcode -a "$USER" -w' >&2
-  echo "deploy: (it asks for the passcode twice, without echo), or export DESK_PASSCODE for this run" >&2
+  # shellcheck disable=SC2016  # the commands to paste, $USER and all
+  {
+    echo 'deploy: store it once in the Keychain with: security add-generic-password -s claude-desk-passcode -a "$USER" -w'
+    echo 'deploy: or replace the item already there with: security add-generic-password -U -s claude-desk-passcode -a "$USER" -w'
+  } >&2
+  echo "deploy: (each asks for the passcode twice, without echo), or export DESK_PASSCODE for this run" >&2
   exit 2
 }
 unset passcode  # a caller's exported passcode would carry the Keychain value to every step
@@ -105,9 +108,10 @@ if [[ -z $data_only ]]; then
   passcode=${DESK_PASSCODE:-}
   if [[ -z $passcode ]]; then
     command -v security >/dev/null || no_passcode "there's no \`security\` command here to read the macOS Keychain with"
-    if ! passcode=$(security find-generic-password -s claude-desk-passcode -w) || [[ -z $passcode ]]; then
-      no_passcode "no claude-desk-passcode item could be read from the macOS Keychain"
-    fi
+    # `security` fails alike for a missing item, a locked login Keychain and denied access.
+    passcode=$(security find-generic-password -s claude-desk-passcode -w) ||
+      no_passcode "the macOS Keychain item claude-desk-passcode couldn't be read (is it stored, and is the login Keychain unlocked?)"
+    [[ -n $passcode ]] || no_passcode "the macOS Keychain item claude-desk-passcode is empty"
   fi
 fi
 unset DESK_PASSCODE

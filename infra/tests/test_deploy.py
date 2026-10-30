@@ -27,6 +27,7 @@ DOMAIN = "desk.example.com"
 CERTIFICATE = f"arn:aws:acm:us-east-1:{ACCOUNT}:certificate/0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9"
 KEYCHAIN_LOOKUP = ["find-generic-password", "-s", "claude-desk-passcode", "-w"]
 STORE_IT = 'security add-generic-password -s claude-desk-passcode -a "$USER" -w'
+REPLACE_IT = 'security add-generic-password -U -s claude-desk-passcode -a "$USER" -w'
 
 # Each stub appends {"tool", "argv", "cwd", "tty", "passcode", "env"} to $STUB_LOG, "passcode" being
 # the SHA-256 of the DESK_PASSCODE it was given (None without one) and "env" each environment
@@ -43,6 +44,9 @@ with open(os.environ["STUB_LOG"], "a") as log:
                           "passcode": sha256(passcode) if passcode else None,
                           "env": {{name: sha256(value) for name, value in os.environ.items()}}}}) + "\\n")
 if tool == "security":
+    if os.environ.get("KEYCHAIN_LOCKED"):         # a locked login Keychain, as over SSH or from launchd
+        print("security: SecKeychainSearchCopyNext: User interaction is not allowed.", file=sys.stderr)
+        sys.exit(36)
     if args != {lookup} or not os.path.exists(os.environ["KEYCHAIN"]):
         print("security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.",
               file=sys.stderr)
@@ -507,13 +511,29 @@ def test_a_caller_variable_named_passcode_carries_the_keychain_value_to_no_step(
     assert "keychain-test-passcode" not in run.text()
 
 
-@pytest.mark.parametrize("item", [None, ""])
-def test_no_passcode_in_the_keychain_says_how_to_store_it_before_any_step(deploy, item):
-    run = deploy(keychain_item=item, DESK_PASSCODE=None, DESK_DEPLOY_ACCOUNT=ACCOUNT)
+@pytest.mark.parametrize("locked", [False, True])
+def test_a_keychain_item_that_cant_be_read_says_so_before_any_step(deploy, locked):
+    """`security` fails alike when the item is missing, when the login Keychain is locked (an SSH or
+    launchd session) and when access is denied, so deploy.sh says only that the item couldn't be
+    read, asks after both causes, and gives the command to store it and the one to replace it."""
+    lock = {"KEYCHAIN_LOCKED": "1"} if locked else {}
+    run = deploy(keychain_item="keychain-test-passcode" if locked else None, DESK_PASSCODE=None,
+                 DESK_DEPLOY_ACCOUNT=ACCOUNT, **lock)
     assert run.status == 2
     assert run.steps() == ["security find-generic-password"]
-    assert STORE_IT in run.output
+    assert ("the macOS Keychain item claude-desk-passcode couldn't be read "
+            "(is it stored, and is the login Keychain unlocked?)") in run.output
+    assert STORE_IT in run.output and REPLACE_IT in run.output
     assert "DESK_PASSCODE" in run.output                                     # the other way to give it
+    assert "keychain-test-passcode" not in run.text()
+
+
+def test_an_empty_keychain_item_says_so_before_any_step(deploy):
+    run = deploy(keychain_item="", DESK_PASSCODE=None, DESK_DEPLOY_ACCOUNT=ACCOUNT)
+    assert run.status == 2
+    assert run.steps() == ["security find-generic-password"]
+    assert "the macOS Keychain item claude-desk-passcode is empty" in run.output
+    assert REPLACE_IT in run.output and "DESK_PASSCODE" in run.output
 
 
 def test_no_security_command_says_how_to_store_the_passcode_before_any_step(deploy):
