@@ -140,17 +140,18 @@ async def send_message(body: MessageIn, request: Request,
                        ctx: Annotated[VisitorCtx, Depends(visitor_ctx)]) -> MessageAccepted:
     """Store the visitor's message and start Claude's turn; the answer arrives on the event stream.
 
-    A message that starts a model turn (mode `ai`) counts toward the turn limits, per conversation and per address,
-    and past either is refused before anything is stored. Then what control rows left for this session is done
-    first, so an outcome that came in meanwhile precedes the message and the same turn answers both. The message
-    wakes a turn unless the owner has taken the chat over (mode `owner`: the owner answers it). In a paused session
-    that turn is the kernel's handoff, with no model call: it runs under the session's turn lock and stops the waiting
-    work from starting more turns, so one handoff answers the message and whatever else was waiting. Neither counts
-    toward the turn limits."""
+    Every message counts toward the post limit, in every mode, and one that starts a model turn (mode `ai`) toward the
+    turn limits too, per conversation and per address; past any of them it is refused before anything is stored,
+    checked or woken. Then what control rows left for this session is done first, so an outcome that came in
+    meanwhile precedes the message and the same turn answers both. The message wakes a turn unless the owner has taken
+    the chat over (mode `owner`: the owner answers it). In a paused session that turn is the kernel's handoff, with no
+    model call: it runs under the session's turn lock and stops the waiting work from starting more turns, so one
+    handoff answers the message and whatever else was waiting. Neither counts toward the turn limits."""
     state = runtime(request).started()
-    if ctx.state.mode == "ai":
-        await state.limiter.enforce_all([("visitor_turn_conversation", ctx.ids.session_id),
-                                         ("visitor_turn", client_ip(request))], ledger=ctx.ledger())
+    limits = [("visitor_post", ctx.ids.session_id)]
+    if ctx.state.mode == "ai":                    # the turn limits first: when one refuses, it names the wait
+        limits = [("visitor_turn_conversation", ctx.ids.session_id), ("visitor_turn", client_ip(request)), *limits]
+    await state.limiter.enforce_all(limits, ledger=ctx.ledger())
     conn, caller = ctx.conn, ctx.caller
     await conn.commit()
     await state.runner.handle_controls(conn, caller)

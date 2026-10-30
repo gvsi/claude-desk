@@ -1143,6 +1143,37 @@ async def test_message_limit(app, browser, fake, kernel_http, model, engine, clo
     assert (await refused_cleanly(first, first_id, "And now?"))["error"] == "rate_limited"     # no window here
 
 
+@pytest.mark.parametrize("mode", ["paused", "owner"])
+async def test_posts_are_limited_in_every_mode(app, browser, fake, kernel_http, engine, clock, mode):
+    """Whatever the mode, one chat takes 120 messages every ten minutes, a backstop on what each one costs even when it
+    starts no model turn: a stored row and, in a paused chat, a handoff the kernel checks and ledgers. The 121st is 429
+    `rate_limited` before anything is stored, checked or woken, and the limit's first refusal is ledgered with the
+    visitor's own credential."""
+    slug = await new_slug(kernel_http, fake)
+    path = f"/api/public/desks/{slug}/messages"
+    runner = app.state.runtime.runner
+    client, token, opened = await open_session(app, browser, slug)
+    session_id = opened["state"]["session_id"]
+    fake.set_mode(session_id, mode)
+    for n in range(120):
+        assert (await client.post(path, json={"text": f"Anyone there {n}"})).status_code == 202
+    await runner.drain()
+    fake.calls.clear()
+
+    refused = await client.post(path, json={"text": "One too many"})
+    await runner.drain()
+    assert (refused.status_code, refused.json()) == (429, {"error": "rate_limited", "retry_after": 600})
+    assert ("One too many",) not in await rows(engine, session_id, "visitor_text", "text")
+    assert len(await rows(engine, session_id, "visitor_text", "text")) == 120
+    assert fake.called("POST /check_reply") == []
+    assert [(call.headers.get("x-session-token"), call.body["event"]["kind"], call.body["event"]["summary"])
+            for call in fake.called("POST /ledger/append")] == [(token, "rate_limit", {"limit": "visitor_post"})]
+
+    clock.advance(600)                                               # the ten minutes have passed
+    assert (await client.post(path, json={"text": "Ten minutes on"})).status_code == 202
+    await runner.drain()
+
+
 async def test_cancel_held_decision(app, browser, fake, kernel_http, model, engine):
     slug = await new_slug(kernel_http, fake)
     client, token, opened = await open_session(app, browser, slug)

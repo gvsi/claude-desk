@@ -10,10 +10,12 @@ logged without values and tried again at the next refusal; the request is refuse
 
 The money guard is on model turns and the daily model budget, never on page loads: loading or resuming a chat is
 never limited, a new chat counts toward `new_chat`, and a visitor message that starts a model turn counts toward
-`visitor_turn` (per address, by the hour) and `visitor_turn_conversation` (per session, with no window). A limit
-with no window keeps its count for the conversation: hits never leave it one by one, and the count is let go only
-once a day has passed since its last hit (`CONVERSATION_IDLE_S`), by when the kernel has closed the session unless
-other requests kept it open, so the memory it holds stays bounded.
+`visitor_turn` (per address, by the hour) and `visitor_turn_conversation` (per session, with no window). Every visitor
+message, whatever the session's mode, also counts toward `visitor_post` (per session, every ten minutes): a backstop on
+what a message costs when it starts no model turn, a stored row and, in a paused chat, a handoff the kernel checks and
+ledgers. A limit with no window keeps its count for the conversation: hits never leave it one by one, and the count is
+let go only once a day has passed since its last hit (`CONVERSATION_IDLE_S`), by when the kernel has closed the
+session unless other requests kept it open, so the memory it holds stays bounded.
 
 Per-IP limits take the key from `deps.client_ip`, which answers None for a caller exempt from them (a
 loopback peer: the built-in agent, and any loopback peer outside production); every other limit needs a key.
@@ -57,6 +59,7 @@ LIMITS: dict[str, Limit] = {
     "proxy": Limit(60, 600, "ip"),                  # document and payment links
     "a2a_ip": Limit(120, 3600, "ip"),
     "visitor_turn_conversation": Limit(30, None, "session"),   # the same messages, per conversation
+    "visitor_post": Limit(120, 600, "session"),     # any visitor message, in every mode: a backstop on what each costs
     "verify": Limit(10, 600, "session"),
     "demo_agent": Limit(5, 3600, "copy"),
     "setup_turn": Limit(80, 3600, "copy"),
