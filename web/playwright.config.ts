@@ -6,7 +6,12 @@ import { defineConfig, devices } from '@playwright/test';
  *   API once for every tab of the browser, so the public page in a new tab and Today share one copy.
  * - `live` (`npm run e2e:live`): the web app at `DESK_WEB_BASE_URL` on a running kernel and API,
  *   with `DESK_PASSCODE`; skipped with a message while either is unset. It keeps no trace, screenshot
- *   or video, so the passcode it types is never written anywhere.
+ *   or video, any of which would hold the passcode it types. What keeps the passcode out of a failed
+ *   run's errors is how `startCopy` (e2e/helpers.ts) types it; this file only keeps the page snapshot
+ *   out of the error context.
+ * The reporter is `list`, which prints none of Playwright's own steps. Those steps name what was
+ *   typed (`Insert "…"`), and the HTML and blob reporters keep them, so a live run with either would
+ *   write the passcode.
  * Nothing is retried: a failure is reported once.
  */
 const MOCK_PORT = 5373;
@@ -22,10 +27,12 @@ function askedProjects(argv: readonly string[]): string[] {
 const asked = askedProjects(process.argv);
 const runsMock = asked.length === 0 || asked.includes('mock');
 
-// A failure's error context holds an accessibility snapshot of the page, input values included,
-// which while the intro dialog is open would be the passcode. With a real passcode in the
-// environment, Playwright (pinned at 1.64.0) takes no such snapshot. Set here, in every process
-// that loads this config, the workers included.
+// A failed test's error context (error-context.md) holds an accessibility snapshot of the page,
+// input values included, which while the intro dialog is open would be the passcode. With a real
+// passcode in the environment, Playwright (pinned at 1.64.0) leaves that snapshot out. It doesn't
+// cover a failing locator expect that finds nothing, whose error carries its own snapshot of the
+// page into that file whatever this says: `startCopy` runs no expect while the field holds the passcode.
+// Set here, in every process that loads this config, the workers included.
 if (process.env.DESK_PASSCODE) process.env.PLAYWRIGHT_NO_COPY_PROMPT = '1';
 
 export default defineConfig({

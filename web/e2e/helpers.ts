@@ -41,14 +41,28 @@ const TODAY_URL = /\/app\/[^/]+\/today$/;
 /**
  * Makes a fresh copy from `/`: the intro dialog's passcode and "Start the demo", then the Desk from
  * Today's URL and the slug from the "Chat as a customer" link under "Your public page". Nothing is
- * read from a fixed value, since every copy has slugs of its own. A refused passcode fails at once,
- * with the field emptied first, so the passcode is in no page snapshot of the failure.
+ * read from a fixed value, since every copy has slugs of its own. A refused passcode fails at once.
+ *
+ * The passcode is never printed or written, even when this fails:
+ * - The field is checked while it is still empty: it is there, editable and blank.
+ * - The passcode goes in with `keyboard.insertText`, which, unlike `fill`, puts nothing in the
+ *   action's call log, the log a failed action's error carries.
+ * - No expect runs while the field holds the passcode, since a failing expect that finds nothing
+ *   snapshots the whole page, field values included; and nothing acts on the field but emptying
+ *   it, whose failure is dropped, since a call log shows the element it found with its `value`
+ *   attribute, which React keeps equal to what was typed. The field is emptied before the next
+ *   expect, whatever the outcome.
  */
 export async function startCopy(page: Page, passcode: string): Promise<DemoCopy> {
   await page.goto('/');
   const dialog = page.getByRole('dialog', { name: 'A Claude front desk for your business' });
   const field = dialog.getByLabel('Passcode');
-  await field.fill(passcode);
+  await field.waitFor();
+  await expect(field).toBeEditable();
+  await expect(field).toHaveValue('');
+  await field.focus();
+  await page.keyboard.insertText(passcode);
+  // The field holds the passcode from here until it is emptied: no expect, and no action on it.
   await dialog.getByRole('button', { name: 'Start the demo' }).click();
   const refusal = dialog.getByRole('alert');
   const outcome = await Promise.race([
@@ -61,11 +75,10 @@ export async function startCopy(page: Page, passcode: string): Promise<DemoCopy>
       () => 'closed' as const,
     ),
   ]);
-  if (outcome !== 'today') {
-    const line = outcome === 'refused' ? await refusal.textContent() : null;
-    await field.fill('').catch(() => undefined);
-    throw new Error(`The intro dialog didn't start a copy${line === null ? '' : `: ${line}`}`);
-  }
+  const line = outcome === 'refused' ? await refusal.textContent() : null;
+  // Whatever happened, the field is emptied, if it is still there, before anything checks the page.
+  if ((await field.count().catch(() => 0)) > 0) await field.clear({ timeout: 5_000 }).catch(() => undefined);
+  if (outcome !== 'today') throw new Error(`The intro dialog didn't start a copy${line === null ? '' : `: ${line}`}`);
   await expect(dialog).toHaveCount(0);
 
   const deskId = decodeURIComponent(new URL(page.url()).pathname.split('/')[2] ?? '');
