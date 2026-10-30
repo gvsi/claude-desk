@@ -7,8 +7,10 @@ counts for none. The three marker sets are disjoint and leave out the words the 
 on ("tu", "te", "ti", "lo", "del", "al", "está", "claro"), which Spanish keeps although French,
 Portuguese or Italian write them too: frequent words of those languages that neither English nor
 Spanish writes ("à", "quand", "já", "vou", "certo", "subito") outweigh them there, and a tie
-with English or Spanish goes to the other language. "para" and "por" count for none, since
-Portuguese writes them as often as Spanish does.
+with Spanish goes to the other language. A word English or Spanish writes on its own ("pour",
+"et cetera", "EU", "das", "sur") marks no other language, and another language must outnumber
+English's markers, since English writes some of them as prefixes ("non-toxic"). "para" and
+"por" count for none, since Portuguese writes them as often as Spanish does.
 
 Prose in any language but English or Spanish hands off to the owner (`unsupported_language`), so
 a misreading in that direction costs a handoff, never an unchecked reply: both lexicons run on
@@ -35,6 +37,7 @@ EN_MARKERS = frozenset("""
     i you she it we they my your his her its our their him us them
     not if just only also any some all more very please thanks thank hello hi yes sure
     help need want like know get let see look call
+    down up out off then now until after before than too
 """.split())
 
 ES_MARKERS = frozenset("""
@@ -44,12 +47,13 @@ ES_MARKERS = frozenset("""
     está estás tu te ti lo ya del al claro listo perfecto enseguida quedó
 """.split())
 
-# French, Portuguese, Italian and German words that are neither English nor Spanish markers
+# French, Portuguese, Italian and German words that English and Spanish don't write on their own:
+# the homographs ("pour", "et", "est", "eu", "sim"; "das", "des", "une", "sur", "pela", "pode",
+# "che") are left out
 OTHER_MARKERS = frozenset("""
-    je vous nous il elle est sont avec pour dans pas une des du ce mais ça peux suis avez oui merci bonjour
-    votre très voudrais aider et qui sur você não com uma isso obrigado obrigada pode posso ajudar muito eu
-    sim pela che sono non questo grazie anche molto ciao ich und nicht das ist mit ein bitte danke kann für
-    sie wir ihnen gerne
+    je vous nous il elle sont avec dans pas du ce mais ça peux suis avez oui merci bonjour votre très
+    voudrais aider qui você não com uma isso obrigado obrigada posso ajudar muito sono non questo grazie
+    anche molto ciao ich und nicht ist mit ein bitte danke kann für sie wir ihnen gerne
     à au toi moi tout quand demain já vou estou tudo depois assim bem certo perfeito
     ci gli più bene tutto perfetto subito dopo
 """.split())
@@ -61,10 +65,10 @@ WORD = re.compile(r"[^\W\d_]+")
 
 
 def detect(text: str) -> Detected:
-    """`en` or `es` when that language's markers lead; `other` for another script, at least as
-    many markers of another language as of each of them, or four or more words with no marker of
-    any language; `none` for no words, a tie between English and Spanish, or a few unmarked words
-    ("OK")."""
+    """`en` or `es` when that language's markers lead; `other` for another script, more markers
+    of another language than of English and at least as many as of Spanish, or four or more words
+    with no marker of any language; `none` for no words, a tie between English and Spanish, or a
+    few unmarked words ("OK")."""
     lowered = unicodedata.normalize("NFKC", text).lower()
     words = WORD.findall(lowered)
     if not words:
@@ -78,7 +82,7 @@ def detect(text: str) -> Detected:
     if any(mark in lowered for mark in SPANISH_MARKS):
         es += SPANISH_MARK_BONUS
     other = sum(word in OTHER_MARKERS for word in words)
-    if other and other >= en and other >= es:
+    if other > en and other >= es:
         return "other"
     if en == es == 0:
         return "other" if len(words) >= MIN_UNMARKED_WORDS else "none"

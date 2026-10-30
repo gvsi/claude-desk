@@ -624,6 +624,69 @@ def test_other_languages_outweigh_the_words_spanish_shares(prose):
 
 
 @pytest.mark.parametrize("prose", [
+    "Don't pour grease down the drain.",
+    "Don't pour it.",
+    "We fix sinks, tubs, et cetera.",
+    "It's non-toxic.",                              # "non" stays an Italian marker
+])
+async def test_a_tie_with_english_reads_as_english(app, client, prose):
+    # another language must outnumber English's markers to hand off, so one word it shares with
+    # English can't outvote one English word on a first reply; a tie with Spanish still hands off
+    copy, visitor = await visitor_of(app, client)
+    assert lang.detect(prose) == "en"
+    verdict = await checked(client, visitor, prose)
+    assert (verdict.ok, verdict.language, verdict.blocks) == (True, "en", [RenderedBlock(kind="prose", text=prose)])
+    assert (await session_of(app, copy, visitor)).last_language == "en"
+
+
+@pytest.mark.parametrize(("prose", "language"), [
+    ("Nos das un momento?", "es"),                  # Spanish writes "das" (dar) and "des"
+    ("No me des tu número.", "es"),
+    ("Cubrimos la zona sur.", "es"),                # "sur" (south)
+    ("Une los tubos.", "es"),                       # "une" (unir)
+    ("Pela el cable.", "es"),                       # "pela" (pelar)
+    ("Pode las ramas secas.", "es"),                # "pode" (podar)
+    ("Che, te aviso.", "es"),                       # "che", as Argentina and Uruguay write it
+    ("Pour it, et cetera.", "en"),                  # English writes "pour" and "et cetera"
+    ("Swap the EU SIM.", "en"),                     # "EU" and "SIM"
+    ("Times are EST, et cetera.", "en"),            # "EST"
+])
+async def test_words_english_or_spanish_write_mark_no_other_language(app, client, prose, language):
+    # no other-language marker is a word English or Spanish writes, so these, where it would tie
+    # with Spanish or outnumber English, read as their own language on a first reply
+    copy, visitor = await visitor_of(app, client)
+    assert lang.detect(prose) == language
+    verdict = await checked(client, visitor, prose)
+    assert (verdict.ok, verdict.language, verdict.blocks) == (True, language,
+                                                              [RenderedBlock(kind="prose", text=prose)])
+    assert (await session_of(app, copy, visitor)).last_language == language
+
+
+@pytest.mark.parametrize("prose", [
+    "Avoid pouring grease down drains.",
+    "Clean up spills quickly.",
+    "Clear out drains regularly.",
+    "Turn everything off quickly.",
+    "Rinse, then dry thoroughly.",
+    "Everything looks fine now.",
+    "Wait until Maria arrives.",
+    "Rinse pipes after cleaning.",
+    "Shut valves before leaving.",
+    "Faster than expected, honestly.",
+    "Maria checks heaters too.",
+])
+async def test_frequent_english_words_keep_plumbing_english_english(app, client, prose):
+    # four or more words with no marker of any language hand off; one frequent English word
+    # neither other list holds ("down", "up", "out", "off", "then", "now", "until", "after",
+    # "before", "than", "too") makes these English, on a first reply too
+    copy, visitor = await visitor_of(app, client)
+    assert lang.detect(prose) == "en"
+    verdict = await checked(client, visitor, prose)
+    assert (verdict.ok, verdict.language, verdict.blocks) == (True, "en", [RenderedBlock(kind="prose", text=prose)])
+    assert (await session_of(app, copy, visitor)).last_language == "en"
+
+
+@pytest.mark.parametrize("prose", [
     "Entendido, revisamos ambos grifos.",           # Spanish in words no list holds hands off too
     "Por favor, me diga o endereço.",               # Portuguese with no Portuguese marker
     "O técnico chega às dez, combinado?",           # a time in words neither lexicon reads
