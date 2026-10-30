@@ -494,6 +494,27 @@ async def test_a_changed_contact_closes_the_sessions_verified_as_them(app, clien
     assert (await get_context(client, again.session_id, again.headers)).status_code == 200
 
 
+async def test_one_write_closes_sessions_for_a_removal_and_a_new_contact(app, client):
+    """One people write that removes Bob and gives Dana another contact closes the sessions
+    verified as each, ledgered in session-ID order, each with its own reason, then the write."""
+    copy = await rivera(app, client)
+    dana, bob = await open_visitor(client, copy), await open_visitor(client, copy)
+    await verified_as(client, dana, "dana@example.com")
+    await verified_as(client, bob, "bob@example.com")
+    before = len(await entries_of(app, copy))
+
+    await updated(client, copy, "people", {"upsert": [{"ref": "dana", "display_name": "Dana Whitfield",
+                                                       "contact": "dana.w@example.net"}], "remove": ["bob"]})
+    reasons = {dana.session_id: "contact_changed", bob.session_id: "person_removed"}
+    assert [(e.event.kind, e.event.session_id, e.event.summary) for e in (await entries_of(app, copy))[before:]] == [
+        *(("session", session_id, {"session_id": session_id, "closed": True, "reason": reasons[session_id]})
+          for session_id in sorted(reasons)),
+        ("desk_data", None, {"part": "people", "refs": ["bob", "dana"]})]
+    for visitor in (dana, bob):
+        response = await get_context(client, visitor.session_id, visitor.headers)
+        assert (response.status_code, response.json()) == (409, {"code": "closed"})
+
+
 async def answered(client: httpx.AsyncClient, copy: Rivera, decision_id: str, answer: str) -> ApprovalResult:
     response = await client.post(f"/approvals/{decision_id}/answer", headers=copy.owner, json={"answer": answer})
     assert response.status_code == 200, response.text
