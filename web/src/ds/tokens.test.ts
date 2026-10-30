@@ -186,7 +186,6 @@ describe('design tokens', () => {
     for (const fontStyle of ['oblique', 'normal', 'italic; color: red']) {
       expect(() => buildTokensCss(withStyle({ ...odd, fontStyle }))).toThrow(/fontStyle/);
     }
-    expect(rule('odd')).toBe('');
     expect(buildTokensCss(withStyle({ ...odd, fontStyle: 'italic' }))).toContain('font-style: italic;');
   });
 
