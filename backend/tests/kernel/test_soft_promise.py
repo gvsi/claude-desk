@@ -91,6 +91,22 @@ async def test_denying_being_an_ai_is_blocked(app, client, reviewer, prose, lang
                                                                                     ["soft.denies_ai"])
 
 
+async def test_both_flags_block_with_both_rules(app, client, reviewer):
+    copy, visitor = await visitor_of(app, client)
+    reviewer.soft_answer = SoftPromiseVerdict(promises_beyond_cards=True, denies_being_ai=True)
+    prose = "I'm Maria's cousin at the shop, and I'll make sure it gets sorted for you."
+    verdict = await checked(client, visitor, prose)
+
+    # one violation per flag, the promise first, so the ledger and the regenerate hint keep both reasons
+    assert [(v.kind, v.rule_id, v.span) for v in verdict.violations] == [
+        ("soft_promise", "soft.promise", prose[:40]), ("soft_promise", "soft.denies_ai", prose[:40])]
+    assert_handed_off(verdict)
+    assert reviewer.soft_inputs == [SoftPromiseInput(language="en", prose=prose, cards=[])]
+    [entry] = await reply_entries(app, copy)
+    assert (entry.event.summary["violations"], entry.event.summary["rule_ids"]) == (
+        ["soft_promise", "soft_promise"], ["soft.promise", "soft.denies_ai"])
+
+
 MARKER = "sink-7731"   # in every failing reply: a failure is logged by kind, never with what came back
 REQUEST = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
 FAILURES = {   # each reply, and the status the ledger records for it
@@ -135,6 +151,21 @@ async def test_soft_promise_is_skipped_when_prose_already_fails(app, client, rev
     copy, visitor = await visitor_of(app, client)
     verdict = await checked(client, visitor, "That will be $89.")
     assert {v.kind for v in verdict.violations} == {"number_in_prose"}
+    assert_handed_off(verdict)
+    assert reviewer.soft_inputs == []                                     # no call: the reply is already handed off
+    [entry] = await reply_entries(app, copy)
+    assert entry.event.summary["soft_promise"] is None
+
+
+@pytest.mark.parametrize(("prose", "clauses", "kind"), [
+    ("Here is your quote.", [clause("quote", "quote:q-none")], "unknown_fact"),       # a clause names no fact
+    ("Je peux envoyer un plombier pour la fuite.", [], "unsupported_language"),       # French
+], ids=["clause_fails", "french"])
+async def test_soft_promise_is_skipped_when_a_clause_or_the_language_fails(app, client, reviewer, prose, clauses,
+                                                                           kind):
+    copy, visitor = await visitor_of(app, client)
+    verdict = await checked(client, visitor, prose, clauses)
+    assert {v.kind for v in verdict.violations} == {kind}
     assert_handed_off(verdict)
     assert reviewer.soft_inputs == []                                     # no call: the reply is already handed off
     [entry] = await reply_entries(app, copy)
