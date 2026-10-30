@@ -310,9 +310,14 @@
   padding: 0 var(--space-8);
 }
 
-.board-conversations__caption,
-.board-conversations__day > p {
+.board-conversations__caption {
   margin-top: var(--space-6);
+}
+
+/* Today's label 8 px under the title, its conversations 16 px under the label, as the Run 1
+   conversation boards draw them. */
+.board-conversations__day > p {
+  margin-top: var(--space-8);
 }
 
 .board-conversations__items {
@@ -321,6 +326,10 @@
   margin: var(--space-20) 0 0;
   padding: 0;
   list-style: none;
+}
+
+.board-conversations__day > .board-conversations__items {
+  margin-top: var(--space-16);
 }
 
 .board-conversations__open {
