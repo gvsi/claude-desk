@@ -37,6 +37,7 @@ import desk_kernel
 
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, MONEY_TOOLS, RuleCard, ToolProfile
 from desk.kernel_service import review_thresholds
+from desk.money_cap import auto_money, moves_money  # noqa: F401  (compiler.moves_money stays importable)
 
 CEDAR_DIR = Path(__file__).resolve().parents[3] / "kernel" / "cedar"
 
@@ -244,16 +245,11 @@ def with_defaults(cards: Iterable[RuleCard], profiles: Iterable[ToolProfile]) ->
 ABOVE_MONEY_CAP = "above_money_cap"
 
 
-def moves_money(card: RuleCard) -> bool:
-    """Does the card take or pay out money: a money tool, or the `charge` or `pay_out` effect
-    (the rule `RuleCard` holds an auto money card's amount to)."""
-    return card.applies_to in MONEY_TOOLS or card.applies_to in ("effect:charge", "effect:pay_out")
-
-
 def above_money_cap(cards: Iterable[RuleCard], auto_money_cap_cents: int) -> list[RuleCard]:
-    """The auto money cards that would allow more than the money cap (`capped`) without asking."""
+    """The auto money cards (`desk.money_cap.auto_money`, the predicate `lower_to_cap` reads too)
+    that would allow more than the money cap (`capped`) without asking."""
     cap = capped(auto_money_cap_cents)
-    return [card for card in cards if card.mode == "auto" and moves_money(card)
+    return [card for card in cards if auto_money(card)
             and (card.max_amount_cents is None or card.max_amount_cents > cap)]
 
 

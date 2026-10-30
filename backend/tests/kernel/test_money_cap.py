@@ -25,6 +25,7 @@ import pytest
 from fastapi import FastAPI
 from sqlalchemy import select
 
+from desk import money_cap
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, Decision, HoursWindow, RuleCard
 from desk.contracts import PolicyVersion as PolicyVersionContract
 from desk.db.models import Desk, Person, PolicyVersion
@@ -400,6 +401,23 @@ def test_lower_to_cap_touches_only_carried_money_cards():
     for cap in (-1, 1_000_001, True, 500.0):
         with pytest.raises(ValueError):
             lower_to_cap(active, active, cap)
+
+
+def test_one_predicate_says_which_cards_the_cap_bounds():
+    # the compiler holds cards to the money cap with desk.money_cap's own predicate, never a copy of it
+    assert compiler.auto_money is money_cap.auto_money
+    assert compiler.moves_money is money_cap.moves_money
+    # so the draft check and the lowering agree on every card: a carried card comes down exactly
+    # when the check would refuse it
+    asks = RuleCard(card_id="ask-links", applies_to="native.payment_link", mode="ask", who="anyone",
+                    reason="Payment links ask.")
+    refunds = RuleCard(card_id="refunds", applies_to="payments.create_refund", mode="auto", who="record_owner",
+                       max_amount_cents=30_000, reason="Refunds to the customer who paid.")
+    quotes = RuleCard(card_id="quotes", applies_to="native.quote", mode="auto", who="anyone", max_amount_cents=90_000,
+                      reason="Quotes from the price list.")
+    for card in (charge_card("links", 30_000), charge_card("small", 5_000), asks, refunds, quotes):
+        lowered = lower_to_cap([card], [card], 10_000) != [card]
+        assert lowered == bool(compiler.above_money_cap([card], 10_000)), card.card_id
 
 
 @pytest.mark.solver

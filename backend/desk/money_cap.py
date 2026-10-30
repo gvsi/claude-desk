@@ -8,6 +8,9 @@ is consistent on its own. The money-limit route of the API's owner tools (Plan 0
 cap from the active cards through `lower_to_cap`; every other draft is at the active version's cap,
 which its carried cards already fit.
 
+Which cards the cap bounds is decided here alone (`auto_money`), and the kernel's compiler holds
+cards to the cap with this same predicate, so the draft check and the lowering can't drift apart.
+
 Both processes may import this module, so it imports nothing but `desk.contracts`, like
 `desk.presets`.
 """
@@ -19,8 +22,15 @@ from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, MONEY_TOOLS, RuleCard
 _MONEY_EFFECTS = ("effect:charge", "effect:pay_out")
 
 
-def _auto_money(card: RuleCard) -> bool:
-    return card.mode == "auto" and (card.applies_to in MONEY_TOOLS or card.applies_to in _MONEY_EFFECTS)
+def moves_money(card: RuleCard) -> bool:
+    """Does the card take or pay out money: a money tool, or the `charge` or `pay_out` effect
+    (the rule `RuleCard` holds an auto money card's amount to)."""
+    return card.applies_to in MONEY_TOOLS or card.applies_to in _MONEY_EFFECTS
+
+
+def auto_money(card: RuleCard) -> bool:
+    """Is the card one the money cap bounds: an auto card that takes or pays out money."""
+    return card.mode == "auto" and moves_money(card)
 
 
 def lower_to_cap(cards: Iterable[RuleCard], active: Iterable[RuleCard], cap: int) -> list[RuleCard]:
@@ -39,7 +49,7 @@ def lower_to_cap(cards: Iterable[RuleCard], active: Iterable[RuleCard], cap: int
     lowered: list[RuleCard] = []
     for card in cards:
         above = card.max_amount_cents is None or card.max_amount_cents > cap
-        if card.card_id not in carried or not _auto_money(card) or not above:
+        if card.card_id not in carried or not auto_money(card) or not above:
             lowered.append(card)
         elif cap == 0:
             lowered.append(RuleCard.model_validate({**card.model_dump(), "mode": "ask", "max_amount_cents": None,
