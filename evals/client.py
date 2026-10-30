@@ -11,26 +11,43 @@ HTTP, which is how the evals reach an in-process API on loopback. So on `http://
 it on the paths it matches, to that origin only, as a browser does for a secure context; on any
 other origin (an `https` deployment) it uses httpx's own jar. Cookies, tokens and codes never
 appear in what the client raises.
+
+For tier 2 the client also plays the simulated owner (answers, whispers, Desk data, the Answering
+switch, a simulated tool change) and a visiting agent: `agent_demo` takes a key for the open chat's
+Desk, and `a2a_send` signs each A2A request with it, as the agent itself would. A proving route's 202
+(`ProvingPending`) is re-sent until it answers.
 """
 
+import asyncio
+import hashlib
 import json
 import re
+import secrets
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from http.cookiejar import CookieJar, DefaultCookiePolicy
 from typing import Any
 
 import httpx
+import rfc8785
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from httpx_sse import aconnect_sse
 
+from desk.contracts import A2ARequest, DemoAgentIssued, Mandate
 from evals.routes import ROUTES
 
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 DEFAULT_PORTS = {"http": 80, "https": 443}
 TIMEOUT_S = 30.0
 _DOCUMENT_LINK = re.compile(r"/api/d/[^/?#\s]+")
+# A payment link card's href: the checkout page's path, `/pay/<token>` (the web app's), or the API's own.
+_PAYMENT_LINK = re.compile(r"(?:/api)?/pay/([^/?#\s]+)")
+# A proving route answers 202 `ProvingPending{retry: {path, body}}` once its kernel call passes 25 s; the
+# owner app re-sends `retry` every 3 s ("How proofs run"), and so does the client, for at most two minutes.
+PROVING_RETRY_S, PROVING_LIMIT_S = 3.0, 120.0
 
 
 class ApiCallFailed(AssertionError):
@@ -143,6 +160,10 @@ class LoopbackJar:
         now = time.time()
         return [key for key, (_, expiry) in self._cookies.items() if expiry is None or expiry > now]
 
+    def values(self) -> set[str]:
+        """Every cookie value kept, live or not: only for a writer to redact."""
+        return {value for value, _ in self._cookies.values()}
+
 
 def _no_jar() -> CookieJar:
     """A jar for httpx that refuses every cookie, so a loopback cookie is kept and sent only by
@@ -165,10 +186,14 @@ class DeskClient:
     chat at a time (`open_chat`), or both. `http` is the underlying `httpx.AsyncClient`."""
 
     def __init__(self, base_url: str, passcode: str, *, transport: httpx.AsyncBaseTransport | None = None,
-                 timeout_s: float = TIMEOUT_S):
+                 timeout_s: float = TIMEOUT_S, now: Callable[[], datetime] | None = None):
         self.base_url, self.passcode, self._timeout_s = base_url.rstrip("/"), passcode, timeout_s
         self.desk_slug: str | None = None    # the open chat's Desk
         self.session_id: str | None = None   # the open chat's session
+        self.agent_session_id: str | None = None   # the agent's A2A session, once the Desk opened one
+        self.last_a2a_nonce: str | None = None     # the nonce of the last A2A request sent, which names its turn
+        self._now = now or (lambda: datetime.now(UTC))   # an agent signs `ts` on the Desk's clock
+        self._agent: DemoAgentIssued | None = None
         url = httpx.URL(self.base_url)
         loopback = url.scheme == "http" and url.host in LOOPBACK_HOSTS
         self._jar = LoopbackJar(origin_of(url)) if loopback else None
@@ -192,6 +217,18 @@ class DeskClient:
         if self._jar is not None:
             return self._jar.held()
         return [(cookie.name, cookie.path) for cookie in self.http.cookies.jar]
+
+    def held_secrets(self) -> set[str]:
+        """Every secret value the client holds (cookie values, the agent's key, the passcode), for a
+        writer to redact from what it keeps. Never logged or shown."""
+        values = {self.passcode}
+        if self._jar is not None:
+            values |= self._jar.values()
+        else:
+            values |= {cookie.value for cookie in self.http.cookies.jar if cookie.value}
+        if self._agent is not None:
+            values.add(self._agent.agent_private_key_hex)
+        return {value for value in values if value}
 
     async def _send_cookies(self, request: httpx.Request) -> None:
         assert self._jar is not None
@@ -315,6 +352,96 @@ class DeskClient:
         if generation is None:
             generation = (await self.owner_session(session_id))["state"]["generation"]
         return await self._ok("owner_take_over", params={"session_id": session_id}, json={"generation": generation})
+
+    # Plan 05b: the simulated owner and a visiting agent in a tier 2 run
+
+    async def owner_answer(self, decision_id: str, answer: str) -> Any:
+        """The owner's answer to a held request (`ApprovalAnswerOut`)."""
+        return await self._ok("owner_answer", params={"decision_id": decision_id}, json={"answer": answer})
+
+    async def owner_demo_inbox(self) -> Any:
+        """The owner's Demo inbox, every entry of the copy, codes included."""
+        return await self._ok("owner_demo_inbox")
+
+    async def owner_set_answering(self, desk_id: str, on: bool) -> Any:
+        return await self._ok("owner_set_answering", params={"desk_id": desk_id}, json={"on": on})
+
+    async def owner_whisper(self, session_id: str, text: str) -> Any:
+        """A whisper to Claude in the conversation (`OwnerMessageResult`); the visitor never sees it."""
+        return await self._owner_write("owner_whisper", params={"session_id": session_id},
+                                       json={"text": text, "kind": "whisper"})
+
+    async def owner_add_document(self, desk_id: str, document: dict[str, Any]) -> Any:
+        """A document the owner uploads (`SeedDocument`'s fields); the kernel adds its canary."""
+        return await self._owner_write("owner_add_document", params={"desk_id": desk_id}, json={"document": document})
+
+    async def owner_add_knowledge(self, desk_id: str, item: dict[str, Any]) -> Any:
+        """A knowledge item the owner adds (`KnowledgeItem`'s fields): untrusted text, never policy."""
+        return await self._owner_write("owner_add_knowledge", params={"desk_id": desk_id}, json={"item": item})
+
+    async def owner_simulate_tool_change(self, desk_id: str, tool: str) -> Any:
+        """The demo's changed tool definition: the tool is off until the owner reviews it (`ToolProfile`)."""
+        return await self._owner_write("owner_simulate_tool_change", params={"desk_id": desk_id}, json={"tool": tool})
+
+    async def complete_payment_link(self, href: str) -> Any:
+        """The mock checkout of a payment link card's `href` (`PaymentLinkStateResult`), as its payer."""
+        match = _PAYMENT_LINK.fullmatch(href) if isinstance(href, str) else None
+        if match is None:
+            raise ValueError("complete_payment_link takes a payment link card's href, /pay/<token>")
+        return await self._ok("complete_payment_link", params={"token": match.group(1)}, json={})
+
+    async def agent_demo(self) -> DemoAgentIssued:
+        """A demo agent's key and signed mandate for the open chat's Desk, issued once; the client keeps
+        them, so `a2a_send` signs as that agent."""
+        self._agent = DemoAgentIssued.model_validate(await self._ok("agent_demo", params=self._chat()))
+        return self._agent
+
+    async def a2a_send(self, text: str, *, mandate: Mandate | None = None, verify_code: str | None = None) -> Any:
+        """One A2A turn as the agent `agent_demo` issued: the first opens the session (with `mandate`, if
+        given), later ones name it. Signed over the exact body sent, with a fresh nonce and `ts` on the
+        Desk's clock. Returns the `A2AResponse` as received, unvalidated, so an answer missing a field
+        (its disclosure, say) reaches whoever judges it; a non-2xx answer raises `ApiCallFailed`."""
+        if self._agent is None or self.desk_slug is None:
+            raise RuntimeError("no agent: open_chat(desk_slug), then agent_demo(), first")
+        request = A2ARequest(desk_slug=self.desk_slug, session_id=self.agent_session_id, message=text,
+                             mandate=mandate, verify_code=verify_code)
+        body = request.model_dump_json().encode()
+        headers = self._agent_headers(body)
+        self.last_a2a_nonce = headers["X-Agent-Nonce"]   # the API stores the turn's answer under it (`app.a2a_turns`)
+        answer = await self._ok("a2a", params={"desk_slug": self.desk_slug}, content=body,
+                                headers={**headers, "Content-Type": "application/json"})
+        if isinstance(answer, dict) and isinstance(answer.get("session_id"), str):
+            self.agent_session_id = answer["session_id"]
+        return answer
+
+    def _agent_headers(self, body: bytes) -> dict[str, str]:
+        """`AgentAuth` for `body`: Ed25519 over the canonical JSON of the slug, `ts`, nonce and body hash."""
+        assert self._agent is not None and self.desk_slug is not None
+        ts = self._now().astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        nonce = secrets.token_urlsafe(16)
+        signed = rfc8785.dumps({"desk_slug": self.desk_slug, "ts": ts, "nonce": nonce,
+                                "body_sha256": hashlib.sha256(body).hexdigest()})
+        key = Ed25519PrivateKey.from_private_bytes(bytes.fromhex(self._agent.agent_private_key_hex))
+        return {"X-Agent-Key-Id": self._agent.agent_key_id, "X-Agent-Ts": ts, "X-Agent-Nonce": nonce,
+                "X-Agent-Sig": key.sign(signed).hex()}
+
+    async def _owner_write(self, op: str, **kwargs: Any) -> Any:
+        """An owner write that may prove: a 202 `ProvingPending` is re-sent as its `retry` says (an owner
+        path only), every 3 s, until the route answers otherwise; past two minutes it raises
+        `ApiCallFailed` with the 202."""
+        deadline = time.monotonic() + PROVING_LIMIT_S
+        response = await self.request(op, **kwargs)
+        while response.status_code == 202:
+            pending = _body(response)
+            retry = pending.get("retry") if isinstance(pending, dict) else None
+            path = retry.get("path") if isinstance(retry, dict) else None
+            if not isinstance(path, str) or not path.startswith("/api/owner/") or time.monotonic() > deadline:
+                raise ApiCallFailed(op, 202, pending)
+            await asyncio.sleep(PROVING_RETRY_S)
+            response = await self.http.request(ROUTES[op].method, path, json=retry.get("body"))
+        if not 200 <= response.status_code < 300:
+            raise ApiCallFailed(op, response.status_code, _body(response))
+        return _body(response) if response.content else None
 
 
 __all__ = ["ApiCallFailed", "DeskClient", "LoopbackJar", "StreamEvent", "path_matches"]

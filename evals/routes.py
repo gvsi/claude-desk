@@ -4,7 +4,8 @@ Each entry names the `landed.toml` id whose PR lands it: `02a` for the public ch
 reads and the health check (Plan 02a's Task 9 adds `02a`), `02` for verification, the Demo inbox,
 document links, A2A and take-over (Plan 02b's Task 12 adds `02`). Tier 1 checks every landed entry
 against the API's OpenAPI document, so a renamed path fails a case instead of turning into a 404
-the case reads as "nothing there". Plan 05b adds the owner and agent operations tier 2 needs.
+the case reads as "nothing there". Plan 05b adds the owner and agent operations tier 2 needs: the
+owner's answer, Demo inbox and Answering switch with Plan 02a, the rest with Plan 02b.
 """
 
 import re
@@ -58,6 +59,17 @@ ROUTES: dict[str, ApiRoute] = {
     "fetch_document": ApiRoute("GET", "/api/d/{token}", "02"),             # a document_link card's href
     "a2a": ApiRoute("POST", "/api/a2a/{desk_slug}", "02"),                 # A2ARequest, signed -> A2AResponse
     "owner_take_over": ApiRoute("POST", f"{_OWNER}/conversations/{{session_id}}/takeover", "02"),  # {generation}
+    # Plan 05b: what a tier 2 run's simulated owner and visiting agent do. Plan 02a's Tasks 8 and 9
+    "owner_answer": ApiRoute("POST", f"{_OWNER}/approvals/{{decision_id}}/answer", "02a"),   # {answer}
+    "owner_demo_inbox": ApiRoute("GET", f"{_OWNER}/demo_inbox", "02a"),                       # -> [DemoInboxEntry]
+    "owner_set_answering": ApiRoute("PUT", f"{_OWNER}/desks/{{desk_id}}/answering", "02a"),   # {on} -> DeskUpdated
+    # and Plan 02b's Tasks 1, 3, 4, 5 and 9
+    "owner_whisper": ApiRoute("POST", f"{_OWNER}/conversations/{{session_id}}/messages", "02"),   # {text, kind}
+    "owner_add_document": ApiRoute("POST", f"{_OWNER}/desks/{{desk_id}}/documents", "02"),       # {document}
+    "owner_add_knowledge": ApiRoute("POST", f"{_OWNER}/desks/{{desk_id}}/knowledge", "02"),      # {item}
+    "owner_simulate_tool_change": ApiRoute("POST", f"{_OWNER}/desks/{{desk_id}}/tools/simulate_change", "02"),  # {tool}
+    "complete_payment_link": ApiRoute("POST", "/api/pay/{token}/complete", "02"),             # {} -> link state
+    "agent_demo": ApiRoute("POST", f"{_CHAT}/agents/key", "02"),                              # -> DemoAgentIssued, once
 }
 
 __all__ = ["ROUTES", "ApiRoute"]
