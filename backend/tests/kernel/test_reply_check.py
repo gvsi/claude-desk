@@ -655,6 +655,7 @@ async def test_a_tie_with_english_reads_as_english(app, client, prose):
     "On vient à dix heures.",                       # French writes "on": a time in its own words
     "On passe demain.",
     "On fait ça pour trente.",                      # a price in its own words
+    "Le but est de venir demain.",                  # and "but" ("goal")
     "Ich komme am Montag.",                         # German writes "am", "in", "an", "was", "will", "also"
     "Ich bin in zehn Minuten da.",
     "Wir sind am Montag da.",
@@ -662,14 +663,17 @@ async def test_a_tie_with_english_reads_as_english(app, client, prose):
     "Was machen wir morgen?",
     "Ich rufe an.",
     "Also, ich komme um zehn.",
+    "Wir kommen morgen her.",                       # and "her" (hither)
     "I tecnici arrivano subito.",                   # Italian writes "i" and "in"
     "Arrivo in un'ora, grazie.",
+    "Il tecnico arriva all'una.",                   # and "all", as "all'" ("at one o'clock")
+    "Se for urgente, vou às dez.",                  # Portuguese writes "for" ("se for", "if it is")
 ])
 async def test_english_markers_another_language_writes_dont_outvote_it(app, client, prose):
-    # "on", "in", "an", "am", "was", "will", "i" and "also" are English markers that French, German
-    # or Italian write as their own, so they don't count against that language: one of its own
-    # markers still hands off on a first reply, and a time, a day or a price in its words never
-    # rests on the model check alone
+    # "on", "in", "an", "am", "was", "will", "i", "also", "her", "all", "for" and "but" are English
+    # markers that French, German, Italian or Portuguese write as their own, so they don't count
+    # against that language: one of its own markers still hands off on a first reply, and a time, a
+    # day or a price in its words never rests on the model check alone
     copy, visitor = await visitor_of(app, client)
     assert lang.detect(prose) == "other"
     verdict = await checked(client, visitor, prose)

@@ -10,9 +10,10 @@ Spanish writes ("à", "quand", "já", "vou", "certo", "subito") outweigh them th
 with Spanish goes to the other language. Most words English or Spanish writes on its own ("pour",
 "et cetera", "EU", "das", "sur") mark no other language; a few loanwords, abbreviations and
 prefixes stay ("non", "ciao", "merci", "tout", "com", "il"), so another language must outnumber
-English's markers ("It's non-toxic.", "Sure, ciao!"). English markers that French, German or
-Italian write as their own ("on", "in", "an", "am", "was", "will", "i", "also") don't count
-against that language, so "On passe demain." and "Ich komme am Montag." hand off. "para" and
+English's markers ("It's non-toxic.", "Sure, ciao!"). English markers that French, German,
+Italian or Portuguese write as their own ("on", "in", "an", "am", "was", "will", "i", "also",
+"her", "all", "for", "but") don't count against that language, so "On passe demain.", "Ich komme
+am Montag.", "Il tecnico arriva all'una." and "Se for urgente, vou às dez." hand off. "para" and
 "por" count for none, since Portuguese writes them as often as Spanish does.
 
 Prose in any language but English or Spanish hands off to the owner (`unsupported_language`), so
@@ -62,10 +63,12 @@ OTHER_MARKERS = frozenset("""
     ci gli più bene tutto perfetto subito dopo
 """.split())
 
-# English markers that French ("on", "an"), German ("in", "an", "am", "was", "will", "also") or
-# Italian ("i", "in") write as their own frequent words: they still count for English, but not
-# against another language's markers
-EN_SHARED = frozenset("on in an am was will i also".split())
+# English markers that French ("on", "an", "but"), German ("in", "an", "am", "was", "will",
+# "also", "her"), Italian ("i", "in", and "all", which "all'" splits off) or Portuguese ("for")
+# write as their own words: they still count for English, but not against another language's
+# markers. Portuguese "to" for "tô" isn't one: the standard spelling has the accent, and English
+# writes "to" far more often
+EN_SHARED = frozenset("on in an am was will i also her all for but".split())
 
 if EN_MARKERS & ES_MARKERS or (EN_MARKERS | ES_MARKERS) & OTHER_MARKERS:
     raise RuntimeError("the language marker sets are disjoint")
