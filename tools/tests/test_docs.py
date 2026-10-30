@@ -1,8 +1,12 @@
 """The docs check (`python -m desk_tools.check_docs`, `make docs-check`) and the shipped docs it guards:
-the README, the threat model and the architecture decisions."""
+the README, the threat model, the architecture decisions, and the product proposal and capability prediction
+that the About this prototype pages show."""
 
+import os
 import re
+import subprocess
 from pathlib import Path
+from xml.etree import ElementTree
 
 import pytest
 
@@ -24,6 +28,12 @@ REQUIRED_DISCLOSURES = {
     "a buggy API process": (THREAT_MODEL,),
     "out of the attacker's reach": (THREAT_MODEL,),
 }
+# The two documents the About this prototype pages show, as Task 1 of the About readers plan
+# (docs/plans/2026-10-29-07-about-readers.md) defines them, each with its figure markers in order.
+ABOUT_DOCS = {
+    "docs/product-proposal.md": ("architecture",),
+    "docs/capability-prediction.md": ("tau3", "readiness"),
+}
 SHIPPED_DOCS = (
     README,
     THREAT_MODEL,
@@ -32,6 +42,7 @@ SHIPPED_DOCS = (
     "docs/deploy.md",
     "docs/ci.md",
     "docs/evals.md",
+    *ABOUT_DOCS,
 )
 
 
@@ -48,11 +59,13 @@ def disclosures_for(path: str) -> str:
 
 
 def passing_tree(root: Path) -> Path:
-    """A tree the docs check passes: every required disclosure where it belongs, links that resolve."""
+    """A tree the docs check passes: every required disclosure where it belongs, links that resolve, and a deny
+    list with no terms yet (without one, the check says so)."""
     write(root, "README.md", "# Claude Desk\n\n" + disclosures_for("README.md")
           + "\nSee [the threat model](docs/threat-model.md).\n")
     write(root, "docs/threat-model.md", "# Threat model\n\n" + disclosures_for("docs/threat-model.md"))
     write(root, "AGENTS.md", "# Agents\n")
+    write(root, ".local/docs-deny.txt", "# private terms, one per line\n")
     return root
 
 
@@ -233,6 +246,7 @@ def test_private_references_in_prose_and_unshipped_docs_pass(tmp_path):
 
 def test_deny_list_is_optional_and_applied(tmp_path):
     root = passing_tree(tmp_path)
+    (root / ".local/docs-deny.txt").unlink()
     write(root, "docs/ci.md", "# CI\n\nBuilt for the Northwind Pilot.\n")
     write(root, "docs/plans/plan.md", "Built for the Northwind Pilot.\n")
     assert run(root)[0] == 0   # no deny list: nothing to apply
@@ -244,6 +258,49 @@ def test_deny_list_is_optional_and_applied(tmp_path):
     assert "docs/ci.md:3: private reference (a term from .local/docs-deny.txt, line 3)" in out
     assert "northwind" not in out.casefold()   # the term itself is never printed
     assert "plans/plan.md" not in out          # only shipped docs are scanned
+
+
+def git(*args: str) -> None:
+    subprocess.run(["git", *args], check=True, capture_output=True)
+
+
+def test_deny_list_falls_back_to_the_main_checkout(tmp_path, monkeypatch, capfd):
+    # A worktree has no .local/ of its own, so the check reads the main checkout's list.
+    for name in [name for name in os.environ if name.startswith("GIT_")]:
+        monkeypatch.delenv(name)   # a hook's GIT_DIR or GIT_INDEX_FILE must not point git at this repository
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/dev/null")   # nor this machine's config (signing, hooks)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))   # and tmp_path is never inside a repository
+    main = passing_tree(tmp_path / "main")
+    write(main, ".gitignore", ".local/\n")
+    write(main, ".local/docs-deny.txt", "northwind pilot\n")
+    write(main, "docs/ci.md", "# CI\n\nBuilt for the Northwind Pilot.\n")
+    git("init", "-q", str(main))
+    git("-C", str(main), "add", ".")
+    git("-C", str(main), "-c", "user.name=Docs Check", "-c", "user.email=docs-check@example.com",
+        "commit", "-q", "-m", "Add the docs")
+    worktree = tmp_path / "worktree"
+    git("-C", str(main), "worktree", "add", "-q", str(worktree))
+    assert not (worktree / ".local").exists()
+
+    code, out = run(worktree)
+
+    assert code == 1
+    assert "docs/ci.md:3: private reference (a term from .local/docs-deny.txt, line 1)" in out
+    assert "no deny list" not in out
+
+    # Outside a repository there is no main checkout to fall back to: no deny list, and the check says so.
+    outside = passing_tree(tmp_path / "outside")
+    (outside / ".local/docs-deny.txt").unlink()
+    write(outside, "docs/ci.md", "# CI\n\nBuilt for the Northwind Pilot.\n")
+
+    code, out = run(outside)
+
+    assert (code, out.splitlines()) == (0, [
+        "docs-check: no deny list (.local/docs-deny.txt), private terms not checked",
+        "docs-check: ok",
+    ])
+    assert capfd.readouterr().err == ""   # git's own error stays out of the output
 
 
 def test_final_mode_checks_placeholders_in_shipped_docs_only(tmp_path):
@@ -271,6 +328,131 @@ def test_final_mode_checks_placeholders_in_shipped_docs_only(tmp_path):
 def test_the_checker_holds_the_plans_disclosures_and_shipped_docs():
     assert check_docs.DISCLOSURES == REQUIRED_DISCLOSURES
     assert sorted(check_docs.SHIPPED_DOCS) == sorted(SHIPPED_DOCS)
+
+
+def test_about_documents_are_shipped_docs():
+    # A shipped doc that isn't in the tree is skipped, so both must also be there to be checked at all.
+    assert [path for path in ABOUT_DOCS if path not in check_docs.SHIPPED_DOCS] == []
+    assert [path for path in ABOUT_DOCS if not (REPO / path).is_file()] == []
+
+
+def test_about_documents_pass_the_docs_check():
+    found = check_docs.check_private(REPO) + check_docs.check_links(REPO)
+
+    assert [str(problem) for problem in found if problem.path in ABOUT_DOCS] == []
+    # The architecture figure GitHub readers see, linked from the proposal, is a committed SVG.
+    proposal = (REPO / "docs/product-proposal.md").read_text()
+    assert "images/v1-architecture.svg" in [target for _, target in check_docs.link_targets(proposal)]
+    assert ElementTree.parse(REPO / "docs/images/v1-architecture.svg").getroot().tag == "{http://www.w3.org/2000/svg}svg"
+
+
+FIGURE_MARKER = re.compile(r"<!-- figure: (architecture|tau3|readiness) -->")
+FIGURE_IMAGE = re.compile(r"!\[[^\[\]\n]+\]\(images/v1-architecture\.svg\)")
+
+
+def reader_subset_problems(text: str, other: str) -> list[str]:
+    """What in `text` the About pages' Markdown reader would refuse, by line: HTML other than a figure marker on
+    a line of its own, an image other than the architecture figure's line right after its marker, a heading
+    below `##`, a nested list, or a link that is neither `https://` nor `other`, the other document's file name.
+    The reader's own tests run the full parse; this catches the common breaks without the web toolchain."""
+    lines = check_docs._prose(text).split("\n")   # code spans and fenced code blanked: what they hold is text
+    problems: list[str] = []
+    figure_images: set[int] = set()
+    for number, line in enumerate(lines, start=1):
+        marker = FIGURE_MARKER.fullmatch(line.rstrip())
+        if marker:
+            if marker.group(1) != "architecture":
+                continue
+            if number < len(lines) and FIGURE_IMAGE.fullmatch(lines[number].rstrip()):
+                figure_images.add(number + 1)
+            else:
+                problems.append(f"line {number}: the architecture marker without its image line right after it")
+            continue
+        if number in figure_images:
+            continue
+        if re.search(r"<[A-Za-z!/?]", line):
+            problems.append(f"line {number}: raw HTML")
+        if "![" in line:
+            problems.append(f"line {number}: an image other than the architecture figure")
+        if re.match(r" {0,3}#{3,}(?:[ \t]|$)", line):
+            problems.append(f"line {number}: a heading below ##")
+        if re.match(r"[ \t]+(?:[-*+]|\d+[.)])[ \t]", line):
+            problems.append(f"line {number}: a nested list")
+    for number, target in check_docs.link_targets(text):
+        if number not in figure_images and not (target.startswith("https://") or target == other):
+            problems.append(f"line {number}: a link to {target}, neither https:// nor {other}")
+    return problems
+
+
+# A document inside the reader's subset, for the cases below to break one way each.
+IN_SUBSET = "\n".join([
+    "# A document",
+    "",
+    "Giovanni Alcantara · October 29, 2026",
+    "",
+    "## A section",
+    "",
+    "Read [the other one](capability-prediction.md) and [a source](https://example.com/report). Code such as",
+    "`<b>`, `![x](y.png)` or `[x](notes.md)` is text.",
+    "",
+    "<!-- figure: architecture -->",
+    "![The architecture](images/v1-architecture.svg)",
+    "",
+    "- One",
+    "- Two",
+    "",
+    "| Axis | Readiness |",
+    "| --- | --- |",
+    "| Apply policies | Near |",
+    "",
+    "<!-- figure: tau3 -->",
+    "",
+])
+
+
+@pytest.mark.parametrize(("added", "problem"), [
+    ("Some <b>bold</b> text.", "raw HTML"),
+    ("<script>alert(1)</script>", "raw HTML"),
+    ("<!-- a note -->", "raw HTML"),
+    ("<!--\nfigure: tau3\n-->", "raw HTML"),
+    ("<!-- figure: pie -->", "raw HTML"),
+    ("Text <!-- figure: tau3 --> inline.", "raw HTML"),
+    ("See <https://example.com>.", "raw HTML"),
+    ("![A chart](images/chart.png)", "an image other than the architecture figure"),
+    ("![The architecture](images/v1-architecture.svg)", "an image other than the architecture figure"),
+    ("<!-- figure: architecture -->\n\nText.", "the architecture marker without its image line"),
+    ("<!-- figure: architecture -->\n![The architecture](images/v1-architecture.svg) and more.",
+     "the architecture marker without its image line"),
+    ("### A subsection", "a heading below ##"),
+    ("#### Deeper", "a heading below ##"),
+    ("- One\n  - Nested", "a nested list"),
+    ("1. One\n   1. Nested", "a nested list"),
+    ("See [the threat model](threat-model.md).", "a link to threat-model.md"),
+    ("See [the proposal](product-proposal.md).", "a link to product-proposal.md"),
+    ("See [the readiness](capability-prediction.md#readiness).", "a link to capability-prediction.md#readiness"),
+    ("See [a page](http://example.com).", "a link to http://example.com"),
+    ("Write [to us](mailto:desk@example.com).", "a link to mailto:desk@example.com"),
+    ("See [the model].\n\n[the model]: threat-model.md", "a link to threat-model.md"),
+])
+def test_the_reader_subset_check_catches_each_break(added, problem):
+    assert reader_subset_problems(IN_SUBSET, "capability-prediction.md") == []
+
+    found = reader_subset_problems(IN_SUBSET + added + "\n", "capability-prediction.md")
+
+    assert [line for line in found if problem in line], found
+
+
+def test_about_documents_stay_in_the_reader_subset():
+    for path, figures in ABOUT_DOCS.items():
+        text = (REPO / path).read_text()
+        other = next(Path(name).name for name in ABOUT_DOCS if name != path)
+        title, byline = [line for line in text.splitlines() if line.strip()][:2]
+
+        assert reader_subset_problems(text, other) == [], path
+        assert tuple(FIGURE_MARKER.findall(text)) == figures, path
+        # The title and the byline feed the page's hero and meta column rather than the article.
+        assert title.startswith("# ") and re.fullmatch(r"Giovanni Alcantara · \w+ \d{1,2}, \d{4}", byline), path
+    assert "[capability prediction](capability-prediction.md)" in (REPO / "docs/product-proposal.md").read_text()
 
 
 @pytest.mark.parametrize("phrase", list(REQUIRED_DISCLOSURES))
@@ -367,6 +549,13 @@ def test_readme_evidence_links_the_evals_guide():
         # which `--final` refuses, so the docs can't ship without the link.
         held = [line for line in evidence.splitlines() if "[measured:" in line and "docs/evals.md" in line]
         assert held, "with no docs/evals.md yet, Evidence must hold a [measured: …] placeholder naming it"
+
+
+def test_readme_documents_link_the_proposal_and_the_prediction():
+    documents = sections((REPO / "README.md").read_text())["Documents"]
+
+    assert [path for path in ABOUT_DOCS if f"]({path})" not in documents] == []
+    assert "[owner:" not in documents
 
 
 def status_table(section: str) -> list[list[str]]:

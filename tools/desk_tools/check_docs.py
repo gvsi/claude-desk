@@ -6,7 +6,8 @@ Relative links across README.md, AGENTS.md and docs/**/*.md resolve inside the r
 are ignored). The shipped docs (SHIPPED_DOCS) hold no private reference: no `~/` path in a link target
 or code; no /Users/ or /home/ path, run-ledger path or claude.ai artifact or share link anywhere; and
 no term from the optional, git-ignored .local/docs-deny.txt (one per line, `#` comments, matched
-ignoring case).
+ignoring case), read from the root or, in a git worktree, from the main checkout. With no list
+found, the check says that private terms were not checked and still passes.
 Each phrase in DISCLOSURES appears in every doc it names, ignoring case, line breaks and curly
 apostrophes. With --final, the shipped docs also hold no placeholder: a value still to be measured
 (`[measured: …]`) or a link the owner still has to give (`[owner: …]`).
@@ -16,7 +17,9 @@ Exit 0 when every check passes, 1 when any fails (each failure printed as `file:
 """
 
 import argparse
+import os
 import re
+import subprocess
 from bisect import bisect_right
 import sys
 from collections.abc import Callable, Iterator
@@ -36,6 +39,8 @@ SHIPPED_DOCS = (
     "docs/deploy.md",
     "docs/ci.md",
     "docs/evals.md",
+    "docs/product-proposal.md",
+    "docs/capability-prediction.md",
 )
 
 # Private anywhere in a shipped doc, and private in a link target or code (where a path is a path,
@@ -172,9 +177,27 @@ def shipped_docs(root: Path) -> list[tuple[str, str]]:
     return [(name, (root / name).read_text()) for name in SHIPPED_DOCS if (root / name).is_file()]
 
 
-def deny_terms(root: Path) -> list[tuple[int, str]]:
+def deny_list(root: Path) -> Path | None:
+    """The root's .local/docs-deny.txt or, when it has none, the main checkout's: a git worktree has no .local/
+    of its own, so the list beside the repository's common git directory is read. A git error means no list."""
     path = root / DENY_LIST
-    if not path.is_file():
+    if path.is_file():
+        return path
+    try:
+        found = subprocess.run(["git", "-C", str(root), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                               capture_output=True, text=True)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    common = found.stdout.strip()
+    if found.returncode != 0 or not os.path.isabs(common):
+        return None
+    path = Path(common).parent / DENY_LIST
+    return path if path.is_file() else None
+
+
+def deny_terms(root: Path) -> list[tuple[int, str]]:
+    path = deny_list(root)
+    if path is None:
         return []
     terms = []
     for number, line in enumerate(path.read_text().splitlines(), start=1):
@@ -242,7 +265,10 @@ def main(argv: list[str] | None = None, out: Callable[[str], None] = print) -> i
     parser.add_argument("--final", action="store_true", help="also refuse placeholders in the shipped docs")
     parser.add_argument("--root", type=Path, default=REPO, help="the repository root (default: this checkout)")
     args = parser.parse_args(argv)
-    problems = check(args.root.resolve(), final=args.final)
+    root = args.root.resolve()
+    if deny_list(root) is None:
+        out(f"docs-check: no deny list ({DENY_LIST}), private terms not checked")
+    problems = check(root, final=args.final)
     for problem in problems:
         out(f"docs-check: {problem}")
     if problems:
