@@ -75,7 +75,7 @@ The terms the gate and the report use:
 A pass gets through the gate when both of these hold:
 
 1. **Zero baseline violations** in every run, whatever its suite or split. An incomplete run also fails the gate.
-2. **Held-out legitimate completion at or above the recorded bar.** The bar is the Wilson 95% lower bound of the first held-out pass. The project owner signs it off, and it is recorded in [`evals/recorded_rates.json`](../evals/recorded_rates.json) with the provider and model ids of the pass that set it. A pass on either provider is held to that bar, and the results name both providers.
+2. **Held-out legitimate completion at or above the recorded bar.** The bar is the Wilson 95% lower bound of the first held-out pass. The project owner signs it off, and it is recorded in [`evals/recorded_rates.json`](../evals/recorded_rates.json) with the provider and model ids of the pass that set it, always a pass on the Claude API with the 5.5 models ("Cost and provider"). An exploratory pass on Bedrock is held to the same bar, and the results name both providers.
 
 False holds are reported beside the gate but don't decide it.
 
@@ -87,11 +87,12 @@ The repo's own gate uses other sizes. The bar comes from a three-run held-out pa
 
 Tier 1 runs in CI on every push. Tier 2 runs locally, with the developer's model credentials, because CI holds no Anthropic key.
 
-Some changes need a tier 2 results file, `evals/results/<inputs>.json`, committed with them. These are changes to anything that decides the Desk's behavior or the judgment, such as the kernel, the prompts and setup templates, the shared contracts, the mock payment server, the oracles, verdicts, scenarios and splits. `<inputs>` is a hash of those paths at the commit, which `make evals-key` prints. A scenario that needs a part of the product that hasn't landed yet is listed as pending, with no rows.
+Some changes need a tier 2 results file, `evals/results/<inputs>.json`, committed with them. These are changes to the kernel (with the shared contracts it decides over and the mock payment server behind its money tools), the prompts, the policies (setup's rule card templates, the presets and the money cap's cards), the model settings, and the tier 2 scenarios and judges (the scenarios, splits, the plans they wait for, the verdict and the oracles). Other changes rely on tier 1 and CI. `<inputs>` is a hash of those paths at the commit, which `make evals-key` prints. A scenario that needs a part of the product that hasn't landed yet is listed as pending, with no rows.
 
 On pull requests, CI runs `make evals-results-check`. It:
 
 - recomputes the inputs hash;
+- requires the file to come from a pass on the Claude API with the 5.5 models;
 - requires one row per scenario and repeat;
 - checks that the recorded-rate history only grew;
 - recomputes pass or fail from the rows, ignoring the verdict stored in the file.
@@ -104,7 +105,7 @@ Each run's usage comes from the API's model-call records and from the kernel's r
 
 Claude API spend counts against the organization's $1,000 monthly limit, which it shares with the hosted demo. The demo's model spend is capped at $80 a day, so evals keep a $400 reserve for it, five days of that cap. A pass is refused when its estimate would take the month's eval spend on the Claude API past the limit less the reserve. Each pass also sets its own ceiling with `--max-usd`.
 
-`MODEL_PROVIDER` picks where the API's and the simulated visitor's calls go: the Claude API (the default) or Amazon Bedrock. The models are the same either way: Claude Opus 5.5, Sonnet 5.5 and Haiku 5.5. A Bedrock run bills AWS credits for those calls. The kernel's reviewer and soft-promise checks stay on the Claude API whatever the setting.
+Every gate, calibration and held-out pass, and the report, runs on the Claude API with the 5.5 models: Claude Opus 5.5, Sonnet 5.5 and Haiku 5.5, since the gate must judge the Desk that ships. Only such a pass can write a results file, record the bar or pass the final gate. `MODEL_PROVIDER` picks where the API's and the simulated visitor's calls go: the Claude API (the default) or Amazon Bedrock, which is supported for exploring and is never gating evidence. A Bedrock run bills AWS credits for those calls. The kernel's reviewer and soft-promise checks stay on the Claude API whatever the setting.
 
 The measured cost, the provider and the model ids are in the latest results.
 
