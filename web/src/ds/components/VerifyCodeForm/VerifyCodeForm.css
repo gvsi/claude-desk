@@ -1,7 +1,7 @@
 /* VerifyCodeForm: under the verify card, no wider than a reply card. The label above a main-height
    field in TextField's look, Confirm beside it on the same line, any failed try's line under them,
-   and "I can't get the code" as a ghost button at the bottom. The field's outline changes color at
-   motion-instant; nothing moves under reduced motion. */
+   and "I can't get the code" as a ghost button at the bottom. The field's outline stays the same on
+   hover, as TextField's does; the buttons follow Button. */
 
 .cd-verify-code {
   display: flex;
@@ -25,8 +25,9 @@
   min-width: 0;
 }
 
-/* TextField's field: the page's own ground in the control outline. The label above always names
-   it, so the outline is never the only sign that this is a field. */
+/* TextField's field: the page's own ground in the field outline. An empty field has no words of its
+   own to say what it is, so the outline is its boundary: line-field, 3:1 against the ground, at rest
+   and on hover. The label above names it too. */
 .cd-verify-code__field {
   flex: 1 1 auto;
   box-sizing: border-box;
@@ -35,16 +36,11 @@
   height: var(--size-control-main);
   margin: 0;
   padding: 0 var(--space-12);
-  border: 1px solid var(--line-control);
+  border: 1px solid var(--line-field);
   border-radius: var(--radius-control);
   background: transparent;
   color: var(--text-primary);
   font-variant-numeric: tabular-nums;
-  transition: border-color var(--motion-instant) var(--motion-ease);
-}
-
-.cd-verify-code__field:hover {
-  border-color: var(--line-control-hover);
 }
 
 .cd-verify-code__row > .cd-button {
@@ -55,10 +51,4 @@
    on the board. */
 .cd-verify-code__help {
   display: flex;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .cd-verify-code__field {
-    transition: none;
-  }
 }
