@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ProofReport, RuleCard } from '../../api/contracts.ts';
-import { RULES_UNAVAILABLE_COPY } from '../../api/http.ts';
+import { RULES_UNAVAILABLE_COPY, request } from '../../api/http.ts';
 import type { RulesDraft } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { PRESETS, RIVERA } from '../../mocks/seed.ts';
@@ -17,7 +17,7 @@ import { renderRoute } from '../../test/renderRoute.tsx';
 import { expectScreenBasics } from '../../test/screen.ts';
 import type { AnswerDraftState } from '../approvals/useAnswer.ts';
 import { draftFromDiff } from './drafts.ts';
-import type { RuleDraftState } from './RuleDraftReview.tsx';
+import { RuleDraftReview, type RuleDraftState } from './RuleDraftReview.tsx';
 
 const DESK = `/app/${RIVERA.deskId}`;
 const DANA = rivera.people.dana;
@@ -330,5 +330,38 @@ describe('rule draft review', () => {
     await second.screen.getByRole('button', { name: 'Confirm change' }).click();
     await expect.element(second.screen.getByText('Your rules are updated.', { exact: true })).toBeVisible();
     expect(desk().policy.version).toBe(lost.version);
+  });
+
+  it('lost_custom_confirm_reads_the_rules_first', async () => {
+    // A caller that applies the draft its own way (setup's confirm) loses the answer too: the rules
+    // as they stand settle it, since applying it makes the draft's version the active one.
+    const confirmed: number[] = [];
+    const reviewOf = (stored: RulesDraft) => {
+      const confirm = async () => {
+        confirmed.push(stored.version);
+        await request('confirmRules', { params: { desk_id: RIVERA.deskId }, body: { version: stored.version } });
+      };
+      const element = <RuleDraftReview deskId={RIVERA.deskId} draft={draftFromDiff(stored, desk().policy)} confirm={confirm} />;
+      return renderRoute('/review', { routes: [{ path: '/review', element }] });
+    };
+
+    const applied = mockStore.world.draft(desk(), [{ ...rivera.ruleCards['rv-book-sat'], mode: 'ask' }]);
+    mockStore.inject({ route: 'confirmRules', status: 'network', afterCommit: true });
+    const first = await reviewOf(applied);
+    await first.screen.getByRole('button', { name: 'Confirm change' }).click();
+    await expect.element(first.screen.getByText('Your rules are updated.', { exact: true })).toBeVisible();
+    expect(first.screen.getByRole('alert').elements()).toHaveLength(0);
+    expect(confirmed).toEqual([applied.version]);
+    expect(desk().policy.version).toBe(applied.version);
+
+    // Lost before it applied: the rules say nothing changed, so it says so, and nothing claims it did.
+    const lost = mockStore.world.draft(desk(), [{ ...rivera.ruleCards['rv-quote'], mode: 'ask' }]);
+    mockStore.inject({ route: 'confirmRules', status: 'network' });
+    const second = await reviewOf(lost);
+    await second.screen.getByRole('button', { name: 'Confirm change' }).click();
+    await expect.element(second.screen.getByRole('alert')).toHaveTextContent("We couldn't reach Claude Desk. Check your connection, then try again.");
+    expect(second.screen.getByText('Your rules are updated.', { exact: true }).elements()).toHaveLength(0);
+    expect(confirmed).toEqual([applied.version, lost.version]);
+    expect(desk().policy.version).toBe(applied.version);
   });
 });

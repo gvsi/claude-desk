@@ -78,7 +78,10 @@ export interface RuleDraftReviewProps {
   inline?: boolean;
   /** Called once the owner confirmed the draft, or kept their rules; without it, keeping them goes back. */
   onDone?: (outcome: 'confirmed' | 'kept') => void;
-  /** Applies the draft in the caller's way (setup's confirm); `confirmRules` by default. */
+  /**
+   * Applies the draft in the caller's way (setup's confirm); `confirmRules` by default. Either way
+   * applying it makes `draft.version` the active rules, which is how a lost answer is settled.
+   */
   confirm?: () => Promise<unknown>;
 }
 
@@ -127,8 +130,9 @@ export function RuleDraftReview({ deskId, draft, title, inline = false, onDone, 
       if (err instanceof ApiError && err.kind === 'unauthorized') return;
       if (err instanceof ApiError && err.code === 'rules_changed_since_draft') {
         setError(CHANGED_SINCE);
-      } else if (!confirm && isUncertain(err)) {
+      } else if (isUncertain(err)) {
         // The answer was lost, so it may have applied: the rules as they stand say whether it did.
+        // A caller's own confirm (setup's) applies the draft's version too, so they settle it as well.
         const now = await queryClient.fetchQuery({ ...rulesQuery(deskId), staleTime: 0 }).catch(() => null);
         if (now?.active.version === draft.version) applied();
         else setError(now === null ? NOT_CONFIRMED : ownerErrorCopy(err));
