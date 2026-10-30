@@ -124,3 +124,14 @@ def test_a_redeploy_is_one_line_and_the_runbook_says_what_it_skips():
     assert "refuses, deploying nothing" in redeploys
     assert "`cdk diff --security-only`" in redeploys and "`--require-approval never`" in redeploys
     assert REDEPLOY in " ".join((INFRA / "scripts" / "deploy.sh").read_text().replace("#", " ").split())
+
+
+def test_the_passcode_is_asked_for_in_printable_ascii():
+    """deploy.sh refuses a Keychain passcode that isn't printable ASCII (test_deploy.py). The runbook
+    says so where the passcode is stored, and why, and says plainly what the check can't catch."""
+    first = section("First deploy (owner's terminal)")
+    assert "The passcode must be printable ASCII" in first
+    assert "`security` hands any other back as hex" in first
+    assert "hex is itself printable ASCII" in first
+    script = " ".join((INFRA / "scripts" / "deploy.sh").read_text().replace("#", " ").split())
+    assert "it must be printable ASCII" in script

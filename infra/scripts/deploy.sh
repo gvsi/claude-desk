@@ -24,8 +24,9 @@
 #
 #   security add-generic-password -s claude-desk-passcode -a "$USER" -w
 #
-# which asks for it twice without echo (-w goes last). Only smoke.py is given the passcode, in its
-# environment; it never reaches a command line, the output or the log.
+# which asks for it twice without echo (-w goes last); it must be printable ASCII, since `security`
+# hands any other back as hex. Only smoke.py is given the passcode, in its environment; it never
+# reaches a command line, the output or the log.
 #
 # The first deploy creates DeskData alone first, so the owner can set the two secrets it creates:
 # `deploy.sh --data-only` runs steps 1 to 4 (preflight without the owner secrets or the web build)
@@ -112,6 +113,11 @@ if [[ -z $data_only ]]; then
     passcode=$(security find-generic-password -s claude-desk-passcode -w) ||
       no_passcode "the macOS Keychain item claude-desk-passcode couldn't be read (is it stored, and is the login Keychain unlocked?)"
     [[ -n $passcode ]] || no_passcode "the macOS Keychain item claude-desk-passcode is empty"
+    # Printable ASCII only (space to ~, byte by byte whatever the caller's locale): `security` hands
+    # back any other passcode as hex, which wouldn't sign in. The value itself is never shown.
+    if (LC_ALL=C; [[ $passcode == *[![:print:]]* ]]); then
+      no_passcode "the macOS Keychain item claude-desk-passcode isn't printable ASCII (it isn't shown)"
+    fi
   fi
 fi
 unset DESK_PASSCODE

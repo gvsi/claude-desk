@@ -537,6 +537,30 @@ def test_an_empty_keychain_item_says_so_before_any_step(deploy):
     assert REPLACE_IT in run.output and "DESK_PASSCODE" in run.output
 
 
+@pytest.mark.parametrize("item", ["café-keychain-passcode", "tab\tkeychain-passcode", "line\nkeychain-passcode",
+                                  "del\x7fkeychain-passcode"])
+def test_a_keychain_passcode_that_isnt_printable_ascii_is_refused_unshown_before_any_step(deploy, item):
+    """docs/deploy.md asks for a printable ASCII passcode: `security` hands any other back as hex,
+    which wouldn't sign in. A value that reaches deploy.sh with other characters is refused before
+    any step, without being shown, whatever the caller's locale."""
+    run = deploy(keychain_item=item, DESK_PASSCODE=None, DESK_DEPLOY_ACCOUNT=ACCOUNT,
+                 LANG="en_US.UTF-8", LC_ALL="en_US.UTF-8")
+    assert run.status == 2
+    assert run.steps() == ["security find-generic-password"]
+    assert "the macOS Keychain item claude-desk-passcode isn't printable ASCII" in run.output
+    assert REPLACE_IT in run.output
+    assert "keychain-passcode" not in run.text()
+
+
+def test_every_printable_ascii_character_reaches_smoke_as_stored(deploy):
+    stored = "".join(map(chr, range(0x20, 0x7F)))                            # space to ~
+    run = deploy(keychain_item=stored, DESK_PASSCODE=None, DESK_DEPLOY_ACCOUNT=ACCOUNT,
+                 LANG="en_US.UTF-8", LC_ALL="en_US.UTF-8")
+    assert run.status == 0, run.output
+    [smoke] = [call for call in run.calls if _is_smoke(call)]
+    assert smoke["passcode"] == _sha256(stored)
+
+
 def test_no_security_command_says_how_to_store_the_passcode_before_any_step(deploy):
     """Off macOS, or with `security` missing, there's no Keychain to read: deploy.sh says so."""
     run = deploy(security=False, DESK_PASSCODE=None, DESK_DEPLOY_ACCOUNT=ACCOUNT)
