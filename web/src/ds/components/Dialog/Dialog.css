@@ -1,7 +1,7 @@
-/* Dialog: a raised surface with the card border and radius, centered over a dimmed page. The title
-   in section type (with a refused dot when it is a danger), the body in secondary text, then the
-   cancel and confirm buttons at the right. No shadow: the dimmed page separates it. It appears in
-   place; nothing slides or fades. */
+/* Dialog: a raised surface with the card border and radius, centered over the page, which the
+   scrim dims. The title in section type (with a refused dot when it is a danger), the body in
+   secondary text, then the cancel and confirm buttons at the right. No shadow: the dimmed page
+   separates it. It appears in place; nothing slides or fades. */
 
 .cd-dialog {
   box-sizing: border-box;
@@ -20,8 +20,7 @@
 }
 
 .cd-dialog::backdrop {
-  background: var(--bg-app);
-  opacity: 0.72;
+  background: var(--scrim);
 }
 
 .cd-dialog__title {

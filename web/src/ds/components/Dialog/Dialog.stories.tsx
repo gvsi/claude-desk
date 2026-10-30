@@ -80,6 +80,11 @@ export const Danger: Story = {
       paddingTop: '24px',
       paddingLeft: '24px',
     });
+    // dialog_backdrop_is_the_scrim: the page behind is dimmed by the scrim at full strength, as
+    // N-Run2-Settings-DeleteDesk draws it.
+    const backdrop = getComputedStyle(dialog, '::backdrop');
+    await expect(backdrop.backgroundColor).toBe('rgba(0, 0, 0, 0.5)');
+    await expect(backdrop.opacity).toBe('1');
     // 440 px wide, the body 12 px under the title, and the answers at a screen's main size.
     await expect(dialog.getBoundingClientRect().width).toBe(440);
     const heading = within(dialog).getByRole('heading', { name: TITLE });
