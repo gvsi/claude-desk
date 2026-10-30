@@ -28,15 +28,24 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, Strict
 
 from desk.contracts import Effect, Violation
 from evals.tier2.artifact import RunArtifact
-from evals.tier2.schema import DEMO_INBOX_ASSUMPTION, Assumption, RecordedRate, Scenario, wilson_lower_95
+from evals.tier2.schema import (
+    DEMO_INBOX_ASSUMPTION,
+    Assumption,
+    RecordedRate,
+    Scenario,
+    ScenarioId,
+    wilson_lower_95,
+)
 from evals.tier2.verdict import RunVerdict
 
 EVALS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = EVALS_DIR.parent
 REPORTS_DIR = EVALS_DIR / "reports"
+OUT_REPORTS_DIR = EVALS_DIR / "out" / "reports"
 EVALS_DOC = REPO_ROOT / "docs" / "evals.md"
 BUDGET_FILE = EVALS_DIR / "budget.toml"
 REPORTS_PATH = "evals/reports"          # where reports live, relative to the repository root
+OUT_REPORTS_PATH = "evals/out/reports"   # where a partial pass's report stays, never committed
 DOC_DIR = "docs"                         # where the evals guide lives, for its link to the report
 
 BEGIN_MARKER = "<!-- latest-results:begin -->"
@@ -298,12 +307,15 @@ class Providers(BaseModel):
 
 
 class PassSummary(BaseModel):
-    """A finished pass: where it ran, on which models, and each of its runs."""
+    """A finished pass: what it ran, where, on which models, and each of its runs."""
 
     model_config = _STRICT
     pass_id: PassId
     date: date
     git_sha: Annotated[StrictStr, StringConstraints(pattern=r"^[0-9a-f]{40}$")]
+    suite: Literal["attack", "legit", "all"]       # --suite
+    split: Literal["calibration", "heldout", "all"]   # --split
+    only: list[ScenarioId]                         # --only, empty for every scenario of the suite and split
     providers: Providers
     model_ids: dict[StrictStr, StrictStr]          # by route, the model id sent
     runs_per_scenario: StrictInt = Field(ge=1)
@@ -485,7 +497,10 @@ def latest_json(pass_result: PassSummary, gate_result: Any, metrics: Metrics | N
         "git_sha": p.git_sha,
         "date": p.date.isoformat(),
         # Beyond the fields the README and the path to MVP read: what the docs' table also shows.
-        "report": f"{REPORTS_PATH}/{report_name(p)}",
+        "report": f"{OUT_REPORTS_PATH if partial(p) else REPORTS_PATH}/{report_name(p)}",
+        "suite": p.suite,
+        "split": p.split,
+        "only": list(p.only),
         "providers": p.providers.model_dump(),
         "judged_runs": len(judged),
         "attack_runs_violating": violating,
@@ -596,12 +611,18 @@ def _summary(p: PassSummary, g: GateSummary, n: dict[str, Any]) -> list[str]:
     if p.null_baseline:
         out.append("This was a null-baseline pass, with Answering off before each legitimate task: it checks "
                    "the legitimate oracles, not the Desk.")
+    if left_out := partial(p):
+        out.append(f"This pass ran part of the suite ({', '.join(left_out)}), so its report stays under "
+                   f"`{OUT_REPORTS_PATH}/` and never becomes the latest report.")
     pending = (f"{_plural(len(p.pending), 'scenario')} waiting for "
                + ", ".join(f"plan {plan}" for plan in sorted(set(p.pending.values())))) if p.pending else "none"
     out.append(_table(("Item", "Value"), [
         ("Pass", f"`{p.pass_id}`"),
         ("Date", n["date"]),
         ("Commit", f"`{p.git_sha[:12]}`"),
+        ("Suite", p.suite),
+        ("Split", _split(p.split)),
+        ("Scenarios", "only " + ", ".join(f"`{sid}`" for sid in p.only) if p.only else "all of the suite and split"),
         ("Runs", f"{n['judged_runs']} judged, {n['errored_runs']} errored"),
         ("Pending scenarios", pending),
         ("Budget", "stopped by its budget before every run started" if p.stopped_by_budget else "within budget"),
@@ -980,19 +1001,43 @@ def latest_refusal(pass_id: str, *, dry_run: bool, null_baseline: bool) -> str |
     return None
 
 
+def partial(p: PassSummary) -> list[str]:
+    """What kept the pass to part of the suite: `--suite` short of all, the calibration split alone,
+    `--only`, or a stop at its budget before every run started. Empty for a pass of the whole suite,
+    the only kind whose report may become the latest."""
+    left_out = []
+    if p.suite != "all":
+        left_out.append(f"--suite {p.suite}")
+    if p.split == "calibration":
+        left_out.append("--split calibration")
+    if p.only:
+        left_out.append(f"--only {','.join(p.only)}")
+    if p.stopped_by_budget:
+        left_out.append("stopped by its --max-usd budget")
+    return left_out
+
+
 def write_report(pass_result: PassSummary, gate_result: Any, metrics: Metrics | None, latency: Latency | None,
                  calibration: Calibration | None, *, recorded: RecordedRate | None = None,
                  null_baseline: NullBaseline | None = None, spend_month: Sequence[SpendRow],
-                 budget: Budget | None = None, reports_dir: Path = REPORTS_DIR, evals_doc: Path = EVALS_DOC) -> Path:
+                 budget: Budget | None = None, reports_dir: Path = REPORTS_DIR, evals_doc: Path = EVALS_DOC,
+                 out_dir: Path = OUT_REPORTS_DIR) -> Path:
     """Writes `<date>-<pass_id>.md` and `latest.json` under `reports_dir`, this month's spend rows as
-    its `spend.csv`, and the evals guide's latest-results block; returns the report's path. A dry run
-    or a null-baseline pass is refused before anything is written: neither measures a Desk."""
+    its `spend.csv`, and the evals guide's latest-results block; returns the report's path. A pass
+    that ran part of the suite (`partial`) writes only its report, under `out_dir`, and none of the
+    rest. A dry run or a null-baseline pass is refused before anything is written: neither measures
+    a Desk."""
     p = PassSummary.model_validate(pass_result)
     if refusal := latest_refusal(p.pass_id, dry_run=p.dry_run, null_baseline=p.null_baseline):
         raise ValueError(refusal)
     inputs = {"recorded": recorded, "null_baseline": null_baseline, "spend_month": spend_month}
     latest = latest_json(p, gate_result, metrics, latency, calibration, **inputs)
     text = render_report(p, gate_result, metrics, latency, calibration, **inputs, budget=budget)
+    if partial(p):
+        out_dir.mkdir(parents=True, exist_ok=True)
+        report = out_dir / report_name(p)
+        report.write_text(text)
+        return report
     doc = _with_latest_results(evals_doc.read_text(), latest, evals_doc)
     reports_dir.mkdir(parents=True, exist_ok=True)
     report = reports_dir / report_name(p)

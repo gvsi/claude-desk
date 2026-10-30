@@ -132,7 +132,7 @@ make evals-report PASS=<id>
 - `BASE_URL=<url>` makes `evals-latency` measure the hosted deployment instead, entering it with the owner's passcode as `DESK_PASSCODE` in `.env`.
 - `NULL_BASELINE=<id>` adds a null-baseline pass of the same held-out set to the report.
 
-The report includes the latest local and hosted latency runs made for the pass. Without one, it says latency wasn't measured.
+The report includes the latest local and hosted latency runs made for the pass. Without one, it says latency wasn't measured. Only a pass of the whole suite that its budget didn't stop becomes the latest results below; the report of any other pass, such as a calibration pass, is kept under `evals/out/reports/`.
 
 For a $0 rehearsal with every model scripted, add `--dry-run`:
 

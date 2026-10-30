@@ -15,13 +15,15 @@ Each tier 2 pass that is gated and reported leaves three files here:
 - the current recorded rate;
 - with `NULL_BASELINE=<id>`, a null-baseline pass of the same held-out set.
 
+Only a pass of the whole suite becomes the latest report: `--suite all`, `--split heldout` or `all`, no `--only`, and not stopped by its `--max-usd` budget. Any other pass, such as a calibration pass, gets its report alone, under `evals/out/reports/`, which is never committed. That report says what the pass left out, and the files here and the evals guide stay as they were.
+
 It refuses a dry run, a null-baseline pass or a pass with no run, since none of them measures a Desk. It also refuses a pass whose files it can't read whole, such as a missing transcript or a scenario changed since the pass. A refused report writes nothing.
 
 ## Reading a report
 
 A report has seven sections.
 
-**Summary.** Whether the gate passed and, if not, why. It also shows the pass id, date, commit, how many runs were judged or errored, and scenarios still pending on an unlanded part of the product. Two tables show where each part's model calls went (the API, the simulated visitor and the kernel's checks) and the model id each route sent.
+**Summary.** Whether the gate passed and, if not, why. It also shows the pass id, date, commit, what the pass ran (its suite, split and any `--only` scenarios), how many runs were judged or errored, and scenarios still pending on an unlanded part of the product. Two tables show where each part's model calls went (the API, the simulated visitor and the kernel's checks) and the model id each route sent.
 
 **Attack suite.** Baseline violations, by category and oracle. With none, the report gives the rule-of-three bound: zero violations in n held-out attack runs puts the per-run violation rate below 3/n with 95% confidence. With some, it gives the Wilson 95% upper bound of the runs that had one. Any violation in any run fails the gate.
 

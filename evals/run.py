@@ -57,7 +57,9 @@ pass they are for. It exits 1 when the run is refused or measured nothing it can
 gate over its rows, the current recorded rate, the usage of its judged legitimate runs, the latest local
 and hosted latency runs whose `--pass` named it (never a dry run's; without one the report says latency
 wasn't measured), the thresholds' calibration at the pass's commit and, with `--null-baseline`, a
-null-baseline pass of the same held-out set. A dry run, a null-baseline pass, a pass with no run, or
+null-baseline pass of the same held-out set. Only a pass of the whole suite (`--suite all`, `--split
+heldout` or `all`, no `--only`) that its budget didn't stop becomes the latest report; any other gets
+its report alone, under `evals/out/reports/`. A dry run, a null-baseline pass, a pass with no run, or
 anything it can't read whole is refused: exit 1, the reason on stdout, nothing written.
 """
 
@@ -402,7 +404,8 @@ def report_inputs(pass_id: str, *, root: Path, null_baseline_id: str | None = No
                             "reads the pass's spend from the row the pass appended")
     try:
         summary = PassSummary(
-            pass_id=result.pass_id, date=day, git_sha=result.git_sha, providers=result.providers.model_dump(),
+            pass_id=result.pass_id, date=day, git_sha=result.git_sha, suite=config.suite, split=config.split,
+            only=list(config.only), providers=result.providers.model_dump(),
             model_ids=result.model_ids, runs_per_scenario=config.runs, external=config.base_url is not None,
             dry_run=config.dry_run, null_baseline=config.null_baseline, stopped_by_budget=result.stopped_by_budget,
             pending=result.pending, heldout_sha256=result.heldout_sha256, spend=own[0], runs=runs)
@@ -577,7 +580,7 @@ def _null_baseline(root: Path, null_id: str, real: "PassResult") -> "NullBaselin
 
 
 def report_command(argv: list[str], *, root: Path | None = None) -> int:
-    from evals.report import write_report
+    from evals.report import partial, write_report
     from evals.tier2.passes import REPO_ROOT, PassRefused
 
     parser = _pass_parser("report")
@@ -587,13 +590,19 @@ def report_command(argv: list[str], *, root: Path | None = None) -> int:
     root = root or REPO_ROOT
     try:
         inputs = report_inputs(options.pass_id, root=root, null_baseline_id=options.null_baseline)
-        written = write_report(**inputs, reports_dir=root / "evals" / "reports", evals_doc=root / "docs" / "evals.md")
+        written = write_report(**inputs, reports_dir=root / "evals" / "reports", evals_doc=root / "docs" / "evals.md",
+                               out_dir=root / "evals" / "out" / "reports")
     except (ReportRefused, PassRefused, OSError, ValueError) as refused:   # ValueError: the guide's markers
         print(f"report: {refused}")
         return 1
     judged = inputs["gate_result"]
     print(f"report: pass {options.pass_id}: the gate {'passed' if judged.passed else 'failed'}; latency "
           f"{'measured' if inputs['latency'] is not None else 'not measured'}")
+    if left_out := partial(inputs["pass_result"]):
+        print(f"report: the pass ran part of the suite ({', '.join(left_out)}), so the latest report, "
+              "evals/reports/spend.csv and the latest results in docs/evals.md stay as they were")
+        print(f"report: wrote {written.relative_to(root)}")
+        return 0
     print(f"report: wrote {written.relative_to(root)}, evals/reports/latest.json and evals/reports/spend.csv, and "
           "the latest results in docs/evals.md")
     return 0

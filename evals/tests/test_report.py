@@ -94,7 +94,7 @@ def spend(pass_id: str = PASS_ID, day: date = PASS_DATE, *, runs: int = 18, desk
 
 def a_pass(runs: list[ReportRun], **changes: Any) -> PassSummary:
     data: dict[str, Any] = {
-        "pass_id": PASS_ID, "date": PASS_DATE, "git_sha": GIT_SHA,
+        "pass_id": PASS_ID, "date": PASS_DATE, "git_sha": GIT_SHA, "suite": "all", "split": "all", "only": [],
         "providers": {"api": "anthropic", "simulator": "anthropic", "kernel_checks": "anthropic"},
         "model_ids": MODEL_IDS, "runs_per_scenario": 3, "external": False, "dry_run": False,
         "null_baseline": False, "stopped_by_budget": False, "pending": {}, "heldout_sha256": HELDOUT_SHA,
@@ -636,9 +636,11 @@ def report_repo(tmp_path: Path) -> Path:
     return root
 
 
-async def report_pass(root: Path, run_one: Any = crafted_run, **changes: Any) -> str:
-    """A finished pass in `root`, its spend in the shared spend file every worktree reads."""
-    result = await run_pass(config(**changes), deps(root, run_one, spend_file=shared_spend_file(root)))
+async def report_pass(root: Path, run_one: Any = crafted_run, *, cost_usd: float = 0.10, **changes: Any) -> str:
+    """A finished pass in `root`, each run costing `cost_usd`, its spend in the shared spend file every
+    worktree reads."""
+    result = await run_pass(config(**changes), deps(root, run_one, cost_usd=cost_usd,
+                                                    spend_file=shared_spend_file(root)))
     return result.pass_id
 
 
@@ -687,6 +689,43 @@ async def test_report_command_writes_the_report_of_a_finished_pass(report_repo, 
         assert [row["pass_id"] for row in csv.DictReader(handle)] == [pass_id, "latency-20261030-120000-0b0b0b"]
     doc = (root / "docs" / "evals.md").read_text()
     assert f"[report for pass `{pass_id}`](../evals/reports/{report.name})" in doc and PLACEHOLDER not in doc
+
+
+async def test_report_command_keeps_a_partial_pass_out_of_the_latest_results(report_repo, capsys):
+    """Only a pass of the whole suite (`--suite all`, a split that holds the held-out set, no `--only`)
+    that started every run becomes the latest report. A calibration-split, single-suite, `--only` or
+    budget-stopped pass gets its report under `evals/out/reports/`, saying what the pass ran, and
+    latest.json, spend.csv and the evals guide's latest results stay as they were."""
+    root = report_repo
+    reports, out, doc = root / "evals" / "reports", root / "evals" / "out" / "reports", root / "docs" / "evals.md"
+    guide = doc.read_text()
+    partial = [
+        ({"split": "calibration"}, "| Split | calibration |", "--split calibration"),
+        ({"suite": "attack"}, "| Suite | attack |", "--suite attack"),
+        ({"only": ("atk-held", "leg-held")}, "| Scenarios | only `atk-held`, `leg-held` |", "--only atk-held,leg-held"),
+        # Four runs at the measured $0.10 a run fit $0.45; the first costs $0.50, so no other run starts.
+        ({"max_usd": 0.45, "cost_usd": 0.50}, "| Budget | stopped by its budget", "stopped by its --max-usd budget"),
+    ]
+    for changes, shown, why in partial:
+        pass_id = await report_pass(root, **changes)
+        assert evals_run.report_command(["--pass", pass_id], root=root) == 0
+        printed = capsys.readouterr().out
+        report = out / f"2026-10-30-{pass_id}.md"
+        assert f"report: wrote evals/out/reports/{report.name}" in printed and why in printed, printed
+        text = report.read_text()
+        assert headings(text) == list(SECTIONS) and shown in text, why
+        assert f"This pass ran part of the suite ({why}), so its report stays under `evals/out/reports/`" in text
+        assert not (reports / "latest.json").exists() and not (reports / "spend.csv").exists(), why
+        assert not list(reports.glob("2026-*.md")) and doc.read_text() == guide, why
+
+    heldout = await report_pass(root, split="heldout")
+    assert evals_run.report_command(["--pass", heldout], root=root) == 0
+    assert f"report: wrote evals/reports/2026-10-30-{heldout}.md" in capsys.readouterr().out
+    latest = json.loads((reports / "latest.json").read_text())
+    assert (latest["pass_id"], latest["suite"], latest["split"], latest["only"]) == (heldout, "all", "heldout", [])
+    text = (reports / f"2026-10-30-{heldout}.md").read_text()
+    assert "| Suite | all |" in text and "| Split | held out |" in text and "This pass ran part" not in text
+    assert heldout in doc.read_text()
 
 
 async def answering_off(scenario: Any, rep: int, target: Any, simulator: Any, **kwargs: Any) -> RunOutcome:
