@@ -138,6 +138,10 @@ def assert_handed_off(verdict: ReplyVerdict, language: str = "en") -> None:
     ("See you this\u2010morning.", {"lex.en.date"}, "this\u2010morning"),          # a Unicode hyphen
     ("Nos vemos el fin\u2013de\u2013semana.", {"lex.es.date"}, "fin\u2013de\u2013semana"),   # en dashes
     ("Come by at one o\u2018clock.", {"lex.en.date"}, "o\u2018clock"),             # a left single quote
+    ("Maria can be there same-day.", {"lex.en.date"}, "same-day"),
+    ("Maria can come the same day.", {"lex.en.date"}, "same day"),
+    ("Maria can be there same\u2011day.", {"lex.en.date"}, "same\u2010day"),     # NFKC makes U+2011 U+2010
+    ("Podemos ir el mismo día.", {"lex.es.date"}, "el mismo día"),
 ])
 async def test_numbers_and_dates_in_prose_are_blocked(app, client, prose, rule_ids, span):
     copy, visitor = await visitor_of(app, client)
@@ -148,7 +152,7 @@ async def test_numbers_and_dates_in_prose_are_blocked(app, client, prose, rule_i
     assert all(len(violation.span) <= 40 for violation in verdict.violations)
     spanish = prose in ("nos vemos el martes", "Puedo ir a las once.", "Llego a la una.",
                         "El total es \u0406\u041e\u041e.", "Puedo ir en abriI.",
-                        "Nos vemos el fin\u2013de\u2013semana.")
+                        "Nos vemos el fin\u2013de\u2013semana.", "Podemos ir el mismo día.")
     assert_handed_off(verdict, "es" if spanish else "en")
 
 
@@ -249,8 +253,8 @@ DASHES.append("−")
 HYPHENATED = [                       # lexicon phrases whose words a dash may join, and the rule each breaks
     ("this-morning", "lex.en.date"), ("next-week", "lex.en.date"), ("no-charge", "lex.en.promise"),
     ("money-back", "lex.en.promise"), ("on-the-house", "lex.en.promise"), ("last-year", "lex.en.date"),
-    ("fin-de-semana", "lex.es.date"), ("la-próxima-semana", "lex.es.date"), ("sin-costo", "lex.es.promise"),
-    ("de-regalo", "lex.es.promise"),
+    ("same-day", "lex.en.date"), ("fin-de-semana", "lex.es.date"), ("la-próxima-semana", "lex.es.date"),
+    ("sin-costo", "lex.es.promise"), ("de-regalo", "lex.es.promise"), ("el-mismo-día", "lex.es.date"),
 ]
 
 
@@ -309,6 +313,8 @@ def test_an_acute_accent_between_words_still_reads_as_a_space(prose, rule_id):
     ("BILLING IS IN ILLINOIS.", "en"),                      # capitals with I, which is read as l too
     ("Isla, Inés, Iván e Isabel ya están en la lista.", "es"),
     ("OK, I will call.", "en"),                             # I and O as words, not numbers
+    ("It is the same. Day and time are on the card.", "en"),   # a sentence ends between "same" and "day"
+    ("Es lo mismo. Día y hora van en la tarjeta.", "es"),
 ])
 async def test_plain_prose_passes(app, client, prose, language):
     copy, visitor = await visitor_of(app, client)

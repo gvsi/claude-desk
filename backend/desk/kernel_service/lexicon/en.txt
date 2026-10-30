@@ -21,13 +21,15 @@ money	dollars?|bucks?|cents?|usd|eur|euros?|pesos?|mxn
 percent	percent(?:age)?s?|per[\s-]?cent|pct
 
 # Days, months and times. "May" counts only capitalized after a word in the same sentence or after
-# in, on, by, until, till, next, this, early, late, mid or last, so the modal "may" passes.
+# in, on, by, until, till, next, this, early, late, mid or last, so the modal "may" passes. "Same
+# day" is a date too ("same-day", "same day"), but not across a sentence break ("the same. Day").
 date	mondays?|tuesdays?|wednesdays?|thursdays?|fridays?|saturdays?|sundays?
 date	january|february|march|april|june|july|august|september|october|november|december
 date	(?:(?<=[^\W\d_] )|(?<=[^\W\d_], )|(?:in|on|by|until|till|next|this|early|late|mid|last)[\s-]+)(?-i:May)
 date	today|tonight|tomorrow|yesterday|weekends?|noon|midnight|o['’]?clock
 date	(?:next|this|last)[\s-]+(?:week|month|year)|this[\s-]+(?:morning|afternoon|evening)
 date	[ap]\.\s?m\.?|pm
+date	same[\s-]{0,3}day
 
 # Promises only the owner's rules or a card can make. "free" passes only in "feel free" and in
 # "free to" after "you're", "you are", "you'll be" or "you will be" ("you're free to ask"), where

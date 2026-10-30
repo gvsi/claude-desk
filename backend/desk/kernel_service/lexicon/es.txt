@@ -21,13 +21,15 @@ money	dolar(?:es)?|pesos?|euros?|centavos?|usd|mxn
 # Percentages
 percent	por[\s-]?ciento|porcentajes?
 
-# Days, months and times ("miércoles", "sábado", "mañana", "mediodía" without accents)
+# Days, months and times ("miércoles", "sábado", "mañana", "mediodía", "día" without accents),
+# "el mismo día" among them
 date	lunes|martes|miercoles|jueves|viernes|sabados?|domingos?
 date	enero|febrero|marzo|abril|mayo|junio|julio|agosto|sept?iembre|octubre|noviembre|diciembre
 date	hoy|manana|ayer|anoche|mediodia|medianoche
 date	fin(?:es)?[\s-]+de[\s-]+semana|(?:la[\s-]+)?(?:proxima|siguiente)[\s-]+semana|semana[\s-]+(?:que[\s-]+viene|proxima|entrante)
 date	esta[\s-]+(?:noche|tarde|semana)|(?:este|el[\s-]+proximo)[\s-]+mes
 date	las[\s-]+once|la[\s-]+una
+date	(?:el[\s-]+)?mismo[\s-]+dia
 
 # Promises only the owner's rules or a card can make ("garantía" without the accent). "libre"
 # states a price before "para", "a" or "al" and everyone or an audience: "acceso libre a todas las
