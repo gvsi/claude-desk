@@ -6,7 +6,7 @@ Claude Desk is tested in two tiers. Tier 1 checks the kernel's boundary cases on
 
 **Tier 1** runs on every commit with no model calls (`make evals-tier1`). It covers the golden `/decide` table, reply-check fixtures in English and Spanish, a scan of everything that reaches a visitor's screen, forged requests and session tokens, cross-copy access, stale and replayed approvals, verification limits, restart races and ledger verification. Its cases are in [`evals/tier1/`](../evals/tier1/).
 
-**Tier 2** runs Claude for real. A simulated stranger or agent drives the real API and kernel through about 50 attack scenarios in eight categories: money, verification, private data, commitments, injection, agents, disclosure and language. A simulated customer works through 31 legitimate tasks in English and Spanish, such as getting a quote, booking a visit, paying a deposit, fetching a document, asking for a callback or getting advice when a pipe bursts.
+**Tier 2** runs Claude for real. A simulated stranger or agent drives the real API and kernel through 51 attack scenarios in eight categories: money, verification, private data, commitments, injection, agents, disclosure and language. A simulated customer works through 31 legitimate tasks in English and Spanish, such as getting a quote, booking a visit, paying a deposit, fetching a document, asking for a callback or getting advice when a pipe bursts.
 
 Each scenario is in one of two splits, listed in [`evals/splits.yaml`](../evals/splits.yaml):
 
@@ -105,7 +105,7 @@ Each run's usage comes from the API's model-call records and from the kernel's r
 
 Claude API spend counts against the organization's $1,000 monthly limit, which it shares with the hosted demo. The demo's model spend is capped at $80 a day, so evals keep a $400 reserve for it, five days of that cap. A pass is refused when its estimate would take the month's eval spend on the Claude API past the limit less the reserve. Each pass also sets its own ceiling with `--max-usd`.
 
-Every gate, calibration and held-out pass, and the report, runs on the Claude API with the 5.5 models: Claude Opus 5.5, Sonnet 5.5 and Haiku 5.5, since the gate must judge the Desk that ships. Only such a pass can write a results file, record the bar or pass the final gate. `MODEL_PROVIDER` picks where the API's and the simulated visitor's calls go: the Claude API (the default) or Amazon Bedrock, which is supported for exploring and is never gating evidence. A Bedrock run bills AWS credits for those calls. The kernel's reviewer and soft-promise checks stay on the Claude API whatever the setting.
+Every gate, calibration and held-out pass, and the report, runs on the Claude API with the 5.5 models: Claude Opus 5.5, Sonnet 5.5 and Haiku 5.5, since the gate must judge the Desk that ships. Only such a pass can write a results file, record the bar, pass the final gate, write the reviewer's thresholds or become the latest results. `MODEL_PROVIDER` picks where the API's and the simulated visitor's calls go: the Claude API (the default) or Amazon Bedrock, which is supported for exploring and is never gating evidence. A Bedrock run bills AWS credits for those calls. The kernel's reviewer and soft-promise checks stay on the Claude API whatever the setting.
 
 The measured cost, the provider and the model ids are in the latest results.
 
@@ -133,7 +133,7 @@ make evals-report PASS=<id>
 - `BASE_URL=<url>` makes `evals-latency` measure the hosted deployment instead, entering it with the owner's passcode as `DESK_PASSCODE` in `.env`.
 - `NULL_BASELINE=<id>` adds a null-baseline pass to the report. It must have judged exactly the held-out legitimate tasks the pass ran, with no `--only` and no stop at its budget.
 
-The report includes the latest local and hosted latency runs made for the pass. Without one, it says latency wasn't measured. Only a pass of the whole suite that its budget didn't stop becomes the latest results below; the report of any other pass, such as a calibration pass, is kept under `evals/out/reports/`.
+The report includes the latest local and hosted latency runs made for the pass. Without one, it says latency wasn't measured. Only a pass of the whole suite that its budget didn't stop, on the Claude API with the 5.5 models, becomes the latest results below; the report of any other pass, such as a calibration pass or a pass on Bedrock, is kept under `evals/out/reports/`.
 
 For a $0 rehearsal with every model scripted, add `--dry-run`:
 
