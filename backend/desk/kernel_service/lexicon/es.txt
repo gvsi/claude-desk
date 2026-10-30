@@ -5,8 +5,9 @@
 # hyphen as "-" ("fin‐de‐semana" with U+2010 is "fin-de-semana"). Categories: number, money,
 # percent and date (number_in_prose), and promise and booking (promise_word). A booking claim with
 # a condition straight before it ("cuando tu cita está confirmada") passes (`BOOKING_CONDITION`
-# in reply_check.py), but not after "sí" (yes), whose accent tells it from "si" (if). Both
-# lexicons run on every draft, whatever its language.
+# in reply_check.py), but not after "sí" (yes), whose accent tells it from "si" (if); every
+# booking claim passes in a reply that carries the booking's card. Both lexicons run on every
+# draft, whatever its language.
 
 # Spelled-out numbers. A bare "uno", "una", "once" or "medio" counts only next to a unit or another
 # number word, so "una pregunta" passes; "las once" and "la una" are clock times (below).

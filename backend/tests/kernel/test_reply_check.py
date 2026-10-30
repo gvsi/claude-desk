@@ -881,17 +881,59 @@ async def test_card_text_is_headline_then_details(app, client, reviewer):
 NOTHING_BEYOND_THE_CARDS = SoftPromiseVerdict(promises_beyond_cards=False, denies_being_ai=False)
 
 
-async def test_a_booking_claim_beside_its_card_is_blocked(app, client, reviewer):
-    """A booking appears only in its card: "You're booked." is blocked even beside the booking card
-    it repeats, by the prose scan, before the soft-promise check is asked."""
+@pytest.mark.parametrize(("prose", "language"), [("You're booked.", "en"), ("Tu cita está confirmada.", "es")])
+async def test_a_booking_claim_beside_its_booking_card_passes_by_the_owners_decision(app, client, reviewer, prose,
+                                                                                     language):
+    """The owner's decision of 2026-10-30: a reply carrying the booking's card may say the visit is
+    booked, since the card says it too. The claim passes the prose scan, reaches the soft-promise
+    check beside the card's text, and, with no promise found beyond the card, is shown with it."""
     copy, visitor = await visitor_of(app, client)
     booking = await own_booking(client, reviewer, visitor)
     reviewer.soft_answer = NOTHING_BEYOND_THE_CARDS
+    verdict = await checked(client, visitor, prose, [clause("booking_confirmed", booking.fact_id)])
+    assert (verdict.ok, verdict.violations, verdict.language) == (True, [], language)
+    prose_block, card = verdict.blocks
+    assert (prose_block.text, card.template, card.fact_id) == (prose, "booking_confirmed", booking.fact_id)
+    assert reviewer.soft_inputs == [SoftPromiseInput(language=language, prose=prose, cards=[card.text])]
+
+
+@pytest.mark.parametrize(("prose", "language", "span"), [
+    ("You're booked.", "en", "You're booked"), ("Tu cita está confirmada.", "es", "Tu cita está confirmada")])
+async def test_a_booking_claim_without_a_booking_card_is_blocked(app, client, reviewer, prose, language, span):
+    """Only a booking card lets a reply say the visit is booked: with no card, or beside another
+    card (a quote), the claim is blocked by the prose scan, before the soft-promise check is asked."""
+    copy, visitor = await visitor_of(app, client)
+    quote = await own_quote(client, visitor)
+    reviewer.soft_answer = NOTHING_BEYOND_THE_CARDS
+    for clauses in ([], [clause("quote", quote.fact_id)]):
+        verdict = await checked(client, visitor, prose, clauses)
+        assert [(v.kind, v.rule_id, v.span) for v in verdict.violations] == [
+            ("promise_word", f"lex.{language}.booking", span)], clauses
+        assert_handed_off(verdict, language)
+    assert reviewer.soft_inputs == []
+
+
+@pytest.mark.parametrize(("case", "kind", "rule_id"), [
+    ("another session's booking", "unentitled_fact", "not_a_reader"),
+    ("an expired booking", "stale_fact", "not_current"),
+])
+async def test_a_booking_card_the_checks_refuse_lets_no_booking_claim_through(app, client, reviewer, case, kind,
+                                                                              rule_id):
+    """Only a booking card the clause checks pass lets the claim through: one citing another
+    session's booking or a booking fact no longer current is refused as before, so the reply
+    carries no booking card and the claim is blocked as well."""
+    copy, visitor = await visitor_of(app, client)
+    if case == "another session's booking":
+        booking = await own_booking(client, reviewer, await open_visitor(client, copy))
+    else:
+        booking = await own_booking(client, reviewer, visitor)
+        await change_fact(app, copy, booking.fact_id, status="expired")
     verdict = await checked(client, visitor, "You're booked.", [clause("booking_confirmed", booking.fact_id)])
-    assert [(v.kind, v.rule_id, v.span) for v in verdict.violations] == [
-        ("promise_word", "lex.en.booking", "You're booked")]
+    assert [(v.kind, v.rule_id) for v in verdict.violations] == [("promise_word", "lex.en.booking"), (kind, rule_id)]
     assert_handed_off(verdict)
     assert reviewer.soft_inputs == []
+    [entry] = await reply_entries(app, copy)
+    assert entry.event.summary["rule_ids"] == ["lex.en.booking", rule_id]
 
 
 async def test_a_reply_naming_only_the_card_passes(app, client, reviewer):
@@ -1041,9 +1083,20 @@ async def test_a_reply_naming_only_the_card_passes(app, client, reviewer):
     ("Ya está hecha tu reserva.", "lex.es.booking", "Ya está hecha"),
 ])
 def test_booking_claims_in_prose_are_blocked(prose, rule_id, span):
-    """Only a booking card says a visit is booked: the claim in prose is a promise word, in English
-    and Spanish, whatever card is beside it."""
+    """Only a booking card says a visit is booked: with none in the reply, the claim in prose is a
+    promise word, in English and Spanish; beside one, it passes (the owner's decision, below)."""
     assert [(v.kind, v.rule_id, v.span) for v in reply_check.scan_prose(prose)] == [("promise_word", rule_id, span)]
+    assert reply_check.scan_prose(prose, booking_card=True) == []
+
+
+def test_a_booking_card_lets_only_the_booking_claim_through():
+    """The owner's decision of 2026-10-30 passes a booking claim beside its card, and nothing else
+    the scan finds: a day, a digit or a promise word in the same prose still blocks."""
+    found = reply_check.scan_prose("You're booked for Tuesday at 10, free of charge.", booking_card=True)
+    assert [(v.rule_id, v.span) for v in found] == [("lex.en.date", "Tuesday"), ("digit", "10"),
+                                                    ("lex.en.promise", "free")]
+    found = reply_check.scan_prose("Tu cita está confirmada para el martes, sin costo.", booking_card=True)
+    assert [(v.rule_id, v.span) for v in found] == [("lex.es.date", "martes"), ("lex.es.promise", "sin costo")]
 
 
 def test_booking_claims_read_lookalike_letters():

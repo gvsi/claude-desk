@@ -12,13 +12,16 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    name, as the owner set them), both lexicons (`lexicon/en.txt` and `lexicon/es.txt`, whatever
    the language, with each letter that looks like a Latin one read as it, from
    `lexicon/lookalikes.txt`, every dash as "-" and every apostrophe as "’"; booking claims such
-   as "you're booked" among them), links and email addresses (`LINK`), and the Desk's document
-   canaries. Links and contacts reach a visitor only in their cards, so prose saying them is
-   blocked even beside the card. Prose may restate a policy its card carries (the owner's
-   decision of 2026-10-30), which the soft-promise check reads with the card.
+   as "you're booked" among them, unless the reply carries a booking card that step 4 passed),
+   links and email addresses (`LINK`), and the Desk's document canaries. Links and contacts
+   reach a visitor only in their cards, so prose saying them is blocked even beside the card.
+   Since the owner's decision of 2026-10-30, a booking claim passes beside the booking's card,
+   which says the same, and a policy's words are left to the soft-promise check, which reads
+   the prose with the cards.
 4. Each clause renders from a fact this session may read, current, of the template's kind and ID,
    with no canary in what it renders. The Desk's catalog (`context.catalog_fact`) is cited like a
-   stored fact, and no template renders it, so it backs no card.
+   stored fact, and no template renders it, so it backs no card. The clauses are checked before
+   the prose is scanned, so the scan knows which cards pass; their refusals follow the scan's.
 5. The soft-promise check, only when steps 2 to 4 found nothing and there is prose: Haiku 5.5
    reads the prose and the cards' texts (never the visitor's words) and flags a promise the cards
    don't hold (`soft.promise`) or prose that says or suggests the writer is a human
@@ -380,7 +383,8 @@ def _links(text: str, readings: dict[str, list[int]]) -> list[tuple[int, str, Vi
     return hits
 
 
-def scan_prose(text: str, canaries: Iterable[str] = (), names: Iterable[str] = ()) -> list[Violation]:
+def scan_prose(text: str, canaries: Iterable[str] = (), names: Iterable[str] = (), *,
+               booking_card: bool = False) -> list[Violation]:
     """Every number, currency sign, lexicon word, link and canary in `text`, after
     `shown`: any Unicode numeral or character drawn as a digit (`digit`, with the separators inside
     one number and the letters shaped like 0 or 1 next to it in the same span, and a word made only
@@ -388,7 +392,9 @@ def scan_prose(text: str, canaries: Iterable[str] = (), names: Iterable[str] = (
     (`percent_sign`) and every match of both lexicons (`lex.<lang>.<category>`) is
     `number_in_prose`, or `promise_word` for the promise and booking categories, but for a booking
     claim with a condition straight before it (`BOOKING_CONDITION`: "once you're booked", "si" but
-    not "sí") or inside such a claim, a claim inside another being one (`_booking_claims`); a run
+    not "sí") or inside such a claim, a claim inside another being one (`_booking_claims`), and
+    for every booking claim with `booking_card` (the reply carries a `booking_confirmed` card the
+    clause checks passed, which says the same: the owner's decision of 2026-10-30); a run
     of text between blanks holding a URL scheme, "www.", a domain before a path, a bare domain
     ending in one of `LINK_TLDS` or an "@" between word characters, whatever dots, dashes and
     underscores are glued to its front (`LINK_GLUE`), is `promise_word` (`link`); a word mixing
@@ -421,7 +427,8 @@ def scan_prose(text: str, canaries: Iterable[str] = (), names: Iterable[str] = (
     hits += [(start, "mixed_script", Violation(kind="unsupported_language", span=_span(word), rule_id="mixed_script"))
              for start, word in _words(text) if _mixes_scripts(word) and reach[start] < start + len(word)]
     readings = _readings(text)
-    hits += _booking_claims(text, readings)
+    if not booking_card:
+        hits += _booking_claims(text, readings)
     hits += _links(text, readings)
     seen: set[tuple[str, int, int]] = set()
     for language, entries in LEXICONS.items():
@@ -595,8 +602,10 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
     if detected == "other":
         excerpt, _ = _blank_canaries(prose, canaries)
         violations.append(Violation(kind="unsupported_language", span=_span(excerpt), rule_id="language"))
-    violations += scan_prose(draft.prose, canaries, await desk_names(ctx, desk_id))
+    # the clauses first, so the scan knows whether a booking card is shown; their refusals follow the prose's
     cards, refused = await check_clauses(ctx, session_row, desk_id, desk, draft.clauses, language, canaries)
+    violations += scan_prose(draft.prose, canaries, await desk_names(ctx, desk_id),
+                             booking_card=any(card.template == "booking_confirmed" for card in cards))
     violations += refused
     usage = None
     if not violations and prose.strip():

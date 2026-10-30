@@ -5,7 +5,8 @@
 # "next-week") and every apostrophe as "’" ("oʼclock" is "o’clock"). Categories: number, money,
 # percent and date (number_in_prose), and promise and booking (promise_word). A booking claim
 # with a condition straight before it ("once you're booked") passes (`BOOKING_CONDITION` in
-# reply_check.py). Both lexicons run on every draft, whatever its language.
+# reply_check.py), and so does every booking claim in a reply that carries the booking's card.
+# Both lexicons run on every draft, whatever its language.
 
 # Spelled-out numbers. A bare "one" counts only next to a unit or another number word, so "one
 # moment" passes.
