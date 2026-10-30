@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Deploy Claude Desk to AWS (us-west-2) from the owner's own terminal. Every deploy runs the whole
-# sequence and stops at the first step that fails:
+# Deploy Claude Desk to AWS (us-west-2), with the owner's go. Every deploy runs the whole sequence
+# and stops at the first step that fails:
 #
-#   1. the owner retypes the AWS account ID it prints;
+#   1. the AWS account: with DESK_DEPLOY_ACCOUNT set, the account the credentials resolve to must
+#      be that one; without it, the owner retypes the account ID it prints;
 #   2. preflight.py: a clean tree, HEAD on origin/main, HEAD's passing tier 2 results file, both
 #      owner secrets set, the web app built and checked at HEAD;
 #   3. make image image-check, tagged with the commit (desk-kernel:<sha>, which the app image is
@@ -15,18 +16,29 @@
 #   7. smoke.py against the public URL, the task's security groups and public IP and, in Express
 #      mode, the origin and its load balancer's security groups.
 #
-#   read -rs DESK_PASSCODE; export DESK_PASSCODE
-#   infra/scripts/deploy.sh [--compute express|alb] [--allow-branch]
+#   infra/scripts/deploy.sh [--compute express|alb] [--allow-branch] [--data-only]
+#   DESK_DEPLOY_ACCOUNT=<account> infra/scripts/deploy.sh      a redeploy, with no account to retype
+#
+# The smoke checks sign in with the owner passcode: DESK_PASSCODE when it's exported, else the
+# macOS Keychain item claude-desk-passcode, read before any deploy step. Store it once with
+#
+#   security add-generic-password -s claude-desk-passcode -a "$USER" -w
+#
+# which asks for it twice without echo (-w goes last). Only smoke.py is given the passcode, in its
+# environment; it never reaches a command line, the output or the log.
 #
 # The first deploy creates DeskData alone first, so the owner can set the two secrets it creates:
 # `deploy.sh --data-only` runs steps 1 to 4 (preflight without the owner secrets or the web build)
-# and stops. It needs no DESK_PASSCODE.
+# and stops. It needs no passcode.
 #
 # A custom domain comes from DESK_DOMAIN_NAME and DESK_CERTIFICATE_ARN (an ACM certificate in
-# us-east-1) in the owner's shell, never from the repo. cdk deploy asks for approval before any
-# change that broadens IAM permissions or security group access, so it keeps the terminal for its
-# own output; everything else, the CloudFormation events included, is also written to
-# infra/out/deploy-<UTC time>.log.
+# us-east-1) in the owner's shell, never from the repo. At a terminal, cdk deploy asks for approval
+# before any change that broadens IAM permissions or security group access, so it keeps the
+# terminal for its own output; everything else, the CloudFormation events included, is also
+# written to infra/out/deploy-<UTC time>.log. A run without a terminal is refused unless
+# DESK_DEPLOY_ACCOUNT is set; nobody can approve there, so before each cdk deploy the log gets that
+# stack's security-relevant changes (a read-only cdk diff --security-only), and the deploy runs
+# with --require-approval never.
 set -euo pipefail
 
 usage() {
@@ -66,7 +78,7 @@ unattended=
 if [[ ! -t 0 || ! -t 1 ]]; then
   if [[ -z ${DESK_DEPLOY_ACCOUNT:-} ]]; then
     echo "deploy: run this in your own terminal: cdk deploy asks for approval there, and you retype the account ID" >&2
-    echo "deploy: or set DESK_DEPLOY_ACCOUNT=<account ID> to deploy unattended" >&2
+    echo "deploy: or set DESK_DEPLOY_ACCOUNT=<account> to deploy unattended" >&2
     exit 2
   fi
   unattended=1
@@ -82,6 +94,7 @@ done
 # given it, in its environment: never on a command line, in the output or in the log.
 no_passcode() {
   echo "deploy: DESK_PASSCODE isn't set and $*; the smoke checks sign in with the passcode" >&2
+  # shellcheck disable=SC2016  # the command to paste, $USER and all
   echo 'deploy: store it once in the Keychain with: security add-generic-password -s claude-desk-passcode -a "$USER" -w' >&2
   echo "deploy: (it asks for the passcode twice, without echo), or export DESK_PASSCODE for this run" >&2
   exit 2
@@ -100,7 +113,8 @@ unset DESK_PASSCODE
 
 mkdir -p "$OUT"
 log=$OUT/deploy-$(date -u +%Y%m%dT%H%M%SZ).log
-# fd 3 stays the terminal, for cdk deploy; everything else goes to the terminal and the log.
+# fd 3 stays the terminal (unattended, the original output), for cdk deploy; everything else goes
+# there and to the log.
 exec 3>&1
 exec > >(tee -a "$log") 2>&1
 on_exit() {

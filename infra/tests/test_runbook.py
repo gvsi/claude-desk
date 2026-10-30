@@ -10,11 +10,16 @@ RUNBOOK = REPO / "docs" / "deploy.md"
 MIGRATIONS = "backend/alembic/versions/"
 
 
-def section(title: str) -> str:
-    """The runbook section under `## <title>`, its lines joined into one."""
+def raw_section(title: str) -> str:
+    """The runbook section under `## <title>`, as written."""
     match = re.search(rf"^## {re.escape(title)}\n(.*?)(?=^## |\Z)", RUNBOOK.read_text(), re.S | re.M)
     assert match, f"docs/deploy.md has no section {title!r}"
-    return " ".join(match.group(1).split())
+    return match.group(1)
+
+
+def section(title: str) -> str:
+    """The runbook section under `## <title>`, its lines joined into one."""
+    return " ".join(raw_section(title).split())
 
 
 def test_rollback_redeploys_an_earlier_commit_only_when_no_migration_shipped_since():
@@ -86,3 +91,36 @@ def test_the_first_deploy_creates_desk_data_behind_the_account_check():
     assert "infra/scripts/deploy.sh --data-only" in lines
     assert lines.index("infra/scripts/deploy.sh --data-only") < next(
         i for i, line in enumerate(lines) if "set_secret.py" in line) < lines.index("infra/scripts/deploy.sh")
+
+
+STORE_PASSCODE = 'security add-generic-password -s claude-desk-passcode -a "$USER" -w'
+REDEPLOY = "DESK_DEPLOY_ACCOUNT=<account> infra/scripts/deploy.sh"
+
+
+def sh_lines(title: str) -> list[str]:
+    """The commands in a section's sh blocks, comments dropped."""
+    blocks = re.findall(r"```sh\n(.*?)```", raw_section(title), re.S)
+    return [line.split("  #", 1)[0].strip() for block in blocks for line in block.splitlines()]
+
+
+def test_the_first_deploy_stores_the_passcode_where_deploy_sh_reads_it():
+    """Without DESK_PASSCODE, deploy.sh reads the Keychain item claude-desk-passcode and, when it's
+    missing, prints how to store it (test_deploy.py); the first deploy stores it with that command,
+    before the full deploy that needs it."""
+    script = (INFRA / "scripts" / "deploy.sh").read_text()
+    assert STORE_PASSCODE in script
+    assert "security find-generic-password -s claude-desk-passcode -w" in script
+    lines = sh_lines("First deploy (owner's terminal)")
+    assert STORE_PASSCODE in lines
+    assert lines.index(STORE_PASSCODE) < lines.index("infra/scripts/deploy.sh")
+    assert "read -rs DESK_PASSCODE; export DESK_PASSCODE" not in lines
+
+
+def test_a_redeploy_is_one_line_and_the_runbook_says_what_it_skips():
+    """With DESK_DEPLOY_ACCOUNT set deploy.sh asks nothing and runs without a terminal, logging each
+    stack's security diff and deploying with --require-approval never (test_deploy.py)."""
+    assert REDEPLOY in sh_lines("Redeploys")
+    redeploys = section("Redeploys")
+    assert "refuses, deploying nothing" in redeploys
+    assert "`cdk diff --security-only`" in redeploys and "`--require-approval never`" in redeploys
+    assert REDEPLOY in " ".join((INFRA / "scripts" / "deploy.sh").read_text().replace("#", " ").split())
