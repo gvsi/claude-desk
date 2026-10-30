@@ -58,13 +58,23 @@ function viewOf({ notice, entry, failed }: DemoInboxItem): ItemView {
   return entry || failed ? { kind: 'failed' } : { kind: 'opening' };
 }
 
+/** A stand-in origin to resolve a link against: no real link can share it. */
+const APP_ORIGIN = 'https://desk.invalid';
+
 /**
- * A request link stays in the owner app: a path in it ("/app/…") or a place on this page ("#…").
- * Anything else, another site or a script URL, draws no link.
+ * A request link stays in the owner app: a place on this page ("#…"), or a path in it ("/app/…")
+ * that a browser resolves to this same site. Anything else draws no link: another site, a script
+ * URL, or a path a browser reads as another site ("//…", "/\…").
  */
 function inAppHref(href: string | undefined): string | undefined {
   if (href === undefined) return undefined;
-  return (href.startsWith('/') && !href.startsWith('//')) || href.startsWith('#') ? href : undefined;
+  if (href.startsWith('#')) return href;
+  if (!href.startsWith('/')) return undefined;
+  try {
+    return new URL(href, APP_ORIGIN).origin === APP_ORIGIN ? href : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** The recipient the kernel writes for the owner; anything else is a masked contact on record. */

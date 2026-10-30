@@ -340,6 +340,20 @@ export const OwnerAlertNotOpenYet: Story = {
 /** Linda's hold alert, opened, as her screen holds it. */
 const holdAlert = everythingArrived.find((item) => item.entry?.kind === 'alert') as DemoInboxItem;
 
+/** Where the owner app opens the held request Linda's alert is about: a path in the app. */
+const IN_APP_HREF = '/app/main/today#request-dec-chen-consultation';
+
+export const OwnerAlertLinkIsAPathInTheApp: Story = {
+  args: { viewer: 'owner', items: [{ ...holdAlert, requestHref: IN_APP_HREF }] },
+  parameters: {
+    canvasNote: `${BOARD}'s owner panel with the request link as the owner app builds it, a path in the app, which no board shows: the alert links there.`,
+  },
+  play: async ({ canvas }) => {
+    // request_link_stays_in_the_app: a path in the app draws a link, as a place on the page does.
+    await expect(canvas.getByRole('link', { name: 'Open the request' })).toHaveAttribute('href', IN_APP_HREF);
+  },
+};
+
 export const OwnerAlertLinkLeavesTheApp: Story = {
   args: { viewer: 'owner', items: [{ ...holdAlert, requestHref: '//elsewhere.example/request' }] },
   parameters: {
@@ -347,6 +361,23 @@ export const OwnerAlertLinkLeavesTheApp: Story = {
   },
   play: async ({ canvas, canvasElement }) => {
     // request_link_stays_in_the_app: only a path in the app or a place on the page draws a link.
+    await expect(within(itemsOf(canvasElement)[0] as HTMLElement).getByText(holdAlert.entry?.body ?? '')).toBeVisible();
+    await expect(canvas.queryByRole('link')).toBeNull();
+  },
+};
+
+/** A path that starts with a slash and a backslash, which a browser reads as another site. */
+const BACKSLASH_HREF = '/\\elsewhere.example/request';
+
+export const OwnerAlertLinkLeavesTheAppByBackslash: Story = {
+  args: { viewer: 'owner', items: [{ ...holdAlert, requestHref: BACKSLASH_HREF }] },
+  parameters: {
+    canvasNote: `${BOARD}'s owner panel with a request link that looks like a path in the app but leaves it, which no screen builds: the alert shows no link.`,
+  },
+  play: async ({ canvas, canvasElement }) => {
+    // request_link_stays_in_the_app: a browser resolves "/\elsewhere.example" to another site, so
+    // it draws no link, however much it looks like a path.
+    await expect(new URL(BACKSLASH_HREF, window.location.href).origin).not.toBe(window.location.origin);
     await expect(within(itemsOf(canvasElement)[0] as HTMLElement).getByText(holdAlert.entry?.body ?? '')).toBeVisible();
     await expect(canvas.queryByRole('link')).toBeNull();
   },
