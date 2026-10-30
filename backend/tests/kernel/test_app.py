@@ -1,7 +1,10 @@
 """The kernel app: health, startup refusals, loopback binding, columns and error answers."""
 
+import ast
 import json
+import logging
 import re
+from pathlib import Path
 
 import desk_kernel
 import psycopg
@@ -9,6 +12,7 @@ import pytest
 
 from sqlalchemy import select
 
+from desk import kernel_service
 from desk.contracts import LedgerEvent
 from desk.db.models import Desk, PriceItem
 from desk.db.session import database_url, dispose_engines, libpq_url
@@ -239,3 +243,52 @@ async def test_error_answers_commit_their_ledger_entry(app, client):
     assert len(await ledger_rows(app, rows)) == 1
     with pytest.raises(ValueError):
         KernelFailure(409, "busy")                                              # only KernelError codes
+
+
+NOTE = "Call me back at maria@riverapl.example"     # what a request carried, which no log may carry
+
+
+async def test_error_logs_carry_no_request_text(app, client, caplog):
+    """An error that isn't a refusal can quote what the request carried (a visitor's arguments, a
+    statement's parameters). The kernel logs its kind and the frames it rose through, never its
+    text."""
+
+    @app.post("/test/raises")
+    async def raises(body: dict) -> dict:
+        raise RuntimeError(f"a bug that quotes {body['note']!r}")
+
+    @app.post("/test/unrecorded")
+    async def unrecorded(body: dict) -> dict:
+        async def fails(ctx: KernelCtx) -> None:
+            raise RuntimeError(f"a record that quotes {body['note']!r}")
+
+        raise KernelFailure(409, "conflict", persist=fails)
+
+    with caplog.at_level(logging.INFO, logger="desk.kernel_service"):
+        responses = [await client.post(path, json={"note": NOTE}) for path in ("/test/raises", "/test/unrecorded")]
+    assert [(response.status_code, response.json()) for response in responses] == [(500, {"code": "internal"})] * 2
+    assert "internal_error route=POST /test/raises kind=RuntimeError\n" in caplog.text
+    assert ("kernel_failure_unrecorded route=POST /test/unrecorded code=conflict reason=conflict kind=RuntimeError\n"
+            in caplog.text)
+    assert "maria@riverapl.example" not in caplog.text
+
+
+PRINTS_ERROR_TEXT = {"exception", "format_exc", "print_exc", "format_exception", "print_exception"}
+
+
+def test_kernel_logs_never_print_an_errors_text():
+    """On a request's or an execution's path, the kernel logs an error with `repo.log_error` only:
+    a `logger.exception`, an `exc_info` or a formatted exception would print its text, which can
+    quote a visitor. Activation's own logs are left out: their errors come from the prover and the
+    owner's own cards, at startup or in the owner's draft."""
+    package = Path(kernel_service.__file__).parent
+    found = []
+    for path in sorted(package.rglob("*.py")):
+        if path.name == "activation.py":
+            continue
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.Call) and (
+                    (isinstance(node.func, ast.Attribute) and node.func.attr in PRINTS_ERROR_TEXT)
+                    or any(keyword.arg == "exc_info" for keyword in node.keywords)):
+                found.append(f"{path.relative_to(package)}:{node.lineno}")
+    assert found == []

@@ -37,7 +37,6 @@ import hashlib
 import json
 import logging
 import re
-import traceback
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -676,8 +675,8 @@ def _internal_error(named: Named, req: DecideRequest, exc: BaseException) -> Ker
     """A failure while deciding that isn't a refusal (`KernelRepo` refusing a statement kernel code
     built, the database failing the transaction, an error in the engine): 500 `internal`, with the
     attempt still on record (`_refused_call`). The log names the failure's kind and the frames it
-    rose through, never its text, which can quote the visitor's arguments."""
-    log.error("decide_internal_error kind=%s\n%s", type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)))
+    rose through, never its text, which can quote the visitor's arguments (`repo.log_error`)."""
+    repo.log_error(log, exc, "decide_internal_error")
     return _refused_call(500, "internal", "internal_error", named, req)
 
 

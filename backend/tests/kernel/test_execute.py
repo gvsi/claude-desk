@@ -7,6 +7,7 @@ orphaned intent as a read does.
 """
 
 import asyncio
+import logging
 
 import httpx
 import pytest
@@ -485,6 +486,37 @@ async def test_on_failed_is_never_kept_without_its_failed_record(app, client, re
     base = {"decision_id": allowed.decision_id, "action_id": action_id}
     assert [e.event.summary for e in await ledger_rows(app, rows) if e.event.kind == "execute"] == [
         {**base, "state": "unknown", "orphaned": True}, {**base, "state": "failed", "reconciled": True}]
+
+
+NOTE = "Call me back at maria@riverapl.example"     # what a visitor typed, which no log may carry
+
+
+def echoes_the_note(*args) -> None:
+    raise RuntimeError(f"the provider refused the note {NOTE!r}")
+
+
+@pytest.mark.parametrize(("hook", "logged"), [("execute", "execution_unknown"), ("on_failed", "on_failed_failed"),
+                                              ("reconcile", "reconcile_error")])
+async def test_a_failure_log_carries_no_visitor_text(app, client, registry, frozen_clock, caplog, hook, logged):
+    """An error raised while an action runs can quote what the visitor typed (an adapter's error its
+    arguments, a validation error the input it refused). The log names the error's kind and the
+    frames it rose through, never its text."""
+    quote = FakeAdapter("native.quote")
+    rows = await desk_with(app, [quote], [card("quote", "native.quote")])
+    visitor = await open_visitor(client, rows)
+    allowed = await decided(client, visitor, "native.quote", {"qty": 1, "note": NOTE})
+    if hook == "on_failed":
+        quote.script["execute"] = AdapterFailure("slot_taken")      # undone, and the undo fails
+    quote.script[hook] = echoes_the_note
+    with caplog.at_level(logging.INFO, logger="desk.kernel_service"):
+        if hook == "reconcile":                                     # an orphan, which a read settles
+            await store_intent(app, rows.copy_id, allowed)
+            frozen_clock.advance(31)
+            assert (await read(client, visitor.headers, allowed)).state == "unknown"
+        else:
+            assert (await executed(client, visitor, allowed)).state == "unknown"
+    assert f"{logged} action_id={allowed.action.action_id} kind=RuntimeError\n" in caplog.text
+    assert "maria@riverapl.example" not in caplog.text
 
 
 async def test_a_take_over_after_the_intent_stops_the_allow(app, client, registry, monkeypatch):

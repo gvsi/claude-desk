@@ -53,14 +53,17 @@ key's advisory lock before the `versions` lock.
 
 A route refuses with `KernelFailure`. Its answer is always a `KernelError{code}`; when the refusal
 must be on record (a ledgered auth failure, an allow that expired), `persist` writes that record
-in a fresh transaction after the request's own has rolled back.
+in a fresh transaction after the request's own has rolled back. An error that isn't a refusal is
+logged with `log_error`, by its kind and the frames it rose through, never its text.
 """
 
 from __future__ import annotations
 
 import base64
+import logging
 import re
 import secrets
+import traceback
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -180,6 +183,16 @@ class KernelFailure(Exception):
         self.code = code
         self.reason = reason or code
         self.persist = persist
+
+
+def log_error(logger: logging.Logger, exc: BaseException, message: str, *args: object) -> None:
+    """Logs `exc` at ERROR as `message` (a fixed event name and kernel-built values, %-formatted
+    with `args`), then `kind=<its class>` and the frames it rose through, never its text: an
+    error's message can quote what a visitor typed (an adapter's error its arguments, a validation
+    error the input it refused, a driver error a statement's parameters). Used in place of
+    `logger.exception` wherever a request or an execution can fail."""
+    logger.error(f"{message} kind=%s\n%s", *args, type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
+                 stacklevel=2)
 
 
 def route_template(request: Request) -> str:
