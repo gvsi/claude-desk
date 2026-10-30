@@ -34,6 +34,7 @@ KEYCHAIN_PROBE = ["find-generic-password", "-s", "claude-desk-passcode", "-g"]
 STORE_IT = 'security add-generic-password -s claude-desk-passcode -a "$USER" -w'
 REPLACE_IT = 'security add-generic-password -U -s claude-desk-passcode -a "$USER" -w'
 RERUN_IT = "run deploy.sh again; if this repeats, export DESK_PASSCODE for this run"
+EXPORT_IT = "to export it without echo or shell history, run: read -rs DESK_PASSCODE && export DESK_PASSCODE"
 
 # Each stub appends {"tool", "argv", "cwd", "tty", "passcode", "env"} to $STUB_LOG, "passcode" being
 # the SHA-256 of the DESK_PASSCODE it was given (None without one) and "env" each environment
@@ -720,6 +721,7 @@ def test_a_keychain_item_that_cant_be_read_says_so_before_any_step(deploy, locke
             "(is it stored, and is the login Keychain unlocked?)") in run.output
     assert STORE_IT in run.output and REPLACE_IT in run.output
     assert "DESK_PASSCODE" in run.output                                     # the other way to give it
+    assert EXPORT_IT in run.output                                           # without echo or history
     assert "keychain-test-passcode" not in run.text()
 
 
@@ -731,6 +733,7 @@ def test_an_empty_keychain_item_says_so_before_any_step(deploy):
     assert run.steps() == ["security find-generic-password"]
     assert "the macOS Keychain item claude-desk-passcode is empty" in run.output
     assert REPLACE_IT in run.output and STORE_IT not in run.output and "DESK_PASSCODE" in run.output
+    assert EXPORT_IT in run.output
 
 
 def test_the_stub_security_answers_as_apples_does(tmp_path):
@@ -839,7 +842,7 @@ def test_a_keychain_item_whose_stored_form_cant_be_read_is_refused_before_any_st
     assert [call["argv"] for call in run.calls] == [KEYCHAIN_LOOKUP, KEYCHAIN_PROBE]
     assert ("the macOS Keychain item claude-desk-passcode couldn't be read a second time, to check how "
             "it's stored (is the login Keychain unlocked?)") in run.output
-    assert RERUN_IT in run.output
+    assert RERUN_IT in run.output and EXPORT_IT in run.output
     assert "add-generic-password" not in run.output                   # neither storing nor replacing it
     assert "keychain-test-passcode" not in run.text()
 
@@ -852,7 +855,7 @@ def test_no_security_command_says_to_export_the_passcode_before_any_step(deploy)
     assert run.calls == []
     assert "no `security` command" in run.output
     assert STORE_IT not in run.output and REPLACE_IT not in run.output
-    assert "export DESK_PASSCODE for this run" in run.output
+    assert "export DESK_PASSCODE for this run" in run.output and EXPORT_IT in run.output
 
 
 def test_unattended_without_the_deploy_account_is_refused(deploy):

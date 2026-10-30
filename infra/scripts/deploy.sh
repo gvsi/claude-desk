@@ -133,6 +133,7 @@ no_passcode() {  # no_passcode store|replace|retry|export <why>: the Keychain co
     retry) echo "deploy: run deploy.sh again; if this repeats, export DESK_PASSCODE for this run" ;;
     *) echo "deploy: export DESK_PASSCODE for this run" ;;
   esac >&2
+  echo "deploy: to export it without echo or shell history, run: read -rs DESK_PASSCODE && export DESK_PASSCODE" >&2
   exit 2
 }
 if [[ -z $data_only ]]; then

@@ -164,3 +164,13 @@ def test_the_runbook_says_who_can_read_the_keychain_item():
             "prompt, through `security` as `deploy.sh` does, agent sessions included.") in first
     assert ("Agents never read it themselves, but that is a rule they follow, not something this setup "
             "enforces.") in first
+
+
+def test_the_runbook_says_how_to_export_the_passcode_without_echo_or_shell_history():
+    """An exported DESK_PASSCODE wins over the Keychain, and deploy.sh's advice offers it for a run
+    (test_deploy.py). Typed on a command line, the passcode would be shown and kept in the shell's
+    history, so the runbook gives a way that does neither, where the passcode is stored."""
+    first = section("First deploy (owner's terminal)")
+    assert ("To export the passcode for one run instead, without echo or shell history, run "
+            "`read -rs DESK_PASSCODE && export DESK_PASSCODE` and type it, then `unset DESK_PASSCODE` "
+            "after the deploy.") in first
