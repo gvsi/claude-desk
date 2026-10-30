@@ -138,3 +138,14 @@ def test_the_passcode_is_asked_for_in_printable_ascii():
     assert "can't catch" not in first and "hex is itself printable ASCII" not in first
     script = " ".join((INFRA / "scripts" / "deploy.sh").read_text().replace("#", " ").split())
     assert "it must be printable ASCII with no backslash" in script
+
+
+def test_the_runbook_says_who_can_read_the_keychain_item():
+    """The Keychain item keeps the passcode from other users, not from the owner's own processes:
+    `security`, which stored it, reads it back for any of them without a prompt. The runbook says so
+    plainly, agent sessions included, and claims no more for the rule that agents don't read it."""
+    first = section("First deploy (owner's terminal)")
+    assert ("While your login Keychain is unlocked, any process running as you can read the item without a "
+            "prompt, through `security` as `deploy.sh` does, agent sessions included.") in first
+    assert ("Agents never read it themselves, but that is a rule they follow, not something this setup "
+            "enforces.") in first
