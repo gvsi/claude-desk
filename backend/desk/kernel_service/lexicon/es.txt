@@ -28,7 +28,12 @@ date	fin(?:es)?[\s-]+de[\s-]+semana|(?:la[\s-]+)?(?:proxima|siguiente)[\s-]+sema
 date	esta[\s-]+(?:noche|tarde|semana)|(?:este|el[\s-]+proximo)[\s-]+mes
 date	las[\s-]+once|la[\s-]+una
 
-# Promises only the owner's rules or a card can make ("garantía" without the accent)
+# Promises only the owner's rules or a card can make ("garantía" without the accent). "libre"
+# states a price before "para" or "a" and everyone or an audience: "acceso libre a todas las
+# clases", "libre para los socios". It passes elsewhere, where it is a time that is open or a
+# freedom: "un horario libre para usted", "libre para la cita", "usted es libre de preguntar".
 promise	garantias?|garantiz[a-z]*|promet[a-z]*|promesas?
 promise	gratis|gratuit[oa]s?|descuentos?|descont[a-z]*|reembols[a-z]*
 promise	sin[\s-]+(?:ningun[\s-]+)?(?:costo|coste|cargo)|de[\s-]+regalo
+promise	libres?(?=[\s-]+(?:para|a)[\s-]+(?:tod[oa]s|todo[\s-]+el[\s-]+mundo|cualquiera)\b)
+promise	libres?(?=[\s-]+(?:para|a)[\s-]+(?:(?:el|la|l[oa]s|nuestr[oa]s?|sus?|tus?)[\s-]+)?(?:soci[oa]s?|miembros?|clientes?|publico)\b)

@@ -151,6 +151,8 @@ async def test_numbers_and_dates_in_prose_are_blocked(app, client, prose, rule_i
     ("The first visit is free to everyone.", "lex.en.promise", "free", "en"),     # "free to" stating a price
     ("It is free to all customers.", "lex.en.promise", "free", "en"),
     ("Inspections are free to members.", "lex.en.promise", "free", "en"),
+    ("As a member you are free to all classes.", "lex.en.promise", "free", "en"),   # an audience after "free to"
+    ("Como socio, usted tiene acceso libre a todas las clases.", "lex.es.promise", "libre", "es"),
     ("Eso es gratis.", "lex.es.promise", "gratis", "es"),
     ("Le prometo.", "lex.es.promise", "prometo", "en"),      # too few words to tell: English
 ])
@@ -185,6 +187,7 @@ def test_the_lookalike_table_is_what_its_script_makes():
     ("You may want to turn off the water.", "en"),          # the modal, not the month
     ("Feel free to ask me anything.", "en"),                # free, not a price
     ("You're free to ask me anything.", "en"),
+    ("Usted es libre de preguntarme lo que quiera.", "es"),   # free to ask, not a price
 ])
 async def test_plain_prose_passes(app, client, prose, language):
     copy, visitor = await visitor_of(app, client)

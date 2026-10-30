@@ -30,10 +30,12 @@ date	[ap]\.\s?m\.?|pm
 # Promises only the owner's rules or a card can make. "free" passes only in "feel free" and in
 # "free to" after "you're", "you are", "you'll be" or "you will be" ("you're free to ask"), where
 # it can't be a price. Anywhere else "free to" may state one: "free to everyone", "free to all
-# customers", "inspections are free to members".
+# customers", "inspections are free to members". So does "free to" before a quantifier, determiner,
+# pronoun or audience, whatever comes before it: "as a member you are free to all classes".
 promise	guarant(?:ee|ees|eed|eeing|y)|promis(?:e|es|ed|ing)
 promise	(?<!feel )free(?! to\b)
 promise	(?<!feel )(?<!you['’]re )(?<!you are )(?<!you['’]ll be )(?<!you will be )free(?= to\b)
+promise	free(?=[\s-]+to[\s-]+(?:all|any(?:one|body)?|every(?:one|body)?|each|the|an?|our|your|their|you|them|members?|customers?|clients?|guests?)\b)
 promise	discount(?:s|ed|ing)?|refund(?:s|ed|ing|able)?|waiv(?:e|es|ed|er|ing)|complimentary
 promise	no[\s-]+charge|on[\s-]+the[\s-]+house|warrant(?:y|ies)|money[\s-]+back
 promise	(?:at[\s-]+)?no[\s-]+(?:extra[\s-]+|additional[\s-]+)?cost
