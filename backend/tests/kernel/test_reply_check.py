@@ -378,6 +378,8 @@ HYPHENATED = [                       # lexicon phrases whose words a dash may jo
     ("entrada-libre", "lex.es.promise"), ("libre-de-impuestos", "lex.es.promise"),
     ("you're-booked", "lex.en.booking"), ("your-visit-is-confirmed", "lex.en.booking"),
     ("tu-cita-está-confirmada", "lex.es.booking"), ("ya-estás-reservado", "lex.es.booking"),
+    ("booking-confirmed", "lex.en.booking"), ("we-have-you-booked", "lex.en.booking"),
+    ("reserva-confirmada", "lex.es.booking"), ("quedó-apartado", "lex.es.booking"),
     ("on-us", "lex.en.promise"), ("no-call-out-fee", "lex.en.promise"), ("in-a-few-minutes", "lex.en.date"),
     ("right-away", "lex.en.date"), ("first-thing-in-the-morning", "lex.en.date"),
     ("por-nuestra-cuenta", "lex.es.promise"), ("por-cuenta-de-la-casa", "lex.es.promise"),
@@ -413,9 +415,9 @@ def test_every_apostrophe_reads_as_the_plain_one(apostrophe):
         assert [(v.rule_id, v.span) for v in reply_check.scan_prose(prose)] == exempt, prose
     found = reply_check.scan_prose(f"As a member you{apostrophe}re free to all classes.")
     assert [(v.rule_id, v.span) for v in found] == [("lex.en.promise", "free")]
-    booked = f"You{apostrophe}re booked"
-    found = reply_check.scan_prose(f"{booked}.")
-    assert [(v.rule_id, v.span) for v in found] == [("lex.en.booking", reply_check.shown(booked))]
+    for booked in (f"You{apostrophe}re booked", f"It{apostrophe}s all booked", f"The spot{apostrophe}s been set"):
+        found = reply_check.scan_prose(f"{booked}.")
+        assert [(v.rule_id, v.span) for v in found] == [("lex.en.booking", reply_check.shown(booked))], booked
     for prose in (f"It{apostrophe}s on us.", f"This one{apostrophe}s on us."):
         assert [(v.rule_id, v.span) for v in reply_check.scan_prose(prose)] == [("lex.en.promise", "on us")], prose
     found = reply_check.scan_prose(f"She{apostrophe}ll be there in a few minutes.")
@@ -582,7 +584,8 @@ async def test_language_detection(app, client, prose, detected):
     ("Claro, enseguida lo reviso.", ["lex.es.date"]),                  # "enseguida" is a time: in Spanish now
     ("Tu cita está confirmada.", ["lex.es.booking"]),                  # a booking claim: in Spanish now
     ("Maria te escribe antes de llegar.", []),
-    ("Listo, quedó apartado para ti.", []),
+    ("Listo, quedó anotado para ti.", []),
+    ("Listo, quedó apartado para ti.", ["lex.es.booking"]),             # a booking claim: in Spanish now
     ("Perfecto, lo anoto.", []),
     ("Listo, ya quedó anotado.", []),
     ("Claro, lo vemos juntos.", []),
@@ -907,6 +910,38 @@ async def test_a_reply_naming_only_the_card_passes(app, client, reviewer):
     ("Your booking’s confirmed.", "lex.en.booking", "Your booking’s confirmed"),
     ("Your visit's been scheduled.", "lex.en.booking", "Your visit's been scheduled"),
     ("Your next appointment is confirmed.", "lex.en.booking", "Your next appointment is confirmed"),
+    # a claim's parts, whatever the phrasing: the nouns, participles, verbs and determiners
+    ("Your reservation is confirmed.", "lex.en.booking", "Your reservation is confirmed"),
+    ("Your slot is booked.", "lex.en.booking", "Your slot is booked"),
+    ("Your time slot is reserved.", "lex.en.booking", "Your time slot is reserved"),
+    ("The spot's been set.", "lex.en.booking", "The spot's been set"),
+    ("Your appointment was scheduled.", "lex.en.booking", "Your appointment was scheduled"),
+    ("Both your visits are booked.", "lex.en.booking", "your visits are booked"),
+    ("Reservation's confirmed.", "lex.en.booking", "Reservation's confirmed"),       # no determiner
+    ("Ana's visit is confirmed.", "lex.en.booking", "Ana's visit is confirmed"),     # a possessive
+    ("Your service call is booked.", "lex.en.booking", "Your service call is booked"),   # anything of yours
+    ("It's booked.", "lex.en.booking", "It's booked"),
+    ("It's all booked.", "lex.en.booking", "It's all booked"),
+    ("That's confirmed.", "lex.en.booking", "That's confirmed"),
+    ("Everything is set.", "lex.en.booking", "Everything is set"),
+    ("Everything's been reserved.", "lex.en.booking", "Everything's been reserved"),
+    ("You're reserved for that time.", "lex.en.booking", "You're reserved"),
+    ("You were booked with Maria.", "lex.en.booking", "You were booked"),
+    ("We have you booked.", "lex.en.booking", "We have you booked"),
+    ("We've got you down for that time.", "lex.en.booking", "We've got you down"),
+    ("I've got you all set.", "lex.en.booking", "I've got you all set"),
+    ("Booked you in.", "lex.en.booking", "Booked you"),                               # no subject
+    ("Maria booked you with her crew.", "lex.en.booking", "booked you"),
+    ("I've reserved the slot for you.", "lex.en.booking", "I've reserved the slot"),
+    ("I reserved your visit.", "lex.en.booking", "I reserved your visit"),
+    ("We've reserved a time slot for you.", "lex.en.booking", "We've reserved a time slot"),
+    ("We reserved it.", "lex.en.booking", "We reserved it"),
+    ("She's confirmed your reservation.", "lex.en.booking", "She's confirmed your reservation"),
+    ("Booking confirmed.", "lex.en.booking", "Booking confirmed"),                    # the headline
+    ("Great, appointment booked!", "lex.en.booking", "appointment booked"),
+    ("Visit: scheduled.", "lex.en.booking", "Visit: scheduled"),
+    ("All booked.", "lex.en.booking", "All booked"),
+    ("Done, all confirmed.", "lex.en.booking", "all confirmed"),
     ("Tu cita está confirmada.", "lex.es.booking", "Tu cita está confirmada"),
     ("Su visita queda agendada.", "lex.es.booking", "Su visita queda agendada"),
     ("Su reserva ya está confirmada.", "lex.es.booking", "Su reserva ya está confirmada"),
@@ -933,6 +968,22 @@ async def test_a_reply_naming_only_the_card_passes(app, client, reviewer):
     ("La cita suya está confirmada.", "lex.es.booking", "está confirmada"),
     ("Bueno, la suya quedó agendada.", "lex.es.booking", "quedó agendada"),
     ("Ya ya está confirmada.", "lex.es.booking", "ya está confirmada"),               # "ya" twice
+    ("Tu cita fue confirmada.", "lex.es.booking", "Tu cita fue confirmada"),
+    ("Su reserva quedó hecha.", "lex.es.booking", "Su reserva quedó hecha"),
+    ("Su turno quedó reservado.", "lex.es.booking", "Su turno quedó reservado"),
+    ("Tu hora está apartada.", "lex.es.booking", "Tu hora está apartada"),
+    ("La visita ha sido agendada.", "lex.es.booking", "La visita ha sido agendada"),
+    ("Las citas están confirmadas.", "lex.es.booking", "Las citas están confirmadas"),     # plural
+    ("Sus visitas ya fueron reservadas.", "lex.es.booking", "Sus visitas ya fueron reservadas"),
+    ("Listo, quedó apartado para ti.", "lex.es.booking", "quedó apartado"),
+    ("Queda confirmada la cita.", "lex.es.booking", "Queda confirmada"),              # the verb first
+    ("Fue agendada con Maria.", "lex.es.booking", "Fue agendada"),
+    ("Quedaste agendado.", "lex.es.booking", "Quedaste agendado"),
+    ("Reserva confirmada.", "lex.es.booking", "Reserva confirmada"),                  # the headline
+    ("Cita agendada.", "lex.es.booking", "Cita agendada"),
+    ("¡Listo! Turno reservado.", "lex.es.booking", "Turno reservado"),
+    ("Visita: confirmada.", "lex.es.booking", "Visita: confirmada"),
+    ("Perfecto, reserva hecha.", "lex.es.booking", "reserva hecha"),
 ])
 def test_booking_claims_in_prose_are_blocked(prose, rule_id, span):
     """Only a booking card says a visit is booked: the claim in prose is a promise word, in English
@@ -947,6 +998,10 @@ def test_booking_claims_read_lookalike_letters():
     assert found == [("lex.en.booking", "You're bооked"), ("mixed_script", "bооked")]
     found = [(v.rule_id, v.span) for v in reply_check.scan_prose("Tu citа está confirmada.")]   # Cyrillic a
     assert found == [("lex.es.booking", "Tu citа está confirmada"), ("mixed_script", "citа")]
+    found = [(v.rule_id, v.span) for v in reply_check.scan_prose("Іt's booked.")]     # a Cyrillic I, a stroke
+    assert found == [("lex.en.booking", "Іt's booked"), ("mixed_script", "Іt")]
+    found = [(v.rule_id, v.span) for v in reply_check.scan_prose("Rеserva confirmada.")]   # Cyrillic e
+    assert found == [("lex.es.booking", "Rеserva confirmada"), ("mixed_script", "Rеserva")]
 
 
 @pytest.mark.parametrize("prose", [
@@ -967,10 +1022,39 @@ def test_booking_claims_read_lookalike_letters():
     "Si ya está confirmada, Maria le avisa.",
     "SI YA ESTÁ CONFIRMADA, MARIA LE AVISA.",
     "Una vez que su reserva queda confirmada, le llega un mensaje.",
+    "Once it's booked, Maria will text you.",
+    "When your reservation is confirmed, you'll get a message.",
+    "If we have you booked already, I can look it up.",
+    "Until everything is set, the time isn't held.",
+    "After I've reserved the slot, Maria will call.",
+    "After I've booked you, Maria will reach out.",
+    "AFTER I'VE BOOKED YOU, MARIA WILL CALL.",              # "I" read as l is still the subject
+    "Cuando su cita fue confirmada, le llegó un mensaje.",
+    "Cuando las citas están confirmadas, Maria las anota.",
+    "Si quedó apartado, Maria le avisa.",
+    "Una vez que la reserva está hecha, le llega un mensaje.",
 ])
 def test_a_condition_before_a_booking_claim_passes(prose):
     """A condition straight before the claim says what happens once a booking exists, which claims
     none: "once you're booked", "cuando tu cita esté confirmada"."""
+    assert reply_check.scan_prose(prose) == []
+
+
+@pytest.mark.parametrize("prose", [
+    "Is your booking confirmed?",                       # no form of "be" before the participle
+    "Most visits are booked a day ahead.",              # a word straight before the noun
+    "All scheduled visits include a call ahead.",       # "all" before a booking noun
+    "All set, I've passed your message on.",            # "all set" says something is done
+    "Have you booked it yet?",                          # "booked it" with no subject
+    "I've confirmed it's in our service area.",         # the object starts a clause of its own
+    "Maria confirmed you're in our service area.",
+    "Para dejar una cita confirmada, necesito su dirección.",   # the participle describes the noun
+    "El tubo está hecho de cobre.",                     # "hecho" counts only after a booking noun
+    "La reparación ya está hecha.",
+])
+def test_replies_using_the_booking_words_otherwise_pass(prose):
+    """The booking lines are written from a claim's parts, so the same words in another order or
+    sense claim nothing and pass."""
     assert reply_check.scan_prose(prose) == []
 
 
