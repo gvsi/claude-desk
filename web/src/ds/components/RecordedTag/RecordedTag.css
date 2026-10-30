@@ -1,0 +1,16 @@
+/* RecordedTag: the 14 px history icon and "Recorded" in one inline row, 4 px apart, in caption
+   type and secondary ink. It never wraps and never shrinks: where a line runs short, the words
+   beside it give way first. */
+
+.cd-recorded-tag {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-4);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.cd-recorded-tag > svg {
+  flex: none;
+}

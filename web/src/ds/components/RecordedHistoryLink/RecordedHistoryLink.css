@@ -1,0 +1,22 @@
+/* RecordedHistoryLink: "Includes recorded history" in caption type and secondary ink, underlined
+   in line-control 3 px under the words. On hover the words turn primary, at motion-instant; the
+   underline stays, so the link never depends on its color. Nothing moves under reduced motion. */
+
+.cd-recorded-history-link {
+  color: var(--text-secondary);
+  text-decoration-line: underline;
+  text-decoration-thickness: 1px;
+  text-decoration-color: var(--line-control);
+  text-underline-offset: 3px;
+  transition: color var(--motion-instant) var(--motion-ease);
+}
+
+.cd-recorded-history-link:hover {
+  color: var(--text-primary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cd-recorded-history-link {
+    transition: none;
+  }
+}

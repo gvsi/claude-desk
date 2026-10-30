@@ -1,21 +1,17 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { useState } from 'react';
 import { expect, within } from 'storybook/test';
 
 import { AttemptRow, type AttemptRowProps } from '../components/AttemptRow/AttemptRow.tsx';
 import { CheckpointMeter } from '../components/AttemptRow/CheckpointMeter.tsx';
 import { Card } from '../components/Card/Card.tsx';
-import { Chip } from '../components/Chip/Chip.tsx';
 import { StatusLabel } from '../components/StatusDot/StatusDot.tsx';
 import { TextLink } from '../components/TextLink/TextLink.tsx';
 import { rivera } from '../fixtures/index.ts';
 import { Icon } from '../icons/index.tsx';
 import { expectComputed } from '../test/expectComputed.ts';
-import { SafetyPage } from './parts.tsx';
+import { KINDS, KindChips, SafetyPage } from './parts.tsx';
 import { SPEC, expectOwnerFrame, expectTabOrder } from './spec.ts';
 
-/** The kinds an attempt is sorted into, "All" first and chosen. */
-const KINDS = ['All', 'Posing as you', 'Money', 'Private data', 'Codes', 'Hidden instructions', 'Other', 'Not sorted yet'] as const;
 
 /** This week's attempts, newest first, as the screen writes them; older ones carry their date. */
 const ATTEMPTS: Omit<AttemptRowProps, 'href'>[] = [
@@ -26,20 +22,6 @@ const ATTEMPTS: Omit<AttemptRowProps, 'href'>[] = [
   { time: 'Yesterday, 2:05 pm', title: 'Hid instructions in a work order', who: 'From chat', stoppedBy: 'reply' },
   { time: 'Oct 26, 9:52 am', title: 'Asked to send Dana’s code elsewhere', who: 'From chat', stoppedBy: 'action' },
 ];
-
-/** The kinds as the screen holds them: "All" chosen at first, and the choice follows each pick. */
-function KindChips() {
-  const [kind, setKind] = useState<(typeof KINDS)[number]>('All');
-  return (
-    <div className="board-chips" role="radiogroup" aria-label="Kind of attempt">
-      {KINDS.map((option) => (
-        <Chip key={option} asRadio selected={option === kind} onClick={() => setKind(option)}>
-          {option}
-        </Chip>
-      ))}
-    </div>
-  );
-}
 
 /** The attempt opened beside the list: what happened in Claude's words, and how it was stopped. */
 function AttemptDetail() {

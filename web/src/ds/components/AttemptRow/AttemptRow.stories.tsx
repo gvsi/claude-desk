@@ -79,6 +79,10 @@ export const ActionCheckpoint: Story = {
     expectComputed(checkpoint, { fontSize: '12px', color: 'rgba(250, 249, 245, 0.64)' });
     await expect(time.getBoundingClientRect().right).toBeLessThan(title.getBoundingClientRect().left);
     await expect(title.getBoundingClientRect().right).toBeLessThan(checkpoint.getBoundingClientRect().left);
+
+    // A live attempt carries no Recorded tag.
+    await expect(canvas.queryByText('Recorded')).toBeNull();
+    await expect(link.querySelector('.cd-recorded-tag')).toBeNull();
   },
 };
 
@@ -93,6 +97,66 @@ export const ReplyCheckpoint: Story = {
   play: async ({ canvas }) => {
     const link = canvas.getByRole('link', { name: /^11:22 am Pushed for a same-day guarantee From chat/ });
     await expectStoppedBy(link, 'Reply checkpoint', ['passed', 'passed', 'passed', 'stopped']);
+  },
+};
+
+export const Recorded: Story = {
+  args: {
+    time: 'Yesterday, 10:10 pm',
+    title: 'Asked for your number in plain digits, not a card',
+    who: 'Recorded by the checkpoint',
+    stoppedBy: 'reply',
+    href: '#safety/msg-plain-digits',
+    recorded: true,
+  },
+  parameters: {
+    canvas: 'N-History-Safety',
+    canvasNote: 'One replayed attempt, as the board marks it: the Recorded tag 10 px after where it came from. The board lists it with four others.',
+  },
+  play: async ({ canvas }) => {
+    // The tag's word joins the row's name, before the checkpoint that stopped it.
+    const link = canvas.getByRole('link', { name: /^Yesterday, 10:10 pm Asked for your number in plain digits, not a card Recorded by the checkpoint Recorded Stopped by/ });
+    await expectStoppedBy(link, 'Reply checkpoint', ['passed', 'passed', 'passed', 'stopped']);
+    const tag = within(link).getByText('Recorded');
+    await expect(tag).toHaveTextContent(/^Recorded$/);
+    await expect(tag.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+    expectComputed(tag, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)', whiteSpace: 'nowrap' });
+
+    // On the line of where it came from, 10 px after it, its words on the same baseline.
+    const who = within(link).getByText('Recorded by the checkpoint');
+    const whoBox = who.getBoundingClientRect();
+    const tagBox = tag.getBoundingClientRect();
+    await expect(Math.round(tagBox.left - whoBox.right)).toBe(10);
+    await expect(tagBox.top).toBe(whoBox.top);
+    await expect(tagBox.height).toBe(whoBox.height);
+    // The row keeps its signed height.
+    await expect(Math.round(link.getBoundingClientRect().height)).toBe(50);
+  },
+};
+
+export const RecordedNarrow: Story = {
+  ...Recorded,
+  // A phone's list: the meter goes under the words, and where it came from gives way to the tag.
+  render: (args: AttemptRowProps) => (
+    <ul style={{ width: 300, maxWidth: '100%', margin: 0, padding: 0, listStyle: 'none' }}>
+      <li>
+        <AttemptRow {...args} />
+      </li>
+    </ul>
+  ),
+  parameters: {
+    canvas: 'N-History-Safety',
+    canvasNote: 'A replayed attempt in a phone-wide list, narrower than the board draws it, where where it came from gives way to the tag.',
+  },
+  play: async ({ canvas }) => {
+    const link = canvas.getByRole('link', { name: /Recorded Stopped by: Reply checkpoint$/ });
+    const who = within(link).getByText('Recorded by the checkpoint');
+    const tag = within(link).getByText('Recorded');
+    // Where it came from ellipsizes first; the tag keeps its whole width inside the row.
+    await expect(who.scrollWidth).toBeGreaterThan(who.clientWidth);
+    await expect(tag.scrollWidth).toBeLessThanOrEqual(tag.clientWidth);
+    await expect(tag.getBoundingClientRect().right).toBeLessThanOrEqual(link.getBoundingClientRect().right - 10);
+    await expect(link.scrollWidth).toBeLessThanOrEqual(link.clientWidth);
   },
 };
 

@@ -40,11 +40,11 @@ function isCompact(): boolean {
   return container.querySelector('.cd-app-shell--compact') !== null;
 }
 
-it('fill_and_the_sidebar_look_are_separate', () => {
-  // `fill` sets only the main area, so moving between a padded page and a filled one leaves the
-  // persistent sidebar as it is; `sidebarLook` alone sets the sidebar's ground, seam and height.
-  const shell = (props: { fill?: boolean; sidebarLook?: 'panel' | 'ground' }) => (
-    <AppShell sidebar={<nav aria-label="Main">Today</nav>} business="Rivera Plumbing" {...props}>
+it('fill_never_changes_the_sidebar', () => {
+  // The sidebar looks the same on every page: the panel, its seam, the window's height. `fill`
+  // sets only the main area, so moving between a padded page and a filled one leaves it as it is.
+  const shell = (fill: boolean) => (
+    <AppShell sidebar={<nav aria-label="Main">Today</nav>} business="Rivera Plumbing" fill={fill}>
       <p>Page</p>
     </AppShell>
   );
@@ -55,24 +55,13 @@ it('fill_and_the_sidebar_look_are_separate', () => {
     return { ground: style.backgroundColor, seam: style.borderRightWidth, align: style.alignItems };
   };
   const PANEL = { ground: 'rgb(34, 34, 32)', seam: '1px', align: 'normal' };
-  const GROUND = { ground: 'rgb(28, 27, 25)', seam: '0px', align: 'flex-start' };
 
-  act(() => root.render(shell({})));
+  act(() => root.render(shell(false)));
   expect(look()).toEqual(PANEL);
   expect(getComputedStyle(main()).paddingLeft).toBe('40px');
-
-  // A filled page keeps the panel sidebar unless the app asks for the ground.
-  act(() => root.render(shell({ fill: true })));
+  act(() => root.render(shell(true)));
   expect(getComputedStyle(main()).paddingLeft).toBe('0px');
   expect(look()).toEqual(PANEL);
-
-  // The ground sidebar beside a padded page, and beside a filled one.
-  act(() => root.render(shell({ sidebarLook: 'ground' })));
-  expect(getComputedStyle(main()).paddingLeft).toBe('40px');
-  expect(look()).toEqual(GROUND);
-  act(() => root.render(shell({ fill: true, sidebarLook: 'ground' })));
-  expect(getComputedStyle(main()).paddingLeft).toBe('0px');
-  expect(look()).toEqual(GROUND);
 });
 
 it('page_state_survives_the_breakpoint', async () => {
