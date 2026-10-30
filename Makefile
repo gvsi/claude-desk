@@ -25,9 +25,10 @@ kernel-contract:
 
 # The API process on 127.0.0.1:8700, with the settings in .env, as the deploy runs it but bound to loopback.
 # It reaches the kernel at KERNEL_URL (default http://127.0.0.1:8701): run `make kernel-serve` beside it.
+# No access log, as in the deploy: a request path can carry a single-use token (/api/d/..., /api/pay/...).
 api-serve:
 	cd backend && uv run --env-file ../.env uvicorn --factory desk.api.main:app_factory \
-		--host 127.0.0.1 --port 8700 --timeout-keep-alive 310
+		--host 127.0.0.1 --port 8700 --timeout-keep-alive 310 --no-access-log
 
 # Prove the Rivera seed's cards and the starter presets with desk-prove and write their reports to
 # kernel/cedar/proofs/, which the kernel activates them from (run it in any commit that changes
