@@ -8,6 +8,7 @@ visitor would get, not the text.
 import copy
 import hashlib
 import importlib
+import importlib.util
 import itertools
 import json
 import pkgutil
@@ -16,7 +17,7 @@ import subprocess
 import sys
 from datetime import time
 from pathlib import Path
-from types import MappingProxyType
+from types import MappingProxyType, ModuleType
 from typing import get_args
 
 import desk_kernel
@@ -718,6 +719,40 @@ def test_the_always_on_effects_are_the_schemas():
     assert always_on.ALWAYS_ON_EFFECTS == {
         tool: frozenset(group["id"].removeprefix("effect:") for group in actions[tool]["memberOf"])
         for tool in always_on.ALWAYS_ON_TOOLS}
+
+
+def fresh_compiler() -> ModuleType:
+    """The compiler's module code run again, as importing it runs it, into a module of its own, so
+    a test can import it under a patch without rebinding the compiler every other test uses."""
+    spec = importlib.util.spec_from_file_location(compiler.__name__, compiler.__file__)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_a_kernel_whose_always_on_effects_drifted_from_its_schema_refuses_to_start(monkeypatch):
+    """Importing the compiler compares `desk.always_on.ALWAYS_ON_EFFECTS` with the effect groups
+    the Cedar base schema gives each always-on tool and raises `RuntimeError` on a mismatch, so a
+    kernel whose shared data drifted from its schema doesn't start (the kernel service imports the
+    compiler through decide and activation). The shipped data imports cleanly."""
+    tool = "native.start_verification"
+    assert fresh_compiler().BASE_SCHEMA == compiler.BASE_SCHEMA
+
+    def mismatch(effects: list[str]) -> str:
+        return f"gives {tool} the effects {effects}, but the Cedar base schema gives it ['send_message']"
+
+    drifts = (
+        ({tool: frozenset()}, mismatch([])),                                  # its effect left out
+        ({tool: frozenset({"send_message", "private_data"})}, mismatch(["private_data", "send_message"])),
+        ({tool: frozenset({"read"})}, mismatch(["read"])),                    # another effect in its place
+        ({tool: frozenset({"send_message"}), "native.unknown": frozenset({"send_message"})},   # no such action
+         "names native.unknown, which the Cedar base schema doesn't declare"),
+    )
+    for drift, message in drifts:
+        monkeypatch.setattr(always_on, "ALWAYS_ON_EFFECTS", MappingProxyType(drift))
+        with pytest.raises(RuntimeError, match=re.escape(message)):
+            fresh_compiler()
 
 
 def test_the_shared_check_names_each_card_that_could_change_verification(monkeypatch):

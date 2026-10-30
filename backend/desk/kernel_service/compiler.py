@@ -5,7 +5,9 @@ directory, so the kernel reads the same files from a test, the repo root or the 
 (`/app/kernel/cedar`):
 
 - `BASE_SCHEMA`: the master plan's "Cedar request shape" with one action per native tool, each a
-  member of its effect groups (`effect:*`), which every Desk's schema starts from.
+  member of its effect groups (`effect:*`), which every Desk's schema starts from. Importing this
+  module raises RuntimeError when `desk.always_on.ALWAYS_ON_EFFECTS`, the always-on tools'
+  effects as the API reads them, differs from those groups, so such a kernel doesn't start.
 - `BASELINE`: set `B`, the always-on forbids, which `PolicyEngine(BASELINE)` adds to every
   evaluation.
 - `invariants(auto_money_cap_cents)`: the proof spec sets `desk-prove` checks every activation
@@ -35,6 +37,7 @@ from typing import Any, Literal
 
 import desk_kernel
 
+from desk import always_on
 from desk.always_on import ALWAYS_ON_CARDS, changes_always_on, same_rule, specificity
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, RuleCard, ToolProfile, money_tool
 from desk.contracts import moves_money  # noqa: F401  (compiler.moves_money stays importable)
@@ -44,6 +47,27 @@ from desk.money_cap import auto_money
 CEDAR_DIR = Path(__file__).resolve().parents[3] / "kernel" / "cedar"
 
 BASE_SCHEMA: dict[str, Any] = json.loads((CEDAR_DIR / "schema.cedarschema.json").read_bytes())
+
+
+def _check_always_on_effects(schema: Mapping[str, Any]) -> None:
+    """Raise RuntimeError unless `desk.always_on.ALWAYS_ON_EFFECTS` gives each always-on tool
+    exactly the effect groups (`effect:*` in its action's `memberOf`) `schema` gives it. The API
+    checks drafted cards with that data and no schema, so a kernel whose shared data drifted from
+    its schema refuses to start: this runs when the compiler is imported, as an explicit check
+    (not an assert, so `python -O` keeps it)."""
+    actions = schema[""]["actions"]
+    for tool, effects in always_on.ALWAYS_ON_EFFECTS.items():
+        if tool not in actions:
+            raise RuntimeError(f"desk.always_on.ALWAYS_ON_EFFECTS names {tool}, which the Cedar base schema "
+                               "doesn't declare")
+        groups = frozenset(group["id"].removeprefix("effect:") for group in actions[tool].get("memberOf", ())
+                           if group["id"].startswith("effect:"))
+        if frozenset(effects) != groups:
+            raise RuntimeError(f"desk.always_on.ALWAYS_ON_EFFECTS gives {tool} the effects {sorted(effects)}, "
+                               f"but the Cedar base schema gives it {sorted(groups)}")
+
+
+_check_always_on_effects(BASE_SCHEMA)
 _BASELINE_BYTES = (CEDAR_DIR / "baseline.cedar").read_bytes()
 BASELINE: str = _BASELINE_BYTES.decode("utf-8")
 
