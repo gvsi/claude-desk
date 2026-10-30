@@ -7,8 +7,8 @@
  *
  * The page is static: it reads its document from `documents.ts`, which only it loads, and makes no request.
  */
-import { Fragment, useEffect, useLayoutEffect, useSyncExternalStore } from 'react';
-import { Link, useLocation } from 'react-router';
+import { Fragment, useContext, useEffect, useLayoutEffect, useSyncExternalStore } from 'react';
+import { Link, UNSAFE_NavigationContext, useLocation, useNavigationType } from 'react-router';
 
 import { Card, ConceptFooter, Icon, Mark, Wordmark } from '../ds/index.ts';
 import { BackLink } from './BackLink.tsx';
@@ -78,6 +78,48 @@ function sectionAnchor(hash: string): string | null {
   } catch {
     return null;
   }
+}
+
+/** What one router's reading pages remember: whether one has drawn yet, and where the window last was in each. */
+interface Reading {
+  drawn: boolean;
+  places: Partial<Record<AboutId, number>>;
+}
+
+/** By router, which the app makes once per window, so each window, and each test's router, starts afresh. */
+const READING = new WeakMap<object, Reading>();
+
+/**
+ * Where the window goes when a document draws. Opened by a link or in place of the current page, it starts at
+ * its top, or at the section its address names, whose anchor exists only once the page has drawn. Back and
+ * Forward return to where the reader last was in that document: the browser's own restoring races the router's
+ * drawing of the page, and loses when the page it leaves is shorter. The router counts the address a window
+ * loads as a move back, so its first page opens as the address says. This runs only when a document draws, not
+ * on every hash: the contents list's links move within the page by themselves.
+ */
+function useReadingPlace(id: AboutId, hash: string) {
+  // The router's navigator: one object for as long as the router lives.
+  const { navigator } = useContext(UNSAFE_NavigationContext);
+  const navigationType = useNavigationType();
+  useLayoutEffect(() => {
+    const reading = READING.get(navigator) ?? { drawn: false, places: {} };
+    READING.set(navigator, reading);
+    if (navigationType === 'POP' && reading.drawn) {
+      window.scrollTo(0, reading.places[id] ?? 0);
+    } else {
+      const anchor = sectionAnchor(hash);
+      const section = anchor ? document.getElementById(anchor) : null;
+      if (section) section.scrollIntoView();
+      else window.scrollTo(0, 0);
+    }
+    reading.drawn = true;
+    const remember = () => {
+      reading.places[id] = window.scrollY;
+    };
+    remember();
+    window.addEventListener('scroll', remember, { passive: true });
+    return () => window.removeEventListener('scroll', remember);
+  }, [id]);
 }
 
 /** A figure by its marker's name. */
@@ -340,6 +382,7 @@ export function ReaderPage({ id }: ReaderPageProps) {
   const compact = useSyncExternalStore(subscribeNarrow, isNarrow, () => false);
   const sections = about.blocks.filter((block): block is Heading => block.kind === 'heading' && block.depth === 2);
   const { hash } = useLocation();
+  useReadingPlace(id, hash);
 
   // Search engines are asked not to list the page while it is open. A best effort: the app serves one
   // index.html for every address, so the tag exists only once the page has drawn.
@@ -359,17 +402,6 @@ export function ReaderPage({ id }: ReaderPageProps) {
       document.title = before;
     };
   }, [about.title]);
-
-  // A page opens at its top, or at the section its address names: the window keeps its place when the
-  // router swaps one document for the other, and a section's anchor is drawn only after the page loads.
-  useLayoutEffect(() => {
-    const anchor = sectionAnchor(hash);
-    const section = anchor ? document.getElementById(anchor) : null;
-    if (section) section.scrollIntoView();
-    else window.scrollTo(0, 0);
-    // Only when a document opens, not on every hash: the contents list's links move within the page by
-    // themselves.
-  }, [id]);
 
   return (
     <div className={`cd-about-page${compact ? ' cd-about-page--compact' : ''}`}>

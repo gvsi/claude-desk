@@ -1,9 +1,9 @@
 /**
  * The About this prototype reading pages end to end, on the dev server's shared mock (`npm run e2e:mock`): opened
  * from the owner sidebar of a fresh copy and left by the way back to Today; opened cold in a browser that has
- * stored nothing; and both pages at the desktop and phone sizes, for a stranger with no cookie and for an owner
- * signed in to a copy, fitting the window and passing axe. Expected words are written out here, never read from
- * the app's code.
+ * stored nothing; reached by Back and Forward at the reader's place; and both pages at the desktop and phone
+ * sizes, for a stranger with no cookie and for an owner signed in to a copy, fitting the window and passing axe.
+ * Expected words are written out here, never read from the app's code.
  */
 import { expect, test, type Page } from '@playwright/test';
 
@@ -160,6 +160,80 @@ test('about_pages_on_a_cold_load', async ({ page, context }) => {
   await page.getByRole('link', { name: 'Back to the prototype', exact: true }).click();
   await page.waitForURL((url) => url.pathname === '/');
   await expect(page.getByRole('dialog', { name: 'A Claude front desk for your business' })).toBeVisible();
+});
+
+/** Scrolls the window to `y`, as a reader would, and waits for the scroll to land. */
+async function scrollWindow(page: Page, y: number): Promise<void> {
+  await page.evaluate(async (to) => {
+    const scrolled = new Promise((resolve) => window.addEventListener('scroll', resolve, { once: true }));
+    window.scrollTo(0, to);
+    await scrolled;
+  }, y);
+}
+
+function scrollY(page: Page): Promise<number> {
+  return page.evaluate(() => window.scrollY);
+}
+
+/** The window's offset once a scroll has landed: two frames on, its scroll event has fired. */
+function settledScrollY(page: Page): Promise<number> {
+  return page.evaluate(async () => {
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    return window.scrollY;
+  });
+}
+
+/**
+ * Waits for the window to be back at `place`, give or take two lines of text: the browser's own restoring and
+ * its scroll anchoring may nudge it as the page draws.
+ */
+async function expectBackAt(page: Page, place: number, where: string): Promise<void> {
+  await expect.poll(async () => Math.abs((await scrollY(page)) - place), where).toBeLessThanOrEqual(56);
+}
+
+test('going_back_returns_to_the_readers_place', async ({ page }) => {
+  // Loaded at a section's address, a page opens at that section, though the router counts a load as a move back.
+  await page.goto('/about/prediction#characteristics');
+  await expect(title(page, 'Capability prediction')).toBeVisible(FIRST_DRAW);
+  const atSection = () =>
+    page.evaluate(() => {
+      const section = document.getElementById('characteristics');
+      if (!section) return false;
+      return Math.abs(section.getBoundingClientRect().top - parseFloat(getComputedStyle(section).scrollMarginTop)) <= 1;
+    });
+  await expect.poll(atSection, 'opened at its section').toBe(true);
+
+  // The proposal opens at its top, and so does the prediction from the proposal's link part way down. Back and
+  // Forward return to where the reader was in each.
+  await page.getByRole('navigation', { name: 'Documents' }).getByRole('link', { name: 'Product proposal', exact: true }).click();
+  await expect(title(page, 'Product proposal')).toBeVisible();
+  expect(await scrollY(page), 'opened').toBe(0);
+  const inText = page.locator('article').getByRole('link', { name: 'capability prediction', exact: true });
+  await inText.scrollIntoViewIfNeeded();
+  const atLink = await settledScrollY(page);
+  expect(atLink, 'the link is part way down').toBeGreaterThan(0);
+  await inText.click();
+  await expect(title(page, 'Capability prediction')).toBeVisible();
+  expect(await scrollY(page), 'opened from the link').toBe(0);
+  await scrollWindow(page, 3000);
+  await page.goBack();
+  await expect(title(page, 'Product proposal')).toBeVisible();
+  await expectBackAt(page, atLink, 'back');
+  await page.goForward();
+  await expect(title(page, 'Capability prediction')).toBeVisible();
+  await expectBackAt(page, 3000, 'forward');
+
+  // An owner who opens a page from the Desk, goes back to the Desk and forward again is where they were.
+  await startCopy(page, MOCK_PASSCODE);
+  await page.getByRole('navigation', { name: 'About this prototype' }).getByRole('link', { name: 'Product proposal', exact: true }).click();
+  await expect(title(page, 'Product proposal')).toBeVisible(FIRST_DRAW);
+  expect(await scrollY(page), 'opened from the sidebar').toBe(0);
+  await scrollWindow(page, 4000);
+  await page.goBack();
+  await page.waitForURL(/\/today$/);
+  await page.goForward();
+  await expect(title(page, 'Product proposal')).toBeVisible();
+  await expectBackAt(page, 4000, 'forward from the Desk');
 });
 
 test('about_pages_fit_phone_width', async ({ page }) => {

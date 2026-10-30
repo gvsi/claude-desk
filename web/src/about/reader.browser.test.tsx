@@ -6,7 +6,7 @@
  */
 import axe from 'axe-core';
 import { MemoryRouter, Route, Routes, useLocation, useNavigate, type NavigateFunction } from 'react-router';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 import { render } from 'vitest-browser-react';
 
@@ -461,6 +461,67 @@ describe('ReaderPage', () => {
         await expect.poll(() => window.scrollY, { message: next }).toBe(0);
       }
     }
+    await screen.unmount();
+  });
+
+  it('going_back_returns_to_the_readers_place', async () => {
+    // Opening a page, by a link or in place of the current one, starts it at its top. Back and Forward return to
+    // where the reader last was in that document; a memory router has no browser to restore it, so the page alone
+    // does. A tall page stands in for the Desk.
+    await page.viewport(DESKTOP.width, DESKTOP.height);
+    // The browser's scroll anchoring nudges the window when one document replaces the other; with it off, every
+    // move is the reader's.
+    document.documentElement.style.overflowAnchor = 'none';
+    onTestFinished(() => {
+      document.documentElement.style.overflowAnchor = '';
+    });
+    const screen = await render(
+      <MemoryRouter initialEntries={['/about/proposal']}>
+        <Routes>
+          <Route path="/about/proposal" element={<ReaderPage id="proposal" />} />
+          <Route path="/about/prediction" element={<ReaderPage id="prediction" />} />
+          <Route path="/desk" element={<div style={{ height: '20000px' }} />} />
+        </Routes>
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+    const title = () => flat(document.querySelector('h1')?.textContent);
+    /** Scrolls the window as a reader does, through to the scroll event the page hears. */
+    const scrollTo = async (y: number) => {
+      const scrolled = new Promise((resolve) => window.addEventListener('scroll', resolve, { once: true }));
+      window.scrollTo(0, y);
+      await scrolled;
+      expect(window.scrollY).toBe(y);
+    };
+    await expect.poll(title).toBe('Product proposal');
+
+    // Opening the other document starts it at its top.
+    await scrollTo(2000);
+    at.navigate?.('/about/prediction');
+    await expect.poll(title).toBe('Capability prediction');
+    expect(window.scrollY, 'opened').toBe(0);
+
+    // Back and Forward return to where the reader was in each document.
+    await scrollTo(1500);
+    at.navigate?.(-1);
+    await expect.poll(title).toBe('Product proposal');
+    expect(window.scrollY, 'back').toBe(2000);
+    at.navigate?.(1);
+    await expect.poll(title).toBe('Capability prediction');
+    expect(window.scrollY, 'forward').toBe(1500);
+
+    // Back from another page draws the reader afresh, at the reader's place.
+    at.navigate?.('/desk');
+    await expect.poll(title).toBe('');
+    await scrollTo(300);
+    at.navigate?.(-1);
+    await expect.poll(title).toBe('Capability prediction');
+    expect(window.scrollY, 'back from the Desk').toBe(1500);
+
+    // A page opened in place of the current one starts at its top.
+    at.navigate?.('/about/proposal', { replace: true });
+    await expect.poll(title).toBe('Product proposal');
+    expect(window.scrollY, 'replaced').toBe(0);
     await screen.unmount();
   });
 
