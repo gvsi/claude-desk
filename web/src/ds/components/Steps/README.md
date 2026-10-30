@@ -23,4 +23,4 @@
 | --- | --- | --- |
 | `label` | `string` | Required. What the steps are of: "Connect Google Calendar", "Set up your Desk". |
 | `steps` | `readonly string[]` | Required. Each step's name, in order. |
-| `current` | `number` | Required. The step the person is on, counted from 0. |
+| `current` | `number` | Required. The step the person is on, counted from 0, kept within the steps: the list and the phone's line name the same step. With no steps there is no line. |

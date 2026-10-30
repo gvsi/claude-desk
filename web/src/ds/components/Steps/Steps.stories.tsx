@@ -139,3 +139,24 @@ export const LaptopHasNoLine: Story = {
     await expect(compactLine(canvasElement)).not.toBeVisible();
   },
 };
+
+export const PastTheEnd: Story = {
+  args: { label: 'Set up your Desk', steps: ['Questions', 'Tools', 'Live'], current: 3 },
+  globals: { viewport: { value: 'phone', isRotated: false } },
+  parameters: { canvas: 'none', canvasNote: `${PHONE_NOTE} A step past the last one is read and drawn as the last.` },
+  play: async ({ canvasElement }) => {
+    // steps_clamped_alike: the list marks the step the line names, so both say the same.
+    const items = await expectPhoneSteps(canvasElement, 'Set up your Desk');
+    await expect(items.map((item) => item.getAttribute('aria-current'))).toEqual([null, null, 'step']);
+    await expect(compactLine(canvasElement).textContent).toBe('Step 3 of 3 · Live');
+  },
+};
+
+export const NoSteps: Story = {
+  args: { label: 'Set up your Desk', steps: [], current: 0 },
+  globals: { viewport: { value: 'phone', isRotated: false } },
+  parameters: { canvas: 'none', canvasNote: `${PHONE_NOTE} With no steps there is no line.` },
+  play: async ({ canvasElement }) => {
+    await expect(canvasElement.querySelector('.cd-steps__compact')).toBeNull();
+  },
+};
