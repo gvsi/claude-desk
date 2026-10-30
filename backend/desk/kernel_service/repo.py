@@ -28,8 +28,8 @@ Row locks are taken in one order, so no two kernel transactions wait on each oth
 6. their live verification challenges, after the people (a Desk's deletion, which locks no
    person, takes its live codes after its sessions);
 7. a payment link (Plan 01c);
-8. document links: an open marks its link in one UPDATE, and a person's removal or a Desk's
-   deletion voids theirs in one;
+8. document links: an open marks its link in one UPDATE, and a person's removal or new contact,
+   or a Desk's deletion, voids theirs in one;
 9. documents, which a person's removal takes `FOR UPDATE` in ID order, and knowledge items, which
    `POST /knowledge` upserts;
 10. an adapter's own rows, which its hooks lock or write (a booking, a handoff; Plan 01c's

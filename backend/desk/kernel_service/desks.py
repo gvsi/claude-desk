@@ -522,12 +522,14 @@ async def _spoken_for(ctx: KernelCtx, desk_id: str) -> set[str]:
 async def put_people(ctx: KernelCtx, desk_row: Desk, body: DeskPeopleRequest) -> list[str]:
     """People upserted by `ref` and removed. A new person needs a contact, and `contact: None` keeps
     the one on record. A changed contact cancels the person's live verification code, which went
-    to the old one, and closes the sessions verified as them (ledgered `session`, reason
-    `contact_changed`), which proved only that they could read the old one. A removed person
-    (`removed_at`) is never on record again, and their ref isn't reused (409): their live code is
-    cancelled, the sessions verified as them close (ledgered `session`, reason `person_removed`),
-    their documents become the owner's alone, and the links that released documents to them and
-    haven't opened are void. Removing them again changes nothing; an unknown ref is 422.
+    to the old one, closes the sessions verified as them (ledgered `session`, reason
+    `contact_changed`), which proved only that they could read the old one, and voids the links
+    that released documents to them and haven't opened; their documents stay theirs. A removed
+    person (`removed_at`) is never on record again, and their ref isn't reused (409): their live
+    code is cancelled, the sessions verified as them close (ledgered `session`, reason
+    `person_removed`), their documents become the owner's alone, and the links that released
+    documents to them and haven't opened are void. Removing them again changes nothing; an unknown
+    ref is 422.
 
     Its locks come in the kernel's order (`repo.py`), after the Desk row the caller holds: the open
     sessions verified as the people it removes or gives another contact (`verified_sessions`), then
@@ -607,9 +609,11 @@ async def verified_sessions(ctx: KernelCtx, desk_row: Desk, person_ids: Sequence
 
 async def _off_the_record(ctx: KernelCtx, desk_row: Desk, now: datetime, *, removed: Sequence[str],
                           recontacted: Sequence[str]) -> None:
-    """What a people write takes off the record: the sessions verified as the people it removes or
-    gives another contact closed, each ledgered `session` with its reason (`person_removed`,
-    `contact_changed`); and what removed people leave (`_owner_only`).
+    """What a people write takes off the record for the people it removes or gives another contact,
+    whose verifications went through a contact it takes away: the sessions verified as them closed,
+    each ledgered `session` with its reason (`person_removed`, `contact_changed`); the document
+    links released to them that haven't opened, void; and the removed people's documents, the
+    owner's alone (`_taken_back`).
 
     Every row is locked before the ledger head, which is taken last, for all the people at once.
     Their sessions come first: `put_people` locked them before the people, and they are taken again
@@ -618,12 +622,12 @@ async def _off_the_record(ctx: KernelCtx, desk_row: Desk, now: datetime, *, remo
     waits on this write: its check has committed, and nothing that holds a verified session's row
     asks for a Desk row, another session, a person or a challenge, all this write holds by then.
     Holding the sessions, a release running in one has committed its link before the links are
-    voided. Then the removed people's links, documents and facts; then the closes are ledgered."""
+    voided. Then their links, the removed people's documents and the facts; then the closes are
+    ledgered."""
     if not removed and not recontacted:
         return
     sessions = await verified_sessions(ctx, desk_row, [*removed, *recontacted])
-    if removed:
-        await _owner_only(ctx, desk_row, removed)
+    await _taken_back(ctx, desk_row, removed=removed, recontacted=recontacted)
     for session in sessions:
         session.closed_at = now
     await ctx.db.flush()
@@ -634,15 +638,19 @@ async def _off_the_record(ctx: KernelCtx, desk_row: Desk, now: datetime, *, remo
             summary={"session_id": session.session_id, "closed": True, "reason": reason}))
 
 
-async def _owner_only(ctx: KernelCtx, desk_row: Desk, person_ids: Sequence[str]) -> None:
-    """What removed people leave, once their sessions are held: their unopened document links void,
-    with their facts expired, and their documents the owner's alone (no record owner; `document:*`
-    facts relabelled `["owner"]`). Every one's links first, as an open of one holds its link and
-    then its fact and the ledger head; then their documents; then the links' facts and the
-    documents'."""
-    voided = await adapters.release_document.void_links(ctx, desk_row.desk_id, person_ids=person_ids)
+async def _taken_back(ctx: KernelCtx, desk_row: Desk, *, removed: Sequence[str], recontacted: Sequence[str]) -> None:
+    """Once the sessions verified as them are held: the document links released to the people a
+    write removes or gives another contact, and not yet opened, void, with their facts expired; and
+    the removed people's documents the owner's alone (no record owner; `document:*` facts
+    relabelled `["owner"]`). A person given another contact keeps their documents. Every one's
+    links first, as an open of one holds its link and then its fact and the ledger head; then the
+    removed people's documents; then the links' facts and the documents'."""
+    voided = await adapters.release_document.void_links(ctx, desk_row.desk_id, person_ids=[*removed, *recontacted])
+    if not removed:                       # no documents change hands
+        await adapters.release_document.expire_link_facts(ctx, desk_row.desk_id, voided)
+        return
     documents = (await ctx.db.scalars(ctx.repo.scoped(select(Document).where(
-        Document.desk_id == desk_row.desk_id, Document.record_owner_person_id.in_(person_ids))
+        Document.desk_id == desk_row.desk_id, Document.record_owner_person_id.in_(removed))
         .order_by(Document.document_id).with_for_update()))).all()
     for document in documents:
         document.record_owner_person_id = None

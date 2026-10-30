@@ -385,16 +385,19 @@ async def test_removing_a_person_runs_in_the_lock_order(app, client):
 
 
 async def test_changing_a_contact_runs_in_the_lock_order(app, client):
-    # Dana is verified in one session, and a code is on its way to her in another
+    # Dana is verified in one session, her invoice's link is unopened, and a code is on its way to
+    # her in another
     copy, _ = await visitor_of(app, client)
-    await confirmed(client, copy, DANA)
+    dana = await confirmed(client, copy, DANA)
+    await released(client, dana, (await documents(app, copy))["dana-invoice"])
     await started(client, await open_visitor(client, copy), DANA)
     with lock_log(app) as log:
         await updated(client, copy, "people", {"upsert": [{"ref": "dana", "display_name": "Dana Whitfield",
                                                            "contact": "dana.w@example.net"}]})
-    # after the Desk row: the session verified as her, her row and her live code, then the
-    # session's close and the write, ledgered
-    assert log.transactions == [["sessions", "people", "verification_challenges", "ledger_heads"]]
+    # after the Desk row: the session verified as her, her row and her live code, her link and its
+    # fact (her invoice stays hers), then the session's close and the write, ledgered
+    assert log.transactions == [["sessions", "people", "verification_challenges", "document_links", "facts",
+                                 "ledger_heads"]]
     assert all(map(in_lock_order, log.transactions))
 
 

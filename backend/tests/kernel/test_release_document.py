@@ -365,6 +365,47 @@ async def test_removing_two_people_while_a_link_opens(app, client, frozen_clock,
     assert (write.kind, write.summary) == ("desk_data", {"part": "people", "refs": ["bob", "dana"]})
 
 
+async def test_a_changed_contact_voids_the_persons_unopened_links(app, client, frozen_clock, caplog):
+    """Whoever verified as Dana proved only that they read a code sent to her old contact. When the
+    owner gives her another, a link already released to her and not yet opened is void, with its
+    fact, as when she is removed, so it can't open her invoice; Bob's stands. The invoice stays
+    hers: verified at her new contact, she gets a new link, which opens."""
+    caplog.set_level(logging.INFO, logger="desk.kernel_service")
+    copy = await rivera(app, client)
+    docs = await documents(app, copy)
+    dana, bob = await confirmed(client, copy, DANA), await confirmed(client, copy, BOB)
+    danas = await released(client, dana, docs["dana-invoice"])
+    bobs = await released(client, bob, docs["bob-warranty"], call_id="call-2")
+    by_person = {link.person_id: link for link in await links(app, copy)}
+    dana_link, bob_link = (by_person[docs[ref].record_owner_person_id] for ref in ("dana-invoice", "bob-warranty"))
+
+    frozen_clock.advance(60)
+    await updated(client, copy, "people", {"upsert": [{"ref": "dana", "display_name": "Dana Whitfield",
+                                                       "contact": "dana.w@example.net"}]})
+    after = {link.link_id: link for link in await links(app, copy)}
+    assert (after[dana_link.link_id].voided_at, after[dana_link.link_id].consumed_at) == (frozen_clock.now(), None)
+    assert (after[bob_link.link_id].voided_at, after[bob_link.link_id].consumed_at) == (None, None)
+    assert (await fact_row(app, copy, danas.fact_id)).status == "expired"
+    assert (await fact_row(app, copy, bobs.fact_id)).status == "available"
+    verdict = await cited_in_closed_session(app, copy, dana.session_id, danas.fact_id)
+    assert violations(verdict) == [("stale_fact", "not_current", [danas.fact_id])]
+
+    # the link released before the change is refused, as a voided link is, and the refusal ledgered
+    caplog.clear()
+    refused = await open_link(client, dana_link.token)
+    assert (refused.status_code, refused.json()) == (404, {"code": "not_found"})
+    assert [record.getMessage() for record in caplog.records if record.getMessage().startswith("kernel_failure")] == [
+        "kernel_failure route=GET /document_links/{token} status=404 code=not_found reason=document_link_refused"]
+    assert (await link_entries(app, copy))[-1] == (dana.session_id, {"link_id": dana_link.link_id, "refused": True})
+
+    # verified at her new contact, Dana gets her invoice again; Bob's link still opens
+    again = await confirmed(client, copy, "dana.w@example.net")
+    await released(client, again, docs["dana-invoice"])
+    [new_link] = [link for link in await links(app, copy) if link.link_id not in after]
+    assert (await open_link(client, new_link.token)).content == docs["dana-invoice"].body.encode()
+    assert (await open_link(client, bob_link.token)).content == docs["bob-warranty"].body.encode()
+
+
 async def test_wrong_person_gets_nothing(app, client):
     copy = await rivera(app, client)
     docs = await documents(app, copy)
