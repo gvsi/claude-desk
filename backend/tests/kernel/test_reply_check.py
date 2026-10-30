@@ -30,7 +30,7 @@ from desk.db.models import ActorSession, Business, Desk, Document
 from desk.db.models import Fact as FactRow
 from desk.kernel_api import PublicDesk
 from desk.kernel_service import labels, lang, ledger, reply_check
-from desk.kernel_service.decisions import SoftPromiseVerdict
+from desk.kernel_service.decisions import SoftPromiseInput, SoftPromiseVerdict
 from scripts import lookalikes
 
 from .fakes import FakeDecisions
@@ -1144,61 +1144,38 @@ def test_a_long_draft_of_booking_claims_is_scanned_in_one_pass():
 
 SERVICE_AREA = "We work in Oakland, Berkeley, Alameda and Emeryville."        # Rivera's seeded policy
 AREA_ES = "Trabajamos en Oakland, Berkeley, Alameda y Emeryville."
-NOTICE_ES = "Para cancelar la visita, avísenos con un día de antelación."
-
-
-@pytest.mark.parametrize(("prose", "policy", "span"), [
-    (SERVICE_AREA, SERVICE_AREA, "We work in Oakland, Berkeley, Alameda an"),            # cut to 40 characters
-    ("Good news: we WORK IN OAKLAND; Berkeley too.", SERVICE_AREA, "we WORK IN OAKLAND; Berkeley"),   # case, commas
-    ("We work in OakIand, BerkeIey and more.", SERVICE_AREA, "We work in OakIand, BerkeIey"),    # a capital I for l
-    ("We work in Oakland—Berkeley and around.", SERVICE_AREA, "We work in Oakland—Berkeley"),   # a dash
-    ("Sí, trabajamos en Oakland, Berkeley, Alameda y Emeryville.", AREA_ES,
-     "trabajamos en Oakland, Berkeley, Alameda"),
-    ("Recuerde: para cancelar la visita, avisenos con un dia de antelacion.", NOTICE_ES,   # accents dropped
-     "para cancelar la visita, avisenos con un"),
-])
-def test_prose_repeating_a_policy_is_blocked(prose, policy, span):
-    """A policy appears only in its card: five or more words in a row shared with a policy's text,
-    in either language, with case, punctuation and the lexicons' readings set aside, is the policy
-    in prose, and names the policy it repeats."""
-    found = reply_check.scan_prose(prose, policies=[("charter:policy:rule", policy)])
-    assert [(v.kind, v.rule_id, v.span, v.fact_ids) for v in found] == [
-        ("promise_word", "policy_echo", span, ["charter:policy:rule"])]
 
 
 @pytest.mark.parametrize("prose", [
+    SERVICE_AREA,                                                           # word for word
+    "Good news: we WORK IN OAKLAND; Berkeley too.",
+    "We work in OakIand, BerkeIey and more.",                               # a capital I for l
+    "We work in Oakland—Berkeley and around.",                              # a dash
+    "Sí, trabajamos en Oakland, Berkeley, Alameda y Emeryville.",
+    "Recuerde: para cancelar la visita, avisenos con un dia de antelacion.",   # accents dropped
     "We work in Oakland.",                                                  # four words in a row
-    "We work in Oakland and nearby towns.",
     "Maria covers Oakland and Berkeley, plus Alameda and Emeryville.",      # the policy in other words
     "Trabajamos en toda la zona de Oakland.",
 ])
-def test_shorter_overlaps_and_paraphrases_of_a_policy_pass(prose):
-    """Fewer than five words in a row, or the policy in other words, is left to the soft-promise
-    check."""
-    policies = [("charter:policy:a", SERVICE_AREA), ("charter:policy:b", AREA_ES)]
-    assert reply_check.scan_prose(prose, policies=policies) == []
+def test_prose_repeating_a_policy_passes_the_scan_by_the_owners_decision(prose):
+    """The owner's decision of 2026-10-30: the prose scan doesn't compare prose with the Desk's
+    policies, so a policy's words in prose, in either language, are no violation of it; the policy
+    card carries the policy, and the soft-promise check flags a promise beyond the cards."""
+    assert reply_check.scan_prose(prose) == []
 
 
-def test_a_long_draft_repeating_a_policy_is_scanned_in_one_pass():
-    """A draft that repeats one word of a policy over and over is one stretch, found in one pass."""
-    started = time.perf_counter()
-    found = reply_check.scan_prose("the " * 5_000, policies=[("charter:policy:a", "the " * 400)])
-    assert time.perf_counter() - started < 2
-    assert [(v.rule_id, v.span) for v in found] == [("policy_echo", ("the " * 10)[:40])]
-
-
-async def test_a_policy_echo_beside_its_card_is_blocked(app, client, reviewer):
-    """The seeded service area's text in prose is blocked even beside the policy card it repeats,
-    by the prose scan, before the soft-promise check is asked; the ledger names the rule."""
+async def test_a_policy_restated_beside_its_card_is_shown_by_the_owners_decision(app, client, reviewer):
+    """The owner's decision of 2026-10-30: prose may restate the policy whose card it carries. The
+    seeded service area's text passes the prose scan, reaches the soft-promise check beside the
+    card's text, and, with no promise found beyond the card, is shown with the card."""
     copy, visitor = await visitor_of(app, client)
     reviewer.soft_answer = NOTHING_BEYOND_THE_CARDS
     verdict = await checked(client, visitor, SERVICE_AREA, [clause("policy", "charter:policy:service_area")])
-    assert [(v.kind, v.rule_id, v.span, v.fact_ids) for v in verdict.violations] == [
-        ("promise_word", "policy_echo", "We work in Oakland, Berkeley, Alameda an", ["charter:policy:service_area"])]
-    assert_handed_off(verdict)
-    assert reviewer.soft_inputs == []
+    assert (verdict.ok, verdict.violations) == (True, [])
+    assert [(block.kind, block.text) for block in verdict.blocks] == [("prose", SERVICE_AREA), ("card", SERVICE_AREA)]
+    assert reviewer.soft_inputs == [SoftPromiseInput(language="en", prose=SERVICE_AREA, cards=[SERVICE_AREA])]
     [entry] = await reply_entries(app, copy)
-    assert (entry.event.summary["violations"], entry.event.summary["rule_ids"]) == (["promise_word"], ["policy_echo"])
+    assert (entry.event.summary["ok"], entry.event.summary["rule_ids"]) == (True, [])
 
 
 async def add_charter(app: FastAPI, copy: Rivera, key: str, value: str) -> str:
@@ -1211,36 +1188,28 @@ async def add_charter(app: FastAPI, copy: Rivera, key: str, value: str) -> str:
     return fact.fact_id
 
 
-async def test_policy_echoes_cover_the_rules_the_session_reads(app, client, reviewer):
-    """Every charter claim stating a rule counts, `policy:*` and the service area, deposit and
-    cancellation claims, in either language; a policy the session can't read isn't one it is
-    shown, so repeating it isn't this check's to block (a session learns nothing about it)."""
+async def test_the_rules_the_session_reads_pass_in_prose_by_the_owners_decision(app, client, reviewer):
+    """The owner's decision of 2026-10-30: no charter claim stating a rule, `policy:*` or the
+    service area, deposit and cancellation claims, is matched against prose in either language, so
+    a reply restating one passes the prose scan and is left to the soft-promise check."""
     copy, visitor = await visitor_of(app, client)
     reviewer.soft_answer = NOTHING_BEYOND_THE_CARDS
-    deposit = await add_charter(app, copy, "deposit", "The deposit is taken when you book the visit.")
-    cancellation = await add_charter(app, copy, "cancellation", "Cancel any time up until the evening before.")
-    area = await add_charter(app, copy, "service_area", "Maria drives out to the whole East Bay.")
-    for prose, fact_id in (("Just so you know, the deposit is taken when you book the visit.", deposit),
-                           ("You can cancel any time up until the evening before.", cancellation),
-                           ("Maria drives out to the whole East Bay.", area)):
-        verdict = await checked(client, visitor, prose)
-        assert [(v.rule_id, v.fact_ids) for v in verdict.violations] == [("policy_echo", [fact_id])], prose
-        assert_handed_off(verdict)
-
-    # in Spanish: a policy the owner wrote in Spanish, repeated in a Spanish reply
+    await add_charter(app, copy, "deposit", "The deposit is taken when you book the visit.")
+    await add_charter(app, copy, "cancellation", "Cancel any time up until the evening before.")
+    await add_charter(app, copy, "service_area", "Maria drives out to the whole East Bay.")
     await change_fact(app, copy, "charter:policy:first_visit",
                       claims=[{"key": "policy:first_visit", "kind": "text", "value": AREA_ES}])
-    verdict = await checked(client, visitor, f"Claro. {AREA_ES}")
-    assert [(v.rule_id, v.fact_ids) for v in verdict.violations] == [("policy_echo", ["charter:policy:first_visit"])]
-    assert_handed_off(verdict, "es")
-
-    # the contact isn't a rule, and an owner-only policy is no policy this session reads
-    await change_fact(app, copy, "charter:contact", claims=[
-        {"key": "contact", "kind": "text", "value": "Text the shop line and Maria calls back."}])
-    await change_fact(app, copy, "charter:policy:arrival", readers=["owner"])
-    for prose in ("Maria texts before she arrives.", "Just text the shop line and Maria calls back."):
-        assert (await checked(client, visitor, prose)).violations == [], prose
-    assert not reply_check.states_rule("contact")
+    for prose, language in (("Just so you know, the deposit is taken when you book the visit.", "en"),
+                            ("You can cancel any time up until the evening before.", "en"),
+                            ("Maria drives out to the whole East Bay.", "en"),
+                            (f"Claro. {AREA_ES}", "es")):
+        verdict = await checked(client, visitor, prose)
+        assert (verdict.ok, verdict.violations, verdict.language) == (True, [], language), prose
+        assert verdict.blocks == [RenderedBlock(kind="prose", text=prose)]
+    assert [inputs.prose for inputs in reviewer.soft_inputs] == [
+        "Just so you know, the deposit is taken when you book the visit.",
+        "You can cancel any time up until the evening before.", "Maria drives out to the whole East Bay.",
+        f"Claro. {AREA_ES}"]
 
 
 @pytest.mark.parametrize(("prose", "span", "language"), [
