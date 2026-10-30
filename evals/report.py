@@ -5,7 +5,11 @@ reader of the repo opens; `latest_json` gives the same numbers as data, so the t
 since the report is rendered from them. `write_report` writes both under `evals/reports/`, copies
 the month's spend rows beside them and rewrites the latest-results block of `docs/evals.md`, only
 for a pass of the whole suite that is gating evidence (on the Claude API with the production 5.5
-models, by `results.gating_refusal`); any other pass's report stays under `evals/out/reports/`.
+models, by `results.gating_refusal`), whose rows hold one judged run of every scenario and
+repetition it selected (`PassSummary.uncovered`, from `results.selection_problems`) and that stood
+for its commit by what it recorded before its runs (`PassSummary.unchecked`, from
+`results.unchecked_refusal`); any other pass's report stays under `evals/out/reports/` and says why
+(`kept_out`).
 
 The inputs are the report's own models, built from what the pass runner, the usage and latency
 measurements and the calibration leave. The report judges nothing: whether the pass passed comes
@@ -356,6 +360,14 @@ class PassSummary(BaseModel):
     spend: SpendRow
     simulator_fallbacks: Fallbacks
     runs: list[ReportRun]
+    # Why its rows don't hold one judged run of every scenario and repetition its config selected, less the
+    # pending ones, reconciled row by row with the suite at its commit (`results.selection_problems`); empty when
+    # they do. Whoever builds a summary states it, so it is never assumed.
+    uncovered: list[StrictStr]
+    # Why what it recorded before its runs doesn't show it stood for its commit's gated inputs (a `--results` pass
+    # that found no uncommitted gated change and built the kernel from that tree, at its commit's inputs:
+    # `results.unchecked_refusal`), or None when it does. Stated by whoever builds a summary, like `uncovered`.
+    unchecked: Annotated[StrictStr, StringConstraints(min_length=1)] | None
 
     @model_validator(mode="after")
     def _one_row_per_run(self) -> Self:
@@ -656,6 +668,13 @@ def _summary(p: PassSummary, g: GateSummary, n: dict[str, Any]) -> list[str]:
     if explores := exploratory(p):
         out.append(f"This pass explores, so its report stays under `{OUT_REPORTS_PATH}/` and never becomes the "
                    f"latest report: {explores}.")
+    if p.uncovered:
+        out.append(f"This pass's rows don't hold a judged run of every scenario and repetition it selected, so its "
+                   f"report stays under `{OUT_REPORTS_PATH}/` and never becomes the latest report: "
+                   f"{'; '.join(p.uncovered)}.")
+    if p.unchecked:
+        out.append(f"This pass can't stand for its commit's gated inputs, so its report stays under "
+                   f"`{OUT_REPORTS_PATH}/` and never becomes the latest report: {p.unchecked}.")
     pending = (f"{_plural(len(p.pending), 'scenario')} waiting for "
                + ", ".join(f"plan {plan}" for plan in sorted(set(p.pending.values())))) if p.pending else "none"
     out.append(_table(("Item", "Value"), [
@@ -1120,8 +1139,10 @@ def exploratory(p: PassSummary) -> str | None:
 
 def kept_out(p: PassSummary) -> bool:
     """Whether the pass's report stays under `evals/out/reports/` and never becomes the latest: it ran
-    part of the suite (`partial`) or explores (`exploratory`)."""
-    return bool(partial(p)) or exploratory(p) is not None
+    part of the suite (`partial`), explores (`exploratory`), its rows don't hold a judged run of every
+    scenario and repetition it selected (`uncovered`), or what it recorded before its runs doesn't show it
+    stood for its commit (`unchecked`)."""
+    return bool(partial(p)) or exploratory(p) is not None or bool(p.uncovered) or p.unchecked is not None
 
 
 def write_report(pass_result: PassSummary, gate_result: Any, metrics: Metrics | None, latency: Latency | None,
@@ -1131,8 +1152,9 @@ def write_report(pass_result: PassSummary, gate_result: Any, metrics: Metrics | 
                  out_dir: Path = OUT_REPORTS_DIR) -> Path:
     """Writes `<date>-<pass_id>.md` and `latest.json` under `reports_dir`, this month's spend rows as
     its `spend.csv`, and the evals guide's latest-results block; returns the report's path. A pass
-    that ran part of the suite (`partial`) or isn't gating evidence (`exploratory`) writes only its
-    report, under `out_dir`, and none of the rest. A dry run or a null-baseline pass is refused
+    whose report is kept out (`kept_out`: it ran part of the suite, isn't gating evidence, doesn't hold
+    a judged run of every scenario and repetition it selected, or can't stand for its commit) writes only
+    its report, under `out_dir`, and none of the rest. A dry run or a null-baseline pass is refused
     before anything is written: neither measures a Desk. So is a report that would become the latest
     with a null baseline that isn't gating evidence; a report kept out says why it isn't."""
     p = PassSummary.model_validate(pass_result)

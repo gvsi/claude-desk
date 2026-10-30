@@ -67,10 +67,14 @@ gate over its rows, the current recorded rate, the usage of its judged legitimat
 and hosted latency runs whose `--pass` named it (never a dry run's; without one the report says latency
 wasn't measured), the thresholds' calibration at the pass's commit and, with `--null-baseline`, a
 null-baseline pass that judged exactly the held-out legitimate tasks the pass ran (no `--only`, no stop
-at its budget). Only a pass of the whole suite (`--suite all`, `--split heldout` or `all`, no
-`--only`) that its budget didn't stop, and that is gating evidence (on the Claude API with the
-production 5.5 models, `evals.results.gating_refusal`), becomes the latest report, and its null
-baseline must be gating evidence too; any other, such as a pass on Bedrock, gets its report alone,
+at its budget). Only a whole `--results` pass becomes the latest report: `--suite all --split all`
+with no `--only`, not stopped by its budget, gating evidence (on the Claude API with the production
+5.5 models, `evals.results.gating_refusal`), holding one judged run of every scenario and repetition
+less the pending ones, its rows reconciled one by one with the suite at its commit
+(`evals.results.selection_problems`), and standing for its commit by what it recorded before its
+runs: no uncommitted gated change, the kernel built from that tree and its commit's gated inputs
+(`evals.results.unchecked_refusal`). Its null baseline must be gating evidence too. Any other pass,
+such as a pass on Bedrock, a held-out-split pass or one with an errored run, gets its report alone,
 under `evals/out/reports/`, and the command says why. A dry run, a null-baseline pass, a pass with no
 run, a null baseline that isn't gating evidence for a report that would become the latest, or anything
 it can't read whole is refused: exit 1, the reason on stdout, nothing written.
@@ -388,11 +392,15 @@ def report_inputs(pass_id: str, *, root: Path, null_baseline_id: str | None = No
     its judged legitimate runs, the latency runs that name it, the thresholds' calibration at its commit
     and, with `null_baseline_id`, a null-baseline pass that judged the same held-out legitimate tasks (and is
     gating evidence when the report would become the latest). Anything missing or inconsistent refuses, so
-    no run or number is left out unseen."""
+    no run or number is left out unseen. The summary also states what keeps the pass from the latest
+    report beyond its config: rows that don't hold one judged run of every scenario and repetition it
+    selected, reconciled with the suite at its commit (`results.selection_problems`), and a start that
+    doesn't show it stood for its commit (`results.unchecked_refusal`)."""
     from pydantic import ValidationError
 
     from evals.gate import gate
     from evals.report import PassSummary, kept_out, latest_refusal, load_budget
+    from evals.results import selection_problems, unchecked_refusal
     from evals.tier2.passes import load_pass
     from evals.tier2.suite import load_recorded_rates, load_splits, load_suite, suite_sha256
     from evals.usage import conversation_metrics
@@ -433,7 +441,8 @@ def report_inputs(pass_id: str, *, root: Path, null_baseline_id: str | None = No
             served_models=result.served_models, runs_per_scenario=config.runs, external=config.base_url is not None,
             dry_run=config.dry_run, null_baseline=config.null_baseline, stopped_by_budget=result.stopped_by_budget,
             pending=result.pending, heldout_sha256=result.heldout_sha256, spend=own[0],
-            simulator_fallbacks=result.simulator_fallbacks, runs=runs)
+            simulator_fallbacks=result.simulator_fallbacks, runs=runs, uncovered=selection_problems(result, root),
+            unchecked=unchecked_refusal(result, root))
     except ValidationError as error:
         raise ReportRefused(f"pass {pass_id} doesn't read as a report's pass ({error.error_count()} problems: "
                             f"{error.errors()[0]['msg']})") from None
@@ -633,7 +642,7 @@ def _null_baseline(root: Path, null_id: str, real: "PassResult", *, latest: bool
 
 
 def report_command(argv: list[str], *, root: Path | None = None) -> int:
-    from evals.report import exploratory, partial, write_report
+    from evals.report import exploratory, kept_out, partial, write_report
     from evals.tier2.passes import REPO_ROOT, PassRefused
 
     parser = _pass_parser("report")
@@ -652,12 +661,18 @@ def report_command(argv: list[str], *, root: Path | None = None) -> int:
     print(f"report: pass {options.pass_id}: the gate {'passed' if judged.passed else 'failed'}; latency "
           f"{'measured' if inputs['latency'] is not None else 'not measured'}")
     kept = "so the latest report, evals/reports/spend.csv and the latest results in docs/evals.md stay as they were"
-    left_out, explores = partial(inputs["pass_result"]), exploratory(inputs["pass_result"])
+    summary = inputs["pass_result"]
+    left_out, explores = partial(summary), exploratory(summary)
     if left_out:
         print(f"report: the pass ran part of the suite ({', '.join(left_out)}), {kept}")
     if explores:
         print(f"report: {explores}; {kept}")
-    if left_out or explores:
+    if summary.uncovered:
+        print(f"report: the pass's rows don't hold a judged run of every scenario and repetition it selected "
+              f"({'; '.join(summary.uncovered)}), {kept}")
+    if summary.unchecked:
+        print(f"report: {summary.unchecked}; {kept}")
+    if kept_out(summary):
         print(f"report: wrote {written.relative_to(root)}")
         return 0
     print(f"report: wrote {written.relative_to(root)}, evals/reports/latest.json and evals/reports/spend.csv, and "

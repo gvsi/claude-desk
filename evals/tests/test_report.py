@@ -108,6 +108,7 @@ def a_pass(runs: list[ReportRun], **changes: Any) -> PassSummary:
         "spend": spend(runs=len(runs)), "runs": runs,
         "simulator_fallbacks": {"turns": sum(r.fallback_turns for r in runs),
                                 "switches": sum(r.switches for r in runs)},
+        "uncovered": [], "unchecked": None,
     }
     return PassSummary.model_validate({**data, **changes})
 
@@ -792,7 +793,7 @@ async def test_report_command_writes_the_report_of_a_finished_pass(report_repo, 
     append_spend(spend_file, {"pass_id": "latency-20261030-120000-0b0b0b", "date": "2026-10-30",
                               "provider": "anthropic", "runs": 0, "desk_usd": "2.4000", "simulator_usd": "0.0000",
                               "claude_api_usd": "2.4000", "total_usd": "2.4000", "estimated_usd": "0.0000"})
-    pass_id = await report_pass(root)
+    pass_id = await report_pass(root, results=True)
     latency_file(root, pass_id)
     latency_file(root, pass_id, provider="fake", reveal_p50=7.0, minutes=90)      # a dry run's: never read
     latency_file(root, "20261030-200000-0c0c0c", reveal_p50=9.0, minutes=30)     # another pass's
@@ -841,7 +842,9 @@ async def test_report_command_names_the_checks_a_pass_before_plan_01b_skipped(re
     """A pass whose runs skipped checks because plan 01b hadn't landed reads them from its rows and
     transcripts, and its report, latest.json and the evals guide's latest results name them."""
     root = report_repo
-    pass_id = await report_pass(root, before_plan_01b)
+    set_landed(root, ("master", "01a", "02a", "02"))
+    commit(root, "plans 01a, 02a and 02 landed, plan 01b not yet")
+    pass_id = await report_pass(root, before_plan_01b, results=True)
     assert evals_run.report_command(["--pass", pass_id], root=root) == 0
     capsys.readouterr()
     reports = root / "evals" / "reports"
@@ -880,7 +883,9 @@ async def test_report_command_keeps_a_partial_pass_out_of_the_latest_results(rep
     """Only a pass of the whole suite (`--suite all`, a split that holds the held-out set, no `--only`)
     that started every run becomes the latest report. A calibration-split, single-suite, `--only` or
     budget-stopped pass gets its report under `evals/out/reports/`, saying what the pass ran, and
-    latest.json, spend.csv and the evals guide's latest results stay as they were."""
+    latest.json, spend.csv and the evals guide's latest results stay as they were. A held-out-split pass
+    isn't a `--results` pass, so nothing checked its tree or built its kernel: it is kept out too, and the
+    whole `--results` pass becomes the latest."""
     root = report_repo
     reports, out, doc = root / "evals" / "reports", root / "evals" / "out" / "reports", root / "docs" / "evals.md"
     guide = doc.read_text()
@@ -905,12 +910,105 @@ async def test_report_command_keeps_a_partial_pass_out_of_the_latest_results(rep
 
     heldout = await report_pass(root, split="heldout")
     assert evals_run.report_command(["--pass", heldout], root=root) == 0
-    assert f"report: wrote evals/reports/2026-10-30-{heldout}.md" in capsys.readouterr().out
+    printed = capsys.readouterr().out
+    assert f"report: pass {heldout} wasn't made with --results" in printed, printed
+    assert f"report: wrote evals/out/reports/2026-10-30-{heldout}.md" in printed, printed
+    assert not (reports / "latest.json").exists() and doc.read_text() == guide
+
+    whole = await report_pass(root, results=True)
+    assert evals_run.report_command(["--pass", whole], root=root) == 0
+    assert f"report: wrote evals/reports/2026-10-30-{whole}.md" in capsys.readouterr().out
     latest = json.loads((reports / "latest.json").read_text())
-    assert (latest["pass_id"], latest["suite"], latest["split"], latest["only"]) == (heldout, "all", "heldout", [])
-    text = (reports / f"2026-10-30-{heldout}.md").read_text()
-    assert "| Suite | all |" in text and "| Split | held out |" in text and "This pass ran part" not in text
-    assert heldout in doc.read_text()
+    assert (latest["pass_id"], latest["suite"], latest["split"], latest["only"]) == (whole, "all", "all", [])
+    text = (reports / f"2026-10-30-{whole}.md").read_text()
+    assert "| Suite | all |" in text and "| Split | all |" in text and "never becomes the latest" not in text
+    assert whole in doc.read_text()
+
+
+async def test_report_command_keeps_a_pass_missing_judged_runs_out_of_the_latest_results(report_repo, capsys):
+    """A pass becomes the latest report only when its rows hold one judged run of every scenario and
+    repetition its config selected, less the pending ones, reconciled row by row with the suite at its
+    commit, never counted. With rows removed from a finished pass's runs.jsonl the gate over the rows left
+    still passes, yet the report stays under `evals/out/reports/` naming the runs with no row, and
+    latest.json, spend.csv and the evals guide's latest results stay as they were. Whole again, the same
+    pass becomes the latest."""
+    root = report_repo
+    reports, out, doc = root / "evals" / "reports", root / "evals" / "out" / "reports", root / "docs" / "evals.md"
+    guide = doc.read_text()
+    pass_id = await report_pass(root, results=True)
+    rows = root / "evals" / "out" / "passes" / pass_id / "runs.jsonl"
+    whole = rows.read_text()
+    rows.write_text("".join(line for line in whole.splitlines(keepends=True) if '"leg-held"' in line))
+    assert evals_run.report_inputs(pass_id, root=root)["gate_result"].passed     # one clean row left
+
+    assert evals_run.report_command(["--pass", pass_id], root=root) == 0
+    printed = capsys.readouterr().out
+    why = "3 runs have no row, in 3 scenarios: atk-cal run 1; atk-held run 1; leg-cal run 1"
+    assert why in printed, printed
+    assert printed.rstrip().endswith(f"report: wrote evals/out/reports/2026-10-30-{pass_id}.md"), printed
+    text = (out / f"2026-10-30-{pass_id}.md").read_text()
+    assert ("This pass's rows don't hold a judged run of every scenario and repetition it selected, so its report "
+            f"stays under `evals/out/reports/` and never becomes the latest report: {why}.") in text
+    assert not (reports / "latest.json").exists() and not (reports / "spend.csv").exists()
+    assert not list(reports.glob("2026-*.md")) and doc.read_text() == guide
+
+    rows.write_text(whole)
+    assert evals_run.report_command(["--pass", pass_id], root=root) == 0
+    assert f"report: wrote evals/reports/2026-10-30-{pass_id}.md" in capsys.readouterr().out
+    assert json.loads((reports / "latest.json").read_text())["pass_id"] == pass_id
+
+
+def _started(**start: Any) -> Any:
+    """The pass's `pass.json` with its `start` record changed, or left out when `start` is empty."""
+    def edit(root: Path, pass_id: str) -> None:
+        done = root / "evals" / "out" / "passes" / pass_id / "pass.json"
+        data = json.loads(done.read_text())
+        if start:
+            data["start"] = {**data["start"], **start}
+        else:
+            del data["start"]
+        done.write_text(json.dumps(data))
+    return edit
+
+
+UNCHECKED = {
+    "an uncommitted gated change at its start": (
+        True, _started(uncommitted=["M backend/desk/kernel_service/app.py"]),
+        "its tree had uncommitted changes under the gated paths when it started: M backend/desk/kernel_service/app.py"),
+    "no record of its start": (True, _started(), "it doesn't record what it checked before its runs"),
+    "no kernel build before its runs": (True, _started(kernel_built=False), "it didn't build the kernel before its runs"),
+    "a pass made without --results": (False, None, "wasn't made with --results, so nothing checked that its tree held "
+                                                   "its commit's gated inputs, and nothing built the kernel from them"),
+}
+
+
+@pytest.mark.parametrize("case", UNCHECKED)
+async def test_report_command_keeps_a_pass_that_cant_stand_for_its_commit_out_of_the_latest_results(
+        report_repo, capsys, case):
+    """A pass becomes the latest report only when what it recorded before its runs shows it stood for its
+    commit, by the rule a results file and the final gate use (`results.unchecked_refusal`): a `--results`
+    pass, which found no uncommitted change under the gated paths when it started and built the kernel from
+    that tree before its runs, at the gated inputs its commit holds. Any other pass's report stays under
+    `evals/out/reports/` with the reason, and latest.json, spend.csv and the guide's latest results stay as
+    they were."""
+    results, edit, why = UNCHECKED[case]
+    root = report_repo
+    reports, out, doc = root / "evals" / "reports", root / "evals" / "out" / "reports", root / "docs" / "evals.md"
+    guide = doc.read_text()
+    pass_id = await report_pass(root, results=results)
+    if edit is not None:
+        edit(root, pass_id)
+
+    assert evals_run.report_command(["--pass", pass_id], root=root) == 0
+    printed = capsys.readouterr().out
+    assert why in printed and "stay as they were" in printed, printed
+    assert printed.rstrip().endswith(f"report: wrote evals/out/reports/2026-10-30-{pass_id}.md"), printed
+    text = (out / f"2026-10-30-{pass_id}.md").read_text()
+    lead = (f"This pass can't stand for its commit's gated inputs, so its report stays under `evals/out/reports/` and "
+            f"never becomes the latest report: pass {pass_id}")
+    assert lead in text and why in text.split(lead, 1)[1].split("\n", 1)[0], text
+    assert not (reports / "latest.json").exists() and not (reports / "spend.csv").exists()
+    assert not list(reports.glob("2026-*.md")) and doc.read_text() == guide
 
 
 async def test_report_command_keeps_an_exploratory_pass_out_of_the_latest_results(report_repo, capsys):
@@ -945,7 +1043,7 @@ async def test_report_command_keeps_an_exploratory_pass_out_of_the_latest_result
         assert not (reports / "latest.json").exists() and not (reports / "spend.csv").exists(), why
         assert not list(reports.glob("2026-*.md")) and doc.read_text() == guide, why
 
-    gating = await report_pass(root)
+    gating = await report_pass(root, results=True)
     assert evals_run.report_command(["--pass", gating], root=root) == 0
     assert f"report: wrote evals/reports/2026-10-30-{gating}.md" in capsys.readouterr().out
     assert json.loads((reports / "latest.json").read_text())["pass_id"] == gating and gating in doc.read_text()
@@ -968,7 +1066,7 @@ async def test_report_command_counts_the_fallbacks_of_every_attempt(report_repo)
                                                        served_models=["claude-opus-5-5", "claude-sonnet-5-5"]))
         return crafted_outcome(scenario, rep, kwargs["pass_id"])
 
-    pass_id = await report_pass(root, infra_first)
+    pass_id = await report_pass(root, infra_first, results=True)
     out = root / "evals" / "out" / "passes" / pass_id
     assert (out / "transcripts" / "atk-held-1-try1.json").is_file()
     totals = json.loads((out / "pass.json").read_text())["simulator_fallbacks"]
@@ -997,7 +1095,7 @@ async def test_report_command_reads_the_null_baseline_pass(report_repo, capsys):
     held-out completion, so the report says whether the legitimate oracles pass a Desk that does
     nothing; a pass that isn't one, or ran on another held-out set, is refused and nothing is written."""
     root = report_repo
-    pass_id = await report_pass(root)
+    pass_id = await report_pass(root, results=True)
     null_id = await report_pass(root, answering_off, suite="legit", split="heldout", null_baseline=True)
     answering_on = await report_pass(root, suite="legit", split="heldout")
 
@@ -1072,7 +1170,7 @@ async def test_report_command_quotes_only_a_gating_null_baseline_in_the_latest_r
         return outcome.model_copy(update={"simulator": outcome.simulator.model_copy(
             update={"served_models": ["claude-sonnet-4-5"]})})
 
-    pass_id = await report_pass(root)
+    pass_id = await report_pass(root, results=True)
     on_bedrock = await report_pass(root, answering_off, provider="bedrock", **null)
     for null_id, why in ((on_bedrock, "it ran the API on bedrock, the simulator on bedrock"),
                          (await report_pass(root, off_model, **null), "the simulator was served by claude-sonnet-4-5")):
@@ -1108,7 +1206,9 @@ async def test_report_command_quotes_only_a_gating_null_baseline_in_the_latest_r
 
 async def test_report_command_counts_errored_runs_by_kind(report_repo):
     """A run that timed out keeps its kind; one whose infra error came back on its retry, or whose verdict
-    didn't fit a row, is an infra error. The report judges none of them and counts each by its kind."""
+    didn't fit a row, is an infra error. The report judges none of them and counts each by its kind, and
+    since the pass holds no judged run of those scenarios, its report stays under `evals/out/reports/`,
+    naming them, and never becomes the latest."""
     root = report_repo
 
     async def scripted(scenario: Any, rep: int, target: Any, simulator: Any, **kwargs: Any) -> RunOutcome:
@@ -1128,12 +1228,15 @@ async def test_report_command_counts_errored_runs_by_kind(report_repo):
         ("atk-cal", "timeout"), ("leg-cal", "infra"), ("atk-held", "infra"), ("leg-held", None)}
 
     assert evals_run.report_command(["--pass", pass_id], root=root) == 0
-    text = (root / "evals" / "reports" / f"2026-10-30-{pass_id}.md").read_text()
+    text = (root / "evals" / "out" / "reports" / f"2026-10-30-{pass_id}.md").read_text()
     assert "| Runs | 1 judged, 3 errored (2 infra, 1 timeout) |" in text
-    latest = json.loads((root / "evals" / "reports" / "latest.json").read_text())
+    assert ("never becomes the latest report: 3 runs weren't judged (an error, or records the verdict couldn't "
+            "read): atk-cal run 1, atk-held run 1, leg-cal run 1.") in text
+    assert not (root / "evals" / "reports" / "latest.json").exists()
+    latest = latest_json(**{name: value for name, value in inputs.items() if name != "budget"})
     assert (latest["judged_runs"], latest["errored_runs"]) == (1, 3)
     assert latest["errored_runs_by_kind"] == {"infra": 2, "timeout": 1}
-    assert latest["gate_passed"] is False
+    assert latest["gate_passed"] is False and latest["report"] == f"evals/out/reports/2026-10-30-{pass_id}.md"
 
 
 async def test_report_command_refuses_what_it_cant_read_whole(report_repo, capsys):
@@ -1144,7 +1247,7 @@ async def test_report_command_refuses_what_it_cant_read_whole(report_repo, capsy
     root = report_repo
     reports, doc = root / "evals" / "reports", root / "docs" / "evals.md"
     guide = doc.read_text()
-    pass_id = await report_pass(root)
+    pass_id = await report_pass(root, results=True)
     out = root / "evals" / "out" / "passes" / pass_id
     transcript = out / "transcripts" / "leg-held-1.json"
     scenario = root / "evals" / "tier2" / "scenarios" / "leg-held.yaml"
