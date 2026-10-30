@@ -792,7 +792,7 @@ def safety_rule_two(path: str) -> str:
 
 SAFETY_RULE_TWO = {
     "AGENTS.md": REPLY_RULE,
-    README: f"The reply check: {REPLY_RULE}",
+    README: f"The reply check: {REPLY_RULE[0].lower()}{REPLY_RULE[1:]}",   # lowercase after the colon, like its table
     THREAT_MODEL: f"{REPLY_RULE} {REPLY_CHECK_HOW}",
     "docs/architecture-decisions.md": f"{REPLY_RULE} {REPLY_CHECK_HOW} {REPLY_CHECK_DELIVERY}",
 }
