@@ -192,11 +192,8 @@ AMOUNT_AND_TIME_WORDS = [   # (prose, rule_id, span): amounts, fractions, "free"
     ("Llega en unos pocos minutos.", "lex.es.date", "en unos pocos minutos"),
     ("Maria llega dentro de un par de horas.", "lex.es.date", "dentro de un par de horas"),
     ("Maria llega en media hora.", "lex.es.date", "en media hora"),
-    ("Maria can come right away.", "lex.en.date", "right away"),
-    ("Maria va enseguida.", "lex.es.date", "enseguida"),
-    ("Maria sale en seguida.", "lex.es.date", "en seguida"),
+    # the bare "right away", "first thing" and "enseguida" pass (the owner's decision, below)
     ("She can come first thing in the morning.", "lex.en.date", "first thing in the morning"),
-    ("Maria can be there first thing.", "lex.en.date", "first thing"),
     ("She can be there the first thing in the morning.", "lex.en.date", "first thing in the morning"),
     ("Maria llega a primera hora.", "lex.es.date", "a primera hora"),
     # the ordinals and fractions the evals read as a date or an amount ("on the fifth", "a fifth off")
@@ -227,7 +224,7 @@ def test_amount_and_time_words_are_blocked(prose, rule_id, span):
     "You can count on us.",                                 # "on us" after count, rely or depend
     "You can always rely on us for repairs.",
     "It depends on us getting a look at it.",
-    "The first thing to do is turn off the water.",         # "first thing" after a determiner is advice
+    "The first thing to do is turn off the water.",         # "first thing" is advice, no time
     "Your first thing to check is the valve under the sink.",
     "Lo primero es cerrar la llave del agua.",
     "First, let me check with Maria.",                      # "first" and "second" are no fraction or day
@@ -239,13 +236,31 @@ def test_ordinary_words_beside_the_amount_and_time_words_pass(prose):
     assert reply_check.scan_prose(prose) == []
 
 
+@pytest.mark.parametrize(("prose", "language"), [
+    ("Turn off the water main right away.", "en"),
+    ("Maria can come right away.", "en"),
+    ("Maria can be there first thing.", "en"),
+    ("Cierre la llave de paso enseguida.", "es"),
+    ("Claro, Maria va enseguida.", "es"),
+    ("Claro, Maria sale en seguida.", "es"),                 # the same adverb in two words
+])
+async def test_bare_time_adverbs_pass_by_the_owners_decision(app, client, prose, language):
+    """The owner's decision of 2026-10-30: the bare adverbs "right away", "first thing" and
+    "enseguida" are no time words, so urgent advice reaches the visitor ("Turn off the water main
+    right away."). A time with its unit or its part of the day still blocks (below)."""
+    copy, visitor = await visitor_of(app, client)
+    verdict = await checked(client, visitor, prose)
+    assert (verdict.ok, verdict.violations, verdict.language) == (True, [], language)
+    assert verdict.blocks == [RenderedBlock(kind="prose", text=prose)]
+
+
 @pytest.mark.parametrize(("prose", "found"), [
     ("It costs zеro.", [("lex.en.number", "zеro"), ("mixed_script", "zеro")]),         # Cyrillic e
     ("Le hacemos un cuаrto menos.", [("lex.es.number", "cuаrto"), ("mixed_script", "cuаrto")]),
     ("It is оn us.", [("lex.en.promise", "оn us"), ("mixed_script", "оn")]),             # Cyrillic o
     ("Maria can be there ın an hour.", [("lex.en.date", "ın an hour")]),                    # dotless i
     ("Va sin comisiоn.", [("lex.es.promise", "sin comisiоn"), ("mixed_script", "comisiоn")]),
-    ("Maria can come RIGHT AWAY.", [("lex.en.date", "RIGHT AWAY")]),
+    ("Maria can be there IN AN HOUR.", [("lex.en.date", "IN AN HOUR")]),
     ("That comes to a couple GRAND.", [("lex.en.money", "GRAND")]),
 ])
 def test_amount_and_time_words_read_lookalike_letters(prose, found):
@@ -382,10 +397,10 @@ HYPHENATED = [                       # lexicon phrases whose words a dash may jo
     ("booking-confirmed", "lex.en.booking"), ("we-have-you-booked", "lex.en.booking"),
     ("reserva-confirmada", "lex.es.booking"), ("quedó-apartado", "lex.es.booking"),
     ("on-us", "lex.en.promise"), ("no-call-out-fee", "lex.en.promise"), ("in-a-few-minutes", "lex.en.date"),
-    ("right-away", "lex.en.date"), ("first-thing-in-the-morning", "lex.en.date"),
+    ("first-thing-in-the-morning", "lex.en.date"),
     ("por-nuestra-cuenta", "lex.es.promise"), ("por-cuenta-de-la-casa", "lex.es.promise"),
     ("sin-comisión", "lex.es.promise"), ("en-una-hora", "lex.es.date"), ("dentro-de-unos-minutos", "lex.es.date"),
-    ("en-seguida", "lex.es.date"), ("a-primera-hora", "lex.es.date"), ("tercera-parte", "lex.es.number"),
+    ("a-primera-hora", "lex.es.date"), ("tercera-parte", "lex.es.number"),
 ]
 
 
@@ -582,7 +597,7 @@ async def test_language_detection(app, client, prose, detected):
 
 @pytest.mark.parametrize(("prose", "rule_ids"), [
     ("Perfecto, ya lo reviso.", []),
-    ("Claro, enseguida lo reviso.", ["lex.es.date"]),                  # "enseguida" is a time: in Spanish now
+    ("Claro, enseguida lo reviso.", []),                               # no time word (the owner's decision)
     ("Tu cita está confirmada.", ["lex.es.booking"]),                  # a booking claim: in Spanish now
     ("Maria te escribe antes de llegar.", []),
     ("Listo, quedó anotado para ti.", []),
