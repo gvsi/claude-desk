@@ -19,7 +19,7 @@ type Story = StoryObj<typeof meta>;
 const SIZES = [16, 20, 24] as const;
 
 export const Mark: Story = {
-  parameters: { canvasNote: 'The board draws the mark at 20 px in the sidebar; the 16 and 24 px sizes are shown beside it.' },
+  parameters: { canvasNote: 'N-Today-Run1 draws the earlier counter mark; the bell (N-Explore-Mark-Bell, signed 2026-10-30) replaced it.' },
   render: () => (
     <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-16)' }}>
       {SIZES.map((size) => (
@@ -47,11 +47,21 @@ export const Mark: Story = {
       expectComputed(tile as Element, { fill: 'rgb(255, 255, 255)', stroke: 'rgba(20, 20, 19, 0.1)' });
       expectComputed(clay as Element, { fill: 'rgb(217, 119, 87)' });
       expectComputed(ink as Element, { fill: 'rgb(20, 20, 19)' });
-      // One clay blob; six ink strokes, each with a round dot at both ends, as the drawing has them.
+      // The tile, the one clay blob, and the six ink strokes with a round dot at both ends of each,
+      // exactly as the drawing has them and in its order.
+      const number = (shape: Element, name: string) => Number(shape.getAttribute(name));
+      await expect(Object.fromEntries(Object.keys(MARK_GEOMETRY.tile).map((name) => [name, number(tile as Element, name)]))).toEqual(
+        MARK_GEOMETRY.tile,
+      );
       await expect([...(clay?.children ?? [])].map((shape) => shape.getAttribute('d'))).toEqual([...MARK_GEOMETRY.clay]);
+      const drawn = [...(ink?.children ?? [])].map((shape) =>
+        shape.tagName === 'path'
+          ? { d: shape.getAttribute('d') }
+          : { cx: number(shape, 'cx'), cy: number(shape, 'cy'), r: number(shape, 'r') },
+      );
+      await expect(drawn).toEqual(MARK_GEOMETRY.ink);
       await expect(ink?.querySelectorAll(':scope > path')).toHaveLength(6);
       await expect(ink?.querySelectorAll(':scope > circle')).toHaveLength(12);
-      await expect(ink?.children).toHaveLength(MARK_GEOMETRY.ink.length);
     }
   },
 };

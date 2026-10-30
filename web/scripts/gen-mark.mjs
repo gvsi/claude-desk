@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Generates the Claude Desk mark's geometry (src/ds/components/Mark/markGeometry.ts) from the
-// favicon (public/favicon.svg), the mark's source drawing, so `Mark` draws exactly the same shapes.
+// Generates the Claude Desk mark's geometry (src/ds/components/Mark/markGeometry.ts) from the mark's
+// signed drawing (src/ds/components/Mark/mark.svg), which is also the page's icon, so `Mark` draws
+// exactly the same shapes.
 //   node scripts/gen-mark.mjs          write markGeometry.ts
 //   node scripts/gen-mark.mjs --check  exit 1 if markGeometry.ts is stale
 // The drawing is read strictly: a white tile, then one group holding the clay group and the ink
@@ -12,8 +13,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const NUMBER = /^-?\d+(?:\.\d+)?$/;
 const HEX = /^#[0-9a-fA-F]{6}$/;
-// Path data: commands, numbers, spaces and commas only.
-const PATH_DATA = /^[MmLlHhVvCcSsQqTtAaZz0-9 .,-]+$/;
+// Path data: a move first, then commands, numbers, spaces and commas only.
+const PATH_DATA = /^[Mm][MmLlHhVvCcSsQqTtAaZz0-9 .,-]*$/;
+// The shapes, which hold no children (no animation, no title, nothing else).
+const LEAVES = new Set(['rect', 'path', 'circle']);
 const ART_TRANSFORM = /^translate\(-?\d+(?:\.\d+)? -?\d+(?:\.\d+)?\) scale\(\d+(?:\.\d+)?\)$/;
 const VIEW_BOX = /^0 0 \d+ \d+$/;
 // One tag with its attributes, or the whitespace between tags.
@@ -21,7 +24,7 @@ const TOKEN = /\s*<(\/?)([A-Za-z]+)((?:\s+[A-Za-z:-]+="[^"<>]*")*)\s*(\/?)>\s*/y
 const ATTRIBUTE = /([A-Za-z:-]+)="([^"]*)"/g;
 
 function fail(message) {
-  throw new Error(`favicon.svg: ${message}`);
+  throw new Error(`mark.svg: ${message}`);
 }
 
 /** The drawing as a tree of `{ name, attrs, children }`, or a throw on anything that isn't a tag. */
@@ -40,8 +43,11 @@ function parse(svg) {
       open.pop();
       continue;
     }
-    const attrs = Object.fromEntries([...attrText.matchAll(ATTRIBUTE)].map(([, key, value]) => [key, value]));
-    const node = { name, attrs, children: [] };
+    const pairs = [...attrText.matchAll(ATTRIBUTE)].map(([, key, value]) => [key, value]);
+    const keys = pairs.map(([key]) => key);
+    const repeated = keys.find((key, i) => keys.indexOf(key) !== i);
+    if (repeated !== undefined) fail(`<${name}> has the attribute ${repeated} twice`);
+    const node = { name, attrs: Object.fromEntries(pairs), children: [] };
     parent.children.push(node);
     if (!selfClosing) open.push(node);
   }
@@ -50,9 +56,10 @@ function parse(svg) {
   return root.children[0];
 }
 
-/** Checks a node's name and that it has exactly the attributes listed. */
+/** Checks a node's name, that it has exactly the attributes listed, and that a shape has no children. */
 function expectNode(node, name, keys) {
   if (node.name !== name) fail(`unexpected <${node.name}> where <${name}> belongs`);
+  if (LEAVES.has(name) && node.children.length > 0) fail(`<${name}> has children, which a shape can't`);
   const extra = Object.keys(node.attrs).filter((key) => !keys.includes(key));
   if (extra.length > 0) fail(`unexpected attribute ${extra.join(', ')} on <${name}>`);
   const missing = keys.filter((key) => !(key in node.attrs));
@@ -71,7 +78,7 @@ function hex(value, where) {
 
 function pathData(node, where) {
   expectNode(node, 'path', ['d']);
-  if (!PATH_DATA.test(node.attrs.d)) fail(`a ${where} path has unexpected data`);
+  if (!PATH_DATA.test(node.attrs.d)) fail(`a path in the ${where} group doesn't start with a move or has unexpected data`);
   return node.attrs.d;
 }
 
@@ -95,6 +102,7 @@ export function readMark(svg) {
 
   expectNode(tileNode, 'rect', ['x', 'y', 'width', 'height', 'rx', 'fill', 'stroke', 'stroke-opacity']);
   const tile = Object.fromEntries(['x', 'y', 'width', 'height', 'rx'].map((key) => [key, number(tileNode.attrs[key], `the tile's ${key}`)]));
+  for (const key of ['width', 'height', 'rx']) if (!(tile[key] > 0)) fail(`the tile's ${key} must be more than 0`);
   const hairlineOpacity = number(tileNode.attrs['stroke-opacity'], "the tile's stroke-opacity");
   if (hairlineOpacity <= 0 || hairlineOpacity > 1) fail("the tile's stroke-opacity is out of range");
 
@@ -128,13 +136,13 @@ export function buildMarkGeometry(svg) {
   const { viewBox, tile, art, clay, ink } = readMark(svg).geometry;
   const shape = (s) => ('d' in s ? `{ d: '${s.d}' }` : `{ cx: ${s.cx}, cy: ${s.cy}, r: ${s.r} }`);
   return [
-    '// Generated from public/favicon.svg by `npm run gen:mark`; never edit this file by hand.',
+    '// Generated from mark.svg by `npm run gen:mark`; never edit this file by hand.',
     '',
     '/**',
-    " * The Claude Desk mark's geometry on its 100-unit grid, read from the favicon, the mark's source",
-    ' * drawing: the tile, then the bell drawn at `art` inside it, its clay dome under its ink lines.',
-    ' * `Mark` draws from it, so the mark and the favicon can\'t drift. Color is not geometry: the',
-    " * mark's fixed colors are the `mark-*` tokens.",
+    " * The Claude Desk mark's geometry on its 100-unit grid, read from its signed drawing (mark.svg,",
+    " * also the page's icon): the tile, then the bell drawn at `art` inside it, its clay dome under its",
+    " * ink lines. `Mark` draws from it, so the mark and the drawing can't drift. Color is not geometry:",
+    " * the mark's fixed colors are the `mark-*` tokens.",
     ' */',
     'export const MARK_GEOMETRY = {',
     `  viewBox: '${viewBox}',`,
@@ -153,14 +161,14 @@ export function buildMarkGeometry(svg) {
 
 function main(args) {
   const web = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-  const faviconPath = path.join(web, 'public', 'favicon.svg');
+  const drawingPath = path.join(web, 'src', 'ds', 'components', 'Mark', 'mark.svg');
   const outPath = path.join(web, 'src', 'ds', 'components', 'Mark', 'markGeometry.ts');
   const unknown = args.filter((arg) => arg !== '--check');
   if (unknown.length > 0) {
     console.error(`Unknown argument: ${unknown.join(' ')}. Use --check to verify without writing.`);
     return 2;
   }
-  const text = buildMarkGeometry(readFileSync(faviconPath, 'utf8'));
+  const text = buildMarkGeometry(readFileSync(drawingPath, 'utf8'));
   if (args.includes('--check')) {
     let current = '';
     try {
@@ -169,14 +177,14 @@ function main(args) {
       // A missing file is stale.
     }
     if (current !== text) {
-      console.error('src/ds/components/Mark/markGeometry.ts is out of date with public/favicon.svg. Run `npm run gen:mark`.');
+      console.error('src/ds/components/Mark/markGeometry.ts is out of date with mark.svg. Run `npm run gen:mark`.');
       return 1;
     }
-    console.log('src/ds/components/Mark/markGeometry.ts matches public/favicon.svg.');
+    console.log('src/ds/components/Mark/markGeometry.ts matches mark.svg.');
     return 0;
   }
   writeFileSync(outPath, text);
-  console.log('Wrote src/ds/components/Mark/markGeometry.ts from public/favicon.svg.');
+  console.log('Wrote src/ds/components/Mark/markGeometry.ts from mark.svg.');
   return 0;
 }
 

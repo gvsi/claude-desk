@@ -1,10 +1,10 @@
-// Generated from public/favicon.svg by `npm run gen:mark`; never edit this file by hand.
+// Generated from mark.svg by `npm run gen:mark`; never edit this file by hand.
 
 /**
- * The Claude Desk mark's geometry on its 100-unit grid, read from the favicon, the mark's source
- * drawing: the tile, then the bell drawn at `art` inside it, its clay dome under its ink lines.
- * `Mark` draws from it, so the mark and the favicon can't drift. Color is not geometry: the
- * mark's fixed colors are the `mark-*` tokens.
+ * The Claude Desk mark's geometry on its 100-unit grid, read from its signed drawing (mark.svg,
+ * also the page's icon): the tile, then the bell drawn at `art` inside it, its clay dome under its
+ * ink lines. `Mark` draws from it, so the mark and the drawing can't drift. Color is not geometry:
+ * the mark's fixed colors are the `mark-*` tokens.
  */
 export const MARK_GEOMETRY = {
   viewBox: '0 0 100 100',

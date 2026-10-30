@@ -37,6 +37,16 @@ function tokenValue(name: string): string | undefined {
   return undefined;
 }
 
+/** Color tokens that alias a `mark-*` color or clay, as "name: value". */
+function aliasesOfTheMarkOrClay(colors: readonly { name: string; value: { dark: string } }[]): string[] {
+  return colors
+    .filter((token) => {
+      const target = ALIAS.exec(token.value.dark)?.[1];
+      return target !== undefined && (target.startsWith('mark-') || target === 'clay' || target.startsWith('clay-'));
+    })
+    .map((token) => `${token.name}: ${token.value.dark}`);
+}
+
 /** The tokens with one more interface type style, for the builder's checks. */
 function withStyle(style: TypeStyle): DesignTokens {
   const copy: DesignTokens = structuredClone(tokens);
@@ -119,6 +129,18 @@ describe('design tokens', () => {
     expect(colorNames.filter((name) => name.startsWith('mark-')).sort()).toEqual(Object.keys(expected).sort());
     // The hairline only edges the tile on a light ground; the tile itself carries the contrast.
     expect(DECORATIVE_COLORS['mark-hairline']).toBeDefined();
+  });
+
+  test('mark_and_clay_are_never_aliased', () => {
+    // An alias would carry the mark's colors, or clay, out of their components under another name.
+    const sample = [
+      { name: 'odd-tile', value: { dark: '{mark-tile}' } },
+      { name: 'odd-field', value: { dark: '{clay}' } },
+      { name: 'odd-soft', value: { dark: '{clay-soft}' } },
+      { name: 'fine', value: { dark: '{bg-app}' } },
+    ];
+    expect(aliasesOfTheMarkOrClay(sample)).toEqual(['odd-tile: {mark-tile}', 'odd-field: {clay}', 'odd-soft: {clay-soft}']);
+    expect(aliasesOfTheMarkOrClay(tokens.color.tokens)).toEqual([]);
   });
 
   test('figure_tokens_match_the_today_board', () => {
