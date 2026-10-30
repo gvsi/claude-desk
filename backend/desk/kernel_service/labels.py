@@ -252,9 +252,13 @@ async def store_knowledge(ctx: KernelCtx, desk_id: str, item: KnowledgeItem) -> 
     Checked before anything is written, else 422 `invalid`: the label is the owner's alone or
     everyone's (`["owner"]` or `["public"]`, with no record owner), the text at most 100 KiB and
     the title at most 200 characters, both text Postgres can hold, and the ID one the ledger can
-    name (`^[A-Za-z0-9_-]{1,64}$`)."""
+    name (`^[A-Za-z0-9_-]{1,64}$`) holding no canary, since the ledger and every reader of the
+    item see its ID as it is."""
     _check_knowledge(item)
-    forced = bool(find_canaries_in([item.title, item.text], await copy_canaries(ctx)))
+    canaries = await copy_canaries(ctx)
+    if find_canaries(item.item_id, canaries):
+        raise KernelFailure(422, "invalid", "knowledge_id_canary")
+    forced = bool(find_canaries_in([item.title, item.text], canaries))
     readers = list(OWNER_ONLY) if forced else list(item.label.readers)
     insert = pg_insert(KnowledgeRow).values(desk_id=desk_id, item_id=item.item_id, copy_id=ctx.copy_id,
                                             source=item.source, title=item.title, text=item.text, readers=readers,

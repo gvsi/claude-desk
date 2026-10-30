@@ -15,9 +15,10 @@
   Desk's rows stay few in a demo copy, where a real Desk would filter in SQL first. The facts
   start with the Desk's catalog (`catalog_fact`), so Claude knows the `item_id`s `native.quote`
   takes. A visitor's or agent's session is never given a row holding one of the copy's document
-  canaries (`labels.find_canaries_in`), whatever its label: knowledge holding one is stored
-  owner-only, and a public charter policy the owner pasted one into is left out, as on the public
-  page, and so is the catalog when an item's title holds one.
+  canaries (`labels.find_canaries_in`), whatever its label: knowledge holding one in its title or
+  text is stored owner-only (and one in its ID is refused), a knowledge item whose ID holds one is
+  left out, and so is a public charter policy the owner pasted one into, as on the public page,
+  and the catalog when an item's title holds one.
 
 A profile carries what Claude is given, the confirmed description and the adapter's input
 schema, and never the text of a changed MCP definition, which only the owner reviews.
@@ -102,7 +103,7 @@ async def session_context(ctx: KernelCtx, principal: Principal, session_row: Ses
         knowledge=[KnowledgeItem(item_id=row.item_id, source=row.source, title=row.title, text=row.text,
                                  label=labels.label_of(row.readers))
                    for row in knowledge if labels.can_read(row.readers, readers)
-                   and not labels.find_canaries_in([row.title, row.text], canaries)],
+                   and not labels.find_canaries_in([row.item_id, row.title, row.text], canaries)],
     )
 
 

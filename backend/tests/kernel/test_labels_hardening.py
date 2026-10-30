@@ -341,13 +341,26 @@ async def test_knowledge_carrying_a_canary_stays_owner_only(app, client):
         for item_id in ("kb-invoice", "kb-titled", "kb-invoice")]
     await assert_no_canary_on_record(app, copy, dana.canary, spaced, wide)
 
-    # a public row holding a canary that came some other way is still never given to a visitor
+    # an ID holding a canary is refused before anything is written, since the ledger names items by ID
+    for item_id in (dana.canary, f"kb-{dana.canary.upper()}", dana.canary.replace("-", "_")):
+        response = await post_knowledge(client, copy, knowledge(item_id, "Note", "Text.", ["public"]))
+        assert (response.status_code, response.json()) == (422, {"code": "invalid"}), item_id
+    assert len(await knowledge_entries(app, copy)) == 3
+    stored_ids = {row.item_id for row in await rows_of(app, copy.copy_id, select(KnowledgeRow))}
+    assert stored_ids == {"kb-invoice", "kb-titled"}
+    await assert_no_canary_on_record(app, copy, dana.canary, dana.canary.upper(), dana.canary.replace("-", "_"))
+
+    # a public row holding a canary that came some other way, in its text or its ID, is still never
+    # given to a visitor
     async with kernel_ctx(app) as ctx:
         ctx.bind(copy.copy_id)
         ctx.db.add(KnowledgeRow(desk_id=copy.desk_id, item_id="kb-older", copy_id=copy.copy_id, source="setup",
                                 title="Older note", text=f"Ref {dana.canary.upper()}", readers=["public"]))
+        ctx.db.add(KnowledgeRow(desk_id=copy.desk_id, item_id=dana.canary, copy_id=copy.copy_id, source="setup",
+                                title="Parking", text="Street parking is fine on our block.", readers=["public"]))
     assert await seen_by(client, copy, visitor) == []
-    assert ("kb-older", ["public"]) in await seen_by(client, copy, None)
+    assert {("kb-older", ("public",)), (dana.canary, ("public",))} <= {
+        (item_id, tuple(readers)) for item_id, readers in await seen_by(client, copy, None)}
 
 
 async def test_knowledge_input_is_bounded(app, client):
