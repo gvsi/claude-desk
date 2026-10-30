@@ -590,6 +590,25 @@ async def test_public_desk_shows_only_public_fields(kernel, ro_read):
 
 
 @pytest.mark.kernel_plan("01a")
+async def test_context_starts_with_the_desks_catalog(kernel, ro_read):
+    """A session's `/context` facts start with the public `catalog`: one text claim per price item, its item_id and
+    title, in item_id order, and no price."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    items = ro_read(ro_schema, copy.copy_id, "SELECT item_id, title FROM {ro}.price_items WHERE desk_id = %s"
+                    " ORDER BY item_id", (copy.desk_ids[0],))
+
+    facts = (await context(http.session(visitor.session_token), visitor.state.session_id)).facts
+    catalog = facts[0]
+    assert (catalog.fact_id, catalog.kind, catalog.status, catalog.label.readers) == (
+        "catalog", "charter", "available", ["public"])
+    assert [(claim.key, claim.kind, claim.value) for claim in catalog.claims] == [
+        (row["item_id"], "text", row["title"]) for row in items]
+    assert len(items) == 4 and [fact.fact_id for fact in facts].count("catalog") == 1
+
+
+@pytest.mark.kernel_plan("01a")
 async def test_ro_columns_match_the_master(kernel, api_conn):
     _, ro_schema, _ = kernel
 

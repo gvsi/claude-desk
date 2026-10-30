@@ -2,6 +2,7 @@
 shows, and each stop reason handled (Plan 02a, Task 5)."""
 
 import asyncio
+import html
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
@@ -126,6 +127,26 @@ async def test_reply_turn_reveals_after_the_check(api_conn, engine, caller, visi
     ((results,),) = await rows(api_conn, caller.session_id, "model_tool_results", "model_content")
     assert [(result["tool_use_id"], json.loads(result["content"]), result["is_error"]) for result in results] == [
         ("toolu_reply", {"outcome": "delivered", "message_id": message.message_id}, False)]
+
+
+async def test_the_desks_catalog_reaches_claude_in_the_desk_context(api_conn, caller, fake):
+    """The kernel's `/context` starts with the Desk's public `catalog` fact, one claim per item (its item_id and
+    title, no price), so Claude can name an item to native__quote; the API passes it on like any other fact."""
+    await said(api_conn, caller, "What kind of work do you do?")
+    model = ScriptedModel([response(reply("We clear drains, flush water heaters and fix leaks."))])
+
+    assert await run_turn(api_conn, caller, model) == "done"
+
+    (request,) = model.requests
+    (context,) = [block["text"] for block in request.messages[0]["content"]
+                  if block["text"].startswith("<desk_context>")]
+    facts = json.loads(html.unescape(context.removeprefix("<desk_context>").removesuffix("</desk_context>")))["facts"]
+    catalog = facts[0]
+    assert (catalog["fact_id"], catalog["kind"], catalog["label"]["readers"]) == ("catalog", "charter", ["public"])
+    assert [(claim["key"], claim["value"]) for claim in catalog["claims"]] == [
+        ("deposit", "Service call deposit"), ("drain", "Drain clearing"), ("heater", "Water heater flush"),
+        ("leak", "Leak repair")]
+    assert {claim["kind"] for claim in catalog["claims"]} == {"text"}            # no price, amount or unit
 
 
 async def test_end_turn_text_becomes_prose(api_conn, caller, fake):

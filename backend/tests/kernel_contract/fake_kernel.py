@@ -931,11 +931,22 @@ class FakeKernelState:
         session, desk = self.session_call(request, request.path_params["session_id"],
                                           request.query_params.get("desk_id"))
         declared = () if session.kind == "owner" else VISITOR_DECLARED
+        facts = [*self._catalog(desk), *(fact for fact in desk.facts.values() if self._current(fact))]
         return SessionContext(
             tools=[desk.tools[tool] for tool in self.tools_given(session, desk)],
             tools_declared=[desk.tools[tool] for tool in declared if tool in desk.tools],
-            facts=[fact for fact in desk.facts.values() if self._current(fact) and self._readable(session, fact)],
+            facts=[fact for fact in facts if self._readable(session, fact)],
             knowledge=[])
+
+    @staticmethod
+    def _catalog(desk: Desk) -> list[Fact]:
+        """The kernel's `catalog` fact (`context.catalog_fact`), first in a session's facts: public, one text claim
+        per price item (its `item_id` and title, no price) in `item_id` order, an item named "hours" left out; built
+        on each read, never stored, and none when the Desk sells nothing."""
+        claims = [Claim(key=item_id, kind="text", value=desk.prices[item_id].title)
+                  for item_id in sorted(desk.prices) if item_id != "hours"]
+        return [Fact(fact_id="catalog", kind="charter", status="available", source="kernel", claims=claims,
+                     label=Label(readers=["public"]))] if claims else []
 
     def decide(self, request: Request, body: DecideRequest) -> Decision:
         session, desk = self.session_call(request, body.session_id, body.desk_id)
