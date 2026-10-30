@@ -1,4 +1,5 @@
 import {
+  createContext,
   useCallback,
   useId,
   useLayoutEffect,
@@ -32,8 +33,29 @@ export interface AppShellProps {
    * conversation boards draw it; the page draws its own dividers.
    */
   fill?: boolean;
+  /**
+   * A panel beside the page, such as `AskClaudePanel`: at the right of the main area, the main
+   * area's height, the page narrowing to make room. A panel that becomes a modal sheet (on a phone)
+   * says so through `AppShellPanelContext`, and the shell makes everything else inert meanwhile.
+   */
+  panel?: ReactNode;
   /** The page. */
   children: ReactNode;
+}
+
+/**
+ * Given to the shell's `panel`: a panel calls it with `true` while it is a modal sheet over the
+ * window, and the shell makes its banner, navigation and page inert, whatever it draws there as the
+ * window changes. With `false` the shell lifts that, and focuses `returnFocusTo` once the page is
+ * live again if focus was left nowhere (the sheet was removed with focus in it).
+ */
+export type SetPanelModal = (modal: boolean, returnFocusTo?: HTMLElement | null) => void;
+
+export const AppShellPanelContext = createContext<SetPanelModal | null>(null);
+
+/** React 18 has no `inert` prop: the attribute, present while `on`. */
+function inertWhen(on: boolean): object {
+  return on ? { inert: '' } : {};
 }
 
 /** Below this width the sidebar becomes a sheet behind "Menu". */
@@ -56,39 +78,63 @@ function isNarrow(): boolean {
  * Menu opens the sidebar as a modal sheet, and Escape, "Close menu" or going to a page closes it
  * and returns focus to Menu.
  */
-export function AppShell({ sidebar, business, banner, layout = 'auto', fill = false, children }: AppShellProps) {
+export function AppShell({ sidebar, business, banner, layout = 'auto', fill = false, panel, children }: AppShellProps) {
   const narrow = useSyncExternalStore(subscribeNarrow, isNarrow, () => false);
   const compact = layout === 'compact' || narrow;
+
+  // While the panel is a modal sheet, everything the shell draws besides it is inert: the inert
+  // attribute is part of each render, so a part drawn anew (the top bar replacing the column as the
+  // window narrows) is inert from the start.
+  const [panelModal, setPanelModal] = useState(false);
+  const returnFocus = useRef<HTMLElement | null>(null);
+  const setModal = useCallback<SetPanelModal>((modal, returnFocusTo) => {
+    returnFocus.current = modal ? null : (returnFocusTo ?? null);
+    setPanelModal(modal);
+  }, []);
+  const inert = panelModal && panel !== undefined && panel !== null;
+  useLayoutEffect(() => {
+    if (inert) return;
+    const target = returnFocus.current;
+    returnFocus.current = null;
+    const active = document.activeElement;
+    if (target?.isConnected && (active === null || active === document.body)) target.focus();
+  }, [inert]);
 
   // Only the navigation changes with the layout. The page stays in the same place in the tree, so
   // crossing the breakpoint (a resized window, a turned phone) keeps its drafts and other state.
   return (
     <div className={`cd-app-shell${compact ? ' cd-app-shell--compact' : ''}${fill ? ' cd-app-shell--fill' : ''}`}>
-      {banner}
+      {banner ? (
+        <div className="cd-app-shell__banner" {...inertWhen(inert)}>
+          {banner}
+        </div>
+      ) : null}
+      {compact ? <CompactNav sidebar={sidebar} business={business} inert={inert} /> : null}
       <div className="cd-app-shell__body">
-        {compact ? (
-          <CompactNav sidebar={sidebar} business={business} />
-        ) : (
-          <aside className="cd-app-shell__column" aria-label="Claude Desk">
+        {compact ? null : (
+          <aside className="cd-app-shell__column" aria-label="Claude Desk" {...inertWhen(inert)}>
             {sidebar}
           </aside>
         )}
-        <Main fill={fill}>{children}</Main>
+        <Main fill={fill} inert={inert}>
+          {children}
+        </Main>
+        {panel ? <AppShellPanelContext.Provider value={setModal}>{panel}</AppShellPanelContext.Provider> : null}
       </div>
     </div>
   );
 }
 
-function Main({ fill, children }: { fill: boolean; children: ReactNode }) {
+function Main({ fill, inert, children }: { fill: boolean; inert: boolean; children: ReactNode }) {
   return (
-    <main className={`cd-app-shell__main${fill ? ' cd-app-shell__main--fill' : ''}`}>
+    <main className={`cd-app-shell__main${fill ? ' cd-app-shell__main--fill' : ''}`} {...inertWhen(inert)}>
       <div className="cd-app-shell__content">{children}</div>
     </main>
   );
 }
 
 /** The compact navigation: the top bar with the mark, the business and Menu, and the sheet Menu opens. */
-function CompactNav({ sidebar, business }: { sidebar: ReactNode; business: string }) {
+function CompactNav({ sidebar, business, inert }: { sidebar: ReactNode; business: string; inert: boolean }) {
   const [open, setOpen] = useState(false);
   const sheet = useRef<HTMLDialogElement>(null);
   const menu = useRef<HTMLButtonElement>(null);
@@ -124,7 +170,7 @@ function CompactNav({ sidebar, business }: { sidebar: ReactNode; business: strin
 
   return (
     <>
-      <div className="cd-app-shell__topbar">
+      <div className="cd-app-shell__topbar" {...inertWhen(inert)}>
         <Mark />
         <span className="cd-app-shell__business cd-type-control" data-copy="user">
           {business}

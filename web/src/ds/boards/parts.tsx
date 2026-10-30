@@ -73,6 +73,8 @@ export interface RiveraFrameProps {
   reviewer?: boolean;
   /** The page lays out its own columns from the sidebar's seam (`AppShell` `fill`). */
   fill?: boolean;
+  /** A panel beside the page, such as Ask Claude (`AppShell` `panel`). */
+  panel?: ReactNode;
   onSwitchBusiness?: () => void;
   children: ReactNode;
 }
@@ -103,11 +105,12 @@ interface OwnerFrameProps extends Omit<RiveraFrameProps, 'twoDesks'> {
   desks: { id: string; name: string }[];
 }
 
-function OwnerFrame({ business, ownerName, desks, current, counts, reviewer = false, fill = false, onSwitchBusiness, children }: OwnerFrameProps) {
+function OwnerFrame({ business, ownerName, desks, current, counts, reviewer = false, fill = false, panel, onSwitchBusiness, children }: OwnerFrameProps) {
   return (
     <AppShell
       business={business}
       fill={fill}
+      panel={panel}
       banner={reviewer ? <ReviewerBar ownerName={ownerName} onStartOver={fn()} /> : undefined}
       sidebar={
         <Sidebar

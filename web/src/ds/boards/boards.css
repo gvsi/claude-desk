@@ -940,23 +940,3 @@
     padding: calc((var(--size-control) - 1lh) / 2) var(--space-12);
   }
 }
-
-/* The Ask Claude panel beside the page: at the window's right edge, the window's height, and the
-   page narrowed by its width. On a phone the panel is its own modal sheet over the whole window. */
-.cd-app-shell__main:has(.board-with-panel__panel) {
-  padding-right: calc(var(--size-side-panel) + var(--space-40));
-}
-
-.board-with-panel__panel {
-  position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  display: flex;
-}
-
-@media (max-width: 639.98px) {
-  .cd-app-shell__main:has(.board-with-panel__panel) {
-    padding-right: var(--space-16);
-  }
-}

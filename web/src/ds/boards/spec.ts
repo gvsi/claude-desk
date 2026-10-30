@@ -95,7 +95,7 @@ export function some<T extends Element = HTMLElement>(root: ParentNode, selector
  * `fill`, as the signed conversation boards draw it: the page filling the main area, and the
  * sidebar on the app ground at its own height, its Answering switch 4 px under the pages.
  */
-export async function expectOwnerFrame(root: HTMLElement, current: string, { fill = false, panel = false } = {}): Promise<void> {
+export async function expectOwnerFrame(root: HTMLElement, current: string, { fill = false } = {}): Promise<void> {
   const column = within(root).getByRole('complementary', { name: 'Claude Desk' });
   expectComputed(column, fill ? SPEC.sidebarFilled : SPEC.sidebar);
   if (fill) {
@@ -107,8 +107,7 @@ export async function expectOwnerFrame(root: HTMLElement, current: string, { fil
   await expect(row).toHaveAttribute('aria-current', 'page');
   expectComputed(row, SPEC.activeNavRow);
   const main = within(root).getByRole('main');
-  // With the Ask Claude panel beside the page, the page's right padding makes room for the panel.
-  expectComputed(main, fill ? SPEC.mainFilled : panel ? { ...SPEC.main, paddingRight: '440px' } : SPEC.main);
+  expectComputed(main, fill ? SPEC.mainFilled : SPEC.main);
   expectComputed(one(main, '.cd-app-shell__content'), fill ? SPEC.contentFilled : SPEC.content);
 }
 

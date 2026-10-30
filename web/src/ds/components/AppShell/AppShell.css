@@ -1,10 +1,11 @@
 /* AppShell: the owner app's frame, the height of the window. The banner runs across the top;
-   under it the sidebar column (size-sidebar on bg-panel, a hairline seam at its right) and the
-   page each scroll on their own. The page is padded 24/40/20 (16 at the top and sides on a phone) and its
-   content is at most size-content wide, centered.
+   under it the sidebar column (size-sidebar on bg-panel, a hairline seam at its right), the page
+   and an optional panel at the right, each scrolling on its own. The page is padded 24/40/20 (16
+   at the top and sides on a phone) and its content is at most size-content wide, centered.
 
-   Compact: a top bar on the panel replaces the column, and Menu opens the sidebar as a modal sheet
-   from the left over a dimmed page. Nothing slides; the sheet appears in place. */
+   Compact: a top bar on the panel replaces the column, above the page and the panel, and Menu
+   opens the sidebar as a modal sheet from the left over a dimmed page. Nothing slides; the sheet
+   appears in place. */
 
 .cd-app-shell {
   display: flex;
@@ -20,9 +21,9 @@
   min-height: 0;
 }
 
-/* Compact: the top bar above the page instead of the column beside it. */
-.cd-app-shell--compact > .cd-app-shell__body {
-  flex-direction: column;
+/* The banner keeps its own height above the rest. */
+.cd-app-shell__banner {
+  flex: none;
 }
 
 .cd-app-shell__column {

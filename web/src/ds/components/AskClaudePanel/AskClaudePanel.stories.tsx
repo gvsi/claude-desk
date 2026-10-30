@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { expect, fn, within } from 'storybook/test';
 
 import { chen, proseBlock } from '../../fixtures';
+import { AppShell } from '../AppShell/AppShell.tsx';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { ClaudeMessage } from '../ClaudeMessage/ClaudeMessage.tsx';
 import { VisitorMessage } from '../VisitorMessage/VisitorMessage.tsx';
@@ -90,13 +91,32 @@ export const Writing: Story = {
 const OPENER = 'Ask Claude to change a rule';
 
 /**
- * A phone screen with the panel shut: a page with its own controls and the button that opens the
- * panel. Closing the panel removes it, as the screen does.
+ * A phone screen with the panel shut: the owner app's shell, a page with its own controls and the
+ * button that opens the panel, which goes in the shell's `panel`. Closing the panel removes it, as
+ * the screen does.
  */
 function PhoneScreen(args: Parameters<typeof AskClaudePanel>[0]) {
   const [open, setOpen] = useState(false);
   return (
-    <div style={{ padding: 16 }}>
+    <AppShell
+      business={chen.business.name}
+      sidebar={
+        <nav aria-label="Main">
+          <a href="#rules">Rules</a>
+        </nav>
+      }
+      panel={
+        open ? (
+          <AskClaudePanel
+            {...args}
+            onClose={() => {
+              args.onClose();
+              setOpen(false);
+            }}
+          />
+        ) : null
+      }
+    >
       <h1 className="cd-type-page-title">Rules</h1>
       <p>
         <a href="#quotes">Quotes</a>
@@ -109,16 +129,7 @@ function PhoneScreen(args: Parameters<typeof AskClaudePanel>[0]) {
           {OPENER}
         </button>
       </p>
-      {open ? (
-        <AskClaudePanel
-          {...args}
-          onClose={() => {
-            args.onClose();
-            setOpen(false);
-          }}
-        />
-      ) : null}
-    </div>
+    </AppShell>
   );
 }
 
@@ -145,8 +156,11 @@ export const Phone: Story = {
     // Focus moves in, to the composer; the page behind is inert.
     const composer = within(sheet).getByRole('textbox', { name: 'Ask Claude' });
     await expect(composer).toHaveFocus();
-    for (const behind of [opener, canvas.getByRole('link', { name: 'Quotes' }), canvas.getByRole('button', { name: 'Add a connector' })]) {
-      await expect(behind.closest('[inert]'), `${behind.textContent ?? ''} is inert`).not.toBeNull();
+    const behind = [opener, canvasElement.querySelector<HTMLElement>('a[href="#quotes"]'), canvasElement.querySelector<HTMLElement>('.cd-app-shell__menu')];
+    for (const control of behind) {
+      await expect(control?.closest('[inert]'), `${control?.textContent ?? ''} is inert`).not.toBeNull();
+      control?.focus();
+      await expect(document.activeElement, `${control?.textContent ?? ''} can't take focus`).not.toBe(control);
     }
 
     // phone_sheet_keeps_focus: Tab and Shift+Tab stay inside the sheet, every stop on a control in it.

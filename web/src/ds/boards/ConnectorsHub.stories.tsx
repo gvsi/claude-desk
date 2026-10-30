@@ -224,28 +224,29 @@ export const AskClaude: Story = {
   name: 'Ask Claude to add a connector',
   globals: { viewport: { value: 'board', isRotated: false } },
   render: () => (
-    <ChenFrame current="rules" counts={CHEN_COUNTS}>
-      <div className="board-with-panel">
-        <RulesPage hub={chen.connectors} chips={CHEN_CHIPS} />
-        <div className="board-with-panel__panel">
-          <AskClaudePanel onClose={fn()} onSend={fn()}>
-            <AskClaudeConversation />
-          </AskClaudePanel>
-        </div>
-      </div>
+    <ChenFrame
+      current="rules"
+      counts={CHEN_COUNTS}
+      panel={
+        <AskClaudePanel onClose={fn()} onSend={fn()}>
+          <AskClaudeConversation />
+        </AskClaudePanel>
+      }
+    >
+      <RulesPage hub={chen.connectors} chips={CHEN_CHIPS} />
     </ChenFrame>
   ),
   parameters: {
     canvas: 'N-Conn-12-Chat',
     canvasNote: [
-      'The panel beside the page is the web app’s layout (plan 04): the page narrows to make room.',
+      'The panel is AppShell’s panel beside the page, which narrows to make room; on a phone it is a modal sheet.',
       'Chen & Co. CPA’s hub has the five built-in connectors its seed uses (its quotes and leads), where the board draws three.',
       'The offer card says what already covers Payments, the always-on money rule, where the board says no rule covers it yet.',
     ].join(' '),
   },
   play: async ({ canvas, canvasElement, userEvent }) => {
     await expect(window.innerWidth).toBe(1512);
-    await expectOwnerFrame(canvasElement, 'Rules', { panel: true });
+    await expectOwnerFrame(canvasElement, 'Rules');
     const page = await expectRulesPage(canvasElement, CHEN_CHIPS);
     // The panel at the right, 400 px wide, the window's height, and the page beside it.
     const panel = canvas.getByRole('complementary', { name: 'Ask Claude' });
