@@ -518,12 +518,16 @@ async def put_people(ctx: KernelCtx, desk_row: Desk, body: DeskPeopleRequest) ->
     `session`), their documents become the owner's alone, and the links that released documents to
     them and haven't opened are void. Removing them again changes nothing; an unknown ref is 422.
 
-    The Desk's people are locked `FOR UPDATE` in ID order, as verification locks them, then their
-    challenges, so a code can't be sent to a contact as it changes or its person goes."""
+    Its locks come in the kernel's order (`repo.py`), after the Desk row the caller holds: the open
+    sessions verified as the people it removes (`verified_sessions`), then the Desk's people `FOR
+    UPDATE` in ID order, as verification locks them, then their challenges, so a code can't be sent
+    to a contact as it changes or its person goes; then what removed people leave
+    (`_off_the_record`)."""
     check_refs([*(upsert.ref for upsert in body.upsert), *body.remove])
     if any(upsert.contact is not None and not valid_contact(upsert.contact) for upsert in body.upsert):
         raise InvalidSeed("contact")
     now = ctx.clock.now()
+    await verified_sessions(ctx, desk_row, await _on_record(ctx, desk_row, body.remove))
     people = {row.ref: row for row in await ctx.db.scalars(ctx.repo.scoped(select(Person).where(
         Person.desk_id == desk_row.desk_id).order_by(Person.person_id).with_for_update()))}
     recontacted: list[str] = []           # people whose code went to a contact no longer on record
@@ -564,30 +568,60 @@ async def put_people(ctx: KernelCtx, desk_row: Desk, body: DeskPeopleRequest) ->
     return sorted([*(upsert.ref for upsert in body.upsert), *(row.ref for row in removed)])
 
 
+async def _on_record(ctx: KernelCtx, desk_row: Desk, refs: Sequence[str]) -> list[str]:
+    """The IDs of the Desk's people on record under `refs`, read without a lock. Only an owner's
+    write to people changes who is on record, and it holds the Desk row, as the caller does, so
+    what this reads holds until the caller commits."""
+    if not refs:
+        return []
+    return list((await ctx.db.scalars(ctx.repo.scoped(select(Person.person_id).where(
+        Person.desk_id == desk_row.desk_id, Person.ref.in_(refs), Person.removed_at.is_(None))
+        .order_by(Person.person_id)))).all())
+
+
+async def verified_sessions(ctx: KernelCtx, desk_row: Desk, person_ids: Sequence[str]) -> list[ActorSession]:
+    """The Desk's open sessions verified as these people, locked `FOR UPDATE` in ID order and read
+    afresh: the lock order's session step for a write that ends them."""
+    if not person_ids:
+        return []
+    return list((await ctx.db.scalars(ctx.repo.scoped(select(ActorSession).where(
+        ActorSession.desk_id == desk_row.desk_id, ActorSession.person_id.in_(person_ids),
+        ActorSession.closed_at.is_(None)).order_by(ActorSession.session_id).with_for_update()
+        .execution_options(populate_existing=True)))).all())
+
+
 async def _off_the_record(ctx: KernelCtx, desk_row: Desk, person_ids: Sequence[str], now: datetime) -> None:
     """What removed people leave: the sessions verified as them closed, each ledgered `session`,
     their unopened document links void, with their facts expired, and their documents the owner's
     alone (no record owner; `document:*` facts relabelled `["owner"]`).
 
-    Every row is locked before the ledger head, which is taken last, for all the people at once:
-    first the sessions of every one of them, so a release running in one has committed its link
-    before the links are voided; then every one's links, as an open of one holds its link and then
-    takes the ledger head; then their documents and facts; then the closes are ledgered."""
+    Every row is locked before the ledger head, which is taken last, for all the people at once.
+    Their sessions come first: `put_people` locked them before the people, and they are taken again
+    here, which waits for none of those and also takes any session a check verified as one of them
+    before `put_people` held their rows. That one comes after the people, yet waits on nothing that
+    waits on this write: its check has committed, and nothing that holds a verified session's row
+    asks for a Desk row, another session, a person or a challenge, all this write holds by then.
+    Holding the sessions, a release running in one has committed its link before the links are
+    voided. Then every one's links, as an open of one holds its link and then its fact and the
+    ledger head; then their documents; then the links' facts and the documents'; then the closes
+    are ledgered."""
     if not person_ids:
         return
-    sessions = (await ctx.db.scalars(ctx.repo.scoped(select(ActorSession).where(
-        ActorSession.desk_id == desk_row.desk_id, ActorSession.person_id.in_(person_ids),
-        ActorSession.closed_at.is_(None)).order_by(ActorSession.session_id).with_for_update()))).all()
-    for person_id in person_ids:
-        await adapters.release_document.void_links(ctx, desk_row.desk_id, person_id=person_id)
-    documents = await ctx.db.scalars(ctx.repo.scoped(select(Document).where(
+    sessions = await verified_sessions(ctx, desk_row, person_ids)
+    voided = await adapters.release_document.void_links(ctx, desk_row.desk_id, person_ids=person_ids)
+    documents = (await ctx.db.scalars(ctx.repo.scoped(select(Document).where(
         Document.desk_id == desk_row.desk_id, Document.record_owner_person_id.in_(person_ids))
-        .order_by(Document.document_id).with_for_update()))
+        .order_by(Document.document_id).with_for_update()))).all()
     for document in documents:
         document.record_owner_person_id = None
-        fact = (await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
-            FactRow.desk_id == desk_row.desk_id, FactRow.fact_id == f"document:{document.document_id}")
-            .with_for_update()))).one()
+    await adapters.release_document.expire_link_facts(ctx, desk_row.desk_id, voided)
+    facts = (await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
+        FactRow.desk_id == desk_row.desk_id,
+        FactRow.fact_id.in_([f"document:{document.document_id}" for document in documents]))
+        .order_by(FactRow.fact_id).with_for_update()))).all()
+    if len(facts) != len(documents):      # every document is written with its fact: never relabel half
+        raise RuntimeError("document_fact_missing")
+    for fact in facts:
         fact.readers, fact.record_owner = ["owner"], None
     for session in sessions:
         session.closed_at = now
@@ -669,7 +703,8 @@ DeleteHook = Callable[[KernelCtx, str], Awaitable[None]]
 
 async def void_document_links(ctx: KernelCtx, desk_id: str) -> None:
     """The Desk's unopened document links, void, and their facts expired."""
-    await adapters.release_document.void_links(ctx, desk_id)
+    voided = await adapters.release_document.void_links(ctx, desk_id)
+    await adapters.release_document.expire_link_facts(ctx, desk_id, voided)
 
 
 # What else a Desk's deletion ends (`(ctx, desk_id)`, in order, inside its transaction): its

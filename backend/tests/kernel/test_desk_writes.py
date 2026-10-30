@@ -419,6 +419,39 @@ async def test_removed_person_loses_entitlement(app, client):
     assert (await people_of(app, copy))["eve"].person_id != dana.person_id
 
 
+async def test_a_session_verified_as_a_removal_begins_is_closed_too(app, client, monkeypatch):
+    """Removing a person locks the sessions verified as them before their row, in the kernel's
+    lock order. A check that verifies another session as them in between, before the write holds
+    their row, commits; the write still closes that session, and ledgers it, like the others."""
+    copy = await rivera(app, client)
+    waiting = await open_visitor(client, copy)
+    [notice] = (await started(client, waiting, "dana@example.com")).inbox
+    code = code_in(await entry_of(client, waiting, notice))
+    lock_sessions, raced = desks.verified_sessions, []
+
+    async def a_check_verifies_meanwhile(ctx, desk_row, person_ids):
+        sessions = await lock_sessions(ctx, desk_row, person_ids)
+        if not raced:                     # the visitor's check commits before the write holds Dana's row
+            raced.append(await check(client, waiting, code))
+        return sessions
+
+    monkeypatch.setattr(desks, "verified_sessions", a_check_verifies_meanwhile)
+    before = len(await entries_of(app, copy))
+    await updated(client, copy, "people", {"remove": ["dana"]})
+    [response] = raced
+    assert (response.status_code, response.json()["verified"]) == (200, True), response.text
+
+    [session] = await rows_of(app, copy.copy_id, select(ActorSession).where(
+        ActorSession.session_id == waiting.session_id))
+    assert session.closed_at is not None
+    assert [(e.event.kind, e.event.session_id, e.event.summary) for e in (await entries_of(app, copy))[before:]
+            if e.event.kind == "session"] == [
+        ("session", waiting.session_id, {"session_id": waiting.session_id, "closed": True,
+                                         "reason": "person_removed"})]
+    response = await get_context(client, waiting.session_id, waiting.headers)
+    assert (response.status_code, response.json()) == (409, {"code": "closed"})
+
+
 async def answered(client: httpx.AsyncClient, copy: Rivera, decision_id: str, answer: str) -> ApprovalResult:
     response = await client.post(f"/approvals/{decision_id}/answer", headers=copy.owner, json={"answer": answer})
     assert response.status_code == 200, response.text

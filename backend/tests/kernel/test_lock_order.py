@@ -1,10 +1,13 @@
 """The kernel's lock order (`repo.py`): the session row, then the decision row, then the execution
-row, then the rows an adapter's hooks lock, then the ledger head, so two kernel transactions never
-deadlock.
+row, then the policy row, people and their verification codes, payment links, document links,
+documents, the rows an adapter's hooks lock and facts, then the ledger head, so two kernel
+transactions never deadlock.
 
 Two tests race requests that once took a pair of rows in opposite orders: the session and the
 decision rows, and an adapter's row and the ledger head. The others record the row locks each
-transaction of a path takes (`LockLog`) and check that they come in that order.
+transaction of a path takes (`LockLog`) and check that they come in that order: executions and
+their reconciliation, answers, cancels and reads, a verification start allowed or approved, a
+document link opened, and a person removed.
 """
 
 import asyncio
@@ -26,16 +29,20 @@ from desk.kernel_service import demo_inbox, execute
 from desk.kernel_service.adapters.base import AdapterFailure, AdapterResult, AdapterUnknown, ExecCtx
 
 from .fakes import FakeAdapter
-from .helpers import kernel_ctx, ledger_rows
+from .helpers import activate_cards, kernel_ctx, ledger_rows
 from .test_adapters import visitor_of
 from .test_approvals import ASK_QUOTES, answered, held_on, post_cancel
 from .test_compiler import card
-from .test_decide import decided, desk_with, owner_decide, set_mode
+from .test_decide import decided, desk_with, open_visitor, owner_decide, set_mode
+from .test_desk_writes import updated
 from .test_execute import executed, fake_quote_desk, post_execute, read, store_intent
+from .test_release_document import DANA, confirmed, documents, links, open_link, released
 from .test_reply_check import checked
+from .test_verification import started
 
 # The tables whose rows the kernel locks, in the order it locks them (repo.py).
-LOCK_ORDER = ("sessions", "decisions", "executions", "policy_versions", "payment_links", "ledger_heads")
+LOCK_ORDER = ("sessions", "decisions", "executions", "policy_versions", "people", "verification_challenges",
+              "payment_links", "document_links", "documents", "facts", "ledger_heads")
 _LOCKING = re.compile(
     r"^\s*(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+kernel\.(?P<written>\w+)"
     r"|^\s*SELECT\b.*?\bFROM\s+kernel\.(?P<read>\w+)\b.*\bFOR\s+(?:NO\s+KEY\s+UPDATE|UPDATE|KEY\s+SHARE|SHARE)\b",
@@ -47,7 +54,7 @@ class LockLog:
     `LOCK_ORDER` in the order the transaction first locks a row of each: a `SELECT ... FOR UPDATE`
     or `FOR SHARE` on the table, or an `INSERT`, `UPDATE` or `DELETE` on it. It goes by table, not
     row, so a second lock on a table counts as one the transaction holds already; each path here
-    works on one session, one decision and one execution."""
+    works on one session, one decision and one execution, and a removal on one person."""
 
     def __init__(self) -> None:
         self.transactions: list[list[str]] = []
@@ -65,6 +72,11 @@ class LockLog:
     def end(self, conn: Connection) -> None:
         if locked := self._open.pop(conn, None):
             self.transactions.append(locked)
+
+
+def in_lock_order(tables: list[str]) -> bool:
+    """Whether a transaction's tables come in `LOCK_ORDER`."""
+    return tables == sorted(tables, key=LOCK_ORDER.index)
 
 
 @contextmanager
@@ -308,3 +320,63 @@ async def test_a_reply_check_keeps_the_lock_order(app, client, frozen_clock):
     assert verdict.ok
     # the session is seen at the check's end (no lock across the model call), just before its entry
     assert log.transactions == [["sessions", "ledger_heads"]]
+
+
+async def test_an_allowed_verification_start_runs_in_the_lock_order(app, client):
+    _, visitor = await visitor_of(app, client)
+    allowed = await decided(client, visitor, "native.start_verification", {"contact": "dana@example.com"})
+    assert allowed.outcome == "allow", allowed.reason_plain
+    with lock_log(app) as log:
+        assert (await executed(client, visitor, allowed)).state == "succeeded"
+    assert log.transactions == [
+        ["sessions", "decisions", "executions"],                    # T1: the intent
+        # T2: the session row FOR UPDATE, then the start's own rows: Dana's row, her live challenges
+        # (cancelled, then the new one), then its `verify` entry and the outcome
+        ["sessions", "decisions", "executions", "people", "verification_challenges", "ledger_heads"],
+    ]
+    assert all(map(in_lock_order, log.transactions))
+
+
+async def test_an_approved_verification_start_runs_in_the_lock_order(app, client):
+    copy, visitor = await visitor_of(app, client)
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        await activate_cards(ctx, copy.desk_id, [card("ask-verify", "native.start_verification", mode="ask")])
+    held = await decided(client, visitor, "native.start_verification", {"contact": "dana@example.com"})
+    assert held.state == "held", held.reason_plain
+    with lock_log(app) as log:
+        assert (await answered(client, copy.owner, held.decision_id, "allow_once")).decision.state == "executed"
+    assert log.transactions == [
+        ["decisions", "executions", "ledger_heads"],                # the answer: approved, with its intent
+        # T2 on the approved path: the held session's row FOR UPDATE, as an allow's, then the same rows
+        ["sessions", "decisions", "executions", "people", "verification_challenges", "ledger_heads"],
+    ]
+    assert all(map(in_lock_order, log.transactions))
+
+
+async def test_a_document_link_opens_in_the_lock_order(app, client):
+    copy, _ = await visitor_of(app, client)
+    dana = await confirmed(client, copy, DANA)
+    await released(client, dana, (await documents(app, copy))["dana-invoice"])
+    [link] = await links(app, copy)
+    with lock_log(app) as log:
+        assert (await open_link(client, link.token)).status_code == 200
+    # one UPDATE marks the link opened, then its fact expires, then the open is ledgered
+    assert log.transactions == [["document_links", "facts", "ledger_heads"]]
+    assert all(map(in_lock_order, log.transactions))
+
+
+async def test_removing_a_person_runs_in_the_lock_order(app, client):
+    # Dana is verified in one session, her invoice's link is unopened, and a code is on its way to her
+    copy, _ = await visitor_of(app, client)
+    dana = await confirmed(client, copy, DANA)
+    await released(client, dana, (await documents(app, copy))["dana-invoice"])
+    await started(client, await open_visitor(client, copy), DANA)
+    with lock_log(app) as log:
+        await updated(client, copy, "people", {"remove": ["dana"]})
+    # the owner's write holds the Desk row first (not a table of the order); then the session
+    # verified as her, her row and her live code, her link, her invoice, their facts, and last the
+    # session's close and the write, ledgered
+    assert log.transactions == [["sessions", "people", "verification_challenges", "document_links", "documents",
+                                 "facts", "ledger_heads"]]
+    assert all(map(in_lock_order, log.transactions))

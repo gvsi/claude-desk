@@ -9,23 +9,40 @@ the answer is sent, so a failed commit answers 500, and it rolls back on any exc
 Row locks are taken in one order, so no two kernel transactions wait on each other:
 
 1. the session row: `FOR UPDATE` by a decision (`auth.lock_session`, held until it commits; the
-   breaker's strike writes it under that lock), by a take-over or hand-back, and in T2 by the
-   execution of an adapter that writes the session's own rows (`locks_session`, a verification
-   start), on either path; `FOR SHARE` by an allow's execution in T1, and in T2 by the execution
-   of any other adapter, on either path, so a Desk's deletion, which closes the session `FOR
-   UPDATE`, commits before T2 takes the row or waits until T2 commits; written by a visitor's or
-   agent's own requests (`last_seen_at`, `last_language`), the reply check's only at its end, just
-   before its ledger entry, so it holds no lock on the row while the soft-promise check runs;
+   breaker's strike writes it under that lock), by a take-over or hand-back, by a verification
+   route, in T2 by the execution of an adapter that writes the session's own rows
+   (`locks_session`, a verification start) on either path, and by the owner's writes that close
+   sessions (`desks.verified_sessions` when a person is removed, a Desk's deletion); `FOR SHARE`
+   by an allow's execution in T1, and in T2 by the execution of any other adapter, on either
+   path, so a Desk's deletion, which closes the session `FOR UPDATE`, commits before T2 takes the
+   row or waits until T2 commits; written by a visitor's or agent's own requests
+   (`last_seen_at`, `last_language`), the reply check's only at its end, just before its ledger
+   entry, so it holds no lock on the row while the soft-promise check runs;
 2. the decision row, `FOR UPDATE`: lazy expiry, an answer, a cancel, each step of an execution,
    reconciliation;
 3. the execution row: inserted with the intent, `FOR UPDATE` in T2, T3 and reconciliation;
 4. the Desk's active `policy_versions` row, `FOR SHARE`, which issuing a payment link takes
    (Plan 01c);
-5. a payment link (Plan 01c);
-6. an adapter's own rows, which its hooks lock or write (a booking; Plan 01c's mandates), after
-   whatever of steps 4 and 5 the same transaction takes;
-7. the Desk's ledger head (`ledger.append`, `FOR UPDATE`, where every entry ends; `ledger.page`
-   reads it `FOR SHARE`).
+5. people, `FOR UPDATE` in ID order: by a verification route or a verification start's T2 (as its
+   adapter's own rows), and by the owner's write to them (`desks.put_people`);
+6. their live verification challenges, after the people (a Desk's deletion, which locks no
+   person, takes its live codes after its sessions);
+7. a payment link (Plan 01c);
+8. document links: an open marks its link in one UPDATE, and a person's removal or a Desk's
+   deletion voids theirs in one;
+9. documents, which a person's removal takes `FOR UPDATE` in ID order, and knowledge items, which
+   `POST /knowledge` upserts;
+10. an adapter's own rows, which its hooks lock or write (a booking, a handoff; Plan 01c's
+    mandates), after whatever of steps 4 to 9 the same transaction takes;
+11. facts: an open expires its link's, voiding expires the links', a removal relabels its
+    person's documents', a right code relabels the session's (`labels.relabel_on_verify`), closing
+    a handoff expires its own, an hours write rewrites the Desk's;
+12. the Desk's ledger head (`ledger.append`, `FOR UPDATE`, where every entry ends; `ledger.page`
+    reads it `FOR SHARE`).
+
+An owner's write to a Desk's data holds the Desk row `FOR UPDATE` (`desks.owner_desk`) before any
+of these, and a write to the business its row after the Desk's; nothing that holds one of the
+rows above asks for a Desk or business row.
 
 A transaction that holds a later lock never asks for an earlier one: a refusal's `persist` locks
 the decision before it appends, nothing holds a payment link and then asks for the policy row,
@@ -33,9 +50,9 @@ and every step runs its adapter's hooks before it appends (T1 `prepare`, T2 `exe
 `on_failed`, reconciliation `reconcile` and then `on_failed`, activation its `ON_ACTIVATE`
 hooks), so a hook may wait for the rows it locks like any other step. An insert under a fresh key
 waits for nothing, so it may come after a later step: T1 and an approved answer run `prepare`
-(step 6) before they insert the intent row (step 3), since a new `action_id` could wait only on
+(step 10) before they insert the intent row (step 3), since a new `action_id` could wait only on
 another uncommitted insert of the same action, which the decision's lock (step 2) rules out, and
-Plan 01c's new payment link (step 5) may follow a mandate reservation (step 6). A row is taken
+Plan 01c's new payment link (step 7) may follow a mandate reservation (step 10). A row is taken
 the first time in the strongest mode the transaction will need, since going from `FOR SHARE` to
 `FOR UPDATE` waits like a new lock. Reading a row without a lock (the session a decision names,
 say) waits for nothing and can come at any point. Reconciliation takes the decision and the
@@ -47,6 +64,12 @@ after it commits, never during it. So a take-over that arrives while the reviewe
 the decision to commit, up to the review's timeout (`decisions.REVIEW_TIMEOUT_S`, 4 s), then
 bumps the generation, and an allow from the old generation expires at `/execute`. No other
 kernel call holds the row across a model call.
+
+A person's removal (`desks.put_people`) is the one step that may ask for an earlier row, and only
+for a session a check verified as the person after the write's session step and before it held
+their row: it takes that session too once it holds the people, so the session closes with the
+rest. That waits on nothing that waits on the write, since the check has committed and nothing
+that holds a verified session's row asks for a Desk row, another session, a person or a challenge.
 
 Activation (`activation.confirm`) holds no session, decision or execution row and starts at step
 4: the Desk's `versions` advisory lock, then its `policy_versions` rows `FOR UPDATE`, then the

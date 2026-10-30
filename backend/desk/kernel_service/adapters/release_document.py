@@ -20,12 +20,13 @@ document is still its person's on a Desk not deleted, and its fact expires in th
 transaction, so a later citation is `stale_fact`. The document goes out as plain text under a file
 name made from its fact's title (`download_name`). Anything else (opened, expired, voided, unknown)
 is the same 404. Deleting the Desk or removing its person voids the link (`void_links`), and its
-fact expires too.
+fact expires too (`expire_link_facts`).
 """
 
 import re
 import secrets
 import unicodedata
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from functools import partial
 from typing import Any, NamedTuple
@@ -236,20 +237,26 @@ async def open_document_link(ctx: KernelCtx, token: str) -> OpenedDocument:
     return OpenedDocument(body.encode("utf-8"), MEDIA_TYPE, download_name(title))
 
 
-async def void_links(ctx: KernelCtx, desk_id: str, *, person_id: str | None = None) -> list[str]:
-    """Voids the Desk's links that haven't opened (only those released to `person_id`, when given)
-    and expires their facts, in the caller's transaction; returns the voided links' IDs."""
+async def void_links(ctx: KernelCtx, desk_id: str, *, person_ids: Sequence[str] | None = None) -> list[str]:
+    """Voids the Desk's links that haven't opened (only those released to one of `person_ids`,
+    when given) in one UPDATE, in the caller's transaction; returns the voided links' IDs in order.
+    Their facts are the caller's to expire (`expire_link_facts`) once it holds the rows it locks
+    before facts (`repo.py`): a person's removal locks their documents in between."""
     now = ctx.clock.now()
     which = [DocumentLink.copy_id == ctx.copy_id, DocumentLink.desk_id == desk_id,
              DocumentLink.consumed_at.is_(None), DocumentLink.voided_at.is_(None)]
-    if person_id is not None:
-        which.append(DocumentLink.person_id == person_id)
-    voided = sorted((await ctx.db.execute(
+    if person_ids is not None:
+        which.append(DocumentLink.person_id.in_(person_ids))
+    return sorted((await ctx.db.execute(
         update(DocumentLink).where(*which).values(voided_at=now).returning(DocumentLink.link_id)
         .execution_options(synchronize_session=False))).scalars())
-    for link_id in voided:
+
+
+async def expire_link_facts(ctx: KernelCtx, desk_id: str, link_ids: Sequence[str]) -> None:
+    """The facts of links that can no longer open (`void_links`), expired in the links' order, in
+    the caller's transaction."""
+    for link_id in link_ids:
         await _expire_fact(ctx, desk_id, link_id)
-    return voided
 
 
 async def href_for(ctx: KernelCtx, fact: Fact) -> str:
