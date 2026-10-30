@@ -36,6 +36,9 @@ SENT_CONTACT = "sent@example.com"   # the stand-in's /verify/start sends this co
 # hexadecimal that starts with a letter. Made fresh each run, so no token-like text is in the source.
 TOKEN_KEY = "tok_" + secrets.token_hex(16)
 HEX_KEY = "e" + secrets.token_hex(19)
+# A token the stand-in's Demo inbox gives as an entry id: shaped like a field name and short enough
+# to be shown, were it one the contract declares. Made fresh each run.
+NAMED_TOKEN = "tok_" + secrets.token_hex(8)
 
 
 class StandInKernel:
@@ -105,6 +108,11 @@ class StandInKernel:
             return JSONResponse({"message": "If that contact is on record, a code is on its way.", "inbox": [notice],
                                  "verification_code": LEAKED_CODE})   # a valid VerifyStarted, plus a leak
 
+        async def demo_inbox(request: Request) -> JSONResponse:
+            self.requests += 1   # on contract, but a code to the raw contact, under a token for an id
+            return JSONResponse([{"entry_id": NAMED_TOKEN, "to": SENT_CONTACT, "kind": "verification_code",
+                                  "body": f"Your code is {LEAKED_CODE}", "created_at": "2026-11-03T18:00:00Z"}])
+
         async def public(request: Request) -> JSONResponse:
             self.requests += 1
             return JSONResponse({"business_name": "Rivera Plumbing", "brand": {LEAKED_CODE: 7}})   # a key it chose
@@ -116,7 +124,7 @@ class StandInKernel:
         return Starlette(lifespan=lifespan, routes=[
             Route("/health", health), Route("/whoami", whoami), Route("/copies", copies, methods=["POST"]),
             Route("/decisions/{id}", decision), Route("/verify/start", verify_start, methods=["POST"]),
-            Route("/public/{slug}", public),
+            Route("/demo_inbox", demo_inbox), Route("/public/{slug}", public),
             Route("/{rest:path}", not_found, methods=["GET", "POST", "PUT", "DELETE"]),
         ])
 
@@ -298,6 +306,37 @@ async def test_an_expectation_mismatch_never_prints_what_the_answer_held(kernel:
             held = [value for value in (LEAKED_CODE, SENT_CONTACT, "Your code", "e-1") if value in shown]
             assert held == [], f"the failure shows {held}"
         assert [called.raw["inbox"][0]["to"] for called in target.responses] == [SENT_CONTACT, SENT_CONTACT]
+    finally:
+        await target.stop()
+
+
+async def test_a_kernel_mismatch_names_the_contracts_words_and_hides_what_the_answer_chose(kernel: StandInKernel):
+    """On the kernel target a mismatch also shows a string the route's response contract declares
+    (a field name or an enum value: fixed public words), so a wrong enum reads "expected 'alert',
+    got 'verification_code'", and a wrong error code names both codes. A code, a contact and a
+    token in the same answer are still told by their size, a token shaped like a field name too:
+    only an exact member of the contract's words is shown."""
+    target = await KernelTarget(models="fake").start()
+    try:
+        expect = Expect(fields={"0.kind": "alert", "0.to": "s\u2022\u2022\u2022@example.com", "0.body": "",
+                                "0.entry_id": "e-1"})
+        with pytest.raises(AssertionError) as failure:
+            await target.call("GET /demo_inbox?session_id=", query={"session_id": "s-1"}, auth=Auth.none(),
+                              expect=expect)
+        shown = str(failure.value)
+        assert shown == (
+            "GET /demo_inbox?session_id= answered 200: 0.kind: expected 'alert', got 'verification_code'; "
+            "0.to: expected 's\u2022\u2022\u2022@example.com', got a string of 16 characters; "
+            "0.body: expected '', got a string of 19 characters; "
+            f"0.entry_id: expected 'e-1', got a string of {len(NAMED_TOKEN)} characters"), shown
+        held = [value for value in (LEAKED_CODE, SENT_CONTACT, "Your code", NAMED_TOKEN) if value in shown]
+        assert held == [], f"the failure shows {held}"
+        with pytest.raises(AssertionError) as failure:
+            await target.call("GET /decisions/{id}", path={"id": "d-1"}, auth=Auth.none(),
+                              expect=Expect(status=409, fields={"code": "conflict"}))
+        assert str(failure.value) == ("GET /decisions/{id} answered 409 (code 'stale_generation'): "
+                                      "code: expected 'conflict', got 'stale_generation'"), str(failure.value)
+        assert [called.raw[0]["entry_id"] for called in target.responses[:1]] == [NAMED_TOKEN]   # recorded raw
     finally:
         await target.stop()
 

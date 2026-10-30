@@ -46,6 +46,7 @@ from evals.tier1.harness import (
     TravelClock,
     check_expect_paths,
     check_request,
+    declared_names,
     load_landed,
     match_expect,
     parse_route,
@@ -402,7 +403,8 @@ class KernelTarget:
                                     f"{undeclared}")
             answer = TypeAdapter(tp).dump_python(value, mode="json")
         self.responses.append(Called(route=route, request=request, status=status, body=answer, raw=raw))
-        if mismatches := match_expect(status, answer, expect):
+        # The route's own words (field names, enum values) are shown too: the answer was read as `tp`.
+        if mismatches := match_expect(status, answer, expect, declared=declared_names(tp)):
             error = isinstance(answer, dict) and status >= 300 and "code" in answer
             # A contract word, safe to show: the answer was validated as a KernelError, whose code is a Literal.
             code = f" (code {answer['code']!r})" if error else ""

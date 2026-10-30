@@ -261,11 +261,13 @@ class Expect:
             _check_matcher(expected)
 
 
-def match_expect(status: int, body: Any, expect: Expect) -> list[str]:
+def match_expect(status: int, body: Any, expect: Expect, *, declared: frozenset[str] = frozenset()) -> list[str]:
     """Every way a response differs from the expectation; empty when it matches. A mismatch shows
     what the response held only as `described` allows, so it never prints a code, a contact or a
-    token the response carries."""
-    return _mismatches(status, body, expect, named_strings(expect))
+    token the response carries: a string only when the expectation names it or it is one of
+    `declared`, the words the response's contract declares (`declared_names` of the type it was
+    read as: field names and enum values, fixed public words, never a value a response chose)."""
+    return _mismatches(status, body, expect, named_strings(expect) | declared)
 
 
 def _mismatches(status: int, body: Any, expect: Expect, named: frozenset[str]) -> list[str]:
@@ -305,19 +307,21 @@ def named_strings(expect: Expect) -> frozenset[str]:
     return frozenset(found)
 
 
-# A string a mismatch may show, when the expectation names it: shaped like the contract's field
-# names and enum values (lowercase words joined by underscores, a tool's dotted name) and no
-# longer than one (the longest is 29 characters). A code starts with a digit; a token mixes case
-# or runs longer (a 256-bit session token takes at least 43 characters, sixteen bytes in hex 32).
+# A string a mismatch may show, when the expectation names it or the response's contract declares
+# it: shaped like the contract's field names and enum values (lowercase words joined by
+# underscores, a tool's dotted name) and no longer than one (the longest is 29 characters). A
+# code starts with a digit; a token mixes case or runs longer (a 256-bit session token takes at
+# least 43 characters, sixteen bytes in hex 32).
 SHOWN_STRING = re.compile(r"[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)?")
 SHOWN_MAX = 30
 
 
 def described(value: Any, named: frozenset[str] = frozenset()) -> str:
     """How a mismatch shows a value the response held: a number, a boolean or None as it is; a
-    string as it is only when the expectation names it (`named`) and it is a short field name or
-    enum value (`SHOWN_STRING`, `SHOWN_MAX`); any other string, and every list and object, by its
-    type and size alone, since it may be or hold a code, a contact or a token."""
+    string as it is only when it is one of `named` (what the expectation names, and the words the
+    response's contract declares where the caller gives them) and it is a short field name or enum
+    value (`SHOWN_STRING`, `SHOWN_MAX`); any other string, and every list and object, by its type
+    and size alone, since it may be or hold a code, a contact or a token."""
     if value is None or isinstance(value, bool | int | float):
         return repr(value)
     if isinstance(value, str):
