@@ -319,14 +319,26 @@ export interface TurnContext {
   latestLink(): string;
 }
 
-/** One event of a turn, made when its time comes. */
-export type Step = (ctx: TurnContext) => SseEvent;
+/**
+ * One event of a turn, made when its time comes. A step is the turn's own (a decision, Claude
+ * writing, a reply), so the owner taking over before its time fences it off and it never runs,
+ * unless it is `unfenced` (served.ts `Server.tick`).
+ */
+export type Step = ((ctx: TurnContext) => SseEvent) & { readonly unfenced?: true };
+
+/**
+ * A step that runs whatever generation the session has moved to, as the API publishes it: a turn's
+ * end, and the outcome of a hold the owner answered (approved holds aren't generation-fenced).
+ */
+function unfenced(step: (ctx: TurnContext) => SseEvent): Step {
+  return Object.assign(step, { unfenced: true as const });
+}
 
 /** Claude is writing: the visitor sees the indicator until the next message or the turn's end. */
 export const writing: Step = () => ({ type: 'writing' });
 
-/** Ends every turn: the visitor's "Claude is writing" clears even when nothing was shown. */
-export const turnEnd: Step = () => ({ type: 'turn_end' });
+/** Ends every turn, a fenced one included: the visitor's "Claude is writing" clears even when nothing was shown. */
+export const turnEnd: Step = unfenced(() => ({ type: 'turn_end' }));
 
 export type RuleName = 'discount' | 'invoice' | 'deposit' | 'booked' | 'book' | 'price' | 'callback' | 'talk' | 'outage' | 'other';
 
@@ -475,9 +487,11 @@ export function allows(answer: ApprovalAnswer): boolean {
 /**
  * What the visitor's chat gets once the owner has answered: the resolved receipt, then Claude's
  * follow-up, which reports what ran (the discounted quote, or the refund) or hands off to Maria.
+ * The receipt reports what the answer already did, so a take-over doesn't fence it; the follow-up
+ * is Claude's, so it does.
  */
 export function afterAnswer(answer: ApprovalAnswer, decision: Decision): Step[] {
-  const resolved: Step = (ctx) => ctx.status('resolved', decision);
+  const resolved = unfenced((ctx) => ctx.status('resolved', decision));
   if (!allows(answer)) return [resolved, writing, (ctx) => ctx.reply([blocks.handoff[ctx.language]])];
   if (decision.action?.tool === 'payments.create_refund') {
     return [resolved, writing, (ctx) => ctx.reply([blocks.prose.details[ctx.language], blocks.refund_issued[ctx.language]])];

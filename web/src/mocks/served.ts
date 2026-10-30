@@ -126,7 +126,8 @@ function isRuleCard(value: unknown): value is RuleCard {
   );
 }
 
-type Scheduled = { step: Step; language: Language; text: string };
+/** A turn's step as queued, with the session's generation then: a take-over since fences it off (`Server.tick`). */
+type Scheduled = { step: Step; language: Language; text: string; generation: number };
 
 /**
  * How a store numbers its copies and names their payment links: the screen tests' one copy from
@@ -184,7 +185,10 @@ export class Server {
     return this.world.desk(deskId) ?? NOT_FOUND;
   }
 
-  /** Queues `steps` after whatever the session's turn is doing, one event every `EVENT_GAP_MS`, then `turn_end`. */
+  /**
+   * Queues `steps` after whatever the session's turn is doing, one event every `EVENT_GAP_MS`, then
+   * `turn_end`, at the session's generation now.
+   */
   runTurn(session: SessionRecord, steps: readonly Step[], language: Language, text: string): void {
     const sessionId = session.state.session_id;
     let turn = this.turns.get(sessionId);
@@ -192,7 +196,8 @@ export class Server {
       turn = { queue: [], timer: null };
       this.turns.set(sessionId, turn);
     }
-    for (const step of [...steps, turnEnd]) turn.queue.push({ step, language, text });
+    const { generation } = session.state;
+    for (const step of [...steps, turnEnd]) turn.queue.push({ step, language, text, generation });
     if (turn.timer === null) this.tick(sessionId);
   }
 
@@ -203,8 +208,12 @@ export class Server {
     turn.timer = setTimeout(() => {
       turn.timer = null;
       const session = world.sessions.get(sessionId);
-      const next = turn.queue.shift();
-      if (world !== this.world || !session || !next) return;
+      let next = turn.queue.shift();
+      if (world !== this.world || !session) return;
+      // The owner took over after these steps were queued: like the API at a stale generation, they
+      // never decide, run or say anything. The turn still ends, so "Claude is writing" clears.
+      while (next !== undefined && next.generation !== session.state.generation && next.step.unfenced !== true) next = turn.queue.shift();
+      if (next === undefined) return;
       world.emit(session, next.step(world.context(session, next.language, next.text)));
       if (turn.queue.length > 0) this.tick(sessionId);
     }, EVENT_GAP_MS);

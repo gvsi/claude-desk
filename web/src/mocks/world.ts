@@ -602,7 +602,8 @@ export class MockWorld {
 
   /**
    * The owner takes over the chat, as the kernel records it: the owner's mode at the next
-   * generation, so anything still running for the old one is fenced off, and the visitor is told.
+   * generation, so a turn still queued for the old one is fenced off (served.ts `Server.tick`), and
+   * the visitor is told.
    */
   takeOver(session: SessionRecord): SessionState {
     session.state = { ...session.state, mode: 'owner', generation: session.state.generation + 1 };

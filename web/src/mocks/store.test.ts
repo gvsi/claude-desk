@@ -500,6 +500,47 @@ describe('the scripted Desk', () => {
   });
 });
 
+describe('taking over', () => {
+  /** What the ledger holds for `sessionId`, by kind, oldest first. */
+  const kindsFor = (sessionId: string) =>
+    (mockStore.world.desks[0]?.ledger ?? []).filter((e) => e.event.session_id === sessionId).map((e) => e.event.kind);
+
+  it('takeover_fences_the_turn_in_flight', async () => {
+    const { session, events } = await openChat();
+    // The visitor picks a time, and Maria takes the chat over before Claude's turn has done anything.
+    await send('The first one please');
+    const taken = await call('takeover', { params: { session_id: session.session_id }, body: { generation: session.generation } });
+    expect(taken).toEqual({ status: 200, body: { ...session, mode: 'owner', generation: session.generation + 1 } });
+    await drain();
+
+    // The turn was queued at the old generation, so it runs nothing: no booking, no receipt, no
+    // reply. It ends silently, and "Claude is writing" clears.
+    expect(typesOf(events)).toEqual(['owner_joined', 'turn_end']);
+    expect(kindsFor(session.session_id)).not.toContain('decide');
+    expect(kindsFor(session.session_id)).not.toContain('execute');
+    expect([...mockStore.world.decisions.values()].filter((d) => d.decision.session_id === session.session_id)).toEqual([]);
+    await drain();
+    expect(typesOf(events)).toEqual(['owner_joined', 'turn_end']);
+  });
+
+  it('takeover_still_tells_the_visitor_an_answered_hold_ran', async () => {
+    const { session, events } = await openChat();
+    await send('Can I get 15% off?');
+    await drain();
+    const [, held] = events[0] ?? [];
+    const decisionId = held?.type === 'held' ? held.decision_id : '';
+
+    // Maria allows the hold, then joins the chat at once. The action ran when she answered, so the
+    // visitor still hears that; Claude's follow-up was for the old generation and never comes.
+    expect((await call('answer', { params: { decision_id: decisionId }, body: { answer: 'allow_once' } })).status).toBe(200);
+    expect((await call('takeover', { params: { session_id: session.session_id }, body: { generation: session.generation } })).status).toBe(200);
+    await drain();
+    expect(typesOf(events).slice(4)).toEqual(['owner_joined', 'resolved', 'turn_end']);
+    expect(events[5]?.[1]).toMatchObject({ type: 'resolved', decision_id: decisionId, state: 'executed' });
+    expect(kindsFor(session.session_id).filter((kind) => kind === 'reply')).toHaveLength(1);
+  });
+});
+
 describe('planted faults', () => {
   const answering = async () => ((await call('me')).body as CopyOut).desks[0]?.answering;
 
