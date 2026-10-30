@@ -460,7 +460,8 @@ async def _side_effect(ctx: KernelCtx, decision_id: str, action_id: str, session
     target = await _target(ctx, decision)
     target.checked = checked
     if path == "allow":
-        assert session is not None                          # an allow's session row is always held
+        if session is None:             # never: an allow's session row is always held; `_run` ends it unknown
+            raise RuntimeError("allow_without_session")
         if session.generation != target.decision.generation:
             return await _fenced(ctx, target, execution, "stale_generation")
         if session.mode != "ai":

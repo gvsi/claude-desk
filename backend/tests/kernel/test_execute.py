@@ -625,6 +625,29 @@ async def test_a_take_over_after_the_intent_stops_the_allow(app, client, registr
     ]
 
 
+async def test_an_allow_holding_no_session_row_ends_unknown_before_its_side_effect(app, client, registry, monkeypatch,
+                                                                                   caplog):
+    """T2 runs an allow only while it holds the session row (the fence). If it ever held none, an
+    explicit check, not an `assert` that `python -O` strips, ends the action `unknown` before the
+    adapter's `execute`: never fenced, and with no `on_failed`, as any outcome nobody knows."""
+    quote, rows, visitor, allowed = await fake_quote_desk(app, client)
+
+    async def no_session(ctx, decision, path) -> None:
+        return None
+
+    monkeypatch.setattr(execute, "_hold_session", no_session)
+    assert await executed(client, visitor, allowed) == ExecResult(
+        action_id=allowed.action.action_id, state="unknown", facts=[], model_view={})
+    assert "execute" not in quote.calls and "on_failed" not in quote.calls
+    assert await committed(app, rows.copy_id, allowed.action.action_id) == ("unknown", "unknown")
+    entries = [(e.event.kind, e.event.summary) for e in await ledger_rows(app, rows)
+               if e.event.kind in ("execute", "auth")]
+    assert entries == [("execute", {"decision_id": allowed.decision_id, "action_id": allowed.action.action_id,
+                                    "state": "unknown", "policy_version": 1, "auto_money_cap_cents": 50_000})]
+    [logged] = [record for record in caplog.records if record.getMessage().startswith("execution_unknown")]
+    assert repr(logged.exc_info[1]) == "RuntimeError('allow_without_session')"
+
+
 async def change_records(app: FastAPI, copy: Rivera, change: str) -> None:
     """Changes the Desk between a quote's decision and its execution."""
     async with kernel_ctx(app) as ctx:
