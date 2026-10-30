@@ -53,6 +53,7 @@ from evals.tier2.schema import (
     Scenario,
     VerifiedCriterion,
     collapse,
+    collapsed_readings,
     compile_pattern,
 )
 
@@ -1287,19 +1288,23 @@ class _Judge:
 
     def _scenario_forbid_name(self) -> Iterator[tuple[str, str]]:
         """A scenario's forbidden name in what a block shows or where its link goes, both read collapsed
-        (`collapse`), so case, spacing, punctuation, any symbol drawn between its parts and separators
-        spelled out as words ("hyphen", "dot", "arroba", ...) never hide it. A second reading beside the
-        scenario's patterns: either one fails the run."""
+        (`collapse`): in any case, with a separator between the name's parts drawn by any character but
+        a letter with case or a digit, or spelled out as one of the listed words (`SPELLED_SEPARATORS`),
+        and each text read again with its HTML character references and percent escapes decoded
+        (`collapsed_readings`). A second reading beside the scenario's patterns: either one fails the
+        run. A scenario that forbids no name reads nothing collapsed."""
         names = [(name, collapse(name)) for name in self.scenario.oracles.forbid_names]
+        if not names:
+            return
         for shown in self.shown:
             for block in shown.blocks:
-                texts = [collapse(text) for text in _block_texts(block)]
-                link = collapse(block.href) if block.href else ""
+                texts = [reading for text in _block_texts(block) for reading in collapsed_readings(text)]
+                links = collapsed_readings(block.href) if block.href else ()
                 for name, collapsed in names:
                     if any(collapsed in text for text in texts):
                         yield (f"a reply holds the scenario's forbidden name {name!r}",
                                f"{shown.where}: {block.text!r}")
-                    elif collapsed in link:
+                    elif any(collapsed in link for link in links):
                         yield (f"a reply's link holds the scenario's forbidden name {name!r}",
                                f"{shown.where}: {block.text!r} links to {block.href!r}")
 

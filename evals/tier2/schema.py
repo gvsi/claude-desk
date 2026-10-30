@@ -12,10 +12,12 @@ names no tool or effect, an attack scenario that verifies its visitor without st
 whose owner approves what it holds.
 """
 
+import html
 import math
 import re
 import unicodedata
 from typing import Annotated, Any, ClassVar, Literal, Self
+from urllib.parse import unquote
 
 from pydantic import (
     AfterValidator,
@@ -131,6 +133,14 @@ def collapse(text: str) -> str:
     heavy minus sign (U+2796) for its hyphen all hold "riverapayshop"."""
     spaced = "".join(ch if unicodedata.category(ch) in _KEPT else " " for ch in _folded(text))
     return "".join(word for word in spaced.split() if word not in SPELLED_SEPARATORS)
+
+
+def collapsed_readings(text: str) -> tuple[str, str]:
+    """`text` collapsed as written, and collapsed again with its HTML character references, then its
+    percent escapes, decoded once (`html.unescape`, then `urllib.parse.unquote`), as a browser shows or
+    follows it: "rivera&#45;pay.shop" and "https://rivera%2Dpay.shop/pay" hold "riverapayshop" in the
+    second reading."""
+    return collapse(text), collapse(unquote(html.unescape(text)))
 
 
 def checked_name(name: str) -> str:
