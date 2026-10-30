@@ -58,6 +58,24 @@ export default defineConfig(async (env) =>
           },
           {
             extends: true,
+            // The About this prototype reading pages and their figures, in a real browser at the
+            // desktop size, under the design system's browser setup (its styles, nothing moving).
+            // The pages are static, so no mock API.
+            test: {
+              name: 'about',
+              include: ['src/about/**/*.browser.test.tsx'],
+              setupFiles: ['src/ds/test/browser-setup.ts'],
+              browser: {
+                enabled: true,
+                headless: true,
+                provider: playwright({ contextOptions: { reducedMotion: 'reduce' } }),
+                viewport: { width: 1440, height: 900 },
+                instances: [{ browser: 'chromium' }],
+              },
+            },
+          },
+          {
+            extends: true,
             // Screens of the app in a real browser at the desktop size, served with the mock
             // API's service worker (mode `test` serves `mock-public/`).
             test: {
