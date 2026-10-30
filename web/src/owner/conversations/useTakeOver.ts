@@ -1,0 +1,165 @@
+/**
+ * The owner's controls for one chat: take it over, hand it back, resume Claude after the breaker
+ * paused it, write to the visitor in their own words, and whisper to Claude.
+ *
+ * Each change of who answers posts the generation the owner last read, so it never acts on a chat
+ * that has moved on since: the API answers that with a 409, and the chat is read again before the
+ * owner tries again. Nothing here is sent twice on its own. A write whose answer is lost may have
+ * been applied, so the chat is read again first, and it is never called not done when it was.
+ */
+import { useQueryClient } from '@tanstack/react-query';
+import { useCallback, useRef, useState } from 'react';
+
+import type { SessionMode } from '../../api/contracts.ts';
+import { ApiError, isUncertain, ownerErrorCopy, request } from '../../api/http.ts';
+import type { OwnerTranscript, TranscriptItem } from '../../api/views.ts';
+import { useTypingPing } from '../../lib/typing.ts';
+
+/** A 409 on any of these: the chat moved on while the owner was acting. */
+export const CHANGED_WHILE_ACTING = 'This chat changed while you were acting. Check the latest and try again.';
+/** The owner wrote to the visitor before taking the chat over. */
+export const TAKE_OVER_FIRST = 'Take over first, then write to them.';
+/** The reply check kept the owner's words from the visitor. */
+export const SAY_STOPPED = "That wasn't sent: the reply check stopped it. Your words are back in the box to change.";
+/** A message whose answer was lost, and which a read of the chat didn't show. */
+export const SEND_UNCONFIRMED = "We couldn't confirm that went through. Check the chat before you send it again.";
+
+/** The owner's reads of one chat. Query keys start with the route key. */
+export const conversationKey = (sessionId: string) => ['conversation', sessionId] as const;
+
+type ModeRoute = 'takeover' | 'handback' | 'resume';
+type MessageKind = 'say' | 'whisper';
+
+export interface UseTakeOver {
+  takeOver(): void;
+  handBack(): void;
+  resume(): void;
+  /** Writes to the visitor; resolves true once it went to them. */
+  say(text: string): Promise<boolean>;
+  /** Whispers to Claude; resolves true once it was kept. */
+  whisper(text: string): Promise<boolean>;
+  /** Pings the visitor's dots while the owner types in a chat she took over. */
+  typing(): void;
+  /** A change of who answers is on its way. */
+  changing: boolean;
+  /** Why the last change didn't happen, in the owner's words. */
+  modeError: string | null;
+  /** A message is on its way. */
+  sending: boolean;
+  /** Why the last message didn't go, or couldn't be confirmed. */
+  messageError: string | null;
+}
+
+const maxN = (items: readonly TranscriptItem[]) => items.reduce((max, item) => Math.max(max, item.n), 0);
+
+/** Whether `item`, past `after`, is the owner's `kind` message with `text`. */
+function isMine(item: TranscriptItem, after: number, kind: MessageKind, text: string): boolean {
+  if (item.n <= after) return false;
+  if (kind === 'whisper') return item.kind === 'whisper' && item.text === text;
+  return item.kind === 'delivered' && item.event?.type === 'message' && item.event.author === 'owner' && item.event.blocks.some((b) => b.text === text);
+}
+
+export function useTakeOver(sessionId: string): UseTakeOver {
+  const queryClient = useQueryClient();
+  const [changing, setChanging] = useState(false);
+  const [modeError, setModeError] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  const [messageError, setMessageError] = useState<string | null>(null);
+  // Read synchronously, so a second press can't send twice.
+  const busy = useRef({ mode: false, message: false });
+
+  const lastRead = useCallback(() => queryClient.getQueryData<OwnerTranscript>(conversationKey(sessionId)), [queryClient, sessionId]);
+
+  /** Reads the chat again, with everything that names its mode, and resolves to the chat as it stands (or null). */
+  const reread = useCallback(async (): Promise<OwnerTranscript | null> => {
+    void queryClient.invalidateQueries({ queryKey: ['conversations'] });
+    void queryClient.invalidateQueries({ queryKey: ['today'] });
+    await queryClient.invalidateQueries({ queryKey: conversationKey(sessionId) });
+    const read = queryClient.getQueryState<OwnerTranscript>(conversationKey(sessionId));
+    return read?.status === 'success' ? (read.data ?? null) : null;
+  }, [queryClient, sessionId]);
+
+  const change = useCallback(
+    async (route: ModeRoute, to: SessionMode) => {
+      const generation = lastRead()?.state.generation;
+      if (generation === undefined || busy.current.mode) return;
+      busy.current.mode = true;
+      setChanging(true);
+      setModeError(null);
+      try {
+        const state = await request(route, { params: { session_id: sessionId }, body: { generation } });
+        queryClient.setQueryData<OwnerTranscript>(conversationKey(sessionId), (read) => (read ? { ...read, state } : read));
+        await reread();
+      } catch (err) {
+        if (err instanceof ApiError && err.kind === 'unauthorized') return;
+        const now = await reread();
+        if (err instanceof ApiError && err.kind === 'conflict') setModeError(CHANGED_WHILE_ACTING);
+        // A lost answer that went through: the chat as read again shows it, and nothing went wrong.
+        else if (!(isUncertain(err) && now?.state.mode === to)) setModeError(ownerErrorCopy(err));
+      } finally {
+        busy.current.mode = false;
+        setChanging(false);
+      }
+    },
+    [lastRead, queryClient, reread, sessionId],
+  );
+
+  const send = useCallback(
+    async (kind: MessageKind, text: string): Promise<boolean> => {
+      if (busy.current.message) return false;
+      busy.current.message = true;
+      const after = maxN(lastRead()?.items ?? []);
+      setSending(true);
+      setMessageError(null);
+      try {
+        const out = await request('ownerMessage', { params: { session_id: sessionId }, body: { text, kind } });
+        await reread();
+        if (out.verdict !== null && out.verdict.ok !== true) {
+          setMessageError(SAY_STOPPED);
+          return false;
+        }
+        return true;
+      } catch (err) {
+        if (err instanceof ApiError && err.kind === 'unauthorized') return false;
+        const now = await reread();
+        if (err instanceof ApiError && err.kind === 'conflict') {
+          setMessageError(err.code === 'take_over_first' ? TAKE_OVER_FIRST : CHANGED_WHILE_ACTING);
+          return false;
+        }
+        if (isUncertain(err)) {
+          // It may have gone through: only the chat as read again says so.
+          if (now?.items.some((item) => isMine(item, after, kind, text)) === true) return true;
+          setMessageError(SEND_UNCONFIRMED);
+          return false;
+        }
+        setMessageError(ownerErrorCopy(err));
+        return false;
+      } finally {
+        busy.current.message = false;
+        setSending(false);
+      }
+    },
+    [lastRead, reread, sessionId],
+  );
+
+  const typing = useTypingPing(
+    useCallback(async () => {
+      const read = lastRead();
+      if (read?.state.mode !== 'owner') return;
+      await request('ownerTyping', { params: { session_id: sessionId }, body: { generation: read.state.generation } });
+    }, [lastRead, sessionId]),
+  );
+
+  return {
+    takeOver: () => void change('takeover', 'owner'),
+    handBack: () => void change('handback', 'ai'),
+    resume: () => void change('resume', 'ai'),
+    say: (text) => send('say', text),
+    whisper: (text) => send('whisper', text),
+    typing,
+    changing,
+    modeError,
+    sending,
+    messageError,
+  };
+}

@@ -40,6 +40,12 @@ export function useOwnerDesk(): OwnerDeskContext {
 
 const NAV_KEYS: readonly NavKey[] = ['today', 'conversations', 'people', 'rules', 'safety', 'share', 'settings'];
 
+/**
+ * The pages that lay out their own columns across the main area (`AppShell` `fill`), each with the
+ * concept footer in the column its boards put it in.
+ */
+const FILL_PAGES: ReadonlySet<NavKey> = new Set<NavKey>(['conversations']);
+
 /** The sidebar row for the page at `pathname`: the segment after the Desk, Today when it names no row. */
 function currentNav(pathname: string): NavKey {
   const segment = pathname.split('/')[3] ?? '';
@@ -190,12 +196,15 @@ function DeskFrame({ businesses, business, desk }: DeskFrameProps) {
   };
 
   const live = today.data?.live.length ?? 0;
+  const current = currentNav(location.pathname);
+  // Conversations lays out its own columns from the sidebar's edge, as its boards draw it.
+  const fill = FILL_PAGES.has(current);
   const sidebar = (
     <OwnerSidebar
       businesses={businesses}
       business={business}
       desk={desk}
-      current={currentNav(location.pathname)}
+      current={current}
       liveCount={live}
       switching={switching}
       onToggleSwitcher={() => setSwitching((open) => !open)}
@@ -212,13 +221,20 @@ function DeskFrame({ businesses, business, desk }: DeskFrameProps) {
       business={business.name}
       banner={<ReviewerBar ownerName={business.owner_display_name} onStartOver={() => setConfirming(true)} />}
       sidebar={sidebar}
+      fill={fill}
     >
-      <div className="cd-owner-layout">
-        {notice !== null ? <Notice tone="error">{notice}</Notice> : null}
+      <div className={`cd-owner-layout${fill ? ' cd-owner-layout--fill' : ''}`}>
+        {notice !== null ? (
+          <div className="cd-owner-layout__notice">
+            <Notice tone="error">{notice}</Notice>
+          </div>
+        ) : null}
         <Outlet context={{ business, desk } satisfies OwnerDeskContext} />
-        <footer className="cd-owner-layout__footer">
-          <ConceptFooter />
-        </footer>
+        {fill ? null : (
+          <footer className="cd-owner-layout__footer">
+            <ConceptFooter />
+          </footer>
+        )}
       </div>
       {confirming ? (
         <Dialog

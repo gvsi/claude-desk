@@ -7,9 +7,12 @@ import type { ConversationSummary } from '../api/views.ts';
 import {
   aboveMoneyCapCopy,
   callbackLine,
+  conversationDay,
   formatCents,
   formatClock,
   formatDay,
+  formatListTime,
+  formatStarted,
   formatWhen,
   greetingFor,
   presenceLine,
@@ -33,6 +36,30 @@ function live(kind: ConversationSummary['kind'], ownerPreview = false): Conversa
 }
 
 describe('format', () => {
+  it('conversation_days_on_the_business_clock', () => {
+    // Thursday, October 29, 10:30 am in Los Angeles.
+    const now = new Date('2026-10-29T17:30:00Z');
+    expect(conversationDay('2026-10-29T07:00:00Z', LA, now)).toBe('Today'); // 00:00 today
+    expect(conversationDay('2026-10-29T06:59:00Z', LA, now)).toBe('Yesterday'); // 23:59 yesterday
+    expect(conversationDay('2026-10-28T07:00:00Z', LA, now)).toBe('Yesterday');
+    expect(conversationDay('2026-10-28T06:59:00Z', LA, now)).toBe('Earlier this week'); // Oct 27
+    expect(conversationDay('2026-10-23T07:00:00Z', LA, now)).toBe('Earlier this week'); // Oct 23, the first of the last 7 days
+    expect(conversationDay('2026-10-23T06:59:00Z', LA, now)).toBe('Earlier'); // Oct 22
+    expect(conversationDay('not a time', LA, now)).toBe('Earlier');
+
+    // Today and yesterday show the time, anything older the date.
+    expect(formatListTime('2026-10-29T17:20:00Z', LA, now)).toBe('10:20 am');
+    expect(formatListTime('2026-10-29T05:10:00Z', LA, now)).toBe('10:10 pm');
+    expect(formatListTime('2026-10-27T17:20:00Z', LA, now)).toBe('Oct 27');
+    expect(formatListTime('nope', LA, now)).toBe('');
+
+    // When a conversation started: "Today at 12:04 pm", "Yesterday at 10:10 pm", "Oct 27 at 9:52 am".
+    expect(formatStarted('2026-10-29T19:04:00Z', LA, new Date('2026-10-29T20:00:00Z'))).toBe('Today at 12:04 pm');
+    expect(formatStarted('2026-10-29T05:10:00Z', LA, now)).toBe('Yesterday at 10:10 pm');
+    expect(formatStarted('2026-10-27T16:52:00Z', LA, now)).toBe('Oct 27 at 9:52 am');
+    expect(formatStarted('nope', LA, now)).toBe('');
+  });
+
   it('greeting_by_local_hour', () => {
     // 2026-10-30 is daylight time in Los Angeles, seven hours behind UTC.
     const at = (iso: string) => new Date(iso);

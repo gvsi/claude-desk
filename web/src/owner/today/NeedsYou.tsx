@@ -31,12 +31,12 @@ function countLabel(n: number): string {
 }
 
 /** The request with nothing offered: what the owner sees until it is read again. */
-function withNoAnswers(decision: Decision): Decision {
+export function withNoAnswers(decision: Decision): Decision {
   return { ...decision, answers: [] };
 }
 
-/** What the approval card shows about a held request beyond the decision itself. */
-function aboutTheRequest(item: HeldItem, now: Date) {
+/** What the approval card shows about a held request beyond the decision itself, wherever it is answered. */
+export function aboutTheRequest(item: HeldItem, now: Date) {
   const { session } = item;
   const name = session.display_name?.trim() ? session.display_name : undefined;
   return {
@@ -208,9 +208,10 @@ export function NeedsYou({ held, callbacks, answers, readAt, registerCard, readF
 
 /**
  * An "always" answer's rule: the cards it proposes are drafted only when the owner asks to review
- * them, and nothing applies until they confirm the draft.
+ * them, and nothing applies until they confirm the draft. Shown under the answered card wherever
+ * the request was answered.
  */
-function DraftedRule({ entry }: { entry: Answered }) {
+export function DraftedRule({ entry }: { entry: Answered }) {
   const { desk } = useOwnerDesk();
   const deskId = desk.desk_id;
   const navigate = useNavigate();

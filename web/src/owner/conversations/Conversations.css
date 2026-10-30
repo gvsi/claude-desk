@@ -1,0 +1,164 @@
+/* Conversations: the page fills the main area (AppShell `fill`), as the signed boards draw it.
+   From 1024 px the list is its own column at the sidebar's edge, 260 px wide with a hairline at
+   its right that runs to the bottom of the window, and the open conversation sits beside it, its
+   content no wider than the reading column, with the concept footer under it. Under 1024 px the
+   list and an open conversation each take the page, the conversation with "All conversations"
+   above it, and the footer follows whichever shows. */
+
+.cd-conversations {
+  display: grid;
+  flex: 1 0 auto;
+  grid-template-columns: minmax(0, 1fr);
+  /* The page's column (the list, or the open conversation under 1024 px), then the footer. */
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-width: 0;
+}
+
+.cd-conversations__footer {
+  padding: 0 var(--space-28) var(--space-20);
+}
+
+.cd-conversations__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+  box-sizing: border-box;
+  min-width: 0;
+  padding: var(--space-24) var(--space-12);
+}
+
+.cd-conversations__title,
+.cd-conversations__caption,
+.cd-conversations__day,
+.cd-conversations__list > .cd-conversations__quiet {
+  margin: 0;
+  padding: 0 var(--space-8);
+}
+
+/* Under the title, as Today sets "Includes recorded history" under its heading. */
+.cd-conversations__caption {
+  margin-top: calc(var(--space-4) - var(--space-16));
+}
+
+.cd-conversations__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.cd-conversations__day {
+  color: var(--text-secondary);
+}
+
+.cd-conversations__items {
+  display: grid;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cd-conversations__open {
+  box-sizing: border-box;
+  min-width: 0;
+  padding: var(--space-24) var(--space-28) var(--space-20);
+}
+
+.cd-conversations__open > * {
+  max-width: var(--size-reading);
+}
+
+.cd-conversations__quiet {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cd-conversations__back {
+  margin: 0 0 var(--space-16);
+}
+
+@media (min-width: 1024px) {
+  .cd-conversations {
+    /* 260 px: the boards' list column, the sidebar's width less 4. */
+    grid-template-columns: calc(var(--size-sidebar) - var(--space-4)) minmax(0, 1fr);
+  }
+
+  .cd-conversations__list {
+    grid-row: 1 / span 2;
+    border-right: 1px solid var(--line-hairline);
+  }
+
+  .cd-conversations__footer {
+    grid-column: 2;
+  }
+
+  .cd-conversations__back {
+    display: none;
+  }
+}
+
+@media (max-width: 1023.98px) {
+  .cd-conversations__list,
+  .cd-conversations__open,
+  .cd-conversations__footer {
+    padding-right: var(--space-16);
+    padding-left: var(--space-16);
+  }
+
+  .cd-conversations--open > .cd-conversations__list,
+  .cd-conversations:not(.cd-conversations--open) > .cd-conversations__open {
+    display: none;
+  }
+}
+
+/* One conversation: who and its latest line, the conversation, then the owner's controls. */
+.cd-conversation {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+  min-width: 0;
+}
+
+.cd-conversation__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4) var(--space-8);
+}
+
+.cd-conversation__name,
+.cd-conversation__latest,
+.cd-conversation__loading {
+  margin: 0;
+}
+
+.cd-conversation__latest,
+.cd-conversation__loading,
+.cd-conversation__quiet {
+  color: var(--text-secondary);
+}
+
+.cd-conversation > .cd-conversation__quiet {
+  margin: calc(var(--space-8) - var(--space-16)) 0 0;
+}
+
+/* A held request's card, and a receipt's full trace, in the conversation's column. */
+.cd-conversation__held,
+.cd-conversation__trace {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+.cd-conversation__trace-missing {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cd-conversation__controls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  min-width: 0;
+}
