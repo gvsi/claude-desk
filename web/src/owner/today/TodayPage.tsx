@@ -89,17 +89,18 @@ export function TodayPage() {
     if (firstHeld !== null) focusCard(firstHeld.decision.decision_id);
   };
 
-  // An arrival at `#request-<id>` lands on that card once, as "Open the request" does: once Needs
-  // you has read, and once the Demo inbox's sheet, whose link it may be, has closed and handed focus
+  // An arrival at `#request-<id>` lands on that card once, as "Open the request" does: once the
+  // latest read of Needs you has worked (a list kept from before a failed read may be missing the
+  // request), and once the Demo inbox's sheet, whose link it may be, has closed and handed focus
   // back to its button. A request that isn't here (answered, or another Desk's) leaves focus as it is.
   const requested = requestInHash(location.hash);
-  const needsYouRead = needsYou.data !== undefined;
+  const readWorked = needsYou.data !== undefined && needsYou.errorUpdatedAt <= needsYou.dataUpdatedAt;
   const landed = useRef<string | null>(null);
   useEffect(() => {
-    if (requested === null || inboxOpen || !needsYouRead || landed.current === location.key) return;
+    if (requested === null || inboxOpen || !readWorked || landed.current === location.key) return;
     landed.current = location.key;
     focusCard(requested);
-  }, [requested, inboxOpen, needsYouRead, location.key, focusCard]);
+  }, [requested, inboxOpen, readWorked, location.key, focusCard]);
 
   const copyLink = () => {
     setLinkCopy('idle');

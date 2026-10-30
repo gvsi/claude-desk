@@ -897,6 +897,28 @@ describe("Today's Demo inbox", () => {
     return { held: () => waiting, release };
   }
 
+  /** The main Desk's Needs you, as the app reads it. */
+  const needsYouPath = ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId);
+
+  /** Answers every read of `path` 503 until `stop()`: `count()` is how many it answered. */
+  function failReads(path: string): { count: () => number; stop: () => void } {
+    let failing = true;
+    let count = 0;
+    worker.use(
+      http.get(path, () => {
+        if (!failing) return undefined;
+        count += 1;
+        return HttpResponse.json({ error: 'kernel', code: 'kernel_unavailable' }, { status: 503 });
+      }),
+    );
+    return {
+      count: () => count,
+      stop: () => {
+        failing = false;
+      },
+    };
+  }
+
   /** The top of `el` is inside the window, where the owner can see it. */
   function expectInView(el: Element): void {
     const box = el.getBoundingClientRect();
@@ -1022,6 +1044,27 @@ describe("Today's Demo inbox", () => {
     await vi.waitFor(() => expect(requests('decision')).toHaveLength(1));
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(sheet.getByRole('link').elements()).toHaveLength(0);
+  });
+
+  it('request_link_waits_for_a_read_that_works', async () => {
+    // Needs you was read before the request was held, and its reads now fail. The address waits for
+    // a read that works rather than spending itself on the list read before, then lands.
+    const { screen, router } = await renderRoute(TODAY);
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    const failing = failReads(needsYouPath);
+    const refund = mockStore.world.addHeldRefund();
+    await expect.element(region(screen, 'Needs you').getByRole('button', { name: 'Try again' }), { timeout: 4_000 }).toBeVisible();
+
+    await router.navigate(requestLink(refund.decision_id));
+    const failed = failing.count();
+    await vi.waitFor(() => expect(failing.count()).toBeGreaterThanOrEqual(failed + 2), { timeout: 4_000 });
+    expect(document.activeElement).toBe(document.body);
+    expect(screen.getByRole('article', { name: `Held for you: ${REFUND_REASON}`, exact: true }).elements()).toHaveLength(0);
+
+    failing.stop();
+    const card = heldCard(screen, REFUND_REASON);
+    await expect.element(card, { timeout: 4_000 }).toBeInTheDocument();
+    await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
   });
 
   it('request_link_without_its_card_leaves_focus_alone', async () => {
