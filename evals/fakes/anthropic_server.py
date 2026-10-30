@@ -416,20 +416,22 @@ class LoopbackServer:
 
     def start(self, timeout_s: float = 30.0) -> None:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # The socket is this method's to close until the thread has started; from then on `_run`
+        # closes it. A Thread.start() that raises never ran `_run`.
         try:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.bind(("127.0.0.1", self.port))
+            self.port = sock.getsockname()[1]
+            config = uvicorn.Config(
+                self.app, lifespan="on", loop="asyncio", http="h11", ws="none", log_config=None,
+                log_level="warning", access_log=False, timeout_graceful_shutdown=self._graceful_shutdown_s,
+            )
+            self._server, self._error = uvicorn.Server(config), None
+            self._thread = threading.Thread(target=self._run, args=(self._server, sock), name=self.name, daemon=True)
+            self._thread.start()
         except BaseException:   # a port in use, say: close it, so a retry on another port leaves none open
             sock.close()
             raise
-        self.port = sock.getsockname()[1]
-        config = uvicorn.Config(
-            self.app, lifespan="on", loop="asyncio", http="h11", ws="none", log_config=None,
-            log_level="warning", access_log=False, timeout_graceful_shutdown=self._graceful_shutdown_s,
-        )
-        self._server, self._error = uvicorn.Server(config), None
-        self._thread = threading.Thread(target=self._run, args=(self._server, sock), name=self.name, daemon=True)
-        self._thread.start()
         deadline = time.monotonic() + timeout_s
         while not self._server.started:
             if not self._thread.is_alive():

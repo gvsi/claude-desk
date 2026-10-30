@@ -321,3 +321,23 @@ def test_a_failed_bind_leaves_no_socket_open():
         taken.close()
 
     assert [str(warning.message) for warning in caught if issubclass(warning.category, ResourceWarning)] == []
+
+
+@pytest.mark.parametrize("step", ["uvicorn.Config", "threading.Thread.start"])
+def test_a_failed_setup_after_the_bind_leaves_no_socket_open(monkeypatch: pytest.MonkeyPatch, step: str):
+    """A start that fails after its bind, from the server's setup up to starting the thread that
+    would own the socket, raises and closes the socket: that thread never ran to close it."""
+
+    def fail(*args: object, **kwargs: object) -> None:
+        raise RuntimeError(f"{step} failed")
+
+    monkeypatch.setattr(step, fail)
+    gc.collect()   # what earlier tests left unclosed warns now, outside the check
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        with pytest.raises(RuntimeError, match=f"^{re.escape(step)} failed$") as raised:
+            LoopbackServer(Starlette(), name="server").start()
+        del raised   # its traceback holds the failed start's frame, and so its socket
+        gc.collect()
+
+    assert [str(warning.message) for warning in caught if issubclass(warning.category, ResourceWarning)] == []
