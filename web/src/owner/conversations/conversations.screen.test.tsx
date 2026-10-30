@@ -269,6 +269,41 @@ describe('Conversations', () => {
     await expectScreenBasics(screen.container, { owner: true });
   });
 
+  it('unsent_words_never_replace_newer_ones', async () => {
+    named(DANA_LIVE, DANA);
+    const { screen } = await renderRoute(conversation(DANA_LIVE), { pollScale: 100 });
+    await screen.getByRole('button', { name: 'Take over' }).click();
+    const box = screen.getByRole('textbox', { name: 'Write to them' });
+    await expect.element(box).toBeVisible();
+
+    // The reply check stops her words, a moment after she sends them (a price in prose).
+    mockStore.inject({ route: 'ownerMessage', status: 200, delayMs: 600, body: { message_id: 'msg-stopped', verdict: { ok: false }, ledger_seq: 1 } });
+    const stopped = 'The drain clearing is $89 today.';
+    await box.fill(stopped);
+    await userEvent.keyboard('{Enter}');
+
+    // While they are on their way the box takes nothing new, so nothing typed meanwhile can be
+    // overwritten when they come back.
+    await expect.element(box).toBeDisabled();
+    await userEvent.keyboard('Newer words');
+
+    // They come back to the box, alone, with the line saying why, and the box has focus again.
+    await expect
+      .element(screen.getByRole('alert').getByText("That wasn't sent: the reply check stopped it. Your words are back in the box to change.", { exact: true }))
+      .toBeVisible();
+    await expect.element(box).toHaveValue(stopped);
+    await expect.element(box).not.toBeDisabled();
+    expect(document.activeElement).toBe(box.element());
+
+    // Words that go through leave the box empty and ready for the next ones.
+    await box.fill('I can come at 4 today.');
+    await userEvent.keyboard('{Enter}');
+    await expect.element(log(screen).getByText('I can come at 4 today.', { exact: true })).toBeVisible();
+    await expect.element(box).toHaveValue('');
+    await expect.poll(() => document.activeElement).toBe(box.element());
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
   it('whisper_in_ai_mode', async () => {
     const chat = session(DANA_LIVE);
     const streamed = chat.events.length;

@@ -139,7 +139,8 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
   const typing = useVisitorTyping(chat.data);
   const mode = chat.data?.state.mode;
 
-  // Unsent words go back into their own box once it is shown, and only there.
+  // Unsent words go back into their own box once it is shown, and only there. The box takes
+  // nothing new while a message is on its way, so they never replace words typed after them.
   useEffect(() => {
     if (unsent === null) return;
     const wrapper = composerRef.current;
@@ -148,6 +149,15 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
     setUnsent(null);
     fillComposer(box, unsent.text);
   }, [unsent, mode]);
+
+  // Focus left the box as it closed for the send: once the send is over, it goes back.
+  const wasSending = useRef(false);
+  useEffect(() => {
+    const ended = wasSending.current && !controls.sending;
+    wasSending.current = controls.sending;
+    const active = document.activeElement;
+    if (ended && (active === null || active === document.body)) composerRef.current?.querySelector('textarea')?.focus();
+  }, [controls.sending]);
 
   if (chat.data === undefined) {
     if (chat.error instanceof ApiError && chat.error.kind === 'not_found') {
@@ -225,6 +235,7 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
           label="Write to them"
           placeholder="They see your words exactly as you write them."
           maxLength={MESSAGE_MAX_LENGTH}
+          disabled={controls.sending}
           onSend={say}
         />
       </div>
@@ -238,6 +249,7 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
           label="Whisper to Claude"
           placeholder="Whisper to Claude. They won't see it."
           maxLength={MESSAGE_MAX_LENGTH}
+          disabled={controls.sending}
           onSend={whisper}
         />
       </div>
