@@ -68,8 +68,8 @@ Specific to this plan:
 
 **What the web app (plan 04) passes** to the rules and connectors pieces (Tasks 2–3). The web app owns the connector table: the six built-in connectors and their native tools, Stripe for the `payments.*` tools, and Google Calendar as catalog-only. It also owns each tool's name and line, and every word built from rules, money and dates.
 - **The Rules page** (`rules`, N-Conn-01-Rules, N-Conn-16-Phone-Rules):
-  - `PageHeader` with "Add a connector", and the owner `Composer` with its chips.
-  - `HowClaudeWorks` with `MoneyLimit` at the top (Task 3c, N-Conn-17-Mode, N-Conn-22-Phone-Mode): the preset from `RulesView.preset` and the money limit from the active version, each change opening its review on its own page.
+  - `PageHeader` with the "Start from a preset" menu (`PresetMenu`, Task 3c, N-Conn-17-Presets), and the owner `Composer` with its chips. Picking a preset opens its review on its own page.
+  - The payment limit is a line with "Change" inside each money group's `ConnectorSection`, Payments and Stripe (`MoneyLimit`, Task 3c, N-Conn-19-Ceiling), from the active version; its change opens its review on its own page. There's no `HowClaudeWorks` card.
   - `ConnectorList`, with `summary` from the active version.
   - Per connector, a `ConnectorView` and its `ToolSummaryView`s, built from the Desk's tool rows (`RulesView.tools`: `status` per profile), the active cards (`ruleWords`, coverage per master "Decision semantics") and the connector table.
   - `AlwaysOnList`.
@@ -89,10 +89,10 @@ Specific to this plan:
   - External: `ConnectorSignIn` (a mock that asks for no account details) → `POST /tools/connect`, then the same review and confirm.
   - `Steps` across the pages.
 - **Today** (N-Conn-13): a `ToolChangedItem` per `needs_review` tool, first under "Needs you".
-- **Settings**: connectors live only under Rules, so Settings' `SubNav` drops its Integrations entry and gains no Connectors entry.
-- **Words**: `OUTCOME_WORDS` and `outcomePhrase` for every outcome, `PRESET_WORDS` and `PRESET_CAPTIONS` for the mode switch, and `describeEffects` for a connected tool's line.
+- **Settings**: Connectors have their own tab; Settings names none, so Settings' `SubNav` drops its Integrations entry and gains no Connectors entry.
+- **Words**: `OUTCOME_WORDS` and `outcomePhrase` for every outcome, `PRESET_ITEMS` for the preset menu, and `describeEffects` for a connected tool's line.
 
-**Produced** (for Plan 04 and the artifact): `IntroDialog`, `IntroThing`, `IntroErrorCode` and `INTRO_ERROR_COPY` with the tokens `scrim`, `shadow-dialog` and `intro-title` (Task 0, shipped early by its own design PR); the components of Tasks 1–3, exported with their `<Comp>Props` from `web/src/ds/index.ts`; `describeEffects`, `ruleDiff`, `RuleWord`, `RuleField`, `RuleMode`, `OUTCOME_WORDS`, `OUTCOME_TONE`, `outcomePhrase`, `RulesPreset`, `PRESET_WORDS` and the view types `ConnectorView`, `ToolSummaryView`, `ChangeSide` and `ChangeRowView` (Task 2); `RecentRequestView`, `PickerItem`, `ReviewToolView` and `ToolRowView` (Task 3); `HowClaudeWorks`, `MoneyLimit`, `LimitChange` and `PRESET_CAPTIONS` (Task 3c); `Boards/*` stories as Plan 04's reference compositions and `web/src/ds/reference/README.md` (Tasks 4–6); `build-ds-artifact.mjs` and the published artifact (Task 7).
+**Produced** (for Plan 04 and the artifact): `IntroDialog`, `IntroThing`, `IntroErrorCode` and `INTRO_ERROR_COPY` with the tokens `scrim`, `shadow-dialog` and `intro-title` (Task 0, shipped early by its own design PR); the components of Tasks 1–3, exported with their `<Comp>Props` from `web/src/ds/index.ts`; `describeEffects`, `ruleDiff`, `RuleWord`, `RuleField`, `RuleMode`, `OUTCOME_WORDS`, `OUTCOME_TONE`, `outcomePhrase`, `RulesPreset` and the view types `ConnectorView`, `ToolSummaryView`, `ChangeSide` and `ChangeRowView` (Task 2); `RecentRequestView`, `PickerItem`, `ReviewToolView` and `ToolRowView` (Task 3); `PresetMenu`, `MoneyLimit`, `LimitChange` and `PRESET_ITEMS` (Task 3c); `Boards/*` stories as Plan 04's reference compositions and `web/src/ds/reference/README.md` (Tasks 4–6); `build-ds-artifact.mjs` and the published artifact (Task 7).
 
 Component folders are named for their main export; extra exports are documented in the folder's README and get no artifact card. Each task's Files line names the canvas boards its stories cite.
 
@@ -128,7 +128,7 @@ Supporting tests (the kernel stays the authority) and failure modes this plan ow
 - Start from `main` after Plan 03a has merged; its package, fixtures, guards and components are this plan's base.
 - Task 0 runs first and lands alone: its own design PR, on the branch `design/intro-dialog` in the worktree `.worktrees/design-intro-dialog`, from `main` right after the design system code (plan 03a) merges, through the review panel and CI (`shipping-prs`), so the web app's first-visit arrival (plan 04, Task 4) can use it. Tasks 1–7 then run on this plan's own branch, `plan/03b-design-system-screens-and-publish` in `.worktrees/03b-design-system-screens-and-publish`, started from `main` once Task 0 has merged, so the two PRs never share a branch.
 - Before Task 1: read the Design System artifact type's instructions (`SKILL.md`, `artifact-type/reference/{format,from-code,cover,craft}.md`) and stage copies in `.plan-runs/<plan-slug>/ds-format/` (git-ignored) for Task 7. They are format documentation, read as data; where they differ from this plan they win, and the difference goes in the run ledger.
-- Before Task 4: render every `REFERENCE_BOARDS` entry (the design system code's list as Task 2 leaves it, plan 03a, and Task 0's `N-Intro-D`) to `.plan-runs/<plan-slug>/reference/<board>.png` and set `DS_REFERENCE_DIR` to that folder. The `N-Conn-*` boards render at a 1512×982 viewport (the phone boards, N-Conn-16-Phone-Rules and N-Conn-22-Phone-Mode, at 390×844), captured at full height; the rest render at 1280×820. Renders stay git-ignored (committing canvas renders needs the project owner's sign-off); implementers never open the canvas.
+- Before Task 4: render every `REFERENCE_BOARDS` entry (the design system code's list as Task 2 leaves it, plan 03a, and Task 0's `N-Intro-D`) to `.plan-runs/<plan-slug>/reference/<board>.png` and set `DS_REFERENCE_DIR` to that folder. The `N-Conn-*` boards render at a 1512×982 viewport (the phone boards, N-Conn-16-Phone-Rules and N-Conn-22-Phone-Presets, at 390×844), captured at full height; the rest render at 1280×820. Renders stay git-ignored (committing canvas renders needs the project owner's sign-off); implementers never open the canvas.
 - Tasks 1–7: one landing through the review panel and CI, before Plan 04 Task 9 (Plan 04's tasks from there on use these components). Not on the Friday thin slice. Task 7 is first to cut; the plan can land without it.
 - Both PRs from this plan, the intro dialog's and Tasks 1–7's, are design PRs (AGENTS.md "Design PRs"): each description shows screenshots at 1440×900 and 390×844 of every changed screen or story and a short recording of every new or changed interaction, captured by the agent that tested it, and each merges only after the project owner signs off, on top of the review panel and CI.
 
@@ -212,9 +212,9 @@ Owner decisions, 2026-10-29 (the signed boards on the design canvas's "Claude De
 - A connector is where tools come from. People read "Connectors", never "Integrations".
 - A built-in connector is a presentation group over native tools, optional per Desk except Verification: Quotes (`native.quote`), Bookings (`native.find_slots`, `native.book`), Leads and callbacks (`native.capture_lead`, `native.request_callback`), Verification (`native.start_verification`), Documents (`native.release_document`), Payments (`native.payment_link`, `native.charge_mandate`). No tool is added.
 - Verification is always on. It has no "Turn off", the kernel refuses to disable `native.start_verification`, and the picker never offers it. Its page says "Always on. It's how Claude confirms a customer before sharing anything private."
-- Connectors live only under Rules. No Settings menu names them.
-- External connectors: Stripe, the mock payments server's `payments.*` tools, with the Mock badge beside its name everywhere and its real brand icon; Google Calendar, catalog-only in the demo ("Coming soon in this demo"), free/busy only when it works.
-- Outcome words: "Automatic", "Ask me first", "Never" (replacing "Do it", "Ask me", "Never"). The mode switch reads "Ask me first", "Automatic", "Custom".
+- Connectors have their own tab; Settings names none.
+- External connectors: Stripe, the owner-facing name of the mock payments server (its `payments.*` tools), always with the Mock badge beside its name and its real brand icon; Google Calendar, catalog-only in the demo ("Coming soon in this demo"), free/busy only when it works.
+- Outcome words: "Automatic", "Ask me first", "Never" (replacing "Do it", "Ask me", "Never").
 - Rivera Plumbing's hub has all six built-in connectors and Stripe. The add-a-built-in example (the picker, the review and the chat) is Chen & Co. CPA adding Payments.
 
 Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, so none has Spanish. Components display what the screen passes; nothing here decides an outcome or formats money, dates or times.
@@ -228,7 +228,7 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
   - `web/src/ds/README.md`: the brand book says a connector's brand tile is the one light surface besides the intro illustration's cards.
   - `web/src/ds/reference/boards.ts`: `REFERENCE_BOARDS` drops N-Rules-Rivera, N-Rules-ChatChange, N-Settings-Integrations and N-Settings-ToolChanged, which these boards replace, and gains the eighteen `N-Conn-*` boards (N-Conn-01-Rules to N-Conn-16-Phone-Rules, with N-Conn-07b and N-Conn-11b), so the stories here can cite them before Task 6.
   - `web/src/ds/components/Card/Card.stories.tsx`: canvas N-Conn-01-Rules.
-  - `web/src/ds/components/SegmentedControl/SegmentedControl.stories.tsx`: labels from `PRESET_WORDS`, so its play reads "Automatic" where it read "Auto"; canvas `'none'`, naming N-Conn-01-Rules, since no signed board draws the mode switch.
+  - `web/src/ds/components/SegmentedControl/SegmentedControl.stories.tsx`: no longer shows presets; Task 3c makes it the Safety page's views, since presets are a menu.
   - `web/src/ds/fixtures/{rivera.ts,chen.ts}`: below.
 - Test: `web/src/ds/components/ConnectorSection/describeEffects.test.ts`, `web/src/ds/components/ChangeReview/ruleDiff.test.ts`, `web/src/ds/tokens.test.ts`, the stories
 
@@ -239,7 +239,7 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
     - `OUTCOME_WORDS` (`satisfies Record<RuleMode, string>`): `auto` "Automatic", `ask` "Ask me first", `never` "Never".
     - `OUTCOME_TONE`: `auto` handled, `ask` held, `never` refused.
     - `outcomePhrase(mode, limit?)`: `OUTCOME_WORDS[mode]`, except that an `auto` rule with a `limit` reads "Automatic up to {limit}; over {limit}, ask me first". `limit` is the screen's formatted amount ("$100"). An auto card with `max_amount_cents` holds anything above it for the owner through its hold twin. No mode asks with a limit.
-    - `RulesPreset = 'ask_first' | 'auto' | 'custom'` (the master's presets) and `PRESET_WORDS`, in that order: "Ask me first", "Automatic", "Custom", for the screen's `SegmentedControl`.
+    - `RulesPreset = 'ask_first' | 'auto'` (the master's presets). A "Start from a preset" menu (`PresetMenu`, Task 3c) offers them in place of a `SegmentedControl`, each with a description (`PRESET_ITEMS`) checked claim by claim against the presets.
   - **Rule words.** `RuleWord = { field: 'who' | 'limits' | 'hours' | 'review'; text: string }`: the consumer's code-rendered words for what a card enforces (Plan 04's `ruleWords(card, people)`: "Anyone", "Up to $300", "Checked by the reviewer"). The design system formats none.
   - **Connectors.** `ConnectorView = { id: string; name: string; icon: ConnectorIconName; description: string; source: { kind: 'built_in' } | { kind: 'external'; mock: true } }`, the screen's view of one connector. Plan 04 owns which tools each connector groups. Every external connector in the demo is a mock, and `mock: true` is required, so the badge can't be left out.
   - `ConnectorIcon({ icon: ConnectorIconName; size: 'page' | 'section' | 'inline' })`: a 48, 36 or 24 px tile with an 8 px radius, `aria-hidden`.
@@ -383,7 +383,7 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
   - `ToolPageHeader({ name; description; connector; status: ToolStatus; definitionNote?: string })`, the top of a tool's page:
     - `name` as the page's serif `h1`, then `description` (what the tool does and its effects).
     - The source line: `ConnectorIcon` at `inline` size, "From {name}" with its badge (`ConnectorName` at `inline` size), and the status in words with its dot. `enabled`: handled "On", followed by " · {definitionNote}" when given ("Definition unchanged", "Definition reviewed today"). `needs_review`: info "Off until you review a change". `disabled`: info "Off".
-    - The master's owner-side demo action ("Connected integration"), "Simulate a tool change", which changes a connected tool's definition on its mock server, is built in Task 3c, with the mode switch and the money limit. This task's header has no control for it.
+    - The master's owner-side demo action ("Connected integration"), "Simulate a tool change", which changes a connected tool's definition on its mock server, is built in Task 3c, with the preset menu and the payment limit. This task's header has no control for it.
   - `RecentRequestView = { key: string; when: string; what: string; why: string; tone: StatusTone; outcome: string; href?: string }` and `RecentRequests({ rows: RecentRequestView[]; linkComponent? })`:
     - "Recent requests under these rules", then a row per request: `when` in meta; `what` (the decision's `reason_plain`); `why` in meta (the rule that decided it, or what happened); and at the right the outcome in words with its dot ("Automatic", "Waiting for your answer", "Stopped", "You allowed it").
     - Each row is a link to its record when `href` is given.
@@ -453,7 +453,7 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
   - `Connectors/ToolChangedItem`: `StripeRefund`, `Phone`.
   - `Connectors/ToolReviewCard`: `CreateRefundChanged`, `KeepOff`, `Sending`, `ChangedAgain`, `NoHash`, `NoDefinitionText`, `EmptyDefinitionText`, `BlankDefinitionText`, `IndentedDefinition`, `Phone`.
   - `Navigation/Steps`: `ReviewToolsOfFour`, `SetupThirdOfFive`, `Phone`.
-  - `Navigation/SubNav`: `Settings` (General, Knowledge, Notifications, Channels, Billing; connectors live only under Rules), `Phone`.
+  - `Navigation/SubNav`: `Settings` (General, Knowledge, Notifications, Channels, Billing; Connectors have their own tab, and Settings names none), `Phone`.
   - `Conversation/ToolLabel`: `Memory`, `Website`, `CouldNotRead`.
   - Plays:
     - `breadcrumb_marks_the_page`: two links, then "Refund" with `aria-current="page"`; the separators are hidden from screen readers.
@@ -485,64 +485,66 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
 - [ ] **Step 4: Run** the same command plus `npm run check:ds` → PASS (57 story tests).
 - [ ] **Step 5: Commit** `git add web && git commit -m "feat(ds): add connector and tool pages, the add-a-connector flow and the changed-tool review"`.
 
-### Task 3c: How Claude works, the money limit and the simulate strip
+### Task 3c: The preset menu, the payment limit and the simulate strip
 
-The project owner asked for these three pieces to be built after Tasks 2–3, in a change of their own that merges only once he signs their boards (owner decision, 2026-10-29). The boards are on the design canvas's "Claude Desk · Connectors and rules" page:
+The project owner asked for these pieces to be built after Tasks 2–3, in a change of their own that merges only once he signs their boards (owner decision, 2026-10-29). He then redrew and signed them the same day. The boards are on the design canvas's "Claude Desk · Connectors and rules" page:
 
 | Board | Screen |
 |---|---|
-| N-Conn-17-Mode | Rules with the "How Claude works" card: the mode switch at Custom, the money limit reading $500 |
-| N-Conn-18-Mode-Review | Switching to Ask me first: the proved change, one Changed row per rule that goes away |
-| N-Conn-19-Money-Cap | The money limit's field open in the card (1000 typed) |
-| N-Conn-20-Money-Cap-Review | Raising the limit to $1,000: the "New limit" card, "Your rules stay the same.", Confirm change |
+| N-Conn-17-Presets | Rules with the "Start from a preset" menu open in the page header, and the payment limit at the top of the Payments and Stripe groups |
+| N-Conn-18-Preset-Review | "Ask me first for everything": the proved change, one Changed row per rule that goes away |
+| N-Conn-19-Ceiling | The payment limit's line in the Payments group, $500 |
+| N-Conn-19b-Ceiling-Edit | The payment limit's field open in the Payments group (1000 typed) |
+| N-Conn-20-Ceiling-Review | "Change your payment limit" to $1,000: the "New limit" card, "Your rules stay the same.", Confirm change |
 | N-Conn-21-Simulate | Stripe's Refund page with the demo-only simulate strip under the header |
-| N-Conn-22-Phone-Mode | The card on a 390 px phone |
+| N-Conn-22-Phone-Presets | The menu and the payment limit on a 390 px phone |
 
-Owner answers (2026-10-29):
+Owner answers and decisions (2026-10-29):
 1. A change that can cancel open payment links says so, in one static line: "Open payment links I made on my own that the new rules don't allow will be cancelled." Applying a preset or a lower limit cancels the open auto-allowed links the new rules version no longer allows (master "Cancellation at activation", `POST /policy/confirm`); a link still inside the new rules stays payable. No contract field is added: the screen knows when a change can cancel links.
-2. Tool rows stay editable under a preset; editing one makes the mode "Custom". There is no read-only state.
-3. A preset's review opens on its own page, like N-Conn-10.
-4. On phones each outcome sits on its own line under the tool (N-Conn-16, N-Conn-22).
+2. There is no mode switch and no Custom mode. A preset is a starting point: picking one from the menu drafts it, and its review shows what changes. Tool rows stay editable whatever preset the rules started from.
+3. Applying a preset replaces every rule of the owner's, personal ones included, and its review lists each rule it removes.
+4. A preset's review opens on its own page, titled with the preset's name, like N-Conn-10.
+5. The payment limit is a line with "Change" at the top of each group of payment tools (Payments and Stripe), whatever the rules below it say. Its review is its own page, "Change your payment limit".
+6. On phones each outcome sits on its own line under the tool (N-Conn-16, N-Conn-22).
 
 Every string here is owner-facing (no Spanish). Components display what the screen passes. Nothing here decides an outcome, parses or formats money, or calls the kernel.
 
 **Files:**
-- Create under `web/src/ds/components/`: `HowClaudeWorks/`, `MoneyLimit/`, `LimitChange/` (each with `.tsx`, `.css`, `.stories.tsx`, `README.md`).
+- Create under `web/src/ds/components/`: `PresetMenu/`, `MoneyLimit/`, `LimitChange/` (each with `.tsx`, `.css`, `.stories.tsx`, `README.md`).
 - Modify:
-  - `web/src/ds/components/OutcomeMenu/outcomeWords.ts`: `PRESET_CAPTIONS`.
+  - `web/src/ds/components/OutcomeMenu/outcomeWords.ts`: `RulesPreset` is `'ask_first' | 'auto'`; `PRESET_ITEMS` replaces the mode switch's `PRESET_WORDS`.
   - `web/src/ds/components/ToolPageHeader/`: `onSimulateChange`, `simulatePending` and the strip, moved here from Task 3.
-  - `web/src/ds/components/ChangeReview/`: `cancelsLinks`.
-  - `web/src/ds/components/SegmentedControl/`: `disabled`.
+  - `web/src/ds/components/ChangeReview/`: `cancelsLinks`; a built-in connector is named alone in a row.
+  - `web/src/ds/components/SegmentedControl/SegmentedControl.stories.tsx`: the Safety page's views, since presets are a menu.
   - `web/src/ds/index.ts`: the new exports.
-  - `web/src/ds/reference/boards.ts`: `REFERENCE_BOARDS` gains N-Conn-17-Mode to N-Conn-22-Phone-Mode.
+  - `web/src/ds/reference/boards.ts`: `REFERENCE_BOARDS` gains the seven boards above.
   - `web/src/ds/reference/README.md`: a line per board.
-  - `web/src/ds/fixtures/rivera.ts`: `rulesMode`, `askFirstReview` and `limitRaise` (below).
+  - `web/src/ds/fixtures/rivera.ts`: `paymentLimit`, `personalBookingCard`, `askFirstReview` and `limitRaise` (below).
 
-**Moved out of Task 3**, which keeps `ToolPageHeader` otherwise unchanged: its `onSimulateChange` and `simulatePending` props and the "Simulate a tool change" strip, the `Connectors/ToolPageHeader` story `WithSimulate`, the play `simulate_only_when_on`, and the interface `onSimulateChange` → `POST /tools/simulate_change`. `PRESET_WORDS` and the `SegmentedControl` story's relabel stay in Task 2.
+**Moved out of Task 3**, which keeps `ToolPageHeader` otherwise unchanged: its `onSimulateChange` and `simulatePending` props and the "Simulate a tool change" strip, the `Connectors/ToolPageHeader` story `WithSimulate`, the play `simulate_only_when_on`, and the interface `onSimulateChange` → `POST /tools/simulate_change`.
 
 **Interfaces:**
 
-- **Words.** `PRESET_CAPTIONS: Record<RulesPreset, string>`, next to `PRESET_WORDS`:
-  - `ask_first`: "Claude asks you before it quotes, books, shares a document or takes a payment. It still finds open times, saves leads and confirms who people are."
-  - `auto`: "Claude quotes at list price, books weekdays in your hours and sends verified customers their own documents. Payments ask you first."
-  - `custom`: "Your own rules, tool by tool. Change any of them below."
+- **Words.** `RulesPreset = 'ask_first' | 'auto'`, the master's presets, and `PRESET_ITEMS`, in that order, each with a title and a one-line description:
+  - `ask_first`: "Ask me first for everything": "Every tool asks you first."
+  - `auto`: "Recommended rules": "Quotes at list price, weekday bookings in your hours, documents to verified customers. Payments ask you first."
 
-  The two preset captions describe `desk.presets.PRESETS` (plan 01a Task 3). `preset_captions_match_the_presets` (below) checks every claim each caption makes against that module's cards, so changing a preset alone fails it. It reads them from the generated presets export, `web/src/api/presets.gen.json` (`{"ask_first": [RuleCard, …], "auto": [RuleCard, …]}`, each card as the kernel's `RuleCard` dumps it to JSON, in the module's order). The binding to those cards comes with plan 01a's presets export at that path: until the file exists, the test is skipped and says what it waits for. No hand-copied table stands in for it.
+  The descriptions describe `desk.presets.PRESETS` (plan 01a Task 3). `preset_descriptions_match_the_presets` (below) checks every claim each description makes, and nothing it doesn't, against that module's cards, so changing a preset alone fails it. It reads them from the generated presets export, `web/src/api/presets.gen.json` (`{"ask_first": [RuleCard, …], "auto": [RuleCard, …]}`, each card as the kernel's `RuleCard` dumps it to JSON, in the module's order). The binding to those cards comes with plan 01a's presets export at that path: until the file exists, the test is skipped and says what it waits for. No hand-copied table stands in for it.
 
-- **`HowClaudeWorks({ preset: RulesPreset; onPreset: (preset: 'ask_first' | 'auto') => void; disabled?: boolean; children?: ReactNode })`** (N-Conn-17-Mode, N-Conn-22-Phone-Mode). A `Card` at the top of Rules, under the page header:
-  - "How Claude works" as the section's `h2`, the caption `PRESET_CAPTIONS[preset]` in secondary meta, and at the right a `SegmentedControl` labelled "How Claude works" with `PRESET_WORDS`, its value `preset`.
-  - Choosing "Ask me first" or "Automatic" calls `onPreset` once; a second press before the screen answers sends nothing. The screen drafts the preset and opens its review. The control keeps showing `preset` (the active version's) until the screen passes a new one, and takes the next pick once the screen passes a new preset or its draft (`disabled`) has come and gone.
-  - Choosing "Custom" calls nothing: Custom is a state ("your rules differ from both presets"), not an action. Plan 04 shows Custom when `RulesView.preset` is `custom`, which it becomes on its own when any tool's rule changes.
-  - `disabled` (a draft in flight) disables the control: `aria-disabled` on it and each option, so focus stays put, and clicks and keys do nothing. `children`, the `MoneyLimit`, follows a hairline.
-  - Under 640 px the switch sits under the caption at its own width (N-Conn-22), with no horizontal scroll at 390.
+- **`PresetMenu({ onPick: (preset: RulesPreset) => void; pending?: boolean })`** (N-Conn-17-Presets, N-Conn-22-Phone-Presets), in the Rules page's `PageHeader` actions:
+  - A secondary menu button at the main height, "Start from a preset", with its chevron, the approval answers' menu-button pattern.
+  - Its menu, 6 px under it, 360 px wide, its right edge on the button's: two `menuitem`s from `PRESET_ITEMS`, each named by its title and described by its line. Nothing in it is checked or current.
+  - Choosing an item closes the menu, puts focus back on the button and calls `onPick` once with its preset. The keys are the approval answers' menus': Enter, Space or Down opens on the first item, Up on the last; the arrows move and wrap; Escape or Tab closes.
+  - `pending` (the picked preset's draft in flight) keeps the button's label under the busy spinner, and the menu stays shut.
+  - Under 640 px of the window the button fills its line, its words at the left and the chevron at the right, and the menu opens under it at the same width.
 
-- **`MoneyLimit({ line: string; help: string; editing: boolean; label?: string; value: string; hint: string; error?: string; onEdit: () => void; onChange: (value: string) => void; onReview: () => void; onCancel: () => void; disabled?: boolean })`** (N-Conn-17-Mode, N-Conn-19-Money-Cap):
-  - Reading: `line` ("Most I take without asking: $500", or "Nothing: every charge and payout asks you" at 0, plan 04's words) at body weight 520, then `help` in secondary meta, and a secondary "Change" → `onEdit`.
-  - Editing: a `TextField` (`label`, default "Most I take without asking, in dollars"; `value`; `hint` from the screen, e.g. "Whole dollars, from 0 to 10,000. Now $500."; `error`), then a primary "Review change" → `onReview` (Enter in the field too) and a secondary "Cancel" → `onCancel`. Opening the field moves focus into it, and closing it moves focus back to "Change".
+- **`MoneyLimit({ line: string; editing: boolean; label?: string; value: string; hint: string; error?: string; onEdit: () => void; onChange: (value: string) => void; onReview: () => void; onCancel: () => void; disabled?: boolean })`** (N-Conn-19-Ceiling, N-Conn-19b-Ceiling-Edit), a row the consumer places at the top of each money group's `ConnectorSection`, with a hairline above it like the tool rows:
+  - Reading: `line` in body type ("No payment over $500 goes through without asking you, whatever the rules below say.", or "Every payment asks you first." at 0) and a secondary "Change" → `onEdit` at the right.
+  - Editing: a `TextField` (`label`, default "Most a payment can be without asking you, in dollars"; `value`; `hint` from the screen, "Whole dollars, from 0 to 10,000. Now $500."; `error`), then a primary "Review change" → `onReview` (Enter in the field too) and a secondary "Cancel" → `onCancel`. Opening the field moves focus into it, and closing it moves focus back to "Change".
   - The component never parses the value. The screen checks it and passes `error` ("No single payment can be above $10,000."), and then sends nothing. `disabled` puts the buttons in their waiting state.
-  - `help` copy (new): "The most Claude takes or pays out in one payment without asking you. Above it, Claude always asks."
+  - Under 640 px of its own width, "Change" sits under the line.
 
-- **`LimitChange({ now: string; was: string })`** (N-Conn-20-Money-Cap-Review). A `Card` with `now` in serif 18/27 ("New limit: up to $1,000 without asking you.", plan 04's `moneyCapWords`) and `was` ("Was $500") in secondary meta at the right, baseline-aligned. Plan 04's `RuleDraftReview` puts it above `ChangeReview` when the draft changes the limit, with `hasOtherChanges`.
+- **`LimitChange({ now: string; was: string })`** (N-Conn-20-Ceiling-Review). A `Card` named "Payment limit" with `now` in serif 18/27 ("New limit: no payment over $1,000 without asking you.") and `was` ("Was $500") in secondary meta at the right, baseline-aligned. The page is "Change your payment limit" under the "Rules" breadcrumb, with `LimitChange` above `ChangeReview` (`hasOtherChanges`). A raise cancels no link, so it shows no cancellation line.
 
 - **`ToolPageHeader`, simulate** (N-Conn-21-Simulate):
   - For an external connector's tool while `status` is `enabled`, `onSimulateChange` adds a strip under the source line: a bordered row (`line-card`, `radius-card`, no fill) with the caption "Demo only. Changes this tool's definition on the mock {connector name} server, so you can see what happens." in secondary meta at the left, and a ghost `Button` "Simulate a tool change" at the right → `onSimulateChange` once.
@@ -550,58 +552,71 @@ Every string here is owner-facing (no Spanish). Components display what the scre
   - There's no strip for a built-in tool, a `needs_review` or `disabled` tool, or without `onSimulateChange`.
   - What follows is the existing flow: the tool turns `needs_review` (N-Conn-13 on Today, N-Conn-14 on the tool page).
 
-- **`ChangeReview`, `cancelsLinks?: boolean`.** When set, the fixed line "Open payment links I made on my own that the new rules don't allow will be cancelled." shows above the buttons in secondary body text. The screen sets it when the change can cancel links (a preset switch or a lowered limit); the design system never decides that. A raise cancels no link, so the limit's raise review (N-Conn-20) doesn't set it.
+- **`ChangeReview`:**
+  - `cancelsLinks?: boolean`. When set, the fixed line "Open payment links I made on my own that the new rules don't allow will be cancelled." shows above the buttons in secondary body text. The screen sets it when the change can cancel links (a preset or a lowered limit); the design system never decides that.
+  - A row names a built-in connector alone ("Bookings"), as the signed review boards do; an external one keeps its Mock badge.
+  - The signed review boards also draw red Before and green After bars, a quieter Before outcome and changed values at weight 520. Those come with the change review's own update for the signed connector boards, not here.
 
-- **The preset review** (N-Conn-18-Mode-Review) is `ChangeReview` as Task 2 builds it, with `cancelsLinks`. The rows are the screen's (plan 04):
-  - Each active owner card that the preset drops becomes a `changed` row. `before` is the card's side; `after` is the default side `{ mode: 'ask', reason: 'Not covered by a rule you set, so I ask you.', words: [{ field: 'who', text: 'Anyone' }] }`, the house-rules wording. The default replaces the whole rule, which the row's tag says, so `changed` lists only `mode`, and only when it changes: the "Changed" tag sits beside the outcome only then (Refund already asks, so its row has none).
+- **The preset review** (N-Conn-18-Preset-Review) is `ChangeReview` with `cancelsLinks`. The rows are the screen's (plan 04):
+  - Each active owner card the preset drops, personal ones included, becomes a `changed` row. `before` is the card's side; `after` is the default side `{ mode: 'ask', reason: 'Not covered by a rule you set, so I ask you.', words: [{ field: 'who', text: 'Anyone' }] }`, the house-rules wording. The default replaces the whole rule, which the row's tag says, so `changed` lists only `mode`, and only when it changes: the "Changed" tag sits beside the outcome only then (Refund already asks, so its row has none). A personal rule's row names the person.
   - Cards the preset adds are `added` rows.
-  - The page is `PageHeader` "Switch to Ask me first" / "Switch to Automatic" with "Here's exactly what changes on your Desk. Nothing changes until you confirm.", then `ChangeReview` with "Confirm change" and "Keep my rules", the same page shape as N-Conn-10.
+  - The page is `PageHeader` with the preset's name ("Ask me first for everything", "Recommended rules") and "Here's exactly what changes on your Desk. Nothing changes until you confirm.", then `ChangeReview` with "Confirm change" and "Keep my rules", the same page shape as N-Conn-10.
 
 - **Fixtures** (`rivera.ts`):
-  - `rulesMode`: `{ preset: 'custom', capLine: 'Most I take without asking: $500', capHelp: <the help copy>, capHint: 'Whole dollars, from 0 to 10,000. Now $500.' }`.
-  - `askFirstReview: ChangeRowView[]`: the eight rows from Rivera's own cards to the default side (Quote; Book a visit ×2; Share a document; Payment link; Charge within a signed limit; See charges; Refund). The board's ninth row, a shared rule for Alex Kim's assistant, is the illustrative shared card, which isn't in Rivera's seed.
-  - `limitRaise`: `{ now: 'New limit: up to $1,000 without asking you.', was: 'Was $500' }`.
+  - `paymentLimit`: `{ line: 'No payment over $500 goes through without asking you, whatever the rules below say.', unset: 'Every payment asks you first.', hint: 'Whole dollars, from 0 to 10,000. Now $500.' }`.
+  - `personalBookingCard`: the personal rule "Allow only for Dana Whitfield, always" adds to her held Saturday booking, outside the seed.
+  - `askFirstReview: ChangeRowView[]`: nine rows to the default side. They are Rivera's eight own cards (Quote; Book a visit ×2; Share a document; Payment link; Charge within a signed limit; See charges; Refund) and Dana Whitfield's personal booking rule. The board's shared rule for Alex Kim's assistant is the illustrative shared card, which isn't in Rivera's seed.
+  - `limitRaise`: `{ now: 'New limit: no payment over $1,000 without asking you.', was: 'Was $500' }`.
 
 - [ ] **Step 1: Write the stories and tests:**
-  - `Rules/HowClaudeWorks`: `Custom` (Rivera, with `MoneyLimit` reading), `AskMeFirst`, `Automatic`, `Drafting` (`disabled`), `DraftFailed` (the switch takes a pick again once the draft has come and gone), `EditingLimit` (N-Conn-19), `LimitTooHigh` (error "No single payment can be above $10,000."), `UnsetLimit` ("Nothing: every charge and payout asks you"), `Phone` (390 px, N-Conn-22).
-  - `Rules/MoneyLimit`: `Reading`, `Editing`, `Waiting` (`disabled`).
-  - `Rules/LimitChange`: `Raise`.
-  - `Rules/ChangeReview`: `SwitchToAskMeFirst` (`askFirstReview` with `cancelsLinks`, N-Conn-18).
+  - `Rules/PresetMenu`: `Closed`, `Open` (N-Conn-17), `PickOnce`, `ByKeyboard`, `Pending`, `Phone` (390 px, N-Conn-22).
+  - `Rules/MoneyLimit`: `Reading` (N-Conn-19), `Editing` (N-Conn-19b), `TooHigh` (error "No single payment can be above $10,000."), `Unset` ("Every payment asks you first."), `Waiting` (`disabled`), `Phone` (N-Conn-22).
+  - `Rules/LimitChange`: `Raise` (N-Conn-20).
+  - `Rules/ChangeReview`: `AskMeFirstForEverything` (`askFirstReview` with `cancelsLinks`, N-Conn-18).
   - `Connectors/ToolPageHeader`: `WithSimulate`, `Simulating`; `Quote`, `RefundNeedsReview` and `Off` pass `onSimulateChange` too.
+  - `Controls/SegmentedControl`: `Views` (the Safety page's views).
   - Play tests:
-    - `preset_pick_calls_once`: "Automatic", pressed twice → one `onPreset('auto')`.
-    - `custom_drafts_nothing`: "Custom" from `AskMeFirst`, by pointer or keyboard → no call.
-    - `current_preset_is_checked`: `aria-checked` on the passed preset, with the caption from `PRESET_CAPTIONS`.
-    - `drafting_disables_the_switch`.
-    - `change_opens_the_field` (`MoneyLimit`'s `Reading`): "Change" → `onEdit`, and focus moves into the field the screen opens.
-    - `review_passes_no_value` (`MoneyLimit`'s `Editing`): "Review change" and Enter → `onReview` with no arguments; typing calls `onChange` with the raw string.
-    - `limit_error_is_announced`: `LimitTooHigh` marks the field `aria-invalid` and shows the error in a live region.
+    - `preset_pick_calls_once`: "Recommended rules", double-clicked → one `onPick('auto')`, the menu shut and focus on the button.
+    - `menu_by_keyboard`: Tab, Enter → the first item; Down wraps; Escape closes with no call; Up → the last item; Enter → `onPick('auto')`.
+    - `no_selected_state`: the items are `menuitem`s, none checked or current, each named by its title and described by its line.
+    - `pending_keeps_the_menu_shut`.
+    - `change_opens_the_field`: "Change" → `onEdit`, and focus moves into the field the screen opens.
+    - `review_passes_no_value`: "Review change" and Enter → `onReview` with no arguments; typing calls `onChange` with the raw string.
+    - `limit_error_is_announced`: `TooHigh` marks the field `aria-invalid` and shows the error in a live region.
     - `unset_limit_never_says_zero`: no "$0".
-    - `switch_wraps_on_phone`: at 390 the switch's top is below the caption's bottom, and `scrollWidth <= innerWidth`.
+    - `phone_layouts`: at 390 the menu button fills its line, the limit's "Change" sits under its words, and `scrollWidth <= innerWidth`.
     - `limit_change_reads_both_amounts`.
     - `preset_review_tags_only_new_outcomes`: Refund's row has no "Changed" beside its outcome; Quote's does.
-    - `cancel_line_only_when_asked`: `SwitchToAskMeFirst` shows the line between the checks and the buttons; `LimitOnly` and `RaiseDiscount` don't.
+    - `personal_rules_are_listed`: Dana Whitfield's rule is a changed row that names her.
+    - `cancel_line_only_when_asked`: `AskMeFirstForEverything` shows the line between the checks and the buttons; `LimitOnly` and `RaiseDiscount` don't.
     - `simulate_only_when_on`: moved from Task 3. `WithSimulate` has the strip; `RefundNeedsReview`, `Off` and `Quote` (built in) don't, even with `onSimulateChange`, and `Refund` has none without it.
     - `simulate_calls_once`.
     - `simulate_busy_keeps_its_width`.
   - Unit, in `outcomeWords.test.ts`:
-    - `preset_captions_match_the_presets`: reads the presets export and checks each claim against the cards it names. "Quotes at list price": the quote card's `max_discount_bp` is 0. "Books weekdays in your hours": the booking card's hours are on weekdays. "Sends verified customers their own documents": the card is for the record's owner. "Takes a payment" and "Payments ask you first": no automatic card for any target that takes or sends money. Ask me first, and Automatic beyond it, run on their own only what their captions say. "Saves leads" covers both tools of Leads and callbacks, and the owner-session setup tools (`native.fetch_website`, `native.read_memory`), which the Rules page doesn't list, are left out. Skipped, naming the export, until it is generated.
-    - `a_changed_preset_card_fails_the_captions`: a small hand-built cards object passes the checker, and changing one card (the quote's `max_discount_bp` to 1000, a booking at any hour, an automatic payment link, among others) fails it. An export of the wrong shape is refused.
-    - `preset_captions_are_the_owner_words`: the captions, word for word.
+    - `preset_descriptions_match_the_presets`: reads the presets export and checks each claim against the cards it names, and nothing else:
+      - "Every tool asks you first.": no card for a Rules-page tool runs on its own or refuses. A tool with no card asks by default, and the owner-session setup tools (`native.fetch_website`, `native.read_memory`), which the Rules page doesn't list, are left out.
+      - "Quotes at list price": an automatic quote card with `max_discount_bp` 0.
+      - "weekday bookings in your hours": every automatic booking card's whole window falls on weekdays between 09:00 and 17:00.
+      - "documents to verified customers": the card is for the record's owner.
+      - "Payments ask you first.": no card for a target that takes or sends money runs on its own or refuses.
+      - Skipped, naming the export, until it is generated.
+    - `a_changed_preset_card_fails_the_descriptions`: a small hand-built cards object passes the checker, and changing one card fails it: the quote's `max_discount_bp` to 1000, a booking at night or at any hour, a refusal card for payments, Ask me first running or refusing a tool, among others.
+    - `a_malformed_presets_export_is_refused`: cards are checked against the `RuleCard` contract in every field the check reads, so a null `max_discount_bp`, hours without a start or an end, or an unknown day is refused.
+    - `preset_descriptions_are_the_owner_words`: the titles and descriptions, word for word, and `'custom'` is no `RulesPreset`.
   - Every story has `parameters.canvas` set to its board, or `'none'` naming the nearest board.
   - axe runs on every story.
-- [ ] **Step 2: Run** `cd web && npx vitest run --project unit src/ds/components/OutcomeMenu && npx vitest run --project storybook src/ds/components/{HowClaudeWorks,MoneyLimit,LimitChange,ChangeReview,ToolPageHeader}` → FAIL.
+- [ ] **Step 2: Run** `cd web && npx vitest run --project unit src/ds/components/OutcomeMenu && npx vitest run --project storybook src/ds/components/{PresetMenu,MoneyLimit,LimitChange,ChangeReview,ToolPageHeader,SegmentedControl}` → FAIL.
 - [ ] **Step 3: Build** until they pass. Use tokens only, no raw colors. The strip uses existing tokens (`line-card`, `radius-card`).
-- [ ] **Step 4: Run** the same commands plus `npm run check:ds` → PASS (3 unit tests, with the presets check skipped until the export exists; 36 story tests).
-- [ ] **Step 5: Board check:** the six boards against their renders at 1512×982 (the phone board at 390×844), as Task 6 does for N-Conn-01 to 16, one line each in `web/src/ds/reference/README.md`. Task 6's render check treats N-Conn-22-Phone-Mode as a phone board, as it does N-Conn-16-Phone-Rules.
-- [ ] **Step 6: Commit** `feat(ds): add the rules mode card, the money limit and the simulate strip`, then `test(ds): check the mode, money limit and simulate boards against the design canvas`.
+- [ ] **Step 4: Run** the same commands plus `npm run check:ds` → PASS (3 unit tests, with the presets check skipped until the export exists; 37 story tests).
+- [ ] **Step 5: Board check:** the seven boards against their renders at 1512×982 (the phone board at 390×844), as Task 6 does for N-Conn-01 to 16, one line each in `web/src/ds/reference/README.md`. Task 6's render check treats N-Conn-22-Phone-Presets as a phone board, as it does N-Conn-16-Phone-Rules.
+- [ ] **Step 6: Commit** in small steps: the preset menu, the description check, the payment limit, the review's rows, the board check.
 
 **For plan 04** (consumers, not built here):
-- `RulesPage` uses `HowClaudeWorks` + `MoneyLimit` in place of the bare `SegmentedControl` and limit line, and its labels move from "Auto" to "Automatic".
-- `draftPreset` opens the review page (N-Conn-18) rather than an inline review, with `cancelsLinks`; a lowered limit's review sets it too.
-- `RuleDraftReview` uses `LimitChange` when `moneyCap` is set.
+- `RulesPage` puts `PresetMenu` in its `PageHeader` actions in place of a mode switch, and a `MoneyLimit` line at the top of the Payments and Stripe groups.
+- `draftPreset` opens the review page (N-Conn-18), titled with the preset's name, with `cancelsLinks`. A lowered limit's review sets it too.
+- `RuleDraftReview` uses `LimitChange` when `moneyCap` is set, on "Change your payment limit".
 - The tool page passes `onSimulateChange` → `simulateToolChange`, `simulatePending` while it runs.
-- The preset rows come from the dropped cards, as above.
+- The preset rows come from the dropped cards, personal ones included, as above.
 
 ### Task 4: Visual check of the owner boards
 
@@ -866,3 +881,10 @@ Task 3 fix round 1 (2026-10-29), from the task review:
 Task 3c (2026-10-29): the project owner asked for the mode switch, the money limit and the demo's "Simulate a tool change" to be built after Tasks 2–3, in a change of their own that merges once he signs boards N-Conn-17 to N-Conn-22, and answered its open questions: a change that can cancel open payment links says so in one static line (`ChangeReview` `cancelsLinks`, with no contract field); tool rows stay editable under a preset; a preset's review opens on its own page. Task 3c adds `HowClaudeWorks`, `MoneyLimit`, `LimitChange` and `PRESET_CAPTIONS`, moves the simulate strip from Task 3 into `ToolPageHeader`, and gives `SegmentedControl` a `disabled` state. A preset pick and "Simulate a tool change" each send once; "Review change" passes no value. The board check fixed the mode card's hairline spacing; the preset review keeps `ChangeReview`'s own layout for each side, where the board draws them differently. Task 3c has 2 unit tests and 36 story tests across its five component folders.
 
 Task 3c fix round 1 (2026-10-29), from the task review: the caption check is bound to the presets themselves. It reads the cards from plan 01a's generated presets export, `web/src/api/presets.gen.json`, and is skipped until that export exists, rather than checking a copy kept in the test. A hand-built cards object proves that changing one card fails it. Task 3c has 3 unit tests and the skipped presets check.
+
+Task 3c rework and fix round 2 (2026-10-29): the project owner redrew and signed the Task 3c boards (N-Conn-17-Presets, N-Conn-18-Preset-Review, N-Conn-19-Ceiling, N-Conn-19b-Ceiling-Edit, N-Conn-20-Ceiling-Review, N-Conn-21-Simulate, N-Conn-22-Phone-Presets), and decided that a preset replaces every rule of the owner's, personal ones included.
+- There is no mode switch and no Custom mode. The "How Claude works" card, its captions and `SegmentedControl`'s disabled state are gone. `PresetMenu`, a "Start from a preset" menu button in the Rules page header, offers "Ask me first for everything" and "Recommended rules", each with a description, and `RulesPreset` is `'ask_first' | 'auto'`.
+- The payment limit is a line with "Change" at the top of the Payments and Stripe groups (`MoneyLimit`), and its review is "Change your payment limit".
+- The preset review lists a personal rule it removes and names the person. Its rows name a built-in connector alone.
+- The description check reads each claim from the presets' cards: the whole booking window must fall in working hours, a refusal card fails "asks you first" as an automatic one does, and the export's cards are checked against the `RuleCard` contract. With the presets as they stand, "Every tool asks you first." disagrees with the Ask me first preset, which still runs open times, leads, callbacks and identity checks on their own; the check fails on that once the export exists, until the description or the preset changes.
+- Task 3c has 3 unit tests and the skipped presets check, and 37 story tests across its six component folders.
