@@ -31,21 +31,22 @@ export function outcomePhrase(mode: RuleMode, limit?: string): string {
 
 /**
  * The rule presets the owner can start from: the master plan's (`desk.presets.PRESETS`). There is no
- * "Custom" preset: rules the owner changes are simply the Desk's rules.
+ * "Custom" preset: rules the owner changes are simply the Desk's rules, with no preset of their own.
  */
 export type RulesPreset = 'ask_first' | 'auto';
 
 /**
- * The two presets the Rules page's "Start from a preset" menu offers, in order: each with its title
- * and a one-line description of what it does. The descriptions describe the master plan's preset
- * cards (`desk.presets.PRESETS`); `outcomeWords.test.ts` checks each claim against those cards, read
- * from their generated export (`web/src/api/presets.gen.json`).
+ * The presets' names and what each sets, in order, in the signed presets board's words: the Rules
+ * page's "Start from a preset" menu (`PresetMenu`) offers each by its label and description. The
+ * descriptions describe the master plan's preset cards (`desk.presets.PRESETS`);
+ * `outcomeWords.test.ts` checks each claim against those cards, read from their generated export
+ * (`web/src/api/presets.gen.json`).
  */
-export const PRESET_ITEMS = [
-  { value: 'ask_first', title: 'Ask me first', description: 'Quotes, bookings, documents and payments wait for your answer.' },
+export const PRESET_WORDS = [
+  { value: 'ask_first', label: 'Ask me first', description: 'Quotes, bookings, documents and payments wait for your answer.' },
   {
     value: 'auto',
-    title: 'Recommended rules',
+    label: 'Recommended rules',
     description: 'Quotes at list price, weekday bookings in your hours, documents to verified customers. Payments ask you first.',
   },
-] as const satisfies readonly { value: RulesPreset; title: string; description: string }[];
+] as const satisfies readonly { value: RulesPreset; label: string; description: string }[];

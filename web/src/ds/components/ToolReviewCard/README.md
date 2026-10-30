@@ -11,7 +11,7 @@
 ## What it shows
 
 - A compact `Card` (`section`, named "Needs your review", 16 px padding), its parts 12 px apart, each label 2 px over its words:
-  - "Needs your review" (an `h2` in meta type) with a held dot, and `noticed` at the right in secondary meta.
+  - "Needs your review" (an `h2` in meta type) with a held dot, and at the right in secondary meta the connector's `ConnectorName` with its "Mock" badge (or "Built in"), " · " and `noticed`, as Today's `ToolChangedItem` names it. So the summary's "Stripe changed …" sits in a card that says Stripe is a mock; every story runs `expectMockBesideExternalNames`.
   - In serif `.cd-type-summary`: "{connector name} changed “{title}”, so it's turned off until you review it. Until you decide, it can't run at all."
   - "What you confirmed before" (an `h3` in secondary caption type), then `description_confirmed`, the text Claude sees, and `describeEffects(effects, reversible)` in secondary meta.
   - "What the connector says now", then a `blockquote` on `bg-app` with a hairline border at `radius-control` and 10 px 12 px of padding, named by its label "Quoted from the connector. Claude never sees this text; it sees only the description you confirmed.". It holds `pending_definition_text` exactly as sent, as literal text: mono `.cd-type-quote` (12 px/18 px), as the board quotes it, `pre-wrap`, `overflow-wrap: anywhere`, `data-copy="user"`. It is never parsed: markup in it shows as written, and nothing in it runs.

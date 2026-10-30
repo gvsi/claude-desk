@@ -9,10 +9,13 @@ import { ConnectorDirectory } from './ConnectorDirectory.tsx';
 
 const { directory } = rivera;
 
+/** The board's state once Google Calendar can be connected: each available app with "Connect". */
+const CONNECTABLE = directory.available.map(({ connector, tools }) => ({ connector, tools, onConnect: fn() }));
+
 const meta = {
   title: 'Connectors/ConnectorDirectory',
   component: ConnectorDirectory,
-  args: { ...directory, available: directory.available.map((row) => ({ ...row, onConnect: fn() })) },
+  args: { ...directory, available: CONNECTABLE },
   render: (args) => (
     <div style={{ maxWidth: 960 }}>
       <ConnectorDirectory {...args} />
@@ -74,6 +77,26 @@ export const RiveraConnectors: Story = {
 
     // mock_badge_always_beside_external_names
     await expect(expectMockBesideExternalNames(canvasElement)).toBe(2);
+  },
+};
+
+export const ComingSoonInTheDemo: Story = {
+  args: { available: directory.available },
+  parameters: {
+    canvasNote:
+      'Google Calendar is catalog-only in the demo, so the web app passes it coming soon, with no "Connect"; the signed board draws the "Connect" it will have once it works.',
+  },
+  play: async ({ canvasElement }) => {
+    // coming_soon_has_no_connect: the app says it is coming soon beside its count, and nothing on
+    // its row can be pressed or followed, so it never leads to a sign-in that can't finish.
+    const available = group(canvasElement, 'Available');
+    const [row] = available.rows;
+    if (!row) throw new Error('No available app');
+    const meta = row.querySelector<HTMLElement>('.cd-connector-directory__meta');
+    await expect(meta?.textContent?.replace(/\s+/g, ' ')).toBe('Coming soon in this demo · 1 tool');
+    await expect(within(row).queryByRole('button')).toBeNull();
+    await expect(within(row).queryByRole('link')).toBeNull();
+    await expect(expectMockBesideExternalNames(available.section)).toBe(1);
   },
 };
 

@@ -206,7 +206,7 @@ export const ConnectGoogleCalendar: Story = {
   name: 'Connect Google Calendar',
   render: () => (
     <RiveraFrame current="rules" counts={RIVERA_COUNTS}>
-      <ConnectorsPage directory={{ ...rivera.directory, available: rivera.directory.available.map((row) => ({ ...row, onConnect: fn() })) }} />
+      <ConnectorsPage directory={{ ...rivera.directory, available: rivera.directory.available.map(({ connector, tools }) => ({ connector, tools, onConnect: fn() })) }} />
       <SignIn />
     </RiveraFrame>
   ),

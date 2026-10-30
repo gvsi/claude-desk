@@ -895,9 +895,10 @@ export interface RulesPageProps {
 }
 
 /**
- * The Rules page: its title, with the preset menu when the page offers it, the composer that asks
- * Claude for a change, the Desk's connectors, a section each, with the payment limit above the
- * tools of the money groups when given, and the always-on rules.
+ * The Rules page: its title and line, with the preset menu when the page offers it, the composer
+ * that asks Claude for a change right under them, the Desk's connectors, a section each, with the
+ * payment limit above the tools of the money groups when given, and the always-on rules.
+ * Connectors are added from the Connectors page, so it has no "Add a connector".
  */
 export function RulesPage({ hub, chips, notice, actions, under, aboveTools = {}, subtitle = true }: RulesPageProps) {
   return (

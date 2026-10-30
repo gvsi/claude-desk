@@ -92,8 +92,8 @@ export function ConnectorReview({ connector, intro, tools, onChangeOutcome, onTu
                 <div className="cd-connector-review__text">
                   <p className="cd-connector-review__name cd-type-body">{tool.name}</p>
                   <p className="cd-connector-review__description cd-type-meta">{tool.description}</p>
-                  {coverageLines(tool).map((line) => (
-                    <p key={line} className="cd-connector-review__covered cd-type-meta">
+                  {coverageLines(tool).map((line, index) => (
+                    <p key={`${index}-${line}`} className="cd-connector-review__covered cd-type-meta">
                       {line}
                     </p>
                   ))}

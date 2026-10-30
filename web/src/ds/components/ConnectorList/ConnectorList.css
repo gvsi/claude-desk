@@ -1,4 +1,4 @@
-/* ConnectorList: the summary, the sections 20 px apart, and "Add a connector" after the last one.
+/* ConnectorList: the summary, the sections 20 px apart, and "Add a connector" after the last one when the page passes it.
    It lays out by its own width: under 640 px (the phone board) the sections are 16 px apart, and
    the summary and the last button go. */
 

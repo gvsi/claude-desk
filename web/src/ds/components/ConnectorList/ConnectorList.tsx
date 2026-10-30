@@ -15,8 +15,8 @@ export interface ConnectorListProps {
 
 /**
  * The Rules hub's list of connectors: the summary line, a list named "Connectors" with one item
- * per section, and "Add a connector" at the end. Under 640 px of its own width the summary and the
- * last button go, as the phone board draws them; the page header keeps its "Add a connector".
+ * per section, and "Add a connector" at the end when the page passes `onAddConnector`. Under 640 px
+ * of its own width the summary and the last button go, as the archived phone board drew them.
  */
 export function ConnectorList({ summary, onAddConnector, children }: ConnectorListProps) {
   const sections = Children.toArray(children);

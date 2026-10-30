@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 
 import { Button } from '../Button/Button.tsx';
+import { useSendOnce } from '../Button/useSendOnce.ts';
 import { Card } from '../Card/Card.tsx';
 import { ConnectorName, type ConnectorView } from '../ConnectorName/ConnectorName.tsx';
 import { Notice } from '../Notice/Notice.tsx';
@@ -258,48 +259,13 @@ export function ChangeReview({
   const failed = error !== undefined && error.trim() !== '';
   const canConfirm = rows.length > 0 || hasOtherChanges;
 
-  // One click waits for its result: until `pending` has come and gone, an error is delivered, or
-  // the promise onConfirm returned rejects. An error is delivered each time one appears or another
-  // replaces it, so the same words after a cleared error release the button again; clearing an
-  // error, as a screen does when a confirm starts, releases nothing. The ref is set in the click
-  // itself, so a second click before the screen re-renders sends nothing.
-  const [clicked, setClicked] = useState<number | null>(null);
-  const sent = useRef(false);
-  const clicks = useRef(0);
-  const release = () => {
-    sent.current = false;
-    setClicked(null);
-  };
-  const sawPending = useRef(pending);
-  useEffect(() => {
-    const ended = sawPending.current && !pending;
-    sawPending.current = pending;
-    if (ended) release();
-  }, [pending]);
-  const delivered = useRef(failed ? error : undefined);
-  useEffect(() => {
-    const now = failed ? error : undefined;
-    const before = delivered.current;
-    delivered.current = now;
-    if (now !== undefined && now !== before) release();
-  }, [failed, error]);
-  const waiting = pending || clicked !== null;
+  // One click waits for its result (`useSendOnce`): until `pending` has come and gone, an error is
+  // delivered, the promise onConfirm returned rejects, or onConfirm throws.
+  const { waiting, send } = useSendOnce<'confirm'>(pending, error);
 
   const confirm = () => {
-    if (sent.current || waiting || !checked) return;
-    sent.current = true;
-    clicks.current += 1;
-    const click = clicks.current;
-    setClicked(click);
-    const result = onConfirm();
-    if (result !== undefined && typeof result.then === 'function') {
-      // A rejection releases only its own click.
-      result.then(undefined, () => {
-        if (clicks.current !== click) return;
-        sent.current = false;
-        setClicked((current) => (current === click ? null : current));
-      });
-    }
+    if (!checked) return;
+    send('confirm', () => onConfirm());
   };
 
   const status = Object.hasOwn(CHECK_HEADINGS, checks.status) ? checks.status : 'unavailable';
@@ -321,8 +287,8 @@ export function ChangeReview({
         <p className="cd-change-review__heading cd-type-control">{CHECK_HEADINGS[status]}</p>
         {checks.lines.length > 0 ? (
           <ul className="cd-change-review__checks cd-type-meta">
-            {checks.lines.map((line) => (
-              <li key={line}>{line}</li>
+            {checks.lines.map((line, index) => (
+              <li key={`${index}-${line}`}>{line}</li>
             ))}
           </ul>
         ) : null}

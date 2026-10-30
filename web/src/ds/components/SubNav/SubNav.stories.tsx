@@ -10,7 +10,7 @@ const meta = {
   component: SubNav,
   args: {
     label: 'Settings',
-    // Connectors live only under Rules, so Settings has no Integrations or Connectors entry.
+    // Connectors have their own tab, so Settings has no Integrations or Connectors entry.
     items: [
       { key: 'general', label: 'General', href: '/settings/general' },
       { key: 'knowledge', label: 'Knowledge', href: '/settings/knowledge' },

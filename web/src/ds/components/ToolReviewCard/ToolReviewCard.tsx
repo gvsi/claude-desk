@@ -4,7 +4,7 @@ import type { ToolProfile } from '../../../api/contracts.ts';
 import { Button } from '../Button/Button.tsx';
 import { useSendOnce } from '../Button/useSendOnce.ts';
 import { Card } from '../Card/Card.tsx';
-import type { ConnectorView } from '../ConnectorName/ConnectorName.tsx';
+import { ConnectorName, type ConnectorView } from '../ConnectorName/ConnectorName.tsx';
 import { describeEffects } from '../ConnectorSection/describeEffects.ts';
 import { Notice } from '../Notice/Notice.tsx';
 import { StatusDot } from '../StatusDot/StatusDot.tsx';
@@ -77,7 +77,10 @@ export function ToolReviewCard({ title, connector, profile, noticed, onTurnBackO
             <StatusDot tone="held" />
             <span>Needs your review</span>
           </h2>
-          <p className="cd-tool-review__noticed cd-type-meta">{noticed}</p>
+          {/* The connector with its badge, as Today's changed-tool item names it, so the card says it is a mock. */}
+          <p className="cd-tool-review__noticed cd-type-meta">
+            <ConnectorName connector={connector} size="inline" /> · {noticed}
+          </p>
         </div>
         <p className="cd-tool-review__summary cd-type-summary">
           {`${connector.name} changed “${title}”, so it's turned off until you review it. Until you decide, it can't run at all.`}

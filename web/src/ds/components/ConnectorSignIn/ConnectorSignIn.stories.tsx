@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { useState } from 'react';
-import { expect, fn, within } from 'storybook/test';
+import { expect, fn, waitFor, within } from 'storybook/test';
 
 import { rivera } from '../../fixtures';
 import { expectComputed } from '../../test/expectComputed.ts';
@@ -114,6 +114,35 @@ export const NothingChosen: Story = {
     await expect(continueButton).toBeEnabled();
     await userEvent.click(continueButton);
     await expect(args.onContinue).toHaveBeenCalledWith('personal');
+  },
+};
+
+export const ContinueOnce: Story = {
+  parameters: { canvasNote: 'Continue while the screen connects the calendar; no board draws it.' },
+  play: async ({ args, canvas }) => {
+    const dialog = canvas.getByRole('dialog', { name: 'Connect Google Calendar Mock' });
+    const continueButton = within(dialog).getByRole('button', { name: 'Continue' });
+    // sign_in_continues_once: two presses in the same moment send once, and Continue spins,
+    // keeping its name, until the screen answers.
+    continueButton.click();
+    continueButton.click();
+    await expect(args.onContinue).toHaveBeenCalledTimes(1);
+    await expect(args.onContinue).toHaveBeenCalledWith('rivera-jobs');
+    await waitFor(() => expect(continueButton).toHaveAttribute('aria-busy', 'true'));
+    await expect(continueButton).toHaveAccessibleName('Continue');
+  },
+};
+
+export const ContinueFailed: Story = {
+  args: { error: "That didn't go through. Try again." },
+  parameters: { canvasNote: "The screen's error after Continue failed; no board draws it. Continue works again." },
+  play: async ({ args, canvas }) => {
+    const dialog = canvas.getByRole('dialog', { name: 'Connect Google Calendar Mock' });
+    await expect(within(dialog).getByText("That didn't go through. Try again.")).toBeVisible();
+    const continueButton = within(dialog).getByRole('button', { name: 'Continue' });
+    await expect(continueButton).not.toHaveAttribute('aria-disabled');
+    continueButton.click();
+    await expect(args.onContinue).toHaveBeenCalledTimes(1);
   },
 };
 

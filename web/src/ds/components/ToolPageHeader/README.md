@@ -4,7 +4,7 @@
 
 ## When to use
 
-- At the top of each tool's page under Rules (`rules/:connector/:tool`), under its `Breadcrumb`.
+- At the top of each tool's page under Connectors (`connectors/:connector/:tool`), under its `Breadcrumb`.
 - While the tool `needs_review`, a `ToolReviewCard` follows it; after the owner turns it back on, the screen passes "Definition reviewed today" and shows an info `Notice` under it.
 - In the demo, with `onSimulateChange`, a connected tool's page offers "Simulate a tool change" (N-Conn-21-Simulate), the master's owner-side demo action ("Connected integration").
 

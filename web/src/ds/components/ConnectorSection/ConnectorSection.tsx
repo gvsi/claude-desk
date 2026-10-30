@@ -21,7 +21,10 @@ export interface ToolSummaryView {
   description: string;
   /** Its rule words: "Anyone · No discounts", "2 rules · 1 shared", "Always on". */
   summary: string;
-  /** The outcome of the rule that governs it for anyone. */
+  /**
+   * The outcome of the most general non-default rule that governs it (the default "Ask me first"
+   * only when no rule of the owner's does).
+   */
   mode: RuleMode;
   /** That rule's formatted amount limit, for an auto card with `max_amount_cents` ("$300"). */
   limit?: string;

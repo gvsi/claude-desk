@@ -4,7 +4,7 @@ import { expect, fn, within } from 'storybook/test';
 import { ChangeReview, type ChangeReviewProps } from '../components/ChangeReview/ChangeReview.tsx';
 import { LimitChange } from '../components/LimitChange/LimitChange.tsx';
 import { MoneyLimit } from '../components/MoneyLimit/MoneyLimit.tsx';
-import { PRESET_ITEMS } from '../components/OutcomeMenu/outcomeWords.ts';
+import { PRESET_WORDS } from '../components/OutcomeMenu/outcomeWords.ts';
 import { PageHeader } from '../components/PageHeader/PageHeader.tsx';
 import { PresetMenu } from '../components/PresetMenu/PresetMenu.tsx';
 import { RecentRequests } from '../components/RecentRequests/RecentRequests.tsx';
@@ -127,7 +127,7 @@ export const Presets: Story = {
     await userEvent.keyboard('{Enter}');
     const menu = within(main).getByRole('menu', { name: 'Start from a preset' });
     await expect(within(menu).getAllByRole('menuitem').map((item) => item.querySelector('.cd-preset-menu__title')?.textContent)).toEqual(
-      PRESET_ITEMS.map((item) => item.title),
+      PRESET_WORDS.map((item) => item.label),
     );
     await expect(within(menu).getByRole('menuitem', { name: 'Ask me first' })).toHaveFocus();
     await expectFooter(canvasElement);

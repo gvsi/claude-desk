@@ -1,7 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent } from 'react';
 
 import { Button } from '../Button/Button.tsx';
-import { PRESET_ITEMS, type RulesPreset } from '../OutcomeMenu/outcomeWords.ts';
+import { PRESET_WORDS, type RulesPreset } from '../OutcomeMenu/outcomeWords.ts';
 
 import './PresetMenu.css';
 
@@ -191,7 +191,7 @@ function PresetItems({ id, labelledBy, opening, onChoose, onClose }: PresetItems
         if (event.key === held.current) held.current = null;
       }}
     >
-      {PRESET_ITEMS.map((preset) => (
+      {PRESET_WORDS.map((preset) => (
         // Named by its title alone; its line is its description, read once, after the name.
         <button
           key={preset.value}
@@ -202,7 +202,7 @@ function PresetItems({ id, labelledBy, opening, onChoose, onClose }: PresetItems
           className="cd-preset-menu__item"
           onClick={() => onChoose(preset.value)}
         >
-          <span className="cd-preset-menu__title cd-type-control">{preset.title}</span>
+          <span className="cd-preset-menu__title cd-type-control">{preset.label}</span>
           <span id={`${id}-${preset.value}-line`} aria-hidden="true" className="cd-preset-menu__line cd-type-caption">
             {preset.description}
           </span>

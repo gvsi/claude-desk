@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="376" viewBox="0 0 1040 376" role="img" aria-labelledby="title desc">
+  <title id="title">v1 architecture: Claude proposes; the kernel decides what runs and what is shown</title>
+  <desc id="desc">A visitor or their agent talks to the chat layer, where Claude proposes each action and drafts each reply and holds no business credential. The kernel, its own process holding every business credential, decides each action (runs, owner decides or refused), checks each reply (shown or handed off) and signs a ledger of every decision and check.</desc>
+  <style>
+    text { font-family: "Hanken Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; fill: rgba(250,249,245,0.92); }
+    .name { font-size: 15px; font-weight: 600; }
+    .line { font-size: 12px; fill: rgba(250,249,245,0.64); }
+    .kicker { font-size: 12px; font-weight: 600; fill: rgba(250,249,245,0.64); }
+    .voice { font-family: "Source Serif 4", Georgia, "Times New Roman", serif; font-size: 17px; }
+    .pill { font-size: 13px; }
+    .box { fill: #2A2927; stroke: rgba(250,249,245,0.14); stroke-width: 1; }
+    .pillbox { fill: none; stroke: rgba(250,249,245,0.22); stroke-width: 1; }
+    .arrow { fill: none; stroke: rgba(250,249,245,0.30); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+  </style>
+  <rect x="0.5" y="0.5" width="1039" height="375" rx="20" fill="#222220" stroke="rgba(250,249,245,0.12)"/>
+
+  <rect class="box" x="32" y="150" width="112" height="72" rx="12"/>
+  <text class="name" x="88" y="181" text-anchor="middle">Visitor</text>
+  <text class="line" x="88" y="201" text-anchor="middle">or their agent</text>
+
+  <path class="arrow" d="M154 186h26M158 182l-4 4 4 4M176 182l4 4-4 4"/>
+
+  <rect class="box" x="190" y="32" width="176" height="312" rx="12"/>
+  <text class="kicker" x="208" y="146">Chat layer</text>
+  <text class="voice" x="208" y="172">Claude proposes</text>
+  <text class="voice" x="208" y="194">each action and</text>
+  <text class="voice" x="208" y="216">drafts each reply</text>
+  <line x1="208" y1="234" x2="348" y2="234" stroke="rgba(250,249,245,0.12)"/>
+  <text class="line" x="208" y="254">No business credential</text>
+
+  <path class="arrow" d="M376 188h28M399 183l5 5-5 5"/>
+
+  <rect x="414" y="24" width="602" height="328" rx="16" fill="#1C1B19" stroke="rgba(250,249,245,0.64)" stroke-width="1.5"/>
+  <text class="kicker" x="436" y="54" style="fill: rgba(250,249,245,0.92)">Kernel</text>
+  <text class="line" x="994" y="54" text-anchor="end">Its own process; holds every business credential</text>
+
+  <rect class="box" x="436" y="74" width="184" height="80" rx="12"/>
+  <text class="name" x="452" y="100">Decide</text>
+  <text class="line" x="452" y="120">Cedar rules compiled from</text>
+  <text class="line" x="452" y="136">the owner’s cards</text>
+  <path class="arrow" d="M630 114h28M653 109l5 5-5 5"/>
+  <rect class="pillbox" x="668" y="98" width="80" height="32" rx="16"/>
+  <circle cx="684" cy="114" r="4" fill="#6fa859"/>
+  <text class="pill" x="696" y="119">Runs</text>
+  <rect class="pillbox" x="756" y="98" width="134" height="32" rx="16"/>
+  <circle cx="772" cy="114" r="4" fill="#dabe4a"/>
+  <text class="pill" x="784" y="119">Owner decides</text>
+  <rect class="pillbox" x="898" y="98" width="96" height="32" rx="16"/>
+  <circle cx="914" cy="114" r="4" fill="#dc8290"/>
+  <text class="pill" x="926" y="119">Refused</text>
+
+  <rect class="box" x="436" y="170" width="184" height="96" rx="12"/>
+  <text class="name" x="452" y="196">Check reply</text>
+  <text class="line" x="452" y="216">Prices, dates and discounts</text>
+  <text class="line" x="452" y="232">only in typed cards</text>
+  <path class="arrow" d="M630 218h28M653 213l5 5-5 5"/>
+  <rect class="pillbox" x="668" y="202" width="88" height="32" rx="16"/>
+  <circle cx="684" cy="218" r="4" fill="#6fa859"/>
+  <text class="pill" x="696" y="223">Shown</text>
+  <rect class="pillbox" x="764" y="202" width="112" height="32" rx="16"/>
+  <circle cx="780" cy="218" r="4" fill="#dabe4a"/>
+  <text class="pill" x="792" y="223">Handed off</text>
+
+  <rect x="436" y="286" width="558" height="44" rx="8" fill="rgba(250,249,245,0.10)"/>
+  <g transform="translate(578 299)" fill="none" stroke="rgba(250,249,245,0.92)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="1" y="7" width="12" height="9" rx="2"/>
+    <path d="M3.5 7V4.5a3.5 3.5 0 0 1 7 0V7"/>
+  </g>
+  <text class="pill" x="600" y="313">Signed ledger of every decision and check</text>
+</svg>

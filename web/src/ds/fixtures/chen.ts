@@ -325,7 +325,7 @@ const appViews = {
 } satisfies Record<string, ConnectorView>;
 
 /**
- * "Add a connector" on Chen & Co. CPA's Rules page: Payments to add, the four built-in connectors
+ * "Add a connector" on Chen & Co. CPA's Connectors page: Payments to add, the four built-in connectors
  * it has, Google Calendar coming soon and Stripe to connect. Verification is never listed, since
  * every Desk has it.
  */

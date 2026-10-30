@@ -155,7 +155,7 @@ export { TakeOverBar, type TakeOverBarProps } from './components/TakeOverBar/Tak
 export {
   OUTCOME_TONE,
   OUTCOME_WORDS,
-  PRESET_ITEMS,
+  PRESET_WORDS,
   outcomePhrase,
   type RuleMode,
   type RulesPreset,

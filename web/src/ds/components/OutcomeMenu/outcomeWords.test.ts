@@ -6,7 +6,7 @@ import { describe, expect, test } from 'vitest';
 
 import type { Effect, RuleCard, ToolName } from '../../../api/contracts.ts';
 import { rulesForTool } from '../ToolRulesCard/toolRules.ts';
-import { OUTCOME_TONE, OUTCOME_WORDS, PRESET_ITEMS, outcomePhrase, type RulesPreset } from './outcomeWords.ts';
+import { OUTCOME_TONE, OUTCOME_WORDS, PRESET_WORDS, outcomePhrase, type RulesPreset } from './outcomeWords.ts';
 
 /**
  * The presets export: `desk.presets.PRESETS` (plan 01a Task 3) as JSON, generated into
@@ -234,7 +234,7 @@ const CLAIMS: Record<PresetName, readonly Claim[]> = {
 function descriptionProblems(cards: PresetCards): string[] {
   const problems: string[] = [];
   for (const preset of ['ask_first', 'auto'] as const) {
-    const description = PRESET_ITEMS.find((item) => item.value === preset)?.description ?? '';
+    const description = PRESET_WORDS.find((item) => item.value === preset)?.description ?? '';
     for (const claim of CLAIMS[preset]) {
       if (!description.includes(claim.words)) problems.push(`${preset}: the description doesn't say "${claim.words}"`);
       const wrong = claim.problem(cards[preset]);
@@ -414,12 +414,13 @@ describe('outcome words', () => {
     // The two presets are the only ones: there is no Custom mode to pick.
     // @ts-expect-error 'custom' is no preset
     const notAPreset: RulesPreset = 'custom';
-    expect(PRESET_ITEMS.map((item) => item.value)).not.toContain(notAPreset);
-    expect(PRESET_ITEMS).toEqual([
-      { value: 'ask_first', title: 'Ask me first', description: 'Quotes, bookings, documents and payments wait for your answer.' },
+    expect(PRESET_WORDS.map((item) => item.value)).not.toContain(notAPreset);
+    // Each says what it sets, in the signed presets board's words.
+    expect(PRESET_WORDS).toEqual([
+      { value: 'ask_first', label: 'Ask me first', description: 'Quotes, bookings, documents and payments wait for your answer.' },
       {
         value: 'auto',
-        title: 'Recommended rules',
+        label: 'Recommended rules',
         description: 'Quotes at list price, weekday bookings in your hours, documents to verified customers. Payments ask you first.',
       },
     ]);

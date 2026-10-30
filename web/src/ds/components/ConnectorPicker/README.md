@@ -4,7 +4,7 @@
 
 ## When to use
 
-- From "Add a connector" on the Rules page, and from an offer card's "Review and add" or "Review and connect" when the screen wants the owner to choose first.
+- From "Add a connector" on the Connectors page, and from an offer card's "Review and add" or "Review and connect" when the screen wants the owner to choose first.
 - Choosing only starts the flow: nothing turns on from the picker. Each tool starts at "Ask me first" in `ConnectorReview`, and the proved change shows in `ChangeReview` before it applies.
 
 ## What it shows

@@ -136,16 +136,16 @@ function TurnOff({ connector, off, words }: { connector: ConnectorView; off: Con
             <div className="cd-connection-panel__confirm">
               <p>These tools stop at once:</p>
               <ul>
-                {off.stops.tools.map((tool) => (
-                  <li key={tool}>{tool}</li>
+                {off.stops.tools.map((tool, index) => (
+                  <li key={`${index}-${tool}`}>{tool}</li>
                 ))}
               </ul>
               {off.stops.rules.length > 0 ? (
                 <>
                   <p>These rules stop applying:</p>
                   <ul>
-                    {off.stops.rules.map((rule) => (
-                      <li key={rule}>{rule}</li>
+                    {off.stops.rules.map((rule, index) => (
+                      <li key={`${index}-${rule}`}>{rule}</li>
                     ))}
                   </ul>
                 </>

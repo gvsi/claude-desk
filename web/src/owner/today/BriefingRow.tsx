@@ -1,0 +1,96 @@
+import type { ReactNode } from 'react';
+
+import type { BriefingItem, BriefingKind } from '../../api/views.ts';
+import { StatusLabel, type StatusTone } from '../../ds/index.ts';
+import { formatWhen } from '../../lib/format.ts';
+import { conversationPath } from '../conversations/status.ts';
+import { useOwnerDesk } from '../OwnerLayout.tsx';
+
+/** Each kind's word and dot. */
+const KINDS = {
+  blocked: { word: 'Blocked', tone: 'refused' },
+  booking: { word: 'Booked', tone: 'handled' },
+  lead: { word: 'New lead', tone: 'info' },
+  answer: { word: 'Answered', tone: 'handled' },
+} as const satisfies Record<BriefingKind, { word: string; tone: StatusTone }>;
+
+/** Whether this build knows how to show `item`: a kind added to the API later is left out rather than misnamed. */
+export function isShown(item: BriefingItem): boolean {
+  return Object.hasOwn(KINDS, item.kind);
+}
+
+/** A name someone gave, as their own text. */
+function Name({ children }: { children: string }) {
+  return (
+    <span className="cd-user-name" data-copy="user">
+      {children}
+    </span>
+  );
+}
+
+/** The row's words: what happened, in the kernel's words or the visitor's own. */
+function words(item: BriefingItem): ReactNode {
+  const name = item.display_name?.trim() ? item.display_name : null;
+  switch (item.kind) {
+    case 'blocked':
+      // The kernel's reason for a refusal; a blocked reply of Claude's has none of its own.
+      return <span className="cd-briefing-row__line">{item.line ?? 'A reply was stopped before it was shown.'}</span>;
+    case 'booking':
+      return (
+        <>
+          <span className="cd-briefing-row__who">{name !== null ? <Name>{name}</Name> : 'Visitor'}</span>
+          {item.line ? <span className="cd-briefing-row__line">{item.line}</span> : null}
+        </>
+      );
+    case 'lead':
+      return (
+        <>
+          <span className="cd-briefing-row__who">{name !== null ? <Name>{name}</Name> : 'Visitor'}</span>
+          {item.line ? (
+            <span className="cd-briefing-row__line" data-copy="user">
+              {item.line}
+            </span>
+          ) : null}
+        </>
+      );
+    case 'answer':
+      return <span className="cd-briefing-row__line">Claude answered {name !== null ? <Name>{name}</Name> : 'a visitor'}.</span>;
+  }
+}
+
+/** Where a row leads: a blocked attempt to its page on Safety, anything else to its conversation, if it has one. */
+function hrefFor(deskId: string, item: BriefingItem): string | null {
+  if (item.kind === 'blocked') return `/app/${encodeURIComponent(deskId)}/safety/${encodeURIComponent(item.ref_id)}`;
+  return item.session_id === null ? null : conversationPath(deskId, item.session_id);
+}
+
+export interface BriefingRowProps {
+  item: BriefingItem;
+}
+
+/**
+ * One thing that happened since last night: when, on the business's clock, what kind of thing it
+ * was, and what happened. The row is one link to where it happened, when it happened somewhere.
+ */
+export function BriefingRow({ item }: BriefingRowProps) {
+  const { business, desk } = useOwnerDesk();
+  if (!isShown(item)) return null;
+  const kind = KINDS[item.kind];
+  const href = hrefFor(desk.desk_id, item);
+  const content = (
+    <>
+      <span className="cd-briefing-row__when cd-type-caption">{formatWhen(item.at, business.timezone, new Date())}</span>
+      <span className="cd-briefing-row__kind cd-type-meta">
+        <StatusLabel tone={kind.tone}>{kind.word}</StatusLabel>
+      </span>
+      <span className="cd-briefing-row__words cd-type-meta">{words(item)}</span>
+    </>
+  );
+  return href === null ? (
+    <div className="cd-briefing-row">{content}</div>
+  ) : (
+    <a className="cd-briefing-row cd-briefing-row--link" href={href}>
+      {content}
+    </a>
+  );
+}

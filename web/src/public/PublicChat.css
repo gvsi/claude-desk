@@ -1,0 +1,49 @@
+/* PublicChat: what the page adds inside the design system's PublicShell (the ghost "Cancel this
+   request" under the receipts of the message that holds the request, the notices under the
+   conversation), and the plain page shown while the Desk loads or when it isn't there. Gutters
+   are 40 px, 16 px on a phone. */
+
+/* 12 px under the last receipt, as the board sets it: the margin's 8 px gap and 4 more. */
+.cd-public-chat__cancel {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-8);
+  padding-top: var(--space-4);
+}
+
+.cd-public-chat__notices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  padding-top: var(--space-16);
+}
+
+.cd-public-state {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-24);
+  box-sizing: border-box;
+  min-height: 100dvh;
+  padding: var(--space-24) var(--space-40);
+  background: var(--bg-app);
+  color: var(--text-primary);
+}
+
+.cd-public-state__main {
+  display: flex;
+  flex: 1 0 auto;
+  align-items: center;
+  justify-content: center;
+}
+
+.cd-public-state__opening {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+@media (max-width: 639.98px) {
+  .cd-public-state {
+    padding: var(--space-16);
+  }
+}

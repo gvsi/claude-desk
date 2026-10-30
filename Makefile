@@ -102,9 +102,9 @@ image-smoke:
 infra-check:
 	cd infra && node --test 'functions/**/*.test.mjs' && uv run pytest -q && npm ci && npx cdk synth --quiet
 
-# The docs check CI runs: relative links resolve across README.md, AGENTS.md and docs/, and the
-# shipped docs carry the required disclosures and no private reference. FINAL=1 also refuses
-# placeholders ([measured: …], [owner: …]), for the docs as they ship.
+# The docs check CI runs: relative links resolve across README.md, AGENTS.md and docs/, the shipped
+# docs carry the required disclosures, and they and docs/images/*.svg carry no private reference.
+# FINAL=1 also refuses placeholders ([measured: …], [owner: …]), for the docs as they ship.
 .PHONY: docs-check
 docs-check:
 	uv run --project tools python -m desk_tools.check_docs $(if $(FINAL),--final)

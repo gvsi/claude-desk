@@ -10,7 +10,7 @@
 ## What it shows
 
 - A secondary `Button` at the main height (40 px), "Start from a preset", with the menu button's chevron, `aria-haspopup="menu"` and `aria-expanded`.
-- Its menu: a popover 6 px under it, 360 px wide, its right edge on the button's, on `bg-surface` with a `line-card` border, `radius-card` and `shadow-dialog`. It holds two `menuitem`s from `PRESET_ITEMS`, in order. Each has its title (`.cd-type-control`) over its line (`.cd-type-caption`, `text-secondary`); it is named by the title and described by the line.
+- Its menu: a popover 6 px under it, 360 px wide, its right edge on the button's, on `bg-surface` with a `line-card` border, `radius-card` and `shadow-dialog`. It holds two `menuitem`s from `PRESET_WORDS`, in order. Each has its label (`.cd-type-control`) over its description (`.cd-type-caption`, `text-secondary`); it is named by the label and described by the description.
   - "Ask me first": "Quotes, bookings, documents and payments wait for your answer."
   - "Recommended rules": "Quotes at list price, weekday bookings in your hours, documents to verified customers. Payments ask you first."
 - No item is checked or current: the Desk's rules are its own, whichever preset they started from.
@@ -29,7 +29,7 @@ As the approval answers' menus:
 
 ## Words
 
-`PRESET_ITEMS` (in `OutcomeMenu/outcomeWords.ts`) holds each preset's title and description. The descriptions describe the master plan's preset cards (`desk.presets.PRESETS`). `outcomeWords.test.ts` checks each claim against those cards, read from their generated export (`web/src/api/presets.gen.json`), and is skipped until that export exists.
+`PRESET_WORDS` (in `OutcomeMenu/outcomeWords.ts`) holds each preset's label and description, in the signed presets board's words. The descriptions describe the master plan's preset cards (`desk.presets.PRESETS`). `outcomeWords.test.ts` checks each claim against those cards, read from their generated export (`web/src/api/presets.gen.json`), and is skipped until that export exists.
 
 ## Props
 

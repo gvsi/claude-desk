@@ -79,7 +79,7 @@ Specific to this plan:
   - `ConnectorDirectory`, from the connector table and the Desk's tool rows:
     - `builtIn`: the built-in connectors the Desk has, Verification noted "Always on", with `builtInCaption`.
     - `connected`: the apps the Desk connected, each with its `connection` in the screen's words (the account, and "Added just now" right after it was added).
-    - `available`: the catalog's apps not yet connected, each with `onConnect`, which opens `connectors/add/:connector`.
+    - `available`: the catalog's apps not yet connected, each with `onConnect`, which opens `connectors/add/:connector`. In the demo, Google Calendar is catalog-only, so the web app passes it with `note: "Coming soon in this demo"` and no `onConnect`, and its row has no button. The signed N-Conn-23 draws the eventual "Connect", and its board story's `canvasNote` says so.
     - Each built-in or connected row's `href` is `connectors/:connector`, and `tools` its tool count.
   - An info `Notice` under the title right after a connector is added (N-Conn-11).
 - **A connector's page** (`connectors/:connector`, N-Conn-02 to N-Conn-04):
@@ -99,9 +99,9 @@ Specific to this plan:
   - `Breadcrumb` "Connectors / {connector}" and `Steps` across the pages; once confirmed, the Connectors page with its notice.
 - **Today** (N-Conn-13): a `ToolChangedItem` per `needs_review` tool, first under "Needs you".
 - **Settings**: Connectors have their own tab; Settings names none, so Settings' `SubNav` drops its Integrations entry and gains no Connectors entry.
-- **Words**: `OUTCOME_WORDS` and `outcomePhrase` for every outcome, `PRESET_ITEMS` for the preset menu, and `describeEffects` for a connected tool's line.
+- **Words**: `OUTCOME_WORDS` and `outcomePhrase` for every outcome, `PRESET_WORDS` for the preset menu, and `describeEffects` for a connected tool's line.
 
-**Produced** (for Plan 04 and the artifact): `IntroDialog`, `IntroThing`, `IntroErrorCode` and `INTRO_ERROR_COPY` with the tokens `scrim`, `shadow-dialog` and `intro-title` (Task 0, shipped early by its own design PR); the components of Tasks 1–3, exported with their `<Comp>Props` from `web/src/ds/index.ts`; `describeEffects`, `ruleDiff`, `RuleWord`, `RuleField`, `RuleMode`, `OUTCOME_WORDS`, `OUTCOME_TONE`, `outcomePhrase`, `RulesPreset` and the view types `ConnectorView`, `ToolSummaryView`, `ChangeSide` and `ChangeRowView` (Task 2); `RecentRequestView`, `PickerItem`, `ReviewToolView` and `ToolRowView` (Task 3); `PresetMenu`, `MoneyLimit`, `LimitChange` and `PRESET_ITEMS` (Task 3c); `Boards/*` stories as Plan 04's reference compositions and `web/src/ds/reference/README.md` (Tasks 4–6); `build-ds-artifact.mjs` and the published artifact (Task 7).
+**Produced** (for Plan 04 and the artifact): `IntroDialog`, `IntroThing`, `IntroErrorCode` and `INTRO_ERROR_COPY` with the tokens `scrim`, `shadow-dialog` and `intro-title` (Task 0, shipped early by its own design PR); the components of Tasks 1–3, exported with their `<Comp>Props` from `web/src/ds/index.ts`; `describeEffects`, `ruleDiff`, `RuleWord`, `RuleField`, `RuleMode`, `OUTCOME_WORDS`, `OUTCOME_TONE`, `outcomePhrase`, `RulesPreset`, `PRESET_WORDS` and the view types `ConnectorView`, `ToolSummaryView`, `ChangeSide` and `ChangeRowView` (Task 2); `RecentRequestView`, `PickerItem`, `ReviewToolView` and `ToolRowView` (Task 3); `PresetMenu`, `MoneyLimit` and `LimitChange` (Task 3c); `Boards/*` stories as Plan 04's reference compositions and `web/src/ds/reference/README.md` (Tasks 4–6); `build-ds-artifact.mjs` and the published artifact (Task 7).
 
 Component folders are named for their main export; extra exports are documented in the folder's README and get no artifact card. Each task's Files line names the canvas boards its stories cite.
 
@@ -248,7 +248,7 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
     - `OUTCOME_WORDS` (`satisfies Record<RuleMode, string>`): `auto` "Automatic", `ask` "Ask me first", `never` "Never".
     - `OUTCOME_TONE`: `auto` handled, `ask` held, `never` refused.
     - `outcomePhrase(mode, limit?)`: `OUTCOME_WORDS[mode]`, except that an `auto` rule with a `limit` reads "Automatic up to {limit}; over {limit}, ask me first". `limit` is the screen's formatted amount ("$100"). An auto card with `max_amount_cents` holds anything above it for the owner through its hold twin. No mode asks with a limit.
-    - `RulesPreset = 'ask_first' | 'auto'`, for the Rules page's "Start from a preset" menu (`PresetMenu`, Task 3c), which offers each with its title and a description (`PRESET_ITEMS`), each description checked claim by claim against the presets. A preset is a bulk edit of the rules, not a mode, so there is no "Custom".
+    - `RulesPreset = 'ask_first' | 'auto'` and `PRESET_WORDS`, in that order, each a `label` and a `description` from the signed presets board: "Ask me first" ("Quotes, bookings, documents and payments wait for your answer.") and "Recommended rules" ("Quotes at list price, weekday bookings in your hours, documents to verified customers. Payments ask you first."), for the Rules page's "Start from a preset" menu (`PresetMenu`, Task 3c), each description checked claim by claim against the presets. A preset is a bulk edit of the rules, not a mode, so there is no "Custom".
   - **Rule words.** `RuleWord = { field: 'who' | 'limits' | 'hours' | 'review'; text: string }`: the consumer's code-rendered words for what a card enforces (Plan 04's `ruleWords(card, people)`: "Anyone", "Up to $300", "Checked by the reviewer"). The design system formats none.
   - **Connectors.** `ConnectorView = { id: string; name: string; icon: ConnectorIconName; description: string; source: { kind: 'built_in' } | { kind: 'external'; mock: true } }`, the screen's view of one connector. Plan 04 owns which tools each connector groups. Every external connector in the demo is a mock, and `mock: true` is required, so the badge can't be left out.
   - `ConnectorIcon({ icon: ConnectorIconName; size: 'page' | 'section' | 'inline' })`: a 48, 36 or 24 px tile with an 8 px radius, `aria-hidden`.
@@ -277,7 +277,7 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
     - `pay_out` "Moves money out."; `charge` "Charges money."; `private_data` "Touches private data."; `send_message` "Sends a message out."; `change` "Changes something."; `read` "Changes nothing.".
     - Then " Can be undone." or " Can't be undone.", only when an effect changes something (`change`, `charge`, `pay_out`, `send_message`). A tool that only reads, or reads private data, has no suffix.
     - The screen calls it for a connected tool's line; components take lines as strings (except `ToolReviewCard`, Task 3).
-  - `ToolSummaryView = { key: string; name: string; description: string; summary: string; mode: RuleMode; limit?: string; status: ToolStatus; href: string }`, one tool on the hub (`mode` and `limit` are the outcome and formatted amount limit of the rule that governs it for anyone):
+  - `ToolSummaryView = { key: string; name: string; description: string; summary: string; mode: RuleMode; limit?: string; status: ToolStatus; href: string }`, one tool on the hub (`mode` and `limit` are the outcome and formatted amount limit of the most general non-default rule that governs it, the default `ask` only when there is none):
     - `description`: the screen's line for what the tool does and its effects ("Prices a job from your price list. Changes something. Can be undone.").
     - `summary`: its rule words ("Anyone · No discounts", "2 rules · 1 shared", "Always on").
   - `ConnectorSection({ connector; href; tools: ToolSummaryView[]; addedNote?: string; linkComponent? })`, a `Card` section named by the connector:
@@ -521,7 +521,7 @@ Every string here is owner-facing (no Spanish). Components display what the scre
 **Files:**
 - Create under `web/src/ds/components/`: `PresetMenu/`, `MoneyLimit/`, `LimitChange/` (each with `.tsx`, `.css`, `.stories.tsx`, `README.md`).
 - Modify:
-  - `web/src/ds/components/OutcomeMenu/outcomeWords.ts`: `RulesPreset` is `'ask_first' | 'auto'`; `PRESET_ITEMS` replaces the mode switch's `PRESET_WORDS`.
+  - `web/src/ds/components/OutcomeMenu/outcomeWords.ts`: `RulesPreset` is `'ask_first' | 'auto'`; `PRESET_WORDS` holds the two presets' labels and descriptions, where the mode switch's words were.
   - `web/src/ds/components/ToolPageHeader/`: `onSimulateChange`, `simulatePending` and the strip, moved here from Task 3.
   - `web/src/ds/components/ChangeReview/`: `cancelsLinks`; a built-in connector is named alone in a row.
   - `web/src/ds/components/SegmentedControl/SegmentedControl.stories.tsx`: the Safety page's views, since presets are a menu.
@@ -534,7 +534,7 @@ Every string here is owner-facing (no Spanish). Components display what the scre
 
 **Interfaces:**
 
-- **Words.** `RulesPreset = 'ask_first' | 'auto'`, the master's presets, and `PRESET_ITEMS`, in that order, each with a title and a one-line description:
+- **Words.** `RulesPreset = 'ask_first' | 'auto'`, the master's presets, and `PRESET_WORDS`, in that order, each with a label and a one-line description:
   - `ask_first`: "Ask me first": "Quotes, bookings, documents and payments wait for your answer."
   - `auto`: "Recommended rules": "Quotes at list price, weekday bookings in your hours, documents to verified customers. Payments ask you first."
 
@@ -542,7 +542,7 @@ Every string here is owner-facing (no Spanish). Components display what the scre
 
 - **`PresetMenu({ onPick: (preset: RulesPreset) => void; pending?: boolean })`** (N-Conn-17-Presets, N-Conn-22-Phone-Presets), in the Rules page's `PageHeader` actions:
   - A secondary menu button at the main height, "Start from a preset", with its chevron, the approval answers' menu-button pattern.
-  - Its menu, 6 px under it, 360 px wide, its right edge on the button's: two `menuitem`s from `PRESET_ITEMS`, each named by its title and described by its line. Nothing in it is checked or current.
+  - Its menu, 6 px under it, 360 px wide, its right edge on the button's: two `menuitem`s from `PRESET_WORDS`, each named by its label and described by its description. Nothing in it is checked or current.
   - Choosing an item closes the menu, puts focus back on the button and calls `onPick` once with its preset. The keys are the approval answers' menus': Enter, Space or Down opens on the first item, Up on the last; the arrows move and wrap; Escape or Tab closes.
   - `pending` (the picked preset's draft in flight) keeps the button's label under the busy spinner, and the menu stays shut.
   - Under 640 px of the window the button fills its line, its words at the left and the chevron at the right, and the menu opens under it at the same width.
@@ -806,7 +806,7 @@ Owner decisions, 2026-10-29 (the signed Connectors tab boards):
 - `ConnectorSection` `aboveTools?: ReactNode`: a line between the header and the tool rows, padded 12 px 16 px (12 px 14 px on a phone) under a hairline, for the payment ceiling. The section uses `hideBuiltIn`.
 - `ConnectorList` `onAddConnector?`: without it, no "Add a connector" at the end.
 - `PageHeader` under 640 px: the actions stay on the title's line, at its right, and the subtitle runs under both, 8 px under the title.
-- `RulesPreset = 'ask_first' | 'auto'`; the menu's words are `PRESET_ITEMS` (Task 3c).
+- `RulesPreset = 'ask_first' | 'auto'`, `PRESET_WORDS` two entries, "Ask me first" and "Recommended rules", each with its board description; the preset menu reads them (Task 3c).
 - `ChangeReview`: the bars and words above; the connector line under a title carries no "Built in".
 
 **Stories** (the rest keep Task 6b's, with their trails starting at Connectors):

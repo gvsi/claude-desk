@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn, waitFor, within } from 'storybook/test';
 
 import { expectComputed } from '../../test/expectComputed.ts';
-import { PRESET_ITEMS } from '../OutcomeMenu/outcomeWords.ts';
+import { PRESET_WORDS } from '../OutcomeMenu/outcomeWords.ts';
 import { PresetMenu } from './PresetMenu.tsx';
 
 const meta = {
@@ -49,11 +49,11 @@ export const Open: Story = {
     await userEvent.click(button);
     await expect(button).toHaveAttribute('aria-expanded', 'true');
     const menu = theMenu(canvasElement);
-    // Two items, each named by its title and described by its line; nothing is checked or current.
+    // Two items, each named by its label and described by its description; nothing is checked or current.
     const items = within(menu).getAllByRole('menuitem');
     await expect(items.map((item) => item.getAttribute('aria-checked'))).toEqual([null, null]);
-    for (const [i, preset] of PRESET_ITEMS.entries()) {
-      await expect(items[i]).toHaveAccessibleName(preset.title);
+    for (const [i, preset] of PRESET_WORDS.entries()) {
+      await expect(items[i]).toHaveAccessibleName(preset.label);
       await expect(items[i]).toHaveAccessibleDescription(preset.description);
     }
     await expect(within(menu).queryAllByRole('menuitemradio')).toEqual([]);
@@ -66,8 +66,8 @@ export const Open: Story = {
     await expect(box.width).toBe(360);
     await expect(box.right).toBe(at.right);
     expectComputed(menu, { backgroundColor: 'rgb(42, 41, 39)', borderTopColor: 'rgba(250, 249, 245, 0.14)', borderTopLeftRadius: '12px' });
-    const title = within(items[1] as HTMLElement).getByText(PRESET_ITEMS[1].title);
-    const line = within(items[1] as HTMLElement).getByText(PRESET_ITEMS[1].description);
+    const title = within(items[1] as HTMLElement).getByText(PRESET_WORDS[1].label);
+    const line = within(items[1] as HTMLElement).getByText(PRESET_WORDS[1].description);
     expectComputed(title, { fontSize: '14px', color: 'rgba(250, 249, 245, 0.92)' });
     expectComputed(line, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' });
     await expect(args.onPick).not.toHaveBeenCalled();
