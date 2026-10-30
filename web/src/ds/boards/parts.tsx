@@ -27,6 +27,9 @@ import type { TranscriptTurn } from '../fixtures/index.ts';
 import { AppShell } from '../components/AppShell/AppShell.tsx';
 import { Button } from '../components/Button/Button.tsx';
 import { Card } from '../components/Card/Card.tsx';
+import { ChainStatus } from '../components/ChainStatus/ChainStatus.tsx';
+import { PageHeader } from '../components/PageHeader/PageHeader.tsx';
+import { SegmentedControl } from '../components/SegmentedControl/SegmentedControl.tsx';
 import { ConversationListItem } from '../components/ConversationListItem/ConversationListItem.tsx';
 import type { PublicBrand, PublicOpenStatus } from '../components/PublicShell/PublicShell.tsx';
 import { ReviewerBar } from '../components/ReviewerBar/ReviewerBar.tsx';
@@ -350,11 +353,22 @@ export const WEEK = [64, 32, 0, 64, 100, 32, 64] as const;
  * Today as Maria Rivera first sees it: the greeting, the things to try, the held request, Live now,
  * the short briefing and the last 7 days. `reviewer` adds the reviewer bar across the top.
  */
-export function TodayNeedsYou({ reviewer = true }: { reviewer?: boolean }) {
+export function TodayNeedsYou({
+  reviewer = true,
+  twoDesks = false,
+  onSwitchBusiness,
+}: {
+  reviewer?: boolean;
+  /** Both of Rivera's Desks, so the sidebar shows its Desk picker. */
+  twoDesks?: boolean;
+  onSwitchBusiness?: () => void;
+}) {
   return (
     <RiveraFrame
       current="today"
       reviewer={reviewer}
+      twoDesks={twoDesks}
+      onSwitchBusiness={onSwitchBusiness}
       counts={{ conversations: { n: 1, label: '1 live conversation' }, safety: { n: 2, label: '2 blocked' } }}
     >
       <div className="board-today">
@@ -621,4 +635,47 @@ export function checkedReply(id: string, blocks: RenderedBlock[], ledgerSeq: num
     ledger_seq: ledgerSeq,
     signature: placeholderHex(`signature:${id}`, 64),
   };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Safety
+
+export type SafetyView = 'attempts' | 'entries';
+
+/**
+ * The Safety page: its title and Claude's line about the week, the held request waiting on Today,
+ * the ledger's chain check beside the view switch, and the page's two columns.
+ */
+export function SafetyPage({ view, entries, list, detail }: { view: SafetyView; entries: number; list: ReactNode; detail: ReactNode }) {
+  return (
+    <RiveraFrame current="safety" counts={{ conversations: { n: 3, label: '3 live conversations' }, safety: { n: 2, label: '2 blocked' } }}>
+      <div className="board-safety">
+        <PageHeader
+          title="Safety"
+          subtitle={<span className="board-safety__week cd-type-summary">6 attempts to talk me around were stopped this week.</span>}
+          actions={
+            <Button variant="secondary" href="#today">
+              <StatusLabel tone="held">1 held for you, in Today</StatusLabel>
+            </Button>
+          }
+        />
+        <div className="board-safety__bar">
+          <ChainStatus chainOk firstBadSeq={null} entries={entries} devKey />
+          <SegmentedControl
+            label="Show"
+            options={[
+              { value: 'attempts', label: 'Attempts' },
+              { value: 'entries', label: 'Every entry' },
+            ]}
+            value={view}
+            onChange={fn()}
+          />
+        </div>
+        <div className={`board-safety__columns board-safety__columns--${view}`}>
+          <div className="board-safety__list">{list}</div>
+          <div className="board-safety__detail">{detail}</div>
+        </div>
+      </div>
+    </RiveraFrame>
+  );
 }

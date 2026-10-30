@@ -512,3 +512,242 @@
     height: 1px;
   }
 }
+
+/* Confirm it's you: the page while the code is on its way, the Demo inbox, the page after it. */
+.board-verify {
+  display: grid;
+  grid-template-columns: minmax(0, 510fr) minmax(0, 260fr) minmax(0, 510fr);
+  background: var(--bg-app);
+}
+
+.board-verify__page {
+  min-width: 0;
+}
+
+.board-verify__inbox {
+  display: grid;
+  min-width: 0;
+  border-right: 1px solid var(--line-hairline);
+  border-left: 1px solid var(--line-hairline);
+}
+
+.board-verify__form {
+  margin-top: var(--space-16);
+}
+
+.board-verify__footer {
+  grid-column: 1 / -1;
+  padding: var(--space-16) var(--space-16) var(--space-20);
+  border-top: 1px solid var(--line-hairline);
+}
+
+@media (max-width: 899.98px) {
+  .board-verify {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .board-verify__inbox {
+    border-top: 1px solid var(--line-hairline);
+    border-bottom: 1px solid var(--line-hairline);
+    border-right: 0;
+    border-left: 0;
+  }
+}
+
+/* Safety: the title row, the chain check beside the view switch, then the list and its detail. */
+.board-safety {
+  display: grid;
+  gap: var(--space-20);
+  min-width: 0;
+}
+
+.board-safety__week {
+  color: var(--text-primary);
+}
+
+.board-safety__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-12) var(--space-16);
+  padding: var(--space-12) 0;
+  border-top: 1px solid var(--line-hairline);
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+.board-safety__bar > .cd-chain-status {
+  flex: 1 1 320px;
+}
+
+.board-safety__columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: var(--space-24);
+  align-items: start;
+  padding-top: var(--space-4);
+}
+
+.board-safety__columns--entries {
+  grid-template-columns: minmax(0, 1fr) 400px;
+}
+
+@media (max-width: 1099.98px) {
+  .board-safety__columns,
+  .board-safety__columns--entries {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.board-safety__list,
+.board-safety__detail {
+  display: grid;
+  gap: var(--space-16);
+  min-width: 0;
+}
+
+.board-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  padding-bottom: var(--space-16);
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+.board-attempts {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The attempt opened beside the list. */
+.board-attempt {
+  display: grid;
+  gap: var(--space-12);
+}
+
+.board-attempt p {
+  margin: 0;
+}
+
+.board-attempt__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4) var(--space-10);
+  color: var(--text-secondary);
+}
+
+.board-attempt__when {
+  margin-left: auto;
+}
+
+.board-attempt__part {
+  display: grid;
+  gap: var(--space-4);
+  padding-top: var(--space-12);
+  border-top: 1px solid var(--line-hairline);
+}
+
+.board-attempt__caption {
+  color: var(--text-secondary);
+}
+
+.board-attempt summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  cursor: pointer;
+  list-style: none;
+}
+
+.board-attempt summary::-webkit-details-marker {
+  display: none;
+}
+
+.board-attempt__chevron {
+  color: var(--text-secondary);
+}
+
+/* Closed, the chevron points at the words; open, down at what opened. */
+.board-attempt details:not([open]) .board-attempt__chevron {
+  transform: rotate(-90deg);
+}
+
+.board-attempt details > :not(summary) {
+  margin-top: var(--space-8);
+}
+
+/* Every entry: the ledger as a table, newest first. */
+.board-ledger {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.board-ledger th,
+.board-ledger td {
+  padding: var(--space-10);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.board-ledger thead th {
+  color: var(--text-secondary);
+  font-weight: 380;
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+.board-ledger tbody tr[aria-current='true'] {
+  background: var(--bg-selected);
+}
+
+.board-ledger td:last-child,
+.board-ledger th:last-child {
+  text-align: right;
+}
+
+.board-ledger__entry {
+  color: var(--text-secondary);
+}
+
+.board-ledger__by {
+  color: var(--text-secondary);
+}
+
+.board-ledger__open {
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.board-ledger__open:hover {
+  text-decoration: underline;
+}
+
+.board-ledger tbody tr[aria-current='true'] > :first-child {
+  border-radius: var(--radius-control) 0 0 var(--radius-control);
+}
+
+.board-ledger tbody tr[aria-current='true'] > :last-child {
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+}
+
+/* The business switcher, open beside the sidebar's business row. Where the web app anchors it is its own. */
+.board-switcher {
+  position: relative;
+}
+
+.board-switcher__menu {
+  position: absolute;
+  top: calc(var(--space-40) * 2 + var(--space-24) + var(--space-2));
+  left: calc(var(--size-sidebar) + var(--space-4));
+  z-index: 1;
+}
+
+@media (max-width: 767.98px) {
+  .board-switcher__menu {
+    top: calc(var(--space-40) * 2 + var(--space-20));
+    right: var(--space-16);
+    left: var(--space-16);
+  }
+}

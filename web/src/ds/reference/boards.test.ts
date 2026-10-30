@@ -78,4 +78,14 @@ describe('reference boards', () => {
     const unnamed = stories.filter(({ canvas }) => !(REFERENCE_BOARDS as readonly unknown[]).includes(canvas));
     expect(unnamed.map(({ id, canvas }) => `${id}: ${JSON.stringify(canvas)}`)).toEqual([]);
   });
+
+  it('every_reference_board_has_a_board_story', async () => {
+    const stories = await boardStories();
+    // Exactly one: a board rebuilt twice would be checked against itself twice, and differ.
+    const counts = REFERENCE_BOARDS.map((board) => {
+      const naming = stories.filter(({ canvas }) => canvas === board).map(({ id }) => id);
+      return `${board}: ${naming.length === 1 ? 'one story' : `${naming.length} stories${naming.length > 1 ? ` (${naming.join('; ')})` : ''}`}`;
+    });
+    expect(counts).toEqual(REFERENCE_BOARDS.map((board) => `${board}: one story`));
+  });
 });
