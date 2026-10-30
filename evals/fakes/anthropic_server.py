@@ -416,8 +416,12 @@ class LoopbackServer:
 
     def start(self, timeout_s: float = 30.0) -> None:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind(("127.0.0.1", self.port))
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind(("127.0.0.1", self.port))
+        except BaseException:   # a port in use, say: close it, so a retry on another port leaves none open
+            sock.close()
+            raise
         self.port = sock.getsockname()[1]
         config = uvicorn.Config(
             self.app, lifespan="on", loop="asyncio", http="h11", ws="none", log_config=None,
