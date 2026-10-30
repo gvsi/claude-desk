@@ -1282,7 +1282,7 @@
     "/api/public/desks/{slug}/sessions": {
       "post": {
         "summary": "Open Session",
-        "description": "The visitor's session on the slug's Desk: the one the cookie holds while the kernel says it is open there (a\nreturning visitor, ledgered as a `session` event), else a new one, whose token only the cookie holds.",
+        "description": "The visitor's session on the slug's Desk: the one the cookie holds while the kernel says it is open there (a\nreturning visitor, ledgered as a `session` event), else a new one, whose token only the cookie holds. Resuming is\nnever limited, however often a page reloads (it creates nothing); a new chat counts toward `new_chat`.",
         "operationId": "public_open_session",
         "parameters": [
           {
@@ -1412,7 +1412,7 @@
     "/api/public/desks/{slug}/messages": {
       "post": {
         "summary": "Send Message",
-        "description": "Store the visitor's message and start Claude's turn; the answer arrives on the event stream.\n\nWithin the message limits (per session and per copy), what control rows left for this session is done first,\nso an outcome that came in meanwhile precedes the message and the same turn answers both. The message wakes a\nturn unless the owner has taken the chat over (mode `owner`: the owner answers it). In a paused session that\nturn is the kernel's handoff, with no model call: it runs under the session's turn lock and stops the waiting\nwork from starting more turns, so one handoff answers the message and whatever else was waiting.",
+        "description": "Store the visitor's message and start Claude's turn; the answer arrives on the event stream.\n\nA message that starts a model turn (mode `ai`) counts toward the turn limits, per conversation and per address,\nand past either is refused before anything is stored. Then what control rows left for this session is done\nfirst, so an outcome that came in meanwhile precedes the message and the same turn answers both. The message\nwakes a turn unless the owner has taken the chat over (mode `owner`: the owner answers it). In a paused session\nthat turn is the kernel's handoff, with no model call: it runs under the session's turn lock and stops the waiting\nwork from starting more turns, so one handoff answers the message and whatever else was waiting. Neither counts\ntoward the turn limits.",
         "operationId": "public_send_message",
         "parameters": [
           {
@@ -1492,7 +1492,7 @@
     "/api/public/desks/{slug}/events": {
       "get": {
         "summary": "Events",
-        "description": "The session's events after the cursor, then live ones (SSE `id` is the event's `seq`). On opening, and as each\ncontrol row appears while it is open, the session's runner does what control rows left and runs waiting work,\nwith the visitor's credential, in a task of its own: a hang-up never cuts it short. Three streams per session\nand thirty per address may be open at once.",
+        "description": "The session's events after the cursor, then live ones (SSE `id` is the event's `seq`). On opening, and as each\ncontrol row appears while it is open, the session's runner does what control rows left and runs waiting work,\nwith the visitor's credential, in a task of its own: a hang-up never cuts it short. Three streams per session\nand thirty per address may be open at once: a session's fourth closes its oldest (opening a stream is never\nrefused for its session's streams, so a reload never is), and past the address's thirty it is 429.",
         "operationId": "public_events",
         "parameters": [
           {

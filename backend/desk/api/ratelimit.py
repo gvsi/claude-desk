@@ -3,10 +3,17 @@
 `RateLimiter.hit(key, limit, window_s)` admits and counts a request while the key's window holds fewer than
 `limit` hits, and otherwise answers how many whole seconds until one leaves it; a refused hit isn't counted.
 `enforce(name, key)` applies one of `LIMITS` and raises `RateLimited(retry_after)`, which the app answers
-with 429 `{"error": "rate_limited", "retry_after": s}`. When the request holds a credential, `ledger` names it,
-and the first refusal in each window of a limit and key is reported to the kernel as an `api`-origin
-`rate_limit` entry naming only the limit. A ledger append that fails is logged without values and tried
-again at the next refusal; the request is refused either way.
+with 429 `{"error": "rate_limited", "retry_after": s}`; `enforce_all` applies several, counting on each or on none.
+When the request holds a credential, `ledger` names it, and the first refusal in each window of a limit and key is
+reported to the kernel as an `api`-origin `rate_limit` entry naming only the limit. A ledger append that fails is
+logged without values and tried again at the next refusal; the request is refused either way.
+
+The money guard is on model turns and the daily model budget, never on page loads (owner decision, 2026-10-29):
+loading or resuming a chat is never limited, a new chat counts toward `new_chat`, and a visitor message that starts
+a model turn counts toward `visitor_turn` (per address, by the hour) and `visitor_turn_conversation` (per session,
+with no window). A limit with no window keeps its count for the conversation: hits never leave it one by one, and
+the count is let go only once a day has passed since its last hit (`CONVERSATION_IDLE_S`), when the kernel has
+closed a session that was idle all along, so the memory it holds stays bounded.
 
 Per-IP limits take the key from `deps.client_ip`, which answers None for a caller exempt from them (a
 loopback peer: the built-in agent, and any loopback peer outside production); every other limit needs a key.
@@ -27,21 +34,24 @@ from desk.kernel_api import LedgerAppendRequest
 logger = logging.getLogger(__name__)
 
 
+CONVERSATION_IDLE_S = 24 * 3600     # the kernel closes a session after a day idle
+
+
 @dataclass(frozen=True)
 class Limit:
     limit: int
-    window_s: int
+    window_s: int | None                # None: no window, the count lasts the conversation (module docstring)
     per: Literal["ip", "session", "copy", "agent_key"]
 
 
 LIMITS: dict[str, Limit] = {
     "passcode": Limit(30, 600, "ip"),               # failed passcodes only: a right one gives its place back
-    "copies": Limit(30, 3600, "ip"),                # new copies and start over
-    "visitor_session": Limit(30, 3600, "ip"),
+    "copies": Limit(30, 3600, "ip"),                # new copies and start over: a backstop against a leaked passcode
+    "new_chat": Limit(180, 3600, "ip"),             # a new visitor session; resuming one is never limited
+    "visitor_turn": Limit(90, 3600, "ip"),          # a visitor message that starts a model turn
     "proxy": Limit(60, 600, "ip"),                  # document and payment links
     "a2a_ip": Limit(120, 3600, "ip"),
-    "visitor_message": Limit(20, 300, "session"),
-    "visitor_message_copy": Limit(300, 86400, "copy"),
+    "visitor_turn_conversation": Limit(30, None, "session"),   # the same messages, per conversation
     "verify": Limit(10, 600, "session"),
     "demo_agent": Limit(5, 3600, "copy"),
     "setup_turn": Limit(80, 3600, "copy"),
@@ -68,16 +78,30 @@ class RateLimitLedger:
     session_id: str | None = None
 
 
+def _span(window_s: float | None) -> float:
+    """How long a window's refusal stays ledgered: the window, or for a conversation's count, its idle day."""
+    return CONVERSATION_IDLE_S if window_s is None else window_s
+
+
 class _Window:
     __slots__ = ("window_s", "hits")
 
-    def __init__(self, window_s: float):
+    def __init__(self, window_s: float | None):
         self.window_s = window_s
         self.hits: deque[float] = deque()
 
     def slide(self, now: float) -> None:
+        if self.window_s is None:                       # a conversation's count, let go after a day with no hit
+            if self.hits and self.hits[-1] <= now - CONVERSATION_IDLE_S:
+                self.hits.clear()
+            return
         while self.hits and self.hits[0] <= now - self.window_s:
             self.hits.popleft()
+
+    def retry_after(self, now: float) -> int:
+        """Whole seconds, at least 1, until a hit leaves (or, with no window, the count is let go)."""
+        frees_at = self.hits[-1] + CONVERSATION_IDLE_S if self.window_s is None else self.hits[0] + self.window_s
+        return max(1, math.ceil(frees_at - now))
 
 
 class RateLimiter:
@@ -94,9 +118,9 @@ class RateLimiter:
     def _now(self) -> float:
         return self._clock().timestamp()
 
-    def hit(self, key: Hashable, limit: int, window_s: float) -> int | None:
+    def hit(self, key: Hashable, limit: int, window_s: float | None) -> int | None:
         """Count one hit and answer None while the window holds fewer than `limit`; else the seconds until one
-        leaves it, counting nothing."""
+        leaves it, counting nothing. `window_s` None counts with no window (module docstring)."""
         now = self._now()
         self._sweep(now)
         window = self._windows.get(key)
@@ -104,7 +128,7 @@ class RateLimiter:
             window = self._windows[key] = _Window(window_s)
         window.slide(now)
         if len(window.hits) >= limit:
-            return max(1, math.ceil(window.hits[0] + window_s - now))
+            return window.retry_after(now)
         window.hits.append(now)
         return None
 
@@ -118,7 +142,7 @@ class RateLimiter:
             if not window.hits:
                 del self._windows[key]
         for key, at in list(self._ledgered.items()):
-            if at <= now - LIMITS[key[0]].window_s:
+            if at <= now - _span(LIMITS[key[0]].window_s):
                 del self._ledgered[key]
 
     def forget(self, name: str, key: Hashable | None) -> None:
@@ -142,10 +166,24 @@ class RateLimiter:
             await self._ledger_refusal(name, key, limit, ledger)
         raise RateLimited(retry_after)
 
+    async def enforce_all(self, limits: list[tuple[str, Hashable | None]], *,
+                          ledger: RateLimitLedger | None = None) -> None:
+        """`enforce` each (name, key) in order, counting a hit on every one or on none: when one refuses, the hits
+        the ones before it counted are taken back."""
+        counted: list[tuple[str, Hashable | None]] = []
+        try:
+            for name, key in limits:
+                await self.enforce(name, key, ledger=ledger)
+                counted.append((name, key))
+        except RateLimited:
+            for name, key in counted:
+                self.forget(name, key)
+            raise
+
     async def _ledger_refusal(self, name: str, key: Hashable, limit: Limit, ledger: RateLimitLedger) -> None:
         now, marker = self._now(), (name, key)
         last = self._ledgered.get(marker)
-        if last is not None and last > now - limit.window_s:
+        if last is not None and last > now - _span(limit.window_s):
             return                                      # this window's refusal is already ledgered
         self._ledgered[marker] = now                    # before the await, so concurrent refusals append once
         event = LedgerEvent(kind="rate_limit", origin="api", session_id=ledger.session_id, summary={"limit": name})
@@ -163,16 +201,24 @@ STREAM_RETRY_AFTER_S = 5      # an open stream frees its place when its client g
 
 
 class StreamSlot:
-    """One open stream's place; `release()` (or leaving its `with` block) frees it, once."""
+    """One open stream's place; `release()` (or leaving its `with` block) frees it, once. `close()` also ends the
+    stream, through the `on_close` its route gave."""
 
-    def __init__(self, slots: "StreamSlots", session_id: str, ip: str | None):
-        self._slots, self._session_id, self._ip = slots, session_id, ip
+    def __init__(self, slots: "StreamSlots", session_id: str, ip: str | None,
+                 on_close: Callable[[], None] | None = None):
+        self._slots, self.session_id, self.ip, self._on_close = slots, session_id, ip, on_close
         self._held = True
 
     def release(self) -> None:
         if self._held:
             self._held = False
-            self._slots._free(self._session_id, self._ip)
+            self._slots._free(self)
+
+    def close(self) -> None:
+        """Make way for a newer stream: free the place at once and end the stream."""
+        self.release()
+        if self._on_close is not None:
+            self._on_close()
 
     def __enter__(self) -> "StreamSlot":
         return self
@@ -182,30 +228,43 @@ class StreamSlot:
 
 
 class StreamSlots:
-    """Open event streams, counted per session and per client address (None: exempt from the address cap)."""
+    """Open event streams, per session (oldest first) and counted per client address (None: exempt from the address
+    cap). A session's stream past its cap closes the session's oldest instead of being refused, so a reload never
+    answers 429 while the old page's stream is still counted; past the address's cap a stream is refused."""
 
     def __init__(self, per_session: int = STREAMS_PER_SESSION, per_ip: int = STREAMS_PER_IP):
         self.per_session, self.per_ip = per_session, per_ip
-        self._sessions: dict[str, int] = {}
+        self._sessions: dict[str, list[StreamSlot]] = {}
         self._ips: dict[str, int] = {}
 
-    def acquire(self, session_id: str, ip: str | None) -> StreamSlot:
-        """A place for one more stream, or `RateLimited` past either cap."""
-        if self._sessions.get(session_id, 0) >= self.per_session or (
-                ip is not None and self._ips.get(ip, 0) >= self.per_ip):
-            raise RateLimited(STREAM_RETRY_AFTER_S)
-        self._sessions[session_id] = self._sessions.get(session_id, 0) + 1
+    def acquire(self, session_id: str, ip: str | None, *, on_close: Callable[[], None] | None = None) -> StreamSlot:
+        """A place for one more stream, `on_close` ending it should a newer one close it. At the session's cap its
+        oldest stream is closed to make way; `RateLimited` when the address would still be past its cap (counting the
+        place that closing frees), and then nothing is closed."""
+        open_here = self._sessions.get(session_id, [])
+        oldest = open_here[0] if len(open_here) >= self.per_session else None
+        if ip is not None:
+            freed = 1 if oldest is not None and oldest.ip == ip else 0
+            if self._ips.get(ip, 0) - freed >= self.per_ip:
+                raise RateLimited(STREAM_RETRY_AFTER_S)
+        if oldest is not None:
+            oldest.close()
+        slot = StreamSlot(self, session_id, ip, on_close)
+        self._sessions.setdefault(session_id, []).append(slot)
         if ip is not None:
             self._ips[ip] = self._ips.get(ip, 0) + 1
-        return StreamSlot(self, session_id, ip)
+        return slot
 
-    def _free(self, session_id: str, ip: str | None) -> None:
-        for counts, key in ((self._sessions, session_id), (self._ips, ip)):
-            if key is not None:
-                counts[key] -= 1
-                if not counts[key]:
-                    del counts[key]
+    def _free(self, slot: StreamSlot) -> None:
+        open_here = self._sessions[slot.session_id]
+        open_here.remove(slot)
+        if not open_here:
+            del self._sessions[slot.session_id]
+        if slot.ip is not None:
+            self._ips[slot.ip] -= 1
+            if not self._ips[slot.ip]:
+                del self._ips[slot.ip]
 
     def open_counts(self) -> tuple[dict[str, int], dict[str, int]]:
         """The open streams by session and by address."""
-        return dict(self._sessions), dict(self._ips)
+        return {session_id: len(open_here) for session_id, open_here in self._sessions.items()}, dict(self._ips)

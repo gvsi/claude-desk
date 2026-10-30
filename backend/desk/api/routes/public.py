@@ -33,7 +33,7 @@ from desk.api.schemas import (
     error_responses,
     operation_ids,
 )
-from desk.api.sse import RUN_EVENTS, ControlRow, event_stream
+from desk.api.sse import RUN_EVENTS, ControlRow, Wakeup, event_stream
 from desk.api.store import MESSAGES, append_message, transcript
 from desk.contracts import LedgerEvent
 from desk.kernel_api import CancelRequest, CreateSessionRequest, LedgerAppendRequest, PublicDesk
@@ -86,14 +86,13 @@ async def agent_card(slug: str, request: Request) -> AgentCardOut:
 @router.post("/desks/{slug}/sessions", response_model=VisitorSession, responses=error_responses(404, 422, 429, 503))
 async def open_session(slug: str, request: Request, response: Response) -> VisitorSession:
     """The visitor's session on the slug's Desk: the one the cookie holds while the kernel says it is open there (a
-    returning visitor, ledgered as a `session` event), else a new one, whose token only the cookie holds."""
+    returning visitor, ledgered as a `session` event), else a new one, whose token only the cookie holds. Resuming is
+    never limited, however often a page reloads (it creates nothing); a new chat counts toward `new_chat`."""
     state = runtime(request).started()
-    ip = client_ip(request)
     token = request.cookies.get(VISITOR_COOKIE)
     if token:
         try:
             async with visitor_context(state, token, slug) as ctx:
-                await state.limiter.enforce("visitor_session", ip, ledger=ctx.ledger())
                 await ctx.caller.kernel.call("POST /ledger/append", LedgerAppendRequest(
                     desk_id=ctx.ids.desk_id, event=LedgerEvent(kind="session", origin="api",
                                                                session_id=ctx.ids.session_id,
@@ -103,7 +102,7 @@ async def open_session(slug: str, request: Request, response: Response) -> Visit
         except ApiProblem as problem:
             if (problem.status, problem.error) != (401, "no_session"):
                 raise
-    await state.limiter.enforce("visitor_session", ip)
+    await state.limiter.enforce("new_chat", client_ip(request))
     created = await state.kernel.public().call("POST /sessions", CreateSessionRequest(desk_slug=slug, kind="visitor"))
     set_visitor_cookie(response, slug, created.session_token)
     return VisitorSession(state=created.state, resumed=False)
@@ -140,14 +139,17 @@ async def send_message(body: MessageIn, request: Request,
                        ctx: Annotated[VisitorCtx, Depends(visitor_ctx)]) -> MessageAccepted:
     """Store the visitor's message and start Claude's turn; the answer arrives on the event stream.
 
-    Within the message limits (per session and per copy), what control rows left for this session is done first,
-    so an outcome that came in meanwhile precedes the message and the same turn answers both. The message wakes a
-    turn unless the owner has taken the chat over (mode `owner`: the owner answers it). In a paused session that
-    turn is the kernel's handoff, with no model call: it runs under the session's turn lock and stops the waiting
-    work from starting more turns, so one handoff answers the message and whatever else was waiting."""
+    A message that starts a model turn (mode `ai`) counts toward the turn limits, per conversation and per address,
+    and past either is refused before anything is stored. Then what control rows left for this session is done
+    first, so an outcome that came in meanwhile precedes the message and the same turn answers both. The message
+    wakes a turn unless the owner has taken the chat over (mode `owner`: the owner answers it). In a paused session
+    that turn is the kernel's handoff, with no model call: it runs under the session's turn lock and stops the waiting
+    work from starting more turns, so one handoff answers the message and whatever else was waiting. Neither counts
+    toward the turn limits."""
     state = runtime(request).started()
-    await state.limiter.enforce("visitor_message", ctx.ids.session_id, ledger=ctx.ledger())
-    await state.limiter.enforce("visitor_message_copy", ctx.ids.copy_id, ledger=ctx.ledger())
+    if ctx.state.mode == "ai":
+        await state.limiter.enforce_all([("visitor_turn_conversation", ctx.ids.session_id),
+                                         ("visitor_turn", client_ip(request))], ledger=ctx.ledger())
     conn, caller = ctx.conn, ctx.caller
     await conn.commit()
     await state.runner.handle_controls(conn, caller)
@@ -194,13 +196,15 @@ async def events(slug: str, request: Request, after: Annotated[int | None, Query
     """The session's events after the cursor, then live ones (SSE `id` is the event's `seq`). On opening, and as each
     control row appears while it is open, the session's runner does what control rows left and runs waiting work,
     with the visitor's credential, in a task of its own: a hang-up never cuts it short. Three streams per session
-    and thirty per address may be open at once."""
+    and thirty per address may be open at once: a session's fourth closes its oldest (opening a stream is never
+    refused for its session's streams, so a reload never is), and past the address's thirty it is 429."""
     state = runtime(request).started()
     cursor = _cursor(last_event_id, after)
     token = request.cookies.get(VISITOR_COOKIE)
     async with visitor_context(state, token, slug) as ctx:      # its connection is let go before the stream opens
         caller = ctx.caller
-    slot = state.stream_slots.acquire(caller.session_id, client_ip(request))
+    wakeup = Wakeup()
+    slot = state.stream_slots.acquire(caller.session_id, client_ip(request), on_close=wakeup.close)
     runner = state.runner
 
     async def on_open() -> None:
@@ -211,7 +215,7 @@ async def events(slug: str, request: Request, after: Annotated[int | None, Query
 
     try:
         response = event_stream(state.database(), state.listener, caller.ids, cursor, on_control=on_control,
-                                on_open=on_open)
+                                on_open=on_open, wakeup=wakeup)
     except BaseException:
         slot.release()
         raise

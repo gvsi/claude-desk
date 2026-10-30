@@ -242,13 +242,19 @@ async def test_passcode_attempts_are_limited(api, browser, fake, clock):
 
 
 async def test_a_team_behind_one_address_can_each_start(api, browser, fake, clock):
-    for _ in range(6):                                                               # six people, one office address
+    """Thirty copies an hour from one address (a team behind one office address, each starting the demo); the 31st
+    is refused, a backstop against a leaked passcode in a loop, since copies spend no model tokens."""
+    for _ in range(30):
         member = browser(api)
         response = await member.post("/api/owner/copies", json={"passcode": PASSCODE})
         assert response.status_code == 201
         assert (await member.get("/api/owner/me")).json() == response.json()
-        clock.advance(600)
-    assert len(fake.copies) == 6
+        clock.advance(60)
+    refused = await browser(api).post("/api/owner/copies", json={"passcode": PASSCODE})
+    assert (refused.status_code, refused.json()) == (429, {"error": "rate_limited", "retry_after": 1800})
+    assert "set-cookie" not in refused.headers and len(fake.copies) == 30
+    elsewhere = await browser(api, ip="198.51.100.4").post("/api/owner/copies", json={"passcode": PASSCODE})
+    assert elsewhere.status_code == 201
 
 
 async def test_copies_limit_counts_start_over_and_ledgers_it(api, browser, fake):

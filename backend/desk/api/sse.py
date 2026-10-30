@@ -104,12 +104,18 @@ async def claim_control(conn: AsyncConnection, row_id: int) -> bool:
 
 
 class Wakeup:
-    """A stream's wake-up: set by the listener when its session gets a notification."""
+    """A stream's wake-up: set by the listener when its session gets a notification. `close()` ends the stream it
+    wakes: a newer stream of the session took its place."""
 
     def __init__(self) -> None:
         self._event = asyncio.Event()
+        self.closed = False
 
     def set(self) -> None:
+        self._event.set()
+
+    def close(self) -> None:
+        self.closed = True
         self._event.set()
 
     async def wait(self, timeout: float) -> bool:
@@ -159,8 +165,9 @@ class Listener:
         await self._disconnect()
 
     @contextlib.asynccontextmanager
-    async def subscribe(self, session_id: str) -> AsyncIterator[Wakeup]:
-        wakeup = Wakeup()
+    async def subscribe(self, session_id: str, wakeup: Wakeup | None = None) -> AsyncIterator[Wakeup]:
+        """Wake `wakeup` (a new one when None) on each notification for the session while the block runs."""
+        wakeup = wakeup or Wakeup()
         self._streams.setdefault(session_id, set()).add(wakeup)
         try:
             yield wakeup
@@ -253,9 +260,10 @@ def being_cancelled() -> bool:
 
 async def _frames(engine: AsyncEngine, listener: Listener, ids: Ids, after: int,
                   on_control: Callable[[ControlRow], Awaitable[None]] | None,
-                  on_open: Callable[[], Awaitable[None]] | None, poll_s: float) -> AsyncIterator[ServerSentEvent]:
+                  on_open: Callable[[], Awaitable[None]] | None, poll_s: float,
+                  wakeup: Wakeup | None) -> AsyncIterator[ServerSentEvent]:
     try:
-        async with listener.subscribe(ids.session_id) as wakeup:
+        async with listener.subscribe(ids.session_id, wakeup) as wakeup:
             # Control rows are tracked by the IDs this stream has seen, not by a high-water mark: a row's ID is
             # taken at insert and rows commit in any order, so a lower ID can become visible after a higher one.
             # Rows already waiting are on_open's.
@@ -265,7 +273,7 @@ async def _frames(engine: AsyncEngine, listener: Listener, ids: Ids, after: int,
                 after = seq
             if on_open is not None:
                 await on_open()
-            while True:
+            while not wakeup.closed:
                 if on_control is not None:
                     unhandled = await _unhandled_controls(engine, ids)
                     handed &= {row.id for row in unhandled}           # a handled row is never unhandled again
@@ -289,16 +297,16 @@ async def _frames(engine: AsyncEngine, listener: Listener, ids: Ids, after: int,
 def event_stream(engine: AsyncEngine, listener: Listener, ids: Ids, last_event_id: int | None, *,
                  on_control: Callable[[ControlRow], Awaitable[None]] | None,
                  on_open: Callable[[], Awaitable[None]] | None, ping_s: float = PING_S,
-                 poll_s: float = POLL_S) -> EventSourceResponse:
+                 poll_s: float = POLL_S, wakeup: Wakeup | None = None) -> EventSourceResponse:
     """The session's events after `last_event_id` (all of them when None), then live ones: SSE `event` is the
     event's `type` and `id` its `seq`. `on_open` runs after the replay (the control rows and pending work already
     waiting); `on_control` gets each control row that appears unhandled while the stream is open, whatever order
-    the rows' writers commit in.
+    the rows' writers commit in. `wakeup`, when given, is the stream's own, and its `close()` ends the stream.
 
     Both callbacks run inside the stream and hold back its frames until they return, so they return promptly
     and start longer work (a resumed turn) as a task. A row can reach `on_open` and `on_control`, or several
     streams; `claim_control` decides which caller handles it."""
-    frames = _frames(engine, listener, ids, last_event_id or 0, on_control, on_open, poll_s)
+    frames = _frames(engine, listener, ids, last_event_id or 0, on_control, on_open, poll_s, wakeup)
     return EventSourceResponse(frames, ping=ping_s, ping_message_factory=lambda: ServerSentEvent(comment="keep-alive"))
 
 

@@ -26,7 +26,7 @@ from sse_starlette import EventSourceResponse
 
 from desk.api import runner as runner_module
 from desk.api.main import create_app
-from desk.api.ratelimit import LIMITS, Limit, StreamSlots
+from desk.api.ratelimit import StreamSlots
 from desk.api.routes.public import _released
 from desk.api.sse import append_control, emit
 from desk.api.store import Ids, append_message
@@ -287,8 +287,11 @@ async def test_session_cookie_is_scoped_to_the_desk_path(app, browser, fake, ker
 
 
 async def test_returning_visitor_resumes_the_session(app, browser, fake, kernel_http):
+    """A returning visitor resumes their session. Loading or resuming a chat creates nothing and spends no model
+    tokens, so it is never limited, however often a visitor reloads; a new chat counts toward 180 an hour from one
+    address, counted only when one is created."""
     slug, other = await new_slug(kernel_http, fake), await new_slug(kernel_http, fake)
-    client, token, opened = await open_session(app, browser, slug)
+    client, token, opened = await open_session(app, browser, slug)                      # the address's first new chat
     session_id = opened["state"]["session_id"]
     desk = fake.desks[fake.sessions[session_id].desk_id]
     fake.calls.clear()
@@ -302,6 +305,16 @@ async def test_returning_visitor_resumes_the_session(app, browser, fake, kernel_
     event = desk.ledger[-1].event
     assert (event.kind, event.origin, event.session_id, event.summary) == ("session", "api", session_id,
                                                                           {"resumed": True})
+
+    # Reloads: the page resumes the session, reads the transcript and opens the stream, never answered 429.
+    for _ in range(200):
+        resumed = await client.post(f"/api/public/desks/{slug}/sessions")
+        assert (resumed.status_code, resumed.json()["resumed"]) == (200, True)
+        assert (await client.get(f"/api/public/desks/{slug}/session")).status_code == 200
+    for _ in range(50):
+        async with Stream(app, events_path(slug), headers=[cookie(token)]) as stream:
+            assert stream.status == 200
+    assert fake.called("POST /sessions") == []
 
     # The cookie names a session of another Desk (forged: browsers send it only to its own Desk's paths): a new
     # session here, and the other Desk's is left alone.
@@ -319,6 +332,17 @@ async def test_returning_visitor_resumes_the_session(app, browser, fake, kernel_
     assert new_id != session_id and session_of(fake, new_token) == new_id
     read = await client.get(f"/api/public/desks/{slug}/session")
     assert read.json()["state"]["session_id"] == new_id
+
+    # Three new chats from this address so far (the first, the forged cookie's and the day-old one's): 177 more fit
+    # in the hour, and the 181st is refused, while an open chat still resumes and another address still starts one.
+    for _ in range(177):
+        assert (await browser(app).post(f"/api/public/desks/{slug}/sessions")).status_code == 200
+    refused = await browser(app).post(f"/api/public/desks/{slug}/sessions")
+    assert (refused.status_code, refused.json()) == (429, {"error": "rate_limited", "retry_after": 3600})
+    assert "set-cookie" not in refused.headers
+    assert len(fake.called("POST /sessions")) == 179                   # since the first, which came before the clear
+    assert (await client.post(f"/api/public/desks/{slug}/sessions")).json()["resumed"] is True
+    assert (await browser(app, ip="198.51.100.4").post(f"/api/public/desks/{slug}/sessions")).status_code == 200
 
 
 async def test_a_session_the_kernel_closed_clears_its_cookie(app, browser, fake, kernel_http):
@@ -591,25 +615,49 @@ async def test_stream_resumes_from_last_event_id(app, browser, fake, kernel_http
 
 
 async def test_open_streams_are_capped(app, browser, fake, kernel_http):
+    """Three streams per session and thirty per address may be open at once. A session's fourth closes its oldest
+    rather than answering 429, so a reload never fails while the old page's stream is still counted; the address's
+    31st is refused, unless it replaces one of its own session's."""
     slug = await new_slug(kernel_http, fake)
     _, token, opened = await open_session(app, browser, slug)
     session_id = opened["state"]["session_id"]
     slots = app.state.runtime.stream_slots
 
-    streams = [await Stream(app, events_path(slug), headers=[cookie(token)]).open() for _ in range(3)]
+    def open_stream(token: str) -> Stream:
+        return Stream(app, events_path(slug), headers=[cookie(token)])
+
+    streams = [await open_stream(token).open() for _ in range(3)]
     assert [stream.status for stream in streams] == [200, 200, 200]
-    async with Stream(app, events_path(slug), headers=[cookie(token)]) as fourth:
-        pass
-    assert (fourth.status, fourth.json()) == (429, {"error": "rate_limited", "retry_after": 5})
-    assert dict(fourth.response_headers)["retry-after"] == "5"
-    assert slots.open_counts() == ({session_id: 3}, {CLIENT_IP: 3})        # the refused one took no place
+    fourth = await open_stream(token).open()
+    assert fourth.status == 200
+    await asyncio.wait_for(streams[0]._task, 5)              # the oldest ended by the server, its client still there
+    assert not streams[0]._hung_up.is_set() and not any(stream._task.done() for stream in [*streams[1:], fourth])
+    assert slots.open_counts() == ({session_id: 3}, {CLIENT_IP: 3})
+    streams = [*streams[1:], fourth]
 
     # A hang-up frees its place for the next stream.
     await streams[0].close()
     assert slots.open_counts() == ({session_id: 2}, {CLIENT_IP: 2})
-    async with Stream(app, events_path(slug), headers=[cookie(token)]) as again:
-        assert again.status == 200
-    for stream in streams[1:]:
+    streams = [*streams[1:], await open_stream(token).open()]
+    assert slots.open_counts() == ({session_id: 3}, {CLIENT_IP: 3})
+
+    # Nine more sessions from the same address fill its thirty; another session's stream is refused and takes no
+    # place, while one of these sessions may still replace its own oldest stream.
+    for _ in range(9):
+        _, other, _ = await open_session(app, browser, slug)
+        streams += [await open_stream(other).open() for _ in range(3)]
+    assert all(stream.status == 200 for stream in streams) and slots.open_counts()[1] == {CLIENT_IP: 30}
+    _, eleventh, _ = await open_session(app, browser, slug)
+    async with open_stream(eleventh) as refused:
+        pass
+    assert (refused.status, refused.json()) == (429, {"error": "rate_limited", "retry_after": 5})
+    assert dict(refused.response_headers)["retry-after"] == "5" and slots.open_counts()[1] == {CLIENT_IP: 30}
+    reload = await open_stream(token).open()
+    assert reload.status == 200
+    await asyncio.wait_for(streams[0]._task, 5)              # the first session's oldest made way for it
+    assert slots.open_counts()[1] == {CLIENT_IP: 30}
+
+    for stream in [*streams[1:], reload]:
         await stream.close()
     assert slots.open_counts() == ({}, {})
 
@@ -787,44 +835,79 @@ async def test_paused_session_answers_each_message_with_one_handoff(app, browser
     assert credentials(fake) == {("x-session-token", token)}
 
 
-async def test_message_limit(app, browser, fake, kernel_http, engine, clock, monkeypatch):
+async def test_message_limit(app, browser, fake, kernel_http, model, engine, clock):
+    """The money guard is on model turns: a message that starts one (mode `ai`) counts toward 90 an hour from one
+    address and 30 in one conversation, which has no window. Past either, 429 `rate_limited` before any row is stored
+    or Claude is called, and the limit's first refusal is ledgered with the visitor's own credential. Messages while
+    the owner has the chat, or while it is paused, count toward neither."""
     slug = await new_slug(kernel_http, fake)
-    client, token, opened = await open_session(app, browser, slug)
-    session_id = opened["state"]["session_id"]
-    fake.set_mode(session_id, "owner")                       # the owner has the chat: messages are stored, no turns
     path = f"/api/public/desks/{slug}/messages"
+    runner = app.state.runtime.runner
+    model.add(*[lambda request: response(reply("Thanks, noted."))] * 200)
+
+    async def asked(texts: list[str]) -> set[str]:
+        """Which of `texts` any model call was sent."""
+        sent = json.dumps([request.messages for request in model.requests])
+        return {words for words in texts if words in sent}
+
+    async def refused_cleanly(client: httpx.AsyncClient, session_id: str, words: str) -> dict:
+        """Post `words`, which must be refused before anything is stored or Claude is called; the 429's body."""
+        calls = len(model.requests)
+        refused = await client.post(path, json={"text": words})
+        await runner.drain()
+        assert refused.status_code == 429 and refused.headers["retry-after"] == str(refused.json()["retry_after"])
+        assert (words,) not in await rows(engine, session_id, "visitor_text", "text")
+        assert len(model.requests) == calls and not await asked([words])
+        return refused.json()
+
+    def appended() -> list[tuple[str | None, str, dict]]:
+        return [(call.headers.get("x-session-token"), call.body["event"]["kind"], call.body["event"]["summary"])
+                for call in fake.called("POST /ledger/append")]
+
+    # Thirty turns in one conversation; the 31st is refused, and stays refused once the hour has passed.
+    first, first_token, opened = await open_session(app, browser, slug)
+    first_id = opened["state"]["session_id"]
+    for n in range(30):
+        assert (await first.post(path, json={"text": f"Question {n}"})).status_code == 202
+    await runner.drain()
+    assert len(await rows(engine, first_id, "visitor_text", "text")) == 30
     fake.calls.clear()
+    assert await refused_cleanly(first, first_id, "One too many") == {"error": "rate_limited", "retry_after": 86400}
+    clock.advance(7200)
+    assert (await refused_cleanly(first, first_id, "Still too many"))["error"] == "rate_limited"
+    assert appended() == [(first_token, "rate_limit", {"limit": "visitor_turn_conversation"})]   # once
 
-    accepted = [(await client.post(path, json={"text": f"Message {n}"})).status_code for n in range(20)]
-    assert accepted == [202] * 20
-    refused = await client.post(path, json={"text": "One too many"})
-    assert (refused.status_code, refused.json()) == (429, {"error": "rate_limited", "retry_after": 300})
-    assert refused.headers["retry-after"] == "300"
-    clock.advance(10)
-    again = await client.post(path, json={"text": "Still too many"})
-    assert (again.status_code, again.json()["retry_after"]) == (429, 290)
-    # The window's first refusal is ledgered once, with the visitor's own credential, naming only the limit.
-    (append,) = fake.called("POST /ledger/append")
-    assert append.headers["x-session-token"] == token and "x-owner-session" not in append.headers
-    event = append.body["event"]
-    assert (event["kind"], event["origin"], event["session_id"], event["summary"]) == (
-        "rate_limit", "api", session_id, {"limit": "visitor_message"})
-    stored = await rows(engine, session_id, "visitor_text", "text")
-    assert len(stored) == 20 and ("One too many",) not in stored and ("Still too many",) not in stored
+    # Ninety turns an hour from one address, over three conversations; the 91st is refused wherever it comes from.
+    for _ in range(3):
+        client, _, opened = await open_session(app, browser, slug)
+        for n in range(30):
+            assert (await client.post(path, json={"text": f"Another question {n}"})).status_code == 202
+    await runner.drain()
+    fourth, fourth_token, opened = await open_session(app, browser, slug)
+    fourth_id = opened["state"]["session_id"]
+    fake.calls.clear()
+    assert await refused_cleanly(fourth, fourth_id, "Hello?") == {"error": "rate_limited", "retry_after": 3600}
+    assert (await refused_cleanly(fourth, fourth_id, "Hello again?"))["retry_after"] == 3600
+    assert appended() == [(fourth_token, "rate_limit", {"limit": "visitor_turn"})]
 
-    clock.advance(291)                                       # the first message has left the five-minute window
-    assert (await client.post(path, json={"text": "Back again"})).status_code == 202
+    # While the owner has the chat, or it is paused, messages start no model turn and count toward neither limit.
+    fake.set_mode(fourth_id, "owner")
+    for n in range(35):
+        assert (await fourth.post(path, json={"text": f"For the owner {n}"})).status_code == 202
+    paused, _, opened = await open_session(app, browser, slug)
+    fake.set_mode(opened["state"]["session_id"], "paused")
+    for n in range(2):
+        assert (await paused.post(path, json={"text": f"Anyone there {n}"})).status_code == 202
+    await runner.drain()
+    assert not await asked([f"For the owner {n}" for n in range(35)] + ["Anyone there 0", "Anyone there 1"])
+    assert len(await rows(engine, fourth_id, "visitor_text", "text")) == 35
+    fake.set_mode(fourth_id, "ai")                                   # handed back: its messages count again
+    assert (await refused_cleanly(fourth, fourth_id, "Back to Claude"))["error"] == "rate_limited"
 
-    # A copy's visitors share a daily limit too (300 in production; 23 here), whichever session sends.
-    monkeypatch.setitem(LIMITS, "visitor_message_copy", Limit(23, 86400, "copy"))
-    other, _, other_opened = await open_session(app, browser, slug)
-    fake.set_mode(other_opened["state"]["session_id"], "owner")
-    assert (await other.post(path, json={"text": "Hello"})).status_code == 202          # the copy's 22nd and 23rd
-    assert (await other.post(path, json={"text": "Hello again"})).status_code == 202
-    over = await other.post(path, json={"text": "And again"})
-    assert (over.status_code, over.json()["error"]) == (429, "rate_limited")
-    assert [call.body["event"]["summary"] for call in fake.called("POST /ledger/append")][-1] == {
-        "limit": "visitor_message_copy"}
+    clock.advance(3600)                                              # the address's hour has passed
+    assert (await fourth.post(path, json={"text": "Back to Claude"})).status_code == 202
+    await runner.drain()
+    assert (await refused_cleanly(first, first_id, "And now?"))["error"] == "rate_limited"     # no window here
 
 
 async def test_cancel_held_decision(app, browser, fake, kernel_http, model, engine):
