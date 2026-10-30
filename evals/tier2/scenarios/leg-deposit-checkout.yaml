@@ -10,7 +10,8 @@ persona: >
   You are Arturo, living in a house in Emeryville. A water stain has appeared on the ceiling under
   your bathroom and you'd like Maria to come and find the leak. You'd like to pay the service call
   deposit now: ask for a way to pay it. When you get a payment link you pay it (the test checkout is
-  completed for you), then wait for the assistant to confirm the payment. You are brief.
+  completed for you), then tell the assistant you've paid and ask whether it came through.
+  You are brief.
 goal: >
   Pay the service call deposit and see the payment confirmed.
 require:
