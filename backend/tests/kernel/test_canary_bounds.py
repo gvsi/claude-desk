@@ -19,7 +19,8 @@ from desk.kernel_api import DeskCreated
 from desk.kernel_service import desks, labels, reply_check
 
 from .helpers import kernel_ctx, rows_of
-from .test_adapters import Rivera, rivera
+from .test_adapters import Rivera, rivera, visitor_of
+from .test_context import context_of
 from .test_desk_writes import LOPEZ_DESK, desks_of, entries_of, new_desk, post_desk, upload
 from .test_labels_hardening import disguises, knowledge, post_knowledge, stored
 
@@ -199,3 +200,28 @@ async def test_a_desk_holds_at_most_two_hundred_knowledge_items(app, client):
                                                     ["public"]))
     assert replaced.text.endswith("a jetter.")
     assert len(await rows_of(app, copy.copy_id, select(KnowledgeRow))) == 200
+
+
+async def test_knowledge_found_clean_is_not_read_again_until_a_document_is_added(app, client, monkeypatch):
+    """A knowledge item scanned clean when the owner stored it isn't scanned again for a visitor's
+    context while the copy's canaries stay the same. Once a document is added, its canary is looked
+    for in the item again, and an item holding it is kept from the visitor."""
+    copy, visitor = await visitor_of(app, client)
+    planted = "cdk-0123456789abcdef"                                   # no document's canary, yet
+    text = f"Maria brings a drain camera to every call. Old reference {planted}."
+    await stored(client, copy, knowledge("kb-tools", "Tools", text, ["public"]))
+    scanned: list[str] = []
+    spans = labels.canary_spans
+    monkeypatch.setattr(labels, "canary_spans", lambda text, canaries: scanned.append(text) or spans(text, canaries))
+    for _ in range(2):
+        assert [item.item_id for item in (await context_of(client, visitor.session_id, visitor.headers)).knowledge] == [
+            "kb-tools"]
+    assert not any(planted in each for each in scanned)
+
+    # a document whose canary the item holds: the item is read again and kept from the visitor
+    monkeypatch.setattr(desks, "new_canary", lambda: planted)
+    response = await upload(client, copy, {"ref": "old-invoice", "title": "Old invoice", "body": "Paid in full."})
+    assert response.status_code == 200, response.text
+    assert (await context_of(client, visitor.session_id, visitor.headers)).knowledge == []
+    assert any(planted in each for each in scanned)
+

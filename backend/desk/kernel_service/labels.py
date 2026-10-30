@@ -38,8 +38,11 @@ in place of one of its own (a Cyrillic к), and a letter shaped like 0 or 1 in p
 """
 
 import functools
+import hashlib
+import json
 import re
 import unicodedata
+from collections import OrderedDict
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
@@ -442,6 +445,35 @@ MAX_KNOWLEDGE_TITLE = 200
 KNOWLEDGE_ID = REF                                     # as `desk_data` entries carry refs
 
 
+# Knowledge found to hold no canary of a set of canaries (`knowledge_canaries`): the digest of the
+# set and the item's ID, title and text, most recently found last. A visitor's context reads each
+# item it may give out, so an item the owner stored clean isn't read again while the copy's
+# canaries stay the same; a document added or removed changes the set, and every item is read
+# again against it. Bounded, so a busy kernel forgets the oldest; one restarted reads each item
+# once more.
+_CLEAN_SCANS: OrderedDict[bytes, None] = OrderedDict()
+MAX_CLEAN_SCANS = 4096
+
+
+def knowledge_canaries(item_id: str, title: str, text: str, canaries: Mapping[str, str]) -> list[str]:
+    """The documents whose canary a knowledge item holds in its ID, title and text, read one after
+    another (`find_canaries_in`), in the order `canaries` lists them. An item found to hold none is
+    remembered, with exactly these canaries, in `_CLEAN_SCANS`, and not read again while they stay
+    the same: the answer for the same ID, title, text and canaries can't change."""
+    if not canaries:
+        return []
+    digest = hashlib.sha256(json.dumps([sorted(canaries.items()), item_id, title, text]).encode()).digest()
+    if digest in _CLEAN_SCANS:
+        _CLEAN_SCANS.move_to_end(digest)
+        return []
+    found = find_canaries_in([item_id, title, text], canaries)
+    if not found:
+        _CLEAN_SCANS[digest] = None
+        while len(_CLEAN_SCANS) > MAX_CLEAN_SCANS:
+            _CLEAN_SCANS.popitem(last=False)
+    return found
+
+
 def _check_knowledge(item: KnowledgeItem) -> None:
     if item.label.readers not in KNOWLEDGE_READERS or item.label.record_owner is not None:
         raise KernelFailure(422, "invalid", "knowledge_label")
@@ -458,8 +490,9 @@ async def store_knowledge(ctx: KernelCtx, desk_id: str, item: KnowledgeItem) -> 
     "knowledge", item_id, owner_only_forced}`. Returns the item as stored.
 
     Knowledge is untrusted text, and one holding a document's canary in its title or text, even
-    split or disguised (`find_canaries_in`), is stored the owner's alone, whatever label it came
-    with (`owner_only_forced`), so private document text never reaches a visitor as knowledge.
+    split or disguised, or split between its ID and its title (`knowledge_canaries`, as a visitor's
+    context reads it), is stored the owner's alone, whatever label it came with
+    (`owner_only_forced`), so private document text never reaches a visitor as knowledge.
     The API's view of the item (`kernel_ro.knowledge_items`) reads that ledgered flag and shows
     such an item's title and text as NULL, so no document text reaches the API either.
 
@@ -476,7 +509,7 @@ async def store_knowledge(ctx: KernelCtx, desk_id: str, item: KnowledgeItem) -> 
     others = (await ctx.db.execute(ctx.repo.scoped(select(func.count(KnowledgeRow.item_id)).where(
         KnowledgeRow.desk_id == desk_id, KnowledgeRow.item_id != item.item_id)))).scalar_one()
     await refuse_past_cap(ctx, desk_id, "knowledge", others, MAX_KNOWLEDGE_ITEMS)
-    forced = bool(find_canaries_in([item.title, item.text], canaries))
+    forced = bool(knowledge_canaries(item.item_id, item.title, item.text, canaries))
     readers = list(OWNER_ONLY) if forced else list(item.label.readers)
     insert = pg_insert(KnowledgeRow).values(desk_id=desk_id, item_id=item.item_id, copy_id=ctx.copy_id,
                                             source=item.source, title=item.title, text=item.text, readers=readers,
