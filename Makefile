@@ -200,8 +200,20 @@ dev:
 # Tier 1 evals: the kernel's boundary cases, with no model calls, no network and no key.
 # evals-tier1 is the one tier 1 target CI runs: the harness's own tests, every case against the
 # contract stub, then the real kernel in-process (the API over it once landed.toml lists 02a or
-# 02). The kernel and API runs need the database, `make kernel` and cvc5.
+# 02). The kernel and API runs need the database, `make kernel` and cvc5. The kernel they start
+# proves with the desk-prove DESK_PROVE names, else the one on PATH, and desk-prove runs the cvc5
+# CVC5 names, else the one on PATH. When either isn't set in the environment or on make's command
+# line, they pass this checkout's own file for it if that file exists: the release build (`make
+# kernel`) as DESK_PROVE, and .tools/cvc5 (`make setup` or `make cvc5`) as CVC5. So after `make
+# setup` and `make kernel` a local run proves in symcc mode with neither on PATH. A DESK_PROVE or
+# CVC5 that is set is left as it is; CI sets its own CVC5 and puts the same desk-prove build on
+# PATH, so it proves with the same binaries.
 EVALS = uv run --project backend --group evals
+CVC5 ?= $(CVC5_DIR)/bin/cvc5
+# $(call tier1_default,NAME): NAME="<its default above>" when nothing outside the Makefile set NAME
+# and that file exists, else nothing.
+tier1_default = $(if $(filter file,$(origin $(1))),$(if $(wildcard $($(1))),$(1)="$($(1))" ))
+TIER1_PROVE = $(call tier1_default,DESK_PROVE)$(call tier1_default,CVC5)
 
 evals-unit:
 	$(EVALS) pytest evals/tests -q
@@ -210,10 +222,10 @@ evals-tier1-stub:
 	$(EVALS) python -m evals.run tier1 --target stub
 
 evals-tier1-kernel:
-	$(EVALS) python -m evals.run tier1 --target kernel
+	$(TIER1_PROVE)$(EVALS) python -m evals.run tier1 --target kernel
 
 evals-tier1-api:
-	$(EVALS) python -m evals.run tier1 --target api
+	$(TIER1_PROVE)$(EVALS) python -m evals.run tier1 --target api
 
 evals-tier1:
 	$(MAKE) evals-unit

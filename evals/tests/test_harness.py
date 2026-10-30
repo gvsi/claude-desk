@@ -15,7 +15,17 @@ from zoneinfo import ZoneInfo
 import pytest
 import rfc8785
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from pydantic import AwareDatetime, BaseModel, NaiveDatetime, TypeAdapter
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    FutureDate,
+    FutureDatetime,
+    NaiveDatetime,
+    PastDate,
+    PastDatetime,
+    TypeAdapter,
+    create_model,
+)
 
 from desk.contracts import CopyCreated, Decision, ExecResult, ProbeResult, SessionCreated
 from desk.kernel_api import KERNEL_RESPONSES, KERNEL_ROUTES, KernelError, VerifyStarted, WhoAmI
@@ -273,6 +283,22 @@ def test_stub_responses_never_read_the_wall_clock(wall_clock):
     assert build_all() == earlier
     first, again = json.loads(earlier["Moments"]), json.loads(earlier["Moments, each field rejected"])
     assert [field for field in first if again[field] == first[field]] == []   # each was built again
+
+
+def test_stub_refuses_dates_relative_to_today():
+    """A past or a future date (`PastDate`, `FutureDate`, `PastDatetime`, `FutureDatetime`) is
+    one polyfactory fills from the wall clock and pydantic checks against today, so the stub has no
+    seeded value for it: building a stand-in model holding one fails at build time, naming the
+    type, and so does an expectation that needs a value where the default build left an optional
+    one empty."""
+    for tp in (PastDate, FutureDate, PastDatetime, FutureDatetime):
+        name = tp.__name__
+        holding = create_model(f"Holding{name}", when=(tp, ...))
+        with pytest.raises(NotImplementedError, match=rf"can't build a {name}:"):
+            build(holding)
+        maybe = create_model(f"Maybe{name}", when=(tp | None, None))
+        with pytest.raises(NotImplementedError, match=rf"can't build a {name}:"):
+            build(maybe, Expect(fields={"when": {"$not": None}}))
 
 
 async def test_stub_honours_the_expected_status():
