@@ -284,3 +284,25 @@ SAMPLES ?= 5
 evals-soft-promise:
 	$(if $(filter file undefined,$(origin MAX_USD)),$(error evals-soft-promise spends money: give MAX_USD=<dollars>, the most it may spend))
 	$(EVALS) python -m evals.calibration.soft_promise --samples $(SAMPLES) --max-usd $(MAX_USD)$(if $(PROMPT_REF), --prompt-ref $(PROMPT_REF))$(if $(PROMPT_FILE), --prompt-file $(PROMPT_FILE))$(if $(LABEL), --label $(LABEL))
+
+# A finished pass, by its id under evals/out/passes (PASS=<id>). evals-gate judges it with no model call
+# (FINAL=1 for the final gate: no pending scenario, three runs and a recorded rate). evals-latency makes
+# TURNS turns of each kind for at most LATENCY_MAX_USD on the stack built from this tree, or on the
+# deployment at BASE_URL (DRY_RUN=1 scripts every model for $0), for the pass PASS names. evals-report
+# writes the pass's report, latest.json and this month's spend.csv under evals/reports and the latest
+# results in docs/evals.md, with a null-baseline pass of the same held-out set when NULL_BASELINE names one.
+.PHONY: evals-gate evals-latency evals-report
+TURNS ?= 20
+LATENCY_MAX_USD ?= 3
+LATENCY_FLAGS = $(if $(BASE_URL), --base-url $(BASE_URL))$(if $(PASS), --pass $(PASS))$(if $(DRY_RUN), --dry-run)
+
+evals-gate:
+	@test -n "$(PASS)" || { echo "evals-gate: name the pass: make evals-gate PASS=<id>" >&2; exit 2; }
+	$(EVALS) python -m evals.run gate --pass $(PASS)$(if $(FINAL), --final)
+
+evals-latency:
+	$(EVALS) python -m evals.run latency --turns $(TURNS) --max-usd $(LATENCY_MAX_USD)$(LATENCY_FLAGS)
+
+evals-report:
+	@test -n "$(PASS)" || { echo "evals-report: name the pass: make evals-report PASS=<id>" >&2; exit 2; }
+	$(EVALS) python -m evals.run report --pass $(PASS)$(if $(NULL_BASELINE), --null-baseline $(NULL_BASELINE))

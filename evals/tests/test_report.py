@@ -8,6 +8,7 @@ attributes the gate's result carries, so the report reads it the way it will rea
 import csv
 import json
 import re
+import subprocess
 from datetime import UTC, date, datetime, timedelta
 from math import comb
 from pathlib import Path
@@ -785,6 +786,29 @@ async def test_report_command_refuses_what_it_cant_read_whole(report_repo, capsy
 
     assert evals_run.report_command(["--pass", pass_id], root=root) == 0      # read whole again, it is written
     assert (reports / "latest.json").exists() and pass_id in doc.read_text()
+
+
+def make(*args: str, dry: bool = True) -> subprocess.CompletedProcess[str]:
+    """`make` in this repository; `dry` prints the commands a target would run without running them."""
+    return subprocess.run(["make", "--no-print-directory", *(["-n"] if dry else []), "-C", str(EVALS_DOC.parents[1]),
+                           *args], capture_output=True, text=True)
+
+
+def test_make_targets_gate_measure_and_report_a_pass():
+    """`make evals-gate`, `evals-latency` and `evals-report` run their subcommands with what they are
+    given; the gate and the report name a pass with PASS, and stop before running anything without it."""
+    assert "python -m evals.run gate --pass p-1 --final" in make("evals-gate", "PASS=p-1", "FINAL=1").stdout
+    assert "--final" not in make("evals-gate", "PASS=p-1").stdout
+    # The plan's latency run, locally: 20 turns of each kind for at most $3.
+    assert "python -m evals.run latency --turns 20 --max-usd 3\n" in make("evals-latency").stdout
+    hosted = make("evals-latency", "PASS=p-1", "BASE_URL=https://desk.example.invalid", "TURNS=5", "LATENCY_MAX_USD=1")
+    assert "latency --turns 5 --max-usd 1 --base-url https://desk.example.invalid --pass p-1" in hosted.stdout
+    assert "latency --turns 20 --max-usd 3 --dry-run" in make("evals-latency", "DRY_RUN=1").stdout
+    assert "python -m evals.run report --pass p-1\n" in make("evals-report", "PASS=p-1").stdout
+    assert "report --pass p-1 --null-baseline p-0" in make("evals-report", "PASS=p-1", "NULL_BASELINE=p-0").stdout
+    for target in ("evals-gate", "evals-report"):
+        unnamed = make(target, dry=False)
+        assert unnamed.returncode != 0 and f"make {target} PASS=<id>" in unnamed.stderr, unnamed.stderr
 
 
 async def test_report_command_reads_only_what_the_report_shows_from_a_transcript(report_repo):
