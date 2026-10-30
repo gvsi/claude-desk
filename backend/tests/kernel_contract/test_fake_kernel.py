@@ -111,6 +111,40 @@ async def test_scripts_override_outcomes_and_results(fake):
     assert (await read_decision(view, booked.decision_id)).state == "failed"
 
 
+async def test_an_execution_in_flight_is_a_conflict_until_it_finishes(fake):
+    """`in_flight(tool)`: the tool's next execution is already running when `/execute` arrives (another request began
+    it; the kernel holds its intent row). Like the kernel, `/execute` answers 409 `conflict` while it runs, since
+    there is no stored result yet, and the decision reads `allowed`, never expiring, until `finish` ends it."""
+    http, state = fake
+    _, visitor = await copy_and_visitor(http, state)
+    view, session_id = http.session(visitor.session_token), visitor.state.session_id
+    state.in_flight("native.quote")
+    running = await decide(view, session_id, 0, "call-1", "native.quote", quote_args("drain"))
+    ran_before = len(state.desks[running.action.desk_id].ledger)
+
+    for _ in range(2):
+        assert await refused(execute(view, running, 0)) == (409, "conflict")
+    state.now += timedelta(seconds=61)                           # running: an allow past its minute doesn't expire
+    assert await read_decision(view, running.decision_id) == running
+    assert len(state.desks[running.action.desk_id].ledger) == ran_before
+
+    other = await decide(view, session_id, 0, "call-2", "native.quote", quote_args("drain"))
+    assert (await execute(view, other, 0)).state == "succeeded"   # once: the next execution runs as usual
+
+    finished = state.finish(running.decision_id)
+    assert finished.state == "executed" and finished == await read_decision(view, running.decision_id)
+    repeat = await execute(view, running, 0)                     # finished: a repeat returns the stored result
+    assert repeat == state.decisions[running.decision_id].result and repeat.state == "succeeded"
+    with pytest.raises(ValueError):
+        state.finish(running.decision_id)                         # only a running execution finishes
+
+    state.in_flight("native.quote")
+    doubtful = await decide(view, session_id, 0, "call-3", "native.quote", quote_args("drain"))
+    assert await refused(execute(view, doubtful, 0)) == (409, "conflict")
+    assert state.finish(doubtful.decision_id, "unknown").state == "unknown"
+    assert await refused(execute(view, doubtful, 0)) == (409, "conflict")    # its outcome still isn't known
+
+
 async def test_a_forced_violation_blocks_the_next_check_only(fake):
     http, state = fake
     _, visitor = await copy_and_visitor(http, state)

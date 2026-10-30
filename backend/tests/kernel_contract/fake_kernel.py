@@ -12,9 +12,10 @@ contract test, before the task that first uses them.
 - Signatures are `"fake:" + sha256 hex` of the fields the kernel signs. Times come from `state.now`.
 - Every non-2xx body is a `KernelError`; a body that isn't the route's request model is 422 `invalid`;
   every answer is checked against the route's response model before it leaves.
-- Knobs for tests: `fail`, `drop_response`, `set_mode`, `script`, `violation`, `verify`, `never`, `reconcile`
-  and `calls` (with `called(route)`); `now` drives expiry and the 24-hour idle close. A `"timeout"` or `"connect"`
-  failure is raised as httpx's own exception, which reaches the client through `httpx.ASGITransport`.
+- Knobs for tests: `fail`, `drop_response`, `set_mode`, `script`, `violation`, `verify`, `never`, `reconcile`,
+  `in_flight` (with `finish`) and `calls` (with `called(route)`); `now` drives expiry and the 24-hour idle close. A
+  `"timeout"` or `"connect"` failure is raised as httpx's own exception, which reaches the client through
+  `httpx.ASGITransport`.
 - Not modelled: Cedar, the reviewer, the breaker's strikes (`set_mode` pauses), `auth` ledger entries
   for refused calls, agents, verification routes and payments (Plans 01b, 01c and 02b add them).
 """
@@ -471,6 +472,7 @@ class DecisionRecord:
     tool: str                                   # the called name, cut to 64 characters
     created_at: datetime
     result: ExecResult | None = None
+    running: bool = False                       # its execution began and hasn't ended (`in_flight`)
 
 
 @dataclass
@@ -503,6 +505,7 @@ class FakeKernelState:
         self._drops: dict[str, int] = {}
         self._scripts: dict[str, Script] = {}
         self._forced: list[str] = []                   # violation kinds the next reply checks carry
+        self._in_flight: dict[str, int] = {}           # tool -> executions left that find themselves running
         self._args: dict[str, dict] = {}                # action_id -> the call's args, as the action row binds them
 
     # Knobs ---------------------------------------------------------------------------------------
@@ -596,6 +599,33 @@ class FakeKernelState:
                                     reconciled=True)
         self.flush()
         return decision
+
+    def in_flight(self, tool: str, *, times: int = 1) -> None:
+        """The tool's next `times` executions are already running when `/execute` arrives, as when another request
+        began them (the kernel holds their intent row): `/execute` answers 409 `conflict`, as the kernel does for
+        every call while an execution runs (it has no stored result yet), and the decision reads `allowed`, never
+        expiring, until `finish` ends it."""
+        if tool not in TOOL_NAMES or times < 1:
+            raise ValueError("a known tool, at least once")
+        self._in_flight[tool] = times
+
+    def finish(self, decision_id: str, exec_state: str = "succeeded") -> Decision:
+        """End an execution `in_flight` left running, as `succeeded`, `failed` or `unknown`: its result is stored,
+        and the decision moves on (ledgered, re-signed and mirrored)."""
+        record = self.decisions[decision_id]
+        if not record.running or exec_state not in ("succeeded", "failed", "unknown"):
+            raise ValueError("only a running execution finishes, as succeeded, failed or unknown")
+        record.running = False
+        self._run(record, self.sessions[record.decision.session_id], exec_state=exec_state)
+        self.flush()
+        return record.decision
+
+    def _take_in_flight(self, tool: str) -> bool:
+        left = self._in_flight.get(tool, 0)
+        if left <= 0:
+            return False
+        self._in_flight[tool] = left - 1
+        return True
 
     def _never(self, desk: Desk, tool: str) -> bool:
         return any(card.mode == "never" and card.applies_to == tool for card in desk.cards)
@@ -1103,7 +1133,8 @@ class FakeKernelState:
     def _refresh(self, record: DecisionRecord) -> Decision:
         """Lazy expiry: an allow lasts 60 s, a hold 24 h."""
         decision = record.decision
-        if decision.state in ("allowed", "held") and record.result is None and self.now > decision.expires_at:
+        if (decision.state in ("allowed", "held") and record.result is None and not record.running
+                and self.now > decision.expires_at):
             return self._transition(record, "expired")
         return decision
 
@@ -1146,6 +1177,8 @@ class FakeKernelState:
             if session.mode == "paused":
                 raise Refusal(409, "mode_paused")
         decision = self._refresh(record)
+        if record.running:                                             # still running: no stored result yet
+            raise Refusal(409, "conflict")
         if record.result is not None:
             if record.result.state not in ("succeeded", "failed"):    # its outcome isn't known yet: no stored result
                 raise Refusal(409, "conflict")
@@ -1154,13 +1187,18 @@ class FakeKernelState:
             return record.result
         if body.approval_id is not None or decision.state != "allowed":
             raise Refusal(409, "conflict")
+        if self._take_in_flight(decision.action.tool):                 # another request began it a moment ago
+            record.running = True
+            raise Refusal(409, "conflict")
         return self._run(record, session)
 
-    def _run(self, record: DecisionRecord, session: Session) -> ExecResult:
-        """Execute the decision's action as `session` (the held session for an approval)."""
+    def _run(self, record: DecisionRecord, session: Session, exec_state: str | None = None) -> ExecResult:
+        """Execute the decision's action as `session` (the held session for an approval), ending in `exec_state` when
+        given, else as the tool's script says (`succeeded` without one)."""
         desk, action = self.desks[record.desk_id], record.decision.action
         script = self._scripts.get(action.tool)
-        exec_state = script.exec_state if script is not None else "succeeded"
+        if exec_state is None:
+            exec_state = script.exec_state if script is not None else "succeeded"
         facts, model_view = self._effects(session, desk, action) if exec_state == "succeeded" else ([], {})
         if model_view is None:                              # the tool's own failure (a slot taken meanwhile)
             exec_state, facts, model_view = "failed", [], {}
