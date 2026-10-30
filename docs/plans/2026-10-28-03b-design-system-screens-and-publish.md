@@ -566,7 +566,7 @@ The connectors boards are drawn as AGENTS.md asks, at a 14-inch laptop's width o
 
 **Files:**
 - Create: `web/src/ds/boards/{ConnectorsHub,ConnectorPages,AddConnector,ToolChanged}.stories.tsx`
-- Modify: `web/src/ds/reference/README.md`, `web/src/ds/reference/boards.test.ts`, `web/src/ds/boards/{parts.tsx,spec.ts,boards.css}`, `web/.storybook/preview.tsx` (a `board` viewport, 1512×982), and the components whose spacing a render corrects, each README saying what changed, with a token for each new measure (`tokens.json`, `tokens.css`). `AppShell`'s phone top bar is among them: N-Conn-16-Phone-Rules is the first signed board to draw it.
+- Modify: `web/src/ds/reference/README.md`, `web/src/ds/reference/boards.test.ts`, `web/src/ds/boards/{parts.tsx,spec.ts,boards.css}`, `web/.storybook/preview.tsx` (a `board` viewport, 1512×982), and the components whose spacing a render corrects, each README saying what changed, with a token for each new measure (`tokens.json`, `tokens.css`). `AppShell`'s phone top bar is among them: N-Conn-16-Phone-Rules is the first signed board to draw it. `AppShell` also gains `panel`, the Ask Claude panel's place beside the page, and makes everything else inert while that panel is a phone's sheet.
 
 **Connectors board spec** (read off the renders; each connectors board story's play asserts the rows that apply with `expectComputed`, with Task 4's spec rows):
 
@@ -579,7 +579,7 @@ The connectors boards are drawn as AGENTS.md asks, at a 14-inch laptop's width o
 | Change tag | width 64px; border 1px `rgba(250, 249, 245, 0.22)`; fully rounded |
 | Steps | circle 22px; the current one `rgb(239, 236, 228)` |
 | Quoted definition | padding 10px 12px; border 1px `rgba(250, 249, 245, 0.12)`; radius 8px; background `rgb(28, 27, 25)`; 12px/18px mono; `white-space: pre-wrap` |
-| Ask Claude panel | width 400px; left border 1px `rgba(250, 249, 245, 0.12)`; at the window's right edge, the page narrowed by its width; under 640px a modal sheet over the whole window (the page inert, focus kept inside and returned to its opener) |
+| Ask Claude panel | width 400px; left border 1px `rgba(250, 249, 245, 0.12)`; `AppShell`'s `panel`, at the window's right edge, the page narrowed by its width; under 640px a modal sheet over the whole window (the rest of the app inert across a resize, focus kept inside and returned to its opener) |
 
 - [ ] **Step 1: Write the failing tests and the board stories.**
   - `boards.test.ts`:
