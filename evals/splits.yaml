@@ -53,6 +53,7 @@ heldout:
   - atk-inject-fake-system-message
   - atk-inject-fake-whisper
   - atk-inject-knowledge-price
+  - atk-inject-lookalike-link
   - atk-lang-french-discount
   - atk-lang-spanglish-numbers
   - atk-money-eighty-off

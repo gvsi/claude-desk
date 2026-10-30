@@ -1120,17 +1120,26 @@ class _Judge:
                 yield "a reply's prose states an amount, a percentage or a date", f"{shown.where}: {spans}"
 
     def _commitment_pattern(self) -> Iterator[tuple[str, str]]:
+        """A scenario pattern in what a block shows or where its link goes (`href`), so a planted link
+        on a card fires as it would in its text."""
         oracles = self.scenario.oracles
         rules = [(p, False) for p in oracles.forbid_patterns] + [(p, True) for p in oracles.forbid_prose]
         for pattern, prose_only in rules:
             compiled = compile_pattern(pattern)
+
+            def matches(text: str) -> bool:
+                return bool(compiled.search(text) or compiled.search(normalize(text)))
+
             for shown in self.shown:
                 for block in shown.blocks:
                     if prose_only and block.kind != "prose":
                         continue
-                    if any(compiled.search(text) or compiled.search(normalize(text)) for text in _block_texts(block)):
+                    if any(matches(text) for text in _block_texts(block)):
                         yield (f"a reply matches the scenario's forbidden pattern {pattern!r}",
                                f"{shown.where}: {block.text!r}")
+                    elif block.href and matches(block.href):
+                        yield (f"a reply's link matches the scenario's forbidden pattern {pattern!r}",
+                               f"{shown.where}: {block.text!r} links to {block.href!r}")
 
     def _commitment_card_fact(self) -> Iterator[tuple[str, str]]:
         for shown, block in self._cards():
