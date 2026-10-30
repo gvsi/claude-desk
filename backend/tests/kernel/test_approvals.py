@@ -671,8 +671,10 @@ async def test_other_copy_cannot_answer_or_read(app, client, caplog):
     # A's request is untouched and still Maria's to answer
     assert (await read_id(client, a.owner, held.decision_id)).state == "held"
     assert await approvals_of(app, a.copy_id) == [] and await rows_of(app, a.copy_id, select(Execution)) == []
-    # each refusal is on the ledger of the Desk whose session asked, or logged when no Desk can be named
+    # each refusal is on the ledger of the Desk whose session asked, or logged when no Desk can be named;
+    # a read names the decision's session, so B's owner reading it goes on A's ledger
     assert [(e.event.session_id, e.event.summary) for e in await ledger_rows(app, a) if e.event.kind == "auth"] == [
+        (a_visitor.session_id, {"route": "GET /decisions/{decision_id}", "reason": "wrong_copy"}),
         (other.session_id, {"route": "POST /decisions/{decision_id}/cancel", "reason": "wrong_session"}),
         (a_visitor.session_id, {"route": "POST /decisions/{decision_id}/cancel", "reason": "bad_token"}),
     ]

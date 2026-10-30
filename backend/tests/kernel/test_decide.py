@@ -897,13 +897,15 @@ async def test_decisions_are_signed(app, client, registry, frozen_clock):
     frozen_clock.advance(24 * 3600)
     response = await client.get(f"/decisions/{held.decision_id}", headers=visitor.headers)
     assert Decision.model_validate(response.json()).state == "expired"
-    # another session's token isn't the decision's session's; another copy's owner doesn't find it
+    # another session's token isn't the decision's session's; another copy's owner doesn't find it;
+    # both are ledgered on the decision's session
     stranger, other = await open_visitor(client, rows), await make_copy_rows(app)
     for headers, status, code in ((stranger.headers, 401, "auth"), (other.owner, 404, "not_found")):
         response = await client.get(f"/decisions/{allowed.decision_id}", headers=headers)
         assert (response.status_code, response.json()) == (status, {"code": code})
     refusals = [(e.event.session_id, e.event.summary) for e in await ledger_rows(app, rows) if e.event.kind == "auth"]
-    assert refusals == [(visitor.session_id, {"route": "GET /decisions/{decision_id}", "reason": "bad_token"})]
+    assert refusals == [(visitor.session_id, {"route": "GET /decisions/{decision_id}", "reason": "bad_token"}),
+                        (visitor.session_id, {"route": "GET /decisions/{decision_id}", "reason": "wrong_copy"})]
 
 
 async def test_a_decision_is_read_only_with_its_own_sessions_token(app, client, registry):
@@ -929,6 +931,35 @@ async def test_a_decision_is_read_only_with_its_own_sessions_token(app, client, 
     assert (refusal.session_id, refusal.summary) == (neighbour.session_id, {"route": route, "reason": "unknown_decision"})
     # the decision's own session still reads it, unchanged
     response = await client.get(f"/decisions/{allowed.decision_id}", headers=visitor.headers)
+    assert Decision.model_validate(response.json()) == allowed
+
+
+async def test_an_owners_refused_read_is_ledgered_on_the_decisions_session(app, client, registry, caplog):
+    quote = FakeAdapter("native.quote")
+    rows = await desk_with(app, [quote], [card("quote", "native.quote")])
+    elsewhere = await desk_with(app, [quote], [card("quote", "native.quote")])   # another copy
+    visitor = await open_visitor(client, rows)
+    allowed = await decided(client, visitor, "native.quote", {"qty": 1})
+    # the session a read names is the decision's, for the owner's credential too: another copy's
+    # owner finds nothing (404, as for a decision no copy has), a bad owner token is 401, and each
+    # is ledgered on the decision's session
+    for headers, status, code in ((elsewhere.owner, 404, "not_found"),
+                                  ({auth.OWNER_HEADER: "not-a-token"}, 401, "auth")):
+        response = await client.get(f"/decisions/{allowed.decision_id}", headers=headers)
+        assert (response.status_code, response.json()) == (status, {"code": code}), sorted(headers)
+    route = "GET /decisions/{decision_id}"
+    refusals = [(e.event.session_id, e.event.summary) for e in await ledger_rows(app, rows) if e.event.kind == "auth"]
+    assert refusals == [(visitor.session_id, {"route": route, "reason": "wrong_copy"}),
+                        (visitor.session_id, {"route": route, "reason": "bad_owner_token"})]
+    assert [e for e in await ledger_rows(app, elsewhere) if e.event.kind == "auth"] == []
+    # a decision no copy has names no session: the owner's 404 has no ledger to go on, so it is logged
+    caplog.set_level(logging.WARNING, logger="desk.kernel_service")
+    response = await client.get("/decisions/dec-none", headers=elsewhere.owner)
+    assert (response.status_code, response.json()) == (404, {"code": "not_found"})
+    assert f"auth_unattributed route={route} reason=unknown_decision" in caplog.text
+    assert len([e for e in await ledger_rows(app, rows) if e.event.kind == "auth"]) == 2
+    # the decision's own owner still reads it, unchanged
+    response = await client.get(f"/decisions/{allowed.decision_id}", headers=rows.owner)
     assert Decision.model_validate(response.json()) == allowed
 
 

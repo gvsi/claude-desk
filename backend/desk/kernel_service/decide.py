@@ -882,16 +882,19 @@ async def get_decision(decision_id: str, ctx: Ctx, request: Request) -> Decision
     orphaned execution reconciled, lazy expiry applied). The session a read names is the
     decision's ("Kernel HTTP API v2", Credentials), so any other session's token, or no single
     credential, is 401, ledgered on the decision's session whatever copy the caller is in. A
-    decision no copy holds is 404, ledgered on the session whose token asked; another copy's owner
-    finds nothing (404)."""
-    storable = _storable(decision_id)
+    decision no copy holds is 404, ledgered on the session whose token asked. The owner's
+    credential is held to the same naming: a bad owner token is 401 and another copy's owner finds
+    nothing (404), each ledgered on the decision's session; an owner asking for a decision no copy
+    holds is 404, logged, since an owner session has no Desk ledger of its own."""
+    copy_id = await repo.copy_of_decision_id(ctx, decision_id) if _storable(decision_id) else None
     if auth.OWNER_HEADER in request.headers and auth.SESSION_HEADER not in request.headers:
-        await auth.require_owner(ctx, request)
-        row = await _decision_row(ctx, decision_id) if storable else None
-        if row is None:
-            raise KernelFailure(404, "not_found", "unknown_decision")
+        named = Named(copy_id=copy_id, decision_id=decision_id) if copy_id is not None else None
+        owner = await auth.require_owner(ctx, request, named=named)
+        row = await _decision_row(ctx, decision_id) if copy_id == owner.copy_id else None
+        if row is None:   # another copy's decision, or none: 404 alike
+            raise AuthError(404, "not_found", "unknown_decision" if named is None else "wrong_copy",
+                            route=route_template(request), named=named)
         return await decision_contract(ctx, await _read(ctx, row))
-    copy_id = await repo.copy_of_decision_id(ctx, decision_id) if storable else None
     row = await _decision_row(ctx, decision_id, copy_id) if copy_id is not None else None
     if row is None:   # no decision has this ID, so it names no session: the token alone says who asks
         await auth.caller(ctx, request, None)

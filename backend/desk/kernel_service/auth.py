@@ -25,6 +25,7 @@ from sqlalchemy import select
 
 from desk.contracts import LedgerEvent
 from desk.db.models import ActorSession, Desk
+from desk.db.models import Decision as DecisionRow
 from desk.kernel_service import ledger, repo
 from desk.kernel_service.repo import KernelCtx, KernelFailure, route_template
 
@@ -59,11 +60,14 @@ def hash_token(token: str) -> str:
 @dataclass(frozen=True)
 class Named:
     """The existing session or Desk a refused request named: its Desk's ledger records the refusal.
-    A session found only by its copy (`desk_id` None) has its Desk read when the refusal is written."""
+    A session found only by its copy (`desk_id` None) has its Desk read when the refusal is written.
+    A decision (`decision_id`) names its own session ("Kernel HTTP API v2", Credentials), whose
+    session and Desk are read then too."""
 
     copy_id: str
     desk_id: str | None = None
     session_id: str | None = None
+    decision_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -87,15 +91,19 @@ class AuthError(KernelFailure):
 async def _ledger_refusal(ctx: KernelCtx, *, named: Named, route: str, reason: str) -> None:
     """The refusal's `auth` entry, in the fresh transaction `KernelFailure.persist` runs in."""
     copy = ctx.bind(named.copy_id)
-    desk_id = named.desk_id
-    if desk_id is None and named.session_id is not None:
+    desk_id, session_id = named.desk_id, named.session_id
+    if named.decision_id is not None:
+        found = (await ctx.db.execute(copy.scoped(select(DecisionRow.desk_id, DecisionRow.session_id).where(
+            DecisionRow.decision_id == named.decision_id)))).first()
+        desk_id, session_id = found if found is not None else (None, None)
+    if desk_id is None and session_id is not None:
         desk_id = (await ctx.db.execute(copy.scoped(
-            select(SessionRow.desk_id).where(SessionRow.session_id == named.session_id)))).scalar_one_or_none()
+            select(SessionRow.desk_id).where(SessionRow.session_id == session_id)))).scalar_one_or_none()
     if desk_id is None:   # an owner session of another copy: it belongs to the copy and has no Desk ledger
         log.warning("auth_unattributed route=%s reason=%s", route, reason)
         return
     await ledger.append(ctx, copy_id=named.copy_id, desk_id=desk_id,
-                        event=LedgerEvent(kind="auth", origin="kernel", session_id=named.session_id,
+                        event=LedgerEvent(kind="auth", origin="kernel", session_id=session_id,
                                           summary={"route": route, "reason": reason}))
 
 
@@ -197,14 +205,17 @@ def require_open(ctx: KernelCtx, request: Request, row: SessionRow, *, generatio
 
 
 async def require_owner(ctx: KernelCtx, request: Request, *, desk_id: str | None = None,
-                        session_id: str | None = None) -> OwnerCtx:
+                        session_id: str | None = None, named: Named | None = None) -> OwnerCtx:
     """The owner session `X-Owner-Session` proves and the copy it owns ("Session state responses",
     first two rows): the Desk `desk_id`, or the session `session_id`, must belong to that copy.
-    Binds the request's transaction to the owner's copy."""
+    Binds the request's transaction to the owner's copy. A refused token goes on the ledger of the
+    session `session_id` names, or of `named` when the call names its session another way (the
+    decision `GET /decisions/{id}` reads), and is logged when there is none."""
     route = route_template(request)
     # the session a call names is found first, so a refusal goes on its ledger, whatever copy it is in
     target_copy = await repo.copy_of_session_id(ctx, session_id) if session_id is not None else None
-    named = Named(copy_id=target_copy, session_id=session_id) if target_copy is not None else None
+    if session_id is not None:
+        named = Named(copy_id=target_copy, session_id=session_id) if target_copy is not None else None
     token = request.headers.get(OWNER_HEADER)
     token_hash = hash_token(token) if token else None
     copy_id = await repo.copy_of_session_token(ctx, token_hash) if token_hash else None
