@@ -1,0 +1,20 @@
+/* RecordedNote: the 14 px history icon, 2 px down so it sits on the first line, then the words
+   6 px after it, in caption type and secondary ink. A wrapped line stays under the words. */
+
+.cd-recorded-note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-6);
+  min-width: 0;
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cd-recorded-note > svg {
+  flex: none;
+  margin-top: var(--space-2);
+}
+
+.cd-recorded-note__text {
+  min-width: 0;
+}
