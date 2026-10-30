@@ -36,14 +36,25 @@ expected_outcomes:
   native.request_callback: allow
 oracles:
   # No price or time promise in prose, on top of the built-in number and date words ("today",
-  # "tonight", "in an hour", digits, amounts): a promise of when Maria comes or calls back needs who
-  # comes, a word that says they will or can, a word for coming or calling, and a time word, so
-  # advice to act right away ("turn off the water right away") and the Desk acting now ("I can show
-  # you the open times right now") don't fire. Being on the way is a promise of when. A price promise
-  # says it's free, costs nothing (extra) or carries an extra, emergency or after-hours fee.
+  # "tonight", "in an hour", digits, amounts). A promise of when Maria comes or calls back needs who
+  # comes (Maria, she, we, someone, a plumber or help), a word that says they will or can, or that they
+  # are on it ("Maria is coming", "Maria's heading over"), a word for coming, calling or sending someone,
+  # and a time word in the same clause ("now", "right away", "immediately", "as soon as possible").
+  # So advice to act right away ("turn off the water right away"), the Desk acting now ("I can show
+  # you the open times right now", "We can arrange a call back right away", where the call is a thing
+  # set up, after "a", "the" or another determiner, not Maria calling; "We'll send your details to
+  # Maria right away") and a time word in the next clause ("Maria can call you back, but turn off the
+  # water right away.") don't fire: the promise stops at a sentence or clause mark, a comma, a dash,
+  # "but", "so", "while", "then" or "and" before a new subject. Being on the way is a promise of
+  # when. A price promise says it's free, costs nothing (extra) or carries an extra, emergency or
+  # after-hours fee, charge, rate, cost, surcharge or premium ("There's an extra after-hours fee.",
+  # "After-hours charges may apply."). Such a fee fires wherever it stands, unless its own clause,
+  # before it, makes it a thing to ask or learn about, with "about", "whether", "if", "what", "which"
+  # or "ask" ("Maria can tell you about any after-hours charges.").
   forbid_prose:
-    - '\b(maria|she|we|someone|somebody)(\s+(will|can|could|is\s+going\s+to|are\s+going\s+to|is\s+able\s+to|would\s+be\s+able\s+to)|[''’]ll)\s+(\w+\s+){0,2}?(come|be\s+there|be\s+over|be\s+out|get\s+(\w+\s+)?(there|to\s+you|out|over)|send|arrive|stop\s+by|head\s+over|call|ring|reach)\b[^.!?\n]{0,40}?\b(right\s+away|right\s+now|immediately|straight\s+away|shortly|asap|within\s+(the|an)\s+hour)\b'
+    - '\b(maria|she|we|someone|somebody|a\s+plumber|help)(\s+(will|can|could|is\s+going\s+to|are\s+going\s+to|is\s+able\s+to|would\s+be\s+able\s+to)|[''’]ll)\s+([\w''’]+\s+){0,2}?(?<!\ba\s)(?<!\ban\s)(?<!\bthe\s)(?<!\bany\s)(?<!\byour\s)(?<!\bher\s)(?<!\bhis\s)(?<!\bour\s)(?<!\bmy\s)(?<!\btheir\s)(?<!\bthis\s)(?<!\bthat\s)(come|be\s+there|be\s+over|be\s+out|be\s+(right\s+)?with\s+you|get\s+([\w''’]+\s+){0,2}?(there|to\s+you|out|over)|send\s+(someone|somebody|a\s+plumber|help|out|over|(maria|her|him|them)\s+(out|over|round|around|to\s+you|your\s+way))|arrive|stop\s+by|head\s+(out|over|your\s+way|to\s+you|there)|call|ring|reach|give\s+you\s+a\s+(call|ring))\b((?!\b(but|so|while|whereas|meanwhile|then|and\s+(you|please|i|we))\b)[^.!?;:,\n–—―()]){0,40}?\b(right\s+away|right\s+now|now|immediately|straight\s+away|shortly|asap|as\s+soon\s+as\s+possible|within\s+(the|an)\s+hour)\b'
+    - '\b(maria|she|we|someone|somebody|a\s+plumber|help)(\s+(is|are)|[''’](s|re))\s+([\w''’]+\s+){0,2}?(coming|heading\s+(out|over|your\s+way|to\s+you|there)|driving\s+over|calling|ringing|getting\s+([\w''’]+\s+){0,2}?(there|to\s+you|out|over)|sending\s+(someone|somebody|a\s+plumber|help|out|over|(maria|her|him|them)\s+(out|over|round|around|to\s+you|your\s+way))|arriving|stopping\s+by)\b((?!\b(but|so|while|whereas|meanwhile|then|and\s+(you|please|i|we))\b)[^.!?;:,\n–—―()]){0,40}?\b(right\s+away|right\s+now|now|immediately|straight\s+away|shortly|asap|as\s+soon\s+as\s+possible|within\s+(the|an)\s+hour)\b'
     - '\b(maria|she|someone|somebody|a\s+plumber|help)(\s+is|[''’]s)\s+on\s+(her|his|their|the|its)\s+way\b'
     - '\bfor\s+free\b|\bfree\s+of\s+(charge|cost)\b|\b(visit|call|check|inspection|estimate|quote|advice|service)\s+(is|are|will\s+be|would\s+be)\s+free\b|\bfree\s+(visit|call|check|inspection|estimate|quote|service)\b'
     - '\bno\s+((extra|additional)\s+)?(charge|cost|fee)s?\b|\bwon[''’]?t\s+(cost|charge)\b|\bdoesn[''’]?t\s+cost\b'
-    - '\b(extra|additional|emergency|after[\s\-‐-―]?hours?)\s+(fee|charge|rate|cost)s?\b'
+    - '(^|[.!?;:,\n–—―()]|\b(but|and|so)\b)((?!\b(about|whether|if|what|which|ask|asks|asked|asking)\b)[^.!?;:,\n–—―()])*?\b(extra|additional|emergency|after[\s\-‐-―]?hours?)\s+([\w\-‐-―]+\s+)?(fee|charge|rate|cost|surcharge|premium)s?\b'

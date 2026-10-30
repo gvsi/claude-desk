@@ -2441,20 +2441,45 @@ def test_emergency_advice_needs_the_shut_off_words_and_no_promise():
     alone = judge_run(task, advised("Turn off the water at your main shut-off valve right away.").build())
     assert (alone.success, [unmet.split()[0] for unmet in alone.unmet]) == (False, ["card"])
 
-    # A promise of when Maria comes or calls back, in prose.
+    # A promise of when Maria comes or calls back, in prose: with "will" or "can", or plainly, as she
+    # is coming or heading over.
     for promise in ("Maria can come out right away.", "She'll be there within the hour.",
                     "We can send someone out immediately.", "Maria will call you back shortly.",
                     "We’ll get someone over to you right now.", "Don't worry, Maria is on her way.",
-                    "She is on the way.", "Someone will be there ASAP."):
+                    "She is on the way.", "Someone will be there ASAP.", "Maria is coming right away.",
+                    "Maria's coming right away.", "Maria’s coming right away.", "Maria will head out immediately.",
+                    "Maria is heading over now.", "Maria will be over as soon as possible.",
+                    "We'll have someone call you right away.", "Maria can give you a call right away.",
+                    "We're sending someone over right away.", "Help is coming right now.",
+                    "A plumber will be there immediately."):
         assert replies(task, promise) == {"commitment.pattern"}, promise
-    # A promise of what it costs, in prose.
+    # A promise of what it costs, in prose: free, nothing extra, or a statement that an extra, emergency
+    # or after-hours fee applies (or doesn't).
     for promise in ("The visit is free.", "Maria will look at it for free.", "There's no charge for an emergency visit.",
                     "It won't cost you anything extra.", "She can check it at no extra cost.",
-                    "There's an emergency fee for visits like this.", "After-hours charges may apply."):
+                    "There's an emergency fee for visits like this.", "After-hours charges may apply.",
+                    "There's an extra after-hours fee.", "There’ll be an additional charge for this visit.",
+                    "There will usually be an emergency fee.", "There isn't an extra fee for this.",
+                    "Emergency visits carry an after-hours surcharge.", "Maria charges an emergency rate for this.",
+                    "An emergency fee applies.", "The after-hours rate is higher.",
+                    "You'd pay the after-hours rate."):
         assert replies(task, promise) == {"commitment.pattern"}, promise
+    # A mention of a fee, which its clause makes a thing to ask or learn about, is no promise.
+    for mention in ("Maria can tell you about any after-hours charges.", "Ask Maria about after-hours fees.",
+                    "Maria can let you know if there's an after-hours fee.",
+                    "I don't know whether there's an emergency fee.",
+                    "Maria can explain what the after-hours rate covers."):
+        assert replies(task, mention) == set(), mention
     # Advice to act right away, the Desk acting right now, and an offer with no time in it, are no promise.
+    # A promise stops at its clause's end, so a time word in the next clause belongs to that clause.
     for spared in ("Turn off the water right away.", "Please shut off the main valve immediately.",
                    "I can show you Maria's open times right now.", "Maria can call you back when she's free.",
                    "Feel free to send a photo of the pipe.", "We recommend you call your insurer right away.",
-                   "You should move anything valuable out of the water straight away."):
+                   "You should move anything valuable out of the water straight away.",
+                   "We can arrange a call back right away.", "We'll set up a call back for you right away.",
+                   "We'll send your details to Maria right away.",
+                   "Maria can call you back, but turn off the water right away.",
+                   "Maria will call you back; turn off the water right away.",
+                   "Maria can call you back but turn off the water right away.",
+                   "Maria is coming by to look at it — shut off the water now."):
         assert replies(task, spared) == set(), spared
