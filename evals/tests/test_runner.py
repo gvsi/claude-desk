@@ -843,6 +843,29 @@ async def test_guessed_codes_reach_verify_check_without_an_inbox_read():
     assert outcome.verdict.violations == []
 
 
+BEFORE_01B = ("master", "01a", "02a", "02")
+
+
+@pytest.mark.parametrize("landed", [BEFORE_01B, (*BEFORE_01B, "01b")])
+async def test_the_owners_demo_inbox_is_read_only_once_plan_01b_has_landed(landed):
+    """The owner's Demo inbox (the kernel's `GET /demo_inbox`) and the codes and notices it holds come
+    with plan 01b. Before it lands, the run doesn't read it: its inbox is empty and the artifact says
+    why. Once it has, an inbox that can't be read fails the run as `infra`, as any record the verdict
+    needs does."""
+    scenario = attack(max_turns=1)
+    desk = Desk(chat(scenario, 1))
+    desk.failures["owner_demo_inbox"] = ApiCallFailed("owner_demo_inbox", 404, {"error": "not_found"})
+    outcome = await drive(scenario, desk, Visitor(desk), landed=landed)
+    if "01b" in landed:
+        assert (outcome.error.kind, outcome.verdict) == ("infra", None)
+        assert "owner_demo_inbox answered 404" in outcome.error.detail
+        return
+    assert outcome.error is None and outcome.verdict.violations == [], outcome.error
+    assert desk.ops("owner_demo_inbox") == []
+    assert outcome.artifact.owner_inbox == [] and outcome.artifact.landed == list(landed)
+    assert "plan 01b" in outcome.artifact.owner_inbox_unread
+
+
 async def test_agent_without_a_mandate_opens_a_mandateless_session():
     for with_mandate in (False, True):
         scenario = attack(visitor="agent", max_turns=2, setup={"agent_mandate": with_mandate})

@@ -33,7 +33,9 @@
 6. The copy's records (`Records.snapshot`), each decision read through `owner_decision`, the
    owner's Demo inbox, usage (`app.model_calls` and the kernel's `review` and `reply` entries; a
    Desk-side model other than the configured one is `config_mismatch`), `check_complete` (anything
-   missing is `infra`, so a blind snapshot can't read as clean), then `judge_run`, in memory.
+   missing is `infra`, so a blind snapshot can't read as clean), then `judge_run`, in memory. The
+   owner's Demo inbox is the kernel's, which plan 01b adds: before that plan has landed where the pass
+   runs (`landed`), the run doesn't read it and the artifact says so (`owner_inbox_unread`).
 
 The whole run has a wall clock (`wall_clock_s`); passing it is a `timeout`. The outcome is written
 to `out_dir` with codes, agent keys, cookies, tokens and link tokens redacted.
@@ -72,7 +74,7 @@ from evals.tier2.artifact import (
 from evals.tier2.prompts import Observation
 from evals.tier2.schema import Scenario
 from evals.tier2.simulator import SimulatorError, note, observe_a2a, observe_events, production_name, said
-from evals.tier2.verdict import RunVerdict, check_complete, judge_run
+from evals.tier2.verdict import KERNEL_VERIFICATION_PLAN, RunVerdict, check_complete, has_landed, judge_run
 
 RunErrorKind = Literal["infra", "timeout", "simulator_refused", "config_mismatch"]
 
@@ -96,6 +98,9 @@ _CODE = re.compile(r"(?<!\d)\d{6}(?!\d)")
 _LINK = re.compile(r"(/api/d/|/api/pay/|/pay/)([^/?#\s\"'\\]+)")
 REDACTED = "[redacted]"
 MIN_SECRET = 6   # shorter values aren't redacted as text (a code is six digits)
+# What the artifact says when the run left the owner's Demo inbox unread.
+OWNER_INBOX_UNREAD = ("not read: plan 01b, which adds the owner's Demo inbox to the kernel with the codes and "
+                      "notices it holds, hasn't landed")
 
 
 class RunError(BaseModel):
@@ -175,13 +180,16 @@ def rivera_seed_data(now: datetime) -> tuple[list[dict[str, Any]], list[dict[str
 async def run_scenario(scenario: Scenario, rep: int, target: Any, simulator: Any, *, wall_clock_s: float = 600,
                        turn_timeout_s: float = 90, pass_id: str = "local", out_dir: Path | None = None,
                        new_client: Callable[[], Any] | None = None,
-                       seed: Callable[[datetime], tuple[list[dict], list[dict]]] | None = None) -> RunOutcome:
+                       seed: Callable[[datetime], tuple[list[dict], list[dict]]] | None = None,
+                       landed: Iterable[str] | None = None) -> RunOutcome:
     """Run `scenario` once on `target` (an `ApiTarget`) with `simulator` as the visitor, and judge it.
 
+    `landed` is the plans landed where the pass runs (its `landed.toml`), recorded in the artifact: they
+    decide what the run reads and which checks the verdict runs; None reads and checks everything.
     `new_client` makes one person's client (a `DeskClient` on the target by default) and `seed` reads
     the seed's documents and people (`rivera_seed_data`): test seams, so a stand-in API can play both."""
     run = _Run(scenario, rep, target, simulator, turn_timeout_s=turn_timeout_s, pass_id=pass_id,
-               new_client=new_client, seed=seed or rivera_seed_data)
+               new_client=new_client, seed=seed or rivera_seed_data, landed=landed)
     artifact = verdict = error = None
     try:
         try:
@@ -227,8 +235,9 @@ class _Run:
 
     def __init__(self, scenario: Scenario, rep: int, target: Any, simulator: Any, *, turn_timeout_s: float,
                  pass_id: str, new_client: Callable[[], Any] | None,
-                 seed: Callable[[datetime], tuple[list[dict], list[dict]]]):
+                 seed: Callable[[datetime], tuple[list[dict], list[dict]]], landed: Iterable[str] | None):
         self.scenario, self.setup, self.rep = scenario, scenario.setup, rep
+        self.landed = list(landed) if landed is not None else None
         self.target, self.simulator = target, simulator
         self.turn_timeout_s, self.pass_id, self.seed = turn_timeout_s, pass_id, seed
         self.records = target.kernel.records
@@ -741,18 +750,25 @@ class _Run:
         for row in records.get("decisions", []):
             decision = Decision.model_validate(await self.owner.owner_decision(row["decision_id"]))
             decisions[decision.decision_id] = decision
-        inbox = [DemoInboxEntry.model_validate(entry) for entry in await self.owner.owner_demo_inbox()]
+        # The kernel's Demo inbox comes with plan 01b: before it lands there is no inbox to read, nor any code
+        # or notice for it to hold. Once it has, an inbox the run can't read fails the run as `infra`.
+        inbox: list[DemoInboxEntry] = []
+        unread: str | None = OWNER_INBOX_UNREAD
+        if has_landed(self.landed, KERNEL_VERIFICATION_PLAN):
+            inbox = [DemoInboxEntry.model_validate(entry) for entry in await self.owner.owner_demo_inbox()]
+            unread = None
         self.secrets |= {code for entry in inbox if entry.kind == "verification_code"
                          for code in _CODE.findall(entry.body)}
         usage, served = await self._usage(records)
         verified_ref = self.verified_ref
         artifact = RunArtifact(
-            scenario_id=self.scenario.id, rep=self.rep, pass_id=self.pass_id, copy_id=self.copy_id,
+            scenario_id=self.scenario.id, rep=self.rep, pass_id=self.pass_id, landed=self.landed, copy_id=self.copy_id,
             desk_ids=[self.desk_id], session_ids=self.session_ids, turns=self.turns, owner_actions=self.owner_actions,
             setup=RunSetup(verified_ref=verified_ref, verified_person_id=self._person_id(verified_ref, records),
                            planted_markers=self.planted),
             markers=[*seed_markers(self.documents, self.people.values()), *self.planted],
             documents_fetched=self.documents_fetched, records=records, decisions_full=decisions, owner_inbox=inbox,
+            owner_inbox_unread=unread,
             public_key_hex=self.target.kernel.health.public_key_hex, usage=usage, simulator_usage=self.sim_run.usage,
             served_models=served,
             providers=Providers(api=getattr(self.target, "provider", None) or "anthropic",

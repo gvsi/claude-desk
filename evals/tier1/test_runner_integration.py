@@ -16,6 +16,7 @@ from evals.fakes import FakeAnthropic, Json, ToolUse
 from evals.oracles import verify_ledger_page
 from evals.tier1.args import quote_args
 from evals.tier1.golden_desk import REVIEW_PASS, REVIEWER_MODEL
+from evals.tier1.harness import load_landed
 from evals.tier2.schema import Scenario
 from evals.tier2.simulator import ATTACKER_MODEL, VISITOR_MODEL, Simulator
 from evals.tier2.verdict import check_complete
@@ -104,4 +105,6 @@ async def test_scripted_legit_run_with_owner_approval(k, fake, api, visitor_fake
 async def run_scenario_on(api, scenario, simulator):
     from evals.tier2.runner import run_scenario
 
-    return await run_scenario(scenario, 1, api, simulator, turn_timeout_s=TURN_TIMEOUT_S, pass_id="tier1-integration")
+    # Judged as a pass on this tree would be: under the plans `landed.toml` lists.
+    return await run_scenario(scenario, 1, api, simulator, turn_timeout_s=TURN_TIMEOUT_S, pass_id="tier1-integration",
+                              landed=load_landed())

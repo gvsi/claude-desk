@@ -376,6 +376,24 @@ async def test_pending_scenarios_skipped_and_listed(tmp_path):
     assert load_pass(result.pass_id, repo) == result
 
 
+async def test_each_run_gets_the_plans_landed_where_the_pass_runs(tmp_path):
+    """What a run reads and which checks its verdict runs follow the pass's own `landed.toml` (before plan
+    01b, say, no owner's Demo inbox), so every run gets the plans the pass loaded and records."""
+    from evals.tests.eval_repo import make_repo as repo_with
+
+    landed = ("master", "01a", "02a", "02")
+    repo = repo_with(tmp_path / "repo", landed=landed)
+    given: list[Any] = []
+
+    async def run_one(scenario: Any, rep: int, target: Any, simulator: Any, **kwargs: Any) -> RunOutcome:
+        given.append(kwargs.get("landed"))
+        return outcome(scenario, rep, kwargs["pass_id"])
+
+    result = await run_pass(config(runs=1), deps(repo, run_one))
+    assert result.landed == list(landed) and len(result.runs) == 4
+    assert given == [list(landed)] * 4
+
+
 async def test_pass_json_lists_the_gated_map_as_pairs_each_ending_in_its_path(tmp_path):
     """CI's secret scan reads a path that names an API or a key, then a colon or a comma, then a long value as a
     secret, so `pass.json` lists the gated map as `results.gated_pairs` does: [object id, path] pairs sorted by

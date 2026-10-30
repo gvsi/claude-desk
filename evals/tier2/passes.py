@@ -18,7 +18,8 @@ secrets redacted). In order, before any run:
    loaded, the checks below and `make kernel`, so nothing committed later is named.
 5. The suite: the scenarios, splits and `landed.toml` are loaded, then `--suite`, `--split` and
    `--only` select over the suite; a scenario that `requires` a plan `landed.toml` lacks is
-   pending, listed with that plan and never run.
+   pending, listed with that plan and never run. Every run gets the landed plans (`run_scenario`'s
+   `landed`), which decide what it reads and which checks its verdict runs.
 6. A pass with runs to make and real models refuses to start without `ANTHROPIC_API_KEY` (the
    kernel's checks use it on every provider), on `bedrock` without `BEDROCK_BEARER_TOKEN`, and
    without list prices for every model it calls on its provider (`evals.pricing.PRICES`).
@@ -600,6 +601,7 @@ class _Pass:
         if problems := split_problems(suite, splits):
             raise PassRefused("the splits don't hold the suite: " + "; ".join(problems))
         landed = load_landed(evals_path(root, "tier1", "landed.toml"))
+        self.landed = list(landed)   # each run gets them: what it reads and which checks run follow them
         selected = self._select(suite.scenarios, splits)
         pending = {s.id: plan for s in selected if (plan := next((p for p in s.requires if p not in landed), None))}
         todo = [(s, rep) for s in selected if s.id not in pending for rep in range(1, config.runs + 1)]
@@ -737,7 +739,7 @@ class _Pass:
         try:
             outcome = await self.deps.run_one(run_as, rep, target, simulator, pass_id=self.pass_id,
                                               wall_clock_s=self.config.wall_clock_s,
-                                              turn_timeout_s=self.config.turn_timeout_s)
+                                              turn_timeout_s=self.config.turn_timeout_s, landed=self.landed)
         except asyncio.CancelledError:   # cut short with its usage unread: charged its estimate
             if not self.config.dry_run:
                 self.spend += self._estimate(scenario.id, rep, attempt, "the pass stopped it before it ended")
