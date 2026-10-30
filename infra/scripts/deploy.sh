@@ -77,10 +77,26 @@ for name in DESK_IMAGE_DIR DESK_IMAGE_FILE DESK_KERNEL_IMAGE; do
     exit 2
   fi
 done
-if [[ -z $data_only && -z ${DESK_PASSCODE:-} ]]; then
-  echo "deploy: export DESK_PASSCODE first (read -rs DESK_PASSCODE; export DESK_PASSCODE); the smoke checks sign in with it" >&2
+# The owner passcode the smoke checks sign in with: DESK_PASSCODE when it's set, else the macOS
+# Keychain's claude-desk-passcode item. It stays in this shell, unexported, and only smoke.py is
+# given it, in its environment: never on a command line, in the output or in the log.
+no_passcode() {
+  echo "deploy: DESK_PASSCODE isn't set and $*; the smoke checks sign in with the passcode" >&2
+  echo 'deploy: store it once in the Keychain with: security add-generic-password -s claude-desk-passcode -a "$USER" -w' >&2
+  echo "deploy: (it asks for the passcode twice, without echo), or export DESK_PASSCODE for this run" >&2
   exit 2
+}
+passcode=
+if [[ -z $data_only ]]; then
+  passcode=${DESK_PASSCODE:-}
+  if [[ -z $passcode ]]; then
+    command -v security >/dev/null || no_passcode "there's no \`security\` command here to read the macOS Keychain with"
+    if ! passcode=$(security find-generic-password -s claude-desk-passcode -w) || [[ -z $passcode ]]; then
+      no_passcode "no claude-desk-passcode item could be read from the macOS Keychain"
+    fi
+  fi
 fi
+unset DESK_PASSCODE
 
 mkdir -p "$OUT"
 log=$OUT/deploy-$(date -u +%Y%m%dT%H%M%SZ).log
@@ -240,7 +256,7 @@ if [[ $compute == express ]]; then
   [[ -n $load_balancer ]] || fail "DeskApp has no LoadBalancerArn output whose security groups to check"
   smoke+=(--origin-host "$origin_host" --load-balancer-arn "$load_balancer")
 fi
-uv run --project "$INFRA" python "$INFRA/scripts/smoke.py" "${smoke[@]}" ||
+DESK_PASSCODE=$passcode uv run --project "$INFRA" python "$INFRA/scripts/smoke.py" "${smoke[@]}" ||
   fail "the smoke checks failed: the deploy isn't done, and the thin slice isn't announced"
 
 echo

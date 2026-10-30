@@ -240,11 +240,13 @@ def test_first_deploy_runs_every_step_in_order(deploy):
                            "--origin-host", "desk-0a1b2c3d.ecs.us-west-2.on.aws", "--load-balancer-arn", LOAD_BALANCER]
 
 
-def test_cdk_deploys_ask_for_approval_on_the_terminal(deploy):
-    run = deploy()
+@pytest.mark.parametrize("account", [{}, {"DESK_DEPLOY_ACCOUNT": ACCOUNT}])
+def test_cdk_deploys_ask_for_approval_on_the_terminal(deploy, account):
+    """At a terminal cdk keeps its approval prompt, whether or not DESK_DEPLOY_ACCOUNT is set."""
+    run = deploy(**account)
     assert run.status == 0, run.output
     cdk_calls = [call for call in run.calls if call["tool"] == "npx"]
-    assert cdk_calls
+    assert cdk_calls and all(call["argv"][2] == "deploy" for call in cdk_calls)
     for call in cdk_calls:
         argv = call["argv"]
         assert argv[argv.index("--require-approval") + 1] == "broadening"
@@ -421,8 +423,12 @@ def test_admin_failure_stops_before_desk_app(deploy):
     assert not any(call["tool"] == "uv" and any("smoke.py" in a for a in call["argv"]) for call in run.calls)
 
 
+def _is_smoke(call: dict) -> bool:
+    return call["tool"] == "uv" and any("smoke.py" in a for a in call["argv"])
+
+
 def _smoke_ran(run) -> bool:
-    return any(call["tool"] == "uv" and any("smoke.py" in a for a in call["argv"]) for call in run.calls)
+    return any(_is_smoke(call) for call in run.calls)
 
 
 def test_a_public_url_that_moves_again_stops_before_smoke(deploy):
@@ -449,11 +455,56 @@ def test_smoke_failure_fails_the_deploy(deploy, status):
     assert "smoke" in run.log.lower() and "stopped" in run.log
 
 
-def test_needs_the_passcode_exported(deploy):
-    run = deploy(DESK_PASSCODE=None)
+def _sha256(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+@pytest.mark.parametrize("terminal", [True, False])
+def test_without_an_exported_passcode_it_comes_from_the_keychain(deploy, terminal):
+    """The smoke checks sign in with the passcode the Keychain holds; deploy.sh reads it once, before
+    any deploy step, and gives it to smoke.py alone, never on a command line, the log or the output."""
+    run = deploy(terminal=terminal, keychain_item="keychain-test-passcode", DESK_PASSCODE=None,
+                 DESK_DEPLOY_ACCOUNT=ACCOUNT)
+    assert run.status == 0, run.output
+    assert run.steps()[0] == "security find-generic-password"
+    [lookup] = [call for call in run.calls if call["tool"] == "security"]
+    assert lookup["argv"] == KEYCHAIN_LOOKUP
+    given = {call["passcode"] for call in run.calls if call["tool"] != "security" and not _is_smoke(call)}
+    assert given == {None}
+    [smoke] = [call for call in run.calls if _is_smoke(call)]
+    assert smoke["passcode"] == _sha256("keychain-test-passcode")
+    assert "keychain-test-passcode" not in run.text()
+
+
+def test_an_exported_passcode_wins_over_the_keychain(deploy):
+    """DESK_PASSCODE, when set, is the one the smoke checks use; the Keychain isn't read, and no
+    step but smoke.py inherits it."""
+    run = deploy(keychain_item="keychain-test-passcode", DESK_PASSCODE="exported-test-passcode")
+    assert run.status == 0, run.output
+    assert not [call for call in run.calls if call["tool"] == "security"]
+    given = {call["passcode"] for call in run.calls if not _is_smoke(call)}
+    assert given == {None}
+    [smoke] = [call for call in run.calls if _is_smoke(call)]
+    assert smoke["passcode"] == _sha256("exported-test-passcode")
+    assert "exported-test-passcode" not in run.text()
+
+
+@pytest.mark.parametrize("item", [None, ""])
+def test_no_passcode_in_the_keychain_says_how_to_store_it_before_any_step(deploy, item):
+    run = deploy(keychain_item=item, DESK_PASSCODE=None, DESK_DEPLOY_ACCOUNT=ACCOUNT)
     assert run.status == 2
-    assert "DESK_PASSCODE" in run.output
+    assert run.steps() == ["security find-generic-password"]
+    assert STORE_IT in run.output
+    assert "DESK_PASSCODE" in run.output                                     # the other way to give it
+
+
+def test_no_security_command_says_how_to_store_the_passcode_before_any_step(deploy):
+    """Off macOS, or with `security` missing, there's no Keychain to read: deploy.sh says so."""
+    run = deploy(security=False, DESK_PASSCODE=None, DESK_DEPLOY_ACCOUNT=ACCOUNT)
+    assert run.status == 2
     assert run.calls == []
+    assert "no `security` command" in run.output
+    assert STORE_IT in run.output and "DESK_PASSCODE" in run.output
 
 
 def test_unattended_without_the_deploy_account_is_refused(deploy):
