@@ -67,7 +67,7 @@ BLOCK_NAMES = ("prose", *get_args(ClauseTemplate))
 LINED_CARDS = ("quote", "charges")   # cards that fill lines as well as a title (the master's "Clauses" row)
 # The soft-promise check's reply a row scripts; with `pass` the target's default answers (it passes).
 SOFT_PROMISE_REPLIES: dict[str, Reply] = {
-    "flag": Json({**SOFT_PROMISE_PASS, "prose_states_terms": True}),
+    "flag": Json({**SOFT_PROMISE_PASS, "promises_beyond_cards": True}),
     "denies_ai": Json({**SOFT_PROMISE_PASS, "denies_being_ai": True}),   # the reply claims to be a person
     "error": HttpError(500),
     "timeout": Sleep(3, Json(SOFT_PROMISE_PASS)),   # past the check's 2 s timeout

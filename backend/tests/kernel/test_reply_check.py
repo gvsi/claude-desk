@@ -259,7 +259,7 @@ async def test_a_fraction_beside_its_quote_is_blocked(app, client, reviewer):
     soft-promise check is asked."""
     copy, visitor = await visitor_of(app, client)
     quote = await own_quote(client, visitor)
-    reviewer.soft_answer = NOTHING_FLAGGED
+    reviewer.soft_answer = NOTHING_BEYOND_THE_CARDS
     verdict = await checked(client, visitor, "That's a quarter off.", [clause("quote", quote.fact_id)])
     assert [(v.kind, v.rule_id, v.span) for v in verdict.violations] == [("number_in_prose", "lex.en.number",
                                                                           "quarter")]
@@ -863,7 +863,7 @@ async def test_card_text_is_headline_then_details(app, client, reviewer):
 
 
 # The soft-promise check flagging nothing, so a block below is the code's own.
-NOTHING_FLAGGED = SoftPromiseVerdict(prose_states_terms=False, denies_being_ai=False)
+NOTHING_BEYOND_THE_CARDS = SoftPromiseVerdict(promises_beyond_cards=False, denies_being_ai=False)
 
 
 async def test_a_booking_claim_beside_its_card_is_blocked(app, client, reviewer):
@@ -871,7 +871,7 @@ async def test_a_booking_claim_beside_its_card_is_blocked(app, client, reviewer)
     it repeats, by the prose scan, before the soft-promise check is asked."""
     copy, visitor = await visitor_of(app, client)
     booking = await own_booking(client, reviewer, visitor)
-    reviewer.soft_answer = NOTHING_FLAGGED
+    reviewer.soft_answer = NOTHING_BEYOND_THE_CARDS
     verdict = await checked(client, visitor, "You're booked.", [clause("booking_confirmed", booking.fact_id)])
     assert [(v.kind, v.rule_id, v.span) for v in verdict.violations] == [
         ("promise_word", "lex.en.booking", "You're booked")]
@@ -883,7 +883,7 @@ async def test_a_reply_naming_only_the_card_passes(app, client, reviewer):
     """Prose that points at the booking card, and claims nothing itself, is shown with it."""
     copy, visitor = await visitor_of(app, client)
     booking = await own_booking(client, reviewer, visitor)
-    reviewer.soft_answer = NOTHING_FLAGGED
+    reviewer.soft_answer = NOTHING_BEYOND_THE_CARDS
     for prose, language in (("The booking is below.", "en"), ("Abajo tiene los datos de su reserva.", "es")):
         verdict = await checked(client, visitor, prose, [clause("booking_confirmed", booking.fact_id)])
         assert (verdict.ok, verdict.violations, verdict.language) == (True, [], language)
@@ -1176,7 +1176,7 @@ async def test_a_policy_echo_beside_its_card_is_blocked(app, client, reviewer):
     """The seeded service area's text in prose is blocked even beside the policy card it repeats,
     by the prose scan, before the soft-promise check is asked; the ledger names the rule."""
     copy, visitor = await visitor_of(app, client)
-    reviewer.soft_answer = NOTHING_FLAGGED
+    reviewer.soft_answer = NOTHING_BEYOND_THE_CARDS
     verdict = await checked(client, visitor, SERVICE_AREA, [clause("policy", "charter:policy:service_area")])
     assert [(v.kind, v.rule_id, v.span, v.fact_ids) for v in verdict.violations] == [
         ("promise_word", "policy_echo", "We work in Oakland, Berkeley, Alameda an", ["charter:policy:service_area"])]
@@ -1201,7 +1201,7 @@ async def test_policy_echoes_cover_the_rules_the_session_reads(app, client, revi
     cancellation claims, in either language; a policy the session can't read isn't one it is
     shown, so repeating it isn't this check's to block (a session learns nothing about it)."""
     copy, visitor = await visitor_of(app, client)
-    reviewer.soft_answer = NOTHING_FLAGGED
+    reviewer.soft_answer = NOTHING_BEYOND_THE_CARDS
     deposit = await add_charter(app, copy, "deposit", "The deposit is taken when you book the visit.")
     cancellation = await add_charter(app, copy, "cancellation", "Cancel any time up until the evening before.")
     area = await add_charter(app, copy, "service_area", "Maria drives out to the whole East Bay.")
@@ -1243,7 +1243,7 @@ async def test_a_link_beside_a_quote_card_is_blocked(app, client, reviewer, pros
     the link."""
     copy, visitor = await visitor_of(app, client)
     quote = await own_quote(client, visitor)
-    reviewer.soft_answer = NOTHING_FLAGGED
+    reviewer.soft_answer = NOTHING_BEYOND_THE_CARDS
     verdict = await checked(client, visitor, prose, [clause("quote", quote.fact_id)])
     assert [(v.kind, v.rule_id, v.span) for v in verdict.violations] == [("promise_word", "link", span)]
     assert_handed_off(verdict, language)

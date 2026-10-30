@@ -34,7 +34,7 @@ VARIABLES = ("DESK_ENV", "DESK_DECISIONS", "DESK_PROVE", "ANTHROPIC_API_KEY", "A
              "ANTHROPIC_ORGANIZATION_ID")
 DATABASE_URL = "postgresql+psycopg://desk_kernel:pw-in-the-url@127.0.0.1:9/desk"   # never opened here
 TEST_KEY = "key-for-tests"
-PASSES = '{"prose_states_terms": false, "denies_being_ai": false}'
+PASSES = '{"promises_beyond_cards": false, "denies_being_ai": false}'
 REPLY = SoftPromiseInput(language="en", prose="Here is your quote.", cards=["$180.00\nDrain clearing"])
 
 
@@ -117,7 +117,7 @@ async def test_ambient_credentials_never_reach_a_request(environ, sent):
     assert (client.api_key, client.auth_token, client.credentials) == (NO_API_KEY, None, None)
 
     verdict, usage = await backend.soft_promise(REPLY)
-    assert verdict == SoftPromiseVerdict(prose_states_terms=False, denies_being_ai=False)
+    assert verdict == SoftPromiseVerdict(promises_beyond_cards=False, denies_being_ai=False)
     (request,) = sent
     assert str(request.url) == "https://api.anthropic.com/v1/messages"      # no test hook: the Claude API
     assert credential(request.headers) == "the placeholder"
@@ -319,7 +319,7 @@ def messages_url() -> Iterator[str]:
 async def test_no_key_in_development_reaches_the_hook_on_a_real_socket(environ, messages_url):
     environ({"ANTHROPIC_BASE_URL": messages_url})
     verdict, usage = await make_decisions(settings()).soft_promise(REPLY)
-    assert verdict == SoftPromiseVerdict(prose_states_terms=False, denies_being_ai=False)
+    assert verdict == SoftPromiseVerdict(promises_beyond_cards=False, denies_being_ai=False)
     assert usage.status == "ok"
     (seen,) = MessagesHandler.seen
     assert seen["path"] == "/v1/messages" and credential(seen["headers"]) == "the placeholder"

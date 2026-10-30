@@ -20,10 +20,8 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    with no canary in what it renders. The Desk's catalog (`context.catalog_fact`) is cited like a
    stored fact, and no template renders it, so it backs no card.
 5. The soft-promise check, only when steps 2 to 4 found nothing and there is prose: Haiku 5.5
-   reads the prose and the cards' texts (never the visitor's words) and flags prose that itself
-   states an amount, discount, date or time, availability, booking status or policy, whether or
-   not a card shows it, or commits the business to anything else the cards don't hold
-   (`soft.promise`), or that says or suggests the writer is a human
+   reads the prose and the cards' texts (never the visitor's words) and flags a promise the cards
+   don't hold (`soft.promise`) or prose that says or suggests the writer is a human
    (`soft.denies_ai`). No verdict (a timeout, an error, a refusal, an unparsable answer) blocks
    too (`soft.unavailable`).
 6. `ok` when nothing was found: the prose (when not empty) and the cards; otherwise only the
@@ -681,7 +679,7 @@ async def soft_promises(ctx: KernelCtx, language: render.Language, prose: str,
     if verdict is None:
         rule_ids = ["soft.unavailable"]
     else:
-        rule_ids = (["soft.promise"] if verdict.prose_states_terms else []) + (
+        rule_ids = (["soft.promise"] if verdict.promises_beyond_cards else []) + (
             ["soft.denies_ai"] if verdict.denies_being_ai else [])
     return [Violation(kind="soft_promise", span=_span(prose), rule_id=rule_id) for rule_id in rule_ids], usage
 
