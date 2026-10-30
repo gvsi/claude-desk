@@ -39,17 +39,23 @@ REPLACE_IT = 'security add-generic-password -U -s claude-desk-passcode -a "$USER
 # print_buffer, which never set a locale): -w writes the password alone, as lowercase hex when any
 # byte fails isprint() in the C locale (space to ~); -g writes the attributes to stdout and
 # `password: ` to stderr, then 0x<HEX> when any byte is outside space to ~ or is a backslash, then
-# "<value>" with those bytes as octal escapes when any byte is not.
-STUB = """#!{python}
-import hashlib, json, os, re, sys
+# "<value>" with those bytes as octal escapes when any byte is not. A watched tool (WATCHED) writes
+# the same record, then runs the real tool.
+RECORD = """import hashlib, json, os, re, sys
 tool, args = os.path.basename(sys.argv[0]), sys.argv[1:]
 passcode = os.environ.get("DESK_PASSCODE")
 sha256 = lambda text: hashlib.sha256(text.encode(errors="surrogateescape")).hexdigest()
 with open(os.environ["STUB_LOG"], "a") as log:
-    log.write(json.dumps({{"tool": tool, "argv": args, "cwd": os.getcwd(), "tty": os.isatty(1),
+    log.write(json.dumps({"tool": tool, "argv": args, "cwd": os.getcwd(), "tty": os.isatty(1),
                           "passcode": sha256(passcode) if passcode else None,
-                          "env": {{name: sha256(value) for name, value in os.environ.items()}}}}) + "\\n")
-if tool == "security":
+                          "env": {name: sha256(value) for name, value in os.environ.items()}}) + "\\n")
+"""
+WATCHED = ("dirname", "date", "mkdir", "tee", "git", "tr")  # every other command deploy.sh runs
+WRAPPER = """#!{python}
+{record}os.execv({real!r}, [{real!r}, *args])
+"""
+STUB = """#!{python}
+{record}if tool == "security":
     if os.environ.get("KEYCHAIN_LOCKED") or (args == {probe} and os.environ.get("KEYCHAIN_PROBE_DENIED")):
         print("security: SecKeychainSearchCopyNext: User interaction is not allowed.", file=sys.stderr)
         sys.exit(36)                              # a locked login Keychain, as over SSH or from launchd
@@ -119,8 +125,9 @@ elif tool == "npx" and args[:2] == ["--no-install", "cdk"] and args[2] == "deplo
 
 
 def _stub_body() -> str:
-    return STUB.format(python=sys.executable, account=ACCOUNT, distribution=DISTRIBUTION_URL, endpoint=ENDPOINT,
-                       load_balancer=LOAD_BALANCER, lookup=repr(KEYCHAIN_LOOKUP), probe=repr(KEYCHAIN_PROBE))
+    return STUB.format(python=sys.executable, record=RECORD, account=ACCOUNT, distribution=DISTRIBUTION_URL,
+                       endpoint=ENDPOINT, load_balancer=LOAD_BALANCER, lookup=repr(KEYCHAIN_LOOKUP),
+                       probe=repr(KEYCHAIN_PROBE))
 
 
 @pytest.fixture
@@ -179,15 +186,27 @@ def deploy(tmp_path):
 
     def run(*args: str, typed: str = ACCOUNT, terminal: bool = True, deployed: dict | None = None,
             keychain_item: str | None = None, security: bool = True, bash_options: tuple[str, ...] = (),
-            **extra_env: str) -> Run:
+            watch: bool = False, **extra_env: str) -> Run:
         """`keychain_item` is the passcode the stub Keychain holds (none by default); without
         `security`, PATH holds the stubs and only the shell and `dirname` besides; `bash_options` go
-        to the bash that runs deploy.sh, before the script."""
+        to the bash that runs deploy.sh, before the script. With `watch`, PATH holds the stubs, the
+        shell and the WATCHED tools alone, each recording its call before it runs the real one, so
+        every command deploy.sh runs is in the calls, or it stops at one it can't find."""
         if deployed is not None:
             stacks.write_text(json.dumps(deployed))
         if keychain_item is not None:
             keychain.write_text(keychain_item)
         path = [bin_dir, keychain_bin, os.environ["PATH"]]
+        if watch:
+            watched = tmp_path / "watched"
+            watched.mkdir(exist_ok=True)
+            for tool in WATCHED:
+                (watched / tool).write_text(WRAPPER.format(python=sys.executable, record=RECORD,
+                                                           real=shutil.which(tool)))
+                (watched / tool).chmod(stat.S_IRWXU)
+            if not (watched / "bash").exists():
+                (watched / "bash").symlink_to(shutil.which("bash"))   # only to start deploy.sh with
+            path = [bin_dir, keychain_bin, watched]
         if not security:
             basics = tmp_path / "basics"
             basics.mkdir(exist_ok=True)
@@ -524,19 +543,25 @@ def test_an_exported_passcode_wins_over_the_keychain(deploy):
     assert "exported-test-passcode" not in run.text()
 
 
-def test_a_caller_variable_named_passcode_carries_the_keychain_value_to_no_step(deploy):
-    """deploy.sh holds the Keychain value in a shell variable named passcode. A caller's exported
-    variable of that name is dropped before the lookup, so the value reaches smoke.py alone, as
-    DESK_PASSCODE, under no other name and in no other step's environment."""
-    run = deploy(keychain_item="keychain-test-passcode", DESK_PASSCODE=None, DESK_DEPLOY_ACCOUNT=ACCOUNT,
-                 passcode="caller-value")
+@pytest.mark.parametrize("exported", [False, True], ids=["keychain", "exported"])
+def test_the_passcode_reaches_smoke_py_alone_from_either_source(deploy, exported):
+    """Every command deploy.sh runs is watched, the startup tools before any step included (with
+    PATH holding only the stubs and the WATCHED tools, any other command would stop the deploy).
+    Whether the passcode comes from the Keychain or from an exported DESK_PASSCODE, and with a
+    caller's `passcode` and `probe` exported (the shell variables deploy.sh keeps it and the
+    Keychain's -g answer in), it reaches smoke.py alone, as DESK_PASSCODE: no other command's
+    environment holds it under any name, nor the -g answer, which holds it too."""
+    secret = "exported-test-passcode" if exported else "keychain-test-passcode"
+    run = deploy(keychain_item="keychain-test-passcode", DESK_PASSCODE=secret if exported else None,
+                 DESK_DEPLOY_ACCOUNT=ACCOUNT, DESK_DOMAIN_NAME=DOMAIN, DESK_CERTIFICATE_ARN=CERTIFICATE,
+                 passcode="caller-value", probe="caller-value", watch=True)
     assert run.status == 0, run.output
-    secret = _sha256("keychain-test-passcode")
-    assert run.calls and _smoke_ran(run)
+    assert set(WATCHED) <= {call["tool"] for call in run.calls} and _smoke_ran(run)
+    forms = {_sha256(secret), _sha256(f'password: "{secret}"')}
     for call in run.calls:
-        holding = sorted(name for name, value in call["env"].items() if value == secret)
+        holding = sorted(name for name, value in call["env"].items() if value in forms)
         assert holding == (["DESK_PASSCODE"] if _is_smoke(call) else []), (call["tool"], call["argv"][:3])
-    assert "keychain-test-passcode" not in run.text()
+    assert secret not in run.text()
 
 
 @pytest.mark.parametrize("trace", [{"SHELLOPTS": "xtrace"}, {"bash_options": ("-x",)}], ids=["SHELLOPTS", "bash-x"])

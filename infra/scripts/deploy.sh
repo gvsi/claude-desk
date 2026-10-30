@@ -49,6 +49,13 @@ if [[ -o xtrace ]]; then
   echo "deploy: run without xtrace; it would print the passcode" >&2
   exit 2
 fi
+# The owner passcode the smoke checks sign in with stays in this shell, unexported, and only
+# smoke.py is given it, in its environment: never on a command line, in the output or in the log.
+# An exported DESK_PASSCODE is taken in and dropped from the environment before the first command
+# runs, and so are a caller's exported passcode and probe, which would carry it to every step.
+unset passcode probe
+passcode=${DESK_PASSCODE:-}
+unset DESK_PASSCODE
 
 usage() {
   echo "usage: infra/scripts/deploy.sh [--compute express|alb] [--allow-branch] [--data-only]"
@@ -98,9 +105,8 @@ for name in DESK_IMAGE_DIR DESK_IMAGE_FILE DESK_KERNEL_IMAGE; do
     exit 2
   fi
 done
-# The owner passcode the smoke checks sign in with: DESK_PASSCODE when it's set, else the macOS
-# Keychain's claude-desk-passcode item. It stays in this shell, unexported, and only smoke.py is
-# given it, in its environment: never on a command line, in the output or in the log.
+# A full deploy's passcode: DESK_PASSCODE when it was set, else the macOS Keychain's
+# claude-desk-passcode item.
 no_passcode() {  # no_passcode store|replace|export <why>: the Keychain commands that apply, if any
   local fix=$1
   shift
@@ -120,10 +126,7 @@ no_passcode() {  # no_passcode store|replace|export <why>: the Keychain commands
   esac >&2
   exit 2
 }
-unset passcode  # a caller's exported passcode would carry the Keychain value to every step
-passcode=
 if [[ -z $data_only ]]; then
-  passcode=${DESK_PASSCODE:-}
   if [[ -z $passcode ]]; then
     command -v security >/dev/null ||
       no_passcode export "there's no \`security\` command here to read the macOS Keychain with"
@@ -144,7 +147,6 @@ if [[ -z $data_only ]]; then
     unset probe
   fi
 fi
-unset DESK_PASSCODE
 
 mkdir -p "$OUT"
 log=$OUT/deploy-$(date -u +%Y%m%dT%H%M%SZ).log
