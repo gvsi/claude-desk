@@ -18,7 +18,7 @@ import desk_kernel
 import httpx
 import psycopg
 from fastapi import FastAPI
-from sqlalchemy import select
+from sqlalchemy import insert, select
 
 from desk.contracts import DemoInboxEntry, Fact, InboxNotice, Label, SessionState
 from desk.db.models import ActorSession, Desk, LedgerEntry, NotificationPref, Person, VerificationChallenge
@@ -585,11 +585,61 @@ async def test_a_failed_inbox_write_logs_no_code(app, client, monkeypatch, caplo
     monkeypatch.setattr(demo_inbox, "new_id", lambda prefix: notice.entry_id)   # the next entry's ID is taken
     response = await start(client, visitor, DANA_PHONE)
     assert (response.status_code, response.json()) == (500, {"code": "internal"})
-    assert "INSERT INTO kernel.demo_inbox" in caplog.text                       # the failed insert was logged
+    assert "IntegrityError sqlstate=23505 constraint=demo_inbox_pkey" in caplog.text   # the failed insert was logged
     assert [(row.status, code_in(await entry_of(client, visitor, notice))) for row in await challenges(app, copy)] == [
         ("live", "424242")]                                                     # and nothing of it was kept
     for code in ("424242", "737373"):
         assert not holds(caplog.text, code), code
+
+
+async def test_a_refused_row_is_not_logged(app, client, monkeypatch, caplog):
+    """A row Postgres refuses can be named in its error ("Failing row contains (...)"; Postgres
+    leaves it out on a table under row-level security, as the kernel's are), and a Demo inbox
+    entry's row holds the code: the error is logged by its class, SQLSTATE and constraint alone,
+    with neither the code nor the row."""
+    caplog.set_level(logging.DEBUG)
+    codes(monkeypatch, 424242)
+    copy = await rivera_copy(app, client)
+    visitor = await open_visitor(client, copy)
+    deliver = demo_inbox.deliver
+
+    async def without_its_desk(ctx, **entry):
+        if entry["kind"] == "verification_code":
+            entry["desk_id"] = None                                             # NOT NULL refuses the row
+        return await deliver(ctx, **entry)
+
+    monkeypatch.setattr(demo_inbox, "deliver", without_its_desk)
+    response = await start(client, visitor, DANA_PHONE)
+    assert (response.status_code, response.json()) == (500, {"code": "internal"})
+    assert not holds(caplog.text, "424242")
+    for row in ("Failing row", "DETAIL", mask_contact(DANA_PHONE)):
+        assert row not in caplog.text, row
+    assert "IntegrityError sqlstate=23502 constraint=-" in caplog.text           # the refusal was logged
+
+
+async def test_a_value_postgres_quotes_is_not_logged(app, client, monkeypatch, caplog):
+    """Postgres quotes a value it can't read in the error's own message, which row-level security
+    doesn't change: a Demo inbox entry whose code reached a column that can't hold it is logged by
+    the error's class and SQLSTATE alone, without the code."""
+    caplog.set_level(logging.DEBUG)
+    codes(monkeypatch, 424242)
+    copy = await rivera_copy(app, client)
+    visitor = await open_visitor(client, copy)
+    deliver = demo_inbox.deliver
+
+    async def dated_by_its_body(ctx, *, copy_id, desk_id, to, person_id, kind, body, preview):
+        if kind != "verification_code":
+            return await deliver(ctx, copy_id=copy_id, desk_id=desk_id, to=to, person_id=person_id, kind=kind,
+                                 body=body, preview=preview)
+        await ctx.db.execute(insert(DemoInboxRow).values(
+            entry_id="inbox-1", copy_id=copy_id, desk_id=desk_id, to=to, person_id=person_id, kind=kind, body=body,
+            preview=preview, created_at=body))                                  # not a time: Postgres quotes it
+
+    monkeypatch.setattr(demo_inbox, "deliver", dated_by_its_body)
+    response = await start(client, visitor, DANA_PHONE)
+    assert (response.status_code, response.json()) == (500, {"code": "internal"})
+    assert not holds(caplog.text, "424242")
+    assert "DataError sqlstate=22007 constraint=-" in caplog.text                # the refusal was logged
 
 
 def test_every_kernel_engine_hides_bound_values(app):

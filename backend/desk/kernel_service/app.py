@@ -39,6 +39,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from desk.contracts import (DemoInboxEntry, KnowledgeItem, LedgerEntry, LedgerEvent, LedgerPage, OwnerMessageResult,
                             PolicyVersion)
+from desk.db import logs as db_logs
 from desk.db.models import Desk, Fact, Handoff
 from desk.db.session import KernelSession, database_url
 from desk.env import is_development
@@ -121,6 +122,7 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
     settings = settings or KernelSettings.from_env()
     clock = clock or SystemClock()
     logging.getLogger("uvicorn.access").addFilter(ACCESS_LOG_FILTER)   # once: the same filter isn't added twice
+    db_logs.install()                     # a database error is logged without its text; once, too
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -134,7 +136,8 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
         policies = activation.PolicyRuntime.start(app.state.unproved_seeds)   # raises on a baseline it can't take
         app.state.engine, app.state.loaded_versions = policies.engine, policies.versions
         app.state.proof_mode = await activation.run_selftest()               # symcc or bounded, for the whole process
-        # a failed statement's error names no bound value: some carry a code or a token
+        # a failed statement's error names no bound value (some carry a code or a token); what
+        # Postgres's own text says is kept out of the log by `db_logs`
         engine = create_async_engine(settings.database_url, pool_pre_ping=True, hide_parameters=True)
         factory = async_sessionmaker(engine, expire_on_commit=False, sync_session_class=KernelSession)
         app.state.kernel = KernelRuntime(settings=settings, clock=clock, signer=signer, engine=engine,

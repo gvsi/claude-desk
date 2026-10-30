@@ -17,6 +17,7 @@ import logging
 import re
 import secrets
 from datetime import timedelta
+from types import SimpleNamespace
 
 import httpx
 import psycopg
@@ -500,3 +501,21 @@ async def test_tokens_never_leave_kernel_tables(app, client, caplog):
         exposed += [text for (text,) in api_rows(copy.copy_id, f"SELECT row_to_json(v)::text FROM kernel_ro.{view} v")]
     for token in (link.token, unknown):
         assert not [text for text in exposed if token in text], token
+
+
+async def test_a_taken_token_is_not_logged(app, client, monkeypatch, caplog):
+    """A link whose token is already another's is refused by the unique index, whose error names
+    the key ("Key (token)=(...)"): the error is logged by its class, SQLSTATE and index alone, the
+    release ends `unknown` as any failed commit does, and the token appears in no log line."""
+    caplog.set_level(logging.DEBUG)
+    copy = await rivera(app, client)
+    invoice = (await documents(app, copy))["dana-invoice"]
+    dana = await confirmed(client, copy, DANA)
+    await released(client, dana, invoice)
+    [link] = await links(app, copy)
+    monkeypatch.setattr(release_document, "secrets", SimpleNamespace(token_urlsafe=lambda nbytes: link.token))
+    decision = await decided(client, dana, TOOL, {"document_id": invoice.document_id}, call_id="call-2")
+    assert (await executed(client, dana, decision)).state == "unknown"
+    assert "IntegrityError sqlstate=23505 constraint=document_links_token" in caplog.text   # the refusal was logged
+    for row in (link.token, "Key (", "DETAIL"):
+        assert row not in caplog.text, row

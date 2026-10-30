@@ -117,8 +117,10 @@ def bind_copy(session: Session | AsyncSession, copy_id: str) -> None:
 
 @functools.cache
 def kernel_engine() -> AsyncEngine:
-    """The kernel process's engine, as desk_kernel. A failed statement's error names no bound value,
-    since some carry a verification code or a link token."""
+    """The kernel process's engine, as desk_kernel. A failed statement's error leaves out its bound
+    values (`hide_parameters`), since some carry a verification code or a link token. That alone
+    doesn't keep them out of a log: Postgres's own message can quote a value it couldn't read, so
+    the kernel logs a database error by its class, SQLSTATE and constraint name (`desk.db.logs`)."""
     return create_async_engine(database_url("KERNEL"), pool_pre_ping=True, hide_parameters=True)
 
 
