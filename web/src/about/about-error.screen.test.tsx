@@ -33,7 +33,7 @@ vi.mock('./documents.ts', () => {
   };
 });
 
-const ERROR_LINE = 'This document can’t be shown right now. You can go back and keep using the Desk.';
+const ERROR_LINE = 'This document can’t be shown right now. You can go back and try again later.';
 
 describe('A document that cannot be parsed', () => {
   it('a_parse_error_stays_on_the_about_page', async () => {

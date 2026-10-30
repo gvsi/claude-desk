@@ -17,7 +17,7 @@ export function ReaderError() {
         About this prototype
       </h1>
       <Notice tone="error" action={<BackLink />}>
-        This document can’t be shown right now. You can go back and keep using the Desk.
+        This document can’t be shown right now. You can go back and try again later.
       </Notice>
     </StandalonePage>
   );

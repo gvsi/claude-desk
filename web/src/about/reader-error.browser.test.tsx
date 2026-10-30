@@ -75,7 +75,7 @@ describe('ReaderError', () => {
 
         // What happened and what to do, in plain words, never the error itself.
         const text = (screen.container.textContent ?? '').replace(/\s+/g, ' ');
-        expect(text, where).toContain('This document can’t be shown right now. You can go back and keep using the Desk.');
+        expect(text, where).toContain('This document can’t be shown right now. You can go back and try again later.');
         expect(text, where).not.toContain('raw HTML');
         // The next step: the way back, to the Desk or the prototype.
         const back = screen.getByRole('link', { name: words, exact: true });

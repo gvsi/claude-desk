@@ -37,7 +37,7 @@ vi.mock('../about/documents.ts', () => {
 
 const TODAY = `/app/${RIVERA.deskId}/today`;
 const GREETING = /^Good (morning|afternoon|evening), Maria$/;
-const ERROR_LINE = 'This document can’t be shown right now. You can go back and keep using the Desk.';
+const ERROR_LINE = 'This document can’t be shown right now. You can go back and try again later.';
 
 // The last Desk lives in this browser's storage, which outlives a test.
 beforeEach(() => {
