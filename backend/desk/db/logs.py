@@ -13,7 +13,20 @@ raised from or during, is a database error (SQLAlchemy's `StatementError`, `DBAP
 them, or the driver's own `psycopg.Error`) is logged with that chain redacted: each exception is
 shown by its class alone, a database error with its SQLSTATE and constraint name too
 (`describe`), and the traceback keeps its frames, which hold code, not values. A database error
-passed as the message or an argument is written as `describe` writes it.
+passed as the message or an argument is written as `describe` writes it. An exception group's
+members are looked through as well; another exception's `exceptions` attribute is not.
+
+A log call never raises because of this: if the redaction itself fails, the record says only
+`log_redaction_failed`, with no arguments and no exception, so a call inside an `except` block
+that then rolls back always reaches the rollback.
+
+What it can't see, so a caller must never log a database error that way:
+- text made before the record is: an f-string, `str(error)` or `repr(error)` in the message, or
+  anything else that formats an error (or an object holding one, as an asyncio task's repr
+  does) into a string first;
+- `extra=` values, which the logger sets on the record after the factory has made it;
+- an error inside a container passed as an argument (a list, a tuple or a mapping of them), or
+  as an attribute of another argument.
 """
 
 import logging
@@ -24,6 +37,7 @@ import psycopg
 from sqlalchemy.exc import StatementError
 
 INSTALLED = "_desk_redacts_database_errors"     # marks the factory `install` made
+REDACTION_FAILED = "log_redaction_failed"         # all a record says when its redaction failed
 
 
 class RedactedError(Exception):
@@ -44,8 +58,10 @@ def describe(exc: BaseException) -> str:
 
 
 def _linked(exc: BaseException) -> Iterator[BaseException]:
-    """The exceptions `exc` was raised from, during or with (an exception group's members)."""
-    for linked in (exc.__cause__, exc.__context__, *getattr(exc, "exceptions", ())):
+    """The exceptions `exc` was raised from, during or with (an exception group's members; any
+    other exception's `exceptions` attribute is its own business)."""
+    members = exc.exceptions if isinstance(exc, BaseExceptionGroup) else ()
+    for linked in (exc.__cause__, exc.__context__, *members):
         if isinstance(linked, BaseException):
             yield linked
 
@@ -96,15 +112,26 @@ def redact(record: logging.LogRecord) -> None:
         record.args = {key: _shown(value) for key, value in record.args.items()}
 
 
+def _redaction_failed(record: logging.LogRecord) -> None:
+    """`record` keeping nothing it was given: a fixed message, no arguments and no exception."""
+    record.msg, record.args = REDACTION_FAILED, ()
+    record.exc_info, record.exc_text = None, None
+
+
 def install() -> None:
-    """Redacts every log record the process makes from now on; a second call changes nothing."""
+    """Redacts every log record the process makes from now on; a second call changes nothing. A
+    log call never raises because of it: a record the redaction fails on says only
+    `log_redaction_failed`, so a call inside an `except` block (one that then rolls back) goes on."""
     made = logging.getLogRecordFactory()
     if getattr(made, INSTALLED, False):
         return
 
     def factory(*args: Any, **kwargs: Any) -> logging.LogRecord:
         record = made(*args, **kwargs)
-        redact(record)
+        try:
+            redact(record)
+        except Exception:
+            _redaction_failed(record)
         return record
 
     setattr(factory, INSTALLED, True)

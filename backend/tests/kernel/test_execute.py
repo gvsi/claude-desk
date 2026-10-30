@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from desk.contracts import Claim, Decision, ExecResult, Fact, InboxNotice, Label, Review
+from desk.db import logs
 from desk.db.models import Decision as DecisionRow
 from desk.db.models import DemoInboxEntry, Document, Execution, NotificationPref, PriceItem, Quote, Tool
 from desk.kernel_service import demo_inbox, execute, ledger
@@ -646,6 +647,41 @@ async def test_an_allow_holding_no_session_row_ends_unknown_before_its_side_effe
                                     "state": "unknown", "policy_version": 1, "auto_money_cap_cents": 50_000})]
     [logged] = [record for record in caplog.records if record.getMessage().startswith("execution_unknown")]
     assert repr(logged.exc_info[1]) == "RuntimeError('allow_without_session')"
+
+
+class OddError(Exception):
+    """An error whose `exceptions` attribute is no list of members, as an exception group's is."""
+
+    exceptions = None
+
+
+@pytest.mark.parametrize("how", ["odd_error", "failing_redaction"])
+async def test_a_log_line_that_cannot_be_redacted_still_ends_unknown(app, client, registry, caplog, monkeypatch,
+                                                                     how):
+    """The log line an unknown outcome writes is redacted as it is made (`desk.db.logs`), inside
+    the handler that rolls back and settles the action. Writing that line never raises, so the
+    rollback and `unknown` still follow: an error with an `exceptions` attribute that isn't an
+    exception group's is read as an error like any other, and a redaction that fails anyway leaves
+    a record saying only `log_redaction_failed`."""
+    quote, rows, visitor, allowed = await fake_quote_desk(app, client)
+    quote.script["execute"] = OddError("the provider's answer was lost")
+    if how == "failing_redaction":
+        def fails(record: logging.LogRecord) -> None:
+            raise RuntimeError("the redaction failed")
+
+        monkeypatch.setattr(logs, "redact", fails)
+    assert await executed(client, visitor, allowed) == ExecResult(
+        action_id=allowed.action.action_id, state="unknown", facts=[], model_view={})
+    assert await committed(app, rows.copy_id, allowed.action.action_id) == ("unknown", "unknown")
+    unknown = [record for record in caplog.records if record.getMessage().startswith("execution_unknown")]
+    if how == "odd_error":
+        [logged] = unknown
+        assert type(logged.exc_info[1]) is OddError                # it holds no database error: shown as raised
+    else:
+        # nothing of the line is kept, and nothing of the error: a fixed message alone
+        failed = [record for record in caplog.records if record.getMessage() == "log_redaction_failed"]
+        assert unknown == [] and failed
+        assert all((record.args, record.exc_info, record.exc_text) == ((), None, None) for record in failed)
 
 
 async def change_records(app: FastAPI, copy: Rivera, change: str) -> None:
