@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
 
 import type { Effect, RuleCard, ToolName } from '../../../api/contracts.ts';
-import { rulesForTool } from '../ToolRulesCard/toolRules.ts';
+import { groupsOverlap, rulesForTool } from '../ToolRulesCard/toolRules.ts';
 import { OUTCOME_TONE, OUTCOME_WORDS, PRESET_WORDS, outcomePhrase, type RulesPreset } from './outcomeWords.ts';
 
 /**
@@ -163,14 +163,16 @@ interface Claim {
 
 /**
  * Claude does the tool on its own for `audience`: an automatic card for them governs it, every
- * automatic card that governs it passes `each`, and no refusal for anyone or for them governs it.
+ * automatic card that governs it passes `each`, and no refusal for a group that shares anyone with
+ * them governs it (groups nest and a never card always wins, so a narrower or a broader group's
+ * refusal still refuses some of them).
  */
 function onItsOwn(words: string, tool: ToolName, audience: RuleCard['who'], each: (card: RuleCard) => string | null): Claim {
   return {
     words,
     problem: (cards) => {
       const rules = governing(cards, tool);
-      const refusal = rules.find((card) => card.mode === 'never' && (card.who === 'anyone' || card.who === audience));
+      const refusal = rules.find((card) => card.mode === 'never' && groupsOverlap(card, { who: audience }));
       if (refusal) return `${refusal.card_id} refuses ${tool}`;
       const automatic = rules.filter((card) => card.mode === 'auto');
       if (!automatic.some((card) => card.who === audience)) return `no automatic card for ${audience} governs ${tool}`;
@@ -282,9 +284,9 @@ function changed(cards: PresetCards, preset: PresetName, edit: { appliesTo?: str
   return { ...cards, [preset]: edit.add ? [...list, edit.add] : list };
 }
 
-/** A card the hand-built presets don't have. */
-function extra(applies_to: string, mode: RuleCard['mode']): RuleCard {
-  return { card_id: 'hand-extra', applies_to, mode, who: 'anyone', reason: 'Added.' };
+/** A card the hand-built presets don't have, for anyone unless `who` says otherwise. */
+function extra(applies_to: string, mode: RuleCard['mode'], who: RuleCard['who'] = 'anyone'): RuleCard {
+  return { card_id: 'hand-extra', applies_to, mode, who, reason: 'Added.' };
 }
 
 /** A change to a card's booking window: weekdays unless `days` says otherwise. */
@@ -337,6 +339,13 @@ describe('outcome words', () => {
       ['Ask me first refuses documents through a rule for messages', changed(good, 'ask_first', { add: extra('effect:send_message', 'never') })],
       ['Recommended refuses quotes through a rule for changes', changed(good, 'auto', { add: extra('effect:change', 'never') })],
       ['Recommended takes payments through a rule for charges', changed(good, 'auto', { appliesTo: 'effect:charge', change: null, add: extra('effect:charge', 'auto') })],
+      // Groups nest (anyone, verified people, record owners) and a never card always wins, so a
+      // refusal for any group that shares someone with the advertised audience contradicts it.
+      ['Recommended refuses quotes to verified people', changed(good, 'auto', { add: extra('native.quote', 'never', 'verified') })],
+      ['Recommended refuses documents to verified people', changed(good, 'auto', { add: extra('native.release_document', 'never', 'verified') })],
+      ['Recommended refuses documents to verified people through a rule for messages', changed(good, 'auto', { add: extra('effect:send_message', 'never', 'verified') })],
+      ['Recommended refuses bookings to record owners, a narrower group', changed(good, 'auto', { add: extra('native.book', 'never', 'record_owner') })],
+      ['Recommended refuses documents to verified people, a broader group, through a rule for private data', changed(good, 'auto', { add: extra('effect:private_data', 'never', 'verified') })],
     ];
     for (const [what, cards] of broken) expect({ what, problems: descriptionProblems(cards).length > 0 }).toEqual({ what, problems: true });
     // And a card a tool's own card outranks, or one for a tool no description speaks of, changes nothing.

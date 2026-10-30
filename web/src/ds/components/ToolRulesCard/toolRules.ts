@@ -16,6 +16,15 @@ const GROUP_WIDTH = { anyone: 3, verified: 2, record_owner: 1 } as const;
 
 type Group = keyof typeof GROUP_WIDTH;
 
+/**
+ * True when two groups of people share someone: each is one of anyone, verified people and record
+ * owners, which nest, so any two of them do. A card for one person or agent is no group.
+ */
+export function groupsOverlap(a: Pick<RuleCard, 'who'>, b: Pick<RuleCard, 'who'>): boolean {
+  const widths = [a.who, b.who].map((who) => (who in GROUP_WIDTH ? GROUP_WIDTH[who as Group] : 0));
+  return Math.min(...widths) > 0;
+}
+
 /** The group of people at each width. */
 const GROUP_AT_WIDTH: Readonly<Record<number, Group>> = { 3: 'anyone', 2: 'verified', 1: 'record_owner' };
 
