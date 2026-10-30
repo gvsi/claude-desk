@@ -33,13 +33,12 @@ from desk.db.tables import KERNEL_RO_VIEWS
 from desk.kernel_service import adapters, compiler, reply_check
 from desk.kernel_service.adapters import release_document
 
-from .helpers import kernel_ctx, ledger_rows, rows_of
+from .helpers import connections_of, kernel_ctx, ledger_rows, rows_of, until_waiting
 from .test_adapters import Rivera, objects, rivera, run
 from .test_context import context_of, fact_ids, tools
 from .test_decide import Visitor, decided, open_visitor
 from .test_desk_writes import put_part, updated
 from .test_execute import executed
-from .test_lead_tools import connections_of, until_waiting
 from .test_reply_check import assert_handed_off, checked, clause, keep_alive_until
 from .test_verification import api_rows, check, code_in, entry_of, session_inbox, started
 
@@ -240,8 +239,9 @@ async def test_a_document_is_named_from_its_title_alone(app, client):
                         ("../../etc/passwd", "etc-passwd.txt"), ("Ｗａｒｒａｎｔｙ", "Warranty.txt"),
                         ("請求書", "document.txt"), ("", "document.txt"), (None, "document.txt"),
                         ("a" * 100, "a" * 60 + ".txt"), ("x" * 59 + " y", "x" * 59 + ".txt")):
-        assert release_document.download_name(title) == name, title
-        assert re.fullmatch(r"[A-Za-z0-9-]{1,60}\.txt", name)
+        got = release_document.download_name(title)
+        assert got == name, title
+        assert re.fullmatch(r"[A-Za-z0-9-]{1,60}\.txt", got), title
 
 
 async def test_link_expires_after_a_day(app, client, frozen_clock):

@@ -11,7 +11,6 @@ and `/execute` as the API sends them; the starter preset's cards auto-allow all 
 import asyncio
 import contextlib
 import logging
-from collections.abc import Collection, Iterator
 from datetime import UTC, datetime, time
 from zoneinfo import ZoneInfo
 
@@ -19,7 +18,7 @@ import httpx
 import psycopg
 import pytest
 from fastapi import FastAPI
-from sqlalchemy import event, select, text
+from sqlalchemy import select
 
 from desk.contracts import ApprovalResult, Claim, Decision, DemoInboxEntry, ExecResult, HoursWindow
 from desk.db.models import Desk, Fact, Handoff, Lead, LedgerEntry, NotificationPref, Person, VerificationChallenge
@@ -28,7 +27,8 @@ from desk.kernel_api import DeskUpdated
 from desk.kernel_service import adapters, compiler, desks, ledger, verification
 from desk.kernel_service.desks import mask_contact
 
-from .helpers import activate_cards, kernel_ctx, ledger_rows, make_copy_rows, rows_of, verify_session
+from .helpers import (activate_cards, connections_of, kernel_ctx, ledger_rows, lock_waiters, make_copy_rows,
+                      rows_of, until_waiting, verify_session)
 from .test_adapters import Rivera, objects, rivera, run, visitor_of
 from .test_approvals import post_answer
 from .test_compiler import card
@@ -343,47 +343,6 @@ async def test_parallel_verification_starts_take_turns(app, client, monkeypatch)
             if entry.event.kind == "verify"] == ["started", "started"]
 
 
-@contextlib.contextmanager
-def connections_of(app: FastAPI) -> Iterator[set[int]]:
-    """The server PIDs of the kernel app's connections checked out while the block runs: the ones
-    this test's requests use."""
-    pids: set[int] = set()
-
-    def checked_out(dbapi_connection, connection_record, connection_proxy) -> None:
-        pids.add(dbapi_connection.driver_connection.info.backend_pid)
-
-    engine = app.state.kernel.engine.sync_engine
-    event.listen(engine, "checkout", checked_out)
-    try:
-        yield pids
-    finally:
-        event.remove(engine, "checkout", checked_out)
-
-
-async def lock_waiters(app: FastAPI, pids: Collection[int], table: str | None = "kernel.sessions") -> int:
-    """How many of the connections `pids` are waiting on a lock now: for a row of `table`, or for
-    any lock when `table` is None (an insert waiting to learn whether its key is taken holds no
-    row's lock). A backend waiting for a row holds or waits for that row's tuple lock, which
-    `pg_locks` shows on the row's table."""
-    relation = "" if table is None else (
-        "AND EXISTS (SELECT 1 FROM pg_locks l WHERE l.pid = a.pid AND l.locktype = 'tuple' "
-        "AND l.relation = to_regclass(:table))")
-    async with app.state.kernel.engine.connect() as conn:
-        return (await conn.execute(text(
-            f"SELECT count(*) FROM pg_stat_activity a WHERE a.wait_event_type = 'Lock' AND a.pid = ANY(:pids) {relation}"),
-            {"pids": sorted(pids), "table": table})).scalar_one()
-
-
-async def until_waiting(app: FastAPI, task: asyncio.Task, pids: Collection[int], table: str | None = "kernel.sessions",
-                        timeout: float = 5.0) -> None:
-    """Returns once `task` has answered or one of the connections `pids` waits on a lock: for a
-    row of `table`, or any lock when `table` is None."""
-    deadline = asyncio.get_running_loop().time() + timeout
-    while not task.done() and await lock_waiters(app, pids, table) == 0:
-        assert asyncio.get_running_loop().time() < deadline, "nothing waited on a lock"
-        await asyncio.sleep(0.01)
-
-
 async def test_lock_waiters_count_only_this_tests_waits_for_the_table(app):
     """The probe a test waits on counts only its own connections waiting for a row of the table it
     names: another client's wait, or one of its own for another table, would release the test's
@@ -395,8 +354,10 @@ async def test_lock_waiters_count_only_this_tests_waits_for_the_table(app):
     lock_desk = "SELECT 1 FROM kernel.desks WHERE desk_id = %(desk_id)s FOR UPDATE"
     locked, release = asyncio.Event(), asyncio.Event()
 
-    async def another_client(*statements: str, holds: bool = False) -> None:
+    async def another_client(*statements: str, holds: bool = False, backends: set[int] | None = None) -> None:
         async with await psycopg.AsyncConnection.connect(libpq_url(database_url("KERNEL"))) as conn:
+            if backends is not None:
+                backends.add(conn.info.backend_pid)
             for statement in (as_copy, *statements):
                 await conn.execute(statement, params)
             if holds:
@@ -408,28 +369,21 @@ async def test_lock_waiters_count_only_this_tests_waits_for_the_table(app):
             for each in (as_copy, statement):
                 await conn.exec_driver_sql(each, params)
 
-    async def until_waits(count: int) -> None:
-        deadline = asyncio.get_running_loop().time() + 5
-        while True:
-            async with app.state.kernel.engine.connect() as conn:
-                waits = (await conn.exec_driver_sql(
-                    "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock'")).scalar_one()
-            if waits >= count:
-                return
-            assert asyncio.get_running_loop().time() < deadline, "the waits never began"
-            await asyncio.sleep(0.01)
-
     holder = asyncio.create_task(another_client(lock_session, lock_desk, holds=True))
     await asyncio.wait_for(locked.wait(), timeout=5)
+    theirs: set[int] = set()
     with connections_of(app) as pids:
-        # another client waits for the session row, and one of ours for the Desk's
-        waits = [asyncio.create_task(another_client(lock_session)), asyncio.create_task(ours(lock_desk))]
-        await until_waits(2)
+        # another client waits for the session row, and one of ours for the Desk's; each wait is
+        # awaited on its own connection, never on a count of every wait in the database
+        waits = [asyncio.create_task(another_client(lock_session, backends=theirs)),
+                 asyncio.create_task(ours(lock_desk))]
+        await until_waiting(app, waits[0], theirs)
+        await until_waiting(app, waits[1], pids, "kernel.desks")
         assert await lock_waiters(app, pids) == 0
         assert await lock_waiters(app, pids, "kernel.desks") == 1
         # then one of ours waits for the session row too
         waits.append(asyncio.create_task(ours(lock_session)))
-        await until_waits(3)
+        await until_waiting(app, waits[2], pids)
         assert await lock_waiters(app, pids) == 1
         assert await lock_waiters(app, pids, None) == 2
     release.set()

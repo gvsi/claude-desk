@@ -1,13 +1,16 @@
-"""Test helpers: kernel rows and contexts outside a request."""
+"""Test helpers: kernel rows and contexts outside a request, and the lock waits a test waits for."""
 
+import asyncio
+import contextlib
 import re
+from collections.abc import Collection, Iterator
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 
 import httpx
 import pytest
 from fastapi import FastAPI
-from sqlalchemy import func, select
+from sqlalchemy import event, func, select, text
 
 from desk.contracts import NotificationDefaults, PolicyVersion, RuleCard, ToolProfile
 from desk.db.models import ActorSession, Business, Copy, Desk, LedgerEntry, NotificationPref
@@ -163,3 +166,46 @@ async def draft_and_confirm(client: httpx.AsyncClient, owner_token: str, desk_id
                                                                           "version": drafted.version})
     assert response.status_code == 200, response.text
     return PolicyVersion.model_validate(response.json())
+
+
+# ---- Lock waits ---------------------------------------------------------------------------------
+
+@contextlib.contextmanager
+def connections_of(app: FastAPI) -> Iterator[set[int]]:
+    """The server PIDs of the kernel app's connections checked out while the block runs: the ones
+    this test's requests use."""
+    pids: set[int] = set()
+
+    def checked_out(dbapi_connection, connection_record, connection_proxy) -> None:
+        pids.add(dbapi_connection.driver_connection.info.backend_pid)
+
+    engine = app.state.kernel.engine.sync_engine
+    event.listen(engine, "checkout", checked_out)
+    try:
+        yield pids
+    finally:
+        event.remove(engine, "checkout", checked_out)
+
+
+async def lock_waiters(app: FastAPI, pids: Collection[int], table: str | None = "kernel.sessions") -> int:
+    """How many of the connections `pids` are waiting on a lock now: for a row of `table`, or for
+    any lock when `table` is None (an insert waiting to learn whether its key is taken holds no
+    row's lock). A backend waiting for a row holds or waits for that row's tuple lock, which
+    `pg_locks` shows on the row's table."""
+    relation = "" if table is None else (
+        "AND EXISTS (SELECT 1 FROM pg_locks l WHERE l.pid = a.pid AND l.locktype = 'tuple' "
+        "AND l.relation = to_regclass(:table))")
+    async with app.state.kernel.engine.connect() as conn:
+        return (await conn.execute(text(
+            f"SELECT count(*) FROM pg_stat_activity a WHERE a.wait_event_type = 'Lock' AND a.pid = ANY(:pids) {relation}"),
+            {"pids": sorted(pids), "table": table})).scalar_one()
+
+
+async def until_waiting(app: FastAPI, task: asyncio.Task, pids: Collection[int], table: str | None = "kernel.sessions",
+                        timeout: float = 5.0) -> None:
+    """Returns once `task` has answered or one of the connections `pids` waits on a lock: for a
+    row of `table`, or any lock when `table` is None."""
+    deadline = asyncio.get_running_loop().time() + timeout
+    while not task.done() and await lock_waiters(app, pids, table) == 0:
+        assert asyncio.get_running_loop().time() < deadline, "nothing waited on a lock"
+        await asyncio.sleep(0.01)
