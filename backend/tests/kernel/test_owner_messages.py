@@ -303,3 +303,23 @@ async def test_owner_text_is_measured_before_it_is_read(app, client, monkeypatch
         response = await post_message(client, copy, visitor.session_id, "½" * 2001, kind)
         assert (response.status_code, response.json()) == (422, {"code": "invalid"}), kind
     assert read == []
+
+
+async def test_say_is_shown_as_typed_and_checked_as_read(app, client):
+    copy, visitor = await visitor_of(app, client)
+    # an ellipsis, a fraction, a ligature and an emoji stay as the owner typed them; only what no
+    # font draws (here a zero-width space) is left out
+    typed = "Running late\u2026 be there in \u00bd an hour, \ufb01ne by you? \U0001f642"
+    result = await sent(client, copy, visitor.session_id, f"Running\u200b late{typed[12:]}")
+    said = result.verdict
+    assert said is not None and said.ok
+    [block] = said.blocks
+    assert (block.title, block.text) == (typed, typed)
+    [fact] = await rows_of(app, copy.copy_id, select(FactRow).where(FactRow.kind == "owner_statement"))
+    assert fact.claims == [Claim(key="text", kind="text", value=typed)]
+    # every check reads the text in NFKC: a canary in full-width characters is blocked
+    dana, *_ = await rows_of(app, copy.copy_id, select(Document).order_by(Document.document_id))
+    wide = "".join(chr(ord(ch) + 0xFEE0) if "!" <= ch <= "~" else ch for ch in dana.canary)
+    blocked = (await sent(client, copy, visitor.session_id, f"Your reference\u2026 {wide}")).verdict
+    assert blocked is not None and (blocked.ok, blocked.blocks) == (False, [])
+    assert [violation.kind for violation in blocked.violations] == ["canary"]

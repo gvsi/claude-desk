@@ -35,7 +35,7 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    and the verdict is ledgered (`reply`) and signed in the same transaction.
 
 The owner's messages (`owner_message`) end in the same record: a say is checked for canaries
-alone and shown in an `owner_said` card, and a whisper is only ledgered.
+alone and shown as typed in an `owner_said` card, and a whisper is only ledgered.
 
 What is shown is exactly what was checked: the prose block holds the prose as the scan read it
 (`shown`: NFKC, without the characters no font draws, such as zero-width spaces, soft hyphens,
@@ -667,16 +667,18 @@ async def owner_message(ctx: KernelCtx, owner: OwnerCtx, session_row: SessionRow
     visitor's or agent's session of the owner's copy, open, on a Desk not deleted, in any mode. The
     text holds 1 to 2000 characters and something to show, else 422 `invalid`.
 
-    A `say` is shown to the visitor as the owner wrote it (as `shown` reads it, like Claude's
-    prose), in one `owner_said` card. It is checked for the canaries of the Desk's documents and
-    nothing else: the number rule is for Claude's prose, and no model reads the owner's words.
-    Clean, the words become the `owner_statement` fact `owner:<message_id>` (one text claim, read
-    by the owner and this session; only the kernel's `owner_said` card renders it, so it backs no
+    A `say` is shown to the visitor as the owner typed it, in one `owner_said` card: only the
+    characters no font draws are left out (`_drawn`), so an ellipsis, a fraction or a ligature
+    stays as typed. Every check reads it as Claude's prose is read (`shown`, which also applies
+    NFKC): the blank check above and the canaries of the Desk's documents. Those are all a say is
+    checked for; the number rule is for Claude's prose, and no model reads the owner's words.
+    Clean, the words become the `owner_statement` fact `owner:<message_id>` (one text claim, read by the
+    owner and this session; only the kernel's `owner_said` card renders it, so it backs no
     price), and `finalize` ledgers and signs the verdict with the `owner_said` receipt, in the
-    session's last language. With a canary, even split by spaces or in another case or width
-    (`labels.find_canaries`), there is no fact and no card: `ok: false`, one `canary` violation
-    naming the documents, and the `owner_say_blocked` receipt, which the API shows the owner and
-    never delivers.
+    session's last language. With a canary, even split by spaces, in another case or width, or
+    accented (`labels.find_canaries`, on the text as checked and as shown), there is no fact and
+    no card: `ok: false`, one `canary` violation naming the documents, and the
+    `owner_say_blocked` receipt, which the API shows the owner and never delivers.
 
     A `whisper` is a note for Claude, which the API adds to its context as untrusted text. The
     kernel ledgers it (`whisper` `{message_id, chars}`, never the text) and keeps nothing else."""
@@ -695,14 +697,16 @@ async def owner_message(ctx: KernelCtx, owner: OwnerCtx, session_row: SessionRow
             summary={"message_id": message_id, "chars": len(req.text)}))
         return OwnerMessageResult(message_id=message_id, verdict=None, ledger_seq=entry.seq)
     language = render.language(session_row.last_language)
-    found = labels.find_canaries(text, await labels.copy_canaries(ctx))
+    typed, canaries = _drawn(req.text), await labels.copy_canaries(ctx)
+    held = {*labels.find_canaries(text, canaries), *labels.find_canaries(typed, canaries)}
+    found = [document_id for document_id in canaries if document_id in held]
     if found:
         verdict = await finalize(ctx, session_row, blocks=[], language=language, author="owner",
                                  violations=[canary_violation(found)],
                                  visitor_plain_key="owner_say_blocked", message_id=message_id)
         return OwnerMessageResult(message_id=message_id, verdict=verdict, ledger_seq=verdict.ledger_seq)
     fact = Fact(fact_id=f"owner:{message_id}", kind="owner_statement", status="available", source="owner",
-                claims=[Claim(key="text", kind="text", value=text)],
+                claims=[Claim(key="text", kind="text", value=typed)],
                 label=Label(readers=["owner", f"session:{session_id}"]))
     ctx.db.add(labels.fact_row(copy_id, desk_id, fact, ctx.clock.now(), session_id=session_id))
     block = render.render_clause(Clause(template="owner_said", fact_id=fact.fact_id), fact, language,
