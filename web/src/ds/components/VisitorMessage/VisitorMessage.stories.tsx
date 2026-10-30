@@ -12,7 +12,7 @@ const meta = {
   title: 'Conversation/VisitorMessage',
   component: VisitorMessage,
   args: { text: danaText },
-  parameters: { layout: 'padded', canvas: 'N-Conv-Live' },
+  parameters: { layout: 'padded', canvas: 'N-Conv-Run1' },
 } satisfies Meta<typeof VisitorMessage>;
 
 export default meta;
@@ -79,7 +79,7 @@ export const LongUnbroken: Story = {
   ),
   parameters: {
     canvas: 'none',
-    canvasNote: "No board shows a word longer than a phone's line; it wraps inside the bubble, as N-Conv-Live's bubbles would.",
+    canvasNote: "No board shows a word longer than a phone's line; it wraps inside the bubble, as N-Conv-Run1's bubbles would.",
   },
   play: async ({ canvas, canvasElement }) => {
     // long_bubble_wraps: nothing reaches past the line or out of the bubble.

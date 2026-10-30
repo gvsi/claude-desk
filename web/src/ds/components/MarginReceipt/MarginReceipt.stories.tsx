@@ -53,7 +53,7 @@ const meta = {
   ],
   parameters: {
     layout: 'padded',
-    canvas: 'N-Conv-Live',
+    canvas: 'N-Conv-Run1',
     canvasNote:
       "The board's receipts are owner notes written for the board; these show the kernel's visitor_plain lines from the Rivera fixture, as the conversation view passes them.",
   },
@@ -157,7 +157,7 @@ export const ReplyHandedOff: Story = {
 export const VisitorReadOnly: Story = {
   args: { ...held, onOpenTrace: undefined },
   parameters: {
-    canvas: 'N-Public-Handoff',
+    canvas: 'N-Public-Handoff-Run1',
     canvasNote:
       "The board draws no receipts; on visitor surfaces a receipt is the kernel's visitor_plain line as plain text, with no trace to open.",
   },

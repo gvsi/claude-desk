@@ -1,0 +1,9 @@
+/* DisclosureLine: one quiet meta line in the secondary ink, with no icon and no dot. It is a
+   statement, not a status, so nothing about it moves or changes color. */
+
+.cd-disclosure-line {
+  min-width: 0;
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}

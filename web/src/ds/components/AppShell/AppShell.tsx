@@ -25,6 +25,19 @@ export interface AppShellProps {
   banner?: ReactNode;
   /** `auto` (the default) shows the column from 768 px up; `compact` always shows the top bar. */
   layout?: 'auto' | 'compact';
+  /**
+   * The page fills the main area edge to edge, with no padding and no content width, for a page
+   * that lays out its own columns, such as Conversations' list beside the open conversation; the
+   * page draws its own dividers. It changes only the main area, never the sidebar.
+   */
+  fill?: boolean;
+  /**
+   * The sidebar column's look: `panel` (the default) on the panel ground with a seam at its right,
+   * as tall as the window; `ground` on the app ground with no seam, at its own height, as the
+   * signed conversation boards draw it. The sidebar stays on every page, so the app passes the
+   * same look on all of them.
+   */
+  sidebarLook?: 'panel' | 'ground';
   /** The page. */
   children: ReactNode;
 }
@@ -49,7 +62,7 @@ function isNarrow(): boolean {
  * Menu opens the sidebar as a modal sheet, and Escape, "Close menu" or going to a page closes it
  * and returns focus to Menu.
  */
-export function AppShell({ sidebar, business, banner, layout = 'auto', children }: AppShellProps) {
+export function AppShell({ sidebar, business, banner, layout = 'auto', fill = false, sidebarLook = 'panel', children }: AppShellProps) {
   const narrow = useSyncExternalStore(subscribeNarrow, isNarrow, () => false);
   const compact = layout === 'compact' || narrow;
 
@@ -62,19 +75,19 @@ export function AppShell({ sidebar, business, banner, layout = 'auto', children 
         {compact ? (
           <CompactNav sidebar={sidebar} business={business} />
         ) : (
-          <aside className="cd-app-shell__column" aria-label="Claude Desk">
+          <aside className={`cd-app-shell__column${sidebarLook === 'ground' ? ' cd-app-shell__column--ground' : ''}`} aria-label="Claude Desk">
             {sidebar}
           </aside>
         )}
-        <Main>{children}</Main>
+        <Main fill={fill}>{children}</Main>
       </div>
     </div>
   );
 }
 
-function Main({ children }: { children: ReactNode }) {
+function Main({ fill, children }: { fill: boolean; children: ReactNode }) {
   return (
-    <main className="cd-app-shell__main">
+    <main className={`cd-app-shell__main${fill ? ' cd-app-shell__main--fill' : ''}`}>
       <div className="cd-app-shell__content">{children}</div>
     </main>
   );

@@ -51,7 +51,7 @@ const meta = {
   ),
   parameters: {
     layout: 'padded',
-    canvas: 'N-Safety',
+    canvas: 'N-Safety-Run1',
     canvasNote:
       "The board's meter puts the reply checkpoint before the auto reviewer; it follows the order the checks run here: who's asking, the action checkpoint, the auto reviewer, then the reply checkpoint. Times are the screen's strings, so the time column is wider than the board's.",
   },

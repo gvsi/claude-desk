@@ -24,7 +24,7 @@ const meta = {
   ),
   parameters: {
     layout: 'padded',
-    canvas: 'N-Conv-Live',
+    canvas: 'N-Conv-Run1',
     canvasNote:
       "The board's status lines are written per chat (\"Live, water heater\"); the screen's status says who is asking or what needs the owner, from one table, and the time is the screen's own string.",
   },

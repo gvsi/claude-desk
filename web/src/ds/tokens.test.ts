@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, test } from 'vitest';
 
-import { buildTokensCss } from '../../scripts/build-tokens.mjs';
+import { buildTokensCss, type DesignTokens, type TypeStyle } from '../../scripts/build-tokens.mjs';
 import { CONTRAST_PAIRS, DECORATIVE_COLORS, contrastRatio, pairContrast } from './contrast';
 import tokens from './tokens.json' with { type: 'json' };
 
@@ -35,6 +35,13 @@ function tokenValue(name: string): string | undefined {
     if (entry) return entry.value;
   }
   return undefined;
+}
+
+/** The tokens with one more interface type style, for the builder's checks. */
+function withStyle(style: TypeStyle): DesignTokens {
+  const copy: DesignTokens = structuredClone(tokens);
+  copy.type.groups.find((group) => group.name === 'Interface')?.styles.push(style);
+  return copy;
 }
 
 describe('design tokens', () => {
@@ -95,6 +102,32 @@ describe('design tokens', () => {
     const reply = voice?.styles.find((style) => style.name === 'illustration-reply');
     expect(reply).toMatchObject({ fontSize: '16px', lineHeight: '24px', fontWeight: 380, opticalSize: 20 });
     expect(reply).not.toHaveProperty('letterSpacing');
+  });
+
+  test('figure_tokens_match_the_today_board', () => {
+    // Today's "Last 7 days" draws two figures at two sizes (N-Today-Run1): the booked total, and
+    // the smaller stopped count. Both are interface type with tabular figures.
+    const ui = tokens.type.groups.find((group) => group.name === 'Interface');
+    expect(ui?.family).toBe('sans');
+    const figure = ui?.styles.find((style) => style.name === 'figure');
+    const small = ui?.styles.find((style) => style.name === 'figure-small');
+    expect(figure).toMatchObject({ fontSize: '32px', lineHeight: '40px', fontWeight: 500, letterSpacing: '-0.3px', fontVariantNumeric: 'tabular-nums' });
+    expect(small).toMatchObject({ fontSize: '24px', lineHeight: '32px', fontWeight: 420, fontVariantNumeric: 'tabular-nums' });
+    expect(small).not.toHaveProperty('letterSpacing');
+    for (const style of [figure, small]) expect(style?.usage.trim().length, style?.name).toBeGreaterThan(0);
+
+    // The generated classes carry the tabular figures; the checkout's amount stays as it was.
+    const css = buildTokensCss(tokens);
+    const rule = (name: string) => new RegExp(`\\.cd-type-${name} \\{[^}]*\\}`).exec(css)?.[0] ?? '';
+    expect(rule('figure')).toContain('font-variant-numeric: tabular-nums;');
+    expect(rule('figure-small')).toContain('font-variant-numeric: tabular-nums;');
+    expect(rule('amount')).not.toContain('font-variant-numeric');
+    // Only tabular figures: anything else, or anything that would write more CSS, is refused.
+    const odd = { name: 'odd', fontSize: '24px', lineHeight: '32px', fontWeight: 420, usage: 'A test style.' };
+    for (const fontVariantNumeric of ['oldstyle-nums', 'tabular-nums; color: red']) {
+      expect(() => buildTokensCss(withStyle({ ...odd, fontVariantNumeric }))).toThrow(/fontVariantNumeric/);
+    }
+    expect(buildTokensCss(withStyle({ ...odd, fontVariantNumeric: 'tabular-nums' }))).toContain('.cd-type-odd {');
   });
 
   test('danger_buttons_are_the_refused_rose', () => {

@@ -37,7 +37,8 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 ### Type
 
 - Use `serif` (Source Serif 4) for Claude's voice and page identity, `sans` (Hanken Grotesk) for the whole interface, and `mono` (JetBrains Mono) only inside an expanded full trace. All three load from Google Fonts.
-- Apply a style with its class, `.cd-type-<style>`. Claude's voice: `greeting`, `page-title`, `intro-title`, `wordmark`, `summary`, `reply`, `illustration-reply`. Interface: `body` (already set on the page body), `control`, `section`, `message`, `meta`, `caption`, `pill`, `count`, `beta`, `brand-name`. Trace: `trace`.
+- Apply a style with its class, `.cd-type-<style>`. Claude's voice: `greeting`, `page-title`, `intro-title`, `wordmark`, `summary`, `reply`, `illustration-reply`. Interface: `body` (already set on the page body), `control`, `section`, `message`, `meta`, `caption`, `pill`, `count`, `beta`, `brand-name`, `amount`, `figure`, `figure-small`. Trace: `trace`.
+- Set a summary's headline figure, such as Today's booked total, in `figure`, and a secondary one, such as Today's stopped count, in `figure-small`; both use tabular figures. `amount` stays the checkout's amount to pay.
 - Set page titles in `page-title`, left-aligned. Claude's replies are `reply` paragraphs with no bubble and no avatar, like a document; a visitor's message is `message` in a `fill-bubble` bubble at `radius-card`, aligned right.
 
 ### Space, size and shape

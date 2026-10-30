@@ -1,0 +1,71 @@
+# DemoInboxPanel
+
+`DemoInboxPanel` is where the demo's verification codes and alerts arrive, standing in for a phone or email inbox.
+
+## When to use
+
+- Beside a visitor's chat, with `viewer="visitor"`, so they can read the code the Desk sent to the contact on record.
+- In the owner's Demo inbox, with `viewer="owner"`, for codes, alerts and ledger checkpoints across the demo copy.
+- Not for chat messages or checkpoint results. Those are messages and margin receipts.
+
+## What it shows
+
+- On `bg-panel`: the title "Demo inbox" (a level-2 heading that names the panel's region) and "Stands in for a phone or email inbox. Nothing is really sent."
+- The entries, newest first, each in a quiet box: who it went to ("To •••• 0142"), and for the owner only the time the screen passes in, at the right of that line. Then:
+
+| Item | Shows |
+| --- | --- |
+| `entry` with the notice's `entry_id` | The kind ("Verification code", "Alert" or "Ledger checkpoint") and `entry.body` word for word, which may hold a code. A ledger checkpoint's body reads in the trace's monospace. |
+| `entry: null`, not failed | The notice's `preview` and a waiting `Notice` "Opening" (`role="status"`). Never a code. |
+| `failed`, or an `entry` with another `entry_id` | The `preview`, an error `Notice` "Couldn’t open this entry." and "Try again", which calls `onRetry(entry_id)`. An entry fetched for another notice never shows under this one. |
+| `viewer="visitor"` and a notice to `owner` | Nothing, whether its entry is opening, failed to open or open. |
+| `viewer="visitor"` and its own `entry` of any kind but `verification_code`, or one the kernel addressed to `owner` | Nothing. |
+| `viewer="visitor"`, its own entry not yet fetched, and a recipient that isn't clearly a contact (blank, or the owner's word written another way) | Nothing, until the fetched entry proves it is a verification code. |
+
+- A visitor never sees the owner's alerts or checkpoints, whatever the screen passes in: before its own entry arrives, a row shows (opening or failed to open) only for a notice to a masked contact on record, the legitimate state of a code on its way.
+- Each entry shows once. Replaying events after a reconnect can append a notice the screen already holds, so the panel keeps only the item that arrived last for each `entry_id`, in that item's place, before it decides what a visitor may see. An earlier copy never shows, even when the latest one doesn't.
+- With nothing to show: "Nothing here yet. Codes and alerts you’d get by text or email show up here."
+- No time ever shows on a visitor's panel, even when an item carries one.
+
+## Accessibility
+
+- The panel is a `section` named by its title, with `lang` set to `language`.
+- The entries, or the empty line, sit in an `aria-live="polite"` region that is always there, so a notice that arrives later is read out, and so is its entry once fetched. The title and subtitle are outside it and are read once.
+
+## What the consumer provides
+
+- `items` in the order they arrived, oldest first: append each `EvDemoInbox` notice as it comes, with `entry: null`. The panel puts the newest at the top, and shows a notice appended twice once, as its later item.
+- The entry for each notice, fetched through the API's Demo inbox route when the notice arrives. Codes come only from those fetched entries, never from a notice. On failure set `failed`; `onRetry` should fetch it again.
+- `time` for the owner's panel only, as a display string the screen formats ("2:14 pm"). The panel formats nothing.
+- `language`: the visitor's language, or the owner's.
+
+## Copy (`inboxCopy.ts`)
+
+| | English | Spanish |
+| --- | --- | --- |
+| Title | Demo inbox | Bandeja de demostración |
+| Subtitle | Stands in for a phone or email inbox. Nothing is really sent. | Hace de bandeja de teléfono o correo. No se envía nada de verdad. |
+| Recipient | To {to} | Para {to} |
+| Kinds | Verification code, Alert, Ledger checkpoint | Código de verificación, Aviso, Punto de control del registro |
+| Opening | Opening | Abriendo |
+| Open failed | Couldn’t open this entry. | No se pudo abrir esta entrada. |
+| Retry | Try again | Intentar de nuevo |
+| Empty | Nothing here yet. Codes and alerts you’d get by text or email show up here. | Aún no hay nada. Aquí aparecen los códigos y avisos que recibirías por mensaje o correo. |
+
+## Layout
+
+- The panel fills the width it is given, padded 24 px top and bottom and 16 px at the sides, with 10 px between the title, the subtitle and the entries. The screen places it, as a column beside the chat or in a sheet, and draws any edge it needs.
+- The title is `section` type, the subtitle and the empty line `meta` in `text-secondary`.
+- Each entry is padded 12 px by 14 px on `fill-card`, in a 1 px `line-card` border at `radius-card`, 10 px apart. The recipient line is `caption` in `text-secondary`, the kind `meta` at weight 520 4 px under it, and the body `body` type 2 px under that. Long words and hashes wrap.
+- Nothing moves.
+
+## Props
+
+| Prop | Type | Notes |
+| --- | --- | --- |
+| `viewer` | `'owner' \| 'visitor'` | Required. A visitor sees only verification codes and no times. |
+| `items` | `DemoInboxItem[]` | Required. Oldest first. |
+| `language` | `'en' \| 'es'` | Required. |
+| `onRetry` | `(entryId: string) => void` | Required. |
+
+`DemoInboxItem` is `{ notice: InboxNotice; time?: string; entry: DemoInboxEntry | null; failed?: boolean }`.

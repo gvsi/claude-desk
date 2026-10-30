@@ -33,7 +33,12 @@ const meta = {
   component: SegmentedControl<Preset>,
   args: { label: 'Mode for this Desk', options: PRESETS, value: 'custom', onChange: fn() },
   render: (args) => <Controlled {...args} />,
-  parameters: { layout: 'padded', canvas: 'N-Rules-Rivera' },
+  parameters: {
+    layout: 'padded',
+    canvas: 'none',
+    canvasNote:
+      'The Connectors and rules boards replace the earlier Rules board this mode control came from; the nearest reference board, N-Safety-Run1, draws the same control for Attempts and Every entry.',
+  },
 } satisfies Meta<typeof SegmentedControl<Preset>>;
 
 export default meta;

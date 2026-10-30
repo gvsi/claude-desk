@@ -1,0 +1,705 @@
+/**
+ * Page-level parts the boards draw that no design system component draws, because the web app
+ * (plan 04) owns those pages: the owner app's frame for Rivera Plumbing, Today's things to try,
+ * its "Last 7 days" column and briefing, and the conversation page's columns. They are composed
+ * here from the components and tokens, only for the `Boards/*` stories, and exported nowhere else.
+ */
+import type { CSSProperties, ReactNode } from 'react';
+import { fn } from 'storybook/test';
+
+import type { EvMessage, PublicDesk, RenderedBlock, StatusEvent } from '../../api/contracts.ts';
+import { AgentMessage } from '../components/AgentMessage/AgentMessage.tsx';
+import { ApprovalCard } from '../components/ApprovalCard/ApprovalCard.tsx';
+import { ClaudeMessage } from '../components/ClaudeMessage/ClaudeMessage.tsx';
+import { ConceptFooter } from '../components/ConceptFooter/ConceptFooter.tsx';
+import { Greeting } from '../components/Greeting/Greeting.tsx';
+import { SectionHeader } from '../components/SectionHeader/SectionHeader.tsx';
+import { MarginNote } from '../components/MarginNote/MarginNote.tsx';
+import { MarginReceipt } from '../components/MarginReceipt/MarginReceipt.tsx';
+import { receiptFromEvent } from '../components/MarginReceipt/receiptTone.ts';
+import { PersonMessage } from '../components/PersonMessage/PersonMessage.tsx';
+import { SystemLine } from '../components/SystemLine/SystemLine.tsx';
+import { TranscriptRow } from '../components/TranscriptRow/TranscriptRow.tsx';
+import { VisitorMessage } from '../components/VisitorMessage/VisitorMessage.tsx';
+import { Whisper } from '../components/Whisper/Whisper.tsx';
+import type { TranscriptTurn } from '../fixtures/index.ts';
+
+import { AppShell } from '../components/AppShell/AppShell.tsx';
+import { Button } from '../components/Button/Button.tsx';
+import { Card } from '../components/Card/Card.tsx';
+import { ChainStatus } from '../components/ChainStatus/ChainStatus.tsx';
+import { PageHeader } from '../components/PageHeader/PageHeader.tsx';
+import { SegmentedControl } from '../components/SegmentedControl/SegmentedControl.tsx';
+import { ConversationListItem } from '../components/ConversationListItem/ConversationListItem.tsx';
+import type { PublicBrand, PublicOpenStatus } from '../components/PublicShell/PublicShell.tsx';
+import { ReviewerBar } from '../components/ReviewerBar/ReviewerBar.tsx';
+import { Sidebar, initialsOf, type NavCount, type NavKey } from '../components/Sidebar/Sidebar.tsx';
+import { StatusDot, StatusLabel, type StatusTone } from '../components/StatusDot/StatusDot.tsx';
+import { TextLink } from '../components/TextLink/TextLink.tsx';
+import { placeholderHex, rivera } from '../fixtures/index.ts';
+import { Icon, type IconName } from '../icons/index.tsx';
+
+import './boards.css';
+
+/** Where the sidebar's rows go: in-page anchors, so nothing leaves the story. */
+export const OWNER_HREFS = {
+  today: '#today',
+  conversations: '#conversations',
+  people: '#customers',
+  rules: '#rules',
+  safety: '#safety',
+  share: '#share',
+  settings: '#settings',
+} satisfies Record<NavKey, string>;
+
+export const MAIN_LINE = { id: 'desk-rivera-main', name: rivera.business.deskName };
+export const EMERGENCIES = { id: 'desk-rivera-emergencies', name: 'Emergencies' };
+
+export interface RiveraFrameProps {
+  current: NavKey;
+  /** The counts beside Conversations and Safety, as each board draws them. */
+  counts: { conversations?: NavCount; safety?: NavCount };
+  /** Both of Rivera's Desks, so the sidebar shows its Desk picker. */
+  twoDesks?: boolean;
+  /** The reviewer bar across the top, as on the arrival boards. */
+  reviewer?: boolean;
+  /** The page lays out its own columns from the sidebar's edge (`AppShell` `fill`). */
+  fill?: boolean;
+  /** The sidebar's look (`AppShell` `sidebarLook`): the panel, or the app ground the Run 1 conversation boards draw. */
+  sidebarLook?: 'panel' | 'ground';
+  onSwitchBusiness?: () => void;
+  children: ReactNode;
+}
+
+/** The owner app for Maria Rivera: the shell, the sidebar on `current`, and the page. */
+export function RiveraFrame({
+  current,
+  counts,
+  twoDesks = false,
+  reviewer = false,
+  fill = false,
+  sidebarLook = 'panel',
+  onSwitchBusiness,
+  children,
+}: RiveraFrameProps) {
+  return (
+    <AppShell
+      business={rivera.business.name}
+      fill={fill}
+      sidebarLook={sidebarLook}
+      banner={reviewer ? <ReviewerBar ownerName={rivera.business.ownerName} onStartOver={fn()} /> : undefined}
+      sidebar={
+        <Sidebar
+          business={rivera.business.name}
+          onSwitchBusiness={onSwitchBusiness ?? fn()}
+          desks={twoDesks ? [MAIN_LINE, EMERGENCIES] : [MAIN_LINE]}
+          currentDeskId={MAIN_LINE.id}
+          onSwitchDesk={fn()}
+          current={current}
+          hrefs={OWNER_HREFS}
+          peopleLabel="Customers"
+          counts={counts}
+          answering
+          onAnsweringChange={fn()}
+          owner={{ name: rivera.business.ownerName, status: 'Available for chats' }}
+        />
+      }
+    >
+      {children}
+    </AppShell>
+  );
+}
+
+/** The public link as Today shows it beside the greeting. */
+export const PUBLIC_LINK = 'desk.example/rivera';
+
+// ---------------------------------------------------------------------------------------------
+// Today
+
+export interface ThingToTry {
+  icon: IconName;
+  title: string;
+  /** A held dot after the title, for something waiting on the owner. */
+  waiting?: boolean;
+  detail: string;
+  action: string;
+}
+
+/** Today's things to try, as the arrival board signs them. */
+export const THINGS_TO_TRY = {
+  chat: {
+    icon: 'conversations',
+    title: 'Chat as a customer',
+    detail: 'Your public page opens in a new tab. Ask about a leak, a price or a time.',
+    action: 'Open your public page',
+  },
+  breakIt: {
+    icon: 'safety',
+    title: 'Try to break it',
+    detail: 'Ask for a discount, another customer’s address or Maria’s home number. Safety shows what was refused and why.',
+    action: 'Show me ideas',
+  },
+  held: {
+    icon: 'clock',
+    title: 'Answer a held request',
+    waiting: true,
+    // Worded like the approval card: the held item's own rule, never a summary of the visitor.
+    detail: `A request is waiting for your answer. Held by your rule: ${rivera.ruleCards['rv-quote'].reason}`,
+    action: 'Open the request',
+  },
+  ownDesk: {
+    icon: 'plus',
+    title: 'Create your own Desk',
+    detail: 'Describe a business in a few sentences. Claude drafts the rules, and you confirm them.',
+    action: 'Start a Desk',
+  },
+} satisfies Record<string, ThingToTry>;
+
+/** "Things to try": a heading with its caption and Hide, then one card of rows, each with its button. */
+export function ThingsToTry({ things }: { things: ThingToTry[] }) {
+  return (
+    <section className="board-section" aria-labelledby="board-things-to-try">
+      <div className="board-section__head">
+        <h2 id="board-things-to-try" className="board-section__title cd-type-section">
+          Things to try
+        </h2>
+        <p className="board-section__caption cd-type-meta">About 10 minutes. No real customer sees any of it.</p>
+        <span className="board-section__end">
+          <Button variant="ghost" onClick={fn()}>
+            Hide this list
+          </Button>
+        </span>
+      </div>
+      <Card padding={16}>
+        <ul className="board-things">
+          {things.map((thing) => (
+            <li key={thing.title} className="board-thing">
+              <span className="board-thing__icon" aria-hidden="true">
+                <Icon name={thing.icon} size={16} />
+              </span>
+              <span className="board-thing__text">
+                <span className="board-thing__title cd-type-control">
+                  {thing.title}
+                  {thing.waiting ? <StatusDot tone="held" /> : null}
+                </span>
+                <span className="board-thing__detail cd-type-meta">{thing.detail}</span>
+              </span>
+              <span className="board-thing__action">
+                <Button variant="secondary" onClick={fn()}>
+                  {thing.action}
+                </Button>
+              </span>
+            </li>
+          ))}
+        </ul>
+      </Card>
+    </section>
+  );
+}
+
+/** "Your public page", at the top of Today's right column. */
+function PublicPagePanel() {
+  return (
+    <div className="board-panel-card">
+      <h2 className="board-panel-card__title cd-type-control">Your public page</h2>
+      <p className="board-quiet cd-type-caption">{PUBLIC_LINK}</p>
+      <div className="board-panel-card__action">
+        <Button variant="secondary" onClick={fn()}>
+          Chat as a customer
+        </Button>
+      </div>
+      <p className="board-quiet cd-type-caption">Opens in a new tab. Your chat shows up here under Live now.</p>
+    </div>
+  );
+}
+
+/** The day letters under the bookings chart: the seven dates ending today, today last. */
+const DAYS = ['F', 'S', 'S', 'M', 'T', 'W', 'T'] as const;
+
+/** "Includes recorded history": the link to the ledger's explanation of the replayed night. */
+function RecordedHistoryLink() {
+  return (
+    <span className="board-recorded cd-type-caption">
+      <TextLink href="#recorded-history">Includes recorded history</TextLink>
+    </span>
+  );
+}
+
+export interface LastSevenDaysProps {
+  /** Each day's bar, as a share of the week's busiest day; null for the empty copy. */
+  bars: readonly number[] | null;
+}
+
+/**
+ * Today's right column: the public page panel, then "Last 7 days": bookings with their amount and
+ * a bar per day, who handled the conversations, and the attempts stopped. Every number is the
+ * screen's display string; nothing here computes one.
+ */
+export function LastSevenDays({ bars }: LastSevenDaysProps) {
+  const empty = bars === null;
+  return (
+    <section className="board-week" aria-labelledby="board-week-title">
+      <PublicPagePanel />
+      <div className="board-week__head">
+        <h2 id="board-week-title" className="board-week__title cd-type-section">
+          Last 7 days
+        </h2>
+        {empty ? null : <RecordedHistoryLink />}
+      </div>
+      {empty ? (
+        <div className="board-week__block">
+          <h3 className="board-week__subtitle cd-type-control">Bookings</h3>
+          <p className="board-quiet cd-type-meta">No bookings in the last 7 days.</p>
+        </div>
+      ) : (
+        <div className="board-week__block">
+          <p className="board-week__total">
+            <span className="cd-type-figure">$1,860</span> <span className="board-quiet cd-type-message">booked</span>
+          </p>
+          <p className="board-quiet cd-type-meta">11 bookings, 2 so far today</p>
+        </div>
+      )}
+      <div className="board-chart" aria-hidden="true">
+        {DAYS.map((day, index) => {
+          const share = bars?.[index] ?? 0;
+          const today = index === DAYS.length - 1;
+          return (
+            <span key={index} className={`board-chart__day${today ? ' board-chart__day--today' : ''}`}>
+              <span className="board-chart__track">
+                <span className="board-chart__bar" style={{ height: share === 0 ? 'var(--space-2)' : `${share}%` }} />
+              </span>
+              <span className="board-chart__letter cd-type-caption">{day}</span>
+            </span>
+          );
+        })}
+      </div>
+      <div className="board-week__block board-week__block--ruled">
+        <h3 className="board-week__subtitle cd-type-control">Handled by Claude, or by you</h3>
+        {empty ? (
+          <p className="board-quiet cd-type-meta">No conversations in the last 7 days.</p>
+        ) : (
+          <>
+            <div className="board-split" aria-hidden="true">
+              <span className="board-split__handled" />
+              <span className="board-split__held" />
+            </div>
+            <div className="board-split__legend cd-type-meta">
+              <StatusLabel tone="handled">Claude handled 38</StatusLabel>
+              <StatusLabel tone="held">You stepped in 3 times</StatusLabel>
+            </div>
+            <p className="board-quiet cd-type-caption">For a big discount, a refund and a Sunday emergency.</p>
+          </>
+        )}
+      </div>
+      <div className="board-week__block board-week__block--ruled">
+        <h3 className="board-week__subtitle cd-type-control">Attempts to talk it around</h3>
+        {empty ? (
+          <p className="board-quiet cd-type-meta">No attempts in the last 7 days.</p>
+        ) : (
+          <>
+            <p className="board-week__total">
+              <span className="cd-type-figure-small">14</span> <span className="board-quiet cd-type-message">stopped</span>
+            </p>
+            <p className="board-quiet cd-type-meta">Nothing was shared and no money moved.</p>
+          </>
+        )}
+        <p className="cd-type-meta">
+          <TextLink href="#safety">Open Safety</TextLink>
+        </p>
+      </div>
+    </section>
+  );
+}
+
+/** One row of the short briefing: when, what happened in words with its dot, and the detail. */
+export interface BriefingRow {
+  time: string;
+  tone: StatusTone;
+  what: string;
+  detail: string;
+}
+
+/** "Since last night": the summary in Claude's voice, a row of each kind, then "See all". */
+export function SinceLastNight({ summary, rows, seeAll }: { summary: string; rows: BriefingRow[]; seeAll: string }) {
+  return (
+    <Card padding={20}>
+      <p className="board-briefing__summary cd-type-summary">{summary}</p>
+      <ul className="board-briefing">
+        {rows.map((row) => (
+          <li key={row.time} className="board-briefing__row">
+            <span className="board-quiet cd-type-meta">{row.time}</span>
+            <span className="cd-type-meta">
+              <StatusLabel tone={row.tone}>{row.what}</StatusLabel>
+            </span>
+            <span className="cd-type-meta">{row.detail}</span>
+          </li>
+        ))}
+      </ul>
+      <p className="cd-type-meta">
+        <TextLink href="#briefing">{seeAll}</TextLink>
+      </p>
+    </Card>
+  );
+}
+
+/** Each day's bookings as a share of the busiest day, Friday to today, as the board draws them. */
+const WEEK = [64, 32, 0, 64, 100, 32, 64] as const;
+
+/**
+ * Today as Maria Rivera first sees it: the greeting, the things to try, the held request, Live now,
+ * the short briefing and the last 7 days. `reviewer` adds the reviewer bar across the top.
+ */
+export function TodayNeedsYou({
+  reviewer = true,
+  twoDesks = false,
+  onSwitchBusiness,
+}: {
+  reviewer?: boolean;
+  /** Both of Rivera's Desks, so the sidebar shows its Desk picker. */
+  twoDesks?: boolean;
+  onSwitchBusiness?: () => void;
+}) {
+  return (
+    <RiveraFrame
+      current="today"
+      reviewer={reviewer}
+      twoDesks={twoDesks}
+      onSwitchBusiness={onSwitchBusiness}
+      counts={{ conversations: { n: 1, label: '1 live conversation' }, safety: { n: 2, label: '2 blocked' } }}
+    >
+      <div className="board-today">
+        <div className="board-today__main">
+          <Greeting text="Good morning, Maria" presence={{ line: 'Quiet right now.', people: [] }} link={{ label: PUBLIC_LINK, onCopy: fn() }} />
+          <ThingsToTry things={[THINGS_TO_TRY.chat, THINGS_TO_TRY.breakIt, THINGS_TO_TRY.held, THINGS_TO_TRY.ownDesk]} />
+          <section className="board-section" aria-labelledby="board-needs-you">
+            <SectionHeader id="board-needs-you" title="Needs you" count={{ n: 1, label: '1 needs you' }} />
+            <ApprovalCard
+              decision={rivera.decisions.held}
+              heldBy={rivera.ruleCards['rv-quote'].reason}
+              context={
+                <>
+                  From the visitor: “<span data-copy="user">How much to clear a clogged drain? Can I get 15% off if I pay cash?</span>”
+                </>
+              }
+              waiting="Web chat, 2 min ago"
+              onAnswer={fn()}
+            />
+          </section>
+          <section className="board-section" aria-labelledby="board-live-now">
+            <SectionHeader id="board-live-now" title="Live now" count={{ n: 1, label: '1 live conversation' }} caption="Shows while someone is chatting" />
+            <ul className="board-conversations__items">
+              <li>
+                <ConversationListItem
+                  name="Your preview"
+                  time="Just now"
+                  status={{ tone: 'info', text: 'Your own preview, in the public page tab' }}
+                  href="#conversation-preview"
+                />
+              </li>
+            </ul>
+          </section>
+          <section className="board-section" aria-labelledby="board-since-last-night">
+            <SectionHeader id="board-since-last-night" title="Since last night" caption={<RecordedHistoryLink />} />
+            <SinceLastNight
+              summary="All 7 conversations stayed inside your rules. I booked three visits, answered a question and stopped two attempts. Nothing was shared."
+              rows={[
+                { time: '3:30 am', tone: 'refused', what: 'Blocked', detail: 'An agent tried to book without a signed limit. Nothing was booked.' },
+                { time: '6:40 am', tone: 'handled', what: 'Booked', detail: 'Dana Whitfield, leak repair' },
+                { time: '5:12 am', tone: 'handled', what: 'Answered', detail: 'Asked if you cover Emeryville. You do.' },
+              ]}
+              seeAll="See all 7"
+            />
+          </section>
+          <ConceptFooter />
+        </div>
+        <LastSevenDays bars={WEEK} />
+      </div>
+    </RiveraFrame>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Conversations
+
+export interface ListedConversation {
+  name: string;
+  time: string;
+  status: { tone: StatusTone; text: string };
+}
+
+/** The conversations the Run 1 boards list beside the open one. */
+export const CONVERSATION_LIST: ListedConversation[] = [
+  { name: 'Lucía Herrera', time: '12:06 pm', status: { tone: 'handled', text: 'Visitor' } },
+  { name: rivera.people.dana.name, time: '12:04 pm', status: { tone: 'held', text: 'Needs you' } },
+  { name: rivera.conversations.alexAgent.name, time: '11:42 am', status: { tone: 'info', text: 'Agent' } },
+  { name: 'Visitor in Berkeley', time: '10:58 am', status: { tone: 'held', text: 'Needs you' } },
+];
+
+/**
+ * The conversations page: the list of today's conversations in its own column at the left, and the
+ * open conversation in the reading column beside it.
+ */
+export function ConversationsPage({ open, items = CONVERSATION_LIST, children }: { open: string; items?: ListedConversation[]; children: ReactNode }) {
+  return (
+    <div className="board-conversations">
+      <nav className="board-conversations__list" aria-labelledby="board-conversations-title">
+        <h1 id="board-conversations-title" className="board-conversations__title cd-type-page-title">
+          Conversations
+        </h1>
+        <p className="board-quiet cd-type-meta">Today</p>
+        <ul className="board-conversations__items">
+          {items.map((item) => (
+            <li key={item.name}>
+              <ConversationListItem {...item} href={`#conversation-${item.time}`} current={item.name === open} />
+            </li>
+          ))}
+        </ul>
+      </nav>
+      <div className="board-conversations__open">{children}</div>
+    </div>
+  );
+}
+
+export interface TurnRowsProps {
+  turns: readonly TranscriptTurn[];
+  /** The owner's own screen opens a receipt's full trace; the visitor's receipts are read-only. */
+  onOpenTrace?: (ledgerSeq: number) => void;
+  /** The whisper's caption: who and when, in the screen's words. */
+  whisperCaption?: string;
+  /** Notes the owner's screen attaches under a turn, by its index in `turns`. */
+  notes?: Record<number, string>;
+  /** Who the agent acts for, as the owner reads it: "Alex Kim's assistant". */
+  agentName?: string;
+  /** The decisions whose receipt draws the sage check: an executed booking or a paid link. */
+  checks?: readonly string[];
+  /** Claude's translations for the owner of what the visitor wrote, by the turn's index. */
+  translations?: Record<number, string>;
+  /** On the owner's own screen her messages read "You", beside her own initials. */
+  ownersOwnScreen?: boolean;
+}
+
+/**
+ * A stored conversation as rows: each message in its own `TranscriptRow`, with the status events
+ * that came before it and its own reply check attached under it, through `receiptFromEvent`.
+ */
+export function TurnRows({
+  turns,
+  onOpenTrace,
+  whisperCaption = 'Your whisper. Only Claude sees this.',
+  notes = {},
+  agentName,
+  checks = [],
+  translations = {},
+  ownersOwnScreen = false,
+}: TurnRowsProps) {
+  const rows: ReactNode[] = [];
+  let pending: StatusEvent[] = [];
+  let requests = 0;
+  const attached = (index: number, events: (EvMessage | StatusEvent)[]) => {
+    const receipts = events.map((event) => {
+      const view = receiptFromEvent(event);
+      const check = event.type !== 'message' && checks.includes(event.decision_id);
+      return <MarginReceipt key={view.ledgerSeq} {...view} onOpenTrace={onOpenTrace} drawCheck={check} />;
+    });
+    const note = notes[index];
+    return note === undefined ? receipts : [...receipts, <MarginNote key="note" text={note} />];
+  };
+  turns.forEach((turn, index) => {
+    switch (turn.kind) {
+      case 'visitor':
+        rows.push(
+          <TranscriptRow key={index} margin={notes[index] === undefined ? undefined : attached(index, [])}>
+            <VisitorMessage text={turn.text} translation={translations[index]} />
+          </TranscriptRow>,
+        );
+        return;
+      case 'agent':
+        requests += 1;
+        rows.push(
+          <TranscriptRow key={index} margin={notes[index] === undefined ? undefined : attached(index, [])}>
+            <AgentMessage agentName={agentName ?? 'Agent'} signed={turn.signed} title="Signed request" meta={`Request ${requests}`} text={turn.text} />
+          </TranscriptRow>,
+        );
+        return;
+      case 'whisper':
+        rows.push(
+          <TranscriptRow key={index} margin={notes[index] === undefined ? undefined : attached(index, [])}>
+            <Whisper caption={whisperCaption} text={turn.text} />
+          </TranscriptRow>,
+        );
+        return;
+      case 'event': {
+        const { event } = turn;
+        if (event.type === 'message') {
+          const words =
+            event.author === 'owner' ? (
+              <PersonMessage
+                name={ownersOwnScreen ? 'You' : rivera.business.ownerName}
+                initials={ownersOwnScreen ? initialsOf(rivera.business.ownerName) : undefined}
+                blocks={event.blocks}
+                language={event.language}
+              />
+            ) : (
+              <ClaudeMessage blocks={event.blocks} language={event.language} ownerName={rivera.business.ownerName} />
+            );
+          rows.push(
+            <TranscriptRow key={index} margin={attached(index, [...pending, event])}>
+              {words}
+            </TranscriptRow>,
+          );
+          pending = [];
+        } else if (event.type === 'owner_joined') {
+          rows.push(<SystemLine key={index} text={`${event.name} joined the chat`} initials={initialsOf(event.name)} />);
+        } else if (event.type === 'receipt' || event.type === 'held' || event.type === 'resolved') {
+          pending.push(event);
+        }
+        return;
+      }
+      default:
+        return;
+    }
+  });
+  return <>{rows}</>;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Sign-off sheets
+
+/**
+ * A sign-off board: one sheet of labelled panels, each a real screen or part of one. The board's
+ * own title, explanations and "How it behaves" notes are sign-off notes, not product, so they stay
+ * in the canvas; each panel keeps its short label.
+ */
+export function Sheet({ title, gap = 40, children }: { title: string; gap?: 24 | 32 | 40; children: ReactNode }) {
+  return (
+    <main className={`board-sheet board-sheet--gap-${gap}`}>
+      <h1 className="cd-sr-only">{title}</h1>
+      {children}
+    </main>
+  );
+}
+
+/**
+ * One labelled panel of a sheet, as wide as the board draws it (`width`, its border included) or
+ * the sheet's full width. A `phone` panel is padded 16 px, a `compact` one 20 px 24 px, the others
+ * 20 px 28 px; a `bare` panel holds a card, which is its own frame.
+ */
+export function Panel({
+  label,
+  width,
+  phone = false,
+  compact = false,
+  bare = false,
+  children,
+}: {
+  label: string;
+  width?: number;
+  phone?: boolean;
+  compact?: boolean;
+  bare?: boolean;
+  children: ReactNode;
+}) {
+  const kind = phone ? ' board-panel--phone' : compact ? ' board-panel--compact' : '';
+  return (
+    <section
+      className={`board-panel${kind}${bare ? ' board-panel--bare' : ''}${width === undefined ? ' board-panel--full' : ' board-panel--sized'}`}
+      style={width === undefined ? undefined : ({ '--board-panel-width': `${width}px` } as CSSProperties)}
+      aria-label={label}
+    >
+      <h2 className="board-panel__label cd-type-caption">{label}</h2>
+      <div className="board-panel__frame">{children}</div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// The public page
+
+/** The public page's brand, as the screen maps `PublicDesk` to it: the seed's field and accent, the text tokens as inks. */
+export function brandOf(publicDesk: PublicDesk): PublicBrand {
+  return {
+    name: publicDesk.business_name,
+    tagline: publicDesk.desk_name,
+    monogram: Array.from(publicDesk.business_name)[0] ?? '',
+    field: publicDesk.brand.primary ?? '',
+    ink: 'var(--text-primary)',
+    inkSecondary: 'var(--text-secondary)',
+    accent: publicDesk.brand.accent ?? '',
+  };
+}
+
+/** Thursday 10:00, open until 18:00: the kernel's words, which the header shows as written. */
+export const OPEN_NOW: NonNullable<PublicOpenStatus> = {
+  open: true,
+  until: '2026-10-29T18:00:00-07:00',
+  opens_at: null,
+  text: 'Open now, until 6:00 pm',
+  as_of: '2026-10-29T10:00:00-07:00',
+  refresh_at: '2026-10-29T18:00:00-07:00',
+};
+
+/** The kernel's line under a reply that passed the check, read from a fixture reply that did. */
+const REPLY_CHECKED = (() => {
+  const reply = rivera.events.quoteTurn.find((event): event is EvMessage => event.type === 'message');
+  if (!reply) throw new Error('the Rivera fixture has no checked reply');
+  return reply.visitor_plain;
+})();
+
+/** A reply from Claude that passed the check, as the stream delivers it, for a board's own turn. */
+export function checkedReply(id: string, blocks: RenderedBlock[], ledgerSeq: number): EvMessage {
+  return {
+    type: 'message',
+    message_id: id,
+    generation: 1,
+    author: 'claude',
+    language: 'en',
+    handoff: false,
+    blocks,
+    visitor_plain: REPLY_CHECKED,
+    ledger_seq: ledgerSeq,
+    signature: placeholderHex(`signature:${id}`, 64),
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Safety
+
+export type SafetyView = 'attempts' | 'entries';
+
+/**
+ * The Safety page: its title and Claude's line about the week, the held request waiting on Today,
+ * the ledger's chain check beside the view switch, and the page's two columns.
+ */
+export function SafetyPage({ view, entries, list, detail }: { view: SafetyView; entries: number; list: ReactNode; detail: ReactNode }) {
+  return (
+    <RiveraFrame current="safety" counts={{ conversations: { n: 3, label: '3 live conversations' }, safety: { n: 2, label: '2 blocked' } }}>
+      <div className="board-safety">
+        <PageHeader
+          title="Safety"
+          subtitle={<span className="board-safety__week cd-type-summary">6 attempts to talk me around were stopped this week.</span>}
+          actions={
+            <Button variant="secondary" href="#today">
+              <StatusLabel tone="held">1 held for you, in Today</StatusLabel>
+            </Button>
+          }
+        />
+        <div className="board-safety__bar">
+          <ChainStatus chainOk firstBadSeq={null} entries={entries} devKey />
+          <SegmentedControl
+            label="Show"
+            options={[
+              { value: 'attempts', label: 'Attempts' },
+              { value: 'entries', label: 'Every entry' },
+            ]}
+            value={view}
+            onChange={fn()}
+          />
+        </div>
+        <div className={`board-safety__columns board-safety__columns--${view}`}>
+          <div className="board-safety__list">{list}</div>
+          <div className="board-safety__detail">{detail}</div>
+        </div>
+      </div>
+    </RiveraFrame>
+  );
+}

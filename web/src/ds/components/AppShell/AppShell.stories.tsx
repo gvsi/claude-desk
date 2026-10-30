@@ -91,9 +91,9 @@ const meta = {
   },
   parameters: {
     layout: 'fullscreen',
-    canvas: 'N-Reviewer-Arrival',
+    canvas: 'N-Today-Run1',
     canvasNote:
-      "The board's Today holds the arrival list and the public panel, which are Plan 04's; here the shell holds the greeting and one held request, under the reviewer bar.",
+      "The board's Today also holds the things to try, the last 7 days and the public page panel, which the Today board story composes; here the shell holds the greeting and one held request, under the reviewer bar.",
   },
 } satisfies Meta<typeof AppShell>;
 
@@ -139,12 +139,56 @@ export const OwnerToday: Story = {
   },
 };
 
+/** A page that lays out its own columns, as the conversations page does: a list, then the conversation. */
+const columns = (
+  <div style={{ display: 'flex' }}>
+    <nav aria-label="Conversations" style={{ width: 260, flex: 'none', borderRight: '1px solid var(--line-hairline)' }}>
+      <h1 className="cd-type-page-title" style={{ margin: 'var(--space-24) var(--space-20) 0' }}>
+        Conversations
+      </h1>
+    </nav>
+    <section aria-label="Conversation with Dana Whitfield" style={{ flex: 1, minWidth: 0 }} />
+  </div>
+);
+
+export const FillsTheMain: Story = {
+  args: { banner: undefined, fill: true, sidebarLook: 'ground', children: columns },
+  parameters: {
+    canvas: 'N-Conv-Run1',
+    canvasNote:
+      'Only the page’s frame: the board’s conversation list starts where the sidebar ends and runs the window’s height, with the conversation beside it (fill), and the sidebar on the app ground at its own height (sidebarLook ground), as the board draws it.',
+  },
+  play: async ({ canvas }) => {
+    // The signed conversation boards draw the sidebar on the app ground with no seam, at its own
+    // height (sidebarLook ground): its Answering switch and owner sit under the pages, not at the
+    // window's foot.
+    const sidebarColumn = canvas.getByRole('complementary', { name: 'Claude Desk' });
+    expectComputed(sidebarColumn, { backgroundColor: 'rgb(28, 27, 25)', borderRightWidth: '0px' });
+    const nav = within(sidebarColumn).getByRole('navigation', { name: 'Main' });
+    const foot = sidebarColumn.querySelector('.cd-sidebar__footer') as HTMLElement;
+    await expect(foot.getBoundingClientRect().top - nav.getBoundingClientRect().bottom).toBe(4);
+
+    // The page fills the main area edge to edge: no padding and no content width, so its first
+    // column starts at the sidebar's seam and runs the height of the window.
+    const column = canvas.getByRole('complementary', { name: 'Claude Desk' });
+    const main = canvas.getByRole('main');
+    expectComputed(main, { paddingTop: '0px', paddingRight: '0px', paddingBottom: '0px', paddingLeft: '0px' });
+    const content = main.firstElementChild as HTMLElement;
+    expectComputed(content, { maxWidth: 'none' });
+    await expect(content.getBoundingClientRect().width).toBe(main.clientWidth);
+    await expect(content.getBoundingClientRect().height).toBe(main.clientHeight);
+    const list = canvas.getByRole('navigation', { name: 'Conversations' });
+    await expect(list.getBoundingClientRect().left).toBe(column.getBoundingClientRect().right);
+    await expect(list.getBoundingClientRect().height).toBe(window.innerHeight);
+  },
+};
+
 export const Compact: Story = {
   args: { layout: 'compact' },
   parameters: {
     canvas: 'none',
     canvasNote:
-      'No board shows the owner app on a phone; the top bar holds the mark, the business and Menu, and Menu opens the sidebar of N-Today-NeedsYou as a sheet.',
+      'No board shows the owner app on a phone; the top bar holds the mark, the business and Menu, and Menu opens the sidebar of N-Today-Run1 as a sheet.',
   },
   play: async ({ canvas, userEvent }) => {
     // A top bar instead of the column: the mark, the business and Menu.

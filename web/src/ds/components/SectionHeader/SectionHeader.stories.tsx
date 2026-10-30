@@ -8,7 +8,7 @@ const meta = {
   title: 'Layout/SectionHeader',
   component: SectionHeader,
   args: { title: 'Needs you' },
-  parameters: { layout: 'padded', canvas: 'N-Today-NeedsYou' },
+  parameters: { layout: 'padded', canvas: 'N-Today-Run1' },
 } satisfies Meta<typeof SectionHeader>;
 
 export default meta;
@@ -54,7 +54,7 @@ export const LongTitle: Story = {
   ),
   parameters: {
     canvas: 'none',
-    canvasNote: "No board shows a title wider than a phone's line; it wraps inside the line, as N-Today-NeedsYou's header would.",
+    canvasNote: "No board shows a title wider than a phone's line; it wraps inside the line, as N-Today-Run1's header would.",
   },
   play: async ({ canvas, canvasElement }) => {
     const line = canvas.getByTestId('phone-line');

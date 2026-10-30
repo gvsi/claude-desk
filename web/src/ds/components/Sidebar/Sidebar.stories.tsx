@@ -72,7 +72,7 @@ const meta = {
       </div>
     ),
   ],
-  parameters: { layout: 'fullscreen', canvas: 'N-Today-NeedsYou' },
+  parameters: { layout: 'fullscreen', canvas: 'N-Today-Run1' },
 } satisfies Meta<typeof Sidebar>;
 
 export default meta;

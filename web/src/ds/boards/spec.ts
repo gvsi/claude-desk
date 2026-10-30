@@ -1,0 +1,194 @@
+/**
+ * The board spec (design system screens plan, Task 4) as computed-style checks, shared by every
+ * `Boards/*` story. Where a signed render differs from the plan's table, the render's value is the
+ * one here, and `reference/README.md` records both and why.
+ */
+import { expect, within } from 'storybook/test';
+
+import { expectComputed, type ComputedExpectation } from '../test/expectComputed.ts';
+
+const SERIF = /^"Source Serif 4"/;
+const SANS = /^"Hanken Grotesk"/;
+
+/** Each spec row, as computed styles. Rows that differ by board say which boards they are for. */
+export const SPEC = {
+  /** Today, Safety, the switcher and the take-over: the sidebar on the panel, a hairline seam at its right. */
+  sidebar: {
+    width: '264px',
+    backgroundColor: 'rgb(34, 34, 32)',
+    borderRightWidth: '1px',
+    borderRightColor: 'rgba(250, 249, 245, 0.12)',
+  },
+  /** The signed conversation boards (N-Conv-Run1, N-Conv-Agent-Run1): the sidebar on the app ground, no seam. */
+  sidebarGround: {
+    width: '264px',
+    backgroundColor: 'rgb(28, 27, 25)',
+    borderRightWidth: '0px',
+  },
+  activeNavRow: {
+    height: '36px',
+    backgroundColor: 'rgb(60, 57, 47)',
+    borderTopLeftRadius: '8px',
+    fontSize: '14px',
+    lineHeight: '20px',
+    fontWeight: '420',
+  },
+  pageTitle: { fontFamily: SERIF, fontSize: '24px', lineHeight: '32px', fontWeight: '460' },
+  greeting: { fontFamily: SERIF, fontSize: '36px', lineHeight: '44px', fontWeight: '300' },
+  /** Today's "Last 7 days" (N-Today-Run1): the booked total, then the smaller stopped count, with tabular figures. */
+  figure: { fontFamily: SANS, fontSize: '32px', lineHeight: '40px', fontWeight: '500', letterSpacing: '-0.3px', fontVariantNumeric: 'tabular-nums' },
+  figureSmall: { fontFamily: SANS, fontSize: '24px', lineHeight: '32px', fontWeight: '420', letterSpacing: 'normal', fontVariantNumeric: 'tabular-nums' },
+  main: { paddingTop: '24px', paddingRight: '40px', paddingBottom: '20px', paddingLeft: '40px' },
+  content: { maxWidth: '960px' },
+  /** The conversation boards: the page fills the main area, so its list starts at the sidebar's seam. */
+  mainFilled: { paddingTop: '0px', paddingRight: '0px', paddingBottom: '0px', paddingLeft: '0px' },
+  contentFilled: { maxWidth: 'none' },
+  reply: { fontFamily: SERIF, fontSize: '15px', lineHeight: '23px', fontWeight: '360', color: 'rgba(250, 249, 245, 0.92)' },
+  bubble: {
+    backgroundColor: 'rgba(250, 249, 245, 0.06)',
+    borderTopLeftRadius: '12px',
+    paddingTop: '8px',
+    paddingRight: '14px',
+    paddingBottom: '8px',
+    paddingLeft: '14px',
+    fontSize: '15px',
+    lineHeight: '21px',
+  },
+  receipt: { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' },
+  dot: { width: '6px', height: '6px' },
+  card: {
+    backgroundColor: 'rgba(250, 249, 245, 0.03)',
+    borderTopWidth: '1px',
+    borderTopColor: 'rgba(250, 249, 245, 0.14)',
+    borderTopLeftRadius: '12px',
+    paddingTop: '20px',
+    paddingLeft: '20px',
+  },
+  secondaryMain: {
+    height: '40px',
+    borderTopLeftRadius: '8px',
+    backgroundColor: 'rgba(250, 249, 245, 0.1)',
+    fontSize: '14px',
+    lineHeight: '20px',
+    fontWeight: '420',
+  },
+  primary: { backgroundColor: 'rgb(239, 236, 228)', color: 'rgb(28, 27, 25)' },
+  composer: { backgroundColor: 'rgb(42, 41, 39)', borderTopLeftRadius: '16px', boxShadow: /0px 4px 20px/ },
+  footer: { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' },
+} as const satisfies Record<string, ComputedExpectation>;
+
+/** The concept footer, word for word. */
+export const FOOTER = 'Concept prototype by Giovanni Alcantara, not an Anthropic product';
+
+/** The one element `selector` finds under `root`, or a thrown error naming the selector. */
+export function one<T extends Element = HTMLElement>(root: ParentNode, selector: string): T {
+  const found = root.querySelectorAll<T & Element>(selector);
+  if (found.length !== 1) throw new Error(`expected one ${selector}, found ${found.length}`);
+  return found[0] as T;
+}
+
+/** Every element `selector` finds under `root`, at least one. */
+export function some<T extends Element = HTMLElement>(root: ParentNode, selector: string): T[] {
+  const found = [...root.querySelectorAll<T & Element>(selector)];
+  if (found.length === 0) throw new Error(`expected at least one ${selector}`);
+  return found;
+}
+
+/**
+ * The owner app's frame: the sidebar column, its current row, and the padded page. As the signed
+ * conversation boards draw it, `fill` has the page fill the main area, and `sidebarLook: 'ground'`
+ * puts the sidebar on the app ground at its own height, its Answering switch 4 px under the pages.
+ */
+export async function expectOwnerFrame(
+  root: HTMLElement,
+  current: string,
+  { fill = false, sidebarLook = 'panel' }: { fill?: boolean; sidebarLook?: 'panel' | 'ground' } = {},
+): Promise<void> {
+  const column = within(root).getByRole('complementary', { name: 'Claude Desk' });
+  expectComputed(column, sidebarLook === 'ground' ? SPEC.sidebarGround : SPEC.sidebar);
+  if (sidebarLook === 'ground') {
+    const nav = within(column).getByRole('navigation', { name: 'Main' });
+    const foot = one(column, '.cd-sidebar__footer');
+    await expect(foot.getBoundingClientRect().top - nav.getBoundingClientRect().bottom, 'the sidebar foot under the pages').toBe(4);
+  }
+  const row = within(column).getByRole('link', { name: new RegExp(`^${current}`) });
+  await expect(row).toHaveAttribute('aria-current', 'page');
+  expectComputed(row, SPEC.activeNavRow);
+  const main = within(root).getByRole('main');
+  expectComputed(main, fill ? SPEC.mainFilled : SPEC.main);
+  expectComputed(one(main, '.cd-app-shell__content'), fill ? SPEC.contentFilled : SPEC.content);
+}
+
+/** The concept footer: there once, word for word, in caption type. */
+export async function expectFooter(root: HTMLElement): Promise<void> {
+  const footer = one(root, '[data-ds="concept-footer"]');
+  await expect(footer.textContent?.replace(/\s+/g, ' ').trim()).toBe(FOOTER);
+  expectComputed(footer, SPEC.footer);
+}
+
+/** Claude's words in serif, every visitor bubble in its fill, every card in its look. */
+export function expectConversationType(root: HTMLElement): void {
+  for (const prose of root.querySelectorAll<HTMLElement>('.cd-claude-message__prose')) expectComputed(prose, SPEC.reply);
+  for (const bubble of root.querySelectorAll<HTMLElement>('.cd-visitor-message__bubble')) expectComputed(bubble, SPEC.bubble);
+}
+
+/** Every `Card` on the board, in the card look. */
+export function expectCards(root: HTMLElement): void {
+  for (const card of some(root, '.cd-card')) expectComputed(card, SPEC.card);
+}
+
+/**
+ * receipts_sit_under_their_message: every receipt or note is attached space-8 under the message it
+ * belongs to, on its side: from the left edge of Claude's or a person's words, or ending at the
+ * right edge of a visitor's or an agent's bubble. Its line is caption type in text-secondary, and
+ * its dot is 6 px. Returns how many rows carry receipts.
+ */
+export async function expectReceiptsUnderMessages(root: HTMLElement): Promise<number> {
+  const rows = [...root.querySelectorAll<HTMLElement>('.cd-transcript-row:not(.cd-transcript-header)')].filter((row) =>
+    row.querySelector(':scope > .cd-transcript-row__margin'),
+  );
+  for (const row of rows) {
+    const main = one(row, ':scope > .cd-transcript-row__main');
+    const margin = one(row, ':scope > .cd-transcript-row__margin');
+    const mainBox = main.getBoundingClientRect();
+    const marginBox = margin.getBoundingClientRect();
+    await expect(Math.round(marginBox.top - mainBox.bottom), 'space between a message and its receipts').toBe(8);
+    const bubble = main.querySelector<HTMLElement>('.cd-visitor-message__bubble, .cd-agent-message__bubble');
+    if (bubble) {
+      await expect(Math.round(marginBox.right), 'receipts end at the bubble').toBe(Math.round(bubble.getBoundingClientRect().right));
+    } else {
+      const words = main.firstElementChild as HTMLElement;
+      await expect(Math.round(marginBox.left), 'receipts start under the words').toBe(Math.round(words.getBoundingClientRect().left));
+    }
+    for (const line of margin.querySelectorAll<HTMLElement>('.cd-margin-line')) {
+      expectComputed(line, SPEC.receipt);
+    }
+    for (const dot of margin.querySelectorAll<HTMLElement>('.cd-status-dot')) expectComputed(dot, SPEC.dot);
+  }
+  return rows.length;
+}
+
+/**
+ * focus_order_is_logical: Tab from the top of the page reaches each of `stops` in this order
+ * (other stops may come between them). Returns every stop Tab reached, in order.
+ */
+export async function expectTabOrder(user: { tab: () => Promise<void> }, stops: HTMLElement[], maxPresses = 80): Promise<HTMLElement[]> {
+  (document.activeElement as HTMLElement | null)?.blur();
+  const reached: HTMLElement[] = [];
+  for (let i = 0; i < maxPresses; i += 1) {
+    await user.tab();
+    const active = document.activeElement as HTMLElement | null;
+    if (!active || active === document.body || reached.includes(active)) break;
+    reached.push(active);
+  }
+  const positions = stops.map((stop) => reached.indexOf(stop));
+  const missing = stops.filter((_, index) => positions[index] === -1).map(describe);
+  await expect(missing, 'stops Tab never reached').toEqual([]);
+  const sorted = [...positions].sort((a, b) => a - b);
+  await expect(positions, `Tab order: ${stops.map(describe).join(', ')}`).toEqual(sorted);
+  return reached;
+}
+
+function describe(el: HTMLElement): string {
+  return el.getAttribute('aria-label') ?? el.textContent?.replace(/\s+/g, ' ').trim() ?? el.tagName;
+}

@@ -1,0 +1,856 @@
+/* The page-level layouts the boards draw and the web app (plan 04) owns, composed for the
+   Boards/* stories only, on the design system's tokens. Classes start "board-", apart from the
+   components' "cd-". Nothing here moves. */
+
+.board-quiet {
+  color: var(--text-secondary);
+}
+
+.board-stack {
+  display: grid;
+  gap: var(--space-28);
+  min-width: 0;
+}
+
+/* Today: the page and its right column. */
+.board-today {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: var(--space-32);
+  align-items: start;
+}
+
+@media (max-width: 1099.98px) {
+  .board-today {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.board-today__main {
+  display: grid;
+  gap: var(--space-32);
+  min-width: 0;
+}
+
+.board-section {
+  display: grid;
+  gap: var(--space-12);
+  min-width: 0;
+}
+
+.board-section__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4) var(--space-8);
+  min-height: var(--size-control);
+}
+
+.board-section__title,
+.board-section__caption {
+  margin: 0;
+}
+
+.board-section__caption {
+  color: var(--text-secondary);
+}
+
+.board-section__end {
+  margin-left: auto;
+}
+
+/* Things to try: rows in one card, hairlines between them. */
+.board-things {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.board-thing {
+  display: grid;
+  grid-template-columns: var(--size-control) minmax(0, 1fr) auto;
+  gap: var(--space-14);
+  align-items: center;
+  padding: var(--space-14) 0;
+}
+
+.board-thing:first-child {
+  padding-top: 0;
+}
+
+.board-thing:last-child {
+  padding-bottom: 0;
+}
+
+.board-thing + .board-thing {
+  border-top: 1px solid var(--line-hairline);
+}
+
+.board-thing__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: var(--size-control);
+  height: var(--size-control);
+  border: 1px solid var(--line-control);
+  border-radius: var(--radius-control);
+  color: var(--text-secondary);
+}
+
+.board-thing__text {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.board-thing__title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.board-thing__detail {
+  color: var(--text-secondary);
+}
+
+@media (max-width: 559.98px) {
+  .board-thing {
+    grid-template-columns: var(--size-control) minmax(0, 1fr);
+  }
+
+  .board-thing__action {
+    grid-column: 2;
+  }
+}
+
+/* Today's right column: the public page panel, then the last 7 days. */
+.board-week {
+  display: grid;
+  gap: var(--space-20);
+  box-sizing: border-box;
+  min-width: 0;
+  padding: var(--space-20);
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-card);
+  background: var(--bg-panel);
+}
+
+.board-panel-card {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-16);
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-card);
+  background: var(--fill-card);
+}
+
+.board-panel-card__title,
+.board-panel-card p {
+  margin: 0;
+}
+
+.board-panel-card__action {
+  margin: var(--space-12) 0 var(--space-6);
+}
+
+.board-week__head {
+  display: grid;
+  gap: var(--space-6);
+  justify-items: start;
+}
+
+.board-week__title,
+.board-week__subtitle,
+.board-week p {
+  margin: 0;
+}
+
+.board-week__block {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.board-week__block--ruled {
+  gap: var(--space-8);
+  padding-top: var(--space-20);
+  border-top: 1px solid var(--line-hairline);
+}
+
+.board-week__total {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+}
+
+.board-recorded .cd-text-link {
+  color: var(--text-secondary);
+}
+
+/* The bookings chart: one thin bar a day, today's in full ink. Decorative: the line says it. */
+.board-chart {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: var(--space-12);
+  /* 12 px under the bookings line, where the column's gap is 20. */
+  margin-top: calc(var(--space-12) - var(--space-20));
+}
+
+.board-chart__day {
+  display: grid;
+  gap: var(--space-6);
+  justify-items: center;
+}
+
+.board-chart__track {
+  display: flex;
+  align-items: flex-end;
+  width: 100%;
+  height: 56px;
+}
+
+.board-chart__bar {
+  width: 100%;
+  border-radius: var(--space-2);
+  background: var(--line-field);
+}
+
+.board-chart__day--today .board-chart__bar {
+  background: var(--text-primary);
+}
+
+.board-chart__letter {
+  color: var(--text-secondary);
+}
+
+.board-chart__day--today .board-chart__letter {
+  color: var(--text-primary);
+  font-weight: 520;
+}
+
+/* Handled by Claude or by the owner: one thin bar beside the words that say the same. */
+.board-split {
+  display: grid;
+  grid-template-columns: 38fr 3fr;
+  gap: var(--space-2);
+  height: var(--size-dot);
+}
+
+.board-split__handled,
+.board-split__held {
+  border-radius: var(--space-2);
+}
+
+.board-split__handled {
+  background: var(--status-handled);
+}
+
+.board-split__held {
+  background: var(--status-held);
+}
+
+.board-split__legend {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-8);
+}
+
+/* The short briefing under "Since last night". */
+.board-briefing__summary {
+  margin: 0 0 var(--space-16);
+}
+
+.board-briefing {
+  margin: 0 0 var(--space-16);
+  padding: 0;
+  list-style: none;
+}
+
+.board-briefing__row {
+  display: grid;
+  grid-template-columns: 72px 104px minmax(0, 1fr);
+  gap: var(--space-12);
+  padding: var(--space-10) 0;
+  border-top: 1px solid var(--line-hairline);
+}
+
+.board-briefing__row > * {
+  margin: 0;
+}
+
+.board-briefing + p,
+.board-briefing__summary + p {
+  margin: 0;
+}
+
+@media (max-width: 559.98px) {
+  .board-briefing__row {
+    grid-template-columns: 72px minmax(0, 1fr);
+  }
+
+  .board-briefing__row > :last-child {
+    grid-column: 1 / -1;
+  }
+}
+
+/* The conversations page: the list in its own column at the sidebar's seam, the open
+   conversation beside it in the reading column. */
+.board-conversations {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  min-width: 0;
+}
+
+.board-conversations__list {
+  box-sizing: border-box;
+  padding: var(--space-24) var(--space-12);
+  border-right: 1px solid var(--line-hairline);
+}
+
+.board-conversations__title,
+.board-conversations__list > p {
+  margin: 0;
+  padding: 0 var(--space-8);
+}
+
+.board-conversations__list > p {
+  margin-top: var(--space-6);
+}
+
+.board-conversations__items {
+  display: grid;
+  gap: var(--space-4);
+  margin: var(--space-20) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.board-conversations__open {
+  box-sizing: border-box;
+  min-width: 0;
+  padding: var(--space-24) var(--space-28) var(--space-20);
+}
+
+.board-conversations__open > * {
+  max-width: var(--size-reading);
+}
+
+@media (max-width: 1023.98px) {
+  .board-conversations {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .board-conversations__list {
+    border-right: 0;
+    border-bottom: 1px solid var(--line-hairline);
+  }
+
+  .board-conversations__open {
+    padding-right: var(--space-16);
+    padding-left: var(--space-16);
+  }
+}
+
+/* The open conversation's head: who, their level, and the latest state. */
+.board-conversation-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4) var(--space-8);
+  margin: 0;
+}
+
+.board-conversation-head__name {
+  margin: 0;
+}
+
+.board-conversation-head__latest {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.board-conversation {
+  display: grid;
+  gap: var(--space-16);
+  min-width: 0;
+}
+
+/* An agent's signed limit: the card look, compact as the board draws it, 12 px 16 px, and 10 px
+   under the conversation's head where the page's rows are 16 px apart. */
+.board-limit {
+  margin-top: calc(var(--space-10) - var(--space-16));
+  padding: var(--space-12) var(--space-16);
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-card);
+  background: var(--fill-card);
+}
+
+.board-limit__title {
+  margin: 0;
+  font-weight: 520;
+}
+
+.board-limit__title + p {
+  margin: var(--space-2) 0 0;
+}
+
+/* Sign-off sheets: labelled panels on the app ground, each a screen or a part of one, at the
+   widths and paddings the boards draw them. */
+.board-sheet {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  box-sizing: border-box;
+  min-height: 100dvh;
+  padding: var(--space-40);
+  background: var(--bg-app);
+  color: var(--text-primary);
+}
+
+.board-sheet--gap-40 {
+  gap: var(--space-40);
+}
+
+.board-sheet--gap-32 {
+  gap: var(--space-32);
+}
+
+.board-sheet--gap-24 {
+  gap: var(--space-24);
+}
+
+.board-panel {
+  display: grid;
+  flex: 0 1 auto;
+  gap: var(--space-10);
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+.board-panel--full {
+  flex: 1 1 100%;
+}
+
+.board-panel--sized {
+  flex-basis: var(--board-panel-width);
+  max-width: var(--board-panel-width);
+}
+
+.board-panel__label {
+  margin: 0;
+  color: var(--text-secondary);
+  font-weight: 380;
+}
+
+.board-panel__frame {
+  box-sizing: border-box;
+  min-width: 0;
+  padding: var(--space-20) var(--space-28);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--radius-card);
+}
+
+.board-panel--compact .board-panel__frame {
+  padding: var(--space-20) var(--space-24);
+}
+
+.board-panel--bare .board-panel__frame {
+  padding: 0;
+  border: 0;
+}
+
+.board-panel--phone .board-panel__frame {
+  padding: var(--space-16);
+}
+
+@media (max-width: 559.98px) {
+  .board-sheet {
+    padding: var(--space-24) var(--space-16);
+  }
+
+  .board-panel--sized {
+    flex-basis: 100%;
+    max-width: none;
+  }
+
+  .board-panel__frame {
+    padding: var(--space-16);
+  }
+}
+
+/* The busy buttons' table: a weight per row, at rest and busy side by side. */
+.board-busy {
+  border-collapse: collapse;
+}
+
+.board-busy th,
+.board-busy td {
+  padding: var(--space-10) var(--space-16) var(--space-10) 0;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.board-busy thead th {
+  color: var(--text-secondary);
+  font-weight: 380;
+}
+
+.board-busy tbody tr {
+  border-top: 1px solid var(--line-hairline);
+}
+
+/* Ask for Maria: the public page in two states side by side, a hairline between them. */
+.board-handoff {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  background: var(--bg-app);
+}
+
+.board-handoff__state {
+  height: 100dvh;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.board-handoff__state {
+  position: relative;
+}
+
+/* The hairline between the states takes no width, so each state keeps the board's 640 px. It is
+   the hairline on the app ground, drawn over the headers too, as the board draws it. */
+.board-handoff__state + .board-handoff__state::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: 1;
+  width: 1px;
+  background: linear-gradient(var(--line-hairline), var(--line-hairline)), var(--bg-app);
+  content: '';
+}
+
+@media (max-width: 899.98px) {
+  .board-handoff {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .board-handoff__state + .board-handoff__state::before {
+    inset: 0 0 auto;
+    width: auto;
+    height: 1px;
+  }
+}
+
+/* Confirm it's you: the page while the code is on its way, the Demo inbox, the page after it. */
+.board-verify {
+  display: grid;
+  grid-template-columns: minmax(0, 510fr) minmax(0, 260fr) minmax(0, 510fr);
+  background: var(--bg-app);
+}
+
+.board-verify__page {
+  height: 100dvh;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.board-verify__inbox {
+  display: grid;
+  min-width: 0;
+  min-height: 100dvh;
+  border-right: 1px solid var(--line-hairline);
+  border-left: 1px solid var(--line-hairline);
+}
+
+.board-verify__form {
+  margin-top: var(--space-16);
+}
+
+@media (max-width: 899.98px) {
+  .board-verify {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .board-verify__inbox {
+    border-top: 1px solid var(--line-hairline);
+    border-bottom: 1px solid var(--line-hairline);
+    border-right: 0;
+    border-left: 0;
+  }
+}
+
+/* Safety: the title row, the chain check beside the view switch, then the list and its detail. */
+.board-safety {
+  display: grid;
+  gap: var(--space-20);
+  min-width: 0;
+}
+
+.board-safety__week {
+  color: var(--text-primary);
+}
+
+.board-safety__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-12) var(--space-16);
+  padding: var(--space-12) 0;
+  border-top: 1px solid var(--line-hairline);
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+.board-safety__bar > .cd-chain-status {
+  flex: 1 1 320px;
+}
+
+.board-safety__columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: var(--space-24);
+  align-items: start;
+  padding-top: var(--space-4);
+}
+
+.board-safety__columns--entries {
+  grid-template-columns: minmax(0, 1fr) 400px;
+}
+
+@media (max-width: 1099.98px) {
+  .board-safety__columns,
+  .board-safety__columns--entries {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.board-safety__list,
+.board-safety__detail {
+  display: grid;
+  gap: var(--space-16);
+  min-width: 0;
+}
+
+.board-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  padding-bottom: var(--space-16);
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+.board-attempts {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The attempt opened beside the list. */
+.board-attempt {
+  display: grid;
+  gap: var(--space-12);
+}
+
+.board-attempt p {
+  margin: 0;
+}
+
+.board-attempt__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4) var(--space-10);
+  color: var(--text-secondary);
+}
+
+.board-attempt__when {
+  margin-left: auto;
+}
+
+.board-attempt__part {
+  display: grid;
+  gap: var(--space-4);
+  padding-top: var(--space-12);
+  border-top: 1px solid var(--line-hairline);
+}
+
+.board-attempt__caption {
+  color: var(--text-secondary);
+}
+
+.board-attempt summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  cursor: pointer;
+  list-style: none;
+}
+
+.board-attempt summary::-webkit-details-marker {
+  display: none;
+}
+
+.board-attempt__chevron {
+  color: var(--text-secondary);
+}
+
+/* Closed, the chevron points at the words; open, down at what opened. */
+.board-attempt details:not([open]) .board-attempt__chevron {
+  transform: rotate(-90deg);
+}
+
+.board-attempt details > :not(summary) {
+  margin-top: var(--space-8);
+}
+
+/* Every entry: the ledger as a table, newest first. */
+.board-ledger {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.board-ledger th,
+.board-ledger td {
+  padding: var(--space-10);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.board-ledger thead th {
+  color: var(--text-secondary);
+  font-weight: 380;
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+.board-ledger tbody tr[aria-current='true'] {
+  background: var(--bg-selected);
+}
+
+.board-ledger td:last-child,
+.board-ledger th:last-child {
+  text-align: right;
+}
+
+.board-ledger__entry {
+  color: var(--text-secondary);
+}
+
+.board-ledger__by {
+  color: var(--text-secondary);
+}
+
+.board-ledger__open {
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.board-ledger__open:hover {
+  text-decoration: underline;
+}
+
+.board-ledger tbody tr[aria-current='true'] > :first-child {
+  border-radius: var(--radius-control) 0 0 var(--radius-control);
+}
+
+.board-ledger tbody tr[aria-current='true'] > :last-child {
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+}
+
+/* The business switcher, open beside the sidebar's business row. Where the web app anchors it is its own. */
+.board-switcher {
+  position: relative;
+}
+
+.board-switcher__menu {
+  position: absolute;
+  top: calc(var(--space-40) * 2 + var(--space-24) + var(--space-2));
+  left: calc(var(--size-sidebar) + var(--space-4));
+  z-index: 1;
+}
+
+@media (max-width: 767.98px) {
+  .board-switcher__menu {
+    top: calc(var(--space-40) * 2 + var(--space-20));
+    right: var(--space-16);
+    left: var(--space-16);
+  }
+}
+
+/* The take-over board's page: today's conversations across the top, then the open chat. */
+.board-takeover {
+  display: grid;
+  gap: var(--space-16);
+  min-width: 0;
+}
+
+.board-takeover__strip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  min-width: 0;
+  /* The items' fill reaches 10 px past the page's edge, so their words line up with it. */
+  margin: 0 0 0 calc(-1 * var(--space-10));
+  padding-bottom: var(--space-12);
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+.board-takeover__strip > ul {
+  display: flex;
+  flex: 1 1 auto;
+  gap: var(--space-6);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.board-takeover__strip li {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.board-takeover__strip > span {
+  flex: none;
+}
+
+.board-takeover__count {
+  margin: 0;
+}
+
+/* The open chat: its head and the folded line across the page, its messages, the bar and the
+   composer in the reading column. */
+.board-takeover__chat {
+  display: grid;
+  gap: var(--space-16);
+  min-width: 0;
+}
+
+.board-takeover__chat > p {
+  margin: 0;
+}
+
+.board-takeover__reading {
+  display: grid;
+  gap: var(--space-16);
+  min-width: 0;
+  max-width: var(--size-reading);
+  padding-top: var(--space-12);
+}
+
+.board-conversation-head__end {
+  margin-left: auto;
+}
+
+@media (max-width: 1023.98px) {
+  .board-takeover__strip {
+    flex-wrap: wrap;
+    margin-left: 0;
+  }
+
+  .board-takeover__strip > ul {
+    flex-wrap: wrap;
+  }
+
+  .board-takeover__strip li {
+    flex: 1 1 200px;
+  }
+}

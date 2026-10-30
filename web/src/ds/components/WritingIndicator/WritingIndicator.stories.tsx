@@ -68,7 +68,7 @@ function DanaTyping(props: WritingIndicatorProps) {
 }
 
 const BUBBLE_NOTE =
-  'N-Conv-Live writes "Dana is typing" as a line; this is the signed typing bubble that replaces it: three dots in her bubble\'s fill and radius, where her next message will appear.';
+  'The signed typing bubble: "Dana is typing" as three dots in her bubble\'s fill and radius, where her next message will appear.';
 
 /** A phone: 390 px, with the 16 px gutter on each side. */
 const PHONE = 390;
@@ -80,7 +80,7 @@ const meta = {
   parameters: {
     layout: 'padded',
     canvas: 'none',
-    canvasNote: 'No board shows Claude writing; the indicator follows "Dana is typing" on N-Conv-Live, in the meta type the plan sets.',
+    canvasNote: 'No board shows Claude writing; the indicator follows "Dana is typing" on N-Conv-Run1, in the meta type the plan sets.',
   },
 } satisfies Meta<typeof WritingIndicator>;
 
@@ -203,7 +203,7 @@ export const DanaTypingBubble: Story = {
       <DanaTyping {...args} />
     </div>
   ),
-  parameters: { canvas: 'N-Conv-Live', canvasNote: BUBBLE_NOTE },
+  parameters: { canvas: 'N-Typing-Bubble-Run1', canvasNote: BUBBLE_NOTE },
   play: async ({ canvas, canvasElement }) => {
     // The owner's conversation at 1280: the bubble is in the log, on Dana's side.
     const log = canvas.getByRole('log', { name: `Conversation with ${dana.name}` });
@@ -232,7 +232,7 @@ export const DanaTypingBubblePhone: Story = {
       <DanaTyping {...args} />
     </div>
   ),
-  parameters: { canvas: 'N-Conv-Live', canvasNote: `${BUBBLE_NOTE} On a phone, 390 px wide.` },
+  parameters: { canvas: 'N-Typing-Bubble-Run1', canvasNote: `${BUBBLE_NOTE} On a phone, 390 px wide.` },
   play: async ({ canvas, canvasElement }) => {
     const phone = canvas.getByTestId('phone');
     const status = canvas.getByRole('status');
@@ -252,7 +252,7 @@ export const ReducedMotion: Story = {
     </div>
   ),
   parameters: {
-    canvas: 'N-Conv-Live',
+    canvas: 'N-Typing-Bubble-Run1',
     canvasNote: `${BUBBLE_NOTE} Under reduced motion the dots stay still in text-secondary; Storybook shows the motion your system asks for, and the design system's browser tests render this story under reduced motion.`,
   },
   play: async ({ canvas }) => {
@@ -374,7 +374,7 @@ async function expectPersonTyping(root: HTMLElement, label: string, name: string
 export const MariaTyping: Story = {
   args: { variant: 'person', who: OWNER },
   render: () => <MariaTakesOver language="en" />,
-  parameters: { layout: 'fullscreen', canvas: 'N-Public-Handoff', canvasNote: PERSON_NOTE },
+  parameters: { layout: 'fullscreen', canvas: 'N-Typing-Owner-Busy', canvasNote: PERSON_NOTE },
   play: async ({ canvasElement }) => {
     // The public page at 1280: in the log, under "Maria Rivera joined the chat".
     await expect(document.documentElement.clientWidth).toBe(1280);
@@ -400,7 +400,7 @@ export const MariaTypingPhone: Story = {
       <MariaTakesOver language="en" />
     </div>
   ),
-  parameters: { layout: 'fullscreen', canvas: 'N-Public-Handoff', canvasNote: `${PERSON_NOTE} On a phone, 390 px wide.` },
+  parameters: { layout: 'fullscreen', canvas: 'N-Typing-Owner-Busy', canvasNote: `${PERSON_NOTE} On a phone, 390 px wide.` },
   play: async ({ canvas, canvasElement }) => {
     const phone = canvas.getByTestId('phone');
     const parts = await expectPersonTyping(canvasElement, `${OWNER} is typing`, OWNER);
@@ -413,7 +413,7 @@ export const MariaTypingPhone: Story = {
 export const MariaTypingEs: Story = {
   args: { variant: 'person', who: OWNER, language: 'es' },
   render: () => <MariaTakesOver language="es" />,
-  parameters: { layout: 'fullscreen', canvas: 'N-Public-Handoff', canvasNote: `${PERSON_NOTE} For a visitor reading in Spanish.` },
+  parameters: { layout: 'fullscreen', canvas: 'N-Typing-Owner-Busy', canvasNote: `${PERSON_NOTE} For a visitor reading in Spanish.` },
   play: async ({ canvasElement }) => {
     const parts = await expectPersonTyping(canvasElement, `${OWNER} está escribiendo`, OWNER);
     await expect(parts.status).toHaveAttribute('lang', 'es');
@@ -425,7 +425,7 @@ export const MariaMessageLands: Story = {
   render: () => <MariaTakesOver language="en" />,
   parameters: {
     layout: 'fullscreen',
-    canvas: 'N-Public-Handoff',
+    canvas: 'N-Typing-Owner-Busy',
     canvasNote: `${PERSON_NOTE} Her message then takes the typing's place, from the same left edge, so nothing jumps.`,
   },
   play: async ({ canvasElement }) => {
@@ -475,7 +475,7 @@ export const PersonReducedMotion: Story = {
     </div>
   ),
   parameters: {
-    canvas: 'N-Public-Handoff',
+    canvas: 'N-Typing-Owner-Busy',
     canvasNote: `${PERSON_NOTE} Under reduced motion the dots stay still in text-secondary; Storybook shows the motion your system asks for, and the design system's browser tests render this story under reduced motion.`,
   },
   play: async ({ canvasElement }) => {

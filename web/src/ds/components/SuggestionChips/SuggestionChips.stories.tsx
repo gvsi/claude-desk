@@ -10,7 +10,7 @@ const meta = {
   title: 'Controls/SuggestionChips',
   component: SuggestionChips,
   args: { label: 'Suggestions', suggestions: TODAY, onPick: fn() },
-  parameters: { layout: 'padded', canvas: 'N-Today-NeedsYou' },
+  parameters: { layout: 'padded', canvas: 'N-Today-Run1' },
 } satisfies Meta<typeof SuggestionChips>;
 
 export default meta;
