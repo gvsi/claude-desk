@@ -300,6 +300,15 @@ export const DECISIONS = {
     reasonPlain: 'A visitor asked for a link to pay the $20.00 service call deposit.',
     amountCents: 2000,
   },
+  /** A demo code to the contact on record for the person the visitor says they are. */
+  startVerification: {
+    tool: 'native.start_verification',
+    effects: ['send_message'],
+    outcome: 'allow',
+    executed: true,
+    cardIds: [],
+    reasonPlain: "A visitor said they're Dana Whitfield, so a code went to her contact on record.",
+  },
   /** Verified Dana's invoice, released to her once she confirmed it's her. */
   releaseInvoice: {
     tool: 'native.release_document',
@@ -427,6 +436,8 @@ export const SCRIPT: readonly ScriptRule[] = [
     name: 'invoice',
     words: ['invoice', 'return', 'factura'],
     steps: [
+      // The code goes to the contact on record, never to the visitor: the kernel decides that first.
+      (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.startVerification)),
       writing,
       (ctx) => ctx.reply([blocks.verify_prompt[ctx.language]]),
       (ctx) =>
@@ -529,11 +540,12 @@ const invoiceProse: Record<Language, RenderedBlock> = {
 
 /**
  * Claude's turn once the visitor confirmed it's them, which the API wakes it for: the invoice they
- * asked for, released to them as its verified owner.
+ * asked for, released to them as its verified owner. No visitor message starts it, so it begins as
+ * the API's turns do, with Claude writing.
  */
 export const AFTER_VERIFY: readonly Step[] = [
-  (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.releaseInvoice)),
   writing,
+  (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.releaseInvoice)),
   (ctx) => ctx.reply([invoiceProse[ctx.language], blocks.document_link[ctx.language]]),
 ];
 

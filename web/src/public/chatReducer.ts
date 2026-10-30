@@ -9,6 +9,8 @@
  *
  * A held request's later lines ("Cancelled", "Maria Rivera approved this") stay under the message
  * that holds it, as every receipt stays under its own message, however far the chat has gone on.
+ * Once Claude is writing, the receipts that follow wait for its reply, so a turn the API starts on
+ * its own (after the visitor confirmed it's them) explains its reply too.
  */
 import type {
   EvDemoInbox,
@@ -23,7 +25,7 @@ import type {
 import type { StreamState } from '../api/stream.ts';
 import type { TranscriptItem, VisitorTranscript } from '../api/views.ts';
 import { receiptFromEvent, type ReceiptView } from '../ds/index.ts';
-import { addPart, emptyGroups, groupRows, settle, type GroupedRow, type RowGroups, type RowPart } from '../lib/transcript.ts';
+import { addPart, emptyGroups, settle, type GroupedRow, type RowGroups, type RowPart } from '../lib/transcript.ts';
 
 /** The visitor's own message: `sent`, being checked after an answer was lost, or `failed`. */
 export type VisitorStatus = 'sent' | 'checking' | 'failed';
@@ -170,14 +172,35 @@ function fromHistory(transcript: VisitorTranscript): ChatState {
     // Whispers and agents' text never reach a visitor's transcript; anything else is left out.
     return null;
   };
-  const groups = groupRows(items, partOf);
-  return { ...initialChatState(), ...groups, lastSeq: transcript.last_seq, openHolds, holds, seen };
+  // A stored conversation has no writing events, so a turn Claude started on its own is found by
+  // what follows a decision's status: Claude's reply, before anyone else's words.
+  let groups = emptyGroups<ChatItem, ReceiptView>();
+  items.forEach((item, index) => {
+    const part = partOf(item);
+    if (part === null) return;
+    if (part.kind === 'receipt' && opensAReply(items, index)) groups = addPart(groups, { kind: 'writing' });
+    groups = addPart(groups, part);
+  });
+  return { ...initialChatState(), ...settle(groups), lastSeq: transcript.last_seq, openHolds, holds, seen };
+}
+
+/**
+ * Whether the decision's status at `index` (an action's outcome or a hold, not a later answer)
+ * comes before a reply of Claude's with no one's words between them: it is that reply's turn.
+ */
+function opensAReply(items: readonly TranscriptItem[], index: number): boolean {
+  const type = items[index]?.event?.type;
+  if (type !== 'receipt' && type !== 'held') return false;
+  const next = items.slice(index + 1).find((item) => item.kind !== 'status');
+  return next?.kind === 'delivered' && next.event?.type === 'message' && next.event.author !== 'owner';
 }
 
 function onEvent(state: ChatState, seq: number, ev: SseEvent): ChatState {
   switch (ev.type) {
     case 'writing':
-      return { ...state, writing: true, error: null };
+      // Claude has started a turn: what it does now explains the reply it is writing, so the turn's
+      // receipts wait for that reply, even in a turn the API started with no visitor message.
+      return { ...state, ...addPart(state, { kind: 'writing' }), writing: true, error: null };
     case 'turn_end':
       return { ...state, ...settle(state), writing: false, ownerTyping: null };
     case 'message': {

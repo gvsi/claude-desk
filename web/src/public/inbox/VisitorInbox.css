@@ -1,0 +1,21 @@
+/* VisitorInbox: the Demo inbox panel in its place. Beside the chat from 1280 px, a column on the
+   panel ground with a hairline at its left, as tall as the window and scrolling on its own. Under
+   the conversation otherwise, the panel in a card's edge, 16 px under the last row. */
+
+.cd-public-chat__inbox-column {
+  position: sticky;
+  top: 0;
+  box-sizing: border-box;
+  height: 100dvh;
+  min-width: 0;
+  overflow-y: auto;
+  border-left: 1px solid var(--line-hairline);
+  background: var(--bg-panel);
+}
+
+.cd-public-chat__inbox {
+  margin-top: var(--space-16);
+  overflow: hidden;
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-card);
+}

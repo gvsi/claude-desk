@@ -47,3 +47,15 @@
     padding: var(--space-16);
   }
 }
+
+/* The page around the shell: nothing of its own while the Demo inbox has no column, then the
+   shell and the inbox's column side by side, the column as wide as the owner's sidebar. */
+.cd-public-chat-page {
+  display: contents;
+}
+
+.cd-public-chat-page--with-inbox {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--size-sidebar);
+  align-items: start;
+}

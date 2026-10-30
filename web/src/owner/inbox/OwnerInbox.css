@@ -1,0 +1,26 @@
+/* OwnerInbox: in Today's right column, the button that opens and closes the Demo inbox, and under
+   it, 12 px apart, the panel in a card's edge, or the line that it is opening or couldn't be read. */
+
+.cd-owner-inbox {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-12);
+  min-width: 0;
+}
+
+.cd-owner-inbox > .cd-notice,
+.cd-owner-inbox__panel {
+  align-self: stretch;
+}
+
+.cd-owner-inbox__panel {
+  overflow: hidden;
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-card);
+}
+
+.cd-owner-inbox__opening {
+  margin: 0;
+  color: var(--text-secondary);
+}

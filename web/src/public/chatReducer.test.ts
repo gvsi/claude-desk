@@ -68,6 +68,34 @@ describe('chatReducer', () => {
     });
   });
 
+  it('a_turn_the_desk_starts_groups_under_its_reply', () => {
+    // The visitor asked and Claude answered; the turn ended.
+    const answered = run([{ type: 'sent', id: 'v1', text: 'Can you send my invoice?' }, ...events([quoteMessage, { type: 'turn_end' }])]);
+    // Then the API wakes Claude with no visitor message (the visitor confirmed it's them): Claude
+    // writes, its action's receipt arrives, then its reply. The receipt explains that reply.
+    const later: EvMessage = { ...quoteMessage, message_id: 'msg-after-verify' };
+    const woke = run(events([{ type: 'writing' }, quoteReceipt, later, { type: 'turn_end' }], 3), answered);
+    expect(woke.rows.map((row) => row.receipts)).toEqual([[], [receiptFromEvent(quoteMessage)], [receiptFromEvent(later), receiptFromEvent(quoteReceipt)]]);
+
+    // A woken turn that ends with no reply keeps its receipt, under the last row.
+    const silent = run(events([{ type: 'writing' }, quoteReceipt, { type: 'turn_end' }], 3), answered);
+    expect(silent.rows.at(-1)?.receipts).toEqual([receiptFromEvent(quoteMessage), receiptFromEvent(quoteReceipt)]);
+
+    // Read back after a reload, where no writing event is stored, the receipt is still the reply's.
+    const reloaded = run([
+      {
+        type: 'history',
+        transcript: transcript(6, [
+          { ...item(1, 'visitor_text'), text: 'Can you send my invoice?' },
+          { ...item(2, 'delivered'), event: quoteMessage },
+          { ...item(3, 'status'), event: quoteReceipt },
+          { ...item(4, 'delivered'), event: later },
+        ]),
+      },
+    ]);
+    expect(reloaded.rows.map((row) => row.receipts)).toEqual(woke.rows.map((row) => row.receipts));
+  });
+
   it('status_before_any_row_is_kept', () => {
     const [resolved] = rivera.events.resolvedTurn as [StatusEvent];
     const state = run(events([resolved]));

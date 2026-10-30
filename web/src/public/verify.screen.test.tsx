@@ -13,7 +13,7 @@ import { DEMO_CODE } from '../mocks/script.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
-import { expectScreenBasics } from '../test/screen.ts';
+import { expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
 
 const PAGE = `/d/${RIVERA.slug}`;
 
@@ -22,6 +22,9 @@ const VERIFIED = 'Verified with a code. Simulated verification';
 
 /** The form's one line for a code that didn't work, whatever the reason. */
 const FAILED = 'That code didn’t work. Check the newest code, or ask me for a new one.';
+
+/** What the Demo inbox entry for the invoice row's code says, word for word. */
+const CODE_BODY = `Your Rivera Plumbing verification code is ${DEMO_CODE}.`;
 
 /** The kernel's verify card, as the script's invoice row sends it. */
 const VERIFY_CARD = rivera.blocks.verify_prompt.en.title ?? '';
@@ -66,9 +69,11 @@ describe('verification', () => {
     await expect.element(screen.getByRole('button', { name: 'Confirm' })).toBeDisabled();
     await expect.element(screen.getByRole('button', { name: 'I can’t get the code' })).toBeVisible();
     expect(screen.getByText(VERIFY_CARD).elements()).toHaveLength(1);
-    // The form sits with the message that asked for the code, under its receipts.
+    // The form sits with the message that asked for the code, under its receipts, as the board draws them.
     const row = card.element().closest('.cd-transcript-row');
     expect(row?.querySelector('.cd-transcript-row__margin input[autocomplete="one-time-code"]')).not.toBeNull();
+    const receipts = [...(row?.querySelectorAll('.cd-transcript-row__margin .cd-margin-receipt') ?? [])].map((el) => el.textContent?.trim());
+    expect(receipts).toEqual(["Reply checked against Maria Rivera's rules", 'Verification started']);
     await expectScreenBasics(screen.container, { owner: false });
   });
 
@@ -84,8 +89,19 @@ describe('verification', () => {
     expect(requests('sendMessage').length).toBeGreaterThan(0);
     for (const { body } of requests('sendMessage')) expect(JSON.stringify(body)).not.toContain(DEMO_CODE);
     for (const { ev } of chatEvents()) expect(JSON.stringify(ev)).not.toContain(DEMO_CODE);
-    // Claude goes on with what was asked: the invoice, for her alone.
-    await expect.element(screen.getByRole('article', { name: 'Document, only for you' })).toBeVisible();
+    // Claude goes on with what was asked: the invoice, for her alone, with the receipts that explain it.
+    const invoice = screen.getByRole('article', { name: 'Document, only for you' });
+    await expect.element(invoice).toBeVisible();
+    const invoiceReceipts = (card: Element) =>
+      [...(card.closest('.cd-transcript-row')?.querySelectorAll('.cd-transcript-row__margin .cd-margin-receipt') ?? [])].map((el) => el.textContent?.trim());
+    const explained = ["Reply checked against Maria Rivera's rules", "Document shared from Maria Rivera's records"];
+    await vi.waitFor(() => expect(invoiceReceipts(invoice.element())).toEqual(explained));
+
+    // The same after a reload, read back from the stored conversation.
+    const reloaded = await renderRoute(PAGE);
+    const stored = reloaded.screen.getByRole('article', { name: 'Document, only for you' });
+    await expect.element(stored).toBeVisible();
+    expect(invoiceReceipts(stored.element())).toEqual(explained);
   });
 
   it('wrong_code_copy_is_uniform', async () => {
@@ -155,5 +171,86 @@ describe('verification', () => {
     const es = await renderRoute(PAGE, { language: 'es-MX' });
     await expect.element(es.screen.getByText('Verificado con un código. Verificación simulada')).toBeVisible();
     await expect.element(es.screen.getByRole('textbox', { name: 'Código de 6 dígitos' })).not.toBeInTheDocument();
+  });
+});
+
+describe('Demo inbox', () => {
+  it('visitor_inbox_reads_only_session_entries', async () => {
+    // The copy's Demo inbox already holds the owner's alert for the seeded hold.
+    const alert = mockStore.world.inbox.find((record) => record.entry.kind === 'alert')?.entry;
+    if (!alert) throw new Error('the seed holds a request, which alerts the owner');
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    // Nothing yet, so no inbox: the page is the chat as it always is.
+    await expect.element(screen.getByRole('region', { name: 'Demo inbox' })).not.toBeInTheDocument();
+
+    await say(screen, 'Can you send my invoice?');
+    const inbox = screen.getByRole('region', { name: 'Demo inbox' });
+    await expect.element(inbox.getByText(CODE_BODY)).toBeVisible();
+    await expect.element(inbox.getByText('Verification code', { exact: true })).toBeVisible();
+    await expect.element(inbox.getByText(`To ${rivera.people.dana.maskedContact}`)).toBeVisible();
+    // Only this chat's codes: the visitor's own read, never the owner's, and never the owner's alert.
+    expect(requests('visitorInbox').length).toBeGreaterThanOrEqual(2);
+    expect(requests('ownerInbox')).toEqual([]);
+    expect(screen.container.textContent).not.toContain(alert.body);
+    // A column beside the chat on a wide window.
+    expect(inbox.element().closest('.cd-public-chat__inbox-column')).not.toBeNull();
+    await expectScreenBasics(screen.container, { owner: false });
+
+    // At phone width it sits with the chat, read again after the reload, the code still there.
+    const phone = await renderRoute(PAGE, { viewport: 'phone' });
+    const narrow = phone.screen.getByRole('region', { name: 'Demo inbox' });
+    await expect.element(narrow.getByText(CODE_BODY)).toBeVisible();
+    expect(narrow.element().closest('.cd-public-chat__inbox-column')).toBeNull();
+    expectNoHorizontalScroll();
+  });
+
+  it('inbox_retry_after_failure', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    // The read when the chat opened went through; the one for the code's notice fails once.
+    await vi.waitFor(() => expect(requests('visitorInbox')).toHaveLength(1));
+    mockStore.inject({ route: 'visitorInbox', status: 500 });
+    await say(screen, 'Can you send my invoice?');
+    const inbox = screen.getByRole('region', { name: 'Demo inbox' });
+    await expect.element(inbox.getByText('Couldn’t open this entry.')).toBeVisible();
+    // The notice's own words show while the entry can't, never a code.
+    await expect.element(inbox.getByText('New verification code')).toBeVisible();
+    expect(inbox.element().textContent).not.toMatch(/\d{6}/);
+
+    await inbox.getByRole('button', { name: 'Try again' }).click();
+    await expect.element(inbox.getByText(CODE_BODY)).toBeVisible();
+    await expect.element(inbox.getByText('Couldn’t open this entry.')).not.toBeInTheDocument();
+    expect(requests('visitorInbox')).toHaveLength(3);
+  });
+
+  it('owner_inbox_shows_alerts', async () => {
+    // The seeded hold alerted the owner: the kernel's line for it, word for word.
+    const alert = mockStore.world.inbox.find((record) => record.entry.kind === 'alert')?.entry;
+    if (!alert) throw new Error('the seed holds a request, which alerts the owner');
+    const { screen } = await renderRoute(`/app/${RIVERA.deskId}/today`);
+    const open = screen.getByRole('button', { name: 'Open the Demo inbox' });
+    await expect.element(open).toBeVisible();
+    // Nothing is read until the owner opens it.
+    expect(requests('ownerInbox')).toEqual([]);
+
+    await open.click();
+    const inbox = screen.getByRole('region', { name: 'Demo inbox' });
+    await expect.element(inbox.getByText(alert.body)).toBeVisible();
+    await expect.element(inbox.getByText('Alert', { exact: true })).toBeVisible();
+    await expect.element(inbox.getByText('To owner')).toBeVisible();
+    // When it came, on the business's clock.
+    expect(inbox.element().querySelector('.cd-demo-inbox__time')?.textContent).toMatch(/^(?:Today|[A-Z][a-z]{2} \d{1,2}), \d{1,2}:\d{2} (?:am|pm)$/);
+    await expectScreenBasics(screen.container, { owner: true });
+
+    // It reads again while open, and stops once closed.
+    await vi.waitFor(() => expect(requests('ownerInbox').length).toBeGreaterThanOrEqual(2));
+    await screen.getByRole('button', { name: 'Close the Demo inbox' }).click();
+    await expect.element(screen.getByRole('region', { name: 'Demo inbox' })).not.toBeInTheDocument();
+    const reads = requests('ownerInbox').length;
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(requests('ownerInbox')).toHaveLength(reads);
+    // Its own codes stay the visitor's: the owner's inbox never calls the visitor's read.
+    expect(requests('visitorInbox')).toEqual([]);
   });
 });

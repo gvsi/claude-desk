@@ -37,6 +37,7 @@ import { browserLanguage } from '../lib/language.ts';
 import { brandFrom } from './brand.ts';
 import type { ChatRow, SendFailure } from './chatReducer.ts';
 import { PUBLIC_COPY, type PublicCopy } from './copy.ts';
+import { VisitorInbox, useVisitorInbox, useWideWindow } from './inbox/VisitorInbox.tsx';
 import { useVisitorChat } from './PublicChatProvider.tsx';
 import { useOpenStatus } from './useOpenStatus.ts';
 import { useVisitorTyping } from './useVisitorTyping.ts';
@@ -343,6 +344,12 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
   const newest = useNewestInView(endRef, composerRef, desk !== null);
   // While the visitor types, the owner's view of the chat shows that someone is, never what.
   const visitorTyping = useVisitorTyping(slug);
+  // The chat can be written in: it loaded, and its session hasn't ended.
+  const ready = chat.status === 'ready' && chat.state.error !== 'session';
+  // The demo's codes: read while the chat can be used, a column of its own on a wide window.
+  const inbox = useVisitorInbox(slug, chat.session?.session_id ?? null, chat.state.inbox, ready);
+  const wide = useWideWindow();
+  const inboxPlacement = wide && !embedded ? 'column' : 'inline';
 
   useEffect(() => {
     if (chat.session !== null) onSession?.(chat.session);
@@ -375,8 +382,6 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
 
   // Words that didn't send when the chat ended wait in the new chat's composer once it can be used.
   const carried = useRef<string | null>(null);
-  // The chat can be written in: it loaded, and its session hasn't ended.
-  const ready = chat.status === 'ready' && chat.state.error !== 'session';
   useEffect(() => {
     const text = carried.current;
     const box = composerRef.current?.querySelector('textarea');
@@ -510,70 +515,76 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
     chat.resend(id);
   };
 
+  const inboxColumn = inboxPlacement === 'column' && inbox.items.length > 0;
   return (
-    <PublicShell
-      brand={brand}
-      ownerName={ownerName}
-      language={language}
-      openStatus={openStatus}
-      onAskForOwner={askForOwner}
-      about={desk.charter}
-      footer={!embedded}
-      composer={
-        <div ref={composerRef} onInput={visitorTyping.onInput}>
-          <Composer
-            variant="visitor"
-            label={copy.message(brand.name)}
-            placeholder={copy.message(brand.name)}
-            sendLabel={copy.send}
-            maxLength={MESSAGE_MAX_LENGTH}
-            disabled={!ready}
-            onSend={send}
-          />
-        </div>
-      }
-    >
-      <Transcript label={copy.conversation(brand.name)}>
-        {state.leading.length > 0 ? (
-          <TranscriptRow
-            margin={[
-              ...state.leading.map((receipt, index) => (
-                <MarginReceipt key={`${receipt.ledgerSeq}-${index}`} source={receipt.source} plain={receipt.plain} ledgerSeq={receipt.ledgerSeq} />
-              )),
-              ...cancelsUnder(state.leading),
-            ]}
-          >
-            {null}
-          </TranscriptRow>
+    // One wrapper whatever the inbox does, so the shell (and what is typed in it) never remounts.
+    <div className={`cd-public-chat-page${inboxColumn ? ' cd-public-chat-page--with-inbox' : ''}`}>
+      <PublicShell
+        brand={brand}
+        ownerName={ownerName}
+        language={language}
+        openStatus={openStatus}
+        onAskForOwner={askForOwner}
+        about={desk.charter}
+        footer={!embedded}
+        composer={
+          <div ref={composerRef} onInput={visitorTyping.onInput}>
+            <Composer
+              variant="visitor"
+              label={copy.message(brand.name)}
+              placeholder={copy.message(brand.name)}
+              sendLabel={copy.send}
+              maxLength={MESSAGE_MAX_LENGTH}
+              disabled={!ready}
+              onSend={send}
+            />
+          </div>
+        }
+      >
+        <Transcript label={copy.conversation(brand.name)}>
+          {state.leading.length > 0 ? (
+            <TranscriptRow
+              margin={[
+                ...state.leading.map((receipt, index) => (
+                  <MarginReceipt key={`${receipt.ledgerSeq}-${index}`} source={receipt.source} plain={receipt.plain} ledgerSeq={receipt.ledgerSeq} />
+                )),
+                ...cancelsUnder(state.leading),
+              ]}
+            >
+              {null}
+            </TranscriptRow>
+          ) : null}
+          {state.rows.map((row) => (
+            <ChatRowView
+              key={rowKey(row)}
+              row={row}
+              ownerName={ownerName}
+              language={language}
+              onResend={resend}
+              after={[...cancelsUnder(row.receipts), ...verifyUnder(row)]}
+            />
+          ))}
+          {state.writing ? <WritingIndicator language={language} /> : null}
+          {/* The owner typing after a take-over: her initials, her name and three dots, until her words come. */}
+          {state.ownerTyping !== null ? (
+            <TranscriptRow>
+              <WritingIndicator language={language} variant="person" who={state.ownerTyping.name} />
+            </TranscriptRow>
+          ) : null}
+        </Transcript>
+        {inboxPlacement === 'inline' ? <VisitorInbox view={inbox} placement="inline" language={language} /> : null}
+        {connectionNotice || turnNotice ? (
+          <div className="cd-public-chat__notices">
+            {turnNotice}
+            {connectionNotice}
+          </div>
         ) : null}
-        {state.rows.map((row) => (
-          <ChatRowView
-            key={rowKey(row)}
-            row={row}
-            ownerName={ownerName}
-            language={language}
-            onResend={resend}
-            after={[...cancelsUnder(row.receipts), ...verifyUnder(row)]}
-          />
-        ))}
-        {state.writing ? <WritingIndicator language={language} /> : null}
-        {/* The owner typing after a take-over: her initials, her name and three dots, until her words come. */}
-        {state.ownerTyping !== null ? (
-          <TranscriptRow>
-            <WritingIndicator language={language} variant="person" who={state.ownerTyping.name} />
-          </TranscriptRow>
-        ) : null}
-      </Transcript>
-      {connectionNotice || turnNotice ? (
-        <div className="cd-public-chat__notices">
-          {turnNotice}
-          {connectionNotice}
-        </div>
-      ) : null}
-      {/* The end of the conversation, which useNewestInView keeps above the composer. */}
-      <div ref={endRef} />
-      <BeforeEachChange before={newest.beforeChange} />
-    </PublicShell>
+        {/* The end of the conversation, which useNewestInView keeps above the composer. */}
+        <div ref={endRef} />
+        <BeforeEachChange before={newest.beforeChange} />
+      </PublicShell>
+      {inboxPlacement === 'column' ? <VisitorInbox view={inbox} placement="column" language={language} /> : null}
+    </div>
   );
 }
 

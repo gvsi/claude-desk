@@ -36,6 +36,11 @@ export type RowPart<Row, R> =
   /** A line about the chat itself (someone joined or left): it ends the turn. */
   | { kind: 'line'; row: Row }
   /**
+   * Claude started a turn of its own, which no one's words began (the API woke it, as after the
+   * visitor confirmed it's them): the receipts that follow wait for its reply, as a turn's do.
+   */
+  | { kind: 'writing' }
+  /**
    * A checkpoint result. With `beside`, a receipt already in the conversation that this one
    * follows, it attaches in the same place; when that one isn't there, as any other receipt.
    */
@@ -93,6 +98,8 @@ export function addPart<Row, R>(groups: RowGroups<Row, R>, part: RowPart<Row, R>
       const settled = settle(groups);
       return { ...settled, rows: [...settled.rows, { item: part.row, receipts: [] }] };
     }
+    case 'writing':
+      return groups.awaitingReply ? groups : { ...groups, awaitingReply: true };
     case 'receipt': {
       const placed = part.beside === undefined ? null : placeBeside(groups, part.receipt, part.beside);
       if (placed !== null) return placed;
