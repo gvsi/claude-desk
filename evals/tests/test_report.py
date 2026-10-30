@@ -99,6 +99,7 @@ def a_pass(runs: list[ReportRun], **changes: Any) -> PassSummary:
         "model_ids": MODEL_IDS, "runs_per_scenario": 3, "external": False, "dry_run": False,
         "null_baseline": False, "stopped_by_budget": False, "pending": {}, "heldout_sha256": HELDOUT_SHA,
         "spend": spend(runs=len(runs)), "runs": runs,
+        "simulator_fallbacks": {"turns": sum(r.fallback_turns for r in runs), "switches": sum(r.switches for r in runs)},
     }
     return PassSummary.model_validate({**data, **changes})
 
@@ -726,6 +727,38 @@ async def test_report_command_keeps_a_partial_pass_out_of_the_latest_results(rep
     text = (reports / f"2026-10-30-{heldout}.md").read_text()
     assert "| Suite | all |" in text and "| Split | held out |" in text and "This pass ran part" not in text
     assert heldout in doc.read_text()
+
+
+async def test_report_command_counts_the_fallbacks_of_every_attempt(report_repo):
+    """A run whose infra error was retried keeps its first attempt's transcript apart, and the turns a
+    fallback model served in that attempt count in the pass's totals (`pass.json`). The report and
+    latest.json give those totals, every attempt's, not only what the final transcripts hold."""
+    root = report_repo
+    tried: set[tuple[str, int]] = set()
+
+    async def infra_first(scenario: Any, rep: int, target: Any, simulator: Any, **kwargs: Any) -> RunOutcome:
+        if scenario.id == "atk-held" and (scenario.id, rep) not in tried:
+            tried.add((scenario.id, rep))
+            return RunOutcome(scenario_id=scenario.id, suite=scenario.suite, rep=rep, pass_id=kwargs["pass_id"],
+                              error=RunError(kind="infra", detail="the stack dropped the run"),
+                              simulator=SimulatorStats(provider="anthropic", model="claude-opus-5-5", turns=2,
+                                                       fallback_turns=1, switches=1,
+                                                       served_models=["claude-opus-5-5", "claude-sonnet-5-5"]))
+        return crafted_outcome(scenario, rep, kwargs["pass_id"])
+
+    pass_id = await report_pass(root, infra_first)
+    out = root / "evals" / "out" / "passes" / pass_id
+    assert (out / "transcripts" / "atk-held-1-try1.json").is_file()
+    totals = json.loads((out / "pass.json").read_text())["simulator_fallbacks"]
+    assert totals == {"turns": 3, "switches": 3}        # atk-cal's turn, and atk-held's in each attempt
+
+    assert evals_run.report_command(["--pass", pass_id], root=root) == 0
+    assert json.loads((root / "evals" / "reports" / "latest.json").read_text())["simulator_fallbacks"] == totals
+    limits = (root / "evals" / "reports" / f"2026-10-30-{pass_id}.md").read_text().split("\n## Limits\n", 1)[1]
+    assert "Simulator fallbacks: 3 simulated-visitor turns were served by the other production model" in limits
+    assert "(3 switches), counting every attempt, retried ones included" in limits
+    with pytest.raises(ValueError, match="fallback totals count every attempt"):   # never fewer than the runs'
+        a_pass([run("atk-x", fallback_turns=2, switches=1)], simulator_fallbacks={"turns": 1, "switches": 1})
 
 
 async def answering_off(scenario: Any, rep: int, target: Any, simulator: Any, **kwargs: Any) -> RunOutcome:

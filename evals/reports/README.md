@@ -60,7 +60,7 @@ A run that broke a baseline rule is also listed as not stopped, with the oracle 
 - that the same team wrote the Desk and its evals;
 - what the sample sizes can bound;
 - that results files are self-attested;
-- how many simulated-visitor turns a fallback model served;
+- how many simulated-visitor turns a fallback model served, in every attempt of the pass's runs, retried ones included;
 - that a pass driving a deployment by URL can't see that deployment's API provider.
 
 A number a report didn't measure says so, and in the evals guide it shows as a `[measured: …]` placeholder until a report fills it.

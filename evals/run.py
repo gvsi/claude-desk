@@ -409,7 +409,8 @@ def report_inputs(pass_id: str, *, root: Path, null_baseline_id: str | None = No
             only=list(config.only), providers=result.providers.model_dump(),
             model_ids=result.model_ids, runs_per_scenario=config.runs, external=config.base_url is not None,
             dry_run=config.dry_run, null_baseline=config.null_baseline, stopped_by_budget=result.stopped_by_budget,
-            pending=result.pending, heldout_sha256=result.heldout_sha256, spend=own[0], runs=runs)
+            pending=result.pending, heldout_sha256=result.heldout_sha256, spend=own[0],
+            simulator_fallbacks=result.simulator_fallbacks, runs=runs)
     except ValidationError as error:
         raise ReportRefused(f"pass {pass_id} doesn't read as a report's pass ({error.error_count()} problems: "
                             f"{error.errors()[0]['msg']})") from None

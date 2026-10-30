@@ -306,6 +306,15 @@ class Providers(BaseModel):
     kernel_checks: Literal["anthropic", "fake"]
 
 
+class Fallbacks(BaseModel):
+    """The simulated-visitor turns a fallback model served, and the switches to it, over every attempt
+    of the pass's runs, retried ones included, as `pass.json` counts them."""
+
+    model_config = _STRICT
+    turns: StrictInt = Field(ge=0)
+    switches: StrictInt = Field(ge=0)
+
+
 class PassSummary(BaseModel):
     """A finished pass: what it ran, where, on which models, and each of its runs."""
 
@@ -326,6 +335,7 @@ class PassSummary(BaseModel):
     pending: dict[StrictStr, StrictStr]            # scenario id: the plan it waits for
     heldout_sha256: Annotated[StrictStr, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
     spend: SpendRow
+    simulator_fallbacks: Fallbacks
     runs: list[ReportRun]
 
     @model_validator(mode="after")
@@ -339,6 +349,9 @@ class PassSummary(BaseModel):
             seen.add((row.scenario_id, row.rep))
         if self.spend.pass_id != self.pass_id:
             raise ValueError("the pass's spend row is its own")
+        if (self.simulator_fallbacks.turns < sum(r.fallback_turns for r in self.runs)
+                or self.simulator_fallbacks.switches < sum(r.switches for r in self.runs)):
+            raise ValueError("the pass's fallback totals count every attempt, so at least its runs' own")
         return self
 
 
@@ -489,8 +502,7 @@ def latest_json(pass_result: PassSummary, gate_result: Any, metrics: Metrics | N
         "measured_cost_per_run_usd": _round(p.spend.total_usd / p.spend.runs) if p.spend.runs else None,
         "eval_spend_month_usd": _round(sum(row.total_usd for row in month)),          # every provider
         "eval_spend_month_claude_api_usd": _round(sum(row.claude_api_usd for row in month)),   # what the guard counts
-        "simulator_fallbacks": {"turns": sum(r.fallback_turns for r in p.runs),
-                                "switches": sum(r.switches for r in p.runs)},
+        "simulator_fallbacks": p.simulator_fallbacks.model_dump(),
         "provider": p.providers.api,
         "model_ids": dict(p.model_ids),
         "pass_id": p.pass_id,
@@ -907,8 +919,8 @@ def _limits(p: PassSummary, n: dict[str, Any]) -> list[str]:
     if fallbacks["turns"]:
         switches = _plural(fallbacks["switches"], "switch", "switches")
         lines.append(f"Simulator fallbacks: {_plural(fallbacks['turns'], 'simulated-visitor turn')} were served by the "
-                     f"other production model after a refusal ({switches}), so those turns came from a model other "
-                     "than the one configured for the role.")
+                     f"other production model after a refusal ({switches}), counting every attempt, retried ones "
+                     "included, so those turns came from a model other than the one configured for the role.")
     else:
         lines.append("Simulator fallbacks: none; every simulated-visitor turn came from the model configured for "
                      "the role.")
