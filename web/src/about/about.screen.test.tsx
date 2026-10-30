@@ -35,7 +35,7 @@ describe('About pages', () => {
     });
     for (const [i, { path, title }] of PAGES.entries()) {
       const { screen, router } = await renderRoute(path);
-      // The page is drawn once its code has loaded: its title, its article and the way back.
+      // The page is drawn once its code has loaded: its title, its article and the link into the prototype.
       await expect.element(screen.getByRole('heading', { level: 1, name: title, exact: true })).toBeVisible();
       await expect.element(screen.getByRole('article')).toBeVisible();
       await expect.element(screen.getByRole('link', { name: 'Try Desk prototype', exact: true })).toHaveAttribute('href', '/');

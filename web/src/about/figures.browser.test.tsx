@@ -9,7 +9,7 @@ import { page } from 'vitest/browser';
 import { render } from 'vitest-browser-react';
 
 import { assertCleanCopy } from '../ds/test/copy.ts';
-import { AXE_TAGS } from '../test/screen.ts';
+import { AXE_TAGS, tokenColor } from '../test/screen.ts';
 import { ABOUT_DOCUMENTS, type Block } from './documents.ts';
 import { ARCHITECTURE_LABELS, ArchitectureFigure } from './figures/ArchitectureFigure.tsx';
 import { MeasuresTable } from './figures/MeasuresTable.tsx';
@@ -22,16 +22,6 @@ const PHONE = { width: 390, height: 844 };
 afterEach(async () => {
   await page.viewport(DESKTOP.width, DESKTOP.height);
 });
-
-/** The color a token computes to, read off a probe element. */
-function tokenColor(token: string): string {
-  const probe = document.createElement('span');
-  probe.style.color = `var(${token})`;
-  document.body.append(probe);
-  const color = getComputedStyle(probe).color;
-  probe.remove();
-  return color;
-}
 
 /** Each element's own `<title>`, as a tooltip shows it. */
 function titles(elements: Element[]): string[] {

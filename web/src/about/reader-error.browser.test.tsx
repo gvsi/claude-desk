@@ -1,7 +1,7 @@
 /**
  * What an About page shows when its document can't be read: `documents.ts` throws here, as it does when a
  * document fails to parse, so the reader can't load, while its error page, which never imports the documents,
- * still draws and points the way back.
+ * still draws and points into the prototype.
  */
 import axe from 'axe-core';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
@@ -39,7 +39,7 @@ vi.mock('./documents.ts', () => {
 const DESKTOP = { width: 1440, height: 900 };
 const PHONE = { width: 390, height: 844 };
 
-/** Where the memory router is, after the back link. */
+/** Where the memory router is, after the link into the prototype. */
 const at = { path: '' };
 
 function LocationProbe() {
@@ -58,9 +58,9 @@ describe('ReaderError', () => {
     // The reader can't load without its documents.
     await expect(import('./ReaderPage.tsx')).rejects.toThrow(/raw HTML/);
 
-    for (const [lastDesk, words, to] of [
-      ['desk-rivera', 'Try Desk prototype', '/app/desk-rivera/today'],
-      [null, 'Try Desk prototype', '/'],
+    for (const [lastDesk, to] of [
+      ['desk-rivera', '/app/desk-rivera/today'],
+      [null, '/'],
     ] as const) {
       for (const size of [DESKTOP, PHONE]) {
         const where = `${size.width}, last Desk ${lastDesk}`;
@@ -80,8 +80,8 @@ describe('ReaderError', () => {
         const text = (screen.container.textContent ?? '').replace(/\s+/g, ' ');
         expect(text, where).toContain('This document can’t be shown right now. You can go back and try again later.');
         expect(text, where).not.toContain('raw HTML');
-        // The next step: the way back, to the Desk or the prototype.
-        const back = screen.getByRole('link', { name: words, exact: true });
+        // The next step: the link into the prototype, to the Desk or its start.
+        const back = screen.getByRole('link', { name: 'Try Desk prototype', exact: true });
         await expect.element(back, { timeout: 1000 }).toHaveAttribute('href', to);
         // The footer, the copy check, axe, and no technical words.
         const footers = screen.container.querySelectorAll('[data-ds="concept-footer"]');

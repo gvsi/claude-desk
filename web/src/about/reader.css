@@ -615,7 +615,7 @@
   --about-gap: calc(var(--space-32) * 2);
   /* The space between the hero and the body, and above the hero. */
   --about-step: calc(var(--space-16) * 7);
-  /* The top bar's height, which what stays under it while scrolling clears. */
+  /* The top bar's height: the contents list and what scrolls into view stop below it. */
   --about-top: calc(var(--space-32) * 2);
   min-height: 100dvh;
   background: var(--bg-app);
@@ -643,6 +643,18 @@
   padding: 0 var(--about-gutter);
   border-bottom: 1px solid var(--line-hairline);
   background: var(--bg-app);
+}
+
+/* What keyboard focus scrolls to stops clear of the bar, as a section opened by its address does. */
+.cd-about-page :is(a, button, summary, [tabindex]):not(.cd-about-top *) {
+  scroll-margin-top: calc(var(--about-top) + var(--space-24));
+}
+
+/* On paper the bar is the page's first line, not laid over what follows. */
+@media print {
+  .cd-about-top {
+    position: static;
+  }
 }
 
 .cd-about-brand {

@@ -13,7 +13,7 @@ export const ABOUT_PAGES: Record<AboutId, { route: string; title: string }> = {
   proposal: { route: '/about/proposal', title: 'Product proposal' },
 };
 
-// The prediction comes first: the proposal builds on it (project owner, 2026-10-30).
+// The prediction comes first (project owner, 2026-10-30).
 const ORDER: AboutId[] = ['prediction', 'proposal'];
 
 /** The sidebar's "About this prototype" group. */

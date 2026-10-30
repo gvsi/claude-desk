@@ -237,6 +237,16 @@ test('going_back_returns_to_the_readers_place', async ({ page }) => {
   await expectBackAt(page, 4000, 'forward from the Desk');
 });
 
+test('about_pages_print_without_the_pinned_bar', async ({ page }) => {
+  // On screen the top bar stays while the page scrolls; on paper it is the page's first line.
+  await page.goto('/about/proposal');
+  await expect(title(page, 'Product proposal')).toBeVisible(FIRST_DRAW);
+  const bar = page.locator('header.cd-about-top');
+  expect(await bar.evaluate((el) => getComputedStyle(el).position)).toBe('sticky');
+  await page.emulateMedia({ media: 'print' });
+  expect(await bar.evaluate((el) => getComputedStyle(el).position)).toBe('static');
+});
+
 test('about_pages_fit_phone_width', async ({ page }) => {
   await eachPage(page, (where) => expectFits(page, where));
 });

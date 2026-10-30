@@ -15,7 +15,7 @@ import { render } from 'vitest-browser-react';
 import { Icon } from '../ds/index.ts';
 import { CONCEPT_FOOTER_TEXT, assertCleanCopy } from '../ds/test/copy.ts';
 import { writeLocal } from '../lib/storage.ts';
-import { AXE_TAGS, assertNoJargon } from '../test/screen.ts';
+import { AXE_TAGS, assertNoJargon, tokenColor } from '../test/screen.ts';
 import { ABOUT_DOCUMENTS, documentText } from './documents.ts';
 import type { AboutId } from './links.ts';
 import { ReaderPage } from './ReaderPage.tsx';
@@ -189,7 +189,7 @@ describe('ReaderPage', () => {
         for (const id of IDS) {
           for (const size of [DESKTOP, PHONE]) {
             const screen = await renderReader(id, { size, lastDesk });
-            // The page is drawn, its back link read from what this browser stored.
+            // The page is drawn, its link into the prototype read from what this browser stored.
             const back = screen.getByRole('link', { name: 'Try Desk prototype', exact: true });
             await expect.element(back).toBeInTheDocument();
             await screen.unmount();
@@ -600,7 +600,7 @@ describe('ReaderPage', () => {
           expect(link.getAttribute('target'), link.href).toBe('_blank');
           expect(link.getAttribute('rel'), link.href).toBe('noopener noreferrer');
         }
-        // Every other link stays in the app, in the same tab: the documents, the contents list and the way back.
+        // Every other link stays in the app, in the same tab: the documents, the contents list and the link into the prototype.
         for (const link of links.filter((link) => !external.includes(link))) {
           expect(link.getAttribute('href'), where).toMatch(/^(?:\/|#)/);
           expect(link.getAttribute('target'), link.href).toBeNull();
@@ -666,18 +666,64 @@ describe('ReaderPage', () => {
       const bar = screen.container.querySelector('header') as HTMLElement;
       window.scrollTo(0, 2000);
       await expect.poll(() => window.scrollY, { message: where }).toBe(2000);
-      // Part way down, the bar is still at the top of the window, drawn over the page.
+      // Part way down, the bar is still at the top of the window, opaque.
       const box = bar.getBoundingClientRect();
       expect(box.top, where).toBe(0);
-      expect(bar.contains(document.elementFromPoint(box.left + box.width / 2, box.height / 2)), where).toBe(true);
-      // A section opened by its address, and the desktop's contents list, sit below the bar, not under it.
+      expect(getComputedStyle(bar).backgroundColor, where).toBe(tokenColor('--bg-app'));
+      if (size === DESKTOP) {
+        // The contents list stays below it.
+        const contents = screen.container.querySelector('nav.cd-about-contents:not(.cd-about-contents--compact)');
+        expect(contents?.getBoundingClientRect().top, where).toBeGreaterThanOrEqual(box.bottom);
+      } else {
+        // On a phone, the document switch under the bar scrolls away with the page.
+        const documents = screen.container.querySelector('nav[aria-label="Documents"]');
+        expect(documents?.getBoundingClientRect().bottom, where).toBeLessThan(0);
+      }
+      // A figure's marks scrolled under it stay under it.
+      const stop = screen.container.querySelector('[data-stop][data-on]') as HTMLElement;
+      const stopBox = stop.getBoundingClientRect();
+      window.scrollBy(0, stopBox.top - box.height / 2);
+      await expect.poll(() => Math.round(stop.getBoundingClientRect().top), { message: where }).toBeLessThan(box.bottom);
+      const under = stop.getBoundingClientRect();
+      expect(bar.contains(document.elementFromPoint(under.left + under.width / 2, under.top + under.height / 2)), where).toBe(true);
+      // A section opened by its address sits below it.
       const section = screen.container.querySelector('article h2') as HTMLElement;
       section.scrollIntoView();
       await expect.poll(() => section.getBoundingClientRect().top, { message: where }).toBeGreaterThanOrEqual(box.bottom);
-      const contents = screen.container.querySelector('nav.cd-about-contents:not(.cd-about-contents--compact)');
-      if (size === DESKTOP) expect(contents?.getBoundingClientRect().top, where).toBeGreaterThanOrEqual(box.bottom);
       await screen.unmount();
     }
+  });
+
+  it('keyboard_focus_stays_clear_of_the_top_bar', async () => {
+    // On a phone the document switch sits under the bar and scrolls with the page: tabbing to it brings it out
+    // from behind the bar.
+    const screen = await renderReader('prediction', { size: PHONE });
+    const bar = screen.container.querySelector('header') as HTMLElement;
+    (screen.container.querySelector('.cd-about-try') as HTMLElement).focus();
+    window.scrollTo(0, 50);
+    await expect.poll(() => window.scrollY).toBe(50);
+    await userEvent.tab();
+    const focused = document.activeElement as HTMLElement;
+    expect(focused.closest('nav[aria-label="Documents"]')).not.toBeNull();
+    await expect.poll(() => focused.getBoundingClientRect().top).toBeGreaterThanOrEqual(bar.getBoundingClientRect().bottom);
+    await screen.unmount();
+  });
+
+  it('tabbing_backwards_stays_clear_of_the_top_bar', async () => {
+    const screen = await renderReader('proposal', { size: DESKTOP });
+    const bar = screen.container.querySelector('header') as HTMLElement;
+    const link = [...screen.container.querySelectorAll('article a')].find(
+      (a) => a.getAttribute('href') === '/about/prediction',
+    ) as HTMLElement;
+    // From the next link down the article, with the page scrolled so that the link sits just under the bar.
+    const links = [...screen.container.querySelectorAll('article a')];
+    (links[links.indexOf(link) + 1] as HTMLElement).focus();
+    window.scrollBy(0, link.getBoundingClientRect().top - 8);
+    await expect.poll(() => Math.round(link.getBoundingClientRect().top)).toBeLessThan(bar.getBoundingClientRect().bottom);
+    await userEvent.tab({ shift: true });
+    expect(document.activeElement).toBe(link);
+    await expect.poll(() => link.getBoundingClientRect().top).toBeGreaterThanOrEqual(bar.getBoundingClientRect().bottom);
+    await screen.unmount();
   });
 
   it('leaving_takes_noindex_and_the_title_away_at_once', async () => {

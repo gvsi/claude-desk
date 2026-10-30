@@ -82,3 +82,13 @@ export function expectNoHorizontalScroll(): void {
 export function expectNoWindowScroll(): void {
   expect(document.documentElement.scrollHeight).toBe(window.innerHeight);
 }
+
+/** The color a token computes to, read off a probe element. */
+export function tokenColor(token: string): string {
+  const probe = document.createElement('span');
+  probe.style.color = `var(${token})`;
+  document.body.append(probe);
+  const color = getComputedStyle(probe).color;
+  probe.remove();
+  return color;
+}

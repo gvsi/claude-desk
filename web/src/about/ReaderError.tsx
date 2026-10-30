@@ -1,5 +1,5 @@
 /**
- * What an About this prototype page shows when its document can't be read: one plain line and the way back
+ * What an About this prototype page shows when its document can't be read: one plain line and the link into the prototype
  * to the Desk, with the footer. It never names the error, and it imports neither the reader nor the
  * documents, so it draws when they can't load.
  */

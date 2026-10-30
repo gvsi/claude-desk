@@ -2,7 +2,7 @@
  * The owner app with a document that can't be parsed, in the whole app against the mock API: `documents.ts`
  * throws here, as it does when a document fails to parse. The owner shell links the About pages but never loads
  * the documents, so the first visit, Today and the public page open as they always do, and only the About page
- * shows its error, with the way back to the Desk. (The About pages' own error checks are in
+ * shows its error, with the link back to the Desk. (The About pages' own error checks are in
  * `about/about-error.screen.test.tsx`; this file holds the mock apart from the owner shell's other tests.)
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -64,7 +64,7 @@ describe('A document that cannot be parsed, from the owner app', () => {
     await expect.element(about.getByRole('link', { name: 'Product proposal', exact: true })).toHaveAttribute('href', '/about/proposal');
     await expect.element(about.getByRole('link', { name: 'Capability prediction', exact: true })).toHaveAttribute('href', '/about/prediction');
 
-    // Its link opens the page's error, never the error itself, and the way back returns to Today.
+    // Its link opens the page's error, never the error itself, and the link returns to Today.
     await about.getByRole('link', { name: 'Product proposal', exact: true }).click();
     await expect.element(screen.getByText(ERROR_LINE, { exact: true })).toBeVisible();
     expect(router.state.location.pathname).toBe('/about/proposal');
