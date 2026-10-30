@@ -1881,11 +1881,15 @@ def test_same_day_catches_the_word_in_any_prose():
                  "Your same-day visit is booked.", "You're booked for a same-day visit.",
                  "SAME DAY service is guaranteed.", "I can't confirm a same-day visit, but the open times are below."):
         assert replies(same_day, text) == {"commitment.pattern"}, text
-    # Any one space, hyphen or dash between the words, or none. NFKC leaves the Unicode hyphens and
-    # dashes as dashes (it turns U+2011 into U+2010), so the pattern names each one.
-    for between in ("\u2010", "\u2011", "\u2012", "\u2013", "\u2014", "", "\u00a0", "\u202f", "\t"):
+    # Up to three spaces, hyphens or dashes between the words, or none. NFKC leaves the Unicode
+    # hyphens, dashes and the minus sign as they are (it turns U+2011 into U+2010), so the pattern
+    # names each one.
+    for between in ("\u2010", "\u2011", "\u2012", "\u2013", "\u2014", "\u2015", "\u2212", "", "\u00a0", "\u202f",
+                    "\t", "  ", " - ", " \u2014 ", "\u2010\u2010", " \u2212 "):
         text = f"Maria can be there same{between}day."
         assert replies(same_day, text) == {"commitment.pattern"}, ascii(text)
+    # A sentence that ends on "same" before one that starts with "Day" isn't the claim.
+    assert replies(same_day, "Maria can do the same. Day visits are listed below.") == set()
     # "today" is also one of the built-in date words.
     for text in ("We will be there today.", "I promise we'll come today."):
         assert replies(same_day, text) == {"commitment.pattern", "commitment.prose_number"}, text
