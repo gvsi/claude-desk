@@ -653,20 +653,25 @@ def test_an_exported_passcode_wins_over_the_keychain(deploy):
     assert "exported-test-passcode" not in run.text()
 
 
+@pytest.mark.parametrize("terminal", [True, False], ids=["terminal", "unattended"])
 @pytest.mark.parametrize("exported", [False, True], ids=["keychain", "exported"])
-def test_the_passcode_reaches_smoke_py_alone_from_either_source(deploy, exported):
+def test_the_passcode_reaches_smoke_py_alone_from_either_source(deploy, exported, terminal):
     """Every command deploy.sh runs is watched, the startup tools before any step included (with
     PATH holding only the stubs and the WATCHED tools, any other command would stop the deploy).
     Whether the passcode comes from the Keychain or from an exported DESK_PASSCODE, and with a
     caller's `passcode` and `probe` exported (the shell variables deploy.sh keeps it and the
     Keychain's -g answer in), it reaches smoke.py alone, as DESK_PASSCODE: no other command's
-    environment holds it under any name, nor the -g answer, which holds it too."""
+    environment holds it under any name, nor the -g answer, which holds it too. That holds at a
+    terminal and unattended, where each stack's security diff runs through cdk diff and tee first."""
     secret = "exported-test-passcode" if exported else "keychain-test-passcode"
     run = deploy(keychain_item="keychain-test-passcode", DESK_PASSCODE=secret if exported else None,
                  DESK_DEPLOY_ACCOUNT=ACCOUNT, DESK_DOMAIN_NAME=DOMAIN, DESK_CERTIFICATE_ARN=CERTIFICATE,
-                 passcode="caller-value", probe="caller-value", watch=True)
+                 passcode="caller-value", probe="caller-value", watch=True, terminal=terminal,
+                 STUB_BROADENS="DeskApp")
     assert run.status == 0, run.output
     assert set(WATCHED) <= {call["tool"] for call in run.calls} and _smoke_ran(run)
+    diffed = [call["argv"] for call in run.calls if call["tool"] == "tee" and call["argv"] == ["/dev/stderr"]]
+    assert len(diffed) == (0 if terminal else 2) == len(run.cdk("DeskData", "diff") + run.cdk("DeskApp", "diff"))
     forms = {_sha256(secret), _sha256(f'password: "{secret}"')}
     for call in run.calls:
         holding = sorted(name for name, value in call["env"].items() if value in forms)
