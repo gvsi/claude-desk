@@ -12,6 +12,15 @@
   padding-top: var(--space-4);
 }
 
+/* A message whose blocks include a cancelled link: its parts in order, 12 px apart, as Claude's
+   own message spaces its blocks. */
+.cd-public-chat__message {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  min-width: 0;
+}
+
 .cd-public-chat__notices {
   display: flex;
   flex-direction: column;

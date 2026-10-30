@@ -194,8 +194,8 @@ export const LINK_CANCELLED: Record<Language, string> = {
 
 /**
  * The `link_cancelled` card as the kernel renders it. The template joins the generated contracts
- * with kernel plan 01c; until then it is named here by hand, and this build's reply card shows it
- * as a plain card with the kernel's words, as it shows any template it doesn't know.
+ * with kernel plan 01c; until then it is named here by hand, and the public chat shows it as the
+ * design system's `LinkCancelledCard`, from its `title`.
  */
 export function linkCancelledBlock(language: Language): RenderedBlock {
   const text = LINK_CANCELLED[language];

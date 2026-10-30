@@ -269,12 +269,21 @@ describe('mock checkout', () => {
     await expect.element(open.screen.getByText(CANCELLED)).not.toBeInTheDocument();
     expect(requests('completePayment')).toHaveLength(1);
 
-    // The chat shows the kernel's link_cancelled line once, from the Desk.
+    // The chat shows the kernel's link_cancelled line once, from the Desk, in the design system's
+    // cancelled link card: its label and the line as written, with no link, button or amount.
     expect(deskMessages()).toHaveLength(1);
     const chat = await renderRoute(CHAT);
     await ready(chat.screen);
     const line = chat.screen.getByText(LINK_CANCELLED.en);
     await expect.element(line).toBeVisible();
     expect(line.elements()).toHaveLength(1);
+    const card = chat.screen.getByRole('article', { name: 'Payment link cancelled' });
+    await expect.element(card).toBeVisible();
+    expect(card.element().textContent).toBe(`Payment link cancelled${LINK_CANCELLED.en}`);
+    expect(card.element().querySelectorAll('a, button')).toHaveLength(0);
+    // Its receipt sits under it, as under every message.
+    const row = card.element().closest('.cd-transcript-row');
+    expect(row?.querySelector('.cd-margin-receipt')).not.toBeNull();
+    await expectScreenBasics(chat.screen.container, { owner: false });
   });
 });
