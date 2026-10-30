@@ -33,7 +33,7 @@ from .helpers import CopyRows, kernel_ctx, ledger_rows, rows_of, verify_session
 from .test_adapters import Rivera, rivera, visitor_of
 from .test_approvals import add_person, answered
 from .test_compiler import card
-from .test_context import context_of, fact_ids, owner_session_id, tools
+from .test_context import add_price_item, catalog_of, context_of, fact_ids, owner_session_id, tools
 from .test_copies import api_rows
 from .test_decide import decided, desk_with, open_visitor, set_session
 from .test_desk_writes import put_part
@@ -169,6 +169,20 @@ async def test_a_canary_in_a_fact_id_or_claim_key_stays_out_of_context(app, clie
     assert "charter:contact" in given and named not in given and keyed.fact_id not in given
     owner = await context_of(client, await owner_session_id(client, copy.owner), copy.owner, desk_id=copy.desk_id)
     assert {named, keyed.fact_id} <= set(fact_ids(owner.facts))
+
+
+@pytest.mark.parametrize("where", ["title", "item_id"])
+async def test_a_canary_in_a_price_item_keeps_the_catalog_out_of_context(app, client, where):
+    """The Desk's catalog, built from its price list on each read, is held to the same rule as a
+    stored fact: an item whose title or ID holds a document's canary keeps the catalog out of a
+    visitor's context. The owner still reads it."""
+    copy, visitor = await visitor_of(app, client)
+    dana = (await documents(app, copy))["dana-invoice"]
+    item_id, title = (dana.canary, "Invoice lookup") if where == "item_id" else ("lookup", f"Invoice {dana.canary}")
+    await add_price_item(app, copy, item_id, title, 5_000)
+    assert "catalog" not in fact_ids((await context_of(client, visitor.session_id, visitor.headers)).facts)
+    owner = await context_of(client, await owner_session_id(client, copy.owner), copy.owner, desk_id=copy.desk_id)
+    assert (item_id, title) in [(claim.key, claim.value) for claim in catalog_of(owner).claims]
 
 
 def full_width(text: str) -> str:
