@@ -45,3 +45,21 @@ export const OwnerSpeaking: Story = {
     expectComputed(avatar, { width: '28px', height: '28px', backgroundColor: 'rgb(60, 57, 47)' });
   },
 };
+
+export const OwnersOwnScreen: Story = {
+  args: { name: 'You', initials: 'MR', role: undefined },
+  parameters: {
+    canvas: 'N-Conv-TakeOver',
+    canvasNote: "Maria's own message on her conversation screen: labelled “You”, beside her own initials; the words are the fixture's owner_said block.",
+  },
+  play: async ({ canvas, canvasElement }) => {
+    // The label is "You", as text; the avatar takes her own initials, never the label's.
+    await expect(canvasElement.querySelector('.cd-person-message__who')).toHaveTextContent(/^You$/);
+    await expect(canvas.getByText('You')).toHaveAttribute('data-copy', 'user');
+    const avatar = canvasElement.querySelector('.cd-person-message__avatar') as HTMLElement;
+    await expect(avatar).toHaveAttribute('aria-hidden', 'true');
+    await expect(avatar.textContent).toBe('MR');
+    expectComputed(avatar, { width: '28px', height: '28px', backgroundColor: 'rgb(60, 57, 47)' });
+    await expect(canvas.getByText(saidText)).toBeVisible();
+  },
+};
