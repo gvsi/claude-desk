@@ -4,37 +4,43 @@ import { expect, fn, within } from 'storybook/test';
 import type { DemoInboxItem } from '../components/DemoInboxPanel/DemoInboxPanel.tsx';
 import { DemoInboxSheet } from '../components/DemoInboxSheet/DemoInboxSheet.tsx';
 import { PageHeader } from '../components/PageHeader/PageHeader.tsx';
+import { requestHrefOf } from '../fixtures/index.ts';
 import { expectComputed } from '../test/expectComputed.ts';
 import { RiveraFrame } from './parts.tsx';
 import { expectOwnerFrame } from './spec.ts';
 
-/** Two alerts about held requests, as the kernel writes them to the owner, newest last. */
-const ALERTS: DemoInboxItem[] = [
-  {
-    notice: { entry_id: 'inbox-alert-saturday', to: 'owner', preview: 'A Saturday booking is waiting' },
-    entry: {
-      entry_id: 'inbox-alert-saturday',
-      to: 'owner',
-      kind: 'alert',
-      body: 'A visitor asked for Saturday morning. Held by your rule: Saturday bookings ask you first.',
-      created_at: '2026-10-30T09:58:00Z',
+/**
+ * Two alerts about held requests, as the kernel writes them to the owner, newest last, each with
+ * the request link the screen builds from the decision it names.
+ */
+const ALERTS: DemoInboxItem[] = (
+  [
+    {
+      notice: { entry_id: 'inbox-alert-saturday', to: 'owner', preview: 'A Saturday booking is waiting' },
+      entry: {
+        entry_id: 'inbox-alert-saturday',
+        to: 'owner',
+        kind: 'alert',
+        body: 'A visitor asked for Saturday morning. Held by your rule: Saturday bookings ask you first.',
+        created_at: '2026-10-30T09:58:00Z',
+        decision_id: 'dec-rivera-saturday',
+      },
+      time: 'Today, 9:58 am',
     },
-    time: 'Today, 9:58 am',
-    requestHref: '#request-dec-rivera-saturday',
-  },
-  {
-    notice: { entry_id: 'inbox-alert-discount', to: 'owner', preview: 'A request is waiting for your answer' },
-    entry: {
-      entry_id: 'inbox-alert-discount',
-      to: 'owner',
-      kind: 'alert',
-      body: 'Dana Whitfield asked for 10% off a drain clearing. Held by your rule: Quotes from your price list, at list price.',
-      created_at: '2026-10-30T10:46:00Z',
+    {
+      notice: { entry_id: 'inbox-alert-discount', to: 'owner', preview: 'A request is waiting for your answer' },
+      entry: {
+        entry_id: 'inbox-alert-discount',
+        to: 'owner',
+        kind: 'alert',
+        body: 'Dana Whitfield asked for 10% off a drain clearing. Held by your rule: Quotes from your price list, at list price.',
+        created_at: '2026-10-30T10:46:00Z',
+        decision_id: 'dec-rivera-discount',
+      },
+      time: 'Today, 10:46 am',
     },
-    time: 'Today, 10:46 am',
-    requestHref: '#request-dec-rivera-discount',
-  },
-];
+  ] satisfies DemoInboxItem[]
+).map((item) => ({ ...item, requestHref: requestHrefOf(item.entry) }));
 
 /** Today, short, with the owner's Demo inbox opened beside it from its button. */
 function InboxSheetOwner() {

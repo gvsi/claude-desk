@@ -41,6 +41,18 @@ export interface DemoInboxFixture {
   ownerTimes: Record<string, string>;
 }
 
+/**
+ * A story's `requestHref` for an inbox entry: the place on the page of the held request its
+ * `decision_id` names. As the kernel rules, only the owner's alert names one, so anything else (a
+ * code, a checkpoint, an alert to someone else, an entry not fetched yet) gets no link, even if it
+ * carries a `decision_id`. The owner app builds its own in-app path; the design system only needs
+ * a place on the page.
+ */
+export function requestHrefOf(entry: DemoInboxEntry | null): string | undefined {
+  if (entry?.kind !== 'alert' || entry.to !== 'owner' || !entry.decision_id) return undefined;
+  return `#request-${encodeURIComponent(entry.decision_id)}`;
+}
+
 export { chen } from './chen';
 export type { CardData } from './rivera';
 export { cardBlock, placeholderHex, proseBlock, rivera, RIVERA_MONEY_CAP_CENTS } from './rivera';

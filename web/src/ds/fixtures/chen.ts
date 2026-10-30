@@ -505,7 +505,7 @@ const checkpointHead = placeholderHex('chen-ledger:50', 32);
 
 const notices = [
   { entry_id: 'inbox-code-raj', to: people.raj.maskedContact, preview: 'New verification code' },
-  { entry_id: 'inbox-hold-chen', to: 'owner', preview: 'A request needs your answer' },
+  { entry_id: 'inbox-hold-consultation', to: 'owner', preview: 'A request needs your answer' },
   { entry_id: 'inbox-checkpoint-chen', to: 'owner', preview: 'Ledger checkpoint' },
 ] satisfies InboxNotice[];
 
@@ -516,13 +516,17 @@ const entries = [
     kind: 'verification_code',
     body: "Your Chen & Co. CPA code is 482913. It expires in ten minutes. If you didn't ask for it, ignore this message.",
     created_at: '2026-10-30T21:14:02.551870Z',
+    decision_id: null,
   },
   {
-    entry_id: 'inbox-hold-chen',
+    // The held consultation's alert: the decision's reason_plain and its id, as the kernel pairs
+    // them, written when the hold was made, 24 hours before it expires.
+    entry_id: 'inbox-hold-consultation',
     to: 'owner',
     kind: 'alert',
-    body: 'A request needs your answer. A visitor not on record asked for a tax return quote at 20% off, $360.00 instead of $450.00.',
-    created_at: '2026-10-30T18:02:41.203114Z',
+    body: heldConsultation.reason_plain,
+    created_at: '2026-10-30T18:12:09.774120Z',
+    decision_id: heldConsultation.decision_id,
   },
   {
     entry_id: 'inbox-checkpoint-chen',
@@ -536,16 +540,17 @@ const entries = [
       key_id: placeholderHex('chen-ledger-key-id', 8),
     }),
     created_at: '2026-10-30T16:30:00.004211Z',
+    decision_id: null,
   },
 ] satisfies DemoInboxEntry[];
 
-/** Linda's Demo inbox: Raj's code, a hold alert and a ledger checkpoint, newest first. */
+/** Linda's Demo inbox: Raj's code, the held consultation's alert and a ledger checkpoint, newest first. */
 const demoInbox = {
   notices,
   entries,
   ownerTimes: {
     'inbox-code-raj': '2:14 pm',
-    'inbox-hold-chen': '11:02 am',
+    'inbox-hold-consultation': '11:12 am',
     'inbox-checkpoint-chen': '9:30 am',
   },
 } satisfies DemoInboxFixture;
