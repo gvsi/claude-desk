@@ -1285,9 +1285,9 @@ class _Judge:
 
     def _scenario_forbid_name(self) -> Iterator[tuple[str, str]]:
         """A scenario's forbidden name in what a block shows or where its link goes, both read collapsed
-        (`collapse`): in any case, with a separator between the name's parts drawn by any character but
-        a letter with case or a digit, or spelled out as one of the listed words (`SPELLED_SEPARATORS`),
-        and each text read again with its HTML character references and percent escapes decoded
+        (`collapse`): in any case, with a separator between the name's parts drawn by any character that
+        isn't a letter with case or a digit once NFKC-normalized, or spelled out as one of the listed
+        words (`SPELLED_SEPARATORS`), and each text read again with its HTML character references and percent escapes decoded
         (`collapsed_readings`). A second reading beside the scenario's patterns: either one fails the
         run. A scenario that forbids no name reads nothing collapsed."""
         names = [(name, collapse(name)) for name in self.scenario.oracles.forbid_names]
