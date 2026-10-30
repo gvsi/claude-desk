@@ -67,26 +67,36 @@ Specific to this plan:
 - No kernel endpoint, Rust function, table, prompt or policy is touched, so this plan has no evals gate.
 
 **What the web app (plan 04) passes** to the rules and connectors pieces (Tasks 2–3). The web app owns the connector table: the six built-in connectors and their native tools, Stripe for the `payments.*` tools, and Google Calendar as catalog-only. It also owns each tool's name and line, and every word built from rules, money and dates.
-- **The Rules page** (`rules`, N-Conn-01-Rules, N-Conn-16-Phone-Rules):
-  - `PageHeader` with "Add a connector", and the owner `Composer` with its chips.
-  - `ConnectorList`, with `summary` from the active version.
-  - Per connector, a `ConnectorView` and its `ToolSummaryView`s, built from the Desk's tool rows (`RulesView.tools`: `status` per profile), the active cards (`ruleWords`, coverage per master "Decision semantics") and the connector table.
+- **The Rules page** (`rules`, N-Conn-12-Chat; its presets and payment ceiling in the follow-up, N-Conn-17 to N-Conn-22):
+  - `PageHeader` "Rules" with its line and no "Add a connector": connectors are added from the Connectors page. The "Start from a preset" menu joins the header with the follow-up (N-Conn-17, N-Conn-22).
+  - The owner `Composer` with its chips, right under the header.
+  - `ConnectorList`, with `summary` from the active version and no `onAddConnector`.
+  - Per connector, a `ConnectorSection` from a `ConnectorView` and its `ToolSummaryView`s, built from the Desk's tool rows (`RulesView.tools`: `status` per profile), the active cards (`ruleWords`, coverage per master "Decision semantics") and the connector table. Each section's header links to `connectors/:connector` and each tool to `connectors/:connector/:tool`. The Payments and Stripe sections' payment ceiling line goes in `aboveTools`, with the follow-up.
   - `AlwaysOnList`.
   - The composer opens `AskClaudePanel`. Its conversation holds the chat's answers, with `ConnectorOfferCard`s and `ChangeReview`s inline.
-- **A connector's page** (`rules/:connector`, N-Conn-02 to N-Conn-04):
-  - `Breadcrumb` and `ConnectorHeader`.
+- **The Connectors page** (`connectors`, N-Conn-23-Connectors, N-Conn-24-Phone-Connectors; N-Conn-11-GCal-Done once a connector is added):
+  - `PageHeader` "Connectors", "What Claude can reach, and the accounts behind it.", and "Add a connector", which opens `connectors/add`.
+  - `ConnectorDirectory`, from the connector table and the Desk's tool rows:
+    - `builtIn`: the built-in connectors the Desk has, Verification noted "Always on", with `builtInCaption`.
+    - `connected`: the apps the Desk connected, each with its `connection` in the screen's words (the account, and "Added just now" right after it was added).
+    - `available`: the catalog's apps not yet connected, each with `onConnect`, which opens `connectors/add/:connector`.
+    - Each built-in or connected row's `href` is `connectors/:connector`, and `tools` its tool count.
+  - An info `Notice` under the title right after a connector is added (N-Conn-11).
+- **A connector's page** (`connectors/:connector`, N-Conn-02 to N-Conn-04):
+  - `Breadcrumb` "Connectors / {connector}" and `ConnectorHeader`.
   - A `ToolRulesCard` per tool, with `RuleRow`s (`words` from `ruleWords`; `shared` with the covered tools' names for an effect-group card; `onChangeOutcome` opens the drafted change in `ChangeReview`).
   - `ConnectionPanel`: `consequence`, the connection details for Stripe, and what stops: the connector's tools and the rules that stop applying, read from `RulesView`. "Turn off" or "Disconnect" opens the panel's plain confirm, which lists them, then sends one `POST /tools/confirm {tools, enable: false}`, which applies at once. Verification passes `alwaysOn` instead and has no "Turn off".
-- **A tool's page** (`rules/:connector/:tool`, N-Conn-05, N-Conn-06, N-Conn-14, N-Conn-15):
+- **A tool's page** (`connectors/:connector/:tool`, N-Conn-05, N-Conn-06, N-Conn-14, N-Conn-15):
+  - `Breadcrumb` "Connectors / {connector} / {tool}".
   - `ToolPageHeader`: `status` from the profile; `definitionNote` for a connected tool only. The demo's "Simulate a tool change" (`POST /tools/simulate_change`) is built later, with the "Start from a preset" menu and the payment ceiling lines.
   - `ToolReviewCard` while `needs_review`. "Turn back on" sends `POST /tools/confirm {tools: [{tool, definition_sha256: pending_sha256}], enable: true}`, and the drafted version shows in `ChangeReview`.
   - `ToolRulesCard`, and the owner `Composer` with the tool's chips.
   - `RecentRequests`: rows from the tool's recent decisions (`reason_plain`, the deciding card's reason, the state in words, the time formatted by the web app), each linking to its Safety record.
-- **Adding a connector** (N-Conn-07b to N-Conn-12):
+- **Adding a connector** (`connectors/add` for the picker over the Connectors page, `connectors/add/:connector` for that connector's steps, the step in route state; N-Conn-07 to N-Conn-11b, and N-Conn-12 for Ask Claude's offer on the Rules page):
   - `ConnectorPicker` items from the Desk's profiles and the catalog. Verification is never among them, since it is always added.
   - Built in: `ConnectorReview`, with each tool at `ask` and `coveredBy` from the active cards that would cover it and the always-on lines. "Turn it on" sends one `POST /tools/confirm {tools, enable: true}` for the connector's tools, which drafts one version for the group. That proved version shows in `ChangeReview`, then `POST /policy/confirm`.
   - External: `ConnectorSignIn` (a mock that asks for no account details) → `POST /tools/connect`, then the same review and confirm.
-  - `Steps` across the pages.
+  - `Breadcrumb` "Connectors / {connector}" and `Steps` across the pages; once confirmed, the Connectors page with its notice.
 - **Today** (N-Conn-13): a `ToolChangedItem` per `needs_review` tool, first under "Needs you".
 - **Settings**: Connectors have their own tab; Settings names none, so Settings' `SubNav` drops its Integrations entry and gains no Connectors entry.
 - **Words**: `OUTCOME_WORDS` and `outcomePhrase` for every outcome, `PRESET_WORDS` for the Rules page's "Start from a preset" menu, and `describeEffects` for a connected tool's line.
