@@ -42,8 +42,8 @@
 # written to infra/out/deploy-<UTC time>.log. A run without a terminal is refused unless
 # DESK_DEPLOY_ACCOUNT is set; nobody can approve there, so before each cdk deploy the log gets that
 # stack's security-relevant changes (a read-only cdk diff --security-only) and one line,
-# "deploy: security summary for <stack>: ...", saying whether its deploy broadens IAM permissions
-# or security group access, and the deploy runs with --require-approval never.
+# "deploy: security summary for <stack>: ...", saying whether cdk diff found a change that broadens
+# IAM permissions or security group access, and the deploy runs with --require-approval never.
 set -euo pipefail
 
 # Under xtrace (bash -x, or SHELLOPTS=xtrace handed down) bash writes each assignment with its value
@@ -233,9 +233,9 @@ cdk_deploy() {
     return 1
   fi
   if ((BASH_REMATCH[1] > 0)); then
-    echo "deploy: security summary for $stack: this deploy broadens IAM permissions or security group access; the changes are above"
+    echo "deploy: security summary for $stack: cdk diff found a change that broadens IAM permissions or security group access; the changes are above"
   else
-    echo "deploy: security summary for $stack: nothing in this deploy broadens IAM permissions or security group access"
+    echo "deploy: security summary for $stack: cdk diff found no change that broadens IAM permissions or security group access"
   fi
   (cd "$INFRA" && npx --no-install cdk deploy "$stack" --require-approval never --progress events \
     "${options[@]}") >&3

@@ -128,6 +128,19 @@ def test_a_redeploy_is_one_line_and_the_runbook_says_what_it_skips():
     assert REDEPLOY in " ".join((INFRA / "scripts" / "deploy.sh").read_text().replace("#", " ").split())
 
 
+def test_the_security_summary_is_described_as_what_cdk_diff_found():
+    """The unattended summary line reports what `cdk diff --security-only` found (test_deploy.py),
+    which is CDK's own check, not a fact about the deploy; the runbook and deploy.sh's header
+    describe the line that way."""
+    claim = "whether `cdk diff` found a change that broadens IAM permissions or security group access"
+    redeploys = section("Redeploys")
+    script = " ".join((INFRA / "scripts" / "deploy.sh").read_text().replace("#", " ").split())
+    assert claim in redeploys
+    assert claim.replace("`", "") in script
+    for text in (redeploys, script):
+        assert "saying whether its deploy broadens" not in text
+
+
 def test_the_passcode_is_asked_for_in_printable_ascii():
     """deploy.sh refuses a Keychain passcode that isn't printable ASCII, or has a backslash, from how
     `security find-generic-password -g` shows the stored item (test_deploy.py). The runbook says so

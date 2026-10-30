@@ -784,8 +784,8 @@ def test_unattended_deploys_log_each_security_diff_then_deploy_without_a_prompt(
     assert "--require-approval never" in run.log                             # said where it applies
 
 
-BROADENS = "this deploy broadens IAM permissions or security group access; the changes are above"
-BROADENS_NOTHING = "nothing in this deploy broadens IAM permissions or security group access"
+BROADENS = "cdk diff found a change that broadens IAM permissions or security group access; the changes are above"
+BROADENS_NOTHING = "cdk diff found no change that broadens IAM permissions or security group access"
 
 
 def test_each_unattended_security_diff_ends_with_a_line_saying_whether_access_broadens(deploy):
