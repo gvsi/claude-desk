@@ -11,10 +11,11 @@ Row locks are taken in one order, so no two kernel transactions wait on each oth
 1. the session row: `FOR UPDATE` by a decision (`auth.lock_session`, held until it commits; the
    breaker's strike writes it under that lock), by a take-over or hand-back, and in T2 by the
    execution of an adapter that writes the session's own rows (`locks_session`, a verification
-   start), on either path; `FOR SHARE` by an allow's execution, in T1 and T2; written by a
-   visitor's or agent's own requests (`last_seen_at`, `last_language`), the reply check's only at
-   its end, just before its ledger entry, so it holds no lock on the row while the soft-promise
-   check runs;
+   start), on either path; `FOR SHARE` by an allow's execution in T1, and in T2 by the execution
+   of any other adapter, on either path, so a Desk's deletion, which closes the session `FOR
+   UPDATE`, commits before T2 takes the row or waits until T2 commits; written by a visitor's or
+   agent's own requests (`last_seen_at`, `last_language`), the reply check's only at its end, just
+   before its ledger entry, so it holds no lock on the row while the soft-promise check runs;
 2. the decision row, `FOR UPDATE`: lazy expiry, an answer, a cancel, each step of an execution,
    reconciliation;
 3. the execution row: inserted with the intent, `FOR UPDATE` in T2, T3 and reconciliation;

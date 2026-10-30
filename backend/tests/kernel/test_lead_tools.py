@@ -22,9 +22,10 @@ from sqlalchemy import select
 
 from desk.contracts import ApprovalResult, Claim, Decision, DemoInboxEntry, ExecResult, HoursWindow
 from desk.db.models import Desk, Fact, Handoff, Lead, LedgerEntry, NotificationPref, Person, VerificationChallenge
+from desk.db.models import DemoInboxEntry as DemoInboxRow
 from desk.db.session import database_url, libpq_url
 from desk.kernel_api import DeskUpdated
-from desk.kernel_service import adapters, compiler, desks, ledger, verification
+from desk.kernel_service import adapters, compiler, desks, execute, ledger, verification
 from desk.kernel_service.desks import mask_contact
 from desk.kernel_service.seed import RIVERA_CARDS
 
@@ -35,7 +36,7 @@ from .test_approvals import post_answer
 from .test_compiler import card
 from .test_context import context_of, tools
 from .test_decide import Visitor, decided, open_visitor, post_decide
-from .test_execute import executed, post_execute
+from .test_execute import committed, executed, post_execute
 from .test_reply_check import checked, clause
 from .test_verification import api_rows, check, code_in, session_inbox
 
@@ -463,6 +464,33 @@ async def test_a_second_answer_waits_for_an_approved_start(app, client, monkeypa
     assert [event.summary["outcome"] for event in entries if event.kind == "verify"] == ["started"]
     assert [event.summary for event in entries if event.kind == "approval" and "refused" in event.summary] == [
         {"decision_id": held.decision_id, "answer": "deny_once", "refused": "executed"}]
+
+
+async def test_a_start_whose_desk_is_deleted_after_its_intent_sends_no_code(app, client, monkeypatch):
+    """The owner deletes the Desk after a start's intent has committed and before its side effect.
+    The start's T2 reads the session and the Desk afresh once it holds the session row, so it
+    makes no challenge and sends no code: the start ends `refused_at_execution`, its intent
+    `failed`, and its `execute` entry names the deleted Desk as the check that failed."""
+    copy, visitor = await visitor_of(app, client)
+    allowed = await decided(client, visitor, "native.start_verification", {"contact": "dana@example.com"})
+    assert allowed.outcome == "allow", allowed.reason_plain
+
+    async def delete_the_desk() -> None:                 # Maria deletes the Desk as the intent commits
+        response = await client.delete(f"/desks/{copy.desk_id}", headers=copy.owner)
+        assert response.status_code == 204, response.text
+
+    monkeypatch.setattr(execute, "_after_intent", delete_the_desk)
+    response = await post_execute(client, visitor, allowed)
+    assert (response.status_code, response.json()) == (409, {"code": "conflict"})
+    assert await rows_of(app, copy.copy_id, select(VerificationChallenge)) == []
+    assert await rows_of(app, copy.copy_id, select(DemoInboxRow).where(DemoInboxRow.kind == "verification_code")) == []
+    assert await committed(app, copy.copy_id, allowed.action.action_id) == ("failed", "refused_at_execution")
+    entries = [entry.event for entry in await ledger_rows(app, copy)]
+    assert [event.summary for event in entries if event.kind == "verify"] == []
+    [refused] = [event.summary for event in entries if event.kind == "execute"]
+    assert {key: refused[key] for key in ("decision_id", "action_id", "state", "reason", "check")} == {
+        "decision_id": allowed.decision_id, "action_id": allowed.action.action_id, "state": "refused_at_execution",
+        "reason": "rules_changed", "check": "desk"}
 
 
 async def test_a_start_is_decided_without_the_reviewer(app, client, reviewer):

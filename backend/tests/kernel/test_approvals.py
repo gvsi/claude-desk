@@ -710,6 +710,32 @@ async def test_the_approved_path_runs_prepare_with_the_intent(app, client, regis
                      "check": "prepare"}
 
 
+async def test_a_desk_deleted_after_the_answer_commits_runs_nothing(app, client, registry, monkeypatch):
+    """Maria approves a held request, and the Desk is deleted after her answer has committed its
+    intent and before the side effect. The approved path's T2 holds the session row and reads the
+    Desk afresh, so nothing runs: what `prepare` reserved is undone, the intent is `failed`, and
+    the decision `refused_at_execution`, its entry naming the deleted Desk; her answer reads it so."""
+    quote = FakeAdapter("native.quote")
+    rows = await desk_with(app, [quote], ASK_QUOTES)
+    visitor, held = await held_on(client, rows)
+
+    async def delete_the_desk() -> None:
+        response = await client.delete(f"/desks/{rows.desk_id}", headers=rows.owner)
+        assert response.status_code == 204, response.text
+
+    monkeypatch.setattr(execute, "_after_intent", delete_the_desk)
+    result = await answered(client, rows.owner, held.decision_id, "allow_once")
+    assert (result.decision.state, result.execution) == ("refused_at_execution", ExecResult(
+        action_id=held.action.action_id, state="failed", facts=[], model_view={}))
+    assert result.decision.visitor_plain == "The rules changed, so this didn't go ahead"
+    assert "execute" not in quote.calls and quote.calls[-1] == "on_failed"     # prepared, then undone
+    assert await committed(app, rows.copy_id, held.action.action_id) == ("failed", "refused_at_execution")
+    [entry] = [e.event.summary for e in await ledger_rows(app, rows) if e.seq == result.decision.ledger_seq]
+    assert entry == {"decision_id": held.decision_id, "action_id": held.action.action_id,
+                     "state": "refused_at_execution", "reason": "rules_changed", "check": "desk",
+                     "policy_version": 1, "auto_money_cap_cents": TEST_CAP}
+
+
 async def test_other_copy_cannot_answer_or_read(app, client, caplog):
     a, a_visitor, held = await held_quote(app, client)
     b, b_visitor = await visitor_of(app, client)

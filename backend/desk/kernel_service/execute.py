@@ -11,11 +11,14 @@ An execution takes up to three transactions, so that a crash leaves a record of 
   runs the adapter's `prepare` and commits the `executions` row in state `intent`, with whatever
   `prepare` reserved and the version and cap the re-check ran under. Nothing outside the kernel
   has happened yet.
-- T2 first holds the session row (`_hold_session`): for an allow `FOR SHARE`, so a take-over
-  waits for a running execution and one that came first stops it (the fence); `FOR UPDATE`, on
-  either path, for an adapter that writes the session's own rows (`locks_session`). Then it locks
-  the decision and the intent row, runs the adapter's `execute`, and commits `succeeded` with the
-  result and the decision `executed`, ledgered and signed again.
+- T2 first holds the session row (`_hold_session`), on either path: `FOR SHARE`, so a take-over,
+  or a Desk's deletion closing the session, waits for a running execution, and one that came
+  first stops it (the fence); `FOR UPDATE` for an adapter that writes the session's own rows
+  (`locks_session`). Then it locks the decision and the intent row and, before any side effect,
+  reads the session and the Desk afresh: a Desk deleted since T1, or an allow's session closed,
+  ends `refused_at_execution` (`_refused_in_t2`), and an allow's take-over or pause is fenced.
+  Otherwise it runs the adapter's `execute`, and commits `succeeded` with the result and the
+  decision `executed`, ledgered and signed again.
 - T3 runs after an `Exception` in T2, which rolled back: `AdapterFailure` (raised only before any
   external side effect) is `failed`, after the adapter's `on_failed`; anything else, a failed T2
   commit included, is `unknown`, left to reconciliation. A `BaseException` (the process dying, a
@@ -151,20 +154,20 @@ async def _share_session(ctx: KernelCtx, session_id: str, *, exclusive: bool = F
                       .with_for_update(read=not exclusive).execution_options(populate_existing=True))
 
 
-async def _hold_session(ctx: KernelCtx, session_id: str, action_id: str, path: ExecPath) -> SessionRow | None:
-    """The session row T2 holds, taken first, before the decision and the intent row (`repo.py`).
-    An allow holds it `FOR SHARE` (the fence). An adapter that writes the session's own rows
-    (`locks_session`: a verification start) holds it `FOR UPDATE` on either path, so two such
-    executions in one session take turns: each holding it shared and then asking for it outright,
-    they would wait on each other until Postgres ended one. None for an approved hold whose adapter
-    doesn't; never None for an allow, since a missing row raises (and the action ends `unknown`,
-    never fenced). The action's tool is read without a lock, which waits for nothing."""
+async def _hold_session(ctx: KernelCtx, session_id: str, action_id: str) -> SessionRow:
+    """The session row T2 holds, on either path, taken first, before the decision and the intent
+    row (`repo.py`), and read afresh. It is held `FOR SHARE` (the fence): a take-over, a pause or a
+    Desk's deletion, each of which writes the row under `FOR UPDATE` (a deletion closes it),
+    either commits before T2 takes it, and T2 sees what it wrote, or waits until T2 commits. An
+    adapter that writes the session's own rows
+    (`locks_session`: a verification start) holds it `FOR UPDATE` instead, so two such executions
+    in one session take turns: each holding it shared and then asking for it outright, they would
+    wait on each other until Postgres ended one. Never None, since a missing row raises (and the
+    action ends `unknown`, never fenced). The action's tool is read without a lock, which waits
+    for nothing."""
     tool = await _one(ctx, select(ActionRow.tool).where(ActionRow.action_id == action_id))
-    if getattr(adapters.ADAPTERS.get(tool), "locks_session", False):
-        return await _share_session(ctx, session_id, exclusive=True)
-    if path == "allow":
-        return await _share_session(ctx, session_id)
-    return None
+    return await _share_session(ctx, session_id,
+                                exclusive=getattr(adapters.ADAPTERS.get(tool), "locks_session", False))
 
 
 def _checked(execution: Execution) -> Checked | None:
@@ -420,9 +423,10 @@ async def execute_allowed(ctx: KernelCtx, session_row: SessionRow, decision_id: 
 
 async def run_approved(ctx: KernelCtx, decision_row: DecisionRow, *, checked: Checked | None = None) -> ExecResult:
     """T2 and T3 for an approved hold whose intent row the answer has committed, as the held
-    session's principal; mode and generation aren't checked (step 6). `checked` is the version and
-    money cap the answer's re-check passed under (`recheck_under`), which its entries record; given
-    none, they record the ones the intent row did (`_checked`)."""
+    session's principal; mode, generation and whether the session is closed aren't checked (step
+    6), but its Desk must still stand (`_refused_in_t2`). `checked` is the version and money cap
+    the answer's re-check passed under (`recheck_under`), which its entries record; given none,
+    they record the ones the intent row did (`_checked`)."""
     return await _run(ctx, decision_row.decision_id, decision_row.action_id, decision_row.session_id, path="approved",
                       checked=checked)
 
@@ -450,13 +454,14 @@ async def _run(ctx: KernelCtx, decision_id: str, action_id: str, session_id: str
 async def _side_effect(ctx: KernelCtx, decision_id: str, action_id: str, session_id: str, path: ExecPath,
                        checked: Checked | None) -> ExecResult | KernelFailure:
     """T2: holding the decision's session row, `session_id`, taken first (`_hold_session`), then
-    under the decision's and the intent row's locks, the adapter's `execute`, then `succeeded` and
+    under the decision's and the intent row's locks, the checks that need the rows as they are now
+    (`_gone`, then an allow's fence), then the adapter's `execute`, then `succeeded` and
     `executed`, committed. The decision is locked before anything here takes the ledger head (an
     adapter's own entry, such as a verification start's `verify`), as an answer or a read that
     locks it and then ledgers does. A failure answer comes back as a `KernelFailure`, already
     committed, for `_run` to raise. Its entry names `checked`, or, given none, the version and cap
     the intent row recorded, as T3's do."""
-    session = await _hold_session(ctx, session_id, action_id, path)
+    session = await _hold_session(ctx, session_id, action_id)
     decision = await _lock_decision(ctx, decision_id)
     execution = await _execution(ctx, action_id, lock=True)
     if execution is None or execution.state != "intent":
@@ -466,9 +471,11 @@ async def _side_effect(ctx: KernelCtx, decision_id: str, action_id: str, session
         return KernelFailure(409, "conflict", "not_an_intent")
     target = await _target(ctx, decision)
     target.checked = checked if checked is not None else _checked(execution)
+    if session is None:                 # never: the session row is always held; `_run` ends it unknown
+        raise RuntimeError(f"{path}_without_session")
+    if (gone := _gone(target, session, path)) is not None:
+        return await _refused_in_t2(ctx, target, execution, gone, path)
     if path == "allow":
-        if session is None:             # never: an allow's session row is always held; `_run` ends it unknown
-            raise RuntimeError("allow_without_session")
         if session.generation != target.decision.generation:
             return await _fenced(ctx, target, execution, "stale_generation")
         if session.mode != "ai":
@@ -482,6 +489,38 @@ async def _side_effect(ctx: KernelCtx, decision_id: str, action_id: str, session
     await _finish(ctx, target, execution, visible, "executed", _summary(target, "executed", **flagged))
     await ctx.db.commit()
     return visible
+
+
+def _gone(target: _Target, session: SessionRow, path: ExecPath) -> str | None:
+    """What T2 finds gone since T1, read afresh under the session row it holds: `desk` when the
+    Desk was deleted (on either path, as step 6 needs), `closed` when an allow's session was closed
+    (an approved hold still runs for a closed session, as step 6 lets it); None when neither. A
+    Desk's deletion closes its open visitor and agent sessions under their rows' locks, so for such
+    a session it either committed before T2 took the row, and T2 sees it here, or waits until T2
+    commits. An owner's session, or one closed already, isn't among those: for them the Desk's row
+    is read afresh, without that guarantee."""
+    if target.desk_row.deleted_at is not None:
+        return "desk"
+    if path == "allow" and session.closed_at is not None:
+        return "closed"
+    return None
+
+
+async def _refused_in_t2(ctx: KernelCtx, target: _Target, execution: Execution, check: str,
+                         path: ExecPath) -> ExecResult | KernelFailure:
+    """A Desk deleted, or an allow's session closed, after T1 and before the side effect: nothing
+    runs. Its intent is `failed` (after `on_failed`), the decision `refused_at_execution` ("rules
+    changed"), its `execute` entry naming the `check` that failed, committed. An allow answers 409
+    `conflict`, as a refusal in T1 does; an approved hold answers with its failed result, so the
+    owner's answer reads the decision as refused."""
+    await _undo(ctx, target)
+    result = _no_result(target.action.action_id, "failed")
+    await _finish(ctx, target, execution, result, "refused_at_execution",
+                  _summary(target, "refused_at_execution", reason="rules_changed", check=check))
+    await ctx.db.commit()
+    if path == "allow":
+        return KernelFailure(409, "conflict", f"refused_at_execution:{check}")
+    return result
 
 
 async def _fenced(ctx: KernelCtx, target: _Target, execution: Execution, code: str) -> KernelFailure:
@@ -509,7 +548,8 @@ async def _finish(ctx: KernelCtx, target: _Target, execution: Execution, result:
                   summary: dict[str, Any]) -> None:
     """The execution's final row and the decision's state, ledgered and signed, in the caller's
     transaction, which holds the decision row (`target.decision`) and the execution row."""
-    execution.state = {"executed": "succeeded", "failed": "failed", "expired": "failed"}[decision_state]
+    execution.state = {"executed": "succeeded", "failed": "failed", "expired": "failed",
+                       "refused_at_execution": "failed"}[decision_state]
     execution.result = result
     execution.finished_at = ctx.clock.now()
     await decide.set_state(ctx, target.decision, decision_state, kind="execute", summary=summary)

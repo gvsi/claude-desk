@@ -277,7 +277,7 @@ async def test_an_approved_hold_runs_in_the_lock_order(app, client, registry):
         assert (await answered(client, rows.owner, held.decision_id, "allow_once")).decision.state == "executed"
     assert log.transactions == [
         ["decisions", "executions", "ledger_heads"],                # the answer: approved, with its intent
-        ["decisions", "executions", "ledger_heads"],                # T2 on the approved path
+        ["sessions", "decisions", "executions", "ledger_heads"],    # T2 on the approved path, holding the session
     ]
 
 

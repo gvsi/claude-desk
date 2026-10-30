@@ -682,8 +682,10 @@ async def delete_desk(ctx: KernelCtx, desk_row: Desk) -> None:
     """Deletes the Desk, which the caller has locked, in one transaction: `deleted_at`, its open
     sessions closed, its live verification codes cancelled, the `ON_DELETE` hooks run, and a
     `desk_data` `{part: "desk", deleted: true}` entry. Its rows and its ledger stay: afterwards
-    routes naming it answer 409 `closed`, its ledger still reads, and an approved hold re-checks to
-    `refused_at_execution`."""
+    routes naming it answer 409 `closed`, its ledger still reads, an approved hold re-checks to
+    `refused_at_execution`, and an execution whose intent was written before the deletion ends
+    `refused_at_execution` before its side effect (`execute._gone`), so a verification start sends
+    no code."""
     now = ctx.clock.now()
     desk_row.deleted_at = now
     sessions = await ctx.db.scalars(ctx.repo.scoped(select(ActorSession).where(

@@ -666,7 +666,7 @@ async def test_an_allow_holding_no_session_row_ends_unknown_before_its_side_effe
     adapter's `execute`: never fenced, and with no `on_failed`, as any outcome nobody knows."""
     quote, rows, visitor, allowed = await fake_quote_desk(app, client)
 
-    async def no_session(ctx, session_id, action_id, path) -> None:
+    async def no_session(ctx, session_id, action_id) -> None:
         return None
 
     monkeypatch.setattr(execute, "_hold_session", no_session)
