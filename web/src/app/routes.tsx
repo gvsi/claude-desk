@@ -8,6 +8,7 @@ import { OwnerLayout } from '../owner/OwnerLayout.tsx';
 import { SafetyPage } from '../owner/safety/SafetyPage.tsx';
 import { BriefingPage } from '../owner/today/BriefingPage.tsx';
 import { TodayPage } from '../owner/today/TodayPage.tsx';
+import { CheckoutPage } from '../public/checkout/CheckoutPage.tsx';
 import { PublicPage } from '../public/PublicPage.tsx';
 import { NotFound } from './NotFound.tsx';
 import { RouteError } from './RouteError.tsx';
@@ -61,6 +62,7 @@ export const routes: RouteObject[] = [
     ],
   },
   { path: '/d/:slug', element: <PublicPage />, errorElement: <RouteError visitor /> },
+  { path: '/pay/:token', element: <CheckoutPage />, errorElement: <RouteError visitor /> },
   aboutRoute('proposal'),
   aboutRoute('prediction'),
   { path: '*', element: <NotFound /> },

@@ -18,6 +18,7 @@ import type {
   NeedsYouItem,
   NeedsYouSession,
   OwnerTranscript,
+  PaymentLinkOut,
   Reports,
   ThisWeek,
   Today,
@@ -33,6 +34,7 @@ import {
   isoTime,
   type DecisionRecord,
   type DeskRecord,
+  type LinkRecord,
   type MockWorld,
   type SessionRecord,
 } from './world.ts';
@@ -504,6 +506,19 @@ export function publicDesk(desk: DeskRecord, language: Language): PublicDesk {
     desk_name: desk.summary.name,
     brand: { ...BUSINESS.brand },
     open_status: desk.openStatus?.[language] ?? null,
+  };
+}
+
+/**
+ * The mock checkout's view of a link: the kernel's `PaymentLinkView` and the fields kernel plan 01c
+ * adds (`views.ts` `PaymentLinkOut`). The customer's name shows only while the link is open.
+ */
+export function paymentLinkOut(link: LinkRecord): PaymentLinkOut {
+  return {
+    ...link.view,
+    cancel_reason: link.cancelReason,
+    business_name: BUSINESS.name,
+    customer_name: link.view.state === 'issued' ? link.customerName : null,
   };
 }
 

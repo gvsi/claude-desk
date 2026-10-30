@@ -12,6 +12,7 @@ import {
   formatClock,
   formatDay,
   formatListTime,
+  formatMoneyExact,
   formatStarted,
   formatWhen,
   greetingFor,
@@ -84,6 +85,15 @@ describe('format', () => {
     expect(formatCents(0)).toBe('$0');
     expect(formatCents(5)).toBe('$0.05');
     expect(formatCents(1_000_000)).toBe('$10,000');
+  });
+
+  it('checkout_amount_keeps_the_cents', () => {
+    // The mock checkout always writes the cents, as a payment page does; cards keep formatCents.
+    expect(formatMoneyExact(2000)).toBe('$20.00');
+    expect(formatMoneyExact(4050)).toBe('$40.50');
+    expect(formatMoneyExact(186_000)).toBe('$1,860.00');
+    expect(formatMoneyExact(5)).toBe('$0.05');
+    expect(formatMoneyExact(1_000_000)).toBe('$10,000.00');
   });
 
   it('clock_in_the_business_time_zone', () => {

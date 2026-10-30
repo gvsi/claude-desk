@@ -9,6 +9,7 @@
 import type {
   ApprovalAnswer,
   CardBlock,
+  ClauseTemplate,
   Decision,
   DecisionState,
   EvDemoInbox,
@@ -181,6 +182,26 @@ export const HELD_PROSE: Record<Language, string> = {
   en: "That's for Maria to decide, so I've asked her. Her answer will show up here.",
   es: 'Eso lo decide Maria, así que ya le pregunté. Su respuesta aparecerá aquí.',
 };
+
+/**
+ * The kernel's `link_cancelled` line, rendered from the owner's name (master plan, "Payment links";
+ * kernel plan 01c), which only the kernel issues.
+ */
+export const LINK_CANCELLED: Record<Language, string> = {
+  en: `This payment link was cancelled because ${OWNER}'s rules changed. Ask again if you still want to pay.`,
+  es: `Este enlace de pago se canceló porque cambiaron las reglas de ${OWNER}. Pide uno nuevo si todavía quieres pagar.`,
+};
+
+/**
+ * The `link_cancelled` card as the kernel renders it. The template joins the generated contracts
+ * with kernel plan 01c; until then it is named here by hand, and this build's reply card shows it
+ * as a plain card with the kernel's words, as it shows any template it doesn't know.
+ */
+export function linkCancelledBlock(language: Language): RenderedBlock {
+  const text = LINK_CANCELLED[language];
+  const template = 'link_cancelled' as unknown as ClauseTemplate;
+  return { kind: 'card', template, text, fact_id: null, title: text, lines: [], href: null, options: [] };
+}
 
 const inboxPreview: Record<Language, string> = {
   en: 'New verification code',

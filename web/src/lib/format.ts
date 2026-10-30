@@ -2,7 +2,8 @@
  * How owner screens write times, amounts and the few lines built from them. Every time is read in
  * the business's time zone (its IANA name, `BusinessOut.timezone`), never the browser's: Maria's
  * morning is Los Angeles' morning wherever the reviewer sits. Visitor surfaces never use this file;
- * they show the kernel's text.
+ * they show the kernel's text. The one exception is the mock checkout's amount, which the page
+ * writes from the link's `amount_cents` with `formatMoneyExact`.
  */
 import type { ConversationSummary } from '../api/views.ts';
 
@@ -64,6 +65,14 @@ export function formatCents(cents: number): string {
     minimumFractionDigits: whole ? 0 : 2,
     maximumFractionDigits: whole ? 0 : 2,
   }).format(cents / 100);
+}
+
+/**
+ * An amount in cents as the mock checkout shows it, always with its cents: "$20.00", "$1,860.00".
+ * Only the checkout uses it; cards and owner screens keep `formatCents`.
+ */
+export function formatMoneyExact(cents: number): string {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(cents / 100);
 }
 
 /** "10:46 am" from a local hour and minute. */

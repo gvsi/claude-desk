@@ -6,9 +6,9 @@
  * cookies: kept in the store for the screen tests' one page, real ones on the dev server. Nothing
  * here is a credential.
  */
-import type { ApprovalAnswer, Decision, DeskUpdated, RuleCard } from '../api/contracts.ts';
+import type { ApprovalAnswer, Decision, DeskUpdated, PaymentLinkState, PaymentLinkStateResult, RuleCard } from '../api/contracts.ts';
 import { ROUTES, type RouteKey, type RouteResponse, type RouteSpec } from '../api/routes.ts';
-import type { ApprovalAnswerOut, CancelAccepted, MessageAccepted, VisitorSession } from '../api/views.ts';
+import type { ApprovalAnswerOut, CancelAccepted, CancelReason, MessageAccepted, VisitorSession } from '../api/views.ts';
 import { RIVERA_MONEY_CAP_CENTS } from '../ds/fixtures/index.ts';
 import {
   attempts,
@@ -20,6 +20,7 @@ import {
   ledgerPage,
   needsYou,
   ownerTranscript,
+  paymentLinkOut,
   publicDesk,
   reports,
   today,
@@ -27,7 +28,7 @@ import {
 } from './readModels.ts';
 import { EVENT_GAP_MS, afterAnswer, allows, cardDiffFor, matchRule, turnEnd, type Language, type Step } from './script.ts';
 import { seedWorld, type MockSeed } from './seed.ts';
-import { MockWorld, isoTime, type DeskRecord, type SessionRecord } from './world.ts';
+import { MockWorld, isoTime, type DeskRecord, type LinkRecord, type SessionRecord } from './world.ts';
 
 /** Plan 02's limit on a visitor's message and on the owner's words. */
 const MESSAGE_MAX = 2000;
@@ -80,6 +81,10 @@ export interface ErrorBody {
   decision?: Decision;
   /** An `above_money_cap` refusal's limit for taking money without asking. */
   cap_cents?: number;
+  /** A payment link's state, when a 409 says why it can't be paid or cancelled now. */
+  state?: PaymentLinkState;
+  /** With that state: `rules_changed` when a change to the business's rules cancelled the link. */
+  cancel_reason?: CancelReason | null;
 }
 
 /** A route's refusal: a 4xx or 5xx with an `{error}` body. */
@@ -243,6 +248,14 @@ function ownerSession(sv: Server, req: Req): SessionRecord | Failure {
   if (req.malformed || !Number.isSafeInteger(generation)) return INVALID;
   if (generation !== session.state.generation) return failWith(409, 'kernel', { code: 'stale_generation' });
   return session;
+}
+
+/**
+ * A payment link's refusal once it isn't `issued`, as the API answers a kernel 409 on the checkout
+ * (plan 02b): the link's state now and, for a link a rule change cancelled, why.
+ */
+function linkClosed(link: LinkRecord): Failure {
+  return failWith(409, 'kernel', { code: 'conflict', state: link.view.state, cancel_reason: link.cancelReason });
 }
 
 /** Every route the mock answers from a copy. Unserved ones fall through to the catch-all, which records them. */
@@ -456,6 +469,28 @@ const SERVED: ServedRoutes = {
     // A 200 opens the stream (handlers.ts); `listen` replays and follows it.
     const visitor = sv.visitor(req.params.slug, req.cookies);
     return isFailure(visitor) ? visitor : { status: 200 };
+  },
+  // The payment link's token is the only credential the checkout carries: no cookie is read.
+  paymentLink(sv, req) {
+    const link = sv.world.links.get(req.params.token ?? '');
+    return link ? ok(paymentLinkOut(link)) : NOT_FOUND;
+  },
+  completePayment(sv, req) {
+    const token = req.params.token ?? '';
+    const link = sv.world.links.get(token);
+    if (!link) return NOT_FOUND;
+    // The kernel completes a link only while it is open, so a second payment is refused.
+    if (link.view.state !== 'issued') return linkClosed(link);
+    const verdict = sv.world.payLink(token, link);
+    return ok({ state: link.view.state, session_id: link.sessionId, verdict } satisfies PaymentLinkStateResult);
+  },
+  cancelPayment(sv, req) {
+    const token = req.params.token ?? '';
+    const link = sv.world.links.get(token);
+    if (!link) return NOT_FOUND;
+    if (link.view.state !== 'issued') return linkClosed(link);
+    sv.world.cancelLink(token, link, 'visitor');
+    return ok({ state: link.view.state, session_id: link.sessionId, verdict: null } satisfies PaymentLinkStateResult);
   },
 };
 

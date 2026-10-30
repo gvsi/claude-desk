@@ -20,6 +20,7 @@ import type {
   Health,
   HoursWindow,
   KnowledgeItem,
+  PaymentLinkView,
   PolicyVersion,
   ProbeResult,
   ProofReport,
@@ -475,6 +476,25 @@ export interface DemoAgentRun {
   task: string;
   state: 'running' | 'done' | 'failed';
   turns: AgentTurn[];
+}
+
+// Tokens
+
+/** Why a payment link was cancelled: only a change to the business's rules gives a reason. */
+export type CancelReason = 'rules_changed';
+
+/**
+ * `GET /api/pay/{token}`: the kernel's `PaymentLinkView` with the fields the kernel payments,
+ * agents and setup plan (plan 01c) adds to it, typed here, optional, until the generated contracts
+ * have them. `cancel_reason` is `rules_changed` for a link a rule change cancelled, else null;
+ * `business_name` is the Desk's business; `customer_name` is the kernel's first name and last
+ * initial for a link from a verified session ("Dana W."), present only while the link is open.
+ * Names are someone's own words and render as text.
+ */
+export interface PaymentLinkOut extends PaymentLinkView {
+  cancel_reason?: CancelReason | null;
+  business_name?: string;
+  customer_name?: string | null;
 }
 
 // Request bodies

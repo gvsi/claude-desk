@@ -16,7 +16,6 @@ import type {
   LedgerPage,
   OwnerMessageResult,
   PaymentLinkStateResult,
-  PaymentLinkView,
   PolicyVersion,
   PublicDesk,
   SessionState,
@@ -50,6 +49,7 @@ import type {
   OwnerMessageBody,
   OwnerTranscript,
   PasscodeBody,
+  PaymentLinkOut,
   PeopleOut,
   PresetBody,
   Reports,
@@ -241,7 +241,7 @@ interface RouteShapes {
   sendAgent: { body: AgentTaskBody; response: AgentRunStarted };
   agentRun: { body: undefined; response: DemoAgentRun };
 
-  paymentLink: { body: undefined; response: PaymentLinkView };
+  paymentLink: { body: undefined; response: PaymentLinkOut };
   completePayment: { body: undefined; response: PaymentLinkStateResult };
   cancelPayment: { body: undefined; response: PaymentLinkStateResult };
 }
