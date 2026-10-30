@@ -13,11 +13,10 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    the language, with each letter that looks like a Latin one read as it, from
    `lexicon/lookalikes.txt`, every dash as "-" and every apostrophe as "’"; booking claims such
    as "you're booked" among them, unless the reply carries a booking card that step 4 passed),
-   links and email addresses (`LINK`), and the Desk's document canaries. Links and contacts
-   reach a visitor only in their cards, so prose saying them is blocked even beside the card.
-   Since the owner's decision of 2026-10-30, a booking claim passes beside the booking's card,
-   which says the same, and a policy's words are left to the soft-promise check, which reads
-   the prose with the cards.
+   and the Desk's document canaries. Since the owner's decisions of 2026-10-30, a booking claim
+   passes beside the booking's card, which says the same, a policy's words are left to the
+   soft-promise check, which reads the prose with the cards, and Claude may write links and
+   email addresses, which its prompt keeps to the business's own.
 4. Each clause renders from a fact this session may read, current, of the template's kind and ID,
    with no canary in what it renders. The Desk's catalog (`context.catalog_fact`) is cited like a
    stored fact, and no template renders it, so it backs no card. The clauses are checked before
@@ -43,7 +42,6 @@ out before anything else is scanned, and a canary violation's span is empty. The
 kinds, rule IDs and the cited fact IDs (through `ledger.safe_ref`), never prose.
 """
 
-import bisect
 import hashlib
 import json
 import re
@@ -84,30 +82,6 @@ BOOKING_CONDITION = re.compile(
     r"|cuando|(?P<si>s[il])|una vez que|en cuanto|apenas|tan pronto como|despues de que|antes de que|hasta que) \Z",
     re.IGNORECASE)
 CONDITION_REACH = 32               # more characters than the longest condition and its space ("tan pronto como ")
-# A link or an email address reaches a visitor only on a card (a payment or document card's `href`,
-# the contact clause from charter facts), so prose holding one of these shapes is blocked, read on
-# folded text like the lexicons. NFKC already writes the full-width and small dots, slashes and @
-# signs as ASCII ones; the ideographic full stop, and the fraction and division slashes, it keeps.
-DOT, SLASH = "[.\u3002]", "[/\u2044\u2215]"
-LABEL = r"[^\W_][\w-]*"            # one label of a domain name
-DOMAIN_START = r"(?<![\w.\u3002-])"
-LINK_TLDS = ("com", "net", "org", "io", "co", "us", "app", "dev", "info", "biz", "mx", "es", "example")
-LINK = re.compile(
-    rf":{SLASH}{SLASH}|(?<!\w)(?:https?|mailto|tel):"   # a scheme: "https://", any other before "://", "https:", "tel:"
-    rf"|{DOMAIN_START}www{DOT}"                      # "www."
-    rf"|{DOMAIN_START}{LABEL}(?:{DOT}{LABEL})+{SLASH}"   # a domain before a path: "rivera-pay.example/checkout"
-    rf"|{DOMAIN_START}{LABEL}(?:{DOT}{LABEL})*{DOT}(?:{'|'.join(LINK_TLDS)})(?![^\W_]|-)"   # a bare domain: "riverapl.com"
-    r"|(?<=\w)@(?=\w)",                              # an email address: "maria@riverapl.example"
-    re.IGNORECASE)
-# Glued to the front of a link, hiding it from `DOMAIN_START` and the schemes' word start: a run of
-# two or more dots (an ellipsis, which NFKC writes as "...") and a run of dots, hyphens (every dash,
-# as the readings write it) and underscores with no word character before it. `_links` blanks them
-# before `LINK` reads a reading, keeping indexes, so "at…rivera-pay.example/checkout",
-# "—www.riverapl.shop" and "_riverapl.com_" are links.
-LINK_GLUE = re.compile(r"[.\u3002]{2,}|(?<!\w)[._\u3002-]+")
-BLANKS = re.compile(r"\S+")        # a run of text between blanks, which a link's span takes in
-LINK_OPENERS = frozenset("([{<«‹\"'“‘¿¡")             # around a link, left out of its span
-LINK_CLOSERS = frozenset(".,;:!?…)]}>»›\"'”’")
 
 
 # Default-ignorable code points beyond category Cf (Unicode's DerivedCoreProperties): the combining
@@ -305,7 +279,7 @@ def _blank_canaries(text: str, canaries: Iterable[str]) -> tuple[str, list[str]]
 
 
 def _readings(text: str) -> dict[str, list[int]]:
-    """The readings of `text` the lexicons and the link scan take (`_fold`), each with the
+    """The readings of `text` the lexicons take (`_fold`), each with the
     index in `text` each of its characters came from: a bare stroke as l, as I, and an ASCII
     capital I as l too ("doIIars"); where NFKC wrote an acute accent as a space and a combining
     acute, each also with that pair read as "’" ("o´clock") besides the space it is drawn on
@@ -357,35 +331,9 @@ def _booking_claims(text: str, readings: dict[str, list[int]]) -> list[tuple[int
     return hits
 
 
-def _links(text: str, readings: dict[str, list[int]]) -> list[tuple[int, str, Violation]]:
-    """A `promise_word` (`link`) for each run of `text` between blanks holding a link shape
-    (`LINK`) in any reading with the dots, dashes and underscores glued to its front blanked
-    (`LINK_GLUE`), spanning that run without the punctuation around it."""
-    runs = [(run.start(), run.end()) for run in BLANKS.finditer(text)]
-    starts = [start for start, _ in runs]
-    found: dict[int, tuple[int, int]] = {}      # a run's index: where its first link shape starts, its last ends
-    unglued = ((LINK_GLUE.sub(lambda glue: " " * len(glue.group()), reading), origin)
-               for reading, origin in readings.items())
-    for reading, origin, match in ((reading, origin, match) for reading, origin in unglued
-                                   for match in LINK.finditer(reading)):
-        start, end = origin[match.start()], origin[match.end() - 1] + 1
-        index = bisect.bisect_right(starts, start) - 1
-        first, last = found.get(index, (start, end))
-        found[index] = (min(first, start), max(last, end))
-    hits = []
-    for index, (first, last) in found.items():
-        start, end = runs[index]
-        while start < first and text[start] in LINK_OPENERS:
-            start += 1
-        while end > last and text[end - 1] in LINK_CLOSERS:
-            end -= 1
-        hits.append((start, "link", Violation(kind="promise_word", span=_span(text[start:end]), rule_id="link")))
-    return hits
-
-
 def scan_prose(text: str, canaries: Iterable[str] = (), names: Iterable[str] = (), *,
                booking_card: bool = False) -> list[Violation]:
-    """Every number, currency sign, lexicon word, link and canary in `text`, after
+    """Every number, currency sign, lexicon word and canary in `text`, after
     `shown`: any Unicode numeral or character drawn as a digit (`digit`, with the separators inside
     one number and the letters shaped like 0 or 1 next to it in the same span, and a word made only
     of such letters unless it is plain ASCII), currency sign (`currency`) or percent sign
@@ -394,16 +342,15 @@ def scan_prose(text: str, canaries: Iterable[str] = (), names: Iterable[str] = (
     claim with a condition straight before it (`BOOKING_CONDITION`: "once you're booked", "si" but
     not "sí") or inside such a claim, a claim inside another being one (`_booking_claims`), and
     for every booking claim with `booking_card` (the reply carries a `booking_confirmed` card the
-    clause checks passed, which says the same: the owner's decision of 2026-10-30); a run
-    of text between blanks holding a URL scheme, "www.", a domain before a path, a bare domain
-    ending in one of `LINK_TLDS` or an "@" between word characters, whatever dots, dashes and
-    underscores are glued to its front (`LINK_GLUE`), is `promise_word` (`link`); a word mixing
+    clause checks passed, which says the same: the owner's decision of 2026-10-30); a word mixing
     Latin letters with another script is `unsupported_language` (`mixed_script`), unless it lies
     inside one of `names` (the Desk's own names) as it is written there; a canary verbatim is
-    `canary`. The lexicons and the link scan read lookalike letters as the Latin ones, a bare
-    stroke both as l and as I, an ASCII capital I as l too, every dash and hyphen as "-" and every
-    apostrophe as "’", an acute accent (a space and a combining acute after NFKC) both as that
-    space and as "’". Canaries come first, then the rest in the order they appear."""
+    `canary`. Links and email addresses are none of these (the owner's decision of 2026-10-30:
+    Claude may write them, and its prompt keeps them to the business's own). The lexicons read
+    lookalike letters as the Latin ones, a bare stroke both as l and as I, an ASCII capital I as l
+    too, every dash and hyphen as "-" and every apostrophe as "’", an acute accent (a space and a
+    combining acute after NFKC) both as that space and as "’". Canaries come first, then the rest
+    in the order they appear."""
     text, found = _blank_canaries(shown(text), canaries)
     hits: list[tuple[int, str, Violation]] = [
         (-1, "canary", Violation(kind="canary", span="", rule_id="canary")) for _ in found]
@@ -429,7 +376,6 @@ def scan_prose(text: str, canaries: Iterable[str] = (), names: Iterable[str] = (
     readings = _readings(text)
     if not booking_card:
         hits += _booking_claims(text, readings)
-    hits += _links(text, readings)
     seen: set[tuple[str, int, int]] = set()
     for language, entries in LEXICONS.items():
         for category, pattern in entries:
