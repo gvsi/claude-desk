@@ -5,9 +5,9 @@
  */
 import type { Effect, RuleCard, ToolName } from '../../api/contracts.ts';
 import type { PeopleOut, ToolRow } from '../../api/views.ts';
-import { reviewChanges, ruleDiff, rulesForTool, type ChangeRowView, type ChangeSide } from '../../ds/index.ts';
+import { reviewChanges, ruleDiff, rulesForTool, type ChangeRowView, type ChangeSide, type RulesTool } from '../../ds/index.ts';
 import { formatCents } from '../../lib/format.ts';
-import { connectorOf } from '../connectors/catalog.ts';
+import { CONNECTORS, TOOL_NAMES, connectorOf } from '../connectors/catalog.ts';
 import type { RuleDraft } from './drafts.ts';
 import { ruleWords, targetWords } from './ruleWords.ts';
 
@@ -47,18 +47,63 @@ function defaultSide(appliesTo?: string): ChangeSide {
   return { ...(appliesTo === undefined ? {} : { appliesTo }), ...DEFAULT_SIDE, words: [...DEFAULT_SIDE.words] };
 }
 
+/** A card shared by every tool with that effect (`effect:charge`), which a tool's own card outranks. */
+const isEffectCard = (card: RuleCard) => card.applies_to.startsWith('effect:');
+
+/**
+ * The rule that decides a tool for anyone, at any time, by the master plan's precedence. Of the
+ * rules that govern it (`rulesForTool`) for anyone at all hours: a never rule always wins; else, at
+ * the most specific level present (the tool's own rules before shared ones), an ask rule makes it
+ * ask, else an automatic one decides, a shared one only where every effect of the tool has one for
+ * anyone. None when no rule decides for anyone: the default ask does.
+ */
+function governingForAnyone(tool: RulesTool, cards: readonly RuleCard[]): RuleCard | undefined {
+  const forAnyone = rulesForTool(tool, cards).filter((card) => card.who === 'anyone' && card.hours == null);
+  const never = forAnyone.find((card) => card.mode === 'never');
+  if (never !== undefined) return never;
+  const [first] = forAnyone;
+  if (first === undefined) return undefined;
+  const level = forAnyone.filter((card) => isEffectCard(card) === isEffectCard(first));
+  const ask = level.find((card) => card.mode === 'ask');
+  if (ask !== undefined) return ask;
+  const auto = level.filter((card) => card.mode === 'auto');
+  if (!isEffectCard(first)) return auto[0];
+  return tool.effects.every((effect) => auto.some((card) => card.applies_to === `effect:${effect}`)) ? auto[0] : undefined;
+}
+
+/** Every tool in the order the Connectors page lists them, then the setup interview's own. */
+const TOOL_ORDER: readonly string[] = [...new Set<string>([...CONNECTORS.flatMap((connector) => connector.tools), ...Object.keys(TOOL_NAMES)])];
+
+/** Where a tool's rows go: by connector, by tool within one, then any tool the catalog doesn't know. */
+function toolPlace(tool: string): number {
+  const at = TOOL_ORDER.indexOf(tool);
+  return at === -1 ? TOOL_ORDER.length : at;
+}
+
+/**
+ * `cards` in the order the review lists their rows (N-Conn-18): by the tool's place, then the
+ * shared rules. The sort is stable, so the cards for one tool, and the shared rules, keep the
+ * draft's order, and which card governs a dropped one (`rulesForTool`'s order) doesn't change.
+ */
+function inReviewOrder(cards: readonly RuleCard[]): RuleCard[] {
+  const place = (card: RuleCard) => (isEffectCard(card) ? TOOL_ORDER.length + 1 : toolPlace(card.applies_to));
+  return [...cards].sort((a, b) => place(a) - place(b));
+}
+
 /**
  * The review's rows: a row per card change (`reviewChanges` over the draft's before and after), each
- * side in words, then a `turned_on` row per tool the draft turns on, at the outcome of the rule that
- * governs it for anyone, else the default ask. `tools` gives each tool's effects, which say which
- * shared rules govern it; the draft's own `turnedOn` rows count too.
+ * side in words, then a `turned_on` row per tool the draft turns on, at the outcome the draft's
+ * rules give it for anyone (`governingForAnyone`), else the default ask. Each group goes by
+ * connector and by tool within one, shared rules last. `tools` gives each tool's effects, which say
+ * which shared rules govern it; the draft's own `turnedOn` rows count too.
  */
 export function changeRows(draft: RuleDraft, people: PeopleOut | null | undefined, tools: ToolEffects = []): ChangeRowView[] {
   const effects = new Map<string, readonly Effect[]>();
   for (const row of [...tools, ...draft.turnedOn]) effects.set(row.tool, row.effects);
   const effectsOf = (tool: ToolName): readonly Effect[] => effects.get(tool) ?? [];
 
-  const rows: ChangeRowView[] = reviewChanges(draft.before, draft.after, effectsOf).map((change): ChangeRowView => {
+  const changes = reviewChanges(inReviewOrder(draft.before), inReviewOrder(draft.after), effectsOf);
+  const rows: ChangeRowView[] = changes.map((change): ChangeRowView => {
     const card = change.before ?? change.after;
     if (card === null) throw new Error('a review change with no card');
     const title = targetWords(card.applies_to);
@@ -74,13 +119,10 @@ export function changeRows(draft: RuleDraft, people: PeopleOut | null | undefine
     };
   });
 
-  for (const row of draft.turnedOn) {
+  for (const row of [...draft.turnedOn].sort((a, b) => toolPlace(a.tool) - toolPlace(b.tool))) {
     const title = targetWords(row.tool);
     const connector = connectorOf(row.tool)?.view;
-    // The rule that decides for anyone, at any time: the most specific such card governing the tool.
-    const governing = rulesForTool({ tool: row.tool, effects: row.effects }, draft.after).find(
-      (card) => card.who === 'anyone' && card.hours == null,
-    );
+    const governing = governingForAnyone({ tool: row.tool, effects: row.effects }, draft.after);
     rows.push({
       key: `turned-on:${row.tool}`,
       change: 'turned_on',

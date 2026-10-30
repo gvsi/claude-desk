@@ -375,16 +375,41 @@ describe('rule drafts', () => {
   });
 
   it('preset_rows_replace_every_owner_rule', () => {
-    // Rivera's cards and Dana's own booking rule, drafted to "Ask me first": the preset replaces every owner card.
-    const owner = [...RIVERA_CARDS, rivera.personalBookingCard];
+    // Rivera's cards, the shared rule for an agent's charges and Dana's own booking rule, drafted to
+    // "Ask me first": the preset replaces every owner card.
+    const owner = [rivera.sharedChargeCard, ...RIVERA_CARDS, rivera.personalBookingCard];
     const preset = PRESETS.ask_first.map((card) => ({ ...card }));
     const draft = draftFromDiff(rulesDraft({ cards: preset, diff: { added: preset, removed: owner, changed: [] } }), version(7, owner), 'ask_first');
     const rows = changeRows(draft, PEOPLE, TOOLS);
 
     // A changed row per dropped card, personal ones included: nothing in the preset covers them, so
-    // each falls to the default ask, and only a new outcome is tagged.
+    // each falls to the default ask, and only a new outcome is tagged. The rows go by connector, as
+    // the Connectors page lists them, and by tool within one (N-Conn-18), shared rules last.
     const dropped = rows.filter((row) => row.change === 'changed');
-    expect(dropped.map((row) => row.key)).toEqual(ids(owner));
+    expect(dropped.map((row) => row.key)).toEqual([
+      'rv-quote',
+      'rv-book-wk',
+      'rv-book-sat',
+      'rv-dana-book',
+      'rv-docs',
+      'rv-link',
+      'rv-mandate',
+      'rv-charges',
+      'rv-refund',
+      'rv-agent-charges',
+    ]);
+    expect(dropped.map((row) => row.connector?.name)).toEqual([
+      'Quotes',
+      'Bookings',
+      'Bookings',
+      'Bookings',
+      'Documents',
+      'Payments',
+      'Payments',
+      'Stripe',
+      'Stripe',
+      undefined,
+    ]);
     for (const row of dropped) expect(row.after, row.key).toEqual({ ...DEFAULT_SIDE, appliesTo: row.title });
     const byKey = new Map(rows.map((row) => [row.key, row]));
     expect(byKey.get('rv-quote')?.changed).toEqual(['mode']);
@@ -506,5 +531,28 @@ describe('rule drafts', () => {
     const forDana = { ...ruleCards['rv-link'], who: 'person' as const, person_id: DANA.personId };
     const partial = changeRows(draftFromVersion(version(7, [...noPayments, forDana]), version(8, [...noPayments, forDana]), turnedOn.slice(0, 1)), PEOPLE, TOOLS);
     expect(partial.map((row) => row.after?.mode)).toEqual(['ask']);
+
+    // The outcome follows precedence, not the first rule listed. A never rule always wins: an
+    // automatic Refund rule beside "never send money out" turns Refund on at Never.
+    const refundOn = [toolRow('payments.create_refund', { status: 'needs_review' })];
+    const turnOn = (cards: RuleCard[]) => changeRows(draftFromVersion(version(7, cards), version(8, cards), refundOn), PEOPLE, TOOLS)[0]?.after;
+    const refundAuto: RuleCard = { ...ruleCards['rv-refund'], card_id: 'card-refund-auto', mode: 'auto', who: 'anyone', max_amount_cents: 5_000, reason: 'Refunds up to $50 go through.' };
+    const neverPayOut: RuleCard = { card_id: 'card-never-pay-out', applies_to: 'effect:pay_out', mode: 'never', who: 'anyone', reason: 'Money never goes out.' };
+    const noRefund = RIVERA_CARDS.filter((card) => card.card_id !== 'rv-refund');
+    expect(turnOn([...noRefund, refundAuto, neverPayOut])).toEqual({ mode: 'never', reason: neverPayOut.reason, words: ruleWords(neverPayOut, PEOPLE) });
+    // An automatic and an ask rule at the same specificity ask, whichever comes first.
+    const refundAsk: RuleCard = { ...refundAuto, card_id: 'card-refund-ask', mode: 'ask', max_amount_cents: null, reason: 'Refunds wait for you.' };
+    expect(turnOn([...noRefund, refundAuto, refundAsk])).toMatchObject({ mode: 'ask', reason: refundAsk.reason });
+    expect(turnOn([...noRefund, refundAsk, refundAuto])).toMatchObject({ mode: 'ask', reason: refundAsk.reason });
+    // A more specific automatic rule still decides over a shared one that asks.
+    const askPayOut: RuleCard = { ...neverPayOut, card_id: 'card-ask-pay-out', mode: 'ask', reason: 'Sending money out asks you first.' };
+    expect(turnOn([...noRefund, askPayOut, refundAuto])).toMatchObject({ mode: 'auto', reason: refundAuto.reason, limit: '$50' });
+    // Shared automatic rules decide for anyone only when every effect has one for anyone: with
+    // private data for verified customers only, a stranger's refund still asks.
+    const autoPayOut: RuleCard = { ...neverPayOut, card_id: 'card-auto-pay-out', mode: 'auto', reason: 'Money goes out on its own.' };
+    const verifiedData: RuleCard = { ...autoPayOut, card_id: 'card-verified-data', applies_to: 'effect:private_data', who: 'verified', reason: 'Verified customers see their own records.' };
+    expect(turnOn([...noRefund, autoPayOut, verifiedData])).toEqual(DEFAULT_SIDE);
+    const anyoneData: RuleCard = { ...verifiedData, card_id: 'card-anyone-data', who: 'anyone' };
+    expect(turnOn([...noRefund, autoPayOut, anyoneData])).toMatchObject({ mode: 'auto', reason: autoPayOut.reason });
   });
 });
