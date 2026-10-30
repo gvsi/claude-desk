@@ -52,13 +52,21 @@ function Bookings({ week }: { week: ThisWeekFigures }) {
       </div>
     );
   }
+  // The booked amount is the headline when the API sends it; until then the count stands alone.
+  const booked = week.booked_cents;
   return (
     <div className="cd-week__part">
-      <h3 className="cd-sr-only">Bookings</h3>
-      <p className="cd-week__figure">
-        <span className="cd-week__number cd-type-greeting">{formatCents(week.booked_cents)}</span>{' '}
-        <span className="cd-week__unit cd-type-body">booked</span>
-      </p>
+      {booked === undefined ? (
+        <h3 className="cd-week__title cd-type-control">Bookings</h3>
+      ) : (
+        <>
+          <h3 className="cd-sr-only">Bookings</h3>
+          <p className="cd-week__figure">
+            <span className="cd-week__number cd-type-greeting">{formatCents(booked)}</span>{' '}
+            <span className="cd-week__unit cd-type-body">booked</span>
+          </p>
+        </>
+      )}
       <p className="cd-week__line cd-type-meta">
         {plural(week.bookings, 'booking', 'bookings')}
         {today > 0 ? `, ${today} so far today` : ''}

@@ -389,6 +389,24 @@ describe('Today', () => {
     await expectScreenBasics(screen.container, { owner: true });
   });
 
+  it('this_week_without_the_booked_amount', async () => {
+    // Until the API's second pass sends it, the booked amount is absent (never 0): the block says
+    // how many bookings there were, and no amount.
+    const days = ZERO_DAYS.map((d, i) => ({ ...d, conversations: i === 6 ? 2 : 0, bookings: i === 2 || i === 6 ? 1 : 0 }));
+    const figures = week({ bookings: 2, conversations: 2, handled: 2, days });
+    delete figures.booked_cents;
+    await injectToday((t) => ({ ...t, this_week: figures }));
+    const { screen } = await renderRoute(TODAY);
+    const block = region(screen, 'Last 7 days');
+    await expect.element(block.getByText('2 bookings, 1 so far today', { exact: true })).toBeVisible();
+    await expect.element(block.getByRole('heading', { name: 'Bookings', exact: true })).toBeVisible();
+    expect(block.getByText(/booked/).elements()).toHaveLength(0);
+    expect(block.element().textContent).not.toMatch(/\$|NaN|undefined/);
+    expect(block.getByRole('list', { name: 'Bookings per day' }).getByRole('listitem').elements()).toHaveLength(7);
+    await expect.element(block.getByText('Claude handled 2', { exact: true })).toBeVisible();
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
   it('this_week_empty_states', async () => {
     const { screen } = await renderRoute(TODAY, { seed: 'rivera_quiet' });
     const block = region(screen, 'Last 7 days');
