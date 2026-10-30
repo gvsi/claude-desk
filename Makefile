@@ -209,7 +209,6 @@ dev:
 # CVC5 that is set is left as it is; CI sets its own CVC5 and puts the same desk-prove build on
 # PATH, so it proves with the same binaries.
 EVALS = uv run --project backend --group evals
-DESK_PROVE ?= $(CURDIR)/kernel/target/release/desk-prove
 CVC5 ?= $(CVC5_DIR)/bin/cvc5
 # $(call tier1_default,NAME): NAME="<its default above>" when nothing outside the Makefile set NAME
 # and that file exists, else nothing.
