@@ -18,7 +18,7 @@ export interface OutcomeGroupRow {
 export interface OutcomeGroupsProps {
   /** The rules by outcome. A group with none is left out. */
   rows: Readonly<Partial<Record<RuleMode, readonly OutcomeGroupRow[]>>>;
-  /** The payment limit's line (`MoneyLimit`), in a card of its own above the groups. */
+  /** The payment limit's line (`MoneyLimit` with `prominent`), in a card of its own above the groups. */
   moneyLimit?: ReactNode;
 }
 
@@ -34,11 +34,7 @@ const MODES = ['auto', 'ask', 'never'] as const satisfies readonly RuleMode[];
 export function OutcomeGroups({ rows, moneyLimit }: OutcomeGroupsProps) {
   return (
     <div className="cd-outcome-groups">
-      {moneyLimit ? (
-        <Card padding={16}>
-          <div className="cd-outcome-groups__money">{moneyLimit}</div>
-        </Card>
-      ) : null}
+      {moneyLimit ? <Card padding={16}>{moneyLimit}</Card> : null}
       {MODES.map((mode) => {
         const group = rows[mode] ?? [];
         return group.length > 0 ? <Group key={mode} mode={mode} rows={group} /> : null;

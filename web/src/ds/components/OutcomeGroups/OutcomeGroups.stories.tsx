@@ -18,7 +18,7 @@ const meta = {
   component: OutcomeGroups,
   args: {
     rows: rivera.setupOutcomes,
-    moneyLimit: <MoneyLimit line={line} editing={false} value="" hint={hint} onEdit={fn()} onChange={fn()} onReview={fn()} onCancel={fn()} />,
+    moneyLimit: <MoneyLimit line={line} editing={false} value="" hint={hint} prominent onEdit={fn()} onChange={fn()} onReview={fn()} onCancel={fn()} />,
   },
   render: (args) => (
     <div style={{ maxWidth: 720 }}>

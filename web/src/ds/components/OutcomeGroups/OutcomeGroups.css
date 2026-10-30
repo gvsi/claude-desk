@@ -14,12 +14,6 @@
   min-width: 0;
 }
 
-/* The payment limit leads the groups, since it holds over every rule in them: its line in weight
-   520, as the setup board draws it (on the Rules page it keeps the body weight). */
-.cd-outcome-groups__money .cd-money-limit__line {
-  font-weight: 520;
-}
-
 .cd-outcome-groups__title {
   display: flex;
   align-items: center;

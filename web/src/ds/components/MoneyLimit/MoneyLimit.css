@@ -29,6 +29,11 @@
   overflow-wrap: anywhere;
 }
 
+/* Where the limit leads the rules under it (the setup interview's rules), its line is in weight 520. */
+.cd-money-limit--prominent .cd-money-limit__line {
+  font-weight: 520;
+}
+
 .cd-money-limit__reading > .cd-button {
   flex: none;
 }

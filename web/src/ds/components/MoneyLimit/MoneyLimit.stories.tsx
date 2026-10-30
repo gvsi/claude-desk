@@ -167,6 +167,25 @@ export const Unset: Story = {
   },
 };
 
+export const Prominent: Story = {
+  args: { prominent: true },
+  render: (args) => (
+    <div style={{ maxWidth: 720 }}>
+      <Controlled {...args} />
+    </div>
+  ),
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      "Drawn on N-R2-Setup-08-Rules, built against boards in review; sign-off pending. Above the setup interview's rules, where the limit leads them, its line is in weight 520.",
+  },
+  play: async ({ canvas }) => {
+    // prominent_line_leads: the line at 520 in the primary ink; "Change" is unchanged.
+    expectComputed(canvas.getByText(line), { fontWeight: '520', fontSize: '14px', color: 'rgba(250, 249, 245, 0.92)' });
+    await expect(canvas.getByRole('button', { name: 'Change' })).toHaveAccessibleDescription(line);
+  },
+};
+
 export const Waiting: Story = {
   args: { editing: true, value: '1000', disabled: true },
   parameters: { canvas: 'N-Conn-19b-Ceiling-Edit', canvasNote: 'A draft in flight; the board draws the field at rest.' },

@@ -31,6 +31,8 @@ export interface MoneyLimitProps {
   onCancel: () => void;
   /** A draft is in flight: the buttons wait. */
   disabled?: boolean;
+  /** The limit leads the rules under it, as above the setup interview's rules: its line in weight 520. */
+  prominent?: boolean;
 }
 
 /**
@@ -51,6 +53,7 @@ export function MoneyLimit({
   onReview,
   onCancel,
   disabled = false,
+  prominent = false,
 }: MoneyLimitProps) {
   const root = useRef<HTMLDivElement>(null);
   // "Change" is described by its own line, so the Rules page's two (Payments and Stripe) differ.
@@ -72,7 +75,7 @@ export function MoneyLimit({
   };
 
   return (
-    <div ref={root} className={`cd-money-limit${editing ? ' cd-money-limit--editing' : ''}`}>
+    <div ref={root} className={`cd-money-limit${editing ? ' cd-money-limit--editing' : ''}${prominent ? ' cd-money-limit--prominent' : ''}`}>
       {editing ? (
         <form className="cd-money-limit__form" noValidate onSubmit={review}>
           <div className="cd-money-limit__field">
