@@ -351,11 +351,12 @@ FIGURE_IMAGE = re.compile(r"!\[[^\[\]\n]+\]\(images/v1-architecture\.svg\)")
 
 
 def reader_subset_problems(text: str, other: str) -> list[str]:
-    """What in `text` the About pages' Markdown reader would refuse, by line: a fenced code block, HTML other than
-    a figure marker on a line of its own, an image other than the architecture figure's line right after its
-    marker, a heading below `##`, a nested list, or a link that is neither `https://` nor `other`, the other
-    document's file name. The reader's own tests run the full parse; this catches the common breaks without the
-    web toolchain."""
+    """What in `text` the About pages' Markdown reader would refuse, by line: a fenced code block or a code span
+    across lines, HTML other than a figure marker on a line of its own, an image other than the architecture
+    figure's line right after its marker, a heading below `##` or a second `#` heading, a blockquote, a thematic
+    break, a setext heading, a nested list, or a link that is neither `https://` nor `other`, the other document's
+    file name. The reader's own tests run the full parse; this catches the common breaks without the web
+    toolchain."""
     problems: list[str] = []
     # The reader has no code blocks, and the blanking below would hide what one holds, so each is refused first.
     # The checker's own fence lines are the ones it skips, opener then closer, so every other one opens a block.
@@ -370,6 +371,7 @@ def reader_subset_problems(text: str, other: str) -> list[str]:
                  for span in check_docs._CODE_SPAN.finditer(unfenced) if "\n" in span.group(0)]
     lines = check_docs._prose(text).split("\n")   # code spans and fenced code blanked: what they hold is text
     figure_images: set[int] = set()
+    titled = False
     for number, line in enumerate(lines, start=1):
         marker = FIGURE_MARKER.fullmatch(line.rstrip())
         if marker:
@@ -388,6 +390,17 @@ def reader_subset_problems(text: str, other: str) -> list[str]:
             problems.append(f"line {number}: an image other than the architecture figure")
         if re.match(r" {0,3}#{3,}(?:[ \t]|$)", line):
             problems.append(f"line {number}: a heading below ##")
+        if re.match(r" {0,3}#(?:[ \t]|$)", line):   # the first is the title, which feeds the page's hero
+            if titled:
+                problems.append(f"line {number}: a second # heading after the title")
+            titled = True
+        if re.match(r" {0,3}>", line):
+            problems.append(f"line {number}: a blockquote")
+        # Under a line of text, a line of = or - turns that text into a heading; elsewhere --- is a break.
+        if number > 1 and lines[number - 2].strip() and re.fullmatch(r" {0,3}(?:=+|-+)[ \t]*", line):
+            problems.append(f"line {number}: a setext heading underline")
+        elif re.fullmatch(r" {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*", line):
+            problems.append(f"line {number}: a thematic break")
         if re.match(r"[ \t]+(?:[-*+]|\d+[.)])[ \t]", line):
             problems.append(f"line {number}: a nested list")
     for number, target in check_docs.link_targets(text):
@@ -437,6 +450,17 @@ IN_SUBSET = "\n".join([
      "the architecture marker without its image line"),
     ("### A subsection", "a heading below ##"),
     ("#### Deeper", "a heading below ##"),
+    ("# Another title", "a second # heading after the title"),
+    ("  #", "a second # heading after the title"),
+    ("> A quote.", "a blockquote"),
+    ("   >Quoted with no space.", "a blockquote"),
+    ("\n---", "a thematic break"),
+    ("\n* * *", "a thematic break"),
+    ("\n___", "a thematic break"),
+    ("A heading\n=", "a setext heading underline"),
+    ("A heading\n  ===", "a setext heading underline"),
+    ("A heading\n--", "a setext heading underline"),
+    ("A heading\n---", "a setext heading underline"),
     ("- One\n  - Nested", "a nested list"),
     ("1. One\n   1. Nested", "a nested list"),
     ("See [the threat model](threat-model.md).", "a link to threat-model.md"),
