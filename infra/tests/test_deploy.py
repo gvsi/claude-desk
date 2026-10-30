@@ -47,8 +47,9 @@ REPLACE_IT = 'security add-generic-password -U -s claude-desk-passcode -a "$USER
 # writes what the pinned CLI, aws-cdk 2.1145.0, does (its cdk-toolkit.js): a warning and the changes
 # for a stack named in STUB_BROADENS, then `✨  Number of stacks with differences: <n>`, which counts
 # only stacks that broaden access (STUB_DIFF_UNCOUNTED leaves that line out, and with
-# STUB_DIFF_COUNTS_NOTHING it counts none, as a later CLI might). A watched tool (WATCHED) writes the
-# same record, then runs the real tool.
+# STUB_DIFF_COUNTS_NOTHING it counts none, as a later CLI might); with STUB_DIFF_WATCHES_LOG each diff
+# then waits for what it wrote to show up in the deploy log, and says whether it did before it ends.
+# A watched tool (WATCHED) writes the same record, then runs the real tool.
 RECORD = """import hashlib, json, os, re, sys
 tool, args = os.path.basename(sys.argv[0]), sys.argv[1:]
 passcode = os.environ.get("DESK_PASSCODE")
@@ -122,6 +123,17 @@ elif tool == "npx" and args[:3] == ["--no-install", "cdk", "diff"]:
     if not os.environ.get("STUB_DIFF_UNCOUNTED"):
         counted = 0 if os.environ.get("STUB_DIFF_COUNTS_NOTHING") else int(broadens)
         print(f"\\n\\u2728  Number of stacks with differences: {{counted}}\\n", file=sys.stderr)
+    if os.environ.get("STUB_DIFF_WATCHES_LOG"):
+        import glob, time
+        marker = f"stub: cdk diff {{os.getpid()}} is still running"
+        print(marker, file=sys.stderr, flush=True)
+        logs = os.path.join(os.environ["DESK_DEPLOY_OUT"], "deploy-*.log")
+        logged = lambda: any(marker in open(path, errors="replace").read() for path in glob.glob(logs))
+        deadline = time.monotonic() + 10
+        while not logged() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        print(f"stub: cdk diff for {{args[3]}}: its output {{'reached' if logged() else 'had not reached'}} the log "
+              "while it ran", file=sys.stderr)
     sys.exit(1 if os.environ.get("FAIL_DIFF") else 0)
 elif tool == "npx" and args[:2] == ["--no-install", "cdk"] and args[2] == "deploy":
     stack = args[3]
@@ -814,6 +826,21 @@ def test_each_unattended_security_diff_ends_with_a_line_saying_whether_access_br
             < log.index(app) < log.index("stub: cdk events for DeskApp"))
 
 
+def test_each_unattended_security_diff_reaches_the_log_as_it_runs(deploy):
+    """A diff that hangs (on credentials or the network) or is killed still leaves in the log what it
+    wrote so far: deploy.sh streams each diff there as it runs and reads its summary from the copy
+    tee keeps. Each stub diff here waits for its own output to show up in the log before it ends,
+    and that output is logged once, not again after the diff."""
+    run = deploy(terminal=False, DESK_DEPLOY_ACCOUNT=ACCOUNT, STUB_BROADENS="DeskApp", STUB_DIFF_WATCHES_LOG="1")
+    assert run.status == 0, run.output
+    for stack, diffs in (("DeskData", 1), ("DeskApp", 2)):
+        assert run.log.count(f"stub: cdk diff for {stack}: its output reached the log while it ran") == diffs
+        assert run.log.count(f"stub: cdk security diff for {stack}") == diffs
+    assert "had not reached" not in run.log
+    assert run.log.count(f"deploy: security summary for DeskData: {BROADENS_NOTHING}") == 1
+    assert run.log.count(f"deploy: security summary for DeskApp: {BROADENS}") == 2
+
+
 def test_a_security_diff_that_warns_of_sensitive_changes_is_summed_up_as_broadening_whatever_its_count(deploy):
     """Should a CDK upgrade stop counting a broadening stack, the warning cdk diff writes before that
     stack's changes ("potentially sensitive changes") still marks it, so the summary fails safe."""
@@ -850,6 +877,7 @@ def test_a_failed_security_diff_stops_before_that_deploy(deploy):
     assert run.status == 1
     assert run.cdk("DeskData", "diff") and not run.cdk("DeskData")
     assert "cdk diff DeskData failed" in run.log
+    assert run.log.count("stub: cdk security diff for DeskData") == 1        # what it wrote, logged once
 
 
 def test_data_only_deploys_desk_data_behind_the_account_check(deploy):

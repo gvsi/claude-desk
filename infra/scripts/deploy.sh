@@ -207,12 +207,13 @@ fi
 # cdk_deploy <stack> [cdk options...]: the pinned CLI, its stack outputs on the terminal (fd 3). At a
 # terminal, cdk asks for approval there before any change that broadens IAM permissions or security
 # group access. Unattended, it first logs those changes with a read-only diff of the same stack and
-# context, then one summary line saying whether cdk diff found a change that broadens access, then
-# deploys with --require-approval never; it stops if the diff fails or gives no count. The summary
-# reads the diff as aws-cdk 2.1145.0 (the pin in infra/package.json) writes it: with --security-only,
-# "Number of stacks with differences" counts a stack only when it broadens access, and the warning
-# "potentially sensitive changes" comes before that stack's changes. Either one marks the stack as
-# broadening, so a later CLI that drops one still fails safe; check both when the pin moves.
+# context, streamed to the log as it runs, then one summary line saying whether cdk diff found a
+# change that broadens access, then deploys with --require-approval never; it stops if the diff
+# fails or gives no count. The summary reads the diff as aws-cdk 2.1145.0 (the pin in
+# infra/package.json) writes it: with --security-only, "Number of stacks with differences" counts a
+# stack only when it broadens access, and the warning "potentially sensitive changes" comes before
+# that stack's changes. Either one marks the stack as broadening, so a later CLI that drops one
+# still fails safe; check both when the pin moves.
 cdk_deploy() {
   local stack=$1
   shift
@@ -225,14 +226,15 @@ cdk_deploy() {
   fi
   echo "deploy: $stack's security-relevant changes (cdk diff --security-only); with no terminal to approve"
   echo "deploy: them on, $stack is deployed with --require-approval never"
+  # tee writes the diff to the output, and so to the log, as it runs, so a diff that hangs or is killed
+  # leaves what it wrote so far, and hands the same text to $diff for the summary; with pipefail the
+  # pipeline fails when cdk diff does.
   local diff counted='Number of stacks with differences: ([0-9]+)'
-  if ! diff=$(cd "$INFRA" && npx --no-install cdk diff "$stack" --security-only --method template --fail-on never \
-    "${options[@]}" 2>&1); then
-    printf '%s\n' "$diff"
+  if ! diff=$( (cd "$INFRA" && npx --no-install cdk diff "$stack" --security-only --method template --fail-on never \
+    "${options[@]}") 2>&1 | tee /dev/stderr); then
     echo "deploy: cdk diff $stack failed, so $stack wasn't deployed" >&2
     return 1
   fi
-  printf '%s\n' "$diff"
   if [[ ! $diff =~ $counted ]]; then
     echo "deploy: cdk diff $stack didn't say whether it broadens access, so $stack wasn't deployed" >&2
     return 1
