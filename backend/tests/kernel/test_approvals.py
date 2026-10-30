@@ -540,6 +540,28 @@ async def test_a_review_gate_hold_offers_no_deny_always(app, client, reviewer):
     assert await approvals_of(app, copy.copy_id) == []
 
 
+# Maria's drafted card for every change at once; the booking cards are more specific than it.
+ASK_CHANGES = RuleCard(card_id="ask-changes", applies_to="effect:change", mode="ask", who="anyone",
+                       reason="Changes ask you first.")
+
+
+async def test_an_ask_card_below_the_booking_cards_leaves_a_limit_hold(app, client):
+    # a Sunday 22:00 booking is outside both booking cards' hours (the master's limit-hold
+    # example). The effect card's ask matches it too, but the tool's own cards decide, so the hold
+    # is their twins' and Maria isn't offered never taking bookings again
+    copy, visitor = await visitor_of(app, client)                            # a stranger
+    await activate(app, copy, [*RIVERA_CARDS, ASK_CHANGES])
+    await add_slot(app, copy, "S-20261101-2200")                             # Sunday at 22:00
+    held = await book(client, visitor, "S-20261101-2200")
+    assert (held.state, held.policy_ids) == ("held", ["H.ask.ask-changes", "H.twin.rv-book-sat",
+                                                      "H.twin.rv-book-wk"])
+    assert held.answers == ["allow_once", "deny_once"]
+    response = await post_answer(client, copy.owner, held.decision_id, "deny_always")
+    assert (response.status_code, response.json()) == (422, {"code": "invalid"})
+    assert (await read_id(client, copy.owner, held.decision_id)).state == "held"
+    assert await approvals_of(app, copy.copy_id) == []
+
+
 async def test_a_person_card_decides_over_the_default_ask(app, client, registry):
     # quotes have Dana's own card (list price only) and, for everyone else, the compiler's default
     # ask. The most specific matching card decides: her discount is past her card's limit, a limit
