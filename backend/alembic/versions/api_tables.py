@@ -19,13 +19,13 @@ Columns the API always writes are NOT NULL with no default: no API code wrote th
 and a table that somehow holds rows fails the migration instead of getting invented values.
 
 Revision ID: api_tables
-Revises: 0007_model_call_finish
+Revises: 0011_quote_created_at
 """
 
 from alembic import op
 
 revision = "api_tables"
-down_revision = "0007_model_call_finish"
+down_revision = "0011_quote_created_at"
 branch_labels = None
 depends_on = None
 

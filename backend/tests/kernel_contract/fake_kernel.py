@@ -1234,7 +1234,8 @@ class FakeKernelState:
             self._put("quotes", (quote_id,), {
                 "quote_id": quote_id, **ids, "session_id": session.session_id, "items": items,
                 "list_cents": action.list_cents, "discount_bp": action.discount_bp,
-                "amount_cents": action.amount_cents, "status": "available", "expires_at": expires_at})
+                "amount_cents": action.amount_cents, "status": "available", "expires_at": expires_at,
+                "created_at": self.now})
             facts.append(Fact(fact_id=f"quote:{quote_id}", kind="quote", status="available", source="kernel",
                               label=label, expires_at=expires_at, claims=[
                                   Claim(key="items", kind="text",
