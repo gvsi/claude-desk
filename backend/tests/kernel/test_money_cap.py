@@ -32,15 +32,16 @@ from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, Decision, HoursWindow, Rul
 from desk.contracts import PolicyVersion as PolicyVersionContract
 from desk.db.models import Desk, Person, PolicyVersion
 from desk.db.session import COPY_SETTING, database_url, libpq_url
-from desk.kernel_service import activation, adapters, compiler, render
+from desk.kernel_service import activation, adapters, compiler, decide, reference, render
 from desk.kernel_service.seed import RIVERA_CARDS
 from desk.money_cap import lower_to_cap
 
 from .fakes import FakeAdapter
-from .helpers import (CopyRows, activate_cards, compile_at, context, draft_and_confirm, draft_refusals, kernel_ctx,
-                      rows_of, verify_session)
+from .helpers import (TEST_CAP, CopyRows, activate_cards, compile_at, context, draft_and_confirm, draft_refusals,
+                      kernel_ctx, rows_of, verify_session)
 from .test_adapters import Rivera, quote_args, rivera
 from .test_approvals import add_person
+from .test_compiler import NATIVE, decide_with, req, schema_for
 from .test_decide import Visitor, activate_sets, decided, desk_with, open_visitor, payment_link, verify_signature
 from .test_desk_writes import new_desk, post_desk
 from .test_verification import api_rows
@@ -455,6 +456,34 @@ def test_one_predicate_says_which_cards_the_cap_bounds():
     for card in (charge_card("links", 30_000), charge_card("small", 5_000), asks, refunds, quotes):
         lowered = lower_to_cap([card], [card], 10_000) != [card]
         assert lowered == bool(compiler.above_money_cap([card], 10_000)), card.card_id
+
+
+def test_one_set_says_which_effects_move_money(monkeypatch):
+    """Which effects take or pay out money is one public set, `desk.contracts.MONEY_EFFECTS`. The
+    card check (`moves_money`, which `RuleCard` and the money cap read) and the tool check
+    (`money_tool`, which the compiler, the reference generator, the bounded check and decide read)
+    both read it when they run, so an effect added there reaches every one of them: an auto card on
+    it needs an amount, and no auto permit on a tool with it compiles without requiring an amount
+    within the cap."""
+    assert contracts.MONEY_EFFECTS == {"charge", "pay_out"}
+    monkeypatch.setattr(contracts, "MONEY_EFFECTS", contracts.MONEY_EFFECTS | {"change"})
+    with pytest.raises(ValidationError):
+        RuleCard(card_id="changes", applies_to="effect:change", mode="auto", who="anyone", reason="Changes.")
+    changes = RuleCard(card_id="changes", applies_to="effect:change", mode="auto", who="anyone",
+                       max_amount_cents=90_000, reason="Changes.")
+    assert contracts.moves_money(changes) and money_cap.auto_money(changes)
+    assert compiler.above_money_cap([changes], 50_000) == [changes]
+    # an auto card on a tool with the effect: the amount is required and bounded by the cap
+    book = RuleCard(card_id="book", applies_to="native.book", mode="auto", who="anyone", reason="Bookings.")
+    [permit] = [text for text in compile_at([book], NATIVE, cap=8_000).A.split("\n\n") if '@id("auto.book")' in text]
+    assert "context has amount_cents && context.amount_cents <= 8000" in permit
+    [ref] = [text for text in reference.reference_sets([book], schema_for(NATIVE)).R.split("\n\n")
+             if '@id("auto.book")' in text]
+    assert f"context has amount_cents && context.amount_cents <= {AUTO_MONEY_HARD_CAP_CENTS}" in ref
+    assert decide_with([book], NATIVE, req("native.book")) == "hold"                     # no amount
+    assert decide_with([book], NATIVE, req("native.book", amount_cents=TEST_CAP + 1)) == "hold"
+    assert decide_with([book], NATIVE, req("native.book", amount_cents=TEST_CAP)) == "allow"
+    assert decide.is_money("native.book", ["change"]) and "native.book" in activation.money_uncovered([], NATIVE)
 
 
 @pytest.mark.solver

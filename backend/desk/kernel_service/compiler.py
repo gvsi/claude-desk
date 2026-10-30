@@ -35,7 +35,7 @@ from typing import Any, Literal
 
 import desk_kernel
 
-from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, MONEY_TOOLS, RuleCard, ToolProfile
+from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, RuleCard, ToolProfile, money_tool
 from desk.contracts import moves_money  # noqa: F401  (compiler.moves_money stays importable)
 from desk.kernel_service import review_thresholds
 from desk.money_cap import auto_money
@@ -150,7 +150,6 @@ CARD_ID = re.compile(r"[a-z0-9][a-z0-9._:-]{0,63}")
 # key IDs) matches this, so none can end a string literal or carry Cedar syntax.
 CEDAR_STRING = re.compile(r"[A-Za-z0-9._:-]{1,80}")
 _DAY_NUMBERS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}   # local_dow, Monday 0
-_MONEY_EFFECTS = frozenset({"charge", "pay_out"})
 
 
 @dataclass(frozen=True)
@@ -471,7 +470,7 @@ def _limits(unit: _Auto, effects: dict[str, frozenset[str]], cap: int) -> str:
     is required and bounded by the version's money cap `cap` (already `capped`, so never above
     AUTO_MONEY_HARD_CAP_CENTS) whatever the cards say; elsewhere a limit reads an optional
     attribute in the `if ... then ... else true` form strict validation takes."""
-    money = {tool in MONEY_TOOLS or bool(effects[tool] & _MONEY_EFFECTS) for tool in unit.tools}
+    money = {money_tool(tool, effects[tool]) for tool in unit.tools}
     if len(money) != 1:
         raise ValueError("an auto permit covers money tools or other tools, never both")
     discount = min(c.max_discount_bp for c in unit.cards)

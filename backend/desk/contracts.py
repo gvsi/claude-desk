@@ -4,6 +4,7 @@ The models below are the master plan's "Shared contracts v2" block, verbatim and
 order (each class is defined before it is used). Field comments are part of the contract.
 """
 
+from collections.abc import Iterable
 from datetime import datetime, time
 from typing import Annotated, Literal, Self, get_args
 
@@ -162,6 +163,8 @@ ToolName = Literal["native.quote", "native.find_slots", "native.book", "native.r
                    "native.fetch_website", "native.read_memory",
                    "payments.list_charges", "payments.create_refund"]
 MONEY_TOOLS: frozenset[str] = frozenset({"native.payment_link", "native.charge_mandate", "payments.create_refund"})
+MONEY_EFFECTS: frozenset[str] = frozenset({"charge", "pay_out"})   # the effects that take or pay out money: the one set
+                                          # every money check reads, for cards (`moves_money`) and tools (`money_tool`)
 MCP_TOOLS: frozenset[str] = frozenset({"payments.list_charges", "payments.create_refund"})   # pinned by definition hash
 
 class ToolProfile(BaseModel):
@@ -279,13 +282,18 @@ class RuleCard(BaseModel):                # Claude drafts, code compiles, the ow
             raise ValueError('a default card is the compiler\'s "ask" card for anyone')
         return self
 
-_MONEY_EFFECTS = frozenset({"effect:charge", "effect:pay_out"})
-
 def moves_money(card: RuleCard) -> bool:
-    """Does the card take or pay out money: on a money tool, or on the `charge` or `pay_out` effect.
+    """Does the card take or pay out money: on a money tool, or on an effect in `MONEY_EFFECTS`.
     Defined here alone: `RuleCard` holds an auto money card to an amount with it, and the money cap
     (`desk.money_cap`) and the kernel's compiler read it too."""
-    return card.applies_to in MONEY_TOOLS or card.applies_to in _MONEY_EFFECTS
+    return card.applies_to in MONEY_TOOLS or card.applies_to in {f"effect:{effect}" for effect in MONEY_EFFECTS}
+
+def money_tool(tool: str, effects: Iterable[str]) -> bool:
+    """Does a tool with these effects take or pay out money: a money tool, or one with an effect in
+    `MONEY_EFFECTS`. Defined here alone: the kernel's compiler requires and caps the amount of every
+    auto permit on such a tool with it, and the reference generator, the bounded check and decide
+    read it too."""
+    return tool in MONEY_TOOLS or not MONEY_EFFECTS.isdisjoint(effects)
 
 class ProofCheck(BaseModel):
     name: str                             # see "Proof obligations"

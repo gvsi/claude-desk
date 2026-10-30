@@ -55,7 +55,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.attributes import set_committed_value
 
 from desk.contracts import (
-    MONEY_TOOLS,
+    MONEY_EFFECTS,  # noqa: F401  (decide.MONEY_EFFECTS stays importable)
     ApprovalAnswer,
     Decision,
     InboxNotice,
@@ -67,6 +67,7 @@ from desk.contracts import (
     Review,
     RuleCard,
     ToolName,
+    money_tool,
 )
 from desk.db.models import Action as ActionRow
 from desk.db.models import Business, Desk, Execution, Person, Tool
@@ -481,7 +482,6 @@ TOOL_NAME_CHARS = 64                      # a refused call's name is stored cut 
 CALL_ID_CHARS = 128                       # a longer call ID is refused: a long one can overflow the decisions index
 QUOTED_CHARS = 200                        # free text quoted to the owner is cut to this
 CLAUDES_NOTE = "Claude's note"            # the label on that text: Claude wrote it into the call, the visitor didn't
-MONEY_EFFECTS = frozenset({"charge", "pay_out"})
 BREAKER_STRIKES = 3
 BREAKER_ALERT = ("Claude paused a conversation after the reviewer flagged three requests as attempts to get "
                  "around your rules. It stays paused until you resume it.")
@@ -552,7 +552,8 @@ def args_sha256(args_json: dict[str, Any]) -> str:
 
 
 def is_money(tool: str, effects: Iterable[str]) -> bool:
-    return tool in MONEY_TOOLS or bool(MONEY_EFFECTS & set(effects))
+    """Does the tool take or pay out money (`desk.contracts.money_tool`, under the name approvals reads)."""
+    return money_tool(tool, effects)
 
 
 @dataclass(frozen=True)

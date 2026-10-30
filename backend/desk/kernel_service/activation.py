@@ -61,13 +61,13 @@ from sqlalchemy import func, select
 
 from desk.contracts import (
     AUTO_MONEY_HARD_CAP_CENTS,
-    MONEY_TOOLS,
     LedgerEvent,
     PolicyVersion,
     ProofCheck,
     ProofReport,
     RuleCard,
     ToolProfile,
+    money_tool,
 )
 from desk.db.models import AgentKey, Person
 from desk.db.models import PolicyVersion as PolicyVersionRow
@@ -939,7 +939,6 @@ BOUNDED_CHECKS = ("auto_within_cards", "review_only_narrows", "hold_within_cards
 MAX_BOUNDED_CASES = 5000
 # What each bounded key loads, as (F, A, H) from the compiled sets, A0 and the reference sets.
 _BOUNDED_SETS = ("policy", "approvable", "a0", "R", "R_hold")
-_MONEY_EFFECTS = frozenset({"charge", "pay_out"})
 
 _in_use: set[str] = set()
 _in_use_lock = threading.Lock()
@@ -961,11 +960,12 @@ def drop_keys(engine: desk_kernel.PolicyEngine, keys: Iterable[str]) -> None:
 
 
 def money_uncovered(cards: Iterable[RuleCard], profiles: Sequence[ToolProfile]) -> list[str]:
-    """The enabled money tools (a `charge` or `pay_out` effect, or in `MONEY_TOOLS`) that no
-    non-default card covers: `money_needs_card` requires the auto set never to allow them."""
+    """The enabled money tools (`desk.contracts.money_tool`: in `MONEY_TOOLS`, or with an effect in
+    `MONEY_EFFECTS`) that no non-default card covers: `money_needs_card` requires the auto set never
+    to allow them."""
     owned = [card for card in cards if not card.is_default]
     return sorted(p.tool for p in profiles
-                  if _is_money(p.tool, frozenset(p.effects))
+                  if money_tool(p.tool, p.effects)
                   and not any(compiler.covers(card, p.tool, profiles, owned) for card in owned))
 
 
@@ -1133,10 +1133,6 @@ def bounded_cases(cards: Iterable[RuleCard], profiles: Iterable[ToolProfile], sc
     return cases
 
 
-def _is_money(tool: str, effects: frozenset[str]) -> bool:
-    return tool in MONEY_TOOLS or bool(effects & _MONEY_EFFECTS)
-
-
 def _named(values: Iterable[str | None], other: str) -> list[str]:
     """The named values, sorted, then one more that is none of them (the last)."""
     named = sorted({value for value in values if value})
@@ -1160,7 +1156,7 @@ def _tool_passes(profile: ToolProfile, action: Mapping[str, Any], owned: Sequenc
     on_tool = [card for card in owned if card.applies_to == tool
                or (card.applies_to.startswith("effect:") and card.applies_to.removeprefix("effect:") in effects)]
     autos = [card for card in on_tool if card.mode == "auto"]
-    dimensions = [_amounts(autos, money=_is_money(tool, effects), cap=cap), _discounts(autos), _times(autos),
+    dimensions = [_amounts(autos, money=money_tool(tool, effects), cap=cap), _discounts(autos), _times(autos),
                   _reviews(autos, effects)]
     principals = [_Principal(kind, resource, standing, person, agent, mandate)
                   for kind in action["appliesTo"]["principalTypes"]
