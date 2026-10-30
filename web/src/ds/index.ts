@@ -136,6 +136,10 @@ export { MarginNote, type MarginNoteProps } from './components/MarginNote/Margin
 // Recorded history
 export { RecordedTag, type RecordedTagProps } from './components/RecordedTag/RecordedTag.tsx';
 export { RecordedNote, type RecordedNoteProps } from './components/RecordedNote/RecordedNote.tsx';
+export {
+  RecordedHistoryLink,
+  type RecordedHistoryLinkProps,
+} from './components/RecordedHistoryLink/RecordedHistoryLink.tsx';
 
 // Owner decisions
 export { ApprovalCard, type ApprovalCardProps } from './components/ApprovalCard/ApprovalCard.tsx';
