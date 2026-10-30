@@ -1,13 +1,14 @@
 /**
  * What a fresh mock copy holds, by seed. `rivera` is the master plan's Rivera seed as far as the
  * mocked routes read it (Rivera Plumbing, Maria Rivera, the Main line Desk with its rule cards and
- * open status, and the seeded hold) plus Dana's live chat; `rivera_quiet` has no hold and no
- * chats; `rivera_two_desks` adds an "Emergencies" Desk. Seeded chats are replayed through the
+ * open status, and the seeded hold) plus Dana's live chat and Alex Kim's assistant's, a visiting
+ * agent's; `rivera_quiet` has no hold and no chats; `rivera_two_desks` adds an "Emergencies" Desk. Seeded chats are replayed through the
  * script's own steps, so their ledger entries, receipts and transcript items line up the way the
  * live ones do.
  */
 import type { HoursWindow, OpenStatus, PolicyVersion } from '../api/contracts.ts';
 import { placeholderHex, rivera } from '../ds/fixtures/index.ts';
+import { seedAgentChat } from './agents.ts';
 import { DECISIONS, SEEDED_HOLD_STEPS, writing, type Language, type Step } from './script.ts';
 import type { MockWorld, ReplayTurn } from './world.ts';
 
@@ -187,6 +188,10 @@ export function seedWorld(world: MockWorld): void {
     });
   }
   if (seed === 'rivera_quiet') return;
+
+  // Alex Kim's assistant, a signed visiting agent, got a quote for the service call deposit and paid
+  // it within its signed limit, forty minutes before the copy opened.
+  seedAgentChat(world, main, opened - 40 * MINUTE);
 
   // The seeded hold: a visitor not on record asked for 15% off, longer ago than "live".
   const heldAt = opened - 12 * MINUTE;

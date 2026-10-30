@@ -438,7 +438,8 @@ export interface AgentCardOut {
     encoding: string;
     ts_window_s: number;
   };
-  example_request: Record<string, unknown>;
+  /** The request line, its headers and its body, as text (the API's `AgentCardOut.example_request`). */
+  example_request: string;
 }
 
 export interface AgentRunStarted {
@@ -450,7 +451,8 @@ export interface AgentTurn {
   author: 'agent' | 'desk';
   n: number;
   blocks: RenderedBlock[];
-  receipts: EvReceipt[];
+  /** A Desk turn's status events, as its `A2AResponse` carries them. */
+  receipts: (EvReceipt | EvHeld | EvResolved)[];
 }
 
 export interface DemoAgentRun {

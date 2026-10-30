@@ -233,14 +233,16 @@ export class MockWorld {
     return desk;
   }
 
-  addSession(desk: DeskRecord, opts: { sessionId?: string; ownerPreview?: boolean } = {}): SessionRecord {
+  /** A new chat on `desk`: a visitor's, the owner's preview, or with `agent` a signed visiting agent's, by the name it gave. */
+  addSession(desk: DeskRecord, opts: { sessionId?: string; ownerPreview?: boolean; agent?: string } = {}): SessionRecord {
     const sessionId = opts.sessionId ?? this.id('ses-web');
+    const kind = opts.agent === undefined ? 'visitor' : 'agent';
     const session: SessionRecord = {
-      state: { session_id: sessionId, kind: 'visitor', verified: false, assurance: 'none', mode: 'ai', generation: 1 },
+      state: { session_id: sessionId, kind, verified: false, assurance: 'none', mode: 'ai', generation: 1 },
       deskId: desk.summary.desk_id,
       ownerPreview: opts.ownerPreview ?? false,
       person: null,
-      displayName: null,
+      displayName: opts.agent ?? null,
       language: 'en',
       lastActivity: this.now(),
       lastVisitorText: null,
@@ -257,7 +259,7 @@ export class MockWorld {
       origin: 'kernel',
       session_id: sessionId,
       ref_id: null,
-      summary: { kind: session.ownerPreview ? 'preview' : 'visitor' },
+      summary: { kind: session.ownerPreview ? 'preview' : kind },
     });
     return session;
   }
@@ -294,6 +296,13 @@ export class MockWorld {
     session.lastActivity = this.now();
     session.typingUntil = null;
     session.visitorTypedAt = null;
+  }
+
+  /** A visiting agent's signed request: its words reach the owner's view only, never a visitor's page. */
+  agentText(session: SessionRecord, text: string): void {
+    this.addItem(session, 'agent_text', text, null);
+    session.lastVisitorText = text;
+    session.lastActivity = this.now();
   }
 
   /** The owner's whisper: only Claude sees it, so it joins the owner's view and the record, never the visitor's stream. */
