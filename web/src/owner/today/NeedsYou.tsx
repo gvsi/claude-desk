@@ -2,6 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 
+import type { Decision } from '../../api/contracts.ts';
 import { ApiError, ownerErrorCopy, request } from '../../api/http.ts';
 import type { NeedsYouItem } from '../../api/views.ts';
 import { ApprovalCard, Button, Card, Notice, SectionHeader, StatusLabel } from '../../ds/index.ts';
@@ -29,6 +30,11 @@ function countLabel(n: number): string {
   return `${n} ${n === 1 ? 'needs' : 'need'} you`;
 }
 
+/** The request with nothing offered: what the owner sees until it is read again. */
+function withNoAnswers(decision: Decision): Decision {
+  return { ...decision, answers: [] };
+}
+
 /** What the approval card shows about a held request beyond the decision itself. */
 function aboutTheRequest(item: HeldItem, now: Date) {
   const { session } = item;
@@ -53,6 +59,8 @@ export interface NeedsYouProps {
   /** Open callbacks, in the order Needs you lists them. */
   callbacks: readonly CallbackItem[];
   answers: UseAnswer;
+  /** When Needs you was last read (its `dataUpdatedAt`), which tells whether `held` shows a request as it stands since a conflict. */
+  readAt: number;
   /** Called with each held request's card as it mounts and unmounts, so "Open the request" can focus it. */
   registerCard: (decisionId: string, el: HTMLElement | null) => void;
   /** The latest read failed: said first, over whatever was read before it. */
@@ -64,7 +72,7 @@ export interface NeedsYouProps {
  * an approval card answered in place, then each open callback, then what was answered here with
  * its final line until the owner dismisses it.
  */
-export function NeedsYou({ held, callbacks, answers, registerCard, readFailure }: NeedsYouProps) {
+export function NeedsYou({ held, callbacks, answers, readAt, registerCard, readFailure }: NeedsYouProps) {
   const titleId = useId();
   const now = new Date();
   const open = held.length + callbacks.length;
@@ -82,6 +90,22 @@ export function NeedsYou({ held, callbacks, answers, registerCard, readFailure }
       if (active === null || active === document.body) answeredCards.current.get(id)?.focus();
     }
   }, [answers.answered]);
+
+  // After a conflict, the card shows the request as Needs you read it again. Focus that fell to the
+  // page as its answers changed (the one pressed may no longer be offered) goes to the request, once.
+  const heldCards = useRef(new Map<string, HTMLElement>());
+  const conflictsSeen = useRef(new Set<string>());
+  useLayoutEffect(() => {
+    for (const item of held) {
+      const id = item.decision.decision_id;
+      const conflict = answers.conflictFor(id);
+      const seen = conflict === undefined ? '' : `${id} ${conflict.at}`;
+      if (conflict === undefined || answers.pending.has(id) || conflictsSeen.current.has(seen)) continue;
+      conflictsSeen.current.add(seen);
+      const active = document.activeElement;
+      if (active === null || active === document.body) heldCards.current.get(id)?.focus();
+    }
+  });
 
   const dismiss = (id: string) => {
     // Focus goes to the next answered card, else the one before, else the section.
@@ -113,14 +137,28 @@ export function NeedsYou({ held, callbacks, answers, registerCard, readFailure }
         <ul className="cd-needs-you">
           {held.map((item) => {
             const id = item.decision.decision_id;
+            const pending = answers.pending.has(id);
+            // The request changed while the owner was looking: its line sits above it, and its
+            // answers are the ones a read since then offers. Until one lands, it offers none.
+            const conflict = answers.conflictFor(id);
+            const asItStands = conflict === undefined || pending || readAt > conflict.at;
             return (
               <li key={id} className="cd-needs-you__item">
-                <div ref={(el) => registerCard(id, el)} className="cd-needs-you__card" tabIndex={-1}>
+                {conflict !== undefined ? <Notice tone="error">{conflict.line}</Notice> : null}
+                <div
+                  ref={(el) => {
+                    registerCard(id, el);
+                    if (el) heldCards.current.set(id, el);
+                    else heldCards.current.delete(id);
+                  }}
+                  className="cd-needs-you__card"
+                  tabIndex={-1}
+                >
                   <ApprovalCard
-                    decision={item.decision}
+                    decision={asItStands ? item.decision : withNoAnswers(item.decision)}
                     {...aboutTheRequest(item, now)}
                     onAnswer={(a) => answers.answer(item, a)}
-                    pending={answers.pending.has(id)}
+                    pending={pending}
                     error={answers.errorFor(id)}
                   />
                 </div>
@@ -282,11 +320,12 @@ function CallbackCard({ item }: { item: CallbackItem }) {
           {handoff.reason}
         </p>
         <p className="cd-callback__when cd-type-meta">{callbackLine(handoff.callback_window, business.timezone)}</p>
+        {/* Only the pressed button spins; the other waits, its words shown, until its request settles. */}
         <div className="cd-callback__actions">
-          <Button variant="secondary" busy={joining} onClick={() => void join()}>
+          <Button variant="secondary" busy={joining} waiting={closing} onClick={() => void join()}>
             Join the chat
           </Button>
-          <Button variant="ghost" busy={closing} onClick={() => void markDone()}>
+          <Button variant="ghost" busy={closing} waiting={joining} onClick={() => void markDone()}>
             Mark done
           </Button>
         </div>

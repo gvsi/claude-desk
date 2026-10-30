@@ -2,14 +2,17 @@
  * Answering a held request from an owner screen. An answer is sent once per click and never
  * retried on its own: a lost answer may have gone through, so it is never called "still held",
  * and asking again can't run the action twice (the API answers a repeat with a 409 and the
- * request's final state). What was answered stays on the screen with its final line while the
- * screen is open, whatever Needs you reads next.
+ * request's final state). A 409 without that final state means the request changed while the
+ * owner was looking: the answer is never sent again, since an approval is bound to the exact call
+ * the owner saw. Needs you is read again first, and the screen offers answers only from that read.
+ * What was answered stays on the screen with its final line while the screen is open, whatever
+ * Needs you reads next.
  */
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useRef, useState } from 'react';
 
 import type { ApprovalAnswer, Decision, RuleCard } from '../../api/contracts.ts';
-import { ApiError, isUncertain, request } from '../../api/http.ts';
+import { ApiError, isUncertain, ownerErrorCopy, request } from '../../api/http.ts';
 import type { NeedsYouItem, RulesDraft } from '../../api/views.ts';
 
 /** A held request as Needs you lists it. */
@@ -29,13 +32,34 @@ export interface AnswerDraftState {
   draft: RulesDraft;
 }
 
+/**
+ * An answer the API turned back because the request changed while the owner was looking (a 409
+ * without the request's final state): the owner's line for it, shown above the request, and when
+ * it came back. Only a read of Needs you that lands after `at` shows the request as it stands.
+ */
+export interface AnswerConflict {
+  line: string;
+  /** When the 409 came back (`Date.now()`), to compare with a read's `dataUpdatedAt`. */
+  at: number;
+}
+
 export interface UseAnswer {
   /** Sends `a` for `item`. Resolves once the request has its final state, and rejects when it doesn't. */
   answer(item: HeldItem, a: ApprovalAnswer): Promise<void>;
   /** The requests whose answer is on its way, by `decision_id`. */
   pending: ReadonlySet<string>;
-  /** Why the last answer for a request didn't settle it, in the owner's words. */
+  /**
+   * Why the last answer for a request didn't settle it, in the owner's words, for the card. A
+   * conflict has its line in `conflictFor` instead.
+   */
   errorFor(decisionId: string): string | undefined;
+  /**
+   * The request changed while the owner was looking, so the last answer was turned back and not
+   * sent again. Its line stays above the request until the owner answers again or the request
+   * settles; the answer's promise rejects only once Needs you has been read again (or that read
+   * failed), and until a read lands after `at` the screen offers no answers for it.
+   */
+  conflictFor(decisionId: string): AnswerConflict | undefined;
   /** What was answered here, by `decision_id`, in the order it was answered. */
   answered: ReadonlyMap<string, Answered>;
   /**
@@ -53,7 +77,29 @@ const ABOVE_LIMIT_LINE = "That's above your limit for taking money without askin
 const NOT_OFFERED_LINE = "That answer isn't available for this request.";
 const CHANGED_LINE = 'This request changed while you were answering. Reload to see where it stands.';
 
-/** The owner's line for an answer that didn't settle the request. */
+/**
+ * The 409 that says the request was answered already, with its final state: `already_resolved`.
+ * The kernel's own 409 (`{error: "kernel", code}`) carries no decision and leaves the request held.
+ */
+function finalStateOf(err: unknown, decisionId: string): Decision | null {
+  if (!(err instanceof ApiError) || err.kind !== 'conflict' || err.code !== 'already_resolved') return null;
+  return err.decision !== null && err.decision.decision_id === decisionId ? err.decision : null;
+}
+
+/**
+ * A 409 without the request's final state: the kernel's own conflict (`{error: "kernel", code}`,
+ * the request still held but changed), or `already_resolved` without a decision to show.
+ */
+function isConflict(err: unknown): err is ApiError {
+  return err instanceof ApiError && err.kind === 'conflict';
+}
+
+/** The owner's line for a conflict: the kernel's code in the owner's words, or, answered already without a final state to show, that it moved on. */
+function conflictLine(err: ApiError): string {
+  return err.code === 'already_resolved' ? CHANGED_LINE : ownerErrorCopy(err);
+}
+
+/** The owner's line for any other answer that didn't settle the request. */
 function lineFor(err: unknown, a: ApprovalAnswer): string {
   if (isUncertain(err)) return UNCERTAIN_LINE;
   if (err instanceof ApiError && err.status === 422) {
@@ -61,16 +107,14 @@ function lineFor(err: unknown, a: ApprovalAnswer): string {
     // a screen read before the cap was lowered can send it.
     return a === 'allow_person' ? ABOVE_LIMIT_LINE : NOT_OFFERED_LINE;
   }
-  // A conflict without the request's state says only that it moved on.
-  if (err instanceof ApiError && err.kind === 'conflict') return CHANGED_LINE;
   return STILL_HELD_LINE;
 }
 
 /**
- * The reads an answer can change: this Desk's Needs you, Today, record and attempts, and any open
- * conversation. Query keys start with their route key, then the Desk.
+ * The reads an answer can change: this Desk's Needs you first, then Today, record and attempts,
+ * and any open conversation. Query keys start with their route key, then the Desk.
  */
-function answerChanges(deskId: string): readonly (readonly string[])[] {
+function answerChanges(deskId: string): readonly [readonly string[], ...(readonly string[])[]] {
   return [['needsYou', deskId], ['today', deskId], ['ledger', deskId], ['safety', deskId], ['conversation']];
 }
 
@@ -93,11 +137,18 @@ export function useAnswer(deskId: string): UseAnswer {
   const [errors, setErrors] = useState<ReadonlyMap<string, string>>(() => new Map());
   const [answered, setAnswered] = useState<ReadonlyMap<string, Answered>>(() => new Map());
   const [kept, setKept] = useState<ReadonlyMap<string, HeldItem>>(() => new Map());
+  const [conflicts, setConflicts] = useState<ReadonlyMap<string, AnswerConflict>>(() => new Map());
   // The answers on their way, read synchronously so a second click can't send twice.
   const sending = useRef(new Set<string>());
 
-  const refresh = useCallback(() => {
-    for (const queryKey of answerChanges(deskId)) void queryClient.invalidateQueries({ queryKey });
+  // Reads again everything the answer can change, and resolves once Needs you has been read (or
+  // that read failed). An invalidation cancels a read already out, so the read it starts is the
+  // first to land after it.
+  const refresh = useCallback((): Promise<void> => {
+    const [needsYou, ...others] = answerChanges(deskId);
+    const read = queryClient.invalidateQueries({ queryKey: needsYou });
+    for (const queryKey of others) void queryClient.invalidateQueries({ queryKey });
+    return read;
   }, [deskId, queryClient]);
 
   const settle = useCallback(
@@ -106,7 +157,8 @@ export function useAnswer(deskId: string): UseAnswer {
       setAnswered((current) => withEntry(current, id, { item, decision, card_diff: cardDiff }));
       setKept((current) => without(current, id));
       setErrors((current) => without(current, id));
-      refresh();
+      setConflicts((current) => without(current, id));
+      void refresh();
     },
     [refresh],
   );
@@ -119,21 +171,33 @@ export function useAnswer(deskId: string): UseAnswer {
       setPending((current) => new Set(current).add(id));
       setKept((current) => withEntry(current, id, item));
       setErrors((current) => without(current, id));
+      setConflicts((current) => without(current, id));
       try {
         const out = await request('answer', { params: { decision_id: id }, body: { answer: a } });
         settle(item, out.decision, out.card_diff);
       } catch (err) {
         // Answered already (a repeat of an answer that went through, or one that came too late):
         // the request's final state is the answer.
-        if (err instanceof ApiError && err.kind === 'conflict' && err.decision !== null && err.decision.decision_id === id) {
-          settle(item, err.decision, null);
+        const final = finalStateOf(err, id);
+        if (final !== null) {
+          settle(item, final, null);
           return;
+        }
+        // The request changed while the owner was looking: the answer isn't sent again. Its card
+        // keeps waiting until Needs you has been read again, so it comes back showing the request as
+        // it stands, and only where Needs you still lists it.
+        if (isConflict(err)) {
+          const conflict: AnswerConflict = { line: conflictLine(err), at: Date.now() };
+          setConflicts((current) => withEntry(current, id, conflict));
+          setKept((current) => without(current, id));
+          await refresh();
+          throw err;
         }
         setErrors((current) => withEntry(current, id, lineFor(err, a)));
         // A lost answer keeps its card to be asked again, even once Needs you no longer lists the
         // request; one that surely didn't go through shows wherever Needs you still lists it.
         if (!isUncertain(err)) setKept((current) => without(current, id));
-        refresh();
+        void refresh();
         throw err;
       } finally {
         sending.current.delete(id);
@@ -148,10 +212,11 @@ export function useAnswer(deskId: string): UseAnswer {
   );
 
   const errorFor = useCallback((decisionId: string) => errors.get(decisionId), [errors]);
+  const conflictFor = useCallback((decisionId: string) => conflicts.get(decisionId), [conflicts]);
 
   const dismiss = useCallback((decisionId: string) => {
     setAnswered((current) => without(current, decisionId));
   }, []);
 
-  return { answer, pending, errorFor, answered, kept, dismiss };
+  return { answer, pending, errorFor, conflictFor, answered, kept, dismiss };
 }

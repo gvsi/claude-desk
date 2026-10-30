@@ -1,8 +1,9 @@
 /**
  * Renders the whole app at `path`, as a screen test sees it: a memory router over the app's
  * routes (or a test's own copy of them), a fresh query client (the app makes one per mount),
- * polling at a twentieth of real time, the desktop or phone viewport, and the mock API (a fresh
- * copy of `seed` when one is named). One app at a time: a second call unmounts the first.
+ * polling at a twentieth of real time unless the test asks for another pace, the desktop or phone
+ * viewport, and the mock API (a fresh copy of `seed` when one is named). One app at a time: a
+ * second call unmounts the first.
  */
 import { createMemoryRouter, type DataRouter, type RouteObject } from 'react-router';
 import { page } from 'vitest/browser';
@@ -40,6 +41,11 @@ export interface RenderRouteOptions {
   seed?: MockSeed | SeedOption;
   /** The app's routes with a test's change, such as a page swapped for one that throws. */
   routes?: RouteObject[];
+  /**
+   * Polling at this fraction of real time (default 0.05). A test that counts reads passes a large
+   * one, such as 100, so no poll lands while it counts.
+   */
+  pollScale?: number;
 }
 
 export interface RenderedRoute {
@@ -66,7 +72,7 @@ export async function renderRoute(path: string, opts: RenderRouteOptions = {}): 
   await page.viewport(width, height);
   resetBrowserLanguage();
   if (opts.language !== undefined) setBrowserLanguage(opts.language);
-  setPollScale(0.05);
+  setPollScale(opts.pollScale ?? 0.05);
   if (opts.seed !== undefined) {
     const { name, signedIn = true } = typeof opts.seed === 'string' ? { name: opts.seed } : opts.seed;
     mockStore.nextEpoch();

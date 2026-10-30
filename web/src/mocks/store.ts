@@ -203,6 +203,10 @@ class SimulatedCookies implements Cookies {
     this.owner = true;
   }
 
+  renewOwner(): void {
+    this.owner = true;
+  }
+
   setVisitor(slug: string, sessionId: string): void {
     this.sessions.set(slug, sessionId);
   }
@@ -269,6 +273,13 @@ class RequestCookies implements Cookies {
     this.setCookie.push(setCookieLine(OWNER_COOKIE.name, value, OWNER_COOKIE.path, OWNER_COOKIE.maxAge));
   }
 
+  /** A start over's new copy gets a new cookie; the one this request carried names nothing from now on. */
+  renewOwner(): void {
+    const sent = this.sent[OWNER_COOKIE.name];
+    if (sent !== undefined && this.all.owners.get(sent) === this.server) this.all.owners.delete(sent);
+    this.setOwner();
+  }
+
   setVisitor(slug: string, sessionId: string): void {
     const value = this.all.cookieValue();
     this.all.visitors.set(value, { server: this.server, slug, sessionId });
@@ -290,6 +301,7 @@ const NO_COOKIES: Cookies = {
   owner: false,
   visitor: () => undefined,
   setOwner: () => undefined,
+  renewOwner: () => undefined,
   setVisitor: () => undefined,
 };
 
