@@ -11,7 +11,9 @@
   (`labels.session_readers`): the public's and its own session's, its person's once verified;
   the owner reads the business's and the public's. A row with no readers is the owner's alone.
   `labels.can_read` decides each row in Python, so there is one rule for who reads what; a
-  Desk's rows stay few in a demo copy, where a real Desk would filter in SQL first.
+  Desk's rows stay few in a demo copy, where a real Desk would filter in SQL first. The facts
+  start with the Desk's catalog (`catalog_fact`), so Claude knows the `item_id`s `native.quote`
+  takes.
 
 A profile carries what Claude is given, the confirmed description and the adapter's input
 schema, and never the text of a changed MCP definition, which only the owner reviews.
@@ -27,8 +29,8 @@ reads its context.
 from fastapi import APIRouter, Request
 from sqlalchemy import or_, select
 
-from desk.contracts import KnowledgeItem, Principal, ToolProfile
-from desk.db.models import Desk, Tool
+from desk.contracts import Claim, Fact, KnowledgeItem, Label, Principal, ToolProfile
+from desk.db.models import Desk, PriceItem, Tool
 from desk.db.models import Fact as FactRow
 from desk.db.models import KnowledgeItem as KnowledgeRow
 from desk.kernel_api import SessionContext
@@ -36,6 +38,28 @@ from desk.kernel_service import auth, decide, labels
 from desk.kernel_service.auth import SessionRow
 from desk.kernel_service.repo import Ctx, KernelCtx
 from desk.kernel_service.sessions import principal_for
+
+
+CATALOG = "catalog"
+
+
+async def catalog_fact(ctx: KernelCtx, desk_id: str) -> Fact | None:
+    """The Desk's catalog: a public fact `catalog` holding a text claim per price item, its
+    `item_id` as the key and its title as the value, in `item_id` order. None when the Desk sells
+    nothing. An item named "hours", a valid item ID that no claim may have as its key, is left
+    out rather than fail the session's whole context.
+
+    It is built from `price_items` on each read and never stored, so it is always the current list,
+    and no stored fact shares its ID (each of theirs is `<kind>:<id>`). It carries no price,
+    amount or unit: an amount reaches a visitor only in the quote card the kernel renders, and no
+    clause template reads this fact, so it backs no card."""
+    items = (await ctx.db.execute(ctx.repo.scoped(select(PriceItem.item_id, PriceItem.title).where(
+        PriceItem.desk_id == desk_id).order_by(PriceItem.item_id)))).all()
+    claims = [Claim(key=item_id, kind="text", value=title) for item_id, title in items if item_id != "hours"]
+    if not claims:
+        return None
+    return Fact(fact_id=CATALOG, kind="charter", status="available", source="kernel", claims=claims,
+                label=Label(readers=["public"]))
 
 
 def _profile(row: Tool) -> ToolProfile:
@@ -60,10 +84,12 @@ async def session_context(ctx: KernelCtx, principal: Principal, session_row: Ses
         or_(FactRow.expires_at.is_(None), FactRow.expires_at > now)).order_by(FactRow.created_at, FactRow.fact_id)))
     knowledge = await ctx.db.scalars(ctx.repo.scoped(
         select(KnowledgeRow).where(KnowledgeRow.desk_id == desk_id).order_by(KnowledgeRow.item_id)))
+    catalog = await catalog_fact(ctx, desk_id)
     return SessionContext(
         tools=[profile for tool, profile in profiles.items() if tool in given],
         tools_declared=[profile for tool, profile in profiles.items() if tool in declared],
-        facts=[labels.fact_of(row) for row in facts if labels.can_read(row.readers, readers)],
+        facts=[*([catalog] if catalog is not None and labels.can_read(catalog.label, readers) else []),
+               *(labels.fact_of(row) for row in facts if labels.can_read(row.readers, readers))],
         knowledge=[KnowledgeItem(item_id=row.item_id, source=row.source, title=row.title, text=row.text,
                                  label=labels.label_of(row.readers))
                    for row in knowledge if labels.can_read(row.readers, readers)],

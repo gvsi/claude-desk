@@ -7,22 +7,25 @@ scripted adapters (`FakeAdapter`) on a Desk to cover tools this plan has no adap
 """
 
 import logging
+import re
 from datetime import timedelta
 
 import httpx
+from fastapi import FastAPI
 from sqlalchemy import select
 
-from desk.contracts import Claim, Principal
-from desk.db.models import Desk, Document, Person, Tool
+from desk.contracts import Claim, Fact, Label, Principal
+from desk.db.models import ActorSession, Desk, Document, Person, PriceItem, Tool
 from desk.db.models import Fact as FactRow
 from desk.db.models import KnowledgeItem as KnowledgeRow
 from desk.kernel_api import SessionContext
-from desk.kernel_service import adapters, auth, decide
+from desk.kernel_service import adapters, auth, context, decide, labels
 from desk.kernel_service.decide import TOOL_NAMES
+from desk.kernel_service.sessions import principal_for
 
 from .fakes import FakeAdapter
-from .helpers import kernel_ctx, ledger_rows, make_copy_rows, rows_of, verify_session
-from .test_adapters import add_slot, book, objects, quote_args, visitor_of
+from .helpers import CopyRows, kernel_ctx, ledger_rows, make_copy_rows, rows_of, verify_session
+from .test_adapters import Rivera, add_slot, book, objects, quote_args, visitor_of
 from .test_approvals import answered
 from .test_compiler import card
 from .test_decide import add_desk, decided, desk_with, open_visitor, set_mode, set_session
@@ -58,9 +61,9 @@ def fact_ids(facts) -> list[str]:
     return [fact.fact_id for fact in facts]
 
 
-# What every session on a Rivera Plumbing copy reads: its public charter.
-PUBLIC_CHARTER = ["charter:contact", "charter:hours", "charter:policy:arrival", "charter:policy:first_visit",
-                  "charter:policy:service_area"]
+# What every session on a Rivera Plumbing copy reads: its catalog, then its public charter.
+PUBLIC_CHARTER = ["catalog", "charter:contact", "charter:hours", "charter:policy:arrival",
+                  "charter:policy:first_visit", "charter:policy:service_area"]
 
 
 # One scripted adapter per standing: a stranger's, a verified visitor's, the owner's setup tool,
@@ -382,3 +385,89 @@ async def test_the_follow_up_can_cite_the_approved_booking(app, client, frozen_c
                                                                 ["owner", f"session:{visitor.session_id}"])
     stranger = await open_visitor(client, copy)
     assert fact_ids((await context_of(client, stranger.session_id, stranger.headers)).facts) == PUBLIC_CHARTER
+
+
+# The Rivera seed's price list as the catalog names it: each item's ID and title, in ID order.
+RIVERA_CATALOG = [("deposit", "Service call deposit"), ("drain", "Drain clearing"), ("heater", "Water heater flush"),
+                  ("leak", "Leak repair")]
+
+
+def catalog_of(seen: SessionContext) -> Fact:
+    [catalog] = [fact for fact in seen.facts if fact.fact_id == "catalog"]
+    return catalog
+
+
+async def test_the_catalog_names_the_desks_items(app, client):
+    copy, stranger = await visitor_of(app, client)
+    seen = await context_of(client, stranger.session_id, stranger.headers)
+    catalog = catalog_of(seen)
+    # one public fact, a text claim per price item: the ID Claude quotes by and the item's title
+    assert (catalog.kind, catalog.status, catalog.source, catalog.label, catalog.expires_at) == (
+        "charter", "available", "kernel", Label(readers=["public"]), None)
+    assert [(claim.key, claim.kind, claim.value) for claim in catalog.claims] == [
+        (item_id, "text", title) for item_id, title in RIVERA_CATALOG]
+    # no price, amount or unit: those reach the visitor only in the quote card
+    assert not re.search(r"\d", catalog.model_dump_json())
+
+
+async def add_price_item(app: FastAPI, rows: Rivera | CopyRows, item_id: str, title: str, unit_cents: int) -> None:
+    """An item the Desk starts selling, added to its price list."""
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(rows.copy_id)
+        ctx.db.add(PriceItem(desk_id=rows.desk_id, item_id=item_id, copy_id=rows.copy_id, title=title,
+                             unit_cents=unit_cents))
+
+
+async def test_the_catalog_follows_the_price_list(app, client):
+    copy, stranger = await visitor_of(app, client)
+    owner_id = await owner_session_id(client, copy.owner)
+    owner = await context_of(client, owner_id, copy.owner, desk_id=copy.desk_id)
+    assert catalog_of(owner) == catalog_of(await context_of(client, stranger.session_id, stranger.headers))
+    # an item the Desk starts selling is in the next read, in ID order, and its price is not
+    await add_price_item(app, copy, "camera", "Sewer camera inspection", 30_000)
+    seen = await context_of(client, stranger.session_id, stranger.headers)
+    assert [(claim.key, claim.value) for claim in catalog_of(seen).claims] == [
+        ("camera", "Sewer camera inspection"), *RIVERA_CATALOG]
+    assert not re.search(r"\d", catalog_of(seen).model_dump_json())
+    owner = await context_of(client, owner_id, copy.owner, desk_id=copy.desk_id)
+    assert catalog_of(owner) == catalog_of(seen)
+
+
+async def test_a_desk_that_sells_nothing_has_no_catalog(app, client):
+    rows = await desk_with(app, [], [])
+    visitor = await open_visitor(client, rows)
+    assert "catalog" not in fact_ids((await context_of(client, visitor.session_id, visitor.headers)).facts)
+    # each Desk names only its own items: a second Desk of the copy still sells nothing
+    second = await add_desk(app, rows, [], [])
+    await add_price_item(app, rows, "drain", "Drain clearing", 18_000)
+    seen = await context_of(client, visitor.session_id, visitor.headers)
+    assert [(claim.key, claim.value) for claim in catalog_of(seen).claims] == [("drain", "Drain clearing")]
+    other = await context_of(client, rows.owner_session_id, rows.owner, desk_id=second)
+    assert "catalog" not in fact_ids(other.facts)
+
+
+async def test_an_item_no_claim_can_name_stays_out_of_the_catalog(app, client):
+    # "hours" is a valid item ID but never a claim key (the hours live in the Desk's windows), so
+    # the catalog leaves that item out rather than fail the whole context
+    copy, stranger = await visitor_of(app, client)
+    await add_price_item(app, copy, "hours", "Hourly labor", 12_000)
+    seen = await context_of(client, stranger.session_id, stranger.headers)
+    assert [(claim.key, claim.value) for claim in catalog_of(seen).claims] == RIVERA_CATALOG
+
+
+async def test_a_visiting_agent_reads_the_catalog(app, client):
+    # agent sessions arrive with Plan 01c, so this reads the context a stored agent session is given;
+    # an agent reads public facts, the catalog among them
+    copy, stranger = await visitor_of(app, client)
+    agent_id = auth.new_session_id()
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        session_row = ActorSession(session_id=agent_id, copy_id=copy.copy_id, desk_id=copy.desk_id, kind="agent",
+                                   agent_key_id="agentkey-1", created_at=ctx.clock.now())
+        ctx.db.add(session_row)
+        await ctx.db.flush()
+        desk_row = (await ctx.db.scalars(ctx.repo.scoped(select(Desk).where(Desk.desk_id == copy.desk_id)))).one()
+        assert labels.can_read(["public"], labels.session_readers(session_row))
+        seen = await context.session_context(ctx, principal_for(session_row), session_row, desk_row)
+    assert catalog_of(seen) == catalog_of(await context_of(client, stranger.session_id, stranger.headers))
+    assert fact_ids(seen.facts) == PUBLIC_CHARTER
