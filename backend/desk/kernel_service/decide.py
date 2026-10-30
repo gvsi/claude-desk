@@ -377,8 +377,10 @@ def normalized_action(row: ActionRow) -> NormalizedAction:
 
 
 async def decision_contract(ctx: KernelCtx, row: DecisionRow, *, inbox: Sequence[InboxNotice] = ()) -> Decision:
-    """The `Decision` a stored row answers with. `inbox` holds the alerts the call that created it
-    wrote; a decision read back later carries none."""
+    """The `Decision` a stored row answers with. `answers` are the owner's choices on a held
+    request, so they are listed while it is `held` and in no other state (the row keeps what it
+    was offered). `inbox` holds the alerts the call that created it wrote; a decision read back
+    later carries none."""
     action = None
     if row.action_id is not None:
         action_row = (await ctx.db.scalars(ctx.repo.scoped(
@@ -387,7 +389,8 @@ async def decision_contract(ctx: KernelCtx, row: DecisionRow, *, inbox: Sequence
     return Decision(decision_id=row.decision_id, session_id=row.session_id, call_id=row.call_id, action=action,
                     outcome=row.outcome, state=row.state, policy_version=row.policy_version,
                     policy_ids=row.policy_ids, card_ids=row.card_ids, review=row.review,
-                    reason_plain=row.reason_plain, visitor_plain=row.visitor_plain, answers=row.answers,
+                    reason_plain=row.reason_plain, visitor_plain=row.visitor_plain,
+                    answers=row.answers if row.state == "held" else [],
                     expires_at=row.expires_at, inbox=list(inbox), ledger_seq=row.ledger_seq,
                     signature=row.signature or "")
 

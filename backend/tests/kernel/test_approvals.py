@@ -11,17 +11,19 @@ does, and reads the outcome back through `GET /decisions/{decision_id}` and the 
 import asyncio
 import logging
 import re
+from typing import get_args
 
 import httpx
 import pytest
 from fastapi import FastAPI
 from sqlalchemy import select
 
-from desk.contracts import ApprovalResult, Decision, ExecResult, PolicyVersion, Principal, Review, RuleCard
+from desk.contracts import (ApprovalResult, Decision, DecisionState, ExecResult, PolicyVersion, Principal, Review,
+                            RuleCard)
 from desk.db.models import Action, ActorSession, Approval, Booking, Execution, Person, Quote
 from desk.db.models import Decision as DecisionRow
 from desk.kernel_service import activation, adapters, approvals, compiler, demo_inbox, desks, execute
-from desk.kernel_service.adapters.base import AdapterRefusal, AdapterResult
+from desk.kernel_service.adapters.base import AdapterFailure, AdapterRefusal, AdapterResult, AdapterUnknown
 from desk.kernel_service.repo import new_id
 from desk.kernel_service.seed import RIVERA_CARDS
 
@@ -29,8 +31,8 @@ from .fakes import FakeAdapter
 from .helpers import CopyRows, activate_cards, kernel_ctx, ledger_rows, rows_of, verify_session
 from .test_adapters import Rivera, add_slot, book, local, quote_args, rivera, visitor_of
 from .test_compiler import card
-from .test_decide import (Visitor, decided, desk_with, open_visitor, payment_link, priced, set_mode, set_session,
-                          verify_signature)
+from .test_decide import (Visitor, by_call, decided, desk_with, open_visitor, payment_link, priced, set_mode,
+                          set_session, verify_signature)
 from .test_execute import activate, change_records, committed, reservations
 
 
@@ -713,6 +715,66 @@ async def test_deny_once_and_cancel(app, client, frozen_clock):
     assert refusals == [{"decision_id": d.decision_id, "cancel_refused": state}
                         for d, state in ((second, "cancelled"), (held, "denied"), (allowed, "expired"),
                                          (late, "expired"))]
+
+
+ENDINGS = {   # how the adapter ends an approved hold in each state
+    "executed": {},
+    "failed": {"execute": AdapterFailure("slot_taken")},
+    "unknown": {"execute": RuntimeError("the provider's answer was lost"), "reconcile": AdapterUnknown("no word yet")},
+    "refused_at_execution": {"prepare": AdapterRefusal("no room")},
+}
+
+
+async def read_back(client: httpx.AsyncClient, rows: CopyRows, visitor: Visitor, decision: Decision) -> list[Decision]:
+    """The decision read again by ID, by the owner and by its session, and by call."""
+    response = await by_call(client, visitor.session_id, decision.call_id, visitor.headers)
+    assert response.status_code == 200, response.text
+    return [await read_id(client, rows.owner, decision.decision_id),
+            await read_id(client, visitor.headers, decision.decision_id), Decision.model_validate(response.json())]
+
+
+@pytest.mark.parametrize("state", [state for state in get_args(DecisionState) if state != "held"])
+async def test_only_a_held_decision_lists_answers(app, client, registry, frozen_clock, state):
+    # `answers` is the owner's choice on a held request (the contract: "held only"); in any other
+    # state there is none, whether the call that moved it there answers or a later read does
+    quote, slots = FakeAdapter("native.quote"), FakeAdapter("native.find_slots", effects=["read"])
+    rows = await desk_with(app, [quote, slots], [*ASK_QUOTES, card("slots", "native.find_slots")])
+    visitor, held = await held_on(client, rows)
+    assert held.answers == ["allow_once", "deny_once", "deny_always"]
+    if state == "approved":                                     # read while the approved action runs
+        running, release = asyncio.Event(), asyncio.Event()
+
+        async def run(xctx, action, args) -> AdapterResult:
+            running.set()
+            await release.wait()
+            return AdapterResult(model_view={"ok": True})
+
+        quote.script["execute"] = run
+        answering = asyncio.create_task(post_answer(client, rows.owner, held.decision_id, "allow_once"))
+        await asyncio.wait_for(running.wait(), 10)
+        decision = await read_id(client, rows.owner, held.decision_id)
+        reads = await read_back(client, rows, visitor, decision)
+        release.set()
+        assert (await asyncio.wait_for(answering, 10)).status_code == 200
+    else:
+        if state == "allowed":
+            decision = await decided(client, visitor, "native.find_slots", call_id="call-2")
+        elif state == "refused":
+            decision = await decided(client, visitor, "native.transfer_funds", call_id="call-2")
+        elif state == "denied":
+            decision = (await answered(client, rows.owner, held.decision_id, "deny_once")).decision
+        elif state == "expired":
+            frozen_clock.advance(24 * 3600)
+            decision = await read_id(client, rows.owner, held.decision_id)
+        elif state == "cancelled":
+            response = await post_cancel(client, visitor, held.decision_id)
+            assert response.status_code == 200, response.text
+            decision = Decision.model_validate(response.json())
+        else:
+            quote.script.update(ENDINGS[state])
+            decision = (await answered(client, rows.owner, held.decision_id, "allow_once")).decision
+        reads = await read_back(client, rows, visitor, decision)
+    assert [(d.state, d.answers) for d in (decision, *reads)] == [(state, [])] * 4
 
 
 async def set_binding(app: FastAPI, copy_id: str, approval_id: str, binding: str) -> None:
