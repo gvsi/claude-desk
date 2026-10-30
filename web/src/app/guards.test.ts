@@ -65,7 +65,8 @@ const TAG_PART = String.raw`(?:[^<>{}]|\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*\})
 // action that can't be taken at all, which a button that can be pressed and spin isn't.
 const BUSY_AND_DISABLED = new RegExp(String.raw`<Button\b(?=${TAG_PART}*?\sbusy=)(?=${TAG_PART}*?\sdisabled=)${TAG_PART}*>`);
 
-// The owner sidebar's look, which every owner page leaves to AppShell's default (the Today look).
+// The owner sidebar's look. AppShell has had no sidebar look since #26; this keeps any page from
+// passing one, even in a spread.
 const SIDEBAR_LOOK = /\bsidebarLook\b/;
 
 // Formatting money or dates: the visitor's page shows only what the kernel rendered.
@@ -234,8 +235,9 @@ describe('app source guards', () => {
   });
 
   it('no_page_sets_the_sidebar_look', () => {
-    // The owner's decision: the sidebar looks the same on every owner page, so nothing outside the
-    // design system passes `sidebarLook`, tests and the mock included.
+    // The owner's decision: the sidebar looks the same on every owner page. AppShell has taken no
+    // `sidebarLook` since #26, and no file outside the design system passes one, tests and the mock
+    // included, even in a spread.
     expect(hits(SIDEBAR_LOOK, sample('<AppShell sidebar={sidebar} sidebarLook="ground">'))).toHaveLength(1);
     expect(hits(SIDEBAR_LOOK, sample("<AppShell {...{ sidebarLook: 'panel' }} />"))).toHaveLength(1);
     expect(hits(SIDEBAR_LOOK, sample('<AppShell sidebar={sidebar} business={name}>'))).toEqual([]);

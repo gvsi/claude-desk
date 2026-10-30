@@ -71,9 +71,12 @@ export interface VisitorChatActions {
 export type VisitorChatView = VisitorChatSnapshot & VisitorChatActions;
 
 /**
- * The visitor's session with `slug`'s Desk: the browser's own when it has one, else a new one. With
- * `previewDeskId`, the owner's preview of that Desk, which the API grants only to the owner of its
- * copy; for anyone else it fails, and a plain chat opens instead.
+ * Opens a session with `slug`'s Desk. Without `previewDeskId`, the API resumes the chat the browser's
+ * visitor cookie names, or opens a new one when there is none. With `previewDeskId`, it always opens a
+ * new owner's preview of that Desk (`openPreview` never resumes one), which the API grants only to
+ * the owner of its copy; for anyone else it fails, and a plain chat opens instead. So a caller with a
+ * preview reads `visitorSession` first and comes here only when the browser has no chat yet, as
+ * `openChat` does; otherwise each load would start another preview.
  */
 export async function ensureSession(slug: string, previewDeskId?: string): Promise<VisitorSession> {
   if (previewDeskId !== undefined && previewDeskId !== '') {

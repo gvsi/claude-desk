@@ -279,7 +279,10 @@ describe('the dev server mock', () => {
     expect(value).not.toBe(firstValue);
     expect(line).toBe(`desk_owner=${value ?? ''}; Path=/api/owner; Max-Age=604800; HttpOnly; SameSite=Strict`);
 
-    // The next `me` names the new copy, and the old cookie names nothing any more.
+    // The next `me` names the new copy, and the old cookie names nothing any more. That last part is
+    // the mock's, not the API's: the mock replaces the copy in place, so it drops the old cookie, which
+    // would otherwise name the new copy. The API's start over leaves the old copy as it is and only
+    // moves the cookie on, so there the old cookie still names the old copy.
     expect((await tab.json<CopyOut>('GET', apiPath('me', {}))).copy_id).toBe(fresh.copy_id);
     const stale = await api.handle(new Request(new URL(apiPath('me', {}), ORIGIN), { headers: { cookie: `desk_owner=${firstValue ?? ''}` } }));
     expect([stale.status, await stale.json()]).toEqual([401, { error: 'no_owner_session' }]);
