@@ -1,0 +1,322 @@
+/* Safety: the title with what is held for the owner at its right, this week's count in serif, then
+   a bar between hairlines with the record's check filling it from the left, its signing key at
+   the end, and the view at the right. Under it, the list (the attempts with their filters, or
+   every entry of the record) and, from 1280 px, the open attempt or entry in a 360 px column
+   beside it; under that width the column stacks under the list. A failed read's line sits first,
+   over what was read before. Positioned, so the visually hidden words in each attempt's checkpoint
+   line sit inside it: with no positioned ancestor they would sit against the window, and below the
+   wide layout, deep in the scrolled page, they would stretch the window, so picking an attempt
+   would scroll the window and push the app shell's bars off the top. */
+
+.cd-safety {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20);
+  min-width: 0;
+}
+
+.cd-safety__headline {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.cd-safety__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-12) var(--space-16);
+  padding: var(--space-12) 0;
+  border-top: 1px solid var(--line-hairline);
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+/* Grows to fill the bar beside the view, so the check's signing key reaches the end of it. A failed
+   read's line sits over the check. */
+.cd-safety__chain {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+.cd-safety__loading {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cd-safety__split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-24);
+  align-items: start;
+}
+
+/* 360 px: the illustration column's 400, less the page gutter. */
+@media (min-width: 1280px) {
+  .cd-safety__split {
+    grid-template-columns: minmax(0, 1fr) calc(var(--size-intro-illustration) - var(--space-40));
+  }
+}
+
+.cd-safety__beside {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+  min-width: 0;
+}
+
+/* The open attempt takes focus when the owner picks a row: its outline follows the card, and it
+   scrolls into view with a little room above it. */
+.cd-safety__opened {
+  border-radius: var(--radius-card);
+  scroll-margin-top: var(--space-16);
+}
+
+.cd-safety__opened:focus:not(:focus-visible) {
+  outline: none;
+}
+
+.cd-safety__hint {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+/* Every entry: a quiet column head, then one row button per entry in four columns: the number,
+   what it records (with the replayed label under it), who wrote it and when, at the right. The
+   head and every row share the record's columns as subgrids, so each head sits over its column
+   and the time column fits the widest time. The open entry is on the selected fill. On a phone
+   the origin and time go under the words. */
+
+.cd-record {
+  display: grid;
+  grid-template-columns: var(--space-40) minmax(0, 1fr) minmax(0, 1fr) auto;
+  column-gap: var(--space-12);
+  min-width: 0;
+}
+
+.cd-record__head,
+.cd-record__list,
+.cd-record__list > li,
+.cd-record__row {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+}
+
+.cd-record__head,
+.cd-record__row {
+  align-items: center;
+  padding: var(--space-8) var(--space-10);
+}
+
+.cd-record__head {
+  border-bottom: 1px solid var(--line-hairline);
+  color: var(--text-secondary);
+}
+
+.cd-record__head-when {
+  text-align: end;
+}
+
+.cd-record__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cd-record__row {
+  width: 100%;
+  min-height: calc(var(--size-control) + var(--space-8));
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition: background-color var(--motion-instant) var(--motion-ease);
+}
+
+.cd-record__row:hover {
+  background: var(--fill-hover);
+}
+
+.cd-record__row[aria-expanded='true'],
+.cd-record__row[aria-expanded='true']:hover {
+  background: var(--bg-selected);
+}
+
+.cd-record__seq,
+.cd-record__when {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.cd-record__when {
+  text-align: end;
+  white-space: nowrap;
+}
+
+.cd-record__what {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.cd-record__replayed,
+.cd-record__who {
+  color: var(--text-secondary);
+}
+
+@media (max-width: 639.98px) {
+  .cd-record {
+    grid-template-columns: var(--space-40) minmax(0, 1fr);
+  }
+
+  .cd-record__head {
+    display: none;
+  }
+
+  .cd-record__row {
+    row-gap: var(--space-2);
+  }
+
+  .cd-record__who,
+  .cd-record__when {
+    grid-column: 2;
+    text-align: start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cd-record__row {
+    transition: none;
+  }
+}
+
+/* The attempts: the filters, then the rows, divided by nothing but their own padding. */
+
+.cd-attempts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  min-width: 0;
+}
+
+.cd-attempts__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* An attempt open beside the list: its status, category and time on one line, the reason in
+   serif, what the stop means and where the entry came from; then Claude's summary and the two
+   tiers that open on request, each part after a hairline. */
+
+.cd-attempt {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+  min-width: 0;
+}
+
+.cd-attempt p {
+  margin: 0;
+}
+
+.cd-attempt__status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4) var(--space-10);
+  color: var(--text-primary);
+}
+
+.cd-attempt__category {
+  color: var(--text-secondary);
+}
+
+.cd-attempt__when {
+  margin-inline-start: auto;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.cd-attempt__what {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.cd-attempt__reason {
+  color: var(--text-primary);
+}
+
+.cd-attempt__claim {
+  color: var(--text-primary);
+}
+
+.cd-attempt__origin,
+.cd-attempt__label {
+  color: var(--text-secondary);
+}
+
+.cd-attempt__part {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-8);
+  padding-top: var(--space-16);
+  border-top: 1px solid var(--line-hairline);
+}
+
+.cd-attempt__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+  min-height: var(--size-control);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+/* The chevron points right while the part is closed, down once it is open. */
+.cd-attempt__toggle[aria-expanded='false'] .cd-attempt__chevron {
+  transform: rotate(-90deg);
+}
+
+.cd-attempt__more {
+  align-self: stretch;
+  min-width: 0;
+  padding-inline-start: var(--space-20);
+}
+
+/* The trace keeps the column's full width: its record needs the room more than the indent. */
+.cd-attempt__more--trace {
+  padding-inline-start: 0;
+}
+
+.cd-attempt__more[hidden] {
+  display: none;
+}
+
+.cd-attempt__missing {
+  color: var(--text-secondary);
+}
+
+.cd-attempts__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  padding-bottom: var(--space-12);
+  border-bottom: 1px solid var(--line-hairline);
+}

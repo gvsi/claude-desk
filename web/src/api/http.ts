@@ -1,0 +1,338 @@
+/**
+ * The one way the app talks to the API. It sends JSON with the browser's own same-origin
+ * credentials and nothing else: the API keeps identity in HttpOnly cookies, so no code here reads
+ * or sets one. An answer body is read only into typed fields; server text never reaches a screen.
+ * Errors fail closed: anything this layer can't read as a clear answer is an `ApiError`.
+ */
+import { UNREACHABLE_COPY, errorCopy } from '../ds/index.ts';
+import { KERNEL_ERROR_CODES, type Decision, type KernelErrorCode, type PaymentLinkState } from './contracts.ts';
+import {
+  ROUTES,
+  apiPath,
+  type HttpMethod,
+  type RouteBody,
+  type RouteKey,
+  type RouteParams,
+  type RouteQuery,
+  type RouteResponse,
+  type RouteSpec,
+} from './routes.ts';
+import type { RulesDraft } from './views.ts';
+
+/** How long one request may take: a Claude turn longer, a proving route past the API's 25 s hold. */
+export const TIMEOUT_MS = { default: 10_000, model: 45_000, proving: 30_000 } as const;
+
+/** A proving route's 202 is retried this often, and given up this long after the first send. */
+export const PROVING_RETRY_MS = 3_000;
+export const PROVING_GIVE_UP_MS = 60_000;
+
+/** Retries of a proving route may only go back to a proving route. */
+const PROVING_PREFIX = '/api/owner/policy/';
+
+export type ApiErrorKind =
+  | 'unauthorized'
+  | 'conflict'
+  | 'unprocessable'
+  | 'not_found'
+  | 'rate_limited'
+  | 'unavailable'
+  | 'network';
+
+interface ApiErrorInit {
+  route: RouteKey;
+  method: HttpMethod;
+  status: number | null;
+  code?: string | null;
+  retryAfter?: number | null;
+  decision?: Decision | null;
+  state?: PaymentLinkState | null;
+  draft?: RulesDraft | null;
+  capCents?: number | null;
+}
+
+/** A request that didn't come back as a clear answer. Its message is its kind, never server text. */
+export class ApiError extends Error {
+  readonly kind: ApiErrorKind;
+  readonly route: RouteKey;
+  readonly method: HttpMethod;
+  /** The HTTP status, or null when no answer arrived. */
+  readonly status: number | null;
+  /** The body's `code` when `error` is "kernel", else its `error`: a snake_case word, or null. */
+  readonly code: string | null;
+  /** Seconds, from a 429's `retry_after`. */
+  readonly retryAfter: number | null;
+  /** A 409's final decision (an answer that came too late). */
+  readonly decision: Decision | null;
+  /** A 409's current payment link state. */
+  readonly state: PaymentLinkState | null;
+  /** A 409's fresh rules draft (the rules changed since the draft). */
+  readonly draft: RulesDraft | null;
+  /** A 422's `cap_cents`: the limit for taking money without asking that a draft went over. */
+  readonly capCents: number | null;
+
+  constructor(kind: ApiErrorKind, init: ApiErrorInit) {
+    super(kind);
+    this.name = 'ApiError';
+    this.kind = kind;
+    this.route = init.route;
+    this.method = init.method;
+    this.status = init.status;
+    this.code = init.code ?? null;
+    this.retryAfter = init.retryAfter ?? null;
+    this.decision = init.decision ?? null;
+    this.state = init.state ?? null;
+    this.draft = init.draft ?? null;
+    this.capCents = init.capCents ?? null;
+  }
+}
+
+/**
+ * A write whose answer was lost (no answer, a timeout or a 5xx) may have been applied, so a screen
+ * reads the current state before saying it wasn't done.
+ */
+export function isUncertain(err: unknown): boolean {
+  return err instanceof ApiError && err.method !== 'GET' && (err.kind === 'network' || err.kind === 'unavailable');
+}
+
+/** What the owner reads when a request fails, by kind. */
+export const OWNER_ERROR_COPY: Readonly<Record<ApiErrorKind, string>> = {
+  unauthorized: 'Your demo session ended. Enter the passcode to start a fresh copy.',
+  conflict: errorCopy('conflict'),
+  unprocessable: errorCopy('invalid'),
+  not_found: errorCopy('not_found'),
+  rate_limited: "That's a lot of requests at once. Wait a moment, then try again.",
+  unavailable: UNREACHABLE_COPY.en,
+  network: "We couldn't reach Claude Desk. Check your connection, then try again.",
+};
+
+export const RULES_UNAVAILABLE_COPY =
+  "Rules can't be checked right now, so this change can't be applied yet. Your current rules stay in place.";
+
+const KERNEL_CODES: ReadonlySet<string> = new Set(KERNEL_ERROR_CODES);
+
+/** The owner's line for any failure: rules that can't be checked, a kernel code, else the kind. */
+export function ownerErrorCopy(err: unknown): string {
+  if (!(err instanceof ApiError)) return OWNER_ERROR_COPY.unavailable;
+  if (err.code === 'rules_cannot_be_checked') return RULES_UNAVAILABLE_COPY;
+  if (err.code !== null && KERNEL_CODES.has(err.code)) return errorCopy(err.code as KernelErrorCode);
+  return OWNER_ERROR_COPY[err.kind];
+}
+
+// Seeing requests: the providers end the owner's session on a 401, once one has succeeded.
+
+export type RequestOutcome = { key: RouteKey; ok: true } | { key: RouteKey; ok: false; error: ApiError };
+
+const observers = new Set<(outcome: RequestOutcome) => void>();
+
+/** Calls `listener` after every request settles. Returns the function that stops it. */
+export function observeRequests(listener: (outcome: RequestOutcome) => void): () => void {
+  observers.add(listener);
+  return () => {
+    observers.delete(listener);
+  };
+}
+
+function notify(outcome: RequestOutcome): void {
+  for (const listener of observers) {
+    try {
+      listener(outcome);
+    } catch {
+      // An observer never changes a request's result.
+    }
+  }
+}
+
+// Options
+
+type HasKeys<T> = keyof T extends never ? false : true;
+
+/** `params` when the path has placeholders and `body` when the route takes one, each typed. */
+export type RequestOptions<K extends RouteKey> = { query?: RouteQuery } & (HasKeys<RouteParams<K>> extends true
+  ? { params: RouteParams<K> }
+  : { params?: undefined }) &
+  (RouteBody<K> extends undefined ? { body?: undefined } : { body: RouteBody<K> });
+
+type RequestArgs<K extends RouteKey> = Record<string, never> extends RequestOptions<K>
+  ? [opts?: RequestOptions<K>]
+  : [opts: RequestOptions<K>];
+
+// Reading answers
+
+interface Answer {
+  status: number;
+  /** The parsed JSON body, or undefined when there was none or it wasn't JSON. */
+  body: unknown;
+  /** True when a body was present but wasn't JSON. */
+  unreadable: boolean;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+const CODE = /^[a-z][a-z0-9_]{0,63}$/;
+
+function codeOf(body: Record<string, unknown>): string | null {
+  const raw = body.error === 'kernel' ? body.code : body.error;
+  return typeof raw === 'string' && CODE.test(raw) ? raw : null;
+}
+
+function retryAfterOf(body: Record<string, unknown>): number | null {
+  const value = body.retry_after;
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function decisionOf(value: unknown): Decision | null {
+  return isRecord(value) && typeof value.decision_id === 'string' && typeof value.state === 'string'
+    ? (value as unknown as Decision)
+    : null;
+}
+
+/** Every `PaymentLinkState`; a state added to the contract fails to compile until it is listed. */
+const paymentLinkStates = {
+  issued: true,
+  paid: true,
+  expired: true,
+  cancelled: true,
+  unknown: true,
+} as const satisfies Record<PaymentLinkState, true>;
+const PAYMENT_LINK_STATES: ReadonlySet<string> = new Set(Object.keys(paymentLinkStates));
+
+function stateOf(value: unknown): PaymentLinkState | null {
+  return typeof value === 'string' && PAYMENT_LINK_STATES.has(value) ? (value as PaymentLinkState) : null;
+}
+
+function draftOf(value: unknown): RulesDraft | null {
+  return isRecord(value) && typeof value.version === 'number' && Array.isArray(value.cards) ? (value as unknown as RulesDraft) : null;
+}
+
+function capCentsOf(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+function kindOf(status: number): ApiErrorKind {
+  if (status === 401) return 'unauthorized';
+  if (status === 404) return 'not_found';
+  if (status === 409) return 'conflict';
+  if (status === 429) return 'rate_limited';
+  // 422 and any other client error: the request itself can't be done as sent.
+  if (status >= 400 && status < 500) return 'unprocessable';
+  return 'unavailable';
+}
+
+function errorFrom(key: RouteKey, method: HttpMethod, answer: Answer): ApiError {
+  const body = isRecord(answer.body) ? answer.body : {};
+  const conflict = answer.status === 409;
+  return new ApiError(kindOf(answer.status), {
+    route: key,
+    method,
+    status: answer.status,
+    code: codeOf(body),
+    retryAfter: retryAfterOf(body),
+    decision: conflict ? decisionOf(body.decision) : null,
+    state: conflict ? stateOf(body.state) : null,
+    draft: conflict ? draftOf(body.draft) : null,
+    capCents: answer.status === 422 ? capCentsOf(body.cap_cents) : null,
+  });
+}
+
+/** One fetch with its own timeout; a failure to get any answer is `network`. */
+async function send(key: RouteKey, method: HttpMethod, path: string, body: unknown, timeoutMs: number): Promise<Answer> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Math.max(0, timeoutMs));
+  try {
+    const headers: Record<string, string> = { Accept: 'application/json' };
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    const res = await fetch(path, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      credentials: 'same-origin',
+      signal: controller.signal,
+    });
+    const text = await res.text();
+    if (text === '') return { status: res.status, body: undefined, unreadable: false };
+    try {
+      return { status: res.status, body: JSON.parse(text) as unknown, unreadable: false };
+    } catch {
+      return { status: res.status, body: undefined, unreadable: true };
+    }
+  } catch {
+    throw new ApiError('network', { route: key, method, status: null });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function timeoutFor(route: RouteSpec): number {
+  if (route.proving) return TIMEOUT_MS.proving;
+  if (route.model) return TIMEOUT_MS.model;
+  return TIMEOUT_MS.default;
+}
+
+/** The retry path, resolved and checked to stay a proving route on this origin, else null. */
+function provingRetryPath(value: unknown): string | null {
+  if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//')) return null;
+  const base = 'http://desk.invalid';
+  let url: URL;
+  try {
+    url = new URL(value, base);
+  } catch {
+    return null;
+  }
+  if (url.origin !== base || !url.pathname.startsWith(PROVING_PREFIX)) return null;
+  return `${url.pathname}${url.search}`;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * A proving route answered 202: post the retry's body to its path every 3 s until something other
+ * than a 202 comes back, and give up as `rules_cannot_be_checked` a minute after the first send.
+ */
+async function followRetry(key: RouteKey, first: Answer, startedAt: number): Promise<Answer> {
+  const deadline = startedAt + PROVING_GIVE_UP_MS;
+  const giveUp = () => new ApiError('unavailable', { route: key, method: 'POST', status: null, code: 'rules_cannot_be_checked' });
+  let answer = first;
+  while (answer.status === 202) {
+    const retry = isRecord(answer.body) && isRecord(answer.body.retry) ? answer.body.retry : null;
+    const path = retry ? provingRetryPath(retry.path) : null;
+    if (retry === null || path === null) throw new ApiError('unavailable', { route: key, method: 'POST', status: 202 });
+    const wait = Math.min(PROVING_RETRY_MS, deadline - Date.now());
+    if (wait > 0) await sleep(wait);
+    if (Date.now() >= deadline) throw giveUp();
+    try {
+      answer = await send(key, 'POST', path, retry.body, Math.min(TIMEOUT_MS.proving, deadline - Date.now()));
+    } catch (err) {
+      if (Date.now() >= deadline) throw giveUp();
+      throw err;
+    }
+  }
+  return answer;
+}
+
+/**
+ * Sends `key`'s request and resolves to its answer: the JSON body, or undefined for an empty 202
+ * or a 204. Rejects with an `ApiError` for anything else.
+ */
+export async function request<K extends RouteKey>(key: K, ...[opts]: RequestArgs<K>): Promise<RouteResponse<K>> {
+  const route: RouteSpec = ROUTES[key];
+  const options = (opts ?? {}) as { params?: RouteParams<K>; query?: RouteQuery; body?: unknown };
+  try {
+    const path = apiPath(key, options.params ?? ({} as RouteParams<K>), options.query);
+    const startedAt = Date.now();
+    let answer = await send(key, route.method, path, options.body, timeoutFor(route));
+    if (answer.status === 202 && route.proving) answer = await followRetry(key, answer, startedAt);
+    if (answer.status < 200 || answer.status > 299) throw errorFrom(key, route.method, answer);
+    // A body that isn't JSON, or none where only a 202 or 204 may answer without one, isn't an answer.
+    const empty = answer.body === undefined && answer.status !== 202 && answer.status !== 204;
+    if (answer.unreadable || empty) throw new ApiError('unavailable', { route: key, method: route.method, status: answer.status });
+    notify({ key, ok: true });
+    return answer.body as RouteResponse<K>;
+  } catch (err) {
+    if (err instanceof ApiError) notify({ key, ok: false, error: err });
+    throw err;
+  }
+}
