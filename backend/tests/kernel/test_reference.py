@@ -206,7 +206,8 @@ def test_reference_agrees_on_joint_coverage_and_default_asks():
     assert '@id("auto.verified-changes")' in verified_changes.R
     # one joint permit, listing both cards, and no permit of either card's own for the refund tool
     joint = reference.reference_sets(JOINT_SETS["joint autos take the tightest limits"], schema)
-    assert re.findall(r'@id\("([^"]+)"\)', joint.R) == ["auto.private-verified+refunds"]
+    assert re.findall(r'@id\("([^"]+)"\)', joint.R) == ["auto.preset-start-verification",   # always on
+                                                         "auto.private-verified+refunds"]
     assert '@card("private-verified,refunds")' in joint.R and "context.amount_cents <= 5000" in joint.R
 
 

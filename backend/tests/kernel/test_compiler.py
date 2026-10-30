@@ -17,7 +17,7 @@ import desk_kernel
 import pytest
 
 from desk.contracts import HoursWindow, ReviewThresholds, RuleCard, ToolName, ToolProfile
-from desk.kernel_service import compiler, review_thresholds
+from desk.kernel_service import compiler, reference, review_thresholds
 from desk.kernel_service.seed import RIVERA_CARDS
 from desk.presets import PRESETS
 
@@ -178,7 +178,10 @@ def test_uncovered_tools_get_a_default_ask():
     cards = [card("slots", "native.find_slots")]
     with_defaults = compiler.with_defaults(cards, NATIVE)
     defaults = {c.card_id: c for c in with_defaults if c.is_default}
-    assert set(defaults) == {f"default:{tool}" for tool in NATIVE_TOOLS if tool != "native.find_slots"}
+    # verification is always on: its card is added to the set, so its tool gets no default ask
+    assert set(defaults) == {f"default:{tool}" for tool in NATIVE_TOOLS
+                             if tool not in ("native.find_slots", "native.start_verification")}
+    assert [c.card_id for c in with_defaults if not c.is_default] == ["preset-start-verification", "slots"]
     assert defaults["default:native.book"] == RuleCard(
         card_id="default:native.book", applies_to="native.book", mode="ask", who="anyone", is_default=True,
         reason="Not covered by a rule yet, so it asks you.")
@@ -319,6 +322,7 @@ def test_joint_effect_autos_take_the_tightest_limits():
     compiled = compile_at(cards, profiles)
     autos = policies(compiled.A)
     assert [(p[0], p[1], p[3]) for p in autos] == [
+        ("auto.preset-start-verification", "preset-start-verification", "native.start_verification"),   # always on
         ("auto.private-verified+refunds", "private-verified,refunds", "effect:private_data,effect:pay_out")]
     assert "principal.verified" in compiled.A and "context.amount_cents <= 5000" in compiled.A
     assert "twin.private-verified+refunds" in compiled.H
@@ -559,6 +563,35 @@ def test_the_shipped_verification_card_stays_as_it_is():
         changed = RuleCard.model_validate({**shipped.model_dump(), **change})
         assert errors(changed) == [f"{changed.card_id}: {ALWAYS_ON}"], change
         assert errors(*others, changed) == [f"{changed.card_id}: {ALWAYS_ON}"], change   # in place of the shipped one
+
+
+def test_a_set_without_the_verification_card_compiles_with_it():
+    """Verification is always on, so a set can't leave it out either: one that lacks the presets'
+    card for `native.start_verification` compiles with it, never with a default ask, in the
+    compiler and in the reference generator alike. It compiles to the same Cedar as the set that
+    holds it, and a start is allowed. A set holding it with its `reason` reworded compiles as it
+    is; one holding another card under its ID can't compile at all."""
+    [shipped] = compiler.ALWAYS_ON_CARDS
+    schema = schema_for(NATIVE)
+    start = req("native.start_verification", recipient="verified_contact")
+    for cards in (PRESETS["ask_first"], PRESETS["auto"], RIVERA_CARDS, [card("book", "native.book")], []):
+        without = [c for c in cards if c != shipped]
+        compiled = compile_at(without, NATIVE)
+        assert shipped in compiled.cards
+        assert "default:native.start_verification" not in {c.card_id for c in compiled.cards}
+        assert compiled.sets() == compile_at([*without, shipped], NATIVE).sets()
+        assert reference.reference_sets(without, schema) == reference.reference_sets([*without, shipped], schema)
+        assert decide_with(without, NATIVE, start) == "allow"
+    reworded = shipped.model_copy(update={"reason": "Anyone can get a code sent to the contact on record."})
+    assert [c for c in compile_at([reworded], NATIVE).cards if not c.is_default] == [reworded]
+    assert reference.reference_sets([reworded], schema) == reference.reference_sets([shipped], schema)
+    changed = shipped.model_copy(update={"mode": "ask"})
+    with pytest.raises(ValueError):
+        compile_at([changed], NATIVE)
+    with pytest.raises(ValueError):
+        reference.reference_sets([changed], schema)
+    [own] = reference.ALWAYS_ON_CARDS                     # the reference states it apart: the same rule
+    assert own.model_copy(update={"reason": shipped.reason}) == shipped
 
 
 AGENT = {"agent_key_id": "agent-key-1"}

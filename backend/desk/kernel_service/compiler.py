@@ -141,6 +141,8 @@ def invariants_sha256(checks: Iterable[str], auto_money_cap_cents: int) -> str:
 #   tools, each as its scope on the shared tools and its who: a card "matches" a request when it
 #   covers the tool and its who holds, a combination when all its cards' who hold. Autos at the
 #   same specificity add up. `A` is evaluated before `H`, so a broader ask needs no exclusion.
+# - A set that lacks one of the presets' `ALWAYS_ON_CARDS` gets it before the defaults are
+#   derived, so a start of the always-on verification never falls to a default ask.
 # - Every enabled tool that cards for anyone don't cover (alone or jointly, any mode) gets a
 #   default ask, so a card for some visitors never leaves the others refused.
 
@@ -155,7 +157,8 @@ _DAY_NUMBERS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun
 @dataclass(frozen=True)
 class CompiledSets:
     """A compiled card set: the Cedar texts of `F` (never cards), `A` (auto cards) and `H` (ask
-    cards, defaults included, and hold twins), and the cards with defaults, sorted by `card_id`."""
+    cards, defaults included, and hold twins), and the cards as compiled (`with_defaults`: with
+    the always-on cards and the defaults), sorted by `card_id`."""
 
     F: str
     A: str
@@ -230,10 +233,15 @@ def _anyone_covers(tool: str, effects: frozenset[str], cards: Sequence[RuleCard]
 
 
 def with_defaults(cards: Iterable[RuleCard], profiles: Iterable[ToolProfile]) -> list[RuleCard]:
-    """The owner's cards plus a default ask for every enabled tool that cards for anyone don't
-    cover (alone or jointly, in any mode), sorted by `card_id`. Defaults in `cards` are dropped and
-    derived again, so a stale one never survives a change of cards or tools."""
+    """The owner's cards, plus each of the presets' `ALWAYS_ON_CARDS` they lack (verification is
+    always on, so a set that leaves its card out still allows a start rather than asking), plus a
+    default ask for every enabled tool that cards for anyone don't cover (alone or jointly, in any
+    mode), sorted by `card_id`. A card that differs from an always-on card only in its `reason`
+    counts as it (`_same_rule`); another card under its ID is kept, and `compile_cards` refuses the
+    repeated ID. Defaults in `cards` are dropped and derived again, so a stale one never survives a
+    change of cards or tools."""
     owned = [c for c in cards if not c.is_default]
+    owned += [shipped for shipped in ALWAYS_ON_CARDS if not any(_same_rule(c, shipped) for c in owned)]
     effects = _tool_effects(profiles)
     defaults = [RuleCard(card_id=f"default:{tool}", applies_to=tool, mode="ask", who="anyone", is_default=True,
                          reason=DEFAULT_REASON)
@@ -248,7 +256,8 @@ ABOVE_MONEY_CAP = "above_money_cap"
 # rule can make a start ask, hold it or turn it off, so `validate_cards` refuses a card that could
 # change one, on the tool or on one of its effects (`_changes_always_on`). The presets' own card
 # for it (auto, for anyone) is that behaviour itself; every preset and the seed carry it and the
-# API drafts it back with the rest, so that card is the one allowed on the tool (`_always_on`).
+# API drafts it back with the rest, so that card is the one allowed on the tool (`_always_on`), and
+# `with_defaults` adds it to a set that leaves it out.
 ALWAYS_ON_TOOLS: frozenset[str] = frozenset({"native.start_verification"})
 ALWAYS_ON_CARDS: tuple[RuleCard, ...] = tuple(c for c in PRESETS["ask_first"] if c.applies_to in ALWAYS_ON_TOOLS)
 # Each always-on tool's effects, from its effect groups in the base schema: a card on one of them
@@ -258,11 +267,16 @@ _ALWAYS_ON_EFFECTS: dict[str, frozenset[str]] = {
     for tool in sorted(ALWAYS_ON_TOOLS)}
 
 
+def _same_rule(card: RuleCard, shipped: RuleCard) -> bool:
+    """Does `card` match `shipped` on every field but `reason`? The reason is the owner's words,
+    which compile to nothing, and a carried card may come back reworded (as
+    `desk.money_cap.lower_to_cap` allows)."""
+    return card.model_copy(update={"reason": shipped.reason}) == shipped
+
+
 def _always_on(card: RuleCard) -> bool:
-    """Is `card` one of the presets' own `ALWAYS_ON_CARDS`? Every field but `reason` must match:
-    the reason is the owner's words, which compile to nothing, and a carried card may come back
-    reworded (as `desk.money_cap.lower_to_cap` allows)."""
-    return any(card.model_copy(update={"reason": shipped.reason}) == shipped for shipped in ALWAYS_ON_CARDS)
+    """Is `card` one of the presets' own `ALWAYS_ON_CARDS` (`_same_rule`)?"""
+    return any(_same_rule(card, shipped) for shipped in ALWAYS_ON_CARDS)
 
 
 def _changes_always_on(card: RuleCard) -> str | None:
@@ -515,7 +529,8 @@ def compile_cards(cards: Iterable[RuleCard], profiles: Iterable[ToolProfile], *,
                   review: bool = True) -> CompiledSets:
     """Compiles rule cards over the enabled `profiles` into `F`, `A` and `H`, at the version's
     money cap (required, so no caller forgets it): every auto permit on a money tool bounds the
-    amount by `min(<the cards' limits>, auto_money_cap_cents, AUTO_MONEY_HARD_CAP_CENTS)`. A card
+    amount by `min(<the cards' limits>, auto_money_cap_cents, AUTO_MONEY_HARD_CAP_CENTS)`. The
+    always-on cards a set lacks are added and the default asks derived (`with_defaults`). A card
     for a tool that isn't enabled emits nothing. Cards are sorted by `card_id` and the text is
     deterministic, so the same cards compile to the same hash in every copy. `review=False` leaves
     out every review gate (`A0` for the `review_only_narrows` proof). Raises ValueError rather than

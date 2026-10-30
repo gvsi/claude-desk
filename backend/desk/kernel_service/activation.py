@@ -314,7 +314,8 @@ class VersionHashes(NamedTuple):
 
 def cards_sha256(cards: Iterable[RuleCard]) -> str:
     """sha256 of `canonical_json` of the owner's cards (defaults left out: both generators derive
-    them again from the profiles), sorted by `card_id`."""
+    them again from the profiles, and each adds the always-on cards a set lacks from the cards
+    alone), sorted by `card_id`."""
     owned = sorted((card for card in cards if not card.is_default), key=lambda card: card.card_id)
     dumped = [card.model_dump(mode="json") for card in owned]
     return hashlib.sha256(desk_kernel.canonical_json(json.dumps(dumped)).encode()).hexdigest()
@@ -790,12 +791,14 @@ async def draft(ctx: KernelCtx, owner: OwnerCtx, desk_id: str, cards: Sequence[R
     refuses at the draft's cap (an auto money card above it among them) are 422 `invalid`, with
     nothing written either way; then the cards are compiled and proved at that cap, and the
     version stores it. A draft writes nothing else: the active version and its cap stay in force
-    until the owner confirms. Default asks are dropped and derived again. A draft with the same key
-    (the parent, the cards and the hashes they are proved against, the cap among them) is returned
-    as it is, unless its report answered nothing (`_proves_again`): then it is proved again in
-    place. The key's advisory lock is held until commit, so a re-post waits for the running proof;
-    the version number is allocated under the Desk's lock just before the insert. Every failing
-    check of the report reads in the owner's words."""
+    until the owner confirms. Default asks are dropped and derived again, and the always-on cards
+    the owner's cards lack are added (`compiler.with_defaults`), so the version lists them and a
+    start of verification never asks. A draft with the same key (the parent, the cards and the
+    hashes they are proved against, the cap among them) is returned as it is, unless its report
+    answered nothing (`_proves_again`): then it is proved again in place. The key's advisory lock
+    is held until commit, so a re-post waits for the running proof; the version number is
+    allocated under the Desk's lock just before the insert. Every failing check of the report
+    reads in the owner's words."""
     owned = [card for card in cards if not card.is_default]
     active = await active_version(ctx, desk_id)
     if (active.version if active is not None else None) != expected_parent:

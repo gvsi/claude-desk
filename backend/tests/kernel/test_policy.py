@@ -25,10 +25,14 @@ from desk.db.models import LedgerEntry, Person, Tool
 from desk.db.models import PolicyVersion as PolicyVersionRow
 from desk.kernel_service import activation, compiler, desks, ledger
 from desk.kernel_service.repo import new_id
+from desk.kernel_service.seed import RIVERA_CARDS
 
 from .helpers import (TEST_CAP, CopyRows, compile_at, draft_and_confirm, draft_refusals, kernel_ctx, make_copy_rows,
                       rows_of)
+from .test_adapters import visitor_of
 from .test_compiler import NATIVE, card, req
+from .test_decide import decided
+from .test_execute import executed
 
 STUBS = Path(__file__).parent / "stubs"
 
@@ -310,6 +314,25 @@ async def test_a_draft_with_an_effect_card_over_verification_is_422(app, client,
     assert await policy_entries(app, desk) == [{"version": 1, "status": "active"}]
     send = card("send", "effect:send_message", review=True)
     assert (await drafted(client, desk, [*BOOK_AND_ASK_CHARGES, shipped, send])).version == 2
+
+
+@pytest.mark.solver
+async def test_a_draft_without_the_verification_card_keeps_starts_allowed(desk_prove, app, client):
+    """A draft that leaves out the presets' card for `native.start_verification` can't switch
+    verification to asking: the compiler adds the card, so the version proves and lists it, and
+    once it is confirmed a visitor naming a contact on record gets a code without the owner being
+    asked."""
+    copy, visitor = await visitor_of(app, client)
+    [shipped] = compiler.ALWAYS_ON_CARDS
+    without = [c for c in RIVERA_CARDS if c != shipped]
+    assert len(without) == len(RIVERA_CARDS) - 1
+    confirmed = await draft_and_confirm(client, copy.owner_token, copy.desk_id, without)
+    assert shipped in confirmed.cards
+    assert "default:native.start_verification" not in {c.card_id for c in confirmed.cards}
+    allowed = await decided(client, visitor, "native.start_verification", {"contact": "dana@example.com"})
+    assert (allowed.outcome, allowed.policy_version, allowed.card_ids) == (
+        "allow", confirmed.version, [shipped.card_id]), allowed.reason_plain
+    assert (await executed(client, visitor, allowed)).state == "succeeded"
 
 
 async def post_confirm(client: httpx.AsyncClient, desk: DeskRows, version: int) -> httpx.Response:
