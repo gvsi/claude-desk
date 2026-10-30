@@ -7,17 +7,21 @@ import { BriefingPage } from '../owner/today/BriefingPage.tsx';
 import { TodayPage } from '../owner/today/TodayPage.tsx';
 import { PublicPage } from '../public/PublicPage.tsx';
 import { NotFound } from './NotFound.tsx';
+import { RouteError } from './RouteError.tsx';
 
 /**
  * The app's routes. Screens join as they are built: `/` (the first visit's intro dialog),
  * `/app/:deskId/*` (owner), `/app/setup/*`, `/d/:slug` (public page), `/d/:slug/agents`,
- * `/pay/:token` and `/vision/*`.
+ * `/pay/:token` and `/vision/*`. Each screen's route carries `RouteError`, so a page that throws
+ * while it draws shows a kind line and never React Router's own error page.
  */
 export const routes: RouteObject[] = [
-  { path: '/', element: <Arrival /> },
+  { path: '/', element: <Arrival />, errorElement: <RouteError /> },
   {
     path: '/app/:deskId',
     element: <OwnerLayout />,
+    // Catches what the owner's pages below throw too.
+    errorElement: <RouteError />,
     children: [
       { index: true, element: <Navigate to="today" replace /> },
       { path: 'today', element: <TodayPage /> },
@@ -27,6 +31,6 @@ export const routes: RouteObject[] = [
       { path: 'safety/:refId?', element: <SafetyPage /> },
     ],
   },
-  { path: '/d/:slug', element: <PublicPage /> },
+  { path: '/d/:slug', element: <PublicPage />, errorElement: <RouteError visitor /> },
   { path: '*', element: <NotFound /> },
 ];

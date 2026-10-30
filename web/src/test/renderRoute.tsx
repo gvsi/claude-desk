@@ -1,10 +1,10 @@
 /**
  * Renders the whole app at `path`, as a screen test sees it: a memory router over the app's
- * routes, a fresh query client (the app makes one per mount), polling at a twentieth of real time,
- * the desktop or phone viewport, and the mock API (a fresh copy of `seed` when one is named). One
- * app at a time: a second call unmounts the first.
+ * routes (or a test's own copy of them), a fresh query client (the app makes one per mount),
+ * polling at a twentieth of real time, the desktop or phone viewport, and the mock API (a fresh
+ * copy of `seed` when one is named). One app at a time: a second call unmounts the first.
  */
-import { createMemoryRouter, type DataRouter } from 'react-router';
+import { createMemoryRouter, type DataRouter, type RouteObject } from 'react-router';
 import { page } from 'vitest/browser';
 import { cleanup, render, type RenderResult } from 'vitest-browser-react';
 
@@ -37,6 +37,8 @@ export interface RenderRouteOptions {
    * the first one changed.
    */
   seed?: MockSeed | SeedOption;
+  /** The app's routes with a test's change, such as a page swapped for one that throws. */
+  routes?: RouteObject[];
 }
 
 export interface RenderedRoute {
@@ -68,7 +70,7 @@ export async function renderRoute(path: string, opts: RenderRouteOptions = {}): 
     const { name, signedIn = true } = typeof opts.seed === 'string' ? { name: opts.seed } : opts.seed;
     mockStore.reset(name, { signedIn });
   }
-  const router = createMemoryRouter(routes, { initialEntries: [path] });
+  const router = createMemoryRouter(opts.routes ?? routes, { initialEntries: [path] });
   const screen = await render(<App router={router} />);
   return { screen, router };
 }
