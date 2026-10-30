@@ -5,17 +5,29 @@
  * receipt that reports what the kernel decided names its state and why (ownerReceipt.ts), and a
  * hold with its card right under it names only its state, since the card says why. A receipt opens
  * the full trace of its ledger entry under its row; Escape or the close button returns focus to the
- * receipt.
+ * receipt. A record that can't be read says so there, with "Try again" and "Close".
  */
 import { useQuery } from '@tanstack/react-query';
-import { Fragment, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 
 import type { EvMessage, StatusEvent } from '../../api/contracts.ts';
 import { request } from '../../api/http.ts';
 import type { TranscriptItem } from '../../api/views.ts';
-import { AgentMessage, ClaudeMessage, FullTrace, MarginReceipt, PersonMessage, TranscriptRow, VisitorMessage, Whisper } from '../../ds/index.ts';
+import {
+  AgentMessage,
+  Button,
+  ClaudeMessage,
+  FullTrace,
+  MarginReceipt,
+  Notice,
+  PersonMessage,
+  TranscriptRow,
+  VisitorMessage,
+  Whisper,
+} from '../../ds/index.ts';
 import { formatClock } from '../../lib/format.ts';
 import { groupRows, opensAReply, type GroupedRow, type RowPart } from '../../lib/transcript.ts';
+import { useReadFailure } from '../useReadFailure.ts';
 import { useOwnerReceipt } from './ownerReceipt.ts';
 
 /** One receipt as the owner's transcript keeps it: its signed event, and whether it is the first for its decision. */
@@ -206,6 +218,8 @@ export function OwnerTranscript({ items, agentName, ownerName, timezone, deskId,
   const traceBox = useRef<HTMLDivElement>(null);
   const focusTrace = useRef(false);
   const { ledger, devKey } = useRecord(deskId, openSeq !== null);
+  // Kept until a read works, so the line and its buttons stay while "Try again" reads.
+  const failure = useReadFailure(ledger);
 
   const openTrace = (ledgerSeq: number) => {
     opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -216,7 +230,8 @@ export function OwnerTranscript({ items, agentName, ownerName, timezone, deskId,
   };
 
   // The trace takes focus once it is drawn, so a keyboard or screen reader user lands in it: the
-  // line that says the record is being read first, then the trace once the record is in.
+  // line that says the record is being read or couldn't be first, then the trace once the record
+  // is in. Focus already in that line (on "Try again", say) stays where it is.
   useLayoutEffect(() => {
     if (!focusTrace.current) return;
     const box = traceBox.current;
@@ -226,7 +241,8 @@ export function OwnerTranscript({ items, agentName, ownerName, timezone, deskId,
       full.focus();
       return;
     }
-    box?.querySelector<HTMLElement>('.cd-conversation__trace-missing')?.focus();
+    const missing = box?.querySelector<HTMLElement>('.cd-conversation__trace-missing');
+    if (missing && !missing.contains(document.activeElement)) missing.focus();
   });
   const closeTrace = () => {
     focusTrace.current = false;
@@ -234,24 +250,47 @@ export function OwnerTranscript({ items, agentName, ownerName, timezone, deskId,
     opener.current?.focus();
   };
 
+  const closeOnEscape = (event: KeyboardEvent) => {
+    if (event.key === 'Escape') closeTrace();
+  };
+
   const page = ledger.data;
   const entry = openSeq === null ? null : (page?.entries.find((e) => e.seq === openSeq) ?? null);
+  let traceBody: ReactNode;
+  if (entry !== null && page !== undefined) {
+    traceBody = <FullTrace entry={entry} chain={{ chain_ok: page.chain_ok, first_bad_seq: page.first_bad_seq }} devKey={devKey} onClose={closeTrace} />;
+  } else if (failure !== null) {
+    // The owner's line for the failed read, as other owner screens say it, with a way to read
+    // the record again and a way to close it.
+    traceBody = (
+      <div className="cd-conversation__trace-missing" tabIndex={-1} onKeyDown={closeOnEscape}>
+        <Notice
+          tone="error"
+          action={
+            <span className="cd-conversation__trace-actions">
+              <Button variant="secondary" busy={failure.retrying} onClick={failure.retry}>
+                Try again
+              </Button>
+              <Button variant="ghost" onClick={closeTrace}>
+                Close
+              </Button>
+            </span>
+          }
+        >
+          {failure.line}
+        </Notice>
+      </div>
+    );
+  } else {
+    traceBody = (
+      <p className="cd-conversation__trace-missing cd-conversation__trace-reading cd-type-meta" role="status" tabIndex={-1} onKeyDown={closeOnEscape}>
+        Reading the record
+      </p>
+    );
+  }
   const trace = (
     <div ref={traceBox} className="cd-conversation__trace">
-      {entry !== null && page !== undefined ? (
-        <FullTrace entry={entry} chain={{ chain_ok: page.chain_ok, first_bad_seq: page.first_bad_seq }} devKey={devKey} onClose={closeTrace} />
-      ) : (
-        <p
-          className="cd-conversation__trace-missing cd-type-meta"
-          role="status"
-          tabIndex={-1}
-          onKeyDown={(event) => {
-            if (event.key === 'Escape') closeTrace();
-          }}
-        >
-          {ledger.isError ? "The record couldn't be read. Try again in a moment." : 'Reading the record'}
-        </p>
-      )}
+      {traceBody}
     </div>
   );
 

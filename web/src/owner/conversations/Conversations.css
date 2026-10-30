@@ -154,7 +154,17 @@
 
 .cd-conversation__trace-missing {
   margin: 0;
+}
+
+.cd-conversation__trace-reading {
   color: var(--text-secondary);
+}
+
+/* "Try again" and "Close", side by side at the failed read's line. */
+.cd-conversation__trace-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
 }
 
 .cd-conversation__controls {

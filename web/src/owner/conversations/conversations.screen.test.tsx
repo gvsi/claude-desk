@@ -239,6 +239,45 @@ describe('Conversations', () => {
     await expectScreenBasics(screen.container, { owner: true });
   });
 
+  it('trace_that_cant_be_read_offers_try_again_and_close', async () => {
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    const chat = log(screen);
+    const reply = session(DANA_LIVE).items.find((item) => item.kind === 'delivered');
+    const seq = reply?.event?.ledger_seq ?? 0;
+    const receipt = chat.getByRole('button', { name: /Open the full trace\.$/ }).first();
+    await expect.element(receipt).toBeVisible();
+    const tryAgain = chat.getByRole('button', { name: 'Try again', exact: true });
+    const close = chat.getByRole('button', { name: 'Close', exact: true });
+
+    // The record can't be read, nor on its one retry: the owner's line, with a way to read it
+    // again and a way to close it, each a click away, and focus in it.
+    mockStore.inject({ route: 'ledger', status: 500, times: 2 });
+    await receipt.click();
+    await expect.element(chat.getByRole('alert').getByText(UNAVAILABLE, { exact: true }), { timeout: 5_000 }).toBeVisible();
+    await expect.element(tryAgain).toBeVisible();
+    await expect.element(close).toBeVisible();
+    expect(document.activeElement?.closest('.cd-conversation__trace')).not.toBeNull();
+    await expectScreenBasics(screen.container, { owner: true });
+
+    // Close closes it, and focus goes back to the receipt.
+    await close.click();
+    await expect.element(tryAgain).not.toBeInTheDocument();
+    expect(chat.getByRole('alert').elements()).toHaveLength(0);
+    expect(document.activeElement).toBe(receipt.element());
+
+    // Opened again, it still can't be read; Try again reads it, and the trace opens with focus in it.
+    mockStore.inject({ route: 'ledger', status: 500, times: 2 });
+    await receipt.click();
+    await expect.poll(() => requests('ledger').length, { timeout: 5_000 }).toBe(4);
+    await expect.element(tryAgain).toBeVisible();
+    await tryAgain.click();
+    const trace = screen.getByRole('region', { name: `Full trace of entry ${seq}`, exact: true });
+    await expect.element(trace).toBeVisible();
+    await expect.poll(() => trace.element().contains(document.activeElement)).toBe(true);
+    expect(requests('ledger')).toHaveLength(5);
+    expect(chat.getByRole('alert').elements()).toHaveLength(0);
+  });
+
   it('take_over_then_say', async () => {
     const chat = named(DANA_LIVE, DANA);
     const { generation } = chat.state;
