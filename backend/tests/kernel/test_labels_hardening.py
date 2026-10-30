@@ -18,7 +18,7 @@ import pytest
 from fastapi import FastAPI
 from sqlalchemy import select
 
-from desk.contracts import KnowledgeItem, Label, ReplyVerdict
+from desk.contracts import Claim, Fact, KnowledgeItem, Label, ReplyVerdict
 from desk.db.models import Document, Execution
 from desk.db.models import Fact as FactRow
 from desk.db.models import KnowledgeItem as KnowledgeRow
@@ -141,6 +141,30 @@ async def test_canary_in_a_rendered_card_is_blocked(app, client, language):
     assert [block["fact_id"] for block in public["charter"]] == ["charter:hours", "charter:contact"]
     owner = await context_of(client, await owner_session_id(client, copy.owner), copy.owner, desk_id=copy.desk_id)
     assert REFUNDS in fact_ids(owner.facts)
+
+
+async def test_a_canary_in_a_fact_id_or_claim_key_stays_out_of_context(app, client):
+    copy, visitor = await visitor_of(app, client)
+    dana = (await documents(app, copy))["dana-invoice"]
+    # the owner names a public policy after Dana's invoice reference: its fact ID and its claim's
+    # key hold the canary, though the policy's text doesn't
+    named = f"charter:policy:{dana.canary}"
+    response = await put_part(client, copy, "charter", {"charter": [
+        {"key": "contact", "kind": "text", "value": "(510) 555-0142"},
+        {"key": f"policy:{dana.canary}", "kind": "text", "value": "Refunds go back to the card used."}]})
+    assert response.status_code == 200, response.text
+    # and a public fact whose ID is plain carries it in a claim's key alone
+    keyed = Fact(fact_id="charter:policy:notes", kind="charter", status="available", source="kernel",
+                 claims=[Claim(key=f"ref {dana.canary.upper()}", kind="text", value="See the invoice.")],
+                 label=Label(readers=["public"]))
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        ctx.db.add(labels.fact_row(copy.copy_id, copy.desk_id, keyed, ctx.clock.now()))
+    # Claude isn't given either in a visitor's context; the owner reads both
+    given = fact_ids((await context_of(client, visitor.session_id, visitor.headers)).facts)
+    assert "charter:contact" in given and named not in given and keyed.fact_id not in given
+    owner = await context_of(client, await owner_session_id(client, copy.owner), copy.owner, desk_id=copy.desk_id)
+    assert {named, keyed.fact_id} <= set(fact_ids(owner.facts))
 
 
 def full_width(text: str) -> str:
