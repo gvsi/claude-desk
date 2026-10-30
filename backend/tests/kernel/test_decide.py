@@ -1006,7 +1006,7 @@ async def test_holds_alert_the_owner_per_notification_defaults(app, client, regi
     quiet = await decided(client, await open_visitor(client, briefed), "native.quote", {"qty": 1, "note": note})
     assert (held.outcome, quiet.outcome) == ("hold", "hold")
     assert held.reason_plain == ("A stranger asked to get a quote for $153 with 15% off. Test card quote. "
-                                 f"From the visitor: “{note}”.")
+                                 f"From the visitor: “{note}”")
     [notice] = held.inbox
     assert (notice.to, notice.preview) == ("owner", "A request needs your answer")
     [entry] = await rows_of(app, alerting.copy_id, select(DemoInboxEntry))
@@ -1049,7 +1049,7 @@ async def test_reviewer_sees_no_visitor_text(app, client, registry, reviewer):
                                                            "value": "Oakland and Berkeley."}]
     assert [card.card_id for card in seen.cards] == ["book"]
     # the owner reads it quoted and labelled, never as an instruction
-    assert decision.reason_plain.endswith(f"From the visitor: “{note[:200]}”.")
+    assert decision.reason_plain.endswith(f"From the visitor: “{note[:200]}”")
 
 
 def test_status_lines_are_digit_free():

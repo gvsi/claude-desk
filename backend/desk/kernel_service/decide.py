@@ -729,7 +729,7 @@ def _reason_plain(call: _Call, outcome: str, reason: str | None, evaluation: Eva
             parts.append(REVIEW_PLAIN[review.recommendation])
         else:
             parts.append(REVIEW_PLAIN["allow" if outcome == "allow" else "unsure"])
-    parts += [f"From the visitor: {_quoted(text)}." for text in call.quotes.values()]
+    parts += [f"From the visitor: {_quoted(text)}" for text in call.quotes.values()]
     return " ".join(parts)
 
 
