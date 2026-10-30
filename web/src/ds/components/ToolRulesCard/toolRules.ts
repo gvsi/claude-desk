@@ -14,6 +14,11 @@ function personScoped(card: RuleCard): boolean {
 /** How wide a group of people a card that isn't person-scoped is for: anyone, then verified people, then record owners. */
 const GROUP_WIDTH = { anyone: 3, verified: 2, record_owner: 1 } as const;
 
+type Group = keyof typeof GROUP_WIDTH;
+
+/** The group of people at each width. */
+const GROUP_AT_WIDTH: Readonly<Record<number, Group>> = { 3: 'anyone', 2: 'verified', 1: 'record_owner' };
+
 /** True when every principal `inner` is for is one `outer` is for too. */
 function containsScope(outer: RuleCard, inner: RuleCard): boolean {
   if (personScoped(inner)) {
@@ -48,6 +53,26 @@ function effectCardCovers(card: RuleCard, tool: RulesTool, effectCards: readonly
 }
 
 /**
+ * Whom an effect card can decide for on this tool. An `auto` group card on a tool with several
+ * effects covers it only jointly, with an `auto` card for each other effect, and one principal must
+ * satisfy every card in the combination: so it reaches the narrowest group among them. Its widest
+ * combination takes the widest card for each other effect, and reaches the people that combination
+ * does. Any other card reaches everyone it is for (a person's or an agent's combination is that
+ * person's or agent's).
+ */
+function jointReach(card: RuleCard, tool: RulesTool, effectCards: readonly RuleCard[]): RuleCard {
+  if (card.mode !== 'auto' || personScoped(card)) return card;
+  let width: number = GROUP_WIDTH[card.who as Group];
+  for (const effect of tool.effects) {
+    if (card.applies_to === `effect:${effect}`) continue;
+    const partners = effectCards.filter((other) => other.mode === 'auto' && other.applies_to === `effect:${effect}` && jointScope(card, other));
+    width = Math.min(width, Math.max(0, ...partners.map((other) => GROUP_WIDTH[other.who as Group])));
+  }
+  const who = GROUP_AT_WIDTH[width];
+  return who === undefined ? card : { ...card, who };
+}
+
+/**
  * True when one of the tool's own cards leaves the effect card nothing to decide on this tool: a
  * `never` card for everyone it is for (a never card always wins), or a card for everyone it is for
  * that is more specific (a tool card outranks an effect card unless the effect card is for one
@@ -68,9 +93,10 @@ function rank(card: RuleCard): number {
 /**
  * The rules that govern a tool, as the master plan's "Coverage and overlap" defines them, most
  * specific first: the tool's own cards, and each card for one of its effects (`effect:charge`) that
- * covers it and that none of its own cards outranks for everyone the effect card is for. So a
- * shared rule shows under a tool only where it decides something; a tool with its own card for the
- * same people doesn't list it. A `never` effect card always shows, since a never card always wins.
+ * covers it and that none of its own cards outranks for everyone the effect card reaches on this
+ * tool (an `auto` card's widest joint combination, `jointReach`). So a shared rule shows under a
+ * tool only where it decides something; a tool with its own card for the same people doesn't list
+ * it. A `never` effect card always shows, since a never card always wins.
  * Default cards (`is_default`) are left out: the card's fallback line says what they do. It lists
  * cards and decides no outcome; the kernel decides every request.
  */
@@ -80,7 +106,9 @@ export function rulesForTool(tool: RulesTool, cards: readonly RuleCard[]): RuleC
   const effectCards = owned.filter((card) => card.applies_to.startsWith('effect:'));
   const governing = [
     ...toolCards,
-    ...effectCards.filter((card) => effectCardCovers(card, tool, effectCards) && (card.mode === 'never' || !outranked(card, toolCards))),
+    ...effectCards.filter(
+      (card) => effectCardCovers(card, tool, effectCards) && (card.mode === 'never' || !outranked(jointReach(card, tool, effectCards), toolCards)),
+    ),
   ];
   return governing.map((card, index) => ({ card, index })).sort((a, b) => rank(a.card) - rank(b.card) || a.index - b.index).map(({ card }) => card);
 }

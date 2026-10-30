@@ -95,6 +95,16 @@ describe('rulesForTool', () => {
     // An ask or never group card covers it alone.
     const askSend = { ...send, card_id: 'ask-send', mode: 'ask' } as const;
     expect(ids(rulesForTool(documents, [askSend]))).toEqual(['ask-send']);
+    // A joint combination covers only the people every card in it is for: anyone's private-data
+    // card with the record owners' send-message card covers record owners. A verified-people ask
+    // card for the tool covers every record owner too, so it outranks both: only it governs.
+    const anyonePrivate = card({ card_id: 'anyone-private', applies_to: 'effect:private_data', who: 'anyone' });
+    const verifiedAsk = card({ card_id: 'verified-ask', applies_to: 'native.release_document', who: 'verified', mode: 'ask' });
+    expect(ids(rulesForTool(documents, [anyonePrivate, send, verifiedAsk]))).toEqual(['verified-ask']);
+    // With an anyone send-message card too, anyone's private-data card has a combination for
+    // anyone, which the verified card doesn't cover, so the two anyone cards still govern.
+    const anyoneSend = card({ card_id: 'anyone-send', applies_to: 'effect:send_message', who: 'anyone' });
+    expect(ids(rulesForTool(documents, [anyonePrivate, send, anyoneSend, verifiedAsk]))).toEqual(['verified-ask', 'anyone-private', 'anyone-send']);
   });
 
   test('never_group_rules_always_show_and_defaults_never_do', () => {

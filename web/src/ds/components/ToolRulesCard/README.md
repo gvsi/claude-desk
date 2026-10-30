@@ -20,9 +20,10 @@
 `rulesForTool(tool, cards): RuleCard[]` (in `toolRules.ts`, also exported) lists the cards that govern a tool, as the master plan's "Coverage and overlap (most specific wins)" defines them, most specific first. It lists cards and decides nothing; the kernel decides every request.
 
 - The tool's own cards (`applies_to` names it), always.
-- A card for one of its effects (`effect:charge`) when it covers the tool and none of the tool's own cards outranks it for everyone it is for:
+- A card for one of its effects (`effect:charge`) when it covers the tool and none of the tool's own cards outranks it for everyone it reaches there:
   - an `auto` effect card covers a tool only when every effect of the tool has an `auto` effect card at the same specificity that one principal can satisfy with it: cards for groups of people combine, and a card for one person or agent combines only with that same person's or agent's cards (`effect:send_message` alone doesn't cover Share a document, which also touches private data, and agent A's private-data card with agent B's send-message card covers nobody);
-  - a tool card outranks an effect card for everyone it is for, so a group rule for anyone is hidden under a tool with its own rule for anyone;
+  - an `auto` group card that covers the tool jointly reaches only the narrowest group in its widest combination: anyone's private-data card with the record owners' send-message card reaches record owners on Share a document, so the tool's ask card for verified people outranks both, and only it shows;
+  - a tool card outranks an effect card for everyone it reaches, so a group rule for anyone is hidden under a tool with its own rule for anyone;
   - a card for one person or agent outranks a card for a tool, so an agent's shared charge rule still governs Payment link for that agent, beside the tool's rule for everyone else;
   - a tool card for fewer people (record owners only) leaves the group rule deciding for everyone else, so both show;
   - a `never` effect card always shows, since a never card always wins.
