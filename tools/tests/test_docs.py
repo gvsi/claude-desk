@@ -526,6 +526,15 @@ def test_the_reader_subset_check_catches_each_break(added, problem):
     assert [line for line in found if problem in line], found
 
 
+def test_a_link_target_may_nest_parentheses():
+    # GitHub, like the reader, keeps balanced parentheses in a link target at any depth, so the address in it
+    # is a link's, not a bare one.
+    text = IN_SUBSET + "See [the wiki](https://en.wikipedia.org/wiki/A_(b_(c))) here.\n"
+
+    assert reader_subset_problems(text, "capability-prediction.md") == []
+    assert [target for _, target in check_docs.link_targets(text)][-1] == "https://en.wikipedia.org/wiki/A_(b_(c))"
+
+
 def test_about_documents_stay_in_the_reader_subset():
     for path, figures in ABOUT_DOCS.items():
         text = (REPO / path).read_text()

@@ -61,6 +61,17 @@ const WORD_CHARACTER = /[\p{L}\p{N}]/u;
 const BARE_ADDRESSES = [/(?:https?:\/\/|www\.)/iy, /[\w.+-]+@[\w-]+\.[\w.-]+/y];
 const BARE_ADDRESS = 'a bare address, which GitHub links; write it as [text](https://…)';
 
+/** Whether a bare address starts at `index` in `text`, at the start of a word. */
+function startsBareAddress(text: string, index: number): boolean {
+  return (
+    !WORD_CHARACTER.test(text[index - 1] ?? '') &&
+    BARE_ADDRESSES.some((pattern) => {
+      pattern.lastIndex = index;
+      return pattern.test(text);
+    })
+  );
+}
+
 // Lines that start a construct outside the subset, checked in this order wherever a line can start a block.
 const OUTSIDE: [RegExp, string][] = [
   [/^[ \t]/, 'an indented line'],
@@ -92,12 +103,6 @@ function parseInlines(source: string, firstLine: number, resolve: LinkResolver):
     throw new MarkdownError(firstLine + (source.slice(0, index).match(/\n/g)?.length ?? 0), reason);
   };
   const isSpace = (index: number) => /^\s?$/.test(source[index] ?? '');
-  const startsBareAddress = (index: number) =>
-    !WORD_CHARACTER.test(source[index - 1] ?? '') &&
-    BARE_ADDRESSES.some((pattern) => {
-      pattern.lastIndex = index;
-      return pattern.test(source);
-    });
 
   function run(until: '**' | ']' | null): Inline[] {
     const start = at;
@@ -152,7 +157,7 @@ function parseInlines(source: string, firstLine: number, resolve: LinkResolver):
       } else if (char === '~') {
         fail(at, 'a tilde, which GitHub reads as strikethrough');
       } else {
-        if (startsBareAddress(at)) {
+        if (startsBareAddress(source, at)) {
           // GitHub links it anywhere but in a link's words, which brackets hold until a ( follows them.
           if (!inBrackets) fail(at, BARE_ADDRESS);
           bareInBrackets ??= at;
@@ -248,12 +253,18 @@ export function documentText(blocks: Block[]): string[] {
 
 /** Each straight quote mark's curly pair: the one that opens a quotation, then the one for everywhere else. */
 const CURLY: Partial<Record<string, readonly [string, string]>> = { "'": ['‘', '’'], '"': ['“', '”'] };
-// A quote mark with nothing shown before it, or after a space, an opening bracket, an opening quote or a dash,
-// opens a quotation unless a space follows it.
-const OPENS_AFTER = /^$|[\s([{“‘—–]/;
+// A quote mark with nothing shown before it, or after a space, an opening bracket, an opening quote, a dash, a
+// hyphen, an ellipsis or a slash, opens a quotation unless a space follows it.
+const OPENS_AFTER = /^$|[\s([{“‘—–…/-]/;
+// What follows a ' that starts a word but is an apostrophe: a leading elision such as ’til, ’em, rock ’n’ roll
+// or a year such as ’90s or ’26, but not a quoted number such as ‘24.7%’.
+const ELISION = /^(?:(?:til|em|cause|tis|twas|n)\b|\d\d(?:s\b|(?![\d%]|[.,]\d)))/i;
 
-/** `text` with its straight quote marks curled, `before` being the character the page shows just ahead of it. */
-function curl(text: string, before: string): string {
+/**
+ * `text` with its straight quote marks curled, `before` being the character the page shows just ahead of it and
+ * `after` the words that follow it in the same block.
+ */
+function curl(text: string, before: string, after = ''): string {
   let out = '';
   for (let at = 0; at < text.length; at += 1) {
     const char = text[at] ?? '';
@@ -262,31 +273,47 @@ function curl(text: string, before: string): string {
       out += char;
       continue;
     }
-    const next = text[at + 1] ?? '';
-    // A ' before a digit is an elision, as in ’90s.
-    const opens = OPENS_AFTER.test(out.at(-1) ?? before) && !/\s/.test(next) && !(char === "'" && /\d/.test(next));
+    const rest = text.slice(at + 1) + after;
+    const opens = OPENS_AFTER.test(out.at(-1) ?? before) && !/^\s/.test(rest) && !(char === "'" && ELISION.test(rest));
     out += opens ? pair[0] : pair[1];
   }
   return out;
 }
 
-/** A block's inlines with their quote marks curled, each piece read after what the page shows before it. */
+/** A block's inlines with their quote marks curled, each piece read between what the page shows around it. */
 function curlRun(inlines: Inline[]): Inline[] {
+  // The pieces of words in reading order, through bold and links.
+  const leaves: Extract<Inline, { text: string }>[] = [];
+  const collect = (pieces: Inline[]) => {
+    for (const inline of pieces) {
+      if ('children' in inline) collect(inline.children);
+      else leaves.push(inline);
+    }
+  };
+  collect(inlines);
+  const shown = new Map<Inline, Inline>();
   let last = '';
-  const walk = (pieces: Inline[]): Inline[] =>
-    pieces.map((inline) => {
-      if ('children' in inline) return { ...inline, children: walk(inline.children) };
-      const shown = inline.kind === 'code' ? inline : { ...inline, text: curl(inline.text, last) };
-      last = shown.text.at(-1) ?? last;
-      return shown;
-    });
-  return walk(inlines);
+  leaves.forEach((leaf, i) => {
+    const after = leaves
+      .slice(i + 1)
+      .map((next) => next.text)
+      .join('');
+    const curled = leaf.kind === 'code' ? leaf : { ...leaf, text: curl(leaf.text, last, after) };
+    last = curled.text.at(-1) ?? last;
+    shown.set(leaf, curled);
+  });
+  const rebuild = (pieces: Inline[]): Inline[] =>
+    pieces.map((inline) =>
+      'children' in inline ? { ...inline, children: rebuild(inline.children) } : (shown.get(inline) ?? inline),
+    );
+  return rebuild(inlines);
 }
 
 /**
  * The blocks as the page shows them, with typographic quote marks in place of the Markdown's straight `'` and
  * `"`, as the page's own words write them: ‘ and “ where one opens a quotation, ’ and ” everywhere else, so an
- * apostrophe or an elision such as ’90s is ’. Code keeps what was typed, and the Markdown on disk is unchanged.
+ * apostrophe or an elision such as ’til or ’90s is ’. Code keeps what was typed, and the Markdown on disk is
+ * unchanged.
  */
 export function curlQuotes(blocks: Block[]): Block[] {
   return blocks.map((block): Block => {
@@ -392,7 +419,10 @@ export function parseDocument(markdown: string, resolve: LinkResolver): Block[] 
   if (!BYLINE.test(lineAt(n).trim()) || !blank(n + 1)) {
     fail(Math.min(n, lines.length - 1), 'the byline, “Name · Month D, YYYY”, follows the title');
   }
-  blocks.push({ kind: 'byline', text: lineAt(n).trim() });
+  const byline = lineAt(n).trim();
+  // GitHub links a bare address in the byline as anywhere else.
+  if ([...byline].some((_, at) => startsBareAddress(byline, at))) fail(n, BARE_ADDRESS);
+  blocks.push({ kind: 'byline', text: byline });
   n += 1;
 
   while (n < lines.length) {
