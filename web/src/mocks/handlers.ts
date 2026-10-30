@@ -5,6 +5,8 @@
  * named by type with the seq as its id, as Plan 02's API sends it. Any other `/api/` request is
  * answered 501 and recorded, so a screen test fails on a route nobody mocked. The screen tests'
  * service worker runs them over `mockStore` (browser.ts), the dev server over its own (devServer.ts).
+ * A request stamped with the epoch it was sent in (the screen tests' page stamps each one) reaches
+ * the store with that epoch and its URL as the app sent it; the store drops it if that epoch is over.
  */
 import {
   http,
@@ -20,6 +22,24 @@ import type { SseEvent } from '../api/contracts.ts';
 import { ROUTES, type RouteKey } from '../api/routes.ts';
 import { SERVED_KEYS } from './served.ts';
 import { streamAfter, type MockAnswer, type MockStore } from './store.ts';
+
+/**
+ * Where a page stamps the epoch it sent a request in: a fetch in this header, and an `EventSource`,
+ * which sends no headers of its own, in this query parameter, last in its URL.
+ */
+export const EPOCH_HEADER = 'x-mock-epoch';
+export const EPOCH_PARAM = 'mock_epoch';
+
+const EPOCH_IN_QUERY = new RegExp(`[?&]${EPOCH_PARAM}=(\\d+)$`);
+
+/** The request's URL as the app sent it, with any epoch parameter taken off, and the epoch it was stamped with. */
+export function unstamped(request: Request): { url: URL; epoch: number | undefined } {
+  const url = new URL(request.url);
+  const inQuery = EPOCH_IN_QUERY.exec(url.search);
+  if (inQuery) url.search = url.search.slice(0, inQuery.index);
+  const stamp = inQuery?.[1] ?? request.headers.get(EPOCH_HEADER);
+  return { url, epoch: stamp !== null && /^\d+$/.test(stamp) ? Number(stamp) : undefined };
+}
 
 /** `/api/owner/desks/{desk_id}/today` as MSW writes it: `/api/owner/desks/:desk_id/today`. */
 function mswPath(key: RouteKey): string {
@@ -95,7 +115,7 @@ export function createHandlers(store: MockStore): HttpHandler[] {
   function served(key: RouteKey): HttpHandler {
     const method = ROUTES[key].method.toLowerCase() as 'get' | 'post' | 'put' | 'delete';
     return http[method](mswPath(key), async ({ request, params, cookies }) => {
-      const url = new URL(request.url);
+      const { url, epoch } = unstamped(request);
       const { body, malformed } = await readBody(request);
       const answer = await store.dispatch(key, {
         params: stringParams(params),
@@ -104,6 +124,7 @@ export function createHandlers(store: MockStore): HttpHandler[] {
         malformed,
         path: `${url.pathname}${url.search}`,
         cookies,
+        epoch,
       });
       return toResponse(answer);
     });
@@ -116,18 +137,19 @@ export function createHandlers(store: MockStore): HttpHandler[] {
    */
   const eventStream: HttpHandler[] = [
     http.get(mswPath('events'), async ({ request, params, cookies }) => {
-      const url = new URL(request.url);
+      const { url, epoch } = unstamped(request);
       const answer = await store.dispatch('events', {
         params: stringParams(params),
         query: url.searchParams,
         path: `${url.pathname}${url.search}`,
         cookies,
+        epoch,
       });
       if (!('network' in answer) && answer.status === 200) return undefined;
       return toResponse(answer);
     }),
     sse<EventMap>(mswPath('events'), ({ request, params, client, cookies }) => {
-      const url = new URL(request.url);
+      const { url } = unstamped(request);
       const slug = stringParams(params).slug ?? '';
       const after = streamAfter(url.searchParams, request.headers.get('last-event-id'));
       let open = true;
@@ -146,7 +168,9 @@ export function createHandlers(store: MockStore): HttpHandler[] {
     ...eventStream,
     ...SERVED_KEYS.filter((key) => key !== 'events').map(served),
     http.all('/api/*', ({ request }) => {
-      store.recordUnhandled(new URL(request.url).pathname);
+      const { url, epoch } = unstamped(request);
+      if (!store.admits(epoch)) return HttpResponse.error();
+      store.recordUnhandled(url.pathname);
       return HttpResponse.json({ error: 'not_mocked' }, { status: 501 });
     }),
   ];

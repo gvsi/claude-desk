@@ -1,8 +1,11 @@
 /**
  * The mock API's handlers in a real browser, through the service worker every screen test uses:
  * they answer from the store (the event stream included), and an `/api/` path no handler serves is
- * answered 501 and recorded.
+ * answered 501 and recorded. A request the page sent late, once the next test or a render from a
+ * seed has started over, reaches nothing, not even a handler the test added; and the page's
+ * stamped fetch fails as native fetch does.
  */
+import { http, HttpResponse } from 'msw';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { PublicDesk, SseEvent } from '../api/contracts.ts';
@@ -10,6 +13,7 @@ import { apiPath } from '../api/routes.ts';
 import { openStream, type StreamState } from '../api/stream.ts';
 import type { CopyOut } from '../api/views.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
+import { startTest, worker } from './browser.ts';
 import { RIVERA } from './seed.ts';
 import { mockStore } from './store.ts';
 
@@ -125,6 +129,87 @@ describe('mock API handlers', () => {
     await renderRoute('/no/such/page', { seed: 'rivera_quiet' });
     expect((await me()).status).toBe(200);
     expect(await (await fetch(apiPath('needsYou', { desk_id: RIVERA.deskId }))).json()).toEqual([]);
+  });
+
+  it('late_requests_from_the_last_test_are_dropped', async () => {
+    // The last test's page sent these just before it ended. The service worker hands each one to
+    // the mock only after the next test has started over, as on a slow runner.
+    const session = fetch(apiPath('openSession', { slug: RIVERA.slug }), { method: 'POST' });
+    const unmocked = fetch('/api/nope');
+    const stream = new EventSource(apiPath('events', { slug: RIVERA.slug }, { after: '0' }));
+    const streamAnswered = new Promise((resolve) => {
+      stream.onopen = resolve;
+      stream.onerror = resolve;
+    });
+    startTest();
+    await Promise.allSettled([session, unmocked]);
+    await streamAnswered;
+    stream.close();
+    // None of them is recorded in this test or changes its copy.
+    expect(mockStore.requests).toEqual([]);
+    expect(mockStore.unhandled).toEqual([]);
+    expect(mockStore.visitorSession(RIVERA.slug)).toBeNull();
+
+    // What this test sends is answered and recorded as ever.
+    expect((await fetch(apiPath('openSession', { slug: RIVERA.slug }), { method: 'POST' })).status).toBe(200);
+    expect(mockStore.requests.map((r) => r.key)).toEqual(['openSession']);
+  });
+
+  it('late_requests_from_before_a_seeded_render_are_dropped', async () => {
+    // The first page's request is still on its way, held here by a planted delay, when the test
+    // renders again from a fresh seed. It changes nothing in the copy that render starts from.
+    mockStore.inject({ route: 'openSession', status: 200, delayMs: 300, afterCommit: true });
+    const late = fetch(apiPath('openSession', { slug: RIVERA.slug }), { method: 'POST' }).then(
+      (res) => res.status,
+      () => 'dropped',
+    );
+    await renderRoute('/no/such/page', { seed: 'rivera' });
+    expect(await late).toBe('dropped');
+    expect(mockStore.visitorSession(RIVERA.slug)).toBeNull();
+    expect(mockStore.requests.filter((r) => r.key === 'openSession')).toEqual([]);
+  });
+
+  it('late_requests_skip_handlers_the_next_test_adds', async () => {
+    // The last test's page sent this just before it ended; the next test adds its own handler for
+    // the same route as it starts. The late request doesn't reach it.
+    const path = apiPath('visitorSession', { slug: RIVERA.slug });
+    const late = fetch(path).then(
+      (res) => res.status,
+      () => 'dropped',
+    );
+    startTest();
+    let hits = 0;
+    worker.use(
+      http.get(path, () => {
+        hits += 1;
+        return HttpResponse.json({ error: 'no_session' }, { status: 401 });
+      }),
+    );
+    expect(await late).toBe('dropped');
+    expect(hits).toBe(0);
+
+    // What this test sends reaches it as ever.
+    expect((await fetch(path)).status).toBe(401);
+    expect(hits).toBe(1);
+  });
+
+  it('stamped_fetch_rejects_a_bad_request_as_native_fetch_does', async () => {
+    // A GET with a body is a TypeError. Native fetch hands it back as a rejected promise, and the
+    // stamped fetch the page sends `/api/` requests through does the same.
+    const outcome = (path: string): Promise<string> | string => {
+      try {
+        return fetch(path, { method: 'GET', body: 'x' }).then(
+          () => 'answered',
+          () => 'rejected',
+        );
+      } catch {
+        return 'threw';
+      }
+    };
+    expect({ api: await outcome('/api/health'), other: await outcome('/not-api') }).toEqual({
+      api: 'rejected',
+      other: 'rejected',
+    });
   });
 
   it('unknown_api_path_is_recorded', async () => {

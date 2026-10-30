@@ -32,9 +32,10 @@ export interface RenderRouteOptions {
   language?: string;
   /**
    * Starts the mock API over from this seed before rendering: by name for a copy this browser is
-   * signed in to, or `{ name, signedIn: false }` for one it hasn't opened yet. Without it the test
-   * keeps the copy it has (each test starts with `rivera`, signed in), so a second render sees what
-   * the first one changed.
+   * signed in to, or `{ name, signedIn: false }` for one it hasn't opened yet. It also starts a new
+   * epoch, as a new test does, so a request the page it unmounted sent late reaches nothing. Without
+   * it the test keeps the copy it has (each test starts with `rivera`, signed in), so a second render
+   * sees what the first one changed.
    */
   seed?: MockSeed | SeedOption;
   /** The app's routes with a test's change, such as a page swapped for one that throws. */
@@ -68,6 +69,7 @@ export async function renderRoute(path: string, opts: RenderRouteOptions = {}): 
   setPollScale(0.05);
   if (opts.seed !== undefined) {
     const { name, signedIn = true } = typeof opts.seed === 'string' ? { name: opts.seed } : opts.seed;
+    mockStore.nextEpoch();
     mockStore.reset(name, { signedIn });
   }
   const router = createMemoryRouter(opts.routes ?? routes, { initialEntries: [path] });
