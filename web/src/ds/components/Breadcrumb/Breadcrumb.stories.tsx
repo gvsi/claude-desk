@@ -9,8 +9,8 @@ const meta = {
   component: Breadcrumb,
   args: {
     items: [
-      { label: 'Rules', href: '/rules' },
-      { label: 'Stripe', href: '/rules/stripe' },
+      { label: 'Connectors', href: '/connectors' },
+      { label: 'Stripe', href: '/connectors/stripe' },
       { label: 'Refund' },
     ],
   },
@@ -31,8 +31,9 @@ export const ToolPage: Story = {
     await expect(items).toHaveLength(3);
     // Two links, then "Refund" as plain text, marked as the page.
     const links = within(nav).getAllByRole('link');
-    await expect(links.map((link) => link.textContent)).toEqual(['Rules', 'Stripe']);
-    await expect(links.map((link) => link.getAttribute('href'))).toEqual(['/rules', '/rules/stripe']);
+    // The trail starts at Connectors, where a connector's and a tool's pages live.
+    await expect(links.map((link) => link.textContent)).toEqual(['Connectors', 'Stripe']);
+    await expect(links.map((link) => link.getAttribute('href'))).toEqual(['/connectors', '/connectors/stripe']);
     const current = within(nav).getByText('Refund');
     await expect(current.closest('a')).toBeNull();
     await expect(current).toHaveAttribute('aria-current', 'page');
@@ -40,7 +41,7 @@ export const ToolPage: Story = {
     const separators = nav.querySelectorAll('[aria-hidden="true"]');
     await expect(separators).toHaveLength(2);
     for (const separator of separators) await expect(separator).toHaveTextContent('/');
-    await expect(nav).toHaveTextContent('Rules/Stripe/Refund');
+    await expect(nav).toHaveTextContent('Connectors/Stripe/Refund');
     // As the board draws it: meta type, the links in accent blue and underlined, the page in primary text.
     expectComputed(links[0] as Element, { fontSize: '13px', color: 'rgb(126, 174, 218)', textDecorationLine: 'underline' });
     expectComputed(current, { color: 'rgba(250, 249, 245, 0.92)' });
