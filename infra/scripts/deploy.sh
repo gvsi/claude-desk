@@ -99,6 +99,7 @@ no_passcode() {
   echo "deploy: (it asks for the passcode twice, without echo), or export DESK_PASSCODE for this run" >&2
   exit 2
 }
+unset passcode  # a caller's exported passcode would carry the Keychain value to every step
 passcode=
 if [[ -z $data_only ]]; then
   passcode=${DESK_PASSCODE:-}

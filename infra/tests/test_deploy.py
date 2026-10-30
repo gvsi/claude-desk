@@ -28,17 +28,20 @@ CERTIFICATE = f"arn:aws:acm:us-east-1:{ACCOUNT}:certificate/0a1b2c3d-4e5f-6071-8
 KEYCHAIN_LOOKUP = ["find-generic-password", "-s", "claude-desk-passcode", "-w"]
 STORE_IT = 'security add-generic-password -s claude-desk-passcode -a "$USER" -w'
 
-# Each stub appends {"tool", "argv", "cwd", "tty", "passcode"} to $STUB_LOG, "passcode" being the
-# SHA-256 of the DESK_PASSCODE it was given (None without one), so no passcode is ever written;
-# aws and cdk read and write the deployed stacks' outputs in $STACKS (JSON), as CloudFormation would
-# hold them; `security` answers the one Keychain lookup deploy.sh makes from the file $KEYCHAIN.
+# Each stub appends {"tool", "argv", "cwd", "tty", "passcode", "env"} to $STUB_LOG, "passcode" being
+# the SHA-256 of the DESK_PASSCODE it was given (None without one) and "env" each environment
+# variable's name with the SHA-256 of its value, so no passcode is ever written; aws and cdk read and
+# write the deployed stacks' outputs in $STACKS (JSON), as CloudFormation would hold them; `security`
+# answers the one Keychain lookup deploy.sh makes from the file $KEYCHAIN.
 STUB = """#!{python}
 import hashlib, json, os, re, sys
 tool, args = os.path.basename(sys.argv[0]), sys.argv[1:]
 passcode = os.environ.get("DESK_PASSCODE")
+sha256 = lambda text: hashlib.sha256(text.encode(errors="surrogateescape")).hexdigest()
 with open(os.environ["STUB_LOG"], "a") as log:
     log.write(json.dumps({{"tool": tool, "argv": args, "cwd": os.getcwd(), "tty": os.isatty(1),
-                          "passcode": hashlib.sha256(passcode.encode()).hexdigest() if passcode else None}}) + "\\n")
+                          "passcode": sha256(passcode) if passcode else None,
+                          "env": {{name: sha256(value) for name, value in os.environ.items()}}}}) + "\\n")
 if tool == "security":
     if args != {lookup} or not os.path.exists(os.environ["KEYCHAIN"]):
         print("security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.",
@@ -487,6 +490,21 @@ def test_an_exported_passcode_wins_over_the_keychain(deploy):
     [smoke] = [call for call in run.calls if _is_smoke(call)]
     assert smoke["passcode"] == _sha256("exported-test-passcode")
     assert "exported-test-passcode" not in run.text()
+
+
+def test_a_caller_variable_named_passcode_carries_the_keychain_value_to_no_step(deploy):
+    """deploy.sh holds the Keychain value in a shell variable named passcode. A caller's exported
+    variable of that name is dropped before the lookup, so the value reaches smoke.py alone, as
+    DESK_PASSCODE, under no other name and in no other step's environment."""
+    run = deploy(keychain_item="keychain-test-passcode", DESK_PASSCODE=None, DESK_DEPLOY_ACCOUNT=ACCOUNT,
+                 passcode="caller-value")
+    assert run.status == 0, run.output
+    secret = _sha256("keychain-test-passcode")
+    assert run.calls and _smoke_ran(run)
+    for call in run.calls:
+        holding = sorted(name for name, value in call["env"].items() if value == secret)
+        assert holding == (["DESK_PASSCODE"] if _is_smoke(call) else []), (call["tool"], call["argv"][:3])
+    assert "keychain-test-passcode" not in run.text()
 
 
 @pytest.mark.parametrize("item", [None, ""])
