@@ -499,6 +499,26 @@ def test_spend_charged_as_an_estimate_is_reported_as_estimated(tmp_path: Path):
         spend(estimated_usd=7.5)
 
 
+def test_the_month_spend_counts_passes_and_latency_runs():
+    """The month's spend line counts its rows with runs as passes and the others, the latency runs', as
+    latency runs, so a latency run never reads as a pass; latest.json carries both counts."""
+    latency_row = SpendRow(pass_id="latency-20261101-090000-0d0d0d", date=PASS_DATE, provider="anthropic", runs=0,
+                           desk_usd=0.30, simulator_usd=0.0, claude_api_usd=0.30, total_usd=0.30, estimated_usd=0.0)
+    inputs = all_inputs()
+    inputs["spend_month"] = [*inputs["spend_month"], latency_row]
+    latest = latest_json(**inputs)
+    assert (latest["eval_spend_month_passes"], latest["eval_spend_month_latency_runs"]) == (2, 1)
+    cost = render_report(**inputs).split("\n## Cost\n", 1)[1].split("\n## ", 1)[0]
+    assert "Eval spend this month: $21.90 over 2 passes and 1 latency run, $21.90 of it on the Claude API" in cost
+
+    alone = all_inputs()
+    latest = latest_json(**alone)
+    assert (latest["eval_spend_month_passes"], latest["eval_spend_month_latency_runs"]) == (2, 0)
+    cost = render_report(**alone).split("\n## Cost\n", 1)[1].split("\n## ", 1)[0]
+    assert "Eval spend this month: $21.60 over 2 passes, $21.60 of it on the Claude API" in cost
+    assert "latency run" not in cost
+
+
 # What a code, contact, key or link token looks like (the runner redacts the same things).
 LEAKS = {
     "a six-digit code": r"(?<![0-9A-Za-z])\d{6}(?![0-9A-Za-z])",
@@ -685,6 +705,48 @@ def test_report_names_a_lowered_bar():
         assert (latest["recorded_bar_lowered"], latest["recorded_bar_lowered_notice"]) == fields
         assert "lowered" not in render_report(**quiet)
         assert "lowered" not in "\n".join(latest_results_block(latest))
+
+
+def test_report_shows_the_calibration_tasks():
+    """The calibration split's legitimate tasks are never out of sight: the legitimate suite section has a
+    "Calibration tasks" line with how many of their judged runs completed, k of n, then each task's own k of
+    n and its errored runs, so `leg-emergency-advice`, which measures whether the reply check's rewrites cost
+    safety advice, shows; latest.json carries the same counts. They stay out of held-out completion and the
+    gate, so the split is as it was. A pass that judged no calibration legitimate run says so."""
+    runs = [*full_pass().runs,
+            run("leg-emergency-advice", split="calibration", rep=1, category="info", success=False),
+            run("leg-emergency-advice", split="calibration", rep=2, category="info"),
+            run("leg-emergency-advice", split="calibration", rep=3, category="info", error="timeout")]
+    inputs = all_inputs(pass_result=a_pass(runs))
+    latest = latest_json(**inputs)
+    assert (latest["calibration_legit_successes"], latest["calibration_legit_trials"]) == (4, 5)
+    assert latest["calibration_legit_by_scenario"] == {
+        "leg-ai-en": {"completed": 3, "judged": 3, "errored": 0},
+        "leg-emergency-advice": {"completed": 1, "judged": 2, "errored": 1},
+    }
+    held_out = latest_json(**all_inputs())
+    for field in ("legit_successes", "legit_trials", "legit_completion_point", "gated_trials"):
+        assert latest[field] == held_out[field], field          # held-out completion and the gate as they were
+    legit = render_report(**inputs).split("\n## Legitimate-task suite\n", 1)[1].split("\n## ", 1)[0]
+    lines = [line for line in legit.splitlines() if line.startswith("Calibration tasks")]
+    assert lines == ["Calibration tasks: 4 of 5 judged runs completed (`leg-ai-en` 3 of 3; `leg-emergency-advice` "
+                     "1 of 2 and 1 errored run not judged). They are the calibration split's legitimate tasks, "
+                     "reported apart: they count toward neither held-out completion nor the gate."]
+
+    none = all_inputs(pass_result=a_pass([r for r in runs if r.split == "heldout"]))
+    latest = latest_json(**none)
+    assert (latest["calibration_legit_successes"], latest["calibration_legit_trials"]) == (None, None)
+    assert latest["calibration_legit_by_scenario"] == {}
+    legit = render_report(**none).split("\n## Legitimate-task suite\n", 1)[1].split("\n## ", 1)[0]
+    assert "Calibration tasks: no calibration legitimate run was judged in this pass." in legit.splitlines()
+
+    # A task whose every run errored is named with its errored runs, never as completed or judged.
+    errored = [run("leg-hours-es", split="calibration", rep=rep, category="info", error="infra") for rep in (1, 2)]
+    mixed = render_report(**all_inputs(pass_result=a_pass([*runs, *errored])))
+    assert ("(`leg-ai-en` 3 of 3; `leg-emergency-advice` 1 of 2 and 1 errored run not judged; `leg-hours-es` 2 errored "
+            "runs not judged)") in mixed
+    alone = render_report(**all_inputs(pass_result=a_pass([*none["pass_result"].runs, *errored])))
+    assert "Calibration tasks: no calibration legitimate run was judged in this pass; 2 runs errored." in alone
 
 
 DOC_SECTIONS = ("What the evals test", "Scenarios and oracles", "The gate", "Where runs happen and what CI checks",

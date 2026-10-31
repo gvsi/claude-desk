@@ -21,7 +21,8 @@ checks, kernel enums, numbers and the recorded rate's sign-off (its signer and, 
 the reason `record-rate` recorded) reach the report, never what a visitor saw or typed, so no code,
 contact, key or link token can. A check a run skipped while a plan hadn't landed is named, scenario
 by scenario, and never counted as passed; a recorded bar lowered on the same held-out set is named
-beside it (`results.lowered_notice`).
+beside it (`results.lowered_notice`); and the calibration split's legitimate tasks are shown task by
+task, apart from held-out completion and the gate, so a task measured only there stays in sight.
 """
 
 import csv
@@ -545,6 +546,13 @@ def latest_json(pass_result: PassSummary, gate_result: Any, metrics: Metrics | N
     point = successes / len(legit) if legit else None
     interval = [wilson_lower_95(successes, len(legit)), wilson_upper_95(successes, len(legit))] if legit else None
     expected = sum(r.expected_allow for r in legit)
+    calibration_tasks: dict[str, list[ReportRun]] = defaultdict(list)
+    for r in p.runs:
+        if r.suite == "legit" and r.split == "calibration":
+            calibration_tasks[r.scenario_id].append(r)
+    by_task = {sid: {"completed": sum(bool(r.success) for r in runs), "judged": sum(r.judged for r in runs),
+                     "errored": sum(not r.judged for r in runs)} for sid, runs in sorted(calibration_tasks.items())}
+    calibration_trials = sum(task["judged"] for task in by_task.values())
 
     false_fail = None
     if recorded is not None and gated:
@@ -598,6 +606,9 @@ def latest_json(pass_result: PassSummary, gate_result: Any, metrics: Metrics | N
         "measured_cost_per_run_usd": _round(p.spend.total_usd / p.spend.runs) if p.spend.runs else None,
         "eval_spend_month_usd": _round(sum(row.total_usd for row in month)),          # every provider
         "eval_spend_month_claude_api_usd": _round(sum(row.claude_api_usd for row in month)),   # what the guard counts
+        # The month's rows: a pass's row counts its runs, and a latency run's row counts none.
+        "eval_spend_month_passes": sum(row.runs > 0 for row in month),
+        "eval_spend_month_latency_runs": sum(row.runs == 0 for row in month),
         # The parts of the pass's and the month's spend charged as an estimate, because nothing could be priced.
         "pass_cost_estimated_usd": _round(p.spend.estimated_usd),
         "eval_spend_month_estimated_usd": _round(sum(row.estimated_usd for row in month)),
@@ -620,6 +631,12 @@ def latest_json(pass_result: PassSummary, gate_result: Any, metrics: Metrics | N
         "legit_successes": successes if legit else None,
         "legit_trials": len(legit) or None,
         "pass_cost_usd": _round(p.spend.total_usd),
+        # The calibration split's legitimate tasks, reported apart from held-out completion and never gated: their
+        # judged runs completed, k of n, and each task's own counts, such as the burst-pipe advice task's.
+        "calibration_legit_successes": (sum(task["completed"] for task in by_task.values())
+                                        if calibration_trials else None),
+        "calibration_legit_trials": calibration_trials or None,
+        "calibration_legit_by_scenario": by_task,
         "recorded_heldout_matches": recorded.heldout_sha256 == p.heldout_sha256 if recorded else None,
         "calibration_version": calibration.version if calibration else None,
         "null_baseline_point": (_round(null_baseline.successes / null_baseline.trials)
@@ -725,7 +742,7 @@ def render_report(pass_result: PassSummary, gate_result: Any, metrics: Metrics |
         *_attacks(p, n),
         *_legit(p, n, recorded, null_baseline),
         *_reviewer(p, metrics, calibration, n),
-        *_cost(p, metrics, spend_month, budget, n),
+        *_cost(p, metrics, budget, n),
         *_latency(latency),
         *_limits(p, n),
     ]
@@ -938,7 +955,30 @@ def _legit(p: PassSummary, n: dict[str, Any], recorded: RecordedRate | None,
         out.append(_table(("Category", "Held-out runs judged", "Completed", "False holds"), [
             (category, len(runs), sum(bool(r.success) for r in runs), sum(r.false_holds for r in runs))
             for category, runs in sorted(by_category.items())]))
+    out.append(_calibration_tasks(n))
     return out
+
+
+def _calibration_tasks(n: dict[str, Any]) -> str:
+    """The calibration split's legitimate tasks, k of n judged runs completed and then task by task, apart
+    from held-out completion and the gate, so a task measured only there, such as the burst-pipe advice
+    task, is never out of sight."""
+    by_task = n["calibration_legit_by_scenario"]
+    if not n["calibration_legit_trials"]:
+        errored = sum(task["errored"] for task in by_task.values())
+        return ("Calibration tasks: no calibration legitimate run was judged in this pass"
+                + (f"; {_plural(errored, 'run')} errored." if errored else "."))
+
+    def counts(task: dict[str, int]) -> str:
+        not_judged = f"{_plural(task['errored'], 'errored run')} not judged"
+        if not task["judged"]:
+            return not_judged
+        return f"{task['completed']} of {task['judged']}" + (f" and {not_judged}" if task["errored"] else "")
+
+    tasks = "; ".join(f"`{scenario_id}` {counts(task)}" for scenario_id, task in by_task.items())
+    return (f"Calibration tasks: {n['calibration_legit_successes']} of {n['calibration_legit_trials']} judged runs "
+            f"completed ({tasks}). They are the calibration split's legitimate tasks, reported apart: they count "
+            "toward neither held-out completion nor the gate.")
 
 
 def _reviewer(p: PassSummary, metrics: Metrics | None, calibration: Calibration | None,
@@ -981,8 +1021,7 @@ def _reviewer(p: PassSummary, metrics: Metrics | None, calibration: Calibration 
     return out
 
 
-def _cost(p: PassSummary, metrics: Metrics | None, spend_month: Sequence[SpendRow], budget: Budget,
-          n: dict[str, Any]) -> list[str]:
+def _cost(p: PassSummary, metrics: Metrics | None, budget: Budget, n: dict[str, Any]) -> list[str]:
     out = ["## Cost"]
     if metrics is not None:
         c = metrics.cost_per_conversation_usd
@@ -1008,11 +1047,12 @@ def _cost(p: PassSummary, metrics: Metrics | None, spend_month: Sequence[SpendRo
         line += (f" Of that, {dollars(s.estimated_usd)} is an estimate, not a measurement: a run that left no usage "
                  "to price is charged a run's estimated cost.")
     out.append(line)
-    month = _month_rows(spend_month, p.date)
     headroom = budget.monthly_limit_usd - budget.demo_reserve_usd
-    line = (f"Eval spend this month: {dollars(n['eval_spend_month_usd'])} over "
-            f"{_plural(len(month), 'pass', 'passes')}, {dollars(n['eval_spend_month_claude_api_usd'])} of it "
-            "on the Claude API, which the cumulative "
+    rows = _plural(n["eval_spend_month_passes"], "pass", "passes")
+    if latency_runs := n["eval_spend_month_latency_runs"]:
+        rows += f" and {_plural(latency_runs, 'latency run')}"
+    line = (f"Eval spend this month: {dollars(n['eval_spend_month_usd'])} over {rows}, "
+            f"{dollars(n['eval_spend_month_claude_api_usd'])} of it on the Claude API, which the cumulative "
             f"guard holds under {dollars(headroom)}: the {dollars(budget.monthly_limit_usd)} monthly limit less "
             f"the demo's {dollars(budget.demo_reserve_usd)} reserve.")
     if n["eval_spend_month_estimated_usd"]:
