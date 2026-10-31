@@ -615,6 +615,7 @@ async def test_payment_reconciliation_keeps_the_lock_order(app, client, reviewer
     assert issue.transactions == [
         # the decision and the execution SKIP LOCKED, then the issue's own rows, then the ledger head
         ["decisions", "executions", "policy_versions", "payment_links", "facts", "ledger_heads"],
+        ["decisions"],      # committed at once; the read goes on holding the decision again
     ]
     assert all(map(in_lock_order, issue.transactions))
     # a completion the provider answers too late: the link is unknown, and a view settles it
