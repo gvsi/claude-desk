@@ -107,6 +107,27 @@
   min-width: 0;
 }
 
+/* The start step's box with its hint, then 12 px under them the examples: a line in the
+   subtitle's secondary body type, and the chips 8 px under it (UXC-P602-After). */
+.cd-setup-start__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  min-width: 0;
+}
+
+.cd-setup-start__examples {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+.cd-setup-start__line {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
 .cd-setup-step__actions {
   display: flex;
   flex-wrap: wrap;
