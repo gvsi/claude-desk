@@ -84,8 +84,9 @@ function jobRows(job: JobProposal): [string, string][] {
 
 function JobCard({ proposal, live, disabled, busyAction, failed, amountRequired, onRetry, onDecision }: ProposalCardProps) {
   const job = proposal.job!;
-  const payment = job.config?.block === 'purpose_payment' ? job.config : null;
-  const [amount, setAmount] = useState(payment?.amount_cents == null ? '' : (payment.amount_cents / 100).toFixed(2));
+  const payment = job.job === 'payment';
+  const initialCents = job.config?.block === 'purpose_payment' ? job.config.amount_cents : null;
+  const [amount, setAmount] = useState(initialCents == null ? '' : (initialCents / 100).toFixed(2));
   const [error, setError] = useState<string | null>(null);
   useEffect(() => { if (amountRequired) setError(copy.amountError); }, [amountRequired]);
   const accepted = proposal.state === 'accepted';
@@ -114,7 +115,7 @@ function JobCard({ proposal, live, disabled, busyAction, failed, amountRequired,
         <TextField label={copy.amount} value={amount} onChange={(value) => { setAmount(value); setError(null); }} hint={copy.amountHint} readOnly={disabled || !live || failed} {...(error ? { error } : {})} />
       </div> : null}
       {live && proposal.state === 'proposed' ? failed ? <FailedDecision disabled={disabled} onRetry={onRetry} /> : <div className="cd-setup-c3__actions cd-setup-c3__indent">
-        <Button variant="primary" disabled={disabled || (payment !== null && !amount.trim())} busy={busyAction === 'accept'} onClick={() => decide('accept')}>{copy.setItUp}</Button>
+        <Button variant="primary" disabled={disabled || (payment && !amount.trim())} busy={busyAction === 'accept'} onClick={() => decide('accept')}>{copy.setItUp}</Button>
         <Button variant="ghost" disabled={disabled} busy={busyAction === 'decline'} onClick={() => decide('decline')}>{copy.decline}</Button>
       </div> : null}
     </div>

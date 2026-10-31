@@ -3514,6 +3514,25 @@ describe('consultant setup', () => {
     expect(requests('setupProposal').slice(mark).map(({ body }) => body)).toEqual([{ accept: true }, { accept: true }]);
   });
 
+  it('shows_and_requires_amount_for_a_payment_with_hidden_config', async () => {
+    const state = await consultantAt('payment');
+    const proposal = structuredClone(state.messages.at(-1)!.card!);
+    proposal.job!.config = null;
+    const decisions: unknown[] = [];
+    await page.viewport(390, 844);
+    const screen = await render(<ProposalCard proposal={proposal} live disabled={false} busyAction={null} failed={false} amountRequired={false} onRetry={() => {}} onDecision={(decision) => decisions.push(decision)} />);
+    const amount = screen.getByRole('textbox', { name: 'Amount', exact: true });
+    await expect.element(amount).toBeVisible();
+    const setup = screen.getByRole('button', { name: 'Set it up', exact: true });
+    await expect.element(setup).toBeDisabled();
+    await expect.element(screen.getByText('Stripe', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Each payment shows in Today', { exact: true })).toBeVisible();
+    await amount.fill('750.00');
+    await setup.click();
+    expect(decisions).toEqual([{ proposal_id: proposal.proposal_id, action: 'accept', body: { accept: true, amount_cents: 75000 } }]);
+    expectNoHorizontalScroll();
+  });
+
   it('requires_a_payment_amount_and_sends_owner_dollars_as_integer_cents', async () => {
     const state = await consultantAt('payment');
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);

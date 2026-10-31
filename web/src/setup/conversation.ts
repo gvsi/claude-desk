@@ -38,7 +38,7 @@ export function decisionBody(decision: ProposalDecision): DecisionResult {
   const body: SetupProposalBody = { accept: true };
   if (decision.amount_cents !== undefined) {
     const amount = decision.amount_cents;
-    if (decision.proposal.kind !== 'job' || decision.proposal.job?.config?.block !== 'purpose_payment') {
+    if (decision.proposal.kind !== 'job' || decision.proposal.job?.job !== 'payment') {
       return { ok: false, field: 'amount_cents', message: 'Only a payment job can change its amount.' };
     }
     if (!Number.isInteger(amount) || amount < 0 || amount > 1_000_000) {
@@ -46,8 +46,9 @@ export function decisionBody(decision: ProposalDecision): DecisionResult {
     }
     body.amount_cents = amount;
   }
-  if (decision.proposal.kind === 'job' && decision.proposal.job?.config?.block === 'purpose_payment'
-    && decision.proposal.job.config.amount_cents === null && body.amount_cents === undefined) {
+  const job = decision.proposal.job;
+  if (decision.proposal.kind === 'job' && job?.job === 'payment'
+    && (job.config?.block !== 'purpose_payment' || job.config.amount_cents === null) && body.amount_cents === undefined) {
     return { ok: false, field: 'amount_cents', code: 'amount_required', message: 'Enter an amount before accepting this payment job.' };
   }
   return { ok: true, body };

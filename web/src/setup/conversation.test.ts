@@ -28,11 +28,19 @@ describe('setup conversation', () => {
     }
   });
 
+  it('requires_and_sends_payment_amounts_even_when_business_tools_hide_config', () => {
+    const proposal: ProposalCard = { ...payment, job: { ...payment.job!, config: null } };
+    expect(decisionBody({ action: 'accept', proposal })).toMatchObject({ ok: false, code: 'amount_required' });
+    expect(decisionBody({ action: 'decline', proposal })).toEqual({ ok: true, body: { accept: false } });
+    expect(decisionBody({ action: 'accept', proposal, amount_cents: 75000 })).toEqual({ ok: true, body: { accept: true, amount_cents: 75000 } });
+    expect(decisionBody({ action: 'accept', proposal, amount_cents: NaN })).toMatchObject({ ok: false, field: 'amount_cents' });
+  });
+
   it('returns_field_errors_instead_of_bodies_for_invalid_payment_amounts', () => {
     for (const amount_cents of [-1, 1_000_001, 0.5, NaN, Infinity]) {
       expect(decisionBody({ action: 'accept', proposal: payment, amount_cents })).toMatchObject({ ok: false, field: 'amount_cents' });
     }
-    const schedule: ProposalCard = { ...payment, job: { ...payment.job!, config: { block: 'typed_booking', appointment_type: 'Intro', minutes: 20 } } };
+    const schedule: ProposalCard = { ...payment, job: { ...payment.job!, job: 'schedule', config: { block: 'typed_booking', appointment_type: 'Intro', minutes: 20 } } };
     const connector: ProposalCard = { ...payment, kind: 'connector', job: null, connector: { app: 'stripe', label: 'Stripe', why: 'Payments', connectable: true } };
     for (const proposal of [schedule, connector]) {
       expect(decisionBody({ action: 'accept', proposal, amount_cents: 100 })).toMatchObject({ ok: false, field: 'amount_cents' });
