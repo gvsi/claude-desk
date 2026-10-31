@@ -155,6 +155,15 @@ function listedHash(tool: ToolProfile): string | null {
   return tool.pending_sha256 != null && tool.pending_sha256 !== '' ? tool.pending_sha256 : (tool.definition_sha256 ?? null);
 }
 
+/**
+ * The policy a card compiles to for a decision that went `outcome`, as the kernel names it: an
+ * auto card's allow, its hold twin, or a never card's forbid.
+ */
+function policyOf(cardId: string, outcome: Decision['outcome']): string {
+  if (outcome === 'hold') return `H.${cardId}.hold`;
+  return outcome === 'refuse' ? `F.never.${cardId}` : `A.${cardId}`;
+}
+
 /** A card with every optional field at its default, so two cards compare by what they enforce. */
 export function canonicalCard(card: RuleCard): string {
   const full: Record<string, unknown> = {
@@ -560,7 +569,7 @@ export class MockWorld {
       outcome: spec.outcome,
       state,
       policy_version: desk.policy.version,
-      policy_ids: spec.cardIds.map((cardId) => (hold ? `H.${cardId}.hold` : `A.${cardId}`)),
+      policy_ids: spec.policyIds ? [...spec.policyIds] : spec.cardIds.map((cardId) => policyOf(cardId, spec.outcome)),
       card_ids: [...spec.cardIds],
       review: null,
       reason_plain: spec.reasonPlain,

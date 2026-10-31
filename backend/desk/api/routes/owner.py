@@ -3,9 +3,9 @@
 Creating a copy is the one call that needs the passcode. Every other owner route takes the copy from the
 kernel's `GET /whoami` answer for the owner cookie (`deps.owner_ctx`), never from the browser.
 
-A new copy (`copies`, `start_over`) asks the kernel for the recorded night when the settings do (Plan 01d), and
-stores what the kernel replayed into it (`store_replayed_night`) before answering: recorded history for the owner's
-reads, never a turn.
+A new copy (`copies`, `start_over`) stores the seeded hold's visitor question and signed held receipt. It also asks
+the kernel for the recorded night when the settings do (Plan 01d), and stores what the kernel replayed into it
+(`store_replayed_night`) before answering: recorded history for the owner's reads, never a turn.
 """
 
 import asyncio
@@ -16,6 +16,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, Path, Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, StringConstraints
+from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from desk.api.cookies import set_owner_cookie, set_visitor_cookie
@@ -55,7 +56,7 @@ from desk.api.schemas import (
     operation_ids,
 )
 from desk.api.sse import append_control, emit
-from desk.api.store import Ids, Replayed, append_message, blocks_text, has_pending, transcript
+from desk.api.store import MESSAGES, Ids, Replayed, append_message, blocks_text, has_pending, transcript
 from desk.contracts import CopyCreated, Decision, DemoInboxEntry, LedgerPage, OwnerMessageResult, SessionState
 from desk.events import EvOwnerJoined, EvOwnerLeft, EvOwnerTyping
 from desk.kernel_api import (
@@ -169,6 +170,44 @@ async def _store_replayed(state: Runtime, created: CopyCreated) -> None:
         logger.error("the replayed night couldn't be stored (%s); the copy has live data only", type(error).__name__)
 
 
+async def store_seeded_chat(conn: AsyncConnection, created: CopyCreated, *, ro_schema: str) -> int:
+    """Store the seeded visitor's question and signed held receipt together, in the caller's transaction.
+
+    An existing visitor row guards retries under the run lock. A dropped receipt raises so the caller rolls back
+    the question too; a seed must never leave half a chat. Only deliver() builds the signed held event.
+    """
+    chat = created.seeded_chat
+    if chat is None:
+        return 0
+    await run_lock(conn, chat.session_id)
+    session = await KernelRO(conn, created.copy_id, ro_schema).session(chat.session_id)
+    if (session is None or session["desk_id"] not in created.desk_ids or session["kind"] != "visitor"
+            or session["closed_at"] is not None):
+        logger.warning("the seeded chat wasn't stored: not an open visitor session on one of the copy's Desks")
+        return 0
+    if (await conn.execute(select(exists().where(
+            MESSAGES.c.copy_id == created.copy_id, MESSAGES.c.session_id == chat.session_id,
+            MESSAGES.c.kind == "visitor_text")))).scalar_one():
+        return 0
+    ids = Ids(copy_id=created.copy_id, desk_id=session["desk_id"], session_id=chat.session_id)
+    await append_message(conn, ids, "visitor_text", text=chat.visitor_line)
+    if await deliver(conn, ids, Status(chat.decision, "held"), ro_schema=ro_schema) is None:
+        raise ValueError("the seeded held receipt wouldn't be shown")
+    return 2
+
+
+async def _store_seeded(state: Runtime, created: CopyCreated) -> None:
+    """Keep the seeded chat independent of the recorded night; neither writer can fail copy creation."""
+    if created.seeded_chat is None:
+        return
+    try:
+        async with state.database().connect() as conn:
+            await store_seeded_chat(conn, created, ro_schema=state.settings.kernel_ro_schema)
+            await conn.commit()
+    except Exception as error:
+        logger.error("the seeded chat couldn't be stored (%s); the copy is still available", type(error).__name__)
+
+
 async def _create_copy(state: Runtime) -> CopyCreated:
     """`POST /copies`, asking for the recorded night when the settings do (`replay_night`). A kernel without the
     seeded night refuses a body that carries `replay_night` at all (422 `invalid`, which creates nothing), so a live
@@ -188,8 +227,10 @@ async def _create_copy(state: Runtime) -> CopyCreated:
 
 async def _new_copy(state: Runtime, response: Response) -> CopyOut:
     """A new copy of the Rivera seed, read back through its own owner token, which goes only into the cookie. It asks
-    for the recorded night when the settings do (`replay_night`) and stores what was replayed before answering."""
+    for the recorded night when the settings do (`replay_night`). The seeded hold's chat commits first, then the
+    replayed night in its own transaction, so either can be stored even if the other fails."""
     created = await _create_copy(state)
+    await _store_seeded(state, created)
     await _store_replayed(state, created)
     async with owner_context(state, created.owner_token) as ctx:
         copy = await copy_out(ctx)
@@ -427,8 +468,9 @@ async def conversation(session_id: Annotated[str, Path(max_length=128)], request
 
 @router.get("/desks/{desk_id}/safety", response_model=list[Attempt], responses=error_responses(401, 404, 422, 503))
 async def safety(desk_id: DeskId, ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> list[Attempt]:
-    """The attempts the checkpoint stopped on the Desk, newest first: refused requests and replies of Claude's it
-    blocked (the "stopped" Today counts)."""
+    """The Desk's refused requests and Claude's stopped drafts, newest first. Today and Safety count refused requests
+    only (owner decision, 2026-10-31). Each refusal's nullable `cause` comes from its decision's `policy_ids` and
+    its ledger decide summary's `reason`/`check` and the session's verified state; drafts have no cause."""
     return await owner_reads.attempts(ctx, ctx.desk(desk_id))
 
 

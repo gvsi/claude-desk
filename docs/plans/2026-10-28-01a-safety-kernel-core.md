@@ -251,7 +251,7 @@ The seed is the master's "Rivera seed" table (its held request: Task 12; Plan 01
 | Prices | `deposit` Service call deposit 2000; `drain` Drain clearing 18000; `heater` Water heater flush 15000; `leak` Leak repair 25000 |
 | People | `dana` Dana Whitfield, dana@example.com; `bob` Bob Okafor, bob@example.com |
 | Documents | `dana-invoice` "Invoice, drain clearing" (record owner `dana`); `bob-warranty` "Warranty, water heater flush" (record owner `bob`) |
-| Notifications | now `["approval", "emergency", "breaker", "lockout"]`; briefing `["lead", "callback", "booking"]` |
+| Notifications | now `["approval", "emergency", "breaker", "lockout", "handoff"]` (`handoff` since the handoff card's follow-up to plan 01b, #96); briefing `["lead", "callback", "booking"]` |
 
 `RIVERA_CARDS` (stable IDs, scopes `anyone`, `verified` or `record_owner`, so the Cedar is identical in every copy) are `PRESETS["ask_first"]`'s auto cards plus:
 

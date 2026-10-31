@@ -47,7 +47,7 @@ from desk.api.prompts import (
 )
 from desk.api.ratelimit import RateLimited
 from desk.api.schemas import SetupStartIn
-from desk.api.setup import owner_name
+from desk.api.setup import default_notifications, owner_name
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS
 from desk.kernel_api import CreateCopyRequest, CreateSessionRequest
 from tests.api.fakes import ScriptedModel, gated, response, unavailable
@@ -1175,7 +1175,7 @@ async def test_desk_is_created_before_any_setup_tool_call(app, browser, fake, ke
     assert seed["name"] == "Main line"
     assert all(seed[part] == [] for part in ("charter", "hours", "price_items", "calendar_slots", "people",
                                              "documents", "connections"))
-    assert seed["notifications"] == {"now": ["approval", "breaker", "lockout", "emergency"],
+    assert seed["notifications"] == {"now": ["approval", "breaker", "lockout", "handoff", "emergency"],
                                      "briefing": ["lead", "callback", "booking"]}
     desk = fake.desks[state["desk_id"]]
     assert desk.slug == state["slug"] and not desk.answering          # Answering stays off through setup
@@ -1892,6 +1892,17 @@ def test_owner_name_fallback_passes_the_kernel_pattern():
         assert OWNER_NAME.fullmatch(name), name
 
 
+def test_a_conversation_handed_to_the_owner_alerts_at_once():
+    # the kernel's handoff card opens an owner handoff and alerts under event kind `handoff` (#96): a new Desk alerts
+    # it at once, as a held request does and as the Rivera seed does, whatever the business; the briefing is unchanged
+    for business_type in ("trade", "office", "landlord", "other"):
+        defaults = default_notifications(business_type)
+        assert "handoff" in defaults.now and "handoff" not in defaults.briefing, business_type
+        assert defaults.briefing == ["lead", "callback", "booking"]
+    assert default_notifications("trade").now == ["approval", "breaker", "lockout", "handoff", "emergency"]
+    assert default_notifications("office").now == ["approval", "breaker", "lockout", "handoff"]
+
+
 async def test_owner_name_fallback_makes_a_desk_the_kernel_takes(app, browser, fake, kernel_http, model):
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model, business_name="A1 Plumbing & Sons", owner_display_name=None)
@@ -2018,7 +2029,7 @@ async def test_an_answer_waiting_on_claude_locks_nothing_and_a_duplicate_is_refu
     assert owner_lines.count("Plumbing.") == 1
 
 
-async def test_a_consent_reading_the_website_locks_nothing_and_a_duplicate_is_refused_at_once(
+async def test_a_consent_reading_the_website_locks_nothing_and_a_duplicate_answers_busy_at_once(
         app, browser, fake, kernel_http, model, engine, db):
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model, website=WEBSITE)
@@ -2037,7 +2048,7 @@ async def test_a_consent_reading_the_website_locks_nothing_and_a_duplicate_is_re
         assert idle_in_transaction(db) == 0
         reads = len(fake.called("GET /context/{session_id}?desk_id="))
         again = await asyncio.wait_for(owner.browser.post(path, json={"allow": True}), 2)
-        assert (again.status_code, again.json()) == (409, {"error": "conflict"})
+        assert again.status_code == 202 and again.json()["busy"] is True
         assert len(fake.called("GET /context/{session_id}?desk_id=")) == reads
     finally:
         release.set()

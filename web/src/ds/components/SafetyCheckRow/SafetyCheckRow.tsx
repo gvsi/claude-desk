@@ -31,7 +31,7 @@ export interface SafetyCheckRowProps {
  * One trick the setup safety check tried on the draft rules: what kind it is, the words it tried in
  * quotes and the checkpoint that stopped it at the left; at the right "Blocked" or "Not blocked"
  * beside its dot, and the kernel's reason under it. Live rows land one by one, `motion-stagger`
- * apart, and appear at once under reduced motion. The row is drawn with a hairline over it; put
+ * apart, and appear at once under reduced motion. Hairlines are drawn only between rows; put
  * each in a list item.
  */
 export function SafetyCheckRow({ label, attempt, blocked, stoppedBy, reason, index, live = false }: SafetyCheckRowProps) {

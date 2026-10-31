@@ -201,7 +201,8 @@ async def _hold_session(ctx: KernelCtx, session_id: str, action_id: str) -> Sess
     Desk's deletion, each of which writes the row under `FOR UPDATE` (a deletion closes it),
     either commits before T2 takes it, and T2 sees what it wrote, or waits until T2 commits. An
     adapter that writes the session's own rows
-    (`locks_session`: a verification start) holds it `FOR UPDATE` instead, so two such executions
+    (`locks_session`: a verification start, or a call-back request, which keeps one open handoff
+    per session) holds it `FOR UPDATE` instead, so two such executions
     in one session take turns: each holding it shared and then asking for it outright, they would
     wait on each other until Postgres ended one. Never None, since a missing row raises (and the
     action ends `unknown`, never fenced). The action's tool is read without a lock, which waits

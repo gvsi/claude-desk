@@ -114,6 +114,50 @@ function heldCard(screen: RenderResult, reason: string) {
 }
 
 /**
+ * Answers the seeded held request on Today with "Allow this time" and waits until its card has
+ * landed and settled, with Dismiss under it.
+ */
+async function allowTheSeededRequest(screen: RenderResult): Promise<void> {
+  const card = heldCard(screen, SEEDED_REASON);
+  const allow = card.getByRole('button', { name: 'Allow this time' });
+  await expect.element(allow).toBeVisible();
+  const item = card.element().closest('li');
+  if (!item) throw new Error('the card sits in an item of Needs you');
+  const landing = watchAnswerLanding(card.element(), item);
+  await allow.click();
+  await landing;
+  await expect.element(card.getByText("You allowed this. It's done.", { exact: true })).toBeVisible();
+}
+
+/** Puts focus on Needs you's one Dismiss without moving the page, and presses Enter on it. */
+async function dismissFromTheKeyboard(screen: RenderResult): Promise<void> {
+  const button = region(screen, 'Needs you').getByRole('button', { name: 'Dismiss' }).element() as HTMLElement;
+  button.focus({ preventScroll: true });
+  expect(document.activeElement).toBe(button);
+  await userEvent.keyboard('{Enter}');
+}
+
+/**
+ * Scrolls the page's column until Needs you's one Dismiss sits just inside its foot, as an owner who
+ * has just answered there sees it, then puts keyboard focus on it without moving the page. `next`,
+ * the section after Needs you, is then out of sight below, so a focus that brought it into view
+ * would scroll the page. Returns the column.
+ */
+async function focusDismissAtTheFoot(screen: RenderResult, next: Element): Promise<HTMLElement> {
+  const column = document.querySelector('main');
+  if (!column) throw new Error('the owner frame draws the page column');
+  const button = region(screen, 'Needs you').getByRole('button', { name: 'Dismiss' }).element() as HTMLElement;
+  column.scrollTop += button.getBoundingClientRect().bottom - column.getBoundingClientRect().bottom + 8;
+  await nextFrames();
+  expect(column.scrollTop, 'the page is scrolled down to Dismiss').toBeGreaterThan(0);
+  expect(button.getBoundingClientRect().bottom, 'Dismiss is in sight').toBeLessThanOrEqual(column.getBoundingClientRect().bottom);
+  expect(next.getBoundingClientRect().top, 'the next section is out of sight below').toBeGreaterThan(column.getBoundingClientRect().bottom);
+  button.focus({ preventScroll: true });
+  expect(document.activeElement).toBe(button);
+  return column;
+}
+
+/**
  * A button beside a busy one, waiting for its request: its words shown with no spinner, announced
  * as unavailable but not disabled, so it keeps its place in the tab order.
  */
@@ -962,11 +1006,13 @@ describe('Today', () => {
 
     await expect.element(block.getByText('Claude handled 3', { exact: true })).toBeVisible();
     await expect.element(block.getByText('You stepped in 1 time', { exact: true })).toBeVisible();
-    await expect.element(block.getByText('2 stopped', { exact: true })).toBeVisible();
+    await expect.element(block.getByRole('heading', { level: 3, name: 'Turned down', exact: true })).toBeVisible();
+    await expect.element(block.getByText('2 requests', { exact: true })).toBeVisible();
     await expect.element(block.getByRole('link', { name: 'Open Safety' })).toHaveAttribute('href', `${DESK}/safety`);
+    expect(block.element().textContent).not.toMatch(/attempt|talk it around|stopped/i);
 
-    // The design system's figure styles: the booked total at the figure size, the stopped count at
-    // the smaller one, both in the interface's face with tabular figures.
+    // The design system's figure styles: the booked total at the figure size, the count of
+    // requests turned down at the smaller one, both in the interface's face with tabular figures.
     const [booked, stopped] = [...block.element().querySelectorAll('.cd-week__number')];
     expect([booked?.textContent, stopped?.textContent]).toEqual(['$378', '2']);
     if (!booked || !stopped) throw new Error('Last 7 days shows both figures');
@@ -1016,9 +1062,11 @@ describe('Today', () => {
     const bookings = block.getByRole('heading', { name: 'Bookings', exact: true }).element().closest('.cd-week__part');
     expect(bookings?.querySelector('a')).toBeNull();
     await expect.element(block.getByText('No conversations in the last 7 days.', { exact: true })).toBeVisible();
-    await expect.element(block.getByText('No attempts in the last 7 days.', { exact: true })).toBeVisible();
+    await expect.element(block.getByRole('heading', { level: 3, name: 'Turned down', exact: true })).toBeVisible();
+    await expect.element(block.getByText('Nothing turned down in the last 7 days.', { exact: true })).toBeVisible();
     await expect.element(block.getByRole('link', { name: 'Open Safety' })).toHaveAttribute('href', `${DESK}/safety`);
     expect(block.getByText(/Claude handled/).elements()).toHaveLength(0);
+    expect(block.element().textContent).not.toMatch(/attempt|talk it around/i);
 
     // Claude handled every conversation and the owner didn't step in. That says only what the
     // owner did, never that no one needed them: a request can still be waiting in Needs you.
@@ -1032,21 +1080,23 @@ describe('Today', () => {
     expect(again.getByText(/No one has needed you/).elements()).toHaveLength(0);
   });
 
-  it('attempts_count_refused_requests_only', async () => {
-    // Rivera's copy keeps one of Claude's drafts the reply check stopped, which nobody tried:
-    // "Since last night" shows it as blocked, and the last 7 days have no attempt to talk Claude around.
+  it('turned_down_counts_refused_requests_only', async () => {
+    // Rivera's copy keeps one of Claude's drafts the reply check stopped, which nobody asked for:
+    // "Since last night" shows it as blocked, and the last 7 days turned no request down.
     const { screen } = await renderRoute(TODAY);
     const block = region(screen, 'Last 7 days');
     const night = region(screen, 'Since last night');
     await expect.element(night.getByText('A reply was stopped before it was shown.', { exact: true })).toBeVisible();
-    await expect.element(block.getByText('No attempts in the last 7 days.', { exact: true })).toBeVisible();
+    await expect.element(block.getByText('Nothing turned down in the last 7 days.', { exact: true })).toBeVisible();
 
-    // The built-in agent tries to charge over its signed limit, which the kernel refuses: that one counts.
+    // The built-in agent tries to charge over its signed limit, which the kernel refuses: that one
+    // counts, in the singular.
     const refused = () => [...mockStore.world.decisions.values()].filter((d) => d.decision.state === 'refused').length;
     await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
     await mockStore.dispatch('sendAgent', { params: { slug: RIVERA.slug }, body: { task: 'push_the_limit', idempotency_key: 'refuse-1' } });
     await expect.poll(refused, { timeout: 5_000 }).toBe(1);
-    await expect.element(block.getByText('1 stopped', { exact: true })).toBeVisible();
+    await expect.element(block.getByText('1 request', { exact: true })).toBeVisible();
+    expect(block.getByText('Nothing turned down in the last 7 days.').elements()).toHaveLength(0);
   });
 
   it.each(['desktop', 'phone'] as const)('this_week_bars_are_24_px_wide_%s', async (viewport) => {
@@ -1408,6 +1458,96 @@ describe('Today', () => {
     // Dismissed, it goes.
     await region(screen, 'Needs you').getByRole('button', { name: 'Dismiss' }).click();
     await expect.element(card).not.toBeInTheDocument();
+  });
+
+  it('dismissing_the_last_answer_focuses_live_now', async () => {
+    // The only request, answered here, then dismissed from the keyboard with the page scrolled down
+    // to it: Needs you goes, and focus goes on to Live now, the section after it, where the page stands.
+    const { screen } = await renderRoute(TODAY, { viewport: 'phone' });
+    await allowTheSeededRequest(screen);
+    expect(region(screen, 'Needs you').getByRole('article').elements()).toHaveLength(1);
+    const live = region(screen, 'Live now');
+    const column = await focusDismissAtTheFoot(screen, live.element());
+
+    const before = { column: column.scrollTop, window: window.scrollY };
+    await userEvent.keyboard('{Enter}');
+    await expect.element(region(screen, 'Needs you')).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(live.element());
+    expect(column.scrollTop).toBe(before.column);
+    expect(window.scrollY).toBe(before.window);
+    // Live now has moved up into the place Needs you left, in sight.
+    const box = live.element().getBoundingClientRect();
+    expect(box.top).toBeGreaterThanOrEqual(column.getBoundingClientRect().top);
+    expect(box.bottom).toBeLessThanOrEqual(column.getBoundingClientRect().bottom);
+  });
+
+  it('dismissing_the_last_answer_with_no_live_chat_focuses_since_last_night', async () => {
+    // No chat is live, so Today draws no Live now: focus goes on to Since last night instead, where
+    // the page stands.
+    await injectToday((t) => ({ ...t, live: [] }));
+    const { screen } = await renderRoute(TODAY, { viewport: 'phone' });
+    await allowTheSeededRequest(screen);
+    expect(region(screen, 'Needs you').getByRole('article').elements()).toHaveLength(1);
+    expect(screen.getByRole('heading', { name: 'Live now' }).elements()).toHaveLength(0);
+    const since = region(screen, 'Since last night');
+    const column = await focusDismissAtTheFoot(screen, since.element());
+
+    const before = { column: column.scrollTop, window: window.scrollY };
+    await userEvent.keyboard('{Enter}');
+    await expect.element(region(screen, 'Needs you')).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(since.element());
+    expect(column.scrollTop).toBe(before.column);
+    expect(window.scrollY).toBe(before.window);
+    expect(since.element().getBoundingClientRect().top).toBeGreaterThanOrEqual(column.getBoundingClientRect().top);
+  });
+
+  it('dismissing_before_the_refresh_finishes_keeps_focus_in_needs_you', async () => {
+    const { screen } = await renderRoute(TODAY, { viewport: 'phone' });
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    const read = holdReads(needsYouPath);
+    onTestFinished(read.release);
+    await allowTheSeededRequest(screen);
+    await vi.waitFor(() => expect(read.held()).toBeGreaterThan(0));
+    const needs = region(screen, 'Needs you');
+
+    // Dismiss before the answer's refresh lands: the cached hold reappears, so the section stays.
+    await dismissFromTheKeyboard(screen);
+    await expect.element(needs.getByRole('button', { name: 'Dismiss' })).not.toBeInTheDocument();
+    await expect.element(heldCard(screen, SEEDED_REASON).getByRole('button', { name: 'Allow this time' })).toBeVisible();
+    expect(document.activeElement).toBe(needs.element());
+
+    read.release();
+    await expect.element(needs).not.toBeInTheDocument();
+  });
+
+  it('dismissing_an_answer_with_a_request_still_held_focuses_needs_you', async () => {
+    // Another request still waits, so Needs you stays, and focus goes to it, as it always has.
+    mockStore.world.addHeldRefund();
+    const { screen } = await renderRoute(TODAY, { viewport: 'phone' });
+    await expect.element(heldCard(screen, REFUND_REASON)).toBeVisible();
+    await allowTheSeededRequest(screen);
+    const needs = region(screen, 'Needs you');
+
+    await dismissFromTheKeyboard(screen);
+    await expect.element(heldCard(screen, SEEDED_REASON)).not.toBeInTheDocument();
+    await expect.element(heldCard(screen, REFUND_REASON)).toBeVisible();
+    expect(document.activeElement).toBe(needs.element());
+  });
+
+  it('dismissing_the_last_answer_while_reads_fail_focuses_needs_you', async () => {
+    // Needs you can't be read, and says so: it stays to say it once its last request goes, so focus
+    // stays on it.
+    const { screen } = await renderRoute(TODAY, { viewport: 'phone' });
+    await allowTheSeededRequest(screen);
+    const needs = region(screen, 'Needs you');
+    const line = needs.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
+    mockStore.inject({ route: 'needsYou', status: 503, times: 10_000 });
+    await expect.element(line, { timeout: 5_000 }).toBeVisible();
+
+    await dismissFromTheKeyboard(screen);
+    await expect.element(heldCard(screen, SEEDED_REASON)).not.toBeInTheDocument();
+    await expect.element(line).toBeVisible();
+    expect(document.activeElement).toBe(needs.element());
   });
 
   it('rule_draft_from_answer_links_to_review', async () => {
