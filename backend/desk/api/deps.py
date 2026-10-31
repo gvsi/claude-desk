@@ -1,10 +1,10 @@
 """What the API's routes depend on: the process's runtime, the caller and the errors routes raise.
 
 `runtime(request)` is the app's `Runtime`: settings, clock, rate limits, the job queue and, once the lifespan has
-started, the kernel client, the database engine, the run events listener and the turn runner. `owner_ctx` is the owner's
-copy and `visitor_ctx` the visitor's session, each taken from the kernel's `GET /whoami` answer for its cookie;
-`client_ip` and `public_origin` follow Plan 06b's seam ("Client IP and public origin"); `require_model_budget`
-guards the model routes.
+started, the kernel client, the database engine, the run events listener, the turn runner and the built-in agent's
+runs. `owner_ctx` is the owner's copy and `visitor_ctx` the visitor's session, each taken from the kernel's
+`GET /whoami` answer for its cookie; `client_ip` and `public_origin` follow Plan 06b's seam ("Client IP and public
+origin"); `require_model_budget` guards the model routes.
 """
 
 import contextlib
@@ -18,10 +18,13 @@ import procrastinate
 from fastapi import Request, Response
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
+from desk.api.agents import DemoAgents
 from desk.api.cookies import OWNER_COOKIE, VISITOR_COOKIE, set_visitor_cookie
-from desk.api.kernel_client import CredentialView, KernelFailed, KernelHttp
+from desk.api.kernel_client import CredentialView, KernelFailed, KernelHttp, KernelUnavailable
 from desk.api.metrics import over_daily_budget
-from desk.api.ratelimit import RateLimiter, RateLimitLedger, StreamSlots
+from desk.api.presence import Presence
+from desk.api.proving import Proving
+from desk.api.ratelimit import RateLimited, RateLimiter, RateLimitLedger, StreamSlots
 from desk.api.ro import KernelRO
 from desk.api.runner import TurnRunner
 from desk.api.settings import Settings
@@ -42,10 +45,17 @@ class ApiProblem(Exception):
         self.clear_visitor = clear_visitor
 
 
+def proving_work() -> Proving:
+    """The proving routes' work, whose errors the app answers with (an `ApiError`) aren't logged as failures."""
+    return Proving(answers=(ApiProblem, RateLimited, KernelFailed, KernelUnavailable))
+
+
 @dataclass
 class Runtime:
-    """The process's state. `kernel`, `engine`, `listener` and `runner` are opened by the lifespan, which also builds
-    the model client unless a test injected one, and opens the job queue (`jobs`) and runs its worker."""
+    """The process's state. `kernel`, `engine`, `listener`, `runner` and `agents` are opened by the lifespan, which
+    also builds the model client unless a test injected one, and opens the job queue (`jobs`) and runs its worker.
+    `a2a_transport` is a test hook the lifespan refuses in production: the transport of the built-in agent's client
+    of the public A2A endpoint (the app itself, in process), set on the runtime before the lifespan starts."""
 
     settings: Settings
     clock: Callable[[], datetime]
@@ -58,6 +68,10 @@ class Runtime:
     engine: AsyncEngine | None = None
     listener: Listener | None = None
     runner: TurnRunner | None = None      # the session turns this process runs (Task 7)
+    agents: DemoAgents | None = None      # the built-in visiting agent's runs (Plan 02b)
+    a2a_transport: Any = field(default=None, repr=False)      # tests only: the built-in agent's way to the app
+    presence: Presence = field(default_factory=Presence)      # who is typing, in this process's memory (Plan 02b)
+    proving: Proving = field(default_factory=proving_work)    # the proving routes' running work (Plan 02b)
 
     def database(self) -> AsyncEngine:
         if self.engine is None:
@@ -66,7 +80,7 @@ class Runtime:
 
     def started(self) -> "Runtime":
         if (self.kernel is None or self.engine is None or self.listener is None or self.runner is None
-                or self.jobs is None):
+                or self.agents is None or self.jobs is None):
             raise RuntimeError("the API's lifespan hasn't started")
         return self
 
@@ -121,11 +135,13 @@ def public_origin(request: Request) -> str:
 @dataclass(frozen=True)
 class OwnerCtx:
     """An owner request's copy, from the kernel's `GET /whoami` answer for the owner cookie: its Desks, the owner
-    session, the owner's kernel view and the copy's kernel_ro reads. The browser never names any of them."""
+    session and its generation (an owner's own tool calls, setup's, are decided at it), the owner's kernel view and
+    the copy's kernel_ro reads. The browser never names any of them."""
 
     copy_id: str
     desk_ids: tuple[str, ...]
     owner_session_id: str
+    owner_generation: int
     kernel: CredentialView = field(repr=False)
     ro: KernelRO = field(repr=False)
 
@@ -159,6 +175,7 @@ async def owner_context(state: Runtime, token: str) -> AsyncIterator[OwnerCtx]:
         raise ApiProblem(401, "no_owner_session")
     async with state.engine.connect() as conn:
         yield OwnerCtx(copy_id=who.copy_id, desk_ids=tuple(who.desk_ids), owner_session_id=who.session.session_id,
+                       owner_generation=who.session.generation,
                        kernel=kernel, ro=KernelRO(conn, who.copy_id, state.settings.kernel_ro_schema))
 
 

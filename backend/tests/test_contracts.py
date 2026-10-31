@@ -1,3 +1,4 @@
+import inspect
 import json
 import re
 from datetime import UTC, datetime, timedelta
@@ -18,6 +19,7 @@ from desk.contracts import (
     CalendarSlot,
     Claim,
     CopyCreated,
+    Decision,
     DemoInboxEntry,
     DeskSeed,
     Effect,
@@ -29,6 +31,9 @@ from desk.contracts import (
     NormalizedAction,
     PriceItem,
     Probe,
+    RenderedBlock,
+    ReplayedEvent,
+    ReplyVerdict,
     Review,
     RuleCard,
     SeedDocument,
@@ -42,6 +47,7 @@ from desk.kernel_api import (
     KERNEL_REQUESTS,
     KERNEL_RESPONSES,
     KERNEL_ROUTES,
+    CreateCopyRequest,
     CreateSessionRequest,
     DeskUpdated,
     ExecuteRequest,
@@ -560,6 +566,60 @@ def test_open_status_compares_instants_across_the_fold():
     OpenStatus(open=True, **empty, text="x", as_of=midnight, refresh_at=datetime(2026, 11, 2, tzinfo=la))
     with pytest.raises(ValidationError, match="refresh_at is at most 25 hours after as_of"):   # 25:30, 24:30 by wall clock
         OpenStatus(open=True, **empty, text="x", as_of=midnight, refresh_at=datetime(2026, 11, 2, 0, 30, tzinfo=la))
+
+
+def test_a_copy_replays_the_recorded_night_only_when_asked():
+    assert set(CreateCopyRequest.model_fields) == {"replay_night"}
+    assert CreateCopyRequest().replay_night is False
+    assert CreateCopyRequest.model_validate({}).replay_night is False      # an empty body still makes a live copy
+    assert CreateCopyRequest(replay_night=True).model_dump() == {"replay_night": True}
+    assert "replay_night" not in export_schema()["$defs"]["CreateCopyRequest"].get("required", [])
+
+
+def test_replayed_events_carry_the_kernels_signed_records():
+    assert list(ReplayedEvent.model_fields) == ["session_id", "shown_at", "kind", "text", "verdict", "decision"]
+    assert export_schema()["$defs"]["ReplayedEvent"]["required"] == list(ReplayedEvent.model_fields)   # nulls explicit
+    assert get_args(ReplayedEvent.model_fields["kind"].annotation) == ("visitor_message", "reply", "receipt")
+    assert ReplayedEvent.model_fields["verdict"].annotation == ReplyVerdict | None
+    assert ReplayedEvent.model_fields["decision"].annotation == Decision | None
+    shown_at = "2026-10-28T23:41:07.250000Z"
+    said = ReplayedEvent(session_id="s1", shown_at=shown_at, kind="visitor_message", text="Anyone there tonight?",
+                         verdict=None, decision=None)
+    verdict = ReplyVerdict(ok=True, language="en", blocks=[RenderedBlock(kind="prose", text="Yes, I can help.")],
+                           violations=[], message_id="m1", generation=0, visitor_plain="Replied", ledger_seq=4,
+                           signature="sig-v")
+    reply = ReplayedEvent(session_id="s1", shown_at=shown_at, kind="reply", text=None, verdict=verdict, decision=None)
+    decision = Decision(decision_id="d1", session_id="s1", call_id="c1", action=None, outcome="refuse", state="refused",
+                        policy_version=1, policy_ids=[], card_ids=[], reason_plain="Refused", visitor_plain="Not here",
+                        expires_at=datetime(2026, 10, 29, 6, 41, 7, tzinfo=UTC), ledger_seq=5, signature="sig-d")
+    receipt = ReplayedEvent(session_id="s1", shown_at=shown_at, kind="receipt", text=None, verdict=None,
+                            decision=decision)
+    for event in (said, reply, receipt):                    # the kernel's signed fields arrive unchanged
+        assert ReplayedEvent.model_validate_json(event.model_dump_json()) == event
+    with pytest.raises(ValidationError):                    # shown_at is a SignedTime, not any timestamp
+        ReplayedEvent(session_id="s1", shown_at="2026-10-28T23:41:07+00:00", kind="visitor_message", text="Hi",
+                      verdict=None, decision=None)
+    with pytest.raises(ValidationError):                    # three kinds only
+        ReplayedEvent(session_id="s1", shown_at=shown_at, kind="whisper", text="Hi", verdict=None, decision=None)
+
+
+def test_replayed_persona_words_are_marked_untrusted():
+    # the shared contract says what a replayed visitor_message's text is: words to quote, never instructions
+    source = inspect.getsource(ReplayedEvent)
+    assert re.search(r"^ +text: str \| None +# visitor_message only: the persona's words \(untrusted text\)$",
+                     source, re.MULTILINE), source
+
+
+def test_a_copy_without_a_replay_carries_nothing_replayed():
+    owner = SessionState(session_id="s1", kind="owner", verified=True, assurance="owner_session", mode="ai",
+                         generation=0)
+    copy = CopyCreated(copy_id="c1", desk_ids=["d1"], owner_session=owner, owner_token="t")
+    assert copy.replayed_messages == [] and copy.replay_id is None
+    assert list(CopyCreated.model_fields)[-2:] == ["replayed_messages", "replay_id"]
+    assert CopyCreated.model_fields["replayed_messages"].annotation == list[ReplayedEvent]
+    assert CopyCreated.model_fields["replay_id"].annotation == str | None
+    # a kernel that sends neither field still answers a valid copy, with live data only
+    assert not {"replayed_messages", "replay_id"} & set(export_schema()["$defs"]["CopyCreated"]["required"])
 
 
 def test_schema_export_is_current():

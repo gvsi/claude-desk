@@ -95,7 +95,8 @@ Effort = Literal["low", "medium", "high", "xhigh", "max"]
 @dataclass(frozen=True)
 class ModelRequest:
     """One model call. `system` is a list of text blocks; `output_schema` (a Pydantic model) makes it a structured
-    route, and the conversation route has none."""
+    route, and the conversation route has none. `timeout_s` bounds each try the SDK makes (the client's own timeout
+    otherwise); it is sent as the SDK's request option, never in the body."""
 
     route: str
     system: list[dict]
@@ -105,6 +106,7 @@ class ModelRequest:
     effort: Effort = "medium"
     max_tokens: int = 16000
     output_schema: Any = None
+    timeout_s: float | None = None
 
     def __post_init__(self) -> None:
         if self.route not in ROUTES:
@@ -113,6 +115,8 @@ class ModelRequest:
             raise ValueError("the conversation route has no output schema, and every other route has one")
         if not self.system or not all(isinstance(block, dict) and block.get("type") == "text" for block in self.system):
             raise ValueError("system is a list of text blocks")
+        if self.timeout_s is not None and not self.timeout_s > 0:
+            raise ValueError("a request's timeout is a positive number of seconds")
 
 
 def _strict(node: Any) -> Any:
@@ -252,6 +256,8 @@ class _SdkModel:
 
     async def call(self, request: ModelRequest) -> ModelResponse:
         kwargs = {**build_kwargs(request), "model": self._sent_model(request.model)}
+        if request.timeout_s is not None:
+            kwargs["timeout"] = request.timeout_s
         started = time.monotonic()
         try:
             if request.output_schema is None:

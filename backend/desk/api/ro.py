@@ -4,8 +4,10 @@ The views leave out every secret and admit only the rows of the copy the transac
 `desk.copy_id` (migrations 0002 and 0005). `KernelRO(conn, copy_id, schema)` names that copy from a
 `WhoAmI` answer, never from the browser, and sets it before each read, so a read always runs as the
 copy it was built for, whatever the transaction read before; each query also filters on `copy_id`
-itself. Reads run in the caller's transaction and never commit. Only the master plan's views and
-columns (`KERNEL_RO_COLUMNS`) can be named; `schema` is `kernel_ro`, or the fake's mirror in tests.
+itself. Reads run in the caller's transaction and never commit; built with `own_transactions`, as
+for work that waits on a model between its reads, each read instead ends the transaction it opened
+(`done`), so none stays open while the work waits. Only the master plan's views and columns
+(`KERNEL_RO_COLUMNS`) can be named; `schema` is `kernel_ro`, or the fake's mirror in tests.
 
 Two reads start from no `WhoAmI` answer: `kernel_session`, for a session a kernel answer just named (a
 payment completion names only the session), and `due_decisions`, for the job that surfaces decisions
@@ -49,12 +51,20 @@ async def set_copy(conn: AsyncConnection, copy_id: str) -> None:
 class KernelRO:
     """One copy's kernel_ro rows: `rows`, `one`, `session` and `desks`."""
 
-    def __init__(self, conn: AsyncConnection, copy_id: str, schema: str = KERNEL_RO):
+    def __init__(self, conn: AsyncConnection, copy_id: str, schema: str = KERNEL_RO, *,
+                 own_transactions: bool = False):
         if not copy_id:
             raise ValueError("KernelRO needs the copy_id of a WhoAmI answer")
         if not _IDENTIFIER.match(schema):
             raise ValueError("schema is a plain identifier")
         self.conn, self.copy_id, self.schema = conn, copy_id, schema
+        self.own_transactions = own_transactions
+
+    async def done(self) -> None:
+        """End the transaction a read opened, when the reads run in transactions of their own (nothing on the
+        connection writes, so it is rolled back); a read in the caller's transaction leaves it as it is."""
+        if self.own_transactions and self.conn.in_transaction():
+            await self.conn.rollback()
 
     async def rows(self, view: str, *, order_by: tuple[str, ...] = (), **equals: Any) -> list[dict[str, Any]]:
         """The view's rows in this copy where each named column equals its value (any of them, for a list)."""
@@ -65,9 +75,13 @@ class KernelRO:
         conditions = [source.c.copy_id == self.copy_id]
         for name, value in equals.items():
             conditions.append(source.c[name].in_(list(value)) if isinstance(value, _MANY) else source.c[name] == value)
-        await set_copy(self.conn, self.copy_id)
-        result = await self.conn.execute(select(source).where(*conditions).order_by(*(source.c[n] for n in order_by)))
-        return [dict(row._mapping) for row in result]
+        try:
+            await set_copy(self.conn, self.copy_id)
+            result = await self.conn.execute(select(source).where(*conditions)
+                                             .order_by(*(source.c[n] for n in order_by)))
+            return [dict(row._mapping) for row in result]
+        finally:
+            await self.done()
 
     async def one(self, view: str, **equals: Any) -> dict[str, Any] | None:
         """The one matching row, None when there is none; more than one is an error."""
@@ -81,6 +95,28 @@ class KernelRO:
 
     async def desks(self) -> list[dict[str, Any]]:
         return await self.rows("desks", order_by=("created_at", "desk_id"))
+
+
+def replayed(entry: dict | None) -> bool:
+    """Whether a ledger entry is recorded history: a kernel entry whose summary carries the `replayed` mark, which only
+    the kernel's replay writes (Plan 01d). A missing entry is not, so this is for an entry the caller has read; a read
+    about a decision, whether it keeps the decision from a model or labels it for the owner (a booking, a charge, a
+    refusal, a tool's decision), asks `decision_replayed`, which fails closed."""
+    if entry is None:
+        return False
+    event = entry["event"] or {}
+    return event.get("origin", "kernel") == "kernel" and isinstance((event.get("summary") or {}).get("replayed"), dict)
+
+
+def decision_replayed(decision: dict[str, Any], entry: dict[str, Any] | None) -> bool:
+    """Whether a `kernel_ro.decisions` row is recorded history, failing closed, for a read that keeps it from a model
+    or labels it for the owner (a tool's decisions, and the bookings, charges and refusals the owner's screens count).
+    `entry` is the copy's `ledger_entries` row at the decision's `ledger_seq` (None when none was read). The decision
+    is live only when it names an entry, that entry was read and the kernel didn't mark it replayed; a null
+    `ledger_seq`, an entry that can't be read (missing, or outside the copy's view) or one other than the entry it
+    names counts as replayed, so a decision of unknown origin is never treated as live."""
+    seq = decision["ledger_seq"]
+    return seq is None or entry is None or entry["seq"] != seq or replayed(entry)
 
 
 async def kernel_session(conn: AsyncConnection, session_id: str, schema: str = KERNEL_RO) -> dict[str, Any] | None:

@@ -1,0 +1,268 @@
+"""The built-in visiting agent (Plan 02b, Task 5; master plan, "Trust boundary": the simulated third party).
+
+A visitor on a Desk's public page can send Alex Kim's assistant, an AI agent this process runs, to do one of three
+tasks on the Desk (`DEMO_TASKS`): book a visit, pay the service call deposit within its spending limit, or ask for a
+charge above that limit. The kernel mints the agent for the visitor's session (`POST /agents/demo`): an Ed25519 key
+and a spending limit (a mandate) its demo wallet signs.
+
+The agent talks to the Desk as another person's agent would: as a separate client of the public A2A endpoint
+(`settings.a2a_loopback`), signing each request with its key, so the kernel checks every signature, binds every
+nonce and bounds every charge by the mandate exactly as for any agent. `run_demo_agent` holds the key, which exists
+in that coroutine alone: never in the run's record, the database, a log or a model request. (The API process holds
+it in memory meanwhile, so the signature protects external agents, not this one, against the API process: master
+plan, "Trust boundary".)
+
+Each step is one structured model call (route `visiting_agent`, low effort, `AgentStep`), at most six a run, each but
+a final `done` followed by one A2A request. The Desk's answer reaches the agent's model only inside `<desk_reply>`
+(`prompts.wrap`), as information. A model that can't answer, an A2A answer other than a 200 `A2AResponse`, an issued
+key that isn't one or, in production, today's model budget spent before a step ends the run `failed`.
+
+What the launcher's panel reads (`DemoAgentRun`): each exchange as the agent's turn, which carries nothing (the
+agent's words go to the Desk but never back to the panel, so no text the kernel didn't check reaches the visitor),
+then the Desk's, with the blocks and signed statuses the kernel checked. Runs live in this process's memory
+(`DemoAgents`): the 50 newest, for an hour, each readable by its launching session alone.
+"""
+
+import asyncio
+import hashlib
+import json
+import logging
+import secrets
+from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime, timedelta
+from urllib.parse import quote
+
+import httpx
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from pydantic import ValidationError
+from sqlalchemy.ext.asyncio import AsyncEngine
+
+from desk.api.metrics import over_daily_budget, record_model_call
+from desk.api.model import CONVERSATION_MODEL, ModelClient, ModelRequest, ModelResponse, ModelUnavailable
+from desk.api.prompts import (
+    DESK_REPLY_TAG,
+    VISITING_AGENT_SYSTEM,
+    AgentStep,
+    DemoTask,
+    agent_task,
+    desk_reply_text,
+    wrap,
+)
+from desk.api.schemas import AgentTurn, DemoAgentRun
+from desk.api.settings import Settings
+from desk.api.store import Ids
+from desk.contracts import A2ARequest, DemoAgentIssued
+from desk.events import A2AResponse
+
+logger = logging.getLogger(__name__)
+
+ROUTE = "visiting_agent"
+MAX_EXCHANGES = 6               # model calls a run, and so A2A requests
+MAX_TOKENS = 1024               # one short message as JSON
+MAX_RUNS = 50
+RUN_LIFE = timedelta(hours=1)
+A2A_TIMEOUT_S = 120.0           # an answer waits for the Desk's turn: up to 30 s for the session's lock, then the turn
+
+Record = Callable[[ModelResponse], Awaitable[None]]
+Spent = Callable[[], Awaitable[bool]]
+
+
+class RunFailed(Exception):
+    """The run can't go on; the message says why without any of the Desk's or the model's text."""
+
+
+# Signing ------------------------------------------------------------------------------------------------------
+
+
+def signed_time(moment: datetime) -> str:
+    """A `SignedTime`: RFC 3339 UTC with microseconds and "Z"."""
+    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def signature_payload(desk_slug: str, ts: str, nonce: str, body_sha256: str) -> bytes:
+    """What an agent signs ("Agent sessions"): `{desk_slug, ts, nonce, body_sha256}` as sorted, compact JSON, which
+    for ASCII values is their RFC 8785 form; a value that isn't ASCII is refused rather than signed differently."""
+    fields = {"desk_slug": desk_slug, "ts": ts, "nonce": nonce, "body_sha256": body_sha256}
+    if not all(value.isascii() for value in fields.values()):
+        raise RunFailed("a signed field isn't ASCII")
+    return json.dumps(fields, sort_keys=True, separators=(",", ":")).encode()
+
+
+def signed_headers(key: Ed25519PrivateKey, agent_key_id: str, desk_slug: str, raw: bytes, ts: str,
+                   nonce: str) -> dict[str, str]:
+    """The `AgentAuth` headers of one request: its Ed25519 signature, in lowercase hex, over the raw body's hash."""
+    sig = key.sign(signature_payload(desk_slug, ts, nonce, hashlib.sha256(raw).hexdigest())).hex()
+    return {"Content-Type": "application/json", "X-Agent-Key-Id": agent_key_id, "X-Agent-Ts": ts,
+            "X-Agent-Nonce": nonce, "X-Agent-Sig": sig}
+
+
+# One run ------------------------------------------------------------------------------------------------------
+
+
+def _private_key(hex_key: str) -> Ed25519PrivateKey:
+    """The issued Ed25519 key; `RunFailed`, naming none of it, when it isn't one."""
+    try:
+        return Ed25519PrivateKey.from_private_bytes(bytes.fromhex(hex_key))
+    except (ValueError, TypeError):
+        raise RunFailed("the issued key isn't an Ed25519 key") from None
+
+
+def _user(text: str) -> dict:
+    return {"role": "user", "content": [{"type": "text", "text": text}]}
+
+
+async def _step(model: ModelClient, messages: list[dict], record: Record) -> AgentStep:
+    """The agent's next step, its usage recorded right after the call; `ModelUnavailable` when there is none."""
+    request = ModelRequest(route=ROUTE, system=[{"type": "text", "text": VISITING_AGENT_SYSTEM}],
+                           messages=list(messages), model=CONVERSATION_MODEL, effort="low", max_tokens=MAX_TOKENS,
+                           output_schema=AgentStep)
+    try:
+        response = await model.call(request)
+    except ModelUnavailable as unavailable:
+        await record(unavailable.response)
+        raise
+    await record(response)
+    if not isinstance(response.parsed, AgentStep):
+        raise ModelUnavailable(response, "no agent step")
+    return response.parsed
+
+
+async def _send(a2a: httpx.AsyncClient, path: str, raw: bytes, headers: dict[str, str]) -> A2AResponse:
+    """The Desk's answer to one signed request; `RunFailed` for anything but a 200 `A2AResponse`."""
+    try:
+        answer = await a2a.post(path, content=raw, headers=headers)
+    except httpx.HTTPError as error:
+        raise RunFailed(f"the A2A request failed ({type(error).__name__})") from None
+    if answer.status_code != 200:
+        raise RunFailed(f"the Desk answered {answer.status_code}")
+    try:
+        return A2AResponse.model_validate_json(answer.content)
+    except ValidationError:
+        raise RunFailed("the Desk's answer isn't an A2A response") from None
+
+
+async def run_demo_agent(issued: DemoAgentIssued, task: DemoTask, slug: str, a2a: httpx.AsyncClient,
+                         model: ModelClient, run: DemoAgentRun, *, clock: Callable[[], datetime],
+                         record: Record, spent: Spent | None = None) -> None:
+    """Run the agent on `task` against the slug's Desk through `a2a`, the public endpoint's client, filling in `run`
+    as it goes and ending it `done` or `failed`. Each model call is recorded with `record`; requests are signed with
+    the issued key at `clock`'s time, the first opening the session with the issued mandate. With `spent` (production:
+    whether today's model budget is spent), it is asked before each step, and once it says so the run ends `failed`
+    with no further model call."""
+    session_id: str | None = None
+    try:                                            # everything in the run ends it `done` or `failed`, the key too
+        key = _private_key(issued.agent_private_key_hex)
+        agent_key_id, mandate = issued.agent_key_id, issued.mandate
+        path = f"/api/a2a/{quote(slug, safe='')}"
+        messages = [_user(agent_task(task))]
+        for n in range(1, MAX_EXCHANGES + 1):
+            if spent is not None and await spent():
+                raise RunFailed("today's model budget is spent")
+            step = await _step(model, messages, record)
+            if step.done:
+                break
+            raw = A2ARequest(desk_slug=slug, session_id=session_id, message=step.message,
+                             mandate=mandate if session_id is None else None).model_dump_json().encode()
+            headers = signed_headers(key, agent_key_id, slug, raw, signed_time(clock()), secrets.token_hex(16))
+            run.turns.append(AgentTurn(author="agent", n=n, blocks=[], receipts=[]))
+            answer = await _send(a2a, path, raw, headers)
+            if session_id is not None and answer.session_id != session_id:
+                raise RunFailed("the Desk answered for another session")
+            session_id = answer.session_id
+            run.turns.append(AgentTurn(author="desk", n=n, blocks=answer.blocks, receipts=answer.receipts))
+            messages += [{"role": "assistant", "content": [{"type": "text", "text": step.model_dump_json()}]},
+                         _user(wrap(DESK_REPLY_TAG, desk_reply_text(answer)))]
+    except ModelUnavailable:
+        _fail(run, "the model was unavailable")
+    except RunFailed as failed:
+        _fail(run, str(failed))
+    except asyncio.CancelledError:
+        _fail(run, "the process is stopping")
+        raise
+    except Exception as error:                      # logged by type only: a message can quote the Desk
+        _fail(run, type(error).__name__)
+    else:
+        run.state = "done"
+
+
+def _fail(run: DemoAgentRun, reason: str) -> None:
+    run.state = "failed"
+    logger.warning("a demo agent's run failed: %s", reason)
+
+
+# The process's runs -------------------------------------------------------------------------------------------
+
+
+def a2a_client(settings: Settings, transport: httpx.AsyncBaseTransport | None = None) -> httpx.AsyncClient:
+    """The agent's client of the public A2A endpoint at `settings.a2a_loopback`, with no proxy from the environment
+    and no redirects. `transport` is a test hook (the app itself, in process), refused in production."""
+    if transport is not None and settings.production:
+        raise RuntimeError("an injected A2A transport is a test hook; production refuses it")
+    return httpx.AsyncClient(base_url=settings.a2a_loopback, transport=transport, timeout=A2A_TIMEOUT_S,
+                             trust_env=False, follow_redirects=False)
+
+
+class DemoAgents:
+    """The built-in agent's runs in this process: each launched in a task of its own, its record kept for an hour
+    (the 50 newest) and read only by the session that launched it. In `production`, each step of a run first checks
+    today's model budget (`metrics.over_daily_budget`) and the run ends `failed` once it is spent."""
+
+    def __init__(self, model: ModelClient, *, a2a: httpx.AsyncClient, engine: AsyncEngine,
+                 clock: Callable[[], datetime], production: bool):
+        self._model, self._a2a, self._engine, self._clock = model, a2a, engine, clock
+        self._production = production
+        self._runs: dict[str, tuple[DemoAgentRun, datetime]] = {}      # oldest first
+        self._tasks: set[asyncio.Task] = set()
+
+    def launch(self, issued: DemoAgentIssued, task: DemoTask, slug: str, launcher: Ids) -> str:
+        """Start a run of the issued agent on `task` for the launcher's session; its run ID. The issued key goes to
+        the run's coroutine alone."""
+        now = self._clock()
+        self._forget(now, room=1)
+        run = DemoAgentRun(run_id="run-" + secrets.token_hex(16), launcher_session_id=launcher.session_id, slug=slug,
+                           task=task, state="running", turns=[])
+        self._runs[run.run_id] = (run, now)
+
+        async def record(response: ModelResponse) -> None:
+            async with self._engine.connect() as conn:
+                await record_model_call(conn, launcher.copy_id, launcher.session_id, ROUTE, response)
+                await conn.commit()
+
+        async def spent() -> bool:
+            async with self._engine.connect() as conn:
+                return await over_daily_budget(conn, self._clock)
+
+        work = asyncio.create_task(run_demo_agent(issued, task, slug, self._a2a, self._model, run, clock=self._clock,
+                                                  record=record, spent=spent if self._production else None),
+                                   name="desk-demo-agent")
+        self._tasks.add(work)
+        work.add_done_callback(self._tasks.discard)
+        return run.run_id
+
+    def run(self, run_id: str, launcher_session_id: str) -> DemoAgentRun | None:
+        """The run as it stands, when `launcher_session_id` launched it within the hour; else None."""
+        self._forget(self._clock())
+        found = self._runs.get(run_id)
+        if found is None or found[0].launcher_session_id != launcher_session_id:
+            return None
+        return found[0].model_copy(deep=True)
+
+    def _forget(self, now: datetime, room: int = 0) -> None:
+        """Drop the runs older than an hour, then the oldest until `room` more fit."""
+        for run_id, (_, launched) in list(self._runs.items()):
+            if now - launched >= RUN_LIFE:
+                del self._runs[run_id]
+        while self._runs and len(self._runs) + room > MAX_RUNS:
+            del self._runs[next(iter(self._runs))]
+
+    async def drain(self) -> None:
+        """Wait until no run is going in this process."""
+        while self._tasks:
+            await asyncio.gather(*list(self._tasks), return_exceptions=True)
+
+    async def close(self) -> None:
+        """Stop every run still going (the process is stopping); each ends `failed`."""
+        tasks = list(self._tasks)
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)

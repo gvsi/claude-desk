@@ -3,26 +3,61 @@
 Every error answer is an `ApiError`; `error_responses` documents them in the OpenAPI document.
 """
 
+import re
 from collections.abc import Callable
 from datetime import date as LocalDate
+from functools import cache
 from typing import Annotated, Any, Literal
+from zoneinfo import available_timezones
 
 from fastapi.routing import APIRoute
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    AfterValidator,
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
+from desk.api.prompts import (
+    CARD_ID_MAX_LENGTH,
+    CARD_REASON_MAX_LENGTH,
+    OWNER_CARDS_MAX,
+    PlannedOutcome,
+    DemoTask,
+    QuestionKey,
+    SituationWho,
+    Triage,
+)
 from desk.contracts import (
     ActorKind,
     ApprovalAnswer,
     Assurance,
+    Clause,
     Decision,
     DecisionState,
     HoursWindow,
+    KnowledgeItem,
+    Outcome,
+    PaymentLinkState,
+    PolicyVersion,
+    Probe,
+    ProbeResult,
+    ProofReport,
+    RenderedBlock,
     RuleCard,
+    SeedDocument,
     SessionMode,
     SessionState,
+    ToolName,
+    Violation,
 )
-from desk.events import EvHeld, EvMessage, EvReceipt, EvResolved
+from desk.events import EvHeld, EvMessage, EvOwnerJoined, EvOwnerLeft, EvReceipt, EvResolved
 from desk.kernel_api import Health
+from desk.presets import PresetName
 
 
 class ApiError(BaseModel):
@@ -67,21 +102,58 @@ class HealthOut(BaseModel):
     kernel: Health | None
 
 
+TranscriptKind = Literal["visitor_text", "agent_text", "delivered", "status", "whisper", "owner_joined", "owner_left"]
+
+
 class TranscriptItem(BaseModel):
-    """One transcript entry as the visitor sees it: their own words, or an event the API delivered."""
+    """One transcript entry as the visitor sees it: their own words, or an event the API delivered or emitted.
+
+    `owner_joined` and `owner_left` (Plan 02b) are where the owner took the conversation over and handed it back, each
+    with the event the visitor's stream got then (`EvOwnerJoined` names the owner as the kernel had them), at that
+    moment; a resume after a breaker pause has none. A client that doesn't know a kind skips the item."""
 
     n: int                                # app.messages.n, the `after` cursor
-    kind: Literal["visitor_text", "agent_text", "delivered", "status", "whisper"]
+    kind: TranscriptKind
     created_at: AwareDatetime
-    text: str | None                      # the author's own words; None for delivered and status items
-    event: Annotated[EvMessage | EvReceipt | EvHeld | EvResolved, Field(discriminator="type")] | None
+    text: str | None                      # the author's own words; None for the items that carry an event
+    event: Annotated[EvMessage | EvReceipt | EvHeld | EvResolved | EvOwnerJoined | EvOwnerLeft,
+                     Field(discriminator="type")] | None
+
+
+class CheckedDraft(BaseModel):
+    """A reply of Claude's exactly as it was sent to the kernel's reply check: its prose and its clauses."""
+
+    prose: str
+    clauses: list[Clause]
+
+
+class StoppedDraft(BaseModel):
+    """A reply of Claude's the kernel's reply check stopped (Plan 02b): the draft as the check had it, and each
+    violation the check found, with the span of the draft it matched (a canary's is "document text", never the canary),
+    the facts it concerns and the rule that matched. It is the owner's alone: no visitor read or event, no model
+    context, no reply check, no job and no log line carries it."""
+
+    draft: CheckedDraft
+    violations: list[Violation]
 
 
 class OwnerTranscriptItem(TranscriptItem):
-    """The owner's view adds the AI-written translation and triage, which never reach a visitor."""
+    """The owner's view adds the AI-written translation and triage (Plan 02b), which never reach a visitor, and each
+    draft of Claude's the reply check stopped.
 
+    `cursor` is where the item stands for `after`: its own `n`, or later once a translation or triage was written onto
+    it, when the item comes again with the same `n` (replace it) and the later cursor (advance `after` to the largest
+    one read). Items come in transcript order (`n`), each once per read.
+
+    A `stopped_draft` item (Plan 02b) stands where the check stopped the draft, before the rewrite or the handoff that
+    followed: its `stopped_draft` holds the draft and why it was stopped, and it has no `text` or `event`. Every other
+    item's `stopped_draft` is null."""
+
+    kind: Literal[TranscriptKind, "stopped_draft"]
+    cursor: int
     owner_translation: str | None
-    triage: str | None
+    triage: Triage | None
+    stopped_draft: StoppedDraft | None
 
 
 # The visitor's chat (Task 7) ---------------------------------------------------------------------------------
@@ -116,6 +188,13 @@ class CancelAccepted(BaseModel):
     decision_id: str
 
 
+class VerifyChecked(BaseModel):
+    """`POST /api/public/desks/{slug}/verify/check`: the session as the kernel has it once the code was right, verified
+    as the contact on record (assurance `demo_code`)."""
+
+    state: SessionState
+
+
 class AgentCardSigning(BaseModel):
     """How an agent signs each request: the headers it sends and the payload its Ed25519 signature covers."""
 
@@ -134,6 +213,35 @@ class AgentCardOut(BaseModel):
     endpoint: str
     signing: AgentCardSigning
     example_request: str
+
+
+class AgentRunStarted(BaseModel):
+    """202: the built-in agent is on its way; poll `GET .../send_agent/{run_id}` for its run (Plan 02b)."""
+
+    run_id: str
+
+
+class AgentTurn(BaseModel):
+    """One side of an exchange in a built-in agent's run: the agent's request (`n`-th), which carries nothing, since
+    the agent's own words are never shown (the panel titles it), or the Desk's answer to it, with the blocks and
+    signed statuses the kernel checked and the Desk showed the agent."""
+
+    author: Literal["agent", "desk"]
+    n: int                                # the exchange: the agent's n-th request and the Desk's answer to it
+    blocks: list[RenderedBlock]
+    receipts: list[Annotated[EvReceipt | EvHeld | EvResolved, Field(discriminator="type")]]
+
+
+class DemoAgentRun(BaseModel):
+    """`GET /api/public/desks/{slug}/send_agent/{run_id}`: a built-in agent's run as its launcher's panel shows it,
+    kept in the process's memory for an hour (Plan 02b)."""
+
+    run_id: str
+    launcher_session_id: str
+    slug: str
+    task: DemoTask
+    state: Literal["running", "done", "failed"]
+    turns: list[AgentTurn]
 
 
 # The owner's answers (Task 8) ------------------------------------------------------------------------------------
@@ -249,10 +357,35 @@ class ConversationSummary(BaseModel):
 
 class OwnerTranscript(BaseModel):
     """`GET /api/owner/conversations/{session_id}?after=n`: the session's state and its transcript after the cursor, as
-    the owner sees it (agent text, whispers, translations and triage included; model, note and context rows never)."""
+    the owner sees it (agent text, whispers, translations and triage included; model, note and context rows never).
+    `typing_until` is when the visitor's typing dots stop, while the visitor is typing, else null (Plan 02b): presence,
+    kept in the API's memory and shown to the owner alone."""
 
     state: SessionState
     items: list[OwnerTranscriptItem]
+    typing_until: AwareDatetime | None
+
+
+# The owner in a conversation (Plan 02b) ----------------------------------------------------------------------------
+
+
+class GenerationIn(BaseModel):
+    """`POST /api/owner/conversations/{session_id}/{takeover,handback,resume,typing}`: the session's generation as the
+    owner last read it; a change made at a generation the session has since left is refused."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    generation: Annotated[int, Field(ge=0)]
+
+
+class OwnerMessageIn(BaseModel):
+    """`POST /api/owner/conversations/{session_id}/messages`: the owner's words, said to the visitor once the owner has
+    taken the conversation over (`say`), or a private note for Claude (`whisper`)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: Annotated[str, StringConstraints(min_length=1, max_length=2000)]
+    kind: Literal["say", "whisper"]
 
 
 class BriefingItem(BaseModel):
@@ -321,22 +454,33 @@ class ThisWeek(BaseModel):
     days: list[WeekDay]
 
 
+class RecordedHistory(BaseModel):
+    """Which of Today's sections count recorded history: the night the kernel replayed into the copy when it was made
+    (Plan 01d), which the owner's screens label "Includes recorded history". A replay holds only finished things, so
+    `needs_you` stays false; it keeps the shape the web reads."""
+
+    needs_you: bool
+    briefing: bool
+    this_week: bool
+
+
 class Today(BaseModel):
     """`GET /api/owner/desks/{desk_id}/today`, computed from the rows on each read. `live` holds the conversations with
-    activity in the last 5 minutes."""
+    activity in the last 5 minutes; `recorded_history` says which sections count replayed rows."""
 
     greeting_name: str
     needs_you_count: int
     live: list[ConversationSummary]
     briefing: Briefing
     this_week: ThisWeek
+    recorded_history: RecordedHistory
 
 
 class Attempt(BaseModel):
     """An attempt the checkpoint stopped (`GET /api/owner/desks/{desk_id}/safety`): a refused decision (`ref_id` its
     `decision_id`) or a reply of Claude's it blocked (`ref_id` the reply entry's `seq`, as text). `reason_plain` is the
     kernel's owner text for a decision, or a line the API composes for a reply; `origin` is the ledger entry's;
-    `ledger_seq` is the entry to show it with. `triage` is AI-written, when there is one."""
+    `ledger_seq` is the entry to show it with. `triage` is AI-written, when there is one (Plan 02b)."""
 
     ref_id: str
     kind: Literal["refused", "held", "reply_blocked"]
@@ -344,5 +488,443 @@ class Attempt(BaseModel):
     card_ids: list[str]
     origin: Literal["kernel", "api"]
     created_at: AwareDatetime
-    triage: str | None
+    triage: Triage | None
     ledger_seq: int
+
+
+# The mock checkout (Plan 02b) ------------------------------------------------------------------------------------
+
+
+class PaymentConflict(BaseModel):
+    """409 from the checkout's complete or cancel: the link is no longer `issued`. `state` is how it reads now and
+    `cancel_reason` why it was cancelled, `rules_changed` when a rule change cancelled it, so the checkout page can say
+    so (master plan, "Payment links")."""
+
+    error: Literal["kernel"] = "kernel"
+    code: Literal["conflict"] = "conflict"
+    state: PaymentLinkState
+    cancel_reason: Literal["rules_changed"] | None
+
+
+# Setup (Plan 02b) --------------------------------------------------------------------------------------------------
+
+SetupStep = Literal["questions", "tools", "rules", "situations", "safety_check", "preview", "live"]
+# Plan 01a's owner name pattern, which the kernel checks every owner name against: ^[A-Za-zÀ-ÿ' -]{1,40}$
+OWNER_NAME_CHARS = "A-Za-zÀ-ÿ' -"
+OWNER_NAME_PATTERN = rf"^[{OWNER_NAME_CHARS}]{{1,40}}$"
+
+
+@cache
+def _time_zones() -> frozenset[str]:
+    return frozenset(available_timezones())
+
+
+class SetupStartIn(BaseModel):
+    """`POST /api/owner/setup`: the owner's own words about the business, the business's time zone (an IANA name)
+    and, if they give it, the name customers should see for them, which wins over one taken from the words. A name
+    the owner types is used as typed (extra spaces aside), so it must fit the kernel's owner name pattern (letters,
+    spaces, apostrophes and hyphens, up to 40), else 422 before Claude is asked."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    description: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1500)]
+    timezone: Annotated[str, StringConstraints(min_length=1, max_length=64)]
+    owner_display_name: Annotated[str, StringConstraints(strip_whitespace=True,
+                                                         pattern=OWNER_NAME_PATTERN)] | None = None
+
+    @field_validator("timezone")
+    @classmethod
+    def _known_zone(cls, value: str) -> str:
+        if value not in _time_zones():
+            raise ValueError("timezone is an IANA time zone name")
+        return value
+
+
+class SetupConsentIn(BaseModel):
+    """`POST /api/owner/setup/{id}/consent`: whether Claude may read the owner's Claude memory and website."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    allow: bool
+
+
+class SetupAnswerIn(BaseModel):
+    """`POST /api/owner/setup/{id}/answer`: the owner's answer, and the question it answers
+    (`SetupState.question` when it was asked), so an answer sent twice can't answer the question after it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    question: QuestionKey
+    text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
+
+
+class SetupMessage(BaseModel):
+    """One line of the setup conversation, owner-facing: Claude's, the owner's, or an inline label for a read of the
+    owner's memory or website (`tool_label`)."""
+
+    role: Literal["claude", "owner", "tool_label"]
+    text: str
+
+
+class SetupState(BaseModel):
+    """A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the
+    owner let Claude read their memory and website (None until asked), the question waiting for an answer (None
+    before consent and after the last one) and the conversation so far."""
+
+    interview_id: str
+    desk_id: str
+    slug: str
+    step: SetupStep
+    consent: bool | None
+    question: QuestionKey | None
+    messages: list[SetupMessage]
+
+
+# Setup's rules (Plan 02b, Task 7) ------------------------------------------------------------------------------
+
+
+class CoveringCard(BaseModel):
+    """A card of the active rules that covers a tool: its own (`shared` false), or one on an effect the tool has, which
+    every tool with that effect shares. A default card is the compiler's ask for a tool no card for anyone covers."""
+
+    card_id: str
+    mode: Literal["auto", "ask", "never"]
+    reason: str
+    shared: bool
+
+
+class ToolRow(BaseModel):
+    """A tool of the Desk as the kernel lists it (`kernel_ro.tools`): its effects, whether it can be undone, its
+    status (`needs_review` until the owner confirms a connected tool), the description Claude sees and, for a
+    connected tool, the hash of the definition it is pinned to and a changed definition waiting for review; and the
+    active rules' cards that cover it, default asks included, in card order (Plan 02b, Task 9)."""
+
+    tool: str
+    source: Literal["native", "mcp"]
+    effects: list[str]
+    reversible: bool
+    status: Literal["enabled", "needs_review", "disabled"]
+    description_confirmed: str
+    definition_sha256: str | None
+    pending_definition_text: str | None   # a changed definition, untrusted text to show as quoted
+    pending_sha256: str | None
+    cards: list[CoveringCard]
+
+
+class SetupTools(BaseModel):
+    """`GET /api/owner/setup/{id}/tools`: the new Desk's tools, and the connection it can still add (the
+    mock payments server, until it is connected)."""
+
+    tools: list[ToolRow]
+    connectable: list[Literal["mock_payments"]]
+
+
+class CardDiff(BaseModel):
+    """How a draft's cards differ from the active version's, by `card_id`, default cards left out; `changed` pairs
+    each card before and after."""
+
+    added: list[RuleCard]
+    removed: list[RuleCard]
+    changed: list[tuple[RuleCard, RuleCard]]
+
+
+class RulesSummary(BaseModel):
+    """A draft's cards in the owner's words: each card's reason, by what it does (once each)."""
+
+    on_its_own: list[str]
+    asks_you: list[str]
+    never: list[str]
+
+
+class RulesDraft(BaseModel):
+    """A rules version the kernel compiled and proved, for the owner to read and confirm: its owner cards (default
+    asks left out), how they differ from the active version's (None in setup), the money cap its money cards are held
+    to, the kernel's proof, and a summary."""
+
+    version: int
+    cards: list[RuleCard]
+    diff: CardDiff | None
+    auto_money_cap_cents: int
+    proof: ProofReport
+    summary: RulesSummary
+
+
+class RulesChanged(BaseModel):
+    """409 from a confirm: the rules changed after the draft was made, so the same cards were drafted again on the
+    rules now in force, and `draft` is the new version to read and confirm."""
+
+    error: Literal["rules_changed_since_draft"] = "rules_changed_since_draft"
+    draft: RulesDraft
+
+
+class ProvingRetry(BaseModel):
+    """The request to send again, unchanged: its path and its JSON body (None when it has none)."""
+
+    path: str
+    body: dict[str, Any] | None
+
+
+class ProvingPending(BaseModel):
+    """202: the rules are still being drafted or checked. Send `retry` again in a few seconds: it picks up the same
+    work, or its answer once done."""
+
+    retry: ProvingRetry
+
+
+class Situation(BaseModel):
+    """A situation Claude wrote to try against the drafted rules: who brings it, the probe code built for it (a
+    hypothetical caller and request, run nowhere) and what the owner's answers say should happen."""
+
+    title: str                            # Claude's words, from the owner's answers (owner-facing)
+    who: SituationWho
+    probe: Probe
+    expected: PlannedOutcome
+
+
+class SituationResult(BaseModel):
+    """What the drafted rules do with a situation (`result`, the kernel's), and whether that matches what was
+    planned: a plan of `allow_if_reviewed` matches a result that depends on the reviewer, decided by an auto rule
+    with `review`; any other plan matches the same outcome when it doesn't depend on the reviewer."""
+
+    situation: Situation
+    result: ProbeResult
+    matches: bool
+
+
+class SafetyRow(BaseModel):
+    """One thing a bad actor would try (`label`, and `tries`, what they'd say), the kernel's verdict on it against
+    the drafted rules (its outcome and `reason_plain`, shown verbatim), and whether it was stopped: refused, or held
+    for the owner where that stops it, and never when it depends on the reviewer agreeing."""
+
+    label: str
+    tries: str
+    result: ProbeResult
+    blocked: bool
+
+
+class SafetyCheck(BaseModel):
+    """`POST /api/owner/policy/setup/{id}/safety_check`: what a bad actor would try against the drafted rules,
+    run nowhere. `total` counts the rows tried (one lacking a stand-in price is left out), `blocked` those stopped, and
+    `seconds` how long the kernel took."""
+
+    rows: list[SafetyRow]
+    blocked: int
+    total: int
+    seconds: float
+
+
+class WentLive(BaseModel):
+    """The Desk answers the public now, at `public_url`."""
+
+    public_url: str
+    slug: str
+
+
+# Desk management, people and reports (Plan 02b, Task 8) ------------------------------------------------------------
+
+
+class PersonOnRecord(BaseModel):
+    """Someone on record on the Desk. Verification codes go only to their contact, which leaves the kernel masked."""
+
+    person_id: str
+    display_name: str
+    masked_contact: str
+
+
+class Lead(BaseModel):
+    """Details a visitor left: the name and note as they typed them (untrusted text, either may be missing)."""
+
+    lead_id: str
+    display_name: str | None
+    note: str | None
+    created_at: AwareDatetime
+
+
+class PeopleOut(BaseModel):
+    """`GET /api/owner/desks/{desk_id}/people`: the people on record, in the order they were added, and the leads,
+    newest first."""
+
+    people: list[PersonOnRecord]
+    leads: list[Lead]
+
+
+class Reports(BaseModel):
+    """`GET /api/owner/desks/{desk_id}/reports?days=n`: the last `n` local dates in the business's time zone, today
+    included, counted as Today's "Last 7 days" is. `bookings` are the bookings made; `paid_cents` the money paid,
+    through payment links and agents' spending limits; `handled_by_claude` and `needed_you` split the conversations
+    into those Claude handled alone and those the owner stepped into. `recorded_history` is true when any of these
+    counts includes the night the kernel replayed into the copy (as `RecordedHistory` is for Today)."""
+
+    bookings: int
+    paid_cents: int
+    handled_by_claude: int
+    needed_you: int
+    recorded_history: bool
+
+
+# Rules after setup (Plan 02b, Task 9) ------------------------------------------------------------------------------
+
+
+class RulesView(BaseModel):
+    """`GET /api/owner/desks/{desk_id}/rules`: the active rules version, each tool of the Desk with the cards that
+    cover it, and the preset the active owner cards are, if they are exactly one (else None: there is no "custom"
+    state)."""
+
+    active: PolicyVersion
+    tools: list[ToolRow]
+    preset: PresetName | None
+
+
+# The reason the kernel writes on the card an "allow for this person" approval drafts (Plan 01a, `card_id`
+# `person-{person or agent key}-{tool}`): it quotes the person's display name, which has no bound.
+KERNEL_PERSON_REASON = re.compile(r"Allowed for .+ after you approved a request like this\.", re.DOTALL)
+
+
+def kernel_person_card(card: RuleCard) -> bool:
+    """Whether the card is one the kernel drafts for one person or agent key from an approval (an answer's
+    `card_diff`): its ID and reason as the kernel writes them, for the person or agent key it names."""
+    scope = {"person": card.person_id, "agent": card.agent_key_id}.get(card.who)
+    return (scope is not None and card.card_id == f"person-{scope}-{card.applies_to}"
+            and KERNEL_PERSON_REASON.fullmatch(card.reason) is not None)
+
+
+def _bounded_card(card: RuleCard) -> RuleCard:
+    """A card the owner's app sends, within the bounds Claude writes cards to in a rules chat (`prompts.ChatCard`),
+    save the reason of a card the kernel drafted for one person or agent key (`kernel_person_card`), which quotes
+    their name however long it is."""
+    if len(card.card_id) > CARD_ID_MAX_LENGTH:
+        raise ValueError(f"a card_id is at most {CARD_ID_MAX_LENGTH} characters")
+    if len(card.reason) > CARD_REASON_MAX_LENGTH and not kernel_person_card(card):
+        raise ValueError(f"a reason is at most {CARD_REASON_MAX_LENGTH} characters")
+    return card
+
+
+OwnerCard = Annotated[RuleCard, AfterValidator(_bounded_card)]
+
+
+class DraftCardsIn(BaseModel):
+    """`POST /api/owner/policy/{desk_id}/draft`: the owner cards as they should stand, on the version they were read
+    from (the kernel answers 409 `conflict` once another is active). At most 60 cards (default asks need not be
+    sent: the kernel adds its own), each `card_id` at most 128 characters and each `reason` at most 200, as a rules
+    chat writes them; beyond any of these, 422 `invalid`. A card the kernel drafted for one person or agent from an
+    approval keeps its reason as the kernel wrote it, however long the name it quotes."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    cards: list[OwnerCard] = Field(max_length=OWNER_CARDS_MAX)
+    expected_parent: int
+
+
+class DraftAddIn(BaseModel):
+    """`POST /api/owner/policy/{desk_id}/draft`: cards to add to the active owner cards, such as an approval's
+    `card_diff`; a card with the ID of an active one takes its place. Each card is bounded as `DraftCardsIn`'s are,
+    and so is the Desk's count of owner cards once these are added: beyond any bound, 422 `invalid`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    add: list[OwnerCard] = Field(min_length=1, max_length=OWNER_CARDS_MAX)
+
+
+class ConfirmRulesIn(BaseModel):
+    """`POST /api/owner/policy/{desk_id}/confirm`: the drafted version the owner read and confirms."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    version: int
+
+
+class AboveMoneyCap(BaseModel):
+    """422 from a drafting route: a new or changed card would take or pay out more on its own than the Desk's money
+    cap, `cap_cents` (0 when unset), so nothing was drafted ("That's above your limit of $X. Raise the limit
+    first.")."""
+
+    error: Literal["above_money_cap"] = "above_money_cap"
+    cap_cents: int
+
+
+class RuleChatIn(BaseModel):
+    """`POST /api/owner/policy/{desk_id}/chat`: what the owner asks Claude about the rules, in their own words."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
+
+
+class RuleChatOut(BaseModel):
+    """Claude's reply to the owner (AI-written, owner-facing) and, when they asked for a change, the draft the kernel
+    compiled and proved; None for a question, with nothing drafted."""
+
+    answer: str
+    draft: RulesDraft | None
+
+
+class PresetIn(BaseModel):
+    """`POST /api/owner/policy/{desk_id}/preset`: "Ask me first for everything" (`ask_first`) or "Recommended rules"
+    (`auto`)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    preset: PresetName
+
+
+class Suggestion(BaseModel):
+    """A rule the owner's own approvals suggest: they approved `count` requests of `tool` in the last 30 days and no
+    auto card covers it, so `card` would let Claude handle them. `text` is the owner-facing line; on a money tool the
+    card allows no more than the largest amount approved, and never more than the money cap."""
+
+    tool: str
+    count: int
+    text: str
+    card: RuleCard
+
+
+class SimulateChangeIn(BaseModel):
+    """`POST /api/owner/desks/{desk_id}/tools/simulate_change`: the connected tool whose definition the demo changes."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tool: ToolName
+
+
+class KnowledgeIn(BaseModel):
+    """`POST /api/owner/desks/{desk_id}/knowledge`: something the owner tells Claude about the business (untrusted
+    text, never policy), owner-only (`Label(readers=["owner"])`) or public (`Label(readers=["public"])`); posting an
+    item again under its `item_id` replaces it, so marking one public is posting it with the public label."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    item: KnowledgeItem
+
+
+class DocumentIn(BaseModel):
+    """`POST /api/owner/desks/{desk_id}/documents`: a document for the Desk, the owner's alone or a customer's on
+    record (`record_owner_ref`), released only through the kernel's single-use links."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    document: SeedDocument
+
+
+class ToolDecisionRow(BaseModel):
+    """One decision on a tool, as its page lists it: whose session asked (`display_name` as `NeedsYouSession`'s,
+    untrusted when a visitor typed it), the outcome and where the request stands, the kernel's owner text, when it was
+    decided and its ledger entry. `replayed` is true for a decision from the night the kernel replayed into the copy
+    (recorded history), and for one whose ledger entry can't be read, which is never shown as live."""
+
+    decision_id: str
+    session_id: str
+    display_name: str | None
+    outcome: Outcome
+    state: DecisionState
+    reason_plain: str
+    created_at: AwareDatetime
+    ledger_seq: int
+    replayed: bool
+
+
+class ToolDecisions(BaseModel):
+    """`GET /api/owner/desks/{desk_id}/tools/{tool}/decisions`: a page of the tool's decisions on the Desk, newest
+    first; `next_before` is the cursor for the next page, None on the last."""
+
+    items: list[ToolDecisionRow]
+    next_before: str | None

@@ -12,15 +12,89 @@ contract test, before the task that first uses them.
 - Signatures are `"fake:" + sha256 hex` of the fields the kernel signs. Times come from `state.now`.
 - Every non-2xx body is a `KernelError`; a body that isn't the route's request model is 422 `invalid`;
   every answer is checked against the route's response model before it leaves.
-- Knobs for tests: `fail`, `drop_response`, `set_mode`, `script`, `violation`, `verify`, `never`, `reconcile`,
-  `in_flight` (with `finish`) and `calls` (with `called(route)`); `now` drives expiry and the 24-hour idle close. A
-  `"timeout"` or `"connect"` failure is raised as httpx's own exception, which reaches the client through
+- Knobs for tests: `fail`, `drop_response`, `set_mode`, `script`, `violation`, `verify`, `never`,
+  `lower_link_limit`, `reconcile`, `in_flight` (with `finish`), `owner_verdict` (an owner's say, as
+  `POST /owner/messages` answers it) and `calls` (with `called(route)`); `now` drives expiry and the 24-hour idle
+  close. A `"timeout"` or `"connect"` failure is raised as httpx's own exception, which reaches the client through
   `httpx.ASGITransport`.
-- Not modelled: Cedar, the reviewer, the breaker's strikes (`set_mode` pauses), `auth` ledger entries
-  for refused calls, agents, verification routes and payments (Plans 01b, 01c and 02b add them).
+- The owner in a conversation (Plans 01a and 01b): `POST /sessions/{id}/mode` takes over, hands back or resumes a
+  session of the owner's copy at its current generation, by Plan 01a's mode table (only the breaker pauses), through
+  `set_mode`. `POST /owner/messages` takes a say or a whisper in any mode: a say is looked at for document canaries
+  only, and a clean one is an `owner_statement` fact and one `owner_said` card of the text verbatim, signed at the
+  session's generation; a whisper is ledgered with its length alone.
+- The recorded night (Plan 01d): `record_night(*sessions)` is the recording `POST /copies` replays into a copy that
+  asks (`replay_night: true`): each session closed at generation 0 with no person, its rows at the recorded moments,
+  every ledger entry it writes appended now and marked `summary.replayed` with its moment and the recording, and the
+  copy's answer carrying the events in shown order (`replayed_messages`, kept in `replayed_nights` too) and its
+  `replay_id`. With none recorded a copy that asks is live; `without_seeded_night()` makes any request that
+  carries `replay_night`, true or false, 422 `invalid`, as a kernel whose request model lacks the field answers it.
+- Verification (Plan 01b): `/verify/start` sends a fresh code only to a contact on record (a Demo inbox entry
+  and its code-free notice) and answers every contact with one message; `/verify/check` takes the session's live
+  challenge's code within ten minutes and five attempts, else 422 `invalid`; a session reads only the code entries
+  of the people whose challenges it, or a demo agent it minted (Plan 01c), started. Codes are kept in memory, never
+  mirrored.
+- Single-use links (Plans 01b and 01c): `native.release_document` and `native.payment_link` mint a random token
+  that only the link card's `href` carries (`/api/d/{token}`, `/pay/{token}`), never a fact, `model_view` or ledger
+  summary. A document link serves its bytes once within a day. A payment link, for the session's own current quote at
+  its amount under the seed's `rv-link` card, is read, completed (a `charge` fact and the kernel's `payment_confirmed`
+  verdict) or cancelled by its token alone; anything but `issued` is 409 `conflict`. Tokens are kept in memory,
+  never mirrored. `PaymentLinkView` serves the contract's fields: a link's `cancel_reason` is kept here but isn't
+  served until the contract has the field (Plan 01c's contract delta).
+- Signed agents (Plan 01c; master "Agent sessions"): `POST /agents/demo` mints a demo agent for the owner or a
+  visitor session of the Desk (an Ed25519 key, `agent_key_id` the first 16 hex of its public key's sha256, and a
+  mandate the copy's demo wallet signs: $20 a charge, $100 in all, for an hour), ten per copy an hour, then 429
+  `rate_limited`. Every call for an agent session carries the four `AgentAuth` headers and `X-Agent-Body-Sha256`,
+  never a token: the signature is checked over `{desk_slug, ts, nonce, body_sha256}` (canonical JSON, `ts` within 5
+  minutes), the key must be the one bound to the session at creation, and a failure is 401, ledgered `agent_auth
+  {route, reason, agent_key_id}` with the kernel's reason.
+  A nonce is bound at its first use to one session and body hash and lasts one A2A turn: it is spent by a passing
+  verdict, an immediate-handoff violation, the second reply check or 5 minutes, after which the same request is 409
+  `replayed`; another body or session under it is 401. An opening `POST /sessions` whose nonce is bound or spent
+  with the same body hash returns the bound session and creates nothing. An agent session is never given refunds,
+  and gets `native.payment_link` and `native.charge_mandate` only with a verified mandate; a mandate charge is
+  allowed iff its amount is within the mandate's remaining (`min(per charge, total - committed - reserved)`), else
+  refused, and is reserved and committed at execution (`refused_at_execution` when the room went meanwhile), writing
+  a `charge` fact rendered `charge_confirmed`. Keys stay in memory; the mirror has the sessions' `agent_key_id` and
+  `mandate_id` and the mandates' amounts.
+- The owner's Desks and setup (Plans 01b and 01c): `POST /desks` makes a Desk in the owner's copy through the same
+  seed path as the Rivera copy (native tools only, the `ask_first` preset's auto cards active), and
+  `PUT /desks/{id}/business` renames its business; each refuses an owner name outside Plan 01a's pattern or an
+  unknown time zone. `PUT /desks/{id}/people` (Plan 01b) upserts and removes people by `ref`, refusing a contact that
+  looks masked (422). `DELETE /desks/{id}` (Plan 01b) closes the Desk's sessions; then its public page is 404, the
+  owner's `/whoami` no longer lists it, and opening a session on it or an owner route naming it answers 409 `closed`;
+  its ledger stays. A preview (`POST /sessions` with `preview: true`) needs the owner of the slug's copy. An owner
+  session is given the setup tools alone, on any Desk of its copy, and executes its own setup decisions:
+  `native.read_memory` answers from `MEMORY_ITEMS` (the simulated memory) and `native.fetch_website` reads any
+  `.example` site as `WEBSITE_TEXT` (the fetch guard refuses every other address, so the call fails), each storing
+  owner-only knowledge; `/context` serves the knowledge a session's labels read.
+- Setup's rules (Plans 01a, 01b and 01c): `PUT /desks/{id}/charter`, `hours`, `prices`, `calendar` and
+  `notifications` replace their part (rows a part drops leave the mirror). `POST /policy/draft` compiles the owner's
+  cards against the active version (else 409), refusing a set with a card that could change starting a verification
+  (Plan 01b, 422 `invalid`: `changes_always_on`), into a new version with the compiler's default asks, proved unless
+  the `proof` knob says otherwise (rejected, timed out, or bounded and left `draft`), idempotent on its parent, cards
+  and enabled tools but for a timed-out rejection, which proves again; `POST /policy/confirm` activates only a proved
+  draft whose parent is still active (else 409); `POST /policy/{version}/probe` decides each `Probe` through the
+  fake's card rules below, changing nothing. `POST /tools/connect` pins the mock payments tools `needs_review`, and
+  `POST /tools/simulate_change` (the owner's demo action) drifts a connected one back to `needs_review` with its
+  changed definition pending. `POST /documents` adds a document through the seed path's writer and `POST /knowledge`
+  upserts an owner-only or public knowledge item (Plan 01b). The `gate` knob holds a route's calls until a test lets
+  them through, as a slow proof does. The fake's rules are cards read plainly (a `never` refuses, an `auto` card whose
+  limits hold allows, an `ask` card or anything uncovered holds), not Cedar: no specificity order between overlapping
+  cards, and an effect card covers a tool by any one of its effects.
+- Refused calls (the baseline's "every attempt logged"): a call refused because its session is closed or its Desk
+  deleted is ledgered `auth {route, reason: "closed"}` on that Desk, naming the session it acted for (none for an
+  owner route or a new session), as the kernel's `auth.AuthError` does; a refused agent signature is ledgered as
+  above. A call naming no Desk or session of the copy has no ledger to go on.
+- Not modelled: Cedar, the reviewer, the breaker's strikes (`set_mode` pauses), the `auth` entries of other refusals
+  (a bad token, another copy's session, a stale generation, a mode), verification's hourly limits and lockouts,
+  voided document links, the mock payments provider and its reconciliation, refunds, an agent payment link's
+  reservation on its mandate, and a mandate charge's reserve and commit as two steps (it commits at once, so a
+  scripted `exec_state="unknown"` charge keeps no reservation).
 """
 
+import asyncio
 import hashlib
+import hmac
 import json
 import re
 import secrets
@@ -29,10 +103,14 @@ import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
-from typing import Any, get_args
+from typing import Any, Literal, get_args
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 import httpx
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat, PublicFormat
 from pydantic import BaseModel, TypeAdapter, ValidationError
 from starlette.requests import Request
 from starlette.responses import Response
@@ -41,30 +119,47 @@ from starlette.routing import Route, Router
 from desk.contracts import (
     AUTO_MONEY_HARD_CAP_CENTS,
     ITEM_ID_PATTERN,
+    MCP_TOOLS,
     MONEY_TOOLS,
     SLOT_ID_PATTERN,
     ApprovalResult,
+    BusinessSeed,
     CalendarSlot,
     CardOption,
     Claim,
     Clause,
     CopyCreated,
     Decision,
+    DemoAgentIssued,
     DemoInboxEntry,
+    DeskSeed,
     ExecResult,
     Fact,
     HoursWindow,
     InboxNotice,
+    KnowledgeItem,
     Label,
     LedgerEntry,
     LedgerEvent,
     LedgerPage,
+    Mandate,
     NormalizedAction,
+    NotificationDefaults,
+    OwnerMessageResult,
+    PolicyVersion,
     PriceItem,
+    Probe,
+    ProbeResult,
+    ProofCheck,
+    ProofReport,
     RenderedBlock,
+    ReplayedEvent,
+    ReplyDraft,
     ReplyVerdict,
     ResourceRef,
     RuleCard,
+    SeedDocument,
+    SeedPerson,
     SessionCreated,
     SessionState,
     ToolCall,
@@ -77,18 +172,46 @@ from desk.kernel_api import (
     AnswerRequest,
     CancelRequest,
     CheckReplyRequest,
+    CreateCopyRequest,
+    CreateDeskRequest,
     CreateSessionRequest,
     DecideRequest,
+    DemoAgentRequest,
     DeskAnsweringRequest,
+    DeskBusinessRequest,
+    DeskCalendarRequest,
+    DeskCharterRequest,
+    DeskCreated,
+    DeskHoursRequest,
+    DeskNotificationsRequest,
+    DeskPeopleRequest,
+    DeskPricesRequest,
     DeskUpdated,
+    DocumentCreated,
+    DocumentUploadRequest,
     ExecuteRequest,
     Health,
     KernelError,
+    KnowledgeRequest,
     LedgerAppendRequest,
+    ModeRequest,
+    OpenStatus,
+    OwnerMessageRequest,
+    PaymentLinkStateResult,
+    PaymentLinkView,
+    PolicyConfirmRequest,
+    PolicyDraftRequest,
+    PolicyProbeRequest,
     PublicDesk,
     SessionContext,
+    ToolsConnectRequest,
+    ToolsSimulateChangeRequest,
+    VerifyCheckRequest,
+    VerifyStarted,
+    VerifyStartRequest,
     WhoAmI,
 )
+from desk.presets import PRESETS
 from tests.kernel_contract.ro_tables import FakeRO
 
 IDLE_LIMIT = timedelta(hours=24)        # a visitor or agent session closes after this long idle
@@ -132,8 +255,11 @@ RIVERA_PRICES = [PriceItem(item_id="deposit", title="Service call deposit", unit
                  PriceItem(item_id="heater", title="Water heater flush", unit_cents=15000),
                  PriceItem(item_id="leak", title="Leak repair", unit_cents=25000)]
 RIVERA_PEOPLE = [("dana", "Dana Whitfield", "dana@example.com"), ("bob", "Bob Okafor", "bob@example.com")]
-RIVERA_DOCUMENTS = [("dana-invoice", "Invoice, drain clearing", "dana"),
-                    ("bob-warranty", "Warranty, water heater flush", "bob")]
+RIVERA_DOCUMENTS = [  # (ref, title, record owner, body): the kernel ends each body with a fresh canary
+    ("dana-invoice", "Invoice, drain clearing", "dana",
+     "Rivera Plumbing\nInvoice, drain clearing\nBilled to Dana Whitfield\nDrain clearing: $180.00\n"),
+    ("bob-warranty", "Warranty, water heater flush", "bob",
+     "Rivera Plumbing\nWarranty, water heater flush\nIssued to Bob Okafor\nCovers the flush for a year.\n")]
 RIVERA_CHARTER = [Claim(key="contact", kind="text", value="(510) 555-0142"),
                   Claim(key="policy:service_area", kind="text",
                         value="We work in Oakland, Berkeley, Alameda and Emeryville."),
@@ -141,20 +267,26 @@ RIVERA_CHARTER = [Claim(key="contact", kind="text", value="(510) 555-0142"),
                         value="The service call deposit is credited to the repair if you go ahead."),
                   Claim(key="policy:arrival", kind="text", value="Maria texts before she arrives.")]
 NOTIFICATIONS = {"now": ["approval", "emergency", "breaker", "lockout"], "briefing": ["lead", "callback", "booking"]}
+# The owner's simulated Claude memory (the kernel's fixtures/memory.json, Plan 01c): (title, text).
+MEMORY_ITEMS = [("Business", "Rivera Plumbing, run by Maria Rivera."),
+                ("Trade", "Plumbing: leaks, drains and water heaters."),
+                ("Service area", "Oakland, Berkeley, Alameda and Emeryville."),
+                ("Hours", "Weekdays 8 to 6, Saturday mornings."),
+                ("Website", "rivera-plumbing.example")]
+OWNER_NAME = re.compile(r"[A-Za-zÀ-ÿ' -]{1,40}")   # Plan 01a's owner_display_name pattern
+# A fetched page (the kernel's fetch guard reads the real one): here any `.example` site reads as this, and any
+# other address is refused.
+WEBSITE_TEXT = "{host}: leak repair, drain clearing and water heaters. Call us any weekday."
 
 
 def _card(card_id: str, applies_to: str, mode: str, who: str, reason: str, **limits) -> RuleCard:
     return RuleCard(card_id=card_id, applies_to=applies_to, mode=mode, who=who, reason=reason, **limits)
 
 
+# `PRESETS["ask_first"]` (Plan 01a): auto cards for anyone on the utility and setup tools; the rest asks.
+ASK_FIRST_CARDS = list(PRESETS["ask_first"])
 RIVERA_CARDS = [
-    *(_card(f"preset-{tool.split('.')[1]}", tool, "auto", "anyone", reason) for tool, reason in (
-        ("native.find_slots", "Showing open times is always fine."),
-        ("native.capture_lead", "Taking down a customer's details is always fine."),
-        ("native.request_callback", "Asking you to call someone back is always fine."),
-        ("native.start_verification", "Sending a code to the contact on record is always fine."),
-        ("native.fetch_website", "Reading your website during setup is always fine."),
-        ("native.read_memory", "Reading your notes during setup is always fine."))),
+    *ASK_FIRST_CARDS,
     _card("rv-quote", "native.quote", "auto", "anyone", "Quotes from your price list, at list price."),
     _card("rv-book-wk", "native.book", "auto", "anyone", "Weekday bookings in opening hours, checked by the reviewer.",
           hours=RIVERA_HOURS[0], review=True),
@@ -162,10 +294,13 @@ RIVERA_CARDS = [
           hours=RIVERA_HOURS[1], review=True),
     _card("rv-docs", "native.release_document", "auto", "record_owner",
           "Customers get their own documents after confirming it's them."),
+    _card("rv-link", "native.payment_link", "auto", "anyone", "Payment links for quotes up to $300, checked by the "
+          "reviewer.", max_amount_cents=30_000, review=True),
+    _card("rv-mandate", "native.charge_mandate", "auto", "anyone",
+          "Agents can pay up to $20 from their spending limit.", max_amount_cents=2_000),
     *(RuleCard(card_id=f"default-{tool}", applies_to=tool, mode="ask", who="anyone", is_default=True,
                reason="Anything your rules don't cover waits for you.")
-      for tool in ("native.release_document", "native.payment_link", "native.charge_mandate",
-                   "payments.list_charges", "payments.create_refund")),
+      for tool in ("native.release_document", "payments.list_charges", "payments.create_refund")),
 ]
 
 
@@ -185,6 +320,7 @@ INPUT_SCHEMAS = {
     "native.book": _closed({"slot_id": {"type": "string", "pattern": SLOT_ID_PATTERN}}, ("slot_id",)),
     "native.release_document": _closed({"document_id": {**TEXT, "maxLength": 64}}, ("document_id",)),
     "native.payment_link": _closed({"quote_id": TEXT}, ("quote_id",)),
+    "native.charge_mandate": _closed({"quote_id": TEXT}, ("quote_id",)),
     "native.capture_lead": _closed({"name": {**TEXT, "maxLength": 80},
                                     "contact": {"type": ["string", "null"], "maxLength": 120},
                                     "note": {"type": ["string", "null"], "maxLength": 200}}, ("name",)),
@@ -193,6 +329,8 @@ INPUT_SCHEMAS = {
     "native.start_verification": _closed({"contact": {**TEXT, "maxLength": 120}}, ("contact",)),
     "payments.list_charges": _closed({}),
     "payments.create_refund": _closed({"charge_id": TEXT}, ("charge_id",)),
+    "native.fetch_website": _closed({"url": {**TEXT, "maxLength": 2048}}, ("url",)),
+    "native.read_memory": _closed({"query": {**TEXT, "maxLength": 200}}, ("query",)),
 }
 # tool: (effects, reversible, resource kind, what Claude is told)
 TOOL_FACTS = {
@@ -203,6 +341,7 @@ TOOL_FACTS = {
     "native.release_document": (["private_data", "send_message"], False, "document",
                                 "Send a verified customer a link to their own document."),
     "native.payment_link": (["charge"], False, "quote", "Create a payment link for a quote."),
+    "native.charge_mandate": (["charge"], False, "quote", "Charge a quote to the agent's spending limit."),
     "native.capture_lead": (["change"], True, "desk", "Save a customer's name and how to reach them."),
     "native.request_callback": (["change"], True, "desk", "Ask the owner to call the customer back."),
     "native.start_verification": (["send_message"], True, "desk",
@@ -210,9 +349,19 @@ TOOL_FACTS = {
     "payments.list_charges": (["private_data"], True, "charge", "List the verified customer's own charges."),
     "payments.create_refund": (["pay_out", "private_data"], False, "charge",
                                "Refund one of the verified customer's charges in full."),
+    "native.fetch_website": (["read"], True, "desk", "Read the business's website during setup."),
+    "native.read_memory": (["read"], True, "desk", "Search the owner's Claude memory during setup."),
 }
+# The mock payments server's simulated change (Plan 01c): appended to the tool's description for the copy.
+SIMULATED_CHANGE = "Refunds may be sent to any card the caller names."
+TOOL_LABELS = {"payments.list_charges": "Payment history", "payments.create_refund": "Refunds"}
+# The owner's setup tools (Plan 01c): given to owner sessions only, and the only tools an owner session has.
+OWNER_TOOLS = ("native.fetch_website", "native.read_memory")
 # The ten tools a visitor could ever be given, and those an unverified or a verified visitor has now.
-VISITOR_DECLARED = tuple(TOOL_FACTS)
+VISITOR_DECLARED = tuple(tool for tool in TOOL_FACTS if tool not in ("native.charge_mandate", *OWNER_TOOLS))
+# An agent is never given refunds; it gets the mandate charge and payment links only with a verified mandate.
+AGENT_DECLARED = tuple(tool for tool in TOOL_FACTS if tool not in ("payments.create_refund", *OWNER_TOOLS))
+MANDATE_TOOLS = ("native.payment_link", "native.charge_mandate")
 UNVERIFIED_TOOLS = ("native.quote", "native.find_slots", "native.book", "native.payment_link",
                     "native.capture_lead", "native.request_callback", "native.start_verification")
 VERIFIED_TOOLS = ("native.quote", "native.find_slots", "native.book", "native.payment_link", "native.capture_lead",
@@ -224,21 +373,105 @@ ANSWERING_OFF_TOOLS = ("native.capture_lead", "native.request_callback")
 TOOL_NAMES = frozenset(get_args(ToolName))
 ALLOW_FOR = timedelta(seconds=60)       # an allow must execute within this
 HOLD_FOR = timedelta(hours=24)          # a hold waits this long for the owner
-# Visitor-facing status lines (the kernel's are en/es templates): no amounts, dates or limits.
+# Visitor-facing status lines, the kernel's own (its `render.en.STATUS` and `render.es.STATUS`, Plan 01a): no amounts,
+# dates or limits, in the session's last language.
 STATUS_TEXT = {
-    "allowed": "That's within the business's rules.",
-    "held": "I've asked {owner} to look at this.",
-    "refused": "That isn't something I can do here.",
-    "approved": "{owner} approved this.",
-    "denied": "{owner} said no to this.",
-    "expired": "This request has expired.",
-    "cancelled": "You cancelled this request.",
-    "executed": "Done.",
-    "failed": "That didn't go through.",
-    "unknown": "I'm still checking whether that went through.",
-    "refused_at_execution": "The rules changed, so this didn't go ahead.",
+    "en": {"allowed": "Checked against {owner}'s rules", "held": "Waiting for {owner} to approve",
+           "refused": "Not something I can do here", "approved": "{owner} approved this",
+           "denied": "{owner} decided not to go ahead", "expired": "This request timed out", "cancelled": "Cancelled",
+           "executed": "Done", "failed": "That didn't go through", "unknown": "Still confirming this",
+           "refused_at_execution": "The rules changed, so this didn't go ahead"},
+    "es": {"allowed": "Revisado con las reglas de {owner}", "held": "Esperando la aprobación de {owner}",
+           "refused": "No es algo que pueda hacer aquí", "approved": "{owner} lo aprobó",
+           "denied": "{owner} decidió no seguir adelante", "expired": "Esta solicitud venció", "cancelled": "Cancelado",
+           "executed": "Hecho", "failed": "No se pudo completar", "unknown": "Todavía lo estamos confirmando",
+           "refused_at_execution": "Las reglas cambiaron, así que no se hizo"},
 }
+# What a visitor's or an agent's executed action did, by tool (the kernel's `render.en.EXECUTED` and
+# `render.es.EXECUTED`, Plans 01b and 01c), in place of the generic executed line.
+EXECUTED_TEXT = {
+    "en": {"native.quote": "Quoted from {owner}'s price list",
+           "native.find_slots": "Times read from {owner}'s calendar",
+           "native.book": "Booked on {owner}'s calendar", "native.capture_lead": "Details saved for {owner}",
+           "native.request_callback": "Callback request saved for {owner}",
+           "native.start_verification": "Verification started",
+           "native.release_document": "Document shared from {owner}'s records",
+           "native.payment_link": "Payment link made for this quote",
+           "payments.list_charges": "Charges read from {owner}'s payments",
+           "payments.create_refund": "Refunded to the original payment",
+           "native.charge_mandate": "Charged within the limit of your mandate"},
+    "es": {"native.quote": "Cotizado con la lista de precios de {owner}",
+           "native.find_slots": "Horarios tomados del calendario de {owner}",
+           "native.book": "Reservado en el calendario de {owner}",
+           "native.capture_lead": "Datos guardados para {owner}",
+           "native.request_callback": "Solicitud de llamada guardada para {owner}",
+           "native.start_verification": "Verificación iniciada",
+           "native.release_document": "Documento compartido desde los registros de {owner}",
+           "native.payment_link": "Enlace de pago creado para esta cotización",
+           "payments.list_charges": "Cargos tomados de los pagos de {owner}",
+           "payments.create_refund": "Reembolsado al pago original",
+           "native.charge_mandate": "Cobrado dentro del límite de tu mandato"},
+}
+
+
+def status_line(state: str, *, tool: str, session_kind: str, language: str | None, owner: str) -> str:
+    """A decision's status line in `state` (the kernel's `decide.status_line`): once a visitor's or an agent's action
+    has run, what was done; otherwise, or for the owner's own setup action, the state's line; in Spanish when the
+    session last spoke it, else in English."""
+    language = "es" if language == "es" else "en"
+    if state == "executed" and session_kind != "owner" and tool in EXECUTED_TEXT[language]:
+        return EXECUTED_TEXT[language][tool].format(owner=owner)
+    return STATUS_TEXT[language][state].format(owner=owner)
+
+
 HELD_ANSWERS = ("allow_once", "allow_person", "deny_once", "deny_always")
+# Rules drafts (Plan 01a): the master's proof obligations, what a failing one says, and the compiler's default ask.
+PROOF_CHECKS = ("never_errors", "baseline_auto", "baseline_approvable", "auto_within_cards", "review_only_narrows",
+                "hold_within_cards", "money_needs_card")
+BOUNDED_CASES = 1_200
+COUNTEREXAMPLE = "A visitor could get something done without asking you that your cards don't allow."
+DEFAULT_REASON = "Anything your rules don't cover waits for you."
+# Verification is always on (Plan 01b): no owner card may change starting one. The tools of the always-on baseline,
+# and the presets' own card for each (auto, for anyone, on the tool), which every preset and the Rivera seed carry.
+ALWAYS_ON_TOOLS = ("native.start_verification",)
+ALWAYS_ON_CARDS = tuple(card for card in PRESETS["ask_first"] if card.applies_to in ALWAYS_ON_TOOLS)
+
+
+def _specificity(card: RuleCard) -> tuple[int, int]:
+    """`(who is a person or an agent, applies_to is a tool)`, compared in that order, as the compiler ranks cards."""
+    return int(card.who in ("person", "agent")), int(not card.applies_to.startswith("effect:"))
+
+
+def changes_always_on(card: RuleCard) -> bool:
+    """Whether `card` could change a tool of the always-on baseline, which `POST /policy/draft` refuses as 422
+    `invalid` (the kernel's compiler, Plan 01b; mirrored here in test code, never in the API's): a card on the tool
+    other than the presets' own for it (every field but its reason the same), or a card on one of the tool's effects
+    that isn't an `auto` card ranked below the presets' card. An `ask` or `never` effect card would hold or refuse
+    the tool, and an `auto` one for a person or an agent would outrank the presets' card with its own gates."""
+    effect = card.applies_to.removeprefix("effect:") if card.applies_to.startswith("effect:") else None
+    for tool in ALWAYS_ON_TOOLS:
+        shipped = [each for each in ALWAYS_ON_CARDS if each.applies_to == tool]
+        if card.applies_to == tool:
+            if not any(card.model_copy(update={"reason": each.reason}) == each for each in shipped):
+                return True
+        elif effect in TOOL_FACTS[tool][0] and (card.mode != "auto" or not shipped
+                                                 or any(_specificity(card) >= _specificity(each) for each in shipped)):
+            return True
+    return False
+
+
+def proof_report(*, ok: bool = True, method: str = "symcc", timed_out: bool = False) -> ProofReport:
+    """A draft's proof: every obligation holding; `ok=False` fails `auto_within_cards` with a plain counterexample;
+    `timed_out` is a rejection with no counterexample; `bounded` is "checked on N cases", never "proven"."""
+    if timed_out:
+        return ProofReport(ok=False, method="symcc", timed_out=True, checks=[])
+    if method == "bounded":
+        return ProofReport(ok=True, method="bounded", cases=BOUNDED_CASES,
+                           checks=[ProofCheck(name=name, ok=True) for name in PROOF_CHECKS])
+    failing = None if ok else "auto_within_cards"
+    return ProofReport(ok=ok, method="symcc", checks=[
+        ProofCheck(name=name, ok=name != failing, counterexample_plain=COUNTEREXAMPLE if name == failing else None)
+        for name in PROOF_CHECKS])
 
 
 def tool_profile(tool: str) -> ToolProfile:
@@ -254,9 +487,174 @@ def signed_time(moment: datetime) -> str:
     return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
+def slugify(name: str) -> str:
+    """A slug's readable part: ASCII lowercase letters and digits, other runs as one "-", at most 40 ("desk" if
+    nothing is left)."""
+    ascii_name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode().lower()
+    return re.sub(r"[^a-z0-9]+", "-", ascii_name).strip("-")[:40].strip("-") or "desk"
+
+
 def mask_contact(contact: str) -> str:
     name, _, domain = contact.partition("@")
     return f"{name[0]}•••@{domain}"
+
+
+def normalize_contact(contact: str) -> str:
+    """An email trimmed and lowercased, else a phone number's ASCII digits ("" when none: no one's contact)."""
+    text = contact.strip().lower()
+    return text if "@" in text else "".join(char for char in text if char in string.digits)
+
+
+KNOWLEDGE_MAX_BYTES = 100 * 1024        # a knowledge item's text
+DOCUMENT_MAX_BYTES = 200 * 1024         # an uploaded document's body
+CODE_TTL = timedelta(minutes=10)        # a verification challenge's life
+LINK_TTL = timedelta(hours=24)          # a document or payment link's life
+PAYMENT_CONFIRMED = {"en": "Payment received", "es": "Pago recibido"}   # the payment_confirmed card's title
+MAX_ATTEMPTS = 5                        # wrong codes a challenge takes before it fails
+# The kernel's verification templates (Plan 01b), by language.
+VERIFY_TEXT = {
+    "en": {"started": "If that contact is on record, a code is on its way. Enter it below to confirm it's you.",
+           "already": "You're already confirmed in this chat.", "preview": "New verification code",
+           "body": "Your {business} code is {code}. It expires in ten minutes. If you didn't ask for it, ignore this "
+                   "message."},
+    "es": {"started": "Si ese contacto está registrado, te enviamos un código. Escríbelo abajo para confirmar que "
+                      "eres tú.",
+           "already": "Ya confirmaste quién eres en este chat.", "preview": "Nuevo código de verificación",
+           "body": "Tu código de {business} es {code}. Vence en diez minutos. Si no lo pediste, ignora este mensaje."},
+}
+
+
+# The public page (Plans 01a, 01b and 01c): the charter in the page's order, the open-now line and the Agent Card,
+# in the kernel's words (its `render.en` and `render.es`).
+CHARTER_TEMPLATES = (("hours", "charter:hours"), ("contact", "charter:contact"), ("policy", "charter:policy:"))
+OPEN_STATUS_DAYS = 7                    # the open-now line looks this many local days ahead
+REFRESH_WITHIN = timedelta(hours=25)    # the latest the line is asked for again
+WEEKDAYS = {"en": ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"),
+            "es": ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")}
+AGENT_TOOLS = {
+    "en": {"native.quote": "get a quote from the price list", "native.find_slots": "find open times",
+           "native.book": "book a visit", "native.payment_link": "get a payment link for a quote",
+           "native.charge_mandate": "pay for a quote within the limit of a signed mandate",
+           "native.capture_lead": "leave contact details", "native.request_callback": "ask for a callback",
+           "native.start_verification": "verify a customer with a code sent to their contact on record",
+           "native.release_document": "receive a verified customer's own documents",
+           "payments.list_charges": "list a verified customer's own charges"},
+    "es": {"native.quote": "pedir una cotización de la lista de precios", "native.find_slots": "buscar horarios libres",
+           "native.book": "reservar una visita", "native.payment_link": "pedir un enlace de pago para una cotización",
+           "native.charge_mandate": "pagar una cotización dentro del límite de un mandato firmado",
+           "native.capture_lead": "dejar datos de contacto",
+           "native.request_callback": "pedir que te devuelvan la llamada",
+           "native.start_verification": "verificar a un cliente con un código enviado a su contacto registrado",
+           "native.release_document": "recibir los documentos propios de un cliente verificado",
+           "payments.list_charges": "ver los cargos propios de un cliente verificado"},
+}
+AGENT_CARD = {
+    "en": ("Visiting agents can talk to {business} here too. Answers come from Claude, an AI, working within "
+           "{owner}'s rules, unless a message is marked as {owner}'s own.",
+           "What an agent can do here: {tools}.",
+           "Send each request to POST /api/a2a/{slug} on this site; {slug} is this Desk's slug.",
+           "Sign every request with Ed25519 and send the headers X-Agent-Key-Id, X-Agent-Ts, X-Agent-Nonce and "
+           "X-Agent-Sig. The signature covers the RFC 8785 canonical JSON of desk_slug, ts, nonce and body_sha256, the "
+           "lowercase hex SHA-256 of the raw request body.",
+           "A signature counts for 5 minutes either side of its timestamp, and each nonce covers one turn of the "
+           "conversation.",
+           "Agent keys only say which agent is asking. They are not business credentials: they can't change {owner}'s "
+           "rules or show anyone's private data, and money moves only as those rules and a signed mandate allow."),
+    "es": ("Los agentes también pueden hablar aquí con {business}. Las respuestas vienen de Claude, una IA, que sigue "
+           "las reglas de {owner}, salvo los mensajes marcados como de {owner}.",
+           "Lo que un agente puede hacer aquí: {tools}.",
+           "Envía cada solicitud a POST /api/a2a/{slug} en este sitio; {slug} es el identificador de este Desk.",
+           "Firma cada solicitud con Ed25519 y envía los encabezados X-Agent-Key-Id, X-Agent-Ts, X-Agent-Nonce y "
+           "X-Agent-Sig. La firma cubre el JSON canónico RFC 8785 de desk_slug, ts, nonce y body_sha256, el SHA-256 en "
+           "hexadecimal minúscula del cuerpo exacto de la solicitud.",
+           "Una firma vale 5 minutos antes o después de su marca de tiempo, y cada nonce cubre un turno de la "
+           "conversación.",
+           "Las claves de agente solo dicen qué agente pregunta. No son credenciales del negocio: no cambian las "
+           "reglas de {owner} ni muestran datos privados de nadie, y el dinero solo se mueve como lo permiten esas "
+           "reglas y un mandato firmado."),
+}
+AGENT_CARD_NO_TOOLS = {"en": "nothing for now", "es": "nada por ahora"}
+
+
+def listing(parts: list[str], language: str) -> str:
+    """"a", "a and b", "a, b and c" ("y" in Spanish)."""
+    last = " and " if language == "en" else " y "
+    return parts[0] if len(parts) == 1 else f"{', '.join(parts[:-1])}{last}{parts[-1]}"
+
+
+def agent_card(language: str, *, business: str, owner: str, slug: str, tools: set[str]) -> list[RenderedBlock]:
+    """The Agent Card in `language`: the kernel's prose blocks, naming what an agent may ask for there by the labels of
+    `tools`, in the card's order."""
+    labels = [label for tool, label in AGENT_TOOLS[language].items() if tool in tools]
+    listed = listing(labels, language) if labels else AGENT_CARD_NO_TOOLS[language]
+    return [RenderedBlock(kind="prose", text=line.format(business=business, owner=owner, slug=slug, tools=listed))
+            for line in AGENT_CARD[language]]
+
+
+def open_window(hours: list[HoursWindow], tz: ZoneInfo, now: datetime) -> tuple[bool, datetime | None, datetime] | None:
+    """Whether the business is open at `now` by its weekly `hours` in `tz` (an end of 00:00 is the end of the day),
+    the next instant within 7 local days that changes it (None when none does), and when the line is asked for again:
+    the earliest of that boundary, the next local midnight and 25 hours on. None without windows. Clock changes are
+    read as the wall clock gives them (the kernel finds each instant they skip or repeat)."""
+    if not hours:
+        return None
+    local_now = now.astimezone(tz)
+    week_on = local_now + timedelta(days=OPEN_STATUS_DAYS)
+    is_open = in_hours(now, hours, tz) is not None
+    candidates = set()
+    day = local_now.date() - timedelta(days=1)
+    while day <= week_on.date() + timedelta(days=1):
+        for window in hours:
+            if ("mon", "tue", "wed", "thu", "fri", "sat", "sun")[day.weekday()] in window.days:
+                candidates.add(datetime.combine(day, window.start, tz))
+                candidates.add(datetime.combine(day + timedelta(days=1), time(0), tz) if window.end == time(0)
+                               else datetime.combine(day, window.end, tz))
+        day += timedelta(days=1)
+    boundary = next((instant for instant in sorted(candidates) if now < instant <= week_on
+                     and (in_hours(instant, hours, tz) is not None) != is_open), None)
+    midnight = datetime.combine(local_now.date() + timedelta(days=1), time(0), tz)
+    return is_open, boundary, min(instant for instant in (boundary, midnight, now + REFRESH_WITHIN) if instant)
+
+
+def _clock(moment: datetime, language: str) -> str:
+    """"2:00 pm" in English, "14:00" in Spanish."""
+    if language == "en":
+        return f"{moment.hour % 12 or 12}:{moment.minute:02d} {'am' if moment.hour < 12 else 'pm'}"
+    return f"{moment.hour}:{moment.minute:02d}"
+
+
+def _day(moment: datetime, as_of: datetime, language: str) -> str:
+    """`moment`'s date as `as_of` reads it: today, tomorrow, the weekday ("next" for a week on)."""
+    ahead, weekday = (moment.date() - as_of.date()).days, WEEKDAYS[language][moment.weekday()]
+    if language == "en":
+        return "today" if ahead == 0 else "tomorrow" if ahead == 1 else f"next {weekday}" if ahead == 7 else weekday
+    return "hoy" if ahead == 0 else "mañana" if ahead == 1 else f"el {'próximo ' if ahead == 7 else ''}{weekday}"
+
+
+def open_status_text(is_open: bool, boundary: datetime | None, as_of: datetime, language: str) -> str:
+    """The kernel's open-now line ("Open now, until 6:00 pm", "Closed now. Opens tomorrow at 8:00 am"), `boundary`
+    and `as_of` in the business's time zone."""
+    at = (lambda moment: f"{'la' if moment.hour == 1 else 'las'} {_clock(moment, 'es')}") if language == "es" else (
+        lambda moment: _clock(moment, "en"))
+    if not is_open:
+        day = _day(boundary, as_of, language)
+        return f"Closed now. Opens {day} at {at(boundary)}" if language == "en" else (
+            f"Cerrado ahora. Abre {day} a {at(boundary)}")
+    if boundary is None:
+        return "Open now" if language == "en" else "Abierto ahora"
+    if (boundary.hour, boundary.minute) == (0, 0):
+        day = _day(boundary - timedelta(days=1), as_of, language)
+        until = ("midnight" if day == "today" else f"{day} at midnight") if language == "en" else (
+            "la medianoche" if day == "hoy" else f"{day} a medianoche")
+    else:
+        day = _day(boundary, as_of, language)
+        if day in ("today", "hoy"):
+            until = at(boundary)
+        elif language == "en":
+            until = f"{at(boundary)} tomorrow" if day == "tomorrow" else f"{day} at {at(boundary)}"
+        else:
+            until = f"{day} a {at(boundary)}"
+    return f"Open now, until {until}" if language == "en" else f"Abierto ahora, hasta {until}"
 
 
 def rivera_slots(now: datetime) -> list[CalendarSlot]:
@@ -271,9 +669,9 @@ def rivera_slots(now: datetime) -> list[CalendarSlot]:
     return slots
 
 
-def in_hours(moment: datetime, windows: list[HoursWindow]) -> HoursWindow | None:
-    """The opening-hours window `moment` (in business time) falls in, if any."""
-    local = moment.astimezone(RIVERA_TZ)
+def in_hours(moment: datetime, windows: list[HoursWindow], tz: ZoneInfo = RIVERA_TZ) -> HoursWindow | None:
+    """The opening-hours window `moment` (in business time, `tz`) falls in, if any."""
+    local = moment.astimezone(tz)
     day = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")[local.weekday()]
     for window in windows:
         end = window.end if window.end != time(0) else time.max
@@ -329,12 +727,20 @@ OTHER_LANGUAGE_WORDS = {"bonjour", "merci", "je", "vous", "nous", "olá", "obrig
                         "danke"}
 SPANISH_WORDS = {"hola", "gracias", "puedo", "usted", "ayudar", "ayudarle", "con", "para", "buenos", "buenas", "días",
                  "tardes", "quiero", "necesito", "cuánto", "cuando", "está", "estoy"}
-REPLY_TEXT = {"en": {"handoff": "Let me check with {owner}.", "checked": "Checked before it was shown.",
-                     "handed_off": "Handed to {owner}.", "verify": "Enter the code sent to the contact on record.",
-                     "hours": "Opening hours"},
-              "es": {"handoff": "Déjame consultarlo con {owner}.", "checked": "Revisado antes de mostrarse.",
-                     "handed_off": "Pasado a {owner}.", "verify": "Escribe el código enviado al contacto registrado.",
-                     "hours": "Horario"}}
+# The cards the fake renders plainly, and a verdict's status lines in the kernel's own words (its `reply_checked`,
+# `reply_handed_off`, `owner_said` and `owner_say_blocked` lines).
+REPLY_TEXT = {"en": {"handoff": "Let me check with {owner}.", "checked": "Reply checked against {owner}'s rules",
+                     "handed_off": "Passed to {owner} to answer",
+                     "verify": "Enter the code sent to the contact on record.", "hours": "Opening hours",
+                     "owner_said": "Written by {owner}",
+                     "owner_say_blocked": "Not sent: it included text from a private document"},
+              "es": {"handoff": "Déjame consultarlo con {owner}.",
+                     "checked": "Respuesta revisada con las reglas de {owner}",
+                     "handed_off": "Pasado a {owner} para responder",
+                     "verify": "Escribe el código enviado al contacto registrado.", "hours": "Horario",
+                     "owner_said": "Escrito por {owner}",
+                     "owner_say_blocked": "No se envió: incluía texto de un documento privado"}}
+OWNER_TEXT_MAX = 2000                   # an owner's say or whisper, in characters (Plan 01b)
 NUMBER_RULES = (("digit", re.compile(r"\d")), ("currency", re.compile(r"[$€£¥¢]")), ("percent", re.compile(r"%")))
 
 
@@ -350,22 +756,123 @@ def detect_language(prose: str) -> str:
     return "en"
 
 
-def scan_prose(prose: str, canaries: list[str]) -> list[Violation]:
-    """Digits, money signs and percent signs in prose, and document canaries (whose text no span repeats)."""
+def canary_key(text: str) -> tuple[str, list[int]]:
+    """`text` as canaries are matched in it (the kernel's `labels.canary_key`): each character in NFKC and case-folded,
+    keeping only ASCII letters and digits, so spaces, punctuation, capitals and full-width forms hide no canary; and
+    the index in `text` each kept character came from."""
+    chars: list[str] = []
+    origin: list[int] = []
+    for index, char in enumerate(text):
+        for part in unicodedata.normalize("NFKC", char).casefold():
+            if part.isascii() and part.isalnum():
+                chars.append(part)
+                origin.append(index)
+    return "".join(chars), origin
+
+
+def canary_spans(text: str, canaries: dict[str, str]) -> list[tuple[str, int, int]]:
+    """Each place a canary of `canaries` (each document's canary, by its ID) occurs in `text`, matched by
+    `canary_key`: the document's ID, and the start and end of the characters it takes up in `text`, whatever lies
+    between."""
+    key, origin = canary_key(text)
+    spans = []
+    for document_id, canary in canaries.items():
+        wanted = canary_key(canary)[0]
+        start = key.find(wanted) if wanted else -1
+        while start >= 0:
+            spans.append((document_id, origin[start], origin[start + len(wanted) - 1] + 1))
+            start = key.find(wanted, start + 1)
+    return spans
+
+
+def scan_prose(prose: str, canaries: dict[str, str]) -> list[Violation]:
+    """Document canaries (`canaries`, each by its document's ID), however they are written (`canary_spans`): one
+    `canary` violation naming their documents, listed first, with each canary blanked out before the rest is scanned,
+    so no span repeats one. Then digits, money signs and percent signs in what is left."""
     text = unicodedata.normalize("NFKC", prose).replace("\u200b", "").replace("\u00ad", "")
+    spans = canary_spans(text, canaries)
+    chars = list(text)
+    for _, start, end in spans:
+        chars[start:end] = " " * (end - start)
+    text = "".join(chars)
+    held = {document_id for document_id, _, _ in spans}
     violations = []
+    if held:
+        violations.append(Violation(kind="canary", span="document text", rule_id="labels.canary",
+                                    fact_ids=[f"document:{document_id}" for document_id in canaries
+                                              if document_id in held]))
     for rule_id, pattern in NUMBER_RULES:
         found = pattern.search(text)
         if found:
             violations.append(Violation(kind="number_in_prose", span=text[found.start():found.start() + 40],
                                         rule_id=rule_id))
-    if any(canary in text for canary in canaries):
-        violations.append(Violation(kind="canary", span="", rule_id="canary"))
     return violations
 
 
 def money(cents: int) -> str:
     return f"${cents / 100:,.2f}"
+
+
+# Signed agents ---------------------------------------------------------------------------------------
+AGENT_HEADERS = ("x-agent-key-id", "x-agent-ts", "x-agent-nonce", "x-agent-sig", "x-agent-body-sha256")
+# The headers' forms the kernel checks before anything else (else `malformed`).
+AGENT_KEY_ID = re.compile(r"[0-9a-f]{16}")
+AGENT_NONCE = re.compile(r"[A-Za-z0-9_-]{16,128}")
+AGENT_SIG = re.compile(r"[0-9a-f]{128}")
+SHA256_HEX = re.compile(r"[0-9a-f]{64}")
+SAFE_REF = re.compile(r"[A-Za-z0-9._:-]{1,64}")
+SIGNED_TIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$")
+AGENT_TS_SKEW = timedelta(minutes=5)    # an agent's `ts` is within this of the kernel's clock
+NONCE_TTL = timedelta(minutes=5)        # a nonce's turn ends this long after its first use at the latest
+IMMEDIATE_HANDOFF = frozenset({"canary", "unsupported_language", "session_paused"})
+DEMO_AGENTS_PER_COPY_PER_HOUR = 10
+DEMO_WALLET = "demo-wallet"
+DEMO_MANDATE = {"per_charge_cents": 2_000, "total_cents": 10_000}   # the master's "Agent demo" row
+DEMO_MANDATE_LIFE = timedelta(hours=1)
+
+
+def safe_ref(value: str) -> str | dict[str, Any]:
+    """`value` as a ledger summary may hold it (the kernel's `ledger.safe_ref`): a plain identifier as it is, anything
+    else as a marker with the first 16 hex characters of its sha256."""
+    return value if SAFE_REF.fullmatch(value) else {"invalid": True, "sha256": sha256_hex(value)[:16]}
+
+
+def agent_payload(desk_slug: str, ts: str, nonce: str, body_sha256: str) -> bytes:
+    """What an agent signs: the canonical JSON of `{desk_slug, ts, nonce, body_sha256}` (RFC 8785 for ASCII values)."""
+    return canonical({"desk_slug": desk_slug, "ts": ts, "nonce": nonce, "body_sha256": body_sha256}).encode()
+
+
+def agent_signature(private_key_hex: str, desk_slug: str, ts: str, nonce: str, body_sha256: str) -> str:
+    """An agent's Ed25519 signature of one A2A request, in lowercase hex (for tests that play the agent)."""
+    key = Ed25519PrivateKey.from_private_bytes(bytes.fromhex(private_key_hex))
+    return key.sign(agent_payload(desk_slug, ts, nonce, body_sha256)).hex()
+
+
+def mandate_payload(mandate: Mandate) -> bytes:
+    """What the wallet signs: the canonical JSON of the mandate's fields but its signature."""
+    return canonical(mandate.model_dump(mode="json", exclude={"sig"})).encode()
+
+
+def _public_hex(key: Ed25519PrivateKey) -> str:
+    return key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
+
+
+def _verifies(public_key_hex: str, payload: bytes, sig_hex: str) -> bool:
+    try:
+        Ed25519PublicKey.from_public_bytes(bytes.fromhex(public_key_hex)).verify(bytes.fromhex(sig_hex), payload)
+    except (ValueError, InvalidSignature):
+        return False
+    return True
+
+
+def parse_signed_time(value: str) -> datetime | None:
+    """A `SignedTime` as an aware datetime; None when it isn't one."""
+    if not SIGNED_TIME.fullmatch(value):
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=UTC)
+    except ValueError:
+        return None
 
 
 @dataclass
@@ -398,6 +905,8 @@ class Session:
     preview: bool = False
     last_language: str | None = None
     closed_at: datetime | None = None
+    agent_key_id: str | None = None             # an agent session's key, bound at creation
+    mandate_id: str | None = None               # an agent session's verified mandate
 
     def state(self) -> SessionState:
         return SessionState(session_id=self.session_id, kind=self.kind, verified=self.verified,
@@ -406,7 +915,8 @@ class Session:
     def ro_row(self) -> dict:
         return {"session_id": self.session_id, "copy_id": self.copy_id, "desk_id": self.desk_id, "kind": self.kind,
                 "verified": self.verified, "assurance": self.assurance, "person_id": self.person_id,
-                "agent_key_id": None, "mandate_id": None, "last_language": self.last_language, "mode": self.mode,
+                "agent_key_id": self.agent_key_id, "mandate_id": self.mandate_id,
+                "last_language": self.last_language, "mode": self.mode,
                 "generation": self.generation, "strikes": self.strikes, "preview": self.preview,
                 "created_at": self.created_at, "closed_at": self.closed_at}
 
@@ -424,6 +934,7 @@ class Person:
     ref: str
     display_name: str
     contact: str
+    created_at: datetime | None = None
 
 
 @dataclass
@@ -432,6 +943,60 @@ class Document:
     title: str
     record_owner_person_id: str | None
     canary: str
+    body: str                                   # ends with the canary, as the kernel's do
+    content_type: str | None = "text/plain; charset=utf-8"   # what the kernel serves it as (None: no header)
+    disposition: str | None = None              # the kernel's Content-Disposition, if it sends one
+    headers: dict[str, str] = field(default_factory=dict)   # any other headers the kernel serves it with
+
+
+@dataclass
+class DocumentLink:
+    """A single-use link to a document: its token is only here and in the card's `href`."""
+
+    link_id: str
+    token: str
+    document_id: str
+    desk_id: str
+    session_id: str
+    expires_at: datetime
+    opened_at: datetime | None = None
+
+
+@dataclass
+class PaymentLink:
+    """A single-use payment link for a quote: its token is only here and in the card's `href`."""
+
+    link_id: str
+    token: str
+    copy_id: str
+    desk_id: str
+    session_id: str
+    quote_id: str
+    action_id: str
+    title: str
+    amount_cents: int
+    expires_at: datetime
+    state: str = "issued"                       # issued, paid, expired or cancelled (no provider, so never unknown)
+    cancel_reason: str | None = None            # rules_changed: a rule change cancelled it
+
+    def ro_row(self) -> dict:
+        return {"link_id": self.link_id, "copy_id": self.copy_id, "desk_id": self.desk_id,
+                "session_id": self.session_id, "quote_id": self.quote_id, "amount_cents": self.amount_cents,
+                "state": self.state, "expires_at": self.expires_at}
+
+
+@dataclass
+class VersionRecord:
+    """A rules version the owner drafted: its cards (the owner's, then the compiler's default asks), its parent, its
+    proof and status, and the key a repeat of the same draft finds it by."""
+
+    version: int
+    parent: int | None
+    cards: list[RuleCard]
+    status: str                                 # draft (bounded), proved, rejected, active or superseded
+    proof: ProofReport
+    key: tuple
+    created_at: datetime
 
 
 @dataclass
@@ -446,15 +1011,19 @@ class Desk:
     slug: str
     hours: list[HoursWindow]
     created_at: datetime
+    timezone: str = RIVERA_TZ.key                                     # the business's
     answering: bool = True
+    deleted_at: datetime | None = None                                # `DELETE /desks/{id}`: its routes are closed
     people: dict[str, Person] = field(default_factory=dict)          # by person_id
     documents: dict[str, Document] = field(default_factory=dict)     # by document_id
     prices: dict[str, PriceItem] = field(default_factory=dict)
     slots: dict[str, CalendarSlot] = field(default_factory=dict)
     facts: dict[str, Fact] = field(default_factory=dict)
     tools: dict[str, ToolProfile] = field(default_factory=dict)
+    knowledge: dict[str, KnowledgeItem] = field(default_factory=dict)   # by item_id
     cards: list[RuleCard] = field(default_factory=list)
     policy_version: int = 1
+    versions: dict[int, VersionRecord] = field(default_factory=dict)   # owner drafts, by version
     ledger: list[LedgerEntry] = field(default_factory=list)
     booked: set[str] = field(default_factory=set)                     # slot_ids with a confirmed booking
 
@@ -476,6 +1045,65 @@ class DecisionRecord:
 
 
 @dataclass
+class Challenge:
+    """A verification challenge: the code sent to `person_id`'s contact on record for `session_id`."""
+
+    challenge_id: str
+    session_id: str
+    person_id: str
+    code: str
+    entry_id: str                               # its Demo inbox entry
+    expires_at: datetime
+    attempts: int = 0
+    status: str = "live"                        # live, consumed, cancelled, expired or failed
+
+
+@dataclass
+class AgentKey:
+    """A demo agent's public key; the private key went to the agent once and is kept nowhere."""
+
+    agent_key_id: str
+    copy_id: str
+    desk_id: str
+    public_key_hex: str
+    minted_by: str                              # the minting session's ID, or "owner"
+    created_at: datetime
+
+
+@dataclass
+class AgentNonce:
+    """An agent's nonce: bound at its first use to one session and body hash, for one A2A turn."""
+
+    session_id: str
+    body_sha256: str
+    first_used_at: datetime
+    check_replies: int = 0
+    spent_at: datetime | None = None
+
+    def spent(self, now: datetime) -> bool:
+        return self.spent_at is not None or now - self.first_used_at >= NONCE_TTL
+
+
+@dataclass
+class MandateRecord:
+    """A verified mandate, stored when its agent's session opened, with what it has committed and reserved."""
+
+    mandate: Mandate
+    copy_id: str
+    session_id: str
+    committed_cents: int = 0
+    reserved_cents: int = 0
+
+    def ro_row(self) -> dict:
+        mandate = self.mandate
+        return {"mandate_id": mandate.mandate_id, "copy_id": self.copy_id, "desk_id": mandate.desk_id,
+                "agent_key_id": mandate.agent_key_id, "on_behalf_of": mandate.on_behalf_of,
+                "per_charge_cents": mandate.per_charge_cents, "total_cents": mandate.total_cents,
+                "committed_cents": self.committed_cents, "reserved_cents": self.reserved_cents,
+                "expires_at": mandate.expires_at}
+
+
+@dataclass
 class Script:
     """A test's override for one tool: the outcome at /decide and the result at execution."""
 
@@ -483,6 +1111,28 @@ class Script:
     exec_state: str = "succeeded"
     model_view: dict | None = None
     facts: list[Fact] | None = None
+    inbox: list[InboxNotice] | None = None
+
+
+@dataclass(frozen=True)
+class RecordedStep:
+    """One moment of a recorded conversation, replayed at `at` (Plan 01d): the visitor's words (`said`, with `text`);
+    a reply of Claude's that passed the check (`replied`, its prose in `text`); a draft the check blocked (`blocked`:
+    its `reply` ledger entry alone, no event); or a tool call decided and finished (`booked`: an open slot of the
+    copy's, executed; `refused`: a document an unverified visitor may not have; `denied`: a quote at a discount, held
+    and denied by the owner)."""
+
+    kind: Literal["said", "replied", "blocked", "booked", "refused", "denied"]
+    at: datetime
+    text: str | None = None
+
+
+@dataclass(frozen=True)
+class RecordedSession:
+    """A recorded conversation: a visitor's or an agent's, its steps in the order they happened."""
+
+    steps: tuple[RecordedStep, ...]
+    kind: Literal["visitor", "agent"] = "visitor"
 
 
 class FakeKernelState:
@@ -493,12 +1143,17 @@ class FakeKernelState:
         self.calls: list[FakeCall] = []
         self._ro = ro
         self._dirty: dict[str, dict[tuple, dict]] = {}
+        self._gone: dict[str, set[tuple]] = {}         # view -> keys of rows removed since the last flush
         self.copies: dict[str, Copy] = {}
         self.desks: dict[str, Desk] = {}
         self.sessions: dict[str, Session] = {}
         self.decisions: dict[str, DecisionRecord] = {}
         self.handoffs: dict[str, dict] = {}             # handoff_id -> its kernel_ro row
         self.inbox: list[tuple[str, DemoInboxEntry]] = []   # (copy_id, entry): the Demo inbox, oldest first
+        self.challenges: dict[str, Challenge] = {}      # challenge_id -> its challenge, codes in memory only
+        self.document_links: dict[str, DocumentLink] = {}   # link_id -> its link, tokens in memory only
+        self.payment_links: dict[str, PaymentLink] = {}     # link_id -> its link, tokens in memory only
+        self.quotes: dict[str, dict] = {}               # quote_id -> its kernel_ro row
         self._by_call: dict[tuple[str, int, str], str] = {}   # (session_id, generation, call_id) -> decision_id
         self._token_hashes: dict[str, str] = {}        # sha256(token) -> session_id
         self._failures: dict[str, list] = {}           # route -> [kind, times left or None]
@@ -507,6 +1162,19 @@ class FakeKernelState:
         self._forced: list[str] = []                   # violation kinds the next reply checks carry
         self._in_flight: dict[str, int] = {}           # tool -> executions left that find themselves running
         self._args: dict[str, dict] = {}                # action_id -> the call's args, as the action row binds them
+        self.agent_keys: dict[str, AgentKey] = {}       # agent_key_id -> its public key
+        self.nonces: dict[tuple[str, str], AgentNonce] = {}   # (agent_key_id, nonce) -> its binding
+        self.wallets: dict[str, Ed25519PrivateKey] = {}  # copy_id -> its demo wallet's key, made on first use
+        self.mandates: dict[str, MandateRecord] = {}    # mandate_id -> the verified mandate
+        self.mandate_nonces: set[tuple[str, str]] = set()   # (copy_id, nonce) of the mandates sessions used
+        self.minted: list[tuple[str, datetime]] = []    # (copy_id, when) of each demo agent minted
+        self.replayed_nights: dict[str, tuple[str, list[ReplayedEvent]]] = {}   # copy_id -> (replay_id, its events)
+        self._night: tuple[RecordedSession, ...] = ()   # what `POST /copies` replays when asked (`record_night`)
+        self._replaying: tuple[str, datetime] | None = None   # (replay_id, the real time) while a replay writes
+        self._no_seeded_night = False                   # `without_seeded_night`: any replay_night is 422
+        self._proofs: list[list] = []                   # [ProofReport, drafts left or None]: the next drafts' proofs
+        self._gates: dict[str, asyncio.Event] = {}      # route -> the event its calls wait for (`gate`)
+        self._route = ""                                # the route template of the call being answered (`_refused`)
 
     # Knobs ---------------------------------------------------------------------------------------
 
@@ -522,10 +1190,50 @@ class FakeKernelState:
             else:
                 self._failures[key] = [kind, times]
 
+    def record_night(self, *sessions: RecordedSession) -> None:
+        """The recording `POST /copies` replays into each copy that asks (`replay_night: true`), as Plan 01d's kernel
+        replays its shipped one: with none recorded, a copy that asks gets live data only."""
+        if any(not session.steps or list(session.steps) != sorted(session.steps, key=lambda step: step.at)
+               for session in sessions):
+            raise ValueError("a recorded session has steps, in the order they happened")
+        self._night = sessions
+
+    def without_seeded_night(self) -> None:
+        """The kernel predates the seeded night: its copy request has no `replay_night` and refuses unknown fields
+        (`extra="forbid"`), so a body that carries it, true or false, is 422 `invalid` and nothing is created; a body
+        without it makes a live copy."""
+        self._no_seeded_night = True
+
     def drop_response(self, route: str, *, times: int = 1) -> None:
         """The route's next `times` calls change state and commit, then time out instead of answering."""
         for key in route_keys(route):
             self._drops[key] = times
+
+    def gate(self, route: str) -> asyncio.Event:
+        """Hold the route's calls, once received and recorded and before any failure or change, until the returned
+        event is set: a slow proof, say. A `fail` set while a call waits applies to it."""
+        event = asyncio.Event()
+        for key in route_keys(route):
+            self._gates[key] = event
+        return event
+
+    def proof(self, *, ok: bool = True, method: str = "symcc", timed_out: bool = False,
+              times: int | None = None) -> None:
+        """The proof of the next `times` drafts (every later draft's when None; `proof_report`): `ok=False` and
+        `timed_out` reject the draft, and `method="bounded"` leaves it `draft`, which no confirm activates."""
+        self._proofs.append([proof_report(ok=ok, method=method, timed_out=timed_out), times])
+
+    def _next_proof(self) -> ProofReport:
+        if not self._proofs:
+            return proof_report()
+        entry = self._proofs[0]
+        report, left = entry
+        if left is not None:
+            if left <= 1:
+                self._proofs.pop(0)
+            else:
+                entry[1] = left - 1
+        return report
 
     def set_mode(self, session_id: str, mode: str) -> SessionState:
         """Take over (`owner`), hand back or resume (`ai`): generation + 1, ledgered `takeover` or `breaker`, as
@@ -555,25 +1263,39 @@ class FakeKernelState:
         assurance `demo_code`, generation unchanged, and `person:<id>` added to the session's facts."""
         session = self.sessions[session_id]
         desk = self.desks[session.desk_id]
-        person = desk.person(person_ref)
-        session.verified, session.assurance, session.person_id = True, "demo_code", person.person_id
-        for fact in list(desk.facts.values()):
-            readers = fact.label.readers
-            if f"session:{session_id}" in readers and f"person:{person.person_id}" not in readers:
-                label = Label(readers=[*readers, f"person:{person.person_id}"], record_owner=person.person_id)
-                self._put_fact(desk, fact.model_copy(update={"label": label}))
+        self._mark_verified(session, desk, desk.person(person_ref))
         self.append(desk, "verify", {"session_id": session_id, "verified": True}, session_id=session_id)
-        self._put_session(session)
         self.flush()
         return session.state()
 
+    def _mark_verified(self, session: Session, desk: Desk, person: Person) -> None:
+        """The session is now `person`'s (assurance `demo_code`, generation unchanged), and the facts it made so far
+        are theirs too: `person:<id>` joins their readers."""
+        session.verified, session.assurance, session.person_id = True, "demo_code", person.person_id
+        for fact in list(desk.facts.values()):
+            readers = fact.label.readers
+            if f"session:{session.session_id}" in readers and f"person:{person.person_id}" not in readers:
+                label = Label(readers=[*readers, f"person:{person.person_id}"], record_owner=person.person_id)
+                self._put_fact(desk, fact.model_copy(update={"label": label}))
+        self._put_session(session)
+
+    def owner_verdict(self, session_id: str, text: str) -> ReplyVerdict:
+        """The verdict an owner's say gets, as `POST /owner/messages` answers it (`_owner_say`), for a test that
+        delivers a say without the take-over routes."""
+        session = self.sessions[session_id]
+        verdict = self._owner_say(session, self.desks[session.desk_id], text, new_id("msg"))
+        self.flush()
+        return verdict
+
     def script(self, tool: str, outcome: str | None = None, exec_state: str = "succeeded",
-               model_view: dict | None = None, facts: list[Fact] | None = None) -> None:
+               model_view: dict | None = None, facts: list[Fact] | None = None,
+               inbox: list[InboxNotice] | None = None) -> None:
         """Override the tool from now on: `outcome` (`allow`, `hold`, `refuse`; None keeps the seed's rule) for a
-        call that normalizes, and the execution's state, `model_view` and facts (None keeps the tool's own)."""
+        call that normalizes, and the execution's state, `model_view`, facts and Demo inbox notices (None keeps the
+        tool's own)."""
         if outcome not in (None, "allow", "hold", "refuse") or exec_state not in ("succeeded", "failed", "unknown"):
             raise ValueError("unknown outcome or execution state")
-        self._scripts[tool] = Script(outcome, exec_state, model_view, facts)
+        self._scripts[tool] = Script(outcome, exec_state, model_view, facts, inbox)
 
     def never(self, desk_id: str, tool: str) -> None:
         """The owner confirms a `never` card for `tool` for anyone (a new active policy version, ledgered `policy`):
@@ -581,12 +1303,37 @@ class FakeKernelState:
         call (`refused_at_execution`, "rules changed"), as `/policy/draft` and `/policy/confirm` would leave it."""
         desk = self.desks[desk_id]
         parent = desk.policy_version
-        self._put_policy(desk, status="superseded")
+        self._supersede_active(desk)
         desk.cards = [*desk.cards, _card(f"never-{tool}", tool, "never", "anyone", "You said never for this.")]
-        desk.policy_version += 1
+        desk.policy_version = self._next_version(desk)
         self._put_policy(desk, parent_version=parent)
         self.append(desk, "policy", {"version": desk.policy_version, "activated": True})
         self.flush()
+
+    def lower_link_limit(self, desk_id: str, max_amount_cents: int) -> list[str]:
+        """The owner confirms `rv-link` at a lower limit (a new active policy version, ledgered `policy`), and the
+        activation cancels the Desk's open auto-allowed links above it: `cancelled`, `cancel_reason` `rules_changed`,
+        their facts expired, each ledgered `payment` `{link_id, state, reason, version}` after the activation's entry
+        (master "Cancellation at activation"). Owner-approved links stay valid. Returns the cancelled links' IDs."""
+        desk = self.desks[desk_id]
+        parent = desk.policy_version
+        self._supersede_active(desk)
+        desk.cards = [card.model_copy(update={"max_amount_cents": max_amount_cents}) if card.card_id == "rv-link"
+                      else card for card in desk.cards]
+        desk.policy_version = self._next_version(desk)
+        self._put_policy(desk, parent_version=parent)
+        self.append(desk, "policy", {"version": desk.policy_version, "activated": True})
+        auto = {record.decision.action.action_id for record in self.decisions.values()
+                if record.decision.action is not None and record.decision.outcome == "allow"}
+        cancelled = []
+        for link in self.payment_links.values():
+            if (link.desk_id == desk_id and link.state == "issued" and link.action_id in auto
+                    and link.amount_cents > max_amount_cents):
+                link.cancel_reason = "rules_changed"
+                self._move_link(link, "cancelled", reason="rules_changed", version=desk.policy_version)
+                cancelled.append(link.link_id)
+        self.flush()
+        return cancelled
 
     def reconcile(self, decision_id: str, exec_state: str = "succeeded") -> Decision:
         """The kernel reconciles an `unknown` execution by its idempotency key (at startup, or on a read 30 s on):
@@ -661,11 +1408,19 @@ class FakeKernelState:
     # Mirror --------------------------------------------------------------------------------------
 
     def _put(self, view: str, key: tuple, row: dict) -> None:
+        self._gone.get(view, set()).discard(key)
         self._dirty.setdefault(view, {})[key] = row
 
+    def _drop(self, view: str, key: tuple) -> None:
+        self._dirty.get(view, {}).pop(key, None)
+        self._gone.setdefault(view, set()).add(key)
+
     def flush(self) -> None:
-        """Write every row that changed to fake_kernel_ro (when the state has one)."""
+        """Write every row that changed to fake_kernel_ro, and remove every row that went (when the state has one)."""
         dirty, self._dirty = self._dirty, {}
+        gone, self._gone = self._gone, {}
+        if self._ro is not None and any(gone.values()):
+            self._ro.delete({view: sorted(keys) for view, keys in gone.items() if keys})
         if self._ro is not None and dirty:
             self._ro.write({view: list(rows.values()) for view, rows in dirty.items()})
 
@@ -678,6 +1433,11 @@ class FakeKernelState:
             "fact_id": fact.fact_id, "copy_id": desk.copy_id, "desk_id": desk.desk_id, "kind": fact.kind,
             "status": fact.status, "claims": [claim.model_dump(mode="json") for claim in fact.claims],
             "readers": list(fact.label.readers), "expires_at": fact.expires_at})
+
+    def _put_business(self, desk: Desk) -> None:
+        self._put("businesses", (desk.business_id,), {
+            "business_id": desk.business_id, "copy_id": desk.copy_id, "name": desk.business_name,
+            "owner_display_name": desk.owner_display_name, "timezone": desk.timezone, "brand": desk.brand})
 
     def _put_desk(self, desk: Desk) -> None:
         self._put("desks", (desk.desk_id,), {
@@ -696,13 +1456,57 @@ class FakeKernelState:
             "profiles_sha256": sha256_hex(canonical(sorted(desk.tools))), "invariants_sha256": sha256_hex("invariants"),
             "review_thresholds_version": 1, "created_at": desk.created_at})
 
+    def _put_version(self, desk: Desk, record: VersionRecord) -> None:
+        version = self._policy_version(desk, record)
+        self._put("policy_versions", (desk.desk_id, record.version), {
+            **version.model_dump(mode="json", include={"desk_id", "version", "cards", "status", "proof", "cedar_sha256",
+                                                       "schema_sha256", "baseline_sha256", "profiles_sha256",
+                                                       "invariants_sha256", "review_thresholds_version"}),
+            "copy_id": desk.copy_id, "parent_version": record.parent, "created_at": record.created_at})
+
+    def _policy_version(self, desk: Desk, record: VersionRecord) -> PolicyVersion:
+        cards = [card.model_dump(mode="json") for card in record.cards]
+        return PolicyVersion(desk_id=desk.desk_id, version=record.version, parent_version=record.parent,
+                             cards=record.cards, cedar_sha256=sha256_hex(canonical(cards)),
+                             schema_sha256=sha256_hex("schema"), baseline_sha256=sha256_hex("baseline"),
+                             profiles_sha256=sha256_hex(canonical(list(record.key[2]))),
+                             invariants_sha256=sha256_hex("invariants"), review_thresholds_version=1,
+                             status=record.status, proof=record.proof)
+
+    def _supersede_active(self, desk: Desk) -> None:
+        """The active version's row becomes `superseded`, as an activation leaves it."""
+        record = desk.versions.get(desk.policy_version)
+        if record is None:
+            self._put_policy(desk, status="superseded")
+        else:
+            record.status = "superseded"
+            self._put_version(desk, record)
+
+    @staticmethod
+    def _next_version(desk: Desk) -> int:
+        return max(desk.policy_version, *desk.versions) + 1 if desk.versions else desk.policy_version + 1
+
+    def _put_tool(self, desk: Desk, profile: ToolProfile) -> None:
+        desk.tools[profile.tool] = profile
+        self._put("tools", (desk.desk_id, profile.tool), {
+            "copy_id": desk.copy_id, "desk_id": desk.desk_id, "tool": profile.tool, "source": profile.source,
+            "effects": profile.effects, "reversible": profile.reversible, "status": profile.status,
+            "description_confirmed": profile.description_confirmed, "definition_sha256": profile.definition_sha256,
+            "pending_definition_text": profile.pending_definition_text, "pending_sha256": profile.pending_sha256})
+
     def append(self, desk: Desk, kind: str, summary: dict, *, origin: str = "kernel", session_id: str | None = None,
                ref_id: str | None = None) -> LedgerEntry:
-        """Append a hashed, chained entry to the Desk's ledger, signed the fake way."""
+        """Append a hashed, chained entry to the Desk's ledger, signed the fake way. While a replay writes, the entry
+        is appended at the real time and marked `summary.replayed` with the time it happened (the clock's, moved
+        back to the recorded moment) and the recording, as only the kernel's replay marks an entry (Plan 01d)."""
+        appended_at = self.now
+        if self._replaying is not None:
+            recording, appended_at = self._replaying
+            summary = {**summary, "replayed": {"at": signed_time(self.now), "recording": recording}}
         event = LedgerEvent(kind=kind, origin=origin, session_id=session_id, ref_id=ref_id, summary=summary)
         envelope = {"copy_id": desk.copy_id, "desk_id": desk.desk_id, "seq": len(desk.ledger) + 1,
-                    "prev_hash": desk.ledger[-1].hash if desk.ledger else GENESIS, "created_at": signed_time(self.now),
-                    "event": event.model_dump(mode="json")}
+                    "prev_hash": desk.ledger[-1].hash if desk.ledger else GENESIS,
+                    "created_at": signed_time(appended_at), "event": event.model_dump(mode="json")}
         digest = sha256_hex(canonical(envelope))
         entry = LedgerEntry(**{**envelope, "event": event}, hash=digest, key_id=KEY_ID,
                             signature="fake:" + sha256_hex(b"desk-ledger-v1\0" + bytes.fromhex(digest)))
@@ -714,59 +1518,91 @@ class FakeKernelState:
     # The Rivera seed -----------------------------------------------------------------------------
 
     def _seed_rivera(self, copy_id: str) -> Desk:
+        business = BusinessSeed(name="Rivera Plumbing", owner_display_name="Maria Rivera", timezone=RIVERA_TZ.key,
+                                brand={"primary": "#1F4E4A", "accent": "#B87333"})
+        seed = DeskSeed(
+            name="Main line", charter=list(RIVERA_CHARTER), hours=list(RIVERA_HOURS), price_items=list(RIVERA_PRICES),
+            calendar_slots=rivera_slots(self.now),
+            people=[SeedPerson(ref=ref, display_name=name, contact=contact) for ref, name, contact in RIVERA_PEOPLE],
+            documents=[SeedDocument(ref=ref, title=title, body=body, record_owner_ref=owner_ref)
+                       for ref, title, owner_ref, body in RIVERA_DOCUMENTS],
+            notifications=NotificationDefaults(**NOTIFICATIONS), connections=["mock_payments"])
+        return self._create_desk(copy_id, business, seed, tools=tuple(TOOL_FACTS), cards=RIVERA_CARDS)
+
+    def _create_desk(self, copy_id: str, business: BusinessSeed, seed: DeskSeed, *, tools: tuple[str, ...],
+                     cards: list[RuleCard]) -> Desk:
+        """The one `DeskSeed` path (`POST /copies` and `POST /desks`): the business (or an existing one of the copy),
+        the Desk, its people, documents (each body ending with a fresh canary, its fact naming only the title), prices,
+        slots, notification prefs, `tools` rows, the active policy version of `cards`, the charter facts, the
+        `charter:hours` fact and a `desk_data` entry."""
+        if business.existing_business_id is not None:
+            existing = next((desk for desk in self.desks.values() if desk.copy_id == copy_id
+                             and desk.business_id == business.existing_business_id), None)
+            if existing is None:
+                raise Refusal(404, "not_found")
+            business = BusinessSeed(name=existing.business_name, owner_display_name=existing.owner_display_name,
+                                    timezone=existing.timezone, brand=existing.brand,
+                                    existing_business_id=existing.business_id)
         suffix = "".join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(6))
-        desk = Desk(desk_id=new_id("desk"), copy_id=copy_id, business_id=new_id("biz"), business_name="Rivera Plumbing",
-                    owner_display_name="Maria Rivera", brand={"primary": "#1F4E4A", "accent": "#B87333"},
-                    name="Main line", slug=f"rivera-plumbing-{suffix}", hours=list(RIVERA_HOURS), created_at=self.now)
+        desk = Desk(desk_id=new_id("desk"), copy_id=copy_id, business_id=business.existing_business_id or new_id("biz"),
+                    business_name=business.name, owner_display_name=business.owner_display_name,
+                    brand=dict(business.brand), timezone=business.timezone, name=seed.name,
+                    slug=f"{slugify(business.name)}-{suffix}", hours=list(seed.hours), created_at=self.now)
         self.desks[desk.desk_id] = desk
         ids = {"copy_id": copy_id, "desk_id": desk.desk_id}
-        self._put("businesses", (desk.business_id,), {
-            "business_id": desk.business_id, "copy_id": copy_id, "name": desk.business_name,
-            "owner_display_name": desk.owner_display_name, "timezone": RIVERA_TZ.key, "brand": desk.brand})
+        if business.existing_business_id is None:
+            self._put_business(desk)
         self._put_desk(desk)
-        for ref, display_name, contact in RIVERA_PEOPLE:
-            person = Person(person_id=new_id("person"), ref=ref, display_name=display_name, contact=contact)
+        for seeded in seed.people:
+            person = Person(person_id=new_id("person"), ref=seeded.ref, display_name=seeded.display_name,
+                            contact=seeded.contact, created_at=self.now)
             desk.people[person.person_id] = person
             self._put("people", (person.person_id,), {
-                "person_id": person.person_id, **ids, "display_name": display_name,
-                "masked_contact": mask_contact(contact), "notes": "", "created_at": self.now})
-        for ref, title, owner_ref in RIVERA_DOCUMENTS:
-            owner = desk.person(owner_ref)
-            document = Document(document_id=new_id("doc"), title=title, record_owner_person_id=owner.person_id,
-                                canary="cdk-" + secrets.token_hex(8))
-            desk.documents[document.document_id] = document
-            self._put("documents", (document.document_id,), {
-                "document_id": document.document_id, **ids, "title": title,
-                "record_owner_person_id": owner.person_id, "created_at": self.now})
-            self._put_fact(desk, Fact(fact_id=f"document:{document.document_id}", kind="document", status="available",
-                                      source="kernel", claims=[Claim(key="title", kind="text", value=title)],
-                                      label=Label(readers=["owner", f"person:{owner.person_id}"],
-                                                  record_owner=owner.person_id)))
-        for item in RIVERA_PRICES:
+                "person_id": person.person_id, **ids, "display_name": seeded.display_name,
+                "masked_contact": mask_contact(seeded.contact), "notes": seeded.notes, "created_at": self.now})
+        for seeded in seed.documents:
+            self._add_document(desk, seeded)
+        for item in seed.price_items:
             desk.prices[item.item_id] = item
             self._put("price_items", (desk.desk_id, item.item_id), {**item.model_dump(), **ids})
-        for slot in rivera_slots(self.now):
+        for slot in seed.calendar_slots:
             desk.slots[slot.slot_id] = slot
             self._put("calendar_slots", (desk.desk_id, slot.slot_id), {**slot.model_dump(), **ids})
-        self._put("notification_prefs", (desk.desk_id,), {**ids, **NOTIFICATIONS})
-        for tool in VISITOR_DECLARED:
-            profile = desk.tools[tool] = tool_profile(tool)
-            self._put("tools", (desk.desk_id, tool), {
-                **ids, "tool": tool, "source": profile.source, "effects": profile.effects,
-                "reversible": profile.reversible, "status": profile.status,
-                "description_confirmed": profile.description_confirmed, "definition_sha256": profile.definition_sha256,
-                "pending_definition_text": None, "pending_sha256": None})
-        desk.cards = list(RIVERA_CARDS)
+        self._put("notification_prefs", (desk.desk_id,), {**ids, **seed.notifications.model_dump()})
+        for tool in tools:
+            self._put_tool(desk, tool_profile(tool))
+        desk.cards = list(cards)
         self._put_policy(desk)
-        for claim in RIVERA_CHARTER:
+        for claim in seed.charter:
             self._put_fact(desk, Fact(fact_id=f"charter:{claim.key}", kind="charter", status="available",
                                       source="kernel", claims=[claim], label=Label(readers=["public"])))
+        self._put_hours(desk)
+        self.append(desk, "desk_data", {"part": "desk", "created": True})
+        return desk
+
+    def _add_document(self, desk: Desk, seeded: SeedDocument) -> Document:
+        """The seed path's document writer: the body ends with a fresh canary and stays here; the `document:<id>`
+        fact names only the title, readable by the owner and the record owner, if there is one."""
+        owner = desk.person(seeded.record_owner_ref) if seeded.record_owner_ref is not None else None
+        owner_id = owner.person_id if owner is not None else None
+        canary = "cdk-" + secrets.token_hex(8)
+        document = Document(document_id=new_id("doc"), title=seeded.title, record_owner_person_id=owner_id,
+                            canary=canary, body=seeded.body + canary)
+        desk.documents[document.document_id] = document
+        self._put("documents", (document.document_id,), {
+            "document_id": document.document_id, "copy_id": desk.copy_id, "desk_id": desk.desk_id,
+            "title": seeded.title, "record_owner_person_id": owner_id, "created_at": self.now})
+        self._put_fact(desk, Fact(fact_id=f"document:{document.document_id}", kind="document", status="available",
+                                  source="kernel", claims=[Claim(key="title", kind="text", value=seeded.title)],
+                                  label=Label(readers=["owner", *([f"person:{owner_id}"] if owner_id else [])],
+                                              record_owner=owner_id)))
+        return document
+
+    def _put_hours(self, desk: Desk) -> None:
         windows = canonical([window.model_dump(mode="json") for window in desk.hours])
         self._put_fact(desk, Fact(fact_id="charter:hours", kind="charter", status="available", source="kernel",
                                   claims=[Claim(key="windows", kind="text", value=windows)],
                                   label=Label(readers=["public"])))
-        self.append(desk, "desk_data", {"part": "desk", "created": True})
-        return desk
 
     def _seed_held_request(self, desk: Desk) -> Decision:
         """A seeded visitor's quote for drain clearing at 15% off, decided like any call: a signed hold."""
@@ -813,13 +1649,22 @@ class FakeKernelState:
 
     def session_call(self, request: Request, session_id: str, desk_id: str | None = None) -> tuple[Session, Desk]:
         """The first three "Session state responses" rows for a call naming `session_id`: the session token must
-        hash to it (401); an owner names its own session and a `desk_id` of its copy (else 404); closed is 409."""
+        hash to it, or an agent's signature authenticate it (401); an owner names its own session and a `desk_id` of
+        its copy (else 404); closed is 409."""
+        if self._signed_by_agent(request):
+            session = self._agent(request, session_id)
+            if desk_id is not None:
+                raise Refusal(422, "invalid")   # desk_id is for owner sessions only
+            self._check_open(session)
+            return session, self.desks[session.desk_id]
         if request.headers.get("x-owner-session") is not None:
             copy, owner = self.owner_of(request)
             if desk_id is None:
                 raise Refusal(422, "invalid")
             if desk_id not in copy.desk_ids or session_id != owner.session_id:
                 raise Refusal(404, "not_found")
+            if self.desks[desk_id].deleted_at is not None:
+                raise self._refused(self.desks[desk_id], 409, "closed", "closed", session_id=owner.session_id)
             return owner, self.desks[desk_id]
         session = self.visitor_of(request)
         if session.session_id != session_id:
@@ -829,12 +1674,176 @@ class FakeKernelState:
         self._check_open(session)
         return session, self.desks[session.desk_id]
 
+    # Agents ----------------------------------------------------------------------------------------
+
+    @staticmethod
+    def _signed_by_agent(request: Request) -> bool:
+        return any(name in request.headers for name in AGENT_HEADERS)
+
+    def _refused(self, desk: Desk | None, status: int, code: str, reason: str, *, session_id: str | None = None,
+                 kind: str = "auth", **extra: Any) -> Refusal:
+        """A refusal the kernel ledgers (its `auth.AuthError`): a `kind` entry `{route, reason, **extra}` naming
+        `session_id` on `desk`, the Desk the call named (none when it names no Desk, as the kernel logs it instead),
+        then the refusal to raise. The route is the call's template, never its path, which may hold a token."""
+        if desk is not None:
+            self.append(desk, kind, {"route": self._route, "reason": reason, **extra}, session_id=session_id)
+        return Refusal(status, code)
+
+    def _agent_refused(self, desk: Desk | None, reason: str, session_id: str | None = None, *,
+                       key_id: str | None = None, status: int = 401, code: str = "auth") -> Refusal:
+        """A refused agent signature, key, nonce or mandate (the kernel's `agents.AgentAuthError`): 401 `auth`, or 409
+        `replayed` for a spent turn's own call, ledgered `agent_auth {route, reason, agent_key_id}` on the Desk it
+        named, never a signature, nonce or key."""
+        extra = {} if key_id is None else {"agent_key_id": safe_ref(key_id)}
+        return self._refused(desk, status, code, reason, session_id=session_id, kind="agent_auth", **extra)
+
+    def _signature(self, request: Request, desk: Desk, session_id: str | None, *,
+                   session_key_id: str | None = None) -> tuple[AgentKey, str, str]:
+        """The request's agent key, nonce and body hash, once its signature checks out for `desk`'s slug, in the
+        kernel's order: every header present and in form (`unsigned` without any, else `malformed`), a key of the
+        copy (`unknown_key`), an Ed25519 signature over `{desk_slug, ts, nonce, body_sha256}` (`bad_signature`), `ts`
+        within 5 minutes (`stale_timestamp`), and the key the session was opened with (`session_key_id`, else
+        `wrong_key`) or, opening one, a key minted for this Desk (`wrong_desk`); else 401, ledgered."""
+        if not self._signed_by_agent(request):
+            raise self._agent_refused(desk, "unsigned", session_id)
+        key_id, ts, nonce, sig, body_sha256 = (request.headers.get(name) or "" for name in AGENT_HEADERS)
+        if not (AGENT_KEY_ID.fullmatch(key_id) and AGENT_NONCE.fullmatch(nonce) and AGENT_SIG.fullmatch(sig)
+                and SHA256_HEX.fullmatch(body_sha256) and parse_signed_time(ts) is not None):
+            raise self._agent_refused(desk, "malformed", session_id, key_id=key_id or None)
+        key = self.agent_keys.get(key_id)
+        if key is None or key.copy_id != desk.copy_id:
+            raise self._agent_refused(desk, "unknown_key", session_id, key_id=key_id)
+        if not _verifies(key.public_key_hex, agent_payload(desk.slug, ts, nonce, body_sha256), sig):
+            raise self._agent_refused(desk, "bad_signature", session_id, key_id=key_id)
+        if abs(self.now - parse_signed_time(ts)) > AGENT_TS_SKEW:
+            raise self._agent_refused(desk, "stale_timestamp", session_id, key_id=key_id)
+        if session_key_id is None and key.desk_id != desk.desk_id:
+            raise self._agent_refused(desk, "wrong_desk", session_id, key_id=key_id)
+        if session_key_id is not None and not hmac.compare_digest(session_key_id, key.agent_key_id):
+            raise self._agent_refused(desk, "wrong_key", session_id, key_id=key_id)
+        return key, nonce, body_sha256
+
+    def _agent(self, request: Request, session_id: str) -> Session:
+        """The agent session `session_id`, for a request its key signed: the key must be the one bound to the session
+        at creation (else 401, ledgered), and the nonce is bound to this session and body hash at its first use; once
+        its turn is over the same request is 409 `replayed`, and any other use of it 401. The nonce is kept on the
+        request for the reply check, which ends its turn. A signature naming a session that isn't an agent's is the
+        wrong credential for it (`auth` `bad_token`); one naming no session, or the owner's, has no Desk to go on."""
+        session = self.sessions.get(session_id)
+        desk = self.desks.get(session.desk_id) if session is not None and session.desk_id else None
+        if session is None or desk is None:
+            raise Refusal(401, "auth")
+        if session.kind != "agent":
+            raise self._refused(desk, 401, "auth", "bad_token", session_id=session_id)
+        key, nonce, body_sha256 = self._signature(request, desk, session_id,
+                                                  session_key_id=session.agent_key_id or "")
+        bound = self.nonces.get((key.agent_key_id, nonce))
+        if bound is None:
+            bound = self.nonces[(key.agent_key_id, nonce)] = AgentNonce(
+                session_id=session_id, body_sha256=body_sha256, first_used_at=self.now)
+        elif (bound.session_id, bound.body_sha256) != (session_id, body_sha256):
+            raise self._agent_refused(desk, "nonce_reused", session_id, key_id=key.agent_key_id)
+        elif bound.spent(self.now):
+            raise self._agent_refused(desk, "replayed", session_id, key_id=key.agent_key_id, status=409,
+                                      code="replayed")
+        request.state.agent_nonce = bound
+        return session
+
+    def _end_agent_turn(self, request: Request, verdict: ReplyVerdict) -> None:
+        """A reply check ends its nonce's turn when it passes, hands off at once, or is the turn's second check."""
+        nonce: AgentNonce = request.state.agent_nonce
+        nonce.check_replies += 1
+        immediate = {violation.kind for violation in verdict.violations} & IMMEDIATE_HANDOFF
+        if verdict.ok or immediate or nonce.check_replies >= 2:
+            nonce.spent_at = self.now
+
+    def _check_mandate(self, desk: Desk, key: AgentKey, mandate: Mandate) -> None:
+        """A mandate a session opens with, in the kernel's order: issued by this copy's demo wallet, which signed it as
+        it stands, for this agent's key and this Desk, not expired, within its own limits and not used before; else
+        401, ledgered with the reason."""
+        def refused(reason: str) -> Refusal:
+            return self._agent_refused(desk, reason, key_id=key.agent_key_id)
+
+        wallet = self.wallets.get(desk.copy_id)
+        if mandate.issuer != DEMO_WALLET or wallet is None:
+            raise refused("mandate_issuer")
+        if not _verifies(_public_hex(wallet), mandate_payload(mandate), mandate.sig):
+            raise refused("mandate_signature")
+        if mandate.agent_key_id != key.agent_key_id:
+            raise refused("mandate_key")
+        if mandate.desk_id != desk.desk_id:
+            raise refused("mandate_audience")
+        expires_at = parse_signed_time(mandate.expires_at)
+        if expires_at is None or expires_at <= self.now:
+            raise refused("mandate_expired")
+        if not 1 <= mandate.per_charge_cents <= min(mandate.total_cents, AUTO_MONEY_HARD_CAP_CENTS):
+            raise refused("mandate_limits")
+        if (desk.copy_id, mandate.nonce) in self.mandate_nonces:
+            raise refused("mandate_reused")
+
+    def _open_agent_session(self, request: Request, body: CreateSessionRequest, desk: Desk) -> SessionCreated:
+        """An agent's `POST /sessions`, by signature alone: a nonce bound or spent with the same body hash returns
+        its bound session (nothing created, the mandate not used again); otherwise the mandate, if any, is checked
+        and stored, and the new session is bound to the key and the nonce. A refusal is ledgered on the Desk, naming
+        no session."""
+        key, nonce, body_sha256 = self._signature(request, desk, None)
+        if desk.deleted_at is not None:                 # a resent opening too: its session closed with the Desk
+            raise self._refused(desk, 409, "closed", "closed")
+        bound = self.nonces.get((key.agent_key_id, nonce))
+        if bound is not None:
+            session = self.sessions[bound.session_id]
+            if bound.body_sha256 != body_sha256 or session.desk_id != desk.desk_id:
+                raise self._agent_refused(desk, "nonce_reused", key_id=key.agent_key_id)
+            if bound.spent(self.now):
+                self.append(desk, "agent_auth", {"resent_opening": True}, session_id=session.session_id)
+            return SessionCreated(state=session.state(), session_token=None)
+        if body.mandate is not None:
+            self._check_mandate(desk, key, body.mandate)
+        session = Session(session_id=secrets.token_urlsafe(16), copy_id=desk.copy_id, desk_id=desk.desk_id,
+                          kind="agent", secret_hash=None, created_at=self.now, last_seen=self.now,
+                          agent_key_id=key.agent_key_id)
+        self.sessions[session.session_id] = session
+        if body.mandate is not None:
+            self.mandate_nonces.add((desk.copy_id, body.mandate.nonce))
+            record = self.mandates[body.mandate.mandate_id] = MandateRecord(
+                mandate=body.mandate, copy_id=desk.copy_id, session_id=session.session_id)
+            session.mandate_id = body.mandate.mandate_id
+            self._put("mandates", (record.mandate.mandate_id,), record.ro_row())
+        self.nonces[(key.agent_key_id, nonce)] = AgentNonce(session_id=session.session_id, body_sha256=body_sha256,
+                                                            first_used_at=self.now)
+        self._put_session(session)
+        self.append(desk, "session", {"session_id": session.session_id, "kind": "agent", "preview": False,
+                                      "agent_key_id": key.agent_key_id, "mandate_id": session.mandate_id},
+                    session_id=session.session_id)
+        return SessionCreated(state=session.state(), session_token=None)
+
+    def _remaining(self, session: Session) -> int | None:
+        """What the session's mandate may still charge at once: `min(per charge, total - committed - reserved)`;
+        None (no room at all) without a mandate, once it has expired, or for another Desk."""
+        record = self.mandates.get(session.mandate_id) if session.mandate_id else None
+        if record is None:
+            return None
+        mandate = record.mandate
+        expires_at = parse_signed_time(mandate.expires_at)
+        if (expires_at is None or self.now >= expires_at or mandate.desk_id != session.desk_id
+                or "charge" not in mandate.allowed_effects):
+            return None
+        return min(mandate.per_charge_cents, mandate.total_cents - record.committed_cents - record.reserved_cents)
+
+    def _room_for(self, session: Session, action: NormalizedAction) -> bool:
+        """Whether a mandate charge still fits its mandate at execution (two calls racing for the last room)."""
+        remaining = self._remaining(session)
+        return remaining is not None and action.amount_cents is not None and action.amount_cents <= remaining
+
     def _check_open(self, session: Session) -> None:
+        """The session is open (a visitor's or an agent's closes after 24 hours idle), else 409 `closed`, ledgered
+        `auth` on its Desk."""
         if session.closed_at is None and session.kind != "owner" and self.now - session.last_seen > IDLE_LIMIT:
             session.closed_at = session.last_seen + IDLE_LIMIT
             self._put_session(session)
         if session.closed_at is not None:
-            raise Refusal(409, "closed")
+            raise self._refused(self.desks.get(session.desk_id or ""), 409, "closed", "closed",
+                                session_id=session.session_id)
         session.last_seen = self.now
 
     @staticmethod
@@ -855,38 +1864,140 @@ class FakeKernelState:
         return Health(version="fake", proof_mode="symcc", dev_signing_key=True, public_key_hex=PUBLIC_KEY_HEX,
                       key_id=KEY_ID, unproved_seeds=[])
 
-    def create_copy(self, request: Request, body: Any) -> CopyCreated:
+    def create_copy(self, request: Request, body: CreateCopyRequest) -> CopyCreated:
+        """A Rivera Plumbing copy with its seeded hold and, when it asks and a night is recorded, the night replayed
+        into it (`_replay`)."""
+        if self._no_seeded_night and "replay_night" in body.model_fields_set:
+            raise Refusal(422, "invalid")
         copy_id = new_id("copy")
         desk = self._seed_rivera(copy_id)
         owner, owner_token = self._new_session(copy_id, None, "owner", verified=True, assurance="owner_session")
         copy = Copy(copy_id=copy_id, owner_session_id=owner.session_id, desk_ids=[desk.desk_id])
         self.copies[copy_id] = copy
         self._seed_held_request(desk)
+        events, replay_id = self._replay(desk) if body.replay_night and self._night else ([], None)
+        if replay_id is not None:
+            self.replayed_nights[copy_id] = (replay_id, events)
         return CopyCreated(copy_id=copy_id, desk_ids=copy.desk_ids, owner_session=owner.state(),
-                           owner_token=owner_token)
+                           owner_token=owner_token, replayed_messages=events, replay_id=replay_id)
+
+    # The recorded night (Plan 01d) ----------------------------------------------------------------------------
+
+    def _replay(self, desk: Desk) -> tuple[list[ReplayedEvent], str]:
+        """Replay the recorded night into the new copy, as data: each session closed at generation 0 with no person
+        (its token kept by no one), its rows at the moments they happened and its ledger entries marked; returns the
+        events in shown order and the replay's id."""
+        replay_id, real_now = new_id("night"), self.now
+        self._replaying = (replay_id, real_now)
+        events: list[ReplayedEvent] = []
+        try:
+            for recorded in self._night:
+                events += self._replay_session(desk, recorded, real_now)
+        finally:
+            self._replaying, self.now = None, real_now
+        events.sort(key=lambda event: event.shown_at)
+        return events, replay_id
+
+    def _replay_session(self, desk: Desk, recorded: RecordedSession, real_now: datetime) -> list[ReplayedEvent]:
+        self.now = recorded.steps[0].at
+        session, _ = self._new_session(desk.copy_id, desk.desk_id, recorded.kind)   # its token is discarded
+        self.append(desk, "session", {"session_id": session.session_id, "kind": recorded.kind, "preview": False},
+                    session_id=session.session_id)
+        events = []
+        for step in recorded.steps:
+            self.now = step.at
+            event = {"session_id": session.session_id, "shown_at": signed_time(step.at), "text": None,
+                     "verdict": None, "decision": None}
+            if step.kind == "said":
+                events.append(ReplayedEvent(**event | {"kind": "visitor_message", "text": step.text}))
+            elif step.kind == "replied":
+                verdict = self._verdict(session, desk, "en", [RenderedBlock(kind="prose", text=step.text)], [], [])
+                events.append(ReplayedEvent(**event | {"kind": "reply", "verdict": verdict}))
+            elif step.kind == "blocked":
+                self._verdict(session, desk, "en", [], [Violation(kind="number_in_prose", span="", rule_id="digit")],
+                              [])
+            else:
+                decision = self._replay_decision(session, desk, step.kind, real_now)
+                events.append(ReplayedEvent(**event | {"kind": "receipt", "decision": decision}))
+        session.closed_at = session.last_seen = recorded.steps[-1].at
+        self._put_session(session)
+        return events
+
+    def _replay_decision(self, session: Session, desk: Desk, kind: str, real_now: datetime) -> Decision:
+        """A booking of the copy's first open slot, executed; a release of a document the session may not have,
+        refused; or a drain clearing quoted at 15% off, held and denied by the owner: decided as any call is, at the
+        recorded moment, and in its final state. A replay leaves no Demo inbox entry and no approval row."""
+        if kind == "booked":
+            slot = min((slot for slot in desk.slots.values() if slot.starts_at > real_now
+                        and slot.slot_id not in desk.booked), key=lambda slot: slot.starts_at)
+            call = ToolCall(call_id=new_id("call"), tool="native.book", args={"slot_id": slot.slot_id})
+        elif kind == "refused":
+            document = next(iter(desk.documents.values()))
+            call = ToolCall(call_id=new_id("call"), tool="native.release_document",
+                            args={"document_id": document.document_id})
+        else:
+            call = ToolCall(call_id=new_id("call"), tool="native.quote",
+                            args={"items": [{"item_id": "drain", "qty": 1}], "requested_discount_bp": 1500})
+        action = self._normalize(session, desk, call)
+        outcome, card_ids = self._rule(session, desk, action)
+        digest = sha256_hex(canonical({"desk_id": None, "tool": call.tool, "args": call.args}))
+        inbox = len(self.inbox)
+        decision = self._new_decision(session, desk, call, digest, action, outcome, card_ids)
+        del self.inbox[inbox:]                          # a hold's owner alert: a replay leaves none
+        record = self.decisions[decision.decision_id]
+        if outcome == "allow":
+            self._run(record, session)
+        elif outcome == "hold":
+            self._transition(record, "denied", kind="approval", answer="deny_once")
+        if record.decision.state != {"booked": "executed", "refused": "refused", "denied": "denied"}[kind]:
+            raise ValueError(f"a replayed {kind} step ended {record.decision.state}")
+        return record.decision
 
     def public_desk(self, request: Request, body: Any) -> PublicDesk:
-        """Public-labelled fields only: names, brand, and the hours, contact and policy charter facts."""
-        desk = next((desk for desk in self.desks.values() if desk.slug == request.path_params["desk_slug"]), None)
-        if desk is None:
-            raise Refusal(404, "not_found")
+        """Public-labelled fields only, in the language asked for (`?lang=es`, else English): names, brand, the charter
+        in the page's order (the hours, unless they have no windows, the contact, then the policies by fact ID), the
+        Agent Card naming what an agent may ask for there now (`_agent_tools`), and the open-now line from the hours on
+        the fake's clock (None without windows, or closed with no opening in the week ahead)."""
+        desk = self._by_slug(request.path_params["desk_slug"])
         language = "es" if request.query_params.get("lang") == "es" else "en"
         charter = []
-        for fact in desk.facts.values():
-            if fact.kind != "charter" or "public" not in fact.label.readers:
-                continue
-            template = {"charter:hours": "hours", "charter:contact": "contact"}.get(fact.fact_id, "policy")
-            charter.append(self._render(desk, template, fact, language))
+        for template, key in CHARTER_TEMPLATES:
+            for fact_id, fact in sorted(desk.facts.items()):
+                named = fact_id == key if template != "policy" else fact_id.startswith(key)
+                if (named and fact.kind == "charter" and "public" in fact.label.readers and self._current(fact)
+                        and (template != "hours" or desk.hours)):
+                    charter.append(self._render(desk, template, fact, language))
+        card = agent_card(language, business=desk.business_name, owner=desk.owner_display_name, slug=desk.slug,
+                          tools=self._agent_tools(desk))
         return PublicDesk(business_name=desk.business_name, desk_name=desk.name,
                           owner_display_name=desk.owner_display_name, brand=dict(desk.brand), charter=charter,
-                          agent_card=[])
+                          agent_card=card, open_status=self._open_status(desk, language))
+
+    def _agent_tools(self, desk: Desk) -> set[str]:
+        """What an agent session may be given on the Desk now: its enabled tools an agent could ever be given, kept to
+        lead capture and callbacks while Answering is off."""
+        tools = {tool for tool in AGENT_DECLARED if tool in desk.tools and desk.tools[tool].status == "enabled"}
+        return tools if desk.answering else tools & set(ANSWERING_OFF_TOOLS)
+
+    def _open_status(self, desk: Desk, language: str) -> OpenStatus | None:
+        tz = ZoneInfo(desk.timezone)
+        window = open_window(desk.hours, tz, self.now)
+        if window is None or (not window[0] and window[1] is None):
+            return None
+        is_open, boundary, refresh_at = window
+        text = open_status_text(is_open, boundary.astimezone(tz) if boundary else None, self.now.astimezone(tz),
+                                language)
+        return OpenStatus(open=is_open, until=boundary if is_open else None, opens_at=None if is_open else boundary,
+                          text=text, as_of=self.now, refresh_at=refresh_at)
 
     def create_session(self, request: Request, body: CreateSessionRequest) -> SessionCreated:
-        desk = next((desk for desk in self.desks.values() if desk.slug == body.desk_slug), None)
-        if desk is None:
-            raise Refusal(404, "not_found")
+        """A session on the slug's Desk: an unknown slug is 404 and a deleted Desk 409 `closed` (an agent's request
+        is signed first, so a refused signature is still ledgered)."""
+        desk = self._by_slug(body.desk_slug, deleted=True)
         if body.kind == "agent":
-            raise Refusal(401, "auth")       # agent signatures arrive with Plan 01c
+            return self._open_agent_session(request, body, desk)
+        if desk.deleted_at is not None:
+            raise self._refused(desk, 409, "closed", "closed")
         if body.preview:
             owner = self._by_token(request.headers.get("x-owner-session"))
             if owner is None or owner.kind != "owner" or owner.copy_id != desk.copy_id:
@@ -896,7 +2007,28 @@ class FakeKernelState:
                     session_id=session.session_id)
         return SessionCreated(state=session.state(), session_token=token)
 
+    def session_mode(self, request: Request, body: ModeRequest) -> SessionState:
+        """The owner's take-over, hand-back and resume (Plan 01a's mode table) of a visitor or agent session of their
+        copy: a token that isn't the owner's is 401, another copy's session or an ID that names none is 404, a closed
+        one 409 `closed`, a stale generation 409 `stale_generation`, and then `paused` (only the breaker pauses) or
+        the owner's own session (it has no mode to set) 422 `invalid`, as the kernel checks them; a change is
+        `set_mode`'s, and the current mode again changes nothing."""
+        copy, _ = self.owner_of(request)
+        session = self.sessions.get(request.path_params["id"])
+        if session is None or session.copy_id != copy.copy_id:
+            raise Refusal(404, "not_found")
+        self._check_open(session)
+        self._check_generation(session, body.generation)
+        if body.mode == "paused" or session.kind == "owner":
+            raise Refusal(422, "invalid")
+        return self.set_mode(session.session_id, body.mode)
+
     def whoami(self, request: Request, body: Any) -> WhoAmI:
+        if self._signed_by_agent(request):              # an agent names its session: `GET /whoami?session_id=`
+            session = self._agent(request, request.query_params.get("session_id") or "")
+            self._check_open(session)
+            return WhoAmI(kind="agent", copy_id=session.copy_id, desk_id=session.desk_id,
+                          desk_ids=[session.desk_id], session=session.state())
         owner_token = request.headers.get("x-owner-session")
         session = self._by_token(owner_token or request.headers.get("x-session-token"))
         if session is None or (session.kind == "owner") != bool(owner_token):
@@ -907,22 +2039,27 @@ class FakeKernelState:
         if session.kind != "owner":
             self._check_open(session)        # the session a token names must be open (master, session auth)
         copy = self.copies[session.copy_id]
-        if session.kind == "owner":
-            return WhoAmI(kind="owner", copy_id=copy.copy_id, desk_id=None, desk_ids=list(copy.desk_ids),
-                          session=session.state())
+        if session.kind == "owner":                     # the copy's live Desks (Plan 01a): a deleted one isn't listed
+            live = [desk_id for desk_id in copy.desk_ids if self.desks[desk_id].deleted_at is None]
+            return WhoAmI(kind="owner", copy_id=copy.copy_id, desk_id=None, desk_ids=live, session=session.state())
         return WhoAmI(kind=session.kind, copy_id=copy.copy_id, desk_id=session.desk_id,
                       desk_ids=[session.desk_id], session=session.state())
 
     # Decisions -----------------------------------------------------------------------------------
 
     def tools_given(self, session: Session, desk: Desk) -> tuple[str, ...]:
-        """The tools this session may call now ("Model-visible tools"); owner setup tools arrive with Plan 01c."""
+        """The tools this session may call now ("Model-visible tools"): an owner session has the setup tools only."""
         if session.kind == "owner":
-            return ()
+            return tuple(tool for tool in OWNER_TOOLS if tool in desk.tools and desk.tools[tool].status == "enabled")
         if not desk.answering and not session.preview:
             given = ANSWERING_OFF_TOOLS
         else:
             given = VERIFIED_TOOLS if session.verified else UNVERIFIED_TOOLS
+        if session.kind == "agent":                     # never refunds; money only with a verified mandate
+            given = tuple(tool for tool in given if tool != "payments.create_refund"
+                          and (tool not in MANDATE_TOOLS or session.mandate_id is not None))
+            if session.mandate_id is not None and (desk.answering or session.preview):
+                given += ("native.charge_mandate",)
         return tuple(tool for tool in given if tool in desk.tools and desk.tools[tool].status == "enabled")
 
     def context(self, request: Request, body: Any) -> SessionContext:
@@ -930,13 +2067,14 @@ class FakeKernelState:
         mode owner and paused still answer."""
         session, desk = self.session_call(request, request.path_params["session_id"],
                                           request.query_params.get("desk_id"))
-        declared = () if session.kind == "owner" else VISITOR_DECLARED
+        declared = {"owner": OWNER_TOOLS, "agent": AGENT_DECLARED}.get(session.kind, VISITOR_DECLARED)
         facts = [*self._catalog(desk), *(fact for fact in desk.facts.values() if self._current(fact))]
         return SessionContext(
             tools=[desk.tools[tool] for tool in self.tools_given(session, desk)],
             tools_declared=[desk.tools[tool] for tool in declared if tool in desk.tools],
             facts=[fact for fact in facts if self._readable(session, fact)],
-            knowledge=[])
+            knowledge=[item for item in desk.knowledge.values()
+                       if self._readers(session) & set(item.label.readers)])
 
     @staticmethod
     def _catalog(desk: Desk) -> list[Fact]:
@@ -1009,8 +2147,16 @@ class FakeKernelState:
             recipient = "verified_contact"
         elif tool == "payments.list_charges":
             resource = ResourceRef(kind="charge", id=f"person:{session.person_id}", owner_person_id=session.person_id)
-        elif tool in ("native.payment_link", "payments.create_refund"):
-            return None                         # quotes to pay and charges to refund arrive with Plan 01c
+        elif tool in ("native.payment_link", "native.charge_mandate"):
+            quote = self.quotes.get(args["quote_id"])
+            fact = desk.facts.get(f"quote:{args['quote_id']}")
+            if (quote is None or quote["desk_id"] != desk.desk_id or fact is None or not self._current(fact)
+                    or not self._readable(session, fact)):
+                return None
+            resource = ResourceRef(kind="quote", id=quote["quote_id"], owner_person_id=None)
+            amount_cents = quote["amount_cents"]
+        elif tool == "payments.create_refund":
+            return None                         # charges to refund arrive with Plan 01c
         profile = desk.tools[tool]
         return NormalizedAction(
             action_id=new_id("act"), copy_id=desk.copy_id, desk_id=desk.desk_id, session_id=session.session_id,
@@ -1035,8 +2181,15 @@ class FakeKernelState:
             if session.person_id is not None and session.person_id == action.resource.owner_person_id:
                 return "allow", ["rv-docs"]
             return "refuse", []                 # the baseline: private data only to its verified record owner
-        preset = f"preset-{tool.split('.')[1]}"
-        if any(card.card_id == preset for card in desk.cards):
+        if tool == "native.charge_mandate" and not self._room_for(session, action):
+            return "refuse", []                 # the baseline: an agent's charge stays within its mandate
+        if tool in ("native.payment_link", "native.charge_mandate"):
+            card = next((card for card in desk.cards if card.applies_to == tool and card.mode == "auto"), None)
+            if card is not None:
+                return ("allow" if action.amount_cents <= card.max_amount_cents else "hold"), [card.card_id]
+        preset = next((card.card_id for card in desk.cards if card.applies_to == tool and card.mode == "auto"
+                       and card.who == "anyone" and card.card_id.startswith("preset-")), None)
+        if preset is not None:
             return "allow", [preset]
         return "hold", [f"default-{tool}"]
 
@@ -1068,8 +2221,9 @@ class FakeKernelState:
             outcome=outcome, state=state, policy_version=desk.policy_version,
             policy_ids=[f"{tier}.{card_id}" for card_id in card_ids], card_ids=card_ids,
             reason_plain=self._reason(session, desk, call, action, card_ids),
-            visitor_plain=STATUS_TEXT[state].format(owner=desk.owner_display_name), answers=answers,
-            expires_at=expires_at, ledger_seq=entry.seq, signature=""))
+            visitor_plain=status_line(state, tool=tool, session_kind=session.kind, language=session.last_language,
+                                      owner=desk.owner_display_name),
+            answers=answers, expires_at=expires_at, ledger_seq=entry.seq, signature=""))
         # the alerts travel once, on this answer: the record every read answers from carries none
         record = DecisionRecord(decision=decision, copy_id=desk.copy_id, desk_id=desk.desk_id,
                                 generation=session.generation, call_sha256=digest, tool=tool, created_at=self.now)
@@ -1101,10 +2255,12 @@ class FakeKernelState:
     @staticmethod
     def _reason(session: Session, desk: Desk, call: ToolCall, action: NormalizedAction | None,
                 card_ids: list[str]) -> str:
-        """The owner-facing reason: who asked for what, the deciding card's reason, then the call's free text quoted
-        after "Claude's note", as the real kernel labels it (Claude wrote it into the call, the visitor didn't)."""
-        who = next((person.display_name for person in desk.people.values() if person.person_id == session.person_id),
-                   "A visitor")
+        """The owner-facing reason: who asked for what ("Setup" for the owner's own setup session), the deciding card's
+        reason, then the call's free text quoted after "Claude's note", as the real kernel labels it (Claude wrote it
+        into the call, the visitor didn't)."""
+        who = "Setup" if session.kind == "owner" else next(
+            (person.display_name for person in desk.people.values() if person.person_id == session.person_id),
+            "A visitor")
         reason = f"{who} asked to use {call.tool[:64]}."
         cards = [card.reason for card in desk.cards if card.card_id in card_ids]
         if cards:
@@ -1135,10 +2291,13 @@ class FakeKernelState:
         """Move a decision to `state`: ledgered, re-signed, mirrored."""
         desk = self.desks[record.desk_id]
         decision = record.decision
+        session = self.sessions[decision.session_id]
         entry = self.append(desk, kind, {"decision_id": decision.decision_id, "state": state, **summary},
                             session_id=decision.session_id, ref_id=decision.decision_id)
+        line = status_line(state, tool=record.tool, session_kind=session.kind, language=session.last_language,
+                           owner=desk.owner_display_name)
         record.decision = self._signed(decision.model_copy(update={
-            "state": state, "visitor_plain": STATUS_TEXT[state].format(owner=desk.owner_display_name),
+            "state": state, "visitor_plain": line,
             "ledger_seq": entry.seq, "answers": decision.answers if state == "held" else []}))
         self._put_decision(record)
         return record.decision
@@ -1153,8 +2312,29 @@ class FakeKernelState:
 
     def _own_decision(self, request: Request, session_id: str | None,
                       decision_id: str) -> tuple[Session, DecisionRecord]:
-        """The session `X-Session-Token` names (and `session_id`, when given) and its own decision: 401, then 404
-        for another session's or an unknown decision, then 409 if the session is closed."""
+        """The session `X-Session-Token` names, or an agent's signature authenticates (and `session_id`, when given),
+        and its own decision: 401, then 404 for another session's or an unknown decision, then 409 if the session is
+        closed. An agent names the session: `session_id`, else the decision's own. An owner names its own session, and
+        the decision must be one of its own setup calls on a Desk of its copy."""
+        if request.headers.get("x-owner-session") is not None:
+            copy, owner = self.owner_of(request)
+            if session_id is not None and session_id != owner.session_id:
+                raise Refusal(404, "not_found")
+            record = self.decisions.get(decision_id)
+            if (record is None or record.decision.session_id != owner.session_id
+                    or record.desk_id not in copy.desk_ids):
+                raise Refusal(404, "not_found")
+            return owner, record
+        if self._signed_by_agent(request):
+            record = self.decisions.get(decision_id)
+            named = session_id or (record.decision.session_id if record is not None else None)
+            if named is None:
+                raise Refusal(404, "not_found")
+            session = self._agent(request, named)
+            if record is None or record.decision.session_id != session.session_id:
+                raise Refusal(404, "not_found")
+            self._check_open(session)
+            return session, record
         session = self.visitor_of(request)
         if session_id is not None and session_id != session.session_id:
             raise Refusal(401, "auth")
@@ -1203,18 +2383,23 @@ class FakeKernelState:
         if self._take_in_flight(decision.action.tool):                 # another request began it a moment ago
             record.running = True
             raise Refusal(409, "conflict")
+        if decision.action.tool == "native.charge_mandate" and not self._room_for(session, decision.action):
+            self._transition(record, "refused_at_execution", kind="execute", reason="mandate_exhausted")
+            raise Refusal(409, "conflict")           # the reservation failed: nothing was charged
         return self._run(record, session)
 
     def _run(self, record: DecisionRecord, session: Session, exec_state: str | None = None) -> ExecResult:
-        """Execute the decision's action as `session` (the held session for an approval), ending in `exec_state` when
-        given, else as the tool's script says (`succeeded` without one)."""
+        """Execute the decision's action as `session` (the held session for an approval; the owner for a setup
+        tool, on the decision's Desk), ending in `exec_state` when given, else as the tool's script says (`succeeded`
+        without one)."""
         desk, action = self.desks[record.desk_id], record.decision.action
         script = self._scripts.get(action.tool)
         if exec_state is None:
             exec_state = script.exec_state if script is not None else "succeeded"
-        facts, model_view = self._effects(session, desk, action) if exec_state == "succeeded" else ([], {})
+        facts, model_view, inbox = (self._effects(session, desk, action) if exec_state == "succeeded"
+                                    else ([], {}, []))
         if model_view is None:                              # the tool's own failure (a slot taken meanwhile)
-            exec_state, facts, model_view = "failed", [], {}
+            exec_state, facts, model_view, inbox = "failed", [], {}, []
         if script is not None:
             if script.facts is not None:
                 facts = list(script.facts)
@@ -1222,7 +2407,10 @@ class FakeKernelState:
                     self._put_fact(desk, fact)
             if script.model_view is not None:
                 model_view = script.model_view
-        record.result = ExecResult(action_id=action.action_id, state=exec_state, facts=facts, model_view=model_view)
+            if script.inbox is not None:
+                inbox = list(script.inbox)
+        record.result = ExecResult(action_id=action.action_id, state=exec_state, facts=facts, model_view=model_view,
+                                   inbox=inbox)
         self._transition(record, {"succeeded": "executed", "failed": "failed", "unknown": "unknown"}[exec_state],
                          kind="execute")
         return record.result
@@ -1234,21 +2422,24 @@ class FakeKernelState:
             readers.append(f"person:{session.person_id}")
         return Label(readers=readers, record_owner=session.person_id)
 
-    def _effects(self, session: Session, desk: Desk, action: NormalizedAction) -> tuple[list[Fact], dict | None]:
-        """The tool's side effects: rows, facts labelled for the session, and Claude's `model_view`."""
+    def _effects(self, session: Session, desk: Desk,
+                 action: NormalizedAction) -> tuple[list[Fact], dict | None, list[InboxNotice]]:
+        """The tool's side effects: rows, facts labelled for the session, Claude's `model_view` and the Demo inbox
+        notices for the visitor (a verification code's, never one that says whether the contact is on record)."""
         args = self._args[action.action_id]
         ids, label = {"copy_id": desk.copy_id, "desk_id": desk.desk_id}, self._label(session)
-        tool, facts, view = action.tool, [], {}
+        tool, facts, view, inbox = action.tool, [], {}, []
         if tool == "native.quote":
             quote_id = new_id("quote")
             items = [{"item_id": item["item_id"], "title": desk.prices[item["item_id"]].title, "qty": item["qty"]}
                      for item in args["items"]]
             expires_at = self.now + timedelta(hours=72)
-            self._put("quotes", (quote_id,), {
+            self.quotes[quote_id] = {
                 "quote_id": quote_id, **ids, "session_id": session.session_id, "items": items,
                 "list_cents": action.list_cents, "discount_bp": action.discount_bp,
                 "amount_cents": action.amount_cents, "status": "available", "expires_at": expires_at,
-                "created_at": self.now})
+                "created_at": self.now}
+            self._put("quotes", (quote_id,), dict(self.quotes[quote_id]))
             facts.append(Fact(fact_id=f"quote:{quote_id}", kind="quote", status="available", source="kernel",
                               label=label, expires_at=expires_at, claims=[
                                   Claim(key="items", kind="text",
@@ -1261,7 +2452,7 @@ class FakeKernelState:
         elif tool == "native.book":
             slot = desk.slots[action.resource.id]
             if slot.slot_id in desk.booked:
-                return [], None
+                return [], None, []
             desk.booked.add(slot.slot_id)
             booking_id = new_id("booking")
             self._put("bookings", (booking_id,), {
@@ -1303,22 +2494,87 @@ class FakeKernelState:
                               label=label, claims=[Claim(key="handoff", kind="ref", value=handoff_id)]))
             view = {"fact_id": facts[0].fact_id, "handoff_id": handoff_id}
         elif tool == "native.start_verification":
+            _, inbox = self._start_challenge(session, desk, args["contact"])
             view = {"status": "requested"}
         elif tool == "native.release_document":
             document = desk.documents[action.resource.id]
-            link_id = new_id("link")
+            link = DocumentLink(link_id=new_id("link"), token=secrets.token_urlsafe(32),
+                                document_id=document.document_id, desk_id=desk.desk_id, session_id=session.session_id,
+                                expires_at=self.now + LINK_TTL)
+            self.document_links[link.link_id] = link
+            link_id = link.link_id
+            self.append(desk, "document_link", {"link_id": link_id, "document_id": document.document_id,
+                                                "issued": True}, session_id=session.session_id)
             facts.append(Fact(fact_id=f"document_link:{link_id}", kind="document", status="available",
-                              source="kernel", expires_at=self.now + timedelta(hours=24),
+                              source="kernel", expires_at=link.expires_at,
                               label=Label(readers=["owner", f"person:{document.record_owner_person_id}"],
                                           record_owner=document.record_owner_person_id),
                               claims=[Claim(key="title", kind="text", value=document.title),
                                       Claim(key="ref", kind="ref", value=link_id)]))
             view = {"fact_id": facts[0].fact_id, "title": document.title, "link_ready": True}
+        elif tool == "native.payment_link":
+            quote = self.quotes[action.resource.id]
+            title = ", ".join(item["title"] + (f" × {item['qty']}" if item["qty"] > 1 else "")
+                              for item in quote["items"])
+            link = PaymentLink(link_id=new_id("link"), token=secrets.token_urlsafe(32), copy_id=desk.copy_id,
+                               desk_id=desk.desk_id, session_id=session.session_id, quote_id=quote["quote_id"],
+                               action_id=action.action_id, title=title, amount_cents=action.amount_cents,
+                               expires_at=self.now + LINK_TTL)
+            self.payment_links[link.link_id] = link
+            self._put("payment_links", (link.link_id,), link.ro_row())
+            self.append(desk, "payment", {"link_id": link.link_id, "state": "issued", "version": desk.policy_version},
+                        session_id=session.session_id)
+            facts.append(Fact(fact_id=f"payment_link:{link.link_id}", kind="payment_link", status="available",
+                              source="kernel", label=label, expires_at=link.expires_at, claims=[
+                                  Claim(key="title", kind="text", value=title),
+                                  Claim(key="total", kind="money", value=link.amount_cents),
+                                  Claim(key="ref", kind="ref", value=link.link_id)]))
+            view = {"fact_id": facts[0].fact_id, "title": title, "amount_cents": link.amount_cents}
+        elif tool == "native.charge_mandate":
+            quote, record = self.quotes[action.resource.id], self.mandates[session.mandate_id]
+            title = ", ".join(item["title"] + (f" × {item['qty']}" if item["qty"] > 1 else "")
+                              for item in quote["items"])
+            record.committed_cents += action.amount_cents     # reserved and committed at once: no provider here
+            self._put("mandates", (record.mandate.mandate_id,), record.ro_row())
+            charge_id = new_id("charge")
+            self.append(desk, "payment", {"charge_id": charge_id, "mandate_id": record.mandate.mandate_id,
+                                          "action_id": action.action_id, "state": "charged"},
+                        session_id=session.session_id)
+            facts.append(Fact(fact_id=f"charge:{charge_id}", kind="charge", status="committed", source="kernel",
+                              label=label, claims=[Claim(key="title", kind="text", value=title),
+                                                   Claim(key="total", kind="money", value=action.amount_cents),
+                                                   Claim(key="ref", kind="ref", value=charge_id)]))
+            view = {"fact_id": facts[0].fact_id, "charge_id": charge_id, "status": "paid"}
         elif tool == "payments.list_charges":
             view = {"charges": []}
+        elif tool == "native.read_memory":
+            words = set(re.findall(r"[a-z]+", args["query"].lower()))
+            found = [(title, text) for title, text in MEMORY_ITEMS
+                     if words & set(re.findall(r"[a-z]+", f"{title} {text}".lower()))]
+            for title, text in found:
+                self._store_knowledge(desk, KnowledgeItem(item_id=f"memory:{slugify(title)}", source="memory_import",
+                                                          title=title, text=text, label=Label(readers=["owner"])))
+            view = {"items": [{"title": title, "text": text} for title, text in found], "simulated": True}
+        elif tool == "native.fetch_website":
+            host = (urlsplit(args["url"]).hostname or "")
+            if urlsplit(args["url"]).scheme not in ("http", "https") or not host.endswith(".example"):
+                return [], None, []                 # the fetch guard refused it (here: anything but a .example site)
+            item = self._store_knowledge(desk, KnowledgeItem(
+                item_id=f"website:{sha256_hex(args['url'])[:16]}", source="website", title=host,
+                text=WEBSITE_TEXT.format(host=host), label=Label(readers=["owner"])))
+            view = {"item_id": item.item_id, "title": item.title, "text": item.text[:8000]}
         for fact in facts:
             self._put_fact(desk, fact)
-        return facts, view
+        return facts, view, inbox
+
+    def _store_knowledge(self, desk: Desk, item: KnowledgeItem) -> KnowledgeItem:
+        """Upsert a knowledge item by its ID, mirrored and ledgered `desk_data` (no text in the entry)."""
+        desk.knowledge[item.item_id] = item
+        self._put("knowledge_items", (desk.desk_id, item.item_id), {
+            "item_id": item.item_id, "copy_id": desk.copy_id, "desk_id": desk.desk_id, "source": item.source,
+            "title": item.title, "text": item.text, "readers": list(item.label.readers)})
+        self.append(desk, "desk_data", {"part": "knowledge", "item_id": item.item_id, "owner_only_forced": False})
+        return item
 
     def cancel(self, request: Request, body: CancelRequest) -> Decision:
         """The visitor withdraws its own held request."""
@@ -1346,7 +2602,8 @@ class FakeKernelState:
             "answer": body.answer, "expires_at": decision.expires_at, "consumed_at": self.now})
         session, action = self.sessions[decision.session_id], decision.action
         execution, card_diff = None, None
-        if body.answer in ("allow_once", "allow_person") and self._never(desk, action.tool):
+        if body.answer in ("allow_once", "allow_person") and (self._never(desk, action.tool) or (
+                action.tool == "native.charge_mandate" and not self._room_for(session, action))):
             # the re-check at execution (step 6): the rules in force no longer let the owner approve it
             self._transition(record, "refused_at_execution", kind="approval", answer=body.answer,
                              approval_id=approval_id, reason="rules changed")
@@ -1369,12 +2626,19 @@ class FakeKernelState:
         return ApprovalResult(decision=record.decision, execution=execution, card_diff=card_diff)
 
     def check_reply(self, request: Request, body: CheckReplyRequest) -> ReplyVerdict:
-        """Check Claude's draft; only what passes is in the blocks, and a failure is the handoff alone."""
+        """Check Claude's draft; only what passes is in the blocks, and a failure is the handoff alone. An agent's
+        check may end its nonce's turn (`_end_agent_turn`)."""
         draft = body.draft
         session, desk = self.session_call(request, draft.session_id)
         self._check_generation(session, draft.generation)
         if session.mode == "owner":
             raise Refusal(409, "mode_owner")
+        verdict = self._check_draft(session, desk, draft)
+        if session.kind == "agent":
+            self._end_agent_turn(request, verdict)
+        return verdict
+
+    def _check_draft(self, session: Session, desk: Desk, draft: ReplyDraft) -> ReplyVerdict:
         language = session.last_language or "en"
         if session.mode == "paused":
             return self._verdict(session, desk, language, [],
@@ -1386,7 +2650,7 @@ class FakeKernelState:
         elif detected in ("en", "es"):
             language = session.last_language = detected
             self._put_session(session)
-        violations += scan_prose(draft.prose, [document.canary for document in desk.documents.values()])
+        violations += scan_prose(draft.prose, self._canaries(desk.copy_id))
         if self._forced:
             kind = self._forced.pop(0)
             violations.append(Violation(kind=kind, span="" if kind == "canary" else draft.prose[:40],
@@ -1399,6 +2663,14 @@ class FakeKernelState:
         prose = [RenderedBlock(kind="prose", text=draft.prose)] if draft.prose else []
         return self._verdict(session, desk, language, prose + cards, violations,
                              [clause.fact_id for clause in draft.clauses if clause.fact_id])
+
+    def _canaries(self, copy_id: str) -> dict[str, str]:
+        """The canary of each document of the copy, on any of its Desks, by document ID in ID order (the kernel's
+        `labels.copy_canaries`)."""
+        documents = [document for desk in self.desks.values() if desk.copy_id == copy_id
+                     for document in desk.documents.values()]
+        return {document.document_id: document.canary
+                for document in sorted(documents, key=lambda document: document.document_id)}
 
     def _readers(self, session: Session) -> set[str]:
         if session.kind == "owner":
@@ -1461,9 +2733,14 @@ class FakeKernelState:
             title = REPLY_TEXT[language]["hours"]
             lines = [f"{', '.join(window.days)} {window.start:%H:%M}-{window.end:%H:%M}" for window in desk.hours]
         elif template == "document_link":
-            title, href = claims["title"], f"/api/d/fake-{claims['ref']}"
+            title, href = claims["title"], f"/api/d/{self.document_links[claims['ref']].token}"
+        elif template == "payment_link":
+            title, lines = claims["title"], [money(claims["total"])]
+            href = f"/pay/{self.payment_links[claims['ref']].token}"
         elif template == "callback_confirmed":
             title = f"{desk.owner_display_name} will call you back."
+        elif template == "charge_confirmed":
+            title, lines = claims.get("title", "Payment"), [money(claims["total"])]
         else:
             title = str(next(iter(claims.values())))
         text = "\n".join([title, *lines, *(option.label for option in options)])
@@ -1471,19 +2748,26 @@ class FakeKernelState:
                              href=href, options=options)
 
     def _verdict(self, session: Session, desk: Desk, language: str, blocks: list[RenderedBlock],
-                 violations: list[Violation], fact_ids: list[str]) -> ReplyVerdict:
-        """Step 7: the handoff alone unless ok, ledgered as `reply`, signed over the six fields."""
+                 violations: list[Violation], fact_ids: list[str], *, author: str = "claude",
+                 message_id: str | None = None) -> ReplyVerdict:
+        """Step 7: the handoff alone unless ok, ledgered as `reply` with its author, signed over the six fields. An
+        owner's say (`author="owner"`) that fails shows nothing at all: the owner's own words never become Claude's
+        handoff."""
         ok = not violations
-        if not ok:
+        if not ok and author == "owner":
+            blocks = []
+        elif not ok:
             text = REPLY_TEXT[language]["handoff"].format(owner=desk.owner_display_name)
             blocks = [RenderedBlock(kind="card", template="handoff", text=text, title=text)]
-        message_id = new_id("msg")
+        message_id = message_id or new_id("msg")
         entry = self.append(desk, "reply", {
-            "message_id": message_id, "author": "claude", "ok": ok, "language": language,
+            "message_id": message_id, "author": author, "ok": ok, "language": language,
             "violations": [violation.kind for violation in violations],
             "rule_ids": [violation.rule_id for violation in violations], "fact_ids": fact_ids},
             session_id=session.session_id, ref_id=message_id)
-        visitor_plain = REPLY_TEXT[language]["checked" if ok else "handed_off"].format(owner=desk.owner_display_name)
+        plain = ("owner_said" if ok else "owner_say_blocked") if author == "owner" else (
+            "checked" if ok else "handed_off")
+        visitor_plain = REPLY_TEXT[language][plain].format(owner=desk.owner_display_name)
         blocks_sha256 = sha256_hex(canonical([block.model_dump(mode="json") for block in blocks]))
         return ReplyVerdict(
             ok=ok, language=language, blocks=blocks, violations=violations, message_id=message_id,
@@ -1492,14 +2776,99 @@ class FakeKernelState:
                                       "message_id": message_id, "blocks_sha256": blocks_sha256,
                                       "visitor_plain": visitor_plain, "ledger_seq": entry.seq}))
 
+    def owner_message(self, request: Request, body: OwnerMessageRequest) -> OwnerMessageResult:
+        """The owner's say or whisper into an open visitor or agent session of their copy, in any mode (Plan 01b):
+        another copy's session or the owner's own is 404, a closed one 409 `closed`, and text outside 1–2000
+        characters 422 `invalid`. A say is `_owner_say`'s; a whisper is ledgered `whisper` with its length, never its
+        text, and makes no fact and no verdict."""
+        copy, _ = self.owner_of(request)
+        session = self.sessions.get(body.session_id)
+        if session is None or session.copy_id != copy.copy_id or session.kind == "owner":
+            raise Refusal(404, "not_found")
+        self._check_open(session)
+        if not 1 <= len(body.text) <= OWNER_TEXT_MAX:
+            raise Refusal(422, "invalid")
+        desk, message_id = self.desks[session.desk_id], new_id("msg")
+        if body.kind == "whisper":
+            entry = self.append(desk, "whisper", {"message_id": message_id, "chars": len(body.text)},
+                                session_id=session.session_id, ref_id=message_id)
+            return OwnerMessageResult(message_id=message_id, verdict=None, ledger_seq=entry.seq)
+        verdict = self._owner_say(session, desk, body.text, message_id)
+        return OwnerMessageResult(message_id=message_id, verdict=verdict, ledger_seq=verdict.ledger_seq)
+
+    def _owner_say(self, session: Session, desk: Desk, text: str, message_id: str) -> ReplyVerdict:
+        """An owner's say: only document canaries are looked for (the number rule doesn't apply to the owner's own
+        words). Clean, it is an `owner_statement` fact `owner:<message_id>` that the owner and this session read, and a
+        verdict in the session's language with one `owner_said` card holding the text verbatim; with a canary, no fact
+        and no card. Ledgered `reply` by the owner either way."""
+        violations = [violation for violation in scan_prose(text, self._canaries(desk.copy_id))
+                      if violation.kind == "canary"]
+        blocks, fact_ids = [], []
+        if not violations:
+            fact = Fact(fact_id=f"owner:{message_id}", kind="owner_statement", status="available", source="owner",
+                        claims=[Claim(key="text", kind="text", value=text)],
+                        label=Label(readers=["owner", f"session:{session.session_id}"]))
+            self._put_fact(desk, fact)
+            blocks = [RenderedBlock(kind="card", template="owner_said", text=text, fact_id=fact.fact_id, title=text)]
+            fact_ids = [fact.fact_id]
+        return self._verdict(session, desk, session.last_language or "en", blocks, violations, fact_ids,
+                             author="owner", message_id=message_id)
+
     # The owner's Desk ----------------------------------------------------------------------------
 
     def _owners_desk(self, request: Request, desk_id: str) -> Desk:
-        """A Desk of the copy `X-Owner-Session` names (401 without it), else 404."""
+        """A Desk of the copy `X-Owner-Session` names (401 without it), else 404; a deleted one is 409 `closed`,
+        ledgered `auth` on it."""
         copy, _ = self.owner_of(request)
         if desk_id not in copy.desk_ids:
             raise Refusal(404, "not_found")
-        return self.desks[desk_id]
+        desk = self.desks[desk_id]
+        if desk.deleted_at is not None:
+            raise self._refused(desk, 409, "closed", "closed")
+        return desk
+
+    def _by_slug(self, slug: str, *, deleted: bool = False) -> Desk:
+        """The live Desk at `slug`, or a deleted one too with `deleted`, else 404 (the public page of a deleted Desk
+        is gone, while opening a session on it is 409 `closed`)."""
+        desk = next((desk for desk in self.desks.values()
+                     if desk.slug == slug and (deleted or desk.deleted_at is None)), None)
+        if desk is None:
+            raise Refusal(404, "not_found")
+        return desk
+
+    def create_desk(self, request: Request, body: CreateDeskRequest) -> DeskCreated:
+        """A new Desk in the owner's copy, through the seed path, with the `ask_first` preset active; its tools are
+        native only, so a `connections` list is refused (422), as are an owner name outside the pattern and an
+        unknown time zone."""
+        copy, _ = self.owner_of(request)
+        if body.desk.connections:
+            raise Refusal(422, "invalid")
+        self._check_business(body.business.owner_display_name, body.business.timezone)
+        native = tuple(tool for tool in TOOL_FACTS if tool_profile(tool).source == "native")
+        desk = self._create_desk(copy.copy_id, body.business, body.desk, tools=native, cards=ASK_FIRST_CARDS)
+        copy.desk_ids.append(desk.desk_id)
+        return DeskCreated(desk_id=desk.desk_id, slug=desk.slug)
+
+    @staticmethod
+    def _check_business(owner_display_name: str, timezone: str) -> None:
+        if not OWNER_NAME.fullmatch(owner_display_name):
+            raise Refusal(422, "invalid")
+        try:
+            ZoneInfo(timezone)
+        except (ValueError, KeyError):              # ZoneInfoNotFoundError is a KeyError
+            raise Refusal(422, "invalid") from None
+
+    def put_business(self, request: Request, body: DeskBusinessRequest) -> DeskUpdated:
+        """The Desk's business: its name, owner name, time zone and brand, for every Desk of that business."""
+        desk = self._owners_desk(request, request.path_params["id"])
+        self._check_business(body.owner_display_name, body.timezone)
+        for each in self.desks.values():
+            if each.business_id == desk.business_id:
+                each.business_name, each.owner_display_name = body.name, body.owner_display_name
+                each.timezone, each.brand = body.timezone, dict(body.brand)
+        self._put_business(desk)
+        self.append(desk, "desk_data", {"part": "business", "refs": []})
+        return DeskUpdated(desk_id=desk.desk_id, updated_at=self.now)
 
     def answering(self, request: Request, body: DeskAnsweringRequest) -> DeskUpdated:
         """The owner's Answering switch: off leaves visitors only lead capture and a callback."""
@@ -1508,6 +2877,18 @@ class FakeKernelState:
         self._put_desk(desk)
         self.append(desk, "desk_data", {"part": "answering", "refs": []})
         return DeskUpdated(desk_id=desk.desk_id, updated_at=self.now)
+
+    def delete_desk(self, request: Request, body: Any) -> None:
+        """The owner deletes a Desk of its copy (204): its sessions close, its public page is 404, and opening a
+        session on it or any owner route naming it answers 409 `closed`; its ledger stays, ending with the deletion's
+        `desk_data` entry. Not modelled: voiding its document links and cancelling its live challenges."""
+        desk = self._owners_desk(request, request.path_params["id"])
+        desk.deleted_at = self.now
+        for session in self.sessions.values():
+            if session.desk_id == desk.desk_id and session.closed_at is None:
+                session.closed_at = self.now
+                self._put_session(session)
+        self.append(desk, "desk_data", {"part": "desk", "deleted": True})
 
     def handoff_done(self, request: Request, body: Any) -> DeskUpdated:
         """The owner closes a callback request: `open` → `done` once, ledgered `desk_data` naming it."""
@@ -1528,12 +2909,563 @@ class FakeKernelState:
         copy, _ = self.owner_of(request)
         return [entry for copy_id, entry in self.inbox if copy_id == copy.copy_id]
 
+    # The Desk's parts (Plan 01b): each `PUT` replaces its part ---------------------------------------
+
+    def _part_updated(self, desk: Desk, part: str) -> DeskUpdated:
+        self.append(desk, "desk_data", {"part": part, "refs": []})
+        return DeskUpdated(desk_id=desk.desk_id, updated_at=self.now)
+
+    def desk_charter(self, request: Request, body: DeskCharterRequest) -> DeskUpdated:
+        """The charter: each claim a public `charter:<key>` fact, in place of the ones before (`charter:hours`
+        stays, since the hours write it); a key given twice is 422."""
+        desk = self._owners_desk(request, request.path_params["id"])
+        keys = [claim.key for claim in body.charter]
+        if len(set(keys)) != len(keys):
+            raise Refusal(422, "invalid")
+        for fact_id in [fact_id for fact_id, fact in desk.facts.items()
+                        if fact.kind == "charter" and fact_id != "charter:hours"]:
+            del desk.facts[fact_id]
+            self._drop("facts", (desk.desk_id, fact_id))
+        for claim in body.charter:
+            self._put_fact(desk, Fact(fact_id=f"charter:{claim.key}", kind="charter", status="available",
+                                      source="kernel", claims=[claim], label=Label(readers=["public"])))
+        return self._part_updated(desk, "charter")
+
+    def desk_hours(self, request: Request, body: DeskHoursRequest) -> DeskUpdated:
+        """The opening hours, and the `charter:hours` fact written again from them."""
+        desk = self._owners_desk(request, request.path_params["id"])
+        desk.hours = list(body.hours)
+        self._put_desk(desk)
+        self._put_hours(desk)
+        return self._part_updated(desk, "hours")
+
+    def desk_prices(self, request: Request, body: DeskPricesRequest) -> DeskUpdated:
+        """The price list, in place of the one before; an item id given twice is 422."""
+        desk = self._owners_desk(request, request.path_params["id"])
+        items = {item.item_id: item for item in body.price_items}
+        if len(items) != len(body.price_items):
+            raise Refusal(422, "invalid")
+        for item_id in set(desk.prices) - set(items):
+            self._drop("price_items", (desk.desk_id, item_id))
+        desk.prices = items
+        for item in items.values():
+            self._put("price_items", (desk.desk_id, item.item_id),
+                      {**item.model_dump(), "copy_id": desk.copy_id, "desk_id": desk.desk_id})
+        return self._part_updated(desk, "prices")
+
+    def desk_calendar(self, request: Request, body: DeskCalendarRequest) -> DeskUpdated:
+        """The bookable slots, in place of the ones before; a slot id given twice is 422."""
+        desk = self._owners_desk(request, request.path_params["id"])
+        slots = {slot.slot_id: slot for slot in body.calendar_slots}
+        if len(slots) != len(body.calendar_slots):
+            raise Refusal(422, "invalid")
+        for slot_id in set(desk.slots) - set(slots):
+            self._drop("calendar_slots", (desk.desk_id, slot_id))
+        desk.slots = slots
+        for slot in slots.values():
+            self._put("calendar_slots", (desk.desk_id, slot.slot_id),
+                      {**slot.model_dump(), "copy_id": desk.copy_id, "desk_id": desk.desk_id})
+        return self._part_updated(desk, "calendar")
+
+    def desk_people(self, request: Request, body: DeskPeopleRequest) -> DeskUpdated:
+        """People on record, upserted by `ref` and removed by `ref`, all or nothing: a contact that looks masked (`•`
+        or `*`), one that isn't an email or a phone number, a new person without one, a ref with `@`, an unknown ref
+        to remove or a ref named twice is 422, and two people sharing a contact 409. `contact: None` keeps the contact
+        on record; a removed person is off the record (their contact gets no code). Ledgered `desk_data` with the
+        refs, never a contact. Not modelled: cancelling a changed or removed person's live challenge, closing the
+        sessions verified as them and relabelling their documents."""
+        desk = self._owners_desk(request, request.path_params["id"])
+        by_ref = {person.ref: person for person in desk.people.values()}
+        refs = [person.ref for person in body.upsert] + list(body.remove)
+        if (len(set(refs)) != len(refs) or any("@" in ref for ref in refs)
+                or any(ref not in by_ref for ref in body.remove)):
+            raise Refusal(422, "invalid")
+        for person in body.upsert:
+            if person.contact is None and person.ref not in by_ref:
+                raise Refusal(422, "invalid")
+            if person.contact is not None and (any(mark in person.contact for mark in "•*")
+                                               or not normalize_contact(person.contact)):
+                raise Refusal(422, "invalid")
+        contacts = {ref: normalize_contact(person.contact) for ref, person in by_ref.items() if ref not in body.remove}
+        contacts.update({person.ref: normalize_contact(person.contact) for person in body.upsert
+                         if person.contact is not None})
+        if len(set(contacts.values())) != len(contacts):
+            raise Refusal(409, "conflict")
+        ids = {"copy_id": desk.copy_id, "desk_id": desk.desk_id}
+        for ref in body.remove:
+            person = by_ref[ref]
+            del desk.people[person.person_id]
+            self._drop("people", (person.person_id,))
+        for upsert in body.upsert:
+            person = by_ref.get(upsert.ref)
+            if person is None:
+                person = Person(person_id=new_id("person"), ref=upsert.ref, display_name=upsert.display_name,
+                                contact=upsert.contact, created_at=self.now)
+                desk.people[person.person_id] = person
+            else:
+                person.display_name = upsert.display_name
+                person.contact = upsert.contact if upsert.contact is not None else person.contact
+            self._put("people", (person.person_id,), {
+                "person_id": person.person_id, **ids, "display_name": person.display_name,
+                "masked_contact": mask_contact(person.contact), "notes": upsert.notes,
+                "created_at": person.created_at or self.now})
+        self.append(desk, "desk_data", {"part": "people", "refs": refs})
+        return DeskUpdated(desk_id=desk.desk_id, updated_at=self.now)
+
+    def desk_notifications(self, request: Request, body: DeskNotificationsRequest) -> DeskUpdated:
+        """What alerts the owner at once and what waits for the briefing."""
+        desk = self._owners_desk(request, request.path_params["id"])
+        self._put("notification_prefs", (desk.desk_id,), {"copy_id": desk.copy_id, "desk_id": desk.desk_id,
+                                                          **body.notifications.model_dump()})
+        return self._part_updated(desk, "notifications")
+
+    # Rules drafts, probes and confirms (Plans 01a and 01c) --------------------------------------------
+
+    def _default_cards(self, desk: Desk, cards: list[RuleCard]) -> list[RuleCard]:
+        """The compiler's default asks: an `ask` card for anyone on each enabled tool that no card for anyone covers,
+        by itself or through one of its effects."""
+        covered = {card.applies_to for card in cards if card.who == "anyone"}
+        return [RuleCard(card_id=f"default-{tool}", applies_to=tool, mode="ask", who="anyone", is_default=True,
+                         reason=DEFAULT_REASON)
+                for tool, profile in sorted(desk.tools.items()) if profile.status == "enabled"
+                and tool not in covered and not any(f"effect:{effect}" in covered for effect in profile.effects)]
+
+    def policy_draft(self, request: Request, body: PolicyDraftRequest) -> PolicyVersion:
+        """The owner's cards compiled and proved against the active version (`expected_parent`, else 409): a new
+        version with the compiler's default asks, `proved` or `rejected` (or `draft` when bounded), ledgered `policy`.
+        The same cards on the same parent and tools return that version, except that a timed-out rejection proves
+        again. A card id given twice, a default card among the owner's, or a card that could change starting a
+        verification (`changes_always_on`) is 422 `invalid`, with nothing drafted or ledgered."""
+        desk = self._owners_desk(request, body.desk_id)
+        if body.expected_parent != desk.policy_version:
+            raise Refusal(409, "conflict")
+        ids = [card.card_id for card in body.cards]
+        if len(set(ids)) != len(ids) or any(card.is_default or changes_always_on(card) for card in body.cards):
+            raise Refusal(422, "invalid")
+        enabled = tuple(sorted(tool for tool, profile in desk.tools.items() if profile.status == "enabled"))
+        key = (body.expected_parent, sha256_hex(canonical([card.model_dump(mode="json") for card in body.cards])),
+               enabled)
+        record = next((record for record in desk.versions.values() if record.key == key), None)
+        if record is not None and not (record.status == "rejected" and record.proof.timed_out):
+            return self._policy_version(desk, record)
+        proof = self._next_proof()
+        status = "draft" if proof.method == "bounded" else "proved" if proof.ok else "rejected"
+        if record is None:
+            record = VersionRecord(version=self._next_version(desk), parent=body.expected_parent,
+                                   cards=[*body.cards, *self._default_cards(desk, body.cards)], status=status,
+                                   proof=proof, key=key, created_at=self.now)
+            desk.versions[record.version] = record
+        else:
+            record.status, record.proof = status, proof
+        self._put_version(desk, record)
+        self.append(desk, "policy", {"version": record.version, "status": status, "method": proof.method})
+        return self._policy_version(desk, record)
+
+    def policy_confirm(self, request: Request, body: PolicyConfirmRequest) -> PolicyVersion:
+        """Activate a proved draft whose parent is still the active version, superseding it (ledgered `policy`);
+        anything else is 409, ledgered as refused. An unknown version is 404."""
+        desk = self._owners_desk(request, body.desk_id)
+        record = desk.versions.get(body.version)
+        if record is None:
+            raise Refusal(404, "not_found")
+        if record.status != "proved" or record.parent != desk.policy_version:
+            refused = "not_proved" if record.status != "proved" else "parent_changed"
+            self.append(desk, "policy", {"version": record.version, "refused": refused})
+            raise Refusal(409, "conflict")
+        self._supersede_active(desk)
+        desk.cards, desk.policy_version, record.status = list(record.cards), record.version, "active"
+        self._put_version(desk, record)
+        self.append(desk, "policy", {"version": record.version, "activated": True})
+        return self._policy_version(desk, record)
+
+    def policy_probe(self, request: Request, body: PolicyProbeRequest) -> list[ProbeResult]:
+        """Each probe decided against the version's cards (a draft's or the active one's), one result per probe, with
+        nothing resolved, executed or activated; one `policy` entry with the outcomes."""
+        desk = self._owners_desk(request, body.desk_id)
+        try:
+            version = int(request.path_params["version"])
+        except ValueError:
+            raise Refusal(404, "not_found") from None
+        record = desk.versions.get(version)
+        if record is None and version != desk.policy_version:
+            raise Refusal(404, "not_found")
+        cards = record.cards if record is not None else desk.cards
+        results = [self._probe(desk, cards, probe) for probe in body.probes]
+        self.append(desk, "policy", {"version": version, "probes": len(results),
+                                     "outcomes": [result.outcome for result in results]})
+        return results
+
+    def _probe_tools(self, desk: Desk, probe: Probe) -> tuple[str, ...]:
+        """The tools a stand-in session of the probe's caller would be given (Answering aside: a probe asks what the
+        rules would do once the Desk answers)."""
+        if probe.actor == "owner":
+            return ()
+        verified = probe.who in ("verified", "record_owner", "person")
+        given = VERIFIED_TOOLS if verified else UNVERIFIED_TOOLS
+        if probe.actor == "agent":
+            mandate = probe.agent_mandate_remaining_cents is not None
+            given = tuple(tool for tool in given if tool != "payments.create_refund"
+                          and (tool not in MANDATE_TOOLS or mandate)) + (("native.charge_mandate",) if mandate else ())
+        return tuple(tool for tool in given if tool in desk.tools and desk.tools[tool].status == "enabled")
+
+    @staticmethod
+    def _scope_matches(card: RuleCard, probe: Probe, verified: bool, own: bool) -> bool:
+        if card.who == "anyone":
+            return True
+        if card.who == "verified":
+            return verified
+        if card.who == "record_owner":
+            return own
+        subject = probe.subject_id if probe.who == card.who else None
+        return subject is not None and subject in (card.person_id, card.agent_key_id)
+
+    def _probe(self, desk: Desk, cards: list[RuleCard], probe: Probe) -> ProbeResult:
+        """One probe through the fake's rules: the tool must be given and its args fit; the baseline (private data
+        only to its verified record owner, no payouts for agents, an agent's charge within its mandate, an amount
+        on every money tool); then a `never` card refuses, an `auto` card whose limits hold allows (a reviewed one
+        holds, depending on the reviewer), and anything else asks."""
+        tool = probe.call.tool[:64]
+        verified = probe.who in ("verified", "record_owner", "person")
+        own = verified and probe.resource_owner == "caller"
+        caller = "A visiting agent" if probe.actor == "agent" else "A verified customer" if verified else "A visitor"
+
+        def result(outcome: str, card_ids: list[str], reason: str, *, review: bool = False) -> ProbeResult:
+            return ProbeResult(probe=probe, outcome=outcome, depends_on_review=review, card_ids=card_ids,
+                               reason_plain=f"{caller} asked to use {tool}. {reason}")
+
+        if tool not in self._probe_tools(desk, probe) or not matches(desk.tools[tool].input_schema, probe.call.args):
+            return result("refuse", [], "Claude has no such tool for them here.")
+        profile = desk.tools[tool]
+        discount = probe.call.args.get("requested_discount_bp", 0) if tool == "native.quote" else 0
+        amount = probe.amount_cents
+        if amount is not None and discount:
+            amount -= amount * discount // 10_000
+        if "private_data" in profile.effects and not own:
+            return result("refuse", [], "Private records go only to the verified person they belong to.")
+        if probe.actor == "agent" and "pay_out" in profile.effects:
+            return result("refuse", [], "No money is paid out to an agent.")
+        if tool in MONEY_TOOLS and amount is None:
+            return result("refuse", [], "Money moves only for a known amount.")
+        if probe.actor == "agent" and "charge" in profile.effects and (
+                probe.agent_mandate_remaining_cents is None or amount > probe.agent_mandate_remaining_cents):
+            return result("refuse", [], "An agent pays only within its spending limit.")
+        covering = [card for card in cards if (card.applies_to == tool or card.applies_to.removeprefix("effect:")
+                                               in profile.effects) and self._scope_matches(card, probe, verified, own)]
+        never = [card for card in covering if card.mode == "never"]
+        if never:
+            return result("refuse", [card.card_id for card in never], never[0].reason)
+        moment = probe.starts_at or self.now
+        within = [card for card in covering if card.mode == "auto"
+                  and (card.max_amount_cents is None or (amount is not None and amount <= card.max_amount_cents))
+                  and (tool not in MONEY_TOOLS or amount <= AUTO_MONEY_HARD_CAP_CENTS)
+                  and discount <= card.max_discount_bp
+                  and (card.hours is None or in_hours(moment, [card.hours], ZoneInfo(desk.timezone)) is not None)]
+        asks = [card for card in covering if card.mode == "ask" and not card.is_default]
+        if within and not asks:
+            card = within[0]
+            if card.review:
+                return result("hold", [card.card_id], card.reason, review=True)
+            return result("allow", [card.card_id], card.reason)
+        holding = asks or [card for card in covering if card.mode == "auto"] or [
+            card for card in covering if card.is_default]
+        card_ids = [card.card_id for card in holding] or [f"default-{tool}"]
+        return result("hold", card_ids, holding[0].reason if holding else DEFAULT_REASON)
+
+    # The owner's documents and knowledge (Plan 01b) ---------------------------------------------------
+
+    def documents(self, request: Request, body: DocumentUploadRequest) -> DocumentCreated:
+        """The owner's document, through the seed path's writer (`_add_document`), ledgered `desk_data` naming it
+        (never its body). A `record_owner_ref` naming no one on record, or a body over 200 KiB, is 422 `invalid`."""
+        desk = self._owners_desk(request, body.desk_id)
+        seeded = body.document
+        if len(seeded.body.encode()) > DOCUMENT_MAX_BYTES or (
+                seeded.record_owner_ref is not None
+                and not any(person.ref == seeded.record_owner_ref for person in desk.people.values())):
+            raise Refusal(422, "invalid")
+        document = self._add_document(desk, seeded)
+        self.append(desk, "desk_data", {"part": "documents", "refs": [document.document_id]})
+        return DocumentCreated(document_id=document.document_id)
+
+
+    def knowledge(self, request: Request, body: KnowledgeRequest) -> KnowledgeItem:
+        """The owner's knowledge item, upserted by `item_id` as given: owner-only (`["owner"]`) or public
+        (`["public"]`), so re-posting it with `["public"]` marks it public; any other readers, or text over 100 KiB,
+        is 422 `invalid` with nothing written. Ledgered `desk_data` naming the item, never its text."""
+        desk = self._owners_desk(request, body.desk_id)
+        item = body.item
+        if item.label.readers not in (["owner"], ["public"]) or len(item.text.encode()) > KNOWLEDGE_MAX_BYTES:
+            raise Refusal(422, "invalid")
+        return self._store_knowledge(desk, item)
+
+    # Connected tools (Plan 01c) -----------------------------------------------------------------------
+
+    def tools_connect(self, request: Request, body: ToolsConnectRequest) -> list[ToolProfile]:
+        """The mock payments server's tools, each pinned by its definition's hash and `needs_review` until the owner
+        confirms it (a tool already connected is left as it is), ledgered `tool_pin`."""
+        desk = self._owners_desk(request, body.desk_id)
+        profiles = []
+        for tool in sorted(MCP_TOOLS):
+            if tool not in desk.tools:
+                self._put_tool(desk, tool_profile(tool).model_copy(update={"status": "needs_review"}))
+            profiles.append(desk.tools[tool])
+        self.append(desk, "tool_pin", {"server": body.server, "tools": [profile.tool for profile in profiles]})
+        return profiles
+
+    def tools_simulate_change(self, request: Request, body: ToolsSimulateChangeRequest) -> ToolProfile:
+        """The owner's demo action: the mock payments server changes the tool's definition for this copy, and the
+        re-listing finds it at once (ledgered `tool_pin`, simulated then drift, with the owner alerted): the tool is
+        `needs_review`, the changed definition waiting as quoted text under its own hash, its pin unchanged. A tool
+        the Desk doesn't have is 404; a native tool, which no server defines, is 422 `invalid`."""
+        desk = self._owners_desk(request, body.desk_id)
+        profile = desk.tools.get(body.tool)
+        if profile is None:
+            raise Refusal(404, "not_found")
+        if profile.source != "mcp":
+            raise Refusal(422, "invalid")
+        listed = canonical({"name": profile.tool.removeprefix("payments."), "inputSchema": profile.input_schema,
+                            "description": f"{TOOL_FACTS[profile.tool][3]} {SIMULATED_CHANGE}"})
+        changed = profile.model_copy(update={"status": "needs_review", "pending_definition_text": listed,
+                                             "pending_sha256": sha256_hex(listed)})
+        self._put_tool(desk, changed)
+        self.append(desk, "tool_pin", {"tool": profile.tool, "event": "simulated"})
+        self.append(desk, "tool_pin", {"tool": profile.tool, "event": "drift",
+                                       "pending_sha256": changed.pending_sha256})
+        self._alert_owner(desk, f"{TOOL_LABELS[profile.tool]} changed. Review it before Claude uses it again.")
+        return changed
+
+    # Verification --------------------------------------------------------------------------------
+
+    def _start_challenge(self, session: Session, desk: Desk, contact: str) -> tuple[str, list[InboxNotice]]:
+        """`/verify/start` semantics (Plan 01b): one message whether or not the contact is on record, and a code for
+        the contact on record only, in a new challenge (a Demo inbox entry and its code-free notice). Starting cancels
+        the session's live challenge, so an older code can't reveal the outcome, and the person's in any session; a
+        contact not on record becomes a lead note. Ledgered `verify` with the outcome, never the code or contact."""
+        texts = VERIFY_TEXT[session.last_language or "en"]
+        if session.verified:
+            self.append(desk, "verify", {"outcome": "already_verified"}, session_id=session.session_id)
+            return texts["already"], []
+        wanted = normalize_contact(contact)
+        person = next((person for person in desk.people.values()
+                       if wanted and normalize_contact(person.contact) == wanted), None)
+        for challenge in self.challenges.values():
+            if challenge.status == "live" and (challenge.session_id == session.session_id or (
+                    person is not None and challenge.person_id == person.person_id)):
+                challenge.status = "cancelled"
+        if person is None:
+            lead_id = new_id("lead")
+            self._put("leads", (lead_id,), {
+                "lead_id": lead_id, "copy_id": desk.copy_id, "desk_id": desk.desk_id, "session_id": session.session_id,
+                "display_name": "Visitor", "note": f"Asked to verify as {contact.strip()[:120]}",
+                "created_at": self.now})
+            self.append(desk, "verify", {"outcome": "not_on_record"}, session_id=session.session_id)
+            return texts["started"], []
+        code, masked = f"{secrets.randbelow(1_000_000):06d}", mask_contact(person.contact)
+        entry = DemoInboxEntry(entry_id=new_id("inbox"), to=masked, kind="verification_code",
+                               body=texts["body"].format(business=desk.business_name, code=code), created_at=self.now)
+        self.inbox.append((desk.copy_id, entry))
+        challenge = Challenge(challenge_id=new_id("challenge"), session_id=session.session_id,
+                              person_id=person.person_id, code=code, entry_id=entry.entry_id,
+                              expires_at=self.now + CODE_TTL)
+        self.challenges[challenge.challenge_id] = challenge
+        self.append(desk, "verify", {"outcome": "started", "challenge_id": challenge.challenge_id},
+                    session_id=session.session_id)
+        return texts["started"], [InboxNotice(entry_id=entry.entry_id, to=masked, preview=texts["preview"])]
+
+    def verify_start(self, request: Request, body: VerifyStartRequest) -> VerifyStarted:
+        """A visitor asks for a code; mode `owner` may, a paused session can't (409 `mode_paused`)."""
+        session, desk = self.session_call(request, body.session_id)
+        if session.mode == "paused":
+            raise Refusal(409, "mode_paused")
+        message, inbox = self._start_challenge(session, desk, body.contact)
+        return VerifyStarted(message=message, inbox=inbox)
+
+    def verify_check(self, request: Request, body: VerifyCheckRequest) -> SessionState:
+        """The code of the session's live challenge verifies it once, as the person on record; every failure (no live
+        challenge, an expired one, a wrong code, a fifth wrong code failing the challenge) is 422 `invalid` alike, after
+        its `verify` entry. A verified session stays as it is."""
+        session, desk = self.session_call(request, body.session_id)
+        if session.verified:
+            self.append(desk, "verify", {"outcome": "already_verified"}, session_id=session.session_id)
+            return session.state()
+        challenge = next((challenge for challenge in self.challenges.values()
+                          if challenge.session_id == session.session_id and challenge.status == "live"), None)
+        if challenge is not None and self.now > challenge.expires_at:
+            challenge.status = "expired"
+            challenge = None
+        if challenge is None:
+            self.append(desk, "verify", {"outcome": "no_challenge"}, session_id=session.session_id)
+            raise Refusal(422, "invalid")
+        if not hmac.compare_digest(body.code.encode(), challenge.code.encode()):
+            challenge.attempts += 1
+            if challenge.attempts >= MAX_ATTEMPTS:
+                challenge.status = "failed"
+            self.append(desk, "verify", {"outcome": "wrong_code", "challenge_id": challenge.challenge_id},
+                        session_id=session.session_id)
+            raise Refusal(422, "invalid")
+        challenge.status = "consumed"
+        self._mark_verified(session, desk, desk.people[challenge.person_id])
+        self.append(desk, "verify", {"outcome": "verified", "challenge_id": challenge.challenge_id},
+                    session_id=session.session_id)
+        return session.state()
+
+    def session_inbox(self, request: Request, body: Any) -> list[DemoInboxEntry]:
+        """The session's Demo inbox: `verification_code` entries for the people whose challenges it started, or an
+        agent session opened with a demo agent's key it minted started (the kernel's `agents.minted_sessions`), oldest
+        first; never an alert or a head checkpoint, nor the codes of an agent another session or the owner minted."""
+        session, _ = self.session_call(request, self._query(request, "session_id"))
+        minted = {key.agent_key_id for key in self.agent_keys.values() if key.minted_by == session.session_id}
+        started_by = {session.session_id} | {agent.session_id for agent in self.sessions.values()
+                                              if agent.kind == "agent" and agent.agent_key_id in minted}
+        people = {challenge.person_id for challenge in self.challenges.values()
+                  if challenge.session_id in started_by}
+        entries = {challenge.entry_id for challenge in self.challenges.values() if challenge.person_id in people}
+        return [entry for copy_id, entry in self.inbox
+                if copy_id == session.copy_id and entry.kind == "verification_code" and entry.entry_id in entries]
+
+    # Single-use links ----------------------------------------------------------------------------
+
+    def document_link(self, request: Request, body: Any) -> Response:
+        """The document a link token names, once and within a day: its bytes with its content type (`text/plain`) and
+        any other headers it carries, the link opened and its fact expired, ledgered `document_link`
+        `{link_id, opened}`. Opened, expired or unknown → 404 `not_found` alike (a known link's refusal ledgered
+        `{link_id, refused}`). The token authenticates only its own document."""
+        link = next((link for link in self.document_links.values()
+                     if hmac.compare_digest(link.token.encode(), request.path_params["token"].encode())), None)
+        if link is None:
+            raise Refusal(404, "not_found")
+        desk = self.desks[link.desk_id]
+        if link.opened_at is not None or self.now >= link.expires_at:
+            self.append(desk, "document_link", {"link_id": link.link_id, "refused": True},
+                        session_id=link.session_id)
+            raise Refusal(404, "not_found")
+        link.opened_at = self.now
+        fact = desk.facts[f"document_link:{link.link_id}"]
+        self._put_fact(desk, fact.model_copy(update={"status": "expired"}))
+        self.append(desk, "document_link", {"link_id": link.link_id, "opened": True}, session_id=link.session_id)
+        document = desk.documents[link.document_id]
+        headers = dict(document.headers)
+        if document.disposition:
+            headers["Content-Disposition"] = document.disposition
+        return Response(document.body.encode(), media_type=document.content_type, headers=headers)
+
+    def _payment_link(self, request: Request) -> PaymentLink:
+        """The payment link a token names (404 `not_found` for none), lazily expired a day after it was issued."""
+        token = request.path_params["token"].encode()
+        link = next((link for link in self.payment_links.values()
+                     if hmac.compare_digest(link.token.encode(), token)), None)
+        if link is None:
+            raise Refusal(404, "not_found")
+        if link.state == "issued" and self.now >= link.expires_at:
+            self._move_link(link, "expired")
+        return link
+
+    def _move_link(self, link: PaymentLink, state: str, **summary) -> None:
+        """The link leaves `issued`: its fact expires, and the move is mirrored and ledgered `payment`."""
+        desk = self.desks[link.desk_id]
+        link.state = state
+        fact = desk.facts.get(f"payment_link:{link.link_id}")
+        if fact is not None:
+            self._put_fact(desk, fact.model_copy(update={"status": "expired"}))
+        self._put("payment_links", (link.link_id,), link.ro_row())
+        self.append(desk, "payment", {"link_id": link.link_id, "state": state, **summary},
+                    session_id=link.session_id)
+
+    def _issued(self, link: PaymentLink, step: str) -> None:
+        """Completing or cancelling needs an `issued` link; anything else is 409 `conflict`, ledgered."""
+        if link.state != "issued":
+            self.append(self.desks[link.desk_id], "payment", {"link_id": link.link_id, "step": step,
+                                                              "refused": True, "state": link.state},
+                        session_id=link.session_id)
+            raise Refusal(409, "conflict")
+
+    def payment_link_view(self, request: Request, body: Any) -> PaymentLinkView:
+        """What the mock checkout shows, by the link's token alone, in its session's last language."""
+        link = self._payment_link(request)
+        language = self.sessions[link.session_id].last_language or "en"
+        return PaymentLinkView(title=link.title, amount_cents=link.amount_cents, state=link.state, language=language)
+
+    def payment_link_complete(self, request: Request, body: Any) -> PaymentLinkStateResult:
+        """The mock payment: an `issued` link is paid once (no provider in the fake), a `charge` fact goes to its
+        session, and the answer carries the kernel's `payment_confirmed` verdict for that session at its current
+        generation, ledgered `reply` by the Desk, in any mode (`deliver()` decides whether it is shown)."""
+        link = self._payment_link(request)
+        self._issued(link, "complete")
+        desk, session = self.desks[link.desk_id], self.sessions[link.session_id]
+        charge_id = new_id("charge")
+        charge = Fact(fact_id=f"charge:{charge_id}", kind="charge", status="committed", source="kernel",
+                      label=self._label(session), claims=[
+                          Claim(key="total", kind="money", value=link.amount_cents),
+                          Claim(key="starts_at", kind="datetime", value=self.now.isoformat()),
+                          Claim(key="ref", kind="ref", value=charge_id)])
+        self._put_fact(desk, charge)
+        self._move_link(link, "paid")
+        language = session.last_language or "en"
+        title, lines = PAYMENT_CONFIRMED[language], [link.title, money(link.amount_cents)]
+        block = RenderedBlock(kind="card", template="payment_confirmed", text="\n".join([title, *lines]),
+                              fact_id=charge.fact_id, title=title, lines=lines)
+        verdict = self._verdict(session, desk, language, [block], [], [charge.fact_id], author="desk")
+        return PaymentLinkStateResult(state="paid", session_id=session.session_id, verdict=verdict)
+
+    def payment_link_cancel(self, request: Request, body: Any) -> PaymentLinkStateResult:
+        """The visitor cancels an `issued` link at checkout: nothing is paid and there is no verdict."""
+        link = self._payment_link(request)
+        self._issued(link, "cancel")
+        self._move_link(link, "cancelled")
+        return PaymentLinkStateResult(state="cancelled", session_id=link.session_id, verdict=None)
+
+    # Demo agents ---------------------------------------------------------------------------------
+
+    def demo_agent(self, request: Request, body: DemoAgentRequest) -> DemoAgentIssued:
+        """A simulated third party for the Desk: minted by its copy's owner or by a visitor session on it (404 for
+        another Desk; 409 `closed` for a deleted one, whose sessions are closed too), ten per copy an hour (then 429
+        `rate_limited`, ledgered `rate_limit`). Its private key is returned once and kept nowhere; its mandate is
+        signed by the copy's demo wallet, made on first use. Ledgered `agent_auth` without a key."""
+        if request.headers.get("x-owner-session") is not None:
+            copy, _ = self.owner_of(request)
+            if body.desk_id not in copy.desk_ids:
+                raise Refusal(404, "not_found")
+            if self.desks[body.desk_id].deleted_at is not None:
+                raise self._refused(self.desks[body.desk_id], 409, "closed", "closed")
+            minted_by = "owner"
+        else:
+            caller = self.visitor_of(request)
+            if caller.desk_id != body.desk_id:
+                raise Refusal(404, "not_found")
+            self._check_open(caller)
+            minted_by = caller.session_id
+        desk = self.desks[body.desk_id]
+        recent = [at for copy_id, at in self.minted if copy_id == desk.copy_id and self.now - at < timedelta(hours=1)]
+        if len(recent) >= DEMO_AGENTS_PER_COPY_PER_HOUR:
+            self.append(desk, "rate_limit", {"limit": "demo_agents"})
+            raise Refusal(429, "rate_limited")
+        private = Ed25519PrivateKey.generate()
+        public_hex = _public_hex(private)
+        key = AgentKey(agent_key_id=sha256_hex(bytes.fromhex(public_hex))[:16], copy_id=desk.copy_id,
+                       desk_id=desk.desk_id, public_key_hex=public_hex, minted_by=minted_by, created_at=self.now)
+        self.agent_keys[key.agent_key_id] = key
+        wallet = self.wallets.setdefault(desk.copy_id, Ed25519PrivateKey.generate())
+        unsigned = Mandate(mandate_id=new_id("mandate"), issuer=DEMO_WALLET, agent_key_id=key.agent_key_id,
+                           desk_id=desk.desk_id, on_behalf_of="Demo visitor", allowed_effects=["charge"],
+                           currency="usd", expires_at=signed_time(self.now + DEMO_MANDATE_LIFE),
+                           nonce=secrets.token_hex(16), sig="", **DEMO_MANDATE)
+        mandate = unsigned.model_copy(update={"sig": wallet.sign(mandate_payload(unsigned)).hex()})
+        self.minted.append((desk.copy_id, self.now))
+        self.append(desk, "agent_auth", {"agent_key_id": key.agent_key_id, "mandate_id": mandate.mandate_id,
+                                         "minted_by": "owner" if minted_by == "owner" else "session"})
+        private_hex = private.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption()).hex()
+        return DemoAgentIssued(agent_key_id=key.agent_key_id, agent_private_key_hex=private_hex, mandate=mandate)
+
     # Ledger --------------------------------------------------------------------------------------
 
     def ledger_append(self, request: Request, body: LedgerAppendRequest) -> LedgerEntry:
         """An API-origin `session`, `rate_limit` or `agent_auth` entry (the body model refuses other kinds) on the
         caller's own Desk, naming no session but the caller's."""
-        if request.headers.get("x-owner-session") is not None:
+        if self._signed_by_agent(request):
+            caller = self._agent(request, body.event.session_id or "")
+            if body.desk_id != caller.desk_id:
+                raise Refusal(404, "not_found")
+            self._check_open(caller)
+        elif request.headers.get("x-owner-session") is not None:
             copy, caller = self.owner_of(request)
             if body.desk_id not in copy.desk_ids:
                 raise Refusal(404, "not_found")
@@ -1598,6 +3530,17 @@ def _route_path(key: str) -> tuple[str, str]:
     return method, target.partition("?")[0]
 
 
+# The kernel's own name for a route whose path parameter it names otherwise than the contract's key.
+KERNEL_TEMPLATES = {"GET /decisions/{id}": "GET /decisions/{decision_id}"}
+
+
+def route_template(key: str) -> str:
+    """The route a `KERNEL_ROUTES` key names, as the kernel's ledger names it (`repo.route_template`): the method and
+    the path template, without the query."""
+    template = " ".join(_route_path(key))
+    return KERNEL_TEMPLATES.get(template, template)
+
+
 def route_keys(name: str) -> set[str]:
     """The `KERNEL_ROUTES` keys `name` names: a key ("POST /decide"), its method and path without the
     query ("GET /decisions/by_call") or its path alone ("/decide")."""
@@ -1620,6 +3563,7 @@ FAKE_ROUTES: dict[str, str] = {
     "POST /copies": "create_copy",
     "GET /public/{desk_slug}": "public_desk",
     "POST /sessions": "create_session",
+    "POST /sessions/{id}/mode": "session_mode",
     "GET /whoami": "whoami",
     "GET /context/{session_id}?desk_id=": "context",
     "POST /decide": "decide",
@@ -1629,11 +3573,36 @@ FAKE_ROUTES: dict[str, str] = {
     "POST /decisions/{decision_id}/cancel": "cancel",
     "POST /approvals/{decision_id}/answer": "answer",
     "POST /check_reply": "check_reply",
+    "POST /owner/messages": "owner_message",
     "POST /ledger/append": "ledger_append",
     "GET /ledger/{desk_id}?verify=true": "ledger_page",
+    "POST /desks": "create_desk",
+    "PUT /desks/{id}/business": "put_business",
     "PUT /desks/{id}/answering": "answering",
+    "PUT /desks/{id}/charter": "desk_charter",
+    "PUT /desks/{id}/hours": "desk_hours",
+    "PUT /desks/{id}/prices": "desk_prices",
+    "PUT /desks/{id}/calendar": "desk_calendar",
+    "PUT /desks/{id}/people": "desk_people",
+    "PUT /desks/{id}/notifications": "desk_notifications",
+    "POST /policy/draft": "policy_draft",
+    "POST /policy/{version}/probe": "policy_probe",
+    "POST /policy/confirm": "policy_confirm",
+    "POST /tools/connect": "tools_connect",
+    "POST /knowledge": "knowledge",
+    "POST /documents": "documents",
+    "POST /tools/simulate_change": "tools_simulate_change",
+    "DELETE /desks/{id}": "delete_desk",
     "POST /handoffs/{id}/done": "handoff_done",
     "GET /demo_inbox": "owner_inbox",
+    "GET /demo_inbox?session_id=": "session_inbox",
+    "POST /verify/start": "verify_start",
+    "POST /verify/check": "verify_check",
+    "GET /document_links/{token}": "document_link",
+    "GET /payment_links/{token}": "payment_link_view",
+    "POST /payment_links/{token}/complete": "payment_link_complete",
+    "POST /payment_links/{token}/cancel": "payment_link_cancel",
+    "POST /agents/demo": "demo_agent",
 }
 
 
@@ -1653,6 +3622,9 @@ def _endpoint(state: FakeKernelState, key: str, handler: Callable[[Request, Any]
             body_json = raw.decode(errors="replace")
         state.calls.append(FakeCall(route=key, path=request.url.path, query=dict(request.query_params),
                                     headers=dict(request.headers), body=body_json))
+        gate = state._gates.get(key)
+        if gate is not None:
+            await gate.wait()
         failure = state._take_failure(key)
         if failure == "timeout":
             raise httpx.ReadTimeout("the fake kernel timed out")
@@ -1662,6 +3634,7 @@ def _endpoint(state: FakeKernelState, key: str, handler: Callable[[Request, Any]
             return _error(int(failure), FAILURE_CODES[failure])
         try:
             body = _parse(request_model, raw)
+            state._route = route_template(key)     # handlers don't await, so no other call answers meanwhile
             result = handler(request, body)
         except Refusal as refusal:
             result = refusal
@@ -1671,6 +3644,8 @@ def _endpoint(state: FakeKernelState, key: str, handler: Callable[[Request, Any]
             raise httpx.ReadTimeout("the fake kernel committed, then timed out")
         if isinstance(result, Refusal):
             return _error(result.status, result.code)
+        if isinstance(result, Response):                # a document's bytes
+            return result
         if response_adapter is None:
             return Response(status_code=204)
         payload = response_adapter.dump_json(result)
@@ -1695,10 +3670,32 @@ async def _not_found(scope, receive, send) -> None:
     await _error(404, "not_found")(scope, receive, send)
 
 
+def _query_names(key: str) -> frozenset[str]:
+    """The query parameters a `KERNEL_ROUTES` key names ("GET /demo_inbox?session_id=" → {"session_id"})."""
+    query = key.partition("?")[2]
+    return frozenset(part.partition("=")[0] for part in query.split("&") if part)
+
+
+def _by_query(endpoints: list[tuple[str, Callable]]):
+    """One endpoint for the routes sharing a method and path: the first, most parameters first, whose query
+    parameters the request all carries (the one naming none always does)."""
+    ordered = sorted(endpoints, key=lambda found: -len(_query_names(found[0])))
+
+    async def endpoint(request: Request) -> Response:
+        for key, handler in ordered:
+            if _query_names(key) <= set(request.query_params):
+                return await handler(request)
+        return _error(404, "not_found")
+
+    return endpoint
+
+
 def fake_kernel_app(state: FakeKernelState) -> Router:
-    """The fake kernel as an ASGI app over `state`."""
-    routes = []
+    """The fake kernel as an ASGI app over `state`. Routes sharing a method and path (the session's and the owner's
+    `GET /demo_inbox`) are told apart by their query (`_by_query`)."""
+    shared: dict[tuple[str, str], list[tuple[str, Callable]]] = {}
     for key, method_name in FAKE_ROUTES.items():
-        method, path = _route_path(key)
-        routes.append(Route(path, _endpoint(state, key, getattr(state, method_name)), methods=[method]))
+        shared.setdefault(_route_path(key), []).append((key, _endpoint(state, key, getattr(state, method_name))))
+    routes = [Route(path, endpoints[0][1] if len(endpoints) == 1 else _by_query(endpoints), methods=[method])
+              for (method, path), endpoints in shared.items()]
     return Router(routes=routes, default=_not_found)

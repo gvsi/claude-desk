@@ -17,7 +17,7 @@ kernel calls.
 
 import os
 from collections.abc import AsyncIterator, Callable, Iterator
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import psycopg
@@ -166,15 +166,27 @@ class Arrange:
     async def execution_in_doubt(self, view: CredentialView, decision: Decision) -> None:
         """The allow's execution has begun and its outcome isn't known: on the fake it ran and ended `unknown` (left
         to reconcile); on the real kernel its `intent` row is in place, as while it runs (reconciliation leaves an
-        intent alone for its first 30 s)."""
+        intent alone for its first 30 s). The row's `started_at` is the host's clock, the one the kernel judges an
+        orphan by, never Postgres' `now()`, which can lag the host (a container's clock after the host slept)."""
         if self._state is not None:
             self._state.script(decision.action.tool, exec_state="unknown")
             await view.call("POST /execute", ExecuteRequest(decision_id=decision.decision_id,
                                                             session_id=decision.session_id, generation=0))
         else:
             self._admin.execute("INSERT INTO kernel.executions (action_id, copy_id, decision_id, state, started_at)"
-                                " VALUES (%s, %s, %s, 'intent', now())",
-                                (decision.action.action_id, decision.action.copy_id, decision.decision_id))
+                                " VALUES (%s, %s, %s, 'intent', %s)",
+                                (decision.action.action_id, decision.action.copy_id, decision.decision_id,
+                                 datetime.now(UTC)))
+
+    def canary(self, copy_id: str) -> str:
+        """One of the copy's document canaries, which no view shows: from the fake's documents, or for the real kernel
+        read as `desk_admin` from its table."""
+        if self._state is not None:
+            return next(document.canary for desk in self._state.desks.values() if desk.copy_id == copy_id
+                        for document in desk.documents.values())
+        (found,) = self._admin.execute("SELECT canary FROM kernel.documents WHERE copy_id = %s ORDER BY document_id"
+                                       " LIMIT 1", (copy_id,)).fetchall()
+        return found[0]
 
     def close_idle_sessions(self, session_id: str) -> None:
         """Closes the session: the fake's clock moves past the 24-hour idle limit (closing every idle visitor

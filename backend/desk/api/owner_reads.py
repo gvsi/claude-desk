@@ -1,5 +1,5 @@
 """The owner's read models (Plan 02a, "Read models" and Task 9): what needs the owner, conversations, Today's briefing
-and last 7 days, and Safety's attempts.
+and last 7 days, and Safety's attempts; and the reports (Plan 02b, Task 8).
 
 Every read is one copy's and one Desk's: kernel rows through the request's `KernelRO`, which reads only the copy the
 owner's `WhoAmI` answer named, filtered by the path Desk, and the API's own rows filtered by that copy and Desk. The
@@ -9,6 +9,12 @@ writes or commits, and nothing is kept between reads: each one is computed from 
 
 Names, notes, reasons and texts a visitor typed are passed on as they are, for the owner's screens to show as
 untrusted text; nothing here reaches a visitor or a model.
+
+Recorded history (Plan 01d): a copy may open on a night the kernel replayed into it. Today flags each section that
+counts any of it, and the reports flag themselves when they do (`recorded_history`), from what the API's reads carry:
+its own rows' `replay_id`, and ledger entries the kernel marked `summary.replayed`, which also mark the decisions they
+record (a booking, a refusal; a decision whose entry can't be read counts as replayed, failing closed). Replayed rows
+never count as needing the owner, so "needs you" is never flagged.
 """
 
 import asyncio
@@ -22,6 +28,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import func, select
 
 from desk.api.deps import OwnerCtx
+from desk.api.ro import decision_replayed, replayed
 from desk.api.schemas import (
     Attempt,
     Briefing,
@@ -32,20 +39,26 @@ from desk.api.schemas import (
     Handoff,
     NeedsYouItem,
     NeedsYouSession,
+    RecordedHistory,
+    Reports,
     ThisWeek,
     Today,
     WeekDay,
 )
-from desk.api.store import MESSAGES
+from desk.api.store import MESSAGES, triaged
 from desk.contracts import Decision
 
 VISITOR_TEXT = ("visitor_text", "agent_text")      # what a visitor, or a visiting agent, wrote
+OWNER_NOTES = ("triage", "annotation")              # what the API writes later for the owner: never activity
 LIVE_FOR = timedelta(minutes=5)                    # Today's "Live now": activity this recent
 BRIEFING_FROM = time(18)                           # "Since last night": from 18:00 yesterday
 WEEK_DAYS = 7                                      # "Last 7 days": today and the six dates before it
 KIND_ORDER = {"blocked": 0, "booking": 1, "lead": 2, "answer": 3}
-# The owner's line for a reply of Claude's the checkpoint stopped, and why, by violation kind.
+# The owner's line for a reply of Claude's the checkpoint stopped, and why: by rule ID where one says more than its
+# violation kind (a booking claim, which is a `promise_word`), else by the kind.
 REPLY_STOPPED = "A reply was stopped before it was shown"
+BOOKING_CLAIM = "it said a booking was made instead of showing the card"
+REPLY_WHY_BY_RULE = {"lex.en.booking": BOOKING_CLAIM, "lex.es.booking": BOOKING_CLAIM}
 REPLY_WHY = {
     "number_in_prose": "it wrote a number outside a checked card",
     "promise_word": "it made a promise the rules don't back",
@@ -210,6 +223,7 @@ class Timed:
     session_id: str | None
     ref_id: str
     line: str | None = None
+    replayed: bool = False                     # recorded history, replayed into the copy (module docstring)
 
 
 @dataclass(frozen=True)
@@ -223,9 +237,23 @@ class Stopped(Timed):
     ledger_seq: int = 0
 
 
-def reply_reason(violations: Iterable[str]) -> str:
-    """The owner's line for a blocked reply of Claude's, from its violation kinds."""
-    why = list(dict.fromkeys(REPLY_WHY[kind] for kind in violations if kind in REPLY_WHY))
+def reply_violations(summary: dict) -> list[tuple[str, str | None]]:
+    """A `reply` ledger entry's violations as (kind, rule ID) pairs, read from its summary's `violations` and, beside
+    them one for one, `rule_ids`, as the kernel writes them. Rule IDs that don't line up with the kinds (missing, or
+    another count) name none of them, so no kind is ever given another's rule."""
+    kinds = list(summary.get("violations") or [])
+    rule_ids = summary.get("rule_ids")
+    if not isinstance(rule_ids, list) or len(rule_ids) != len(kinds):
+        rule_ids = [None] * len(kinds)
+    return [(kind, rule_id if isinstance(rule_id, str) else None)
+            for kind, rule_id in zip(kinds, rule_ids, strict=True) if isinstance(kind, str)]
+
+
+def reply_reason(violations: Iterable[tuple[str, str | None]]) -> str:
+    """The owner's line for a blocked reply of Claude's, from its violations: each one's rule ID's line, else its
+    kind's."""
+    why = list(dict.fromkeys(line for kind, rule_id in violations
+                             if (line := REPLY_WHY_BY_RULE.get(rule_id or "") or REPLY_WHY.get(kind))))
     return f"{REPLY_STOPPED}, because {' and '.join(why)}." if why else f"{REPLY_STOPPED}."
 
 
@@ -250,7 +278,7 @@ def _stopped_attempts(decisions: list[dict], ledger: list[dict], sessions: dict[
     """Stopped attempts in `sessions` (the Desk's visitor and agent sessions): a decision refused when decided
     (`outcome = "refuse"`, at its `created_at`), or a `reply` entry of Claude's with a violation other than
     `session_paused`. A refusal at execution, a denial, an expiry, an owner's say and a paused chat's handoff aren't
-    attempts."""
+    attempts. A refusal is recorded history as on its tool's page (`decision_replayed`, failing closed)."""
     entries = {entry["seq"]: entry for entry in ledger}
     found = []
     for row in decisions:
@@ -259,19 +287,21 @@ def _stopped_attempts(decisions: list[dict], ledger: list[dict], sessions: dict[
         entry = entries.get(row["ledger_seq"])
         origin = (entry["event"] or {}).get("origin", "kernel") if entry else "kernel"
         found.append(Stopped(at=utc(row["created_at"]), session_id=row["session_id"], ref_id=row["decision_id"],
-                             line=row["reason_plain"], kind="refused", reason_plain=row["reason_plain"],
-                             card_ids=tuple(row["card_ids"] or ()), origin=origin, ledger_seq=row["ledger_seq"]))
+                             line=row["reason_plain"], replayed=decision_replayed(row, entry), kind="refused",
+                             reason_plain=row["reason_plain"], card_ids=tuple(row["card_ids"] or ()), origin=origin,
+                             ledger_seq=row["ledger_seq"]))
     for entry in ledger:
         event = entry["event"] or {}
         summary = event.get("summary") or {}
-        violations = [kind for kind in summary.get("violations") or [] if isinstance(kind, str)]
+        violations = reply_violations(summary)
         if event.get("kind") != "reply" or summary.get("author") != "claude" or event.get("session_id") not in sessions:
             continue
-        if not [kind for kind in violations if kind != "session_paused"]:
+        if not [kind for kind, _ in violations if kind != "session_paused"]:
             continue
         found.append(Stopped(at=entry_time(entry), session_id=event.get("session_id"), ref_id=str(entry["seq"]),
-                             line=None, kind="reply_blocked", reason_plain=reply_reason(violations),
-                             origin=event.get("origin", "kernel"), ledger_seq=entry["seq"]))
+                             line=None, replayed=replayed(entry), kind="reply_blocked",
+                             reason_plain=reply_reason(violations), origin=event.get("origin", "kernel"),
+                             ledger_seq=entry["seq"]))
     return found
 
 
@@ -317,7 +347,8 @@ def _stepped_in(decisions: list[dict], ledger: list[dict]) -> list[Timed]:
                 continue
             session_id = session_id or (decision["session_id"] if decision else None)
         if session_id is not None:
-            found.append(Timed(at=entry_time(entry), session_id=session_id, ref_id=str(entry["seq"])))
+            found.append(Timed(at=entry_time(entry), session_id=session_id, ref_id=str(entry["seq"]),
+                               replayed=replayed(entry)))
     return found
 
 
@@ -333,14 +364,14 @@ async def activity(ctx: OwnerCtx, desk_id: str, start: datetime) -> Activity:
     quotes = [row for row in await ctx.ro.rows("quotes", desk_id=desk_id) if row["session_id"] in who.sessions]
 
     def executed(tool: str) -> list[Timed]:
-        return [Timed(at=entry_time(entries[row["ledger_seq"]]), session_id=row["session_id"],
-                      ref_id=row["decision_id"], line=row["reason_plain"])
+        return [Timed(at=entry_time(entry), session_id=row["session_id"], ref_id=row["decision_id"],
+                      line=row["reason_plain"], replayed=decision_replayed(row, entry))
                 for row in decisions if row["tool"] == tool and row["state"] == "executed"
-                and row["ledger_seq"] in entries]
+                and (entry := entries.get(row["ledger_seq"])) is not None]
 
     rows = await ctx.ro.conn.execute(
         select(MESSAGES.c.n, MESSAGES.c.session_id, MESSAGES.c.kind, MESSAGES.c.author, MESSAGES.c.blocks,
-               MESSAGES.c.created_at)
+               MESSAGES.c.created_at, MESSAGES.c.replay_id)
         .where(MESSAGES.c.copy_id == ctx.copy_id, MESSAGES.c.desk_id == desk_id, MESSAGES.c.created_at >= start,
                MESSAGES.c.kind.in_((*VISITOR_TEXT, "delivered", "owner_say", "whisper")))
         .order_by(MESSAGES.c.n))
@@ -348,7 +379,8 @@ async def activity(ctx: OwnerCtx, desk_id: str, start: datetime) -> Activity:
     for row in rows:
         if row.session_id not in who.sessions:
             continue
-        at = Timed(at=utc(row.created_at), session_id=row.session_id, ref_id=str(row.n))
+        at = Timed(at=utc(row.created_at), session_id=row.session_id, ref_id=str(row.n),
+                   replayed=row.replay_id is not None)
         if row.kind in VISITOR_TEXT:
             texts.append(at)
         elif row.author == "owner":
@@ -384,30 +416,48 @@ def _newest_first(items: list[BriefingItem]) -> list[BriefingItem]:
     return items
 
 
+@dataclass(frozen=True)
+class Counted:
+    """What the briefing from `start` to `end` counts: the stopped attempts, bookings and leads, the conversations'
+    text rows, and each conversation Claude answered alone (a reply it delivered, other than the handoff clause, and no
+    booking, lead, hold, stopped attempt or callback) at its newest such reply, by session."""
+
+    stopped: list[Timed]
+    bookings: list[Timed]
+    leads: list[Timed]
+    texts: list[Timed]
+    answers: dict[str, Timed]
+
+
+def briefing_counts(done: Activity, start: datetime, end: datetime) -> Counted:
+    stopped = _within(done.stopped, start, end)
+    bookings, leads = _within(done.bookings, start, end), _within(done.leads, start, end)
+    busy = _sessions([*stopped, *bookings, *leads, *_within(done.holds, start, end),
+                      *_within(done.callbacks, start, end)])
+    texts = _within(done.texts, start, end)
+    conversations = _sessions(texts)
+    newest: dict[str, Timed] = {}
+    for reply in _within(done.replies, start, end):
+        if reply.session_id in conversations and reply.session_id not in busy:
+            if reply.session_id not in newest or reply.at >= newest[reply.session_id].at:
+                newest[reply.session_id] = reply
+    return Counted(stopped=stopped, bookings=bookings, leads=leads, texts=texts, answers=newest)
+
+
 def briefing_items(done: Activity, start: datetime, end: datetime) -> list[BriefingItem]:
     """Every briefing item from `start` to `end`, newest first: each stopped attempt, booking and lead, and each
-    conversation Claude answered alone (a reply it delivered, other than the handoff clause, and no booking, lead,
-    hold, stopped attempt or callback), at its newest such reply."""
+    conversation Claude answered alone, at its newest such reply (`briefing_counts`)."""
     who = done.people
 
     def item(kind: str, thing: Timed, ref_id: str | None = None, line: str | None = None) -> BriefingItem:
         return BriefingItem(kind=kind, at=thing.at, session_id=thing.session_id,
                             display_name=who.name(thing.session_id), ref_id=ref_id or thing.ref_id, line=line)
 
-    stopped = _within(done.stopped, start, end)
-    bookings, leads = _within(done.bookings, start, end), _within(done.leads, start, end)
-    items = [item("blocked", attempt, line=attempt.line) for attempt in stopped]
-    items += [item("booking", booking, line=booking.line) for booking in bookings]
-    items += [item("lead", lead, line=lead.line) for lead in leads]
-    busy = _sessions([*stopped, *bookings, *leads, *_within(done.holds, start, end),
-                      *_within(done.callbacks, start, end)])
-    conversations = _sessions(_within(done.texts, start, end))
-    newest: dict[str, Timed] = {}
-    for reply in _within(done.replies, start, end):
-        if reply.session_id in conversations and reply.session_id not in busy:
-            if reply.session_id not in newest or reply.at >= newest[reply.session_id].at:
-                newest[reply.session_id] = reply
-    items += [item("answer", reply, ref_id=session_id) for session_id, reply in newest.items()]
+    counted = briefing_counts(done, start, end)
+    items = [item("blocked", attempt, line=attempt.line) for attempt in counted.stopped]
+    items += [item("booking", booking, line=booking.line) for booking in counted.bookings]
+    items += [item("lead", lead, line=lead.line) for lead in counted.leads]
+    items += [item("answer", reply, ref_id=session_id) for session_id, reply in counted.answers.items()]
     return _newest_first(items)
 
 
@@ -425,27 +475,75 @@ def briefing(done: Activity, frame: Windows) -> Briefing:
                               lead_or_answer=first("lead", "answer")))
 
 
+@dataclass(frozen=True)
+class WeekCounted:
+    """What a span of days counts from `start` to `end`, Today's last 7 days and the reports alike: the conversations'
+    text rows, the bookings and stopped attempts, and the owner stepping into those conversations; and from them, how
+    many conversations there were, how many the owner stepped into and how many Claude handled alone."""
+
+    texts: list[Timed]
+    bookings: list[Timed]
+    stopped: list[Timed]
+    stepped: list[Timed]
+
+    @property
+    def conversations(self) -> int:
+        """The conversations with a text row in the span."""
+        return len(_sessions(self.texts))
+
+    @property
+    def stepped_in(self) -> int:
+        """The conversations the owner stepped into in the span (`stepped` holds the span's conversations only)."""
+        return len(_sessions(self.stepped))
+
+    @property
+    def handled(self) -> int:
+        """The conversations Claude handled alone: every one the owner didn't step into."""
+        return self.conversations - self.stepped_in
+
+
+def week_counts(done: Activity, start: datetime, end: datetime) -> WeekCounted:
+    """The one count of a span of days, so the last 7 days and the reports can't drift apart."""
+    texts = _within(done.texts, start, end)
+    conversations = _sessions(texts)
+    return WeekCounted(texts=texts, bookings=_within(done.bookings, start, end),
+                       stopped=_within(done.stopped, start, end),
+                       stepped=[thing for thing in _within(done.stepped, start, end)
+                                if thing.session_id in conversations])
+
+
 def this_week(done: Activity, frame: Windows) -> ThisWeek:
     """The last 7 days: totals from `start` to now, and each local date's conversations, bookings and stopped
-    attempts. A conversation the owner stepped into (inside the window) isn't one Claude handled. Each booking's
-    amount is taken over all the Desk's bookings, so a quote a booking before the window took backs none in it."""
-    texts = _within(done.texts, frame.start, frame.now)
-    bookings = _within(done.bookings, frame.start, frame.now)
-    stopped = _within(done.stopped, frame.start, frame.now)
-    conversations = _sessions(texts)
-    stepped_in = len(conversations & _sessions(_within(done.stepped, frame.start, frame.now)))
+    attempts (`week_counts`). A conversation the owner stepped into (inside the window) isn't one Claude handled.
+    Each booking's amount is taken over all the Desk's bookings, so a quote a booking before the window took backs
+    none in it."""
+    counted = week_counts(done, frame.start, frame.now)
     talked: dict[date, set[str]] = {day: set() for day in frame.dates}
-    for text in texts:
+    for text in counted.texts:
         talked.setdefault(frame.local_date(text.at), set()).add(text.session_id)
-    booked = Counter(frame.local_date(booking.at) for booking in bookings)
-    blocked = Counter(frame.local_date(attempt.at) for attempt in stopped)
+    booked = Counter(frame.local_date(booking.at) for booking in counted.bookings)
+    blocked = Counter(frame.local_date(attempt.at) for attempt in counted.stopped)
     return ThisWeek(
-        timezone=frame.zone.key, start=frame.dates[0], end=frame.dates[-1], bookings=len(bookings),
-        booked_cents=sum(done.booked[booking.ref_id] for booking in bookings),
-        conversations=len(conversations), handled=len(conversations) - stepped_in, stepped_in=stepped_in,
-        stopped=len(stopped),
+        timezone=frame.zone.key, start=frame.dates[0], end=frame.dates[-1], bookings=len(counted.bookings),
+        booked_cents=sum(done.booked[booking.ref_id] for booking in counted.bookings),
+        conversations=counted.conversations, handled=counted.handled, stepped_in=counted.stepped_in,
+        stopped=len(counted.stopped),
         days=[WeekDay(date=day, conversations=len(talked[day]), bookings=booked[day], stopped=blocked[day])
               for day in frame.dates])
+
+
+def recorded_history(done: Activity, frame: Windows) -> RecordedHistory:
+    """Which of Today's sections count recorded history: each is flagged when something it counts is replayed (module
+    docstring). "Needs you" never is: replayed rows never count as needing the owner (Plan 01d replays finished things
+    only). "Since last night" and "last 7 days" are read from what they count (`briefing_counts`, `week_counts`), so
+    a flag can't drift from the numbers it labels."""
+    since = briefing_counts(done, frame.since, frame.now)
+    week = week_counts(done, frame.start, frame.now)
+    return RecordedHistory(
+        needs_you=False,
+        briefing=any(thing.replayed for thing in (*since.stopped, *since.bookings, *since.leads, *since.texts,
+                                                  *since.answers.values())),
+        this_week=any(thing.replayed for thing in (*week.texts, *week.bookings, *week.stopped, *week.stepped)))
 
 
 async def desk_zone(ctx: OwnerCtx, desk_id: str) -> tuple[dict, dict]:
@@ -464,6 +562,68 @@ async def briefing_list(ctx: OwnerCtx, desk_id: str, now: datetime) -> BriefingL
                                                                 frame.since, frame.now))
 
 
+# Reports (Plan 02b, Task 8) -----------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Paid:
+    """A payment the reports count: its amount, and whether it is recorded history."""
+
+    cents: int
+    replayed: bool
+
+
+async def _paid(ctx: OwnerCtx, desk_id: str, sessions: dict[str, dict], start: datetime, end: datetime) -> list[Paid]:
+    """The payments in the Desk's visitor and agent sessions from `start` to `end`: each payment link paid, for the
+    link's amount, when its move to `paid` (its first `payment` ledger entry in that state, not a refused retry, which
+    the kernel ledgers with the link's state too) falls in the window; and each agent's mandate charge executed, at its
+    decision's entry, for the amount the decision was made on, read from the kernel with the owner's credential. A
+    link is recorded history when its `payment` entry is marked replayed, a charge when its decision is
+    (`decision_replayed`)."""
+    ledger = await ctx.ro.rows("ledger_entries", desk_id=desk_id, order_by=("seq",))
+    entries = {entry["seq"]: entry for entry in ledger}
+    links = {row["link_id"]: row["amount_cents"] for row in await ctx.ro.rows("payment_links", desk_id=desk_id,
+                                                                                state="paid")
+             if row["session_id"] in sessions}
+    paid = []
+    for entry in ledger:
+        event = entry["event"] or {}
+        summary = event.get("summary") or {}
+        if (event.get("kind") == "payment" and summary.get("state") == "paid" and not summary.get("refused")
+                and summary.get("link_id") in links):
+            amount = links.pop(summary["link_id"])         # a link moves to `paid` once, wherever the window is
+            if start <= entry_time(entry) <= end:
+                paid.append(Paid(cents=amount, replayed=replayed(entry)))
+    charges = [row for row in await ctx.ro.rows("decisions", desk_id=desk_id, tool="native.charge_mandate",
+                                                state="executed")
+               if row["session_id"] in sessions and row["ledger_seq"] in entries
+               and start <= entry_time(entries[row["ledger_seq"]]) <= end]
+    for row in charges:
+        decision = await ctx.kernel.call("GET /decisions/{id}", path={"id": row["decision_id"]})
+        paid.append(Paid(cents=(decision.action.amount_cents or 0) if decision.action is not None else 0,
+                         replayed=decision_replayed(row, entries[row["ledger_seq"]])))
+    return paid
+
+
+async def reports(ctx: OwnerCtx, desk_id: str, now: datetime, days: int) -> Reports:
+    """The last `days` local dates in the business's time zone, today included, from 00:00 on the first of them to
+    now, counted as Today's last 7 days are (`week_counts`): bookings, money paid, and the conversations Claude
+    handled alone versus the ones the owner stepped into. `recorded_history` is read from what those counts include,
+    so it can't drift from the numbers it labels: a replayed booking, payment, conversation row or owner's step into
+    one flags it."""
+    _, business = await desk_zone(ctx, desk_id)
+    zone, now = ZoneInfo(business["timezone"]), utc(now)
+    first = now.astimezone(zone).date() - timedelta(days=days - 1)
+    start = datetime.combine(first, time(0), tzinfo=zone).astimezone(UTC)
+    done = await activity(ctx, desk_id, start)
+    counted = week_counts(done, start, now)
+    paid = await _paid(ctx, desk_id, done.people.sessions, start, now)
+    return Reports(bookings=len(counted.bookings), paid_cents=sum(payment.cents for payment in paid),
+                   handled_by_claude=counted.handled, needed_you=counted.stepped_in,
+                   recorded_history=any(thing.replayed
+                                        for thing in (*counted.bookings, *counted.texts, *counted.stepped, *paid)))
+
+
 # Conversations ------------------------------------------------------------------------------------------------
 
 
@@ -474,7 +634,7 @@ async def conversations(ctx: OwnerCtx, desk_id: str, who: People | None = None) 
     decisions = await ctx.ro.rows("decisions", desk_id=desk_id)
     latest = dict((await ctx.ro.conn.execute(
         select(MESSAGES.c.session_id, func.max(MESSAGES.c.created_at))
-        .where(MESSAGES.c.copy_id == ctx.copy_id, MESSAGES.c.desk_id == desk_id)
+        .where(MESSAGES.c.copy_id == ctx.copy_id, MESSAGES.c.desk_id == desk_id, MESSAGES.c.kind.not_in(OWNER_NOTES))
         .group_by(MESSAGES.c.session_id))).all())
     counts: dict[str, Counter] = {}
     for row in decisions:
@@ -505,20 +665,22 @@ async def today(ctx: OwnerCtx, desk_id: str, now: datetime) -> Today:
     live = [summary for summary in await conversations(ctx, desk_id, done.people)
             if summary.last_activity >= frame.now - LIVE_FOR]
     return Today(greeting_name=(business["owner_display_name"].split() or [""])[0], needs_you_count=len(held),
-                 live=live, briefing=briefing(done, frame), this_week=this_week(done, frame))
+                 live=live, briefing=briefing(done, frame), this_week=this_week(done, frame),
+                 recorded_history=recorded_history(done, frame))
 
 
 # Safety -------------------------------------------------------------------------------------------------------
 
 
 async def attempts(ctx: OwnerCtx, desk_id: str) -> list[Attempt]:
-    """The Desk's stopped attempts (Today's "Stopped"), newest first; `triage` stays None until triage summaries are
-    written."""
+    """The Desk's stopped attempts (Today's "Stopped"), newest first, each with its AI-written triage once one is
+    written (Plan 02b, Task 10), else None."""
     sessions = {row["session_id"]: row for row in await ctx.ro.rows("sessions", desk_id=desk_id)}
     decisions = await ctx.ro.rows("decisions", desk_id=desk_id)
     ledger = await ctx.ro.rows("ledger_entries", desk_id=desk_id, order_by=("seq",))
+    triage = await triaged(ctx.ro.conn, ctx.copy_id, desk_id=desk_id)
     found = sorted(_stopped_attempts(decisions, ledger, sessions), key=lambda attempt: attempt.ref_id, reverse=True)
     found.sort(key=lambda attempt: attempt.at, reverse=True)
     return [Attempt(ref_id=attempt.ref_id, kind=attempt.kind, reason_plain=attempt.reason_plain,
-                    card_ids=list(attempt.card_ids), origin=attempt.origin, created_at=attempt.at, triage=None,
-                    ledger_seq=attempt.ledger_seq) for attempt in found]
+                    card_ids=list(attempt.card_ids), origin=attempt.origin, created_at=attempt.at,
+                    triage=triage.get(attempt.ref_id), ledger_seq=attempt.ledger_seq) for attempt in found]

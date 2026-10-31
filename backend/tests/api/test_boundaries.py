@@ -132,7 +132,19 @@ def shown(error: BaseException) -> str:
     return "".join(traceback.format_exception(error)) + repr(error)
 
 
-async def test_kernel_client_never_logs_credentials(kernel_url, caplog):
+@pytest.fixture
+def unredacted_logs() -> Iterator[None]:
+    """Log records as Python makes them: without the link-token redaction an app built earlier in the process installs
+    (`log_redaction`), so the kernel client's own quieting is what a test checks."""
+    factory = logging.getLogRecordFactory()
+    logging.setLogRecordFactory(logging.LogRecord)
+    try:
+        yield
+    finally:
+        logging.setLogRecordFactory(factory)
+
+
+async def test_kernel_client_never_logs_credentials(kernel_url, caplog, unredacted_logs):
     caplog.set_level(logging.DEBUG)
     async with httpx.AsyncClient(base_url=kernel_url) as plain:      # the control: httpx logs are captured here
         await plain.get("/payment_links/control-token-z9")

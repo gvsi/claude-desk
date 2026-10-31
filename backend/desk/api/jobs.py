@@ -21,13 +21,30 @@ next message.
   then the decision isn't read again.
 - `retry_stalled_jobs`, every 10 minutes and one at a time: jobs whose worker stopped sending heartbeats (a task
   that died mid-job) go back to `todo`, as Procrastinate documents ("Retry stalled jobs").
+- `triage_attempt(copy_id, desk_id, session_id, ref_id, ref_kind)` and `translate_message(copy_id, message_id)`
+  (Plan 02b, Task 10): AI-written text for the owner alone (`triage.py`), the only jobs that call the model. A turn
+  defers a triage for each attempt the checkpoint stopped, and a translation for each reply of Claude's the kernel
+  rendered in another language than English (`defer_turn_annotations`); the visitor's and the agent's routes defer
+  one for each message they store (`defer_translation`), but none for a message to a paused chat, which the kernel's
+  handoff answers with no model call. Each translation counts on the conversation's `translate` limit first
+  (`translating`), and past it isn't queued: the owner reads the message as sent. Queueing one never fails what
+  deferred it: a queue that can't take it is logged, and that annotation is simply missing.
 
-`jobs_app(connector)` builds the Procrastinate app; the API's lifespan opens it and runs `run_worker`. The
-connector is `desk.db.session.procrastinate_connector(url)`, its own small pool; tests use Procrastinate's
-`InMemoryConnector`.
+**Two queues, two workers.** A job that waits on the model never stands in front of one a visitor waits for. The
+resume job and the periodic ones run on `QUEUE`, one at a time, on the worker named `WORKER`, which listens for new
+jobs. The triage and translation jobs run on `ANNOTATION_QUEUE`, on a worker of their own (`ANNOTATION_WORKER`),
+`ANNOTATION_CONCURRENCY` at a time; each of their model calls gives up after `triage.ANNOTATION_TIMEOUT_S` a try. So
+a Haiku call that is slow, retried or stalled delays other annotations at most, never the owner's answer reaching
+the visitor or the due-decision scan. That worker polls for jobs every `ANNOTATION_POLL_S` instead of listening:
+an owner-only annotation can wait a second, and polling holds no connection open.
+
+`jobs_app(connector)` builds the Procrastinate app; the API's lifespan opens it and runs `run_worker`, which runs
+both workers. The connector is `desk.db.session.procrastinate_connector(url)`, its own small pool; tests use
+Procrastinate's `InMemoryConnector`.
 """
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -42,33 +59,51 @@ from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from desk.api.deliver import NOT_FINAL, Status, deliver, run_lock
+from desk.api.model import ModelClient
+from desk.api.ratelimit import RateLimited, RateLimiter, RateLimitLedger
 from desk.api.ro import KERNEL_RO, due_decisions
 from desk.api.sse import RUN_EVENTS, append_control
-from desk.api.store import Ids, append_message
+from desk.api.store import MESSAGES, Ids, append_message
+from desk.api.triage import RefKind, Stopped, translate_message, triage_attempt
 from desk.contracts import Decision
 
 logger = logging.getLogger(__name__)
 
 QUEUE = "desk"
+ANNOTATION_QUEUE = "desk-annotations"   # the triage and translation jobs' own queue (module docstring)
 RESUME_AFTER_ANSWER = "desk.resume_after_answer"
 SURFACE_DUE_DECISIONS = "desk.surface_due_decisions"
 RETRY_STALLED_JOBS = "desk.retry_stalled_jobs"
+TRIAGE_ATTEMPT = "desk.triage_attempt"
+TRANSLATE_MESSAGE = "desk.translate_message"
 SCHEDULE = {SURFACE_DUE_DECISIONS: "* * * * *", RETRY_STALLED_JOBS: "*/10 * * * *"}
 SHUTDOWN_GRACE_S = 5.0             # a stopping worker waits this long for its running jobs
 RESTART_S = 5.0                    # a failed worker starts again after this long
 ENV = "desk"                       # the worker's `additional_context` key for the jobs' `JobEnv`
 WORKER = "desk-api"                # the worker's name: Procrastinate logs its jobs on `procrastinate.worker.desk-api`
+ANNOTATION_WORKER = "desk-api-annotations"  # the annotation queue's worker, logging on its own name likewise
+ANNOTATION_CONCURRENCY = 4         # annotation jobs the worker runs at once
+ANNOTATION_POLL_S = 1.0            # the annotation worker looks for new jobs this often (it doesn't listen)
+# Each worker's name and options: the queues it runs and how.
+WORKERS: dict[str, dict[str, Any]] = {
+    WORKER: {"queues": [QUEUE]},
+    ANNOTATION_WORKER: {"queues": [ANNOTATION_QUEUE], "concurrency": ANNOTATION_CONCURRENCY, "listen_notify": False,
+                        "fetch_job_polling_interval": ANNOTATION_POLL_S},
+}
 EXPIRES = frozenset({"allowed", "held"})    # the states the kernel expires lazily, on its next read
 
 
 @dataclass(frozen=True)
 class JobEnv:
     """What jobs run with: the API's database engine, where kernel_ro is read (`kernel_ro`; the fake's mirror in
-    tests) and the process's clock."""
+    tests), the process's clock, and for the triage and translation jobs the API's model client and whether this is
+    production (where today's model budget applies)."""
 
     engine: AsyncEngine
     ro_schema: str
     clock: Callable[[], datetime]
+    model: ModelClient | None = None
+    production: bool = False
 
 
 def jobs_app(connector: BaseConnector, *, schedule: bool = True) -> procrastinate.App:
@@ -92,6 +127,19 @@ def jobs_app(connector: BaseConnector, *, schedule: bool = True) -> procrastinat
     async def retry_stalled_jobs_job(context: JobContext, timestamp: int) -> None:
         await retry_stalled_jobs(context.app.job_manager)
 
+    @app.task(name=TRIAGE_ATTEMPT, queue=ANNOTATION_QUEUE, pass_context=True)
+    async def triage_attempt_job(context: JobContext, copy_id: str, desk_id: str, session_id: str, ref_id: str,
+                                 ref_kind: RefKind) -> None:
+        env = _env(context)
+        await triage_attempt(env.engine, _model(env), Ids(copy_id=copy_id, desk_id=desk_id, session_id=session_id),
+                             ref_id, ref_kind, ro_schema=env.ro_schema, production=env.production, clock=env.clock)
+
+    @app.task(name=TRANSLATE_MESSAGE, queue=ANNOTATION_QUEUE, pass_context=True)
+    async def translate_message_job(context: JobContext, copy_id: str, message_id: str) -> None:
+        env = _env(context)
+        await translate_message(env.engine, _model(env), copy_id, message_id, production=env.production,
+                                clock=env.clock)
+
     if schedule:
         for task in (surface_due_decisions_job, retry_stalled_jobs_job):
             app.periodic(cron=SCHEDULE[task.name], periodic_id=task.name)(task)
@@ -105,18 +153,32 @@ def _env(context: JobContext) -> JobEnv:
     return env
 
 
+def _model(env: JobEnv) -> ModelClient:
+    if env.model is None:
+        raise RuntimeError("the triage and translation jobs run only with the API's model client")
+    return env.model
+
+
 async def run_worker(app: procrastinate.App, env: JobEnv) -> None:
-    """Run the queue's jobs (and, when scheduled, defer the periodic ones) until cancelled; a stopping worker lets its
-    running jobs finish for a few seconds. Signals are the server's, not the worker's. A worker that fails, or stops
-    on its own (Procrastinate stops one whose listener lost the database), is started again, its error logged by type
-    only: jobs wait in the queue meanwhile."""
+    """Run both queues' jobs, each on its own worker (`WORKERS`, module docstring), and, when scheduled, defer the
+    periodic ones, until cancelled; a stopping worker lets its running jobs finish for a few seconds. Signals are the
+    server's, not the workers'. Each worker that fails, or stops on its own (Procrastinate stops one whose listener
+    lost the database), is started again on its own, its error logged by type only: its jobs wait in their queue
+    meanwhile, and the other worker runs on. Both workers defer the periodic jobs; the job queue's database defers
+    each once."""
+    async with asyncio.TaskGroup() as workers:
+        for name, options in WORKERS.items():
+            workers.create_task(_keep_running(app, env, name, options), name=f"desk-jobs-{name}")
+
+
+async def _keep_running(app: procrastinate.App, env: JobEnv, name: str, options: dict[str, Any]) -> None:
     while True:
         try:
-            await app.run_worker_async(queues=[QUEUE], name=WORKER, install_signal_handlers=False,
-                                       additional_context={ENV: env}, shutdown_graceful_timeout=SHUTDOWN_GRACE_S)
-            logger.error("the job worker stopped; starting it again")
+            await app.run_worker_async(name=name, install_signal_handlers=False, additional_context={ENV: env},
+                                       shutdown_graceful_timeout=SHUTDOWN_GRACE_S, **options)
+            logger.error("the job worker %s stopped; starting it again", name)
         except Exception as error:
-            logger.error("the job worker stopped with %s; starting it again", type(error).__name__)
+            logger.error("the job worker %s stopped with %s; starting it again", name, type(error).__name__)
         await asyncio.sleep(RESTART_S)
 
 
@@ -127,6 +189,73 @@ async def defer_resume_after_answer(app: procrastinate.App, ids: Ids, decision: 
         raise ValueError("a decision resumes only its own session")
     await app.configure_task(RESUME_AFTER_ANSWER).defer_async(
         copy_id=ids.copy_id, desk_id=ids.desk_id, session_id=ids.session_id, decision=decision.model_dump(mode="json"))
+
+
+async def defer_triage(app: procrastinate.App, ids: Ids, stopped: Stopped) -> None:
+    """Leave a stopped attempt for the triage job: the session's IDs and the attempt's, nothing else."""
+    await app.configure_task(TRIAGE_ATTEMPT).defer_async(
+        copy_id=ids.copy_id, desk_id=ids.desk_id, session_id=ids.session_id, ref_id=stopped.ref_id,
+        ref_kind=stopped.ref_kind)
+
+
+async def translating(limiter: RateLimiter | None, ids: Ids, ledger: RateLimitLedger) -> bool:
+    """Whether the conversation may have one more owner translation: a hit on its `translate` limit, the window's first
+    refusal ledgered with the caller's credential. Without a limiter there is none."""
+    if limiter is None:
+        return False
+    try:
+        await limiter.enforce("translate", ids.session_id, ledger=ledger)
+    except RateLimited:
+        logger.info("a conversation's translations are past their limit; the owner reads the message as sent")
+        return False
+    return True
+
+
+async def defer_translation(app: procrastinate.App | None, ids: Ids, message_id: str, *,
+                            limiter: RateLimiter | None, ledger: RateLimitLedger) -> None:
+    """Leave a stored message of the session's for the translation job, by its `message_id`, once the conversation's
+    `translate` limit admits it (`translating`). Never raises: a queue that can't take it is logged by the error's
+    type, and the owner sees the message untranslated, as past the limit."""
+    if app is None or not await translating(limiter, ids, ledger):
+        return
+    try:
+        await app.configure_task(TRANSLATE_MESSAGE).defer_async(copy_id=ids.copy_id, message_id=message_id)
+    except Exception as error:
+        logger.error("a translation couldn't be queued (%s)", type(error).__name__)
+
+
+async def defer_turn_annotations(app: procrastinate.App | None, conn: AsyncConnection, ids: Ids,
+                                 stopped: list[Stopped], replied: list[str], *, limiter: RateLimiter | None = None,
+                                 ledger: RateLimitLedger | None = None) -> None:
+    """After a turn: a triage for each attempt it saw stopped, and a translation for each reply of Claude's it
+    delivered (`replied`, by the kernel's `message_id`) that the kernel rendered in another language than English,
+    each counted on the conversation's `translate` limit (`defer_translation`; none without `limiter` and `ledger`).
+    Never raises, so it never changes how the turn ends: each one that can't be queued is logged by the error's type
+    and left out. Reads in a transaction of its own on `conn`."""
+    if app is None or not (stopped or replied):
+        return
+    translate: list[str] = []
+    if replied:
+        try:
+            rows = await conn.execute(select(MESSAGES.c.message_id).where(
+                MESSAGES.c.copy_id == ids.copy_id, MESSAGES.c.session_id == ids.session_id,
+                MESSAGES.c.kind == "delivered", MESSAGES.c.author == "claude", MESSAGES.c.ref_id.in_(replied),
+                MESSAGES.c.language.is_distinct_from("en")).order_by(MESSAGES.c.n))
+            translate = [message_id for (message_id,) in rows]
+            await conn.commit()
+        except Exception as error:
+            logger.error("a turn's replies couldn't be read for translation (%s)", type(error).__name__)
+            with contextlib.suppress(Exception):
+                await conn.rollback()
+    for attempt in dict.fromkeys(stopped):
+        try:
+            await defer_triage(app, ids, attempt)
+        except Exception as error:
+            logger.error("a triage couldn't be queued (%s)", type(error).__name__)
+    if ledger is None:
+        return
+    for message_id in translate:
+        await defer_translation(app, ids, message_id, limiter=limiter, ledger=ledger)
 
 
 # The jobs ----------------------------------------------------------------------------------------------------

@@ -3,8 +3,9 @@ behavior"; Plan 02a, "Tool results Claude receives").
 
 Claude only proposes. Every tool call but `send_reply` goes to `/decide` with the `tool_use` ID as its call ID,
 and runs only on the kernel's allow, through `/execute`; a hold returns at once. The visitor sees each decision
-once, as the kernel signed it (`Status`, through `deliver()`). `send_reply` goes to `/check_reply`, and only what
-the kernel passed, or its handoff, reaches the visitor, through `deliver()`.
+once, as the kernel signed it (`Status`, through `deliver()`), and an execution's Demo inbox notices meant for it (a
+code sent), code-free; a decision's own notices are owner alerts and never reach it. `send_reply` goes to
+`/check_reply`, and only what the kernel passed, or its handoff, reaches the visitor, through `deliver()`.
 
 Failures fail closed ("Fail-closed behavior"): nothing is decided twice (a lost `/decide` answer is found by call
 ID, a lost `/execute` answer by polling the decision), an `/execute` answered 409 `conflict` (the kernel has no
@@ -15,6 +16,20 @@ and each `ToolOutcome` says how the turn goes on: `fenced` (a take-over or a sta
 
 `route_call`, `recover_call`, `send_reply` and `hand_off` take the call's own connection and commit each
 publication on it at once, so a receipt reaches the visitor while sibling calls still run.
+
+An outcome also names the attempt the checkpoint stopped, when it did (`stopped`, as Safety counts one: a call refused
+when decided, or a reply blocked for anything but a paused session), for the turn to leave for triage (Plan 02b,
+Task 10).
+
+A draft of Claude's the reply check stopped (`ok: false`) is kept for the owner (Plan 02b): one `stopped_draft` row
+holding the draft as it was sent to `/check_reply`, the verdict's `message_id` and its violations
+(`store.append_stopped_draft`). A handoff shown in the draft's place is delivered just after it, in the same
+transaction. A block Claude may rewrite writes nothing here: its outcome carries the draft (`kept`) for the turn to
+keep with the result Claude reads (its call's `tool_result`, or the note on its plain text), so the session's locks
+are never held across a later kernel call. Only the owner's transcript shows the row, and the triage job reads only
+the ledger entry it names (`ledger_seq`) to place a triage on it: never a visitor's read or stream, a model context, a
+reply check, a job's arguments or a log line. Input that never reached the check, the loop's own handoff clause and an
+owner's say (whose verdict goes back to the owner) are never kept this way.
 """
 
 import asyncio
@@ -27,13 +42,25 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, ValidationError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from desk.api.deliver import NOT_FINAL, Reply, Status, deliver
+from desk.api.deliver import NOT_FINAL, Reply, Status, deliver, run_lock
 from desk.api.kernel_client import CredentialView, KernelFailed, KernelUnavailable
 from desk.api.prompts import KERNEL_ONLY_TEMPLATES, REPLY_TEMPLATES, REWRITE_INSTRUCTION, SEND_REPLY_TOOL
 from desk.api.ro import KERNEL_RO
-from desk.api.sse import append_control
-from desk.api.store import Ids
-from desk.contracts import ActorKind, Clause, Decision, ExecResult, ReplyDraft, ReplyVerdict, ToolCall, ToolProfile
+from desk.api.schemas import CheckedDraft, StoppedDraft
+from desk.api.sse import append_control, emit_inbox
+from desk.api.store import Ids, KeptDraft, append_stopped_draft
+from desk.api.triage import Stopped
+from desk.contracts import (
+    MONEY_TOOLS,
+    ActorKind,
+    Clause,
+    Decision,
+    ExecResult,
+    ReplyDraft,
+    ReplyVerdict,
+    ToolCall,
+    ToolProfile,
+)
 from desk.kernel_api import CheckReplyRequest, DecideRequest, ExecuteRequest, SessionContext
 
 # How a change to the session's tools reaches Claude. "append": a `role: "system"` message of `tool_addition` and
@@ -147,6 +174,8 @@ SEND_REPLY = SEND_REPLY_TOOL["name"]
 # After an /execute timeout the decision is read each second for ten seconds ("Fail-closed behavior").
 EXECUTE_POLL_S, EXECUTE_POLLS = 1.0, 10
 EXECUTED = frozenset({"executed", "failed", "unknown"})
+# The effects that move money (master plan, "Money cap"): taking it, and paying it out (a refund among them).
+MONEY_EFFECTS = frozenset({"charge", "pay_out"})
 # Violations Claude gets one rewrite for; any other kind hands off at once.
 REGENERABLE = frozenset({"number_in_prose", "promise_word", "soft_promise", "unknown_fact", "stale_fact",
                          "unentitled_fact"})
@@ -184,10 +213,13 @@ def result_json(result: dict) -> str:
 @dataclass(frozen=True)
 class ToolOutcome:
     """How one tool call ended. `result` is the JSON Claude receives (`block` wraps it in its `tool_result`);
-    `status` the decision shown to the visitor; `delivered` what a reply put on screen. The flags tell the turn
-    how to go on (module docstring); the timings feed the turn's metrics. `unread` (with `unavailable`) marks a call
-    `recover_call` couldn't look up by its call ID: whether it ran isn't known, and with no decision ID nothing else
-    can carry its outcome, so it is never answered but left open for a later request."""
+    `status` the decision shown to the visitor; `delivered` what a reply put on screen; `kept` a draft the check
+    stopped that Claude may rewrite, for the turn to keep for the owner. The flags tell the turn how to go on (module
+    docstring); the timings feed the turn's metrics. `unread` (with `unavailable`) marks a call whose outcome the
+    kernel couldn't be reached to give: `recover_call` couldn't look it up by its call ID, or an allow's `/execute`
+    found no final state (`_execute`). Whether it ran, or still may, isn't known, so it is never answered but left open
+    for a later request, which finds it by its call ID: an allow then runs once (a repeat returns the stored result),
+    and Claude reads what it ended as, never `unavailable` for a call that ran."""
 
     result: dict
     is_error: bool
@@ -199,6 +231,8 @@ class ToolOutcome:
     unavailable: bool = False
     turn_over: bool = False
     unread: bool = False
+    stopped: Stopped | None = None                     # the attempt the checkpoint stopped, for triage
+    kept: KeptDraft | None = None                      # a stopped draft the turn keeps with the result Claude reads
     decide_ms: int = 0
     execute_ms: int = 0
     check_reply_ms: int = 0
@@ -237,6 +271,15 @@ async def _publish(conn: AsyncConnection, caller: Caller, status: Status) -> Sta
         await append_control(conn, caller.ids, "decision_pending", {"decision_id": status.decision.decision_id})
     await conn.commit()
     return status
+
+
+async def _show_inbox(conn: AsyncConnection, caller: Caller, result: ExecResult) -> None:
+    """The execution's Demo inbox notices for the visitor (a code sent to the contact on record: the panel reads it
+    through the kernel), on the stream at once; owner alerts never, and each entry once (`emit_inbox`). A decision's
+    own notices (`Decision.inbox`: holds, pauses, drift alerts) are the owner's and are never shown."""
+    if result.inbox:
+        await emit_inbox(conn, caller.ids, result.inbox)
+        await conn.commit()
 
 
 async def _pending(conn: AsyncConnection, caller: Caller, decision_id: str) -> None:
@@ -316,7 +359,10 @@ def _executed(decision: Decision | None, decision_id: str, result: ExecResult) -
 
 async def _execute(conn: AsyncConnection, caller: Caller, generation: int, decision: Decision) -> ToolOutcome:
     """Run an allow, then show the decision as the kernel signed it once it ran. A 409 `conflict` (the execution under
-    way or in doubt, or the allow no longer runnable) is answered from the decision as it stands (`_not_known_yet`)."""
+    way or in doubt, or the allow no longer runnable) is answered from the decision as it stands (`_not_known_yet`). An
+    `/execute` that can't reach the kernel is followed by reads of the decision; when none finds it final (it may
+    have run, or may still run), the call is left open (`unread`) for a later request to find by its call ID, and
+    left as a `decision_pending` row so its final state is shown even if none comes."""
     try:
         result = await caller.kernel.call("POST /execute", ExecuteRequest(
             decision_id=decision.decision_id, session_id=caller.session_id, generation=generation))
@@ -328,16 +374,18 @@ async def _execute(conn: AsyncConnection, caller: Caller, generation: int, decis
         final = await _poll(caller, decision.decision_id)
         if isinstance(final, ToolOutcome):
             return final
-        if final is None:
+        if final is None:                               # it may have run, or still may: left open (`unread`)
             await _pending(conn, caller, decision.decision_id)
-            return _unavailable()
+            return replace(_unavailable(), unread=True)
         return await _settle(conn, caller, generation, final)
     try:
         final = await _read(caller, decision.decision_id)
     except (KernelFailed, KernelUnavailable):
         await _pending(conn, caller, decision.decision_id)
+        await _show_inbox(conn, caller, result)
         return ToolOutcome(_executed(None, decision.decision_id, result), result.state != "succeeded")
     status = await _publish(conn, caller, Status(final, "receipt"))
+    await _show_inbox(conn, caller, result)
     return ToolOutcome(_executed(final, decision.decision_id, result), result.state != "succeeded", status=status)
 
 
@@ -345,7 +393,8 @@ async def _settle(conn: AsyncConnection, caller: Caller, generation: int | None,
     """Act on a decision as it stands: run an allow, show a hold, and answer with what it ended as.
 
     `generation` None settles a decision made at a generation the session has since left (a take-over or a
-    hand-back came after the turn that made it stopped): it is shown and answered from its state alone. Nothing goes
+    hand-back came after the turn that made it stopped), or one that moves money found by another request than the
+    one that made it (`recover_call`): it is shown and answered from its state alone. Nothing goes
     to /execute, which the kernel refuses at another generation than the decision's (an allow would expire there,
     and the turn stop as fenced), so a call that ran is answered without the stored result a repeat returns, and
     an allow that isn't final yet (an execution may still be under way) is left for the visitor's next request,
@@ -386,6 +435,7 @@ async def _settle(conn: AsyncConnection, caller: Caller, generation: int | None,
         return replace(_refusal(failure), status=from_state.status)
     except KernelUnavailable:
         return replace(_unavailable(), status=from_state.status)
+    await _show_inbox(conn, caller, result)              # once: a notice the first run published isn't again
     return ToolOutcome(_executed(decision, decision.decision_id, result), result.state != "succeeded",
                        status=from_state.status)
 
@@ -415,11 +465,18 @@ async def route_call(conn: AsyncConnection, caller: Caller, generation: int, blo
         decision = found
     decide_ms, started = _ms(started), time.monotonic()
     outcome = await _settle(conn, caller, generation, decision)
-    return replace(outcome, decide_ms=decide_ms, execute_ms=_ms(started))
+    stopped = Stopped("decision", decision.decision_id) if decision.outcome == "refuse" else None
+    return replace(outcome, stopped=stopped, decide_ms=decide_ms, execute_ms=_ms(started))
+
+
+def moves_money(decision: Decision) -> bool:
+    """Whether the decision's action moves money: a money tool, or an action with a money effect."""
+    action = decision.action
+    return action is not None and (action.tool in MONEY_TOOLS or bool(MONEY_EFFECTS & set(action.effects)))
 
 
 async def recover_call(conn: AsyncConnection, caller: Caller, generation: int, block: dict, *,
-                       made_at: int) -> ToolOutcome:
+                       made_at: int, resumes_money: bool = False) -> ToolOutcome:
     """A `tool_use` block a turn left unanswered (it stopped after the call): found by call ID at `made_at`, the
     session generation that turn ran at, never decided again. No decision means it never ran; an allow runs now (a
     repeat returns the stored result, and a 409 `conflict`, its execution already under way, answers from the
@@ -428,16 +485,23 @@ async def recover_call(conn: AsyncConnection, caller: Caller, generation: int, b
     state (`_settle`). If settling it raises (a publication that failed), a decision that isn't final is left as a
     `decision_pending` row before the error goes on, so its final state is still shown once it has one.
 
+    Money stays fail-closed outside the request that made the call: a decision that moves money (`moves_money`) goes
+    to `/execute` again only when `resumes_money` (this request is that one, sent again, or the same turn); any other
+    request answers it from its state, never sending `/execute` (`unknown` while it isn't final, left to its
+    `decision_pending` row and the kernel's reconciliation).
+
     A lookup that can't reach the kernel answers `unread`: the call may have run, so its caller leaves it open, with no
     results row, for a later request to look up again. Once the decision is found the kernel was asked, and whatever
     settling it answers (`unknown` after a 409 whose decision couldn't be read, left pending) closes the call, so
-    /execute is never sent again for it."""
+    /execute is never sent again for it, but for an allow whose `/execute` again found no final state, left open the
+    same way (`_execute`): a later `/execute` of the same decision runs it once or returns its stored result."""
     call = tool_call(block)
     found = await _by_call(caller, made_at, call.call_id)
     if isinstance(found, ToolOutcome):
         return replace(found, unread=True) if found.unavailable else found
+    runs = made_at == generation and (resumes_money or not moves_money(found))
     try:
-        return await _settle(conn, caller, generation if made_at == generation else None, found)
+        return await _settle(conn, caller, generation if runs else None, found)
     except Exception:
         await conn.rollback()
         if found.state in NOT_FINAL:
@@ -483,6 +547,22 @@ def _draft(tool_input: Any) -> tuple[str, list[Clause]] | list[dict]:
     return reply.prose, [Clause(template=clause.template, fact_id=clause.fact_id) for clause in reply.clauses]
 
 
+def _stopped(verdict: ReplyVerdict) -> Stopped | None:
+    """A reply of Claude's the checkpoint stopped, as Safety counts one: blocked for anything but a paused session."""
+    if verdict.ok or all(violation.kind == "session_paused" for violation in verdict.violations):
+        return None
+    return Stopped("reply", str(verdict.ledger_seq))
+
+
+def _kept(prose: str, clauses: list[Clause], verdict: ReplyVerdict, *, rewritable: bool) -> KeptDraft:
+    """A draft of Claude's the check stopped, as the owner keeps it: as it was sent to `/check_reply`, with the
+    verdict's violations and `message_id` and, when Claude may rewrite it (nothing is shown in its place), the
+    verdict's ledger entry, so the attempt's triage shows on the draft's item."""
+    stopped = StoppedDraft(draft=CheckedDraft(prose=prose, clauses=clauses), violations=verdict.violations)
+    return KeptDraft(message_id=verdict.message_id, stopped=stopped,
+                     ledger_seq=verdict.ledger_seq if rewritable else None)
+
+
 def _blocked(violations: list[dict], **timing: int) -> ToolOutcome:
     return ToolOutcome({"outcome": "blocked", "violations": violations, "instruction": REWRITE_INSTRUCTION}, True,
                        **timing)
@@ -523,8 +603,9 @@ async def hand_off(conn: AsyncConnection, caller: Caller, generation: int, *,
     verdict = await _check(caller, generation, "", [Clause(template="handoff")])
     if isinstance(verdict, ToolOutcome):
         return replace(verdict, check_reply_ms=_ms(started))
-    return await _show(conn, caller, verdict, call_id, dict(DELIVERED_HANDOFF), "handoff",
-                       check_reply_ms=_ms(started))
+    shown = await _show(conn, caller, verdict, call_id, dict(DELIVERED_HANDOFF), "handoff",
+                        check_reply_ms=_ms(started))
+    return replace(shown, stopped=_stopped(verdict))
 
 
 async def send_reply(conn: AsyncConnection, caller: Caller, generation: int, tool_input: Any, attempt: int, *,
@@ -535,7 +616,11 @@ async def send_reply(conn: AsyncConnection, caller: Caller, generation: int, too
     `REWRITE_INSTRUCTION`. An immediate-handoff kind (`canary`, `unsupported_language`, `session_paused`), or a block
     on attempt 2, shows the verdict's blocks, the handoff clause, with no further kernel call. Input that doesn't
     fit the tool never reaches the kernel: Claude gets one rewrite, then the handoff. `call_id` is the `send_reply`
-    call's `tool_use` ID; without one (Claude's plain text) the reply is the API's."""
+    call's `tool_use` ID; without one (Claude's plain text) the reply is the API's.
+
+    A draft the check stopped is kept for the owner (module docstring): committed with the handoff shown in its place,
+    or, on a block Claude may rewrite, carried on the outcome (`kept`) for the caller to keep with the call's result.
+    Nothing is left open on `conn` either way, so no lock of the session outlives the call."""
     if attempt not in (1, 2):
         raise ValueError("a reply has two attempts")
     draft = _draft(tool_input)
@@ -552,6 +637,10 @@ async def send_reply(conn: AsyncConnection, caller: Caller, generation: int, too
         return await _show(conn, caller, verdict, call_id, {"outcome": "delivered", "message_id": verdict.message_id},
                            "reply", **timing)
     if attempt == 1 and all(violation.kind in REGENERABLE for violation in verdict.violations):
-        return _blocked([{"kind": violation.kind, "span": violation.span} for violation in verdict.violations],
-                        **timing)
-    return await _show(conn, caller, verdict, call_id, dict(DELIVERED_HANDOFF), "handoff", **timing)
+        return replace(_blocked([{"kind": violation.kind, "span": violation.span}
+                                 for violation in verdict.violations], **timing), stopped=_stopped(verdict),
+                       kept=_kept(*draft, verdict, rewritable=True))
+    await run_lock(conn, caller.session_id)            # before the events lock, as the handoff's delivery takes them
+    await append_stopped_draft(conn, caller.ids, _kept(*draft, verdict, rewritable=False))
+    shown = await _show(conn, caller, verdict, call_id, dict(DELIVERED_HANDOFF), "handoff", **timing)
+    return replace(shown, stopped=_stopped(verdict))

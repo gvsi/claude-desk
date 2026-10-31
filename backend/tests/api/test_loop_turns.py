@@ -266,7 +266,8 @@ async def test_parallel_calls_with_mixed_outcomes_share_one_tool_result_message(
     results = tool_results(second)
     assert [(result["tool_use_id"], result["content"]["outcome"], result["is_error"]) for result in results] == [
         ("toolu_quote", "done", False), ("toolu_half", "held_for_owner", False), ("toolu_invoice", "refused", True)]
-    assert results[1]["content"]["message"] == "I've asked Maria Rivera to look at this."
+    assert results[1]["content"]["message"] == (                                 # the kernel's line, unchanged
+        fake.decisions[results[1]["content"]["decision_id"]].decision.visitor_plain)
     # each decision showed once, as the kernel signed it, as soon as it was known; the reply came after them all
     shown = await events(api_conn, caller.session_id)
     assert shown[0].type == "writing" and [event.type for event in shown[-2:]] == ["message", "turn_end"]
@@ -382,7 +383,7 @@ async def test_held_result_returns_without_waiting(api_conn, caller, fake):
     (held,) = tool_results(model.requests[1])
     decision_id = held["content"]["decision_id"]
     assert held["content"] == {"outcome": "held_for_owner", "decision_id": decision_id,
-                               "message": "I've asked Maria Rivera to look at this."} and held["is_error"] is False
+                               "message": fake.decisions[decision_id].decision.visitor_plain} and not held["is_error"]
     assert [call.route for call in fake.calls if call.route in (
         "POST /decide", "POST /execute", "GET /decisions/{id}", "POST /check_reply")] == [
         "POST /decide", "POST /check_reply"]
@@ -590,7 +591,8 @@ async def test_unknown_tool_and_invalid_args_continue_the_turn(api_conn, caller,
     first, conflict, invalid = (tool_results(request) for request in model.requests[1:])
     assert [(result["tool_use_id"], result["content"]["outcome"], result["is_error"]) for result in first] == [
         ("toolu_wire", "refused", True), ("toolu_days", "refused", True), ("toolu_reused", "done", False)]
-    assert first[0]["content"]["message"] == "That isn't something I can do here."
+    assert first[0]["content"]["message"] == (                                   # the kernel's line, unchanged
+        fake.decisions[first[0]["content"]["decision_id"]].decision.visitor_plain)
     # refused by the kernel before any decision: a refused result with nothing more to say
     assert [(result["content"], result["is_error"]) for result in conflict + invalid] == [
         ({"outcome": "refused"}, True), ({"outcome": "refused"}, True)]

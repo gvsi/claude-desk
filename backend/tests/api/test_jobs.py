@@ -1,5 +1,6 @@
 """The API's jobs (Plan 02a, Task 8): the resume job an owner's answer defers, the minute job that surfaces decisions
-gone final or past their time, and the retry of jobs a stopped worker left.
+gone final or past their time, the retry of jobs a stopped worker left, and the two workers that run them (the
+annotation jobs on their own, Plan 02b's Task 10).
 
 The jobs run here as the worker runs them, on the API's engine and FakeKernel's kernel_ro mirror, without a credential:
 what they leave is read with the visitor's own credential on the session's next request (`TurnRunner`).
@@ -16,10 +17,18 @@ from sqlalchemy.dialects import postgresql
 from desk.api.deliver import Status, deliver
 from desk.api import jobs
 from desk.api.jobs import (
+    ANNOTATION_CONCURRENCY,
+    ANNOTATION_POLL_S,
+    ANNOTATION_QUEUE,
+    ANNOTATION_WORKER,
     QUEUE,
+    RESUME_AFTER_ANSWER,
     RETRY_STALLED_JOBS,
     SCHEDULE,
     SURFACE_DUE_DECISIONS,
+    TRANSLATE_MESSAGE,
+    TRIAGE_ATTEMPT,
+    WORKER,
     JobEnv,
     jobs_app,
     resume_after_answer,
@@ -306,30 +315,45 @@ async def test_stalled_job_is_retried(db):
             await manager.unregister_worker(worker_id)
 
 
-async def test_a_worker_that_stops_is_started_again(monkeypatch, caplog):
-    """A worker that fails, or stops on its own (Procrastinate stops one whose listener lost the database), is
-    started again; its error is logged by type only."""
+async def test_each_worker_that_stops_is_started_again(monkeypatch, caplog):
+    """The jobs run on two queues, each with its own worker: the resume job and the periodic ones one at a time, on a
+    worker that listens for them, and the triage and translation jobs, which wait on the model, several at a time on
+    a worker that polls. A worker that fails, or stops on its own (Procrastinate stops one whose listener lost the
+    database), is started again while the other runs on; its error is logged by type only."""
+    app = jobs_app(InMemoryConnector(), schedule=False)
+    assert {name: task.queue for name, task in app.tasks.items() if name.startswith("desk.")} == {
+        RESUME_AFTER_ANSWER: QUEUE, SURFACE_DUE_DECISIONS: QUEUE, RETRY_STALLED_JOBS: QUEUE,
+        TRIAGE_ATTEMPT: ANNOTATION_QUEUE, TRANSLATE_MESSAGE: ANNOTATION_QUEUE}
     monkeypatch.setattr(jobs, "RESTART_S", 0)
-    started = asyncio.Event()
+    env = JobEnv(engine=None, ro_schema="kernel_ro", clock=None)
+    runs: dict[str, list[dict]] = {WORKER: [], ANNOTATION_WORKER: []}
+    running = {name: asyncio.Event() for name in runs}
 
     class Queue:
-        runs = 0
-
         async def run_worker_async(self, **options) -> None:
-            Queue.runs += 1
-            assert options["install_signal_handlers"] is False and options["queues"] == [QUEUE]
-            if Queue.runs == 1:
+            name = options["name"]
+            runs[name].append(options)
+            if name == WORKER and len(runs[name]) == 1:
                 raise RuntimeError("could not connect to dana@example.com")
-            if Queue.runs == 3:
-                started.set()
-                await asyncio.Event().wait()                           # runs until the lifespan stops it
+            if name == WORKER and len(runs[name]) == 2:
+                return                                                 # stopped on its own
+            running[name].set()
+            await asyncio.Event().wait()                               # runs until the lifespan stops it
 
-    worker = asyncio.create_task(run_worker(Queue(), JobEnv(engine=None, ro_schema="kernel_ro", clock=None)))
-    await asyncio.wait_for(started.wait(), 5)
+    worker = asyncio.create_task(run_worker(Queue(), env))
+    await asyncio.wait_for(asyncio.gather(*(event.wait() for event in running.values())), 5)
     worker.cancel()
     with pytest.raises(asyncio.CancelledError):
         await worker
-    assert Queue.runs == 3
+    assert {name: len(started) for name, started in runs.items()} == {WORKER: 3, ANNOTATION_WORKER: 1}
+    for started in runs.values():
+        assert all(options == started[0] for options in started)       # started again as it was
+        assert started[0]["install_signal_handlers"] is False and started[0]["additional_context"] == {jobs.ENV: env}
+    desk, annotations = runs[WORKER][0], runs[ANNOTATION_WORKER][0]
+    assert (desk["queues"], desk.get("concurrency", 1), desk.get("listen_notify", True)) == ([QUEUE], 1, True)
+    assert (annotations["queues"], annotations["concurrency"], annotations["listen_notify"]) == (
+        [ANNOTATION_QUEUE], ANNOTATION_CONCURRENCY, False)
+    assert ANNOTATION_CONCURRENCY >= 2 and annotations["fetch_job_polling_interval"] == ANNOTATION_POLL_S
     logged = [record.getMessage() for record in caplog.records if record.name == "desk.api.jobs"]
-    assert logged == ["the job worker stopped with RuntimeError; starting it again",
-                      "the job worker stopped; starting it again"]
+    assert logged == [f"the job worker {WORKER} stopped with RuntimeError; starting it again",
+                      f"the job worker {WORKER} stopped; starting it again"]
