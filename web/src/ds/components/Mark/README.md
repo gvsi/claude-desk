@@ -15,7 +15,7 @@
 | The first-visit intro dialog, beside the `Wordmark` | 20 px | No tile, light ink |
 | A standalone page and the owner app while it opens, beside the `Wordmark` | 20 px | No tile, light ink |
 | The intro illustration's reply card, alone in an avatar's place | 32 px | No tile, dark ink (`ground="light"`) |
-| The About pages' top bar, beside the `Wordmark` | 20 px | The white tile (`tile`) |
+| The About pages' top bar, beside the `Wordmark`: with its "Preview" badge on the desktop bar, the name alone on the phone bar | 20 px | The white tile (`tile`) |
 | The browser tab (`favicon.svg`) | The browser's | No tile: dark ink on a light tab bar, light ink on a dark one |
 
 - On the dark grounds (every ground in the app) the ink is `mark-ink-light`. On a light ground, `ground="light"`, it keeps the drawing's dark ink, `mark-ink`.
@@ -42,7 +42,7 @@
 | --- | --- | --- |
 | `preview` | `boolean` | Adds the "Preview" badge 8 px to the name's right: a `Pill` with `caps`, its word drawn in capitals by `.cd-type-badge-caps`, the product's one all-caps label. |
 
-`Wordmark` sets "Claude Desk" in serif (`.cd-type-wordmark`), on one line with its badge, centred. In the sidebar the lockup is the 36 px mark, then the wordmark 10 px on, all centred on one line (owner, 2026-10-30).
+`Wordmark` sets "Claude Desk" in serif (`.cd-type-wordmark`), on one line with its badge, centred; the name never wraps. In the sidebar the lockup is the 36 px mark, then the wordmark 10 px on, all centred on one line (owner, 2026-10-30).
 
 ## Geometry
 

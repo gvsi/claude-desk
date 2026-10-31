@@ -336,12 +336,16 @@ function DocumentSwitch({ current, compact }: { current: AboutId; compact: boole
   );
 }
 
-function Brand() {
+/**
+ * The mark on its white tile and the wordmark. The desktop bar adds the Preview badge; the phone bar,
+ * like the signed phone top bar, shows the name alone, so it stays on one line at a phone's width.
+ */
+function Brand({ compact }: { compact: boolean }) {
   return (
     <span className="cd-about-brand">
       {/* The one place the mark keeps its white tile. */}
       <Mark tile />
-      <Wordmark preview />
+      <Wordmark preview={!compact} />
     </span>
   );
 }
@@ -353,7 +357,7 @@ function TopBar({ current, compact }: { current: AboutId; compact: boolean }) {
       <>
         <header className="cd-about-top cd-about-top--compact">
           <PrototypeLink compact />
-          <Brand />
+          <Brand compact />
         </header>
         <DocumentSwitch current={current} compact />
       </>
@@ -361,7 +365,7 @@ function TopBar({ current, compact }: { current: AboutId; compact: boolean }) {
   }
   return (
     <header className="cd-about-top">
-      <Brand />
+      <Brand compact={false} />
       <DocumentSwitch current={current} compact={false} />
       <PrototypeLink />
     </header>

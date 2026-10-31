@@ -244,6 +244,29 @@ describe('ReaderPage', () => {
     }
   });
 
+  it('phone_top_bar_keeps_the_name_on_one_line', async () => {
+    // The phone bar follows the signed phone top bar: the bell beside "Claude Desk" and no Preview
+    // badge, the name on one line (the wordmark's 22 px line) and nothing past the window's width,
+    // down to a 320 px phone. The desktop bar keeps the badge.
+    const phones = [PHONE, { width: 375, height: 812 }, { width: 360, height: 800 }, { width: 320, height: 640 }];
+    for (const size of phones) {
+      const where = `at ${size.width}`;
+      const screen = await renderReader('proposal', { size });
+      const bar = screen.container.querySelector('header');
+      const name = bar?.querySelector<HTMLElement>('.cd-type-wordmark');
+      expect(name?.textContent, where).toBe('Claude Desk');
+      expect(name?.getBoundingClientRect().height, where).toBe(22);
+      expect(bar?.querySelector('.cd-pill'), where).toBeNull();
+      expect(document.documentElement.scrollWidth, where).toBeLessThanOrEqual(size.width);
+      await screen.unmount();
+    }
+    const screen = await renderReader('proposal', { size: DESKTOP });
+    const bar = screen.container.querySelector('header');
+    expect(bar?.querySelector<HTMLElement>('.cd-type-wordmark')?.getBoundingClientRect().height).toBe(22);
+    expect(bar?.querySelector('.cd-pill')?.textContent).toBe('Preview');
+    await screen.unmount();
+  });
+
   it('reader_chrome_has_no_jargon', async () => {
     /** A copy of `el` without the parts the documents' words fill: the jargon check reads only the page's own. */
     const without = (el: Element | null | undefined, selector: string): HTMLElement => {
@@ -263,7 +286,9 @@ describe('ReaderPage', () => {
         const topBar = root.querySelector('header');
         const documents = root.querySelector('nav[aria-label="Documents"]');
         expect(readText(documents ?? document.body), where).toBe('Capability prediction Product proposal');
-        expect(readText(topBar ?? document.body), where).toMatch(phone ? /^Try Desk prototype Claude Desk Preview$/ : /Try Desk prototype$/);
+        expect(readText(topBar ?? document.body), where).toBe(
+          phone ? 'Try Desk prototype Claude Desk' : 'Claude Desk Preview Capability prediction Product proposal Try Desk prototype',
+        );
         // "On this page", without the entries, which are the document's section names.
         const contents = without(root.querySelector('nav[aria-label="On this page"]'), 'ol');
         expect(readText(contents), where).toBe(

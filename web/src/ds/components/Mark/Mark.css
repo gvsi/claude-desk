@@ -28,10 +28,15 @@
   fill: var(--mark-ink);
 }
 
-/* The wordmark on one line: the name, then the Preview badge 8 px to its right, centred on it. */
+/* The wordmark on one line: the name, then the Preview badge 8 px to its right, centred on it. The
+   name never splits across two lines. */
 .cd-wordmark {
   display: inline-flex;
   align-items: center;
   gap: var(--space-8);
   color: var(--text-primary);
+}
+
+.cd-wordmark__name {
+  white-space: nowrap;
 }
