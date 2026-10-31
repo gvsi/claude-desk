@@ -621,18 +621,20 @@ async def test_claude_cannot_draft_link_cancelled(app, client, reviewer, templat
 
 async def test_a_link_cancelled_card_is_never_current_for_a_draft(app, client, reviewer, monkeypatch):
     """A second fence behind `kernel_only_template`: the template counts no fact status as current,
-    so even with `link_cancelled` taken off the kernel-only list, Claude citing its own cancelled
-    link's fact gets no card (`stale_fact`)."""
+    so even with `link_cancelled` taken off the kernel-only list, Claude citing a link's fact gets no
+    card (`stale_fact`): a link it cancelled, whose fact has expired, and an open one, whose fact is
+    current for every other template, which only the template's empty status set refuses."""
     copy = await rivera(app, client)
     visitor = await open_visitor(client, copy)
     link = await rv_link(app, client, reviewer, copy, visitor)
     assert (await post_cancel(client, link.token)).status_code == 200
+    still_open = await rv_link(app, client, reviewer, copy, visitor, ("drain", 1), call_id="call-link-2")
     monkeypatch.setattr(reply_check, "KERNEL_ONLY", reply_check.KERNEL_ONLY - {"link_cancelled"})
-    fact_id = f"payment_link:{link.link_id}"
-    verdict = await checked(client, visitor, "Here is where your payment stands.",
-                            [clause("link_cancelled", fact_id)])
-    assert violations(verdict) == [("stale_fact", "not_current", [fact_id])]
-    assert_handed_off(verdict)
+    for fact_id in (f"payment_link:{link.link_id}", f"payment_link:{still_open.link_id}"):
+        verdict = await checked(client, visitor, "Here is where your payment stands.",
+                                [clause("link_cancelled", fact_id)])
+        assert violations(verdict) == [("stale_fact", "not_current", [fact_id])], fact_id
+        assert_handed_off(verdict)
 
 
 # ---- A rule change and the links it no longer allows --------------------------------------------------
