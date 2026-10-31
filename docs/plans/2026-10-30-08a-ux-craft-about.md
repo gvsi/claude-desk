@@ -15,7 +15,7 @@
 - P3-02, the trace: `UXC-P302-Before` (`#artboard-9f22aaa6ecca`) and `UXC-P302-After` (`#artboard-1b43f1271bc4`).
 - P3-03, the marker: `UXC-P303-Before` (`#artboard-06296d5e8909`) and `UXC-P303-After` (`#artboard-1ba9a2f503b7`).
 
-The spec of each is `.plan-runs/ux-review/craft-2026-10-30-1914.md` in the main checkout. Where that note and this plan differ, this plan wins.
+The spec of each is the UX craft review's note (craft-2026-10-30-1914.md, kept outside the repository). Where that note and this plan differ, this plan wins.
 
 ## Global Constraints
 
@@ -24,8 +24,8 @@ The master plan's Global Constraints apply as plan 07 copies them. Specific to t
 - **Static and offline, as plan 07 says.** The pages still make no request. The new hooks read the DOM and nothing else.
 - **Figures say only what the text says.** No label, value or element is added, removed or reworded. Each animation shows existing parts in a new order. The tests that pin the chart and the architecture figure to the documents keep passing unchanged.
 - **Tokens only.** No raw colour, no raw duration and no raw easing in `reader.css`. Every duration is a motion token or a `calc()` of them, every easing is `--motion-ease` or `--motion-ease-emphasis`, and `app/guards.test.ts`'s `RAW_MS` and `RAW_CSS_SECONDS` stay green.
-- **Exceptions, signed.** The forecast's fit line draws over three `motion-base` (600 ms), longer than the design system's 60 to 200 ms range. The project owner approved this for an explanatory figure on 2026-10-30. Every other step stays within the range. The contents bar's slide is a second small moment on both About pages, after each page's lead figure, signed with P3-03 (ruling by claude-desk-1b, the proposals' owner, 2026-10-30). The fit eases with `motion-ease-emphasis`, because the board's ease-in-out isn't a token.
-- **Phone contents list unchanged.** No signed board draws a marker on the phone, so the phone's disclosure list stays as it is (ruling by claude-desk-1b, 2026-10-30). The marker is the laptop's sticky list only.
+- **Exceptions, signed.** The forecast's fit line draws over three `motion-base` (600 ms), longer than the design system's 60 to 200 ms range. The project owner approved this for an explanatory figure on 2026-10-30. Every other step stays within the range. The contents bar's slide is a second small moment on both About pages, after each page's lead figure, signed with P3-03 (ruling by the UX craft reviewer, the proposals' owner, 2026-10-30). The fit eases with `motion-ease-emphasis`, because the board's ease-in-out isn't a token.
+- **Phone contents list unchanged.** No signed board draws a marker on the phone, so the phone's disclosure list stays as it is (ruling by the UX craft reviewer, 2026-10-30). The marker is the laptop's sticky list only.
 - **Checks that read the page wait for it to rest.** The screens project and the end-to-end tests run with motion, so an axe check or a fit check on an About page waits until every figure's animations have finished (`document.getAnimations()` settled), or runs under emulated reduced motion.
 - **Plays once.** A figure plays the first time it is a third in view in that page load, and never again until the page reloads, including after the reader opens the other document and comes back (the figure remounts). Scrolling back shows it complete. A figure above the fold plays on load.
 - **Complete by default.** With no observer, before hydration, in print, or under `prefers-reduced-motion: reduce`, the figure is drawn complete, before, during and after its first time in view. The animated state is reached only by adding the played mark, never by hiding parts by default. Every rule that hides, scales or clips a part for the animation (the `ready` state and the `played` keyframes' start) sits inside `@media screen and (prefers-reduced-motion: no-preference)`, and `usePlayOnce` sets no `data-play` at all when reduced motion matches.
@@ -101,7 +101,7 @@ The master plan's Global Constraints apply as plan 07 copies them. Specific to t
   - No `scroll-behavior` in CSS. A root `smooth` would also glide `useReadingPlace`'s `window.scrollTo` and `scrollIntoView` calls, which name no behavior (Back and Forward would animate and record wrong places), and the readers' end-to-end test's own scrolls.
   - `Contents`' links keep their `href="#…"` and get a click handler. It skips modified clicks (new tab, new window). It prevents the default jump, pushes the hash through the router's `navigate` first (before scrolling, so the history entry being left keeps the reader's place for Back), and calls `heading.scrollIntoView({ behavior: reduced ? 'instant' : 'smooth', block: 'start' })`, where `reduced` is `matchMedia('(prefers-reduced-motion: reduce)')` read at the click. The heading's `scroll-margin-top` still applies. Pushing the hash doesn't rerun `useReadingPlace` (that runs only when a document draws). Then it focuses the heading with `preventScroll: true`.
   - Add a step to `e2e/about-readers.spec.ts`: follow a contents link, then Back, then Forward. Back lands where the reader was before following the link, within `expectBackAt`'s 56 px. Forward lands with the heading at its scroll margin.
-  - Ruling (this plan, 2026-10-30, agreed with the About pages' owner, claude-desk-cd): moving focus to the section is issue #123. It is the same interaction, so it is folded in here, and this plan's PR closes #123.
+  - Ruling (this plan, 2026-10-30, agreed with the About pages' owner, the About pages' owner): moving focus to the section is issue #123. It is the same interaction, so it is folded in here, and this plan's PR closes #123.
   - Keep as they are: `useReadingPlace`'s Back and Forward restoring (it records the place only while the pathname matches), the h2s' `scroll-margin-top` for the pinned bar (`--about-top`), the scroll margin on focusable elements outside the bar, and the static bar in print.
 - [ ] Run `npx vitest run --project about src/about/reader.browser.test.tsx`, `npx vitest run --project about-motion src/about/reader.motion.browser.test.tsx`, the about unit tests and the readers' end-to-end test (`npx playwright test e2e/about-readers.spec.ts`).
 - [ ] Commit: `feat(web): mark the section being read in the About pages' contents and move focus to it`, with `Closes #123.` in the body.
@@ -112,7 +112,7 @@ One design PR from `plan/08a-ux-craft-about`, titled `feat(web): play the About 
 
 ## Review Ledger
 
-**Round 1 (2026-10-30), Opus 5.5 and GPT-6.1 Sol, both "with fixes"; validated and fixed by claude-desk-3c.**
+**Round 1 (2026-10-30), Opus 5.5 and GPT-6.1 Sol, both "with fixes"; validated and fixed by the coordinator.**
 - Test contexts (both seats, P1/P2): there's no `browser` project, and `about` forces reduced motion, so the motion tests couldn't run. Added the `about-motion` project and split the tests by context.
 - Smooth scroll (both seats, P1/P2): a root `scroll-behavior: smooth` would glide `useReadingPlace`'s restores and the e2e test's scrolls. The contents link's click handler now scrolls smoothly; every other scroll stays instant. Added an e2e Back/Forward step.
 - Complete figures (both seats, P2): the base stylesheet stops animations but doesn't undo a hidden start. The hide rules now sit only under `screen` plus `no-preference`, `usePlayOnce` sets nothing under reduced motion, and a guard plus an e2e print step check it.
@@ -120,10 +120,10 @@ One design PR from `plan/08a-ux-craft-about`, titled `feat(web): play the About 
 - Fit reveal (Opus, P2, unconfirmed): reference box and end state specified, with a test.
 - Stale section marker (Opus, P2): recompute from every heading's rect on each callback, and mark the last section at the page end.
 - P3s taken: `data-` hooks for the chart's parts; checks wait for animations to finish; focused heading has no ring; router location in the test.
-- Rulings by claude-desk-1b (the proposals' owner): no phone marker; the bar slide is a signed second moment; the fit eases with `motion-ease-emphasis`; no ring on a focused heading.
+- Rulings by the UX craft reviewer (the proposals' owner): no phone marker; the bar slide is a signed second moment; the fit eases with `motion-ease-emphasis`; no ring on a focused heading.
 - Opus rated the test-context and smooth-scroll findings P1, so these fixes get a second round (P1 extension).
 
-**Round 2 (2026-10-30), Opus 5.5 and GPT-6.1 Sol, both "with fixes", no P1; validated and fixed by claude-desk-3c.** Both seats confirmed round 1's fixes hold.
+**Round 2 (2026-10-30), Opus 5.5 and GPT-6.1 Sol, both "with fixes", no P1; validated and fixed by the coordinator.** Both seats confirmed round 1's fixes hold.
 - Stale marker after a jump (Sol, P2): a jump can carry headings past the band with no observer callback, which Sol reproduced in Chromium. The hook now also recomputes once each scroll rests, and holds the target during a link's own jump, so the bar slides once (Opus, P3).
 - Phone marker (Opus, P2): the Viewports bullet still asked for one. Now: no marker and no `aria-current` on the phone, with a 390 px assertion.
 - Played set across tests (Opus, P2): a test-only `forgetPlayedFigures()` called in each motion file's `afterEach`.
@@ -131,5 +131,5 @@ One design PR from `plan/08a-ux-craft-about`, titled `feat(web): play the About 
 - Round cap reached (2 completed rounds, the second with no P1). These fixes aren't re-reviewed as a plan; each task's review and the PR panel check them.
 - Task 2: P3 parked — a step that already finished can relight once if the layout crosses 1100 px during the 2.44 s trace (rotating a tablet mid-trace); the figure still ends at rest, and a switch after the play has ended replays nothing — rare and harmless, needs per-part played state across remounts.
 
-**During Task 3 (2026-10-31), rulings by claude-desk-3c:** `useCurrentSection` also returns `follow`, the click handler updates the address before it scrolls (in the other order, Back under reduced motion landed 848 px off), and the short-last-section test sizes its window from the page. Interfaces and Task 3 now say so.
+**During Task 3 (2026-10-31), rulings by the coordinator:** `useCurrentSection` also returns `follow`, the click handler updates the address before it scrolls (in the other order, Back under reduced motion landed 848 px off), and the short-last-section test sizes its window from the page. Interfaces and Task 3 now say so.
 - Task 3: P3 parked — the 1 s hold fallback in `useCurrentSection` (scrollend missing) and its restart during continued scrolling have no direct test; normal scroll completion is covered — a timer regression would leave the marker held a second longer.
