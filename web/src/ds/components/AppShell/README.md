@@ -18,6 +18,11 @@
 - Menu opens the sidebar as a modal sheet from the left, with focus inside it, over the page dimmed by `scrim`, as behind `DemoInboxSheet` and `Dialog`. Escape, "Close menu", the dimmed page or going to a page closes it, and focus returns to Menu. Escape inside the sidebar's Desk list closes only the list.
 - The sheet appears in place; nothing slides.
 - `panel`, when given, sits at the right of the main area at its height, and the page narrows to make room (the Ask Claude panel beside Rules, N-Conn-12-Chat). Below 768 px the top bar runs above the page and the panel.
+- A panel that opens beside the page arrives from where it lives, and the page moves rather than jumping (the open and closed states stay as N-Conn-12-Chat and N-Conn-17-Presets draw them; only the move between them is new):
+  - Opening, the panel slides `space-24` in from the right and fades up. The page is laid out at its new width at once and glides from where it was to its new place on `transform` alone (a FLIP, never a width animation), so the chip the owner pressed doesn't leap from under the pointer. Both run on `motion-base` with `motion-ease-emphasis`.
+  - Closing reverses on `motion-fast`: the panel leaves the row at once, so the page takes its full width and glides back, while the panel slides out over the page's right edge, `inert`, and then goes. A panel given again while one is leaving is a new one.
+  - While they move, the page can be drawn past the main area's edge, and the panel past the window's, for a moment: both are clipped rather than scrolling sideways. A sheet fixed over the window isn't clipped.
+  - A panel that takes no room beside the page, a modal sheet such as `AskClaudePanel` under 1024 px, neither slides nor moves the page, and nor does anything under `prefers-reduced-motion: reduce`: the end state at once. A panel shown when the shell first draws doesn't move either.
 - A panel that becomes a modal sheet, as `AskClaudePanel` does under 1024 px, says so through `AppShellPanelContext`. While it does, the banner, the navigation and the page are `inert`: the attribute is part of every render, so whatever the shell draws there as the window changes (the top bar replacing the column) stays out of reach. If Menu's sheet is open when that starts (the window narrowed with the top bar showing), it closes, and focus moves into the panel rather than back to Menu. When the panel stops being a sheet the page is live again; if the panel was removed with focus in it, the shell returns focus to the element the panel names.
 
 ## What the consumer provides
@@ -37,5 +42,5 @@
 | `banner` | `ReactNode` | Full width, above everything. |
 | `layout` | `'auto' \| 'compact'` | `auto` (the default) switches to the top bar below 768 px. |
 | `fill` | `boolean` | The page fills the main area, unpadded, for a page with its own columns. The sidebar is unchanged. |
-| `panel` | `ReactNode` | A panel at the right of the page. While it says it is a modal sheet, everything else is inert. |
+| `panel` | `ReactNode` | A panel at the right of the page. While it says it is a modal sheet, everything else is inert. Beside the page it slides in and out, and the page glides. |
 | `children` | `ReactNode` | Required. |

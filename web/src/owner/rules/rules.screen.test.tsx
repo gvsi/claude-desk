@@ -14,6 +14,7 @@ import { ROUTES } from '../../api/routes.ts';
 import type { Suggestion } from '../../api/views.ts';
 import { routes } from '../../app/routes.tsx';
 import { rivera } from '../../ds/fixtures/index.ts';
+import { settled } from '../../ds/test/settled.ts';
 import { worker } from '../../mocks/browser.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
@@ -424,6 +425,8 @@ describe('rules page', () => {
       await page.viewport(width, 900);
       await expect.poll(() => window.innerWidth).toBe(width);
       await expect.poll(() => screen.container.querySelector('.cd-app-shell')?.classList.contains('cd-app-shell--compact')).toBe(width < 768);
+      // Measured at rest: the panel has slid in and the page has glided beside it.
+      await settled(screen.container);
       const title = screen.getByRole('heading', { level: 1, name: 'Rules' }).element();
       const header = title.closest('.cd-page-header') as HTMLElement;
       // From 1024 px up the panel stays beside the page.

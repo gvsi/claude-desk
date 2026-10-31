@@ -10,6 +10,7 @@
 ## What it shows
 
 - A complementary region named by its heading, "Ask Claude", `size-side-panel` (400 px) wide on `bg-panel`, with a `line-hairline` seam on its left and 24 px of padding (20 px at the bottom).
+- Beside the page it slides in as it opens and out as it closes, and the page glides to make room; `AppShell` runs that move (see its README). As a sheet it appears and goes at once.
 - Under 1024 px it is a modal sheet instead (`role="dialog"`, `aria-modal`). The rule is that the page beside the panel never gets under 360 px: the sidebar's 264 px column and the panel's 400 px leave it 360 px at 1024 px, and an upright tablet (768 px) would leave it 104 px.
   - From 640 px to 1023 px (a tablet) the sheet is the panel as it is beside the page, 400 px wide with its padding and seam, docked at the window's right edge at its full height, so the conversation keeps the panel's measure. `scrim` covers the rest of the window, as behind `Dialog` and the other sheets, with no shadow.
   - Under 640 px (a phone) it is the whole window, with 16 px of padding, no seam and no scrim.

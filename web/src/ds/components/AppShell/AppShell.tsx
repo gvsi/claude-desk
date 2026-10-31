@@ -1,5 +1,7 @@
 import {
+  Component,
   createContext,
+  createRef,
   useCallback,
   useId,
   useLayoutEffect,
@@ -9,6 +11,7 @@ import {
   type KeyboardEvent,
   type MouseEvent,
   type ReactNode,
+  type RefObject,
 } from 'react';
 
 import { Icon } from '../../icons/index.tsx';
@@ -37,7 +40,8 @@ export interface AppShellProps {
    * A panel beside the page, such as `AskClaudePanel`: at the right of the main area, the main
    * area's height, the page narrowing to make room. A panel that becomes a modal sheet (on a phone
    * or a tablet) says so through `AppShellPanelContext`, and the shell makes everything else inert
-   * meanwhile.
+   * meanwhile. A panel that opens beside the page slides in, and the page glides to its new place;
+   * one that closes slides out while the page glides back (`PanelSlot`).
    */
   panel?: ReactNode;
   /** The page. */
@@ -73,6 +77,18 @@ function isNarrow(): boolean {
   return window.matchMedia(NARROW).matches;
 }
 
+const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
+
+function subscribeReducedMotion(onChange: () => void): () => void {
+  const query = window.matchMedia(REDUCED_MOTION);
+  query.addEventListener('change', onChange);
+  return () => query.removeEventListener('change', onChange);
+}
+
+function reducesMotion(): boolean {
+  return window.matchMedia(REDUCED_MOTION).matches;
+}
+
 /**
  * The owner app's frame: an optional banner across the top, the sidebar in its column on the
  * panel, and the page beside it, padded and no wider than `size-content`. On a narrow screen, or
@@ -83,6 +99,8 @@ function isNarrow(): boolean {
 export function AppShell({ sidebar, business, banner, layout = 'auto', fill = false, panel, children }: AppShellProps) {
   const narrow = useSyncExternalStore(subscribeNarrow, isNarrow, () => false);
   const compact = layout === 'compact' || narrow;
+  const reduced = useSyncExternalStore(subscribeReducedMotion, reducesMotion, () => true);
+  const content = useRef<HTMLDivElement>(null);
 
   // While the panel is a modal sheet, everything the shell draws besides it is inert: the inert
   // attribute is part of each render, so a part drawn anew (the top bar replacing the column as the
@@ -120,21 +138,167 @@ export function AppShell({ sidebar, business, banner, layout = 'auto', fill = fa
             {sidebar}
           </aside>
         )}
-        <Main fill={fill} inert={inert}>
+        <Main fill={fill} inert={inert} contentRef={content}>
           {children}
         </Main>
-        {panel ? <AppShellPanelContext.Provider value={setModal}>{panel}</AppShellPanelContext.Provider> : null}
+        {/* A panel beside the page slides in and out; a sheet, or any panel under reduced motion, comes and goes at once. */}
+        <PanelSlot panel={panel} setModal={setModal} moves={!panelModal && !reduced} contentRef={content} />
       </div>
     </div>
   );
 }
 
-function Main({ fill, inert, children }: { fill: boolean; inert: boolean; children: ReactNode }) {
+function Main({ fill, inert, contentRef, children }: { fill: boolean; inert: boolean; contentRef: RefObject<HTMLDivElement>; children: ReactNode }) {
   return (
     <main className={`cd-app-shell__main${fill ? ' cd-app-shell__main--fill' : ''}`} {...inertWhen(inert)}>
-      <div className="cd-app-shell__content">{children}</div>
+      <div ref={contentRef} className="cd-app-shell__content">
+        {children}
+      </div>
     </main>
   );
+}
+
+/** A motion token's value in milliseconds, from the root, whether the token is written in milliseconds or seconds. */
+function tokenMillis(name: string): number {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const time = Number.parseFloat(value);
+  if (!Number.isFinite(time)) return 0;
+  return value.endsWith('ms') ? time : time * 1000;
+}
+
+function tokenValue(name: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+interface PanelSlotProps {
+  /** The shell's `panel`: shown while given. */
+  panel: ReactNode;
+  setModal: SetPanelModal;
+  /**
+   * The panel sits beside the page and motion is allowed: it may slide, and the page glide. When
+   * that stops (the panel became a sheet, or motion was reduced), any move under way ends at once.
+   */
+  moves: boolean;
+  /** The page's content, which glides when the panel opens or closes beside it. */
+  contentRef: RefObject<HTMLDivElement>;
+}
+
+interface PanelSlotState {
+  /** The panel shown: the shell's own, or, while it leaves, the last one it gave. */
+  node: ReactNode;
+  /** The panel was taken away and is sliding out, out of reach, before it goes. */
+  leaving: boolean;
+  /** Counts openings, so a panel opened again while the last one leaves is a new one. */
+  key: number;
+}
+
+type PanelPhase = 'none' | 'open' | 'leaving';
+
+const phaseOf = (state: PanelSlotState): PanelPhase => (state.node ? (state.leaving ? 'leaving' : 'open') : 'none');
+
+/**
+ * The panel beside the page, and how it comes and goes. Opening, the panel slides `space-24` in
+ * from the right and fades up, and the page, laid out at its new width at once, glides from where
+ * it was to its new place on transform alone (a FLIP: first, last, invert, play), both on
+ * motion-base with the emphasis ease. Closing reverses on motion-fast: the panel, out of reach and
+ * out of the row, so the page takes its full width at once, slides out while the page glides back.
+ * A panel that takes no room in the row (a sheet over the window) neither slides nor moves the page,
+ * and under reduced motion every change is its end state at once.
+ *
+ * A class, because the page's place before the change has to be read before React changes the
+ * page (`getSnapshotBeforeUpdate`), and the motion started after it, before the browser paints.
+ */
+class PanelSlot extends Component<PanelSlotProps, PanelSlotState> {
+  state: PanelSlotState = { node: null, leaving: false, key: 0 };
+
+  private slot = createRef<HTMLDivElement>();
+
+  private glide: Animation | null = null;
+
+  private fallback: number | undefined;
+
+  static getDerivedStateFromProps(props: PanelSlotProps, state: PanelSlotState): Partial<PanelSlotState> | null {
+    if (props.panel) {
+      const reopened = !state.node || state.leaving;
+      return { node: props.panel, leaving: false, key: reopened ? state.key + 1 : state.key };
+    }
+    if (state.node && !state.leaving) return props.moves ? { leaving: true } : { node: null };
+    return null;
+  }
+
+  getSnapshotBeforeUpdate(_props: PanelSlotProps, prev: PanelSlotState): number | null {
+    if (phaseOf(prev) === phaseOf(this.state) && prev.key === this.state.key) return null;
+    // A panel that has slid out was already out of the row: its going moves nothing.
+    if (phaseOf(prev) === 'leaving' && phaseOf(this.state) === 'none') return null;
+    // Where the page is drawn now, mid-glide included, so a glide taken over starts from there.
+    return this.props.contentRef.current?.getBoundingClientRect().left ?? null;
+  }
+
+  componentDidUpdate(props: PanelSlotProps, _prev: PanelSlotState, first: number | null): void {
+    // A panel that became a sheet mid-move (a sheet is fixed, and a moving slot would carry it), or
+    // motion reduced mid-move: the move's end state, at once.
+    if (props.moves && !this.props.moves) {
+      for (const animation of this.slot.current?.getAnimations() ?? []) animation.finish();
+      this.glide?.finish();
+    }
+    if (first === null) return;
+    const phase = phaseOf(this.state);
+    const content = this.props.contentRef.current;
+    this.glide?.cancel();
+    this.glide = null;
+    if (!content || reducesMotion()) return;
+    const opening = phase === 'open';
+    const timing = { duration: tokenMillis(opening ? '--motion-base' : '--motion-fast'), easing: tokenValue('--motion-ease-emphasis') };
+    const shift = first - content.getBoundingClientRect().left;
+    if (Math.abs(shift) >= 0.5) {
+      const glide = content.animate([{ transform: `translateX(${shift}px)` }, { transform: 'none' }], timing);
+      this.glide = glide;
+      // Drawn past the main area's edge while it glides, the page never makes it scroll sideways.
+      const main = content.parentElement;
+      main?.setAttribute('data-gliding', '');
+      const landed = () => {
+        if (this.glide === glide || this.glide === null) main?.removeAttribute('data-gliding');
+      };
+      glide.finished.then(landed, landed);
+    }
+    const slot = this.slot.current;
+    if (!slot) return;
+    const away = { transform: `translateX(${tokenValue('--space-24')})`, opacity: 0 };
+    const here = { transform: 'none', opacity: 1 };
+    if (opening) {
+      // Only a panel beside the page slides in: a sheet takes no room in the row.
+      if (slot.offsetWidth > 0) slot.animate([away, here], timing);
+      return;
+    }
+    if (phase === 'leaving') {
+      const { key } = this.state;
+      const leave = slot.animate([here, away], { ...timing, fill: 'forwards' });
+      leave.finished.then(() => this.drop(key), () => {});
+      // If the animation's end never comes (a hidden tab), the panel still goes.
+      window.clearTimeout(this.fallback);
+      this.fallback = window.setTimeout(() => this.drop(key), timing.duration + tokenMillis('--motion-instant'));
+    }
+  }
+
+  componentWillUnmount(): void {
+    window.clearTimeout(this.fallback);
+  }
+
+  /** The panel that was leaving goes, unless another has opened since. */
+  private drop(key: number): void {
+    window.clearTimeout(this.fallback);
+    this.setState((state) => (state.leaving && state.key === key ? { node: null, leaving: false } : null));
+  }
+
+  render() {
+    const { node, leaving, key } = this.state;
+    if (!node) return null;
+    return (
+      <div key={key} ref={this.slot} className={`cd-app-shell__panel${leaving ? ' cd-app-shell__panel--leaving' : ''}`} {...inertWhen(leaving)}>
+        <AppShellPanelContext.Provider value={this.props.setModal}>{node}</AppShellPanelContext.Provider>
+      </div>
+    );
+  }
 }
 
 /** The compact navigation: the top bar with the mark, the business and Menu, and the sheet Menu opens. */
