@@ -26,7 +26,7 @@ import {
 import { writeLocal } from '../lib/storage.ts';
 import { connectorPageHref } from './connectors/pages.ts';
 import { AskClaudeProvider, useAskClaudeHost } from './rules/askClaude.tsx';
-import { DESKS_KEY, desksQuery, findDesk, invalidateCopy, lastOrFirst, todayPath, useDesks, useToday, useTodayReadAhead } from './useDesks.ts';
+import { DESKS_KEY, desksQuery, findDesk, invalidateCopy, lastOrFirst, readTodayEarly, todayPath, useDesks, useToday } from './useDesks.ts';
 
 import './OwnerLayout.css';
 
@@ -134,23 +134,24 @@ export function OwnerLayout() {
  * One Desk's frame, mounted afresh for each Desk, so the copy's Desks are read again whenever the
  * owner lands on a Desk they don't list (a new copy's, a Desk just made). Only that fresh read can
  * say the Desk isn't the owner's, unless a page holds the Desk (`holdDesk`) while it settles a
- * delete: then the frame stays up as it last was, and the page moves on once it knows. Opened onto
- * Today with the loading page up (a reload, a Desk not listed yet), the loading page stays while
- * Today is read ahead too, as on a first visit, so Today opens drawn; a Desk already listed (a
- * switch between Desks) opens at once.
+ * delete: then the frame stays up as it last was, and the page moves on once it knows. Opened at
+ * Today's address with the loading page up (a reload, a Desk not listed yet), it sends Today's own
+ * reads with the Desks' rather than once they are in, so Today, which keeps its sections back until
+ * those reads are in, opens sooner.
  */
 function DeskGate({ deskId }: { deskId: string }) {
   const desks = useDesks(deskId);
   const location = useLocation();
+  const queryClient = useQueryClient();
   const found = desks.data ? findDesk(desks.data, deskId) : null;
   const [held, setHeld] = useState<ShownDesk | null>(null);
   const shown = found ?? held;
-  const readingAhead = useTodayReadAhead(deskId, found === null && opensToday(location.pathname));
+  const readsToday = found === null && opensToday(location.pathname);
+  useEffect(() => {
+    if (readsToday) readTodayEarly(queryClient, deskId);
+  }, [readsToday, queryClient, deskId]);
 
-  if (shown) {
-    if (readingAhead) return <OwnerState />;
-    return <DeskFrame businesses={desks.data ?? []} business={shown.business} desk={shown.desk} onHold={setHeld} />;
-  }
+  if (shown) return <DeskFrame businesses={desks.data ?? []} business={shown.business} desk={shown.desk} onHold={setHeld} />;
   if (desks.isError) return <OwnerState error={desks.error} onRetry={() => void desks.refetch()} />;
   if (desks.data && !desks.isFetching) return <NotFound />;
   return <OwnerState />;

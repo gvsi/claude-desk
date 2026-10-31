@@ -30,10 +30,11 @@ import {
   focusIsOn,
   nextFrames,
 } from '../../test/screen.ts';
-import { watchFor, watchPages } from '../../test/watch.ts';
+import { watchFor, watchPages, watchTop } from '../../test/watch.ts';
 
 const TODAY = `/app/${RIVERA.deskId}/today`;
 const DESK = `/app/${RIVERA.deskId}`;
+const CONVERSATIONS = `/app/${RIVERA.deskId}/conversations`;
 const LA = 'America/Los_Angeles';
 
 const SEEDED_REASON = rivera.decisions.held.reason_plain;
@@ -123,6 +124,36 @@ function holdReads(path: string): { held: () => number; release: () => void } {
 
 /** The main Desk's Needs you, as the app reads it. */
 const needsYouPath = ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId);
+
+/** The Emergencies Desk's Needs you, as the app reads it. */
+const emergenciesNeedsYouPath = ROUTES.needsYou.path.replace('{desk_id}', RIVERA.emergenciesDeskId);
+
+/** The sidebar's pages. */
+function mainNav(screen: RenderResult) {
+  return screen.getByRole('navigation', { name: 'Main' });
+}
+
+/** From the Desk named `from` to the one named `to`, with the sidebar's Desk picker. */
+async function switchDesk(screen: RenderResult, from: string, to: string): Promise<void> {
+  await screen.getByRole('button', { name: `Switch Desk, current: ${from}` }).click();
+  await screen.getByRole('button', { name: to }).click();
+  await expect.element(screen.getByRole('button', { name: `Switch Desk, current: ${to}` })).toBeVisible();
+}
+
+/** Today's "Since last night" heading, when Today shows it. */
+const sinceLastNightHeading = () => [...document.querySelectorAll('.cd-today h2')].find((h) => h.textContent === 'Since last night') ?? null;
+
+/**
+ * Today is open but still reading what it first shows: its column holds the loading line alone,
+ * with no greeting and no section yet in either column, so nothing shown before Today is drawn can
+ * be pushed down by it, the right column included where it stacks under the page.
+ */
+function expectTodayOpening(): void {
+  const page = document.querySelector('.cd-today');
+  expect(page).not.toBeNull();
+  expect(page!.textContent).toBe('Opening your Desk');
+  expect(page!.querySelector('.cd-today__main > .cd-loading-line[role="status"]')).not.toBeNull();
+}
 
 /** Waits for `key` to be read `n` more times than now. */
 async function readsMore(key: string, n: number): Promise<void> {
@@ -244,10 +275,11 @@ describe('Today', () => {
   });
 
   it('reload_opens_today_drawn', async () => {
-    // Opened at Today's address, as a reload does, the owner's loading page stays until what Today
-    // first shows is read, so its sections never arrive one by one, each pushing the next down.
-    // The Desks and Today answer at once; Needs you is held back. The page this file drew last goes
-    // first, so the watch sees only this one.
+    // Opened at Today's address, as a reload does: the owner's loading page while the copy's Desks
+    // are read, then Today with its column on the loading line until what it first shows is read,
+    // so its sections never arrive one by one, each pushing the next down. The Desks and Today
+    // answer at once; Needs you is held back. The page this file drew last goes first, so the watch
+    // sees only this one.
     await cleanup();
     const pages = watchPages();
     const needsYou = holdReads(needsYouPath);
@@ -257,8 +289,7 @@ describe('Today', () => {
     await expect.poll(() => requests('desks').length).toBeGreaterThan(0);
     // Time for Today to be drawn, had it opened without Needs you.
     await new Promise((resolve) => setTimeout(resolve, 300));
-    await expect.element(screen.getByText('Opening your Desk', { exact: true })).toBeVisible();
-    expect(screen.getByRole('heading', { name: 'Since last night' }).elements()).toHaveLength(0);
+    expectTodayOpening();
 
     // Once Needs you is in, Today opens with every section drawn.
     needsYou.release();
@@ -266,16 +297,34 @@ describe('Today', () => {
     await expect.element(region(screen, 'Live now').getByRole('link')).toBeVisible();
     await expect.element(region(screen, 'Since last night').getByRole('listitem').first()).toBeVisible();
     await expect.element(screen.getByRole('heading', { level: 2, name: 'Last 7 days' })).toBeVisible();
-    expect(pages()).toEqual(['loading', 'today']);
+    expect(pages()).toEqual(['loading', 'today opening', 'today']);
   });
 
-  it('reload_waits_on_today_no_longer_than_a_first_visit', async () => {
-    // A read that runs past the read ahead's 3 s cap doesn't keep the owner on the loading page:
-    // Today opens, still reading what needs the owner, and the request shows when its read is in.
+  it('reload_reads_today_beside_the_desks', async () => {
+    // A reload of Today sends Today's own reads with the copy's Desks, not once they are in, so on
+    // a slow network Today opens a round trip sooner.
+    const desks = holdReads(ROUTES.desks.path);
+    const needsYou = holdReads(needsYouPath);
+    const { screen } = await renderRoute(TODAY);
+    await vi.waitFor(() => expect(desks.held()).toBe(1));
+    await vi.waitFor(() => expect(needsYou.held()).toBe(1));
+    await expect.poll(() => requests('today').length).toBeGreaterThan(0);
+    await expect.element(screen.getByText('Opening your Desk', { exact: true })).toBeVisible();
+    expect(document.querySelector('.cd-owner-state')).not.toBeNull();
+
+    desks.release();
+    needsYou.release();
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+  });
+
+  it('today_waits_no_longer_than_a_first_visit', async () => {
+    // A read that runs past the read ahead's 3 s cap doesn't keep Today's column on the loading
+    // line: Today draws what it has, still reading what needs the owner, and the request shows when
+    // its read is in.
     const needsYou = holdReads(needsYouPath);
     const { screen } = await renderRoute(TODAY);
     await vi.waitFor(() => expect(needsYou.held()).toBe(1));
-    await expect.element(screen.getByText('Opening your Desk', { exact: true })).toBeVisible();
+    await vi.waitFor(expectTodayOpening);
     await expect.element(region(screen, 'Since last night').getByRole('listitem').first(), { timeout: 5_000 }).toBeVisible();
     expect(heldCard(screen, SEEDED_REASON).elements()).toHaveLength(0);
 
@@ -283,16 +332,74 @@ describe('Today', () => {
     await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
   });
 
-  it('switching_desks_opens_today_at_once', async () => {
-    // A Desk the copy's Desks already list opens straight onto its Today, never the loading page.
+  it('switching_desks_opens_today_drawn', async () => {
+    // Another Desk the copy's Desks already list opens at once, never on the owner's loading page,
+    // onto a Today whose column stays on the loading line until that Desk's Today and Needs you are
+    // in. Here Needs you is slow, with a request waiting, so "Since last night" would show first and
+    // then be pushed down by it.
     const { screen } = await renderRoute(TODAY, { seed: 'rivera_two_desks' });
     await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
-    const sawLoading = watchFor('Opening your Desk');
-    await screen.getByRole('button', { name: 'Switch Desk, current: Main line' }).click();
-    await screen.getByRole('button', { name: 'Emergencies' }).click();
-    await expect.element(screen.getByRole('button', { name: 'Switch Desk, current: Emergencies' })).toBeVisible();
-    await expect.element(region(screen, 'Since last night')).toBeVisible();
-    expect(sawLoading()).toBe(false);
+    const [seeded] = await heldItems();
+    mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: [seeded] });
+    const needsYou = holdReads(emergenciesNeedsYouPath);
+    const pages = watchPages();
+    await switchDesk(screen, 'Main line', 'Emergencies');
+    await vi.waitFor(() => expect(needsYou.held()).toBe(1));
+    // Time for Today to be drawn, had it opened without Needs you.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expectTodayOpening();
+    const since = watchTop(sinceLastNightHeading);
+
+    needsYou.release();
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    await expect.element(region(screen, 'Since last night').getByText('A quiet night', { exact: true })).toBeVisible();
+    expect(since()).toHaveLength(1);
+    expect(pages()).toEqual(['today', 'today opening', 'today']);
+  });
+
+  it('switching_to_a_desk_already_read_opens_today_at_once', async () => {
+    // A Desk whose Today and Needs you are already read opens straight onto its Today drawn, with
+    // neither the loading page nor the loading line, even while those reads go out again: here they
+    // are held, so only what was read can draw it.
+    const { screen } = await renderRoute(TODAY, { seed: 'rivera_two_desks' });
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    await switchDesk(screen, 'Main line', 'Emergencies');
+    await expect.element(region(screen, 'Since last night').getByText('A quiet night', { exact: true })).toBeVisible();
+
+    const today = holdReads(ROUTES.today.path.replace('{desk_id}', RIVERA.deskId));
+    const needsYou = holdReads(needsYouPath);
+    const pages = watchPages();
+    await switchDesk(screen, 'Emergencies', 'Main line');
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    expect(pages()).toEqual(['today without its held request', 'today']);
+    today.release();
+    needsYou.release();
+  });
+
+  it('today_after_a_reload_elsewhere_opens_drawn', async () => {
+    // Reloaded on Conversations, the frame keeps Today read, but Needs you is read only as Today
+    // opens, here slowly. Today keeps its column on the loading line until Needs you is in too, so
+    // "Since last night" never shows and is then pushed down by the requests above it.
+    const first = await renderRoute(TODAY);
+    await expect.element(heldCard(first.screen, SEEDED_REASON)).toBeVisible();
+    await mainNav(first.screen).getByRole('link', { name: /^Conversations/ }).click();
+    await expect.poll(() => first.router.state.location.pathname).toBe(CONVERSATIONS);
+    const { screen } = await renderRoute(CONVERSATIONS);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Conversations' })).toBeVisible();
+    await expect.poll(() => requests('today').length).toBeGreaterThan(0);
+
+    const needsYou = holdReads(needsYouPath);
+    const since = watchTop(sinceLastNightHeading);
+    await mainNav(screen).getByRole('link', { name: 'Today' }).click();
+    await vi.waitFor(() => expect(needsYou.held()).toBe(1));
+    // Time for Today to be drawn, had it opened without Needs you.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expectTodayOpening();
+
+    needsYou.release();
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    await expect.element(region(screen, 'Since last night').getByRole('listitem').first()).toBeVisible();
+    expect(since()).toHaveLength(1);
   });
 
   it('needs_you_read_failure_says_so', async () => {
@@ -1537,6 +1644,24 @@ describe("Today's Demo inbox", () => {
     await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
     expectInView(card.element());
     expect(router.state.location.hash).toBe(`#request-${encodeURIComponent(held.decision_id)}`);
+  });
+
+  it('request_link_lands_once_today_has_drawn', async () => {
+    // Needs you is in at once but Today's own read is slow, so the page keeps its column on the
+    // loading line while Needs you is read again and again. The landing waits for the card to be
+    // drawn, rather than spend itself on a page that doesn't show the request yet.
+    const held = seededHold();
+    const todayRead = holdReads(ROUTES.today.path.replace('{desk_id}', RIVERA.deskId));
+    const { screen } = await renderRoute(requestLink(held.decision_id));
+    await vi.waitFor(() => expect(todayRead.held()).toBeGreaterThanOrEqual(1));
+    await vi.waitFor(expectTodayOpening);
+    await readsMore('needsYou', 3);
+    expectTodayOpening();
+
+    todayRead.release();
+    const card = heldCard(screen, SEEDED_REASON);
+    await expect.element(card).toBeInTheDocument();
+    await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
   });
 
   it('inbox_polls_only_while_the_sheet_is_open', async () => {

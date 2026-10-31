@@ -57,9 +57,9 @@ export function useNeedsYou(deskId: string) {
 
 /**
  * When the last read ahead of each Desk's Today gives up (a `Date.now()` time), per app (its query
- * client, so a reload starts afresh), until the Desk's frame next opens and takes it: the first
- * visit's page reads ahead and then opens the frame, which waits no longer than that, so a visit
- * has one deadline however many pages wait on it.
+ * client, so a reload starts afresh), until the Desk's Today next opens and takes it: the first
+ * visit's page reads ahead and then opens Today, which waits no longer than that, so a visit has
+ * one deadline however many pages wait on it.
  */
 const readAheadDeadlines = new WeakMap<QueryClient, Map<string, number>>();
 
@@ -76,12 +76,21 @@ function deadlinesOf(queryClient: QueryClient): Map<string, number> {
  * Reads what a Desk's Today first shows (the copy's Desks, its Today and Needs you) at once, for up
  * to `capMs`, so a page can open onto a Today that is already drawn. A read that fails or runs long
  * is left to Today, which shows and retries it as it always does; this never throws. The Desk's
- * frame, opened next, waits no later than this does (`useTodayReadAhead`).
+ * Today, opened next, waits no later than this does (`useTodayOpening`).
  */
 export async function readTodayAhead(queryClient: QueryClient, deskId: string, capMs: number): Promise<void> {
   const deadline = Date.now() + capMs;
   deadlinesOf(queryClient).set(deskId, deadline);
   await readTodayUntil(queryClient, deskId, deadline);
+}
+
+/**
+ * Sends what a Desk's Today first shows besides the copy's Desks (its Today and Needs you) now,
+ * without waiting on them, so a page about to open Today has them sooner; this never throws.
+ */
+export function readTodayEarly(queryClient: QueryClient, deskId: string): void {
+  void queryClient.prefetchQuery(todayQuery(deskId));
+  void queryClient.prefetchQuery(needsYouQuery(deskId));
 }
 
 /** `readTodayAhead`'s reads, until `deadline` (a `Date.now()` time) at the latest. */
@@ -100,32 +109,31 @@ async function readTodayUntil(queryClient: QueryClient, deskId: string, deadline
 }
 
 /**
- * Whether a Desk's frame opening onto its Today from the owner's loading page (a reload, or a Desk
- * the copy's Desks don't list yet) is still reading Today ahead. `wanted`, as the frame first
- * renders, says whether to; then it reads what Today first shows, as a first visit does, so Today
- * opens drawn rather than section by section, each pushing the next down. It waits until the
- * deadline of the read ahead that opened this frame (the first visit's page), else `READ_AHEAD_MS`
- * from now: past that deadline, it doesn't wait at all.
+ * Whether a Desk's Today, just opened, is still reading what it first shows (its Today and Needs
+ * you), so it keeps its sections back and they open together rather than one by one, each pushing
+ * the next down, however the owner came: a first visit, a reload, another Desk or another page.
+ * Reads already in, or failed, open it at once; else it waits no later than the read ahead that
+ * opened it gives up (a first visit's page), or `READ_AHEAD_MS` from when it opened. Once open, it
+ * stays open.
  */
-export function useTodayReadAhead(deskId: string, wanted: boolean): boolean {
+export function useTodayOpening(deskId: string): boolean {
   const queryClient = useQueryClient();
+  const today = useToday(deskId);
+  const needsYou = useNeedsYou(deskId);
+  const read = (today.data !== undefined || today.isError) && (needsYou.data !== undefined || needsYou.isError);
   const [deadline] = useState(() => deadlinesOf(queryClient).get(deskId) ?? Date.now() + READ_AHEAD_MS);
-  const [reading, setReading] = useState(() => wanted && Date.now() < deadline);
-  // Taken once the frame has it: the Desk's next frame is a later visit, with a wait of its own.
+  const [open, setOpen] = useState(() => read || Date.now() >= deadline);
+  if (read && !open) setOpen(true);
+  // Taken once Today has it: the Desk's next Today is a later visit, with a wait of its own.
   useEffect(() => {
     deadlinesOf(queryClient).delete(deskId);
   }, [queryClient, deskId]);
   useEffect(() => {
-    if (!reading) return undefined;
-    let live = true;
-    void readTodayUntil(queryClient, deskId, deadline).then(() => {
-      if (live) setReading(false);
-    });
-    return () => {
-      live = false;
-    };
-  }, [reading, queryClient, deskId, deadline]);
-  return reading;
+    if (open) return undefined;
+    const timer = setTimeout(() => setOpen(true), deadline - Date.now());
+    return () => clearTimeout(timer);
+  }, [open, deadline]);
+  return !open;
 }
 
 /** The copy changed (a new copy, a Desk added or deleted): read the businesses and the copy again. */
