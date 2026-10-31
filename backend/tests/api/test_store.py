@@ -610,7 +610,7 @@ async def test_transcript_projects_each_audience(api_conn, kernel_http, fake, vi
                            generation=0)                              # never shown as written
     await deliver(api_conn, ids, Reply(verdict, "claude", "api"), ro_schema=ro_schema)
     await deliver(api_conn, ids, Status(held, "held"), ro_schema=ro_schema)
-    pushed = Triage(summary="Pushed for a discount.", category="discount_push")
+    pushed = Triage(summary="Pushed for a discount.", category="prices")
     await append_message(api_conn, ids, "triage", ref_id=held.decision_id, text=pushed.model_dump_json())
     await append_message(api_conn, ids, "whisper", text="Offer a callback instead.")
     await append_message(api_conn, ids, "note", text="The visitor verified.")
