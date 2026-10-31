@@ -1620,9 +1620,9 @@ describe('Today', () => {
     expect(router.state.location.pathname).toBe(TODAY);
   });
 
-  it('things_to_try_opens_the_vision_article', async () => {
+  it.each(['desktop', 'phone'] as const)('things_to_try_opens_the_vision_article_on_%s', async (viewport) => {
     // One quiet link under the list, after its card, opens the Vision article under About this prototype.
-    const { screen, router } = await renderRoute(TODAY);
+    const { screen, router } = await renderRoute(TODAY, { viewport });
     const things = region(screen, 'Things to try');
     const link = things.getByRole('link', { name: 'Vision: where a Desk could go next', exact: true });
     await expect.element(link).toHaveAttribute('href', '/about/vision');
@@ -1637,6 +1637,10 @@ describe('Today', () => {
     await link.click();
     await expect.poll(() => router.state.location.pathname).toBe('/about/vision');
     await expect.element(screen.getByRole('heading', { level: 1, name: 'A front desk that never closes', exact: true })).toBeVisible();
+    await expect.poll(() => window.scrollY).toBe(0);
+    const heading = screen.container.querySelector('h1')?.getBoundingClientRect();
+    expect(heading?.top).toBeGreaterThanOrEqual(0);
+    expect(heading?.bottom).toBeLessThanOrEqual(window.innerHeight);
   });
 });
 

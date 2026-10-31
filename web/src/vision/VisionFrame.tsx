@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
-import { useNavigate } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 
+import { usePagePlace } from '../about/usePagePlace.ts';
 import { AppShell, ClaudeMessage, Sidebar, VisionBar } from '../ds/index.ts';
 import { useDocumentTitle } from '../lib/useDocumentTitle.ts';
 import { followInAppLinks } from '../owner/inAppLinks.ts';
@@ -26,6 +27,8 @@ export interface VisionFrameProps {
  */
 export function VisionFrame({ title, children }: VisionFrameProps) {
   const navigate = useNavigate();
+  const { pathname } = useLocation();
+  usePagePlace(pathname);
 
   useDocumentTitle(title);
 

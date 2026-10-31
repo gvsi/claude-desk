@@ -19,6 +19,7 @@ import { AboutSwitch } from '../AboutSwitch.tsx';
 import { readNext } from '../links.ts';
 import { PrototypeLink } from '../PrototypeLink.tsx';
 import { useNoIndex } from '../useNoIndex.ts';
+import { usePagePlace } from '../usePagePlace.ts';
 import {
   ARTICLE,
   PICTURE_CARDS,
@@ -267,6 +268,7 @@ export function VisionArticle() {
   // The tab names the page while it is open; search engines are asked not to list it, as the other About pages.
   useDocumentTitle(inApp(ARTICLE.kicker));
   useNoIndex();
+  usePagePlace('vision');
   const compact = useSyncExternalStore(subscribeNarrow, isNarrow, () => false);
   // The About set's switch, the article marked as the page on show: in the bar, or under it on a phone, where it
   // scrolls away with the page as the reading pages' does.

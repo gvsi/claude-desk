@@ -23,6 +23,65 @@ afterEach(() => {
 });
 
 describe('About pages', () => {
+  it.each(['desktop', 'phone'] as const)('read_next_opens_vision_at_the_top_on_%s', async (viewport) => {
+    const { screen, router } = await renderRoute('/about/proposal', { viewport, strict: true });
+    await expect.element(screen.getByRole('heading', { name: 'Product proposal', exact: true })).toBeVisible();
+    const next = screen.container.querySelector('[data-next-label]')?.parentElement?.querySelector('a');
+    if (!next) throw new Error('no Read next');
+    await userEvent.click(next);
+    await expect.poll(() => router.state.location.pathname).toBe('/about/vision');
+    await expect.element(screen.getByRole('heading', { name: 'A front desk that never closes', exact: true })).toBeVisible();
+    await expect.poll(() => window.scrollY).toBe(0);
+    const heading = screen.container.querySelector('h1')?.getBoundingClientRect();
+    expect(heading?.top).toBeGreaterThanOrEqual(0);
+    expect(heading?.bottom).toBeLessThanOrEqual(window.innerHeight);
+  });
+
+  it.each(['desktop', 'phone'] as const)('vision_cards_open_at_the_top_and_history_restores_the_place_on_%s', async (viewport) => {
+    // Isolate the page's restoration from Chromium's anchoring when the shorter picture replaces the article.
+    document.documentElement.style.overflowAnchor = 'none';
+    document.body.style.overflowAnchor = 'none';
+    onTestFinished(() => {
+      document.documentElement.style.overflowAnchor = '';
+      document.body.style.overflowAnchor = '';
+    });
+    const { screen, router } = await renderRoute('/about/vision', { viewport, strict: true });
+    await expect.element(screen.getByRole('heading', { name: 'A front desk that never closes', exact: true })).toBeVisible();
+    await document.fonts.ready;
+    const scrollTo = async (top: number) => {
+      const scrolled = new Promise((resolve) => window.addEventListener('scroll', resolve, { once: true }));
+      window.scrollTo({ top, behavior: 'instant' });
+      await scrolled;
+      return window.scrollY;
+    };
+    const card = screen.container.querySelector<HTMLAnchorElement>('a[href="/vision/phone"]');
+    if (!card) throw new Error('no phone card');
+    const articlePlace = await scrollTo(card.getBoundingClientRect().top + window.scrollY - 150);
+    expect(articlePlace).toBeGreaterThan(0);
+    card.click();
+    await expect.poll(() => router.state.location.pathname).toBe('/vision/phone');
+    const bar = screen.getByRole('note', { name: 'Vision', exact: true });
+    await expect.element(bar).toBeVisible();
+    await expect.poll(() => window.scrollY).toBe(0);
+    const box = bar.element().getBoundingClientRect();
+    expect(box.top).toBeGreaterThanOrEqual(0);
+    expect(box.bottom).toBeLessThanOrEqual(window.innerHeight);
+
+    const phonePlace = await scrollTo(100);
+    await router.navigate(-1);
+    await expect.element(screen.getByRole('heading', { name: 'A front desk that never closes', exact: true })).toBeVisible();
+    await expect.poll(() => window.scrollY).toBe(articlePlace);
+    await router.navigate(1);
+    await expect.element(bar).toBeVisible();
+    await expect.poll(() => window.scrollY).toBe(phonePlace);
+
+    // A DOM click leaves the scroll where the reader put it, even when the bar is above the viewport.
+    const back = screen.getByRole('link', { name: 'Back to Vision', exact: true }).element() as HTMLAnchorElement;
+    back.click();
+    await expect.poll(() => router.state.location.pathname).toBe('/about/vision');
+    await expect.poll(() => window.scrollY).toBe(0);
+  });
+
   it('about_pages_render_at_their_routes', async () => {
     writeLocal('lastDesk', null);
     // Nothing is logged on the way, such as React Router's warning, given once, for a page whose code is
