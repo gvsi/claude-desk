@@ -30,7 +30,10 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    with no canary in any field it renders or in the fact ID it names. The Desk's catalog
    (`context.catalog_fact`) is cited like a stored fact, and no template renders it, so it backs
    no card. The clauses are checked before the prose is scanned, so the scan knows which cards
-   pass; their refusals follow the scan's.
+   pass; their refusals follow the scan's. The shown prose followed by free-text charter policy
+   cards is also scanned in reply order, separated by newlines, using the public-text rules.
+   Unsafe policy clauses are refused as `unknown_fact` / `policy_combined`, naming the facts
+   contributing to the match. Structured cards stay outside this public-text scan.
 5. The soft-promise check, only when steps 2 to 4 found nothing and there is prose: Haiku 5.5
    reads the prose and the cards' texts (never the visitor's words) and flags a promise the cards
    don't hold (`soft.promise`) or prose that says or suggests the writer is a human
@@ -432,12 +435,24 @@ def scan_public_policies(values: Mapping[str, str]) -> dict[str, list[str]]:
     Keep full match ranges for attribution, even when a violation's display span is truncated.
     Only contributing keys and rule IDs leave the scan.
     """
-    fields = {key: set(scan_public_text(value)) for key, value in values.items()}
-    ranges: list[tuple[str, int, int]] = []
+    return _scan_public_parts(sorted(values.items()))
+
+
+def _scan_public_parts(values: Sequence[tuple[str | None, str]]) -> dict[str, list[str]]:
+    """The public-text rules in the supplied rendering order, attributed to policy IDs.
+
+    A None key is reply prose: it supplies context, but its own refusals stay with the
+    existing prose checks. Newline boundaries keep separate cards from joining word fragments.
+    """
+    fields: dict[str, set[str]] = {}
+    for key, value in values:
+        if key is not None:
+            fields.setdefault(key, set()).update(scan_public_text(value))
+    ranges: list[tuple[str | None, int, int]] = []
     pieces: list[str] = []
     offset = 0
-    for key in sorted(values):
-        text = shown(values[key])
+    for key, value in values:
+        text = shown(value)
         pieces.append(text)
         ranges.append((key, offset, offset + len(text)))
         offset += len(text) + 1
@@ -457,9 +472,27 @@ def scan_public_policies(values: Mapping[str, str]) -> dict[str, list[str]]:
                 end = boundary
                 break
         for key, low, high in ranges:
-            if low < high and low < end and start < high:
+            if key is not None and low < high and low < end and start < high:
                 fields[key].add(rule)
     return {key: sorted(rules) for key, rules in sorted(fields.items()) if rules}
+
+
+def policy_card_violations(prose: str, cards: Sequence[RenderedBlock]) -> list[Violation]:
+    """Refuse unsafe policy text in the order a reply would show it, before signing.
+
+    Only free-text charter policies join the prose; structured cards legitimately carry
+    numbers. Keep contributing fact IDs in reply order and never echo policy text.
+    """
+    policies = [(card.fact_id, card.text) for card in cards
+                if card.template == "policy" and card.fact_id is not None
+                and card.fact_id.startswith("charter:policy:")]
+    if not policies:
+        return []
+    refused = _scan_public_parts([(None, prose), *policies])
+    fact_ids = list(dict.fromkeys(fact_id for fact_id, _ in policies if fact_id in refused))
+    if not fact_ids:
+        return []
+    return [Violation(kind="unknown_fact", span="policy", rule_id="policy_combined", fact_ids=fact_ids)]
 
 
 # ---- Clauses --------------------------------------------------------------------------------------
@@ -618,6 +651,7 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
     violations += scan_prose(draft.prose, canaries, await desk_names(ctx, desk_id),
                              booking_card=any(card.template == "booking_confirmed" for card in cards))
     violations += refused
+    violations += policy_card_violations(prose, cards)
     usage = None
     if not violations and prose.strip():
         found, usage = await soft_promises(ctx, language, prose, cards)

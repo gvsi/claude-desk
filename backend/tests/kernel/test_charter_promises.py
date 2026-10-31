@@ -7,9 +7,107 @@ from desk.kernel_service.seed import rivera_seed
 
 from .test_adapters import rivera
 from .test_desk_writes import desks_of, entries_of, facts_of, new_desk, post_desk, put_part
+from .test_decide import open_visitor
+from .test_reply_check import (assert_handed_off, checked, clause, own_quote, public_key, reply_entries,
+                               verify_verdict)
 
 
 POLICY_KEYS = ("about", "service_area", "pricing", "intake", "after_hours", "urgent", "how_we_help", "custom")
+
+
+@pytest.mark.parametrize("parts", [
+    ("No", "charge for consultations."),
+    ("Sin", "costo para consultas."),
+    ("Your appointment is", "confirmed."),
+    ("Tu cita está", "confirmada."),
+])
+async def test_reply_refuses_policy_promises_reassembled_in_citation_order(app, client, parts):
+    copy = await rivera(app, client)
+    # Public order is harmless; the unrelated policy must not be blamed for the reply's reversal.
+    response = await put_part(client, copy, "charter", {"charter": [
+        {"key": "policy:a", "kind": "text", "value": parts[1]},
+        {"key": "policy:b", "kind": "text", "value": parts[0]},
+        {"key": "policy:z", "kind": "text", "value": "Ask about our services."},
+    ]})
+    assert response.status_code == 200, response.text
+    visitor = await open_visitor(client, copy)
+    verdict = await checked(client, visitor, "", [
+        clause("policy", "charter:policy:z"),
+        clause("policy", "charter:policy:b"),
+        clause("policy", "charter:policy:a"),
+    ])
+    assert verdict.ok is False
+    assert [(v.kind, v.rule_id, v.fact_ids) for v in verdict.violations] == [
+        ("unknown_fact", "policy_combined", ["charter:policy:b", "charter:policy:a"])]
+    assert_handed_off(verdict)
+    verify_verdict(await public_key(client), visitor.session_id, verdict)
+    assert all(block.template != "policy" for block in verdict.blocks)
+    [entry] = await reply_entries(app, copy)
+    assert (entry.event.summary["ok"], entry.event.summary["rule_ids"]) == (False, ["policy_combined"])
+
+
+@pytest.mark.parametrize("parts", [
+    ("We offer fr", "ee consultations."),
+    ("Ofrecemos consultas gra", "tis."),
+])
+async def test_reply_keeps_honest_policy_word_fragments_on_separate_cards(app, client, parts):
+    copy = await rivera(app, client)
+    response = await put_part(client, copy, "charter", {"charter": [
+        {"key": "policy:a", "kind": "text", "value": parts[0]},
+        {"key": "policy:b", "kind": "text", "value": parts[1]},
+    ]})
+    assert response.status_code == 200, response.text
+    visitor = await open_visitor(client, copy)
+    verdict = await checked(client, visitor, "", [
+        clause("policy", "charter:policy:a"), clause("policy", "charter:policy:b")])
+    assert (verdict.ok, verdict.violations) == (True, [])
+    assert [block.text for block in verdict.blocks] == list(parts)
+    verify_verdict(await public_key(client), visitor.session_id, verdict)
+
+
+@pytest.mark.parametrize("prose", ["No", "Ｎｏ"])
+async def test_reply_refuses_a_promise_split_between_shown_prose_and_policy(app, client, prose):
+    copy = await rivera(app, client)
+    response = await put_part(client, copy, "charter", {"charter": [
+        {"key": "policy:a", "kind": "text", "value": "charge for consultations."},
+    ]})
+    assert response.status_code == 200, response.text
+    visitor = await open_visitor(client, copy)
+    # The full-width letters normalize to the prose actually shown to the visitor.
+    verdict = await checked(client, visitor, prose, [clause("policy", "charter:policy:a")])
+    assert [(v.kind, v.rule_id, v.fact_ids) for v in verdict.violations] == [
+        ("unknown_fact", "policy_combined", ["charter:policy:a"])]
+    assert_handed_off(verdict)
+    verify_verdict(await public_key(client), visitor.session_id, verdict)
+
+
+@pytest.mark.parametrize("quote_first", [False, True])
+async def test_reply_does_not_scan_quote_numbers_as_policy_text(app, client, quote_first):
+    copy = await rivera(app, client)
+    response = await put_part(client, copy, "charter", {"charter": [
+        {"key": "policy:a", "kind": "text", "value": "Ask about our services."},
+    ]})
+    assert response.status_code == 200, response.text
+    visitor = await open_visitor(client, copy)
+    quote = await own_quote(client, visitor)
+    clauses = [clause("policy", "charter:policy:a"), clause("quote", quote.fact_id)]
+    if quote_first:
+        clauses.reverse()
+    verdict = await checked(client, visitor, "Here are the details.", clauses)
+    assert (verdict.ok, verdict.violations) == (True, [])
+    assert [block.template for block in verdict.blocks[1:]] == [item["template"] for item in clauses]
+    assert next(block for block in verdict.blocks if block.template == "quote").title == "$180.00"
+    verify_verdict(await public_key(client), visitor.session_id, verdict)
+
+
+async def test_prose_only_failure_keeps_its_existing_rule_beside_a_policy(app, client):
+    copy = await rivera(app, client)
+    visitor = await open_visitor(client, copy)
+    verdict = await checked(client, visitor, "No charge for consultations.", [
+        clause("policy", "charter:policy:service_area")])
+    assert [(v.kind, v.rule_id, v.fact_ids) for v in verdict.violations] == [
+        ("promise_word", "lex.en.promise", [])]
+    assert_handed_off(verdict)
 
 
 @pytest.mark.parametrize(("unsafe", "honest", "rules"), [
