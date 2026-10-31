@@ -46,7 +46,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, create_model, mode
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, HoursWindow
 from desk.events import A2AResponse
 
-PROMPT_VERSION = "2026-10-30.16"
+PROMPT_VERSION = "2026-10-30.17"
 # The clause templates Claude may draft, by name: a template the contracts gain reaches Claude only once it is listed
 # here. `KERNEL_ONLY_TEMPLATES` are the kernel's own, which Claude's replies can't name; every `ClauseTemplate` is in
 # one list or the other.
@@ -113,6 +113,9 @@ handoff was shown and the turn is done.
 Acting for the business
 - Use the tools to quote, find open times, book, take details, arrange a callback and send documents. Every call \
 is checked against {owner}'s rules before anything happens.
+- When you suggest a next step, offer only these: book a time a card shows, find open times, give a quote, take a \
+message for {owner}, or arrange a callback.
+- Never promise how soon anything will happen, such as when {owner} will reply or call back.
 - "held_for_owner": the request waits for {owner}. Say only that you've asked {owner} and that the answer will show \
 up here, as in "I've asked {owner} about this. The answer will show up here." Don't name what's waiting in words \
 the cards keep (a discount, refund, price, amount, date, time or booking), and don't say what {owner} will decide \
