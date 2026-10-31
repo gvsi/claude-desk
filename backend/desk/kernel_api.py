@@ -201,6 +201,12 @@ class ToolPin(BaseModel):                  # a tool and the hash the owner revie
     tool: ToolName
     definition_sha256: Sha256Hex
 
+def each_tool_once(tools: list[ToolPin]) -> list[ToolPin]:
+    """The batch rule /tools/confirm and the owner API's body share: a batch names each tool once."""
+    if len({pin.tool for pin in tools}) != len(tools):
+        raise ValueError("a batch names each tool once")
+    return tools
+
 class ToolsConfirmRequest(KernelRequest):     # POST /tools/confirm: a whole connector in one batch, one tool a list of one
     desk_id: str
     tools: list[ToolPin] = Field(min_length=1, max_length=len(get_args(ToolName)))
@@ -208,8 +214,7 @@ class ToolsConfirmRequest(KernelRequest):     # POST /tools/confirm: a whole con
 
     @model_validator(mode="after")
     def _each_tool_once(self) -> Self:
-        if len({pin.tool for pin in self.tools}) != len(self.tools):
-            raise ValueError("a batch names each tool once")
+        each_tool_once(self.tools)
         return self
 
 class ToolsSimulateChangeRequest(KernelRequest):   # POST /tools/simulate_change (demo)

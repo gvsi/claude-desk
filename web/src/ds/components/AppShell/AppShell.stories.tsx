@@ -169,6 +169,37 @@ export const OwnerToday: Story = {
   },
 };
 
+export const SkipToContent: Story = {
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      'No board draws Skip to content: the first Tab stop on every owner page, out of sight until the keyboard reaches it, then at the top left over the reviewer bar and the sidebar, on the raised surface with the standard focus ring.',
+  },
+  play: async ({ canvas, userEvent }) => {
+    // skip_link_first_and_out_of_sight: nothing shows until the keyboard reaches it.
+    const skip = canvas.getByRole('link', { name: 'Skip to content' });
+    await expect(skip.getBoundingClientRect().width).toBeLessThanOrEqual(1);
+
+    // The first Tab, before Start over: at the top left, over the reviewer bar, with the ring.
+    await userEvent.tab();
+    await expect(skip).toHaveFocus();
+    expectComputed(skip, {
+      height: '32px',
+      paddingLeft: '12px',
+      borderTopLeftRadius: '8px',
+      backgroundColor: 'rgb(42, 41, 39)',
+      color: 'rgba(250, 249, 245, 0.92)',
+      outlineStyle: 'solid',
+      outlineWidth: '2px',
+      outlineColor: 'rgb(126, 174, 218)',
+    });
+    const box = skip.getBoundingClientRect();
+    await expect([box.left, box.top]).toEqual([8, 8]);
+    await expect(box.top).toBeLessThan(canvas.getByRole('note').getBoundingClientRect().bottom);
+    await expect(document.elementFromPoint(box.left + 4, box.top + 4)).toBe(skip);
+  },
+};
+
 /** A page that lays out its own columns, as the conversations page does: a list, then the conversation. */
 const columns = (
   <div style={{ display: 'flex' }}>
