@@ -141,6 +141,8 @@ export function IntroDialog({
     fieldRef.current?.focus();
   }, []);
 
+  // Keep this before the leaving effect: with no exit to run, that effect closes the dialog at once,
+  // and must call the `onClosed` of the render that set `leaving`, not an earlier one.
   useLayoutEffect(() => {
     onClosedRef.current = onClosed;
   });

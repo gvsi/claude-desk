@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { useLayoutEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useState } from 'react';
 import { expect, fn, spyOn, waitFor, within, type Mock } from 'storybook/test';
 
 import { expectComputed } from '../../test/expectComputed.ts';
@@ -66,6 +66,31 @@ function LeavingPage(args: IntroDialogProps) {
         await args.onSubmit(passcode);
         setLeaving(true);
         setBusy(false);
+      }}
+    />
+  );
+}
+
+/**
+ * A page that takes the dialog away while it is leaving, as when the owner goes elsewhere before the
+ * exit ends: a frame after `leaving` is set, the dialog is no longer rendered.
+ */
+function GoneWhileLeavingPage(args: IntroDialogProps) {
+  const [leaving, setLeaving] = useState(false);
+  const [shown, setShown] = useState(true);
+  useEffect(() => {
+    if (!leaving) return;
+    const frame = requestAnimationFrame(() => setShown(false));
+    return () => cancelAnimationFrame(frame);
+  }, [leaving]);
+  if (!shown) return null;
+  return (
+    <IntroDialog
+      {...args}
+      leaving={leaving}
+      onSubmit={async (passcode) => {
+        await args.onSubmit(passcode);
+        setLeaving(true);
       }}
     />
   );
@@ -632,6 +657,38 @@ export const LeavingWithoutAnimationEnd: Story = {
       watchTheClose.disconnect();
       timers.mockRestore();
       window.removeEventListener('animationend', swallow, { capture: true });
+    }
+  },
+};
+
+export const GoneWhileLeaving: Story = {
+  render: (args) => <GoneWhileLeavingPage {...args} />,
+  parameters: { canvasNote: Leaving.parameters?.canvasNote },
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
+    const dialog = canvas.getByRole('dialog', { name: args.title }) as HTMLDialogElement;
+    await settled(dialog);
+    const exit = watchTheExit(dialog);
+    let goneAt = Number.NaN;
+    const watchTheRemoval = new MutationObserver(() => {
+      if (!dialog.isConnected && Number.isNaN(goneAt)) goneAt = performance.now();
+    });
+    watchTheRemoval.observe(canvasElement, { childList: true, subtree: true });
+    try {
+      await userEvent.type(canvas.getByLabelText('Passcode'), 'rivera-demo');
+      await userEvent.keyboard('{Enter}');
+      await waitFor(() => expect(dialog.isConnected).toBe(false));
+
+      // gone_while_leaving_never_says_closed: the dialog had started to leave, and the page took it
+      // away before its exit could end. Well past the exit and its fallback timer, it never said it
+      // had closed, so a page that has moved on isn't sent anywhere.
+      await expect(exit.at()?.open).toBe(true);
+      await expect(goneAt - exit.startedAt()).toBeLessThan(motion('fast'));
+      await new Promise((resolve) => setTimeout(resolve, (motion('fast') + motion('instant')) * 2));
+      await expect(args.onClosed).not.toHaveBeenCalled();
+      await expect(args.onSubmit).toHaveBeenCalledTimes(1);
+    } finally {
+      exit.stop();
+      watchTheRemoval.disconnect();
     }
   },
 };

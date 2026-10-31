@@ -123,24 +123,30 @@ it('the_illustration_is_whole_from_the_start_under_reduced_motion', async () => 
 
 it('the_exit_closes_at_once_under_reduced_motion', async () => {
   // Under reduced motion there is no exit to wait for: as the page says the passcode worked, the
-  // dialog closes before the browser draws a frame of it leaving, and says so once.
+  // dialog closes before the browser draws a frame of it leaving, and says so once. It says so to
+  // the page as that render left it: the `onClosed` passed with `leaving`, never an earlier one,
+  // which a page like Arrival's would read with no Desk to go on to, leaving the visitor on the
+  // preview.
   const host = document.createElement('div');
   document.body.append(host);
   const root = createRoot(host);
+  const onClosedBefore = vi.fn();
   const onClosed = vi.fn();
-  const props = { ...(meta.args as IntroDialogProps), onClosed };
+  const props = meta.args as IntroDialogProps;
   try {
-    flushSync(() => root.render(<IntroDialog {...props} busy />));
+    flushSync(() => root.render(<IntroDialog {...props} onClosed={onClosedBefore} busy />));
     const dialog = host.querySelector('dialog') as HTMLDialogElement;
     expect(dialog.open).toBe(true);
-    flushSync(() => root.render(<IntroDialog {...props} leaving />));
+    flushSync(() => root.render(<IntroDialog {...props} onClosed={onClosed} leaving />));
     expect(dialog.classList.contains('cd-intro--leaving')).toBe(true);
     expect(dialog.open).toBe(false);
+    expect(onClosedBefore).not.toHaveBeenCalled();
     expect(onClosed).toHaveBeenCalledTimes(1);
     const panel = dialog.querySelector('.cd-intro__panel') as HTMLElement;
     expect([getComputedStyle(dialog).animationName, getComputedStyle(panel).animationName]).toEqual(['none', 'none']);
     // Nothing was left waiting to close it again.
     await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(onClosedBefore).not.toHaveBeenCalled();
     expect(onClosed).toHaveBeenCalledTimes(1);
   } finally {
     root.unmount();
